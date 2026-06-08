@@ -28,7 +28,7 @@
 # harmless for non-ticket tests.
 export _TICKET_TEST_NO_SYNC=1
 
-# Unset PROJECT_ROOT exported by the .claude/scripts/dso shim (bb42-1291).
+# Unset PROJECT_ROOT exported by the rebar CLI (bb42-1291).
 # Tests that source this library create temp-repo fixtures and expect ticket
 # scripts/libraries to resolve REPO_ROOT from CWD (the fixture path). With
 # PROJECT_ROOT leaked from the shim, ticket-lib.sh / ticket-create.sh / etc.

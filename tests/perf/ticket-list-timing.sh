@@ -23,7 +23,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-TICKET_LIST_SH="$REPO_ROOT/plugins/dso/scripts/ticket-list.sh"
+TICKET_LIST_SH="$REPO_ROOT/src/rebar/_engine/ticket-list.sh"
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
 threshold_pct=20

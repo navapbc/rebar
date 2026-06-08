@@ -14,7 +14,7 @@ set -euo pipefail
 # When run as a subprocess from a pre-commit hook, GIT_DIR is inherited and would
 # cause git rev-parse --show-toplevel (and all subsequent git -C commands) to
 # operate on the hook's repo instead of the intended target repo.
-# PROJECT_ROOT is also unset: it is exported by the dso shim to the host project
+# PROJECT_ROOT is also unset: it is exported by the rebar CLI to the host project
 # root, but ticket-init.sh must always initialize the repo at CWD (the target repo
 # the CLI was invoked from), not the shim's project root.
 unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_COMMON_DIR PROJECT_ROOT 2>/dev/null || true

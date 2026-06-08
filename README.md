@@ -90,7 +90,20 @@ verify.require_verdict_for_close=true
 ## Tests
 
 ```bash
-pip install '.[dev]'
-pytest                                       # Python suite (reducer, graph, reconciler)
-bash tests/scripts/test-ticket-create.sh     # bash engine tests
+pip install '.[dev]'                          # includes the mcp extra for interface tests
+pytest                                        # full Python suite
+pytest tests/interfaces                       # interface-parity tier only
+bash tests/scripts/test-ticket-create.sh      # bash engine tests
 ```
+
+The Python suite is sub-divided by concern:
+
+- `tests/scripts`, `tests/unit` — the engine (reducer, graph, reconciler) and bash scripts.
+- `tests/interfaces` — proves the **library, CLI, and MCP** interfaces behave
+  identically over one git-backed store:
+  - `test_parity.py` runs each operation through all three interfaces (and a
+    cross-interface coherence check: write via one, read via the others);
+  - `test_surface.py` pins the per-interface capability surface (e.g. MCP has no
+    `init`; there is no `classify`);
+  - `test_library.py` / `test_cli.py` / `test_mcp.py` cover per-interface
+    specifics (typed exceptions, exit-code passthrough, read-only/live gates).

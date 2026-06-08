@@ -17,7 +17,7 @@ dependencies = []
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.2"]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "mcp>=1.2"]
 
 [project.scripts]
 rebar = "rebar.cli:main"
@@ -41,5 +41,7 @@ markers = [
     "unit: unit-tier tests (network-guarded)",
     "scripts: scripts-tier tests (engine scripts / reconciler)",
     "integration: integration-tier tests (may require live services)",
+    "interface: interface-parity tests (library / CLI / MCP over one store)",
     "allow_network: opt out of the network guard for a test",
+    "benchmark: performance benchmark (informational; not a pass/fail gate)",
 ]

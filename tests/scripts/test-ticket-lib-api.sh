@@ -28,7 +28,6 @@ REPO_ROOT="${REPO_ROOT:-${GITHUB_WORKSPACE:-$(cd "$SCRIPT_DIR/../.." && pwd)}}"
 
 TICKET_SCRIPT="$REPO_ROOT/src/rebar/_engine/ticket"
 TICKET_LIB_API="$REPO_ROOT/src/rebar/_engine/ticket-lib-api.sh"
-DSO_SHIM="$REPO_ROOT/.claude/scripts/dso"
 
 # shellcheck source=/dev/null
 source "$REPO_ROOT/tests/lib/assert.sh"

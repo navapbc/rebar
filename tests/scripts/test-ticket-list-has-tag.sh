@@ -192,7 +192,7 @@ test_no_matching_tickets_exits_0_empty() {
 test_no_matching_tickets_exits_0_empty
 
 # ── In-process path tests (ticket_list() in ticket-lib-api.sh) ────────────────
-# These exercise the default (non-legacy) path used by `.claude/scripts/dso ticket list`.
+# These exercise the default (non-legacy) path used by `rebar list`.
 
 # ── Scenario 5: in-process — bug with detected_by:tests appears ───────────────
 echo "Test 5: [in-process] bug with detected_by:tests tag appears in --has-tag=detected_by:tests results"

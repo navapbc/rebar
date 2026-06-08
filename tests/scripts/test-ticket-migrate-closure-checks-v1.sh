@@ -111,7 +111,7 @@ _setup_epic_fixture() {
 
 # ── Helper: read the current compiled description for a ticket ────────────────
 # Uses the ticket reducer directly against the tracker dir for test isolation.
-# This avoids dependency on the .claude/scripts/dso shim being present in the
+# This avoids dependency on the rebar CLI being present in the
 # fixture repo — the fixture repo only has .tickets-tracker/, not the full tooling.
 _get_ticket_description() {
     local repo="$1"

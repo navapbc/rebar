@@ -597,51 +597,29 @@ def _decorate_outbound_comment(body: str) -> str:
     return f"{body}\n\n{RECONCILER_MARKER}"
 
 
-# Bug 6afc-20ee-84e5-4dd5: machine-metadata comment exclusion.
+# Reconciler-internal machine-comment exclusion.
 #
-# These prefixes mark skill-to-skill (machine-to-machine) ticket-comment
-# payloads — NOT human comments. They are written onto local tickets purely to
-# hand context between DSO skills/sub-agents and must NEVER be mirrored outbound
-# to Jira: they are large (PREPLANNING_CONTEXT bodies routinely exceed Jira's
-# 32,767-char comment cap), internal, and meaningless to a Jira reader. Syncing
-# them outbound also drove the outbound comment-sync loop (over-length adds fail
-# silently and re-emit every pass).
+# These prefixes mark reconciler-generated machine comments that must NEVER be
+# mirrored outbound to Jira (they are internal monitoring noise, not human Jira
+# content). Only reconciler-internal markers are listed here — when rebar was
+# decoupled from the DSO plugin, the skill-to-skill payload prefixes
+# (PREPLANNING_CONTEXT / RESEARCH_FINDINGS / DEFENSE_RECORD / CHECKPOINT /
+# WORKTREE_TRACKING) were removed, since a standalone rebar never produces them.
 #
-# This is the comment-side analogue of the label `_EXCLUDED_PREFIXES` constant
-# below; kept here, beside the comment-diff logic, for locality with the only
-# consumer (_diff_comments).
+# Kept here beside the comment-diff logic for locality with the only consumer
+# (_diff_comments). Human comments are never excluded.
 #
-# Prefixes (each a genuine machine payload written via `dso ticket comment`):
-#   - PREPLANNING_CONTEXT: / PREPLANNING_CONTEXT_LIGHTWEIGHT:
-#       PIL handoff payload (see ${CLAUDE_PLUGIN_ROOT}/docs/contracts/pil-handoff.md):
-#       preplanning → implementation-plan context, serialized JSON.
-#   - RESEARCH_FINDINGS:  JSON array merged by preplanning across skill runs.
-#   - DEFENSE_RECORD:     machine-readable review-defense JSON (review-defense-store.sh).
-#   - CHECKPOINT          sub-agent progress notes ("CHECKPOINT N/6: ...").
-#   - WORKTREE_TRACKING:  fail-silent worktree lifecycle tracking comment.
-#   - BRIDGE_CANARY_ALERT: heartbeat-canary staleness alert (reconcile-bridge-
-#       canary.yml). Bug 57d1: the canary appends a fresh-TIMESTAMPED "Still
-#       stale as of <ts>: ..." comment to its alert ticket every run; mirrored
-#       outbound, the volatile timestamp never matches a prior Jira body, so the
-#       comment re-adds every pass and accumulates duplicate Jira comments (20+
-#       observed on DIG-5383). It is internal monitoring noise, not human Jira
-#       content — exclude it (the canary now prefixes the marker; see
-#       reconcile-bridge-canary.yml).
-#   - "Still stale as of"  LEGACY pre-marker form of the same canary alert
-#       comment (57d1 follow-up): the BRIDGE_CANARY_ALERT: marker only tags
-#       FUTURE canary comments, but the existing unmarked backlog already on
-#       the alert ticket ("Still stale as of <ts>: Last successful run ...")
-#       keeps re-emitting. Exclude the legacy content prefix too so the existing
-#       backlog stops mirroring — not just future marked comments. The canary is
-#       the only producer of this exact phrasing (a human would not write it).
-# Only genuine machine markers are listed — human comments are never excluded.
+# Prefixes:
+#   - BRIDGE_CANARY_ALERT: heartbeat-canary staleness alert. The canary appends a
+#       freshly-TIMESTAMPED "Still stale as of <ts>: ..." comment to its alert
+#       ticket every run; mirrored outbound, the volatile timestamp never matches
+#       a prior Jira body, so the comment re-adds every pass and accumulates
+#       duplicate Jira comments. Internal monitoring noise — exclude it.
+#   - "Still stale as of"  LEGACY pre-marker form of the same canary alert comment
+#       (the BRIDGE_CANARY_ALERT: marker only tags future canary comments; this
+#       excludes the existing unmarked backlog too). The canary is the only
+#       producer of this exact phrasing (a human would not write it).
 _EXCLUDED_COMMENT_PREFIXES: tuple[str, ...] = (
-    "PREPLANNING_CONTEXT:",
-    "PREPLANNING_CONTEXT_LIGHTWEIGHT:",
-    "RESEARCH_FINDINGS:",
-    "DEFENSE_RECORD:",
-    "CHECKPOINT",
-    "WORKTREE_TRACKING:",
     "BRIDGE_CANARY_ALERT:",
     "Still stale as of",
 )

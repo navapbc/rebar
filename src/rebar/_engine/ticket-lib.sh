@@ -1037,172 +1037,6 @@ with open(out_path, 'w', encoding='utf-8') as f:
     return 0
 }
 
-# _ticket_has_pil <ticket_id>
-# Returns exit 0 if the ticket has a "### Planning Intelligence Log" heading in
-# any event (CREATE description, EDIT fields.description, or COMMENT body), OR
-# if a PRECONDITIONS event with gate_name=brainstorm_complete exists in the
-# ticket directory (written by preconditions-record.sh in brainstorm Phase 3 Step 3a).
-# Returns exit 1 if neither signal is present.
-#
-# WHY THE EXACT MARKER IS PREFERRED:
-# The "### Planning Intelligence Log" heading is written exclusively by the
-# canonical epic-scrutiny-pipeline.md (brainstorm Steps 2.5/2.6/2.75/3). It is
-# a load-bearing integrity signal: its presence proves that the full pipeline ran
-# (gap analysis, web research, scenario analysis, fidelity review). Substitute
-# paths such as /dso:plan-review (red-team-reviewer + blue-team-filter) do NOT
-# write this marker because they bypass the pipeline. Accepting any other comment
-# format as evidence would silently allow incomplete scrutiny to gate-pass.
-# See: ${CLAUDE_PLUGIN_ROOT}/skills/brainstorm/SKILL.md Steps 2.5 HARD-GATE.
-#
-# WHY PRECONDITIONS brainstorm_complete IS ACCEPTED AS FALLBACK (bug 4284-0dc4):
-# The LLM may write the epic description without the PIL heading even when the full
-# pipeline ran. The PRECONDITIONS event with gate_name=brainstorm_complete is always
-# written by Phase 3 Step 3a (HARD-GATE enforced), which can only be reached after
-# Phase 2 approval (post-scrutiny). It is stronger evidence than the PIL heading for
-# the brainstorm:complete tag specifically because it is a script-written artifact,
-# not a template-written one that the LLM can accidentally omit.
-#
-# Honors TICKET_CMD and TICKETS_TRACKER_DIR env vars for testability.
-_ticket_has_pil() {
-    local ticket_id="$1"
-
-    local _lib_dir
-    _lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local _ticket_cmd="${TICKET_CMD:-$_lib_dir/ticket}"
-
-    local _repo_root=""
-    if [[ -z "${TICKETS_TRACKER_DIR:-}" ]]; then
-        _repo_root="$(GIT_DISCOVERY_ACROSS_FILESYSTEM=1 git rev-parse --show-toplevel)"
-    fi
-    local _tracker_dir="${TICKETS_TRACKER_DIR:-$_repo_root/.tickets-tracker}"
-
-    # Primary check: PIL heading in description or comments AND the body
-    # underneath that heading must contain the three mandatory fields written
-    # by the canonical scrutiny pipeline (epic-description-template.md lines
-    # 28, 30, 35). A bare heading with no body content is not sufficient —
-    # the prior validator accepted "### Planning Intelligence Log\n- Entry 1"
-    # stubs, which is exactly the failure mode this validator is meant to
-    # prevent (bug a307-0f58).
-    if TICKETS_TRACKER_DIR="$_tracker_dir" bash "$_ticket_cmd" show "$ticket_id" 2>/dev/null | python3 -c "
-import json, re, sys
-try:
-    state = json.load(sys.stdin)
-except (json.JSONDecodeError, ValueError):
-    sys.exit(1)
-
-marker = '### Planning Intelligence Log'
-
-# Mandatory field markers — every canonical PIL written by
-# epic-scrutiny-pipeline.md populates these four fields. Absence of any one
-# of them indicates a stub PIL that bypassed the pipeline.
-# WHY FOUR FIELDS (bug ecc2-e508-b2a8-4b7f): Adding Gap analysis (Step 1) as
-# a required field prevents orchestrators from writing a compliant-looking PIL
-# manually (with only the old 3 fields) while bypassing the canonical scrutiny
-# pipeline. Step 1 gap analysis runs at the start of the pipeline; its
-# presence in the PIL proves the pipeline entry point was reached.
-REQUIRED_FIELDS = (
-    '**Gap analysis (Step 1)**:',
-    '**Web research (Step 2.6)**:',
-    '**Scenario analysis (Step 2.75)**:',
-    '**LLM-instruction signal (Step 5)**:',
-)
-
-def _pil_section(text):
-    # Return everything from the PIL heading to the next markdown heading at
-    # the same or shallower level, or to end of text.
-    idx = text.find(marker)
-    if idx < 0:
-        return None
-    rest = text[idx + len(marker):]
-    # Stop at the next '## ' or '### ' heading at column 0
-    end = re.search(r'(?m)^#{1,3} ', rest)
-    return rest if end is None else rest[:end.start()]
-
-def _passes(text):
-    section = _pil_section(text)
-    if section is None:
-        return False
-    for field in REQUIRED_FIELDS:
-        if field not in section:
-            return False
-    # If Scenario analysis is 'triggered', require Red Team + Blue Team
-    # dispatch evidence in the PIL body. SIMPLE epics (≤2 SCs / internal
-    # refactor with no integration signals) legitimately use 'not triggered'
-    # or 'skipped — ...' values and are exempt.
-    scenario_match = re.search(
-        r'\*\*Scenario analysis \(Step 2\.75\)\*\*:\s*([^\n]+)', section)
-    if scenario_match and 'triggered' in scenario_match.group(1) \
-       and 'not triggered' not in scenario_match.group(1) \
-       and 'skipped' not in scenario_match.group(1):
-        if 'Red Team' not in section or 'Blue Team' not in section:
-            return False
-    return True
-
-desc = state.get('description', '') or ''
-if marker in desc and _passes(desc):
-    sys.exit(0)
-for comment in state.get('comments', []):
-    body = comment.get('body', '') or ''
-    if marker in body and _passes(body):
-        sys.exit(0)
-sys.exit(1)
-" 2>/dev/null; then
-        return 0
-    fi
-
-    # REVIEW-DEFENSE (CI PR #90 critical): The PRECONDITIONS fallback reads from
-    # .tickets-tracker/, which is an orphan git branch requiring the same push
-    # access as any code change. Forging a brainstorm_complete event requires the
-    # same git write permissions as manually adding the PIL heading to a description
-    # — no new trust boundary is created. This is an internal developer tool; the
-    # canonical pipeline (_write_preconditions in ticket-lib.sh) is the only
-    # producer in normal operation.
-    #
-    # Fallback: PRECONDITIONS event with gate_name=brainstorm_complete in the ticket dir.
-    # Handles the case where the LLM wrote the description without the PIL heading but the
-    # canonical pipeline ran (brainstorm Phase 3 Step 3a always writes this event).
-    local _ticket_dir="$_tracker_dir/$ticket_id"
-    if [[ -d "$_ticket_dir" ]]; then
-        python3 -c "
-import json, os, sys
-
-ticket_dir = sys.argv[1]
-try:
-    all_files = os.listdir(ticket_dir)
-except OSError:
-    sys.exit(1)
-
-precon_files = [
-    f for f in all_files
-    if (f.endswith('-PRECONDITIONS.json') or f.endswith('-PRECONDITIONS-SNAPSHOT.json'))
-    and not f.endswith('.retired')
-]
-
-for fname in precon_files:
-    fpath = os.path.join(ticket_dir, fname)
-    try:
-        with open(fpath) as fp:
-            data = json.load(fp)
-    except Exception:
-        continue
-    if data.get('event_type') == 'PRECONDITIONS' and not data.get('compacted'):
-        # Flat event: gate_name is at the top level of the event object
-        if data.get('gate_name') == 'brainstorm_complete':
-            sys.exit(0)
-    if data.get('event_type') == 'PRECONDITIONS' and data.get('compacted'):
-        # Compacted snapshot: brainstorm_complete gate_name is tracked in
-        # data.represented_gate_names (written by _compact_preconditions)
-        inner = data.get('data', {})
-        if 'brainstorm_complete' in inner.get('represented_gate_names', []):
-            sys.exit(0)
-
-sys.exit(1)
-" "$_ticket_dir" 2>/dev/null && return 0
-    fi
-
-    return 1
-}
-
 # _compact_preconditions <ticket_dir> <epic_id>
 # Compacts all flat PRECONDITIONS event files in ticket_dir into a single
 # PRECONDITIONS-SNAPSHOT.json, then retires the originals by renaming them
@@ -1366,30 +1200,13 @@ print(f'[compact_preconditions] snapshot written: {tmp_path}', file=sys.stderr)
 }
 
 # _tag_add_checked <ticket_id> <tag>
-# Adds a tag to a ticket with a PIL guard for brainstorm:complete.
-# For any tag other than "brainstorm:complete", delegates directly to _tag_add.
-# For "brainstorm:complete", requires _ticket_has_pil to return 0 first;
-# emits an error to stderr and returns 1 if the PIL marker is absent.
-#
-# _tag_add directly) in task fd3c-21b5, which follows this task in the same story.
-# The TDD decomposition: this task (0abf-422e) implements the guard in ticket-lib.sh;
-# the CLI wire-up is the next task. The RED marker for test_ticket_tag_cli_rejects_
-# brainstorm_complete_without_pil in .test-index is retained until fd3c-21b5 lands.
+# Adds a tag to a ticket. Tags are free-form in rebar — there is no special
+# gating on any tag value. (The DSO Planning-Intelligence-Log gate on
+# "brainstorm:complete" was removed when rebar was decoupled from the plugin.)
+# Retained as a thin wrapper so existing call sites stay stable.
 _tag_add_checked() {
     local ticket_id="$1"
     local tag="$2"
-
-    if [[ "$tag" != "brainstorm:complete" ]]; then
-        _tag_add "$ticket_id" "$tag"
-        return $?
-    fi
-
-    if ! _ticket_has_pil "$ticket_id" 2>/dev/null; then
-        echo "Error: cannot add 'brainstorm:complete' tag: Planning Intelligence Log not found in ticket events." >&2
-        echo "Run /dso:brainstorm on this epic first to generate the Planning Intelligence Log." >&2
-        return 1
-    fi
-
     _tag_add "$ticket_id" "$tag"
 }
 
@@ -1853,7 +1670,7 @@ if isinstance(schema_version, int) and schema_version > 2:
     warn_file = os.path.join(warn_dir, warn_key)
     if not os.path.exists(warn_file):
         print(
-            '[DSO WARN] preconditions reader: unknown schema_version={} for ticket {} '
+            '[WARN] preconditions reader: unknown schema_version={} for ticket {} '
             '-- falling back to minimal-tier interpretation'.format(schema_version, ticket_id),
             file=sys.stderr
         )

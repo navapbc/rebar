@@ -848,7 +848,7 @@ ticket_create() {
         set -euo pipefail
 
         # Unset git hook env vars so git commands target the correct repo.
-        # PROJECT_ROOT is unset here because it is exported by the dso shim to
+        # PROJECT_ROOT is unset here because it is exported by the rebar CLI to
         # point at the host project root — ticket_create must resolve the tracker
         # from CWD (the repo the CLI was invoked in) rather than the shim's root.
         unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_COMMON_DIR PROJECT_ROOT 2>/dev/null || true
@@ -2242,16 +2242,6 @@ ticket_exists() {
 ticket_validate() {
     bash "$_TICKETLIB_DIR/validate-issues.sh" "$@"
     return $?
-}
-
-# ── ticket_classify ────────────────────────────────────────────────────────────
-# The DSO agent-routing classifier (classify-task.sh / classify-task.py) is not
-# part of rebar — task→model/subagent routing is DSO-specific. The `classify`
-# subcommand is retained as a stub that reports it is unavailable so callers get
-# a clear signal rather than a missing-file error.
-ticket_classify() {
-    echo "rebar: 'classify' (DSO agent-routing) is not available in rebar." >&2
-    return 2
 }
 
 # ── ticket_clarity_check ───────────────────────────────────────────────────────

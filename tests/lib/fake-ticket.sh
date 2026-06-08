@@ -55,7 +55,7 @@ case "$subcommand" in
         ;;
     show)
         # Return a minimal v3 ticket JSON object.
-        # Fields match what sprint-next-batch.sh and classify-task.sh expect.
+        # Fields match what the ticket reducer expects.
         ticket_id="${2:-mock-xxxx}"
         printf '{"ticket_id":"%s","ticket_type":"task","status":"open","title":"Mock ticket %s","priority":2}\n' \
             "$ticket_id" "$ticket_id"

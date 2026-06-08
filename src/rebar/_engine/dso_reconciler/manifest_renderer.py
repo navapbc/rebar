@@ -23,7 +23,7 @@ Mutation dataclass instances or legacy dict-shaped batch mutations. The
 renderer normalizes via best-effort attribute / key lookup so the two surfaces
 compose.
 
-Contract: ``${CLAUDE_PLUGIN_ROOT}/docs/contracts/asymmetric-manifest.md``.
+Contract: ``docs/contracts/asymmetric-manifest.md``.
 """
 
 from __future__ import annotations

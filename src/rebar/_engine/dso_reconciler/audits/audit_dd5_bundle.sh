@@ -27,7 +27,7 @@
 # Environment:
 #   AUDIT_ARTIFACTS_DIR      — override artifact root (default: <repo-root>/.reconciler-audit-artifacts)
 #   QUARANTINE_LIST          — override quarantine artifact path (default: <artifact-dir>/quarantine.json)
-#   TICKET_CLI               — override ticket CLI (default: .claude/scripts/dso)
+#   TICKET_CLI               — override ticket CLI (default: the bundled rebar CLI)
 #   RECONCILER_PHASE_GATE_DIR — passed through to check_phase_gate
 
 set -uo pipefail

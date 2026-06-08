@@ -197,11 +197,21 @@ test_next_batch_routes_through_dispatcher() {
     if echo "$_output" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
-required = ['available_pool', 'opus_cap', 'skipped_overlap', 'skipped_blocked_story']
+required = ['available_pool', 'skipped_overlap', 'skipped_blocked_story']
 missing = [k for k in required if k not in d]
 if missing:
     print('Missing keys: ' + ', '.join(missing), file=sys.stderr)
     sys.exit(1)
+# Decoupled: the DSO agent-routing overlay must be gone.
+if 'opus_cap' in d:
+    print('Routing key opus_cap should be absent', file=sys.stderr)
+    sys.exit(1)
+routing_fields = {'model', 'subagent', 'class', 'complexity'}
+for entry in d.get('batch', []):
+    leaked = routing_fields & set(entry)
+    if leaked:
+        print('Routing fields leaked: ' + ', '.join(sorted(leaked)), file=sys.stderr)
+        sys.exit(1)
 " 2>/dev/null; then
         echo "  PASS: --json output is valid JSON with required keys"
         (( PASS++ ))

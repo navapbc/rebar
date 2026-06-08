@@ -60,7 +60,7 @@ _snapshot_protected_files() {
     [[ -z "$_SE_REPO_ROOT" ]] && return
     local _pf
     for _pf in \
-        "$_SE_REPO_ROOT/.claude/dso-config.conf" \
+        "$_SE_REPO_ROOT/.rebar/config.conf" \
         "$_SE_REPO_ROOT/.test-index" \
     ; do
         if [[ -f "$_pf" ]]; then

@@ -45,7 +45,7 @@ done
 
 # ── Resolve base path ───────────────────────────────────────────────────────
 if [ -z "$base_path" ]; then
-    # Respect PROJECT_ROOT exported by the .claude/scripts/dso shim (bb42-1291).
+    # Respect PROJECT_ROOT exported by the rebar CLI (bb42-1291).
     REPO_ROOT="${PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
     base_path="$REPO_ROOT/.tickets-tracker"
 fi

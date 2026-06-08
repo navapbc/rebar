@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ticket-clarity-check.sh
-# SC2 heuristic clarity scorer for DSO tickets.
+# SC2 heuristic clarity scorer for tickets.
 #
 # Evaluates a ticket's clarity by scoring its description across multiple
 # dimensions: length, structure (section headers, bullet lists), and
@@ -17,7 +17,7 @@
 #   1 — fail (score < threshold)
 #   2 — error (invalid input, missing ticket ID, malformed JSON)
 #
-# Contract: ${CLAUDE_PLUGIN_ROOT}/docs/contracts/ticket-clarity-check-output.md
+# Contract: docs/contracts/ticket-clarity-check-output.md
 
 set -uo pipefail
 
@@ -122,7 +122,7 @@ if [[ "$TICKET_TYPE" == "ERROR" ]]; then
 fi
 
 # ── Read threshold from config ────────────────────────────────────────────────
-# Priority: --config file (ticket_clarity.threshold) > dso-config.conf (clarity_check.pass_threshold)
+# Priority: --config file (ticket_clarity.threshold) > .rebar/config.conf (clarity_check.pass_threshold)
 # Minimum valid threshold: 1
 
 _read_config_key() {

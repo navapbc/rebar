@@ -41,7 +41,6 @@ _usage() {
     echo "  tag           Add a tag to a ticket"
     echo "  untag         Remove a tag from a ticket"
     echo "  validate      Validate ticket quality (exit 0-4 by score; --json, --terse)"
-    echo "  classify      Classify task for routing (JSON output with model/subagent/class/complexity/priority)"
     echo "  clarity-check Score ticket clarity (exit 0=pass, 1=fail; JSON: score/verdict/threshold)"
     echo "  check-ac      Check ticket has Acceptance Criteria block (exit 0=pass, 1=fail; AC_CHECK: pass|fail)"
     echo "  quality-check Check ticket dispatch readiness (exit 0=pass, 1=fail; QUALITY: pass|fail)"
@@ -277,6 +276,17 @@ case "$subcommand" in
         _ensure_initialized
         exec bash "$SCRIPT_DIR/ticket-fsck.sh" "$@"
         ;;
+    fsck-recover)
+        # ticket-fsck-recover.sh: recover the tracker worktree (dangling commits,
+        # interrupted rebases). The recover script takes --tracker-dir <path>, not
+        # the TICKETS_TRACKER_DIR env var, so translate it when injected (tests).
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then
+            _ensure_initialized
+            exec bash "$SCRIPT_DIR/ticket-fsck-recover.sh" "$@"
+        else
+            exec bash "$SCRIPT_DIR/ticket-fsck-recover.sh" --tracker-dir "$TICKETS_TRACKER_DIR" "$@"
+        fi
+        ;;
     bridge-fsck)
         # ticket-bridge-fsck.py: bridge mapping audit (orphans, duplicates, stale SYNCs)
         # Skip _ensure_initialized when TICKETS_TRACKER_DIR is set (test environments
@@ -362,18 +372,6 @@ case "$subcommand" in
         # shellcheck source=/dev/null
         source "$SCRIPT_DIR/ticket-lib-api.sh"
         _ticketlib_dispatch ticket_validate "$@"
-        exit $?
-        ;;
-    classify)
-        # REVIEW-DEFENSE: _ensure_initialized is intentionally omitted here.
-        # classify-task.sh reads tickets via TICKET_CMD env var (injectable for tests).
-        # In production TICKET_CMD defaults to the ticket script itself, which calls
-        # _ensure_initialized when it runs ticket show — initialization is transitive.
-        # Calling _ensure_initialized here would break test isolation where TICKET_CMD
-        # is mocked and no real ticket store exists.
-        # shellcheck source=/dev/null
-        source "$SCRIPT_DIR/ticket-lib-api.sh"
-        _ticketlib_dispatch ticket_classify "$@"
         exit $?
         ;;
     clarity-check)

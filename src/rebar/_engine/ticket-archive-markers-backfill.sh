@@ -26,7 +26,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Respect PROJECT_ROOT exported by the .claude/scripts/dso shim (bb42-1291).
+# Respect PROJECT_ROOT exported by the rebar CLI (bb42-1291).
 REPO_ROOT="${PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
 TRACKER_DIR="${TICKET_TRACKER_DIR:-${REPO_ROOT}/.tickets-tracker}"
 

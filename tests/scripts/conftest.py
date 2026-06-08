@@ -24,31 +24,10 @@ _TESTS_SCRIPTS_DIR = str(Path(__file__).resolve().parent)
 if _TESTS_SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _TESTS_SCRIPTS_DIR)
 
-# Ensure dso plugin scripts are importable for tests that load modules by path.
+# Ensure the bundled engine scripts are importable for tests that load modules by path.
 _SCRIPTS_DIR = str(Path(__file__).resolve().parents[2] / "src" / "rebar" / "_engine")
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
-
-# ---------------------------------------------------------------------------
-# CLAUDE_PLUGIN_ROOT isolation fixture
-# ---------------------------------------------------------------------------
-# When tests invoke the dso shim as a subprocess (e.g. dso ref-query), the shim
-# resolves the plugin root via CLAUDE_PLUGIN_ROOT.  In worktree sessions the env
-# var may point to the main repo's plugin directory, which doesn't have files
-# created in the worktree yet.  This autouse fixture ensures the resolved path
-# always points to the worktree's own src/rebar/_engine/ tree so subprocess calls see
-# the files under test.
-_REPO_ROOT_FOR_PLUGIN = Path(__file__).resolve().parents[2]
-_WORKTREE_PLUGIN_ROOT = str(_REPO_ROOT_FOR_PLUGIN / "src" / "rebar" / "_engine")
-
-
-@pytest.fixture(autouse=True)
-def _worktree_plugin_root_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Set CLAUDE_PLUGIN_ROOT to the worktree plugin path for subprocess calls."""
-    worktree_plugin = _WORKTREE_PLUGIN_ROOT
-    if Path(worktree_plugin).is_dir():
-        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", worktree_plugin)
-
 
 # ---------------------------------------------------------------------------
 # Module loading

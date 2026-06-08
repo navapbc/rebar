@@ -120,25 +120,4 @@ test_double_call_produces_invalid_json() {
 }
 test_double_call_produces_invalid_json
 
-# ── Test 3: structural guard — skill files must not contain the brace-group pattern ──
-# Regression prevention: if the double-call brace-group re-enters sprint/SKILL.md
-# or auto-resume.md, this test fails immediately.
-test_no_brace_group_in_skill_files() {
-    local skill_md="$REPO_ROOT/plugins/dso/skills/sprint/SKILL.md"
-    local resume_md="$REPO_ROOT/plugins/dso/skills/sprint/prompts/auto-resume.md"
-
-    # The brace-group pattern: two consecutive ticket list calls inside { ... }
-    # Match: "{ .claude/scripts/dso ticket list ... ; .claude/scripts/dso ticket list ..."
-    # Uses grep -cE (POSIX extended regex) for macOS/Linux portability.
-    local pattern='\{ \.claude/scripts/dso ticket list.*; \.claude/scripts/dso ticket list'
-
-    local match_skill match_resume
-    match_skill=$(grep -cE "$pattern" "$skill_md" 2>/dev/null || echo 0)
-    match_resume=$(grep -cE "$pattern" "$resume_md" 2>/dev/null || echo 0)
-
-    assert_eq "sprint/SKILL.md has no brace-group double ticket-list pattern" "0" "$match_skill"
-    assert_eq "auto-resume.md has no brace-group double ticket-list pattern" "0" "$match_resume"
-}
-test_no_brace_group_in_skill_files
-
 print_summary

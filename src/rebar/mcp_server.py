@@ -45,14 +45,20 @@ def build_server():
     def list_tickets(
         status: str | None = None,
         ticket_type: str | None = None,
+        priority: int | None = None,
+        parent: str | None = None,
         has_tag: str | None = None,
+        without_tag: str | None = None,
         include_archived: bool = False,
     ) -> list[dict]:
         """List tickets as a JSON array, with optional filters."""
         return rebar.list_tickets(
             status=status,
             ticket_type=ticket_type,
+            priority=priority,
+            parent=parent,
             has_tag=has_tag,
+            without_tag=without_tag,
             include_archived=include_archived,
         )
 
@@ -70,6 +76,12 @@ def build_server():
     def next_batch(epic_id: str) -> dict:
         """Next parallel batch of unblocked tickets under an epic's hierarchy."""
         return rebar.next_batch(epic_id)
+
+    @mcp.tool()
+    def fsck(recover: bool = False) -> str:
+        """Check ticket-store integrity (JSON validity, CREATE presence, lock
+        cleanup). Set recover=True to run the recovery path."""
+        return rebar.fsck(recover=recover)
 
     @mcp.tool()
     def reconcile(mode: str = "dry-run") -> dict:
@@ -94,6 +106,7 @@ def build_server():
             title: str,
             parent: str | None = None,
             priority: int | None = None,
+            assignee: str | None = None,
             description: str | None = None,
             tags: list[str] | None = None,
         ) -> str:
@@ -103,6 +116,7 @@ def build_server():
                 title,
                 parent=parent,
                 priority=priority,
+                assignee=assignee,
                 description=description,
                 tags=tags,
             )
@@ -168,6 +182,12 @@ def build_server():
         def archive_ticket(ticket_id: str) -> str:
             """Archive a ticket (excludes it from the default list)."""
             rebar.archive(ticket_id)
+            return "ok"
+
+        @mcp.tool()
+        def compact_ticket(ticket_id: str | None = None) -> str:
+            """Compact a ticket's event log (or all tickets if id omitted)."""
+            rebar.compact(ticket_id)
             return "ok"
 
     return mcp

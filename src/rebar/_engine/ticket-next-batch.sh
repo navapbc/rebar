@@ -1,22 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# ticket-next-batch.sh — Deterministic next-batch selector for sprint orchestration.
+# ticket-next-batch.sh — Deterministic next-batch selector.
 #
-# Selects tasks for a parallel agent batch under a given epic. Produces a
-# fully-classified, conflict-free batch in one script call — the orchestrator
-# receives everything it needs to launch sub-agents without further analysis.
-#
-# NOTE: Delegates to scripts/issue-batch.sh for ticket-based issue tracking.
+# Selects the next batch of unblocked tasks under a given epic that can be worked
+# in parallel without file-level conflicts. Dependency-ordered; conflict-free.
 #
 # Handles the 3-tier hierarchy (epic -> story -> task):
 #   - If a story has open blockers, all its child tasks are deferred regardless
 #     of their own dependency state.
 #   - Tasks with file-level overlap are serialized: only the higher-priority
 #     task enters the batch; the lower-priority one defers to the next cycle.
-#   - Opus cap: at most 2 opus-classified tasks per batch. Remaining opus tasks
-#     are deferred (SKIPPED_OPUS_CAP); freed slots are filled with non-opus tasks.
-#   - Classification (subagent, model, class, complexity) is included in output
-#     so the orchestrator can launch sub-agents directly without extra calls.
 #
 # Usage:
 #   ticket-next-batch.sh <epic-id>              # All non-conflicting ready tasks
@@ -27,17 +20,13 @@ set -euo pipefail
 #
 # Text output lines:
 #   EPIC: <id>  <title>
-#   AVAILABLE_POOL: <n>  (candidates before overlap/opus-cap filtering)
+#   AVAILABLE_POOL: <n>  (candidates before overlap filtering)
 #   BATCH_SIZE: <n>
-#   TASK: <id>  P<priority>  <type>  <model>  <subagent>  <class>  <title>  [story:<id>]
+#   TASK: <id>  P<priority>  <type>  <title>
 #   SKIPPED_OVERLAP: <id>  deferred (overlaps with <other-id> on <file>)
 #   SKIPPED_BLOCKED_STORY: <id>  deferred (parent story <story-id> is blocked)
-#   SKIPPED_OPUS_CAP: <id>  deferred (opus cap reached; 2 opus tasks already in batch)
 #   SKIPPED_IN_PROGRESS: <id>  already in_progress
 #   SKIPPED_NEEDS_PLANNING: <id>  needs implementation planning (story has 0 children)
-#
-# TASK field order (tab-separated after "TASK: "):
-#   id  P<priority>  issue-type  model  subagent-type  class  title  [story:id]
 #
 # Exit codes:
 #   0 — Batch generated (BATCH_SIZE may be 0 if no ready tasks)
@@ -58,12 +47,9 @@ fi
 TICKET_CMD="${TICKET_CMD:-${SCRIPT_DIR}/rebar}"
 REDUCER="${SCRIPT_DIR}/ticket-reducer.py"
 
-# NOTE: the DSO agent-routing layer (classify-task.py / analyze-file-impact.py)
-# is intentionally omitted from rebar. next-batch computes only the
-# unblocked-under-epic-hierarchy set. Empty SCORER/ANALYZE_IMPACT engage the
-# built-in default classification (sonnet / general-purpose), neutralizing
-# routing while preserving the output shape.
-SCORER=""
+# Optional file-impact analyzer for richer file-overlap detection. Left empty
+# in rebar (next-batch falls back to heuristic file extraction); the hook is
+# retained so a project can wire in a static analyzer if desired.
 ANALYZE_IMPACT=""
 
 # v3 event-sourced ticket system — the only supported backend.
@@ -302,7 +288,6 @@ SPRINT_TMPDIR="$tmpdir" \
 SPRINT_EPIC_ID="$epic_id" \
 SPRINT_LIMIT="$limit" \
 SPRINT_JSON="$json_output" \
-SPRINT_SCORER="$SCORER" \
 SPRINT_PYTHON="$PYTHON" \
 SPRINT_ANALYZE_IMPACT="$ANALYZE_IMPACT" \
 SPRINT_REPO_ROOT="$REPO_ROOT" \
@@ -325,7 +310,6 @@ tmpdir          = os.environ["SPRINT_TMPDIR"]
 epic_id         = os.environ["SPRINT_EPIC_ID"]
 limit           = int(os.environ.get("SPRINT_LIMIT", "0"))
 json_mode       = os.environ.get("SPRINT_JSON", "false").lower() == "true"
-scorer          = os.environ.get("SPRINT_SCORER", "")
 python          = os.environ.get("SPRINT_PYTHON", "python3")
 analyze_impact  = os.environ.get("SPRINT_ANALYZE_IMPACT", "")
 repo_root       = os.environ.get("SPRINT_REPO_ROOT", "")
@@ -348,8 +332,6 @@ if reducer_path and os.path.exists(reducer_path):
         _reduce_ticket = _mod.reduce_ticket
     except Exception:
         pass
-
-OPUS_CAP = 2
 
 # Flag: planning.external_dependency_block_enabled (passed from bash section)
 _FLAG_ENABLED = os.environ.get("SPRINT_PLANNING_FLAG_ENABLED", "false").lower() in ("true", "1", "yes")
@@ -540,36 +522,6 @@ def analyze_file_impact(seed_files):
         return files_likely_modified, files_likely_read
     except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
         return None, None
-
-def classify_tasks(task_list):
-    """
-    Run classify-task.py on task_list (list of raw task dicts).
-    Returns dict: task_id -> classification dict.
-    Falls back to default classification on any error.
-    """
-    default_cls = lambda tid: {
-        "id": tid, "priority": 3, "class": "independent",
-        "subagent": "general-purpose", "model": "sonnet",
-        "complexity": "low", "reason": "fallback"
-    }
-
-    if not task_list or not scorer or not os.path.exists(scorer):
-        return {t.get("id", ""): default_cls(t.get("id", "")) for t in task_list}
-
-    try:
-        result = subprocess.run(
-            [python, scorer],
-            input=json.dumps(task_list),
-            capture_output=True, text=True, timeout=60
-        )
-        if result.returncode != 0 or not result.stdout.strip():
-            return {t.get("id", ""): default_cls(t.get("id", "")) for t in task_list}
-        data = json.loads(result.stdout)
-        if not isinstance(data, list):
-            data = [data]
-        return {item["id"]: item for item in data if "id" in item}
-    except Exception:
-        return {t.get("id", ""): default_cls(t.get("id", "")) for t in task_list}
 
 # ── Load epic details ─────────────────────────────────────────────────────────
 
@@ -792,21 +744,15 @@ for raw in ready_tasks:
 
     candidates_raw.append(raw)
 
-# ── Classify all candidates in one batch call ─────────────────────────────────
-
-classifications = classify_tasks(candidates_raw)
-
-# ── Build enriched candidate objects ─────────────────────────────────────────
+# ── Build candidate objects ───────────────────────────────────────────────────
 
 class Candidate:
     __slots__ = (
         "id", "title", "priority", "itype", "status", "files",
         "files_read",
-        "model", "subagent", "cls", "complexity",
-        "classify_priority",
     )
 
-    def __init__(self, raw, cls_info):
+    def __init__(self, raw):
         self.id               = raw.get("id", "")
         self.title            = raw.get("title", "untitled")
         self.priority      = raw.get("priority", 4)
@@ -816,7 +762,7 @@ class Candidate:
         full_ticket           = _load_ticket_body(self.id)
         text                  = (raw.get("description") or "") + " " + (raw.get("notes") or "") + " " + full_ticket
         seed_files            = extract_files(text)
-        # Try static analysis via analyze-file-impact.py
+        # Static file-impact analysis (for parallel-batch file-overlap detection)
         files_likely_modified, files_likely_read = analyze_file_impact(list(seed_files))
         if files_likely_modified is not None:
             self.files        = files_likely_modified
@@ -825,20 +771,11 @@ class Candidate:
             # Fallback: use extract_files() output
             self.files        = seed_files
             self.files_read   = set()
-        self.model            = cls_info.get("model", "sonnet")
-        self.subagent         = cls_info.get("subagent", "general-purpose")
-        self.cls              = cls_info.get("class", "independent")
-        self.complexity       = cls_info.get("complexity", "low")
-        self.classify_priority = cls_info.get("priority", 3)
 
-candidates = [
-    Candidate(raw, classifications.get(raw.get("id", ""), {}))
-    for raw in candidates_raw
-]
+candidates = [Candidate(raw) for raw in candidates_raw]
 
-# Sort: classify_priority first (1=interface-contract → highest urgency),
-# then priority (0=critical), then id for stable tie-breaking.
-candidates.sort(key=lambda c: (c.classify_priority, c.priority, c.id))
+# Sort by priority (0=critical), then id for stable tie-breaking.
+candidates.sort(key=lambda c: (c.priority, c.id))
 
 # ── Greedy selection with file-overlap and opus cap ───────────────────────────
 
@@ -851,10 +788,8 @@ OVERLAP_SAFE_FILES = {
 
 claimed_files   = {}   # file -> task_id that claimed it
 batch           = []   # Candidate objects in batch
-opus_in_batch   = 0
 
 skipped_overlap  = []  # (id, title, conflict_file, conflict_task_id)
-skipped_opus_cap = []  # (id, title)
 
 for c in candidates:
     # Hard stop if limit reached
@@ -876,17 +811,10 @@ for c in candidates:
         skipped_overlap.append((c.id, c.title, conflict_file, conflict_task))
         continue
 
-    # Opus cap check
-    if c.model == "opus" and opus_in_batch >= OPUS_CAP:
-        skipped_opus_cap.append((c.id, c.title))
-        continue
-
     # Add to batch
     batch.append(c)
     for f in c.files:
         claimed_files[f] = c.id
-    if c.model == "opus":
-        opus_in_batch += 1
 
 # ── Conflict matrix (stderr) ──────────────────────────────────────────────────
 
@@ -952,17 +880,12 @@ if json_mode:
         "epic_title":     epic_title,
         "batch_size":     len(batch),
         "available_pool": len(candidates),
-        "opus_cap":       OPUS_CAP,
         "batch": [
             {
                 "id":             c.id,
                 "title":          c.title,
                 "priority": c.priority,
                 "type":           c.itype,
-                "model":          c.model,
-                "subagent":       c.subagent,
-                "class":          c.cls,
-                "complexity":     c.complexity,
                 "files":          sorted(c.files),
                 "files_likely_read": sorted(c.files_read),
             }
@@ -971,10 +894,6 @@ if json_mode:
         "skipped_overlap": [
             {"id": tid, "title": title, "conflict_file": cf, "conflict_with": ct}
             for tid, title, cf, ct in skipped_overlap
-        ],
-        "skipped_opus_cap": [
-            {"id": tid, "title": title}
-            for tid, title in skipped_opus_cap
         ],
         "skipped_blocked_story": [
             {"id": tid, "title": title, "blocked_story": sid}
@@ -1002,14 +921,9 @@ else:
     print(f"AVAILABLE_POOL: {len(candidates)}")
     print(f"BATCH_SIZE: {len(batch)}")
     for c in batch:
-        print(
-            f"TASK: {c.id}\tP{c.priority}\t{c.itype}"
-            f"\t{c.model}\t{c.subagent}\t{c.cls}\t{c.title}"
-        )
+        print(f"TASK: {c.id}\tP{c.priority}\t{c.itype}\t{c.title}")
     for tid, title, cf, ct in skipped_overlap:
         print(f"SKIPPED_OVERLAP: {tid}\tdeferred (overlaps with {ct} on {cf})")
-    for tid, title in skipped_opus_cap:
-        print(f"SKIPPED_OPUS_CAP: {tid}\tdeferred (opus cap of {OPUS_CAP} reached)")
     for tid, title, sid in skipped_blocked_story:
         print(f"SKIPPED_BLOCKED_STORY: {tid}\tdeferred (parent story {sid} is blocked)")
     for tid, title, sid in skipped_design_awaiting:

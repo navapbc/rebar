@@ -521,7 +521,7 @@ def _apply_outbound_conflict(mutation, *, client=None, repo_root=None) -> ApplyR
 # Inbound leaves write local ticket-tracker events directly because the local
 # CLI is the authoritative reader and we want deterministic file-shape control.
 # Event files follow the format documented at
-# ${CLAUDE_PLUGIN_ROOT}/docs/ticket-system-v3-architecture.md and mirrored
+# docs/ticket-system-v3-architecture.md and mirrored
 # throughout the tracker dir as <ticket_id>/<ts>-<uuid>-<EVENT>.json.
 # ---------------------------------------------------------------------------
 

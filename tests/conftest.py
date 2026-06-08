@@ -11,11 +11,10 @@ mis-routed tracker_dir/cwd handling (the failure mode that put
 target an existing top-level dir (e.g. ``src/rebar/_engine/x.json``); for
 that level of guarantee, run ``git status --porcelain`` in CI.
 
-Also provides a network-escape guard (bug 1c68) for tests/unit/** and
-tests/scripts/**. Any test in those tiers that opens a real socket raises
-``RuntimeError`` with a clear message. Tests that legitimately need network
-access (none expected in these tiers) may opt out via
-``@pytest.mark.allow_network``.
+Also provides a network-escape guard for tests/unit/** and tests/scripts/**.
+Any test in those tiers that opens a real socket raises ``RuntimeError`` with a
+clear message. Tests that legitimately need network access (none expected in
+these tiers) may opt out via ``@pytest.mark.allow_network``.
 """
 
 from __future__ import annotations
@@ -64,22 +63,22 @@ def _in_guarded_tier(item: pytest.Item) -> bool:
 
 def _guard_socket_connect(*args: object, **kwargs: object) -> None:
     raise RuntimeError(
-        "Network access is forbidden in unit/scripts tests (bug 1c68). "
+        "Network access is forbidden in unit/scripts tests. "
         "Mock the network call (e.g. unittest.mock.patch('urllib.request.urlopen')) "
         "or add @pytest.mark.allow_network if this test genuinely needs network access."
     )
 
 
 @pytest.fixture(autouse=True)
-def _dso_network_guard(request: pytest.FixtureRequest) -> Iterator[None]:
-    """Block real socket connections in unit and scripts test tiers (bug 1c68).
+def _network_guard(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Block real socket connections in unit and scripts test tiers.
 
     Patches ``socket.socket.connect`` and ``socket.create_connection`` to raise
     ``RuntimeError`` for every test whose path falls under tests/unit/ or
     tests/scripts/, unless the test is decorated with
     ``@pytest.mark.allow_network``.
 
-    Uses stdlib ``unittest.mock.patch`` — no new dependencies (rule:risky-dep).
+    Uses stdlib ``unittest.mock.patch`` — no new dependencies.
     """
     if not _in_guarded_tier(request.node):
         yield
@@ -93,68 +92,12 @@ def _dso_network_guard(request: pytest.FixtureRequest) -> Iterator[None]:
         patch(
             "socket.create_connection",
             side_effect=RuntimeError(
-                "Network access is forbidden in unit/scripts tests (bug 1c68). "
+                "Network access is forbidden in unit/scripts tests. "
                 "Mock the network call or add @pytest.mark.allow_network."
             ),
         ),
     ):
         yield
-
-
-@pytest.fixture(autouse=True)
-def _dso_disable_telemetry_during_tests(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Block live telemetry POSTs across the entire pytest session.
-
-    The d2f9 emit wrapper (telemetry_emit_wrapper.emit_event) honours
-    DSO_TELEMETRY_DISABLE=1 as a hard no-op switch. Until this fixture
-    existed, tests that imported runner.py / arbiter_processor.py and
-    reached the emit code paths would Popen the telemetry-emit.sh shim,
-    which POSTs to review_telemetry.endpoint_url. While that endpoint
-    was the SCP-blocked Lambda Function URL every POST silently 403'd,
-    masking the leak. Once endpoint_url was repointed to the API
-    Gateway (bypassing the SCP), every unguarded test run started
-    polluting s3://dso-telemetry-review-820258254566/<client_id>/<date>/
-    with synthetic records.
-
-    Tests that intentionally exercise the wrapper (e.g.
-    test_telemetry_emit_wrapper.py, test_telemetry_schema_contract.py)
-    already call ``monkeypatch.delenv("DSO_TELEMETRY_DISABLE", raising=
-    False)`` per-test; pytest applies the per-test monkeypatch AFTER
-    this autouse fixture, so those overrides continue to work
-    unchanged.
-    """
-    monkeypatch.setenv("DSO_TELEMETRY_DISABLE", "1")
-
-
-@pytest.fixture(autouse=True)
-def _dso_dummy_anthropic_api_key(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Set a dummy ANTHROPIC_API_KEY so tests that exercise dispatch_review
-    (or any provider-config-validated path) don't fail with
-    ``ConfigError: Missing ANTHROPIC_API_KEY`` when run in a CI job that
-    lacks the secret (e.g. Python Skill/Doc Tests, ticket-platform-matrix).
-
-    Without this fixture, every test that reaches the provider-config
-    validation step needs its own ``monkeypatch.setenv("ANTHROPIC_API_KEY",
-    ...)`` even when the LLM call itself is mocked. Bug f148 PR-A surfaced
-    this when its R2 test passed locally (key was set in the shell) but
-    failed on CI (no key exposed to the unit-test job).
-
-    Tests that intentionally probe the missing-key path (e.g.
-    test_providers_config.py:110) already call
-    ``monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)`` per-test;
-    pytest applies per-test monkeypatch AFTER autouse fixtures, so those
-    overrides continue to work unchanged.
-
-    The dummy key shape (sk-test-…) is non-functional — no real API call
-    can succeed with it — so leaking it into a real LLM call (e.g. by
-    forgetting to mock litellm) will fail loudly with a 401, not silently
-    bill a customer's account.
-    """
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-dummy-key-for-unit-tests")
 
 
 @pytest.fixture(autouse=True)

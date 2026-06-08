@@ -387,7 +387,7 @@ for issue in issues:
     while IFS='|' read -r level epic_id epic_title; do
         case "$level" in
             EMPTY)
-                log_verbose "Epic with 0 children: $epic_id - $epic_title (run /dso:preplanning to decompose when ready)"
+                log_verbose "Epic with 0 children: $epic_id - $epic_title (decompose into child tickets when ready)"
                 ((empty_count++)) || true
                 ;;
         esac

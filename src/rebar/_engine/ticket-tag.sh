@@ -12,7 +12,7 @@ source "$SCRIPT_DIR/ticket-lib.sh"
 _usage() {
     echo "Usage: ticket tag <ticket_id> <tag>" >&2
     echo "  ticket_id: ticket directory name (e.g., abcd-1234)" >&2
-    echo "  tag:       tag to add (e.g., brainstorm:complete)" >&2
+    echo "  tag:       tag to add (e.g., area:frontend)" >&2
     exit 1
 }
 

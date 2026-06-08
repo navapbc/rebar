@@ -158,7 +158,7 @@ def test_b_single_violation(tmp_path, invariants):
 
     # Exactly one subprocess.run call (ticket-cli). The rebar dispatcher is the
     # ticket CLI itself, so the bug-filing command is `rebar create bug ...`
-    # (no `ticket` subcommand prefix as in the legacy dso shim).
+    # (no `ticket` subcommand prefix as in the legacy DSO CLI).
     mock_run.assert_called_once()
     cli_args = mock_run.call_args[0][0]
     assert "create" in cli_args and "bug" in cli_args

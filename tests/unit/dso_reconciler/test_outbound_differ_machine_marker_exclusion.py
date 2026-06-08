@@ -85,11 +85,13 @@ def _make_ticket_with_comments(ticket_id: str, comment_bodies: list[str]) -> dic
     }
 
 
-def test_preplanning_context_comment_not_emitted(
+def test_preplanning_context_comment_now_emitted(
     outbound_differ: ModuleType,
 ) -> None:
-    """A local comment beginning with ``PREPLANNING_CONTEXT:`` is a skill-to-skill
-    machine payload and must produce ZERO outbound comment mutations."""
+    """Post-decouple: ``PREPLANNING_CONTEXT:`` was a DSO skill-to-skill marker.
+    rebar no longer recognizes it, so such a comment is treated as ordinary and
+    IS mirrored outbound (the exclusion list is trimmed to reconciler-internal
+    markers only)."""
     jira_key = "DIG-6000"
     body = 'PREPLANNING_CONTEXT:{"epic":"e1","stories":["s1","s2"]}'
     ticket = _make_ticket_with_comments("local-mm-1", [body])
@@ -103,10 +105,9 @@ def test_preplanning_context_comment_not_emitted(
     )
 
     comment_mutations = [m for m in result if m.comments]
-    assert comment_mutations == [], (
-        "A PREPLANNING_CONTEXT: machine-marker comment must be excluded from "
-        f"outbound sync. Got comment mutations: "
-        f"{[m.comments for m in comment_mutations]}"
+    assert len(comment_mutations) == 1, (
+        "A PREPLANNING_CONTEXT: comment is now an ordinary comment and must be "
+        f"mirrored outbound. Got comment mutations: {comment_mutations}"
     )
 
 
@@ -114,10 +115,10 @@ def test_human_comment_still_emitted_alongside_excluded_marker(
     outbound_differ: ModuleType,
 ) -> None:
     """Exclusion is surgical: a genuine human comment in the same ticket is still
-    synced, while the machine-marker comment is skipped."""
+    synced, while a reconciler-internal machine-marker comment is skipped."""
     jira_key = "DIG-6001"
     human_body = "Investigating the root cause; will update shortly."
-    marker_body = 'RESEARCH_FINDINGS:[{"capability":"x","status":"ok"}]'
+    marker_body = "BRIDGE_CANARY_ALERT: Still stale as of 2026-06-04T20:42:59Z: 3h ago."
     ticket = _make_ticket_with_comments("local-mm-2", [marker_body, human_body])
     store = StubBindingStore({"local-mm-2": jira_key})
     snapshot = _make_jira_snapshot_with_comments(jira_key, [])
@@ -135,7 +136,7 @@ def test_human_comment_still_emitted_alongside_excluded_marker(
         f"Exactly one (human) comment should be emitted; got {emitted}"
     )
     assert human_body in emitted[0]["body"]
-    assert "RESEARCH_FINDINGS" not in emitted[0]["body"]
+    assert "BRIDGE_CANARY_ALERT" not in emitted[0]["body"]
 
 
 def test_bridge_canary_alert_comments_not_emitted(

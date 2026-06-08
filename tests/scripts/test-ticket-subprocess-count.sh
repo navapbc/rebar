@@ -119,31 +119,9 @@ test_show_llm_pathway_single_python3() {
 }
 test_show_llm_pathway_single_python3
 
-# ── Test 4: ticket-transition.sh epic-close section uses ≤1 python3 ──────────
-# The epic-close reminder section (lines ~388-393) currently invokes 2 python3 calls
-# in a pipeline: one for the reducer, one for type extraction via json.loads.
-# After S2-T4 consolidation, this must be a single python3 call.
-echo "Test 4: ticket-transition.sh epic-close section uses at most 1 python3 subprocess"
-test_transition_epic_close_single_python3() {
-    if [ ! -f "$TRANSITION_SCRIPT" ]; then
-        assert_eq "ticket-transition.sh exists" "exists" "missing"
-        return
-    fi
-
-    # Count python3 invocations in the epic-close reminder section.
-    # From '# Epic-close reminder' to the closing 'fi' of the if block.
-    local epic_close_count
-    epic_close_count=$(awk '
-        /# Epic-close reminder/ { in_block=1 }
-        /^fi$/ && in_block { in_block=0 }
-        in_block && /python3/ && !/^\s*#/ { count++ }
-        END { print count+0 }
-    ' "$TRANSITION_SCRIPT")
-
-    # RED: currently 2 (reducer | type-extraction pipeline); must be ≤1 after consolidation.
-    assert_eq "ticket-transition.sh epic-close python3 count is ≤1" "1" "$epic_close_count"
-}
-test_transition_epic_close_single_python3
+# (The former Test 4 measured the epic-close /dso:end-session reminder's python3
+# subprocess count. That reminder was removed when rebar was decoupled from the
+# DSO plugin, so the test no longer has a code section to measure.)
 
 # ── Test 5: ticket-transition.sh main flock pipeline uses exactly 1 python3 ───
 # The flock section (lines ~222-352) must contain exactly 1 python3 -c invocation.

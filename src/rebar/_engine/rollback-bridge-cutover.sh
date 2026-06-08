@@ -61,7 +61,7 @@
 #   1. Do NOT execute this script. The cutover stays in place.
 #   2. Identify the specific failure mode that prompted the rollback consideration
 #      (a band failure, a single problematic Jira issue, a payload-format defect,
-#      etc.). File a bug ticket via /dso:fix-bug and treat it as a normal
+#      etc.). File a bug ticket via the bug-fix workflow and treat it as a normal
 #      production defect rather than a rollback condition.
 #   3. If a single Jira issue or class of issues is in a bad state, mutate
 #      them in-place via the reconciler bands (orphan_band, stale_band,
@@ -70,7 +70,7 @@
 #      mutation cap, manifest hash check, bot allowlist) that make targeted
 #      in-place healing safe even under operator pressure.
 #   4. If the failure is broader (e.g., reconciler crashes on every CREATE),
-#      patch the reconciler code via the standard /dso:fix-bug workflow and
+#      patch the reconciler code via the standard bug-fix workflow and
 #      ship via PR. The reconciler is single-flight, so a broken pass blocks
 #      the next pass; once the fix lands the next scheduled tick recovers
 #      automatically.

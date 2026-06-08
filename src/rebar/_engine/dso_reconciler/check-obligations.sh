@@ -14,7 +14,7 @@
 #   bash "${_PLUGIN_GIT_PATH}/scripts/dso_reconciler/check-obligations.sh"
 #
 # Environment:
-#   DSO_TICKET_CLI   — override the ticket CLI path (default: .claude/scripts/dso)
+#   DSO_TICKET_CLI   — override the ticket CLI path (default: the bundled rebar CLI)
 #   DSO_TODAY        — override "today" (YYYY-MM-DD) for deterministic testing
 #
 # Contract: see docs/contracts/obligation-ticket-schema.md within the plugin tree.
