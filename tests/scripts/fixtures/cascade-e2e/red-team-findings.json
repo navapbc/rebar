@@ -1,0 +1,10 @@
+{
+  "findings": [
+    {
+      "target": "synthetic-story-1",
+      "description": "Synthetic finding: story missing one acceptance criterion",
+      "severity": "important",
+      "category": "completeness"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture: flaky test detected via duplicate testcase entries (generic retry framework) -->
+<!-- Same classname::name appears twice: once with <failure>, once without -->
+<!-- Expected: script reports com.example.DuplicateTest::testFlakyDuplicate as flaky -->
+<testsuites>
+  <testsuite name="com.example.DuplicateTest" tests="2" failures="1" errors="0">
+    <!-- First attempt: failed -->
+    <testcase classname="com.example.DuplicateTest" name="testFlakyDuplicate" time="0.1">
+      <failure message="Assertion failed" type="java.lang.AssertionError">
+        Expected: 42, but was: 0
+      </failure>
+    </testcase>
+    <!-- Second attempt (retry): passed -->
+    <testcase classname="com.example.DuplicateTest" name="testFlakyDuplicate" time="0.2">
+    </testcase>
+  </testsuite>
+</testsuites>

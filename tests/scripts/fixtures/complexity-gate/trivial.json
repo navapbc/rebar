@@ -1,0 +1,10 @@
+{
+  "classification": "TRIVIAL",
+  "confidence": "high",
+  "files_estimated": ["src/agents/config.py"],
+  "layers_touched": ["Service"],
+  "interfaces_affected": 0,
+  "scope_certainty": "High",
+  "qualitative_overrides": [],
+  "reasoning": "Single config field addition in existing model, one layer, no interface changes."
+}

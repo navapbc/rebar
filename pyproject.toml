@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rebar"
+version = "0.1.0"
+description = "Event-sourced ticket system with a Jira reconciler — CLI, Python library, and MCP server."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+# The ticket engine (bash + the ticket_reducer / ticket_graph / dso_reconciler
+# Python packages + acli-integration.py) is stdlib-only and ships as package
+# data under rebar/_engine/. System prerequisites (not pip deps): git, jq,
+# flock, python3, and `acli` (only for live Jira reconciliation).
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.2"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+rebar = "rebar.cli:main"
+rebar-mcp = "rebar.mcp_server:main"
+
+[tool.hatch.build.targets.wheel]
+# packages includes the whole src/rebar tree (the _engine dir with its bash
+# scripts, executables, wordlist, and native Python packages ships verbatim as
+# package data — hatchling includes all files under the package, not just .py).
+packages = ["src/rebar"]
+artifacts = [
+    "src/rebar/_engine/**/*",
+]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/rebar", "tests", "README.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: unit-tier tests (network-guarded)",
+    "scripts: scripts-tier tests (engine scripts / reconciler)",
+    "integration: integration-tier tests (may require live services)",
+    "allow_network: opt out of the network guard for a test",
+]

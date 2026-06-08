@@ -1,0 +1,103 @@
+{
+  "captured_at": "2026-04-23T23:09:15Z",
+  "platform": "Darwin",
+  "ops": {
+    "show": {
+      "median_s": 0.22,
+      "median": 0.22,
+      "sc_target_s": 0.05
+    },
+    "list": {
+      "median_s": 0.24,
+      "median": 0.24,
+      "sc_target_s": 0.05
+    },
+    "comment": {
+      "median_s": 0.23,
+      "median": 0.23,
+      "sc_target_s": 0.05
+    },
+    "create": {
+      "median_s": 0.25,
+      "median": 0.25,
+      "sc_target_s": 0.05
+    },
+    "tag": {
+      "median_s": 0.22,
+      "median": 0.22,
+      "sc_target_s": 0.05
+    },
+    "untag": {
+      "median_s": 0.22,
+      "median": 0.22,
+      "sc_target_s": 0.05
+    },
+    "edit": {
+      "median_s": 0.23,
+      "median": 0.23,
+      "sc_target_s": 0.05
+    },
+    "transition": {
+      "median_s": 0.28,
+      "median": 0.28,
+      "sc_target_s": 0.05
+    }
+  },
+  "platform_budgets": {
+    "linux": {
+      "sc1_target_s": 0.05,
+      "slack_s": 0
+    },
+    "macos": {
+      "sc1_target_s": 0.05,
+      "slack_s": 0.02
+    },
+    "alpine": {
+      "sc1_target_s": 0.05,
+      "slack_s": 0.05
+    }
+  },
+  "show": {
+    "median_s": 0.22,
+    "median": 0.22,
+    "sc_target_s": 0.05
+  },
+  "list": {
+    "median_s": 0.24,
+    "median": 0.24,
+    "sc_target_s": 0.05
+  },
+  "comment": {
+    "median_s": 0.23,
+    "median": 0.23,
+    "sc_target_s": 0.05
+  },
+  "create": {
+    "median_s": 0.25,
+    "median": 0.25,
+    "sc_target_s": 0.05
+  },
+  "tag": {
+    "median_s": 0.22,
+    "median": 0.22,
+    "sc_target_s": 0.05
+  },
+  "untag": {
+    "median_s": 0.22,
+    "median": 0.22,
+    "sc_target_s": 0.05
+  },
+  "edit": {
+    "median_s": 0.23,
+    "median": 0.23,
+    "sc_target_s": 0.05
+  },
+  "transition": {
+    "median_s": 0.28,
+    "median": 0.28,
+    "sc_target_s": 0.05
+  },
+  "aggregate_sprint_turn_s": 2.9118,
+  "aggregate_sprint_turn_linux_s": 4.5,
+  "_aggregate_sprint_turn_linux_s_comment": "Bumped from 3.5s to 4.5s (2026-04-28): original 3.5s estimate was unmeasured; per-op medians (0.22-0.28s × 20 ops) imply 4.4-5.6s pre-refactor on Linux CI shared runners. Also reflects BusyBox flock compatibility fixes applied to Alpine CI."
+}

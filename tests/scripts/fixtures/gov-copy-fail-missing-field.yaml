@@ -1,0 +1,15 @@
+# INVALID: missing required 'rationale' block on the item
+schema_version: 1
+items:
+  - id: "field-program-name"
+    values:
+      label: "Program Name"
+      hint: "Enter the full name of the program."
+      errors:
+        required: "Program name is required."
+    # rationale block is absent — validator must reject this
+    checks:
+      fk_grade: 8
+      banned_words_found: []
+      active_voice: true
+      source: "deterministic-post-processor"

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture: no flaky tests — all tests pass cleanly -->
+<!-- Expected: script reports "No flaky tests detected." -->
+<testsuites>
+  <testsuite name="com.example.CleanTest" tests="3" failures="0" errors="0">
+    <testcase classname="com.example.CleanTest" name="testPassesCleanly" time="0.1">
+    </testcase>
+    <testcase classname="com.example.CleanTest" name="testAnotherCleanPass" time="0.2">
+    </testcase>
+    <testcase classname="com.example.CleanTest" name="testYetAnotherPass" time="0.05">
+    </testcase>
+  </testsuite>
+</testsuites>

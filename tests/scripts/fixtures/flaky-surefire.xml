@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture: flaky test detected via Maven Surefire <flakyFailure> / <flakyError> elements -->
+<!-- Expected: script reports com.example.SurefireTest::testFlakyMaven as flaky -->
+<testsuites>
+  <testsuite name="com.example.SurefireTest" tests="2" failures="0" errors="0" flakes="2">
+    <testcase classname="com.example.SurefireTest" name="testFlakyMaven" time="0.3">
+      <flakyFailure message="Expected true but was false" type="java.lang.AssertionError">
+        Test failed on attempt 1, passed on attempt 2
+      </flakyFailure>
+    </testcase>
+    <testcase classname="com.example.SurefireTest" name="testFlakyError" time="0.4">
+      <flakyError message="Connection refused" type="java.io.IOException">
+        Test errored on attempt 1, passed on attempt 2
+      </flakyError>
+    </testcase>
+  </testsuite>
+</testsuites>

@@ -1,0 +1,509 @@
+#!/usr/bin/env bash
+# ticket
+# Dispatcher for the event-sourced ticket system.
+# Routes subcommands to their implementation scripts.
+#
+# Usage: ticket <subcommand> [args...]
+#   ticket init                                   — initialize ticket system (orphan branch + worktree)
+#   ticket create <type> <title> [--parent <id>]  — create a new ticket
+#   ticket show <ticket_id>                       — show compiled ticket state as JSON
+#   ticket list                                   — list all tickets as a JSON array
+#   ticket transition <ticket_id> <current> <target> — transition status with optimistic concurrency
+#                                                     (requires current_status to match actual state;
+#                                                      exits non-zero if state has changed since read)
+#   ticket comment <ticket_id> <body>             — append a comment to a ticket
+#   ticket link <id1> <id2> <relation>            — link two tickets (blocks|depends_on|relates_to)
+#   ticket unlink <id1> <id2>                     — remove a link between two tickets
+#   ticket deps <ticket_id>                       — show dependency graph for a ticket (JSON)
+#   ticket bridge-status [--format=json]          — show last bridge run status
+#   ticket bridge-fsck [--tickets-tracker=<path>] — audit bridge mappings (orphans, duplicates, stale SYNCs)
+#   ticket tag <ticket_id> <tag>                  — add a tag to a ticket
+#   ticket untag <ticket_id> <tag>                — remove a tag from a ticket
+#   ticket summary <id> [<id> ...]                — one-line ticket summary with blocking status
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+_usage() {
+    echo "Usage: ticket <subcommand> [args...]"
+    echo ""
+    echo "Subcommands:"
+    echo "  init        Initialize the ticket system"
+    echo "  create      Create a new ticket"
+    echo "  show        Show ticket details"
+    echo "  list        List all tickets as JSON"
+    echo "  transition  Transition ticket status (optimistic concurrency)"
+    echo "  comment     Add a comment to a ticket"
+    echo "  link        Link two tickets (blocks|depends_on|relates_to)"
+    echo "  unlink      Remove a link between two tickets"
+    echo "  deps        Show dependency graph for a ticket (<ticket_id>)"
+    echo "  edit          Edit ticket fields (--title, --priority, --assignee, --ticket_type, --description, --tags)"
+    echo "  tag           Add a tag to a ticket"
+    echo "  untag         Remove a tag from a ticket"
+    echo "  validate      Validate ticket quality (exit 0-4 by score; --json, --terse)"
+    echo "  classify      Classify task for routing (JSON output with model/subagent/class/complexity/priority)"
+    echo "  clarity-check Score ticket clarity (exit 0=pass, 1=fail; JSON: score/verdict/threshold)"
+    echo "  check-ac      Check ticket has Acceptance Criteria block (exit 0=pass, 1=fail; AC_CHECK: pass|fail)"
+    echo "  quality-check Check ticket dispatch readiness (exit 0=pass, 1=fail; QUALITY: pass|fail)"
+    echo "  purge-bridge  Remove non-project inbound bridge tickets (--keep=<KEY> [--dry-run])"
+    echo "  summary       One-line ticket summary with blocking status for one or more IDs"
+    echo "  bridge-status Show last bridge run status [--format=json]"
+    echo "  bridge-fsck   Audit bridge mappings (orphans, duplicates, stale SYNCs)"
+    echo "  exists        O(1) presence check (exit 0=exists, 1=not found)"
+    echo "  list-epics    List open epics [--all] [--has-tag=TAG] [--min-children=N]"
+    echo "  list-descendants  BFS walk from a root ticket, bucketed by type (JSON)"
+    echo "  next-batch    Select next parallel agent batch for an epic [--json]"
+    echo "  ready         List tickets ready to work (all blockers closed)"
+    echo "  archive       Archive an open ticket (excludes from default list; idempotent)"
+    echo "  set-file-impact  Record file impact for a ticket (JSON array of {path,reason} objects)"
+    echo "  get-file-impact  Get the current file impact array for a ticket (JSON)"
+    echo "  set-verify-commands  Record DD-level verify commands (JSON array of {dd_id,dd_text,command})"
+    echo "  get-verify-commands  Get the current verify commands array for a ticket (JSON)"
+    echo "  scratch          Manage per-ticket scratch values (set/get/clear)"
+    exit 1
+}
+
+_ensure_initialized() {
+    # When the tracker location is explicitly injected (tests, embedding), the
+    # caller manages the tracker — do not auto-init the cwd repo's tracker.
+    if [[ -n "${TICKETS_TRACKER_DIR:-}" ]]; then
+        return 0
+    fi
+    if [[ "${DSO_TICKET_LEGACY:-}" == "1" ]]; then
+        echo "DSO_TICKET_LEGACY=1: using Python-backed _ensure_initialized path" >&2
+        local repo_root
+        repo_root="${PROJECT_ROOT:-${REBAR_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}}" || true
+        if [[ -z "$repo_root" ]]; then
+            echo "Error: not inside a git repository (set REBAR_ROOT or run inside the repo)" >&2
+            exit 1
+        fi
+        if [[ ! -d "$repo_root/.tickets-tracker" ]]; then
+            bash "$SCRIPT_DIR/ticket-init.sh" --silent 1>/dev/null || {
+                echo "Error: ticket system initialization failed. Run 'ticket init' manually." >&2
+                exit 1
+            }
+        fi
+        if [[ "${_TICKET_TEST_NO_SYNC:-}" == "1" ]]; then
+            return 0
+        fi
+        local tracker_dir
+        tracker_dir=$(python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$repo_root/.tickets-tracker" 2>/dev/null) || tracker_dir="$repo_root/.tickets-tracker"
+        if [[ -d "$tracker_dir" ]] && git -C "$tracker_dir" rev-parse --verify tickets &>/dev/null; then
+            local sync_marker
+            sync_marker="/tmp/.ticket-sync-$(python3 -c "import hashlib,sys; print(hashlib.md5(sys.argv[1].encode()).hexdigest()[:12])" "$tracker_dir" 2>/dev/null || echo "fallback")"
+            local now
+            now=$(date +%s)
+            local marker_age=9999
+            if [[ -f "$sync_marker" ]]; then
+                local marker_time
+                marker_time=$(cat "$sync_marker" 2>/dev/null || echo 0)
+                marker_age=$(( now - marker_time ))
+            fi
+            # Sync at most once per minute to shrink the divergence window during
+            # rapid-fire ticket operations (brainstorm sessions). 87f3-3b57.
+            if [[ "$marker_age" -ge 60 ]]; then
+                if git -C "$tracker_dir" fetch origin tickets --quiet 2>/dev/null; then
+                    if git -C "$tracker_dir" rev-parse --verify origin/tickets &>/dev/null; then
+                        if ! git -C "$tracker_dir" merge-base tickets origin/tickets &>/dev/null; then
+                            git -C "$tracker_dir" reset --hard origin/tickets --quiet 2>/dev/null || true
+                        else
+                            local _local_ahead
+                            _local_ahead=$(git -C "$tracker_dir" log --oneline origin/tickets..tickets 2>/dev/null) || true
+                            if [ -z "$_local_ahead" ]; then
+                                git -C "$tracker_dir" reset --hard origin/tickets --quiet 2>/dev/null || true
+                            fi
+                        fi
+                    fi
+                fi
+                echo "$now" > "$sync_marker"
+            fi
+        fi
+        return 0
+    fi
+
+    local repo_root
+    repo_root="${PROJECT_ROOT:-${REBAR_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}}" || true
+    if [[ -z "$repo_root" ]]; then
+        echo "Error: not inside a git repository (set REBAR_ROOT or run inside the repo)" >&2
+        exit 1
+    fi
+    if [[ ! -d "$repo_root/.tickets-tracker" ]]; then
+        bash "$SCRIPT_DIR/ticket-init.sh" --silent 1>/dev/null || {
+            echo "Error: ticket system initialization failed. Run 'ticket init' manually." >&2
+            exit 1
+        }
+    fi
+    # Sync ticket data from origin if not recently synced.
+    # Works from both main repo and worktree contexts.
+    # _TICKET_TEST_NO_SYNC=1 skips the sync block entirely — used by test
+    # harnesses where temp repos have no remote and the fetch is wasted I/O.
+    if [[ "${_TICKET_TEST_NO_SYNC:-}" == "1" ]]; then
+        return
+    fi
+    local tracker_dir
+    if command -v realpath >/dev/null 2>&1; then
+        tracker_dir=$(realpath "$repo_root/.tickets-tracker" 2>/dev/null) || tracker_dir="$repo_root/.tickets-tracker"
+    else
+        tracker_dir=$(cd "$repo_root/.tickets-tracker" 2>/dev/null && pwd -P) || tracker_dir="$repo_root/.tickets-tracker"
+    fi
+    if [[ -d "$tracker_dir" ]] && git -C "$tracker_dir" rev-parse --verify tickets &>/dev/null; then
+        local _md5_12
+        if command -v md5sum >/dev/null 2>&1; then
+            _md5_12=$(printf '%s' "$tracker_dir" | md5sum | cut -c1-12)
+        else
+            _md5_12=$(printf '%s' "$tracker_dir" | md5 | cut -c1-12)
+        fi
+        local sync_marker="/tmp/.ticket-sync-${_md5_12:-fallback}"
+        local now
+        now=$(date +%s)
+        local marker_age=9999
+        if [[ -f "$sync_marker" ]]; then
+            local marker_time
+            marker_time=$(cat "$sync_marker" 2>/dev/null || echo 0)
+            marker_age=$(( now - marker_time ))
+        fi
+        # Sync at most once per minute to shrink the divergence window during
+        # rapid-fire ticket operations (brainstorm sessions). 87f3-3b57.
+        if [[ "$marker_age" -ge 60 ]]; then
+            if git -C "$tracker_dir" fetch origin tickets --quiet 2>/dev/null; then
+                if git -C "$tracker_dir" rev-parse --verify origin/tickets &>/dev/null; then
+                    # Two-phase sync guard (0051-3428 + eb00-efd0):
+                    # Phase 1: detect unrelated histories (orphan branch created when
+                    # origin/tickets was not yet known locally). No merge-base means
+                    # the local branch is a stale orphan — safe to force-reset.
+                    # Phase 2: for related histories, preserve local-ahead commits
+                    # (the original eb00-efd0 protection).
+                    if ! git -C "$tracker_dir" merge-base tickets origin/tickets &>/dev/null; then
+                        # Unrelated histories: local is a stale orphan; force-reset to remote
+                        git -C "$tracker_dir" reset --hard origin/tickets --quiet 2>/dev/null || true
+                    else
+                        # Related histories: only reset if local has no commits ahead of remote
+                        local _local_ahead
+                        _local_ahead=$(git -C "$tracker_dir" log --oneline origin/tickets..tickets 2>/dev/null) || true
+                        if [ -z "$_local_ahead" ]; then
+                            git -C "$tracker_dir" reset --hard origin/tickets --quiet 2>/dev/null || true
+                        fi
+                    fi
+                fi
+            fi
+            echo "$now" > "$sync_marker"
+        fi
+    fi
+}
+
+if [ $# -lt 1 ]; then
+    _usage
+fi
+
+subcommand="$1"
+shift
+
+case "$subcommand" in
+    init)
+        exec bash "$SCRIPT_DIR/ticket-init.sh" "$@"
+        ;;
+    create)
+        _ensure_initialized
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_create "$@"
+        exit $?
+        ;;
+    show)
+        _ensure_initialized
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_show "$@"
+        exit $?
+        ;;
+    transition)
+        _ensure_initialized
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_transition "$@"
+        exit $?
+        ;;
+    list)
+        _ensure_initialized
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_list "$@"
+        exit $?
+        ;;
+    list-epics)
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized; fi
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_list_epics "$@"
+        exit $?
+        ;;
+    list-descendants)
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized; fi
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_list_descendants "$@"
+        exit $?
+        ;;
+    next-batch)
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized; fi
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_next_batch "$@"
+        exit $?
+        ;;
+    comment)
+        _ensure_initialized
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_comment "$@"
+        exit $?
+        ;;
+    compact)
+        _ensure_initialized
+        # Route through ticket_compact in the library so short IDs / aliases /
+        # prefixes are resolved before delegating to ticket-compact.sh
+        # (bug ec61-0e1f).
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_compact "$@"
+        exit $?
+        ;;
+    compact-all)
+        _ensure_initialized
+        exec bash "$SCRIPT_DIR/ticket-compact-all.sh" "$@"
+        ;;
+    fsck)
+        # ticket-fsck.sh: JSON validity + CREATE presence + index.lock cleanup
+        _ensure_initialized
+        exec bash "$SCRIPT_DIR/ticket-fsck.sh" "$@"
+        ;;
+    bridge-fsck)
+        # ticket-bridge-fsck.py: bridge mapping audit (orphans, duplicates, stale SYNCs)
+        # Skip _ensure_initialized when TICKETS_TRACKER_DIR is set (test environments
+        # provide their own tracker dir and should not trigger ticket-init.sh).
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then
+            _ensure_initialized
+        fi
+        exec python3 "$SCRIPT_DIR/ticket-bridge-fsck.py" "$@"
+        ;;
+    link)
+        _ensure_initialized
+        # REVIEW-DEFENSE: link routes to ticket-graph.py (not ticket-link.sh) by design.
+        # ticket-graph.py's add_dependency() performs link + cycle detection in one atomic
+        # operation, which ticket-link.sh does not. unlink intentionally stays on
+        # ticket-link.sh because its existing unlink logic correctly computes net-effective
+        # state and writes UNLINK events in the same format that ticket-graph.py reads.
+        # Both scripts write LINK/UNLINK events to the same append-only event log, so
+        # link and unlink remain consistent across the two implementations.
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_link "$@"
+        exit $?
+        ;;
+    unlink)
+        _ensure_initialized
+        exec bash "$SCRIPT_DIR/ticket-link.sh" unlink "$@"
+        ;;
+    deps)
+        _ensure_initialized
+        exec python3 "$SCRIPT_DIR/ticket-graph.py" "$@"
+        ;;
+    revert)
+        # Skip _ensure_initialized when TICKETS_TRACKER_DIR is set (test environments
+        # provide their own tracker dir and should not trigger ticket-init.sh).
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then
+            _ensure_initialized
+        fi
+        exec bash "$SCRIPT_DIR/ticket-revert.sh" "$@"
+        ;;
+    bridge-status)
+        # Skip _ensure_initialized when TICKETS_TRACKER_DIR is set (test environments
+        # provide their own tracker dir and should not trigger ticket-init.sh).
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then
+            _ensure_initialized
+        fi
+        exec bash "$SCRIPT_DIR/ticket-bridge-status.sh" "$@"
+        ;;
+    edit)
+        _ensure_initialized
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_edit "$@"
+        exit $?
+        ;;
+    exists)
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized; fi
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_exists "$@"
+        exit $?
+        ;;
+    tag)
+        _ensure_initialized
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_tag "$@"
+        exit $?
+        ;;
+    untag)
+        _ensure_initialized
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_untag "$@"
+        exit $?
+        ;;
+    validate)
+        # REVIEW-DEFENSE: _ensure_initialized is intentionally omitted here.
+        # validate-issues.sh reads tickets via TICKET_CMD env var (injectable for tests).
+        # In production TICKET_CMD defaults to the ticket script itself, which calls
+        # _ensure_initialized when it runs ticket list — initialization is transitive.
+        # Calling _ensure_initialized here would break test isolation where TICKET_CMD
+        # is mocked and no real ticket store exists.
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_validate "$@"
+        exit $?
+        ;;
+    classify)
+        # REVIEW-DEFENSE: _ensure_initialized is intentionally omitted here.
+        # classify-task.sh reads tickets via TICKET_CMD env var (injectable for tests).
+        # In production TICKET_CMD defaults to the ticket script itself, which calls
+        # _ensure_initialized when it runs ticket show — initialization is transitive.
+        # Calling _ensure_initialized here would break test isolation where TICKET_CMD
+        # is mocked and no real ticket store exists.
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_classify "$@"
+        exit $?
+        ;;
+    clarity-check)
+        # REVIEW-DEFENSE: _ensure_initialized is intentionally omitted here.
+        # ticket-clarity-check.sh reads tickets via DSO_CLI (not TICKET_CMD), so test
+        # isolation uses --stdin mode (pipe fixture JSON directly) rather than env injection.
+        # In production DSO_CLI calls ticket show, which calls _ensure_initialized —
+        # initialization is transitive. Calling _ensure_initialized here would break
+        # test isolation where no real ticket store exists.
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_clarity_check "$@"
+        exit $?
+        ;;
+    check-ac)
+        # REVIEW-DEFENSE: _ensure_initialized is intentionally omitted here.
+        # check-acceptance-criteria.sh reads tickets via TICKET_CMD env var (injectable for tests).
+        # In production TICKET_CMD defaults to the ticket script itself, which calls
+        # _ensure_initialized when it runs ticket show — initialization is transitive.
+        # Calling _ensure_initialized here would break test isolation where TICKET_CMD
+        # is mocked and no real ticket store exists.
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_check_ac "$@"
+        exit $?
+        ;;
+    quality-check)
+        # REVIEW-DEFENSE: _ensure_initialized is intentionally omitted here.
+        # issue-quality-check.sh reads tickets via TICKET_CMD env var (injectable for tests).
+        # In production TICKET_CMD defaults to the ticket script itself, which calls
+        # _ensure_initialized when it runs ticket show — initialization is transitive.
+        # Calling _ensure_initialized here would break test isolation where TICKET_CMD
+        # is mocked and no real ticket store exists.
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_quality_check "$@"
+        exit $?
+        ;;
+    purge-bridge)
+        # Skip _ensure_initialized when TICKETS_TRACKER_DIR is set (test environments
+        # provide their own tracker dir and should not trigger ticket-init.sh).
+        # purge-non-project-tickets.sh handles tracker initialization internally.
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then
+            _ensure_initialized
+        fi
+        exec bash "$SCRIPT_DIR/ticket-purge-bridge.sh" "$@"
+        ;;
+    ready)
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized; fi
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_ready "$@"
+        exit $?
+        ;;
+    summary)
+        # REVIEW-DEFENSE: _ensure_initialized is intentionally omitted here.
+        # issue-summary.sh reads tickets via TICKET_CMD env var (injectable for tests).
+        # In production TICKET_CMD defaults to the ticket script itself, which calls
+        # _ensure_initialized when it runs ticket show — initialization is transitive.
+        # Calling _ensure_initialized here would break test isolation where TICKET_CMD
+        # is mocked and no real ticket store exists.
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_summary "$@"
+        exit $?
+        ;;
+    archive)
+        _ensure_initialized
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_archive "$@"
+        exit $?
+        ;;
+    delete)
+        _ensure_initialized
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_delete "$@"
+        exit $?
+        ;;
+    set-file-impact)
+        _ensure_initialized
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_set_file_impact "$@"
+        exit $?
+        ;;
+    get-file-impact)
+        _ensure_initialized
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_get_file_impact "$@"
+        exit $?
+        ;;
+    set-verify-commands)
+        _ensure_initialized
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_set_verify_commands "$@"
+        exit $?
+        ;;
+    get-verify-commands)
+        _ensure_initialized
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_get_verify_commands "$@"
+        exit $?
+        ;;
+    resolve)
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized; fi
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_resolve "$@"
+        exit $?
+        ;;
+    format)
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized; fi
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_format "$@"
+        exit $?
+        ;;
+    scratch)
+        # Route scratch sub-verb to ticket-scratch.sh dispatcher.
+        # ticket-scratch.sh handles set/get/clear routing and unknown-verb errors.
+        # No _ensure_initialized: scratch uses the filesystem, not the ticket store.
+        exec bash "$SCRIPT_DIR/ticket-scratch.sh" "$@"
+        ;;
+    *)
+        echo "Error: unknown subcommand '$subcommand'" >&2
+        _usage
+        ;;
+esac

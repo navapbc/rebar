@@ -1,0 +1,10 @@
+{
+  "classification": "MODERATE",
+  "confidence": "high",
+  "files_estimated": ["src/agents/config.py", "src/services/document_processor.py"],
+  "layers_touched": ["Service", "Agent/Node"],
+  "interfaces_affected": 0,
+  "scope_certainty": "Medium",
+  "qualitative_overrides": [],
+  "reasoning": "Two-file change across two layers with medium scope certainty, no interface changes."
+}

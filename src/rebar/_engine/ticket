@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# ticket — compatibility alias for the rebar dispatcher.
+#
+# The dispatcher was renamed to `rebar` (the user-facing command), but the
+# engine's internal scripts, tests, and historical references invoke it as
+# `ticket`. This thin wrapper forwards to the sibling `rebar` dispatcher so both
+# names resolve identically. The dispatcher resolves its own SCRIPT_DIR from
+# BASH_SOURCE, so siblings are located correctly regardless of the invoked name.
+exec bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rebar" "$@"

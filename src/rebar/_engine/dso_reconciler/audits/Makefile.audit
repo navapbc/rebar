@@ -1,0 +1,98 @@
+# Makefile.audit — Orchestrates per-phase audit pipeline for the reconciler.
+#
+# Usage:
+#   make -f Makefile.audit audit-phase PHASE=<phase-name>
+#   make -f Makefile.audit help
+#
+# The audit-phase target invokes the 5 audit scripts in dependency order:
+#   dd4 (gate) → dd1 (baseline) → dd2 (orphan diff) → dd3 (mutation caps) → dd5 (bundler)
+#
+# Any non-zero exit from an earlier step short-circuits the rest.
+#
+# Environment overrides:
+#   AUDIT_DIR  — override the directory containing the audit scripts
+#                (default: the directory containing this Makefile, trailing slash included)
+#   PHASE      — required phase name (e.g. bootstrap-strict)
+#   DD5_EPIC   — epic ID forwarded to dd5 bundler (default: empty string)
+
+# ── Shared step name constants ────────────────────────────────────────────────
+DD4_STEP := dd4-phase-gate
+DD1_STEP := dd1-baseline
+DD2_STEP := dd2-orphan-count
+DD3_STEP := dd3-mutation-caps
+DD5_STEP := dd5-bundle
+
+# ── Resolve the directory containing sibling audit scripts ────────────────────
+# Uses lastword(MAKEFILE_LIST) so this Makefile works regardless of CWD.
+# The trailing slash is intentional; scripts are referenced as $(AUDIT_DIR)script.sh
+_MAKEFILE_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+
+# AUDIT_DIR may be overridden by the caller (used by tests to point at stubs).
+AUDIT_DIR ?= $(_MAKEFILE_DIR)
+
+# Optional epic ID for dd5 (may be left empty in non-bundler contexts)
+DD5_EPIC ?=
+
+.PHONY: audit-phase audit-live $(DD4_STEP) $(DD1_STEP) $(DD2_STEP) $(DD3_STEP) $(DD5_STEP) help _check-phase _check-pass-log
+
+# ── Bootstrap-throttle phase constant ─────────────────────────────────────────
+BOOTSTRAP_THROTTLE_PHASE := bootstrap-throttle
+
+# ── help ──────────────────────────────────────────────────────────────────────
+help:
+	@printf 'Usage: make -f Makefile.audit audit-phase PHASE=<phase-name>\n'
+	@printf '       make -f Makefile.audit audit-live\n'
+	@printf '\n'
+	@printf 'Targets:\n'
+	@printf '  audit-phase  Run all 5 audit scripts in dep order (requires PHASE=<n>)\n'
+	@printf '  audit-live   Alias for audit-phase PHASE=$(BOOTSTRAP_THROTTLE_PHASE)\n'
+	@printf '  help         Print this message\n'
+	@printf '\n'
+	@printf 'Step order: $(DD4_STEP) -> $(DD1_STEP) -> $(DD2_STEP) -> $(DD3_STEP) -> $(DD5_STEP)\n'
+
+# ── audit-live — bootstrap-throttle phase convenience wrapper ─────────────────
+audit-live:
+	$(MAKE) -f $(lastword $(MAKEFILE_LIST)) audit-phase PHASE=$(BOOTSTRAP_THROTTLE_PHASE)
+
+# ── audit-phase — mandatory PHASE guard + dep-ordered invocation ──────────────
+audit-phase: _check-phase $(DD4_STEP) $(DD1_STEP) $(DD2_STEP) $(DD3_STEP) $(DD5_STEP)
+
+_check-phase:
+ifndef PHASE
+	$(error PHASE is required. Usage: make -f Makefile.audit audit-phase PHASE=<phase-name>)
+endif
+
+# ── dd4: phase gate (sourced as library by siblings; also run standalone) ─────
+$(DD4_STEP):
+	bash $(AUDIT_DIR)audit_dd4_phase_gate.sh "$(PHASE)"
+
+# ── dd1: baseline capture ─────────────────────────────────────────────────────
+$(DD1_STEP):
+	bash $(AUDIT_DIR)audit_dd1_baseline.sh "$(PHASE)"
+
+# ── dd2: orphan count diff ────────────────────────────────────────────────────
+$(DD2_STEP):
+	bash $(AUDIT_DIR)audit_dd2_orphan_count.sh "$(PHASE)"
+
+# ── dd3: mutation caps (Python) ───────────────────────────────────────────────
+# The pass-log is produced by the reconciler itself (per-pass mutation counts).
+# This Makefile does NOT generate it — the operator must ensure it exists at
+# $(AUDIT_DIR)pass-log.jsonl before invoking audit-phase / audit-live. See the
+# audit-live runbook for the manual capture step.
+$(DD3_STEP): _check-pass-log
+	python3 $(AUDIT_DIR)audit_dd3_mutation_caps.py --phase "$(PHASE)" --pass-log "$(AUDIT_DIR)pass-log.jsonl"
+
+# Fail with a clear message if the operator has not staged pass-log.jsonl.
+_check-pass-log:
+	@if [ ! -f "$(AUDIT_DIR)pass-log.jsonl" ]; then \
+		printf 'ERROR: pass-log.jsonl not found at %spass-log.jsonl\n' "$(AUDIT_DIR)" 1>&2; \
+		printf '       The reconciler must emit a per-pass JSON-Lines log before\n' 1>&2; \
+		printf '       running the dd3 mutation-cap audit. See the audit-live\n' 1>&2; \
+		printf '       runbook (docs/runbooks/audit-live-runbook.md) for the\n' 1>&2; \
+		printf '       manual capture step.\n' 1>&2; \
+		exit 1; \
+	fi
+
+# ── dd5: artifact bundler ─────────────────────────────────────────────────────
+$(DD5_STEP):
+	bash $(AUDIT_DIR)audit_dd5_bundle.sh "$(PHASE)" --epic "$(DD5_EPIC)"
