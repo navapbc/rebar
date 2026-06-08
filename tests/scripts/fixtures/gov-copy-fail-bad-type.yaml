@@ -1,0 +1,3 @@
+# INVALID: 'items' is a string instead of a list
+schema_version: 1
+items: "this should be a list, not a string"

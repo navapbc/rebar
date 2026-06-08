@@ -1,0 +1,9 @@
+# Cascade E2E expected behavior matrix
+# Format: cycle_number | touchpoint | expected_action | expected_terminal_token
+# cycle 1: preplanning Phase E with findings -> re-dispatch story-decomposer (delta mode)
+# cycle 2: preplanning Phase E with findings -> re-dispatch + oscillation-check
+# cycle 3 (MAX_CYCLES=3): findings persist -> REPLAN_ESCALATE: brainstorm
+
+cycle=1 touchpoint=preplanning-phase-e action=delta-redispatch terminal=none
+cycle=2 touchpoint=preplanning-phase-e action=delta-redispatch+oscillation-check terminal=none
+cycle=3 touchpoint=preplanning-phase-e action=delta-redispatch terminal=REPLAN_ESCALATE:brainstorm

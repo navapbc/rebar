@@ -1,0 +1,12 @@
+{
+  "type": "bug",
+  "tier": 1,
+  "classification": "TRIVIAL",
+  "confidence": "high",
+  "files_estimated": ["src/agents/gap_analysis.py"],
+  "layers_touched": ["Agent/Node"],
+  "interfaces_affected": 0,
+  "scope_certainty": "High",
+  "qualitative_overrides": [],
+  "reasoning": "Tier 1 bug with clear reproduction path; single-file fix in one layer."
+}

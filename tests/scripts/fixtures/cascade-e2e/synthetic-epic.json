@@ -1,0 +1,10 @@
+{
+  "epic_id": "synthetic-epic-12345",
+  "title": "Synthetic Test Epic for Cascade E2E",
+  "success_criteria": [
+    {"sc_id": "sc-1", "text": "Synthetic criterion for cascade testing"}
+  ],
+  "stories": [
+    {"story_id": "synthetic-story-1", "title": "Synthetic story", "done_definitions": ["dd-1"]}
+  ]
+}

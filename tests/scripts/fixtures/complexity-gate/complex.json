@@ -1,0 +1,15 @@
+{
+  "classification": "COMPLEX",
+  "confidence": "high",
+  "files_estimated": [
+    "src/agents/config.py",
+    "src/services/document_processor.py",
+    "src/routes/upload_routes.py",
+    "src/models/pipeline_result.py"
+  ],
+  "layers_touched": ["Route/Blueprint", "Service", "Agent/Node", "DB/SQLAlchemy Model"],
+  "interfaces_affected": 1,
+  "scope_certainty": "Low",
+  "qualitative_overrides": ["scope_certainty_low", "interface_change"],
+  "reasoning": "Four-file change across four architectural layers with interface changes and low scope certainty."
+}

@@ -1,0 +1,23 @@
+schema_version: 1
+items:
+  - id: "test-nested-errors"
+    values:
+      label: "Test"
+      hint: "Test hint."
+      # Wrong shape: contract requires `errors` to be a mapping of
+      # error key → STRING. A nested dict value here would be str()-coerced
+      # by the post-processor's _get_item_text and feed literal "{'message':...}"
+      # into readability + banned-word + voice scorers. Validator must reject.
+      errors:
+        required:
+          message: "Enter your name."
+          severity: "error"
+    rationale:
+      rule_ids: ["test.rule"]
+      conflicts: []
+      deviations: []
+    checks:
+      fk_grade: 5
+      banned_words_found: []
+      active_voice: true
+      source: "deterministic-post-processor"

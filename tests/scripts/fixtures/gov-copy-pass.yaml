@@ -1,0 +1,40 @@
+schema_version: 1
+items:
+  - id: "field-program-name"
+    values:
+      label: "Program Name"
+      hint: "Enter the full name of the program as it appears in the authorization."
+      errors:
+        required: "Program name is required."
+        max_length: "Program name must be 100 characters or fewer."
+    rationale:
+      rule_ids:
+        - "PLAIN-LANGUAGE-ACT-2010"
+        - "OMB-M-17-06"
+      conflicts: []
+      deviations: []
+    checks:
+      fk_grade: 8
+      banned_words_found: []
+      active_voice: true
+      source: "deterministic-post-processor"
+  - id: "field-benefit-amount"
+    values:
+      label: "Monthly Benefit Amount"
+      hint: "The dollar amount you receive each month from this program."
+      errors:
+        required: "Benefit amount is required."
+        invalid_format: "Enter a number, like 500 or 1200.50."
+    rationale:
+      rule_ids:
+        - "PLAIN-LANGUAGE-ACT-2010"
+      conflicts:
+        - "Internal style guide: prefer 'amount' over 'benefit amount' — overridden by program terminology requirement."
+      deviations:
+        - rule_id: "OMB-M-17-06"
+          reason: "Dollar amounts are formatted per agency financial guidelines, not plain-language number style."
+    checks:
+      fk_grade: 7
+      banned_words_found: []
+      active_voice: true
+      source: "deterministic-post-processor"

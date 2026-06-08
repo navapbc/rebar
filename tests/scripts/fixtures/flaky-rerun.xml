@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture: flaky test detected via <rerun> element (existing pattern) -->
+<!-- Expected: script reports com.example.FlakyRerunTest::testFlakeyMethod as flaky -->
+<testsuites>
+  <testsuite name="com.example.FlakyRerunTest" tests="1" failures="0" errors="0">
+    <testcase classname="com.example.FlakyRerunTest" name="testFlakeyMethod" time="0.5">
+      <rerun message="Flaky: rerun detected" type="java.lang.AssertionError">
+        Flaky test failed on first attempt
+      </rerun>
+    </testcase>
+  </testsuite>
+</testsuites>

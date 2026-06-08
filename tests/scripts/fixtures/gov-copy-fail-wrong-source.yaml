@@ -1,0 +1,19 @@
+schema_version: 1
+items:
+  - id: "test-wrong-source"
+    values:
+      label: "Test"
+      hint: "Test hint."
+      errors: {}
+    rationale:
+      rule_ids: ["test.rule"]
+      conflicts: []
+      deviations: []
+    checks:
+      fk_grade: 5
+      banned_words_found: []
+      active_voice: true
+      # Wrong source value: LLM bypassed the post-processor and self-attested
+      # the checks block. The validator must reject this — only the deterministic
+      # post-processor may write the checks block (contract line 85).
+      source: "gov-copy-writer"
