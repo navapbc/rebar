@@ -12,8 +12,10 @@
 #                                                     (requires current_status to match actual state;
 #                                                      exits non-zero if state has changed since read)
 #   ticket comment <ticket_id> <body>             — append a comment to a ticket
-#   ticket link <id1> <id2> <relation>            — link two tickets (blocks|depends_on|relates_to)
-#   ticket unlink <id1> <id2>                     — remove a link between two tickets
+#   ticket link <id1> <id2> <relation>            — link two tickets (relation REQUIRED:
+#                                                     blocks|depends_on|relates_to|duplicates|supersedes|discovered_from)
+#   ticket unlink <source> <target>               — remove ONE link between an ordered pair (no relation arg;
+#                                                     removes the most-recent link; call repeatedly for multiple)
 #   ticket deps <ticket_id>                       — show dependency graph for a ticket (JSON)
 #   ticket bridge-status [--format=json]          — show last bridge run status
 #   ticket bridge-fsck [--tickets-tracker=<path>] — audit bridge mappings (orphans, duplicates, stale SYNCs)
@@ -40,16 +42,16 @@ _usage() {
     echo "  transition  Transition ticket status (optimistic concurrency)"
     echo "  claim       Atomically claim an open ticket (-> in_progress + assignee; exit 10 if taken)"
     echo "  comment     Add a comment to a ticket"
-    echo "  link        Link two tickets (blocks|depends_on|relates_to)"
-    echo "  unlink      Remove a link between two tickets"
+    echo "  link        Link two tickets (relation REQUIRED: blocks|depends_on|relates_to|duplicates|supersedes|discovered_from)"
+    echo "  unlink      Remove ONE link between an ordered <source> <target> pair (no relation arg; most-recent first)"
     echo "  deps        Show dependency graph for a ticket (<ticket_id>)"
     echo "  edit          Edit ticket fields (--title, --priority, --assignee, --ticket_type, --description, --tags)"
     echo "  tag           Add a tag to a ticket"
     echo "  untag         Remove a tag from a ticket"
-    echo "  validate      Validate ticket quality (exit 0-4 by score; --json, --terse)"
-    echo "  clarity-check Score ticket clarity (exit 0=pass, 1=fail; JSON: score/verdict/threshold)"
-    echo "  check-ac      Check ticket has Acceptance Criteria block (exit 0=pass, 1=fail; AC_CHECK: pass|fail)"
-    echo "  quality-check Check ticket dispatch readiness (exit 0=pass, 1=fail; QUALITY: pass|fail)"
+    echo "  validate      Repo-wide tracker health check (NO ticket id; scores the whole store 1-5, exit 0-4; --json, --terse, --verbose, --fix)"
+    echo "  clarity-check Score one ticket's clarity (<ticket_id>; exit 0=pass, 1=fail; JSON: score/verdict/threshold)"
+    echo "  check-ac      Check one ticket has an Acceptance Criteria block (<ticket_id>; exit 0=pass, 1=fail; AC_CHECK: pass|fail)"
+    echo "  quality-check Check one ticket's dispatch readiness (<ticket_id>; exit 0=pass, 1=fail; QUALITY: pass|fail)"
     echo "  purge-bridge  Remove non-project inbound bridge tickets (--keep=<KEY> [--dry-run])"
     echo "  summary       One-line ticket summary with blocking status for one or more IDs"
     echo "  bridge-status Show last bridge run status [--format=json]"

@@ -93,15 +93,58 @@ rebar list [--status=open] [--has-tag=...]   # JSON array
 rebar show <id|alias>                         # compiled ticket state (JSON)
 rebar transition <id> <current> <target>      # optimistic-concurrency status change
 rebar comment <id> "<body>"
-rebar link <id1> <id2> blocks|depends_on|relates_to
+rebar link <id1> <id2> <relation>            # relation REQUIRED (see relations below)
+rebar unlink <source> <target>               # remove ONE link for the ordered pair (no relation arg)
 rebar deps <id>                               # dependency graph
 rebar ready                                   # tickets with all blockers closed
 rebar next-batch <epic-id>                    # unblocked tickets under an epic's hierarchy
+rebar validate                                # repo-wide tracker health (NO ticket id; whole-store score 1-5)
+rebar clarity-check <id> / check-ac <id> / quality-check <id>   # per-ticket quality gates
 rebar reconcile [--mode dry-run|reconcile-check|live]   # Jira sync (default: dry-run)
 ```
 
 Repo root is resolved from `REBAR_ROOT` (or `PROJECT_ROOT`), falling back to the
 git toplevel of the working directory.
+
+**`validate` vs. the per-ticket gates.** `rebar validate` takes **no ticket id** —
+it scans the whole store and prints an overall tracker-health score (1-5, exit
+0-4) bucketed into critical / major / minor / warning findings (`--json`,
+`--terse`, `--verbose`, `--fix`). Passing it a ticket id errors. The *per-ticket*
+quality gates are separate commands that each take an `<id>`: `clarity-check`,
+`check-ac`, `quality-check`.
+
+**Links.** `rebar link <id1> <id2> <relation>` **requires** a relation; the six
+relations are `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`,
+`discovered_from`. `rebar unlink <source> <target>` takes **no** relation
+argument — it is pair-scoped and removes the **most-recently-created** link
+between that ordered pair, one per call, so to remove multiple links between the
+same pair you call `unlink` repeatedly. Note that **blocking** links
+(`blocks`/`depends_on`) may be promoted up the parent hierarchy when created (see
+below), so `unlink` must target the **promoted (ancestor)** endpoint to remove
+such a link.
+
+### Hierarchy promotion of blocking links
+
+For **blocking** dependencies only (`blocks`, `depends_on`), rebar promotes the
+link endpoints up the parent hierarchy so the dependency sits between tickets at
+a comparable level (epic↔epic, story↔story, task/bug↔task/bug). When it does so
+it emits a `REDIRECT: A→B promoted to …` note. Non-blocking relations
+(`relates_to`, `duplicates`, `supersedes`, `discovered_from`) are linked exactly
+as given, with no promotion.
+
+### The store auto-commits and auto-pushes every write
+
+Every rebar **write** (`create`, `edit`, `transition`, `claim`, `link`, …)
+auto-commits its event to the `tickets` branch **and** auto-pushes that branch to
+`origin/tickets` whenever an `origin` remote exists. **Local ticket activity is
+therefore shared with the remote immediately** — including test/scratch tickets,
+so be deliberate when working against a repo with a shared `tickets` remote. The
+push is **best-effort**: with no `origin` remote nothing is pushed, and a push
+failure (e.g. non-fast-forward it cannot auto-merge, or no network) never fails
+the write — it leaves the local commit intact and the branch diverged.
+`rebar fsck` reports `PUSH_PENDING` when the local `tickets` branch is ahead of
+`origin/tickets`, so unpushed activity is observable. See
+[`docs/concurrency.md`](docs/concurrency.md) for the push/merge-retry algorithm.
 
 ## Python library
 

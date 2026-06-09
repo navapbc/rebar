@@ -54,7 +54,10 @@ over one git-backed store.
 
 - **Storage** — a dedicated `tickets` git **orphan branch**, checked out as a
   worktree at `.tickets-tracker/`. Tickets are directories; mutations are
-  append-only UUID-named event files (see `docs/event-schema.md`).
+  append-only UUID-named event files (see `docs/event-schema.md`). Every write
+  auto-commits its event **and** auto-pushes `tickets` to `origin/tickets` when an
+  `origin` remote exists, so local ticket activity is shared with the remote
+  immediately (best-effort; see `docs/concurrency.md` "Outbound — push").
 
 ## Concurrency model (summary)
 

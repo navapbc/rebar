@@ -57,12 +57,45 @@ additionally requires `REBAR_MCP_ALLOW_RECONCILE_LIVE=1`.
 
 ## Quality gates
 
-Before dispatching/closing, self-check with `clarity_check` (score/verdict),
-`check_ac` (has Acceptance Criteria), `quality_check` (dispatch readiness), and
-`validate` (overall). Record `set_file_impact` (the `{path,reason}` array that
-`next_batch` uses to avoid scheduling file-conflicting tickets together) and
-`set_verify_commands` (DD-level verification) so downstream scheduling and
-verification work.
+The **per-ticket** gates each take a ticket id and self-check a single ticket
+before you dispatch/close it: `clarity_check` (score/verdict), `check_ac` (has an
+Acceptance Criteria block), `quality_check` (dispatch readiness). Separately,
+`validate` is a **repo-wide** tracker-health check — it takes **NO ticket id**
+(passing one errors); it scans the whole store and returns an overall health
+score (1-5) bucketed into critical/major/minor/warning findings (e.g. orphaned
+tasks, cycles, cross-epic child deps). Use the per-ticket gates on the ticket
+you're working; use `validate` for store-level health.
+
+Record `set_file_impact` (the `{path,reason}` array that `next_batch` uses to
+avoid scheduling file-conflicting tickets together) and `set_verify_commands`
+(DD-level verification) so downstream scheduling and verification work.
+
+## Linking (relations + hierarchy promotion)
+
+- `link <id1> <id2> <relation>` **requires** a relation. The six relations:
+  `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`,
+  `discovered_from`.
+- `unlink <source> <target>` takes **no** relation argument — it is pair-scoped
+  and removes the **most-recently-created** link between that ordered pair (one
+  per call). If a pair has multiple links, call `unlink` repeatedly.
+- **Hierarchy promotion (blocking links only).** For `blocks`/`depends_on`, rebar
+  promotes the link endpoints up the parent hierarchy so the dependency lands
+  between tickets at a comparable level (epic↔epic, story↔story,
+  task/bug↔task/bug), emitting a `REDIRECT: A→B promoted to …` note when it does.
+  This is why a blocking link you point at a child ticket can land on its epic.
+  Non-blocking relations (`relates_to`/`duplicates`/`supersedes`/
+  `discovered_from`) are linked exactly as given, with **no** promotion.
+  Consequence: because a blocking link may be promoted to an ancestor, `unlink`
+  must target the **promoted (ancestor)** endpoint to remove it.
+
+## The store shares every write immediately
+
+Every write (`create`/`edit`/`transition`/`claim`/`link`/…) auto-commits its
+event to the `tickets` branch **and** auto-pushes to `origin/tickets` when an
+`origin` remote exists — so your local ticket activity (including test tickets)
+propagates to the shared remote immediately. Push is best-effort: no remote means
+no push, and a push failure never fails the write (the commit stays local and
+diverged). `fsck` reports `PUSH_PENDING` when the local branch is ahead of origin.
 
 ## Library quick reference
 

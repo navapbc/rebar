@@ -110,13 +110,18 @@ rebase** (bug 637b: an interrupted rebase strands picks as dangling commits, and
 compaction `*.retired` renames conflict under rebase where merge unions cleanly).
 
 ### Outbound — push (on every write)
-`_push_tickets_branch` (`ticket-lib.sh:685-790`) pushes `HEAD:tickets`. On a
-non-fast-forward rejection it **fetches + merges** `origin/tickets` (union) and
-retries (bounded). It refuses to merge through a rebase/merge recovery state
-(`_check_no_rebase_in_progress`, `ticket-lib.sh:217`). Push is **best-effort**: a
-failed push never fails the caller — it leaves local commits intact and diverged.
-`rebar fsck` surfaces that divergence as a `PUSH_PENDING` notice
-(`ticket-fsck.sh`, Check 4.5) so it is not silent.
+**Every** rebar write (`create`/`edit`/`transition`/`claim`/`link`/…) auto-commits
+its event and then auto-pushes — so local ticket activity (including test/scratch
+tickets) propagates to the shared `origin/tickets` **immediately**, with no
+separate push step. `_push_tickets_branch` (`ticket-lib.sh:482`) pushes
+`HEAD:tickets` whenever an `origin` remote exists (no remote → it is a no-op and
+nothing is shared). On a non-fast-forward rejection it **fetches + merges**
+`origin/tickets` (union) and retries (bounded). It refuses to merge through a
+rebase/merge recovery state (`_check_no_rebase_in_progress`, `ticket-lib.sh:217`).
+Push is **best-effort**: a failed push (no network, unresolvable non-fast-forward,
+recovery state) never fails the caller — it warns, leaves local commits intact,
+and the branch stays diverged. `rebar fsck` surfaces that divergence as a
+`PUSH_PENDING` notice (`ticket-fsck.sh`, Check 4.5) so it is not silent.
 
 ### Inbound — background sync (periodic, on reads/commands)
 `_reconverge_tickets` (`ticket-sync.sh`, called from the `rebar` dispatcher's
