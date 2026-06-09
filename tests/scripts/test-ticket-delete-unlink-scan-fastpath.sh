@@ -71,8 +71,14 @@ fi
 
 # Write a minimal CREATE event for the deleted ticket so resolve_ticket_id works.
 _make_tracker_with_deleted() {
-    local tracker_dir
-    tracker_dir=$(mktemp -d "${TMPDIR:-/tmp}/test-fastpath.XXXXXX")
+    local tracker_dir _tmpbase
+    # Strip any trailing slash from $TMPDIR (macOS sets e.g. /var/.../T/) so the
+    # mktemp template does not produce a doubled slash. The scan prints
+    # pathlib.Path-normalized (single-slash) paths, while the assertions below
+    # grep -F for "$tracker_dir/..." literally — a "//" would never match.
+    _tmpbase="${TMPDIR:-/tmp}"
+    _tmpbase="${_tmpbase%/}"
+    tracker_dir=$(mktemp -d "$_tmpbase/test-fastpath.XXXXXX")
     _CLEANUP_DIRS+=("$tracker_dir")
 
     # Initialize as a git repo so the resolver works
