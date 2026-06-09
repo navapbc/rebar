@@ -27,7 +27,7 @@ from typing import Any, Protocol, runtime_checkable
 # Reconciler loop-breaker marker (Gap 1). Outbound comments embed this
 # token; inbound passes filter any Jira comment whose body contains it
 # so we do not detect our own echoes as new Jira-side comments.
-RECONCILER_MARKER = "<!-- dso:reconciler-echo -->"
+RECONCILER_MARKER = "<!-- rebar:reconciler-echo -->"
 
 
 _ADF_KEY_INBOUND = "rebar_reconciler.adf"

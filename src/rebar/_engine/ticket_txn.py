@@ -139,13 +139,13 @@ def _transition(argv):
                     if not hmac.compare_digest(verdict_hash_arg, expected_hash):
                         print(f'Error: verdict hash mismatch for {ticket_type} {ticket_id}.', file=sys.stderr)
                         print(f'  This means the completion verifier did not produce a PASS verdict at the current HEAD.', file=sys.stderr)
-                        print(f'  Recovery: dispatch dso:completion-verifier, then run compute-verdict-hash.sh.', file=sys.stderr)
+                        print(f'  Recovery: produce a PASS completion verdict, then run compute-verdict-hash.sh.', file=sys.stderr)
                         print(f'  Override: use --force-close="<reason>" to bypass (requires user approval).', file=sys.stderr)
                         os.close(fd)
                         sys.exit(1)
                 else:
                     print(f'Error: closing a {ticket_type} requires --verdict-hash (from compute-verdict-hash.sh after completion verifier PASS).', file=sys.stderr)
-                    print(f'  Recovery: dispatch dso:completion-verifier, then:', file=sys.stderr)
+                    print(f'  Recovery: produce a PASS completion verdict, then:', file=sys.stderr)
                     print(f'    bash compute-verdict-hash.sh {ticket_id} PASS  # produces the hash', file=sys.stderr)
                     print(f'    ticket transition {ticket_id} closed --verdict-hash=<hash-from-above>', file=sys.stderr)
                     print(f'  Override: use --force-close="<reason>" to bypass (requires user approval).', file=sys.stderr)

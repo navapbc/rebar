@@ -44,7 +44,7 @@ def _rebar_env(name: str, default: str | None = None) -> str | None:
 # Loop-breaker marker (mirrors inbound_differ.RECONCILER_MARKER).
 # Outbound comments embed this token so inbound passes — including the
 # bootstrap in _apply_inbound_create — can skip our own echoes.
-_RECONCILER_MARKER_APPLIER = "<!-- dso:reconciler-echo -->"
+_RECONCILER_MARKER_APPLIER = "<!-- rebar:reconciler-echo -->"
 
 # Typed-mutation dispatch layer.
 #

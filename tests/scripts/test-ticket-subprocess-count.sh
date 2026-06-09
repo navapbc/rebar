@@ -119,10 +119,6 @@ test_show_llm_pathway_single_python3() {
 }
 test_show_llm_pathway_single_python3
 
-# (The former Test 4 measured the epic-close /dso:end-session reminder's python3
-# subprocess count. That reminder was removed when rebar was decoupled from the
-# DSO plugin, so the test no longer has a code section to measure.)
-
 # ── Test 5: ticket-transition.sh main flock pipeline uses exactly 1 python3 ───
 # The flock section (lines ~222-352) must contain exactly 1 python3 -c invocation.
 # This is an invariant test — it verifies the flock block was NOT accidentally

@@ -567,7 +567,7 @@ def _map_comments_for_create(ticket: dict[str, Any]) -> list[dict[str, Any]]:
 # every outbound comment would re-appear inbound as a "new Jira comment"
 # and the bridge would loop. Kept identical here and in inbound_differ.py
 # so both directions agree on the loop-breaker pattern.
-RECONCILER_MARKER = "<!-- dso:reconciler-echo -->"
+RECONCILER_MARKER = "<!-- rebar:reconciler-echo -->"
 
 
 def _normalize_comment_body(body: Any) -> str:

@@ -3,7 +3,7 @@
 The design (validated by ``probe_gap1_inbound_comments.sh`` against live
 Jira earlier in the session):
 
-1. **Outbound emits a marker token** — ``<!-- dso:reconciler-echo -->`` is
+1. **Outbound emits a marker token** — ``<!-- rebar:reconciler-echo -->`` is
    appended to every outbound comment body so the inbound pass can
    identify (and filter) our own echoes.
 2. **Inbound set-diff by Jira comment id** — local comments carry an

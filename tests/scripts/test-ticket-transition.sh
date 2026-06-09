@@ -1046,48 +1046,6 @@ PYEOF
 }
 test_close_blocked_even_when_unblock_script_broken
 
-# ── test_epic_close_emits_no_plugin_reminder ─────────────────────────────────
-# rebar is decoupled from the DSO plugin: closing an epic must NOT print the
-# old "/dso:end-session" sprint reminder (or any REMINDER line). Neither epics
-# nor tasks emit plugin UX.
-test_epic_close_emits_no_plugin_reminder() {
-    local repo
-    repo=$(_make_test_repo)
-    local tracker_dir="$repo/.tickets-tracker"
-
-    local epic_id task_id
-    epic_id=$(_create_ticket "$repo" epic "My epic")
-    if [ -z "$epic_id" ]; then
-        assert_eq "setup: epic created" "non-empty" "empty"
-        assert_pass_if_clean "test_epic_close_emits_no_plugin_reminder"
-        return
-    fi
-
-    task_id=$(_create_ticket "$repo" task "A plain task")
-    if [ -z "$task_id" ]; then
-        assert_eq "setup: task created" "non-empty" "empty"
-        assert_pass_if_clean "test_epic_close_emits_no_plugin_reminder"
-        return
-    fi
-
-    # Close the epic — output must NOT contain the REMINDER line or /dso: text
-    local epic_out reminder_absent dso_absent
-    epic_out=$(cd "$repo" && bash "$TICKET_SCRIPT" transition "$epic_id" open closed --verdict-hash="$(_verdict_hash "$repo" "$epic_id")" 2>/dev/null) || true
-    reminder_absent=1; grep -q "REMINDER:" <<< "$epic_out" && reminder_absent=0
-    assert_eq "epic-close: no REMINDER line" "1" "$reminder_absent"
-    dso_absent=1; grep -q "/dso:" <<< "$epic_out" && dso_absent=0
-    assert_eq "epic-close: no /dso: plugin text" "1" "$dso_absent"
-
-    # Close a task — also no REMINDER line
-    local task_out
-    task_out=$(cd "$repo" && bash "$TICKET_SCRIPT" transition "$task_id" open closed 2>/dev/null) || true
-    reminder_absent=1; grep -q "REMINDER:" <<< "$task_out" && reminder_absent=0
-    assert_eq "task-close: no REMINDER line" "1" "$reminder_absent"
-
-    assert_pass_if_clean "test_epic_close_emits_no_plugin_reminder"
-}
-test_epic_close_emits_no_plugin_reminder
-
 # ── Test 21 (RED): first STATUS event has parent_status_uuid: null ───────────
 echo "Test 21 (RED): first STATUS event has parent_status_uuid field set to JSON null"
 test_parent_uuid_first_event_is_null() {

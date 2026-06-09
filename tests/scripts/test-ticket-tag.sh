@@ -40,7 +40,7 @@ _rebar() {
 
 # ── test_brainstorm_complete_is_plain_tag ────────────────────────────────────
 # An epic with no Planning Intelligence Log can still be tagged brainstorm:complete
-# (no gate). Pre-decouple this returned exit 1 with a "/dso:brainstorm" error.
+# (no gate): tags are freeform and ungated.
 test_brainstorm_complete_is_plain_tag() {
     _snapshot_fail
     local root eid rc

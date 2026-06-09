@@ -90,7 +90,7 @@ def _read_events_of_type(tracker_dir: Path, local_id: str, event_type: str) -> l
     return events
 
 
-RECONCILER_MARKER = "<!-- dso:reconciler-echo -->"
+RECONCILER_MARKER = "<!-- rebar:reconciler-echo -->"
 
 
 def _plain_comment(cid: str, body: str) -> dict:
