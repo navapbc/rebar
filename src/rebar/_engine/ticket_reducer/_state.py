@@ -24,6 +24,7 @@ def make_initial_state() -> dict:
         "bridge_alerts": [],
         "reverts": [],
         "file_impact": [],
+        "verify_commands": [],
         "preconditions_summary": {"status": "pre-manifest"},
         "parent_status_uuid": "",
     }
@@ -55,5 +56,6 @@ def make_error_dict(ticket_id: str, status: str, error: str) -> dict:
         "bridge_alerts": [],
         "reverts": [],
         "file_impact": [],
+        "verify_commands": [],
         "parent_status_uuid": "",
     }

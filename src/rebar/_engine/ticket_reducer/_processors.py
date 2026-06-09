@@ -287,6 +287,19 @@ def process_file_impact(state: dict, event: dict, data: dict) -> None:
     state["file_impact"] = data.get("file_impact") or []
 
 
+def process_verify_commands(state: dict, event: dict, data: dict) -> None:
+    """Apply a VERIFY_COMMANDS event: replace state.verify_commands (last-writer-wins).
+
+    Mirrors the jq `show` reducer semantics (`.verify_commands = ev.data.verify_commands // []`)
+    and the FILE_IMPACT processor. Without this, `verify_commands` was produced only
+    by the jq reducer (show/get-file-impact), never by the Python reducer — so it was
+    invisible in list/search and silently DROPPED when a ticket was compacted into a
+    SNAPSHOT (the compactor builds compiled_state via this reducer). `or []` handles
+    both missing key and JSON null.
+    """
+    state["verify_commands"] = data.get("verify_commands") or []
+
+
 def process_archived(state: dict) -> None:
     """Apply an ARCHIVED event: mark ticket archived and reflect in status field.
 
@@ -392,6 +405,8 @@ def replay_events(
             process_edit(state, data)
         elif event_type == "FILE_IMPACT":
             process_file_impact(state, event, data)
+        elif event_type == "VERIFY_COMMANDS":
+            process_verify_commands(state, event, data)
         elif event_type == "ARCHIVED":
             process_archived(state)
         elif event_type == "SNAPSHOT":
