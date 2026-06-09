@@ -238,7 +238,7 @@ def test_excluded_fields_change_does_not_drive_mutations(
     """A change only in an EXCLUDED_FIELDS field produces mutation_count=0.
 
     Pass 1: snapshot has issues with 'summary' field (real) and no excluded fields.
-    Pass 2: same issues but with an 'dso_local_id' field added (in EXCLUDED_FIELDS).
+    Pass 2: same issues but with an 'local_id' field added (in EXCLUDED_FIELDS).
     The differ must ignore that change and emit zero mutations.
     """
     pass_id = "excluded-fields-pass"
@@ -258,7 +258,7 @@ def test_excluded_fields_change_does_not_drive_mutations(
             "fields": {
                 "summary": "Some issue",
                 "status": {"name": "To Do"},
-                "dso_local_id": "abc-123",  # EXCLUDED_FIELDS member
+                "local_id": "abc-123",  # EXCLUDED_FIELDS member
             },
         }
     ]

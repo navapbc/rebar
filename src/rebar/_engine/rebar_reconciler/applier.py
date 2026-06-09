@@ -32,14 +32,13 @@ logger = logging.getLogger(__name__)
 
 
 def _rebar_env(name: str, default: str | None = None) -> str | None:
-    """Read ``REBAR_<name>`` preferred; deprecated ``DSO_<name>`` fallback (WS1).
+    """Read ``REBAR_<name>`` from the environment (DSO_* support removed).
 
     Local to this module: the reconciler modules are spec-loaded under test (where
     ``rebar_reconciler`` is the test-package shadow), so a cross-module import of a
     shared shim would not resolve.
     """
-    val = os.environ.get(f"REBAR_{name}")
-    return val if val is not None else os.environ.get(f"DSO_{name}", default)
+    return os.environ.get(f"REBAR_{name}", default)
 
 # Loop-breaker marker (mirrors inbound_differ.RECONCILER_MARKER).
 # Outbound comments embed this token so inbound passes — including the
@@ -256,7 +255,7 @@ def _apply_outbound_create(mutation, *, client=None, repo_root=None) -> ApplyRes
 # Allowlist of fields that can be pushed outbound via update_issue. Other
 # fields in the changed_fields set are silently dropped — pushing arbitrary
 # fields outbound is a higher-blast-radius change that lands in a follow-up
-# story. Status is governed separately by DSO_RECONCILER_STATUS_GATING.
+# story. Status is governed separately by REBAR_RECONCILER_STATUS_GATING.
 # "parent" is intentionally included but routed to client.set_parent
 # (REST PUT /rest/api/3/issue/{key} {"fields":{"parent":{"key":K}}}) rather
 # than client.update_issue — ACLI edit does not support reparenting
@@ -311,7 +310,7 @@ def _apply_outbound_update(mutation, *, client=None, repo_root=None) -> ApplyRes
         changed_fields = payload
 
     # Bug 85a1 (Gap 8): status outbound is now first-class. The previous
-    # DSO_RECONCILER_STATUS_GATING gate has been removed — status flows
+    # REBAR_RECONCILER_STATUS_GATING gate has been removed — status flows
     # through ``client.update_issue`` which routes status to
     # ``transition_issue`` (REST POST /transitions). The legacy
     # ``_route_status_via_draft5`` no-op stub is unused.
@@ -859,11 +858,11 @@ def _apply_inbound_create(
                 {"status": local_status, "current_status": "open"},
             )
 
-    # Write rebar-id label + dso_local_id entity property back to Jira so the
+    # Write rebar-id label + local_id entity property back to Jira so the
     # differ recognizes this issue as mirrored on subsequent passes (dedup).
     if client is not None:
         _call_with_retry(client.add_label, jira_key, f"rebar-id:{local_id}")
-        _call_with_retry(client.set_entity_property, jira_key, "dso_local_id", local_id)
+        _call_with_retry(client.set_entity_property, jira_key, "local_id", local_id)
 
     # Bug 221b: bootstrap pre-existing Jira comments so the local ticket has
     # a complete comment history immediately after inbound create.
@@ -1284,7 +1283,7 @@ def _apply_inbound_clean_label(mutation, *, client=None, repo_root=None) -> Appl
 def _apply_inbound_repair_property(
     mutation, *, client=None, repo_root=None
 ) -> ApplyResult:
-    """Repair a missing ``dso_local_id`` entity property on a Jira issue.
+    """Repair a missing ``local_id`` entity property on a Jira issue.
 
     Delegates to the existing :func:`inbound_repair_property` implementation
     (kept under its legacy name for back-compat with existing tests). Wraps
@@ -1458,7 +1457,7 @@ with their authorization status for rebar-id label mutations:
   8. inbound_clean_label   — AUTHORIZED for {delete}: removes stale or
                              duplicated "rebar-id-*" labels from the Jira side.
   9. inbound_repair_property — UNAUTHORIZED for rebar-id label mutations.
-                              This leaf writes the dso_local_id entity PROPERTY
+                              This leaf writes the local_id entity PROPERTY
                               FIELD via set_issue_property(), NOT the label.
 
 Only inbound_clean_label (delete), outbound_create (create), and
@@ -1470,7 +1469,7 @@ conflict_resolver must not write, modify, or emit rebar-id label mutations;
 rebar-id is the identity primitive and its provenance is governed solely by the
 two authorized leaves above, not by the per-field provenance resolution path.
 
-inbound_repair_property writes the dso_local_id property field (entity
+inbound_repair_property writes the local_id property field (entity
 properties, not labels). It MUST NOT touch the label surface.
 """
 
@@ -1498,7 +1497,7 @@ _AUTHORIZED_REBAR_ID_LABEL_ACTIONS: dict[str, frozenset[str]] = {
 # leaf emits a rebar-id-* label mutation.
 #
 # Guard mode is controlled by REBAR_ID_GUARD_MODE (env) or rebar_id_guard_mode
-# (dso-config.conf key). Precedence: env > config > default ('raise').
+# (.rebar/config.conf key). Precedence: env > config > default ('raise').
 # ---------------------------------------------------------------------------
 
 
@@ -2113,7 +2112,7 @@ def create_one(
             # condition would have cleared on retry.
             _call_with_retry(client.add_label, jira_key, f"rebar-id:{local_id}")
             _call_with_retry(
-                client.set_entity_property, jira_key, "dso_local_id", local_id
+                client.set_entity_property, jira_key, "local_id", local_id
             )
             if binding_store is not None and local_id:
                 binding_store.bind_confirm(local_id, jira_key)
@@ -2278,7 +2277,7 @@ def update_one(
     # status is included: bug 85a1 (Gap 8) removed the BY_DESIGN drop —
     # outbound status push now uses REST POST /transitions via
     # ``transition_issue`` (bypasses ACLI's silent-exit-0 failure mode).
-    # The typed leaf's DSO_RECONCILER_STATUS_GATING gate is also gone.
+    # The typed leaf's REBAR_RECONCILER_STATUS_GATING gate is also gone.
     _OUTBOUND_BATCH_ALLOWLIST = frozenset(
         {"summary", "description", "assignee", "priority", "status"}
     )
@@ -2446,7 +2445,7 @@ def delete_one(mutation: dict, client) -> None:
 def inbound_repair_property(mutation, client) -> dict:
     """Repair a missing entity property on a Jira issue.
 
-    Happy path: invokes ``client.set_issue_property(target, 'dso_local_id', local_id)``
+    Happy path: invokes ``client.set_issue_property(target, 'local_id', local_id)``
     and returns ``{'status': 'ok', 'key': target}``.
 
     Failure path: when ``set_issue_property`` raises, attempts a follow-on cleanup
@@ -2477,7 +2476,7 @@ def inbound_repair_property(mutation, client) -> dict:
     local_id = payload.get("local_id", "")
 
     try:
-        client.set_issue_property(target, "dso_local_id", local_id)
+        client.set_issue_property(target, "local_id", local_id)
         return {"status": "ok", "key": target, "follow_on": None}
     except Exception as exc:
         label_remove_err: Exception | None = None
@@ -2761,7 +2760,7 @@ def apply(
             suppressed_targets.add(local_id)
 
     # Create an AcliClient for inbound leaves that need to write back to
-    # Jira (rebar-id label + dso_local_id property). The caller (reconcile_once)
+    # Jira (rebar-id label + local_id property). The caller (reconcile_once)
     # does not pass a client — the fetcher creates its own for reading, and
     # the legacy batch path (_apply_batch) creates its own for outbound writes.
     # The inbound dispatch path needs its own for the write-back step.

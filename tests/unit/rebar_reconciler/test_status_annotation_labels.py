@@ -1,18 +1,18 @@
-"""Unit tests for lossless status mapping via dso-status: annotation labels.
+"""Unit tests for lossless status mapping via rebar-status: annotation labels.
 
 Ticket: 929a-cc1b-09ee-4e7a
 DIG live workflow = {To Do, In Progress, In Review, Done} only.
-blocked/cancelled must map to In Progress/Done plus a dso-status: label.
-Inbound must prefer dso-status: label over raw Jira workflow status.
-dso-status: labels must be excluded from local tag sync.
+blocked/cancelled must map to In Progress/Done plus a rebar-status: label.
+Inbound must prefer rebar-status: label over raw Jira workflow status.
+rebar-status: labels must be excluded from local tag sync.
 
 Test IDs:
-  (a) outbound blocked → "In Progress" + dso-status:blocked label intent
-  (b) outbound cancelled → "Done" + dso-status:cancelled label intent
-  (c) status change blocked→in_progress removes dso-status:blocked label
-  (d) inbound dso-status:blocked label → local "blocked" regardless of workflow status
+  (a) outbound blocked → "In Progress" + rebar-status:blocked label intent
+  (b) outbound cancelled → "Done" + rebar-status:cancelled label intent
+  (c) status change blocked→in_progress removes rebar-status:blocked label
+  (d) inbound rebar-status:blocked label → local "blocked" regardless of workflow status
   (e) inbound "In Review" with no label → "in_progress" (not "open")
-  (f) dso-status: labels excluded from local tag sync both directions
+  (f) rebar-status: labels excluded from local tag sync both directions
 """
 
 from __future__ import annotations
@@ -134,7 +134,7 @@ def _make_jira_fields(
 
 
 # ---------------------------------------------------------------------------
-# Test (a): outbound blocked → "In Progress" + dso-status:blocked label intent
+# Test (a): outbound blocked → "In Progress" + rebar-status:blocked label intent
 # ---------------------------------------------------------------------------
 
 
@@ -162,7 +162,7 @@ def test_outbound_blocked_maps_to_in_progress(outbound_differ: ModuleType) -> No
 
 
 def test_outbound_blocked_emits_dso_status_blocked_label(outbound_differ: ModuleType) -> None:
-    """(a) outbound blocked must also emit dso-status:blocked label intent."""
+    """(a) outbound blocked must also emit rebar-status:blocked label intent."""
     ticket = _make_local_ticket(ticket_id="local-1", status="blocked")
     store = StubOutboundBindingStore()
 
@@ -175,8 +175,8 @@ def test_outbound_blocked_emits_dso_status_blocked_label(outbound_differ: Module
     assert len(result) == 1
     m = result[0]
     label_names = {lb["label"] for lb in m.labels if lb.get("action") == "add"}
-    assert "dso-status:blocked" in label_names, (
-        f"outbound blocked must emit dso-status:blocked label. Got labels: {m.labels}"
+    assert "rebar-status:blocked" in label_names, (
+        f"outbound blocked must emit rebar-status:blocked label. Got labels: {m.labels}"
     )
 
 
@@ -194,7 +194,7 @@ def test_outbound_blocked_update_maps_to_in_progress(outbound_differ: ModuleType
         binding_store=store,
     )
 
-    # Should emit update with dso-status:blocked label (since Jira doesn't have it yet)
+    # Should emit update with rebar-status:blocked label (since Jira doesn't have it yet)
     assert len(result) == 1
     m = result[0]
     assert m.action == "update"
@@ -203,15 +203,15 @@ def test_outbound_blocked_update_maps_to_in_progress(outbound_differ: ModuleType
         assert m.fields["status"] == "In Progress", (
             f"blocked must map to 'In Progress', got: {m.fields['status']!r}"
         )
-    # dso-status:blocked label must be added
+    # rebar-status:blocked label must be added
     label_adds = [lb["label"] for lb in m.labels if lb.get("action") == "add"]
-    assert "dso-status:blocked" in label_adds, (
-        f"Must emit dso-status:blocked label for blocked status. Got: {m.labels}"
+    assert "rebar-status:blocked" in label_adds, (
+        f"Must emit rebar-status:blocked label for blocked status. Got: {m.labels}"
     )
 
 
 # ---------------------------------------------------------------------------
-# Test (b): outbound cancelled → "Done" + dso-status:cancelled label intent
+# Test (b): outbound cancelled → "Done" + rebar-status:cancelled label intent
 # ---------------------------------------------------------------------------
 
 
@@ -240,7 +240,7 @@ def test_outbound_cancelled_maps_to_done(outbound_differ: ModuleType) -> None:
 
 
 def test_outbound_cancelled_emits_dso_status_cancelled_label(outbound_differ: ModuleType) -> None:
-    """(b) outbound cancelled must also emit dso-status:cancelled label intent."""
+    """(b) outbound cancelled must also emit rebar-status:cancelled label intent."""
     ticket = _make_local_ticket(ticket_id="local-1", status="cancelled")
     store = StubOutboundBindingStore()
 
@@ -254,23 +254,23 @@ def test_outbound_cancelled_emits_dso_status_cancelled_label(outbound_differ: Mo
     assert len(result) == 1
     m = result[0]
     label_names = {lb["label"] for lb in m.labels if lb.get("action") == "add"}
-    assert "dso-status:cancelled" in label_names, (
-        f"outbound cancelled must emit dso-status:cancelled label. Got labels: {m.labels}"
+    assert "rebar-status:cancelled" in label_names, (
+        f"outbound cancelled must emit rebar-status:cancelled label. Got labels: {m.labels}"
     )
 
 
 # ---------------------------------------------------------------------------
-# Test (c): status change blocked→in_progress removes dso-status:blocked label
+# Test (c): status change blocked→in_progress removes rebar-status:blocked label
 # ---------------------------------------------------------------------------
 
 
 def test_outbound_blocked_to_in_progress_removes_annotation_label(
     outbound_differ: ModuleType,
 ) -> None:
-    """(c) when local status changes from blocked to in_progress, remove dso-status:blocked.
+    """(c) when local status changes from blocked to in_progress, remove rebar-status:blocked.
 
-    Jira has dso-status:blocked from a previous pass; now local is in_progress.
-    The differ must emit a REMOVE for dso-status:blocked.
+    Jira has rebar-status:blocked from a previous pass; now local is in_progress.
+    The differ must emit a REMOVE for rebar-status:blocked.
     """
     ticket = _make_local_ticket(
         ticket_id="local-1",
@@ -283,7 +283,7 @@ def test_outbound_blocked_to_in_progress_removes_annotation_label(
         "DIG-100": _make_jira_fields(
             status="In Progress",
             summary="Fixed now",
-            labels=["dso-status:blocked"],
+            labels=["rebar-status:blocked"],
         ),
     }
 
@@ -296,8 +296,8 @@ def test_outbound_blocked_to_in_progress_removes_annotation_label(
     assert len(result) == 1, f"Expected 1 update mutation, got {result}"
     m = result[0]
     label_removes = [lb["label"] for lb in m.labels if lb.get("action") == "remove"]
-    assert "dso-status:blocked" in label_removes, (
-        f"Must remove stale dso-status:blocked when status moves to in_progress. "
+    assert "rebar-status:blocked" in label_removes, (
+        f"Must remove stale rebar-status:blocked when status moves to in_progress. "
         f"Got labels: {m.labels}"
     )
 
@@ -305,7 +305,7 @@ def test_outbound_blocked_to_in_progress_removes_annotation_label(
 def test_outbound_cancelled_to_closed_removes_annotation_label(
     outbound_differ: ModuleType,
 ) -> None:
-    """(c) variant: when closed replaces cancelled, remove dso-status:cancelled."""
+    """(c) variant: when closed replaces cancelled, remove rebar-status:cancelled."""
     ticket = _make_local_ticket(
         ticket_id="local-1",
         status="closed",
@@ -316,7 +316,7 @@ def test_outbound_cancelled_to_closed_removes_annotation_label(
         "DIG-200": _make_jira_fields(
             status="Done",
             summary="All done",
-            labels=["dso-status:cancelled"],
+            labels=["rebar-status:cancelled"],
         ),
     }
 
@@ -329,30 +329,30 @@ def test_outbound_cancelled_to_closed_removes_annotation_label(
     assert len(result) == 1, f"Expected 1 update mutation, got {result}"
     m = result[0]
     label_removes = [lb["label"] for lb in m.labels if lb.get("action") == "remove"]
-    assert "dso-status:cancelled" in label_removes, (
-        f"Must remove stale dso-status:cancelled when status moves to closed. "
+    assert "rebar-status:cancelled" in label_removes, (
+        f"Must remove stale rebar-status:cancelled when status moves to closed. "
         f"Got labels: {m.labels}"
     )
 
 
 # ---------------------------------------------------------------------------
-# Test (d): inbound dso-status:blocked label → local "blocked"
+# Test (d): inbound rebar-status:blocked label → local "blocked"
 # ---------------------------------------------------------------------------
 
 
 def test_inbound_dso_status_blocked_label_overrides_jira_status(
     inbound_differ: ModuleType,
 ) -> None:
-    """(d) inbound with dso-status:blocked label → local 'blocked' regardless of workflow status.
+    """(d) inbound with rebar-status:blocked label → local 'blocked' regardless of workflow status.
 
-    Jira reports "In Progress" as workflow status, but the dso-status:blocked
+    Jira reports "In Progress" as workflow status, but the rebar-status:blocked
     label carries the lossless annotation. Local should be "blocked".
     """
     jira_snapshot = {
         "DIG-100": _make_jira_fields(
             status="In Progress",
             summary="Blocked ticket",
-            labels=["dso-status:blocked"],
+            labels=["rebar-status:blocked"],
         ),
     }
     store = StubInboundBindingStore({"DIG-100": "local-1"})
@@ -370,14 +370,14 @@ def test_inbound_dso_status_blocked_label_overrides_jira_status(
         local_tickets_by_id=local_tickets,
     )
 
-    # Local is already "blocked"; Jira says "In Progress" but has dso-status:blocked.
+    # Local is already "blocked"; Jira says "In Progress" but has rebar-status:blocked.
     # No status change should be emitted (local is correct).
     status_changes = [
         m for m in mutations
         if m.local_id == "local-1" and "status" in m.fields
     ]
     assert status_changes == [], (
-        f"Inbound must NOT overwrite local 'blocked' when dso-status:blocked is present. "
+        f"Inbound must NOT overwrite local 'blocked' when rebar-status:blocked is present. "
         f"Got: {status_changes}"
     )
 
@@ -385,12 +385,12 @@ def test_inbound_dso_status_blocked_label_overrides_jira_status(
 def test_inbound_dso_status_blocked_label_sets_local_blocked_when_local_is_open(
     inbound_differ: ModuleType,
 ) -> None:
-    """(d) inbound dso-status:blocked label → local status becomes 'blocked', not 'in_progress'."""
+    """(d) inbound rebar-status:blocked label → local status becomes 'blocked', not 'in_progress'."""
     jira_snapshot = {
         "DIG-100": _make_jira_fields(
             status="In Progress",
             summary="Some ticket",
-            labels=["dso-status:blocked"],
+            labels=["rebar-status:blocked"],
         ),
     }
     store = StubInboundBindingStore({"DIG-100": "local-1"})
@@ -416,7 +416,7 @@ def test_inbound_dso_status_blocked_label_sets_local_blocked_when_local_is_open(
         f"Expected 1 status mutation. Got: {mutations}"
     )
     assert status_mutations[0].fields["status"] == "blocked", (
-        f"inbound with dso-status:blocked label must set status='blocked', "
+        f"inbound with rebar-status:blocked label must set status='blocked', "
         f"got: {status_mutations[0].fields['status']!r}"
     )
 
@@ -424,12 +424,12 @@ def test_inbound_dso_status_blocked_label_sets_local_blocked_when_local_is_open(
 def test_inbound_dso_status_cancelled_label_sets_local_cancelled(
     inbound_differ: ModuleType,
 ) -> None:
-    """(d) inbound dso-status:cancelled label → local status = 'cancelled'."""
+    """(d) inbound rebar-status:cancelled label → local status = 'cancelled'."""
     jira_snapshot = {
         "DIG-200": _make_jira_fields(
             status="Done",
             summary="Cancelled ticket",
-            labels=["dso-status:cancelled"],
+            labels=["rebar-status:cancelled"],
         ),
     }
     store = StubInboundBindingStore({"DIG-200": "local-2"})
@@ -453,18 +453,18 @@ def test_inbound_dso_status_cancelled_label_sets_local_cancelled(
     ]
     assert len(status_mutations) == 1
     assert status_mutations[0].fields["status"] == "cancelled", (
-        f"inbound with dso-status:cancelled must set status='cancelled', "
+        f"inbound with rebar-status:cancelled must set status='cancelled', "
         f"got: {status_mutations[0].fields['status']!r}"
     )
 
 
 # ---------------------------------------------------------------------------
-# Test (e): inbound "In Review" with no dso-status label → "in_progress"
+# Test (e): inbound "In Review" with no rebar-status label → "in_progress"
 # ---------------------------------------------------------------------------
 
 
 def test_inbound_in_review_maps_to_in_progress(inbound_differ: ModuleType) -> None:
-    """(e) inbound 'In Review' with no dso-status label → local 'in_progress', not 'open'.
+    """(e) inbound 'In Review' with no rebar-status label → local 'in_progress', not 'open'.
 
     RED today: _JIRA_TO_LOCAL_STATUS has no entry for 'In Review', so
     _map_jira_to_local_fields returns 'open' (the dict.get default).
@@ -504,20 +504,20 @@ def test_inbound_in_review_maps_to_in_progress(inbound_differ: ModuleType) -> No
 
 
 # ---------------------------------------------------------------------------
-# Test (f): dso-status: labels excluded from local tag sync both directions
+# Test (f): rebar-status: labels excluded from local tag sync both directions
 # ---------------------------------------------------------------------------
 
 
 def test_outbound_dso_status_labels_excluded_from_tag_sync(
     outbound_differ: ModuleType,
 ) -> None:
-    """(f) dso-status: labels must not be synced as user tags outbound.
+    """(f) rebar-status: labels must not be synced as user tags outbound.
 
-    When local ticket has no dso-status: tags but Jira has dso-status:blocked,
+    When local ticket has no rebar-status: tags but Jira has rebar-status:blocked,
     the outbound differ must NOT emit a REMOVE for that label via normal tag
     diff (it is managed by status logic only).
     """
-    # Local is now in_progress (not blocked), no dso-status: tag in local tags
+    # Local is now in_progress (not blocked), no rebar-status: tag in local tags
     ticket = _make_local_ticket(
         ticket_id="local-1",
         status="in_progress",
@@ -529,7 +529,7 @@ def test_outbound_dso_status_labels_excluded_from_tag_sync(
         "DIG-100": _make_jira_fields(
             status="In Progress",
             summary="Fixed",
-            labels=["dso-status:blocked", "user-tag"],
+            labels=["rebar-status:blocked", "user-tag"],
         ),
     }
 
@@ -539,17 +539,17 @@ def test_outbound_dso_status_labels_excluded_from_tag_sync(
         binding_store=store,
     )
 
-    # The dso-status:blocked label removal should be via status-driven logic
+    # The rebar-status:blocked label removal should be via status-driven logic
     # (not via blind tag diff where it would look like "Jira has it, local doesn't")
-    # Specifically: the status-driven REMOVE for dso-status:blocked should appear,
+    # Specifically: the status-driven REMOVE for rebar-status:blocked should appear,
     # but a spurious tag-diff REMOVE must NOT appear as a duplicate.
     if result:
         m = result[0]
         label_removes = [lb["label"] for lb in m.labels if lb.get("action") == "remove"]
         # The remove should appear exactly once (not duplicated by tag diff)
-        remove_count = label_removes.count("dso-status:blocked")
+        remove_count = label_removes.count("rebar-status:blocked")
         assert remove_count <= 1, (
-            f"dso-status:blocked removal should appear at most once (not duplicated). "
+            f"rebar-status:blocked removal should appear at most once (not duplicated). "
             f"Got {remove_count} removes."
         )
 
@@ -557,17 +557,17 @@ def test_outbound_dso_status_labels_excluded_from_tag_sync(
 def test_inbound_dso_status_labels_excluded_from_local_tag_sync(
     inbound_differ: ModuleType,
 ) -> None:
-    """(f) dso-status: labels must not leak into local ticket tags via inbound label sync.
+    """(f) rebar-status: labels must not leak into local ticket tags via inbound label sync.
 
-    Jira has dso-status:blocked label. Local ticket has no such tag.
-    The inbound label diff must NOT emit an ADD for dso-status:blocked as a
+    Jira has rebar-status:blocked label. Local ticket has no such tag.
+    The inbound label diff must NOT emit an ADD for rebar-status:blocked as a
     user tag (it is a reconciler-managed annotation, not a user label).
     """
     jira_snapshot = {
         "DIG-100": _make_jira_fields(
             status="In Progress",
             summary="Blocked ticket",
-            labels=["dso-status:blocked", "real-user-tag"],
+            labels=["rebar-status:blocked", "real-user-tag"],
         ),
     }
     store = StubInboundBindingStore({"DIG-100": "local-1"})
@@ -576,7 +576,7 @@ def test_inbound_dso_status_labels_excluded_from_local_tag_sync(
             ticket_id="local-1",
             status="blocked",
             title="Blocked ticket",
-            tags=[],  # no dso-status: tags locally
+            tags=[],  # no rebar-status: tags locally
         ),
     }
 
@@ -594,8 +594,8 @@ def test_inbound_dso_status_labels_excluded_from_local_tag_sync(
                 lb["label"] for lb in m.labels if lb.get("action") == "add"
             )
 
-    assert "dso-status:blocked" not in label_adds, (
-        f"dso-status:blocked must NOT be added as a local user tag. "
+    assert "rebar-status:blocked" not in label_adds, (
+        f"rebar-status:blocked must NOT be added as a local user tag. "
         f"Got label adds: {label_adds}"
     )
     # real-user-tag should still come through

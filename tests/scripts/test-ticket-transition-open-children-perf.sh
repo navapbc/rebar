@@ -130,10 +130,10 @@ PYEOF
     chmod +x "$wrapper_script"
 
     # Run ticket transition: close the target (which has 0 children)
-    # Use the counting wrapper as DSO_REDUCER if ticket-transition.sh supports it,
+    # Use the counting wrapper as REBAR_REDUCER if ticket-transition.sh supports it,
     # otherwise count via a different method.
     # Strategy: patch the inline python in ticket-transition.sh to use our wrapper
-    # by setting an environment variable DSO_REDUCER_SCRIPT.
+    # by setting an environment variable REBAR_REDUCER_SCRIPT.
     # so we temporarily create a counting wrapper at the same path.
     # Alternative: use time-based check instead.
     local exit_code=0
@@ -261,11 +261,11 @@ sys.exit(result.returncode)
 SPYEOF
     chmod +x "$spy_reducer"
 
-    # Run the transition with the spy reducer injected via DSO_REDUCER env var.
+    # Run the transition with the spy reducer injected via REBAR_REDUCER env var.
     # hardcoded. To spy on it, we need a way to override.
     #
     # Current code passes $REDUCER to the inline python as sys.argv[3] in Step 1b.
-    # We use DSO_REDUCER_SCRIPT env var if the fix adds support for it, OR we test
+    # We use REBAR_REDUCER_SCRIPT env var if the fix adds support for it, OR we test
     # the observable side-effect: the transition should complete quickly (< timeout).
     #
     # For the RED phase: the test checks that transition timing is bounded.
@@ -274,7 +274,7 @@ SPYEOF
     # The fix should skip reducer calls for all N unrelated tickets (0 matches).
 
     # Count reducer subprocess calls by temporarily replacing the reducer
-    # use DSO_REDUCER_SCRIPT if supported, otherwise check structural fix.
+    # use REBAR_REDUCER_SCRIPT if supported, otherwise check structural fix.
 
     # Structural check: verify the inline python does NOT call read_state_via_reducer
     # for all tickets — it should check parent_id from snapshot/CREATE first.

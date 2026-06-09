@@ -76,8 +76,8 @@ def mut_mod():
 @pytest.fixture
 def fixture_repo(tmp_path, monkeypatch):
     monkeypatch.delenv("TICKETS_TRACKER_DIR", raising=False)
-    monkeypatch.delenv("DSO_ENV_ID", raising=False)
-    monkeypatch.delenv("DSO_AUTHOR", raising=False)
+    monkeypatch.delenv("REBAR_ENV_ID", raising=False)
+    monkeypatch.delenv("REBAR_AUTHOR", raising=False)
     tracker = tmp_path / ".tickets-tracker"
     tracker.mkdir()
     (tracker / ".env-id").write_text("test-env-id", encoding="utf-8")

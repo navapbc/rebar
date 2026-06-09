@@ -77,8 +77,8 @@ def test_excluded_fields_only_change_produces_no_mutations(
     differ: ModuleType, mutation_mod: ModuleType
 ) -> None:
     # Both excluded fields differ — no mutation should be emitted.
-    jira = {"DSO-1": {"dso_local_id": "old-local", "rebar-id": "old-id"}}
-    local = {"DSO-1": {"dso_local_id": "new-local", "rebar-id": "new-id"}}
+    jira = {"DSO-1": {"local_id": "old-local", "rebar-id": "old-id"}}
+    local = {"DSO-1": {"local_id": "new-local", "rebar-id": "new-id"}}
     result = differ.compute_mutations(local_state=local, jira_state=jira)
     assert result == []
 
@@ -163,16 +163,16 @@ def test_excluded_field_not_in_update_payload(
     differ: ModuleType, mutation_mod: ModuleType
 ) -> None:
     local = {
-        "DSO-9": {"summary": "after", "dso_local_id": "local-2", "rebar-id": "id-2"}
+        "DSO-9": {"summary": "after", "local_id": "local-2", "rebar-id": "id-2"}
     }
     jira = {
-        "DSO-9": {"summary": "before", "dso_local_id": "local-1", "rebar-id": "id-1"}
+        "DSO-9": {"summary": "before", "local_id": "local-1", "rebar-id": "id-1"}
     }
     result = differ.compute_mutations(local_state=local, jira_state=jira)
     assert len(result) == 1
     m = result[0]
     assert m.action == mutation_mod.MutationAction.update
-    assert "dso_local_id" not in m.payload
+    assert "local_id" not in m.payload
     assert "rebar-id" not in m.payload
     assert m.payload == {"summary": "after"}
 
@@ -180,7 +180,7 @@ def test_create_excludes_excluded_fields(
     differ: ModuleType, mutation_mod: ModuleType
 ) -> None:
     """A new issue whose only fields are excluded should yield no mutation."""
-    local = {"DSO-11": {"dso_local_id": "loc", "rebar-id": "xid"}}
+    local = {"DSO-11": {"local_id": "loc", "rebar-id": "xid"}}
     jira: dict = {}
     result = differ.compute_mutations(local_state=local, jira_state=jira)
     assert result == []
@@ -188,14 +188,14 @@ def test_create_excludes_excluded_fields(
 def test_create_with_mixed_fields_excludes_excluded_only(
     differ: ModuleType, mutation_mod: ModuleType
 ) -> None:
-    local = {"DSO-12": {"summary": "keep me", "dso_local_id": "skip-me"}}
+    local = {"DSO-12": {"summary": "keep me", "local_id": "skip-me"}}
     jira: dict = {}
     result = differ.compute_mutations(local_state=local, jira_state=jira)
     assert len(result) == 1
     m = result[0]
     assert m.action == mutation_mod.MutationAction.create
     assert m.payload == {"summary": "keep me"}
-    assert "dso_local_id" not in m.payload
+    assert "local_id" not in m.payload
 
 def test_pure_function_invariant(
     differ: ModuleType, mutation_mod: ModuleType
@@ -240,18 +240,18 @@ def test_every_mutation_carries_provenance(
     bug F2 originally fixed.
     """
     local = {
-        # Update case (changed field) with explicit dso_local_id.
-        "DSO-100": {"summary": "new", "dso_local_id": "loc-explicit-100"},
-        # Update case with no dso_local_id (fallback to target).
+        # Update case (changed field) with explicit local_id.
+        "DSO-100": {"summary": "new", "local_id": "loc-explicit-100"},
+        # Update case with no local_id (fallback to target).
         "DSO-101": {"summary": "after"},
         # Create case (no prior jira entry).
         "DSO-300": {"summary": "brand new"},
     }
     jira = {
-        "DSO-100": {"summary": "old", "dso_local_id": "loc-explicit-100"},
+        "DSO-100": {"summary": "old", "local_id": "loc-explicit-100"},
         "DSO-101": {"summary": "before"},
         # Delete case: present in jira but absent in local.
-        "DSO-200": {"summary": "going", "dso_local_id": "loc-explicit-200"},
+        "DSO-200": {"summary": "going", "local_id": "loc-explicit-200"},
     }
     mutations = differ.compute_mutations(local_state=local, jira_state=jira)
 
@@ -271,16 +271,16 @@ def test_no_outbound_create_for_already_bound_local_id(
     differ: ModuleType, mutation_mod: ModuleType
 ) -> None:
     """dd-4: differ MUST NOT emit (outbound, create) for a local ticket whose
-    dso_local_id is already present in the fetched Jira working set."""
+    local_id is already present in the fetched Jira working set."""
     local = {
-        # Local ticket A is already bound: its dso_local_id appears in
+        # Local ticket A is already bound: its local_id appears in
         # jira_state under a different key (the Jira-side issue key).
-        "loc-A": {"summary": "A", "dso_local_id": "uuid-A"},
-        # Local ticket B is unbound: no Jira entry carries dso_local_id "uuid-B".
-        "loc-B": {"summary": "B", "dso_local_id": "uuid-B"},
+        "loc-A": {"summary": "A", "local_id": "uuid-A"},
+        # Local ticket B is unbound: no Jira entry carries local_id "uuid-B".
+        "loc-B": {"summary": "B", "local_id": "uuid-B"},
     }
     jira = {
-        "PROJ-1": {"summary": "A", "dso_local_id": "uuid-A"},
+        "PROJ-1": {"summary": "A", "local_id": "uuid-A"},
     }
 
     result = differ.compute_mutations(local_state=local, jira_state=jira)
@@ -373,7 +373,7 @@ def _stress_fixture() -> tuple[dict, dict]:
       - inbound create  (jira-only ticket)
       - update          (changed allowed field on both sides)
       - delete          (asymmetric one-sided absence with no bind)
-      - bind-aware suppression (local dso_local_id matches a jira entry)
+      - bind-aware suppression (local local_id matches a jira entry)
       - probe / conflict pathway (unbindable state — covered passively where
         the differ's _VALID_COMBINATIONS gate allows it)
     """
@@ -381,7 +381,7 @@ def _stress_fixture() -> tuple[dict, dict]:
         "loc-1": {"summary": "alpha", "status": "open"},
         "loc-2": {"summary": "beta updated", "status": "open"},
         "loc-3": {"summary": "gamma", "priority": "high"},
-        "loc-4": {"summary": "delta", "dso_local_id": "uuid-bound-4"},
+        "loc-4": {"summary": "delta", "local_id": "uuid-bound-4"},
         "loc-5": {"summary": "epsilon", "status": "closed"},
         "loc-6": {"summary": "zeta", "priority": "low"},
         "loc-9": {"summary": "iota new"},
@@ -389,7 +389,7 @@ def _stress_fixture() -> tuple[dict, dict]:
     jira = {
         "loc-1": {"summary": "alpha", "status": "open"},  # identical → no mutation
         "loc-2": {"summary": "beta old", "status": "open"},  # update
-        "PROJ-4": {"summary": "delta", "dso_local_id": "uuid-bound-4"},  # bound
+        "PROJ-4": {"summary": "delta", "local_id": "uuid-bound-4"},  # bound
         "loc-5": {"summary": "epsilon", "status": "open"},  # update (status)
         "loc-7": {"summary": "eta remote"},  # inbound create
         "loc-8": {"summary": "theta going"},  # delete (local removed)
@@ -457,11 +457,11 @@ def test_differ_is_pure_across_input_permutations(
 
 # ---------------------------------------------------------------------------
 # Bug 4354: snapshot-differ must recognise bound issues via the rebar-id: label
-# even when the fetcher snapshot lacks the dso_local_id entity property.
+# even when the fetcher snapshot lacks the local_id entity property.
 #
 # Root cause: fetcher.fetch_snapshot only stores Jira `fields` (which include
-# `labels`) — the `dso_local_id` entity property is never in the snapshot.
-# So the snapshot-differ sees DIG-NNNN in jira_state without dso_local_id,
+# `labels`) — the `local_id` entity property is never in the snapshot.
+# So the snapshot-differ sees DIG-NNNN in jira_state without local_id,
 # falls into the "in_jira and not in_local" branch with jira_local_id=None,
 # and emits an inbound CREATE. The applier then creates a phantom
 # jira-dig-NNNN local entity AND writes a ghost `rebar-id:jira-dig-NNNN`
@@ -480,7 +480,7 @@ def test_rebar_id_label_suppresses_phantom_inbound_create(
 ) -> None:
     """Bug 4354: a Jira issue carrying `rebar-id:<local_id>` is already bound;
     the snapshot-differ MUST NOT emit an inbound CREATE for it, even when
-    the snapshot lacks the dso_local_id entity property (the fetcher does
+    the snapshot lacks the local_id entity property (the fetcher does
     not populate it).
     """
     local: dict = {}
@@ -491,7 +491,7 @@ def test_rebar_id_label_suppresses_phantom_inbound_create(
                 "rebar-id:259f-2f86-77c2-4767",
                 "labelprobe-1780064991",
             ],
-            # dso_local_id is intentionally absent — fetcher.fetch_snapshot
+            # local_id is intentionally absent — fetcher.fetch_snapshot
             # never populates entity properties into the snapshot.
         }
     }

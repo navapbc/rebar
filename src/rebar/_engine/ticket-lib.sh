@@ -95,9 +95,9 @@ _flock_stage_commit() {
     local relative_path="${final_path#"$tracker_dir/"}"
 
     # ── Ensure gc.auto=0 in tickets worktree (skip if already set) ───────────
-    # _DSO_GC_AUTO_ZERO=1: caller guarantees gc.auto is already 0 (set by ticket
+    # _REBAR_GC_AUTO_ZERO=1: caller guarantees gc.auto is already 0 (set by ticket
     # init and clone_ticket_repo) — skips the git subprocess check (~10ms/op).
-    if [ "${_DSO_GC_AUTO_ZERO:-0}" != "1" ] && \
+    if [ "${_REBAR_GC_AUTO_ZERO:-0}" != "1" ] && \
        [ "$(git -C "$tracker_dir" config --get gc.auto 2>/dev/null)" != "0" ]; then
         git -C "$tracker_dir" config gc.auto 0
     fi
@@ -1507,7 +1507,7 @@ with open(latest_path, encoding='utf-8') as f:
 #                   if no unique prefix exists at any length
 #   <other>:        falls back to auto with a warning on stderr
 #
-# Config: reads ticket.display_mode from WORKFLOW_CONFIG_FILE (or dso-config.conf).
+# Config: reads ticket.display_mode from WORKFLOW_CONFIG_FILE.
 # Honors TICKETS_TRACKER_DIR env var for tracker path.
 format_ticket_id() {
     local ticket_id="$1"

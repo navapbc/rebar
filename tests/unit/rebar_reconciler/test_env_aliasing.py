@@ -1,9 +1,9 @@
-"""WS1: Python-surface env aliasing — REBAR_* preferred, DSO_* deprecated fallback.
+"""Python-surface env reads — REBAR_* only (DSO_* support removed).
 
 The reconciler reads several env vars directly from ``os.environ`` via a local
 ``_rebar_env`` helper (applier.py / outbound_differ.py). This asserts the
-resolution contract: ``REBAR_<NAME>`` wins; the legacy ``DSO_<NAME>`` is honored
-as a deprecated fallback for one release; otherwise the default.
+resolution contract: ``REBAR_<NAME>`` is honored; the legacy ``DSO_<NAME>`` is
+IGNORED; otherwise the default.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def _load(modname: str, filename: str):
     ("applier", "applier.py"),
     ("outbound_differ", "outbound_differ.py"),
 ])
-def test_rebar_env_prefers_rebar_then_dso(modname, filename, monkeypatch):
+def test_rebar_env_reads_rebar_only(modname, filename, monkeypatch):
     mod = _load(modname, filename)
     monkeypatch.delenv("REBAR_WS1ALIAS", raising=False)
     monkeypatch.delenv("DSO_WS1ALIAS", raising=False)
@@ -42,10 +42,10 @@ def test_rebar_env_prefers_rebar_then_dso(modname, filename, monkeypatch):
     # Neither set → default.
     assert mod._rebar_env("WS1ALIAS", "fallback-default") == "fallback-default"
 
-    # Only the deprecated DSO_* set → honored.
+    # Legacy DSO_* is IGNORED (support removed) → still the default.
     monkeypatch.setenv("DSO_WS1ALIAS", "from-dso")
-    assert mod._rebar_env("WS1ALIAS", "fallback-default") == "from-dso"
+    assert mod._rebar_env("WS1ALIAS", "fallback-default") == "fallback-default"
 
-    # REBAR_* set → preferred over DSO_*.
+    # REBAR_* is honored.
     monkeypatch.setenv("REBAR_WS1ALIAS", "from-rebar")
     assert mod._rebar_env("WS1ALIAS", "fallback-default") == "from-rebar"

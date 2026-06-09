@@ -1,7 +1,7 @@
 """AST + string-literal purity test for differ.py (story 3d5a / dd-3).
 
 The differ MUST be agnostic to status-mapping logic; that's the applier's
-concern (via DSO_RECONCILER_STATUS_GATING + local_to_jira_status). This
+concern (via REBAR_RECONCILER_STATUS_GATING + local_to_jira_status). This
 test catches dynamic references (getattr, importlib, dict lookups) that
 would couple the differ to status mapping at runtime.
 """

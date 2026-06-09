@@ -439,9 +439,9 @@ case "$subcommand" in
         ;;
     clarity-check)
         # REVIEW-DEFENSE: _ensure_initialized is intentionally omitted here.
-        # ticket-clarity-check.sh reads tickets via DSO_CLI (not TICKET_CMD), so test
+        # ticket-clarity-check.sh reads tickets via REBAR_CLI (not TICKET_CMD), so test
         # isolation uses --stdin mode (pipe fixture JSON directly) rather than env injection.
-        # In production DSO_CLI calls ticket show, which calls _ensure_initialized —
+        # In production REBAR_CLI calls ticket show, which calls _ensure_initialized —
         # initialization is transitive. Calling _ensure_initialized here would break
         # test isolation where no real ticket store exists.
         # shellcheck source=/dev/null

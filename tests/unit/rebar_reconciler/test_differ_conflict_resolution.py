@@ -167,12 +167,12 @@ def test_dangling_jira_ref_emits_inbound_conflict(
     differ: ModuleType,
     mutation_mod: ModuleType,
 ) -> None:
-    """A Jira issue whose dso_local_id has no matching local ticket must
+    """A Jira issue whose local_id has no matching local ticket must
     surface as an (inbound, conflict) Mutation — never silently dropped."""
     local: dict[str, dict] = {}
     jira = {
         "PROJ-1": {
-            "dso_local_id": "ZZZ",
+            "local_id": "ZZZ",
             "summary": "orphan jira issue",
             "status": "Open",
         }
@@ -199,18 +199,18 @@ def test_ambiguous_local_binding_emits_outbound_probe(
     differ: ModuleType,
     mutation_mod: ModuleType,
 ) -> None:
-    """A local ticket with dso_local_id set but no matching Jira binding is
+    """A local ticket with local_id set but no matching Jira binding is
     ambiguous (could be unbound-create OR stale local_id) and must surface
     as an (outbound, probe) Mutation rather than an unconditional create."""
     # Ambiguity signal: a Jira issue exists whose KEY equals the local
-    # ticket's dso_local_id, suggesting a possible stale or
+    # ticket's local_id, suggesting a possible stale or
     # conflated binding (the local_id may once have referred to that Jira
     # issue, but the Jira side no longer carries the back-pointer). The
     # differ must NOT silently outbound-create a duplicate — it surfaces a
     # probe so the applier can disambiguate.
     local = {
         "LOCAL-A": {
-            "dso_local_id": "MAYBE-MAPPED",
+            "local_id": "MAYBE-MAPPED",
             "summary": "ambiguous binding",
         }
     }
@@ -240,12 +240,12 @@ def test_duplicate_local_id_emits_conflict_per_collision(
     differ: ModuleType,
     mutation_mod: ModuleType,
 ) -> None:
-    """When two local tickets share the same dso_local_id, each must emit an
+    """When two local tickets share the same local_id, each must emit an
     (inbound, conflict) Mutation. Unique-id tickets are unaffected."""
     local = {
-        "LOCAL-X": {"dso_local_id": "DUP", "summary": "first"},
-        "LOCAL-Y": {"dso_local_id": "DUP", "summary": "second"},
-        "LOCAL-Z": {"dso_local_id": "OK", "summary": "uncontested"},
+        "LOCAL-X": {"local_id": "DUP", "summary": "first"},
+        "LOCAL-Y": {"local_id": "DUP", "summary": "second"},
+        "LOCAL-Z": {"local_id": "OK", "summary": "uncontested"},
     }
     jira: dict[str, dict] = {}
 

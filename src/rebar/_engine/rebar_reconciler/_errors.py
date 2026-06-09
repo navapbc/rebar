@@ -13,7 +13,7 @@ class RebarIdLabelWriteError(Exception):
     All other applier leaves (outbound_update, outbound_delete, outbound_probe,
     outbound_conflict, inbound_create, inbound_update, inbound_repair_property)
     MUST NOT emit rebar-id label mutations. inbound_repair_property writes the
-    dso_local_id entity property field, NOT the label.
+    local_id entity property field, NOT the label.
 
     Raise this error when a leaf that is not in _AUTHORIZED_REBAR_ID_LABEL_WRITERS
     attempts to write a rebar-id label.

@@ -98,7 +98,7 @@ def _make_stub_invariants(
 ) -> tuple[ModuleType, MagicMock]:
     """Return (stub_module, drift_spy) where drift_spy records report_schema_drift calls."""
     stub = types.ModuleType("reconcile_invariants")
-    stub.check_at_most_one_dso_local_id = MagicMock(return_value=[])
+    stub.check_at_most_one_local_id = MagicMock(return_value=[])
     stub.check_dual_identity_complete = MagicMock(
         return_value=(quarantine or set(), seeds or [])
     )
@@ -169,7 +169,7 @@ def test_invariant_phase_passes_seed_mutations_to_differ(tmp_path):
     """compute_mutations must be called with seed_mutations kwarg.
 
     Behavior under test: the invariant phase produces seed repair_property
-    mutations for one-sided dso_local_id rows; those seeds must reach the
+    mutations for one-sided local_id rows; those seeds must reach the
     differ so they land in the same pass (no deferral).
     """
     pass_id = "inv-phase-seeds"
@@ -179,7 +179,7 @@ def test_invariant_phase_passes_seed_mutations_to_differ(tmp_path):
             "action": "repair_property",
             "key": "JIRA-7",
             "local_id": "local-7",
-            "fields": {"dso_local_id": "local-7"},
+            "fields": {"local_id": "local-7"},
         }
     ]
 
@@ -225,10 +225,10 @@ def test_schema_drift_post_emit_filter_invokes_report(tmp_path):
             "action": "repair_property",
             "key": "JIRA-7",
             "local_id": "local-7",
-            "fields": {"dso_local_id": "local-7"},
+            "fields": {"local_id": "local-7"},
             "follow_on": {
                 "kind": "schema_drift",
-                "target": "dso_local_id",
+                "target": "local_id",
                 "observed": "STRING",
                 "expected": "ARRAY",
             },
@@ -258,7 +258,7 @@ def test_schema_drift_post_emit_filter_invokes_report(tmp_path):
         f"Expected report_schema_drift to be called once, got {drift_spy.call_count}"
     )
     args = drift_spy.call_args.args
-    assert args == ("dso_local_id", "STRING", "ARRAY"), (
+    assert args == ("local_id", "STRING", "ARRAY"), (
         f"report_schema_drift called with unexpected args: {args!r}"
     )
 
@@ -279,7 +279,7 @@ def test_same_pass_follow_on_emitted(tmp_path):
             "action": "repair_property",
             "key": "JIRA-9",
             "local_id": "local-9",
-            "fields": {"dso_local_id": "local-9"},
+            "fields": {"local_id": "local-9"},
             "follow_on": {
                 "kind": "schema_drift",
                 "target": "labels",

@@ -571,12 +571,12 @@ PYEOF
     # Run transition with a modified environment: override UNBLOCK_SCRIPT if the
     # implementation uses it, otherwise pass an invalid tracker_dir suffix via env
     # so detect_newly_unblocked fails.
-    # Strategy: set DSO_UNBLOCK_SCRIPT env to the broken script so ticket-transition.sh
+    # Strategy: set REBAR_UNBLOCK_SCRIPT env to the broken script so ticket-transition.sh
     # uses it when calling ticket-unblock.py (the implementation should honor this).
     # RED: regardless of strategy, the test verifies exit 0 + stderr warning.
     local stdout_out stderr_out
     local exit_code=0
-    stdout_out=$(cd "$repo" && DSO_UNBLOCK_SCRIPT="$fake_bin/ticket-unblock.py" \
+    stdout_out=$(cd "$repo" && REBAR_UNBLOCK_SCRIPT="$fake_bin/ticket-unblock.py" \
         bash "$TICKET_SCRIPT" transition "$ticket_a" open closed 2>/tmp/test-unblock-fail-stderr-$$) || exit_code=$?
     stderr_out=$(cat /tmp/test-unblock-fail-stderr-$$ 2>/dev/null || true)
     rm -f /tmp/test-unblock-fail-stderr-$$
@@ -589,7 +589,7 @@ PYEOF
 
     # Assert: if unblock was attempted and failed, a warning appears on stderr.
     # RED: current implementation doesn't call unblock → no warning emitted.
-    # After dso-f8xn: warning should appear when DSO_UNBLOCK_SCRIPT exits non-zero.
+    # After dso-f8xn: warning should appear when REBAR_UNBLOCK_SCRIPT exits non-zero.
     # We can only assert on the warning presence AFTER implementation calls the script.
     # For now this assertion is the RED trigger: warn on stderr when unblock fails.
     # Note: this specific assertion fails RED only after dso-f8xn adds the call.
@@ -741,10 +741,10 @@ test_transition_close_blocked_with_open_children() {
 test_transition_close_blocked_with_open_children
 
 # ── Suite-runner guard for RED compact-on-close tests ──────────────────────────
-# ticket-transition.sh does not call compact yet and does not read DSO_COMPACT_SCRIPT.
+# ticket-transition.sh does not call compact yet and does not read REBAR_COMPACT_SCRIPT.
 # When running under run-all.sh, skip these RED tests so the suite stays green.
 _compact_on_close_implemented() {
-    grep -q 'DSO_COMPACT_SCRIPT' "$TICKET_TRANSITION_SCRIPT" 2>/dev/null
+    grep -q 'REBAR_COMPACT_SCRIPT' "$TICKET_TRANSITION_SCRIPT" 2>/dev/null
 }
 
 if [ "${_RUN_ALL_ACTIVE:-0}" = "1" ] && ! _compact_on_close_implemented; then
@@ -796,7 +796,7 @@ test_close_triggers_compaction() {
 test_close_triggers_compaction
 
 # ── Test 16 (RED): close succeeds even if compact fails ────────────────────────
-echo "Test 16 (RED): close succeeds (exit 0) even if DSO_COMPACT_SCRIPT points to a failing script"
+echo "Test 16 (RED): close succeeds (exit 0) even if REBAR_COMPACT_SCRIPT points to a failing script"
 test_close_succeeds_if_compact_fails() {
     _snapshot_fail
 
@@ -817,10 +817,10 @@ exit 1
 COMPEOF
     chmod +x "$tmpdir/fail-compact.sh"
 
-    # Close the ticket with DSO_COMPACT_SCRIPT pointing to the failing script
-    # RED: ticket-transition.sh does not read DSO_COMPACT_SCRIPT yet
+    # Close the ticket with REBAR_COMPACT_SCRIPT pointing to the failing script
+    # RED: ticket-transition.sh does not read REBAR_COMPACT_SCRIPT yet
     local exit_code=0
-    (cd "$repo" && DSO_COMPACT_SCRIPT="$tmpdir/fail-compact.sh" \
+    (cd "$repo" && REBAR_COMPACT_SCRIPT="$tmpdir/fail-compact.sh" \
         bash "$TICKET_SCRIPT" transition "$ticket_id" open closed 2>/dev/null) || exit_code=$?
 
     # Assert: transition exits 0 (compact failure is non-blocking)
@@ -831,12 +831,12 @@ COMPEOF
     compiled_status=$(_get_ticket_status "$repo" "$ticket_id")
     assert_eq "compact-fail: ticket status is closed" "closed" "$compiled_status"
 
-    # Assert: DSO_COMPACT_SCRIPT was actually invoked (breadcrumb file exists)
-    # RED: ticket-transition.sh does not read DSO_COMPACT_SCRIPT yet → compact not called
+    # Assert: REBAR_COMPACT_SCRIPT was actually invoked (breadcrumb file exists)
+    # RED: ticket-transition.sh does not read REBAR_COMPACT_SCRIPT yet → compact not called
     if [ -f "$tmpdir/compact-was-called" ]; then
-        assert_eq "compact-fail: DSO_COMPACT_SCRIPT was invoked" "called" "called"
+        assert_eq "compact-fail: REBAR_COMPACT_SCRIPT was invoked" "called" "called"
     else
-        assert_eq "compact-fail: DSO_COMPACT_SCRIPT was invoked" "called" "not-called"
+        assert_eq "compact-fail: REBAR_COMPACT_SCRIPT was invoked" "called" "not-called"
     fi
 
     assert_pass_if_clean "test_close_succeeds_if_compact_fails"
@@ -981,8 +981,8 @@ test_close_no_2n_spawns() {
 }
 test_close_no_2n_spawns
 
-# ── Test 20 (RED): close fails even when DSO_UNBLOCK_SCRIPT is broken, if children exist ─
-echo "Test 20 (RED): close exits non-zero even when DSO_UNBLOCK_SCRIPT fails, if parent has open children"
+# ── Test 20 (RED): close fails even when REBAR_UNBLOCK_SCRIPT is broken, if children exist ─
+echo "Test 20 (RED): close exits non-zero even when REBAR_UNBLOCK_SCRIPT fails, if parent has open children"
 test_close_blocked_even_when_unblock_script_broken() {
     _snapshot_fail
 
@@ -1029,7 +1029,7 @@ PYEOF
     # regardless of whether the unblock script works.
     local exit_code=0
     local stderr_out
-    stderr_out=$(cd "$repo" && DSO_UNBLOCK_SCRIPT="$fake_script" \
+    stderr_out=$(cd "$repo" && REBAR_UNBLOCK_SCRIPT="$fake_script" \
         bash "$TICKET_SCRIPT" transition "$parent_id" open closed 2>&1) || exit_code=$?
 
     # Assert: exits non-zero (child guard must fire even if unblock detection fails)
@@ -1146,10 +1146,10 @@ print(ev.get('uuid', ''))
     fi
 
     # Run second transition: in_progress → closed
-    # Suppress compaction (DSO_COMPACT_SCRIPT=/bin/true) so the STATUS event file
+    # Suppress compaction (REBAR_COMPACT_SCRIPT=/bin/true) so the STATUS event file
     # is not absorbed into a SNAPSHOT before we can read it.
     local exit_code2=0
-    (cd "$repo" && DSO_COMPACT_SCRIPT=/bin/true bash "$TICKET_SCRIPT" transition "$ticket_id" in_progress closed 2>/dev/null) || exit_code2=$?
+    (cd "$repo" && REBAR_COMPACT_SCRIPT=/bin/true bash "$TICKET_SCRIPT" transition "$ticket_id" in_progress closed 2>/dev/null) || exit_code2=$?
     assert_eq "parent-uuid-second: second transition exits 0" "0" "$exit_code2"
 
     # Find the second (newest) STATUS event file (compaction suppressed — should exist)
@@ -1291,10 +1291,10 @@ print('HAS_FIELD' if 'parent_status_uuid' in ev else 'NO_FIELD')
 
     # Run a new transition: the reducer will compute current status from the legacy event (in_progress)
     # so we transition from in_progress → closed.
-    # Suppress compaction (DSO_COMPACT_SCRIPT=/bin/true) so the STATUS event file
+    # Suppress compaction (REBAR_COMPACT_SCRIPT=/bin/true) so the STATUS event file
     # is not absorbed into a SNAPSHOT before we can read it.
     local exit_code=0
-    (cd "$repo" && DSO_COMPACT_SCRIPT=/bin/true bash "$TICKET_SCRIPT" transition "$ticket_id" in_progress closed 2>/dev/null) || exit_code=$?
+    (cd "$repo" && REBAR_COMPACT_SCRIPT=/bin/true bash "$TICKET_SCRIPT" transition "$ticket_id" in_progress closed 2>/dev/null) || exit_code=$?
     assert_eq "parent-uuid-legacy: transition after legacy event exits 0" "0" "$exit_code"
 
     # Find the new STATUS event (written by ticket-transition.sh — not the legacy one)

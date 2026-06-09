@@ -2,7 +2,7 @@
 # tests/scripts/test-ticket-update-rav.sh
 # RED test suite for ticket-update-rav.sh (read-after-write verification wrapper).
 #
-# Tests validate the script's interface behavior using DSO_TICKET_RAV_TEST=1
+# Tests validate the script's interface behavior using REBAR_TICKET_RAV_TEST=1
 # test-double mode — no real ticket mutations required.
 #
 # Test cases:
@@ -66,7 +66,7 @@ fi
 
 # Run the RAV script in test-double mode and capture stdout+stderr
 _run_rav() {
-    DSO_TICKET_RAV_TEST=1 bash "$RAV_SCRIPT" "$@"
+    REBAR_TICKET_RAV_TEST=1 bash "$RAV_SCRIPT" "$@"
 }
 
 # Run and capture stderr separately
@@ -74,7 +74,7 @@ _run_rav_stderr() {
     local tmp_err
     tmp_err=$(mktemp "${TMPDIR:-/tmp}/rav-test-stderr.XXXXXX")
     local exit_code=0
-    DSO_TICKET_RAV_TEST=1 bash "$RAV_SCRIPT" "$@" 2>"$tmp_err" || exit_code=$?
+    REBAR_TICKET_RAV_TEST=1 bash "$RAV_SCRIPT" "$@" 2>"$tmp_err" || exit_code=$?
     cat "$tmp_err" >&2
     local stderr_content
     stderr_content=$(cat "$tmp_err")
@@ -90,7 +90,7 @@ _run_rav_capture() {
     local tmp_err
     tmp_err=$(mktemp "${TMPDIR:-/tmp}/rav-test-stderr.XXXXXX")
     local exit_code=0
-    DSO_TICKET_RAV_TEST=1 bash "$RAV_SCRIPT" "$@" 2>"$tmp_err" || exit_code=$?
+    REBAR_TICKET_RAV_TEST=1 bash "$RAV_SCRIPT" "$@" 2>"$tmp_err" || exit_code=$?
     printf -v "$_out_var" '%s' "$(cat "$tmp_err")"
     rm -f "$tmp_err"
     return "$exit_code"

@@ -135,11 +135,11 @@ _JIRA_TO_LOCAL_STATUS: dict[str, str] = {
     "Cancelled": "cancelled",
 }
 
-# dso-status: annotation labels that override the Jira workflow status on inbound.
-# Maps dso-status:<label> -> local status. Takes precedence over _JIRA_TO_LOCAL_STATUS.
-_DSO_STATUS_LABEL_TO_LOCAL: dict[str, str] = {
-    "dso-status:blocked": "blocked",
-    "dso-status:cancelled": "cancelled",
+# rebar-status: annotation labels that override the Jira workflow status on inbound.
+# Maps rebar-status:<label> -> local status. Takes precedence over _JIRA_TO_LOCAL_STATUS.
+_REBAR_STATUS_LABEL_TO_LOCAL: dict[str, str] = {
+    "rebar-status:blocked": "blocked",
+    "rebar-status:cancelled": "cancelled",
 }
 
 
@@ -190,8 +190,8 @@ def _assignee_matches(local_val: str, jira_raw: Any) -> bool:
 def _map_jira_to_local_fields(jira_fields: dict[str, Any]) -> dict[str, Any]:
     """Map Jira fields to local ticket field names/values.
 
-    ticket 929a: when jira_fields carries a dso-status: annotation label
-    (e.g. ``dso-status:blocked``), the label takes precedence over the raw
+    ticket 929a: when jira_fields carries a rebar-status: annotation label
+    (e.g. ``rebar-status:blocked``), the label takes precedence over the raw
     Jira workflow status for the local status mapping. This preserves lossless
     round-trip for statuses that have no direct Jira equivalent (blocked maps
     to In Progress on Jira, cancelled maps to Done). Without this, a
@@ -211,12 +211,12 @@ def _map_jira_to_local_fields(jira_fields: dict[str, Any]) -> dict[str, Any]:
     status_raw = _extract_jira_field_value(jira_fields, "status") or "To Do"
     assignee = _extract_jira_field_value(jira_fields, "assignee") or ""
 
-    # Prefer dso-status: annotation label over raw Jira workflow status.
-    # Check labels list for any dso-status: entry and map to local status.
+    # Prefer rebar-status: annotation label over raw Jira workflow status.
+    # Check labels list for any rebar-status: entry and map to local status.
     local_status: str | None = None
     for label in jira_fields.get("labels") or []:
-        if label in _DSO_STATUS_LABEL_TO_LOCAL:
-            local_status = _DSO_STATUS_LABEL_TO_LOCAL[label]
+        if label in _REBAR_STATUS_LABEL_TO_LOCAL:
+            local_status = _REBAR_STATUS_LABEL_TO_LOCAL[label]
             break
     if local_status is None:
         local_status = _JIRA_TO_LOCAL_STATUS.get(status_raw, "open")
@@ -332,10 +332,10 @@ def _diff_jira_vs_local(
 # ``_apply_outbound_create`` / ``_apply_inbound_create``; ``rebar-id-`` is
 # preserved for backward compatibility with pre-cutover labels still on
 # legacy Jira issues.
-# dso-status: annotation labels are reconciler-managed (emitted/removed by
+# rebar-status: annotation labels are reconciler-managed (emitted/removed by
 # status logic); they must not leak into local ticket tags via inbound label
 # sync (ticket 929a). Exclude from both sides of the label diff.
-_EXCLUDED_PREFIXES: tuple[str, ...] = ("rebar-id:", "rebar-id-", "imported:", "dso-status:")
+_EXCLUDED_PREFIXES: tuple[str, ...] = ("rebar-id:", "rebar-id-", "imported:", "rebar-status:")
 
 
 def _normalize_jira_body(body: Any) -> str:

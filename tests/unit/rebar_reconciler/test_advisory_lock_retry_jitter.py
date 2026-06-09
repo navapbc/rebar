@@ -2,7 +2,7 @@
 
 Covers:
   1. Default budget of 5: succeeds on attempt 4 when _rebase_retry fails 3 times.
-  2. Custom budget of 2 (via DSO_RECONCILER_LOCK_RETRY_BUDGET): raises
+  2. Custom budget of 2 (via REBAR_RECONCILER_LOCK_RETRY_BUDGET): raises
      ReconcileLockError after 2 failures.
   3. Backoff timing: time.sleep is called between failed attempts, and the
      captured sleep durations are strictly increasing on average (exponential
@@ -91,7 +91,7 @@ def _error_result(conc_mod):
 
 def test_default_budget_succeeds_on_fourth_attempt(lock_mod, conc_mod, monkeypatch):
     """Default budget=5 → fails 3 times, then succeeds on attempt 4."""
-    monkeypatch.delenv("DSO_RECONCILER_LOCK_RETRY_BUDGET", raising=False)
+    monkeypatch.delenv("REBAR_RECONCILER_LOCK_RETRY_BUDGET", raising=False)
 
     call_count = {"n": 0}
 
@@ -116,7 +116,7 @@ def test_default_budget_succeeds_on_fourth_attempt(lock_mod, conc_mod, monkeypat
 
 def test_custom_budget_two_raises_after_two_failures(lock_mod, conc_mod, monkeypatch):
     """Budget=2 → 2 failures → raises ReconcileLockError."""
-    monkeypatch.setenv("DSO_RECONCILER_LOCK_RETRY_BUDGET", "2")
+    monkeypatch.setenv("REBAR_RECONCILER_LOCK_RETRY_BUDGET", "2")
 
     call_count = {"n": 0}
 
@@ -136,7 +136,7 @@ def test_custom_budget_two_raises_after_two_failures(lock_mod, conc_mod, monkeyp
 
 def test_backoff_timing_increases_between_retries(lock_mod, conc_mod, monkeypatch):
     """Sleep durations are bounded by exponential schedule with ±30% jitter, capped at 5s."""
-    monkeypatch.setenv("DSO_RECONCILER_LOCK_RETRY_BUDGET", "6")
+    monkeypatch.setenv("REBAR_RECONCILER_LOCK_RETRY_BUDGET", "6")
 
     def always_drift(repo_root, write_fn, **kwargs):
         return _drift_result(conc_mod)
@@ -170,7 +170,7 @@ def test_backoff_timing_increases_between_retries(lock_mod, conc_mod, monkeypatc
 
 def test_budget_one_is_fail_fast(lock_mod, conc_mod, monkeypatch):
     """Budget=1 → exactly one attempt, no backoff sleep, fail-fast like today."""
-    monkeypatch.setenv("DSO_RECONCILER_LOCK_RETRY_BUDGET", "1")
+    monkeypatch.setenv("REBAR_RECONCILER_LOCK_RETRY_BUDGET", "1")
 
     call_count = {"n": 0}
 
@@ -191,7 +191,7 @@ def test_budget_one_is_fail_fast(lock_mod, conc_mod, monkeypatch):
 
 def test_non_drift_error_fails_fast_without_retry(lock_mod, conc_mod, monkeypatch):
     """abort_due_to_error from _rebase_retry must NOT be retried — fail fast."""
-    monkeypatch.setenv("DSO_RECONCILER_LOCK_RETRY_BUDGET", "5")
+    monkeypatch.setenv("REBAR_RECONCILER_LOCK_RETRY_BUDGET", "5")
 
     call_count = {"n": 0}
 

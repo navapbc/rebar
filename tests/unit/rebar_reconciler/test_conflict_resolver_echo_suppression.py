@@ -33,8 +33,8 @@ def test_echo_suppressed_for_identical_elements(differ, ledger_mod):
     ledger = ledger_mod.ProvenanceLedger()
     # Record what would be emitted next so it becomes an echo
     ledger.record("PROJ-1", "jira", {"summary": "echoed"})
-    local_state = {"LOCAL-1": {"dso_local_id": "id-1", "jira_key": "PROJ-1", "summary": "echoed"}}
-    jira_state = {"PROJ-1": {"dso_local_id": "id-1", "summary": "echoed"}}
+    local_state = {"LOCAL-1": {"local_id": "id-1", "jira_key": "PROJ-1", "summary": "echoed"}}
+    jira_state = {"PROJ-1": {"local_id": "id-1", "summary": "echoed"}}
     differ.compute_mutations(local_state, jira_state, ledger=ledger)
     # Implementation-defined: echo suppression should drop or pre-filter via ledger
     # Test asserts that at least the echo path was checked — ledger has the entry
@@ -44,7 +44,7 @@ def test_echo_suppressed_for_identical_elements(differ, ledger_mod):
 def test_zero_mutations_on_second_pass(differ, ledger_mod):
     """Two-pass simulation: pass 1 emits mutations + records them; pass 2 on same state emits zero."""
     ledger = ledger_mod.ProvenanceLedger()
-    local_state = {"LOCAL-1": {"dso_local_id": "id-1", "summary": "x"}}
+    local_state = {"LOCAL-1": {"local_id": "id-1", "summary": "x"}}
     jira_state = {}
     # Pass 1 — may emit (outbound, create) for LOCAL-1
     pass1 = differ.compute_mutations(local_state, jira_state, ledger=ledger)

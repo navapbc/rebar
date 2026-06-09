@@ -6,28 +6,19 @@
 # SOURCEABILITY CONTRACT: no file-scope `set`, `exit`, or `trap`; functions and
 # vars use the `_rebar_` / `REBAR_` namespace; safe to source more than once.
 
-# ── Env-var aliasing (read both, prefer REBAR_*) ──────────────────────────────
-# The engine internals read DSO_* / PROJECT_ROOT; expose REBAR_* as the public
-# surface and keep them in sync so the bash write path and the Python reconciler
-# never disagree on repo-root.
+# ── Env-var normalization ─────────────────────────────────────────────────────
+# REBAR_* is the sole public env surface (DSO_* support removed). Keep REBAR_ROOT
+# and PROJECT_ROOT in sync so the bash write path and the Python reconciler never
+# disagree on repo-root, and map the public REBAR_GC_AUTO_ZERO knob onto the
+# engine-internal _REBAR_GC_AUTO_ZERO name.
 : "${REBAR_ROOT:=${PROJECT_ROOT:-}}"
 : "${PROJECT_ROOT:=${REBAR_ROOT:-}}"
-: "${DSO_AUTHOR:=${REBAR_AUTHOR:-}}"
-: "${DSO_TICKET_CLI:=${REBAR_TICKET_CLI:-}}"
-: "${DSO_CLI:=${REBAR_CLI:-}}"
-: "${_DSO_GC_AUTO_ZERO:=${REBAR_GC_AUTO_ZERO:-}}"
-: "${DSO_UNBLOCK_SCRIPT:=${REBAR_UNBLOCK_SCRIPT:-}}"
-: "${DSO_COMPACT_SCRIPT:=${REBAR_COMPACT_SCRIPT:-}}"
+: "${_REBAR_GC_AUTO_ZERO:=${REBAR_GC_AUTO_ZERO:-}}"
 
-# Strip empty aliases so `:-` fallbacks downstream still fire.
+# Strip empty values so `:-` fallbacks downstream still fire.
 [ -z "${REBAR_ROOT:-}" ] && unset REBAR_ROOT
 [ -z "${PROJECT_ROOT:-}" ] && unset PROJECT_ROOT
-[ -z "${DSO_AUTHOR:-}" ] && unset DSO_AUTHOR
-[ -z "${DSO_TICKET_CLI:-}" ] && unset DSO_TICKET_CLI
-[ -z "${DSO_CLI:-}" ] && unset DSO_CLI
-[ -z "${_DSO_GC_AUTO_ZERO:-}" ] && unset _DSO_GC_AUTO_ZERO
-[ -z "${DSO_UNBLOCK_SCRIPT:-}" ] && unset DSO_UNBLOCK_SCRIPT
-[ -z "${DSO_COMPACT_SCRIPT:-}" ] && unset DSO_COMPACT_SCRIPT
+[ -z "${_REBAR_GC_AUTO_ZERO:-}" ] && unset _REBAR_GC_AUTO_ZERO
 
 # ── Engine dir ────────────────────────────────────────────────────────────────
 # _rebar_engine_dir: directory containing this helper (the flat engine dir).
@@ -64,12 +55,10 @@ _rebar_config_file() {
 
 # ── Ticket CLI ────────────────────────────────────────────────────────────────
 # _rebar_ticket_cli: path to the rebar dispatcher (for scripts that shell out to
-# the ticket CLI). Honors REBAR_TICKET_CLI / DSO_TICKET_CLI overrides.
+# the ticket CLI). Honors the REBAR_TICKET_CLI override.
 _rebar_ticket_cli() {
     if [ -n "${REBAR_TICKET_CLI:-}" ]; then
         printf '%s\n' "$REBAR_TICKET_CLI"
-    elif [ -n "${DSO_TICKET_CLI:-}" ]; then
-        printf '%s\n' "$DSO_TICKET_CLI"
     else
         printf '%s\n' "$(_rebar_engine_dir)/rebar"
     fi

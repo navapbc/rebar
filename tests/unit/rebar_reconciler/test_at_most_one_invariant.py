@@ -1,4 +1,4 @@
-"""Tests for invariants.check_at_most_one_dso_local_id().
+"""Tests for invariants.check_at_most_one_local_id().
 
 Tests cover:
   - test_a_clean_snapshot: no violations → no writes or ticket-cli calls
@@ -7,7 +7,7 @@ Tests cover:
   - test_c_dedup_window: same key violated twice within 24h → exactly one ticket-cli call
   - test_d_cap_at_5: 7 violations with cap=5 → exactly 5 writes + 5 calls + 2 skipped
   - test_reconcile_once_invokes_invariant_after_fetch: reconcile_once() calls
-    check_at_most_one_dso_local_id exactly once with the post-fetch snapshot
+    check_at_most_one_local_id exactly once with the post-fetch snapshot
   - test_end_to_end_second_write_produces_one_alert_one_bug: two passes; pass 2 has
     a violation → exactly one BRIDGE_ALERT file entry + one ticket-cli call
 """
@@ -96,19 +96,19 @@ def _make_subprocess_result(
 
 
 def test_a_clean_snapshot(tmp_path, invariants):
-    """A snapshot with no issues having multiple dso_local_ids produces no side effects."""
+    """A snapshot with no issues having multiple local_ids produces no side effects."""
     snapshot = {
-        "PROJ-100": {"dso_local_ids": ["local-abc"]},
-        "PROJ-200": {"dso_local_ids": []},
-        "PROJ-300": {"dso_local_ids": ["local-xyz"]},
-        "PROJ-400": {},  # no dso_local_ids key at all
+        "PROJ-100": {"local_ids": ["local-abc"]},
+        "PROJ-200": {"local_ids": []},
+        "PROJ-300": {"local_ids": ["local-xyz"]},
+        "PROJ-400": {},  # no local_ids key at all
     }
 
     mock_store = _make_alert_store_mock(deduped_keys=set())
 
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
         with patch("invariants.subprocess.run") as mock_run:
-            result = invariants.check_at_most_one_dso_local_id(
+            result = invariants.check_at_most_one_local_id(
                 snapshot, repo_root=tmp_path, ticket_cli="/fake/dso"
             )
 
@@ -124,9 +124,9 @@ def test_a_clean_snapshot(tmp_path, invariants):
 
 
 def test_b_single_violation(tmp_path, invariants):
-    """One issue with two dso_local_ids triggers one append, one ticket-cli call, one patch."""
+    """One issue with two local_ids triggers one append, one ticket-cli call, one patch."""
     snapshot = {
-        "PROJ-100": {"dso_local_ids": ["local-aaa", "local-bbb"]},
+        "PROJ-100": {"local_ids": ["local-aaa", "local-bbb"]},
     }
 
     mock_store = _make_alert_store_mock(deduped_keys=set())
@@ -140,14 +140,14 @@ def test_b_single_violation(tmp_path, invariants):
 
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
         with patch("invariants.subprocess.run", return_value=mock_proc_result) as mock_run:
-            result = invariants.check_at_most_one_dso_local_id(
+            result = invariants.check_at_most_one_local_id(
                 snapshot, repo_root=tmp_path, ticket_cli="/fake/dso"
             )
 
     # One violation returned
     assert len(result) == 1
     assert result[0]["jira_key"] == "PROJ-100"
-    assert result[0]["dso_local_ids"] == ["local-aaa", "local-bbb"]
+    assert result[0]["local_ids"] == ["local-aaa", "local-bbb"]
 
     # Exactly one append call
     mock_store.append.assert_called_once()
@@ -180,7 +180,7 @@ def test_c_dedup_window(tmp_path, invariants):
     """Second call for the same jira_key within 24h dedup window skips ticket-cli."""
     dedup_key = "bridge-alert:at-most-one:PROJ-100"
     snapshot = {
-        "PROJ-100": {"dso_local_ids": ["local-aaa", "local-bbb"]},
+        "PROJ-100": {"local_ids": ["local-aaa", "local-bbb"]},
     }
 
     # Simulate the key already being deduped (i.e., within the 24h window)
@@ -188,7 +188,7 @@ def test_c_dedup_window(tmp_path, invariants):
 
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
         with patch("invariants.subprocess.run") as mock_run:
-            result = invariants.check_at_most_one_dso_local_id(
+            result = invariants.check_at_most_one_local_id(
                 snapshot, repo_root=tmp_path, ticket_cli="/fake/dso"
             )
 
@@ -207,7 +207,7 @@ def test_c_legacy_dedup_key_still_recognized(tmp_path, invariants):
     """
     legacy_dedup_key = "at-most-one:PROJ-LEGACY"
     snapshot = {
-        "PROJ-LEGACY": {"dso_local_ids": ["legacy-a", "legacy-b"]},
+        "PROJ-LEGACY": {"local_ids": ["legacy-a", "legacy-b"]},
     }
 
     # Store has the LEGACY key only — not the new prefixed format.
@@ -215,7 +215,7 @@ def test_c_legacy_dedup_key_still_recognized(tmp_path, invariants):
 
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
         with patch("invariants.subprocess.run") as mock_run:
-            result = invariants.check_at_most_one_dso_local_id(
+            result = invariants.check_at_most_one_local_id(
                 snapshot, repo_root=tmp_path, ticket_cli="/fake/dso"
             )
 
@@ -234,7 +234,7 @@ def test_c_legacy_dedup_key_still_recognized(tmp_path, invariants):
 def test_d_cap_at_5(tmp_path, invariants):
     """With 7 violations and cap=5, exactly 5 are processed and 2 are skipped."""
     snapshot = {
-        f"PROJ-{100 + i * 100}": {"dso_local_ids": [f"local-a{i}", f"local-b{i}"]}
+        f"PROJ-{100 + i * 100}": {"local_ids": [f"local-a{i}", f"local-b{i}"]}
         for i in range(7)
     }
 
@@ -246,7 +246,7 @@ def test_d_cap_at_5(tmp_path, invariants):
 
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
         with patch("invariants.subprocess.run", return_value=mock_proc_result) as mock_run:
-            result = invariants.check_at_most_one_dso_local_id(
+            result = invariants.check_at_most_one_local_id(
                 snapshot, repo_root=tmp_path, ticket_cli="/fake/dso"
             )
 
@@ -348,12 +348,12 @@ def _make_stub_health() -> ModuleType:
 
 
 # ---------------------------------------------------------------------------
-# Test (e): reconcile_once() calls check_at_most_one_dso_local_id exactly once
+# Test (e): reconcile_once() calls check_at_most_one_local_id exactly once
 # ---------------------------------------------------------------------------
 
 
 def test_reconcile_once_invokes_invariant_after_fetch(tmp_path):
-    """reconcile_once() must call check_at_most_one_dso_local_id exactly once
+    """reconcile_once() must call check_at_most_one_local_id exactly once
     with the post-fetch snapshot dict, BEFORE computing mutations.
 
     All collaborators (fetcher, differ, applier, health, invariants) are mocked
@@ -361,7 +361,7 @@ def test_reconcile_once_invokes_invariant_after_fetch(tmp_path):
     """
     pass_id = "inv-invoke-test"
     snapshot = {
-        "JIRA-1": {"summary": "clean issue", "dso_local_ids": ["local-abc"]},
+        "JIRA-1": {"summary": "clean issue", "local_ids": ["local-abc"]},
     }
 
     # Build stubs
@@ -373,7 +373,7 @@ def test_reconcile_once_invokes_invariant_after_fetch(tmp_path):
     # Build invariants stub with a trackable mock
     stub_invariants = types.ModuleType("reconcile_invariants")
     invariants_mock = MagicMock(return_value=[])
-    stub_invariants.check_at_most_one_dso_local_id = invariants_mock
+    stub_invariants.check_at_most_one_local_id = invariants_mock
     stub_invariants.check_dual_identity_complete = lambda prev, curr: (set(), [])
     stub_invariants.report_schema_drift = lambda *a, **kw: None
 
@@ -394,23 +394,23 @@ def test_reconcile_once_invokes_invariant_after_fetch(tmp_path):
         for key in _RECONCILE_COLLAB_KEYS + ("reconcile",):
             sys.modules.pop(key, None)
 
-    # check_at_most_one_dso_local_id must have been called exactly once
+    # check_at_most_one_local_id must have been called exactly once
     assert invariants_mock.call_count == 1, (
-        f"Expected check_at_most_one_dso_local_id to be called once, "
+        f"Expected check_at_most_one_local_id to be called once, "
         f"got {invariants_mock.call_count}"
     )
 
     # The first positional argument must be the post-fetch snapshot dict
     called_snapshot = invariants_mock.call_args[0][0]
     assert called_snapshot == snapshot, (
-        f"check_at_most_one_dso_local_id was called with wrong snapshot: "
+        f"check_at_most_one_local_id was called with wrong snapshot: "
         f"{called_snapshot!r} != {snapshot!r}"
     )
 
     # repo_root must be passed as keyword argument
     called_kwargs = invariants_mock.call_args[1]
     assert "repo_root" in called_kwargs, (
-        "check_at_most_one_dso_local_id must be called with repo_root kwarg"
+        "check_at_most_one_local_id must be called with repo_root kwarg"
     )
 
 
@@ -423,7 +423,7 @@ def test_end_to_end_second_write_produces_one_alert_one_bug(tmp_path):
     """Two passes through reconcile_once() using the real invariants + alert_store.
 
     Pass 1: clean snapshot (no violations) → no alerts, no ticket-cli calls.
-    Pass 2: 'JIRA-42' has dso_local_ids=['id1','id2'] (violation) → exactly one
+    Pass 2: 'JIRA-42' has local_ids=['id1','id2'] (violation) → exactly one
     alert entry in bridge_state/alerts/ and exactly one ticket-cli subprocess call.
 
     Strategy: load the real invariants module once, patch subprocess.run on it, then
@@ -433,11 +433,11 @@ def test_end_to_end_second_write_produces_one_alert_one_bug(tmp_path):
     pass_id = "e2e-alert-test"
 
     snapshot_clean = {
-        "JIRA-1": {"summary": "clean", "dso_local_ids": ["local-only"]},
+        "JIRA-1": {"summary": "clean", "local_ids": ["local-only"]},
     }
     snapshot_violation = {
-        "JIRA-1": {"summary": "clean", "dso_local_ids": ["local-only"]},
-        "JIRA-42": {"summary": "dup", "dso_local_ids": ["id1", "id2"]},
+        "JIRA-1": {"summary": "clean", "local_ids": ["local-only"]},
+        "JIRA-42": {"summary": "dup", "local_ids": ["id1", "id2"]},
     }
 
     def _run_pass_e2e(snapshot: dict, invariants_instance: ModuleType) -> None:

@@ -2,7 +2,7 @@
 
 Task eab4: verifies that after create_one() creates a Jira issue, the
 write-then-read round-trip is correct:
-  1. get_entity_property("DIG-999", "dso_local_id") returns the local ticket ID.
+  1. get_entity_property("DIG-999", "local_id") returns the local ticket ID.
   2. One of the add_label calls included a label matching "rebar-id:<local_id>".
 
 All tests use a mock AcliClient — no real Jira calls are made.
@@ -120,9 +120,9 @@ def test_get_entity_property_returns_local_id_after_create(applier, tmp_path):
 
     applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
 
-    stored_value = client.get_entity_property(issue_key, "dso_local_id")
+    stored_value = client.get_entity_property(issue_key, "local_id")
     assert stored_value == local_id, (
-        f"Expected get_entity_property({issue_key!r}, 'dso_local_id') == {local_id!r}, "
+        f"Expected get_entity_property({issue_key!r}, 'local_id') == {local_id!r}, "
         f"got {stored_value!r}"
     )
 
@@ -155,7 +155,7 @@ def test_readback_both_assertions_together(applier, tmp_path):
     applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
 
     # Assert 1: entity property readback
-    stored_local_id = client.get_entity_property(issue_key, "dso_local_id")
+    stored_local_id = client.get_entity_property(issue_key, "local_id")
     assert stored_local_id == local_id, (
         f"Entity property mismatch: expected {local_id!r}, got {stored_local_id!r}"
     )

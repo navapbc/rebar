@@ -176,6 +176,6 @@ clone_ticket_repo() {
         # Subprocess ticket calls (bash scripts/ticket ...) do not inherit it and
         # will perform the gc.auto check on first write — the ~10ms cost is
         # acceptable in exchange for correct test isolation.
-        _DSO_GC_AUTO_ZERO=1
+        _REBAR_GC_AUTO_ZERO=1
     fi
 }

@@ -664,7 +664,7 @@ def reconcile_once(
     curr_snapshot: dict = json.loads(curr_path.read_text())
 
     # Check structural invariants on the post-fetch snapshot, before diffing.
-    # check_at_most_one_dso_local_id returns only the filed violations (capped
+    # check_at_most_one_local_id returns only the filed violations (capped
     # at 5 per pass — see invariants._CAP_PER_PASS), so the prior log line's
     # "violations" and "filed" numbers were identical by construction. F11: log
     # filed count with the cap for clarity.
@@ -676,7 +676,7 @@ def reconcile_once(
             f"invariants: skipped (filtered pass, {len(curr_snapshot)} issues in snapshot)"
         )
     else:
-        filed = invariants_mod.check_at_most_one_dso_local_id(
+        filed = invariants_mod.check_at_most_one_local_id(
             curr_snapshot, repo_root=repo_root
         )
         print(  # noqa: T201
@@ -685,7 +685,7 @@ def reconcile_once(
 
     # Invariant phase: verify dual-identity round-trip on the post-fetch
     # snapshot before diffing. Quarantine one-sided keys (skipped by the
-    # differ) and seed repair_property mutations for one-sided dso_local_id
+    # differ) and seed repair_property mutations for one-sided local_id
     # rows so the differ emits the repair in this same pass.
     #
     # Filtered passes skip this to avoid seeding repair mutations for

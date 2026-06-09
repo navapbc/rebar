@@ -72,12 +72,12 @@ def _load_alert_store():
     return mod
 
 
-def check_at_most_one_dso_local_id(
+def check_at_most_one_local_id(
     snapshot: dict,
     repo_root: Path | None = None,
     ticket_cli: str | None = None,
 ) -> list[dict]:
-    """Check that no Jira issue has more than one dso_local_id mapping.
+    """Check that no Jira issue has more than one local_id mapping.
 
     snapshot: dict mapping jira_key -> {fields}
     Returns list of violation dicts filed this pass.
@@ -96,8 +96,8 @@ def check_at_most_one_dso_local_id(
     violations_filed = []
 
     for jira_key, fields in snapshot.items():
-        # Check if this issue has multiple dso_local_id values (duplicates)
-        rebar_ids = fields.get("dso_local_ids", [])
+        # Check if this issue has multiple local_id values (duplicates)
+        rebar_ids = fields.get("local_ids", [])
         if isinstance(rebar_ids, list) and len(rebar_ids) > 1:
             if len(violations_filed) >= _CAP_PER_PASS:
                 continue
@@ -121,7 +121,7 @@ def check_at_most_one_dso_local_id(
                 "key": dedup_key,
                 "jira_key": jira_key,
                 "timestamp_ns": time.time_ns(),
-                "reason": f"multiple dso_local_ids: {rebar_ids}",
+                "reason": f"multiple local_ids: {rebar_ids}",
             }
             alert_store.append(record, repo_root)
 
@@ -136,7 +136,7 @@ def check_at_most_one_dso_local_id(
                         ticket_cli,
                         "create",
                         "bug",
-                        f"at-most-one violation: {jira_key} has multiple dso_local_ids",
+                        f"at-most-one violation: {jira_key} has multiple local_ids",
                         "--priority",
                         "1",
                     ],
@@ -174,7 +174,7 @@ def check_at_most_one_dso_local_id(
                 # for a sweeper that converts orphan alerts into ticket-create
                 # retries on subsequent passes.
                 print(  # noqa: T201
-                    f"WARN: invariants.check_at_most_one_dso_local_id: "
+                    f"WARN: invariants.check_at_most_one_local_id: "
                     f"alert {dedup_key!r} filed but bug-ticket creation "
                     f"failed ({cli_error}); alert is orphan-without-bug.",
                     file=sys.stderr,
@@ -183,7 +183,7 @@ def check_at_most_one_dso_local_id(
             violations_filed.append(
                 {
                     "jira_key": jira_key,
-                    "dso_local_ids": rebar_ids,
+                    "local_ids": rebar_ids,
                     "dedup_key": dedup_key,
                 }
             )
@@ -231,15 +231,15 @@ def check_dual_identity_complete(
 ) -> tuple[set[str], list]:
     """Verify bidirectional binding between local tickets and Jira issues.
 
-    For each local entry with a ``dso_local_id``, find the Jira side whose
-    ``dso_local_id`` matches. Inconsistencies are classified as:
+    For each local entry with a ``local_id``, find the Jira side whose
+    ``local_id`` matches. Inconsistencies are classified as:
 
     * **Missing back-pointer** (local has no ``jira_key``) -> seed an inbound
       ``repair_property`` Mutation to write the back-pointer.
     * **Conflicting back-pointer** (local's ``jira_key`` does not match the
       matched peer) -> quarantine the local key.
     * **Double-bind** (more than one Jira issue claims the same
-      ``dso_local_id``) -> quarantine the local key and every colliding Jira
+      ``local_id``) -> quarantine the local key and every colliding Jira
       key.
 
     Returns:
@@ -251,13 +251,13 @@ def check_dual_identity_complete(
 
     jira_local_id_index: dict[str, list[str]] = {}
     for jk, jentry in jira_state.items():
-        jid = jentry.get("dso_local_id")
+        jid = jentry.get("local_id")
         if not jid:
             continue
         jira_local_id_index.setdefault(jid, []).append(jk)
 
     for local_key, local in local_state.items():
-        rebar_id = local.get("dso_local_id")
+        rebar_id = local.get("local_id")
         if not rebar_id:
             continue
         peer_keys = jira_local_id_index.get(rebar_id, [])
@@ -283,7 +283,7 @@ def check_dual_identity_complete(
         if not local_jira_pointer:
             # Align the seeded mutation with applier.inbound_repair_property's
             # contract: target = JIRA issue key (peer_key), payload carries the
-            # local_id used to write the dso_local_id entity property. A prior
+            # local_id used to write the local_id entity property. A prior
             # version emitted target=local_key + payload={set_field, value},
             # which did not match the leaf's expected schema and silently
             # short-circuited dispatch. (coderabbit / contract-shape fix)
@@ -330,7 +330,7 @@ def report_schema_drift(issue_key: str, observed: dict, expected: dict) -> None:
 
     # Persist the alert record before filing the ticket so subsequent passes
     # hit is_deduped() and skip, mirroring the pattern in
-    # check_at_most_one_dso_local_id().
+    # check_at_most_one_local_id().
     alert_store.append(
         {
             "key": dedup_key,

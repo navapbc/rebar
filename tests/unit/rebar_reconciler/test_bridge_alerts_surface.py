@@ -1,7 +1,7 @@
 """Smoke test: bridge_alerts surface through the stateless reconcile.py orchestrator.
 
 Drives reconcile_once() through a minimal scenario that triggers an invariant
-violation (duplicate dso_local_ids on a Jira issue), then asserts that
+violation (duplicate local_ids on a Jira issue), then asserts that
 alert_store wrote >= 1 record to the bridge_state/bridge_alerts/ directory.
 
 Module under test: src/rebar/_engine/rebar_reconciler/reconcile.py (reconcile module).
@@ -230,17 +230,17 @@ def test_alert_emitted_through_stateless_path(
 ):
     """An invariant violation triggers alert_store >= 1 record via reconcile_once().
 
-    Scenario: a Jira snapshot contains one issue with two dso_local_id values
-    (duplicate mapping).  check_at_most_one_dso_local_id() detects the violation
+    Scenario: a Jira snapshot contains one issue with two local_id values
+    (duplicate mapping).  check_at_most_one_local_id() detects the violation
     and calls alert_store.append() to write an operator-visible alert record.
 
     The test asserts:
     1. reconcile_once() completes without exception.
     2. bridge_state/bridge_alerts/ contains at least one JSONL file with >= 1 record.
-    3. The record's 'reason' field contains the word 'dso_local_id' — confirming
+    3. The record's 'reason' field contains the word 'local_id' — confirming
        the alert originated from the invariant check, not a different code path.
     """
-    # Snapshot with a duplicate dso_local_ids entry — triggers at-most-one invariant.
+    # Snapshot with a duplicate local_ids entry — triggers at-most-one invariant.
     issues_with_violation = [
         {
             "key": "DIG-50",
@@ -248,7 +248,7 @@ def test_alert_emitted_through_stateless_path(
                 "summary": "Duplicate ID issue",
                 "status": {"name": "In Progress"},
                 "issuetype": {"name": "Story"},
-                "dso_local_ids": ["local-aaa1-bbbb-cccc-dddd", "local-1111-2222-3333-4444"],
+                "local_ids": ["local-aaa1-bbbb-cccc-dddd", "local-1111-2222-3333-4444"],
             },
         }
     ]
@@ -279,7 +279,7 @@ def test_alert_emitted_through_stateless_path(
     # (and write the alert) without the orchestrator hitting the Mutation.get()
     # AttributeError that occurs when Mutation dataclass objects enter the
     # schema-drift scan loop at reconcile.py:331.  The alert emission path
-    # (invariants.check_at_most_one_dso_local_id → alert_store.append) executes
+    # (invariants.check_at_most_one_local_id → alert_store.append) executes
     # BEFORE compute_mutations is called, so patching compute_mutations does NOT
     # suppress the alert we are testing.
     with (
@@ -310,7 +310,7 @@ def test_alert_emitted_through_stateless_path(
     jsonl_files = sorted(alerts_dir.glob("*.jsonl"))
     assert len(jsonl_files) >= 1, (
         f"No JSONL files found in {alerts_dir}. "
-        "Expected >= 1 alert record from the duplicate dso_local_ids violation."
+        "Expected >= 1 alert record from the duplicate local_ids violation."
     )
 
     # Read all records and verify at least one matches the violation scenario.
@@ -332,13 +332,13 @@ def test_alert_emitted_through_stateless_path(
         f"JSONL files exist but contain no parseable records: {jsonl_files}"
     )
 
-    # At least one record must reference dso_local_id in its reason or key
-    # — confirming it came from check_at_most_one_dso_local_id.
+    # At least one record must reference local_id in its reason or key
+    # — confirming it came from check_at_most_one_local_id.
     matching = [
         r for r in all_records
-        if "dso_local_id" in r.get("reason", "") or "at-most-one" in r.get("key", "")
+        if "local_id" in r.get("reason", "") or "at-most-one" in r.get("key", "")
     ]
     assert len(matching) >= 1, (
-        f"No alert record references dso_local_id/at-most-one. "
+        f"No alert record references local_id/at-most-one. "
         f"Records found: {all_records}"
     )

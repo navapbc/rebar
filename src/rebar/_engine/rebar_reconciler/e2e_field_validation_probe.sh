@@ -15,7 +15,7 @@
 #
 # Usage: invoked by reconcile-bridge.yml when mode=field-validate, or manually.
 # Requires: JIRA_URL, JIRA_USER, JIRA_API_TOKEN env vars.
-# Requires: DSO_FIELD_VALIDATION_PROBE=1 to opt in (prevents accidental
+# Requires: REBAR_FIELD_VALIDATION_PROBE=1 to opt in (prevents accidental
 #           inclusion in generic test-discovery sweeps).
 # Working directory: repo root.
 
@@ -24,8 +24,8 @@ set -euo pipefail
 # Explicit opt-in gate — prevents accidental invocation by find/glob test
 # discovery. The probe creates real Jira issues against the configured
 # instance, so it must only run when the caller explicitly intends to.
-if [ "${DSO_FIELD_VALIDATION_PROBE:-0}" != "1" ]; then
-    echo "SKIP: e2e_field_validation_probe.sh requires DSO_FIELD_VALIDATION_PROBE=1" >&2
+if [ "${REBAR_FIELD_VALIDATION_PROBE:-0}" != "1" ]; then
+    echo "SKIP: e2e_field_validation_probe.sh requires REBAR_FIELD_VALIDATION_PROBE=1" >&2
     echo "      (this probe creates real Jira issues against the configured instance)" >&2
     exit 0
 fi
@@ -1614,7 +1614,7 @@ echo ""
 
 # Bug 85a1 (Gap 8): status outbound is now first-class — local status changes
 # must propagate to Jira via REST POST /transitions. Previously this phase
-# asserted BY_DESIGN no-propagation (gated behind DSO_RECONCILER_STATUS_GATING);
+# asserted BY_DESIGN no-propagation (gated behind REBAR_RECONCILER_STATUS_GATING);
 # that gate was removed.
 #
 # Bug b859 (Part 1b, H4 fix): we transition LOCAL_IDS[2] (idx 2 — FIELD-PROBE-3

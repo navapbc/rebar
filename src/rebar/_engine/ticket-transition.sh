@@ -348,7 +348,7 @@ PYEOF
     # This is non-critical — if the unblock script fails, the close still proceeds
     # (children were already verified absent above). batch_close_json is only used
     # in Step 4 for UNBLOCKED output, not for open-children detection.
-    unblock_script="${DSO_UNBLOCK_SCRIPT:-$SCRIPT_DIR/ticket-unblock.py}"
+    unblock_script="${REBAR_UNBLOCK_SCRIPT:-$SCRIPT_DIR/ticket-unblock.py}"
     batch_close_json=$(python3 "$unblock_script" --batch-close "$TRACKER_DIR" "$ticket_id" 2>/dev/null) || true
 fi
 
@@ -410,7 +410,7 @@ print(','.join(ids)) if ids else None
     fi
 
     # Compact-on-close: squash event log into SNAPSHOT (non-blocking)
-    compact_script="${DSO_COMPACT_SCRIPT:-$SCRIPT_DIR/ticket-compact.sh}"
+    compact_script="${REBAR_COMPACT_SCRIPT:-$SCRIPT_DIR/ticket-compact.sh}"
     bash "$compact_script" "$ticket_id" --threshold=0 --skip-sync 2>/dev/null || true
 
     # Scratch cleanup: remove per-ticket scratch dir (non-blocking; always returns 0)

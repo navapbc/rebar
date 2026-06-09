@@ -1,6 +1,6 @@
 """Unit tests for rebar_reconciler/invariants.py.
 
-Covers check_at_most_one_dso_local_id end-to-end against a mocked alert_store
+Covers check_at_most_one_local_id end-to-end against a mocked alert_store
 and a mocked subprocess.run for the ticket CLI invocation. Does NOT load
 reconcile.py — tests that exercise the reconcile→invariants integration live
 in test_at_most_one_invariant.py (deferred to the core-pipeline PR because
@@ -45,7 +45,7 @@ def mock_alert_store() -> MagicMock:
 
 
 def _snapshot_with_dup(jira_key: str = "DIG-100") -> dict:
-    return {jira_key: {"dso_local_ids": ["id-a", "id-b"]}}
+    return {jira_key: {"local_ids": ["id-a", "id-b"]}}
 
 
 def _ok_cli_result(bug_id: str = "abc1-def2-1234-5678") -> MagicMock:
@@ -68,13 +68,13 @@ def _ok_cli_result(bug_id: str = "abc1-def2-1234-5678") -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
-def test_dup_dso_local_ids_files_alert_and_bug(
+def test_dup_local_ids_files_alert_and_bug(
     invariants: ModuleType, mock_alert_store: MagicMock, tmp_path: Path
 ) -> None:
-    """A snapshot with duplicate dso_local_ids files one alert and one bug ticket."""
+    """A snapshot with duplicate local_ids files one alert and one bug ticket."""
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
         with patch.object(invariants.subprocess, "run", return_value=_ok_cli_result()):
-            filed = invariants.check_at_most_one_dso_local_id(
+            filed = invariants.check_at_most_one_local_id(
                 _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/dso"
             )
 
@@ -96,9 +96,9 @@ def test_no_duplicates_files_nothing(
     invariants: ModuleType, mock_alert_store: MagicMock, tmp_path: Path
 ) -> None:
     """A clean snapshot triggers no alerts."""
-    snap = {"DIG-1": {"dso_local_ids": ["only-one"]}, "DIG-2": {}}
+    snap = {"DIG-1": {"local_ids": ["only-one"]}, "DIG-2": {}}
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
-        filed = invariants.check_at_most_one_dso_local_id(
+        filed = invariants.check_at_most_one_local_id(
             snap, repo_root=tmp_path, ticket_cli="/fake/dso"
         )
 
@@ -119,7 +119,7 @@ def test_dedup_short_circuits(
     mock_alert_store.is_deduped.return_value = True
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
         with patch.object(invariants.subprocess, "run") as mock_run:
-            filed = invariants.check_at_most_one_dso_local_id(
+            filed = invariants.check_at_most_one_local_id(
                 _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/dso"
             )
 
@@ -137,10 +137,10 @@ def test_cap_per_pass_limits_filings(
     invariants: ModuleType, mock_alert_store: MagicMock, tmp_path: Path
 ) -> None:
     """Only _CAP_PER_PASS=5 violations are filed per call; extras are skipped this pass."""
-    snap = {f"DIG-{i}": {"dso_local_ids": ["a", "b"]} for i in range(10)}
+    snap = {f"DIG-{i}": {"local_ids": ["a", "b"]} for i in range(10)}
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
         with patch.object(invariants.subprocess, "run", return_value=_ok_cli_result()):
-            filed = invariants.check_at_most_one_dso_local_id(
+            filed = invariants.check_at_most_one_local_id(
                 snap, repo_root=tmp_path, ticket_cli="/fake/dso"
             )
 
@@ -167,7 +167,7 @@ def test_timeout_surfaces_warning_does_not_patch_bug(
             "run",
             side_effect=subprocess.TimeoutExpired(cmd="dso", timeout=30),
         ):
-            filed = invariants.check_at_most_one_dso_local_id(
+            filed = invariants.check_at_most_one_local_id(
                 _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/dso"
             )
 
@@ -195,7 +195,7 @@ def test_oserror_surfaces_warning_does_not_patch_bug(
             "run",
             side_effect=FileNotFoundError("dso not on PATH"),
         ):
-            filed = invariants.check_at_most_one_dso_local_id(
+            filed = invariants.check_at_most_one_local_id(
                 _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/dso"
             )
 
@@ -225,7 +225,7 @@ def test_non_zero_exit_surfaces_warning(
     bad_result.stderr = "Invalid ticket type"
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
         with patch.object(invariants.subprocess, "run", return_value=bad_result):
-            filed = invariants.check_at_most_one_dso_local_id(
+            filed = invariants.check_at_most_one_local_id(
                 _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/dso"
             )
 
@@ -253,27 +253,27 @@ def test_programming_error_propagates(
             side_effect=AttributeError("simulated programming defect"),
         ):
             with pytest.raises(AttributeError, match="simulated programming defect"):
-                invariants.check_at_most_one_dso_local_id(
+                invariants.check_at_most_one_local_id(
                     _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/dso"
                 )
 
 
 # ---------------------------------------------------------------------------
-# Non-list dso_local_ids value is ignored (defensive read shape)
+# Non-list local_ids value is ignored (defensive read shape)
 # ---------------------------------------------------------------------------
 
 
-def test_non_list_dso_local_ids_is_ignored(
+def test_non_list_local_ids_is_ignored(
     invariants: ModuleType, mock_alert_store: MagicMock, tmp_path: Path
 ) -> None:
-    """A snapshot entry whose dso_local_ids is not a list (or a single-element list) does not trigger a violation."""
+    """A snapshot entry whose local_ids is not a list (or a single-element list) does not trigger a violation."""
     snap = {
-        "DIG-A": {"dso_local_ids": "single-string-not-a-list"},
-        "DIG-B": {"dso_local_ids": ["just-one"]},
-        "DIG-C": {},  # no dso_local_ids at all
+        "DIG-A": {"local_ids": "single-string-not-a-list"},
+        "DIG-B": {"local_ids": ["just-one"]},
+        "DIG-C": {},  # no local_ids at all
     }
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
-        filed = invariants.check_at_most_one_dso_local_id(
+        filed = invariants.check_at_most_one_local_id(
             snap, repo_root=tmp_path, ticket_cli="/fake/dso"
         )
 
@@ -335,7 +335,7 @@ def test_garbage_cli_output_leaves_alert_unpatched(
     garbage_result.stderr = ""
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
         with patch.object(invariants.subprocess, "run", return_value=garbage_result):
-            filed = invariants.check_at_most_one_dso_local_id(
+            filed = invariants.check_at_most_one_local_id(
                 _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/dso"
             )
 
@@ -356,13 +356,13 @@ def test_valid_cli_output_extracts_id_and_patches_alert(
     used to patch the alert — guards against a regression to the
     whitespace-split[-1] approach that would return the wrong token if the
     title contains trailing tokens."""
-    # Title is "at-most-one violation: DIG-100 has multiple dso_local_ids" —
+    # Title is "at-most-one violation: DIG-100 has multiple local_ids" —
     # if extraction reverted to split()[-1] of the FIRST line, it would return
-    # "dso_local_ids", not the canonical ID.
+    # "local_ids", not the canonical ID.
     canonical_id = "9999-aaaa-bbbb-cccc"
     multi_line_stdout = (
         f"Created ticket some-alias ({canonical_id}): "
-        f"at-most-one violation: DIG-100 has multiple dso_local_ids\n"
+        f"at-most-one violation: DIG-100 has multiple local_ids\n"
         f"{canonical_id}\n"
     )
     result = MagicMock()
@@ -371,7 +371,7 @@ def test_valid_cli_output_extracts_id_and_patches_alert(
     result.stderr = ""
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
         with patch.object(invariants.subprocess, "run", return_value=result):
-            filed = invariants.check_at_most_one_dso_local_id(
+            filed = invariants.check_at_most_one_local_id(
                 _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/dso"
             )
 

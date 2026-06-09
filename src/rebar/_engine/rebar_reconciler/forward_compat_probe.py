@@ -104,7 +104,7 @@ def run() -> StepResult:
 
         # Sub-op 2: property_write
         try:
-            client.set_issue_property(issue_key, "dso_local_id", probe_uuid)
+            client.set_issue_property(issue_key, "local_id", probe_uuid)
             sub_ops.append({"op": "property_write", "ok": True})
         except Exception as exc:
             sub_ops.append({"op": "property_write", "ok": False, "error": str(exc)})
@@ -165,7 +165,7 @@ def run() -> StepResult:
 
         # Sub-op 4: property_rest_read
         try:
-            value = client.get_issue_property(issue_key, "dso_local_id")
+            value = client.get_issue_property(issue_key, "local_id")
             match = value == probe_uuid
             sub_ops.append({"op": "property_rest_read", "ok": match})
             if not match:

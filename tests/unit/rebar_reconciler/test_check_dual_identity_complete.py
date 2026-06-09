@@ -30,20 +30,20 @@ def test_returns_quarantine_and_seed_mutations(inv):
     ambiguous double-bind (quarantine)."""
     local = {
         # missing back-pointer — should seed repair
-        "LOCAL-A": {"dso_local_id": "id-A"},  # no jira_key
+        "LOCAL-A": {"local_id": "id-A"},  # no jira_key
         # double-bind — should quarantine
-        "LOCAL-B": {"dso_local_id": "id-DUP"},
+        "LOCAL-B": {"local_id": "id-DUP"},
     }
     jira = {
-        "PROJ-1": {"dso_local_id": "id-A"},
-        "PROJ-2": {"dso_local_id": "id-DUP"},
-        "PROJ-3": {"dso_local_id": "id-DUP"},  # collision
+        "PROJ-1": {"local_id": "id-A"},
+        "PROJ-2": {"local_id": "id-DUP"},
+        "PROJ-3": {"local_id": "id-DUP"},  # collision
     }
     quarantine, repairs = inv.check_dual_identity_complete(local, jira)
     # LOCAL-A's missing back-pointer should yield a repair mutation directed at
     # the JIRA peer (PROJ-1) — per applier.inbound_repair_property contract,
     # target = jira_key and payload carries the local_id used to set the
-    # dso_local_id entity property.
+    # local_id entity property.
     repair_for_a = [
         m
         for m in repairs
@@ -89,11 +89,11 @@ def test_cap_per_pass_invariant(inv):
         patch.object(inv, "subprocess"),
     ):
         # Build 60 colliding local IDs across 60 local + 120 jira entries.
-        local = {f"L-{i}": {"dso_local_id": f"DUP-{i}"} for i in range(60)}
+        local = {f"L-{i}": {"local_id": f"DUP-{i}"} for i in range(60)}
         jira = {}
         for i in range(60):
-            jira[f"J-{i}-a"] = {"dso_local_id": f"DUP-{i}"}
-            jira[f"J-{i}-b"] = {"dso_local_id": f"DUP-{i}"}
+            jira[f"J-{i}-a"] = {"local_id": f"DUP-{i}"}
+            jira[f"J-{i}-b"] = {"local_id": f"DUP-{i}"}
         quarantine, _ = inv.check_dual_identity_complete(local, jira)
         # Cap is best-effort — weak upper bound; strict cap enforcement is a follow-on.
         assert len(quarantine) <= 200

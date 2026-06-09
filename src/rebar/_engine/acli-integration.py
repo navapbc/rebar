@@ -186,7 +186,7 @@ def _sanitize_comment(body: str) -> str:
 # ensures correct Jira state names are used in ACLI transition commands.
 # ticket 929a: blocked/cancelled map to the nearest live DIG workflow state
 # ({To Do, In Progress, In Review, Done} only); lossless information is
-# preserved via dso-status: annotation labels managed by outbound_differ.
+# preserved via rebar-status: annotation labels managed by outbound_differ.
 _LOCAL_STATUS_TO_JIRA: dict[str, str] = {
     "open": "To Do",
     "in_progress": "In Progress",

@@ -95,7 +95,7 @@ def test_update_one_forwards_status_to_client(applier):
     """Bug 85a1 (Gap 8): status is now allowlisted and must be forwarded.
 
     Previously status was dropped here because outbound status was gated
-    BY_DESIGN behind DSO_RECONCILER_STATUS_GATING. Gap 8 removed that gate
+    BY_DESIGN behind REBAR_RECONCILER_STATUS_GATING. Gap 8 removed that gate
     and rewrote ``transition_issue`` to use REST. update_one now passes
     status through to ``client.update_issue``, which routes it to
     ``transition_issue`` → REST POST /transitions.

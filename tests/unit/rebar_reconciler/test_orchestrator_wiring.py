@@ -122,7 +122,7 @@ def _stub_modules(
     health_mod.count_open_by_type.return_value = {}
 
     invariants_mod = MagicMock()
-    invariants_mod.check_at_most_one_dso_local_id.return_value = []
+    invariants_mod.check_at_most_one_local_id.return_value = []
     invariants_mod.check_dual_identity_complete.return_value = (set(), [])
 
     # Binding store: real module with a mock store instance

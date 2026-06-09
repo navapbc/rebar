@@ -11,7 +11,7 @@ _RECONCILER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${JIRA_URL:?required}"
 : "${JIRA_USER:?required}"
 : "${JIRA_API_TOKEN:?required}"
-: "${DSO_FIELD_VALIDATION_PROBE:?must be set to 1}"
+: "${REBAR_FIELD_VALIDATION_PROBE:?must be set to 1}"
 
 PROJECT="${JIRA_PROJECT:-DIG}"
 TS=$(date +%s)

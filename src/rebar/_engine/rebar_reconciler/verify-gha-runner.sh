@@ -17,9 +17,9 @@ GH_TIMEOUT="${GH_TIMEOUT:-30s}"
 # Resolve repo root so we can invoke the repo-pinned rebar CLI rather than the
 # bare `dso` lookup (PATH may resolve the wrong binary in CI/dev shells).
 _REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-DSO_CMD="${DSO_CMD:-${REBAR_TICKET_CLI:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)/rebar}}"
-if [[ ! -x "$DSO_CMD" ]]; then
-    DSO_CMD="dso"  # fall back to PATH (e.g., outside a checkout)
+REBAR_CMD="${REBAR_CMD:-${REBAR_TICKET_CLI:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)/rebar}}"
+if [[ ! -x "$REBAR_CMD" ]]; then
+    REBAR_CMD="dso"  # fall back to PATH (e.g., outside a checkout)
 fi
 
 # Portable timeout resolver. GNU `timeout` ships in Linux coreutils but not in
@@ -89,6 +89,6 @@ if ! _output=$(_run_with_timeout "$GH_TIMEOUT" gh run list --workflow="$WORKFLOW
 fi
 
 # Step 3: Log the output as a story comment via the repo-pinned rebar CLI
-"$DSO_CMD" ticket comment "$STORY_ID" "GHA runner verified: $(echo "$_output" | head -5)"
+"$REBAR_CMD" ticket comment "$STORY_ID" "GHA runner verified: $(echo "$_output" | head -5)"
 
 exit 0

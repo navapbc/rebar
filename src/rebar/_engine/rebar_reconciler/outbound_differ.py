@@ -31,9 +31,8 @@ from typing import Any, Protocol, runtime_checkable
 
 
 def _rebar_env(name: str, default: str | None = None) -> str | None:
-    """Read ``REBAR_<name>`` preferred; deprecated ``DSO_<name>`` fallback (WS1)."""
-    val = os.environ.get(f"REBAR_{name}")
-    return val if val is not None else os.environ.get(f"DSO_{name}", default)
+    """Read ``REBAR_<name>`` from the environment (DSO_* support removed)."""
+    return os.environ.get(f"REBAR_{name}", default)
 
 
 # Sentinel: presence of the "comment" key in a snapshot entry confirms the
@@ -277,7 +276,7 @@ _LOCAL_TO_JIRA_STATUS: dict[str, str] = {
     "in_progress": "In Progress",
     # blocked/cancelled have no direct equivalent in the live DIG workflow
     # ({To Do, In Progress, In Review, Done} only). Map to the nearest live
-    # state; lossless information is preserved via dso-status: annotation
+    # state; lossless information is preserved via rebar-status: annotation
     # labels emitted/removed by status logic (see _status_annotation_labels).
     "blocked": "In Progress",
     "closed": "Done",
@@ -286,10 +285,10 @@ _LOCAL_TO_JIRA_STATUS: dict[str, str] = {
 }
 
 # Local statuses that need an annotation label to preserve lossless intent.
-# Maps local_status -> dso-status:<label> emitted when that status is active.
+# Maps local_status -> rebar-status:<label> emitted when that status is active.
 _STATUS_ANNOTATION_LABEL: dict[str, str] = {
-    "blocked": "dso-status:blocked",
-    "cancelled": "dso-status:cancelled",
+    "blocked": "rebar-status:blocked",
+    "cancelled": "rebar-status:cancelled",
 }
 
 
@@ -447,7 +446,7 @@ def _diff_fields(
     Jira's ``{accountId, displayName, emailAddress}`` dict matches a local
     string in any of those three forms (bug 85a1, Gap 4).
 
-    Bug b859 (Part 0d): when ``DSO_RECONCILER_VERBOSE=1`` is set, emit a
+    Bug b859 (Part 0d): when ``REBAR_RECONCILER_VERBOSE=1`` is set, emit a
     one-line RECON record per detected field-diff with truncated local /
     jira values so operators can debug parity issues directly from the
     probe's side-car log. Off by default to keep production stderr quiet.
@@ -777,11 +776,11 @@ def _diff_comments(
 # separator ("rebar-id-<local_id>"); both forms must be excluded from outbound
 # diffs to avoid emitting spurious remove mutations for identity labels.
 # See bug 68a4-f9d5-5540-4b95.
-# dso-status: labels are reconciler-managed annotation labels (emitted/removed
+# rebar-status: labels are reconciler-managed annotation labels (emitted/removed
 # by status logic only); they must be excluded from the normal user-tag diff
-# so that dso-status: labels on Jira do not produce spurious REMOVE mutations
+# so that rebar-status: labels on Jira do not produce spurious REMOVE mutations
 # via the tag diff path (ticket 929a).
-_EXCLUDED_PREFIXES: tuple[str, ...] = ("rebar-id:", "rebar-id-", "imported:", "dso-status:")
+_EXCLUDED_PREFIXES: tuple[str, ...] = ("rebar-id:", "rebar-id-", "imported:", "rebar-status:")
 
 
 def _diff_labels(
@@ -840,7 +839,7 @@ def _diff_status_annotation_labels(
     local_status: str,
     jira_labels: list[str],
 ) -> list[dict[str, Any]]:
-    """Compute add/remove mutations for dso-status: annotation labels.
+    """Compute add/remove mutations for rebar-status: annotation labels.
 
     These labels encode lossless status information for statuses that have no
     direct equivalent in the live DIG Jira workflow (currently blocked and
@@ -848,14 +847,14 @@ def _diff_status_annotation_labels(
 
     Rules:
     - When local_status is in _STATUS_ANNOTATION_LABEL, emit ADD for the
-      corresponding dso-status: label if Jira does not already carry it.
-    - When a dso-status: annotation label is present on Jira but local_status
+      corresponding rebar-status: label if Jira does not already carry it.
+    - When a rebar-status: annotation label is present on Jira but local_status
       no longer matches it, emit REMOVE to clean up the stale label.
     """
     mutations: list[dict[str, Any]] = []
     desired_annotation = _STATUS_ANNOTATION_LABEL.get(local_status)
     jira_annotation_labels = {
-        label for label in jira_labels if label.startswith("dso-status:")
+        label for label in jira_labels if label.startswith("rebar-status:")
     }
 
     # Add desired annotation if not already present
@@ -865,7 +864,7 @@ def _diff_status_annotation_labels(
     ):
         mutations.append({"action": "add", "label": desired_annotation})
 
-    # Remove stale annotations (dso-status: labels that no longer match)
+    # Remove stale annotations (rebar-status: labels that no longer match)
     for stale in sorted(jira_annotation_labels):
         if stale != desired_annotation:
             mutations.append({"action": "remove", "label": stale})
@@ -1093,7 +1092,7 @@ def compute_outbound_mutations(
             if local_label_intent is not None:
                 intent_set = local_label_intent.get(local_id, set())
             label_mutations = _diff_labels(ticket, jira_fields, intent_set)
-            # ticket 929a: status annotation labels (dso-status:blocked/cancelled)
+            # ticket 929a: status annotation labels (rebar-status:blocked/cancelled)
             # are managed separately from user tags (excluded from _diff_labels via
             # _EXCLUDED_PREFIXES). Compute and merge annotation mutations here.
             annotation_mutations = _diff_status_annotation_labels(

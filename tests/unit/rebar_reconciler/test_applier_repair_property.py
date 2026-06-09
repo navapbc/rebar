@@ -66,7 +66,7 @@ def test_happy_path(applier):
     # No schema-drift signal on success
     assert result.get("follow_on") is None
     # set_issue_property called exactly once with expected args
-    client.set_issue_property.assert_called_once_with("DIG-42", "dso_local_id", "abc-123")
+    client.set_issue_property.assert_called_once_with("DIG-42", "local_id", "abc-123")
     # No label removal on success
     client.remove_label.assert_not_called()
 

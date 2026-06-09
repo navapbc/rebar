@@ -59,7 +59,7 @@ def _make_snapshot(field: str, value):
     """Build a single-issue snapshot dict shaped for differ.compute_mutations."""
     return {
         JIRA_KEY: {
-            "dso_local_id": LOCAL_ID,
+            "local_id": LOCAL_ID,
             field: value,
         }
     }
@@ -81,7 +81,7 @@ def _apply_mutation_to_snapshot(snapshot: dict, mutation) -> dict:
         return result
     if action in ("create", "update"):
         if target not in result:
-            result[target] = {"dso_local_id": payload.get("local_id", target)}
+            result[target] = {"local_id": payload.get("local_id", target)}
         result[target].update(payload)
         return result
     # probe / conflict / clean_label / repair_property: no snapshot change.
@@ -159,14 +159,14 @@ def test_labels_matrix_excludes_rebar_id(differ):
     """
     prev = {
         JIRA_KEY: {
-            "dso_local_id": LOCAL_ID,
+            "local_id": LOCAL_ID,
             "rebar-id": "rebar-id:OLD",
             "labels": ["feature"],
         }
     }
     next_ = {
         JIRA_KEY: {
-            "dso_local_id": LOCAL_ID,
+            "local_id": LOCAL_ID,
             "rebar-id": "rebar-id:NEW",
             "labels": ["feature"],
         }

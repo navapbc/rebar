@@ -5,7 +5,7 @@
 # Tests verify that the dispatcher correctly routes 'ticket clarity-check' to
 # ticket-clarity-check.sh and that exit codes and JSON output are passed through.
 #
-# Uses --stdin mode because ticket-clarity-check.sh fetches tickets via DSO_CLI
+# Uses --stdin mode because ticket-clarity-check.sh fetches tickets via REBAR_CLI
 # (not TICKET_CMD), so stub injection is not available for the ticket-id path.
 # --stdin tests the full dispatcher→ticket_clarity_check()→ticket-clarity-check.sh chain.
 #

@@ -108,7 +108,7 @@ def main() -> None:
         print("PROBE_PASS step=STEP_LABEL")
 
         # STEP 3: Write issue property
-        client.set_issue_property(issue_key, "dso_local_id", probe_uuid)
+        client.set_issue_property(issue_key, "local_id", probe_uuid)
         print("PROBE_PASS step=STEP_PROPERTY_WRITE")
 
         # STEP 4: JQL search with retry. AcliClient.search_issues caches
@@ -143,7 +143,7 @@ def main() -> None:
         # surfaces as a distinct PROBE_FAIL reason rather than being collapsed
         # into the catch-all `reason=exception` branch below.
         try:
-            read_value = client.get_issue_property(issue_key, "dso_local_id")
+            read_value = client.get_issue_property(issue_key, "local_id")
         except KeyError as exc:
             print(
                 f"PROBE_FAIL step=STEP_PROPERTY_READ "

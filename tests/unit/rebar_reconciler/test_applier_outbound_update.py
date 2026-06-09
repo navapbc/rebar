@@ -4,7 +4,7 @@ Behavior under test:
   - Allowlisted fields (summary, description, assignee, priority, status) are
     pushed via client.update_issue, routed through _call_with_retry.
   - Non-allowlisted fields are silently dropped — zero side-effects on those.
-  - Status is first-class (DSO_RECONCILER_STATUS_GATING gate removed in bug 85a1
+  - Status is first-class (REBAR_RECONCILER_STATUS_GATING gate removed in bug 85a1
     Gap 8): status flows through client.update_issue without raising.
   - payload['labels'] dispatch: add_label / remove_label per entry (gap fix for
     bugs 3b5f / 85a1 — previously silently dropped).
@@ -111,12 +111,12 @@ def test_non_allowlist_fields_silently_dropped(applier):
 
 
 def test_status_field_is_forwarded_to_update_issue(applier, monkeypatch):
-    """Bug 85a1 (Gap 8): the DSO_RECONCILER_STATUS_GATING gate has been
+    """Bug 85a1 (Gap 8): the REBAR_RECONCILER_STATUS_GATING gate has been
     removed. Status is now first-class — ``_apply_outbound_update`` passes
     it through to ``client.update_issue`` (which routes status to
     ``transition_issue`` → REST POST /transitions inside acli-integration).
     """
-    monkeypatch.delenv("DSO_RECONCILER_STATUS_GATING", raising=False)
+    monkeypatch.delenv("REBAR_RECONCILER_STATUS_GATING", raising=False)
     client = SimpleNamespace(update_issue=MagicMock(return_value=None))
     mutation = _make_outbound_update_mutation(
         applier, {"status": "Done", "summary": "x"}
@@ -139,7 +139,7 @@ def test_status_only_payload_still_pushes(applier, monkeypatch):
     Previously the gating prevented any update_issue call when status was the
     sole field; the new contract pushes it.
     """
-    monkeypatch.delenv("DSO_RECONCILER_STATUS_GATING", raising=False)
+    monkeypatch.delenv("REBAR_RECONCILER_STATUS_GATING", raising=False)
     client = SimpleNamespace(
         update_issue=MagicMock(return_value=None),
         add_label=MagicMock(),

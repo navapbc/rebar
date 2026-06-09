@@ -65,15 +65,15 @@ def fixture_repo(tmp_path, monkeypatch):
     override in the host shell cannot leak into the test and steer writes
     away from the tmp tracker dir (PR #375 review thread 3306949620).
 
-    Also removes DSO_ENV_ID and DSO_AUTHOR — both are read by
+    Also removes REBAR_ENV_ID and REBAR_AUTHOR — both are read by
     ``applier._event_meta()`` and written into every event file. If
     developer-shell values leak into the test the assertions still pass
     locally but the event-file ``env_id``/``author`` diverge between local
     and CI runs (PR #375 review thread 3307104056).
     """
     monkeypatch.delenv("TICKETS_TRACKER_DIR", raising=False)
-    monkeypatch.delenv("DSO_ENV_ID", raising=False)
-    monkeypatch.delenv("DSO_AUTHOR", raising=False)
+    monkeypatch.delenv("REBAR_ENV_ID", raising=False)
+    monkeypatch.delenv("REBAR_AUTHOR", raising=False)
     tracker = tmp_path / ".tickets-tracker"
     tracker.mkdir()
     (tracker / ".env-id").write_text("test-env-id", encoding="utf-8")
@@ -366,7 +366,7 @@ def test_inbound_repair_property_invokes_client(applier, mut_mod):
         payload={"local_id": "L"},
     )
     result = applier._apply_typed(mutation, client=client)
-    client.set_issue_property.assert_called_once_with("DIG-X", "dso_local_id", "L")
+    client.set_issue_property.assert_called_once_with("DIG-X", "local_id", "L")
     assert result.payload.get("status") == "ok"
 
 
@@ -729,7 +729,7 @@ def test_inbound_update_extracts_nested_jira_objects(applier, mut_mod, fixture_r
 
 def test_inbound_create_writes_back_jira_dedup_markers(applier, mut_mod, fixture_repo):
     """After creating the local ticket, inbound_create must write rebar-id label
-    and dso_local_id property back to Jira so the differ recognizes the issue
+    and local_id property back to Jira so the differ recognizes the issue
     as mirrored on subsequent passes.
     """
     client = MagicMock()
@@ -748,7 +748,7 @@ def test_inbound_create_writes_back_jira_dedup_markers(applier, mut_mod, fixture
     assert result.payload["local_id"] == local_id
     client.add_label.assert_called_once_with("DIG-700", f"rebar-id:{local_id}")
     client.set_entity_property.assert_called_once_with(
-        "DIG-700", "dso_local_id", local_id
+        "DIG-700", "local_id", local_id
     )
 
 

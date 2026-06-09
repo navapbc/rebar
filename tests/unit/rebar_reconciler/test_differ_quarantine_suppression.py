@@ -178,7 +178,7 @@ def test_seed_mutations_prepended_to_result(
         direction=MutationDirection.inbound,
         action=MutationAction.repair_property,
         target="SEED-X",
-        payload={"missing_property": "dso_local_id"},
+        payload={"missing_property": "local_id"},
         provenance={
             "source": "invariants.check_dual_identity_complete",
             "reason": "missing_dual_identity",
@@ -209,4 +209,4 @@ def test_seed_mutations_prepended_to_result(
     assert seed.target == "SEED-X"
     assert seed.action == MutationAction.repair_property
     assert seed.direction == MutationDirection.inbound
-    assert seed.payload == {"missing_property": "dso_local_id"}
+    assert seed.payload == {"missing_property": "local_id"}

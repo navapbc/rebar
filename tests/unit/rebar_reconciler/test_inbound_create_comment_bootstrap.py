@@ -62,8 +62,8 @@ def inbound_differ():
 def fixture_repo(tmp_path, monkeypatch):
     """Isolated tracker directory for each test."""
     monkeypatch.delenv("TICKETS_TRACKER_DIR", raising=False)
-    monkeypatch.delenv("DSO_ENV_ID", raising=False)
-    monkeypatch.delenv("DSO_AUTHOR", raising=False)
+    monkeypatch.delenv("REBAR_ENV_ID", raising=False)
+    monkeypatch.delenv("REBAR_AUTHOR", raising=False)
     tracker = tmp_path / ".tickets-tracker"
     tracker.mkdir()
     (tracker / ".env-id").write_text("test-env-id", encoding="utf-8")

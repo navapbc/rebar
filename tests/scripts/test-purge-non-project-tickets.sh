@@ -9,10 +9,10 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-DSO_PLUGIN_DIR="$PLUGIN_ROOT/src/rebar/_engine"
-SCRIPT="$DSO_PLUGIN_DIR/purge-non-project-tickets.sh"
+REBAR_PLUGIN_DIR="$PLUGIN_ROOT/src/rebar/_engine"
+SCRIPT="$REBAR_PLUGIN_DIR/purge-non-project-tickets.sh"
 # Canonical implementation (tested for behavioral correctness)
-CANONICAL="$DSO_PLUGIN_DIR/ticket-purge-bridge.sh"
+CANONICAL="$REBAR_PLUGIN_DIR/ticket-purge-bridge.sh"
 
 source "$SCRIPT_DIR/../lib/run_test.sh"
 

@@ -14,15 +14,15 @@
 #   bash "${_PLUGIN_GIT_PATH}/scripts/rebar_reconciler/check-obligations.sh"
 #
 # Environment:
-#   DSO_TICKET_CLI   — override the ticket CLI path (default: the bundled rebar CLI)
-#   DSO_TODAY        — override "today" (YYYY-MM-DD) for deterministic testing
+#   REBAR_TICKET_CLI   — override the ticket CLI path (default: the bundled rebar CLI)
+#   REBAR_TODAY        — override "today" (YYYY-MM-DD) for deterministic testing
 #
 # Contract: see docs/contracts/obligation-ticket-schema.md within the plugin tree.
 
 set -uo pipefail
 
-TICKET_CLI="${DSO_TICKET_CLI:-${REBAR_TICKET_CLI:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)/rebar}}"
-TODAY="${DSO_TODAY:-$(date -u +%Y-%m-%d)}"
+TICKET_CLI="${REBAR_TICKET_CLI:-${REBAR_TICKET_CLI:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)/rebar}}"
+TODAY="${REBAR_TODAY:-$(date -u +%Y-%m-%d)}"
 
 if [[ ! -x "$TICKET_CLI" ]]; then
     echo "check-obligations: ticket CLI not found at $TICKET_CLI" >&2
@@ -41,7 +41,7 @@ print((datetime.date(int(y),int(m),int(d)) - datetime.date(1970,1,1)).days)
 
 TODAY_DAYS=$(_epoch_days "$TODAY")
 if [[ -z "$TODAY_DAYS" ]]; then
-    echo "check-obligations: could not parse DSO_TODAY=$TODAY" >&2
+    echo "check-obligations: could not parse REBAR_TODAY=$TODAY" >&2
     exit 0
 fi
 

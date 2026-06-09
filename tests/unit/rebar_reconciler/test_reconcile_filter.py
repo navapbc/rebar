@@ -267,7 +267,7 @@ class TestReconcileOnceFiltered:
 
         # Invariants stub
         invariants = types.ModuleType("reconcile_invariants")
-        invariants.check_at_most_one_dso_local_id = lambda *a, **kw: []
+        invariants.check_at_most_one_local_id = lambda *a, **kw: []
         invariants.check_dual_identity_complete = lambda *a, **kw: (set(), [])
         invariants.report_schema_drift = lambda *a, **kw: None
         stubs["reconcile_invariants"] = invariants

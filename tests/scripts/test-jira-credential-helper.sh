@@ -23,9 +23,9 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-DSO_PLUGIN_DIR="$PLUGIN_ROOT/src/rebar/_engine"
+REBAR_PLUGIN_DIR="$PLUGIN_ROOT/src/rebar/_engine"
 REPO_ROOT="$(cd "$SCRIPT_DIR" && git rev-parse --show-toplevel)"
-HELPER_SCRIPT="$DSO_PLUGIN_DIR/jira-credential-helper.sh"
+HELPER_SCRIPT="$REBAR_PLUGIN_DIR/jira-credential-helper.sh"
 
 source "$PLUGIN_ROOT/tests/lib/assert.sh"
 

@@ -113,13 +113,13 @@ _DRAFT9_CASES = [
         # must not appear in any mutation payload at all.
         {
             JIRA_KEY: {
-                "dso_local_id": LOCAL_ID,
+                "local_id": LOCAL_ID,
                 "labels": [REBAR_ID_LABEL, "feature"],
             }
         },
         {
             JIRA_KEY: {
-                "dso_local_id": LOCAL_ID,
+                "local_id": LOCAL_ID,
                 "labels": [REBAR_ID_LABEL, "feature"],
                 "comments": [{"id": "c1", "body": "New Jira comment"}],
             }
@@ -131,14 +131,14 @@ _DRAFT9_CASES = [
         # rebar-id label identical on both sides — must not appear in outbound payload.
         {
             JIRA_KEY: {
-                "dso_local_id": LOCAL_ID,
+                "local_id": LOCAL_ID,
                 "labels": [REBAR_ID_LABEL, "feature"],
                 "comments": [{"id": "c1", "body": "Local comment"}],
             }
         },
         {
             JIRA_KEY: {
-                "dso_local_id": LOCAL_ID,
+                "local_id": LOCAL_ID,
                 "labels": [REBAR_ID_LABEL, "feature"],
             }
         },
@@ -149,14 +149,14 @@ _DRAFT9_CASES = [
         # rebar-id label identical on both sides — must not appear in update payload.
         {
             JIRA_KEY: {
-                "dso_local_id": LOCAL_ID,
+                "local_id": LOCAL_ID,
                 "labels": [REBAR_ID_LABEL, "feature"],
                 "comments": [{"id": "c1", "body": "Local version of comment"}],
             }
         },
         {
             JIRA_KEY: {
-                "dso_local_id": LOCAL_ID,
+                "local_id": LOCAL_ID,
                 "labels": [REBAR_ID_LABEL, "feature"],
                 "comments": [{"id": "c1", "body": "Jira version of comment"}],
             }
@@ -171,14 +171,14 @@ _DRAFT9_CASES = [
         # inject a rebar-id label write via the labels resolver.
         {
             JIRA_KEY: {
-                "dso_local_id": LOCAL_ID,
+                "local_id": LOCAL_ID,
                 "labels": [REBAR_ID_LABEL, "feature"],
                 "comments": [],
             }
         },
         {
             JIRA_KEY: {
-                "dso_local_id": LOCAL_ID,
+                "local_id": LOCAL_ID,
                 "labels": [REBAR_ID_LABEL, "feature"],
                 "comments": [{"id": "c1", "body": "Jira still has this comment"}],
             }
@@ -194,13 +194,13 @@ _DRAFT9_CASES = [
         # label sets diverge, the resolver must never introduce a rebar-id-* label.
         {
             JIRA_KEY: {
-                "dso_local_id": LOCAL_ID,
+                "local_id": LOCAL_ID,
                 "labels": ["feature", "sprint-1"],
             }
         },
         {
             JIRA_KEY: {
-                "dso_local_id": LOCAL_ID,
+                "local_id": LOCAL_ID,
                 "labels": ["feature", "bug"],
             }
         },
@@ -219,13 +219,13 @@ _DRAFT9_CASES = [
         # behavior that actually enforces the contract.
         {
             JIRA_KEY: {
-                "dso_local_id": LOCAL_ID,
+                "local_id": LOCAL_ID,
                 "labels": [REBAR_ID_LABEL, "feature"],
             }
         },
         {
             JIRA_KEY: {
-                "dso_local_id": LOCAL_ID,
+                "local_id": LOCAL_ID,
                 "labels": ["feature"],
             }
         },
@@ -244,13 +244,13 @@ _DRAFT9_CASES = [
         # local does NOT. Symmetric inbound counterpart of (e2).
         {
             JIRA_KEY: {
-                "dso_local_id": LOCAL_ID,
+                "local_id": LOCAL_ID,
                 "labels": ["feature"],
             }
         },
         {
             JIRA_KEY: {
-                "dso_local_id": LOCAL_ID,
+                "local_id": LOCAL_ID,
                 "labels": [REBAR_ID_LABEL, "feature"],
             }
         },
@@ -272,14 +272,14 @@ _DRAFT9_CASES = [
         # the unhashable-dict issue in resolve_set_valued's dedup pass.
         {
             JIRA_KEY: {
-                "dso_local_id": LOCAL_ID,
+                "local_id": LOCAL_ID,
                 "labels": [REBAR_ID_LABEL, "feature"],
                 "links": ["PROJ-2"],
             }
         },
         {
             JIRA_KEY: {
-                "dso_local_id": LOCAL_ID,
+                "local_id": LOCAL_ID,
                 "labels": [REBAR_ID_LABEL, "feature"],
                 "links": ["PROJ-2", "PROJ-3"],
             }

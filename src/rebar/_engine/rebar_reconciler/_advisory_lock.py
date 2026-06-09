@@ -72,7 +72,7 @@ _GATE_FILE = ".reconciler-phase-gate"
 # envelope tight while unblocking dev probes.
 # ---------------------------------------------------------------------------
 
-_LOCK_RETRY_BUDGET_ENV = "DSO_RECONCILER_LOCK_RETRY_BUDGET"
+_LOCK_RETRY_BUDGET_ENV = "REBAR_RECONCILER_LOCK_RETRY_BUDGET"
 _LOCK_RETRY_BUDGET_DEFAULT = 5
 _BACKOFF_BASE_SECONDS = 0.2  # 200ms
 _BACKOFF_FACTOR = 2.0
@@ -106,7 +106,7 @@ def _resolve_retry_budget() -> int:
     """Return the outer retry budget (>=1) from env var or default.
 
     Reads ``REBAR_RECONCILER_LOCK_RETRY_BUDGET`` preferred, falling back to the
-    deprecated ``DSO_RECONCILER_LOCK_RETRY_BUDGET`` (WS1 env aliasing).
+    deprecated ``REBAR_RECONCILER_LOCK_RETRY_BUDGET`` (WS1 env aliasing).
     """
     raw = os.environ.get("REBAR_RECONCILER_LOCK_RETRY_BUDGET")
     if raw is None:

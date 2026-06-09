@@ -19,7 +19,7 @@
 # Environment:
 #   SCRATCH_BASE_DIR  Optional override for the scratch base directory
 #                     (default: REPO_ROOT/.claude/scratch/)
-#   DSO_TEST_CRASH    When set to "1", exits 1 between tempfile write and rename,
+#   REBAR_TEST_CRASH    When set to "1", exits 1 between tempfile write and rename,
 #                     simulating a mid-write crash (for crash-safety tests only).
 
 set -uo pipefail
@@ -79,12 +79,12 @@ PYEOF
 )
 
 # ── Step 3: Crash-test hook (test-only) ───────────────────────────────────────
-# DSO_TEST_CRASH=1 causes exit before the atomic rename, simulating a crash
+# REBAR_TEST_CRASH=1 causes exit before the atomic rename, simulating a crash
 # between tempfile write and rename. The atomic writer is NOT called in crash
 # mode — this emulates the crash *within* the writer (after write, before rename).
 # This is used by test 8 to verify crash-safety: the target file should remain
 # at the prior-version envelope (or absent), and no *.tmp.* files should linger.
-if [ "${DSO_TEST_CRASH:-}" = "1" ]; then
+if [ "${REBAR_TEST_CRASH:-}" = "1" ]; then
     # Write the tmpfile ourselves (mimicking the internal state) then exit
     # without renaming — leaving the tmp file so the test can verify cleanup.
     target_dir="$(dirname "$abs_path")"

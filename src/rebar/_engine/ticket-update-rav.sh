@@ -19,7 +19,7 @@ source "$_ENGINE_DIR/rebar-config.sh"
 # On mismatch: exits 1, prints JSON to stderr:
 #   {"error":"rav_mismatch","operation":"...","ticket_id":"...","field":"...","intended_value":"...","actual_value":"..."}
 #
-# Test mode (DSO_TICKET_RAV_TEST=1):
+# Test mode (REBAR_TICKET_RAV_TEST=1):
 #   Uses mock responses instead of real ticket mutations, allowing interface
 #   behavior to be tested without a live ticket system.
 #   Mock behavior: the "show" output returns an object where:
@@ -146,8 +146,8 @@ print(json.dumps({
 }
 
 # ── Test-double mode ──────────────────────────────────────────────────────────
-# DSO_TICKET_RAV_TEST=1: mock ticket CLI responses for unit tests of the assertion logic.
-if [[ "${DSO_TICKET_RAV_TEST:-0}" == "1" ]]; then
+# REBAR_TICKET_RAV_TEST=1: mock ticket CLI responses for unit tests of the assertion logic.
+if [[ "${REBAR_TICKET_RAV_TEST:-0}" == "1" ]]; then
     # Mock Step 1: simulate ticket mutation (always succeeds unless operation is invalid)
 
     # Determine effective ticket_id for test mode
@@ -178,10 +178,10 @@ if [[ "${DSO_TICKET_RAV_TEST:-0}" == "1" ]]; then
 fi
 
 # ── Live mode: resolve ticket CLI ─────────────────────────────────────────────
-DSO_TICKET_CLI="${DSO_TICKET_CLI:-$(_rebar_ticket_cli)}"
+REBAR_TICKET_CLI="${REBAR_TICKET_CLI:-$(_rebar_ticket_cli)}"
 
 # ── Step 1: Execute ticket mutation ──────────────────────────────────────────
-if ! $DSO_TICKET_CLI "$operation" "${passthrough_args[@]+"${passthrough_args[@]}"}"; then
+if ! $REBAR_TICKET_CLI "$operation" "${passthrough_args[@]+"${passthrough_args[@]}"}"; then
     echo "Error: ticket $operation failed" >&2
     exit 1
 fi
@@ -189,7 +189,7 @@ fi
 # Derive ticket_id from passthrough if not explicitly provided.
 # For 'create', the CLI outputs the new ticket ID to stdout — capture it.
 if [[ "$operation" == "create" && -z "$ticket_id" ]]; then
-    new_id=$($DSO_TICKET_CLI "$operation" "${passthrough_args[@]+"${passthrough_args[@]}"}" 2>/dev/null | tail -1) || true
+    new_id=$($REBAR_TICKET_CLI "$operation" "${passthrough_args[@]+"${passthrough_args[@]}"}" 2>/dev/null | tail -1) || true
     ticket_id="$new_id"
 fi
 
@@ -205,7 +205,7 @@ fi
 
 # ── Step 2: Re-read the ticket ────────────────────────────────────────────────
 show_output=""
-if ! show_output=$($DSO_TICKET_CLI show "$ticket_id" 2>/dev/null); then
+if ! show_output=$($REBAR_TICKET_CLI show "$ticket_id" 2>/dev/null); then
     echo "Error: failed to re-read ticket '$ticket_id' after $operation" >&2
     exit 1
 fi
