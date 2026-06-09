@@ -2,7 +2,7 @@
 
 RED task 0089: verifies that after create_one() successfully creates a Jira issue,
 it writes both:
-  1. A ``dso-id:<local_id>`` label via client.add_label().
+  1. A ``rebar-id:<local_id>`` label via client.add_label().
   2. A ``dso_local_id`` entity property via client.set_entity_property().
 
 All tests mock AcliClient so no real Jira calls are made.
@@ -88,14 +88,14 @@ def test_set_entity_property_called_after_create(applier):
 
 
 def test_add_label_called_after_create(applier):
-    """After create_one() creates an issue, add_label is called with dso-id:<local_id>."""
+    """After create_one() creates an issue, add_label is called with rebar-id:<local_id>."""
     local_id = "tick-abc2"
     client = _make_mock_client(create_return={"key": "DIG-999"})
     mutation = _make_create_mutation(local_id)
 
     applier.create_one(mutation, client, rest_calls=0)
 
-    client.add_label.assert_called_once_with("DIG-999", f"dso-id:{local_id}")
+    client.add_label.assert_called_once_with("DIG-999", f"rebar-id:{local_id}")
 
 
 def test_identity_writes_use_correct_jira_key(applier):
@@ -106,7 +106,7 @@ def test_identity_writes_use_correct_jira_key(applier):
 
     applier.create_one(mutation, client, rest_calls=0)
 
-    client.add_label.assert_called_once_with("PROJ-42", f"dso-id:{local_id}")
+    client.add_label.assert_called_once_with("PROJ-42", f"rebar-id:{local_id}")
     client.set_entity_property.assert_called_once_with("PROJ-42", "dso_local_id", local_id)
 
 

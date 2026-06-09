@@ -59,7 +59,7 @@ def run() -> StepResult:
         )
 
     probe_uuid = str(uuid.uuid4())
-    label = f"dso-id:{probe_uuid}"
+    label = f"rebar-id:{probe_uuid}"
     issue_key = None
     sub_ops: list[dict] = []
 

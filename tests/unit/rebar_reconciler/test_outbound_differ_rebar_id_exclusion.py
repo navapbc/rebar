@@ -1,15 +1,15 @@
 """Regression test for bug 68a4-f9d5-5540-4b95.
 
-The bridge-internal binding label written by applier.py is f"dso-id:{local_id}"
+The bridge-internal binding label written by applier.py is f"rebar-id:{local_id}"
 (COLON separator — see applier.py around line 601). The outbound differ's
-_EXCLUDED_PREFIXES previously used "dso-id-" (HYPHEN), so the differ saw the
-dso-id:<UUID> label on Jira but not in local tags, and emitted a spurious
+_EXCLUDED_PREFIXES previously used "rebar-id-" (HYPHEN), so the differ saw the
+rebar-id:<UUID> label on Jira but not in local tags, and emitted a spurious
 label-remove mutation. That tripped the audit guard / produced a Jira
 mutation for a bridge-internal identity label that the differ should not
 touch.
 
 This test asserts that for a bound ticket whose Jira labels include
-"dso-id:<local_id>" (colon form, as actually written), the outbound differ
+"rebar-id:<local_id>" (colon form, as actually written), the outbound differ
 does NOT emit any label mutation for that label.
 """
 
@@ -71,20 +71,20 @@ def _make_ticket(
     }
 
 
-def test_outbound_differ_excludes_colon_form_dso_id_label(
+def test_outbound_differ_excludes_colon_form_rebar_id_label(
     outbound_differ: ModuleType,
 ) -> None:
-    """Jira-side ``dso-id:<UUID>`` (colon) label must NOT yield a remove mutation.
+    """Jira-side ``rebar-id:<UUID>`` (colon) label must NOT yield a remove mutation.
 
     Mirrors the real-world case: applier.py writes the binding label with a
-    colon separator, so the Jira snapshot contains "dso-id:local-1", but the
+    colon separator, so the Jira snapshot contains "rebar-id:local-1", but the
     local ticket's tags do not. Without proper exclusion, the differ would
     emit a remove mutation for this bridge-internal label.
     """
     local_id = "local-1"
     ticket = _make_ticket(
         ticket_id=local_id,
-        tags=["real-label"],  # no dso-id:* in local tags (as in production)
+        tags=["real-label"],  # no rebar-id:* in local tags (as in production)
     )
     store = StubBindingStore({local_id: "PROJ-100"})
     jira_snapshot = {
@@ -95,7 +95,7 @@ def test_outbound_differ_excludes_colon_form_dso_id_label(
             "priority": "Medium",
             "status": "To Do",
             "assignee": "alice",
-            "labels": [f"dso-id:{local_id}", "real-label"],
+            "labels": [f"rebar-id:{local_id}", "real-label"],
         }
     }
 
@@ -106,20 +106,20 @@ def test_outbound_differ_excludes_colon_form_dso_id_label(
     )
 
     # No mutation should be emitted at all — fields match and the only
-    # label difference is the bridge-internal dso-id:* label which must
+    # label difference is the bridge-internal rebar-id:* label which must
     # be excluded.
     label_mutations = []
     for m in result:
         label_mutations.extend(getattr(m, "labels", []) or [])
 
-    dso_id_mutations = [
+    rebar_id_mutations = [
         lm
         for lm in label_mutations
         if isinstance(lm.get("label"), str)
-        and lm["label"].startswith("dso-id:")
+        and lm["label"].startswith("rebar-id:")
     ]
-    assert dso_id_mutations == [], (
-        f"Outbound differ emitted mutations for dso-id:* labels: "
-        f"{dso_id_mutations}. These are bridge-internal identity labels "
+    assert rebar_id_mutations == [], (
+        f"Outbound differ emitted mutations for rebar-id:* labels: "
+        f"{rebar_id_mutations}. These are bridge-internal identity labels "
         f"and must be excluded from outbound diffs."
     )

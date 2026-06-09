@@ -135,7 +135,7 @@ _errors_module = _load_errors_module()
 StatusMappingError = _errors_module.StatusMappingError
 DirectionMismatchError = _errors_module.DirectionMismatchError
 UnknownActionError = _errors_module.UnknownActionError
-DsoIdLabelWriteError = _errors_module.DsoIdLabelWriteError
+RebarIdLabelWriteError = _errors_module.RebarIdLabelWriteError
 
 
 # Subject prefixes considered "benign" for HEAD-drift tolerance — i.e.,
@@ -785,7 +785,7 @@ def _apply_inbound_create(
     local_id = _jira_key_to_local_id(jira_key)
 
     # Defense-in-depth inbound dedup (ticket 1577). The snapshot differ normally
-    # stands down for an already-bound issue by recognising its dso-id:<local_id>
+    # stands down for an already-bound issue by recognising its rebar-id:<local_id>
     # label in the fetched fields (bug 4354) — that is the primary production
     # dedup. This guard covers the narrow transient where the snapshot predates
     # the label write-back yet the binding already exists in bindings.json: the
@@ -859,10 +859,10 @@ def _apply_inbound_create(
                 {"status": local_status, "current_status": "open"},
             )
 
-    # Write dso-id label + dso_local_id entity property back to Jira so the
+    # Write rebar-id label + dso_local_id entity property back to Jira so the
     # differ recognizes this issue as mirrored on subsequent passes (dedup).
     if client is not None:
-        _call_with_retry(client.add_label, jira_key, f"dso-id:{local_id}")
+        _call_with_retry(client.add_label, jira_key, f"rebar-id:{local_id}")
         _call_with_retry(client.set_entity_property, jira_key, "dso_local_id", local_id)
 
     # Bug 221b: bootstrap pre-existing Jira comments so the local ticket has
@@ -1256,12 +1256,12 @@ def _apply_inbound_probe(mutation, *, client=None, repo_root=None) -> ApplyResul
 
 
 def _apply_inbound_clean_label(mutation, *, client=None, repo_root=None) -> ApplyResult:
-    """Remove dso-id-* labels from a Jira issue.
+    """Remove rebar-id-* labels from a Jira issue.
 
     Inbound-only leaf: invoked when the differ has detected stale or duplicated
-    `dso-id-*` labels on the Jira side that need to be removed. The mutation
+    `rebar-id-*` labels on the Jira side that need to be removed. The mutation
     payload carries the labels to remove under ``labels_to_remove``; only labels
-    that match the ``dso-id-*`` pattern are removed (defensive filter against a
+    that match the ``rebar-id-*`` pattern are removed (defensive filter against a
     misshapen payload). All client calls go through :func:`_call_with_retry`
     so transient 5xx/429/timeout failures retry with backoff.
     """
@@ -1273,8 +1273,8 @@ def _apply_inbound_clean_label(mutation, *, client=None, repo_root=None) -> Appl
     labels = mutation.payload.get("labels_to_remove") or []
     removed: list[str] = []
     for label in labels:
-        # Defensive: only remove labels matching the dso-id-* pattern.
-        if not isinstance(label, str) or not label.startswith("dso-id-"):
+        # Defensive: only remove labels matching the rebar-id-* pattern.
+        if not isinstance(label, str) or not label.startswith("rebar-id-"):
             continue
         _call_with_retry(client.remove_label, mutation.target, label)
         removed.append(label)
@@ -1430,86 +1430,86 @@ _LEAVES: dict[tuple[Any, Any], Callable[..., ApplyResult]] = _build_leaves()
 
 
 # ---------------------------------------------------------------------------
-# dso-id label write authorization contract
+# rebar-id label write authorization contract
 # ---------------------------------------------------------------------------
 
 # Justification for the F841 suppression below: this constant is read by
 # tests/unit/rebar_reconciler/test_errors.py::test_authorized_writers_docstring
 # _documents_full_contract via getattr — static analyzers cannot trace the
 # usage. Do NOT remove; it is the contract artifact for story 4496 dd-1.
-_AUTHORIZED_DSO_ID_LABEL_WRITERS_DOC: str = """  # noqa: F841
-dso-id label write authorization contract for applier.py
+_AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC: str = """  # noqa: F841
+rebar-id label write authorization contract for applier.py
 =========================================================
 
 The applier dispatches mutations through exactly 9 leaf handlers, listed below
-with their authorization status for dso-id label mutations:
+with their authorization status for rebar-id label mutations:
 
-  1. outbound_create       — AUTHORIZED for {create}: adds "dso-id:<local_id>"
+  1. outbound_create       — AUTHORIZED for {create}: adds "rebar-id:<local_id>"
                              label when a new Jira issue is created outbound.
-  2. outbound_update       — UNAUTHORIZED for dso-id label mutations.
-  3. outbound_delete       — UNAUTHORIZED for dso-id label mutations.
-  4. outbound_probe        — UNAUTHORIZED for dso-id label mutations.
-  5. outbound_conflict     — UNAUTHORIZED for dso-id label mutations.
-  6. inbound_create        — AUTHORIZED for {create}: adds "dso-id:<local_id>"
+  2. outbound_update       — UNAUTHORIZED for rebar-id label mutations.
+  3. outbound_delete       — UNAUTHORIZED for rebar-id label mutations.
+  4. outbound_probe        — UNAUTHORIZED for rebar-id label mutations.
+  5. outbound_conflict     — UNAUTHORIZED for rebar-id label mutations.
+  6. inbound_create        — AUTHORIZED for {create}: adds "rebar-id:<local_id>"
                              label when a new local ticket is created inbound
                              (dedup write-back so the differ recognizes the
                              issue as mirrored on subsequent passes).
-  7. inbound_update        — UNAUTHORIZED for dso-id label mutations.
+  7. inbound_update        — UNAUTHORIZED for rebar-id label mutations.
   8. inbound_clean_label   — AUTHORIZED for {delete}: removes stale or
-                             duplicated "dso-id-*" labels from the Jira side.
-  9. inbound_repair_property — UNAUTHORIZED for dso-id label mutations.
+                             duplicated "rebar-id-*" labels from the Jira side.
+  9. inbound_repair_property — UNAUTHORIZED for rebar-id label mutations.
                               This leaf writes the dso_local_id entity PROPERTY
                               FIELD via set_issue_property(), NOT the label.
 
 Only inbound_clean_label (delete), outbound_create (create), and
-inbound_create (create) may emit dso-id label mutations. Any other leaf that emits such a mutation is a bug
-and should raise DsoIdLabelWriteError from _errors.py.
+inbound_create (create) may emit rebar-id label mutations. Any other leaf that emits such a mutation is a bug
+and should raise RebarIdLabelWriteError from _errors.py.
 
-conflict_resolver per-element provenance MUST skip dso-id fields. The
-conflict_resolver must not write, modify, or emit dso-id label mutations;
-dso-id is the identity primitive and its provenance is governed solely by the
+conflict_resolver per-element provenance MUST skip rebar-id fields. The
+conflict_resolver must not write, modify, or emit rebar-id label mutations;
+rebar-id is the identity primitive and its provenance is governed solely by the
 two authorized leaves above, not by the per-field provenance resolution path.
 
 inbound_repair_property writes the dso_local_id property field (entity
 properties, not labels). It MUST NOT touch the label surface.
 """
 
-_AUTHORIZED_DSO_ID_LABEL_WRITERS: frozenset[str] = frozenset(
+_AUTHORIZED_REBAR_ID_LABEL_WRITERS: frozenset[str] = frozenset(
     {"inbound_clean_label", "outbound_create", "inbound_create"}
 )
-"""Leaf names authorized to emit dso-id label mutations (see _AUTHORIZED_DSO_ID_LABEL_WRITERS_DOC)."""
+"""Leaf names authorized to emit rebar-id label mutations (see _AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC)."""
 
-# Per-leaf authorized-action map: enforced by _audit_dso_id_label_writes.
+# Per-leaf authorized-action map: enforced by _audit_rebar_id_label_writes.
 # Each authorized leaf is permitted ONLY the action(s) listed here; any other
-# action on a dso-id-* label by the same leaf raises DsoIdLabelWriteError. The
+# action on a rebar-id-* label by the same leaf raises RebarIdLabelWriteError. The
 # pair set is the single source of truth referenced by
-# _AUTHORIZED_DSO_ID_LABEL_WRITERS_DOC above.
-_AUTHORIZED_DSO_ID_LABEL_ACTIONS: dict[str, frozenset[str]] = {
+# _AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC above.
+_AUTHORIZED_REBAR_ID_LABEL_ACTIONS: dict[str, frozenset[str]] = {
     "outbound_create": frozenset({"create"}),
     "inbound_create": frozenset({"create"}),
     "inbound_clean_label": frozenset({"delete"}),
 }
 
 # ---------------------------------------------------------------------------
-# dso-id label write guard
+# rebar-id label write guard
 #
-# _audit_dso_id_label_writes is called after every leaf returns its mutation
+# _audit_rebar_id_label_writes is called after every leaf returns its mutation
 # list (or before dispatching the typed-mutation leaf) to ensure no unauthorized
-# leaf emits a dso-id-* label mutation.
+# leaf emits a rebar-id-* label mutation.
 #
-# Guard mode is controlled by DSO_DSO_ID_GUARD_MODE (env) or dso_id_guard_mode
+# Guard mode is controlled by REBAR_ID_GUARD_MODE (env) or rebar_id_guard_mode
 # (dso-config.conf key). Precedence: env > config > default ('raise').
 # ---------------------------------------------------------------------------
 
 
-def _get_dso_id_guard_mode_from_config() -> str | None:
-    """Read dso_id_guard_mode from the rebar config file, if present.
+def _get_rebar_id_guard_mode_from_config() -> str | None:
+    """Read rebar_id_guard_mode from the rebar config file, if present.
 
     Returns the value string (e.g. 'raise', 'warn') or None when the key
     is absent or the file cannot be read.
 
     Resolution order for the guard mode (env wins):
-      1. os.environ['DSO_DSO_ID_GUARD_MODE']  — checked in _audit_dso_id_label_writes
+      1. os.environ['REBAR_ID_GUARD_MODE']  — checked in _audit_rebar_id_label_writes
       2. This function (.rebar/config.conf fallback)
       3. Default: 'raise'
     """
@@ -1525,7 +1525,7 @@ def _get_dso_id_guard_mode_from_config() -> str | None:
             return None
         for line in config_path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
-            if line.startswith("dso_id_guard_mode"):
+            if line.startswith("rebar_id_guard_mode"):
                 parts = line.split("=", 1)
                 if len(parts) == 2:
                     return parts[1].strip().strip('"').strip("'")
@@ -1538,14 +1538,14 @@ def _get_dso_id_guard_mode_from_config() -> str | None:
     return None
 
 
-def _is_dso_id_label_write_mutation(mutation) -> bool:
-    """Return True when *mutation* represents a dso-id-* label write.
+def _is_rebar_id_label_write_mutation(mutation) -> bool:
+    """Return True when *mutation* represents a rebar-id-* label write.
 
     Checks two shapes:
     - String payload (direct audit call): mutation.target == 'label' AND
-      mutation.payload.startswith('dso-id-') AND action in {create,update,delete}.
+      mutation.payload.startswith('rebar-id-') AND action in {create,update,delete}.
     - Dict payload (full Mutation from apply()): payload contains 'target'=='label'
-      AND 'label' value starts with 'dso-id-' AND action in {create,update,delete}.
+      AND 'label' value starts with 'rebar-id-' AND action in {create,update,delete}.
     """
     action = str(getattr(mutation, "action", ""))
     if action not in {"create", "update", "delete"}:
@@ -1554,7 +1554,7 @@ def _is_dso_id_label_write_mutation(mutation) -> bool:
     if isinstance(payload, str):
         # String payload: check target field and payload value
         target = getattr(mutation, "target", "")
-        return target == "label" and payload.startswith("dso-id-")
+        return target == "label" and payload.startswith("rebar-id-")
     elif isinstance(payload, dict):
         # Dict payload: check embedded 'target'=='label' and 'label' value
         embedded_target = payload.get("target", "")
@@ -1562,41 +1562,41 @@ def _is_dso_id_label_write_mutation(mutation) -> bool:
         if (
             embedded_target == "label"
             and isinstance(label_val, str)
-            and label_val.startswith("dso-id-")
+            and label_val.startswith("rebar-id-")
         ):
             return True
     return False
 
 
-def _audit_dso_id_label_writes(leaf_name: str, mutations: list) -> None:
-    """Guard: raise (or warn) when an unauthorized leaf emits a dso-id-* label mutation.
+def _audit_rebar_id_label_writes(leaf_name: str, mutations: list) -> None:
+    """Guard: raise (or warn) when an unauthorized leaf emits a rebar-id-* label mutation.
 
     Called before leaf dispatch (`_apply_typed`) AND on each leaf invocation in
     the legacy batch path (`_apply_batch`) to enforce the two-authorized-leaves
-    contract documented in `_AUTHORIZED_DSO_ID_LABEL_WRITERS_DOC`.
+    contract documented in `_AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC`.
 
-    Per-action enforcement (wired via `_AUTHORIZED_DSO_ID_LABEL_ACTIONS`):
-      - When `leaf_name` is in `_AUTHORIZED_DSO_ID_LABEL_WRITERS` but emits an
+    Per-action enforcement (wired via `_AUTHORIZED_REBAR_ID_LABEL_ACTIONS`):
+      - When `leaf_name` is in `_AUTHORIZED_REBAR_ID_LABEL_WRITERS` but emits an
         action OUTSIDE its permitted action set (e.g., outbound_create
-        attempting a `delete` on a dso-id label), the guard still raises. The
+        attempting a `delete` on a rebar-id label), the guard still raises. The
         contract is per-action; defeating it would leave a security gap by
         allowing an authorized leaf to perform any action.
 
-    Guard mode (DSO_DSO_ID_GUARD_MODE env var, .rebar/config.conf key dso_id_guard_mode,
+    Guard mode (REBAR_ID_GUARD_MODE env var, .rebar/config.conf key rebar_id_guard_mode,
     default 'raise'):
-      - 'raise': DsoIdLabelWriteError raised on violation (default, production-safe).
-      - 'warn': WARNING logged with tag DSO_ID_GUARD; no exception raised (staged rollout).
+      - 'raise': RebarIdLabelWriteError raised on violation (default, production-safe).
+      - 'warn': WARNING logged with tag REBAR_ID_GUARD; no exception raised (staged rollout).
 
     Precedence: env var > .rebar/config.conf key > default 'raise'.
     """
-    is_authorized_leaf = leaf_name in _AUTHORIZED_DSO_ID_LABEL_WRITERS
-    allowed_actions = _AUTHORIZED_DSO_ID_LABEL_ACTIONS.get(leaf_name, frozenset())
+    is_authorized_leaf = leaf_name in _AUTHORIZED_REBAR_ID_LABEL_WRITERS
+    allowed_actions = _AUTHORIZED_REBAR_ID_LABEL_ACTIONS.get(leaf_name, frozenset())
 
     offending = None
     offending_payload = None
     offending_action = None
     for mutation in mutations:
-        if not _is_dso_id_label_write_mutation(mutation):
+        if not _is_rebar_id_label_write_mutation(mutation):
             continue
         action_str = str(getattr(mutation, "action", ""))
         if is_authorized_leaf and action_str in allowed_actions:
@@ -1618,14 +1618,14 @@ def _audit_dso_id_label_writes(leaf_name: str, mutations: list) -> None:
         return
 
     # Determine guard mode: env > config > default 'raise'
-    guard_mode = _rebar_env("DSO_ID_GUARD_MODE")
+    guard_mode = _rebar_env("ID_GUARD_MODE")
     if guard_mode is None:
-        guard_mode = _get_dso_id_guard_mode_from_config()
+        guard_mode = _get_rebar_id_guard_mode_from_config()
     if guard_mode is None:
         guard_mode = "raise"
 
     msg = (
-        f"DSO_ID_GUARD: unauthorized dso-id label write from leaf '{leaf_name}' "
+        f"REBAR_ID_GUARD: unauthorized rebar-id label write from leaf '{leaf_name}' "
         f"(action={offending_action!r}); offending payload: {offending_payload!r}"
     )
 
@@ -1634,21 +1634,21 @@ def _audit_dso_id_label_writes(leaf_name: str, mutations: list) -> None:
         return
 
     errs = _load_errors_module()
-    raise errs.DsoIdLabelWriteError(msg)
+    raise errs.RebarIdLabelWriteError(msg)
 
 
 class _BatchAuditView:
     """Adapter exposing a legacy dict-shaped batch mutation to the audit guard.
 
-    The audit (`_is_dso_id_label_write_mutation`) expects an object with
+    The audit (`_is_rebar_id_label_write_mutation`) expects an object with
     ``target``, ``payload`` (str OR dict), and ``action`` attributes. Legacy
     batch mutations are dicts of shape ``{"action": ..., "key": ..., "fields":
-    {"labels": [...], ...}}`` — this view surfaces any dso-id-* label values
+    {"labels": [...], ...}}`` — this view surfaces any rebar-id-* label values
     sitting under ``fields["labels"]`` as a synthetic label-write mutation so
     the guard fires on unauthorized batch paths (e.g., an outbound_update
-    trying to push a dso-id-* label).
+    trying to push a rebar-id-* label).
 
-    ``target`` is set to 'label' iff the batch mutation includes a dso-id-*
+    ``target`` is set to 'label' iff the batch mutation includes a rebar-id-*
     label in its fields; otherwise an empty string makes the audit pass-through.
     """
 
@@ -1661,7 +1661,7 @@ class _BatchAuditView:
         dso_label = None
         if isinstance(labels, (list, tuple)):
             for lbl in labels:
-                if isinstance(lbl, str) and lbl.startswith("dso-id-"):
+                if isinstance(lbl, str) and lbl.startswith("rebar-id-"):
                     dso_label = lbl
                     break
         if dso_label is not None:
@@ -1669,7 +1669,7 @@ class _BatchAuditView:
             self.payload = dso_label
         else:
             # Synthesise an explicit non-label target so the guard's
-            # _is_dso_id_label_write_mutation returns False on benign batches.
+            # _is_rebar_id_label_write_mutation returns False on benign batches.
             self.target = ""
             self.payload = ""
 
@@ -1700,8 +1700,8 @@ def _apply_typed(mutation, *, client=None, repo_root=None, binding_store=None) -
     handler. Raises UnknownActionError with zero side-effects (no client calls,
     no I/O) if the pair is not registered.
 
-    Calls _audit_dso_id_label_writes BEFORE invoking the leaf so that any
-    unauthorized dso-id label mutation is blocked prior to side-effects.
+    Calls _audit_rebar_id_label_writes BEFORE invoking the leaf so that any
+    unauthorized rebar-id label mutation is blocked prior to side-effects.
     """
     key = (mutation.direction, mutation.action)
     handler = _LEAVES.get(key)
@@ -1712,9 +1712,9 @@ def _apply_typed(mutation, *, client=None, repo_root=None, binding_store=None) -
             f"action={mutation.action.value!s})"
         )
     # Audit: derive leaf_name from the (direction, action) pair and run the
-    # dso-id label write guard before any leaf side-effect occurs.
+    # rebar-id label write guard before any leaf side-effect occurs.
     leaf_name = _LEAF_NAMES.get((mutation.direction.value, mutation.action.value), "")
-    _audit_dso_id_label_writes(leaf_name, [mutation])
+    _audit_rebar_id_label_writes(leaf_name, [mutation])
     # All inbound leaves accept repo_root; outbound leaves now do too. Pass it
     # uniformly so the leaves can write to the local tracker when applicable.
     # Inspect the handler signature once to decide whether to pass repo_root,
@@ -2020,7 +2020,7 @@ def create_one(
     Budget guard: if rest_calls >= 200, appends mutation to deferred_creates and
     returns None without issuing any REST calls.
 
-    JQL dedup: searches for an existing issue with label 'dso-id:<local_id>' before
+    JQL dedup: searches for an existing issue with label 'rebar-id:<local_id>' before
     creating. On hit, skips create_issue(), writes mapping.json atomically, appends a
     dedup-create-skipped event to events_list, and returns a dedup sentinel.
     On miss, proceeds with create_issue().
@@ -2053,7 +2053,7 @@ def create_one(
         return None
 
     local_id = mutation.get("local_id", "")
-    jql = f'labels = "dso-id:{local_id}"'
+    jql = f'labels = "rebar-id:{local_id}"'
     hits = client.search_issues(jql)
 
     if hits:
@@ -2111,7 +2111,7 @@ def create_one(
             # a single transient failure here triggers the unnecessary rollback
             # branch (delete_issue + BRIDGE_ALERT) even though the underlying
             # condition would have cleared on retry.
-            _call_with_retry(client.add_label, jira_key, f"dso-id:{local_id}")
+            _call_with_retry(client.add_label, jira_key, f"rebar-id:{local_id}")
             _call_with_retry(
                 client.set_entity_property, jira_key, "dso_local_id", local_id
             )
@@ -2166,7 +2166,7 @@ def create_one(
     # previously applied only to update_one (lines 1744-1779) — the symmetric
     # gap in create_one caused outbound CREATE to silently drop every user
     # label and comment, leaving freshly-created Jira issues with only the
-    # dso-id system label (Phase 1 of the e2e field-validation probe).
+    # rebar-id system label (Phase 1 of the e2e field-validation probe).
     # Failures here are logged but non-fatal — the create + identity write
     # already succeeded; a downstream label/comment dispatch failure must
     # not roll back the Jira issue.
@@ -2450,7 +2450,7 @@ def inbound_repair_property(mutation, client) -> dict:
     and returns ``{'status': 'ok', 'key': target}``.
 
     Failure path: when ``set_issue_property`` raises, attempts a follow-on cleanup
-    via ``client.remove_label(target, 'dso-id-<local_id>')`` (best-effort — a
+    via ``client.remove_label(target, 'rebar-id-<local_id>')`` (best-effort — a
     ``remove_label`` exception is captured, NOT raised), and returns an outcome
     dict with ``status='repair_property_failed'`` plus a top-level ``follow_on``
     payload whose ``kind`` is ``'schema_drift_signal'``. The follow-on is the
@@ -2482,7 +2482,7 @@ def inbound_repair_property(mutation, client) -> dict:
     except Exception as exc:
         label_remove_err: Exception | None = None
         try:
-            client.remove_label(target, f"dso-id-{local_id}")
+            client.remove_label(target, f"rebar-id-{local_id}")
         except Exception as e:
             label_remove_err = e
 
@@ -2761,7 +2761,7 @@ def apply(
             suppressed_targets.add(local_id)
 
     # Create an AcliClient for inbound leaves that need to write back to
-    # Jira (dso-id label + dso_local_id property). The caller (reconcile_once)
+    # Jira (rebar-id label + dso_local_id property). The caller (reconcile_once)
     # does not pass a client — the fetcher creates its own for reading, and
     # the legacy batch path (_apply_batch) creates its own for outbound writes.
     # The inbound dispatch path needs its own for the write-back step.
@@ -3179,13 +3179,13 @@ def _apply_batch(
             action = mutation.get("action", "")
             outcome = dict(mutation)
 
-            # Audit pass: extend the dso-id label write guard to the legacy
+            # Audit pass: extend the rebar-id label write guard to the legacy
             # batch dispatch path. create_one/update_one/delete_one all issue
             # outbound Jira writes, so each batch mutation maps to an
             # outbound_<action> leaf for guard-name purposes. Without this
-            # call, _audit_dso_id_label_writes was bypassed for every legacy
+            # call, _audit_rebar_id_label_writes was bypassed for every legacy
             # dict-shaped mutation — only _apply_typed enforced the contract.
-            _audit_dso_id_label_writes(
+            _audit_rebar_id_label_writes(
                 f"outbound_{action}", [_BatchAuditView(mutation)]
             )
 

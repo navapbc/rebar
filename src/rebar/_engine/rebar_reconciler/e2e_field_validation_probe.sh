@@ -747,13 +747,13 @@ if [ -n "${JIRA_KEYS[5]}" ]; then
 fi
 matrix_set "labels" "outbound" "create" "TESTED"
 
-# dso-id binding label (spot check ticket 1)
+# rebar-id binding label (spot check ticket 1)
 if [ -n "${JIRA_KEYS[0]}" ]; then
     jira_labels=$(get_jira_labels "${JIRA_KEYS[0]}")
-    if echo "$jira_labels" | grep -q "dso-id"; then
-        pass_test "Phase1.verify-dso-id-label"
+    if echo "$jira_labels" | grep -q "rebar-id"; then
+        pass_test "Phase1.verify-rebar-id-label"
     else
-        fail_test "Phase1.verify-dso-id-label" "no dso-id label: ${jira_labels}"
+        fail_test "Phase1.verify-rebar-id-label" "no rebar-id label: ${jira_labels}"
     fi
 fi
 
@@ -1295,7 +1295,7 @@ fi
 #
 # Outbound dedup (2d-1): Run reconciler a second time after all creates.
 #   For each original 10 probe tickets, assert that Jira search by their
-#   dso-id label returns EXACTLY 1 issue per ticket.
+#   rebar-id label returns EXACTLY 1 issue per ticket.
 # Inbound dedup (2d-2): Assert that each probe Jira issue has exactly one
 #   local jira-* mirror (or one confirmed binding) — no duplicate local
 #   CREATE events across passes.
@@ -1308,23 +1308,23 @@ echo "Running second reconciler pass for dedup check..."
 reconciler_output=$(run_filtered_reconciler "$PARITY_FILTER")
 echo "$reconciler_output" | grep -E "^(FILTERED|filter:|OK:|ERROR:)" || true
 
-# 2d-1: Outbound dedup — exactly 1 Jira issue per probe dso-id label
+# 2d-1: Outbound dedup — exactly 1 Jira issue per probe rebar-id label
 dedup_outbound_ok=true
 for i in $(seq 0 9); do
     [ -z "${JIRA_KEYS[$i]}" ] && continue
     local_id="${LOCAL_IDS[$i]}"
-    # The dso-id label takes the form "dso-id-<short-id>" or "dso-id-<full-id>".
-    # Search by the exact dso-id label present on the known Jira key.
+    # The rebar-id label takes the form "rebar-id-<short-id>" or "rebar-id-<full-id>".
+    # Search by the exact rebar-id label present on the known Jira key.
     jira_labels_raw=$(get_jira_labels "${JIRA_KEYS[$i]}" 2>/dev/null) || true
     dso_label=$(python3 -c "
 import json, sys
 labels = json.loads(sys.argv[1]) if sys.argv[1].startswith('[') else []
-match = [l for l in labels if l.startswith('dso-id')]
+match = [l for l in labels if l.startswith('rebar-id')]
 print(match[0] if match else '')
 " "$jira_labels_raw" 2>/dev/null) || true
 
     if [ -z "$dso_label" ]; then
-        skip_test "Phase2d.outbound-dedup-${i}" "no dso-id label found on ${JIRA_KEYS[$i]}"
+        skip_test "Phase2d.outbound-dedup-${i}" "no rebar-id label found on ${JIRA_KEYS[$i]}"
         continue
     fi
 

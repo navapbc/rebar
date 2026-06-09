@@ -45,7 +45,7 @@ Breakdown:
 The 5 failures are pre-existing and story-external (applier.py:858 `Mutation.get` bug,
 documented in the task brief). They are NOT regressions introduced by this story:
 
-- tests/unit/rebar_reconciler/test_e2e_dedup_pass.py::test_pre_existing_dso_id_produces_zero_creates
+- tests/unit/rebar_reconciler/test_e2e_dedup_pass.py::test_pre_existing_rebar_id_produces_zero_creates
 - tests/unit/rebar_reconciler/test_main_entry.py::test_run_pass_returns_75_on_reschedule_error
 - tests/unit/rebar_reconciler/test_reconcile_once.py::test_idempotency_two_passes_with_unchanged_remote
 - tests/unit/rebar_reconciler/test_reconcile_once.py::test_excluded_fields_change_does_not_drive_mutations

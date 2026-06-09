@@ -4,7 +4,7 @@ Historical bug (bug 85a1-f581-2252-4a21, originated PR #87e4): the
 label/comment dispatch fix for outbound UPDATE was added to ``update_one``
 (applier.py:1744-1779) but NOT to the symmetric CREATE leaf ``create_one``.
 Phase 1 of the e2e field-validation probe consequently observed
-freshly-created Jira issues with only the ``dso-id:<local_id>`` system
+freshly-created Jira issues with only the ``rebar-id:<local_id>`` system
 label (written at applier.py:1628) — user-supplied labels and comments
 from the mutation payload were silently dropped.
 
@@ -15,7 +15,7 @@ top-level keys on the batch dict.
 This RED test asserts that, after a successful create, ``client.add_label``
 is called for each ``{action: "add", label: X}`` entry and ``client.add_comment``
 is called for each ``{body: Y}`` entry — in addition to the existing
-``dso-id:<local_id>`` identity label write.
+``rebar-id:<local_id>`` identity label write.
 """
 
 from __future__ import annotations
@@ -87,7 +87,7 @@ def test_create_one_dispatches_user_supplied_labels(applier):
     )
     applier.create_one(mutation, client, rest_calls=0)
 
-    # add_label must be called for each user label PLUS the dso-id system label.
+    # add_label must be called for each user label PLUS the rebar-id system label.
     actual_calls = [c.args for c in client.add_label.call_args_list]
     assert ("DIG-111", "label-a") in actual_calls, (
         f"user label 'label-a' was not propagated to add_label; calls: {actual_calls!r}"
@@ -95,8 +95,8 @@ def test_create_one_dispatches_user_supplied_labels(applier):
     assert ("DIG-111", "label-b") in actual_calls, (
         f"user label 'label-b' was not propagated to add_label; calls: {actual_calls!r}"
     )
-    assert ("DIG-111", f"dso-id:{local_id}") in actual_calls, (
-        f"dso-id system label still required; calls: {actual_calls!r}"
+    assert ("DIG-111", f"rebar-id:{local_id}") in actual_calls, (
+        f"rebar-id system label still required; calls: {actual_calls!r}"
     )
 
 
@@ -137,8 +137,8 @@ def test_create_one_label_failure_does_not_abort_create(applier):
     """A label dispatch failure logs but does not abort the create or rollback the issue."""
     local_id = "tick-lbl3"
     client = _make_mock_client(create_return={"key": "DIG-444"})
-    # First add_label = system dso-id label (succeeds);
-    # subsequent calls = user labels (fail). Order is dso-id first per the
+    # First add_label = system rebar-id label (succeeds);
+    # subsequent calls = user labels (fail). Order is rebar-id first per the
     # existing identity-write block at applier.py:1628.
     client.add_label.side_effect = [None, RuntimeError("label dispatch failed")]
     mutation = _make_create_mutation_with_labels_and_comments(
@@ -165,6 +165,6 @@ def test_create_one_no_labels_or_comments_unchanged_behavior(applier):
         "fields": {"summary": "bare", "issuetype": {"name": "Task"}},
     }
     applier.create_one(mutation, client, rest_calls=0)
-    # Only dso-id system label written.
-    client.add_label.assert_called_once_with("DIG-555", f"dso-id:{local_id}")
+    # Only rebar-id system label written.
+    client.add_label.assert_called_once_with("DIG-555", f"rebar-id:{local_id}")
     client.add_comment.assert_not_called()

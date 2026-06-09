@@ -321,21 +321,21 @@ def _diff_jira_vs_local(
 # Label diff helpers
 # ---------------------------------------------------------------------------
 
-# Bug eadb (Issue A): the colon-form ``dso-id:<local_id>`` label was missing
-# from this exclusion list (only the hyphen-form ``dso-id-<local_id>`` was
-# present), so the inbound differ saw the canonical Jira-side dso-id label
+# Bug eadb (Issue A): the colon-form ``rebar-id:<local_id>`` label was missing
+# from this exclusion list (only the hyphen-form ``rebar-id-<local_id>`` was
+# present), so the inbound differ saw the canonical Jira-side rebar-id label
 # as a "Jira-only" tag and emitted an inbound ADD on every pass — leaking
 # bridge-internal identifiers into local ticket ``tags``. The outbound
 # differ's ``_EXCLUDED_PREFIXES`` was patched for the same root cause in
 # PR #454; this is the inbound mirror of that fix. Both separator forms
-# must be excluded: ``dso-id:`` is the canonical form written by
-# ``_apply_outbound_create`` / ``_apply_inbound_create``; ``dso-id-`` is
+# must be excluded: ``rebar-id:`` is the canonical form written by
+# ``_apply_outbound_create`` / ``_apply_inbound_create``; ``rebar-id-`` is
 # preserved for backward compatibility with pre-cutover labels still on
 # legacy Jira issues.
 # dso-status: annotation labels are reconciler-managed (emitted/removed by
 # status logic); they must not leak into local ticket tags via inbound label
 # sync (ticket 929a). Exclude from both sides of the label diff.
-_EXCLUDED_PREFIXES: tuple[str, ...] = ("dso-id:", "dso-id-", "imported:", "dso-status:")
+_EXCLUDED_PREFIXES: tuple[str, ...] = ("rebar-id:", "rebar-id-", "imported:", "dso-status:")
 
 
 def _normalize_jira_body(body: Any) -> str:

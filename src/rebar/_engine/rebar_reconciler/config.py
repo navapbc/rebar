@@ -1,7 +1,7 @@
 """Configuration constants for rebar_reconciler."""
 from __future__ import annotations
 
-EXCLUDED_FIELDS: tuple[str, ...] = ('dso_local_id', 'dso-id')
+EXCLUDED_FIELDS: tuple[str, ...] = ('dso_local_id', 'rebar-id')
 
 # Status mapping: local-side status name -> Jira-side status name.
 # Used by outbound_update v1's status-routing path (gated behind

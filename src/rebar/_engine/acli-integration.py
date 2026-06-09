@@ -1474,7 +1474,7 @@ class AcliClient:
             ``--labels foo`` clobbers all existing labels, leaving only ``foo``.
             That semantic is incompatible with the reconciler's conflict policy
             ('additive content merged inbound: labels added') because it would
-            destroy Jira-only labels on every dso-id stamp.
+            destroy Jira-only labels on every rebar-id stamp.
           - The ``--from-json`` payload schema (exposed via
             ``acli jira workitem edit --generate-json``) includes
             ``labelsToAdd`` and ``labelsToRemove`` as the documented additive

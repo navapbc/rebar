@@ -72,7 +72,7 @@ def main() -> None:
         sys.exit(2)
 
     probe_uuid = str(uuid.uuid4())
-    label = f"dso-id:{probe_uuid}"
+    label = f"rebar-id:{probe_uuid}"
 
     client = AcliClient(
         jira_url=jira_url,

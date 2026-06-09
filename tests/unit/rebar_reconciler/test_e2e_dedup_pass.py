@@ -2,7 +2,7 @@
 
 Integration test wiring differ → applier with a fake AcliClient for one
 reconciler pass.  Canonical DD-3 evidence: pre-existing issue with
-dso-id label produces zero create_issue calls.
+rebar-id label produces zero create_issue calls.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ def applier():
 
 
 class FakeAcliClient:
-    """Simulates AcliClient with PROJ-999 pre-existing, labeled dso-id:uuid-X."""
+    """Simulates AcliClient with PROJ-999 pre-existing, labeled rebar-id:uuid-X."""
 
     def __init__(self):
         self.creates: list = []
@@ -64,7 +64,7 @@ class FakeAcliClient:
     def search_issues(self, jql: str) -> list:
         # Return the pre-existing issue only when searching for uuid-X's label
         if "uuid-X" in jql:
-            return [{"key": "PROJ-999", "labels": ["dso-id:uuid-X"]}]
+            return [{"key": "PROJ-999", "labels": ["rebar-id:uuid-X"]}]
         return []
 
     def create_issue(self, fields: dict) -> dict:
@@ -138,16 +138,16 @@ def _make_fake_concurrency() -> types.ModuleType:
 # ---------------------------------------------------------------------------
 
 
-def test_pre_existing_dso_id_produces_zero_creates(tmp_path, differ, applier):
-    """A Jira issue already carrying a dso-id:<local_id> label → zero creates (end-to-end).
+def test_pre_existing_rebar_id_produces_zero_creates(tmp_path, differ, applier):
+    """A Jira issue already carrying a rebar-id:<local_id> label → zero creates (end-to-end).
 
     Production semantics since commit 1f0032df24 / bug 4354: the fetcher
     snapshot stores Jira ``fields`` only (never the ``dso_local_id`` entity
     property), so the snapshot differ recognises an already-bound issue by its
-    ``dso-id:<local_id>`` / ``dso-id-<local_id>`` label and STANDS DOWN — the
+    ``rebar-id:<local_id>`` / ``rebar-id-<local_id>`` label and STANDS DOWN — the
     issue is owned by the binding-aware inbound/outbound differs. No inbound
     CREATE is emitted, so apply() never materialises a phantom ``jira-dig-NNNN``
-    local ticket and never writes a ghost ``dso-id:`` label back to Jira.
+    local ticket and never writes a ghost ``rebar-id:`` label back to Jira.
 
     This replaces an obsolete pre-4354 contract that asserted an applier-level
     dedup guard (mapping.json + a ``dedup-create-skipped`` manifest event). That
@@ -178,7 +178,7 @@ def test_pre_existing_dso_id_produces_zero_creates(tmp_path, differ, applier):
             m.get("key") if isinstance(m, dict) else None
         )
 
-    # Step 1 — differ: a bound Jira issue (carries a dso-id:<local_id> label)
+    # Step 1 — differ: a bound Jira issue (carries a rebar-id:<local_id> label)
     # present in the Jira snapshot but absent from the local snapshot must NOT
     # produce an inbound create — the 4354 label stand-down.
     prev_snapshot: dict = {}
@@ -186,7 +186,7 @@ def test_pre_existing_dso_id_produces_zero_creates(tmp_path, differ, applier):
         "DIG-999": {
             "summary": "Already mirrored",
             "status": "open",
-            "labels": ["dso-id:jira-dig-999"],
+            "labels": ["rebar-id:jira-dig-999"],
         }
     }
     mutations = differ.compute_mutations(prev_snapshot, next_snapshot)
@@ -211,7 +211,7 @@ def test_pre_existing_dso_id_produces_zero_creates(tmp_path, differ, applier):
         "a label-bound issue must never trigger create_issue"
     )
 
-    # Step 3 — regression guard: a genuinely-unbound Jira issue (no dso-id
+    # Step 3 — regression guard: a genuinely-unbound Jira issue (no rebar-id
     # label) STILL produces an inbound create. The stand-down is scoped to
     # bound issues; without this, 4354 would over-suppress legitimate creates.
     unbound_snapshot: dict = {

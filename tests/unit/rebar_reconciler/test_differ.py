@@ -77,8 +77,8 @@ def test_excluded_fields_only_change_produces_no_mutations(
     differ: ModuleType, mutation_mod: ModuleType
 ) -> None:
     # Both excluded fields differ — no mutation should be emitted.
-    jira = {"DSO-1": {"dso_local_id": "old-local", "dso-id": "old-id"}}
-    local = {"DSO-1": {"dso_local_id": "new-local", "dso-id": "new-id"}}
+    jira = {"DSO-1": {"dso_local_id": "old-local", "rebar-id": "old-id"}}
+    local = {"DSO-1": {"dso_local_id": "new-local", "rebar-id": "new-id"}}
     result = differ.compute_mutations(local_state=local, jira_state=jira)
     assert result == []
 
@@ -163,24 +163,24 @@ def test_excluded_field_not_in_update_payload(
     differ: ModuleType, mutation_mod: ModuleType
 ) -> None:
     local = {
-        "DSO-9": {"summary": "after", "dso_local_id": "local-2", "dso-id": "id-2"}
+        "DSO-9": {"summary": "after", "dso_local_id": "local-2", "rebar-id": "id-2"}
     }
     jira = {
-        "DSO-9": {"summary": "before", "dso_local_id": "local-1", "dso-id": "id-1"}
+        "DSO-9": {"summary": "before", "dso_local_id": "local-1", "rebar-id": "id-1"}
     }
     result = differ.compute_mutations(local_state=local, jira_state=jira)
     assert len(result) == 1
     m = result[0]
     assert m.action == mutation_mod.MutationAction.update
     assert "dso_local_id" not in m.payload
-    assert "dso-id" not in m.payload
+    assert "rebar-id" not in m.payload
     assert m.payload == {"summary": "after"}
 
 def test_create_excludes_excluded_fields(
     differ: ModuleType, mutation_mod: ModuleType
 ) -> None:
     """A new issue whose only fields are excluded should yield no mutation."""
-    local = {"DSO-11": {"dso_local_id": "loc", "dso-id": "xid"}}
+    local = {"DSO-11": {"dso_local_id": "loc", "rebar-id": "xid"}}
     jira: dict = {}
     result = differ.compute_mutations(local_state=local, jira_state=jira)
     assert result == []
@@ -456,7 +456,7 @@ def test_differ_is_pure_across_input_permutations(
 
 
 # ---------------------------------------------------------------------------
-# Bug 4354: snapshot-differ must recognise bound issues via the dso-id: label
+# Bug 4354: snapshot-differ must recognise bound issues via the rebar-id: label
 # even when the fetcher snapshot lacks the dso_local_id entity property.
 #
 # Root cause: fetcher.fetch_snapshot only stores Jira `fields` (which include
@@ -464,21 +464,21 @@ def test_differ_is_pure_across_input_permutations(
 # So the snapshot-differ sees DIG-NNNN in jira_state without dso_local_id,
 # falls into the "in_jira and not in_local" branch with jira_local_id=None,
 # and emits an inbound CREATE. The applier then creates a phantom
-# jira-dig-NNNN local entity AND writes a ghost `dso-id:jira-dig-NNNN`
+# jira-dig-NNNN local entity AND writes a ghost `rebar-id:jira-dig-NNNN`
 # label back to Jira (verified empirically by labels-probe.sh on 2026-05-29:
 # after binding e486-... to DIG-5029, the next pass produced
-# `['dso-id:259f-...', 'dso-id:jira-dig-5029', 'labelprobe-...']` on Jira).
+# `['rebar-id:259f-...', 'rebar-id:jira-dig-5029', 'labelprobe-...']` on Jira).
 #
 # Fix: the snapshot-differ must treat any Jira issue carrying a
-# `dso-id:<local_id>` label as "already managed by the binding-aware
+# `rebar-id:<local_id>` label as "already managed by the binding-aware
 # differs" and skip it — no inbound CREATE, no inbound conflict.
 # ---------------------------------------------------------------------------
 
 
-def test_dso_id_label_suppresses_phantom_inbound_create(
+def test_rebar_id_label_suppresses_phantom_inbound_create(
     differ: ModuleType, mutation_mod: ModuleType
 ) -> None:
-    """Bug 4354: a Jira issue carrying `dso-id:<local_id>` is already bound;
+    """Bug 4354: a Jira issue carrying `rebar-id:<local_id>` is already bound;
     the snapshot-differ MUST NOT emit an inbound CREATE for it, even when
     the snapshot lacks the dso_local_id entity property (the fetcher does
     not populate it).
@@ -488,7 +488,7 @@ def test_dso_id_label_suppresses_phantom_inbound_create(
         "DIG-5029": {
             "summary": "labels-probe ticket",
             "labels": [
-                "dso-id:259f-2f86-77c2-4767",
+                "rebar-id:259f-2f86-77c2-4767",
                 "labelprobe-1780064991",
             ],
             # dso_local_id is intentionally absent — fetcher.fetch_snapshot
@@ -496,7 +496,7 @@ def test_dso_id_label_suppresses_phantom_inbound_create(
         }
     }
     result = differ.compute_mutations(local_state=local, jira_state=jira)
-    # No inbound CREATE for DIG-5029 — it's bound (label `dso-id:259f-...`).
+    # No inbound CREATE for DIG-5029 — it's bound (label `rebar-id:259f-...`).
     inbound_creates = [
         m
         for m in result
@@ -522,17 +522,17 @@ def test_dso_id_label_suppresses_phantom_inbound_create(
     )
 
 
-def test_dso_id_label_with_dash_form_also_suppresses_inbound_create(
+def test_rebar_id_label_with_dash_form_also_suppresses_inbound_create(
     differ: ModuleType, mutation_mod: ModuleType
 ) -> None:
-    """Bug 4354: legacy `dso-id-<local_id>` hyphen-form labels (pre-cutover)
+    """Bug 4354: legacy `rebar-id-<local_id>` hyphen-form labels (pre-cutover)
     also signal a binding. Snapshot-differ must skip these too.
     """
     local: dict = {}
     jira = {
         "DIG-1234": {
             "summary": "legacy bound ticket",
-            "labels": ["dso-id-abcd-1234-ef56-7890", "anyusertag"],
+            "labels": ["rebar-id-abcd-1234-ef56-7890", "anyusertag"],
         }
     }
     result = differ.compute_mutations(local_state=local, jira_state=jira)
@@ -552,10 +552,10 @@ def test_dso_id_label_with_dash_form_also_suppresses_inbound_create(
     )
 
 
-def test_unbound_jira_issue_without_dso_id_label_still_creates(
+def test_unbound_jira_issue_without_rebar_id_label_still_creates(
     differ: ModuleType, mutation_mod: ModuleType
 ) -> None:
-    """Bug 4354 (regression-guard): a Jira issue WITHOUT any dso-id label is
+    """Bug 4354 (regression-guard): a Jira issue WITHOUT any rebar-id label is
     genuinely unbound; the snapshot-differ MUST still emit inbound CREATE so
     a fresh external Jira issue is mirrored locally.
     """

@@ -51,7 +51,7 @@ def test_all_leaves_invocable_without_import_error(applier):
             direction=direction,
             action=action,
             target="MOCK-1",
-            payload={"changed_fields": {"title": "x"}, "labels_to_remove": ["dso-id-a"]},
+            payload={"changed_fields": {"title": "x"}, "labels_to_remove": ["rebar-id-a"]},
             provenance={"source": "smoke"},
         )
         # Each leaf must be callable; ModuleNotFoundError on import would

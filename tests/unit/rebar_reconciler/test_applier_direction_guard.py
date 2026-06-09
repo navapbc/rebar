@@ -98,7 +98,7 @@ def test_every_leaf_raises_direction_mismatch_when_direction_flipped(applier):
                 action=action,
                 target="PROJ-1",
                 payload={
-                    "labels_to_remove": ["dso-id-x"],
+                    "labels_to_remove": ["rebar-id-x"],
                     "changed_fields": {"title": "x"},
                     "property": "summary",
                     "value": "x",

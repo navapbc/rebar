@@ -169,10 +169,10 @@ def test_jql_miss_calls_create_issue(applier):
 
 
 def test_jql_query_uses_local_id_label(applier):
-    """search_issues is called with the correct dso-id label JQL for the mutation's local_id."""
+    """search_issues is called with the correct rebar-id label JQL for the mutation's local_id."""
     client = _make_mock_client(search_return=[])
 
     mutation = _make_create_mutation("tick-0007")
     applier.create_one(mutation, client, rest_calls=0)
 
-    client.search_issues.assert_called_once_with('labels = "dso-id:tick-0007"')
+    client.search_issues.assert_called_once_with('labels = "rebar-id:tick-0007"')

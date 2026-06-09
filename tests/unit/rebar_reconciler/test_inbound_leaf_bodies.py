@@ -517,7 +517,7 @@ def test_inbound_create_dedups_against_binding_store(applier, mut_mod, fixture_r
     store is deduped — mapping recorded, no phantom local ticket materialised.
 
     Covers the narrow transient the snapshot differ's 4354 label stand-down
-    cannot: the fetched snapshot predates the dso-id:<local_id> label write-back,
+    cannot: the fetched snapshot predates the rebar-id:<local_id> label write-back,
     so the differ mis-emits an inbound CREATE, but bindings.json already records
     the binding. The applier-level guard catches it.
     """
@@ -728,7 +728,7 @@ def test_inbound_update_extracts_nested_jira_objects(applier, mut_mod, fixture_r
 
 
 def test_inbound_create_writes_back_jira_dedup_markers(applier, mut_mod, fixture_repo):
-    """After creating the local ticket, inbound_create must write dso-id label
+    """After creating the local ticket, inbound_create must write rebar-id label
     and dso_local_id property back to Jira so the differ recognizes the issue
     as mirrored on subsequent passes.
     """
@@ -746,7 +746,7 @@ def test_inbound_create_writes_back_jira_dedup_markers(applier, mut_mod, fixture
     result = applier._apply_typed(mutation, client=client, repo_root=fixture_repo)
     local_id = "jira-dig-700"
     assert result.payload["local_id"] == local_id
-    client.add_label.assert_called_once_with("DIG-700", f"dso-id:{local_id}")
+    client.add_label.assert_called_once_with("DIG-700", f"rebar-id:{local_id}")
     client.set_entity_property.assert_called_once_with(
         "DIG-700", "dso_local_id", local_id
     )

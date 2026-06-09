@@ -125,12 +125,12 @@ def test_orphaned_binding(rc_mod: ModuleType) -> None:
 
 
 def test_orphaned_jira(rc_mod: ModuleType) -> None:
-    """Jira issue with dso-id-* label but not in binding store is orphaned."""
+    """Jira issue with rebar-id-* label but not in binding store is orphaned."""
     local_tickets = [{"id": "abc-1234", "title": "Local only"}]
     jira_snapshot = {
         "DIG-999": {
             "summary": "Orphaned",
-            "labels": ["dso-id-old-ticket", "team:backend"],
+            "labels": ["rebar-id-old-ticket", "team:backend"],
         },
     }
     store = StubBindingStore([])  # no bindings
@@ -141,7 +141,7 @@ def test_orphaned_jira(rc_mod: ModuleType) -> None:
 
 
 def test_unbound_counts(rc_mod: ModuleType) -> None:
-    """Unbound local tickets and Jira issues without dso-id labels are counted."""
+    """Unbound local tickets and Jira issues without rebar-id labels are counted."""
     local_tickets = [
         {"id": "local-1", "title": "A"},
         {"id": "local-2", "title": "B"},
@@ -178,21 +178,21 @@ def test_priority_mismatch_with_mapping(rc_mod: ModuleType) -> None:
     assert priority_discs[0]["jira_value"] == "Highest"
 
 
-def test_labels_exclude_dso_id(rc_mod: ModuleType) -> None:
-    """dso-id-* and imported:* labels are excluded from comparison."""
+def test_labels_exclude_rebar_id(rc_mod: ModuleType) -> None:
+    """rebar-id-* and imported:* labels are excluded from comparison."""
     local_tickets = [
         {
             "id": "abc-1",
             "title": "T",
             "status": "open",
-            "tags": ["team:backend", "dso-id-abc-1"],
+            "tags": ["team:backend", "rebar-id-abc-1"],
         },
     ]
     jira_snapshot = {
         "DIG-1": {
             "summary": "T",
             "status": "To Do",
-            "labels": ["team:backend", "dso-id-abc-1", "imported:yes"],
+            "labels": ["team:backend", "rebar-id-abc-1", "imported:yes"],
         },
     }
     store = StubBindingStore([("abc-1", "DIG-1")])

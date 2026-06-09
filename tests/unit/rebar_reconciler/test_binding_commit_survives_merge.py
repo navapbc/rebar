@@ -276,7 +276,7 @@ def test_outbound_update_generated_when_bindings_present(
             "status": {"name": "To Do"},
             "issuetype": {"name": "Task"},
             "assignee": None,
-            "labels": ["field-probe-test", "dso-id:probe-ticket-1"],
+            "labels": ["field-probe-test", "rebar-id:probe-ticket-1"],
         }
     }
 

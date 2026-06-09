@@ -276,11 +276,11 @@ def test_deleted_ticket_excluded(outbound_differ: ModuleType) -> None:
     assert result == []
 
 
-def test_label_diff_excludes_dso_id(outbound_differ: ModuleType) -> None:
-    """dso-id-* labels are not included in label diff mutations."""
+def test_label_diff_excludes_rebar_id(outbound_differ: ModuleType) -> None:
+    """rebar-id-* labels are not included in label diff mutations."""
     ticket = _make_ticket(
         ticket_id="local-1",
-        tags=["dso-id-local-1", "real-label"],
+        tags=["rebar-id-local-1", "real-label"],
         status="open",
     )
     store = StubBindingStore({"local-1": "PROJ-100"})
@@ -292,7 +292,7 @@ def test_label_diff_excludes_dso_id(outbound_differ: ModuleType) -> None:
             "priority": "Medium",
             "status": "To Do",
             "assignee": "alice",
-            "labels": ["dso-id-local-1"],
+            "labels": ["rebar-id-local-1"],
         }
     }
 
@@ -304,7 +304,7 @@ def test_label_diff_excludes_dso_id(outbound_differ: ModuleType) -> None:
 
     assert len(result) == 1
     m = result[0]
-    # Only the real-label should appear as an add; dso-id-* filtered out
+    # Only the real-label should appear as an add; rebar-id-* filtered out
     label_adds = [lb for lb in m.labels if lb["action"] == "add"]
     label_removes = [lb for lb in m.labels if lb["action"] == "remove"]
     assert len(label_adds) == 1

@@ -146,7 +146,7 @@ contract (`DSO_TICKET_CLI`, `DSO_CLI`, `DSO_COMPACT_SCRIPT`, …).
    reconciler suite (~862 unit cases across 131 files) as the gate, with a revert plan ready.
 3. **Python-side env aliasing (review finding):** `rebar-config.sh` aliases only ~7
    of ~30 `DSO_*` vars, and the Python reconciler reads several **directly** from
-   `os.environ` (`DSO_ENV_ID`, `DSO_AUTHOR`, `DSO_DSO_ID_GUARD_MODE` in `applier.py:615-1610`;
+   `os.environ` (`DSO_ENV_ID`, `DSO_AUTHOR`, `DSO_REBAR_ID_GUARD_MODE` in `applier.py:615-1610`;
    `DSO_RECONCILER_VERBOSE` in `outbound_differ.py:456`), bypassing the shell hub.
    Add a small Python config shim that reads `REBAR_X` then falls back to `DSO_X`,
    and route the reconciler's env reads through it — otherwise the "deprecated alias

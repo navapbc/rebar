@@ -84,35 +84,35 @@ def test_str_preserves_message(errs):
 
 
 # ---------------------------------------------------------------------------
-# New tests for DsoIdLabelWriteError and _AUTHORIZED_DSO_ID_LABEL_WRITERS
+# New tests for RebarIdLabelWriteError and _AUTHORIZED_REBAR_ID_LABEL_WRITERS
 # ---------------------------------------------------------------------------
 
 
-def test_dso_id_label_write_error_is_exception_subclass(errs):
-    """DsoIdLabelWriteError must be importable from _errors and subclass Exception."""
-    assert issubclass(errs.DsoIdLabelWriteError, Exception)
+def test_rebar_id_label_write_error_is_exception_subclass(errs):
+    """RebarIdLabelWriteError must be importable from _errors and subclass Exception."""
+    assert issubclass(errs.RebarIdLabelWriteError, Exception)
 
 
-def test_dso_id_label_write_error_str_preserves_message(errs):
-    """DsoIdLabelWriteError must carry the message string through str()."""
-    e = errs.DsoIdLabelWriteError("unauthorized write attempt")
+def test_rebar_id_label_write_error_str_preserves_message(errs):
+    """RebarIdLabelWriteError must carry the message string through str()."""
+    e = errs.RebarIdLabelWriteError("unauthorized write attempt")
     assert "unauthorized write attempt" in str(e)
 
 
 def test_authorized_writers_frozenset_value(applier):
-    """_AUTHORIZED_DSO_ID_LABEL_WRITERS must equal exactly the three authorized leaves."""
-    assert applier._AUTHORIZED_DSO_ID_LABEL_WRITERS == frozenset(
+    """_AUTHORIZED_REBAR_ID_LABEL_WRITERS must equal exactly the three authorized leaves."""
+    assert applier._AUTHORIZED_REBAR_ID_LABEL_WRITERS == frozenset(
         {"inbound_clean_label", "outbound_create", "inbound_create"}
     )
 
 
 def test_authorized_writers_is_frozenset(applier):
-    """_AUTHORIZED_DSO_ID_LABEL_WRITERS must be a frozenset (immutable, hashable)."""
-    assert isinstance(applier._AUTHORIZED_DSO_ID_LABEL_WRITERS, frozenset)
+    """_AUTHORIZED_REBAR_ID_LABEL_WRITERS must be a frozenset (immutable, hashable)."""
+    assert isinstance(applier._AUTHORIZED_REBAR_ID_LABEL_WRITERS, frozenset)
 
 
 def test_authorized_writers_docstring_documents_full_contract(applier):
-    """The _AUTHORIZED_DSO_ID_LABEL_WRITERS docstring must document the full 9-leaf contract.
+    """The _AUTHORIZED_REBAR_ID_LABEL_WRITERS docstring must document the full 9-leaf contract.
 
     Asserts that the docstring (stored as __doc__ on the constant's hosting
     module-level object, or in the module docstring — the convention is to
@@ -122,21 +122,21 @@ def test_authorized_writers_docstring_documents_full_contract(applier):
       - 'inbound_repair_property' (property field, NOT label)
 
     Because Python frozenset constants cannot carry __doc__, the contract text
-    MUST appear in _AUTHORIZED_DSO_ID_LABEL_WRITERS_DOC (a string constant)
+    MUST appear in _AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC (a string constant)
     OR in the module-level docstring of applier.py.
     """
     # Collect candidate docstring sources: module docstring + dedicated doc constant.
     candidates = []
     if applier.__doc__:
         candidates.append(applier.__doc__)
-    doc_attr = getattr(applier, "_AUTHORIZED_DSO_ID_LABEL_WRITERS_DOC", None)
+    doc_attr = getattr(applier, "_AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC", None)
     if doc_attr:
         candidates.append(str(doc_attr))
 
     # At least one source must exist.
     assert candidates, (
         "No docstring source found: applier.__doc__ is None and "
-        "_AUTHORIZED_DSO_ID_LABEL_WRITERS_DOC is not defined"
+        "_AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC is not defined"
     )
 
     full_text = "\n".join(candidates)

@@ -358,21 +358,21 @@ def test_inbound_label_diff(inbound_differ: ModuleType) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Bug eadb (Issue A): colon-form ``dso-id:<local_id>`` must be excluded from
+# Bug eadb (Issue A): colon-form ``rebar-id:<local_id>`` must be excluded from
 # inbound label diff (same root cause as outbound PR #454, this is the
 # inbound mirror). The probe (T3 IB-ADD) saw local pick up
-# ``dso-id:jira-dig-5024`` after the reconciler ran because the colon form
+# ``rebar-id:jira-dig-5024`` after the reconciler ran because the colon form
 # was not in ``_EXCLUDED_PREFIXES``.
 # ---------------------------------------------------------------------------
 
 
-def test_inbound_label_diff_excludes_colon_form_dso_id(
+def test_inbound_label_diff_excludes_colon_form_rebar_id(
     inbound_differ: ModuleType,
 ) -> None:
-    """``dso-id:<local_id>`` (colon form) must NOT appear as an inbound ADD.
+    """``rebar-id:<local_id>`` (colon form) must NOT appear as an inbound ADD.
 
-    Pre-fix: ``_EXCLUDED_PREFIXES`` contained only ``("dso-id-", "imported:")``,
-    so the colon-form canonical dso-id label written by
+    Pre-fix: ``_EXCLUDED_PREFIXES`` contained only ``("rebar-id-", "imported:")``,
+    so the colon-form canonical rebar-id label written by
     ``_apply_outbound_create`` / ``_apply_inbound_create`` was treated as a
     Jira-only user label and emitted as an ADD on every pass — leaking the
     bridge identifier into local tags.
@@ -387,9 +387,9 @@ def test_inbound_label_diff_excludes_colon_form_dso_id(
             "assignee": "",
             "labels": [
                 "labelprobe",
-                "dso-id:local-200",
-                "dso-id:jira-dig-200",
-                "dso-id-legacy-hyphen",
+                "rebar-id:local-200",
+                "rebar-id:jira-dig-200",
+                "rebar-id-legacy-hyphen",
                 "imported:legacy",
             ],
         }
@@ -413,29 +413,29 @@ def test_inbound_label_diff_excludes_colon_form_dso_id(
         local_tickets_by_id=local_tickets,
     )
 
-    # No inbound mutation should emit a ``dso-id*`` add — both colon AND
+    # No inbound mutation should emit a ``rebar-id*`` add — both colon AND
     # hyphen forms are bridge-internal. The ``imported:`` prefix is also
     # excluded.
     for m in result:
         for lm in m.labels:
             label = lm.get("label", "")
-            assert not label.startswith("dso-id:"), (
-                f"Inbound differ leaked colon-form dso-id label: {label!r}"
+            assert not label.startswith("rebar-id:"), (
+                f"Inbound differ leaked colon-form rebar-id label: {label!r}"
             )
-            assert not label.startswith("dso-id-"), (
-                f"Inbound differ leaked hyphen-form dso-id label: {label!r}"
+            assert not label.startswith("rebar-id-"), (
+                f"Inbound differ leaked hyphen-form rebar-id label: {label!r}"
             )
             assert not label.startswith("imported:"), (
                 f"Inbound differ leaked imported: label: {label!r}"
             )
 
 
-def test_inbound_label_diff_does_not_remove_local_colon_form_dso_id(
+def test_inbound_label_diff_does_not_remove_local_colon_form_rebar_id(
     inbound_differ: ModuleType,
 ) -> None:
-    """When local has a stale ``dso-id:<id>`` tag but Jira lacks it, the
+    """When local has a stale ``rebar-id:<id>`` tag but Jira lacks it, the
     inbound differ must NOT emit a REMOVE — bridge-internal labels are
-    governed by the dso-id label authorization contract, not by inbound
+    governed by the rebar-id label authorization contract, not by inbound
     user-label coordination.
     """
     jira_snapshot = {
@@ -458,7 +458,7 @@ def test_inbound_label_diff_does_not_remove_local_colon_form_dso_id(
             "priority": 2,
             "status": "open",
             "assignee": "",
-            "tags": ["labelprobe", "dso-id:local-201", "dso-id:jira-dig-201"],
+            "tags": ["labelprobe", "rebar-id:local-201", "rebar-id:jira-dig-201"],
         }
     }
 
@@ -472,5 +472,5 @@ def test_inbound_label_diff_does_not_remove_local_colon_form_dso_id(
         for lm in m.labels:
             assert not (
                 lm.get("action") == "remove"
-                and str(lm.get("label", "")).startswith("dso-id:")
-            ), f"Inbound differ emitted spurious REMOVE for dso-id label: {lm}"
+                and str(lm.get("label", "")).startswith("rebar-id:")
+            ), f"Inbound differ emitted spurious REMOVE for rebar-id label: {lm}"

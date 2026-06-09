@@ -97,8 +97,8 @@ def check_at_most_one_dso_local_id(
 
     for jira_key, fields in snapshot.items():
         # Check if this issue has multiple dso_local_id values (duplicates)
-        dso_ids = fields.get("dso_local_ids", [])
-        if isinstance(dso_ids, list) and len(dso_ids) > 1:
+        rebar_ids = fields.get("dso_local_ids", [])
+        if isinstance(rebar_ids, list) and len(rebar_ids) > 1:
             if len(violations_filed) >= _CAP_PER_PASS:
                 continue
 
@@ -121,7 +121,7 @@ def check_at_most_one_dso_local_id(
                 "key": dedup_key,
                 "jira_key": jira_key,
                 "timestamp_ns": time.time_ns(),
-                "reason": f"multiple dso_local_ids: {dso_ids}",
+                "reason": f"multiple dso_local_ids: {rebar_ids}",
             }
             alert_store.append(record, repo_root)
 
@@ -183,7 +183,7 @@ def check_at_most_one_dso_local_id(
             violations_filed.append(
                 {
                     "jira_key": jira_key,
-                    "dso_local_ids": dso_ids,
+                    "dso_local_ids": rebar_ids,
                     "dedup_key": dedup_key,
                 }
             )
@@ -257,10 +257,10 @@ def check_dual_identity_complete(
         jira_local_id_index.setdefault(jid, []).append(jk)
 
     for local_key, local in local_state.items():
-        dso_id = local.get("dso_local_id")
-        if not dso_id:
+        rebar_id = local.get("dso_local_id")
+        if not rebar_id:
             continue
-        peer_keys = jira_local_id_index.get(dso_id, [])
+        peer_keys = jira_local_id_index.get(rebar_id, [])
         if not peer_keys:
             continue
         if len(peer_keys) > 1:
@@ -292,7 +292,7 @@ def check_dual_identity_complete(
                     direction=mut_mod.MutationDirection.inbound,
                     action=mut_mod.MutationAction.repair_property,
                     target=peer_key,
-                    payload={"local_id": dso_id},
+                    payload={"local_id": rebar_id},
                     provenance={
                         "reason": "missing_back_pointer",
                         "local_key": local_key,

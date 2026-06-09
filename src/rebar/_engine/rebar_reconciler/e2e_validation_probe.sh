@@ -238,11 +238,11 @@ else
     fail_test "Phase1.jira-label-e2e-validation" "labels: ${jira_labels}"
 fi
 
-# Step 3e: Verify Jira issue has dso-id label for binding.
-if echo "$jira_labels" | grep -q "dso-id"; then
-    pass_test "Phase1.jira-dso-id-label"
+# Step 3e: Verify Jira issue has rebar-id label for binding.
+if echo "$jira_labels" | grep -q "rebar-id"; then
+    pass_test "Phase1.jira-rebar-id-label"
 else
-    fail_test "Phase1.jira-dso-id-label" "no dso-id label found: ${jira_labels}"
+    fail_test "Phase1.jira-rebar-id-label" "no rebar-id label found: ${jira_labels}"
 fi
 
 # ---------------------------------------------------------------------------

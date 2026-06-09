@@ -170,7 +170,7 @@ class TestRecovery:
         assert not store.is_pending("lost-1")
         # The FIRST search must use the canonical colon form.
         first_call_arg = client.search_issues.call_args_list[0][0][0]
-        assert first_call_arg == 'labels = "dso-id:lost-1"', (
+        assert first_call_arg == 'labels = "rebar-id:lost-1"', (
             f"Primary search must use colon form; got: {first_call_arg!r}"
         )
 
@@ -204,15 +204,15 @@ class TestRecovery:
         """Client returns a result ONLY for colon-form JQL — binding confirmed.
 
         This is the RED test: before the fix, the code searches hyphen-form
-        (dso-id-{id}) which returns no results, so the binding is discarded.
-        After the fix, colon-form (dso-id:{id}) is the primary search and
+        (rebar-id-{id}) which returns no results, so the binding is discarded.
+        After the fix, colon-form (rebar-id:{id}) is the primary search and
         matches the mock, confirming the binding to DIG-999.
         """
         store.bind_pending("abc-5678")
 
         def selective_search(jql: str):
             # Only return a hit for the canonical colon-form label.
-            if jql == 'labels = "dso-id:abc-5678"':
+            if jql == 'labels = "rebar-id:abc-5678"':
                 return [{"key": "DIG-999"}]
             return []
 
@@ -235,14 +235,14 @@ class TestRecovery:
         """Client returns a result ONLY for hyphen-form JQL — legacy fallback.
 
         Old issues written before the colon→hyphen migration may carry a
-        dso-id-{id} label.  The recovery logic must attempt the hyphen-form
+        rebar-id-{id} label.  The recovery logic must attempt the hyphen-form
         when the colon-form search returns nothing.
         """
         store.bind_pending("xyz-0001")
 
         def selective_search(jql: str):
             # Only return a hit for the legacy hyphen-form label.
-            if jql == 'labels = "dso-id-xyz-0001"':
+            if jql == 'labels = "rebar-id-xyz-0001"':
                 return [{"key": "DIG-100"}]
             return []
 
@@ -278,7 +278,7 @@ class TestRecovery:
             "Should stop at colon-form hit; hyphen fallback must not be called"
         )
         first_call_arg = client.search_issues.call_args_list[0][0][0]
-        assert first_call_arg == 'labels = "dso-id:dup-0042"'
+        assert first_call_arg == 'labels = "rebar-id:dup-0042"'
 
 
 class TestLoadBindingStore:

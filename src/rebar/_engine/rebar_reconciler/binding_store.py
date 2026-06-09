@@ -7,12 +7,12 @@ Write-ahead protocol
 --------------------
 1. bind_pending(local_id)          — mark outbound create in-flight
 2. Jira client.create_issue(...)   — obtain DIG-NNNN
-3. Jira client.add_label / set_entity_property — plant dso-id marker
+3. Jira client.add_label / set_entity_property — plant rebar-id marker
 4. bind_confirm(local_id, jira_key) — finalise binding
 5. save()                          — atomic persist
 
 Recovery (next pass startup): recover_pending_bindings(client) searches
-Jira for the dso-id label and either confirms or unbinds each pending
+Jira for the rebar-id label and either confirms or unbinds each pending
 entry.
 """
 
@@ -39,7 +39,7 @@ _EMPTY_STORE: dict[str, Any] = {
 # Bug 1e08-1a35-0267-4ca6 — binding lifecycle (GC) defaults. These are the
 # reconciler's only int-valued binding env vars; parsed defensively below so a
 # typo'd ops value degrades to the default rather than aborting the pass
-# (mirrors applier.py's best-effort _get_dso_id_guard_mode_from_config).
+# (mirrors applier.py's best-effort _get_rebar_id_guard_mode_from_config).
 _DEFAULT_ABSENT_RETIRE_GRACE = 3
 
 
@@ -374,10 +374,10 @@ class BindingStore:
         """Scan for pending bindings and attempt to recover.
 
         For each pending binding:
-        1. Search Jira for ``dso-id:{local_id}`` label (canonical colon form —
+        1. Search Jira for ``rebar-id:{local_id}`` label (canonical colon form —
            written by applier.py outbound_create and inbound_create since the
            identity-label write was introduced).
-        2. If not found, fall back to ``dso-id-{local_id}`` (legacy hyphen
+        2. If not found, fall back to ``rebar-id-{local_id}`` (legacy hyphen
            form — old issues created before the colon form was adopted may
            carry this label; differ.py:402-414 recognises both forms).
         3. If found via either search → confirm binding with discovered key.
@@ -388,11 +388,11 @@ class BindingStore:
         recovered = 0
         for local_id in list(self.pending_bindings()):
             # Primary: canonical colon-form label (applier.py:753, 1931).
-            colon_label = f"dso-id:{local_id}"
+            colon_label = f"rebar-id:{local_id}"
             results = client.search_issues(f'labels = "{colon_label}"')
             if not results:
                 # Legacy fallback: hyphen-form label (pre-colon-migration issues).
-                hyphen_label = f"dso-id-{local_id}"
+                hyphen_label = f"rebar-id-{local_id}"
                 results = client.search_issues(f'labels = "{hyphen_label}"')
             if results:
                 jira_key = results[0]["key"]

@@ -1,7 +1,7 @@
 """Parametrized matrix tests for conflict_resolver per-element provenance (story 26de, task 626e).
 
 Covers dd-1: 4 scalars (title, description, priority, assignee) and 4 collections
-(comments, labels excluding dso-id, watchers, links), bidirectional, apply-once
+(comments, labels excluding rebar-id, watchers, links), bidirectional, apply-once
 and zero-mutations across 3 consecutive follow-on passes. Plus counter-edit
 disambiguation per AC.
 
@@ -100,7 +100,7 @@ SCALAR_CASES = [
     ("assignee", "alice", "bob"),
 ]
 
-# 4 collections (labels excludes dso-id per dd-1; we test with non-dso-id labels)
+# 4 collections (labels excludes rebar-id per dd-1; we test with non-rebar-id labels)
 COLLECTION_CASES = [
     ("comments", ["comment-a"], ["comment-a", "comment-b"]),
     ("labels", ["feature"], ["feature", "bug"]),
@@ -151,30 +151,30 @@ def test_bidirectional_apply_once_then_idempotent(differ, field, old, new, origi
         )
 
 
-def test_labels_matrix_excludes_dso_id(differ):
-    """Per dd-1: labels matrix must exclude dso-id-* labels.
+def test_labels_matrix_excludes_rebar_id(differ):
+    """Per dd-1: labels matrix must exclude rebar-id-* labels.
 
-    A change to a dso-id-* label MUST NOT emit a mutation, even when other labels
-    differ. (dso-id is an identity marker, not a user-facing label.)
+    A change to a rebar-id-* label MUST NOT emit a mutation, even when other labels
+    differ. (rebar-id is an identity marker, not a user-facing label.)
     """
     prev = {
         JIRA_KEY: {
             "dso_local_id": LOCAL_ID,
-            "dso-id": "dso-id:OLD",
+            "rebar-id": "rebar-id:OLD",
             "labels": ["feature"],
         }
     }
     next_ = {
         JIRA_KEY: {
             "dso_local_id": LOCAL_ID,
-            "dso-id": "dso-id:NEW",
+            "rebar-id": "rebar-id:NEW",
             "labels": ["feature"],
         }
     }
     muts = differ.compute_mutations(prev, next_)
-    # Only dso-id changed — and dso-id is in EXCLUDED_FIELDS — so zero mutations.
+    # Only rebar-id changed — and rebar-id is in EXCLUDED_FIELDS — so zero mutations.
     assert muts == [], (
-        f"dso-id change should be excluded from labels matrix; got mutations: {muts}"
+        f"rebar-id change should be excluded from labels matrix; got mutations: {muts}"
     )
 
 

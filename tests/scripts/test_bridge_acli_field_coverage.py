@@ -430,7 +430,7 @@ class TestAcliContractRegression:
         """
         client, captured_cmds, fake_run_acli = acli_capture
         with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
-            client.add_label("DIG-3802", "dso-id:abc-123")
+            client.add_label("DIG-3802", "rebar-id:abc-123")
 
         assert len(captured_cmds) >= 1, "add_label must issue an ACLI command"
         cmd = captured_cmds[0]
@@ -469,7 +469,7 @@ class TestAcliContractRegression:
 
         with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
             with patch.object(acli_mod.json, "dump", side_effect=capturing_dump):
-                client.add_label("DIG-3802", "dso-id:abc-123")
+                client.add_label("DIG-3802", "rebar-id:abc-123")
 
         assert captured_payloads, "add_label must json.dump a --from-json payload"
         payload = captured_payloads[0]
@@ -477,7 +477,7 @@ class TestAcliContractRegression:
             f"Payload 'issues' must be a single-element list with the Jira key. "
             f"Got: {payload!r}"
         )
-        assert payload.get("labelsToAdd") == ["dso-id:abc-123"], (
+        assert payload.get("labelsToAdd") == ["rebar-id:abc-123"], (
             f"Payload must use 'labelsToAdd' (additive). 'labels' would be "
             f"set-replace and would destroy existing labels. Got: {payload!r}"
         )

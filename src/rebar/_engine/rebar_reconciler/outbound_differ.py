@@ -773,15 +773,15 @@ def _diff_comments(
 # ---------------------------------------------------------------------------
 
 # NOTE: applier.py writes the bridge-internal binding label as
-# f"dso-id:{local_id}" (COLON separator). Legacy code paths used a HYPHEN
-# separator ("dso-id-<local_id>"); both forms must be excluded from outbound
+# f"rebar-id:{local_id}" (COLON separator). Legacy code paths used a HYPHEN
+# separator ("rebar-id-<local_id>"); both forms must be excluded from outbound
 # diffs to avoid emitting spurious remove mutations for identity labels.
 # See bug 68a4-f9d5-5540-4b95.
 # dso-status: labels are reconciler-managed annotation labels (emitted/removed
 # by status logic only); they must be excluded from the normal user-tag diff
 # so that dso-status: labels on Jira do not produce spurious REMOVE mutations
 # via the tag diff path (ticket 929a).
-_EXCLUDED_PREFIXES: tuple[str, ...] = ("dso-id:", "dso-id-", "imported:", "dso-status:")
+_EXCLUDED_PREFIXES: tuple[str, ...] = ("rebar-id:", "rebar-id-", "imported:", "dso-status:")
 
 
 def _diff_labels(

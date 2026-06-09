@@ -2,7 +2,7 @@
 
 Covers DD-3:
   (inbound, repair_property) failure → applier removes the orphan
-  ``dso-id-<local_id>`` label AND emits a follow-on schema-drift signal in
+  ``rebar-id-<local_id>`` label AND emits a follow-on schema-drift signal in
   the SAME pass; fault-injection asserts both side effects (sc-7).
 
 Import-direction guarantee (F6): applier.py MUST NOT import invariants —
@@ -89,7 +89,7 @@ def test_failure_cleans_label_and_signals_drift(applier):
     assert result["key"] == "DIG-99"
 
     # Label cleanup attempted exactly once with the correct format
-    client.remove_label.assert_called_once_with("DIG-99", "dso-id-local-99")
+    client.remove_label.assert_called_once_with("DIG-99", "rebar-id-local-99")
 
     # Follow-on schema-drift signal present at top level
     follow_on = result["follow_on"]
@@ -121,7 +121,7 @@ def test_failure_resilient_to_label_remove_error(applier):
     assert result["key"] == "DIG-7"
 
     # remove_label was still attempted
-    client.remove_label.assert_called_once_with("DIG-7", "dso-id-loc-7")
+    client.remove_label.assert_called_once_with("DIG-7", "rebar-id-loc-7")
 
     # Follow-on signal still emitted, with the label_remove_error captured
     follow_on = result["follow_on"]

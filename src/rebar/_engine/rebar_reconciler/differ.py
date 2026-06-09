@@ -236,7 +236,7 @@ def compute_mutations(
     }
     # The set of local dso_local_ids that are present in local_state at all,
     # used to short-circuit dangling-jira-ref detection.
-    local_dso_ids: set[str] = set(local_id_to_keys.keys())
+    local_rebar_ids: set[str] = set(local_id_to_keys.keys())
 
     # Seed mutations (if any) are prepended to the result list before the
     # differ walks local/jira state. They are NOT filtered through
@@ -366,8 +366,8 @@ def compute_mutations(
 
             # Bug 4354: when the snapshot lacks dso_local_id (the fetcher
             # stores Jira `fields` only — the dso_local_id entity property
-            # is never in the snapshot), fall back to the `dso-id:<local_id>`
-            # / `dso-id-<local_id>` label as the bound-marker signal. The
+            # is never in the snapshot), fall back to the `rebar-id:<local_id>`
+            # / `rebar-id-<local_id>` label as the bound-marker signal. The
             # same prefixes are excluded by outbound_differ._EXCLUDED_PREFIXES
             # and inbound_differ._EXCLUDED_PREFIXES — they're the canonical
             # and legacy forms written by _apply_inbound_create / create_one
@@ -381,10 +381,10 @@ def compute_mutations(
             # immediately after outbound binding, before prev advances)
             # mis-classifies as unbound and emits an inbound CREATE — which
             # the applier materialises as a phantom `jira-dig-NNNN` local
-            # entity AND writes a ghost `dso-id:jira-dig-NNNN` label back
+            # entity AND writes a ghost `rebar-id:jira-dig-NNNN` label back
             # to Jira (empirically confirmed by labels-probe.sh on
             # 2026-05-29: after binding 259f-... → DIG-5029, the next pass
-            # produced `['dso-id:259f-...', 'dso-id:jira-dig-5029',
+            # produced `['rebar-id:259f-...', 'rebar-id:jira-dig-5029',
             # 'labelprobe-...']` on Jira). The label-derived path also
             # suppresses the dangling-conflict emission below: a
             # conflict's `suppress_pair` follow-on would otherwise drop
@@ -401,15 +401,15 @@ def compute_mutations(
             # dropped.
             if jira_local_id is None and isinstance(jira_fields, dict):
                 _labels = jira_fields.get("labels") or []
-                _has_dso_id_label = False
+                _has_rebar_id_label = False
                 if isinstance(_labels, (list, tuple)):
                     for _lbl in _labels:
                         if isinstance(_lbl, str) and (
-                            _lbl.startswith("dso-id:") or _lbl.startswith("dso-id-")
+                            _lbl.startswith("rebar-id:") or _lbl.startswith("rebar-id-")
                         ):
-                            _has_dso_id_label = True
+                            _has_rebar_id_label = True
                             break
-                if _has_dso_id_label:
+                if _has_rebar_id_label:
                     # Bound — owned by binding-aware differs.
                     continue
 
@@ -418,7 +418,7 @@ def compute_mutations(
             # (inbound, conflict) so the human can decide whether to recreate
             # the local ticket, clear the Jira-side binding, or close the
             # Jira issue. Never silently drop.
-            if jira_local_id_str and jira_local_id_str not in local_dso_ids:
+            if jira_local_id_str and jira_local_id_str not in local_rebar_ids:
                 _emit(
                     Mutation(
                         direction=MutationDirection.inbound,

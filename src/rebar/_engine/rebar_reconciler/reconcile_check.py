@@ -81,14 +81,14 @@ _TYPE_JIRA_TO_LOCAL: dict[str, str] = {v: k for k, v in _TYPE_LOCAL_TO_JIRA.item
 
 def _is_dso_label(label: str) -> bool:
     """Return True for labels that should be excluded from comparison."""
-    return label.startswith("dso-id-") or label.startswith("imported:")
+    return label.startswith("rebar-id-") or label.startswith("imported:")
 
 
 def _compare_labels(
     local_labels: list[str] | None,
     jira_labels: list[str] | None,
 ) -> list[dict[str, Any]]:
-    """Compare labels (excluding dso-id-* and imported:*), return discrepancies."""
+    """Compare labels (excluding rebar-id-* and imported:*), return discrepancies."""
     local_set = {lbl for lbl in (local_labels or []) if not _is_dso_label(lbl)}
     jira_set = {lbl for lbl in (jira_labels or []) if not _is_dso_label(lbl)}
     if local_set == jira_set:
@@ -252,14 +252,14 @@ def reconcile_check(
         pair_discs = _compare_pair(local_id, jira_key, local_ticket, jira_issue)
         discrepancies.extend(pair_discs)
 
-    # Orphaned Jira: issues with dso-id-* labels but no binding
+    # Orphaned Jira: issues with rebar-id-* labels but no binding
     orphaned_jira: list[str] = []
     for jira_key, jira_issue in jira_snapshot.items():
         if jira_key in bound_jira_keys:
             continue
         labels = jira_issue.get("labels") or []
         has_dso_label = any(
-            lbl.startswith("dso-id-") for lbl in labels if isinstance(lbl, str)
+            lbl.startswith("rebar-id-") for lbl in labels if isinstance(lbl, str)
         )
         if has_dso_label:
             orphaned_jira.append(jira_key)
@@ -275,7 +275,7 @@ def reconcile_check(
         for jira_key, jira_issue in jira_snapshot.items()
         if jira_key not in bound_jira_keys
         and not any(
-            lbl.startswith("dso-id-")
+            lbl.startswith("rebar-id-")
             for lbl in (jira_issue.get("labels") or [])
             if isinstance(lbl, str)
         )
@@ -313,7 +313,7 @@ def format_report(report: dict[str, Any]) -> str:
         lines.append(f"  {ob} — bound but missing locally or in Jira")
     lines.append(f"Orphaned Jira issues: {len(report['orphaned_jira'])}")
     for oj in report["orphaned_jira"]:
-        lines.append(f"  {oj} — has dso-id-* label but no local binding")
+        lines.append(f"  {oj} — has rebar-id-* label but no local binding")
     lines.append(
         f"Unbound: {report['unbound_local']} local tickets, "
         f"{report['unbound_jira']} Jira issues"

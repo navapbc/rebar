@@ -3,7 +3,7 @@
 Task eab4: verifies that after create_one() creates a Jira issue, the
 write-then-read round-trip is correct:
   1. get_entity_property("DIG-999", "dso_local_id") returns the local ticket ID.
-  2. One of the add_label calls included a label matching "dso-id:<local_id>".
+  2. One of the add_label calls included a label matching "rebar-id:<local_id>".
 
 All tests use a mock AcliClient — no real Jira calls are made.
 """
@@ -127,8 +127,8 @@ def test_get_entity_property_returns_local_id_after_create(applier, tmp_path):
     )
 
 
-def test_add_label_includes_dso_id_label_after_create(applier, tmp_path):
-    """Assert 2: one of the add_label calls contains a label matching dso-id:<local_id>."""
+def test_add_label_includes_rebar_id_label_after_create(applier, tmp_path):
+    """Assert 2: one of the add_label calls contains a label matching rebar-id:<local_id>."""
     local_id = "tick-readback-002"
     issue_key = "DIG-999"
     client = _make_readback_client(issue_key)
@@ -136,7 +136,7 @@ def test_add_label_includes_dso_id_label_after_create(applier, tmp_path):
 
     applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
 
-    expected_label = f"dso-id:{local_id}"
+    expected_label = f"rebar-id:{local_id}"
     label_calls = client.add_label_calls
     labels_written = [label for (_key, label) in label_calls]
     assert expected_label in labels_written, (
@@ -146,7 +146,7 @@ def test_add_label_includes_dso_id_label_after_create(applier, tmp_path):
 
 
 def test_readback_both_assertions_together(applier, tmp_path):
-    """Readback round-trip: both entity property and dso-id label are correct after create."""
+    """Readback round-trip: both entity property and rebar-id label are correct after create."""
     local_id = "tick-readback-003"
     issue_key = "DIG-777"
     client = _make_readback_client(issue_key)
@@ -160,8 +160,8 @@ def test_readback_both_assertions_together(applier, tmp_path):
         f"Entity property mismatch: expected {local_id!r}, got {stored_local_id!r}"
     )
 
-    # Assert 2: dso-id label present in add_label calls for the correct key
-    expected_label = f"dso-id:{local_id}"
+    # Assert 2: rebar-id label present in add_label calls for the correct key
+    expected_label = f"rebar-id:{local_id}"
     label_calls_for_key = [
         label for (key, label) in client.add_label_calls if key == issue_key
     ]
