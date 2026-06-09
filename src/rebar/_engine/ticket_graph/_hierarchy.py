@@ -6,11 +6,11 @@ import os
 from typing import Any
 
 from ticket_graph._loader import reduce_all_tickets, reduce_ticket
+from ticket_graph._relations import _BLOCKING_RELATIONS
 
-
-# Relations whose links represent BLOCKING dependencies. Only these are subject
-# to hierarchy promotion — see resolve_hierarchy_link's docstring for rationale.
-_BLOCKING_RELATIONS: frozenset[str] = frozenset({"blocks", "depends_on"})
+# Relations whose links represent BLOCKING dependencies (single source of truth in
+# ticket_graph._relations). Only these are subject to hierarchy promotion — see
+# resolve_hierarchy_link's docstring for rationale.
 
 # Type-tier mapping defining "comparable level" in the hierarchy. Higher number
 # == higher tier. epic (top) > story (mid) > task/bug (leaf, SAME tier).

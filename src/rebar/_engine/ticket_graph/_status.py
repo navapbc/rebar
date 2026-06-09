@@ -6,8 +6,7 @@ import json
 import os
 
 from ticket_graph._loader import reduce_ticket
-
-_BLOCKING_RELATIONS = frozenset({"blocks", "depends_on"})
+from ticket_graph._relations import _BLOCKING_RELATIONS  # re-exported for _blockers
 
 
 # The reviewer noted the function "may not exist" — it does exist and is the authoritative
