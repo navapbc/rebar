@@ -1919,6 +1919,28 @@ ticket_edit() {
                         return 1
                     fi
                     ;;
+                priority=*)
+                    # Mirror ticket-create's priority validation (bug df7a-61b3):
+                    # edit must not accept out-of-range or non-numeric priorities
+                    # that create rejects (else edit is a validation-bypass path).
+                    case "${_pair#priority=}" in
+                        0|1|2|3|4) ;;
+                        *)
+                            echo "Error: invalid priority '${_pair#priority=}'. Must be 0-4" >&2
+                            return 1
+                            ;;
+                    esac
+                    ;;
+                ticket_type=*)
+                    # Mirror ticket-create's ticket_type validation (bug df7a-61b3).
+                    case "${_pair#ticket_type=}" in
+                        bug|epic|story|task) ;;
+                        *)
+                            echo "Error: invalid ticket type '${_pair#ticket_type=}'. Must be one of: bug, epic, story, task" >&2
+                            return 1
+                            ;;
+                    esac
+                    ;;
                 parent=*)
                     _new_parent_id_input="${_pair#parent=}"
                     if [ -z "$_new_parent_id_input" ]; then

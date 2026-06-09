@@ -154,8 +154,33 @@ test_summary_routes_through_dispatcher() {
     fi
 }
 
+# ── Test 7: status + title are parsed from JSON show output (bug aa2e-3dcd) ──
+# The original parser scraped a long-retired human-readable `show` layout, so
+# against the current JSON output every ticket rendered as "[unknown] {". Assert
+# the real status and title surface so that regression can't return silently.
+test_summary_parses_status_and_title() {
+    local _mock _output _exit
+    echo "Test 7: summary renders parsed status and title (not [unknown] / '{')"
+    _mock=$(make_ticket_mock_summary)
+    _exit=0
+    _output=$(TICKET_CMD="$_mock" "$DISPATCHER" summary t1 2>/dev/null) || _exit=$?
+
+    if [[ $_exit -eq 0 ]] \
+        && [[ "$_output" == *"[open]"* ]] \
+        && [[ "$_output" == *"Implement login"* ]] \
+        && [[ "$_output" != *"[unknown]"* ]] \
+        && [[ "$_output" != *" { "* ]]; then
+        echo "  PASS: status [open] and title 'Implement login' rendered"
+        (( PASS++ ))
+    else
+        echo "  FAIL: expected '[open]' and 'Implement login', got: $_output" >&2
+        (( FAIL++ ))
+    fi
+}
+
 # Run the RED zone tests
 test_summary_routes_through_dispatcher
+test_summary_parses_status_and_title
 
 # ── Results ───────────────────────────────────────────────────────────────────
 echo ""

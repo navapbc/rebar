@@ -651,4 +651,64 @@ test_ticket_edit_description_nonempty_still_works() {
 }
 test_ticket_edit_description_nonempty_still_works
 
+# ── Test 19: ticket edit --priority validates range (bug df7a-61b3) ──────────
+# create rejects priority outside 0-4; edit must apply the same guard so it is
+# not a validation-bypass back door (pressure-test finding).
+echo ""
+echo "Test 19: ticket edit --priority rejects out-of-range / non-numeric (regression)"
+test_ticket_edit_priority_validates() {
+    local repo
+    repo=$(_make_test_repo)
+    local tkt
+    tkt=$(_create_ticket "$repo" "priority validation test")
+    if [ -z "$tkt" ]; then
+        assert_eq "created ticket" "non-empty" "empty"
+        return
+    fi
+
+    local exit_code=0
+    (cd "$repo" && bash "$TICKET_SCRIPT" edit "$tkt" --priority=99 >/dev/null 2>&1) || exit_code=$?
+    assert_ne "edit --priority=99 (out of range) exits nonzero" "0" "$exit_code"
+
+    exit_code=0
+    (cd "$repo" && bash "$TICKET_SCRIPT" edit "$tkt" --priority=high >/dev/null 2>&1) || exit_code=$?
+    assert_ne "edit --priority=high (non-numeric) exits nonzero" "0" "$exit_code"
+
+    # No mutation: priority remains the create default (2)
+    assert_eq "priority unchanged after rejected edits" "2" "$(_get_ticket_field "$repo" "$tkt" "priority")"
+
+    # Valid priority still works
+    exit_code=0
+    (cd "$repo" && bash "$TICKET_SCRIPT" edit "$tkt" --priority=0 >/dev/null 2>&1) || exit_code=$?
+    assert_eq "edit --priority=0 (valid) exits 0" "0" "$exit_code"
+    assert_eq "valid priority applied" "0" "$(_get_ticket_field "$repo" "$tkt" "priority")"
+}
+test_ticket_edit_priority_validates
+
+# ── Test 20: ticket edit --ticket_type validates enum (bug df7a-61b3) ────────
+echo ""
+echo "Test 20: ticket edit --ticket_type rejects invalid type (regression)"
+test_ticket_edit_ticket_type_validates() {
+    local repo
+    repo=$(_make_test_repo)
+    local tkt
+    tkt=$(_create_ticket "$repo" "ticket_type validation test")
+    if [ -z "$tkt" ]; then
+        assert_eq "created ticket" "non-empty" "empty"
+        return
+    fi
+
+    local exit_code=0
+    (cd "$repo" && bash "$TICKET_SCRIPT" edit "$tkt" --ticket_type=widget >/dev/null 2>&1) || exit_code=$?
+    assert_ne "edit --ticket_type=widget (invalid) exits nonzero" "0" "$exit_code"
+    assert_eq "ticket_type unchanged after rejected edit" "task" "$(_get_ticket_field "$repo" "$tkt" "ticket_type")"
+
+    # Valid type still works
+    exit_code=0
+    (cd "$repo" && bash "$TICKET_SCRIPT" edit "$tkt" --ticket_type=bug >/dev/null 2>&1) || exit_code=$?
+    assert_eq "edit --ticket_type=bug (valid) exits 0" "0" "$exit_code"
+    assert_eq "valid ticket_type applied" "bug" "$(_get_ticket_field "$repo" "$tkt" "ticket_type")"
+}
+test_ticket_edit_ticket_type_validates
+
 print_summary
