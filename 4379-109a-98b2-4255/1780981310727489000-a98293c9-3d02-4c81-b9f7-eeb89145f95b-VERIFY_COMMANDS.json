@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"verify_commands":[{"command":"pytest tests/test_foo.py","dd_id":"DD1","dd_text":"foo works"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1780981310727489000,"uuid":"a98293c9-3d02-4c81-b9f7-eeb89145f95b"}
