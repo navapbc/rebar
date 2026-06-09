@@ -1482,4 +1482,49 @@ test_parent_alias_resolution() {
 }
 test_parent_alias_resolution
 
+# ── GAP-5: ticket create rejects out-of-range / non-numeric --priority ─────────
+# Mirrors the invalid-ticket_type test (Test 6): --priority 99 (out of the 0-4
+# range) and --priority high (non-numeric) must both exit non-zero and write no
+# CREATE event.
+echo "GAP-5: ticket create rejects --priority 99 (out of range) and --priority high (non-numeric)"
+test_ticket_create_rejects_invalid_priority() {
+    local repo
+    repo=$(_make_test_repo)
+
+    if [ ! -f "$TICKET_CREATE_SCRIPT" ]; then
+        assert_eq "ticket-create.sh exists" "exists" "missing"
+        return
+    fi
+
+    local tracker_dir="$repo/.tickets-tracker"
+
+    # Out-of-range numeric priority.
+    local exit_code=0
+    local stderr_out
+    stderr_out=$(cd "$repo" && bash "$TICKET_SCRIPT" create task "Gap5 out-of-range priority" --priority 99 2>&1) || exit_code=$?
+    assert_eq "gap5: --priority 99 (out of range) exits non-zero" "1" "$([ "$exit_code" -ne 0 ] && echo 1 || echo 0)"
+    if [ -n "$stderr_out" ]; then
+        assert_eq "gap5: error message printed for out-of-range priority" "has-message" "has-message"
+    else
+        assert_eq "gap5: error message printed for out-of-range priority" "has-message" "silent"
+    fi
+
+    # Non-numeric priority.
+    local exit_code2=0
+    local stderr_out2
+    stderr_out2=$(cd "$repo" && bash "$TICKET_SCRIPT" create task "Gap5 non-numeric priority" --priority high 2>&1) || exit_code2=$?
+    assert_eq "gap5: --priority high (non-numeric) exits non-zero" "1" "$([ "$exit_code2" -ne 0 ] && echo 1 || echo 0)"
+    if [ -n "$stderr_out2" ]; then
+        assert_eq "gap5: error message printed for non-numeric priority" "has-message" "has-message"
+    else
+        assert_eq "gap5: error message printed for non-numeric priority" "has-message" "silent"
+    fi
+
+    # Assert: no CREATE event file was written (command should fail before writing).
+    local spurious_events
+    spurious_events=$(find "$tracker_dir" -maxdepth 2 -name '*-CREATE.json' ! -name '.*' 2>/dev/null | wc -l | tr -d ' ')
+    assert_eq "gap5: no CREATE event written on invalid priority" "0" "$spurious_events"
+}
+test_ticket_create_rejects_invalid_priority
+
 print_summary

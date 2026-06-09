@@ -1491,4 +1491,49 @@ test_ticket_unlink_after_compaction_succeeds() {
 }
 test_ticket_unlink_after_compaction_succeeds
 
+# ── GAP-4: self-link `link <id> <id> blocks` is rejected ──────────────────────
+# A ticket may not link to itself; the engine must reject `link <id> <id>` with
+# a non-zero exit and write no LINK event.
+echo "GAP-4: ticket link <id> <id> blocks (self-link) is rejected — no LINK event written"
+test_ticket_link_self_link_rejected() {
+    _snapshot_fail
+
+    local repo
+    repo=$(_make_test_repo)
+    local tracker_dir="$repo/.tickets-tracker"
+
+    local id1
+    id1=$(_create_ticket "$repo" task "Self-link source")
+    if [ -z "$id1" ]; then
+        assert_eq "gap4: ticket created for self-link test" "non-empty" "empty"
+        assert_pass_if_clean "test_ticket_link_self_link_rejected"
+        return
+    fi
+
+    local before_count
+    before_count=$(_count_link_events "$tracker_dir" "$id1")
+
+    local exit_code=0
+    local stderr_out
+    stderr_out=$(cd "$repo" && bash "$TICKET_SCRIPT" link "$id1" "$id1" blocks 2>&1) || exit_code=$?
+
+    # Assert: exits non-zero
+    assert_eq "gap4: self-link exits non-zero" "1" "$([ "$exit_code" -ne 0 ] && echo 1 || echo 0)"
+
+    # Assert: error message printed (not silent)
+    if [ -n "$stderr_out" ]; then
+        assert_eq "gap4: self-link error message printed" "has-message" "has-message"
+    else
+        assert_eq "gap4: self-link error message printed" "has-message" "silent"
+    fi
+
+    # Assert: no LINK event written
+    local after_count
+    after_count=$(_count_link_events "$tracker_dir" "$id1")
+    assert_eq "gap4: no LINK event written for self-link" "$before_count" "$after_count"
+
+    assert_pass_if_clean "test_ticket_link_self_link_rejected"
+}
+test_ticket_link_self_link_rejected
+
 print_summary

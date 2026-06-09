@@ -64,6 +64,40 @@ MOCK_EOF
     echo "$mock_script"
 }
 
+# make_ticket_mock_with_deps — like make_ticket_mock_summary but also implements
+# the `deps <id>` subcommand (GAP-8). t1 is blocked (non-empty blockers,
+# ready_to_work=false); t2 is ready (empty blockers, ready_to_work=true).
+make_ticket_mock_with_deps() {
+    local mock_dir
+    mock_dir=$(mktemp -d)
+    _CLEANUP_DIRS+=("$mock_dir")
+    local mock_script="$mock_dir/ticket"
+    cat > "$mock_script" << 'MOCK_EOF'
+#!/usr/bin/env bash
+SUBCMD="${1:-}"
+TICKET_ID="${2:-}"
+case "$SUBCMD" in
+    show)
+        case "$TICKET_ID" in
+            t1) echo '{"ticket_id":"t1","title":"Implement login","ticket_type":"task","status":"open","priority":2,"tags":[],"description":"Add login flow","notes":"","deps":[],"comments":[]}' ; exit 0 ;;
+            t2) echo '{"ticket_id":"t2","title":"Write unit tests","ticket_type":"task","status":"in_progress","priority":3,"tags":[],"description":"Unit tests for parser","notes":"","deps":[],"comments":[]}' ; exit 0 ;;
+            *) exit 1 ;;
+        esac ;;
+    deps)
+        case "$TICKET_ID" in
+            # t1 is blocked by t9: non-empty blockers + ready_to_work=false.
+            t1) echo '{"ticket_id":"t1","blockers":["t9"],"ready_to_work":false}' ; exit 0 ;;
+            # t2 has no blockers and is ready to work.
+            t2) echo '{"ticket_id":"t2","blockers":[],"ready_to_work":true}' ; exit 0 ;;
+            *) exit 1 ;;
+        esac ;;
+    *) exit 0 ;;
+esac
+MOCK_EOF
+    chmod +x "$mock_script"
+    echo "$mock_script"
+}
+
 # ── Test 1: Dispatcher exists and is executable ───────────────────────────────
 echo "Test 1: Dispatcher exists and is executable"
 if [[ -x "$DISPATCHER" ]]; then
@@ -178,9 +212,48 @@ test_summary_parses_status_and_title() {
     fi
 }
 
+# ── GAP-8: summary renders 'blocked by: <id>' from deps; ready tickets '(ready)' ─
+# issue-summary.sh also calls `<ticket> deps <id>` and, when deps returns
+# non-empty blockers with ready_to_work=false, renders a 'blocked by: <ids>'
+# suffix. A ready ticket (empty blockers / ready_to_work=true) still renders
+# '(ready)'. The base mock only implements `show`; here we use a mock that also
+# implements `deps`.
+test_summary_renders_blocked_by_from_deps() {
+    local _mock _output _exit
+    echo "GAP-8: summary renders 'blocked by: <id>' for a blocked ticket and '(ready)' for a ready one"
+    _mock=$(make_ticket_mock_with_deps)
+
+    # Blocked ticket t1 — must show 'blocked by: t9', not '(ready)'.
+    _exit=0
+    _output=$(TICKET_CMD="$_mock" "$DISPATCHER" summary t1 2>/dev/null) || _exit=$?
+    if [[ $_exit -eq 0 ]] \
+        && [[ "$_output" == *"blocked by: t9"* ]] \
+        && [[ "$_output" != *"(ready)"* ]]; then
+        echo "  PASS: blocked ticket renders 'blocked by: t9' suffix"
+        (( PASS++ ))
+    else
+        echo "  FAIL: expected 'blocked by: t9' (not '(ready)'), got: $_output" >&2
+        (( FAIL++ ))
+    fi
+
+    # Ready ticket t2 — must still render '(ready)'.
+    _exit=0
+    _output=$(TICKET_CMD="$_mock" "$DISPATCHER" summary t2 2>/dev/null) || _exit=$?
+    if [[ $_exit -eq 0 ]] \
+        && [[ "$_output" == *"(ready)"* ]] \
+        && [[ "$_output" != *"blocked by"* ]]; then
+        echo "  PASS: ready ticket still renders '(ready)' suffix"
+        (( PASS++ ))
+    else
+        echo "  FAIL: expected '(ready)' (no 'blocked by'), got: $_output" >&2
+        (( FAIL++ ))
+    fi
+}
+
 # Run the RED zone tests
 test_summary_routes_through_dispatcher
 test_summary_parses_status_and_title
+test_summary_renders_blocked_by_from_deps
 
 # ── Results ───────────────────────────────────────────────────────────────────
 echo ""

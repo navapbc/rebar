@@ -1575,4 +1575,172 @@ test_reparented_child_blocks_parent_close() {
 }
 test_reparented_child_blocks_parent_close
 
+# ── GAP-2: 2-arg auto-detect transition form `transition <id> <target>` ────────
+# The dispatcher accepts `transition <id> <target>` (no current_status) and
+# infers the current status. An open ticket transitioned with just `in_progress`
+# must move to in_progress.
+echo ""
+echo "GAP-2: transition <id> in_progress (auto-detect current status) moves open->in_progress"
+test_transition_autodetect_two_arg() {
+    _snapshot_fail
+
+    local repo
+    repo=$(_make_test_repo)
+    local ticket_id
+    ticket_id=$(_create_ticket "$repo")
+    if [ -z "$ticket_id" ]; then
+        assert_eq "gap2-autodetect: ticket created" "non-empty" "empty"
+        assert_pass_if_clean "test_transition_autodetect_two_arg"
+        return
+    fi
+
+    # 2-arg form: omit current_status; the engine should auto-detect open.
+    local exit_code=0
+    (cd "$repo" && bash "$TICKET_SCRIPT" transition "$ticket_id" in_progress 2>/dev/null) || exit_code=$?
+    assert_eq "gap2-autodetect: 2-arg transition exits 0" "0" "$exit_code"
+
+    # Compiled status must now be in_progress.
+    local compiled_status
+    compiled_status=$(_get_ticket_status "$repo" "$ticket_id")
+    assert_eq "gap2-autodetect: compiled status is in_progress" "in_progress" "$compiled_status"
+
+    assert_pass_if_clean "test_transition_autodetect_two_arg"
+}
+test_transition_autodetect_two_arg
+
+# ── GAP-3: backward transition `transition <id> in_progress open` ──────────────
+# A ticket moved to in_progress can be transitioned back to open; the backward
+# move succeeds and the compiled status returns to open.
+echo ""
+echo "GAP-3: backward transition in_progress->open succeeds (status returns to open)"
+test_transition_backward_in_progress_to_open() {
+    _snapshot_fail
+
+    local repo
+    repo=$(_make_test_repo)
+    local ticket_id
+    ticket_id=$(_create_ticket "$repo")
+    if [ -z "$ticket_id" ]; then
+        assert_eq "gap3-backward: ticket created" "non-empty" "empty"
+        assert_pass_if_clean "test_transition_backward_in_progress_to_open"
+        return
+    fi
+
+    # First move open -> in_progress.
+    (cd "$repo" && bash "$TICKET_SCRIPT" transition "$ticket_id" open in_progress 2>/dev/null) || true
+    local mid_status
+    mid_status=$(_get_ticket_status "$repo" "$ticket_id")
+    assert_eq "gap3-backward: precondition status is in_progress" "in_progress" "$mid_status"
+
+    # Backward move in_progress -> open must succeed.
+    local exit_code=0
+    (cd "$repo" && bash "$TICKET_SCRIPT" transition "$ticket_id" in_progress open 2>/dev/null) || exit_code=$?
+    assert_eq "gap3-backward: in_progress->open exits 0" "0" "$exit_code"
+
+    local final_status
+    final_status=$(_get_ticket_status "$repo" "$ticket_id")
+    assert_eq "gap3-backward: compiled status returns to open" "open" "$final_status"
+
+    assert_pass_if_clean "test_transition_backward_in_progress_to_open"
+}
+test_transition_backward_in_progress_to_open
+
+# ── GAP-9: closing a STORY/EPIC WITHOUT --verdict-hash is REJECTED ─────────────
+# Guards a validation-bypass hole: story/epic close requires a verdict hash. The
+# OMITTED-hash case must fail (non-zero exit) and leave the ticket open. A valid
+# hash (from _verdict_hash) is asserted to still succeed as a control.
+echo ""
+echo "GAP-9: closing a story/epic without --verdict-hash is rejected (ticket stays open)"
+test_transition_story_epic_close_requires_verdict_hash() {
+    _snapshot_fail
+
+    local repo
+    repo=$(_make_test_repo)
+
+    local ttype
+    for ttype in story epic; do
+        local tid
+        tid=$(_create_ticket "$repo" "$ttype" "Gap9 $ttype to close")
+        if [ -z "$tid" ]; then
+            assert_eq "gap9: $ttype created" "non-empty" "empty"
+            continue
+        fi
+
+        # OMITTED verdict hash — must be rejected.
+        local exit_code=0
+        local stderr_out
+        stderr_out=$(cd "$repo" && bash "$TICKET_SCRIPT" transition "$tid" open closed 2>&1) || exit_code=$?
+        assert_eq "gap9: $ttype close WITHOUT --verdict-hash exits non-zero" "1" \
+            "$([ "$exit_code" -ne 0 ] && echo 1 || echo 0)"
+
+        # Ticket must remain open (no bypass).
+        local status_after
+        status_after=$(_get_ticket_status "$repo" "$tid")
+        assert_eq "gap9: $ttype still open after rejected close" "open" "$status_after"
+
+        # Control: WITH a valid verdict hash the close succeeds.
+        local ok_exit=0
+        (cd "$repo" && bash "$TICKET_SCRIPT" transition "$tid" open closed \
+            --verdict-hash="$(_verdict_hash "$repo" "$tid")" 2>/dev/null) || ok_exit=$?
+        assert_eq "gap9: $ttype close WITH valid --verdict-hash exits 0" "0" "$ok_exit"
+        assert_eq "gap9: $ttype is closed with valid hash" "closed" "$(_get_ticket_status "$repo" "$tid")"
+    done
+
+    assert_pass_if_clean "test_transition_story_epic_close_requires_verdict_hash"
+}
+test_transition_story_epic_close_requires_verdict_hash
+
+# ── GAP-10: closing a BUG with an invalid --reason PREFIX is rejected ──────────
+# --reason is required for bug close and must start with 'Fixed:' or
+# 'Escalated to user:'. A prefix like "patched it" must be rejected (prefix
+# validation, not mere presence); a valid prefix must be accepted.
+echo ""
+echo "GAP-10: bug close --reason prefix is validated (invalid prefix rejected, 'Fixed:'/'Escalated to user:' accepted)"
+test_transition_bug_close_reason_prefix_validated() {
+    _snapshot_fail
+
+    local repo
+    repo=$(_make_test_repo)
+
+    # Invalid prefix: present but does not start with an allowed prefix.
+    local bug_bad
+    bug_bad=$(_create_ticket "$repo" bug "Gap10 bug invalid reason prefix")
+    if [ -z "$bug_bad" ]; then
+        assert_eq "gap10: bug (bad-prefix) created" "non-empty" "empty"
+        assert_pass_if_clean "test_transition_bug_close_reason_prefix_validated"
+        return
+    fi
+    local bad_exit=0
+    local bad_stderr
+    bad_stderr=$(cd "$repo" && bash "$TICKET_SCRIPT" transition "$bug_bad" open closed --reason="patched it" 2>&1) || bad_exit=$?
+    assert_eq "gap10: bug close with invalid --reason prefix exits non-zero" "1" \
+        "$([ "$bad_exit" -ne 0 ] && echo 1 || echo 0)"
+    assert_eq "gap10: bug stays open after rejected reason prefix" "open" "$(_get_ticket_status "$repo" "$bug_bad")"
+    # Error should hint at the required prefix.
+    if [[ "$bad_stderr" =~ Fixed:|Escalated|prefix|reason ]]; then
+        assert_eq "gap10: error mentions required prefix" "has-prefix-hint" "has-prefix-hint"
+    else
+        assert_eq "gap10: error mentions required prefix" "has-prefix-hint" "no-hint: $bad_stderr"
+    fi
+
+    # Valid prefix 'Fixed:' — must be accepted.
+    local bug_fixed
+    bug_fixed=$(_create_ticket "$repo" bug "Gap10 bug Fixed prefix")
+    local fixed_exit=0
+    (cd "$repo" && bash "$TICKET_SCRIPT" transition "$bug_fixed" open closed --reason="Fixed: patched the null check" 2>/dev/null) || fixed_exit=$?
+    assert_eq "gap10: bug close with 'Fixed:' prefix exits 0" "0" "$fixed_exit"
+    assert_eq "gap10: bug with 'Fixed:' reason is closed" "closed" "$(_get_ticket_status "$repo" "$bug_fixed")"
+
+    # Valid prefix 'Escalated to user:' — must also be accepted.
+    local bug_esc
+    bug_esc=$(_create_ticket "$repo" bug "Gap10 bug Escalated prefix")
+    local esc_exit=0
+    (cd "$repo" && bash "$TICKET_SCRIPT" transition "$bug_esc" open closed --reason="Escalated to user: needs product decision" 2>/dev/null) || esc_exit=$?
+    assert_eq "gap10: bug close with 'Escalated to user:' prefix exits 0" "0" "$esc_exit"
+    assert_eq "gap10: bug with 'Escalated to user:' reason is closed" "closed" "$(_get_ticket_status "$repo" "$bug_esc")"
+
+    assert_pass_if_clean "test_transition_bug_close_reason_prefix_validated"
+}
+test_transition_bug_close_reason_prefix_validated
+
 print_summary

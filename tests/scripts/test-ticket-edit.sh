@@ -711,4 +711,53 @@ test_ticket_edit_ticket_type_validates() {
 }
 test_ticket_edit_ticket_type_validates
 
+# ── GAP-11: multi-hop reparent cycle is rejected ─────────────────────────────
+# Test 14 covers the direct self-parent case only. This covers the 2-hop cycle:
+# set B's parent to A, then attempt to set A's parent to B. The second edit must
+# be rejected (non-zero exit) because A->B->A would form a cycle, and A's
+# parent_id must remain unset.
+echo ""
+echo "GAP-11: ticket edit --parent rejects a multi-hop reparent cycle (A->B->A)"
+test_ticket_edit_parent_rejects_multihop_cycle() {
+    local repo
+    repo=$(_make_test_repo)
+
+    if [ ! -f "$TICKET_EDIT_SCRIPT" ]; then
+        assert_eq "ticket-edit.sh exists for multihop cycle test" "exists" "missing"
+        return
+    fi
+
+    local a_id b_id
+    a_id=$(_create_ticket "$repo" "Gap11 ticket A")
+    b_id=$(_create_ticket "$repo" "Gap11 ticket B")
+    if [ -z "$a_id" ] || [ -z "$b_id" ]; then
+        assert_eq "gap11: created A and B tickets" "both non-empty" "missing"
+        return
+    fi
+
+    # Set B's parent to A (B is now a child of A).
+    local attach_exit=0
+    (cd "$repo" && bash "$TICKET_SCRIPT" edit "$b_id" --parent="$a_id" >/dev/null 2>&1) || attach_exit=$?
+    assert_eq "gap11: edit B --parent=A exits 0" "0" "$attach_exit"
+    assert_eq "gap11: B's parent is A" "$a_id" "$(_get_ticket_field "$repo" "$b_id" "parent_id")"
+
+    # Now attempt to set A's parent to B — this would create the cycle A->B->A
+    # and must be rejected.
+    local cycle_exit=0
+    (cd "$repo" && bash "$TICKET_SCRIPT" edit "$a_id" --parent="$b_id" >/dev/null 2>&1) || cycle_exit=$?
+    assert_ne "gap11: edit A --parent=B (cycle) exits nonzero" "0" "$cycle_exit"
+
+    # A's parent must remain unset (no cycle written). Acceptable shapes:
+    # MISSING, None, or empty.
+    local a_parent
+    a_parent=$(_get_ticket_field "$repo" "$a_id" "parent_id")
+    case "$a_parent" in
+        ""|"None"|"MISSING")
+            assert_eq "gap11: A's parent unchanged after rejected cycle" "unset" "unset" ;;
+        *)
+            assert_eq "gap11: A's parent unchanged after rejected cycle" "unset" "$a_parent" ;;
+    esac
+}
+test_ticket_edit_parent_rejects_multihop_cycle
+
 print_summary

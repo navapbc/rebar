@@ -73,7 +73,52 @@ test_ordinary_tag_round_trip() {
     assert_pass_if_clean "test_ordinary_tag_round_trip"
 }
 
+# ── GAP-6: adding the same tag twice is idempotent ───────────────────────────
+# Tagging a ticket with the same tag twice must succeed (exit 0) and the tag
+# must appear exactly once in the compiled state.
+test_tag_twice_is_idempotent() {
+    _snapshot_fail
+    local root tid rc
+    root="$(_new_repo)"
+    tid=$(_rebar "$root" create task "T" 2>/dev/null | tail -1)
+
+    rc=0; _rebar "$root" tag "$tid" area:api >/dev/null 2>&1 || rc=$?
+    assert_eq "gap6: first tag succeeds" "0" "$rc"
+
+    # Second identical tag must also succeed (idempotent, not an error).
+    rc=0; _rebar "$root" tag "$tid" area:api >/dev/null 2>&1 || rc=$?
+    assert_eq "gap6: second identical tag exits 0 (idempotent)" "0" "$rc"
+
+    # Tag must appear exactly once in the compiled tags array.
+    local show_json count
+    show_json=$(_rebar "$root" show "$tid" 2>/dev/null)
+    count=$(SHOW_JSON="$show_json" python3 -c '
+import json, os
+d = json.loads(os.environ["SHOW_JSON"])
+print(sum(1 for t in d.get("tags", []) if t == "area:api"))
+' 2>/dev/null) || count="ERR"
+    assert_eq "gap6: tag appears exactly once after double-tag" "1" "$count"
+    assert_pass_if_clean "test_tag_twice_is_idempotent"
+}
+
+# ── GAP-7: untag of a tag the ticket does not have is graceful ────────────────
+# Untagging a tag that was never applied must exit 0 without error (graceful
+# no-op), not fail.
+test_untag_absent_tag_is_graceful() {
+    _snapshot_fail
+    local root tid rc
+    root="$(_new_repo)"
+    tid=$(_rebar "$root" create task "T" 2>/dev/null | tail -1)
+
+    # Ticket has no tags; untag a tag it never had.
+    rc=0; _rebar "$root" untag "$tid" never:applied >/dev/null 2>&1 || rc=$?
+    assert_eq "gap7: untag of absent tag exits 0 (graceful)" "0" "$rc"
+    assert_pass_if_clean "test_untag_absent_tag_is_graceful"
+}
+
 test_brainstorm_complete_is_plain_tag
 test_ordinary_tag_round_trip
+test_tag_twice_is_idempotent
+test_untag_absent_tag_is_graceful
 
 print_summary
