@@ -77,9 +77,22 @@ On top of that foundation, rebar adds what parallel agent work actually needs:
 
 ## Requirements
 
+**Runtime (system):**
 - Python ≥ 3.10
-- System binaries: `git`, `jq`, `flock`, `bash`
-- `acli` (Atlassian CLI) — only for live Jira reconciliation
+- `git`, `bash`, `jq` — required.
+- `flock` from **util-linux** — recommended for robust write serialization, but
+  **not strictly required**: it is not on `PATH` by default on macOS
+  (`brew install util-linux`), and when no util-linux `flock` is found rebar falls
+  back to a `mkdir`-based lock automatically. (A non-util-linux `flock` such as
+  BusyBox's is ignored in favor of the fallback.)
+- `acli` (Atlassian CLI) — only for **live** Jira reconciliation.
+
+**Python extras (pip):** the base install gives the `rebar` CLI + `import rebar`
+library; `[mcp]` adds the `rebar-mcp` server (pulls `mcp>=1.2`); `[dev]` adds the
+test/dev deps (`pytest`, `mcp`, `jsonschema`) and is **required to run the full
+test suite** — the interface-parity tests import the MCP server, so they error
+(not skip) if the `mcp` extra is absent. See [Install](#install) and
+[Tests](#tests).
 
 ## Install
 
@@ -270,8 +283,13 @@ verify.require_verdict_for_close=true
 
 ## Tests
 
+Run the suite from an environment with the `[dev]` extra installed (a venv is
+recommended); the interface-parity tests import the MCP server, so a bare
+interpreter without the `mcp` extra will **error** rather than skip.
+
 ```bash
-pip install '.[dev]'                          # includes the mcp extra for interface tests
+python -m venv .venv && source .venv/bin/activate
+pip install -e '.[dev]'                       # editable + pytest, mcp, jsonschema
 pytest                                        # full Python suite
 pytest tests/interfaces                       # interface-parity tier only
 bash tests/scripts/test-ticket-create.sh      # bash engine tests
