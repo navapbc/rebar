@@ -2,3 +2,5 @@
 .closure-key
 .state-cache
 .scratch/
+.cache.json
+*/.cache.json
