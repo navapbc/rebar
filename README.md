@@ -1,6 +1,16 @@
 # rebar
 
-An event-sourced ticket system with a Jira reconciler, exposed three ways:
+A git-native ticket system for coordinating coding agents — and the humans
+working alongside them.
+
+Point several agents at one repo and they immediately need a shared place to
+coordinate: to claim work without grabbing the same ticket, record what they
+discover, and hand off cleanly — while your teammates stay in the loop through
+Jira. rebar makes the tracker *part of the repo itself*, so it travels with every
+clone, needs no database or daemon, and lets many agents and sessions write at
+once without merge conflicts or lost work.
+
+It's an event-sourced ticket system with a Jira reconciler, exposed three ways:
 
 - **CLI** — the `rebar` command
 - **Python library** — `import rebar`
@@ -13,6 +23,57 @@ events. A level-triggered reconciler bidirectionally syncs tickets with Jira.
 This project was extracted from the `digital-service-orchestra` Claude Code
 plugin. The bash + Python engine is wrapped verbatim under `src/rebar/_engine/`;
 the three interfaces are thin layers over it.
+
+## Why rebar
+
+If you run coding agents against a repo, you eventually want to run *several* at
+once — and the moment you do, they need a shared place to coordinate. Most
+trackers weren't built for that:
+
+- **They're heavy.** A daemon to babysit or a local database to keep running,
+  with dependencies thick enough that a routine upgrade can break your work
+  tracking across machines.
+- **They don't travel with the code.** State lives outside the repo, so a fresh
+  clone doesn't come with its tickets.
+- **They fight your git history.** A tracker that writes to your working branch
+  tangles ticket churn into your source-code commits.
+- **They have no concurrency story.** Nothing stops two agents from claiming the
+  same work or clobbering each other's state, and concurrent edits produce merge
+  conflicts you resolve by hand — or lose.
+- **They buckle at scale.** Speed and usability fall off past a few hundred
+  tickets.
+
+**rebar's answer is to make the tracker part of the repo.** Tickets are an
+append-only event log on a dedicated `tickets` orphan branch (linked in through a
+gitignored worktree); current state is a fast, deterministic replay of that log.
+That single decision pays off across the board:
+
+- **Zero infrastructure, fully portable.** No database, no daemon — just git and a
+  lightweight Python install. Clone the repo and the tracker comes with it.
+- **No commit interference.** Ticket events live on their own branch and never
+  touch your source history. Every write auto-commits and auto-pushes, so activity
+  is shared in real time.
+- **Concurrency by design.** Each event gets a globally-unique filename, so
+  parallel writes merge as a clean union, and the rare conflicting fork resolves
+  deterministically — every clone converges with no lost data. `claim` is an
+  atomic, optimistic-concurrency primitive: agents grab work without stepping on
+  each other.
+- **Built to scale.** The event log plus cached replay stays fast as tickets grow.
+
+On top of that foundation, rebar adds what parallel agent work actually needs:
+
+- **Bidirectional Jira sync** — agents work in rebar, teammates work in Jira, and
+  a level-triggered reconciler keeps the two in step.
+- **Conflict-aware scheduling** — tickets record their file impact, so
+  `next-batch` hands parallel agents work that won't collide on the same files.
+- **Scratch space** — an invisible per-ticket channel for subagents to pass notes
+  to one another.
+- **Quality gates** — clarity, acceptance-criteria, dispatch-readiness, and
+  repo-wide health checks keep work dispatch-ready.
+- **Provenance links** — `discovered_from` ties emergent work back to the ticket
+  that surfaced it.
+- **One store, three interfaces** — drive it from the CLI, a Python library, or
+  the MCP server.
 
 ## Requirements
 
