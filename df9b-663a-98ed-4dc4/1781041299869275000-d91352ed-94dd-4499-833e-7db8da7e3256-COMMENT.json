@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"body":"Done: __init__._native_reads_enabled() per-call gate; REBAR_NATIVE_READS=0 falls back to subprocess. MCP reads delegate to these. Commit 7d53bc5."},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"COMMENT","timestamp":1781041299869275000,"uuid":"d91352ed-94dd-4499-833e-7db8da7e3256"}
