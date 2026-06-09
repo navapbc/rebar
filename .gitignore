@@ -10,3 +10,4 @@ dist/
 bridge_state/
 .claude/
 session-logs/
+CLAUDE.local.md

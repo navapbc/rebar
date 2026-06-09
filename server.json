@@ -1,0 +1,37 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.navapbc/rebar",
+  "description": "Event-sourced ticket system with a Jira reconciler, exposed as an MCP server (tickets over a git-backed store).",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/navapbc/rebar",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "nava-rebar",
+      "version": "0.1.0",
+      "transport": { "type": "stdio" },
+      "runtimeHint": "uvx",
+      "environmentVariables": [
+        {
+          "name": "REBAR_ROOT",
+          "description": "Path to the repo root that holds the .tickets-tracker store (defaults to the git toplevel of the working dir).",
+          "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_READONLY",
+          "description": "Set to 1 to expose only the read tools (no write/mutation tools).",
+          "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_ALLOW_RECONCILE_LIVE",
+          "description": "Set to 1 to allow the live (mutating) Jira reconcile mode; otherwise reconcile is dry-run only.",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

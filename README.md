@@ -22,6 +22,19 @@ the three interfaces are thin layers over it.
 
 ## Install
 
+Published to PyPI as **`nava-rebar`** (the import package and commands stay
+`rebar` / `rebar-mcp`):
+
+```bash
+pipx install nava-rebar              # isolated CLI: rebar
+pip install 'nava-rebar[mcp]'        # + MCP server: rebar-mcp
+pip install nava-rebar               # library: import rebar
+
+brew install navapbc/rebar/rebar     # Homebrew tap (CLI)
+```
+
+From a source checkout:
+
 ```bash
 pip install .            # library + CLI
 pip install '.[mcp]'     # + MCP server (FastMCP)
@@ -81,6 +94,29 @@ rebar-mcp          # stdio transport
 Exposes ticket operations as MCP tools. `reconcile` defaults to `dry-run`
 (`live` requires `REBAR_MCP_ALLOW_RECONCILE_LIVE=1`). Set `REBAR_MCP_READONLY=1`
 to expose only the read tools (no write/mutation tools).
+
+Register it in an MCP client (e.g. Claude Desktop/Code) — zero-preinstall via
+`uvx`:
+
+```json
+{
+  "mcpServers": {
+    "rebar": {
+      "command": "uvx",
+      "args": ["--from", "nava-rebar[mcp]", "rebar-mcp"],
+      "env": { "REBAR_ROOT": "/path/to/your/repo" }
+    }
+  }
+}
+```
+
+A registry manifest for the [MCP Registry](https://github.com/modelcontextprotocol/registry)
+lives in [`server.json`](server.json) (`io.github.navapbc/rebar`); publish it with
+the `mcp-publisher` CLI (`mcp-publisher login github` → `mcp-publisher publish`).
+
+## License
+
+Apache-2.0 — see [`LICENSE`](LICENSE).
 
 ## Configuration
 

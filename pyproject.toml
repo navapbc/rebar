@@ -11,6 +11,8 @@ version = "0.1.0"
 description = "Event-sourced ticket system with a Jira reconciler — CLI, Python library, and MCP server."
 readme = "README.md"
 requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = []
 
 # The ticket engine (bash + the ticket_reducer / ticket_graph / rebar_reconciler
