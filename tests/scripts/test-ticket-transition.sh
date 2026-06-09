@@ -1603,17 +1603,33 @@ test_transition_backward_in_progress_to_open() {
 }
 test_transition_backward_in_progress_to_open
 
-# ── GAP-9: closing a STORY/EPIC WITHOUT --verdict-hash is REJECTED ─────────────
-# Guards a validation-bypass hole: story/epic close requires a verdict hash. The
-# OMITTED-hash case must fail (non-zero exit) and leave the ticket open. A valid
-# hash (from _verdict_hash) is asserted to still succeed as a control.
+# ── GAP-9: the verdict-hash close gate is OPT-IN (off by default; enforced when on) ──
+# The story/epic verdict-hash gate is OFF by default: close without a hash must
+# succeed. With verify.require_verdict_for_close=true it is enforced — the
+# OMITTED-hash case must fail (non-zero exit) and leave the ticket open, while a
+# valid hash (from _verdict_hash) still succeeds as a control.
 echo ""
-echo "GAP-9: closing a story/epic without --verdict-hash is rejected (ticket stays open)"
+echo "GAP-9: verdict-hash close gate is opt-in (off by default, enforced when enabled)"
 test_transition_story_epic_close_requires_verdict_hash() {
     _snapshot_fail
 
     local repo
     repo=$(_make_test_repo)
+
+    # Default (no config): gate is OFF — story close WITHOUT a hash succeeds.
+    local def_tid def_exit=0
+    def_tid=$(_create_ticket "$repo" story "Gap9 default-off close")
+    if [ -n "$def_tid" ]; then
+        (cd "$repo" && bash "$TICKET_SCRIPT" transition "$def_tid" open closed 2>/dev/null) || def_exit=$?
+        assert_eq "gap9: default (gate off) story close WITHOUT hash succeeds" "0" "$def_exit"
+        assert_eq "gap9: default-off story is closed" "closed" "$(_get_ticket_status "$repo" "$def_tid")"
+    else
+        assert_eq "gap9: default story created" "non-empty" "empty"
+    fi
+
+    # Opt IN to the gate via repo config, then enforcement applies.
+    mkdir -p "$repo/.rebar"
+    echo "verify.require_verdict_for_close=true" > "$repo/.rebar/config.conf"
 
     local ttype
     for ttype in story epic; do
@@ -1624,7 +1640,7 @@ test_transition_story_epic_close_requires_verdict_hash() {
             continue
         fi
 
-        # OMITTED verdict hash — must be rejected.
+        # OMITTED verdict hash — must be rejected (gate enabled).
         local exit_code=0
         local stderr_out
         stderr_out=$(cd "$repo" && bash "$TICKET_SCRIPT" transition "$tid" open closed 2>&1) || exit_code=$?

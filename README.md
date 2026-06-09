@@ -276,9 +276,10 @@ Optional `.rebar/config.conf` (or `.rebar.conf`) at the repo root, flat
 `key=value`:
 
 ```ini
-ticket.display_mode=auto          # auto | canonical | alias | short
+ticket.display_mode=auto             # auto | canonical | alias | short
 ticket_clarity.threshold=70
-verify.require_verdict_for_close=true
+verify.require_verdict_for_close=true # opt-in (default: false) — gate story/epic
+                                      # close on a PASS verdict hash
 ```
 
 ## Tests

@@ -99,8 +99,9 @@ def _transition(argv):
         # The verdict hash is an HMAC that encodes: this ticket received PASS at this git state.
         # compute-verdict-hash.sh and this gate compute the same HMAC independently.
         if target_status == 'closed' and ticket_type in ('story', 'epic'):
-            # Check config: verify.require_verdict_for_close (default: true)
-            require_verdict = True
+            # Check config: verify.require_verdict_for_close (default: false — opt-in).
+            # The verdict-hash gate is OFF unless the repo explicitly enables it.
+            require_verdict = False
             try:
                 _cfg_root = os.environ.get('REBAR_ROOT') or os.environ.get('PROJECT_ROOT') or tracker_dir.rsplit('/', 1)[0]
                 config_path = os.environ.get('REBAR_CONFIG') or os.path.join(_cfg_root, '.rebar', 'config.conf')
@@ -109,8 +110,8 @@ def _transition(argv):
                         for _line in _cf:
                             if _line.strip().startswith('verify.require_verdict_for_close='):
                                 val = _line.strip().split('=', 1)[1].strip().lower()
-                                if val in ('false', '0', 'no'):
-                                    require_verdict = False
+                                if val in ('true', '1', 'yes'):
+                                    require_verdict = True
             except Exception:
                 pass
 
