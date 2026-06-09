@@ -330,6 +330,36 @@ test_ready_routes_through_dispatcher() {
         echo "  Output: $_output" >&2
         (( FAIL++ ))
     fi
+
+    # Test 7: --json outputs a single JSON ARRAY of compiled ticket states
+    # (ready set: task-a, task-c; blocked task-b excluded). The whole stdout
+    # must parse as one JSON list — this is the shape the library `ready()` and
+    # the MCP `ready_tickets` tool consume.
+    echo "Test 7: --json outputs a single JSON array of ready ticket states"
+    _tracker=$(make_ready_fixture)
+    _exit=0
+    _output=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" ready --json 2>&1) || _exit=$?
+
+    local _json_check
+    _json_check=$(echo "$_output" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+assert isinstance(data, list), 'not a JSON array'
+ids = {t.get('ticket_id') for t in data}
+assert 'task-a' in ids and 'task-c' in ids, 'missing ready tickets: %r' % (ids,)
+assert 'task-b' not in ids, 'blocked task-b leaked into ready array'
+print('OK')
+" 2>&1) || true
+
+    if [[ "$_json_check" == "OK" ]] && [[ $_exit -eq 0 ]]; then
+        echo "  PASS: --json emits a JSON array with task-a, task-c; task-b excluded (exit $_exit)"
+        (( PASS++ ))
+    else
+        echo "  FAIL: --json did not emit the expected JSON array (RED — expected before GREEN)" >&2
+        echo "  Check: $_json_check" >&2
+        echo "  Output: $_output" >&2
+        (( FAIL++ ))
+    fi
 }
 
 # Run the RED zone tests

@@ -7,14 +7,18 @@ A ticket is "ready" if:
      are "closed" (or do not exist / tombstoned)
 
 Usage:
-    python3 ticket-ready.py [--format=llm] [--epic=<epic_id>]
+    python3 ticket-ready.py [--format=llm] [--json] [--epic=<epic_id>]
 
 Environment:
     TICKETS_TRACKER_DIR — path to the tickets tracker directory.
     When absent, derived from `git rev-parse --show-toplevel`.
 
-Output (default): one ticket ID per line
-Output (--format=llm): one JSON object per line (JSONL), LLM-optimised format
+Output (default):       one ticket ID per line
+Output (--format=llm):  one JSON object per line (JSONL), LLM-optimised format
+Output (--json):        a single JSON ARRAY of compiled ticket-state dicts
+                        (the same element shape `list`/`search` emit, derived
+                        from the same reducer data path); `--json` wins over
+                        `--format` when both are passed.
 """
 
 from __future__ import annotations
@@ -172,6 +176,14 @@ def main() -> int:
         help="Output format: 'ids' (one ID per line, default) or 'llm' (JSONL).",
     )
     parser.add_argument(
+        "--json",
+        action="store_true",
+        help=(
+            "Emit a single JSON array of compiled ticket-state dicts (same "
+            "element shape as `list`/`search`). Takes precedence over --format."
+        ),
+    )
+    parser.add_argument(
         "--epic",
         default=None,
         metavar="EPIC_ID",
@@ -195,6 +207,14 @@ def main() -> int:
         epic_filter = resolve_ticket_id(epic_filter, tracker_dir) or epic_filter
 
     ready = find_ready_tickets(tracker_dir, epic_filter=epic_filter)
+
+    # --json wins over --format: emit ONE JSON array of compiled ticket-state
+    # dicts. `find_ready_tickets` already returns these state dicts straight
+    # from the same reducer the --format=llm branch consumes, so this reuses the
+    # identical data path while matching the array shape `list`/`search` emit.
+    if args.json:
+        print(json.dumps(ready, ensure_ascii=False))
+        return 0
 
     if args.format == "llm":
         from ticket_reducer.llm_format import to_llm  # noqa: PLC0415
