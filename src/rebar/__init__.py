@@ -44,6 +44,15 @@ def _run(args, *, repo_root=None, check=True, input=None):
     return run(args, repo_root=repo_root, input=input, check=False, capture=True)
 
 
+def _native_reads_enabled() -> bool:
+    """Whether the public reads run in-process (default) vs. via the subprocess
+    dispatcher. Read PER CALL so a long-lived process (e.g. rebar-mcp) is
+    toggleable. Set ``REBAR_NATIVE_READS=0`` to force the subprocess path."""
+    import os
+
+    return os.environ.get("REBAR_NATIVE_READS", "1") != "0"
+
+
 def _ok(cp: subprocess.CompletedProcess, *, what: str) -> str:
     if cp.returncode != 0:
         raise RebarError(
@@ -279,6 +288,9 @@ def compact(ticket_id: str | None = None, *, repo_root=None) -> None:
 # ── Read path (subprocess → dispatcher; alias-aware, returns parsed JSON) ─────
 def show_ticket(ticket_id: str, *, repo_root=None) -> dict:
     """Compiled ticket state as a dict (alias/short-id aware)."""
+    if _native_reads_enabled():
+        from rebar import _reads
+        return _reads.show_ticket(ticket_id, repo_root=repo_root)
     return _json(_run(["show", ticket_id], repo_root=repo_root), what="show")
 
 
@@ -309,16 +321,34 @@ def list_tickets(
         args.append(f"--without-tag={without_tag}")
     if include_archived:
         args.append("--include-archived")
+    if _native_reads_enabled():
+        from rebar import _reads
+        return _reads.list_tickets(
+            status=status,
+            ticket_type=ticket_type,
+            priority=priority,
+            parent=parent,
+            has_tag=has_tag,
+            without_tag=without_tag,
+            include_archived=include_archived,
+            repo_root=repo_root,
+        )
     return _json(_run(args, repo_root=repo_root), what="list")
 
 
 def deps(ticket_id: str, *, repo_root=None) -> dict:
     """Dependency graph for a ticket (JSON)."""
+    if _native_reads_enabled():
+        from rebar import _reads
+        return _reads.deps(ticket_id, repo_root=repo_root)
     return _json(_run(["deps", ticket_id], repo_root=repo_root), what="deps")
 
 
 def ready(*, repo_root=None) -> Any:
     """Tickets ready to work (all blockers closed)."""
+    if _native_reads_enabled():
+        from rebar import _reads
+        return _reads.ready(repo_root=repo_root)
     return _json(_run(["ready", "--json"], repo_root=repo_root), what="ready")
 
 
@@ -350,6 +380,16 @@ def search(
         args.append(f"--has-tag={has_tag}")
     if include_archived:
         args.append("--include-archived")
+    if _native_reads_enabled():
+        from rebar import _reads
+        return _reads.search(
+            query,
+            status=status,
+            ticket_type=ticket_type,
+            has_tag=has_tag,
+            include_archived=include_archived,
+            repo_root=repo_root,
+        )
     return _json(_run(args, repo_root=repo_root), what="search")
 
 
