@@ -44,15 +44,6 @@ def _run(args, *, repo_root=None, check=True, input=None):
     return run(args, repo_root=repo_root, input=input, check=False, capture=True)
 
 
-def _native_reads_enabled() -> bool:
-    """Whether the public reads run in-process (default) vs. via the subprocess
-    dispatcher. Read PER CALL so a long-lived process (e.g. rebar-mcp) is
-    toggleable. Set ``REBAR_NATIVE_READS=0`` to force the subprocess path."""
-    import os
-
-    return os.environ.get("REBAR_NATIVE_READS", "1") != "0"
-
-
 def _ok(cp: subprocess.CompletedProcess, *, what: str) -> str:
     if cp.returncode != 0:
         raise RebarError(
@@ -285,13 +276,13 @@ def compact(ticket_id: str | None = None, *, repo_root=None) -> None:
     _ok(_run(args, repo_root=repo_root), what="compact")
 
 
-# ── Read path (subprocess → dispatcher; alias-aware, returns parsed JSON) ─────
+# ── Read path (in-process via rebar._reads; alias-aware, returns parsed JSON) ──
+# Reads compute from the native ticket_reducer/ticket_graph packages in-process —
+# no subprocess. (next_batch is the lone exception: still the bash orchestrator.)
 def show_ticket(ticket_id: str, *, repo_root=None) -> dict:
     """Compiled ticket state as a dict (alias/short-id aware)."""
-    if _native_reads_enabled():
-        from rebar import _reads
-        return _reads.show_ticket(ticket_id, repo_root=repo_root)
-    return _json(_run(["show", ticket_id], repo_root=repo_root), what="show")
+    from rebar import _reads
+    return _reads.show_ticket(ticket_id, repo_root=repo_root)
 
 
 def list_tickets(
@@ -306,54 +297,35 @@ def list_tickets(
     repo_root=None,
 ) -> list[dict]:
     """List tickets as a list of dicts, with optional filters."""
-    args = ["list"]
-    if status:
-        args.append(f"--status={status}")
-    if ticket_type:
-        args.append(f"--type={ticket_type}")
-    if priority is not None:
-        args.append(f"--priority={priority}")
-    if parent:
-        args.append(f"--parent={parent}")
-    if has_tag:
-        args.append(f"--has-tag={has_tag}")
-    if without_tag:
-        args.append(f"--without-tag={without_tag}")
-    if include_archived:
-        args.append("--include-archived")
-    if _native_reads_enabled():
-        from rebar import _reads
-        return _reads.list_tickets(
-            status=status,
-            ticket_type=ticket_type,
-            priority=priority,
-            parent=parent,
-            has_tag=has_tag,
-            without_tag=without_tag,
-            include_archived=include_archived,
-            repo_root=repo_root,
-        )
-    return _json(_run(args, repo_root=repo_root), what="list")
+    from rebar import _reads
+    return _reads.list_tickets(
+        status=status,
+        ticket_type=ticket_type,
+        priority=priority,
+        parent=parent,
+        has_tag=has_tag,
+        without_tag=without_tag,
+        include_archived=include_archived,
+        repo_root=repo_root,
+    )
 
 
 def deps(ticket_id: str, *, repo_root=None) -> dict:
     """Dependency graph for a ticket (JSON)."""
-    if _native_reads_enabled():
-        from rebar import _reads
-        return _reads.deps(ticket_id, repo_root=repo_root)
-    return _json(_run(["deps", ticket_id], repo_root=repo_root), what="deps")
+    from rebar import _reads
+    return _reads.deps(ticket_id, repo_root=repo_root)
 
 
 def ready(*, repo_root=None) -> Any:
     """Tickets ready to work (all blockers closed)."""
-    if _native_reads_enabled():
-        from rebar import _reads
-        return _reads.ready(repo_root=repo_root)
-    return _json(_run(["ready", "--json"], repo_root=repo_root), what="ready")
+    from rebar import _reads
+    return _reads.ready(repo_root=repo_root)
 
 
 def next_batch(epic_id: str, *, repo_root=None) -> dict:
-    """Next parallel batch of unblocked tickets under an epic's hierarchy (JSON)."""
+    """Next parallel batch of unblocked tickets under an epic's hierarchy (JSON).
+
+    Still routed through the bash engine (the only read not yet in-process)."""
     return _json(_run(["next-batch", epic_id, "--json"], repo_root=repo_root), what="next-batch")
 
 
@@ -371,26 +343,15 @@ def search(
     Returns a JSON list of matching ticket states (same element shape as
     :func:`list_tickets`). Query terms are whitespace-split and matched
     case-insensitively (AND)."""
-    args = ["search", query]
-    if status is not None:
-        args.append(f"--status={status}")
-    if ticket_type is not None:
-        args.append(f"--type={ticket_type}")
-    if has_tag is not None:
-        args.append(f"--has-tag={has_tag}")
-    if include_archived:
-        args.append("--include-archived")
-    if _native_reads_enabled():
-        from rebar import _reads
-        return _reads.search(
-            query,
-            status=status,
-            ticket_type=ticket_type,
-            has_tag=has_tag,
-            include_archived=include_archived,
-            repo_root=repo_root,
-        )
-    return _json(_run(args, repo_root=repo_root), what="search")
+    from rebar import _reads
+    return _reads.search(
+        query,
+        status=status,
+        ticket_type=ticket_type,
+        has_tag=has_tag,
+        include_archived=include_archived,
+        repo_root=repo_root,
+    )
 
 
 def fsck(*, recover: bool = False, repo_root=None) -> str:

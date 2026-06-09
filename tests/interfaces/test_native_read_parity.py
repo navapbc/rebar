@@ -1,41 +1,69 @@
-"""Parity gate for #2: in-process native reads vs. the subprocess dispatcher.
+"""Parity gate for #2: in-process native reads vs. the bash dispatcher.
 
-Every public read must return the SAME object whether it runs in-process
-(``REBAR_NATIVE_READS`` default) or via the bash dispatcher
-(``REBAR_NATIVE_READS=0``), across the edge cases the per-read shims handle
-differently: archived on/off, alias / short-id / canonical input, missing &
-error tickets, blocker permutations, and each filter dimension.
+The library's public reads run in-process (via ticket_reducer / ticket_graph).
+This pins them against the independent **bash engine** (the `rebar` dispatcher,
+invoked through ``rebar._engine.run``) across the edge cases the per-read shims
+handle differently: archived on/off, alias / short-id / canonical input, missing
+& error tickets, blocker permutations, and each filter dimension.
 
-Writes always go through the subprocess path, so the fixture seeds identically
-for both read modes.
+(Originally this compared an in-process vs. a REBAR_NATIVE_READS=0 subprocess
+path; that kill-switch was removed in the 0.2.0 cycle, so the oracle is now the
+bash dispatcher directly — a stronger, independent implementation.)
 """
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import rebar
+from rebar._engine import run as _engine_run
 
 
-def _native(monkeypatch, fn):
-    monkeypatch.delenv("REBAR_NATIVE_READS", raising=False)
-    return fn()
+def _bash(args, repo):
+    """Oracle: run the bash dispatcher and return parsed JSON. Raises RebarError
+    on a nonzero exit (mirrors the contract the in-process reads must match)."""
+    cp = _engine_run(args, repo_root=repo, check=False, capture=True)
+    if cp.returncode != 0:
+        raise rebar.RebarError(
+            f"bash {args[0]} exit {cp.returncode}: {cp.stderr.strip()}",
+            returncode=cp.returncode,
+            stderr=cp.stderr,
+        )
+    return json.loads(cp.stdout)
 
 
-def _subprocess(monkeypatch, fn):
-    monkeypatch.setenv("REBAR_NATIVE_READS", "0")
-    try:
-        return fn()
-    finally:
-        monkeypatch.delenv("REBAR_NATIVE_READS", raising=False)
+def _list_args(**kw):
+    args = ["list"]
+    if kw.get("status"):
+        args.append(f"--status={kw['status']}")
+    if kw.get("ticket_type"):
+        args.append(f"--type={kw['ticket_type']}")
+    if kw.get("priority") is not None:
+        args.append(f"--priority={kw['priority']}")
+    if kw.get("parent"):
+        args.append(f"--parent={kw['parent']}")
+    if kw.get("has_tag"):
+        args.append(f"--has-tag={kw['has_tag']}")
+    if kw.get("without_tag"):
+        args.append(f"--without-tag={kw['without_tag']}")
+    if kw.get("include_archived"):
+        args.append("--include-archived")
+    return args
 
 
-def _assert_parity(monkeypatch, fn):
-    """fn() under both modes must be equal; returns the (shared) result."""
-    native = _native(monkeypatch, fn)
-    sub = _subprocess(monkeypatch, fn)
-    assert native == sub, f"native != subprocess\n native={native!r}\n sub={sub!r}"
-    return native
+def _search_args(query, **kw):
+    args = ["search", query]
+    if kw.get("status") is not None:
+        args.append(f"--status={kw['status']}")
+    if kw.get("ticket_type") is not None:
+        args.append(f"--type={kw['ticket_type']}")
+    if kw.get("has_tag") is not None:
+        args.append(f"--has-tag={kw['has_tag']}")
+    if kw.get("include_archived"):
+        args.append("--include-archived")
+    return args
 
 
 @pytest.fixture
@@ -58,9 +86,7 @@ def seeded(rebar_repo):
     )
     ids["archived"] = rebar.create_ticket("task", "Task zeta archived", repo_root=r)
 
-    # Blocker edge: task_open depends_on task_blocker (still open → blocks).
     rebar.link(ids["task_open"], ids["task_blocker"], "depends_on", repo_root=r)
-    # Archived edge.
     rebar.archive(ids["archived"], repo_root=r)
     return rebar_repo, ids, alias
 
@@ -79,57 +105,49 @@ def seeded(rebar_repo):
         {"priority": 2},
     ],
 )
-def test_list_parity(monkeypatch, seeded, kwargs):
-    repo, ids, _alias = seeded
-    res = _assert_parity(
-        monkeypatch, lambda: rebar.list_tickets(repo_root=str(repo), **kwargs)
-    )
-    assert isinstance(res, list)
+def test_list_parity(seeded, kwargs):
+    repo, _ids, _alias = seeded
+    lib = rebar.list_tickets(repo_root=str(repo), **kwargs)
+    assert lib == _bash(_list_args(**kwargs), str(repo))
+    assert isinstance(lib, list)
 
 
-def test_list_parent_filter_parity(monkeypatch, seeded):
+def test_list_parent_filter_parity(seeded):
     repo, ids, _alias = seeded
-    res = _assert_parity(
-        monkeypatch, lambda: rebar.list_tickets(parent=ids["epic"], repo_root=str(repo))
-    )
-    assert any(t["ticket_id"] == ids["story"] for t in res)
+    lib = rebar.list_tickets(parent=ids["epic"], repo_root=str(repo))
+    assert lib == _bash(_list_args(parent=ids["epic"]), str(repo))
+    assert any(t["ticket_id"] == ids["story"] for t in lib)
 
 
 # ── show ─────────────────────────────────────────────────────────────────────
-def test_show_parity_canonical(monkeypatch, seeded):
+def test_show_parity_canonical(seeded):
     repo, ids, _alias = seeded
-    res = _assert_parity(
-        monkeypatch, lambda: rebar.show_ticket(ids["task_open"], repo_root=str(repo))
-    )
-    assert res["ticket_id"] == ids["task_open"]
+    lib = rebar.show_ticket(ids["task_open"], repo_root=str(repo))
+    assert lib == _bash(["show", ids["task_open"]], str(repo))
+    assert lib["ticket_id"] == ids["task_open"]
 
 
-def test_show_parity_alias(monkeypatch, seeded):
+def test_show_parity_alias(seeded):
     repo, ids, alias = seeded
-    res = _assert_parity(monkeypatch, lambda: rebar.show_ticket(alias, repo_root=str(repo)))
-    assert res["ticket_id"] == ids["task_open"]
+    lib = rebar.show_ticket(alias, repo_root=str(repo))
+    assert lib == _bash(["show", alias], str(repo))
+    assert lib["ticket_id"] == ids["task_open"]
 
 
-def test_show_parity_short_id(monkeypatch, seeded):
+def test_show_parity_short_id(seeded):
     repo, ids, _alias = seeded
-    short = ids["task_open"].split("-")[0]  # first hex group
-    res = _assert_parity(monkeypatch, lambda: rebar.show_ticket(short, repo_root=str(repo)))
-    assert res["ticket_id"] == ids["task_open"]
+    short = ids["task_open"].split("-")[0]
+    lib = rebar.show_ticket(short, repo_root=str(repo))
+    assert lib == _bash(["show", short], str(repo))
+    assert lib["ticket_id"] == ids["task_open"]
 
 
-def test_show_missing_raises_both_modes(monkeypatch, seeded):
+def test_show_missing_raises_both(seeded):
     repo, _ids, _alias = seeded
-
-    def call():
-        return rebar.show_ticket("nope-nope-nope-nope", repo_root=str(repo))
-
-    monkeypatch.delenv("REBAR_NATIVE_READS", raising=False)
     with pytest.raises(rebar.RebarError):
-        call()
-    monkeypatch.setenv("REBAR_NATIVE_READS", "0")
+        rebar.show_ticket("nope-nope-nope-nope", repo_root=str(repo))
     with pytest.raises(rebar.RebarError):
-        call()
-    monkeypatch.delenv("REBAR_NATIVE_READS", raising=False)
+        _bash(["show", "nope-nope-nope-nope"], str(repo))
 
 
 # ── search ───────────────────────────────────────────────────────────────────
@@ -140,62 +158,56 @@ def test_show_missing_raises_both_modes(monkeypatch, seeded):
         (("search term",), {}),
         (("task",), {"status": "open"}),
         (("task",), {"ticket_type": "task"}),
-        (("zeta",), {}),  # archived ticket — excluded by default
+        (("zeta",), {}),
         (("zeta",), {"include_archived": True}),
         (("frontend",), {"has_tag": "frontend"}),
         (("definitely-no-match-xyz",), {}),
     ],
 )
-def test_search_parity(monkeypatch, seeded, args, kwargs):
+def test_search_parity(seeded, args, kwargs):
     repo, _ids, _alias = seeded
-    _assert_parity(
-        monkeypatch, lambda: rebar.search(*args, repo_root=str(repo), **kwargs)
-    )
+    lib = rebar.search(*args, repo_root=str(repo), **kwargs)
+    assert lib == _bash(_search_args(*args, **kwargs), str(repo))
 
 
 # ── ready ────────────────────────────────────────────────────────────────────
-def test_ready_parity(monkeypatch, seeded):
+def test_ready_parity(seeded):
     repo, ids, _alias = seeded
-    res = _assert_parity(monkeypatch, lambda: rebar.ready(repo_root=str(repo)))
-    ready_ids = {t["ticket_id"] for t in res}
-    # task_open is blocked by an open task_blocker → not ready.
+    lib = rebar.ready(repo_root=str(repo))
+    assert lib == _bash(["ready", "--json"], str(repo))
+    ready_ids = {t["ticket_id"] for t in lib}
     assert ids["task_open"] not in ready_ids
     assert ids["task_blocker"] in ready_ids
 
 
-def test_ready_parity_after_unblock(monkeypatch, seeded):
+def test_ready_parity_after_unblock(seeded):
     repo, ids, _alias = seeded
     rebar.claim(ids["task_blocker"], assignee="t", repo_root=str(repo))
     rebar.transition(ids["task_blocker"], "in_progress", "closed", repo_root=str(repo))
-    res = _assert_parity(monkeypatch, lambda: rebar.ready(repo_root=str(repo)))
-    assert ids["task_open"] in {t["ticket_id"] for t in res}
+    lib = rebar.ready(repo_root=str(repo))
+    assert lib == _bash(["ready", "--json"], str(repo))
+    assert ids["task_open"] in {t["ticket_id"] for t in lib}
 
 
 # ── deps ─────────────────────────────────────────────────────────────────────
-def test_deps_parity(monkeypatch, seeded):
+def test_deps_parity(seeded):
     repo, ids, _alias = seeded
-    res = _assert_parity(monkeypatch, lambda: rebar.deps(ids["task_open"], repo_root=str(repo)))
-    assert res["ticket_id"] == ids["task_open"]
+    lib = rebar.deps(ids["task_open"], repo_root=str(repo))
+    assert lib == _bash(["deps", ids["task_open"]], str(repo))
+    assert lib["ticket_id"] == ids["task_open"]
 
 
-def test_deps_archived_target_raises_both_modes(monkeypatch, seeded):
+def test_deps_archived_target_raises_both(seeded):
     repo, ids, _alias = seeded
-
-    def call():
-        return rebar.deps(ids["archived"], repo_root=str(repo))
-
-    monkeypatch.delenv("REBAR_NATIVE_READS", raising=False)
     with pytest.raises(rebar.RebarError):
-        call()
-    monkeypatch.setenv("REBAR_NATIVE_READS", "0")
+        rebar.deps(ids["archived"], repo_root=str(repo))
     with pytest.raises(rebar.RebarError):
-        call()
-    monkeypatch.delenv("REBAR_NATIVE_READS", raising=False)
+        _bash(["deps", ids["archived"]], str(repo))
 
 
 # ── empty store ──────────────────────────────────────────────────────────────
-def test_empty_store_parity(monkeypatch, rebar_repo):
+def test_empty_store_parity(rebar_repo):
     repo = str(rebar_repo)
-    _assert_parity(monkeypatch, lambda: rebar.list_tickets(repo_root=repo))
-    _assert_parity(monkeypatch, lambda: rebar.ready(repo_root=repo))
-    _assert_parity(monkeypatch, lambda: rebar.search("anything", repo_root=repo))
+    assert rebar.list_tickets(repo_root=repo) == _bash(["list"], repo)
+    assert rebar.ready(repo_root=repo) == _bash(["ready", "--json"], repo)
+    assert rebar.search("anything", repo_root=repo) == _bash(["search", "anything"], repo)

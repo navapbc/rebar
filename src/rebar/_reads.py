@@ -3,12 +3,13 @@
 These mirror the bash read shims — ``ticket-show.sh``, ``ticket-list.sh``,
 ``ticket-graph.py`` (deps), ``ticket-ready.py``, ``ticket-search.py`` — but run
 in-process via the native ``ticket_reducer`` / ``ticket_graph`` packages, with no
-``bash`` + ``python3`` subprocess per call. ``rebar.__init__`` routes the public
-read functions here unless ``REBAR_NATIVE_READS=0``.
+``bash`` + ``python3`` subprocess per call. ``rebar.__init__``'s public read
+functions delegate straight here (there is no subprocess fallback).
 
-Each function returns the SAME Python object the subprocess path yields after its
+Each function returns the SAME Python object the bash dispatcher yields after its
 JSON round-trip, so callers (and the MCP server, which delegates to these) see no
-change. Parity is pinned by ``tests/interfaces/test_native_read_parity.py``.
+change. Parity against the bash engine is pinned by
+``tests/interfaces/test_native_read_parity.py``.
 
 ONE deliberate behavior difference vs. the subprocess path: in-process reads do
 NOT run the dispatcher's ``_ensure_initialized`` step, so they perform NO implicit

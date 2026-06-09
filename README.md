@@ -166,10 +166,9 @@ pip install -e '.[dev]'   # editable + test deps (pytest, mcp)
 >
 > Reads are increasingly Python-native and run **in-process** — the library's
 > `show`/`list`/`deps`/`ready`/`search` and the MCP read tools resolve via the
-> bundled `ticket_reducer`/`ticket_graph` packages with no subprocess (set
-> `REBAR_NATIVE_READS=0` to fall back to the dispatcher). The write path and
-> `next-batch` still drive the bash engine, so the unpacked-to-disk requirement
-> stands.
+> bundled `ticket_reducer`/`ticket_graph` packages with no subprocess. The write
+> path and `next-batch` still drive the bash engine, so the unpacked-to-disk
+> requirement stands.
 
 ## CLI
 
