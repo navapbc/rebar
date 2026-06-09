@@ -44,8 +44,10 @@ _create_ticket() {
     local repo="$1"
     local ticket_type="${2:-task}"
     local title="${3:-Test ticket}"
+    local extra_args="${4:-}"
     local out
-    out=$(cd "$repo" && bash "$TICKET_SCRIPT" create "$ticket_type" "$title" 2>/dev/null) || true
+    # shellcheck disable=SC2086
+    out=$(cd "$repo" && bash "$TICKET_SCRIPT" create "$ticket_type" "$title" $extra_args 2>/dev/null) || true
     echo "$out" | tail -1
 }
 
@@ -1463,5 +1465,114 @@ test_force_close_skips_open_children_guard() {
     assert_pass_if_clean "test_force_close_skips_open_children_guard"
 }
 test_force_close_skips_open_children_guard
+
+# ── Test 26 (bug #6): a non-closed (in_progress) child blocks the parent close ──
+# Regression for the too-narrow open-children guard: previously only children with
+# status exactly 'open' were counted, so an in_progress child did NOT block the
+# parent close. The guard must treat ANY non-closed child (open, in_progress,
+# blocked, in_review, ...) as unresolved.
+echo ""
+echo "Test 26 (bug #6): in_progress child blocks parent close (not just status=open)"
+test_in_progress_child_blocks_parent_close() {
+    _snapshot_fail
+
+    local repo
+    repo=$(_make_test_repo)
+
+    # Parent epic
+    local parent_id
+    parent_id=$(_create_ticket "$repo" epic "Epic with in_progress child")
+    if [ -z "$parent_id" ]; then
+        assert_eq "in_progress-child: parent epic created" "non-empty" "empty"
+        assert_pass_if_clean "test_in_progress_child_blocks_parent_close"
+        return
+    fi
+
+    # Child task under the parent, then moved to in_progress (NOT open, NOT closed)
+    local child_id
+    child_id=$(_create_ticket "$repo" task "Active child" "--parent $parent_id")
+    if [ -z "$child_id" ]; then
+        assert_eq "in_progress-child: child ticket created" "non-empty" "empty"
+        assert_pass_if_clean "test_in_progress_child_blocks_parent_close"
+        return
+    fi
+    (cd "$repo" && bash "$TICKET_SCRIPT" transition "$child_id" open in_progress 2>/dev/null) || true
+    local child_status
+    child_status=$(_get_ticket_status "$repo" "$child_id")
+    assert_eq "in_progress-child: child is in_progress" "in_progress" "$child_status"
+
+    # Closing the parent (with a valid verdict-hash so we reach the children guard,
+    # not the verdict-hash guard) must FAIL because the child is non-closed.
+    local close_exit=0 close_stderr
+    close_stderr=$(cd "$repo" && bash "$TICKET_SCRIPT" transition "$parent_id" open closed \
+        --verdict-hash="$(_verdict_hash "$repo" "$parent_id")" 2>&1) || close_exit=$?
+    assert_eq "in_progress-child: close blocked (non-zero exit)" "1" "$([ "$close_exit" -ne 0 ] && echo 1 || echo 0)"
+
+    # Parent must remain open (not closed)
+    local parent_status
+    parent_status=$(_get_ticket_status "$repo" "$parent_id")
+    assert_eq "in_progress-child: parent still open after blocked close" "open" "$parent_status"
+
+    # Error must name the unresolved child
+    if [[ "$close_stderr" == *"$child_id"* ]]; then
+        assert_eq "in_progress-child: error lists the unresolved child" "has-child" "has-child"
+    else
+        assert_eq "in_progress-child: error lists the unresolved child" "has-child" "missing: $close_stderr"
+    fi
+
+    assert_pass_if_clean "test_in_progress_child_blocks_parent_close"
+}
+test_in_progress_child_blocks_parent_close
+
+# ── Test 27 (bug #6): a child REPARENTED via `edit --parent` blocks the close ──
+# Root cause of the audit finding: the open-children scan read parent_id only from
+# the CREATE event, so a child created without a parent and later reparented onto
+# the epic (via `edit --parent`) was invisible to the guard — the epic could close
+# while that child was still in_progress. The scan must use the effective (reduced)
+# parent_id including EDIT events.
+echo ""
+echo "Test 27 (bug #6): child reparented via edit --parent blocks parent close"
+test_reparented_child_blocks_parent_close() {
+    local repo
+    repo=$(_make_test_repo)
+
+    local parent_id
+    parent_id=$(_create_ticket "$repo" epic "Epic gaining a reparented child")
+    if [ -z "$parent_id" ]; then
+        assert_eq "reparent-child: parent epic created" "non-empty" "empty"
+        assert_pass_if_clean "test_reparented_child_blocks_parent_close"
+        return
+    fi
+
+    # Child created with NO parent (CREATE event records no parent_id) ...
+    local child_id
+    child_id=$(_create_ticket "$repo" task "Orphan that gets adopted")
+    if [ -z "$child_id" ]; then
+        assert_eq "reparent-child: child ticket created" "non-empty" "empty"
+        assert_pass_if_clean "test_reparented_child_blocks_parent_close"
+        return
+    fi
+    # ... then reparented onto the epic via an EDIT event, and set in_progress.
+    (cd "$repo" && bash "$TICKET_SCRIPT" edit "$child_id" --parent="$parent_id" 2>/dev/null) || true
+    (cd "$repo" && bash "$TICKET_SCRIPT" transition "$child_id" open in_progress 2>/dev/null) || true
+
+    local close_exit=0 close_stderr
+    close_stderr=$(cd "$repo" && bash "$TICKET_SCRIPT" transition "$parent_id" open closed \
+        --verdict-hash="$(_verdict_hash "$repo" "$parent_id")" 2>&1) || close_exit=$?
+    assert_eq "reparent-child: close blocked (non-zero exit)" "1" "$([ "$close_exit" -ne 0 ] && echo 1 || echo 0)"
+
+    local parent_status
+    parent_status=$(_get_ticket_status "$repo" "$parent_id")
+    assert_eq "reparent-child: parent still open after blocked close" "open" "$parent_status"
+
+    if [[ "$close_stderr" == *"$child_id"* ]]; then
+        assert_eq "reparent-child: error lists the reparented child" "has-child" "has-child"
+    else
+        assert_eq "reparent-child: error lists the reparented child" "has-child" "missing: $close_stderr"
+    fi
+
+    assert_pass_if_clean "test_reparented_child_blocks_parent_close"
+}
+test_reparented_child_blocks_parent_close
 
 print_summary

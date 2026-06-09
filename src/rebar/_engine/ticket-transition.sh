@@ -25,7 +25,7 @@ _usage() {
     echo "       ticket transition <ticket_id> <target_status> [--reason=<text>] [--force] [--verdict-hash=<hash>] [--force-close=<reason>]  (auto-detects current status)" >&2
     echo "  current_status / target_status: open | in_progress | closed | blocked" >&2
     echo "  --reason=<text>          Required when closing bug tickets. Must start with 'Fixed:' or 'Escalated to user:'." >&2
-    echo "  --force                  Skip the open-children guard when closing. Open children remain open." >&2
+    echo "  --force                  Skip the unresolved-children guard when closing. Non-closed children remain unresolved." >&2
     echo "  --verdict-hash=<hash>    Required when closing story/epic tickets. HMAC from compute-verdict-hash.sh." >&2
     echo "  --force-close=<reason>   Bypass verdict-hash requirement for story/epic (requires user approval via hook)." >&2
     echo "  Examples:" >&2
@@ -199,21 +199,53 @@ def read_state_from_snapshot(ticket_dir):
 
 _UNKNOWN = object()  # Sentinel for corrupt/missing CREATE events (shared across functions)
 
-def read_parent_id_from_create(ticket_dir):
-    """Read parent_id from the CREATE event without running the full reducer.
+def effective_parent_id(ticket_dir):
+    """Current parent_id from the FULL event history, not just CREATE.
 
-    Returns the parent_id string (may be None/empty) or the module-level sentinel
-    _UNKNOWN if the CREATE event cannot be read (corrupt/missing).
+    The membership pre-filter must honor reparents made via `edit --parent`
+    (an EDIT event) and `edit --parent=null` (detach). Reading parent_id from the
+    CREATE event alone made reparented children invisible to the open-children
+    guard — an epic could be closed while a child reparented onto it (via edit)
+    was still open/in_progress, because that child's CREATE event recorded no
+    parent. (Compacted tickets fold pre-SNAPSHOT events into compiled_state and
+    retire the originals as *.retired, which the *.json glob excludes; present
+    EDITs are therefore always post-baseline, so last-by-timestamp wins.)
+
+    Pure file reads (no reducer subprocess), so this stays cheap at scale — the
+    expensive reducer is still only invoked for confirmed children (Pass 2).
+
+    Returns the parent_id string, '' (detached / no parent), or the sentinel
+    _UNKNOWN if no readable CREATE/SNAPSHOT baseline exists.
     """
-    creates = sorted(glob.glob(os.path.join(ticket_dir, '*-CREATE.json')))
-    if not creates:
+    setters = []          # (filename, parent_value)
+    have_baseline = False
+    for path in glob.glob(os.path.join(ticket_dir, '*.json')):
+        name = os.path.basename(path)
+        if name.startswith('.'):
+            continue
+        try:
+            with open(path) as f:
+                event = json.load(f)
+        except Exception:
+            continue
+        data = event.get('data', {}) or {}
+        if name.endswith('-CREATE.json'):
+            setters.append((name, data.get('parent_id')))
+            have_baseline = True
+        elif name.endswith('-SNAPSHOT.json'):
+            compiled = data.get('compiled_state') or {}
+            setters.append((name, compiled.get('parent_id')))
+            have_baseline = True
+        elif name.endswith('-EDIT.json'):
+            fields = data.get('fields', {}) or {}
+            if 'parent_id' in fields:
+                setters.append((name, fields.get('parent_id')))
+    if not have_baseline or not setters:
         return _UNKNOWN
-    try:
-        with open(creates[-1]) as f:
-            event = json.load(f)
-        return event.get('data', {}).get('parent_id')
-    except Exception:
-        return _UNKNOWN
+    # filename == ${timestamp_ns}-${uuid}-${TYPE}.json, so lexical == chronological
+    setters.sort(key=lambda t: t[0])
+    value = setters[-1][1]
+    return value if value else ''
 
 def read_state_via_reducer(ticket_dir):
     """Fallback: invoke reducer subprocess for tickets without a SNAPSHOT.
@@ -254,31 +286,19 @@ try:
             continue
         tid = entry.name
 
-        # Pass 1a: try SNAPSHOT (fastest — compiled state, no subprocess)
-        snapshot_state = read_state_from_snapshot(entry.path)
-        if snapshot_state is not None:
-            # Snapshot gives us parent_id without a subprocess.
-            # If parent_id doesn't match, skip immediately.
-            if snapshot_state.get('parent_id') != ticket_id:
-                continue
-            # Parent matches — check status from snapshot.
-            # Still need reducer to account for STATUS events after the snapshot.
-            state = read_state_via_reducer(entry.path)
-            if state is None:
-                state = snapshot_state  # fall back to snapshot status
-        else:
-            # Pass 1b: no SNAPSHOT — read parent_id from CREATE event (no subprocess).
-            parent_id_from_create = read_parent_id_from_create(entry.path)
-            if parent_id_from_create is _UNKNOWN:
-                # Cannot determine parent without reducer; skip for safety.
-                # (Corrupt/missing CREATE — not a valid child anyway.)
-                continue
-            if parent_id_from_create != ticket_id:
-                # CREATE event confirms this is not a child — skip without reducer.
-                continue
-            # Confirmed child via CREATE event — run reducer for current status.
-            state = read_state_via_reducer(entry.path)
+        # Pass 1 (fast, no subprocess): determine the ticket's CURRENT parent_id
+        # from its full event history (CREATE + EDITs + SNAPSHOT). Skip immediately
+        # unless this ticket is currently parented to the ticket being closed.
+        eff_parent = effective_parent_id(entry.path)
+        if eff_parent is _UNKNOWN or eff_parent != ticket_id:
+            continue
 
+        # Pass 2 (targeted): confirmed current child — run the reducer for its
+        # authoritative status (accounts for STATUS events after any SNAPSHOT),
+        # falling back to the SNAPSHOT compiled state if the reducer is unavailable.
+        state = read_state_via_reducer(entry.path)
+        if state is None:
+            state = read_state_from_snapshot(entry.path)
         if state is None:
             continue
         # Tombstone-aware: .tombstone.json is written by ticket delete and carries
@@ -313,12 +333,12 @@ PYEOF
     if [ -n "$open_children" ]; then
         open_children_count=$(echo "$open_children" | wc -l | tr -d ' ')
         if [ "$force_close" = "true" ]; then
-            echo "Warning: closing ticket '$ticket_id' with ${open_children_count} open child ticket(s) (--force)." >&2
-            echo "The following children remain open:" >&2
+            echo "Warning: closing ticket '$ticket_id' with ${open_children_count} unresolved (non-closed) child ticket(s) (--force)." >&2
+            echo "The following children are not yet closed:" >&2
             echo "$open_children" >&2
         else
-            echo "Error: cannot close ticket '$ticket_id' while it has ${open_children_count} open child ticket(s)." >&2
-            echo "Close the following children first, or use --force to close the parent with children remaining open:" >&2
+            echo "Error: cannot close ticket '$ticket_id' while it has ${open_children_count} unresolved (non-closed) child ticket(s)." >&2
+            echo "Close the following children first, or use --force to close the parent with children unresolved:" >&2
             echo "$open_children" >&2
             exit 1
         fi
