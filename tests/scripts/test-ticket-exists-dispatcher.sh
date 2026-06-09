@@ -45,9 +45,10 @@ make_tracker_fixture() {
     tracker_dir=$(mktemp -d)
     _CLEANUP_DIRS+=("$tracker_dir")
 
-    # e1 ticket (exists)
+    # e1 ticket (exists) — CREATE event carries a stored alias so we can also
+    # verify alias resolution (bug: 'exists <alias>' must work like show/edit/claim).
     mkdir -p "$tracker_dir/e1"
-    python3 -c "import json; json.dump({'event_type':'CREATE','ticket_id':'e1'}, open('$tracker_dir/e1/001-CREATE.json','w'))"
+    python3 -c "import json; json.dump({'event_type':'CREATE','ticket_id':'e1','data':{'alias':'happy-test-alias'}}, open('$tracker_dir/e1/001-CREATE.json','w'))"
 
     # arch1 ticket (exists)
     mkdir -p "$tracker_dir/arch1"
@@ -145,6 +146,35 @@ test_exists_routes_through_dispatcher() {
         (( PASS++ ))
     else
         echo "  FAIL: 'ticket exists' with no args exited 0 (RED — expected before GREEN)" >&2
+        (( FAIL++ ))
+    fi
+
+    # Test 7: 'exists <alias>' resolves the alias (regression for bug #7 — exists
+    # must accept aliases like show/edit/claim, not just raw ticket ids).
+    echo "Test 7: 'ticket exists <alias>' resolves alias and exits 0"
+    _tracker=$(make_tracker_fixture)
+    _exit=0
+    TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" exists happy-test-alias 2>/dev/null || _exit=$?
+
+    if [[ $_exit -eq 0 ]]; then
+        echo "  PASS: 'ticket exists happy-test-alias' exits 0 (alias resolved to e1)"
+        (( PASS++ ))
+    else
+        echo "  FAIL: 'ticket exists happy-test-alias' exited $_exit (expected 0 — alias not resolved)" >&2
+        (( FAIL++ ))
+    fi
+
+    # Test 8: 'exists <bogus-alias>' (no matching ticket) exits non-zero.
+    echo "Test 8: 'ticket exists <bogus-alias>' exits non-zero"
+    _tracker=$(make_tracker_fixture)
+    _exit=0
+    TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" exists no-such-alias 2>/dev/null || _exit=$?
+
+    if [[ $_exit -ge 1 ]]; then
+        echo "  PASS: 'ticket exists no-such-alias' exits non-zero (exit $_exit — not found)"
+        (( PASS++ ))
+    else
+        echo "  FAIL: 'ticket exists no-such-alias' exited 0 (expected non-zero)" >&2
         (( FAIL++ ))
     fi
 }

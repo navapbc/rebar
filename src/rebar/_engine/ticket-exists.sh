@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# ticket-exists.sh — O(1) presence check for a ticket in the tracker.
+# ticket-exists.sh — O(1)-ish presence check for a ticket in the tracker.
 # Exit 0 if ticket exists, exit 1 if not.
+#
+# Accepts any id form (full 16-hex ID, 8-hex short ID, alias, jira_key, or unique
+# prefix) — consistent with show/edit/claim — by resolving the input through the
+# shared resolve_ticket_id helper before the presence check.
 set -euo pipefail
 
 if [ -z "${1:-}" ]; then
@@ -8,7 +12,9 @@ if [ -z "${1:-}" ]; then
     exit 1
 fi
 
-ticket_id="$1"
+raw_id="$1"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Resolve tracker dir without unconditional git subprocess.
 if [ -n "${TICKETS_TRACKER_DIR:-}" ]; then
@@ -18,30 +24,30 @@ else
     TRACKER_DIR="$REPO_ROOT/.tickets-tracker"
 fi
 
-# Resolve 8-char short ID prefix (e.g. "f61f-7e0a") to full canonical ID.
-# The tracker may be a symlink (worktrees); use -L so find follows it.
-if [[ "$ticket_id" =~ ^[a-z0-9]{4}-[a-z0-9]{4}$ ]]; then
-    _full_id=""
-    _match_count=0
-    while IFS= read -r -d '' _entry; do
-        # Bug 19a3-03ca: ${var##*/} param expansion — no basename subprocess per entry.
-        _base="${_entry##*/}"
-        if [[ "${_base:0:9}" == "$ticket_id" ]] && \
-           [[ "$_base" =~ ^[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$ ]]; then
-            _full_id="$_base"
-            _match_count=$((_match_count + 1))
-        fi
-    done < <(find -L "$TRACKER_DIR" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -print0 2>/dev/null)
-    if [ "$_match_count" -eq 1 ]; then
-        ticket_id="$_full_id"
-    fi
+# has_ticket_events — true if $1 is a ticket dir with CREATE/SNAPSHOT events.
+has_ticket_events() {
+    local _dir="$1"
+    [ -d "$_dir" ] && \
+        { ls "$_dir/"*-CREATE.json >/dev/null 2>&1 || ls "$_dir/"*-SNAPSHOT.json >/dev/null 2>&1; }
+}
+
+# Fast path: exact directory-name match (O(1), no resolver/subprocess). Covers
+# canonical ids and any literal directory name without needing id resolution.
+if has_ticket_events "$TRACKER_DIR/$raw_id"; then
+    exit 0
 fi
 
-ticket_dir="$TRACKER_DIR/$ticket_id"
+# Resolve any other id form (8-hex short, alias, jira_key, unique prefix) to the
+# canonical ticket directory name — consistent with show/edit/claim. resolve_ticket_id
+# verifies presence and exits non-zero if the input cannot be resolved to an
+# existing ticket, which is exactly the "absent" semantics we want.
+declare -f resolve_ticket_id >/dev/null 2>&1 || source "$SCRIPT_DIR/ticket-lib.sh"
+if ! ticket_id=$(TICKETS_TRACKER_DIR="$TRACKER_DIR" resolve_ticket_id "$raw_id" 2>/dev/null); then
+    exit 1
+fi
 
-# Check for CREATE (normal) or SNAPSHOT (post-compaction) events.
-if [ -d "$ticket_dir" ] && \
-   { ls "$ticket_dir/"*-CREATE.json >/dev/null 2>&1 || ls "$ticket_dir/"*-SNAPSHOT.json >/dev/null 2>&1; }; then
+# Final presence check on the resolved canonical id.
+if has_ticket_events "$TRACKER_DIR/$ticket_id"; then
     exit 0
 fi
 exit 1
