@@ -19,6 +19,40 @@ import os
 
 import rebar
 
+# Typed output for show_ticket so FastMCP advertises an outputSchema to MCP
+# clients (agents get a documented, validated shape instead of an opaque dict).
+# Mirrors src/rebar/schemas/ticket_state.schema.json — kept permissive
+# (extra="allow", non-core fields optional) so the evolving event-sourced shape
+# never breaks the tool. A cross-interface test pins this and the CLI/library
+# output to the canonical schema.
+#
+# Defined at module level (not inside build_server) because FastMCP resolves
+# return annotations via eval against the function's module globals; a local
+# class can't be resolved under `from __future__ import annotations`. pydantic is
+# guaranteed by the `mcp` extra; guarded so a bare `import rebar.mcp_server`
+# without the extra still reaches build_server's friendly install message.
+try:
+    from pydantic import BaseModel, ConfigDict
+
+    class TicketStateOut(BaseModel):
+        model_config = ConfigDict(extra="allow")
+
+        ticket_id: str
+        ticket_type: str
+        title: str
+        status: str
+        priority: int
+        tags: list[str] = []
+        assignee: str | None = None
+        parent_id: str | None = None
+        alias: str | None = None
+        description: str | None = None
+        comments: list[dict] = []
+        deps: list[dict] = []
+        file_impact: list[dict] = []
+except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
+    TicketStateOut = None  # type: ignore[assignment,misc]
+
 
 def _readonly() -> bool:
     return os.environ.get("REBAR_MCP_READONLY", "").strip() in ("1", "true", "yes")
@@ -37,9 +71,9 @@ def build_server():
 
     # ── Read tools ────────────────────────────────────────────────────────────
     @mcp.tool()
-    def show_ticket(ticket_id: str) -> dict:
+    def show_ticket(ticket_id: str) -> TicketStateOut:
         """Show compiled ticket state (accepts full id, short id, or alias)."""
-        return rebar.show_ticket(ticket_id)
+        return TicketStateOut.model_validate(rebar.show_ticket(ticket_id))
 
     @mcp.tool()
     def list_tickets(

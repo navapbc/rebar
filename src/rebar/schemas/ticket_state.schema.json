@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/ticket_state.schema.json",
+  "title": "TicketState",
+  "description": "Compiled ticket state as emitted by `rebar show <id>` (and the library show_ticket / MCP show_ticket tool). This is replay-derived state, not an event. Unknown properties are allowed so the event-sourced shape can evolve without breaking consumers.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ticket_id", "ticket_type", "title", "status", "priority", "tags"],
+  "properties": {
+    "ticket_id": {
+      "type": "string",
+      "description": "Canonical ticket id (the directory name on the tickets branch)."
+    },
+    "ticket_type": {
+      "type": "string",
+      "enum": ["bug", "epic", "story", "task"]
+    },
+    "title": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["open", "in_progress", "blocked", "closed", "archived", "deleted"],
+      "description": "Replayed lifecycle status. 'archived'/'deleted' reflect the archive marker / soft-delete tombstone."
+    },
+    "priority": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4,
+      "description": "0=critical … 4=backlog (default 2)."
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "assignee": { "type": ["string", "null"] },
+    "parent_id": { "type": ["string", "null"] },
+    "alias": {
+      "type": ["string", "null"],
+      "description": "Human-friendly slug (e.g. 'damp-filth-cup')."
+    },
+    "description": { "type": ["string", "null"] },
+    "author": { "type": ["string", "null"] },
+    "created_at": {
+      "type": ["integer", "null"],
+      "description": "Creation timestamp in nanoseconds (time.time_ns())."
+    },
+    "env_id": { "type": ["string", "null"] },
+    "comments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["body"],
+        "properties": {
+          "body": { "type": "string" },
+          "author": { "type": ["string", "null"] },
+          "timestamp": { "type": ["integer", "string", "null"] }
+        }
+      }
+    },
+    "deps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["target_id", "relation"],
+        "properties": {
+          "target_id": { "type": "string" },
+          "relation": {
+            "type": "string",
+            "enum": ["blocks", "depends_on", "relates_to", "duplicates", "supersedes", "discovered_from"]
+          },
+          "link_uuid": { "type": "string" }
+        }
+      }
+    },
+    "file_impact": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "bridge_alerts": { "type": "array" },
+    "reverts": { "type": "array" },
+    "preconditions_summary": { "type": "object" }
+  }
+}

@@ -22,7 +22,7 @@ dependencies = []
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.2"]
-dev = ["pytest>=8", "mcp>=1.2"]
+dev = ["pytest>=8", "mcp>=1.2", "jsonschema>=4"]
 
 [project.scripts]
 rebar = "rebar.cli:main"
