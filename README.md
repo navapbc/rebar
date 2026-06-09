@@ -151,12 +151,25 @@ pip install '.[mcp]'      # + MCP server (FastMCP)
 pip install -e '.[dev]'   # editable + test deps (pytest, mcp)
 ```
 
-> **Packaging note:** the engine (bash dispatcher + `ticket-*.sh` + python
-> helpers) is exec'd as real files, so rebar must be installed **unpacked to a
-> real on-disk directory** — zipimport / zip-safe installs are unsupported.
-> Standard wheel installs (hatchling builds unpacked) and editable installs
-> satisfy this; `engine_dir()` asserts it at the first engine call and fails
-> loudly otherwise.
+> **Packaging note — why rebar installs *unpacked* to disk.** rebar's engine is a
+> **`bash` dispatcher plus `ticket-*.sh` and Python helper files that an external
+> `bash` process executes as real on-disk files** — it `source`s its siblings by
+> path and runs the Python helpers as `python3 <file>`. That's a property of the
+> *engine*, not of Python's import system, so the package must be installed
+> unpacked to a real directory and **zipimport / zip-safe bundles (zipapp, shiv,
+> PEX, Lambda zips) are unsupported**. The subtle part: a zip-safe wheel would not
+> even help, because `bash` itself has to read the scripts from a filesystem —
+> rebar requires `bash` on the host *regardless* of how Python is packaged. Every
+> standard install satisfies this: pip/pipx wheels (hatchling builds unpacked),
+> editable installs, and Homebrew all land real files. `engine_dir()` asserts it
+> at the first engine call and fails loudly otherwise.
+>
+> Reads are increasingly Python-native and run **in-process** — the library's
+> `show`/`list`/`deps`/`ready`/`search` and the MCP read tools resolve via the
+> bundled `ticket_reducer`/`ticket_graph` packages with no subprocess (set
+> `REBAR_NATIVE_READS=0` to fall back to the dispatcher). The write path and
+> `next-batch` still drive the bash engine, so the unpacked-to-disk requirement
+> stands.
 
 ## CLI
 
