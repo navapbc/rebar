@@ -31,12 +31,14 @@ class Adapter:
     def show(self, tid: str) -> dict: ...
     def list(self, **filters: Any) -> list[dict]: ...
     def transition(self, tid: str, current: str, target: str) -> bool: ...
+    def claim(self, tid: str, assignee: str | None = None) -> bool: ...
     def comment(self, tid: str, body: str) -> None: ...
     def tag(self, tid: str, tag: str) -> None: ...
     def link(self, a: str, b: str, relation: str) -> None: ...
     def deps(self, tid: str) -> dict: ...
     def ready(self) -> Any: ...
     def next_batch(self, epic_id: str) -> dict: ...
+    def search(self, query: str, **filters: Any) -> list[dict]: ...
 
 
 # ── Library ────────────────────────────────────────────────────────────────
@@ -64,6 +66,13 @@ class LibraryAdapter(Adapter):
         except self._r.RebarError:
             return False
 
+    def claim(self, tid: str, assignee: str | None = None) -> bool:
+        try:
+            self._r.claim(tid, assignee=assignee)
+            return True
+        except self._r.RebarError:
+            return False
+
     def comment(self, tid: str, body: str) -> None:
         self._r.comment(tid, body)
 
@@ -81,6 +90,9 @@ class LibraryAdapter(Adapter):
 
     def next_batch(self, epic_id: str) -> dict:
         return self._r.next_batch(epic_id)
+
+    def search(self, query: str, **filters: Any) -> list[dict]:
+        return self._r.search(query, **filters)
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
@@ -142,6 +154,12 @@ class CliAdapter(Adapter):
     def transition(self, tid: str, current: str, target: str) -> bool:
         return self._run("transition", tid, current, target).returncode == 0
 
+    def claim(self, tid: str, assignee: str | None = None) -> bool:
+        args = ["claim", tid]
+        if assignee:
+            args.append(f"--assignee={assignee}")
+        return self._run(*args).returncode == 0
+
     def comment(self, tid: str, body: str) -> None:
         assert self._run("comment", tid, body).returncode == 0
 
@@ -159,6 +177,14 @@ class CliAdapter(Adapter):
 
     def next_batch(self, epic_id: str) -> dict:
         return self._ok_json("next-batch", epic_id, "--json")
+
+    def search(self, query: str, **filters: Any) -> list[dict]:
+        args = ["search", query]
+        for k, v in filters.items():
+            if v is None:
+                continue
+            args.append(f"--{k.replace('_', '-')}={v}")
+        return self._ok_json(*args)
 
 
 # ── MCP ──────────────────────────────────────────────────────────────────────
@@ -227,6 +253,13 @@ class McpAdapter(Adapter):
         except Exception:
             return False
 
+    def claim(self, tid: str, assignee: str | None = None) -> bool:
+        try:
+            self._call("claim_ticket", ticket_id=tid, assignee=assignee)
+            return True
+        except Exception:
+            return False
+
     def comment(self, tid: str, body: str) -> None:
         self._call("comment_ticket", ticket_id=tid, body=body)
 
@@ -244,3 +277,6 @@ class McpAdapter(Adapter):
 
     def next_batch(self, epic_id: str) -> dict:
         return self._call("next_batch", epic_id=epic_id)
+
+    def search(self, query: str, **filters: Any) -> list[dict]:
+        return self._call("search", query=query, **filters)

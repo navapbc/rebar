@@ -340,7 +340,7 @@ test_delete_list_visibility
 # History: the edge-triggered bridge (bridge/_outbound_handlers.handle_status_event,
 # which called delete_issue for status==deleted) was removed in commit a3a3928f52
 # when epic 3a03 cut over to the level-triggered reconciler. The reconciler has no
-# delete_issue route — instead, dso_reconciler.outbound_differ maps a deleted local
+# delete_issue route — instead, rebar_reconciler.outbound_differ maps a deleted local
 # status to the Jira "Done" status (deleted -> Done) and excludes deleted tickets
 # from outbound mutations by default. This test asserts that CURRENT behavior:
 #   1. _map_local_to_jira_fields maps status "deleted" -> "Done".
@@ -363,7 +363,7 @@ import sys, os
 repo_root = sys.argv[1]
 sys.path.insert(0, os.path.join(repo_root, 'src', 'rebar', '_engine'))
 
-from dso_reconciler.outbound_differ import (
+from rebar_reconciler.outbound_differ import (
     _map_local_to_jira_fields,
     compute_outbound_mutations,
 )

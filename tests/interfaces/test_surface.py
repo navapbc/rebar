@@ -34,10 +34,15 @@ def test_mcp_exposes_expected_tools() -> None:
     names = set(_mcp_tools())
     expected = {
         "show_ticket", "list_tickets", "ticket_deps", "ready_tickets",
-        "next_batch", "reconcile", "create_ticket", "transition_ticket",
+        "next_batch", "search", "reconcile", "create_ticket", "transition_ticket",
+        "claim_ticket", "reopen_ticket",
         "comment_ticket", "edit_ticket", "link_tickets", "unlink_tickets",
         "tag_ticket", "untag_ticket", "archive_ticket",
         "compact_ticket", "fsck",
+        # WS5d: quality gates + file-impact over MCP
+        "clarity_check", "check_ac", "quality_check", "validate",
+        "get_file_impact", "set_file_impact",
+        "get_verify_commands", "set_verify_commands",
     }
     assert expected <= names, f"missing MCP tools: {expected - names}"
 
@@ -65,9 +70,11 @@ def test_library_public_api() -> None:
     import rebar
 
     for fn in (
-        "init_repo", "create_ticket", "transition", "comment", "edit_ticket",
+        "init_repo", "create_ticket", "transition", "claim", "reopen", "comment", "edit_ticket",
         "link", "unlink", "tag", "untag", "archive", "compact", "fsck",
-        "show_ticket", "list_tickets", "deps", "ready", "next_batch", "reconcile",
+        "clarity_check", "check_ac", "quality_check", "validate",
+        "get_file_impact", "set_file_impact", "get_verify_commands", "set_verify_commands",
+        "show_ticket", "list_tickets", "deps", "ready", "next_batch", "search", "reconcile",
     ):
         assert callable(getattr(rebar, fn)), fn
     assert not hasattr(rebar, "classify")

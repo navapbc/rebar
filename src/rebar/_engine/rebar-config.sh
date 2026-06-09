@@ -12,7 +12,6 @@
 # never disagree on repo-root.
 : "${REBAR_ROOT:=${PROJECT_ROOT:-}}"
 : "${PROJECT_ROOT:=${REBAR_ROOT:-}}"
-: "${DSO_TICKET_LEGACY:=${REBAR_TICKET_LEGACY:-}}"
 : "${DSO_AUTHOR:=${REBAR_AUTHOR:-}}"
 : "${DSO_TICKET_CLI:=${REBAR_TICKET_CLI:-}}"
 : "${DSO_CLI:=${REBAR_CLI:-}}"
@@ -23,7 +22,6 @@
 # Strip empty aliases so `:-` fallbacks downstream still fire.
 [ -z "${REBAR_ROOT:-}" ] && unset REBAR_ROOT
 [ -z "${PROJECT_ROOT:-}" ] && unset PROJECT_ROOT
-[ -z "${DSO_TICKET_LEGACY:-}" ] && unset DSO_TICKET_LEGACY
 [ -z "${DSO_AUTHOR:-}" ] && unset DSO_AUTHOR
 [ -z "${DSO_TICKET_CLI:-}" ] && unset DSO_TICKET_CLI
 [ -z "${DSO_CLI:-}" ] && unset DSO_CLI

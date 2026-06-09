@@ -24,6 +24,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Shared cross-environment reconvergence helper (_reconverge_tickets). Self-
+# contained; see ticket-sync.sh for the Concurrency Doctrine (§0) rationale.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/ticket-sync.sh"
+
 _usage() {
     echo "Usage: ticket <subcommand> [args...]"
     echo ""
@@ -33,6 +38,7 @@ _usage() {
     echo "  show        Show ticket details"
     echo "  list        List all tickets as JSON"
     echo "  transition  Transition ticket status (optimistic concurrency)"
+    echo "  claim       Atomically claim an open ticket (-> in_progress + assignee; exit 10 if taken)"
     echo "  comment     Add a comment to a ticket"
     echo "  link        Link two tickets (blocks|depends_on|relates_to)"
     echo "  unlink      Remove a link between two tickets"
@@ -53,6 +59,7 @@ _usage() {
     echo "  list-descendants  BFS walk from a root ticket, bucketed by type (JSON)"
     echo "  next-batch    Select next parallel agent batch for an epic [--json]"
     echo "  ready         List tickets ready to work (all blockers closed)"
+    echo "  search        Full-text search over titles/descriptions/comments/tags (JSON)"
     echo "  archive       Archive an open ticket (excludes from default list; idempotent)"
     echo "  set-file-impact  Record file impact for a ticket (JSON array of {path,reason} objects)"
     echo "  get-file-impact  Get the current file impact array for a ticket (JSON)"
@@ -68,58 +75,6 @@ _ensure_initialized() {
     if [[ -n "${TICKETS_TRACKER_DIR:-}" ]]; then
         return 0
     fi
-    if [[ "${DSO_TICKET_LEGACY:-}" == "1" ]]; then
-        echo "DSO_TICKET_LEGACY=1: using Python-backed _ensure_initialized path" >&2
-        local repo_root
-        repo_root="${PROJECT_ROOT:-${REBAR_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}}" || true
-        if [[ -z "$repo_root" ]]; then
-            echo "Error: not inside a git repository (set REBAR_ROOT or run inside the repo)" >&2
-            exit 1
-        fi
-        if [[ ! -d "$repo_root/.tickets-tracker" ]]; then
-            bash "$SCRIPT_DIR/ticket-init.sh" --silent 1>/dev/null || {
-                echo "Error: ticket system initialization failed. Run 'ticket init' manually." >&2
-                exit 1
-            }
-        fi
-        if [[ "${_TICKET_TEST_NO_SYNC:-}" == "1" ]]; then
-            return 0
-        fi
-        local tracker_dir
-        tracker_dir=$(python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$repo_root/.tickets-tracker" 2>/dev/null) || tracker_dir="$repo_root/.tickets-tracker"
-        if [[ -d "$tracker_dir" ]] && git -C "$tracker_dir" rev-parse --verify tickets &>/dev/null; then
-            local sync_marker
-            sync_marker="/tmp/.ticket-sync-$(python3 -c "import hashlib,sys; print(hashlib.md5(sys.argv[1].encode()).hexdigest()[:12])" "$tracker_dir" 2>/dev/null || echo "fallback")"
-            local now
-            now=$(date +%s)
-            local marker_age=9999
-            if [[ -f "$sync_marker" ]]; then
-                local marker_time
-                marker_time=$(cat "$sync_marker" 2>/dev/null || echo 0)
-                marker_age=$(( now - marker_time ))
-            fi
-            # Sync at most once per minute to shrink the divergence window during
-            # rapid-fire ticket operations (brainstorm sessions). 87f3-3b57.
-            if [[ "$marker_age" -ge 60 ]]; then
-                if git -C "$tracker_dir" fetch origin tickets --quiet 2>/dev/null; then
-                    if git -C "$tracker_dir" rev-parse --verify origin/tickets &>/dev/null; then
-                        if ! git -C "$tracker_dir" merge-base tickets origin/tickets &>/dev/null; then
-                            git -C "$tracker_dir" reset --hard origin/tickets --quiet 2>/dev/null || true
-                        else
-                            local _local_ahead
-                            _local_ahead=$(git -C "$tracker_dir" log --oneline origin/tickets..tickets 2>/dev/null) || true
-                            if [ -z "$_local_ahead" ]; then
-                                git -C "$tracker_dir" reset --hard origin/tickets --quiet 2>/dev/null || true
-                            fi
-                        fi
-                    fi
-                fi
-                echo "$now" > "$sync_marker"
-            fi
-        fi
-        return 0
-    fi
-
     local repo_root
     repo_root="${PROJECT_ROOT:-${REBAR_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}}" || true
     if [[ -z "$repo_root" ]]; then
@@ -163,28 +118,14 @@ _ensure_initialized() {
         fi
         # Sync at most once per minute to shrink the divergence window during
         # rapid-fire ticket operations (brainstorm sessions). 87f3-3b57.
+        #
+        # Reconvergence policy lives in _reconverge_tickets (ticket-sync.sh): it
+        # detects local-ahead by HEAD (not the lagging branch ref — the WS3
+        # data-loss fix), merges-as-union for related divergence, force-resets
+        # only the unrelated-history stale-orphan case, refuses to act through a
+        # rebase/merge recovery state, and runs under the write lock.
         if [[ "$marker_age" -ge 60 ]]; then
-            if git -C "$tracker_dir" fetch origin tickets --quiet 2>/dev/null; then
-                if git -C "$tracker_dir" rev-parse --verify origin/tickets &>/dev/null; then
-                    # Two-phase sync guard (0051-3428 + eb00-efd0):
-                    # Phase 1: detect unrelated histories (orphan branch created when
-                    # origin/tickets was not yet known locally). No merge-base means
-                    # the local branch is a stale orphan — safe to force-reset.
-                    # Phase 2: for related histories, preserve local-ahead commits
-                    # (the original eb00-efd0 protection).
-                    if ! git -C "$tracker_dir" merge-base tickets origin/tickets &>/dev/null; then
-                        # Unrelated histories: local is a stale orphan; force-reset to remote
-                        git -C "$tracker_dir" reset --hard origin/tickets --quiet 2>/dev/null || true
-                    else
-                        # Related histories: only reset if local has no commits ahead of remote
-                        local _local_ahead
-                        _local_ahead=$(git -C "$tracker_dir" log --oneline origin/tickets..tickets 2>/dev/null) || true
-                        if [ -z "$_local_ahead" ]; then
-                            git -C "$tracker_dir" reset --hard origin/tickets --quiet 2>/dev/null || true
-                        fi
-                    fi
-                fi
-            fi
+            _reconverge_tickets "$tracker_dir"
             echo "$now" > "$sync_marker"
         fi
     fi
@@ -220,6 +161,21 @@ case "$subcommand" in
         # shellcheck source=/dev/null
         source "$SCRIPT_DIR/ticket-lib-api.sh"
         _ticketlib_dispatch ticket_transition "$@"
+        exit $?
+        ;;
+    claim)
+        # Atomic claim (open -> in_progress + assignee in one locked commit).
+        # exit 10 surfaces optimistic-concurrency rejection (already claimed).
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized; fi
+        exec bash "$SCRIPT_DIR/ticket-claim.sh" "$@"
+        ;;
+    reopen)
+        # Thin convenience over transition: closed -> open (optimistic concurrency,
+        # exit 10 if not currently closed).
+        _ensure_initialized
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/ticket-lib-api.sh"
+        _ticketlib_dispatch ticket_transition "$1" closed open
         exit $?
         ;;
     list)
@@ -425,6 +381,11 @@ case "$subcommand" in
         source "$SCRIPT_DIR/ticket-lib-api.sh"
         _ticketlib_dispatch ticket_ready "$@"
         exit $?
+        ;;
+    search)
+        # Full-text search (replay-derived; no committed index). Read-only.
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized; fi
+        exec python3 "$SCRIPT_DIR/ticket-search.py" "$@"
         ;;
     summary)
         # REVIEW-DEFENSE: _ensure_initialized is intentionally omitted here.

@@ -5,11 +5,9 @@
 # Verifies that:
 #   1. `ticket show` spawns zero python3 processes (bash-native path).
 #   2. Bash-native md5 computation is byte-identical to Python's hashlib.md5.
-#   3. DSO_TICKET_LEGACY=1 routes back through the python3-backed path.
 #
-# Tests 1 and 3 MUST FAIL (RED) against the current unmodified code because
-# the bash-native implementation and DSO_TICKET_LEGACY toggle do not exist yet.
-# Test 2 is a GREEN test that documents the intended bash md5 replacement.
+# Test 1 verifies the bash-native (zero-python3) read path; Test 2 documents the
+# bash md5 replacement.
 #
 # Usage: bash tests/scripts/test-ticket-init-bash-native.sh
 
@@ -177,47 +175,12 @@ test_md5_12_byte_identical() {
     return 0
 }
 
-# ── Test 3: DSO_TICKET_LEGACY=1 routes through the python3-backed path ────────
-test_dso_ticket_legacy_restores_python() {
-    local setup repo ticket_id sentinel shim_dir
-    setup=$(_make_initialized_repo_with_ticket) || { echo "  setup failed"; return 1; }
-    repo="${setup% *}"
-    ticket_id="${setup##* }"
-
-    sentinel="/tmp/python3-sentinel-$$-legacy"
-    rm -f "$sentinel"
-    _CLEANUP_FILES+=("$sentinel")
-
-    shim_dir=$(_make_python3_shim "$sentinel")
-
-    local exit_code=0
-    (
-        cd "$repo"
-        PATH="$shim_dir:$PATH" \
-            DSO_TICKET_LEGACY=1 \
-            _TICKET_TEST_NO_SYNC=1 \
-            bash "$TICKET_SCRIPT" show "$ticket_id" >/dev/null 2>&1
-    ) || exit_code=$?
-
-    if [ "$exit_code" -ne 0 ]; then
-        echo "  ticket show (legacy) exited $exit_code (expected 0)"
-        return 1
-    fi
-
-    if [ ! -f "$sentinel" ]; then
-        echo "  sentinel missing: python3 was NOT spawned in legacy mode (expected spawn)"
-        return 1
-    fi
-    return 0
-}
-
 # ── Runner ────────────────────────────────────────────────────────────────────
 pass=0
 fail=0
 for fn in \
     test_ensure_initialized_no_python3 \
-    test_md5_12_byte_identical \
-    test_dso_ticket_legacy_restores_python
+    test_md5_12_byte_identical
 do
     if $fn; then
         echo "PASS: $fn"

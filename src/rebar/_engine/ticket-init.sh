@@ -328,9 +328,11 @@ if ! git -C "$TRACKER_DIR" show tickets:.gitignore &>/dev/null 2>&1; then
 .closure-key
 .state-cache
 .scratch/
+.cache.json
+*/.cache.json
 GITIGNORE
     git -C "$TRACKER_DIR" add .gitignore
-    git -C "$TRACKER_DIR" commit -q --no-verify -m "chore: add .gitignore for env-id, state-cache, and scratch"
+    git -C "$TRACKER_DIR" commit -q --no-verify -m "chore: add .gitignore for env-id, state-cache, scratch, and reducer cache"
 else
     # Pre-upgrade path: .gitignore exists but may be missing entries.
     _gitignore_content=$(git -C "$TRACKER_DIR" show tickets:.gitignore 2>/dev/null || echo "")
@@ -345,6 +347,15 @@ else
             git -C "$TRACKER_DIR" show tickets:.gitignore > "$TRACKER_DIR/.gitignore"
         fi
         echo ".closure-key" >> "$TRACKER_DIR/.gitignore"
+        _gitignore_updated=true
+    fi
+    # I3a: the per-ticket reducer cache (.cache.json) is local + rebuildable and
+    # must never be committed (it would create cross-client merge conflicts).
+    if ! echo "$_gitignore_content" | grep -qFx '.cache.json' 2>/dev/null; then
+        if [ "$_gitignore_updated" = false ]; then
+            git -C "$TRACKER_DIR" show tickets:.gitignore > "$TRACKER_DIR/.gitignore"
+        fi
+        printf '%s\n%s\n' '.cache.json' '*/.cache.json' >> "$TRACKER_DIR/.gitignore"
         _gitignore_updated=true
     fi
     if [ "$_gitignore_updated" = true ]; then

@@ -27,14 +27,26 @@ def test_readonly_hides_write_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     names = _tool_names(build_server())
     # Reads remain; writes are gone.
     assert "show_ticket" in names and "list_tickets" in names
-    for write_tool in ("create_ticket", "transition_ticket", "tag_ticket", "archive_ticket"):
+    for write_tool in (
+        "create_ticket", "transition_ticket", "tag_ticket", "archive_ticket",
+        "claim_ticket", "reopen_ticket", "set_file_impact", "set_verify_commands",
+    ):
         assert write_tool not in names, write_tool
+    # WS5d: quality-gate + file-impact READ tools stay exposed in readonly mode.
+    for read_tool in (
+        "clarity_check", "check_ac", "quality_check", "validate",
+        "get_file_impact", "get_verify_commands",
+    ):
+        assert read_tool in names, read_tool
 
 
 def test_write_tools_present_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("REBAR_MCP_READONLY", raising=False)
     names = _tool_names(build_server())
-    assert {"create_ticket", "transition_ticket"} <= names
+    assert {
+        "create_ticket", "transition_ticket", "claim_ticket", "reopen_ticket",
+        "set_file_impact", "set_verify_commands",
+    } <= names
 
 
 def test_live_reconcile_refused_without_optin(monkeypatch: pytest.MonkeyPatch, rebar_repo) -> None:

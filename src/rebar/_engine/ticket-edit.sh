@@ -114,7 +114,7 @@ if ! find "$TRACKER_DIR/$ticket_id" -maxdepth 1 \( -name '*-CREATE.json' -o -nam
 fi
 
 # ── Field-level guards (bug 3f93-1b3d parent; bug e78f-9f79 description) ────
-# Mirror of the lib-api ticket_edit logic for the DSO_TICKET_LEGACY=1 path.
+# Mirror of the lib-api ticket_edit field-guard logic (standalone-script path).
 for _i in "${!_parsed_pairs[@]}"; do
     _pair="${_parsed_pairs[$_i]}"
     case "$_pair" in

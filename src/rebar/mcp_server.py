@@ -78,10 +78,58 @@ def build_server():
         return rebar.next_batch(epic_id)
 
     @mcp.tool()
+    def search(
+        query: str,
+        status: str | None = None,
+        ticket_type: str | None = None,
+        has_tag: str | None = None,
+        include_archived: bool = False,
+    ) -> list[dict]:
+        """Full-text search over titles/descriptions/comments/tags (replay-derived)."""
+        return rebar.search(
+            query,
+            status=status,
+            ticket_type=ticket_type,
+            has_tag=has_tag,
+            include_archived=include_archived,
+        )
+
+    @mcp.tool()
     def fsck(recover: bool = False) -> str:
         """Check ticket-store integrity (JSON validity, CREATE presence, lock
         cleanup). Set recover=True to run the recovery path."""
         return rebar.fsck(recover=recover)
+
+    # ── Quality gates + file-impact reads (WS5d) ───────────────────────────────
+    @mcp.tool()
+    def clarity_check(ticket_id: str) -> dict:
+        """Score ticket clarity (score / verdict / threshold / passed)."""
+        return rebar.clarity_check(ticket_id)
+
+    @mcp.tool()
+    def check_ac(ticket_id: str) -> dict:
+        """Check the ticket has an Acceptance Criteria block (passed / output)."""
+        return rebar.check_ac(ticket_id)
+
+    @mcp.tool()
+    def quality_check(ticket_id: str) -> dict:
+        """Check ticket dispatch readiness (passed / output)."""
+        return rebar.quality_check(ticket_id)
+
+    @mcp.tool()
+    def validate(ticket_id: str) -> dict:
+        """Validate ticket quality (JSON report; exit 0-4 by score)."""
+        return rebar.validate(ticket_id)
+
+    @mcp.tool()
+    def get_file_impact(ticket_id: str) -> list[dict]:
+        """Get the file-impact array (consumed by next-batch conflict scheduling)."""
+        return rebar.get_file_impact(ticket_id)
+
+    @mcp.tool()
+    def get_verify_commands(ticket_id: str) -> list[dict]:
+        """Get the DD-level verify-commands array for a ticket."""
+        return rebar.get_verify_commands(ticket_id)
 
     @mcp.tool()
     def reconcile(mode: str = "dry-run") -> dict:
@@ -127,6 +175,21 @@ def build_server():
         ) -> dict:
             """Transition a ticket's status (optimistic concurrency)."""
             return rebar.transition(ticket_id, current_status, target_status)
+
+        @mcp.tool()
+        def claim_ticket(ticket_id: str, assignee: str | None = None) -> dict:
+            """Atomically claim an OPEN ticket (-> in_progress + assignee).
+
+            Raises a tool error (ConcurrencyError) if the ticket is not open —
+            i.e. another agent already claimed it.
+            """
+            return rebar.claim(ticket_id, assignee=assignee)
+
+        @mcp.tool()
+        def reopen_ticket(ticket_id: str) -> dict:
+            """Reopen a closed ticket (closed -> open). Optimistic-concurrency:
+            raises a tool error if the ticket is not currently closed."""
+            return rebar.reopen(ticket_id)
 
         @mcp.tool()
         def comment_ticket(ticket_id: str, body: str) -> str:
@@ -188,6 +251,20 @@ def build_server():
         def compact_ticket(ticket_id: str | None = None) -> str:
             """Compact a ticket's event log (or all tickets if id omitted)."""
             rebar.compact(ticket_id)
+            return "ok"
+
+        # ── File-impact / verify-commands writes (WS5d; feed next-batch) ───────
+        @mcp.tool()
+        def set_file_impact(ticket_id: str, impact: list) -> str:
+            """Record file impact (list of {path, reason}) for conflict-aware
+            next-batch scheduling."""
+            rebar.set_file_impact(ticket_id, impact)
+            return "ok"
+
+        @mcp.tool()
+        def set_verify_commands(ticket_id: str, commands: list) -> str:
+            """Record DD-level verify commands (list of {dd_id, dd_text, command})."""
+            rebar.set_verify_commands(ticket_id, commands)
             return "ok"
 
     return mcp

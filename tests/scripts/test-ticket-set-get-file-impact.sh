@@ -43,7 +43,7 @@ _create_ticket() {
     local title="${3:-Test ticket}"
     local out
     out=$(cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" create "$ticket_type" "$title" 2>/dev/null) || true
     echo "$out" | tail -1
 }
@@ -79,7 +79,7 @@ test_set_file_impact_happy_path() {
 
     local exit_code=0
     (cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" set-file-impact "$ticket_id" \
         '[{"path":"src/foo.py","reason":"modified"}]' 2>/dev/null) || exit_code=$?
 
@@ -178,7 +178,7 @@ test_get_file_impact_returns_set_value() {
 
     # First set a value
     (cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" set-file-impact "$ticket_id" \
         '[{"path":"src/foo.py","reason":"modified"}]' 2>/dev/null) || true
 
@@ -186,7 +186,7 @@ test_get_file_impact_returns_set_value() {
     local exit_code=0
     local output
     output=$(cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" get-file-impact "$ticket_id" 2>/dev/null) || exit_code=$?
 
     # Assert: exits 0
@@ -256,7 +256,7 @@ test_ticket_show_includes_file_impact() {
 
     # Set file impact
     (cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" set-file-impact "$ticket_id" \
         '[{"path":"src/foo.py","reason":"modified"}]' 2>/dev/null) || true
 
@@ -264,7 +264,7 @@ test_ticket_show_includes_file_impact() {
     local exit_code=0
     local show_output
     show_output=$(cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" show "$ticket_id" 2>/dev/null) || exit_code=$?
 
     # Assert: exits 0
@@ -340,7 +340,7 @@ test_set_file_impact_rejects_invalid_json() {
     local exit_code=0
     local combined_out
     combined_out=$(cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" set-file-impact "$ticket_id" 'not-json' 2>&1) || exit_code=$?
 
     # Assert: exits non-zero
@@ -382,7 +382,7 @@ test_set_file_impact_rejects_non_array() {
     local exit_code=0
     local combined_out
     combined_out=$(cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" set-file-impact "$ticket_id" '{"not":"an-array"}' 2>&1) || exit_code=$?
 
     # Assert: exits non-zero (must be an array, not an object)
@@ -428,7 +428,7 @@ test_set_file_impact_empty_array() {
     # Set empty array
     local exit_code=0
     (cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" set-file-impact "$ticket_id" '[]' 2>/dev/null) || exit_code=$?
 
     # Assert: exits 0 (empty array is valid)
@@ -445,7 +445,7 @@ test_set_file_impact_empty_array() {
     local get_exit_code=0
     local get_output
     get_output=$(cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" get-file-impact "$ticket_id" 2>/dev/null) || get_exit_code=$?
 
     # Assert: get exits 0

@@ -7,6 +7,7 @@
 #   2. CREATE event presence (via reducer)
 #   3. Stale .git/index.lock cleanup
 #   4. SNAPSHOT source_event_uuids consistency
+#   4.5 Push-pending notice (local ahead of origin/tickets; informational)
 #   5. Summary
 #
 # Non-destructive except for stale index.lock removal.
@@ -203,6 +204,20 @@ for file_uuid, name in event_files.items():
         issue_count=$((issue_count + check4_count))
     done
 done
+
+# ── Check 4.5: push-pending (local ahead of origin/tickets) ──────────────────
+# WS3 observability: push is best-effort, so a local commit with a failed/absent
+# push silently diverges from origin. Surface that instead of staying silent.
+# Informational only — does NOT increment issue_count (un-pushed work is not an
+# integrity defect), so the exit code is unaffected. Compares against the LOCAL
+# origin/tickets ref (no network fetch — keeps fsck side-effect-free).
+if git -C "$TRACKER_DIR" remote get-url origin >/dev/null 2>&1 \
+   && git -C "$TRACKER_DIR" rev-parse --verify origin/tickets >/dev/null 2>&1; then
+    _push_ahead=$(git -C "$TRACKER_DIR" rev-list origin/tickets..HEAD --count 2>/dev/null || echo 0)
+    if [ "${_push_ahead:-0}" -gt 0 ]; then
+        echo "PUSH_PENDING: local tickets branch is ahead of origin/tickets by ${_push_ahead} commit(s) — push pending (run a ticket write to retry the push, or check connectivity to origin)"
+    fi
+fi
 
 # ── Check 5: Summary ────────────────────────────────────────────────────────
 if [ "$issue_count" -eq 0 ]; then

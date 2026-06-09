@@ -38,7 +38,7 @@ _create_ticket() {
     local title="${3:-Test ticket}"
     local out
     out=$(cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" create "$ticket_type" "$title" 2>/dev/null) || true
     echo "$out" | tail -1
 }
@@ -73,7 +73,7 @@ test_set_verify_commands_happy_path() {
 
     local exit_code=0
     (cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" set-verify-commands "$ticket_id" \
             '[{"dd_id":"dd-1","dd_text":"The feature works","command":"pytest tests/test_feature.py"}]' \
     ) >/dev/null 2>&1 || exit_code=$?
@@ -107,14 +107,14 @@ test_get_verify_commands_roundtrip() {
     fi
 
     (cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" set-verify-commands "$ticket_id" \
             '[{"dd_id":"dd-1","dd_text":"Feature A","command":"pytest tests/a.py"},{"dd_id":"dd-2","dd_text":"Feature B","command":"bash tests/b.sh"}]' \
     ) >/dev/null 2>&1
 
     local got
     got=$(cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" get-verify-commands "$ticket_id" 2>/dev/null)
 
     local count
@@ -151,14 +151,14 @@ test_show_includes_verify_commands() {
     fi
 
     (cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" set-verify-commands "$ticket_id" \
             '[{"dd_id":"dd-1","dd_text":"Check","command":"echo ok"}]' \
     ) >/dev/null 2>&1
 
     local show_out
     show_out=$(cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" show "$ticket_id" 2>/dev/null)
 
     local vc_length
@@ -182,7 +182,7 @@ test_invalid_json() {
 
     local exit_code=0
     (cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" set-verify-commands "$ticket_id" "not-json" \
     ) >/dev/null 2>&1 || exit_code=$?
 
@@ -205,7 +205,7 @@ test_json_object() {
 
     local exit_code=0
     (cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" set-verify-commands "$ticket_id" '{"not":"array"}' \
     ) >/dev/null 2>&1 || exit_code=$?
 
@@ -228,7 +228,7 @@ test_empty_array() {
 
     local exit_code=0
     (cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" set-verify-commands "$ticket_id" '[]' \
     ) >/dev/null 2>&1 || exit_code=$?
 
@@ -236,7 +236,7 @@ test_empty_array() {
 
     local got
     got=$(cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" get-verify-commands "$ticket_id" 2>/dev/null)
 
     assert_eq "get returns empty array" "[]" "$got"
@@ -257,20 +257,20 @@ test_last_write_wins() {
     ticket_id=$(_create_ticket "$repo" task "LWW test")
 
     (cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" set-verify-commands "$ticket_id" \
             '[{"dd_id":"dd-1","dd_text":"First","command":"echo first"}]' \
     ) >/dev/null 2>&1
 
     (cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" set-verify-commands "$ticket_id" \
             '[{"dd_id":"dd-1","dd_text":"Second","command":"echo second"}]' \
     ) >/dev/null 2>&1
 
     local got
     got=$(cd "$repo" && \
-        _TICKET_TEST_NO_SYNC=1 DSO_TICKET_LEGACY=0 \
+        _TICKET_TEST_NO_SYNC=1 \
         bash "$TICKET_SCRIPT" get-verify-commands "$ticket_id" 2>/dev/null)
 
     local dd_text

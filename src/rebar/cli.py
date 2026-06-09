@@ -1,7 +1,7 @@
 """rebar CLI.
 
 Delegates to the bundled bash dispatcher for all ticket subcommands, and
-intercepts ``rebar reconcile`` to route it to ``python -m dso_reconciler``
+intercepts ``rebar reconcile`` to route it to ``python -m rebar_reconciler``
 (the engine dispatcher itself has no reconcile arm).
 """
 
@@ -16,7 +16,7 @@ from rebar._engine import dispatcher, engine_env
 
 
 def _reconcile(argv: list[str]) -> int:
-    """rebar reconcile [--mode MODE] [--repo-root ROOT] [extra dso_reconciler args]."""
+    """rebar reconcile [--mode MODE] [--repo-root ROOT] [extra rebar_reconciler args]."""
     root = str(config.repo_root())
     args = list(argv)
     if not any(a == "--repo-root" or a.startswith("--repo-root=") for a in args):
@@ -24,7 +24,7 @@ def _reconcile(argv: list[str]) -> int:
     if not any(a == "--mode" or a.startswith("--mode=") for a in args):
         args += ["--mode", "dry-run"]
     return subprocess.call(
-        ["python3", "-m", "dso_reconciler", *args],
+        ["python3", "-m", "rebar_reconciler", *args],
         env=engine_env(root),
     )
 

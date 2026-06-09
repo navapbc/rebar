@@ -25,7 +25,11 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-TRANSITION_SCRIPT="$REPO_ROOT/src/rebar/_engine/ticket-transition.sh"
+# WS2: the flock-held critical section was extracted from ticket-transition.sh's
+# heredoc into the importable ticket_txn.py module — it remains the lock-holding,
+# committing entrypoint (one process: flock -> reduce/verify -> write -> commit).
+# These structural guards now inspect ticket_txn.py, where that section lives.
+TRANSITION_SCRIPT="$REPO_ROOT/src/rebar/_engine/ticket_txn.py"
 
 source "$REPO_ROOT/tests/lib/assert.sh"
 

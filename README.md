@@ -27,6 +27,12 @@ pip install .            # library + CLI
 pip install '.[mcp]'     # + MCP server (FastMCP)
 ```
 
+The engine (bash dispatcher + `ticket-*.sh` + python helpers) is exec'd as real
+files, so rebar must be installed **unpacked to a real on-disk directory**:
+zipimport / zip-safe installs are unsupported. Standard wheel installs (hatchling
+builds unpacked) and editable installs satisfy this; `engine_dir()` asserts it at
+the first engine call and fails loudly otherwise.
+
 ## CLI
 
 ```bash

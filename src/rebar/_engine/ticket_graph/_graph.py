@@ -182,8 +182,8 @@ def check_would_create_cycle(
     """Return True if adding source_id→target_id would create a cycle.
 
     Only 'blocks' and 'depends_on' relations can create cycles.
-    'relates_to', 'duplicates', and 'supersedes' never create cycles
-    and always return False.
+    'relates_to', 'duplicates', 'supersedes', and 'discovered_from' never create
+    cycles and always return False.
 
     Cycle semantics:
     - ``source blocks target``  means source must precede target.  A cycle
@@ -197,7 +197,7 @@ def check_would_create_cycle(
     redundant transitive edge A→C→B plus proposed A→B is mis-reported as a
     cycle because A happens to be "blocked by" B in the reverse sense.
     """
-    if relation in ("relates_to", "duplicates", "supersedes"):
+    if relation in ("relates_to", "duplicates", "supersedes", "discovered_from"):
         return False
 
     if relation == "depends_on":

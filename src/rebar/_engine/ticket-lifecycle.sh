@@ -27,6 +27,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=ticket-lib.sh disable=SC1091
 source "$SCRIPT_DIR/ticket-lib.sh"
 
+# Shared reconvergence helper (_reconverge_tickets) — same cross-environment sync
+# policy as the rebar dispatcher. See ticket-sync.sh (§0 Concurrency Doctrine).
+# shellcheck source=ticket-sync.sh disable=SC1091
+source "$SCRIPT_DIR/ticket-sync.sh"
+
 # ── Parse arguments ──────────────────────────────────────────────────────────
 base_path=""
 while [ $# -gt 0 ]; do
@@ -56,26 +61,18 @@ if [ ! -d "$base_path" ]; then
 fi
 
 # ── Step 1: Sync once ───────────────────────────────────────────────────────
-# Fetch and reset-or-merge from origin tickets branch (best-effort; skip if no remote)
+# Reconverge with origin/tickets (best-effort; skip if no remote). Policy lives
+# in _reconverge_tickets (ticket-sync.sh): detects local-ahead by HEAD (not the
+# lagging branch ref — the WS3 data-loss fix), merges-as-union for related
+# divergence, force-resets only the unrelated-history stale-orphan case, refuses
+# to act through a rebase/merge recovery state, and runs under the write lock.
 _has_remote=false
 if git -C "$base_path" remote get-url origin >/dev/null 2>&1; then
     _has_remote=true
 fi
 
 if [ "$_has_remote" = true ]; then
-    if git -C "$base_path" fetch origin tickets 2>/dev/null; then
-        # Two-phase sync guard (0051-3428 + eb00-efd0):
-        # Phase 1: orphan branch (no merge-base) — safe to force-reset.
-        # Phase 2: related history — preserve local-ahead commits.
-        if ! git -C "$base_path" merge-base tickets origin/tickets &>/dev/null; then
-            git -C "$base_path" reset --hard origin/tickets 2>/dev/null || true
-        else
-            _local_ahead=$(git -C "$base_path" log --oneline origin/tickets..tickets 2>/dev/null) || true
-            if [ -z "$_local_ahead" ]; then
-                git -C "$base_path" reset --hard origin/tickets 2>/dev/null || true
-            fi
-        fi
-    fi
+    _reconverge_tickets "$base_path"
 fi
 
 # ── Step 2: Bulk compact ────────────────────────────────────────────────────

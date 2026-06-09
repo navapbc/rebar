@@ -18,8 +18,8 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-RECONCILER_DIR="$REPO_ROOT/src/rebar/_engine/dso_reconciler"
-# Parent of dso_reconciler/ so `python3 -m dso_reconciler` resolves the package
+RECONCILER_DIR="$REPO_ROOT/src/rebar/_engine/rebar_reconciler"
+# Parent of rebar_reconciler/ so `python3 -m rebar_reconciler` resolves the package
 RECONCILER_PARENT="$REPO_ROOT/src/rebar/_engine"
 
 source "$REPO_ROOT/tests/lib/assert.sh"
@@ -91,7 +91,7 @@ test_dry_run_enumerate_excludes_scratch() {
     root=$(_make_fixture_root)
 
     local output exit_code=0
-    output=$(PYTHONPATH="$RECONCILER_PARENT" python3 -m dso_reconciler \
+    output=$(PYTHONPATH="$RECONCILER_PARENT" python3 -m rebar_reconciler \
         --repo-root "$root" --dry-run-enumerate 2>/dev/null) || exit_code=$?
 
     assert_eq "--dry-run-enumerate exits 0" "0" "$exit_code"
@@ -116,7 +116,7 @@ test_dry_run_enumerate_includes_valid_ticket() {
     root=$(_make_fixture_root)
 
     local output exit_code=0
-    output=$(PYTHONPATH="$RECONCILER_PARENT" python3 -m dso_reconciler \
+    output=$(PYTHONPATH="$RECONCILER_PARENT" python3 -m rebar_reconciler \
         --repo-root "$root" --dry-run-enumerate 2>/dev/null) || exit_code=$?
 
     assert_eq "--dry-run-enumerate exits 0 (test B)" "0" "$exit_code"

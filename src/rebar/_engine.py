@@ -1,7 +1,7 @@
 """Locate and invoke the bundled ticket engine.
 
 The engine (bash dispatcher + ``ticket-*.sh`` + the ``ticket_reducer`` /
-``ticket_graph`` / ``dso_reconciler`` Python packages + ``acli-integration.py``)
+``ticket_graph`` / ``rebar_reconciler`` Python packages + ``acli-integration.py``)
 ships as package data under ``rebar/_engine/``. This module resolves that
 directory deterministically (editable or wheel install) and runs the dispatcher
 as a subprocess with an environment that pins repo-root and import paths.
@@ -22,8 +22,22 @@ def engine_dir() -> Path:
 
     ``importlib.resources.files`` returns a real filesystem path for editable
     and wheel installs (hatchling wheels install unzipped), which bash requires.
+
+    rebar's engine is bash + python helpers exec'd as real files, so it MUST be
+    installed UNPACKED to a real on-disk directory — zipimport / zip-safe installs
+    are unsupported. We assert that here so a mispackaged install fails loudly at
+    the first engine call instead of with an opaque bash error.
     """
-    return Path(str(importlib.resources.files("rebar") / "_engine")).resolve()
+    path = Path(str(importlib.resources.files("rebar") / "_engine")).resolve()
+    if not path.is_dir():
+        raise RuntimeError(
+            f"rebar engine directory is not a real on-disk directory: {path!s}. "
+            "The engine (bash dispatcher + ticket-*.sh + python helpers) must be "
+            "installed UNPACKED to the filesystem; rebar does not support "
+            "zipimport / zip-safe installs. Install from a wheel (hatchling builds "
+            "unpacked) or as an editable install — not a zipapp/zip-imported package."
+        )
+    return path
 
 
 def dispatcher() -> Path:
@@ -40,8 +54,8 @@ def engine_env(repo_root: str | os.PathLike[str] | None = None) -> dict[str, str
     """Environment for engine subprocesses.
 
     - Prepends the engine dir to ``PYTHONPATH`` so bundled ``python3`` helpers
-      and ``python -m dso_reconciler`` resolve ``ticket_reducer`` / ``ticket_graph``
-      / ``dso_reconciler`` imports.
+      and ``python -m rebar_reconciler`` resolve ``ticket_reducer`` / ``ticket_graph``
+      / ``rebar_reconciler`` imports.
     - Pins ``REBAR_ROOT`` *and* ``PROJECT_ROOT`` (the bash write path reads
       ``PROJECT_ROOT``; the reconciler reads ``REBAR_ROOT`` — they must agree).
     - Pins ``TICKET_WORDLIST_PATH`` so alias generation never falls back to hex

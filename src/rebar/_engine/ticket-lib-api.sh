@@ -159,11 +159,6 @@ _ticketlib_dispatch() {
 # In-process replacement for ticket-show.sh.
 # Uses bash+jq event reduction — zero python3 subprocess spawns on the default path.
 ticket_show() {
-    # Legacy escape hatch: DSO_TICKET_LEGACY=1 delegates to the original script.
-    if [ "${DSO_TICKET_LEGACY:-0}" = "1" ]; then
-        bash "$_TICKETLIB_DIR/ticket-show.sh" "$@"
-        return $?
-    fi
 
     # Multi-ID support (bug jira-dig-2565): if more than one positional ID is
     # supplied, iterate and recurse single-ID for each, threading `--format=*`
@@ -623,11 +618,6 @@ reduce $_events[] as $ev (initial_state($TID); apply_event($ev))
 # ── ticket_list ──────────────────────────────────────────────────────────────
 # In-process replacement for ticket-list.sh.
 ticket_list() {
-    # Legacy escape hatch: DSO_TICKET_LEGACY=1 delegates to the original script.
-    if [ "${DSO_TICKET_LEGACY:-0}" = "1" ]; then
-        bash "$_TICKETLIB_DIR/ticket-list.sh" "$@"
-        return $?
-    fi
 
     # Run the body with strict mode scoped to this function via a subshell.
     (
@@ -837,11 +827,6 @@ if alerted_count > 0:
 # ── ticket_create ─────────────────────────────────────────────────────────────
 # In-process replacement for ticket-create.sh.
 ticket_create() {
-    # Legacy escape hatch: DSO_TICKET_LEGACY=1 delegates to the original script.
-    if [ "${DSO_TICKET_LEGACY:-0}" = "1" ]; then
-        bash "$_TICKETLIB_DIR/ticket-create.sh" "$@"
-        return $?
-    fi
 
     # Run the body with strict mode scoped to this subshell.
     (
@@ -1147,11 +1132,6 @@ with open(sys.argv[12], 'w', encoding='utf-8') as f:
 # ── ticket_comment ────────────────────────────────────────────────────────────
 # In-process replacement for ticket-comment.sh.
 ticket_comment() {
-    # Legacy escape hatch: DSO_TICKET_LEGACY=1 delegates to the original script.
-    if [ "${DSO_TICKET_LEGACY:-0}" = "1" ]; then
-        bash "$_TICKETLIB_DIR/ticket-comment.sh" "$@"
-        return $?
-    fi
 
     # Run the body with strict mode scoped to this function via a subshell.
     (
@@ -1258,10 +1238,6 @@ with open(sys.argv[4], 'w', encoding='utf-8') as f:
 # ── ticket_set_file_impact ────────────────────────────────────────────────────
 # Write a FILE_IMPACT event recording which files are affected by a ticket.
 ticket_set_file_impact() {
-    if [ "${DSO_TICKET_LEGACY:-0}" = "1" ]; then
-        echo "Error: ticket set-file-impact not available in legacy mode" >&2
-        return 1
-    fi
 
     (
         set -euo pipefail
@@ -1375,10 +1351,6 @@ with open(sys.argv[4], 'w', encoding='utf-8') as f:
 # ── ticket_get_file_impact ────────────────────────────────────────────────────
 # Read the compiled file_impact array for a ticket.
 ticket_get_file_impact() {
-    if [ "${DSO_TICKET_LEGACY:-0}" = "1" ]; then
-        echo "Error: ticket get-file-impact not available in legacy mode" >&2
-        return 1
-    fi
 
     (
         set -euo pipefail
@@ -1584,10 +1556,6 @@ reduce $_events[] as $ev (initial_state($TID); apply_event($ev))
 # Write a VERIFY_COMMANDS event recording DD-level verify commands for a ticket.
 # Follows the set-file-impact pattern: last-write-wins, compiled into verify_commands field.
 ticket_set_verify_commands() {
-    if [ "${DSO_TICKET_LEGACY:-0}" = "1" ]; then
-        echo "Error: ticket set-verify-commands not available in legacy mode" >&2
-        return 1
-    fi
 
     (
         set -euo pipefail
@@ -1691,10 +1659,6 @@ with open(sys.argv[4], 'w', encoding='utf-8') as f:
 # ── ticket_get_verify_commands ────────────────────────────────────────────────
 # Read the compiled verify_commands array for a ticket.
 ticket_get_verify_commands() {
-    if [ "${DSO_TICKET_LEGACY:-0}" = "1" ]; then
-        echo "Error: ticket get-verify-commands not available in legacy mode" >&2
-        return 1
-    fi
 
     (
         set -euo pipefail
@@ -1738,10 +1702,6 @@ ticket_get_verify_commands() {
 # ── ticket_tag ────────────────────────────────────────────────────────────────
 # In-process replacement for ticket-tag.sh.
 ticket_tag() {
-    if [ "${DSO_TICKET_LEGACY:-0}" = "1" ]; then
-        bash "$_TICKETLIB_DIR/ticket-tag.sh" "$@"
-        return $?
-    fi
 
     (
         set -euo pipefail
@@ -1791,10 +1751,6 @@ ticket_tag() {
 # ── ticket_untag ──────────────────────────────────────────────────────────────
 # In-process replacement for ticket-untag.sh.
 ticket_untag() {
-    if [ "${DSO_TICKET_LEGACY:-0}" = "1" ]; then
-        bash "$_TICKETLIB_DIR/ticket-untag.sh" "$@"
-        return $?
-    fi
 
     (
         set -euo pipefail
@@ -1840,10 +1796,6 @@ ticket_untag() {
 # ── ticket_edit ───────────────────────────────────────────────────────────────
 # In-process replacement for ticket-edit.sh.
 ticket_edit() {
-    if [ "${DSO_TICKET_LEGACY:-0}" = "1" ]; then
-        bash "$_TICKETLIB_DIR/ticket-edit.sh" "$@"
-        return $?
-    fi
 
     (
         set -euo pipefail
@@ -2103,10 +2055,6 @@ with open(out_path, 'w', encoding='utf-8') as f:
 # --dry-run: position-independent flag; when present, delegates to ticket-link.sh
 #   which prints a [DRY RUN] preview without writing any event (bug 3796-ccd3).
 ticket_link() {
-    if [ "${DSO_TICKET_LEGACY:-0}" = "1" ]; then
-        bash "$_TICKETLIB_DIR/ticket-link.sh" link "$@"
-        return $?
-    fi
 
     (
         set -euo pipefail
@@ -2233,7 +2181,7 @@ ticket_compact() {
 
 # ── ticket_exists ─────────────────────────────────────────────────────────────
 ticket_exists() {
-    # No DSO_TICKET_LEGACY path: ticket-exists.sh is the canonical implementation (no prior script).
+    # Canonical implementation: ticket-exists.sh is the canonical implementation (no prior script).
     bash "$_TICKETLIB_DIR/ticket-exists.sh" "$@"
     return $?
 }
@@ -2270,28 +2218,28 @@ ticket_summary() {
 
 # ── ticket_ready ───────────────────────────────────────────────────────────────
 ticket_ready() {
-    # No DSO_TICKET_LEGACY path: ticket-ready.sh is the canonical implementation (no prior script).
+    # Canonical implementation: ticket-ready.sh is the canonical implementation (no prior script).
     bash "$_TICKETLIB_DIR/ticket-ready.sh" "$@"
     return $?
 }
 
 # ── ticket_list_epics ──────────────────────────────────────────────────────────
 ticket_list_epics() {
-    # No DSO_TICKET_LEGACY path: delegates to sprint-list-epics.sh (canonical; no prior script).
+    # Canonical implementation: delegates to sprint-list-epics.sh (canonical; no prior script).
     bash "$_TICKETLIB_DIR/ticket-list-epics.sh" "$@"
     return $?
 }
 
 # ── ticket_list_descendants ────────────────────────────────────────────────────
 ticket_list_descendants() {
-    # No DSO_TICKET_LEGACY path: ticket-list-descendants.sh is the canonical implementation (no prior script).
+    # Canonical implementation: ticket-list-descendants.sh is the canonical implementation (no prior script).
     bash "$_TICKETLIB_DIR/ticket-list-descendants.sh" "$@"
     return $?
 }
 
 # ── ticket_next_batch ─────────────────────────────────────────────────────────
 ticket_next_batch() {
-    # No DSO_TICKET_LEGACY path: ticket-next-batch.sh is the canonical implementation (no prior script).
+    # Canonical implementation: ticket-next-batch.sh is the canonical implementation (no prior script).
     bash "$_TICKETLIB_DIR/ticket-next-batch.sh" "$@"
     return $?
 }

@@ -78,9 +78,15 @@ def create_ticket(
     assignee: str | None = None,
     description: str | None = None,
     tags: list[str] | None = None,
+    return_alias: bool = False,
     repo_root=None,
-) -> str:
-    """Create a ticket; returns the canonical 16-hex ticket id."""
+):
+    """Create a ticket.
+
+    Returns the canonical 16-hex ticket id (default). With ``return_alias=True``,
+    returns ``{"id": <16-hex>, "alias": <human alias>}`` so agents don't need a
+    second ``show`` to learn the alias (WS5e).
+    """
     args = ["create", ticket_type, title]
     if parent:
         args += ["--parent", parent]
@@ -94,7 +100,15 @@ def create_ticket(
         args += ["--tags", ",".join(tags)]
     out = _ok(_run(args, repo_root=repo_root), what="create")
     lines = [ln for ln in out.splitlines() if ln.strip()]
-    return lines[-1].strip() if lines else ""
+    ticket_id = lines[-1].strip() if lines else ""
+    if not return_alias:
+        return ticket_id
+    alias = ""
+    try:
+        alias = (show_ticket(ticket_id, repo_root=repo_root) or {}).get("alias") or ""
+    except RebarError:
+        alias = ""
+    return {"id": ticket_id, "alias": alias}
 
 
 def transition(
@@ -116,6 +130,104 @@ def transition(
         )
     _ok(cp, what="transition")
     return {"id": ticket_id, "status": target_status}
+
+
+def claim(ticket_id: str, *, assignee=None, repo_root=None) -> dict:
+    """Atomically claim an OPEN ticket: move it to ``in_progress`` and set its
+    assignee in one locked critical section.
+
+    Raises :class:`ConcurrencyError` (engine exit code 10) if the ticket is not
+    ``open`` — i.e. someone else already claimed it — and :class:`RebarError` for
+    other failures. This is the optimistic-concurrency primitive parallel agents
+    use to grab work without double-assignment.
+    """
+    args = ["claim", ticket_id]
+    if assignee:
+        args += [f"--assignee={assignee}"]
+    cp = _run(args, repo_root=repo_root)
+    if cp.returncode == 10:
+        raise ConcurrencyError(
+            f"claim rejected: {ticket_id} is not open (already claimed). "
+            f"{cp.stderr.strip()}",
+            returncode=10,
+            stderr=cp.stderr,
+        )
+    _ok(cp, what="claim")
+    return {"id": ticket_id, "status": "in_progress", "assignee": assignee}
+
+
+def reopen(ticket_id: str, *, repo_root=None) -> dict:
+    """Reopen a closed ticket (closed -> open) — a thin convenience over
+    :func:`transition`, still optimistic-concurrency (raises ConcurrencyError if
+    the ticket is not currently ``closed``)."""
+    return transition(ticket_id, "closed", "open", repo_root=repo_root)
+
+
+# ── Quality gates + file-impact (WS5d; CLI-parity + MCP surface) ──────────────
+# Quality checks exit 0=pass / 1=fail (not an error), so they use the
+# non-raising _run and report a `passed` boolean rather than raising.
+def _json_or(out: str, default):
+    import json as _json
+    try:
+        return _json.loads(out)
+    except Exception:
+        return default
+
+
+def clarity_check(ticket_id: str, *, repo_root=None) -> dict:
+    """Score ticket clarity → {score, verdict, threshold, passed}."""
+    cp = _run(["clarity-check", ticket_id], repo_root=repo_root)
+    data = _json_or(cp.stdout, {"output": (cp.stdout or cp.stderr).strip()})
+    data["passed"] = cp.returncode == 0
+    return data
+
+
+def check_ac(ticket_id: str, *, repo_root=None) -> dict:
+    """Check a ticket has an Acceptance Criteria block → {passed, output}."""
+    cp = _run(["check-ac", ticket_id], repo_root=repo_root)
+    return {"passed": cp.returncode == 0, "output": (cp.stdout + cp.stderr).strip()}
+
+
+def quality_check(ticket_id: str, *, repo_root=None) -> dict:
+    """Check ticket dispatch readiness → {passed, output}."""
+    cp = _run(["quality-check", ticket_id], repo_root=repo_root)
+    return {"passed": cp.returncode == 0, "output": (cp.stdout + cp.stderr).strip()}
+
+
+def validate(ticket_id: str, *, repo_root=None) -> dict:
+    """Validate ticket quality (JSON report; exit 0-4 by score)."""
+    cp = _run(["validate", ticket_id, "--json"], repo_root=repo_root)
+    data = _json_or(cp.stdout, {"output": (cp.stdout or cp.stderr).strip()})
+    if isinstance(data, dict):
+        data.setdefault("exit_code", cp.returncode)
+    return data
+
+
+def get_file_impact(ticket_id: str, *, repo_root=None) -> list:
+    """Get the current file-impact array for a ticket."""
+    out = _ok(_run(["get-file-impact", ticket_id], repo_root=repo_root), what="get-file-impact")
+    return _json_or(out, [])
+
+
+def set_file_impact(ticket_id: str, impact, *, repo_root=None) -> None:
+    """Record file impact (list of {path, reason} dicts, or a JSON string)."""
+    import json as _json
+    payload = impact if isinstance(impact, str) else _json.dumps(impact)
+    _ok(_run(["set-file-impact", ticket_id, payload], repo_root=repo_root), what="set-file-impact")
+
+
+def get_verify_commands(ticket_id: str, *, repo_root=None) -> list:
+    """Get the current DD-level verify-commands array for a ticket."""
+    out = _ok(_run(["get-verify-commands", ticket_id], repo_root=repo_root), what="get-verify-commands")
+    return _json_or(out, [])
+
+
+def set_verify_commands(ticket_id: str, commands, *, repo_root=None) -> None:
+    """Record DD-level verify commands (list of {dd_id, dd_text, command} dicts,
+    or a JSON string)."""
+    import json as _json
+    payload = commands if isinstance(commands, str) else _json.dumps(commands)
+    _ok(_run(["set-verify-commands", ticket_id, payload], repo_root=repo_root), what="set-verify-commands")
 
 
 def comment(ticket_id: str, body: str, *, repo_root=None) -> None:
@@ -211,6 +323,32 @@ def next_batch(epic_id: str, *, repo_root=None) -> dict:
     return _json(_run(["next-batch", epic_id, "--json"], repo_root=repo_root), what="next-batch")
 
 
+def search(
+    query: str,
+    *,
+    status: str | None = None,
+    ticket_type: str | None = None,
+    has_tag: str | None = None,
+    include_archived: bool = False,
+    repo_root=None,
+) -> list:
+    """Full-text search over titles/descriptions/comments/tags (replay-derived).
+
+    Returns a JSON list of matching ticket states (same element shape as
+    :func:`list_tickets`). Query terms are whitespace-split and matched
+    case-insensitively (AND)."""
+    args = ["search", query]
+    if status is not None:
+        args.append(f"--status={status}")
+    if ticket_type is not None:
+        args.append(f"--type={ticket_type}")
+    if has_tag is not None:
+        args.append(f"--has-tag={has_tag}")
+    if include_archived:
+        args.append("--include-archived")
+    return _json(_run(args, repo_root=repo_root), what="search")
+
+
 def fsck(*, recover: bool = False, repo_root=None) -> str:
     args = ["fsck-recover"] if recover else ["fsck"]
     return _ok(_run(args, repo_root=repo_root), what="fsck")
@@ -225,7 +363,7 @@ def reconcile(mode: str = "dry-run", *, repo_root=None) -> dict:
     """
     root = str(config.repo_root(repo_root))
     cmd = [
-        "python3", "-m", "dso_reconciler",
+        "python3", "-m", "rebar_reconciler",
         "--mode", mode, "--repo-root", root,
     ]
     cp = subprocess.run(
@@ -265,6 +403,8 @@ __all__ = [
     "init_repo",
     "create_ticket",
     "transition",
+    "claim",
+    "reopen",
     "comment",
     "edit_ticket",
     "link",
@@ -274,12 +414,22 @@ __all__ = [
     "archive",
     "compact",
     "fsck",
+    # quality gates + file-impact
+    "clarity_check",
+    "check_ac",
+    "quality_check",
+    "validate",
+    "get_file_impact",
+    "set_file_impact",
+    "get_verify_commands",
+    "set_verify_commands",
     # read path
     "show_ticket",
     "list_tickets",
     "deps",
     "ready",
     "next_batch",
+    "search",
     # reconciler
     "reconcile",
     # native re-exports

@@ -1,7 +1,7 @@
 """In-process access to the engine's native Python packages.
 
 Importing this module ensures the bundled engine directory is on ``sys.path``
-so the stdlib-only ``ticket_reducer`` / ``ticket_graph`` / ``dso_reconciler``
+so the stdlib-only ``ticket_reducer`` / ``ticket_graph`` / ``rebar_reconciler``
 packages can be imported directly (no subprocess). It then re-exports the
 stable read-path entry points.
 """

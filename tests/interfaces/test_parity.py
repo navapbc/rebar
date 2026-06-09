@@ -64,6 +64,37 @@ def test_transition_stale_rejected_parity(adapter) -> None:
     assert adapter.show(tid)["status"] == "open"
 
 
+def test_claim_happy_parity(adapter) -> None:
+    """claim moves an open ticket to in_progress and sets the assignee, identically
+    across library/CLI/MCP."""
+    tid = adapter.create("task", "Claimable")
+    assert adapter.claim(tid, assignee="alice") is True
+    state = adapter.show(tid)
+    assert state["status"] == "in_progress"
+    assert state.get("assignee") == "alice"
+
+
+def test_claim_not_open_rejected_parity(adapter) -> None:
+    """Claiming a non-open ticket is rejected (exit-10 / ConcurrencyError / MCP
+    tool error) and the store is unchanged — surfaced uniformly across interfaces."""
+    tid = adapter.create("task", "Already claimed")
+    assert adapter.claim(tid, assignee="alice") is True
+    # Second claim must be rejected; assignee must remain the first winner's.
+    assert adapter.claim(tid, assignee="bob") is False
+    state = adapter.show(tid)
+    assert state["status"] == "in_progress"
+    assert state.get("assignee") == "alice"
+
+
+def test_search_parity(adapter) -> None:
+    """Full-text search returns identical matches via library/CLI/MCP."""
+    hit = adapter.create("task", "searchable kumquat ticket")
+    adapter.create("task", "unrelated noise")
+    results = adapter.search("kumquat")
+    ids = {t["ticket_id"] for t in results}
+    assert ids == {hit}
+
+
 def test_tag_and_comment_parity(adapter) -> None:
     tid = adapter.create("task", "Tag me")
     adapter.tag(tid, "area:api")

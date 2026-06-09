@@ -15,7 +15,9 @@ from ticket_graph._status import _get_ticket_status
 
 
 CANONICAL_RELATIONS: frozenset[str] = frozenset(
-    {"blocks", "depends_on", "relates_to", "duplicates", "supersedes"}
+    # discovered_from: emergent-work provenance (B discovered_from A). Directional
+    # (no reciprocal LINK), non-blocking, never cycle-inducing — see _graph.py.
+    {"blocks", "depends_on", "relates_to", "duplicates", "supersedes", "discovered_from"}
 )
 
 
@@ -324,7 +326,10 @@ def add_dependency(
         if resolved_source_state
         else ""
     )
-    if level and check_cycle_at_level(
+    # Only the cycle-capable relations (blocks / depends_on) are subject to the
+    # per-level cycle guard; relates_to / duplicates / supersedes / discovered_from
+    # are non-blocking and never cycle-inducing (mirrors check_would_create_cycle).
+    if relation in ("blocks", "depends_on") and level and check_cycle_at_level(
         resolved_source, resolved_target, level, tracker_dir
     ):
         if resolved_source == resolved_target:

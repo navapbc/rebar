@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
 
-# The ticket engine (bash + the ticket_reducer / ticket_graph / dso_reconciler
+# The ticket engine (bash + the ticket_reducer / ticket_graph / rebar_reconciler
 # Python packages + acli-integration.py) is stdlib-only and ships as package
 # data under rebar/_engine/. System prerequisites (not pip deps): git, jq,
 # flock, python3, and `acli` (only for live Jira reconciliation).

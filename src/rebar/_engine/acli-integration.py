@@ -24,8 +24,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from dso_reconciler.adf import text_to_adf as _text_to_adf  # canonical location
-from dso_reconciler.comment_limits import (  # shared send/diff truncation
+from rebar_reconciler.adf import text_to_adf as _text_to_adf  # canonical location
+from rebar_reconciler.comment_limits import (  # shared send/diff truncation
     _JIRA_COMMENT_MAX_CHARS,
     truncate_comment_body as _truncate_comment_body,
 )
@@ -159,7 +159,7 @@ def _sanitize_comment(body: str) -> str:
     driving the outbound comment-sync loop (re-emitted every pass). Truncating
     here (mirroring ``_sanitize_summary``) lets the comment land.
 
-    The actual truncation rule lives in the shared ``dso_reconciler.comment_
+    The actual truncation rule lives in the shared ``rebar_reconciler.comment_
     limits.truncate_comment_body`` helper so the differ's comparison path
     (``outbound_differ._diff_comments``) applies the IDENTICAL transform and the
     diff converges. A truncation warning is emitted so an operator can
@@ -201,7 +201,7 @@ _LOCAL_STATUS_TO_JIRA: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
-# _text_to_adf is imported from dso_reconciler.adf (canonical location)
+# _text_to_adf is imported from rebar_reconciler.adf (canonical location)
 
 
 # ---------------------------------------------------------------------------
@@ -1002,7 +1002,7 @@ def get_comments(
 
 
 # ---------------------------------------------------------------------------
-# AcliClient class — used by the dso_reconciler bands (fetcher, applier,
+# AcliClient class — used by the rebar_reconciler bands (fetcher, applier,
 # stale_band, open_count_skew_band) and the capability / forward-compat probes.
 # ---------------------------------------------------------------------------
 
@@ -1010,7 +1010,7 @@ def get_comments(
 class AcliClient:
     """Client wrapping ACLI Go binary for Jira operations.
 
-    Provides the method interface consumed by the dso_reconciler:
+    Provides the method interface consumed by the rebar_reconciler:
     create_issue, update_issue, delete_issue, get_issue, search_issues,
     get_myself, get_server_info, get_comments, set_relationship, plus
     per-issue property read/write helpers.
