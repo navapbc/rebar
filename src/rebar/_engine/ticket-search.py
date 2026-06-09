@@ -29,7 +29,7 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from ticket_reducer import reduce_all_tickets  # noqa: E402
+from ticket_reducer import reduce_all_tickets, search_states  # noqa: E402
 
 
 def _tracker_dir() -> str:
@@ -48,40 +48,6 @@ def _tracker_dir() -> str:
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("Error: not inside a git repository (set REBAR_ROOT)", file=sys.stderr)
         sys.exit(1)
-
-
-def _haystack(state: dict) -> str:
-    parts = [
-        str(state.get("title") or ""),
-        str(state.get("description") or ""),
-        " ".join(str(t) for t in (state.get("tags") or [])),
-    ]
-    for c in state.get("comments") or []:
-        if isinstance(c, dict):
-            parts.append(str(c.get("body") or ""))
-        else:
-            parts.append(str(c))
-    return "\n".join(parts).lower()
-
-
-def search(states: list[dict], query: str, *, status=None, ticket_type=None,
-           has_tag=None) -> list[dict]:
-    # AND over whitespace-split, case-insensitive terms.
-    terms = [t for t in query.lower().split() if t]
-    out = []
-    for st in states:
-        if not isinstance(st, dict) or "status" not in st:
-            continue  # skip error dicts
-        if status is not None and st.get("status") != status:
-            continue
-        if ticket_type is not None and st.get("ticket_type") != ticket_type:
-            continue
-        if has_tag is not None and has_tag not in (st.get("tags") or []):
-            continue
-        hay = _haystack(st)
-        if all(term in hay for term in terms):
-            out.append(st)
-    return out
 
 
 def main(argv) -> int:
@@ -110,7 +76,7 @@ def main(argv) -> int:
         exclude_archived=not include_archived,
         exclude_deleted=True,
     )
-    results = search(states, query, status=status, ticket_type=ticket_type, has_tag=has_tag)
+    results = search_states(states, query, status=status, ticket_type=ticket_type, has_tag=has_tag)
     from ticket_reducer._present import public_state
     print(json.dumps([public_state(t) for t in results], ensure_ascii=False))
     return 0
