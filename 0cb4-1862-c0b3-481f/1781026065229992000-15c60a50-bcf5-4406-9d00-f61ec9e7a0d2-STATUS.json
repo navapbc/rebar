@@ -1,1 +1,0 @@
-{"timestamp": 1781026065229992000, "uuid": "15c60a50-bcf5-4406-9d00-f61ec9e7a0d2", "event_type": "STATUS", "env_id": "ade0f2ef-51cc-45a2-bb97-c09846cd3df5", "author": "Joe Oakhart", "parent_status_uuid": "c32b41ff-f67e-4e46-bab6-a1527546c3e1", "data": {"status": "open", "current_status": "in_progress", "parent_status_uuid": "c32b41ff-f67e-4e46-bab6-a1527546c3e1"}}
