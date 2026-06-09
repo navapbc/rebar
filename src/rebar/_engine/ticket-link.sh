@@ -3,8 +3,12 @@
 # Write LINK and UNLINK events for the event-sourced ticket system.
 #
 # Usage:
-#   ticket-link.sh link <id1> <id2> [<relation>]  — write LINK event in id1 dir
-#   ticket-link.sh unlink <id1> <id2>            — write UNLINK event in id1 dir
+#   ticket-link.sh link <id1> <id2> <relation>   — write LINK event in id1 dir
+#                                                   (relation is REQUIRED)
+#   ticket-link.sh unlink <source> <target>      — write UNLINK event in source dir
+#                                                   (pair-scoped, NO relation arg;
+#                                                    removes the most-recent link
+#                                                    between the pair)
 #
 # Relations supported: blocks, depends_on, relates_to, duplicates, supersedes, discovered_from
 # For relates_to, a reciprocal LINK event is also written in id2 dir.
@@ -23,8 +27,9 @@ TRACKER_DIR=$(python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "
 
 # ── Usage ─────────────────────────────────────────────────────────────────────
 _usage() {
-    echo "Usage: ticket link <source_id> <target_id> [<relation>]" >&2
-    echo "       ticket unlink <source_id> <target_id>" >&2
+    echo "Usage: ticket link <source_id> <target_id> <relation>   (relation REQUIRED)" >&2
+    echo "       ticket unlink <source> <target>   (pair-scoped, NO relation arg;" >&2
+    echo "                                          removes the most-recent link between the pair)" >&2
     echo "" >&2
     echo "  relation: blocks | depends_on | relates_to | duplicates | supersedes | discovered_from" >&2
     echo "  relates_to creates bidirectional LINK events in both ticket dirs" >&2

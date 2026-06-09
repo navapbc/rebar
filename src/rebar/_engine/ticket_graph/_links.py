@@ -273,8 +273,12 @@ def add_dependency(
             f"invalid relation '{relation}': must be one of {canonical_list}"
         )
 
-    # Step 1: Resolve hierarchy
-    hierarchy_result = resolve_hierarchy_link(source_id, target_id, tracker_dir)
+    # Step 1: Resolve hierarchy. The relation is passed through so the resolver
+    # can gate promotion: only blocking deps (blocks/depends_on) are promoted to
+    # a comparable type-tier; all other relations link the exact pair.
+    hierarchy_result = resolve_hierarchy_link(
+        source_id, target_id, tracker_dir, relation
+    )
 
     if "error" in hierarchy_result:
         raise ValueError(hierarchy_result["error"])
