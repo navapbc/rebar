@@ -111,7 +111,8 @@ def main(argv) -> int:
         exclude_deleted=True,
     )
     results = search(states, query, status=status, ticket_type=ticket_type, has_tag=has_tag)
-    print(json.dumps(results, ensure_ascii=False))
+    from ticket_reducer._present import public_state
+    print(json.dumps([public_state(t) for t in results], ensure_ascii=False))
     return 0
 
 

@@ -288,210 +288,27 @@ ticket_show() {
 
         local TICKET_DIR="$TRACKER_DIR/$ticket_id"
 
-        # ── Collect and sort main event files ────────────────────────────────
-        # Exclude: .cache.json, PRECONDITIONS files (handled separately below).
-        # Sort key: (timestamp, event_type_order, basename).
-        # LINK=0, UNLINK=1, all others=99 — preserves LINK-before-UNLINK invariant
-        # at same Unix-second timestamp (mirrors Python _sort.py event_sort_key).
-        local sorted_files=()
-        while IFS= read -r f; do
-            [ -n "$f" ] && sorted_files+=("$f")
-        done < <(
-            # shellcheck disable=SC2012
-            # SC2012 suppressed: glob expansion is used; ls is for alphanumeric-safe
-            # event filenames (timestamps + UUIDs + event_type — no spaces or special chars).
-            ls "$TICKET_DIR"/*.json 2>/dev/null | \
-            while IFS= read -r fp; do
-                local base
-                base="$(basename "$fp")"
-                [[ "$base" == ".cache.json" ]] && continue
-                [[ "$base" == *-PRECONDITIONS.json ]] && continue
-                [[ "$base" == *-PRECONDITIONS-SNAPSHOT.json ]] && continue
-                echo "$fp"
-            done | \
-            while IFS= read -r fp; do
-                local base ts stem etype order
-                base="$(basename "$fp")"
-                ts="${base%%-*}"
-                stem="${base%.json}"
-                etype="${stem##*-}"
-                # bash 3.2: case patterns inside <(...) process substitutions
-                # cause parse errors (`)` is mistaken for closing paren).
-                # Use if/elif instead.
-                if [ "$etype" = "LINK" ]; then
-                    order=0
-                elif [ "$etype" = "UNLINK" ]; then
-                    order=1
-                else
-                    order=99
-                fi
-                printf '%s\t%02d\t%s\t%s\n' "$ts" "$order" "$base" "$fp"
-            done | sort -t$'\t' -k1,1 -k2,2n -k3,3 | cut -f4
-        )
-
-        # ── jq event-reducer program ──────────────────────────────────────────
-        # Implements the same event-sourcing logic as ticket_reducer/_api.py.
-        # Supports: CREATE, STATUS, COMMENT, LINK, UNLINK, EDIT, ARCHIVED,
-        # BRIDGE_ALERT, REVERT, SNAPSHOT. Unknown types are silently ignored.
-        # the ticket show bash-native path (epic 78fc-3858, story 564c-e391).
-        # shellcheck disable=SC2016
-        # SC2016 suppressed: single quotes intentional — _JQ_REDUCE is a jq program
-        # where $-references are jq variables (not shell), not shell expansions.
-        local _JQ_REDUCE='
-def initial_state($tid):
-  {
-    ticket_id: $tid,
-    ticket_type: null,
-    title: null,
-    status: "open",
-    author: null,
-    created_at: null,
-    env_id: null,
-    parent_id: null,
-    priority: null,
-    assignee: null,
-    alias: null,
-    description: "",
-    tags: [],
-    comments: [],
-    deps: [],
-    bridge_alerts: [],
-    reverts: [],
-    file_impact: [],
-    preconditions_summary: {status: "pre-manifest"}
-  };
-
-def _editable_keys:
-  ["ticket_id","ticket_type","title","status","author","created_at","env_id",
-   "parent_id","priority","assignee","alias","description","tags","comments","deps",
-   "bridge_alerts","reverts"];
-
-def apply_event(ev):
-  if ev.event_type == "CREATE" then
-    . + {
-      ticket_type: ev.data.ticket_type,
-      title: ev.data.title,
-      author: ev.author,
-      created_at: ev.timestamp,
-      env_id: ev.env_id,
-      parent_id: (if (ev.data.parent_id? // "") == "" then null
-                  else ev.data.parent_id end),
-      priority:    (ev.data.priority?  // null),
-      assignee:    (ev.data.assignee?  // null),
-      alias:       (ev.data.alias?     // null),
-      description: (ev.data.description? // ""),
-      tags:        (ev.data.tags? // [])
-    }
-  elif ev.event_type == "STATUS" then
-    .status = ev.data.status
-  elif ev.event_type == "COMMENT" then
-    .comments += [{
-      body: (if ev.data.body == null then ""
-             elif (ev.data.body | type) == "string" then ev.data.body
-             else (ev.data.body | tostring)
-             end),
-      author:    ev.author,
-      timestamp: ev.timestamp
-    }]
-  elif ev.event_type == "LINK" then
-    .deps += [{
-      target_id: ((ev.data.target_id? // ev.data.target?) // ""),
-      relation:  (ev.data.relation? // ""),
-      link_uuid:  ev.uuid
-    }]
-  elif ev.event_type == "UNLINK" then
-    .deps = [.deps[] | select(.link_uuid != ev.data.link_uuid)]
-  elif ev.event_type == "EDIT" then
-    reduce ((ev.data.fields? // {}) | to_entries[]) as $field (.;
-      if $field.key == "tags" then
-        if   ($field.value | type) == "array"  then .tags = $field.value
-        elif ($field.value | type) == "string" then
-          .tags = [($field.value | split(","))[] |
-                   gsub("^\\s+|\\s+$"; "") | select(length > 0)]
-        else .tags = []
-        end
-      elif ([_editable_keys[] == $field.key] | any) then
-        .[$field.key] = $field.value
-      else .
-      end
-    )
-  elif ev.event_type == "ARCHIVED" then
-    .archived = true
-    | (if .status == "deleted" then . else .status = "archived" end)
-  elif ev.event_type == "BRIDGE_ALERT" then
-    ((ev.data.alert_type? // ev.data.reason? // ev.data.detail?) // "") as $reason |
-    if ev.data.resolved? // false then
-      ((ev.data.resolves_uuid? // ev.data.alert_uuid?) // "") as $target |
-      if ([.bridge_alerts[] | select(.uuid == $target)] | length) > 0 then
-        .bridge_alerts = [.bridge_alerts[] |
-          if .uuid == $target then .resolved = true else . end]
-      else
-        .bridge_alerts += [{uuid: ev.uuid, reason: $reason,
-                            timestamp: ev.timestamp, resolved: true}]
-      end
-    else
-      .bridge_alerts += [{uuid: ev.uuid, reason: $reason,
-                          timestamp: ev.timestamp, resolved: false}]
-    end
-  elif ev.event_type == "REVERT" then
-    .reverts += [{
-      uuid:              ev.uuid,
-      target_event_uuid: (ev.data.target_event_uuid? // null),
-      target_event_type: (ev.data.target_event_type? // null),
-      reason:            (ev.data.reason? // ""),
-      timestamp:          ev.timestamp,
-      author:             ev.author
-    }]
-  elif ev.event_type == "SNAPSHOT" then
-    reduce ((ev.data.compiled_state? // {}) | to_entries[]) as $field (.;
-      .[$field.key] = $field.value
-    )
-  elif ev.event_type == "FILE_IMPACT" then
-    .file_impact = (ev.data.file_impact // [])
-  elif ev.event_type == "VERIFY_COMMANDS" then
-    .verify_commands = (ev.data.verify_commands // [])
-  else .
-  end;
-
-reduce $_events[] as $ev (initial_state($TID); apply_event($ev))
-'
-
-        # ── Validate and reduce event files (skip corrupt JSON gracefully) ────
-        # Pipe each file through `jq -c .` first to pre-validate; corrupt files
-        # produce no output and are silently excluded (mirrors Python try/except).
+        # ── Reduce via the single source of truth: the Python ticket_reducer ──
+        # Replaces the former in-bash jq reducer + separate preconditions scan,
+        # which had drifted from the Python reducer (bug f026). reduce_ticket
+        # computes the FULL compiled state (including preconditions_summary) and
+        # uses the .cache.json fast-path; public_state strips internal-only keys
+        # (parent_status_uuid, last_status_env_id, preconditions_summary.source_count)
+        # so the interface output matches list/search exactly.
         local state
-        if [ "${#sorted_files[@]}" -eq 0 ]; then
-            echo "Error: ticket \"$ticket_id\" has no events" >&2
-            return 1
-        fi
-
-        # Write validated events to a temp file; jq --slurpfile reads multiple
-        # top-level JSON values and wraps them in an array as $_events.
-        local _valid_tmp
-        _valid_tmp=$(mktemp)
-        # shellcheck disable=SC2064
-        trap "rm -f '$_valid_tmp'" EXIT
-        local f
-        for f in "${sorted_files[@]}"; do
-            jq -c '.' "$f" 2>/dev/null >> "$_valid_tmp" || true
-        done
-
-        if [ ! -s "$_valid_tmp" ]; then
-            echo "Error: ticket \"$ticket_id\" has no CREATE or SNAPSHOT event" >&2
-            return 1
-        fi
-
-        # Run reducer: $_events is the array of all validated events (from --slurpfile)
-        state=$(jq -n --arg TID "$ticket_id" --slurpfile _events "$_valid_tmp" "$_JQ_REDUCE" \
-                2>/dev/null)
-        local _jq_exit=$?
-        rm -f "$_valid_tmp"
-        if [ "$_jq_exit" -ne 0 ] || [ -z "$state" ]; then
+        state=$(_SCRIPT_DIR="$_TICKETLIB_DIR" python3 -c '
+import sys, os, json
+sys.path.insert(0, os.environ["_SCRIPT_DIR"])
+from ticket_reducer import reduce_ticket
+from ticket_reducer._present import public_state
+print(json.dumps(public_state(reduce_ticket(sys.argv[1])), ensure_ascii=False))
+' "$TICKET_DIR" 2>/dev/null) || true
+        if [ -z "$state" ]; then
             echo "Error: failed to reduce ticket \"$ticket_id\"" >&2
             return 1
         fi
 
-        # Verify CREATE event was present (ticket_type must be non-null after reduction)
+        # Verify CREATE/SNAPSHOT was present (ticket_type non-null after reduction)
         local _ttype
         _ttype=$(printf '%s' "$state" | jq -r '.ticket_type // empty' 2>/dev/null)
         if [ -z "$_ttype" ]; then
@@ -499,106 +316,18 @@ reduce $_events[] as $ev (initial_state($TID); apply_event($ev))
             return 1
         fi
 
-        # ── Compute preconditions_summary ─────────────────────────────────────
-        # Scan *-PRECONDITIONS.json files separately (not part of main event replay).
-        # Skips corrupt files gracefully; skips PRECONDITIONS-SNAPSHOT files
-        # (handled in the same pass via -PRECONDITIONS-SNAPSHOT.json pattern).
-        local _precond_summary='{"status":"pre-manifest"}'
-        local _precond_files=()
-        while IFS= read -r _pf; do
-            [ -n "$_pf" ] && _precond_files+=("$_pf")
-        done < <(
-            # Use find to avoid ls|grep (SC2010); exclude PRECONDITIONS-SNAPSHOT files.
-            find "$TICKET_DIR" -maxdepth 1 -name '*-PRECONDITIONS.json' \
-                ! -name '*-PRECONDITIONS-SNAPSHOT.json' 2>/dev/null | sort || true
-        )
-        # Also check for PRECONDITIONS-SNAPSHOT (compacted form)
-        local _precond_snap
-        _precond_snap=$(
-            find "$TICKET_DIR" -maxdepth 1 -name '*-PRECONDITIONS-SNAPSHOT.json' \
-                ! -name '*.retired' 2>/dev/null | sort | tail -1 || true
-        )
-        if [ -n "$_precond_snap" ]; then
-            # Compacted PRECONDITIONS snapshot — read directly
-            _precond_summary=$(jq -c '
-                .data // . |
-                {status: "present",
-                 manifest_depth: (.manifest_depth? // 0),
-                 gate_verdicts:  (.gate_verdicts?  // {}),
-                 source_count:   (.source_count?   // 1),
-                 compacted:      true}
-            ' "$_precond_snap" 2>/dev/null) || _precond_summary='{"status":"pre-manifest"}'
-        elif [ "${#_precond_files[@]}" -gt 0 ]; then
-            # Flat PRECONDITIONS events — LWW-merge by (gate_name,session_id,worktree_id)
-            _precond_summary=$(
-                for _pf in "${_precond_files[@]}"; do
-                    jq -c '.' "$_pf" 2>/dev/null || true
-                done | jq -n '
-                reduce inputs as $ev (
-                    {};
-                    if ($ev | has("event_type")) and ($ev.event_type == "PRECONDITIONS") then
-                        (($ev.data.gate_name?    // "") + "|" +
-                         ($ev.data.session_id?   // "") + "|" +
-                         ($ev.data.worktree_id?  // "")) as $key |
-                        if has($key) then
-                            if ($ev.timestamp? // 0) > .[$key]._ts
-                            then .[$key] = ($ev.data + {_ts: ($ev.timestamp? // 0)})
-                            else .
-                            end
-                        else .[$key] = ($ev.data + {_ts: ($ev.timestamp? // 0)})
-                        end
-                    else .
-                    end
-                ) |
-                to_entries |
-                if length == 0 then {status: "pre-manifest"}
-                else {
-                    status:          "present",
-                    manifest_depth:  ([.[].value.manifest_depth? // 0] | max // 0),
-                    gate_verdicts:   (reduce .[].value.gate_verdicts? as $gv
-                                       ({}; . + ($gv // {})))
-                }
-                end
-                ' 2>/dev/null
-            ) || _precond_summary='{"status":"pre-manifest"}'
-        fi
-
-        # Merge preconditions_summary into state
-        state=$(printf '%s' "$state" | \
-                jq --argjson ps "$_precond_summary" \
-                   '.preconditions_summary = $ps' 2>/dev/null) || true
-
         # ── Output ────────────────────────────────────────────────────────────
         if [ "$format" = "llm" ]; then
-            # LLM format: rename keys, strip nulls and empty arrays, minify.
-            # Mirrors ticket_reducer/llm_format.py to_llm() key mapping exactly.
-            printf '%s' "$state" | jq -c '
-                # Build renamed dict; use null as sentinel for "omit this key"
-                {
-                    id:   .ticket_id,
-                    t:    .ticket_type,
-                    ttl:  .title,
-                    st:   .status,
-                    au:   .author,
-                    pid:  .parent_id,
-                    pr:   .priority,
-                    asn:  .assignee,
-                    desc: .description,
-                    tg:   (if (.tags | length)     > 0 then .tags else null end),
-                    cm:   (if (.comments | length) > 0
-                           then [.comments[] |
-                                 {b: .body, au: .author} |
-                                 with_entries(select(.value != null))]
-                           else null end),
-                    dp:   (if (.deps | length)     > 0
-                           then [.deps[] |
-                                 {tid: .target_id, r: .relation} |
-                                 with_entries(select(.value != null))]
-                           else null end),
-                    cf:   (if ((.conflicts? // []) | length) > 0
-                           then .conflicts else null end)
-                } | with_entries(select(.value != null))
-            ' 2>/dev/null
+            # LLM format via the single shared formatter ticket_reducer.llm_format
+            # to_llm (same one `list`/`ready --format=llm` use), so show and list
+            # emit identical LLM shapes (bug f026 — the old inline jq mapping had
+            # drifted from to_llm). `state` is already public_state-filtered.
+            printf '%s' "$state" | _SCRIPT_DIR="$_TICKETLIB_DIR" python3 -c '
+import sys, os, json
+sys.path.insert(0, os.environ["_SCRIPT_DIR"])
+from ticket_reducer.llm_format import to_llm
+print(json.dumps(to_llm(json.load(sys.stdin)), ensure_ascii=False, separators=(",", ":")))
+' 2>/dev/null
         else
             # Default format: pretty-printed JSON
             printf '%s' "$state" | jq '.' 2>/dev/null
@@ -753,6 +482,7 @@ import sys, os, json
 sys.path.insert(0, os.environ['_SCRIPT_DIR'])
 from ticket_reducer import reduce_all_tickets, apply_ticket_filters
 from ticket_reducer.llm_format import to_llm
+from ticket_reducer._present import public_state
 
 tracker_dir = os.environ['_TRACKER_DIR']
 include_archived = os.environ.get('_INCLUDE_ARCHIVED', '') == 'true'
@@ -775,7 +505,7 @@ results = apply_ticket_filters(
     tag_filter=tag_filter, priority_filter=priority_filter, without_tag_filter=without_tag_filter,
 )
 for t in results:
-    print(json.dumps(to_llm(t), ensure_ascii=False, separators=(',', ':')))
+    print(json.dumps(to_llm(public_state(t)), ensure_ascii=False, separators=(',', ':')))
 "
         else
             _TRACKER_DIR="$TRACKER_DIR" _INCLUDE_ARCHIVED="$include_archived" \
@@ -787,6 +517,7 @@ for t in results:
 import sys, os, json
 sys.path.insert(0, os.environ['_SCRIPT_DIR'])
 from ticket_reducer import reduce_all_tickets, apply_ticket_filters
+from ticket_reducer._present import public_state
 
 tracker_dir = os.environ['_TRACKER_DIR']
 include_archived = os.environ.get('_INCLUDE_ARCHIVED', '') == 'true'
@@ -808,7 +539,7 @@ results = apply_ticket_filters(
     type_filter=type_filter, status_filter=status_filter, parent_filter=parent_filter,
     tag_filter=tag_filter, priority_filter=priority_filter, without_tag_filter=without_tag_filter,
 )
-print(json.dumps(results, ensure_ascii=False))
+print(json.dumps([public_state(t) for t in results], ensure_ascii=False))
 
 alerted_count = sum(
     1 for t in results
@@ -1393,160 +1124,17 @@ ticket_get_file_impact() {
             return 0
         fi
 
-        # Collect and sort event files (same pattern as ticket_show)
-        local sorted_files=()
-        while IFS= read -r -d '' f; do
-            sorted_files+=("$f")
-        done < <(find "$TRACKER_DIR/$ticket_id" -maxdepth 1 -name '*.json' ! -name '.*' \
-            -print0 2>/dev/null | sort -z)
-
-        if [ "${#sorted_files[@]}" -eq 0 ]; then
-            echo "[]"
-            return 0
-        fi
-
-        # shellcheck disable=SC2016
-        local _JQ_REDUCE='
-def initial_state($tid):
-  {
-    ticket_id: $tid,
-    ticket_type: null,
-    title: null,
-    status: "open",
-    author: null,
-    created_at: null,
-    env_id: null,
-    parent_id: null,
-    priority: null,
-    assignee: null,
-    alias: null,
-    description: "",
-    tags: [],
-    comments: [],
-    deps: [],
-    bridge_alerts: [],
-    reverts: [],
-    file_impact: [],
-    preconditions_summary: {status: "pre-manifest"}
-  };
-
-def _editable_keys:
-  ["ticket_id","ticket_type","title","status","author","created_at","env_id",
-   "parent_id","priority","assignee","alias","description","tags","comments","deps",
-   "bridge_alerts","reverts"];
-
-def apply_event(ev):
-  if ev.event_type == "CREATE" then
-    . + {
-      ticket_type: ev.data.ticket_type,
-      title: ev.data.title,
-      author: ev.author,
-      created_at: ev.timestamp,
-      env_id: ev.env_id,
-      parent_id: (if (ev.data.parent_id? // "") == "" then null
-                  else ev.data.parent_id end),
-      priority:    (ev.data.priority?  // null),
-      assignee:    (ev.data.assignee?  // null),
-      alias:       (ev.data.alias?     // null),
-      description: (ev.data.description? // ""),
-      tags:        (ev.data.tags? // [])
-    }
-  elif ev.event_type == "STATUS" then
-    .status = ev.data.status
-  elif ev.event_type == "COMMENT" then
-    .comments += [{
-      body: (if ev.data.body == null then ""
-             elif (ev.data.body | type) == "string" then ev.data.body
-             else (ev.data.body | tostring)
-             end),
-      author:    ev.author,
-      timestamp: ev.timestamp
-    }]
-  elif ev.event_type == "LINK" then
-    .deps += [{
-      target_id: ((ev.data.target_id? // ev.data.target?) // ""),
-      relation:  (ev.data.relation? // ""),
-      link_uuid:  ev.uuid
-    }]
-  elif ev.event_type == "UNLINK" then
-    .deps = [.deps[] | select(.link_uuid != ev.data.link_uuid)]
-  elif ev.event_type == "EDIT" then
-    reduce ((ev.data.fields? // {}) | to_entries[]) as $field (.;
-      if $field.key == "tags" then
-        if   ($field.value | type) == "array"  then .tags = $field.value
-        elif ($field.value | type) == "string" then
-          .tags = [($field.value | split(","))[] |
-                   gsub("^\\s+|\\s+$"; "") | select(length > 0)]
-        else .tags = []
-        end
-      elif ([_editable_keys[] == $field.key] | any) then
-        .[$field.key] = $field.value
-      else .
-      end
-    )
-  elif ev.event_type == "ARCHIVED" then
-    .archived = true
-    | (if .status == "deleted" then . else .status = "archived" end)
-  elif ev.event_type == "BRIDGE_ALERT" then
-    ((ev.data.alert_type? // ev.data.reason? // ev.data.detail?) // "") as $reason |
-    if ev.data.resolved? // false then
-      ((ev.data.resolves_uuid? // ev.data.alert_uuid?) // "") as $target |
-      if ([.bridge_alerts[] | select(.uuid == $target)] | length) > 0 then
-        .bridge_alerts = [.bridge_alerts[] |
-          if .uuid == $target then .resolved = true else . end]
-      else
-        .bridge_alerts += [{uuid: ev.uuid, reason: $reason,
-                            timestamp: ev.timestamp, resolved: true}]
-      end
-    else
-      .bridge_alerts += [{uuid: ev.uuid, reason: $reason,
-                          timestamp: ev.timestamp, resolved: false}]
-    end
-  elif ev.event_type == "REVERT" then
-    .reverts += [{
-      uuid:              ev.uuid,
-      target_event_uuid: (ev.data.target_event_uuid? // null),
-      target_event_type: (ev.data.target_event_type? // null),
-      reason:            (ev.data.reason? // ""),
-      timestamp:          ev.timestamp,
-      author:             ev.author
-    }]
-  elif ev.event_type == "SNAPSHOT" then
-    reduce ((ev.data.compiled_state? // {}) | to_entries[]) as $field (.;
-      .[$field.key] = $field.value
-    )
-  elif ev.event_type == "FILE_IMPACT" then
-    .file_impact = (ev.data.file_impact // [])
-  elif ev.event_type == "VERIFY_COMMANDS" then
-    .verify_commands = (ev.data.verify_commands // [])
-  else .
-  end;
-
-reduce $_events[] as $ev (initial_state($TID); apply_event($ev))
-'
-
-        # as ticket_show (epic 78fc-3858, story 564c-e391). ticket_get_file_impact reuses
-        # the shared $_JQ_REDUCE program (defined in ticket_show's scope and available via
-        # the _ticketlib_dispatch subshell) to avoid duplicating reducer logic.
-        local _valid_tmp
-        _valid_tmp=$(mktemp)
-        # shellcheck disable=SC2064
-        trap "rm -f '$_valid_tmp'" EXIT
-        local f
-        for f in "${sorted_files[@]}"; do
-            jq -c '.' "$f" 2>/dev/null >> "$_valid_tmp" || true
-        done
-
-        if [ ! -s "$_valid_tmp" ]; then
-            echo "[]"
-            rm -f "$_valid_tmp"
-            return 0
-        fi
-
+        # Reduce via the single source of truth (Python ticket_reducer) and emit
+        # the file_impact array — same reducer as show/list (bug f026), replacing
+        # the former duplicated in-bash jq reducer. reduce_ticket always yields a
+        # file_impact key (default []), preserving the legacy []-on-miss contract.
         local fi_out
-        fi_out=$(jq -c -n --arg TID "$ticket_id" --slurpfile _events "$_valid_tmp" \
-            "$_JQ_REDUCE | .file_impact // []" 2>/dev/null) || fi_out="[]"
-        rm -f "$_valid_tmp"
+        fi_out=$(_SCRIPT_DIR="$_TICKETLIB_DIR" python3 -c '
+import sys, os, json
+sys.path.insert(0, os.environ["_SCRIPT_DIR"])
+from ticket_reducer import reduce_ticket
+print(json.dumps(reduce_ticket(sys.argv[1]).get("file_impact") or [], ensure_ascii=False))
+' "$TRACKER_DIR/$ticket_id" 2>/dev/null) || fi_out="[]"
 
         echo "$fi_out"
     )

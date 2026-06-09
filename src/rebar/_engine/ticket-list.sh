@@ -162,6 +162,7 @@ import sys, os, json
 sys.path.insert(0, os.environ['_SCRIPT_DIR'])
 from ticket_reducer import reduce_all_tickets, apply_ticket_filters
 from ticket_reducer.llm_format import to_llm
+from ticket_reducer._present import public_state
 
 tracker_dir = os.environ['_TRACKER_DIR']
 include_archived = os.environ.get('_INCLUDE_ARCHIVED', '') == 'true'
@@ -184,7 +185,7 @@ results = apply_ticket_filters(
     tag_filter=tag_filter, priority_filter=priority_filter, without_tag_filter=without_tag_filter,
 )
 for t in results:
-    print(json.dumps(to_llm(t), ensure_ascii=False, separators=(',', ':')))
+    print(json.dumps(to_llm(public_state(t)), ensure_ascii=False, separators=(',', ':')))
 "
 else
     # Default: JSON array — reduce, filter, and emit in a single process.
@@ -198,6 +199,7 @@ else
 import sys, os, json
 sys.path.insert(0, os.environ['_SCRIPT_DIR'])
 from ticket_reducer import reduce_all_tickets, apply_ticket_filters
+from ticket_reducer._present import public_state
 
 tracker_dir = os.environ['_TRACKER_DIR']
 include_archived = os.environ.get('_INCLUDE_ARCHIVED', '') == 'true'
@@ -219,7 +221,7 @@ results = apply_ticket_filters(
     type_filter=type_filter, status_filter=status_filter, parent_filter=parent_filter,
     tag_filter=tag_filter, priority_filter=priority_filter, without_tag_filter=without_tag_filter,
 )
-print(json.dumps(results, ensure_ascii=False))
+print(json.dumps([public_state(t) for t in results], ensure_ascii=False))
 
 alerted_count = sum(
     1 for t in results

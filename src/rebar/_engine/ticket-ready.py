@@ -212,15 +212,17 @@ def main() -> int:
     # dicts. `find_ready_tickets` already returns these state dicts straight
     # from the same reducer the --format=llm branch consumes, so this reuses the
     # identical data path while matching the array shape `list`/`search` emit.
+    from ticket_reducer._present import public_state  # noqa: PLC0415
+
     if args.json:
-        print(json.dumps(ready, ensure_ascii=False))
+        print(json.dumps([public_state(s) for s in ready], ensure_ascii=False))
         return 0
 
     if args.format == "llm":
         from ticket_reducer.llm_format import to_llm  # noqa: PLC0415
 
         for state in ready:
-            print(json.dumps(to_llm(state), ensure_ascii=False))
+            print(json.dumps(to_llm(public_state(state)), ensure_ascii=False))
     else:
         for state in ready:
             tid = state.get("ticket_id")
