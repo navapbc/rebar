@@ -31,8 +31,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/ticket-sync.sh"
 
-_usage() {
-    echo "Usage: ticket <subcommand> [args...]"
+_print_overview() {
+    echo "Usage: rebar <subcommand> [args...]"
+    echo ""
+    echo "Run 'rebar <subcommand> --help' for usage of a specific subcommand."
     echo ""
     echo "Subcommands:"
     echo "  init        Initialize the ticket system"
@@ -68,7 +70,76 @@ _usage() {
     echo "  set-verify-commands  Record DD-level verify commands (JSON array of {dd_id,dd_text,command})"
     echo "  get-verify-commands  Get the current verify commands array for a ticket (JSON)"
     echo "  scratch          Manage per-ticket scratch values (set/get/clear)"
-    exit 1
+}
+
+# Misuse (no/unknown subcommand): overview + non-zero exit (preserves prior behavior).
+_usage() { _print_overview; exit 1; }
+# Explicit help request: overview to stdout, success exit.
+_help_overview() { _print_overview; exit 0; }
+
+# Per-subcommand usage, printed on `rebar <sub> --help` / `rebar help <sub>`.
+# Mirrors each subcommand's own Usage: text. Printed to stdout; exits 0. The
+# command itself is NOT executed (no _ensure_initialized, no side effects).
+_print_subcommand_help() {
+    local sub="$1"
+    case "$sub" in
+        init)         echo "Usage: rebar init [--silent]" ;;
+        create)       echo "Usage: rebar create <bug|epic|story|task> <title> [--parent <id>] [--priority <0-4>] [--assignee <name>] [--description <text>] [--tags <t1,t2>]" ;;
+        show)         echo "Usage: rebar show [--format=llm] <ticket_id> [<ticket_id> ...]" ;;
+        list)         echo "Usage: rebar list [--status=<s>] [--type=<t>] [--priority=<n>] [--parent=<id>] [--has-tag=<tag>] [--without-tag=<tag>] [--include-archived] [--exclude-deleted] [--format=llm]" ;;
+        transition)
+            echo "Usage: rebar transition <ticket_id> <current_status> <target_status> [--reason=<text>] [--force] [--verdict-hash=<hash>] [--force-close=<reason>]"
+            echo "       rebar transition <ticket_id> <target_status>   (auto-detects current status)"
+            echo "  status: open | in_progress | closed | blocked"
+            echo "  bug close requires --reason (prefix 'Fixed:' or 'Escalated to user:'); story/epic close requires --verdict-hash (or --force-close=<reason>)" ;;
+        claim)        echo "Usage: rebar claim <ticket_id> [--assignee=<name>]   (atomic open -> in_progress; exit 10 if already claimed)" ;;
+        reopen)       echo "Usage: rebar reopen <ticket_id>   (closed -> open; exit 10 if not currently closed)" ;;
+        comment)      echo "Usage: rebar comment <ticket_id> <body>" ;;
+        link)
+            echo "Usage: rebar link <id1> <id2> <relation>   (relation REQUIRED)"
+            echo "  relation: blocks | depends_on | relates_to | duplicates | supersedes | discovered_from"
+            echo "  blocking deps (blocks/depends_on) are promoted to a comparable hierarchy level" ;;
+        unlink)       echo "Usage: rebar unlink <source> <target>   (no relation arg; removes the most-recent link between the pair — call repeatedly for multiple)" ;;
+        deps)         echo "Usage: rebar deps <ticket_id>" ;;
+        edit)         echo "Usage: rebar edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] [--ticket_type=VALUE] [--description=VALUE] [--tags=VALUE] [--parent=VALUE]" ;;
+        tag)          echo "Usage: rebar tag <ticket_id> <tag>" ;;
+        untag)        echo "Usage: rebar untag <ticket_id> <tag>" ;;
+        validate)     echo "Usage: rebar validate [--quick|--full] [--fix] [--verbose] [--json] [--terse]   (repo-wide health check; takes NO ticket id)" ;;
+        clarity-check) echo "Usage: rebar clarity-check <ticket_id>   (exit 0=pass, 1=fail; JSON: score/verdict/threshold)" ;;
+        check-ac)     echo "Usage: rebar check-ac <ticket_id>   (exit 0=pass, 1=fail; AC_CHECK: pass|fail)" ;;
+        quality-check) echo "Usage: rebar quality-check <ticket_id>   (exit 0=pass, 1=fail; QUALITY: pass|fail)" ;;
+        exists)       echo "Usage: rebar exists <ticket_id|alias>   (exit 0=exists, 1=not found)" ;;
+        list-epics)   echo "Usage: rebar list-epics [--all] [--has-tag=<tag>] [--min-children=<n>]" ;;
+        list-descendants) echo "Usage: rebar list-descendants <root_ticket_id>   (BFS walk bucketed by type, JSON)" ;;
+        next-batch)   echo "Usage: rebar next-batch <epic_id> [--json]" ;;
+        ready)        echo "Usage: rebar ready   (lists tickets whose blockers are all closed)" ;;
+        search)       echo "Usage: rebar search <query> [--status=<s>] [--type=<t>] [--has-tag=<tag>]" ;;
+        archive)      echo "Usage: rebar archive <ticket_id>   (excludes from default list; idempotent)" ;;
+        delete)       echo "Usage: rebar delete <ticket_id> --user-approved   (destructive; requires explicit approval)" ;;
+        set-file-impact)  echo "Usage: rebar set-file-impact <ticket_id> <json_array>   (array of {path,reason} objects)" ;;
+        get-file-impact)  echo "Usage: rebar get-file-impact <ticket_id>" ;;
+        set-verify-commands) echo "Usage: rebar set-verify-commands <ticket_id> <json_array>   (array of {dd_id,dd_text,command})" ;;
+        get-verify-commands) echo "Usage: rebar get-verify-commands <ticket_id>" ;;
+        summary)      echo "Usage: rebar summary <ticket_id> [<ticket_id> ...]" ;;
+        scratch)      echo "Usage: rebar scratch <set|get|clear> <ticket_id> [<key> [<value>]]" ;;
+        compact)      echo "Usage: rebar compact <ticket_id> [--threshold=<n>]" ;;
+        compact-all)  echo "Usage: rebar compact-all [--dry-run] [--limit=<n>] [--no-commit]" ;;
+        fsck)         echo "Usage: rebar fsck" ;;
+        fsck-recover) echo "Usage: rebar fsck-recover [--tracker-dir <path>]" ;;
+        bridge-status) echo "Usage: rebar bridge-status [--format=json]" ;;
+        bridge-fsck)  echo "Usage: rebar bridge-fsck [--tickets-tracker=<path>]" ;;
+        purge-bridge) echo "Usage: rebar purge-bridge --keep=<PROJECT_KEY> [--dry-run]" ;;
+        revert)       echo "Usage: rebar revert <ticket_id> <target_uuid> [--reason=<text>]" ;;
+        resolve)      echo "Usage: rebar resolve <id_or_alias_or_prefix>" ;;
+        format)       echo "Usage: rebar format <ticket_id> [mode]" ;;
+        *)
+            echo "Error: unknown subcommand '$sub'" >&2
+            echo "" >&2
+            _print_overview >&2
+            return 1
+            ;;
+    esac
+    return 0
 }
 
 _ensure_initialized() {
@@ -137,8 +208,42 @@ if [ $# -lt 1 ]; then
     _usage
 fi
 
+# ── Help interception (must run BEFORE the case below, so no subcommand is ever
+# executed and no side effects / _ensure_initialized occur) ──────────────────
+# Top level: `rebar help [<sub>]`, `rebar --help`, `rebar -h`.
+#   - bare  -> full subcommand overview (exit 0)
+#   - `help <sub>` -> that subcommand's usage (exit 0)
+# Per subcommand: `rebar <sub> --help|-h` is treated as a help request ONLY when
+# the flag is the FIRST argument immediately after the subcommand. Free-text
+# parameters (title, body, comment, description, tags, search query, ...) always
+# sit at position >= 2 (preceded by a type or id), so they can never be mistaken
+# for the help flag. The bare word `help` is honored only at top level, so e.g.
+# `rebar search help` still searches for the term "help".
+case "$1" in
+    help)
+        if [ -n "${2:-}" ]; then
+            _print_subcommand_help "$2"; exit $?
+        fi
+        _help_overview
+        ;;
+    --help|-h)
+        if [ -n "${2:-}" ]; then
+            _print_subcommand_help "$2"; exit $?
+        fi
+        _help_overview
+        ;;
+esac
+
 subcommand="$1"
 shift
+
+# First positional after the subcommand is `--help`/`-h` -> show that
+# subcommand's usage and exit without executing.
+case "${1:-}" in
+    --help|-h)
+        _print_subcommand_help "$subcommand"; exit $?
+        ;;
+esac
 
 case "$subcommand" in
     init)

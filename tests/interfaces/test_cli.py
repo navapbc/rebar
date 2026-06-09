@@ -47,6 +47,70 @@ def test_unknown_subcommand_errors(rebar_repo: Path) -> None:
     assert "unknown subcommand" in (cp.stdout + cp.stderr).lower()
 
 
+def test_help_flag_shows_usage_without_executing(rebar_repo: Path) -> None:
+    """`rebar <sub> --help` prints the subcommand usage and exits 0 WITHOUT
+    executing the command. `init` is the canonical example: it has no required
+    args, so it used to run (and re-initialize) instead of showing help."""
+    cp = _cli("init", "--help", cwd=str(rebar_repo))
+    assert cp.returncode == 0
+    assert "Usage: rebar init" in cp.stdout
+    # init prints "initialized" when it actually runs — must be absent here.
+    assert "initialized" not in (cp.stdout + cp.stderr).lower()
+
+
+def test_subcommand_help_has_no_side_effect(rebar_repo: Path) -> None:
+    """`rebar create --help` must show usage and create nothing."""
+    before = len(rebar.list_tickets(repo_root=str(rebar_repo)))
+    cp = _cli("create", "--help", cwd=str(rebar_repo))
+    assert cp.returncode == 0
+    assert "Usage: rebar create" in cp.stdout
+    after = len(rebar.list_tickets(repo_root=str(rebar_repo)))
+    assert after == before  # no ticket was created
+
+
+def test_top_level_help_forms_list_subcommands(rebar_repo: Path) -> None:
+    for form in ("--help", "-h", "help"):
+        cp = _cli(form, cwd=str(rebar_repo))
+        assert cp.returncode == 0, form
+        assert "Subcommands:" in cp.stdout, form
+
+
+def test_help_word_with_subcommand(rebar_repo: Path) -> None:
+    cp = _cli("help", "transition", cwd=str(rebar_repo))
+    assert cp.returncode == 0
+    assert "Usage: rebar transition" in cp.stdout
+
+
+def test_short_help_flag_on_subcommand(rebar_repo: Path) -> None:
+    cp = _cli("tag", "-h", cwd=str(rebar_repo))
+    assert cp.returncode == 0
+    assert "Usage: rebar tag" in cp.stdout
+
+
+def test_help_in_freetext_title_is_not_intercepted(rebar_repo: Path) -> None:
+    """`--help` appearing in a free-text parameter (the title is at position 2,
+    after the type) must NOT trigger help — the ticket is created normally and
+    the literal text is preserved."""
+    before = len(rebar.list_tickets(repo_root=str(rebar_repo)))
+    cp = _cli("create", "task", "please pass --help to the parser", cwd=str(rebar_repo))
+    assert cp.returncode == 0
+    assert "Usage: rebar create" not in cp.stdout  # not the help text
+    after = rebar.list_tickets(repo_root=str(rebar_repo))
+    assert len(after) == before + 1
+    assert any("--help" in t["title"] for t in after)
+
+
+def test_bare_help_word_in_freetext_is_not_intercepted(rebar_repo: Path) -> None:
+    """The bare word `help` is honored only at top level; as a free-text value
+    (a title here) it is stored literally, not treated as a help request."""
+    tid = rebar.create_ticket("task", "placeholder", repo_root=str(rebar_repo))
+    cp = _cli("comment", tid, "run with --help or -h for usage", cwd=str(rebar_repo))
+    assert cp.returncode == 0
+    assert "Usage:" not in cp.stdout  # the comment was added, not help shown
+    comments = rebar.show_ticket(tid, repo_root=str(rebar_repo))["comments"]
+    assert any("--help" in c["body"] for c in comments)
+
+
 def test_reconcile_intercepted_dry_run_default(rebar_repo: Path) -> None:
     """`rebar reconcile` is intercepted and routed to the reconciler in dry-run
     by default. Without acli it cannot mutate; it must not crash the CLI with an

@@ -103,6 +103,13 @@ rebar clarity-check <id> / check-ac <id> / quality-check <id>   # per-ticket qua
 rebar reconcile [--mode dry-run|reconcile-check|live]   # Jira sync (default: dry-run)
 ```
 
+Run `rebar help` (or `rebar --help` / `-h`) for the subcommand overview, and
+`rebar <subcommand> --help` (or `rebar help <subcommand>`) for a specific
+subcommand's usage — `--help` prints usage and never executes the command.
+Help is only recognized as the first argument after the subcommand, so a
+`--help`/`-h`/`help` that appears inside a free-text parameter (title, comment
+body, search query, …) is treated as literal text, not a help request.
+
 Repo root is resolved from `REBAR_ROOT` (or `PROJECT_ROOT`), falling back to the
 git toplevel of the working directory.
 
