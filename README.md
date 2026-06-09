@@ -113,6 +113,9 @@ Register it in an MCP client (e.g. Claude Desktop/Code) — zero-preinstall via
 A registry manifest for the [MCP Registry](https://github.com/modelcontextprotocol/registry)
 lives in [`server.json`](server.json) (`io.github.navapbc/rebar`); publish it with
 the `mcp-publisher` CLI (`mcp-publisher login github` → `mcp-publisher publish`).
+The registry verifies PyPI-package ownership via this annotation:
+
+mcp-name: io.github.navapbc/rebar
 
 ## License
 
