@@ -194,10 +194,12 @@ mk RBUG bug "PROBE: reason-guard bug"; assert_rc 0 "create fresh bug"
 run_rb transition "$RBUG" open closed; assert_rc_ne 0 "bug close requires --reason"
 run_rb transition "$RBUG" open closed --reason="patched"; assert_rc_ne 0 "bug reason prefix enforced"
 run_rb transition "$RBUG" open closed --reason="Fixed: probe"; assert_rc 0 "bug close with Fixed: reason"
-run_rb transition "$STORY" open closed; assert_rc_ne 0 "story close requires --verdict-hash"
-run_rb transition "$STORY" open closed --force-close="probe"; assert_rc 0 "story --force-close bypasses verdict-hash"
+# Verdict-hash close gate is OPT-IN (default off, since 0.2.0): story/epic close
+# succeeds without --verdict-hash. Enforcement when enabled
+# (verify.require_verdict_for_close=true) is covered by the GAP-9 bash test.
+run_rb transition "$STORY" open closed; assert_rc 0 "story close succeeds by default (verdict gate opt-in)"
 # EPIC's only child (STORY) is now closed, so the children guard allows the close.
-run_rb transition "$EPIC" open closed --force-close="probe"; assert_rc 0 "epic --force-close (child already closed)"
+run_rb transition "$EPIC" open closed; assert_rc 0 "epic close succeeds (child already closed)"
 
 section "quality gates"
 run_rb clarity-check "$TASK"; assert_contains '"score"' "clarity-check JSON"
