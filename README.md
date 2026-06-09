@@ -22,29 +22,67 @@ the three interfaces are thin layers over it.
 
 ## Install
 
-Published to PyPI as **`nava-rebar`** (the import package and commands stay
-`rebar` / `rebar-mcp`):
+rebar ships from one Python package — PyPI distribution **`nava-rebar`** (the
+import package and commands stay `rebar` / `rebar-mcp`). Pick the channel that
+fits. (System prerequisites in all cases: `git`, `jq`, `flock`, `bash`,
+`python3`; `acli` only for live Jira reconciliation.)
+
+### Homebrew (CLI)
 
 ```bash
-pipx install nava-rebar              # isolated CLI: rebar
-pip install 'nava-rebar[mcp]'        # + MCP server: rebar-mcp
-pip install nava-rebar               # library: import rebar
-
-brew install navapbc/rebar/rebar     # Homebrew tap (CLI)
+brew install navapbc/rebar/rebar
+# or: brew tap navapbc/rebar && brew install rebar
 ```
 
-From a source checkout:
+Installs the `rebar` CLI (and the `rebar` library inside the formula's venv). For
+the MCP server via Homebrew users, install the `[mcp]` extra with pipx/uvx below.
+
+### PyPI — pipx / pip
 
 ```bash
-pip install .            # library + CLI
-pip install '.[mcp]'     # + MCP server (FastMCP)
+pipx install nava-rebar              # isolated CLI on PATH: rebar
+pip  install nava-rebar              # library: import rebar
+pip  install 'nava-rebar[mcp]'       # + MCP server: rebar-mcp
 ```
 
-The engine (bash dispatcher + `ticket-*.sh` + python helpers) is exec'd as real
-files, so rebar must be installed **unpacked to a real on-disk directory**:
-zipimport / zip-safe installs are unsupported. Standard wheel installs (hatchling
-builds unpacked) and editable installs satisfy this; `engine_dir()` asserts it at
-the first engine call and fails loudly otherwise.
+### MCP server — from the MCP Registry
+
+Listed in the [MCP Registry](https://registry.modelcontextprotocol.io) as
+**`io.github.navapbc/rebar`**. Registry-aware MCP clients can add it by that
+name; or register it directly in your client config (zero pre-install via
+`uvx`):
+
+```json
+{
+  "mcpServers": {
+    "rebar": {
+      "command": "uvx",
+      "args": ["--from", "nava-rebar[mcp]", "rebar-mcp"],
+      "env": { "REBAR_ROOT": "/path/to/your/repo" }
+    }
+  }
+}
+```
+
+(Already pip/pipx-installed `nava-rebar[mcp]`? Use `"command": "rebar-mcp"`
+instead.) Server flags: `REBAR_MCP_READONLY=1` exposes only read tools;
+`reconcile` is dry-run unless `REBAR_MCP_ALLOW_RECONCILE_LIVE=1`.
+
+### From source
+
+```bash
+git clone https://github.com/navapbc/rebar && cd rebar
+pip install .              # library + CLI
+pip install '.[mcp]'      # + MCP server (FastMCP)
+pip install -e '.[dev]'   # editable + test deps (pytest, mcp)
+```
+
+> **Packaging note:** the engine (bash dispatcher + `ticket-*.sh` + python
+> helpers) is exec'd as real files, so rebar must be installed **unpacked to a
+> real on-disk directory** — zipimport / zip-safe installs are unsupported.
+> Standard wheel installs (hatchling builds unpacked) and editable installs
+> satisfy this; `engine_dir()` asserts it at the first engine call and fails
+> loudly otherwise.
 
 ## CLI
 
@@ -93,27 +131,14 @@ rebar-mcp          # stdio transport
 
 Exposes ticket operations as MCP tools. `reconcile` defaults to `dry-run`
 (`live` requires `REBAR_MCP_ALLOW_RECONCILE_LIVE=1`). Set `REBAR_MCP_READONLY=1`
-to expose only the read tools (no write/mutation tools).
+to expose only the read tools (no write/mutation tools). To register it in an MCP
+client (registry name `io.github.navapbc/rebar`, or a direct `uvx` config), see
+[Install → MCP server](#mcp-server--from-the-mcp-registry) above.
 
-Register it in an MCP client (e.g. Claude Desktop/Code) — zero-preinstall via
-`uvx`:
-
-```json
-{
-  "mcpServers": {
-    "rebar": {
-      "command": "uvx",
-      "args": ["--from", "nava-rebar[mcp]", "rebar-mcp"],
-      "env": { "REBAR_ROOT": "/path/to/your/repo" }
-    }
-  }
-}
-```
-
-A registry manifest for the [MCP Registry](https://github.com/modelcontextprotocol/registry)
-lives in [`server.json`](server.json) (`io.github.navapbc/rebar`); publish it with
-the `mcp-publisher` CLI (`mcp-publisher login github` → `mcp-publisher publish`).
-The registry verifies PyPI-package ownership via this annotation:
+**Maintainers:** the registry manifest lives in [`server.json`](server.json);
+publish/update it with the `mcp-publisher` CLI (see `docs/releasing.md`). The
+registry verifies PyPI-package ownership via this annotation (kept in this
+README, which is the PyPI long description):
 
 mcp-name: io.github.navapbc/rebar
 

@@ -75,13 +75,26 @@ MCP server (`rebar-mcp`) needs the `mcp` extra; brew users get it via
 `pipx install 'nava-rebar[mcp]'` or `uvx --from nava-rebar[mcp] rebar-mcp`.
 
 ### 4. Update the MCP Registry
-The PyPI release must already carry the `mcp-name: io.github.navapbc/rebar`
-annotation (it lives in `README.md`, which is the PyPI long description — the
-registry greps it to verify package ownership). Then:
+Prereqs (both already satisfied for this project — listed so they aren't
+rediscovered):
+- The PyPI release must carry the `mcp-name: io.github.navapbc/rebar` annotation
+  (it lives in `README.md` = the PyPI long description; the registry greps it to
+  verify package ownership).
+- `server.json` `description` must be **≤ 100 characters** (the registry rejects
+  longer with HTTP 422 — note PyPI/pyproject have no such limit, so the two
+  descriptions can differ).
+- To publish under the **org** namespace `io.github.navapbc/*`, your `navapbc`
+  GitHub membership must be **public**:
+  `gh api --method PUT orgs/navapbc/public_members/<you>` (revert with `DELETE`).
+
 ```bash
-mcp-publisher login github      # browser auth as a navapbc-org GitHub user
+mcp-publisher login github      # browser/device auth as a navapbc-org GitHub user
 mcp-publisher publish           # publishes ./server.json (validates schema first)
 ```
+**Gotcha:** `mcp-publisher` captures your org namespace claims **at login time**.
+If you publicize org membership *after* logging in, re-run `mcp-publisher login
+github` before `publish`, or you'll get a 403 listing only `io.github.<you>/*`.
+Verify: `curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.navapbc/rebar"`.
 
 ---
 
