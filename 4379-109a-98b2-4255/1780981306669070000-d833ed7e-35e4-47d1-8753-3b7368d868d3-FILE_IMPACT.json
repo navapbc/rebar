@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/foo.py","reason":"edit foo"},{"path":"src/bar.py","reason":"edit bar"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1780981306669070000,"uuid":"d833ed7e-35e4-47d1-8753-3b7368d868d3"}
