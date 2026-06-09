@@ -1,0 +1,65 @@
+name: release
+
+# Build and publish nava-rebar to PyPI via Trusted Publishing (OIDC) — no stored
+# token. Publishing is gated to version tags (push a tag like `v0.1.0`); a manual
+# run (workflow_dispatch) builds + validates the distributions but does NOT publish,
+# so it doubles as a release dry-run.
+#
+# One-time PyPI setup (Account → Publishing → add a pending publisher):
+#   PyPI project name: nava-rebar
+#   Owner:             navapbc
+#   Repository:        rebar
+#   Workflow filename: release.yml
+#   Environment:       pypi
+# Also create a GitHub environment named `pypi` (Settings → Environments) — add
+# required-reviewers protection there if you want a manual approval gate.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+      - name: Validate metadata (PyPI-readiness)
+        run: |
+          python -m pip install --upgrade twine
+          python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # Only publish on a version-tag push; a manual dispatch stops after build.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: pypi
+      url: https://pypi.org/p/nava-rebar
+    permissions:
+      id-token: write   # mint the short-lived OIDC token for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

@@ -3,7 +3,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "rebar"
+# Distribution name (PyPI). The import package stays `rebar` and the console
+# scripts stay `rebar` / `rebar-mcp` — those are independent of the dist name.
+# `rebar` itself is taken on PyPI (Eventbrite), so we publish under `nava-rebar`.
+name = "nava-rebar"
 version = "0.1.0"
 description = "Event-sourced ticket system with a Jira reconciler — CLI, Python library, and MCP server."
 readme = "README.md"
