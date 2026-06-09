@@ -151,9 +151,10 @@ def build_server():
         return rebar.quality_check(ticket_id)
 
     @mcp.tool()
-    def validate(ticket_id: str) -> dict:
-        """Validate ticket quality (JSON report; exit 0-4 by score)."""
-        return rebar.validate(ticket_id)
+    def validate() -> dict:
+        """Repo-wide quality health check (JSON report: score, critical/major/
+        minor issues, warnings, suggestions). Takes no ticket id."""
+        return rebar.validate()
 
     @mcp.tool()
     def get_file_impact(ticket_id: str) -> list[dict]:

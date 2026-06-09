@@ -194,13 +194,17 @@ def quality_check(ticket_id: str, *, repo_root=None) -> dict:
     return {"passed": cp.returncode == 0, "output": (cp.stdout + cp.stderr).strip()}
 
 
-def validate(ticket_id: str, *, repo_root=None) -> dict:
-    """Validate ticket quality (JSON report; exit 0-4 by score)."""
-    cp = _run(["validate", ticket_id, "--json"], repo_root=repo_root)
-    data = _json_or(cp.stdout, {"output": (cp.stdout or cp.stderr).strip()})
-    if isinstance(data, dict):
-        data.setdefault("exit_code", cp.returncode)
-    return data
+def validate(*, repo_root=None) -> dict:
+    """Repo-wide quality health check (JSON report).
+
+    ``validate`` is repo-wide and takes no ticket id. Its exit code is
+    score-encoded (exit == 5 - score), so a nonzero exit is NORMAL — not a
+    failure. We use the non-raising :func:`_run` and json-parse stdout,
+    returning {score, critical_issues, major_issues, minor_issues, warnings,
+    suggestions}.
+    """
+    cp = _run(["validate", "--json"], repo_root=repo_root)
+    return _json_or(cp.stdout, {"output": (cp.stdout or cp.stderr).strip()})
 
 
 def get_file_impact(ticket_id: str, *, repo_root=None) -> list:

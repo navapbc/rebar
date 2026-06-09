@@ -119,3 +119,27 @@ def test_reconcile_intercepted_dry_run_default(rebar_repo: Path) -> None:
     # Either the reconciler ran (0/75) or it failed cleanly on missing acli — but
     # never the dispatcher's "unknown subcommand 'reconcile'".
     assert "unknown subcommand 'reconcile'" not in (cp.stdout + cp.stderr).lower()
+
+
+def test_validate_is_repo_wide_no_ticket_id(rebar_repo: Path) -> None:
+    """`validate` is repo-wide: it takes NO ticket id. Passing one must not be
+    accepted as a positional (regression: the engine rejected positionals with
+    'Unknown option', breaking the lib/MCP surface that wrongly passed a id).
+
+    The library `rebar.validate()` takes no ticket id, tolerates the
+    score-encoded nonzero exit, and returns the parsed JSON report (not an
+    error dict)."""
+    # CLI: no-id invocation produces a real JSON report, not an "Unknown option".
+    cp = _cli("validate", "--json", cwd=str(rebar_repo))
+    assert "unknown option" not in (cp.stdout + cp.stderr).lower()
+    import json
+    report = json.loads(cp.stdout)
+    assert "score" in report
+
+    # Library: same report, never an {"output": "Unknown option..."} error dict.
+    r = rebar.validate(repo_root=str(rebar_repo))
+    assert isinstance(r, dict)
+    assert "score" in r
+    for key in ("critical_issues", "major_issues", "minor_issues",
+                "warnings", "suggestions"):
+        assert key in r

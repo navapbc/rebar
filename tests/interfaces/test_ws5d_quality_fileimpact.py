@@ -36,5 +36,5 @@ def test_quality_gates_return_passed_shape(rebar_repo: Path) -> None:
         result = fn(tid)
         assert isinstance(result, dict)
         assert "passed" in result and isinstance(result["passed"], bool)
-    v = rebar.validate(tid)
+    v = rebar.validate()
     assert isinstance(v, dict)
