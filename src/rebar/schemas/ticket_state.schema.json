@@ -85,6 +85,20 @@
         }
       }
     },
+    "verify_commands": {
+      "type": "array",
+      "description": "DD-level verification commands (always present; default []).",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["command"],
+        "properties": {
+          "dd_id": { "type": "string" },
+          "dd_text": { "type": "string" },
+          "command": { "type": "string" }
+        }
+      }
+    },
     "bridge_alerts": { "type": "array" },
     "reverts": { "type": "array" },
     "preconditions_summary": { "type": "object" }
