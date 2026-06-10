@@ -483,6 +483,17 @@ def _cmd_ready(argv: list[str], tracker: str) -> int:
             continue
         if arg.startswith("--epic="):
             epic = arg[len("--epic="):]
+            i += 1
+            continue
+        if arg.startswith("-"):
+            # Reject unknown options, including the removed legacy `--json`
+            # (use `--output json`). Mirrors the old ready arm's exit 2.
+            print(f"Error: unknown option '{arg}'", file=sys.stderr)
+            print(
+                "Usage: ticket ready [--output json|llm] [--epic <id>]",
+                file=sys.stderr,
+            )
+            return 2
         i += 1
     states = ready_states(tracker, epic=epic)
     if fmt == "json":

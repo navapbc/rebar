@@ -360,6 +360,22 @@ print('OK')
         echo "  Output: $_output" >&2
         (( FAIL++ ))
     fi
+
+    # Test 8: the removed legacy `--json` flag is rejected (use `--output json`).
+    # Regression guard for story 23d2: the collapsed ready arm must not silently
+    # accept and ignore unknown options (pre-23d2 the old arm exited non-zero).
+    echo "Test 8: legacy --json flag is rejected (non-zero exit, not silently ignored)"
+    _tracker=$(make_ready_fixture)
+    _exit=0
+    _output=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" ready --json 2>&1) || _exit=$?
+    if [[ $_exit -ne 0 ]] && echo "$_output" | grep -q "unknown option"; then
+        echo "  PASS: ready --json rejected (exit $_exit)"
+        (( PASS++ ))
+    else
+        echo "  FAIL: ready --json should be rejected, got exit $_exit" >&2
+        echo "  Output: $_output" >&2
+        (( FAIL++ ))
+    fi
 }
 
 # Run the RED zone tests
