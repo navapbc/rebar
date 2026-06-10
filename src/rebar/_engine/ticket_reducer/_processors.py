@@ -252,9 +252,11 @@ def process_revert(state: dict, event: dict, data: dict, event_uuid: str) -> Non
     list fast-path, but replay still re-applied the ARCHIVED event, leaving
     compiled state at status=archived/archived=True (ticket stayed hidden).
     Clear the archived projection so the ticket is visible again with status
-    open. A ticket that was DELETED (delete writes STATUS(deleted)+ARCHIVED)
-    keeps its terminal deleted status: process_archived never set
-    status=archived for it, so the ``== "archived"`` guard leaves it untouched.
+    open. A ticket that was DELETED (delete writes STATUS(deleted)+ARCHIVED) is
+    left FULLY untouched: it keeps status="deleted" AND archived=True, so it
+    stays hidden. (Default `list` excludes archived but not deleted, so clearing
+    archived on a deleted ticket would resurrect it into the listing — review
+    H1.) The status!="deleted" guard on the whole block enforces this.
     """
     state["reverts"].append(
         {
@@ -266,7 +268,11 @@ def process_revert(state: dict, event: dict, data: dict, event_uuid: str) -> Non
             "author": event.get("author"),
         }
     )
-    if data.get("target_event_type") == "ARCHIVED" and state.get("archived"):
+    if (
+        data.get("target_event_type") == "ARCHIVED"
+        and state.get("archived")
+        and state.get("status") != "deleted"
+    ):
         state["archived"] = False
         if state.get("status") == "archived":
             state["status"] = "open"

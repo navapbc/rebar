@@ -356,7 +356,8 @@ def _audit_log_probe(
     """
     detail_str = "" if not detail else f" detail={detail!r}"
     print(  # noqa: T201
-        f"inbound_probe: branch={branch_label} key={issue_key}{detail_str}"
+        f"inbound_probe: branch={branch_label} key={issue_key}{detail_str}",
+        file=sys.stderr,
     )
 
 
@@ -428,13 +429,18 @@ def route_inbound_probe(mutation: Any, probe_result: Any) -> list[Any] | None:
     return None
 
 
-def _read_local_tickets(repo_root: Path) -> list[dict]:
+def _read_local_tickets(repo_root: Path, *, no_sync: bool = False) -> list[dict]:
     """Read local tickets from the ticket CLI, falling back to empty list.
 
     In production the ticket CLI is the ``rebar`` dispatcher (``rebar list``),
     resolved from REBAR_TICKET_CLI or the engine dir alongside this package.
     If the CLI is unavailable (unit tests, minimal environments), return an
     empty list with a warning on stderr.
+
+    ``no_sync=True`` sets REBAR_NO_SYNC for the subprocess so the read does not
+    trigger the tickets-branch fetch/reconverge (a git working-tree mutation).
+    Cap-0 reconcile passes (dry-run/reconcile-check) pass this so a no-write
+    pass stays literally no-write on the local git tree (review M3).
     """
     import os as _os  # local import to avoid top-level dep
     import subprocess as _sp  # local import to avoid top-level dep
@@ -449,6 +455,7 @@ def _read_local_tickets(repo_root: Path) -> list[dict]:
             file=sys.stderr,
         )
         return []
+    _env = dict(_os.environ, REBAR_NO_SYNC="1") if no_sync else None
     try:
         result = _sp.run(
             [str(cli), "list"],
@@ -456,6 +463,7 @@ def _read_local_tickets(repo_root: Path) -> list[dict]:
             text=True,
             cwd=str(repo_root),
             timeout=60,
+            env=_env,
         )
         if result.returncode != 0:
             print(  # noqa: T201
@@ -648,7 +656,7 @@ def reconcile_once(
     # -----------------------------------------------------------------------
     # Read local tickets from the ticket CLI.
     # -----------------------------------------------------------------------
-    local_tickets = _read_local_tickets(repo_root)
+    local_tickets = _read_local_tickets(repo_root, no_sync=not persist)
 
     # -----------------------------------------------------------------------
     # Load and recover binding store.
@@ -1100,7 +1108,8 @@ def reconcile_once(
         print(  # noqa: T201
             f"filter: {unfiltered_count} mutations computed, "
             f"{len(mutations)} match filter ({len(filter_local_ids)} local IDs, "
-            f"{len(target_set)} target keys)"
+            f"{len(target_set)} target keys)",
+            file=sys.stderr,
         )
         sync_logger.log(
             "filter_applied",
@@ -1297,7 +1306,7 @@ def reconcile_once(
         "mutation_count": len(mutations),
         "mutations_applied": mutations_applied,
         "mutation_failures": mutation_failures,
-        "manifest_path": str(manifest_path),
+        "manifest_path": str(manifest_path) if manifest_path is not None else None,
     }
     # No-write (cap-0) mode: surface the COMPUTED plan in the result so callers
     # (rebar.reconcile / MCP) receive the detailed mutation plan even though no

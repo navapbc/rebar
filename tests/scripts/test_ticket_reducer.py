@@ -3323,6 +3323,16 @@ def test_revert_of_archived_does_not_resurrect_deleted(reducer: ModuleType, tmp_
 
     state = reducer.reduce_ticket(str(ticket_dir))
     assert state["status"] == "deleted", f"deleted must NOT be resurrected; got {state['status']!r}"
+    # Review H1: reverting the ARCHIVED of a deleted ticket must also leave it
+    # archived=True so it stays HIDDEN — the default list excludes archived but
+    # not deleted, so clearing archived would resurrect it into the listing.
+    assert state["archived"] is True, (
+        f"deleted ticket must stay archived (hidden) after revert; got archived={state.get('archived')!r}"
+    )
+    visible = reducer.reduce_all_tickets(str(tracker_dir), exclude_archived=True)
+    assert not any(t.get("ticket_id") == "tkt-deleted" for t in visible), (
+        "deleted ticket must NOT reappear in the default exclude_archived projection after revert"
+    )
 
 
 # ---------------------------------------------------------------------------

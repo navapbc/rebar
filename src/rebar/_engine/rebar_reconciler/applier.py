@@ -2788,6 +2788,13 @@ def apply(
     pending_bug_tickets: list[dict] = []
 
     for mut in inbound_typed:
+        # No-write (cap-0) modes must not APPLY: the inbound leaves write local
+        # CREATE events + Jira-side labels/properties. cap-0 already empties
+        # mutations_input upstream so this loop is a no-op today, but gate it
+        # explicitly so the no-write contract is self-enforcing rather than
+        # relying on that coupling (review M1).
+        if not persist:
+            break
         if _is_suppressed(getattr(mut, "target", "")):
             continue
         result = _apply_typed(
