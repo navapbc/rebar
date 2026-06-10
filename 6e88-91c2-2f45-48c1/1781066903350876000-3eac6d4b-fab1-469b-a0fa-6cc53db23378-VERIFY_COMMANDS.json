@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"verify_commands":[{"command":".venv/bin/python -m pytest tests/interfaces/test_parity.py -k deleted -q","dd_id":"DD1","dd_text":"exclude_deleted identical across CLI/library/MCP"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1781066903350876000,"uuid":"3eac6d4b-fab1-469b-a0fa-6cc53db23378"}
