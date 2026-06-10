@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/mcp_server.py","reason":"case-insensitive env truthy parse"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781066307461209000,"uuid":"46c1fcad-999e-43f3-a7e8-7b2954b9c482"}
