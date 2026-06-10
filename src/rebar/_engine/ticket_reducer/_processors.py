@@ -379,6 +379,7 @@ def replay_events(
     latest_snapshot_idx, snapshot_source_uuids = scan_for_latest_snapshot(event_files)
     start_idx = latest_snapshot_idx if latest_snapshot_idx is not None else 0
     valid_event_count = 0
+    seen_uuids: set[str] = set()
 
     for idx, filepath in enumerate(event_files):
         try:
@@ -396,6 +397,16 @@ def replay_events(
         event_uuid = event.get("uuid", "")
         if event_uuid and event_uuid in snapshot_source_uuids:
             continue
+
+        # Dedup by UUID among events that actually replay: first occurrence in
+        # filename order wins; a duplicate event file (same payload uuid under a
+        # different filename) is skipped so it applies exactly once. Scoped to
+        # post-snapshot, non-snapshot-source events, so zero interaction with
+        # the compaction/snapshot machinery (bug 944c-374d).
+        if event_uuid:
+            if event_uuid in seen_uuids:
+                continue
+            seen_uuids.add(event_uuid)
 
         event_type = event.get("event_type", "")
         data = event.get("data", {})

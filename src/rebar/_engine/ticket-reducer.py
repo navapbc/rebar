@@ -32,10 +32,7 @@ from ticket_reducer import (  # noqa: E402
     reduce_all_tickets,
     reduce_ticket,
 )
-from ticket_reducer._api import (  # noqa: E402 — re-exports for backward compat
-    LastTimestampWinsStrategy,  # noqa: F401
-    MostStatusEventsWinsStrategy,  # noqa: F401
-    ReducerStrategy,  # noqa: F401
+from ticket_reducer._api import (  # noqa: E402 — re-export for backward compat
     _is_net_archived,  # noqa: F401
 )
 

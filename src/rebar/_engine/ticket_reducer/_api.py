@@ -11,86 +11,11 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Protocol, runtime_checkable
 
 from ticket_reducer._cache import prepare_event_files, write_cache
 from ticket_reducer._processors import replay_events
 from ticket_reducer._state import make_error_dict, make_initial_state
 from ticket_reducer.marker import remove_marker
-
-
-@runtime_checkable
-class ReducerStrategy(Protocol):
-    """Protocol for pluggable ticket event merge strategies."""
-
-    def resolve(self, events: list[dict]) -> list[dict]:
-        """Merge and deduplicate a list of events, returning the resolved list."""
-        ...
-
-
-class LastTimestampWinsStrategy:
-    """Default strategy: dedup by UUID (first occurrence wins), sort by timestamp."""
-
-    def resolve(self, events: list[dict]) -> list[dict]:
-        seen: set[str] = set()
-        deduped: list[dict] = []
-        for event in events:
-            uuid = event.get("uuid", "")
-            if uuid and uuid in seen:
-                continue
-            if uuid:
-                seen.add(uuid)
-            deduped.append(event)
-        return sorted(deduped, key=lambda e: e.get("timestamp", 0))
-
-
-class MostStatusEventsWinsStrategy:
-    """Conflict resolution: env with most net STATUS transitions wins."""
-
-    def __init__(self, bridge_env_id: str | None = None) -> None:
-        self.bridge_env_id = bridge_env_id
-
-    def resolve(self, events: list[dict]) -> list[dict]:
-        status_by_env: dict[str, list[dict]] = {}
-        for event in events:
-            if event.get("event_type") == "STATUS":
-                env_id = event.get("env_id", "")
-                status_by_env.setdefault(env_id, []).append(event)
-
-        def _net_transitions(status_events: list[dict]) -> int:
-            seen_statuses: set[str] = set()
-            seen_statuses.add("open")
-            count = 0
-            for ev in status_events:
-                target = ev.get("data", {}).get("status", "")
-                if target and target not in seen_statuses:
-                    seen_statuses.add(target)
-                    count += 1
-            return count
-
-        candidate_envs = [
-            env_id for env_id in status_by_env if env_id != self.bridge_env_id
-        ]
-        if not candidate_envs:
-            return sorted(events, key=lambda e: e.get("timestamp", 0))
-
-        def _sort_key(env_id: str) -> tuple[int, int]:
-            evs = status_by_env[env_id]
-            net = _net_transitions(evs)
-            latest_ts = max(e.get("timestamp", 0) for e in evs)
-            return (net, latest_ts)
-
-        winner_env_id = max(candidate_envs, key=_sort_key)
-        losing_env_ids = set(status_by_env.keys()) - {winner_env_id}
-        result: list[dict] = []
-        for event in events:
-            if (
-                event.get("event_type") == "STATUS"
-                and event.get("env_id") in losing_env_ids
-            ):
-                continue
-            result.append(event)
-        return sorted(result, key=lambda e: e.get("timestamp", 0))
 
 
 def _is_net_archived(ticket_dir: str) -> bool:
@@ -196,12 +121,19 @@ def _compute_preconditions_summary(ticket_dir: str) -> dict:
 
 def reduce_ticket(
     ticket_dir_path: str | os.PathLike[str],
-    strategy: ReducerStrategy | None = None,
 ) -> dict | None:
-    """Compile all events in ticket_dir_path to current ticket state."""
-    if strategy is None:
-        strategy = LastTimestampWinsStrategy()
+    """Compile all events in ticket_dir_path to current ticket state.
 
+    Events are replayed in **filename order** (lexicographic = chronological per
+    the event-format contract). Replay performs **UUID dedup**: among the events
+    that actually replay, the *first* occurrence of a given event ``uuid`` (in
+    filename order) is applied and any later file carrying the same ``uuid`` is
+    skipped. This makes a duplicate event file (e.g. a COMMENT copied to a new
+    filename with the same payload ``uuid``) apply exactly once. Dedup is scoped
+    to replayed events only, so it composes with compaction: events before the
+    latest SNAPSHOT — and events whose ``uuid`` the SNAPSHOT already captured —
+    are skipped before dedup is consulted.
+    """
     ticket_dir = os.path.normpath(str(ticket_dir_path))
     ticket_id = os.path.basename(ticket_dir)
 

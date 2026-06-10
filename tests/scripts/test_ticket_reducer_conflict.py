@@ -1,9 +1,14 @@
-"""Tests for MostStatusEventsWinsStrategy conflict resolution.
+"""Tests for reduce_ticket UUID-dedup on replay (bug 944c-374d).
 
-Tests verify MostStatusEventsWinsStrategy behavior (GREEN after dso-b0ku).
+The reducer replays raw event files in filename order with seen-UUID dedup:
+the FIRST occurrence of a given event uuid (in filename order) applies; any
+later file carrying the same uuid is skipped. This guards against a duplicate
+event file (e.g. a COMMENT copied to a new filename with the same payload uuid)
+double-applying on replay.
 
-Contract reference: src/rebar/_engine/docs/contracts/ticket-reducer-strategy-contract.md
-Story: dso-je9x (write RED tests), dso-b0ku (implement MostStatusEventsWinsStrategy)
+The pluggable reducer "strategy" was dead code (never wired into reduce_ticket)
+and was deleted; these tests exercise the actual replay semantics end-to-end via
+reduce_ticket, not a strategy object.
 
 Test: python3 -m pytest tests/scripts/test_ticket_reducer_conflict.py -q
 """
@@ -11,6 +16,7 @@ Test: python3 -m pytest tests/scripts/test_ticket_reducer_conflict.py -q
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 from types import ModuleType
 
@@ -43,389 +49,261 @@ def reducer() -> ModuleType:
     return _load_module()
 
 
-def _make_create_event(env_id: str, uuid: str = "create-001", ts: int = 1000) -> dict:
-    """Helper: build a minimal valid CREATE event dict."""
-    return {
-        "event_type": "CREATE",
-        "uuid": uuid,
-        "timestamp": ts,
-        "author": "test-user",
-        "env_id": env_id,
-        "data": {
-            "ticket_type": "task",
-            "title": "Conflict test ticket",
-        },
-    }
-
-
-def _make_status_event(
-    env_id: str,
+def _write_event(
+    ticket_dir: Path,
+    timestamp: int,
     uuid: str,
-    ts: int,
-    status: str,
-    current_status: str = "open",
-) -> dict:
-    """Helper: build a STATUS event dict."""
-    return {
-        "event_type": "STATUS",
+    event_type: str,
+    data: dict,
+    env_id: str = "00000000-0000-4000-8000-000000000001",
+    author: str = "Test User",
+) -> Path:
+    """Write a well-formed event JSON file and return its path.
+
+    Filename embeds the timestamp first so two files sharing the same payload
+    ``uuid`` but different timestamps get distinct filenames yet the same
+    in-payload event uuid — the exact duplicate-UUID scenario under test.
+    """
+    filename = f"{timestamp}-{uuid}-{event_type}.json"
+    payload = {
+        "timestamp": timestamp,
         "uuid": uuid,
-        "timestamp": ts,
+        "event_type": event_type,
         "env_id": env_id,
-        "data": {
-            "status": status,
-            "current_status": current_status,
-        },
+        "author": author,
+        "data": data,
     }
+    path = ticket_dir / filename
+    path.write_text(json.dumps(payload))
+    return path
+
+
+_CREATE_UUID = "11111111-1111-4111-8111-111111111111"
+_COMMENT_UUID = "22222222-2222-4222-8222-222222222222"
+_STATUS_UUID = "33333333-3333-4333-8333-333333333333"
 
 
 # ---------------------------------------------------------------------------
-# Test 1: MostStatusEventsWinsStrategy is importable from ticket_reducer module
-#         and simple majority: env with more net STATUS transitions wins
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-@pytest.mark.scripts
-def test_most_status_events_wins_simple_majority(reducer: ModuleType) -> None:
-    """Env-A has 3 net STATUS transitions, env-B has 1; env-A's latest STATUS wins.
-
-    RED: MostStatusEventsWinsStrategy does not exist yet — AttributeError expected
-    until dso-b0ku implements it.
-
-    Setup:
-      env-A: CREATE → in_progress → review → closed  (3 net transitions)
-      env-B: CREATE → in_progress                     (1 net transition)
-    Expected: final status = "closed" (env-A wins by net transition count)
-    """
-    assert hasattr(reducer, "MostStatusEventsWinsStrategy"), (
-        "MostStatusEventsWinsStrategy not found in ticket-reducer.py — "
-        "this is the expected RED state before dso-b0ku implementation."
-    )
-
-    MostStatusEventsWinsStrategy = getattr(reducer, "MostStatusEventsWinsStrategy")
-    strategy = MostStatusEventsWinsStrategy()
-
-    env_a = "env-aaaa-0000-0000-0000-000000000001"
-    env_b = "env-bbbb-0000-0000-0000-000000000002"
-
-    events = [
-        # env-A: 3 net STATUS transitions
-        _make_create_event(env_a, uuid="create-aaa", ts=1000),
-        _make_status_event(env_a, "status-a1", ts=2000, status="in_progress"),
-        _make_status_event(
-            env_a,
-            "status-a2",
-            ts=3000,
-            status="review",
-            current_status="in_progress",
-        ),
-        _make_status_event(
-            env_a, "status-a3", ts=4000, status="closed", current_status="review"
-        ),
-        # env-B: 1 net STATUS transition
-        _make_create_event(env_b, uuid="create-bbb", ts=1000),
-        _make_status_event(env_b, "status-b1", ts=2500, status="in_progress"),
-    ]
-
-    result = strategy.resolve(events)
-
-    # The resolved event list should contain env-A's STATUS events (the winner)
-    status_events = [e for e in result if e.get("event_type") == "STATUS"]
-    last_status = status_events[-1] if status_events else None
-    assert last_status is not None, "resolve() returned no STATUS events"
-    assert last_status["data"]["status"] == "closed", (
-        f"Expected final status 'closed' (env-A with 3 net transitions wins), "
-        f"but got '{last_status['data']['status']}'. "
-        f"env-A has 3 net transitions; env-B has 1."
-    )
-
-
-# ---------------------------------------------------------------------------
-# Test 2: Net transitions count, not raw event count
+# Test 1: a duplicate-UUID COMMENT file applies exactly once
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_net_transitions_not_raw_events(reducer: ModuleType) -> None:
-    """Env with 5 raw STATUS events but 1 net transition loses to env with 2 net transitions.
+def test_duplicate_uuid_comment_applies_once(
+    tmp_path: Path, reducer: ModuleType
+) -> None:
+    """A COMMENT event copied to a second filename (same uuid) appears ONCE.
 
-    RED: MostStatusEventsWinsStrategy does not exist yet.
-
-    "Net transitions" = unique status changes (each distinct target status counts once).
-    Raw event count must NOT be used as the tiebreaker.
-
-    Setup:
-      env-A: 5 raw STATUS events that oscillate back and forth → 1 net transition
-             (open → in_progress → open → in_progress → open → in_progress)
-             The repeated cycling means only 1 unique net transition forward.
-      env-B: 2 raw STATUS events → 2 net transitions
-             (open → in_progress → closed)
-    Expected: env-B wins (2 net transitions > 1 net transition)
+    RED before the dedup fix: filename-order replay double-applies the second
+    file, so the comment shows up twice.
     """
-    assert hasattr(reducer, "MostStatusEventsWinsStrategy"), (
-        "MostStatusEventsWinsStrategy not found in ticket-reducer.py — "
-        "this is the expected RED state before dso-b0ku implementation."
+    ticket_dir = tmp_path / "tkt-dup-comment"
+    ticket_dir.mkdir()
+
+    _write_event(
+        ticket_dir,
+        timestamp=1000,
+        uuid=_CREATE_UUID,
+        event_type="CREATE",
+        data={"ticket_type": "task", "title": "Dedup test"},
+    )
+    _write_event(
+        ticket_dir,
+        timestamp=2000,
+        uuid=_COMMENT_UUID,
+        event_type="COMMENT",
+        data={"body": "hello world"},
+    )
+    # Same payload uuid, later timestamp => distinct filename, duplicate event.
+    _write_event(
+        ticket_dir,
+        timestamp=2001,
+        uuid=_COMMENT_UUID,
+        event_type="COMMENT",
+        data={"body": "hello world"},
     )
 
-    MostStatusEventsWinsStrategy = getattr(reducer, "MostStatusEventsWinsStrategy")
-    strategy = MostStatusEventsWinsStrategy()
+    state = reducer.reduce_ticket(ticket_dir)
 
-    env_a = "env-aaaa-0000-0000-0000-000000000001"
-    env_b = "env-bbbb-0000-0000-0000-000000000002"
-
-    events = [
-        _make_create_event(env_a, uuid="create-aaa", ts=1000),
-        # env-A: 5 raw STATUS events, but oscillates — net unique transitions = 1
-        _make_status_event(env_a, "status-a1", ts=2000, status="in_progress"),
-        _make_status_event(
-            env_a,
-            "status-a2",
-            ts=2100,
-            status="open",
-            current_status="in_progress",
-        ),
-        _make_status_event(
-            env_a, "status-a3", ts=2200, status="in_progress", current_status="open"
-        ),
-        _make_status_event(
-            env_a,
-            "status-a4",
-            ts=2300,
-            status="open",
-            current_status="in_progress",
-        ),
-        _make_status_event(
-            env_a, "status-a5", ts=2400, status="in_progress", current_status="open"
-        ),
-        _make_create_event(env_b, uuid="create-bbb", ts=1000),
-        # env-B: 2 raw STATUS events, 2 net transitions (open→in_progress, in_progress→closed)
-        _make_status_event(env_b, "status-b1", ts=3000, status="in_progress"),
-        _make_status_event(
-            env_b,
-            "status-b2",
-            ts=4000,
-            status="closed",
-            current_status="in_progress",
-        ),
-    ]
-
-    result = strategy.resolve(events)
-
-    status_events = [e for e in result if e.get("event_type") == "STATUS"]
-    last_status = status_events[-1] if status_events else None
-    assert last_status is not None, "resolve() returned no STATUS events"
-    assert last_status["data"]["status"] == "closed", (
-        f"Expected final status 'closed' (env-B with 2 net transitions wins over "
-        f"env-A with 1 net transition despite having 5 raw events), "
-        f"but got '{last_status['data']['status']}'."
+    assert state is not None
+    bodies = [c["body"] for c in state["comments"]]
+    assert bodies == ["hello world"], (
+        f"Duplicate-UUID COMMENT must apply exactly once; got {bodies}"
     )
 
 
 # ---------------------------------------------------------------------------
-# Test 3: Timestamp tiebreaker when net transition counts are equal
+# Test 2: a duplicate STATUS event does not self-fork the status
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_timestamp_tiebreaker(reducer: ModuleType) -> None:
-    """Two envs with equal net transitions; latest timestamp wins.
+def test_duplicate_uuid_status_does_not_self_fork(
+    tmp_path: Path, reducer: ModuleType
+) -> None:
+    """A STATUS event duplicated under a second filename resolves to one status.
 
-    RED: MostStatusEventsWinsStrategy does not exist yet.
-
-    Setup:
-      env-A: 2 net transitions, latest STATUS at ts=3000, final status="review"
-      env-B: 2 net transitions, latest STATUS at ts=5000, final status="closed"
-    Expected: env-B wins (tie on net transitions → latest timestamp wins)
+    Re-applying the same STATUS uuid must not be treated as two distinct envs /
+    a fork; the net status is just the single transition.
     """
-    assert hasattr(reducer, "MostStatusEventsWinsStrategy"), (
-        "MostStatusEventsWinsStrategy not found in ticket-reducer.py — "
-        "this is the expected RED state before dso-b0ku implementation."
+    ticket_dir = tmp_path / "tkt-dup-status"
+    ticket_dir.mkdir()
+
+    _write_event(
+        ticket_dir,
+        timestamp=1000,
+        uuid=_CREATE_UUID,
+        event_type="CREATE",
+        data={"ticket_type": "task", "title": "Status dedup"},
+    )
+    _write_event(
+        ticket_dir,
+        timestamp=2000,
+        uuid=_STATUS_UUID,
+        event_type="STATUS",
+        data={"status": "closed", "current_status": "open"},
+    )
+    _write_event(
+        ticket_dir,
+        timestamp=2001,
+        uuid=_STATUS_UUID,
+        event_type="STATUS",
+        data={"status": "closed", "current_status": "open"},
     )
 
-    MostStatusEventsWinsStrategy = getattr(reducer, "MostStatusEventsWinsStrategy")
-    strategy = MostStatusEventsWinsStrategy()
+    state = reducer.reduce_ticket(ticket_dir)
 
-    env_a = "env-aaaa-0000-0000-0000-000000000001"
-    env_b = "env-bbbb-0000-0000-0000-000000000002"
-
-    events = [
-        _make_create_event(env_a, uuid="create-aaa", ts=1000),
-        # env-A: 2 net transitions, last at ts=3000
-        _make_status_event(env_a, "status-a1", ts=2000, status="in_progress"),
-        _make_status_event(
-            env_a,
-            "status-a2",
-            ts=3000,
-            status="review",
-            current_status="in_progress",
-        ),
-        _make_create_event(env_b, uuid="create-bbb", ts=1000),
-        # env-B: 2 net transitions, last at ts=5000
-        _make_status_event(env_b, "status-b1", ts=4000, status="in_progress"),
-        _make_status_event(
-            env_b,
-            "status-b2",
-            ts=5000,
-            status="closed",
-            current_status="in_progress",
-        ),
-    ]
-
-    result = strategy.resolve(events)
-
-    status_events = [e for e in result if e.get("event_type") == "STATUS"]
-    last_status = status_events[-1] if status_events else None
-    assert last_status is not None, "resolve() returned no STATUS events"
-    assert last_status["data"]["status"] == "closed", (
-        f"Expected final status 'closed' (env-B has later timestamp ts=5000 vs "
-        f"env-A ts=3000 on equal net transitions), "
-        f"but got '{last_status['data']['status']}'."
+    assert state is not None
+    assert state["status"] == "closed", (
+        f"Duplicate STATUS uuid must resolve to a single transition; "
+        f"got {state['status']}"
     )
 
 
 # ---------------------------------------------------------------------------
-# Test 4: Bridge env is excluded from net transition count
+# Test 3: distinct-UUID multi-event tickets are unchanged by dedup
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_bridge_env_excluded(reducer: ModuleType) -> None:
-    """Bridge env ID is excluded from net transition count; non-bridge env wins even with fewer raw events.
+def test_distinct_uuid_events_unchanged(
+    tmp_path: Path, reducer: ModuleType
+) -> None:
+    """Three distinct COMMENT uuids all apply — dedup must not over-collapse."""
+    ticket_dir = tmp_path / "tkt-distinct"
+    ticket_dir.mkdir()
 
-    RED: MostStatusEventsWinsStrategy does not exist yet.
-
-    A "bridge env" is an environment whose ID matches the bridge env pattern
-    (e.g., "bridge" in env_id, or env_id == BRIDGE_ENV_ID sentinel). Bridge envs
-    act as sync coordinators and must not contribute to the winner selection.
-
-    Setup:
-      bridge-env: 5 raw STATUS events (3 net transitions) — EXCLUDED from count
-      env-A: 1 raw STATUS event (1 net transition)
-    Expected: env-A wins — only non-bridge envs are counted. bridge-env's events
-    are excluded from the net-transition count.
-
-    The bridge env ID used here follows the convention that the strategy recognises
-    as a bridge: env_id contains "bridge" substring (implementation may vary).
-    """
-    assert hasattr(reducer, "MostStatusEventsWinsStrategy"), (
-        "MostStatusEventsWinsStrategy not found in ticket-reducer.py — "
-        "this is the expected RED state before dso-b0ku implementation."
+    _write_event(
+        ticket_dir,
+        timestamp=1000,
+        uuid=_CREATE_UUID,
+        event_type="CREATE",
+        data={"ticket_type": "task", "title": "Distinct"},
     )
+    for i in range(3):
+        _write_event(
+            ticket_dir,
+            timestamp=2000 + i,
+            uuid=f"4444444{i}-4444-4444-8444-444444444444",
+            event_type="COMMENT",
+            data={"body": f"comment-{i}"},
+        )
 
-    MostStatusEventsWinsStrategy = getattr(reducer, "MostStatusEventsWinsStrategy")
+    state = reducer.reduce_ticket(ticket_dir)
 
-    bridge_env = "bridge-env-0000-0000-0000-000000000099"
-    env_a = "env-aaaa-0000-0000-0000-000000000001"
-
-    # Pass bridge_env_id to the constructor so the strategy knows which env to exclude
-    strategy = MostStatusEventsWinsStrategy(bridge_env_id=bridge_env)
-
-    events = [
-        _make_create_event(bridge_env, uuid="create-bridge", ts=1000),
-        # bridge-env: 3 net transitions — should be excluded
-        _make_status_event(bridge_env, "status-bridge1", ts=2000, status="in_progress"),
-        _make_status_event(
-            bridge_env,
-            "status-bridge2",
-            ts=3000,
-            status="review",
-            current_status="in_progress",
-        ),
-        _make_status_event(
-            bridge_env,
-            "status-bridge3",
-            ts=4000,
-            status="closed",
-            current_status="review",
-        ),
-        _make_create_event(env_a, uuid="create-aaa", ts=1000),
-        # env-A: 1 net transition — should win because bridge is excluded
-        _make_status_event(env_a, "status-a1", ts=2500, status="in_progress"),
-    ]
-
-    result = strategy.resolve(events)
-
-    # env-A's STATUS events should be in the result (bridge excluded)
-    env_a_status_events = [
-        e
-        for e in result
-        if e.get("event_type") == "STATUS" and e.get("env_id") == env_a
-    ]
-    assert len(env_a_status_events) > 0, (
-        "Expected env-A's STATUS events in resolve() result, but found none. "
-        "Bridge env should be excluded, leaving env-A as the sole participant."
-    )
-
-    # Bridge env STATUS events should NOT drive the winner
-    status_events = [e for e in result if e.get("event_type") == "STATUS"]
-    last_status = status_events[-1] if status_events else None
-    assert last_status is not None, "resolve() returned no STATUS events"
-    # env-A's final status is "in_progress" (its only STATUS event)
-    assert last_status["data"]["status"] == "in_progress", (
-        f"Expected final status 'in_progress' (env-A wins; bridge-env excluded), "
-        f"but got '{last_status['data']['status']}'."
+    assert state is not None
+    bodies = [c["body"] for c in state["comments"]]
+    assert bodies == ["comment-0", "comment-1", "comment-2"], (
+        f"Distinct-UUID comments must all apply in filename order; got {bodies}"
     )
 
 
 # ---------------------------------------------------------------------------
-# Test 5: Single env — no conflict, returns latest STATUS unchanged
+# Test 4: a SNAPSHOT + a post-snapshot duplicate pair applies once
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_single_env_no_conflict(reducer: ModuleType) -> None:
-    """Single env input — no conflict, resolve() returns events with latest STATUS unchanged.
+def test_snapshot_plus_post_snapshot_duplicate_applies_once(
+    tmp_path: Path, reducer: ModuleType
+) -> None:
+    """A post-snapshot COMMENT duplicated under a second filename applies once.
 
-    RED: MostStatusEventsWinsStrategy does not exist yet.
-
-    When there is only one environment in the event list, there is no conflict to
-    resolve. The strategy must pass through the events unchanged (deduped + sorted),
-    and the final STATUS must be the last status from that env.
+    The dedup lives AFTER the snapshot-source-uuid skip, so it composes cleanly
+    with compaction: the snapshot restores compiled state, and the duplicated
+    post-snapshot event still applies exactly once.
     """
-    assert hasattr(reducer, "MostStatusEventsWinsStrategy"), (
-        "MostStatusEventsWinsStrategy not found in ticket-reducer.py — "
-        "this is the expected RED state before dso-b0ku implementation."
+    ticket_dir = tmp_path / "tkt-snap"
+    ticket_dir.mkdir()
+
+    # Pre-snapshot CREATE + COMMENT, captured into the snapshot's source uuids.
+    pre_comment_uuid = "55555555-5555-4555-8555-555555555555"
+    _write_event(
+        ticket_dir,
+        timestamp=1000,
+        uuid=_CREATE_UUID,
+        event_type="CREATE",
+        data={"ticket_type": "task", "title": "Snap base"},
+    )
+    _write_event(
+        ticket_dir,
+        timestamp=1100,
+        uuid=pre_comment_uuid,
+        event_type="COMMENT",
+        data={"body": "pre-snapshot comment"},
     )
 
-    MostStatusEventsWinsStrategy = getattr(reducer, "MostStatusEventsWinsStrategy")
-    strategy = MostStatusEventsWinsStrategy()
-
-    env_a = "env-aaaa-0000-0000-0000-000000000001"
-
-    events = [
-        _make_create_event(env_a, uuid="create-aaa", ts=1000),
-        _make_status_event(env_a, "status-a1", ts=2000, status="in_progress"),
-        _make_status_event(
-            env_a,
-            "status-a2",
-            ts=3000,
-            status="closed",
-            current_status="in_progress",
-        ),
-    ]
-
-    result = strategy.resolve(events)
-
-    assert result is not None, "resolve() must not return None for a single-env input"
-    assert len(result) == 3, (
-        f"Expected 3 events returned (no events dropped for single env), "
-        f"but got {len(result)}. Full result: {result}"
+    # SNAPSHOT captures compiled state up to and including the pre-snapshot
+    # comment (so the raw CREATE/COMMENT files are skipped on replay).
+    _write_event(
+        ticket_dir,
+        timestamp=1500,
+        uuid="66666666-6666-4666-8666-666666666666",
+        event_type="SNAPSHOT",
+        data={
+            "source_event_uuids": [_CREATE_UUID, pre_comment_uuid],
+            "compiled_state": {
+                "ticket_id": "tkt-snap",
+                "ticket_type": "task",
+                "title": "Snap base",
+                "status": "open",
+                "comments": [
+                    {
+                        "body": "pre-snapshot comment",
+                        "author": "Test User",
+                        "timestamp": 1100,
+                    }
+                ],
+            },
+        },
     )
 
-    status_events = [e for e in result if e.get("event_type") == "STATUS"]
-    last_status = status_events[-1] if status_events else None
-    assert last_status is not None, "resolve() returned no STATUS events"
-    assert last_status["data"]["status"] == "closed", (
-        f"Expected final status 'closed' (latest STATUS from single env), "
-        f"but got '{last_status['data']['status']}'."
+    # Post-snapshot COMMENT duplicated under two filenames (same payload uuid).
+    post_uuid = "77777777-7777-4777-8777-777777777777"
+    _write_event(
+        ticket_dir,
+        timestamp=2000,
+        uuid=post_uuid,
+        event_type="COMMENT",
+        data={"body": "post-snapshot comment"},
+    )
+    _write_event(
+        ticket_dir,
+        timestamp=2001,
+        uuid=post_uuid,
+        event_type="COMMENT",
+        data={"body": "post-snapshot comment"},
     )
 
-    # Events must be in ascending timestamp order (consistent with strategy contract)
-    timestamps = [e["timestamp"] for e in result]
-    assert timestamps == sorted(timestamps), (
-        f"Expected events sorted ascending by timestamp, but got: {timestamps}"
+    state = reducer.reduce_ticket(ticket_dir)
+
+    assert state is not None
+    bodies = [c["body"] for c in state["comments"]]
+    assert bodies == ["pre-snapshot comment", "post-snapshot comment"], (
+        f"Snapshot + duplicated post-snapshot comment must apply once each; "
+        f"got {bodies}"
     )
