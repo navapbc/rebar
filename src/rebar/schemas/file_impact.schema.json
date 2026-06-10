@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/file_impact.schema.json",
+  "title": "FileImpact",
+  "description": "File-impact array, emitted by `rebar get-file-impact <id>` (and consumed by next-batch conflict scheduling). Each entry is the shared file_impact_entry {path, reason} — the same element as TicketState.file_impact[].",
+  "type": "array",
+  "items": { "$ref": "common.schema.json#/$defs/file_impact_entry" }
+}

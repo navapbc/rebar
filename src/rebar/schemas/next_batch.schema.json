@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/next_batch.schema.json",
+  "title": "NextBatch",
+  "description": "Conflict-aware next parallel batch for an epic, emitted by `rebar next-batch <epic> --output json`. The `batch` holds schedulable items; the `skipped_*` arrays explain deferrals. NOTE: `next-batch --limit=0` emits the reduced variant {epic_id, batch_size:0, tasks:[]} — both forms validate here (batch/tasks and the skipped_* arrays are all optional).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["epic_id"],
+  "properties": {
+    "epic_id": { "type": "string" },
+    "epic_title": { "type": "string" },
+    "batch_size": { "type": "integer", "minimum": 0 },
+    "available_pool": { "type": "integer", "minimum": 0 },
+    "batch": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/batch_item" }
+    },
+    "tasks": {
+      "type": "array",
+      "description": "Present (empty) only in the --limit=0 reduced variant.",
+      "items": { "$ref": "common.schema.json#/$defs/batch_item" }
+    },
+    "skipped_overlap": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/skipped_item" } },
+    "skipped_blocked_story": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/skipped_item" } },
+    "skipped_design_awaiting": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/skipped_item" } },
+    "skipped_manual_awaiting": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/skipped_item" } },
+    "skipped_in_progress": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/skipped_item" } },
+    "skipped_needs_planning": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/skipped_item" } }
+  }
+}

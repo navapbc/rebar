@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/clarity_result.schema.json",
+  "title": "ClarityResult",
+  "description": "Per-ticket clarity score, emitted by `rebar clarity-check <id>`. The engine `--output json` emits {score, verdict, threshold}; the library/MCP add a client-side `passed` boolean (so the library shape has 4 keys).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["score", "verdict", "threshold"],
+  "properties": {
+    "score": { "type": "integer" },
+    "verdict": { "type": "string", "enum": ["pass", "fail"] },
+    "threshold": { "type": "integer" },
+    "passed": { "type": "boolean", "description": "Added by the library/MCP wrappers (not the engine JSON)." }
+  }
+}

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/ticket_state.schema.json",
   "title": "TicketState",
-  "description": "Compiled ticket state as emitted by `rebar show <id>` (and the library show_ticket / MCP show_ticket tool). This is replay-derived state, not an event. Unknown properties are allowed so the event-sourced shape can evolve without breaking consumers.",
+  "description": "Compiled ticket state as emitted by `rebar show <id>` (and the library show_ticket / MCP show_ticket tool), and the element shape of `list` / `search`. This is replay-derived state, not an event. Unknown properties are allowed so the event-sourced shape can evolve without breaking consumers. Shared sub-objects (comment/dep/file_impact_entry/verify_command_entry) are $ref'd from common.schema.json.",
   "type": "object",
   "additionalProperties": true,
   "required": ["ticket_id", "ticket_type", "title", "status", "priority", "tags"],
@@ -11,22 +11,10 @@
       "type": "string",
       "description": "Canonical ticket id (the directory name on the tickets branch)."
     },
-    "ticket_type": {
-      "type": "string",
-      "enum": ["bug", "epic", "story", "task"]
-    },
+    "ticket_type": { "$ref": "common.schema.json#/$defs/ticket_type" },
     "title": { "type": "string" },
-    "status": {
-      "type": "string",
-      "enum": ["open", "in_progress", "blocked", "closed", "archived", "deleted"],
-      "description": "Replayed lifecycle status. 'archived'/'deleted' reflect the archive marker / soft-delete tombstone."
-    },
-    "priority": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 4,
-      "description": "0=critical … 4=backlog (default 2)."
-    },
+    "status": { "$ref": "common.schema.json#/$defs/ticket_status" },
+    "priority": { "$ref": "common.schema.json#/$defs/priority" },
     "tags": {
       "type": "array",
       "items": { "type": "string" }
@@ -46,58 +34,20 @@
     "env_id": { "type": ["string", "null"] },
     "comments": {
       "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": true,
-        "required": ["body"],
-        "properties": {
-          "body": { "type": "string" },
-          "author": { "type": ["string", "null"] },
-          "timestamp": { "type": ["integer", "string", "null"] }
-        }
-      }
+      "items": { "$ref": "common.schema.json#/$defs/comment" }
     },
     "deps": {
       "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": true,
-        "required": ["target_id", "relation"],
-        "properties": {
-          "target_id": { "type": "string" },
-          "relation": {
-            "type": "string",
-            "enum": ["blocks", "depends_on", "relates_to", "duplicates", "supersedes", "discovered_from"]
-          },
-          "link_uuid": { "type": "string" }
-        }
-      }
+      "items": { "$ref": "common.schema.json#/$defs/dep" }
     },
     "file_impact": {
       "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": true,
-        "required": ["path"],
-        "properties": {
-          "path": { "type": "string" },
-          "reason": { "type": "string" }
-        }
-      }
+      "items": { "$ref": "common.schema.json#/$defs/file_impact_entry" }
     },
     "verify_commands": {
       "type": "array",
       "description": "DD-level verification commands (always present; default []).",
-      "items": {
-        "type": "object",
-        "additionalProperties": true,
-        "required": ["command"],
-        "properties": {
-          "dd_id": { "type": "string" },
-          "dd_text": { "type": "string" },
-          "command": { "type": "string" }
-        }
-      }
+      "items": { "$ref": "common.schema.json#/$defs/verify_command_entry" }
     },
     "bridge_alerts": { "type": "array" },
     "reverts": { "type": "array" },

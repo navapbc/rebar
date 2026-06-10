@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/validate_report.schema.json",
+  "title": "ValidateReport",
+  "description": "Repo-wide tracker-health report, emitted by `rebar validate --output json` (and the library validate() / MCP validate, which take NO ticket id). `score` is 1-5 (exit == 5 - score). Findings are bucketed by severity.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["score", "critical_issues", "major_issues", "minor_issues", "warnings", "suggestions"],
+  "properties": {
+    "score": { "type": "integer", "minimum": 1, "maximum": 5 },
+    "critical_issues": { "type": "array" },
+    "major_issues": { "type": "array" },
+    "minor_issues": { "type": "array" },
+    "warnings": { "type": "array" },
+    "suggestions": { "type": "array" }
+  }
+}

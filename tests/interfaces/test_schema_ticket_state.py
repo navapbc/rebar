@@ -33,6 +33,13 @@ def _schema() -> dict:
     return schemas.load(schemas.TICKET_STATE)
 
 
+def _validate(instance) -> None:
+    # Use the registry-aware validator: ticket_state.schema.json now $ref's the
+    # shared common.schema.json $defs (comment/dep/file_impact_entry/…), so a
+    # bare jsonschema.validate(instance, schema) can no longer resolve the refs.
+    schemas.validator(schemas.TICKET_STATE).validate(instance)
+
+
 def test_show_output_conforms_to_schema(adapter) -> None:
     """A representative ticket (tags + comments populated) validates. Tags and
     comments are added via the uniform adapter methods so the scenario is
@@ -42,14 +49,14 @@ def test_show_output_conforms_to_schema(adapter) -> None:
     adapter.comment(tid, "a comment")
     state = adapter.show(tid)
     assert state["tags"] == ["alpha"]
-    jsonschema.validate(instance=state, schema=_schema())
+    _validate(state)
 
 
 def test_minimal_ticket_conforms_to_schema(adapter) -> None:
     """A freshly created ticket with only defaults still satisfies the required
     fields (ticket_id/ticket_type/title/status/priority/tags)."""
     tid = adapter.create("bug", "Minimal ticket")
-    jsonschema.validate(instance=adapter.show(tid), schema=_schema())
+    _validate(adapter.show(tid))
 
 
 def test_schema_itself_is_valid() -> None:

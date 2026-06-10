@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/bridge_fsck.schema.json",
+  "title": "BridgeFsck",
+  "description": "Bridge-mapping audit findings, emitted by `rebar bridge-fsck --output json` (the {orphaned, duplicates, stale} dict that audit_bridge_mappings already builds internally). Each entry is a finding object whose fields vary by anomaly type, so items are permissive objects.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["orphaned", "duplicates", "stale"],
+  "properties": {
+    "orphaned": { "type": "array", "items": { "type": "object" } },
+    "duplicates": { "type": "array", "items": { "type": "object" } },
+    "stale": { "type": "array", "items": { "type": "object" } }
+  }
+}

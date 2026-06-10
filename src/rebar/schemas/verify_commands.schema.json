@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/verify_commands.schema.json",
+  "title": "VerifyCommands",
+  "description": "DD-level verify-commands array, emitted by `rebar get-verify-commands <id>`. Each entry is the shared verify_command_entry {dd_id, dd_text, command} — the same element as TicketState.verify_commands[].",
+  "type": "array",
+  "items": { "$ref": "common.schema.json#/$defs/verify_command_entry" }
+}

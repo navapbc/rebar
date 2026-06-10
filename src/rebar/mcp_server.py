@@ -34,9 +34,13 @@ import rebar
 try:
     from pydantic import BaseModel, ConfigDict
 
-    class TicketStateOut(BaseModel):
+    class _Out(BaseModel):
+        # Permissive base: extra fields allowed so the evolving event-sourced
+        # shapes never break a tool. Each model mirrors a src/rebar/schemas file;
+        # the cross-interface schema tests pin both to the canonical schema.
         model_config = ConfigDict(extra="allow")
 
+    class TicketStateOut(_Out):
         ticket_id: str
         ticket_type: str
         title: str
@@ -50,12 +54,56 @@ try:
         comments: list[dict] = []
         deps: list[dict] = []
         file_impact: list[dict] = []
+
+    class DepsGraphOut(_Out):
+        ticket_id: str
+        deps: list[dict] = []
+        blockers: list[str] = []
+        children: list[str] = []
+        ready_to_work: bool
+
+    class NextBatchOut(_Out):
+        epic_id: str
+
+    class ClarityResultOut(_Out):
+        score: int
+        verdict: str
+        threshold: int
+        passed: bool | None = None
+
+    class ValidateReportOut(_Out):
+        score: int
+        critical_issues: list = []
+        major_issues: list = []
+        minor_issues: list = []
+        warnings: list = []
+        suggestions: list = []
+
+    class FileImpactItemOut(_Out):
+        path: str
+        reason: str | None = None
+
+    class VerifyCommandItemOut(_Out):
+        command: str
+        dd_id: str | None = None
+        dd_text: str | None = None
 except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     TicketStateOut = None  # type: ignore[assignment,misc]
+    DepsGraphOut = ClarityResultOut = ValidateReportOut = None  # type: ignore[assignment,misc]
+    NextBatchOut = FileImpactItemOut = VerifyCommandItemOut = None  # type: ignore[assignment,misc]
 
 
 def _readonly() -> bool:
     return os.environ.get("REBAR_MCP_READONLY", "").strip() in ("1", "true", "yes")
+
+
+def _dump(item):
+    """Normalize a typed list-item param to a plain dict (FastMCP may deliver a
+    validated pydantic model or a raw dict depending on version). Drops keys whose
+    value is None so the engine receives a clean {path,reason}/{dd_id,…} object."""
+    if hasattr(item, "model_dump"):
+        return {k: v for k, v in item.model_dump().items() if v is not None}
+    return item
 
 
 def build_server():
@@ -84,32 +132,35 @@ def build_server():
         has_tag: str | None = None,
         without_tag: str | None = None,
         include_archived: bool = False,
-    ) -> list[dict]:
+    ) -> list[TicketStateOut]:
         """List tickets as a JSON array, with optional filters."""
-        return rebar.list_tickets(
-            status=status,
-            ticket_type=ticket_type,
-            priority=priority,
-            parent=parent,
-            has_tag=has_tag,
-            without_tag=without_tag,
-            include_archived=include_archived,
-        )
+        return [
+            TicketStateOut.model_validate(t)
+            for t in rebar.list_tickets(
+                status=status,
+                ticket_type=ticket_type,
+                priority=priority,
+                parent=parent,
+                has_tag=has_tag,
+                without_tag=without_tag,
+                include_archived=include_archived,
+            )
+        ]
 
     @mcp.tool()
-    def ticket_deps(ticket_id: str) -> dict:
+    def ticket_deps(ticket_id: str) -> DepsGraphOut:
         """Show the dependency graph for a ticket."""
-        return rebar.deps(ticket_id)
+        return DepsGraphOut.model_validate(rebar.deps(ticket_id))
 
     @mcp.tool()
-    def ready_tickets() -> object:
+    def ready_tickets() -> list[TicketStateOut]:
         """List tickets ready to work (all blockers closed)."""
-        return rebar.ready()
+        return [TicketStateOut.model_validate(t) for t in rebar.ready()]
 
     @mcp.tool()
-    def next_batch(epic_id: str) -> dict:
+    def next_batch(epic_id: str) -> NextBatchOut:
         """Next parallel batch of unblocked tickets under an epic's hierarchy."""
-        return rebar.next_batch(epic_id)
+        return NextBatchOut.model_validate(rebar.next_batch(epic_id))
 
     @mcp.tool()
     def search(
@@ -118,15 +169,18 @@ def build_server():
         ticket_type: str | None = None,
         has_tag: str | None = None,
         include_archived: bool = False,
-    ) -> list[dict]:
+    ) -> list[TicketStateOut]:
         """Full-text search over titles/descriptions/comments/tags (replay-derived)."""
-        return rebar.search(
-            query,
-            status=status,
-            ticket_type=ticket_type,
-            has_tag=has_tag,
-            include_archived=include_archived,
-        )
+        return [
+            TicketStateOut.model_validate(t)
+            for t in rebar.search(
+                query,
+                status=status,
+                ticket_type=ticket_type,
+                has_tag=has_tag,
+                include_archived=include_archived,
+            )
+        ]
 
     @mcp.tool()
     def fsck(recover: bool = False) -> str:
@@ -136,9 +190,9 @@ def build_server():
 
     # ── Quality gates + file-impact reads (WS5d) ───────────────────────────────
     @mcp.tool()
-    def clarity_check(ticket_id: str) -> dict:
+    def clarity_check(ticket_id: str) -> ClarityResultOut:
         """Score ticket clarity (score / verdict / threshold / passed)."""
-        return rebar.clarity_check(ticket_id)
+        return ClarityResultOut.model_validate(rebar.clarity_check(ticket_id))
 
     @mcp.tool()
     def check_ac(ticket_id: str) -> dict:
@@ -151,20 +205,20 @@ def build_server():
         return rebar.quality_check(ticket_id)
 
     @mcp.tool()
-    def validate() -> dict:
+    def validate() -> ValidateReportOut:
         """Repo-wide quality health check (JSON report: score, critical/major/
         minor issues, warnings, suggestions). Takes no ticket id."""
-        return rebar.validate()
+        return ValidateReportOut.model_validate(rebar.validate())
 
     @mcp.tool()
-    def get_file_impact(ticket_id: str) -> list[dict]:
+    def get_file_impact(ticket_id: str) -> list[FileImpactItemOut]:
         """Get the file-impact array (consumed by next-batch conflict scheduling)."""
-        return rebar.get_file_impact(ticket_id)
+        return [FileImpactItemOut.model_validate(e) for e in rebar.get_file_impact(ticket_id)]
 
     @mcp.tool()
-    def get_verify_commands(ticket_id: str) -> list[dict]:
+    def get_verify_commands(ticket_id: str) -> list[VerifyCommandItemOut]:
         """Get the DD-level verify-commands array for a ticket."""
-        return rebar.get_verify_commands(ticket_id)
+        return [VerifyCommandItemOut.model_validate(e) for e in rebar.get_verify_commands(ticket_id)]
 
     @mcp.tool()
     def reconcile(mode: str = "dry-run") -> dict:
@@ -240,8 +294,9 @@ def build_server():
             assignee: str | None = None,
             description: str | None = None,
             tags: list[str] | None = None,
+            ticket_type: str | None = None,
         ) -> str:
-            """Edit ticket fields."""
+            """Edit ticket fields (title/priority/assignee/description/tags/ticket_type)."""
             rebar.edit_ticket(
                 ticket_id,
                 title=title,
@@ -249,6 +304,7 @@ def build_server():
                 assignee=assignee,
                 description=description,
                 tags=tags,
+                ticket_type=ticket_type,
             )
             return "ok"
 
@@ -289,17 +345,19 @@ def build_server():
             return "ok"
 
         # ── File-impact / verify-commands writes (WS5d; feed next-batch) ───────
+        # Typed item params so the tools advertise an inputSchema (the {path,reason}
+        # / {dd_id,dd_text,command} shapes mirror the get_* output models + schemas).
         @mcp.tool()
-        def set_file_impact(ticket_id: str, impact: list) -> str:
+        def set_file_impact(ticket_id: str, impact: list[FileImpactItemOut]) -> str:
             """Record file impact (list of {path, reason}) for conflict-aware
             next-batch scheduling."""
-            rebar.set_file_impact(ticket_id, impact)
+            rebar.set_file_impact(ticket_id, [_dump(e) for e in impact])
             return "ok"
 
         @mcp.tool()
-        def set_verify_commands(ticket_id: str, commands: list) -> str:
+        def set_verify_commands(ticket_id: str, commands: list[VerifyCommandItemOut]) -> str:
             """Record DD-level verify commands (list of {dd_id, dd_text, command})."""
-            rebar.set_verify_commands(ticket_id, commands)
+            rebar.set_verify_commands(ticket_id, [_dump(e) for e in commands])
             return "ok"
 
     return mcp

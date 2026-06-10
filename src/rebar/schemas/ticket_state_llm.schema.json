@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/ticket_state_llm.schema.json",
+  "title": "TicketStateLLM",
+  "description": "Token-minified ticket state with shortened keys, emitted by `show`/`list`/`ready` under `--output llm` (one minified JSON object; list/ready emit one per line / NDJSON). Produced by ticket_reducer.llm_format.to_llm. Null/empty fields are stripped, so most keys are optional. Key map: ticket_id→id, ticket_type→t, title→ttl, status→st, author→au, priority→pr, alias→a, assignee→asn, parent_id→pid, description→desc, comments→cm, deps→dp, tags→tg, children→ch, inbound_links→ibl.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["id", "t", "ttl", "st"],
+  "properties": {
+    "id": { "type": "string" },
+    "t": { "$ref": "common.schema.json#/$defs/ticket_type" },
+    "ttl": { "type": "string" },
+    "st": { "$ref": "common.schema.json#/$defs/ticket_status" },
+    "au": { "type": ["string", "null"] },
+    "pr": { "$ref": "common.schema.json#/$defs/priority" },
+    "a": { "type": ["string", "null"], "description": "alias" },
+    "asn": { "type": ["string", "null"], "description": "assignee" },
+    "pid": { "type": ["string", "null"], "description": "parent_id" },
+    "desc": { "type": "string" },
+    "cm": { "type": "array", "description": "comments (sub-keys b=body, au=author)" },
+    "dp": { "type": "array", "description": "deps (sub-keys tid=target_id, r=relation)" },
+    "tg": { "type": "array", "description": "tags" },
+    "ch": { "type": "array", "description": "children" },
+    "ibl": { "type": "array", "description": "inbound_links (sub-keys f=from_id, r=relation)" }
+  }
+}

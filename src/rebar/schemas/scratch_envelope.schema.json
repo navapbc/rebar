@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/scratch_envelope.schema.json",
+  "title": "ScratchEnvelope",
+  "description": "Result envelope for `rebar scratch get|set|clear`. `status` discriminates the outcome: 'ok' (set/clear), 'hit'/'miss' (get), or 'error'. On a 'hit', `ts` and `value` are present.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["status"],
+  "properties": {
+    "status": { "type": "string", "enum": ["ok", "hit", "miss", "error"] },
+    "ts": { "type": "string", "description": "ISO-8601 timestamp (present on a get hit)." },
+    "value": { "type": "string" },
+    "code": { "type": "string", "description": "Machine error code (status=error)." },
+    "reason": { "type": "string" }
+  }
+}

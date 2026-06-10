@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/deps_graph.schema.json",
+  "title": "DepsGraph",
+  "description": "Dependency graph for one ticket, emitted by `rebar deps <id>` (and the library deps() / MCP ticket_deps). `deps` are this ticket's outbound links (the same entries as TicketState.deps); `blockers`/`children` are id strings; `ready_to_work` is true when every blocker is closed.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ticket_id", "deps", "blockers", "children", "ready_to_work"],
+  "properties": {
+    "ticket_id": { "type": "string" },
+    "deps": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/dep" }
+    },
+    "blockers": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "children": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "ready_to_work": { "type": "boolean" }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/error_envelope.schema.json",
+  "title": "ErrorEnvelope",
+  "description": "Structured error emitted on stdout (so callers' json.load succeeds) when a read can't resolve its target — e.g. `rebar show <missing>` emits {error:'ticket_not_found', input, message}. Aliases the shared error_envelope $def.",
+  "$ref": "common.schema.json#/$defs/error_envelope"
+}

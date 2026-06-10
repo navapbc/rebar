@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/common.schema.json",
+  "title": "rebar shared sub-schemas",
+  "description": "Reusable $defs referenced by the per-output rebar schemas. Authored once here and $ref'd everywhere (a {path,reason} entry, a dep, a comment, etc.) so the shapes never drift between, e.g., `get-file-impact` and `TicketState.file_impact[]`. Load schemas via rebar.schemas.validator(name), which wires a referencing Registry so these cross-file $refs resolve.",
+  "$defs": {
+    "ticket_status": {
+      "type": "string",
+      "enum": ["open", "in_progress", "blocked", "closed", "archived", "deleted"]
+    },
+    "ticket_type": {
+      "type": "string",
+      "enum": ["bug", "epic", "story", "task"]
+    },
+    "relation": {
+      "type": "string",
+      "enum": ["blocks", "depends_on", "relates_to", "duplicates", "supersedes", "discovered_from"]
+    },
+    "priority": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4,
+      "description": "0=critical … 4=backlog (default 2)."
+    },
+    "comment": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["body"],
+      "properties": {
+        "body": { "type": "string" },
+        "author": { "type": ["string", "null"] },
+        "timestamp": { "type": ["integer", "string", "null"] }
+      }
+    },
+    "dep": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["target_id", "relation"],
+      "properties": {
+        "target_id": { "type": "string" },
+        "relation": { "$ref": "common.schema.json#/$defs/relation" },
+        "link_uuid": { "type": "string" }
+      }
+    },
+    "file_impact_entry": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string" },
+        "reason": { "type": "string" }
+      }
+    },
+    "verify_command_entry": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["command"],
+      "properties": {
+        "dd_id": { "type": "string" },
+        "dd_text": { "type": "string" },
+        "command": { "type": "string" }
+      }
+    },
+    "batch_item": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "title"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "priority": { "$ref": "common.schema.json#/$defs/priority" },
+        "type": { "$ref": "common.schema.json#/$defs/ticket_type" },
+        "files": { "type": "array" },
+        "files_likely_read": { "type": "array" }
+      }
+    },
+    "skipped_item": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "title"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "conflict_file": { "type": "string" },
+        "conflict_with": { "type": "string" },
+        "blocked_story": { "type": "string" }
+      }
+    },
+    "error_envelope": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["error", "input", "message"],
+      "properties": {
+        "error": { "type": "string", "description": "Machine error code, e.g. 'ticket_not_found'." },
+        "input": { "type": "string", "description": "The raw input that failed to resolve." },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/bridge_status.schema.json",
+  "title": "BridgeStatus",
+  "description": "Last Jira-bridge run status, emitted by `rebar bridge-status --output json`: the raw .bridge-status.json contents plus a computed `unresolved_alerts_count`. Fields are permissive because the producer history varies across bridge generations.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "last_run_timestamp": { "type": ["integer", "null"] },
+    "success": { "type": ["boolean", "null"] },
+    "error": { "type": ["string", "null"] },
+    "unresolved_conflicts": { "type": ["integer", "null"] },
+    "unresolved_alerts_count": { "type": "integer", "minimum": 0 }
+  }
+}
