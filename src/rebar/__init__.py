@@ -48,8 +48,15 @@ class ConcurrencyError(RebarError):
 
 
 # ── Internals ────────────────────────────────────────────────────────────────
-def _run(args, *, repo_root=None, check=True, input=None):
-    return run(args, repo_root=repo_root, input=input, check=False, capture=True)
+def _run(args, *, repo_root=None, check=True, input=None, env_extra=None):
+    return run(
+        args,
+        repo_root=repo_root,
+        input=input,
+        check=False,
+        capture=True,
+        env_extra=env_extra,
+    )
 
 
 def _ok(cp: subprocess.CompletedProcess, *, what: str) -> str:
@@ -388,9 +395,15 @@ def search(
     )
 
 
-def fsck(*, recover: bool = False, repo_root=None) -> str:
+def fsck(*, recover: bool = False, report_only: bool = False, repo_root=None) -> str:
+    """Run store integrity checks. ``recover=True`` runs the destructive recovery
+    path. ``report_only=True`` suppresses fsck's only mutation — removing a stale
+    ``.git/index.lock`` — so a read-only surface (MCP under REBAR_MCP_READONLY)
+    can run plain fsck without any git-state write (the stale lock is reported,
+    not removed)."""
     args = ["fsck-recover"] if recover else ["fsck"]
-    return _ok(_run(args, repo_root=repo_root), what="fsck")
+    env_extra = {"REBAR_FSCK_NO_MUTATE": "1"} if report_only else None
+    return _ok(_run(args, repo_root=repo_root, env_extra=env_extra), what="fsck")
 
 
 def summary(*ticket_ids: str, repo_root=None) -> list:

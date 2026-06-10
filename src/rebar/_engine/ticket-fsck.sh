@@ -177,8 +177,15 @@ except OSError:
     fi
 
     if [ "$lock_age_stale" = true ]; then
-        rm -f "$lock_file"
-        echo "FIXED: removed stale .git/index.lock (older than 5 minutes)"
+        if [ "${REBAR_FSCK_NO_MUTATE:-}" = "1" ]; then
+            # Read-only invocation (e.g. an MCP server with REBAR_MCP_READONLY):
+            # report the stale lock but do NOT remove it. Removing index.lock is
+            # a git-state write and must not happen on a read-only surface.
+            echo "WARN: stale .git/index.lock present (older than 5 minutes) — not removed (read-only)"
+        else
+            rm -f "$lock_file"
+            echo "FIXED: removed stale .git/index.lock (older than 5 minutes)"
+        fi
     else
         echo "WARN: .git/index.lock exists (younger than 5 minutes) — not removed"
     fi

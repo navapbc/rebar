@@ -231,7 +231,9 @@ def build_server():
                 "fsck recover=True is a write operation and is disabled: this "
                 "server is read-only (REBAR_MCP_READONLY)"
             )
-        return rebar.fsck(recover=recover)
+        # Plain fsck still mutates: it removes a stale .git/index.lock. On a
+        # read-only server suppress that write (report the stale lock instead).
+        return rebar.fsck(recover=recover, report_only=_readonly())
 
     # ── Quality gates + file-impact reads (WS5d) ───────────────────────────────
     @mcp.tool()

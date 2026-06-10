@@ -90,6 +90,7 @@ def run(
     input: str | None = None,
     check: bool = True,
     capture: bool = True,
+    env_extra: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """Invoke the ``rebar`` bash dispatcher as a subprocess.
 
@@ -99,6 +100,8 @@ def run(
     the library/CLI is invoked from an unrelated directory.
     """
     env = engine_env(repo_root)
+    if env_extra:
+        env.update(env_extra)
     if cwd is None:
         cwd = env.get("REBAR_ROOT") or env.get("PROJECT_ROOT")
         if cwd and not os.path.isdir(cwd):

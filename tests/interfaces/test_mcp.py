@@ -174,6 +174,49 @@ def test_plain_fsck_available_in_both_modes(
         asyncio.run(srv.call_tool("fsck", {}))  # no raise
 
 
+def _make_stale_index_lock(repo):
+    """Create a stale (>5min) .git/index.lock in the repo's tracker; return its path."""
+    import os
+    import time
+    from pathlib import Path
+
+    tracker = Path(repo) / ".tickets-tracker"
+    gd = tracker / ".git"
+    gitdir = (
+        Path(gd.read_text().split("gitdir:", 1)[1].strip()) if gd.is_file() else gd
+    )
+    lock = gitdir / "index.lock"
+    lock.write_text("")
+    old = time.time() - 600
+    os.utime(lock, (old, old))
+    return lock
+
+
+def test_plain_fsck_does_not_remove_lock_under_readonly(
+    monkeypatch: pytest.MonkeyPatch, rebar_repo
+) -> None:
+    """Bug terse-frost-ale (sibling of f6f6): plain fsck() removes a stale
+    .git/index.lock — a git-state write. A read-only server must report it, not
+    remove it."""
+    lock = _make_stale_index_lock(rebar_repo)
+    monkeypatch.setenv("REBAR_MCP_READONLY", "1")
+    srv = build_server()
+    res = asyncio.run(srv.call_tool("fsck", {}))
+    assert lock.exists(), "read-only fsck() must NOT remove the stale index.lock"
+    assert "not removed (read-only)" in str(res)
+
+
+def test_plain_fsck_removes_lock_when_writable(
+    monkeypatch: pytest.MonkeyPatch, rebar_repo
+) -> None:
+    """Control: a writable server still cleans the stale lock."""
+    lock = _make_stale_index_lock(rebar_repo)
+    monkeypatch.delenv("REBAR_MCP_READONLY", raising=False)
+    srv = build_server()
+    asyncio.run(srv.call_tool("fsck", {}))
+    assert not lock.exists(), "writable fsck() should remove the stale index.lock"
+
+
 # ── clarity_check missing-ticket schema-conformance over MCP (BUG ef5f) ─────────
 def test_clarity_check_missing_ticket_mcp_clean(
     monkeypatch: pytest.MonkeyPatch, rebar_repo
