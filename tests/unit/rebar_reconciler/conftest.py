@@ -61,6 +61,20 @@ def _seed_dotted_namespace() -> None:
     # the source loads. Load it from the engine dir under the canonical key.
     import rebar_reconciler  # the test-dir package under pytest; engine pkg in prod
 
+    # The test-dir package shadows the engine package, so dotted submodule
+    # imports against the ENGINE (e.g. acli-integration.py's module-level
+    # ``from rebar_reconciler.adf import ...`` / ``from rebar_reconciler.comment_limits
+    # import ...``, executed when reconcile_once loads acli-integration via
+    # _load) would fail to resolve — and _load registers the half-loaded module
+    # in sys.modules before exec, poisoning the cache for sibling tests. Extend
+    # this package's __path__ to include the engine's rebar_reconciler dir so ANY
+    # engine submodule falls through generically, instead of hand-seeding each
+    # one. Already-seeded flat sys.modules keys (e.g. alert_store below) still
+    # win, so their object identity is preserved.
+    _engine_pkg = str(_ENGINE_DIR / "rebar_reconciler")
+    if _engine_pkg not in rebar_reconciler.__path__:
+        rebar_reconciler.__path__.append(_engine_pkg)
+
     key = "rebar_reconciler.alert_store"
     if key not in sys.modules:
         asp = _ENGINE_DIR / "rebar_reconciler" / "alert_store.py"
