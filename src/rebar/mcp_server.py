@@ -183,8 +183,15 @@ def build_server():
         has_tag: str | None = None,
         without_tag: str | None = None,
         include_archived: bool = False,
+        exclude_deleted: bool = False,
     ) -> list[TicketStateOut]:
-        """List tickets as a JSON array, with optional filters."""
+        """List tickets as a JSON array, with optional filters.
+
+        ``exclude_deleted`` drops tickets whose reduced status is ``deleted``.
+        delete writes STATUS(deleted)+ARCHIVED, so the default list already hides
+        tombstones via archived-exclusion; ``exclude_deleted`` only changes
+        results when combined with ``include_archived=True``.
+        """
         return [
             TicketStateOut.model_validate(t)
             for t in rebar.list_tickets(
@@ -195,6 +202,7 @@ def build_server():
                 has_tag=has_tag,
                 without_tag=without_tag,
                 include_archived=include_archived,
+                exclude_deleted=exclude_deleted,
             )
         ]
 

@@ -7,6 +7,9 @@ interface and reads through the other two, proving all three share one store.
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -110,6 +113,64 @@ def test_deps_parity(adapter) -> None:
     adapter.link(a, b, "blocks")
     graph = adapter.deps(b)
     assert isinstance(graph, dict)
+
+
+def _cli_list_ids(*flags: str) -> set[str]:
+    """Run `rebar list <flags>` (JSON oracle) and return the matched ticket ids."""
+    cp = subprocess.run(
+        [sys.executable, "-m", "rebar.cli", "list", *flags],
+        capture_output=True,
+        text=True,
+    )
+    assert cp.returncode == 0, f"cli list {flags} failed: {cp.stderr}"
+    return {t["ticket_id"] for t in json.loads(cp.stdout)}
+
+
+@pytest.mark.parametrize("exclude_deleted", [False, True])
+def test_list_exclude_deleted_parity(rebar_repo: Path, exclude_deleted: bool) -> None:
+    """`exclude_deleted` must exist and behave identically across CLI/library/MCP.
+
+    delete writes STATUS(deleted)+ARCHIVED, so the DEFAULT list already hides
+    tombstones via archived-exclusion; exclude_deleted only changes results when
+    combined with include_archived=True. The CLI is the oracle; library and MCP
+    must return the SAME ids for each flag combination.
+    """
+    pytest.importorskip("mcp")
+    lib, mcp = LibraryAdapter(), McpAdapter()
+
+    live = lib.create("task", "still alive")
+    doomed = lib.create("task", "to be deleted")
+
+    # Delete via the CLI (destructive; requires explicit approval).
+    cp = subprocess.run(
+        [sys.executable, "-m", "rebar.cli", "delete", doomed, "--user-approved"],
+        capture_output=True,
+        text=True,
+    )
+    assert cp.returncode == 0, f"cli delete failed: {cp.stderr}"
+
+    # Default list: tombstone hidden by archived-exclusion regardless of the flag.
+    cli_default = _cli_list_ids()
+    assert cli_default == {live}
+    assert {t["ticket_id"] for t in lib.list(exclude_deleted=exclude_deleted)} == cli_default
+    assert {t["ticket_id"] for t in mcp.list(exclude_deleted=exclude_deleted)} == cli_default
+
+    # include_archived=True is where exclude_deleted actually matters.
+    cli_flags = ["--include-archived"] + (["--exclude-deleted"] if exclude_deleted else [])
+    cli_ids = _cli_list_ids(*cli_flags)
+    expected = {live} if exclude_deleted else {live, doomed}
+    assert cli_ids == expected
+
+    lib_ids = {
+        t["ticket_id"]
+        for t in lib.list(include_archived=True, exclude_deleted=exclude_deleted)
+    }
+    mcp_ids = {
+        t["ticket_id"]
+        for t in mcp.list(include_archived=True, exclude_deleted=exclude_deleted)
+    }
+    assert lib_ids == cli_ids
+    assert mcp_ids == cli_ids
 
 
 # ── Cross-interface coherence: one store, three windows ──────────────────────

@@ -335,9 +335,16 @@ def list_tickets(
     has_tag: str | None = None,
     without_tag: str | None = None,
     include_archived: bool = False,
+    exclude_deleted: bool = False,
     repo_root=None,
 ) -> list[dict]:
-    """List tickets as a list of dicts, with optional filters."""
+    """List tickets as a list of dicts, with optional filters.
+
+    ``exclude_deleted`` drops tickets whose reduced status is ``deleted``. Note
+    delete writes STATUS(deleted)+ARCHIVED, so the default list already hides
+    tombstones via archived-exclusion; ``exclude_deleted`` only changes results
+    when combined with ``include_archived=True``.
+    """
     from rebar import _reads
     return _reads.list_tickets(
         status=status,
@@ -347,6 +354,7 @@ def list_tickets(
         has_tag=has_tag,
         without_tag=without_tag,
         include_archived=include_archived,
+        exclude_deleted=exclude_deleted,
         repo_root=repo_root,
     )
 
