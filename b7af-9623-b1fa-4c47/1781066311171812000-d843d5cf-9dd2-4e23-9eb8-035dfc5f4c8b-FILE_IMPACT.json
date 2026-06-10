@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/__init__.py","reason":"relations + reconcile docstrings"},{"path":"src/rebar/mcp_server.py","reason":"module docstring + link tool doc"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781066311171812000,"uuid":"d843d5cf-9dd2-4e23-9eb8-035dfc5f4c8b"}
