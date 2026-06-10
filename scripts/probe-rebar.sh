@@ -259,7 +259,11 @@ run_rb bridge-fsck -o json; assert_contains '"orphaned"' "bridge-fsck json shape
 section "lifecycle --output json — create/claim/transition/reopen/delete result shapes"
 run_rb create task "PROBE: lifecycle json" --output json; assert_rc 0 "create --output json"
 assert_contains '"id"' "create json has id"; assert_contains '"alias"' "create json has alias"
+# `create --output json` can't go through mk() (which scrapes a bare-id line), so
+# track the id for cleanup explicitly — otherwise the soft-deleted tombstone dir
+# is left behind and PROBE_LIVE's store-unchanged check trips.
 LCID=$(printf '%s' "$OUT" | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])' 2>/dev/null)
+[ -n "$LCID" ] && _CREATED+=("$LCID")
 run_rb claim "$LCID" --assignee probe -o json; assert_rc 0 "claim -o json"; assert_contains '"status": "in_progress"' "claim json status"
 run_rb transition "$LCID" in_progress closed --output json; assert_rc 0 "transition --output json"; assert_contains '"newly_unblocked"' "transition json shape"
 run_rb reopen "$LCID" -o json; assert_rc 0 "reopen -o json"; assert_contains '"to": "open"' "reopen json to=open"
