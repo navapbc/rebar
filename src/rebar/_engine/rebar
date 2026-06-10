@@ -43,6 +43,7 @@ _print_overview() {
     echo "  list        List all tickets as JSON"
     echo "  transition  Transition ticket status (optimistic concurrency)"
     echo "  claim       Atomically claim an open ticket (-> in_progress + assignee; exit 10 if taken)"
+    echo "  reopen      Reopen a closed ticket (closed -> open; exit 10 if not currently closed)"
     echo "  comment     Add a comment to a ticket"
     echo "  link        Link two tickets (relation REQUIRED: blocks|depends_on|relates_to|duplicates|supersedes|discovered_from)"
     echo "  unlink      Remove ONE link between an ordered <source> <target> pair (no relation arg; most-recent first)"
@@ -70,6 +71,14 @@ _print_overview() {
     echo "  set-verify-commands  Record DD-level verify commands (JSON array of {dd_id,dd_text,command})"
     echo "  get-verify-commands  Get the current verify commands array for a ticket (JSON)"
     echo "  scratch          Manage per-ticket scratch values (set/get/clear)"
+    echo "  delete        Delete a ticket (destructive; requires --user-approved)"
+    echo "  compact       Compact a ticket's event log [--threshold=<n>]"
+    echo "  compact-all   Compact all eligible tickets [--dry-run] [--limit=<n>] [--no-commit]"
+    echo "  fsck          Check store integrity (JSON validity, CREATE presence, index.lock) [--output json]"
+    echo "  fsck-recover  Recover the tracker worktree (dangling commits, interrupted rebases) [--tracker-dir <path>]"
+    echo "  revert        Revert a ticket to a prior event UUID (<ticket_id> <target_uuid> [--reason=<text>])"
+    echo "  resolve       Resolve an id/alias/prefix to a canonical ticket id"
+    echo "  format        Render a ticket for display (<ticket_id> [mode])"
 }
 
 # Misuse (no/unknown subcommand): overview + non-zero exit (preserves prior behavior).
@@ -288,6 +297,15 @@ case "$subcommand" in
         _reopen_fmt="$_OUTPUT_FMT"
         _strip_output_flags "$@"
         set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
+        # Arity guard AFTER flag stripping, so flags-only invocations
+        # (e.g. `rebar reopen --output json`) are caught too. Without this,
+        # `$1` below dereferences an unset positional under `set -u` and bash
+        # emits a raw `unbound variable` diagnostic instead of the Usage
+        # contract (matching sibling arms claim/archive).
+        if [ $# -lt 1 ]; then
+            _print_subcommand_help reopen >&2
+            exit 1
+        fi
         _ticketlib_dispatch ticket_transition "$1" closed open --output="$_reopen_fmt"
         exit $?
         ;;
