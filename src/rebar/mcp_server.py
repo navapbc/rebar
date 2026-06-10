@@ -15,9 +15,30 @@ The ``mcp`` dependency is an optional extra and is imported lazily.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 
 import rebar
+
+# The reconcile tool gates modes by the engine's canonical MODE_CAPS table, which
+# lives in the bundled engine at rebar_reconciler/mode.py. We load it ONCE here by
+# FILE PATH (not `from rebar_reconciler.mode import ...`) and bind the names as
+# module globals. Loading by path is deliberate: the dotted import is unreliable
+# because the top-level name `rebar_reconciler` is shadowed in sys.modules in some
+# contexts (notably the unit-test package of the same name under pytest), which
+# makes `rebar_reconciler.mode` raise ModuleNotFoundError. mode.py is stdlib-only
+# and self-contained, so a standalone path-load is safe.
+def _load_engine_mode():
+    from rebar._engine import engine_dir
+
+    mode_path = engine_dir() / "rebar_reconciler" / "mode.py"
+    spec = importlib.util.spec_from_file_location("rebar._engine_mode", mode_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.MODE_CAPS, mod.Mode
+
+
+MODE_CAPS, Mode = _load_engine_mode()
 
 # Typed output for show_ticket so FastMCP advertises an outputSchema to MCP
 # clients (agents get a documented, validated shape instead of an opaque dict).
@@ -275,15 +296,8 @@ def build_server():
         require REBAR_MCP_ALLOW_RECONCILE_LIVE=1 and are blocked under
         REBAR_MCP_READONLY. reconcile-check / dry-run are non-mutating.
         """
-        # Source the mode caps from the engine (single source of truth).
-        # Importing rebar._native puts the bundled engine dir on sys.path so the
-        # engine-local `rebar_reconciler` package resolves regardless of whether
-        # a native read has run yet in this process (the `import rebar` at module
-        # top does NOT add it — that only happens once _native is imported).
+        # MODE_CAPS / Mode are imported once at module load (see top of file).
         # Unknown mode -> ValueError -> clean tool error.
-        import rebar._native  # noqa: F401
-        from rebar_reconciler.mode import MODE_CAPS, Mode
-
         parsed = Mode.from_str(mode)
         # Any cap != 0 mutates Jira (10/100/None — note LIVE's cap is None, so we
         # gate on != 0, NOT > 0). cap-0 modes are non-mutating and always allowed.
