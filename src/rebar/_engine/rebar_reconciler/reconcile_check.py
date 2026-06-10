@@ -79,7 +79,7 @@ _TYPE_LOCAL_TO_JIRA: dict[str, str] = {
 _TYPE_JIRA_TO_LOCAL: dict[str, str] = {v: k for k, v in _TYPE_LOCAL_TO_JIRA.items()}
 
 
-def _is_dso_label(label: str) -> bool:
+def _is_rebar_internal_label(label: str) -> bool:
     """Return True for labels that should be excluded from comparison."""
     return label.startswith("rebar-id-") or label.startswith("imported:")
 
@@ -89,8 +89,8 @@ def _compare_labels(
     jira_labels: list[str] | None,
 ) -> list[dict[str, Any]]:
     """Compare labels (excluding rebar-id-* and imported:*), return discrepancies."""
-    local_set = {lbl for lbl in (local_labels or []) if not _is_dso_label(lbl)}
-    jira_set = {lbl for lbl in (jira_labels or []) if not _is_dso_label(lbl)}
+    local_set = {lbl for lbl in (local_labels or []) if not _is_rebar_internal_label(lbl)}
+    jira_set = {lbl for lbl in (jira_labels or []) if not _is_rebar_internal_label(lbl)}
     if local_set == jira_set:
         return []
     return [
@@ -258,10 +258,10 @@ def reconcile_check(
         if jira_key in bound_jira_keys:
             continue
         labels = jira_issue.get("labels") or []
-        has_dso_label = any(
+        has_rebar_id_label = any(
             lbl.startswith("rebar-id-") for lbl in labels if isinstance(lbl, str)
         )
-        if has_dso_label:
+        if has_rebar_id_label:
             orphaned_jira.append(jira_key)
 
     # Unbound counts

@@ -262,7 +262,7 @@ fi
 
 if [ "$_branch_exists_local" = true ]; then
     # Branch exists locally — just mount the worktree
-    _wt_err_tmp=$(mktemp /tmp/dso-init-wt.XXXXXX)
+    _wt_err_tmp=$(mktemp /tmp/rebar-init-wt.XXXXXX)
     git -C "$REPO_ROOT" worktree add "$TRACKER_DIR" tickets >/dev/null 2>"$_wt_err_tmp" || {
         echo "ERROR: git worktree add (local branch) failed: $(cat "$_wt_err_tmp")" >&2
         rm -f "$_wt_err_tmp"; exit 1
@@ -271,7 +271,7 @@ if [ "$_branch_exists_local" = true ]; then
 elif [ "$_branch_exists_remote" = true ]; then
     # Branch exists on remote — fetch and mount
     git -C "$REPO_ROOT" fetch origin tickets 2>/dev/null
-    _wt_err_tmp=$(mktemp /tmp/dso-init-wt.XXXXXX)
+    _wt_err_tmp=$(mktemp /tmp/rebar-init-wt.XXXXXX)
     git -C "$REPO_ROOT" worktree add "$TRACKER_DIR" tickets >/dev/null 2>"$_wt_err_tmp" || {
         echo "ERROR: git worktree add (remote branch) failed: $(cat "$_wt_err_tmp")" >&2
         rm -f "$_wt_err_tmp"; exit 1
@@ -282,7 +282,7 @@ else
     # Use git worktree add --orphan when available (git >= 2.40): works even
     # on blank repos with no HEAD. Fall back to --detach + checkout --orphan
     # for older git (requires HEAD; fails on zero-commit repos).
-    _wt_err_tmp=$(mktemp /tmp/dso-init-wt.XXXXXX)
+    _wt_err_tmp=$(mktemp /tmp/rebar-init-wt.XXXXXX)
     _git_minor=$(git --version 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+' | head -1 | cut -d. -f2 || echo "0")
     _git_major=$(git --version 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+' | head -1 | cut -d. -f1 || echo "2")
     if (( _git_major > 2 || (_git_major == 2 && _git_minor >= 40) )); then

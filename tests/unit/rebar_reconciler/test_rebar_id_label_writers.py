@@ -171,7 +171,7 @@ def test_authorized_leaves_pass_audit(applier):
 # ---------------------------------------------------------------------------
 
 
-def _make_inbound_update_mutation_with_dso_label(mut_mod):
+def _make_inbound_update_mutation_with_rebar_id_label(mut_mod):
     """Build an inbound update Mutation whose payload signals a rebar-id-* label write."""
     # The payload uses target='label' convention at the dict level so the
     # apply()-wired audit can detect the label write.
@@ -192,7 +192,7 @@ def test_apply_raises_for_unauthorized_rebar_id_label_mutation(
     After wiring _audit_rebar_id_label_writes into apply(), this call must raise.
     (Before wiring: this test fails — that is the RED state.)
     """
-    mut = _make_inbound_update_mutation_with_dso_label(mut_mod)
+    mut = _make_inbound_update_mutation_with_rebar_id_label(mut_mod)
     # Use applier.RebarIdLabelWriteError to avoid importlib module-identity mismatch.
     with pytest.raises(applier.RebarIdLabelWriteError):
         applier.apply(mut, client=None)

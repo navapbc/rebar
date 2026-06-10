@@ -48,7 +48,7 @@ if [ ! -d "$_REDUCER_DIR/ticket_reducer" ]; then
     echo "Error: ticket_reducer not found at $_REDUCER_DIR/ticket_reducer" >&2; exit 1
 fi
 
-_TMPDIR=$(mktemp -d "${TMPDIR:-/tmp}/dso-concurrency-test.XXXXXX")
+_TMPDIR=$(mktemp -d "${TMPDIR:-/tmp}/rebar-concurrency-test.XXXXXX")
 trap 'rm -rf "$_TMPDIR"' EXIT
 
 echo "Concurrent STATUS write test: $_WRITES writes, $_RUNS determinism runs"

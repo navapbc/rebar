@@ -1,7 +1,6 @@
 """Tests for Gap 1: inbound comment propagation.
 
-The design (validated by ``probe_gap1_inbound_comments.sh`` against live
-Jira earlier in the session):
+The design (validated against live Jira during development):
 
 1. **Outbound emits a marker token** — ``<!-- rebar:reconciler-echo -->`` is
    appended to every outbound comment body so the inbound pass can

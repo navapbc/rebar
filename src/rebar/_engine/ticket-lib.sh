@@ -1461,7 +1461,7 @@ _, latest_path, latest_data = candidates[-1]
 # Forward-compat: warn once per (ticket_id, schema_version) when schema_version is unknown (> 2)
 schema_version = latest_data.get('schema_version', 1)
 if isinstance(schema_version, int) and schema_version > 2:
-    warn_dir = os.path.join(tempfile.gettempdir(), 'dso-preconditions-warn')
+    warn_dir = os.path.join(tempfile.gettempdir(), 'rebar-preconditions-warn')
     os.makedirs(warn_dir, exist_ok=True)
     warn_key = '{}_{}_v{}'.format(ticket_id, gate_name, schema_version)
     warn_file = os.path.join(warn_dir, warn_key)

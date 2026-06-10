@@ -353,7 +353,7 @@ def _diff_comments_inbound(
 ) -> list[dict[str, Any]]:
     """Detect Jira-side comments not yet mirrored locally (bug 85a1, Gap 1).
 
-    Strategy (validated by ``probe_gap1_inbound_comments.sh``):
+    Strategy (validated against live Jira during development):
       1. Read each Jira comment's id + body.
       2. Loop-breaker: skip any comment whose body contains
          ``RECONCILER_MARKER`` — that's our own outbound echo.

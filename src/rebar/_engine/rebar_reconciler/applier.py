@@ -1657,15 +1657,15 @@ class _BatchAuditView:
         self.action = batch_mutation.get("action", "")
         fields = batch_mutation.get("fields") or {}
         labels = fields.get("labels") if isinstance(fields, dict) else None
-        dso_label = None
+        rebar_id_label = None
         if isinstance(labels, (list, tuple)):
             for lbl in labels:
                 if isinstance(lbl, str) and lbl.startswith("rebar-id-"):
-                    dso_label = lbl
+                    rebar_id_label = lbl
                     break
-        if dso_label is not None:
+        if rebar_id_label is not None:
             self.target = "label"
-            self.payload = dso_label
+            self.payload = rebar_id_label
         else:
             # Synthesise an explicit non-label target so the guard's
             # _is_rebar_id_label_write_mutation returns False on benign batches.

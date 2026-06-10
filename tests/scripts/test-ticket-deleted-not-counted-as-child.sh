@@ -35,7 +35,7 @@ echo "=== test-ticket-deleted-not-counted-as-child.sh ==="
 # ── Helper: fresh temp git repo with ticket system initialized ────────────────
 _make_test_repo() {
     local tmp
-    tmp=$(mktemp -d "${TMPDIR:-/tmp}/dso-deleted-child.XXXXXX")
+    tmp=$(mktemp -d "${TMPDIR:-/tmp}/rebar-deleted-child.XXXXXX")
     _CLEANUP_DIRS+=("$tmp")
     clone_ticket_repo "$tmp/repo"
     echo "$tmp/repo"
