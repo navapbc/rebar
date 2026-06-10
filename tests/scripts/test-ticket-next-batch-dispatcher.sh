@@ -325,10 +325,236 @@ test_next_batch_skipped_overlap() {
     fi
 }
 
+# make_file_impact_fixture — creates a .tickets-tracker/ with:
+#   nb-fi-epic         (epic, open)
+#     nb-fi-story      (story, open, no blockers)
+#       nb-fi-a        (task, open, generic title)
+#       nb-fi-b        (task, open, generic title)
+# Both tasks record an *identical* recorded file_impact (FILE_IMPACT event) of
+# [{"path":"src/shared.py","reason":"edit"}]. Their titles share NO file path, so
+# the only overlap signal is the recorded file_impact — exercising the bug.
+make_file_impact_fixture() {
+    local tracker_dir
+    tracker_dir=$(mktemp -d)
+    _CLEANUP_DIRS+=("$tracker_dir")
+
+    python3 - "$tracker_dir" <<'PYEOF'
+import json, sys, os
+base = sys.argv[1]
+ts = 1700002000000000000
+
+def write(tid, ts_offset, event_type, data):
+    d = os.path.join(base, tid)
+    os.makedirs(d, exist_ok=True)
+    idx = len(os.listdir(d)) + 1
+    evt = {
+        "event_type": event_type,
+        "ticket_id": tid,
+        "timestamp": ts + ts_offset,
+        "uuid": f"test-{tid}-{idx:04d}",
+        "env_id": "test",
+        "author": "test",
+        "data": data,
+    }
+    with open(os.path.join(d, f"{idx:03d}-{event_type}.json"), "w") as f:
+        json.dump(evt, f)
+
+write("nb-fi-epic", 0, "CREATE", {
+    "ticket_id": "nb-fi-epic", "title": "NB FI Epic", "ticket_type": "epic",
+    "status": "open", "priority": 1, "parent_id": None,
+    "tags": [], "description": "", "notes": "",
+})
+write("nb-fi-story", 1, "CREATE", {
+    "ticket_id": "nb-fi-story", "title": "NB FI Story", "ticket_type": "story",
+    "status": "open", "priority": 2, "parent_id": "nb-fi-epic",
+    "tags": [], "description": "", "notes": "",
+})
+# Generic titles with NO file paths — overlap must come from recorded file_impact.
+write("nb-fi-a", 2, "CREATE", {
+    "ticket_id": "nb-fi-a", "title": "NB FI Task A", "ticket_type": "task",
+    "status": "open", "priority": 2, "parent_id": "nb-fi-story",
+    "tags": [], "description": "", "notes": "",
+})
+write("nb-fi-a", 3, "FILE_IMPACT", {
+    "file_impact": [{"path": "src/shared.py", "reason": "edit"}],
+})
+write("nb-fi-b", 4, "CREATE", {
+    "ticket_id": "nb-fi-b", "title": "NB FI Task B", "ticket_type": "task",
+    "status": "open", "priority": 2, "parent_id": "nb-fi-story",
+    "tags": [], "description": "", "notes": "",
+})
+write("nb-fi-b", 5, "FILE_IMPACT", {
+    "file_impact": [{"path": "src/shared.py", "reason": "edit"}],
+})
+PYEOF
+
+    echo "$tracker_dir"
+}
+
+# make_no_impact_fixture — control: two tasks, generic titles, NO file_impact.
+# They must co-schedule (no overlap), proving the fix does not over-serialize.
+make_no_impact_fixture() {
+    local tracker_dir
+    tracker_dir=$(mktemp -d)
+    _CLEANUP_DIRS+=("$tracker_dir")
+
+    python3 - "$tracker_dir" <<'PYEOF'
+import json, sys, os
+base = sys.argv[1]
+ts = 1700003000000000000
+
+def write(tid, ts_offset, event_type, data):
+    d = os.path.join(base, tid)
+    os.makedirs(d, exist_ok=True)
+    idx = len(os.listdir(d)) + 1
+    evt = {
+        "event_type": event_type,
+        "ticket_id": tid,
+        "timestamp": ts + ts_offset,
+        "uuid": f"test-{tid}-{idx:04d}",
+        "env_id": "test",
+        "author": "test",
+        "data": data,
+    }
+    with open(os.path.join(d, f"{idx:03d}-{event_type}.json"), "w") as f:
+        json.dump(evt, f)
+
+write("nb-ni-epic", 0, "CREATE", {
+    "ticket_id": "nb-ni-epic", "title": "NB NI Epic", "ticket_type": "epic",
+    "status": "open", "priority": 1, "parent_id": None,
+    "tags": [], "description": "", "notes": "",
+})
+write("nb-ni-story", 1, "CREATE", {
+    "ticket_id": "nb-ni-story", "title": "NB NI Story", "ticket_type": "story",
+    "status": "open", "priority": 2, "parent_id": "nb-ni-epic",
+    "tags": [], "description": "", "notes": "",
+})
+write("nb-ni-a", 2, "CREATE", {
+    "ticket_id": "nb-ni-a", "title": "NB NI Task A", "ticket_type": "task",
+    "status": "open", "priority": 2, "parent_id": "nb-ni-story",
+    "tags": [], "description": "", "notes": "",
+})
+write("nb-ni-b", 3, "CREATE", {
+    "ticket_id": "nb-ni-b", "title": "NB NI Task B", "ticket_type": "task",
+    "status": "open", "priority": 2, "parent_id": "nb-ni-story",
+    "tags": [], "description": "", "notes": "",
+})
+PYEOF
+
+    echo "$tracker_dir"
+}
+
+test_next_batch_file_impact_overlap() {
+    local _tracker _output _exit
+
+    # Test 9: Two tasks with identical RECORDED file_impact (and no file paths in
+    # their titles) → exactly ONE batched, the other in skipped_overlap, naming
+    # the shared path as conflict_file. This is RED against current code: today
+    # recorded file_impact never reaches the scheduler, so BOTH get batched.
+    echo "Test 9: Recorded file_impact participates in overlap detection (one batched, one skipped_overlap)"
+    _tracker=$(make_file_impact_fixture)
+    _exit=0
+    _output=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" next-batch nb-fi-epic --output json 2>/dev/null) || _exit=$?
+
+    if echo "$_output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+batch_ids = {e.get('id') for e in d.get('batch', [])}
+overlap = d.get('skipped_overlap', [])
+overlap_ids = {e.get('id') for e in overlap}
+errs = []
+if len(batch_ids) != 1:
+    errs.append('expected exactly 1 batched, got %d: %s' % (len(batch_ids), sorted(batch_ids)))
+if len(overlap_ids) != 1:
+    errs.append('expected exactly 1 skipped_overlap, got %d: %s' % (len(overlap_ids), sorted(overlap_ids)))
+if batch_ids and overlap_ids and (batch_ids & overlap_ids):
+    errs.append('same ticket both batched and skipped: %s' % sorted(batch_ids & overlap_ids))
+# The conflict must name the shared declared path.
+conflict_files = {e.get('conflict_file') for e in overlap}
+if 'src/shared.py' not in conflict_files:
+    errs.append('conflict_file did not name shared declared path; got %s' % sorted(conflict_files))
+if errs:
+    print('; '.join(errs), file=sys.stderr)
+    sys.exit(1)
+" 2>/tmp/_fi_err; then
+        echo "  PASS: recorded file_impact serialized the two tasks (1 batched, 1 skipped_overlap)"
+        (( PASS++ ))
+    else
+        echo "  FAIL: recorded file_impact ignored — both tasks batched (RED — expected before GREEN)" >&2
+        echo "  Reason: $(cat /tmp/_fi_err 2>/dev/null)" >&2
+        echo "  Output: $_output" >&2
+        (( FAIL++ ))
+    fi
+
+    # Test 10: Control — two tasks with NO recorded file_impact and no file paths
+    # in their titles must co-schedule (both batched, none skipped_overlap).
+    echo "Test 10: No-file-impact control case co-schedules both tasks"
+    _tracker=$(make_no_impact_fixture)
+    _exit=0
+    _output=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" next-batch nb-ni-epic --output json 2>/dev/null) || _exit=$?
+
+    if echo "$_output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+batch_ids = {e.get('id') for e in d.get('batch', [])}
+overlap_ids = {e.get('id') for e in d.get('skipped_overlap', [])}
+errs = []
+if batch_ids != {'nb-ni-a', 'nb-ni-b'}:
+    errs.append('expected both tasks batched, got %s' % sorted(batch_ids))
+if overlap_ids:
+    errs.append('expected no skipped_overlap, got %s' % sorted(overlap_ids))
+if errs:
+    print('; '.join(errs), file=sys.stderr)
+    sys.exit(1)
+" 2>/tmp/_ni_err; then
+        echo "  PASS: no-file-impact tasks co-scheduled (both batched, none skipped_overlap)"
+        (( PASS++ ))
+    else
+        echo "  FAIL: no-file-impact control over-serialized" >&2
+        echo "  Reason: $(cat /tmp/_ni_err 2>/dev/null)" >&2
+        echo "  Output: $_output" >&2
+        (( FAIL++ ))
+    fi
+
+    # Test 11: --output json keys unchanged (validate batch items against schema's
+    # batch_item shape — files / files_likely_read remain present, no new keys).
+    echo "Test 11: --output json batch_item keys unchanged after file_impact fix"
+    _tracker=$(make_file_impact_fixture)
+    _exit=0
+    _output=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" next-batch nb-fi-epic --output json 2>/dev/null) || _exit=$?
+
+    if echo "$_output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+# Top-level keys the contract guarantees.
+for k in ('available_pool', 'skipped_overlap', 'skipped_blocked_story', 'batch'):
+    if k not in d:
+        print('missing top-level key: ' + k, file=sys.stderr); sys.exit(1)
+# batch_item allowed keys per common.schema.json#/\$defs/batch_item (no routing leak).
+allowed = {'id', 'title', 'priority', 'type', 'files', 'files_likely_read'}
+routing = {'model', 'subagent', 'class', 'complexity'}
+for e in d.get('batch', []):
+    extra = set(e) - allowed
+    if extra:
+        print('unexpected batch_item keys: ' + ', '.join(sorted(extra)), file=sys.stderr); sys.exit(1)
+    if routing & set(e):
+        print('routing fields leaked', file=sys.stderr); sys.exit(1)
+" 2>/tmp/_keys_err; then
+        echo "  PASS: --output json batch_item keys unchanged"
+        (( PASS++ ))
+    else
+        echo "  FAIL: --output json keys changed" >&2
+        echo "  Reason: $(cat /tmp/_keys_err 2>/dev/null)" >&2
+        echo "  Output: $_output" >&2
+        (( FAIL++ ))
+    fi
+}
+
 # Run the RED zone tests
 test_next_batch_routes_through_dispatcher
 test_next_batch_no_epic_exits_nonzero
 test_next_batch_skipped_overlap
+test_next_batch_file_impact_overlap
 
 # ── Results ───────────────────────────────────────────────────────────────────
 echo ""

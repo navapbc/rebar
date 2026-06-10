@@ -631,6 +631,8 @@ for t in all_tickets:
             "title": t.get("title", "untitled"),
             "issue_type": t.get("ticket_type", "task"),
             "dependencies": t.get("deps", []),
+            "description": t.get("description", ""),
+            "file_impact": t.get("file_impact", []),
         })
 
 # ── Identify stories and check which are blocked ──────────────────────────────
@@ -777,6 +779,12 @@ class Candidate:
             # Fallback: use extract_files() output
             self.files        = seed_files
             self.files_read   = set()
+        # Union recorded file_impact paths into the conflict set (applied once,
+        # regardless of which branch set self.files above — self.files is a set
+        # in both branches, so set(...) | declared is type-safe).
+        declared = {e["path"] for e in (raw.get("file_impact") or []) if isinstance(e, dict) and e.get("path")}
+        if declared:
+            self.files = set(self.files) | declared
 
 candidates = [Candidate(raw) for raw in candidates_raw]
 
