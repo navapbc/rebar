@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"verify_commands":[{"command":"bash tests/scripts/test-ticket-edit.sh && bash tests/scripts/test-ticket-lib-api.sh","dd_id":"DD1","dd_text":"empty --title rejected on both code paths"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1781066915322410000,"uuid":"fa6da46c-b7dc-4a53-963b-6bb0d6d9be96"}
