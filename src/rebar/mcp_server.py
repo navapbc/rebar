@@ -275,9 +275,13 @@ def build_server():
         require REBAR_MCP_ALLOW_RECONCILE_LIVE=1 and are blocked under
         REBAR_MCP_READONLY. reconcile-check / dry-run are non-mutating.
         """
-        # Source the mode caps from the engine (single source of truth); the
-        # import resolves in-process because `import rebar` already put the
-        # engine dir on sys.path. Unknown mode -> ValueError -> clean tool error.
+        # Source the mode caps from the engine (single source of truth).
+        # Importing rebar._native puts the bundled engine dir on sys.path so the
+        # engine-local `rebar_reconciler` package resolves regardless of whether
+        # a native read has run yet in this process (the `import rebar` at module
+        # top does NOT add it — that only happens once _native is imported).
+        # Unknown mode -> ValueError -> clean tool error.
+        import rebar._native  # noqa: F401
         from rebar_reconciler.mode import MODE_CAPS, Mode
 
         parsed = Mode.from_str(mode)
