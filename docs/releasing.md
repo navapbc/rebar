@@ -50,11 +50,11 @@ gh run watch "$(gh run list --workflow=release.yml --event=push -L1 --json datab
 The workflow builds + `twine check`s + publishes via OIDC. (A `workflow_dispatch`
 run builds without publishing — use it as a dry run.)
 
-Verify:
+Verify the version is live on the channel:
 ```bash
 curl -s https://pypi.org/pypi/nava-rebar/json | python3 -c "import json,sys;print(json.load(sys.stdin)['info']['version'])"
-pipx install "nava-rebar==X.Y.Z" --force
 ```
+(Full install + probe of the published artifact is step 5 below.)
 
 ### 3. Update the Homebrew tap (after PyPI has the new sdist)
 ```bash
@@ -95,6 +95,31 @@ mcp-publisher publish           # publishes ./server.json (validates schema firs
 If you publicize org membership *after* logging in, re-run `mcp-publisher login
 github` before `publish`, or you'll get a 403 listing only `io.github.<you>/*`.
 Verify: `curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.navapbc/rebar"`.
+
+### 5. Post-release smoke test — update the local install from the channel, then probe
+Once the version is live on PyPI, **update your local install from the
+distribution channel** and run the end-to-end **live probe** against it. This is
+the release gate that verifies the *published* artifact (not your working tree)
+actually installs and that every CLI command works against the real engine —
+catching the class of bug where a local editable checkout passes but the shipped
+package is broken.
+```bash
+# 1) Pull the just-published version FROM THE CHANNEL (with the mcp extra so
+#    rebar-mcp is covered too). --force replaces any stale local/editable install.
+pipx install "nava-rebar[mcp]==X.Y.Z" --force
+
+# 2) Probe the INSTALLED (distribution-channel) build — not the repo's editable
+#    .venv. Point $REBAR at the pipx shim so the probe drives the shipped binary.
+REBAR="$(pipx environment --value PIPX_BIN_DIR)/rebar" bash scripts/probe-rebar.sh
+
+# Optional: also exercise the REAL project store (it snapshots the existing
+# tickets, removes only what it creates, and verifies the store is unchanged):
+REBAR="$(pipx environment --value PIPX_BIN_DIR)/rebar" PROBE_LIVE=1 bash scripts/probe-rebar.sh
+```
+`scripts/probe-rebar.sh` exercises every command + edge cases and prints
+`PROBE RESULT: N passed, 0 failed`; a non-zero exit means the published build is
+broken. Since **PyPI is immutable**, recover by *yanking* the bad version and
+shipping a fixed version bump (re-run this step on the new version).
 
 ---
 
