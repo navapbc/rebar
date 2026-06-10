@@ -64,6 +64,8 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
     """
     env_dir = os.environ.get("TICKETS_TRACKER_DIR")
     if env_dir:
+        # Explicit tracker dir — read it directly, no git precondition (test
+        # fixtures and tooling point this at a hand-built tracker on purpose).
         return env_dir
     root = (
         str(repo_root)
@@ -80,6 +82,26 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
                 .strip()
             )
         except (subprocess.CalledProcessError, FileNotFoundError):
+            print(
+                "Error: not inside a git repository (set REBAR_ROOT or run inside the repo)",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    else:
+        # A repo-root was supplied (arg / PROJECT_ROOT / REBAR_ROOT). The rebar
+        # store is git-backed, so require root to be a git work tree — matching
+        # the pre-collapse bash read path, which errored ("not inside a git
+        # repository") on an uninitialized dir. This is the precondition
+        # rebar_reconciler._read_local_tickets relies on: against a minimal /
+        # uninitialized environment `rebar list` must fail so the reconciler
+        # treats it as "no local tickets" rather than reading a half-built,
+        # uncommitted working tree. (Bug: see ticket below.)
+        _r = subprocess.run(
+            ["git", "-C", root, "rev-parse", "--is-inside-work-tree"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if _r.returncode != 0:
             print(
                 "Error: not inside a git repository (set REBAR_ROOT or run inside the repo)",
                 file=sys.stderr,
