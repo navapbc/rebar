@@ -616,6 +616,42 @@ def test_graph_cache_invalidated_on_new_link(graph: ModuleType, tmp_path: Path) 
     )
 
 
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_graph_cache_key_invalidated_on_same_size_rewrite(tmp_path: Path) -> None:
+    """Bug zonal-folly-ditch (sibling of reducer bug 1d76): the graph cache key
+    must fold in mtime so a same-BYTE-LENGTH in-place rewrite of an event file
+    (git checkout/rebase of the tickets branch, fsck-recover cherry-pick)
+    invalidates the cache — filename+size alone cannot see it and would serve a
+    stale graph through deps/ready/next-batch.
+    """
+    import os
+
+    from ticket_graph._cache import _compute_cache_key
+
+    tracker = tmp_path / "tracker"
+    (tracker / "0000-aaaa-bbbb-cccc").mkdir(parents=True)
+    ev = tracker / "0000-aaaa-bbbb-cccc" / "0000-create.json"
+    ev.write_text('{"event_type":"CREATE","data":{"title":"AAAA"}}')
+
+    key1 = _compute_cache_key(str(tracker))
+    # Unchanged dir → cache still hits (key stable; no read-path regression).
+    assert _compute_cache_key(str(tracker)) == key1
+
+    body = ev.read_text()
+    st = ev.stat()
+    ev.write_text(body.replace("AAAA", "BBBB"))  # same byte length, new content
+    assert len(ev.read_text()) == len(body), "rewrite must be same byte length"
+    # Simulate a checkout/rebase that bumps mtime without changing size.
+    os.utime(ev, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
+
+    key2 = _compute_cache_key(str(tracker))
+    assert key2 != key1, (
+        "same-size in-place rewrite must invalidate the graph cache key "
+        "(else deps/ready/next-batch serve stale graph state)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Same-second LINK/UNLINK timestamp ordering — _is_active_link must not allow
 # UNLINK to replay before LINK when they share the same Unix-second timestamp
