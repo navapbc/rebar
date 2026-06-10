@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/_engine/ticket_reducer/_cache.py","reason":"add mtime to dir hash"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781066305606025000,"uuid":"264106f6-7e7f-4907-a264-3efd7605b1a2"}
