@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"verify_commands":[{"command":"bash tests/scripts/test-ticket-next-batch-dispatcher.sh","dd_id":"DD1","dd_text":"identical recorded file-impact forces overlap skip; schema keys unchanged"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1781066906797432000,"uuid":"9abe9161-8e76-4f0c-9303-adea33910097"}
