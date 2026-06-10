@@ -87,10 +87,24 @@ try:
         command: str
         dd_id: str | None = None
         dd_text: str | None = None
+
+    class CreateResultOut(_Out):
+        id: str
+        alias: str | None = None
+
+    class ClaimResultOut(_Out):
+        ticket_id: str
+        status: str
+        assignee: str | None = None
+
+    # NOTE: transition/reopen return {ticket_id, from, to, newly_unblocked}; the
+    # `from` key is a Python reserved word, so those tools return a plain dict
+    # (FastMCP serializes it correctly) rather than a typed model.
 except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     TicketStateOut = None  # type: ignore[assignment,misc]
     DepsGraphOut = ClarityResultOut = ValidateReportOut = None  # type: ignore[assignment,misc]
     NextBatchOut = FileImpactItemOut = VerifyCommandItemOut = None  # type: ignore[assignment,misc]
+    CreateResultOut = ClaimResultOut = None  # type: ignore[assignment,misc]
 
 
 def _readonly() -> bool:
@@ -246,33 +260,38 @@ def build_server():
             assignee: str | None = None,
             description: str | None = None,
             tags: list[str] | None = None,
-        ) -> str:
-            """Create a ticket; returns the canonical ticket id."""
-            return rebar.create_ticket(
-                ticket_type,
-                title,
-                parent=parent,
-                priority=priority,
-                assignee=assignee,
-                description=description,
-                tags=tags,
+        ) -> CreateResultOut:
+            """Create a ticket; returns {id, alias} (agents get the alias without
+            a second show())."""
+            return CreateResultOut.model_validate(
+                rebar.create_ticket(
+                    ticket_type,
+                    title,
+                    parent=parent,
+                    priority=priority,
+                    assignee=assignee,
+                    description=description,
+                    tags=tags,
+                    return_alias=True,
+                )
             )
 
         @mcp.tool()
         def transition_ticket(
             ticket_id: str, current_status: str, target_status: str
         ) -> dict:
-            """Transition a ticket's status (optimistic concurrency)."""
+            """Transition a ticket's status (optimistic concurrency). Returns the
+            engine result {ticket_id, from, to, newly_unblocked}."""
             return rebar.transition(ticket_id, current_status, target_status)
 
         @mcp.tool()
-        def claim_ticket(ticket_id: str, assignee: str | None = None) -> dict:
+        def claim_ticket(ticket_id: str, assignee: str | None = None) -> ClaimResultOut:
             """Atomically claim an OPEN ticket (-> in_progress + assignee).
 
             Raises a tool error (ConcurrencyError) if the ticket is not open —
             i.e. another agent already claimed it.
             """
-            return rebar.claim(ticket_id, assignee=assignee)
+            return ClaimResultOut.model_validate(rebar.claim(ticket_id, assignee=assignee))
 
         @mcp.tool()
         def reopen_ticket(ticket_id: str) -> dict:

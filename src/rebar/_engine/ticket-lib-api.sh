@@ -595,6 +595,14 @@ ticket_create() {
             return 1
         }
 
+        # Resolve --output/-o (report: text|json) and strip it before the
+        # positional <type> <title> + flag parsing (ticket-output.sh is sourced
+        # at the top of this lib).
+        _resolve_output_format report "$@" || return 2
+        local _create_fmt="$_OUTPUT_FMT"
+        _strip_output_flags "$@"
+        set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
+
         if [ $# -lt 2 ]; then
             _usage
             return 1
@@ -849,16 +857,21 @@ with open(sys.argv[12], 'w', encoding='utf-8') as f:
 
         rm -f "$temp_event"
 
-        # Output dual-format: human summary first, canonical ID last (both stdout).
-        # SC3: both lines on stdout; scripts extract ID via | tail -1.
-        # Lead with the human-readable alias when available; canonical ID
-        # is parenthetical. Matches the parity output in ticket-create.sh.
-        if [ -n "$ticket_alias" ] && [ "$ticket_alias" != "$ticket_id" ]; then
-            echo "Created ticket $ticket_alias ($ticket_id): $title"
+        # --output json: one structured object {id, alias, title}. Default (text):
+        # human summary first, canonical ID last (| tail -1 id-scrape).
+        if [ "$_create_fmt" = "json" ]; then
+            python3 -c 'import json,sys; print(json.dumps({"id": sys.argv[1], "alias": (sys.argv[2] or None), "title": sys.argv[3]}))' \
+                "$ticket_id" "$ticket_alias" "$title"
         else
-            echo "Created ticket $ticket_id: $title"
+            # Lead with the human-readable alias when available; canonical ID
+            # is parenthetical. Matches the parity output in ticket-create.sh.
+            if [ -n "$ticket_alias" ] && [ "$ticket_alias" != "$ticket_id" ]; then
+                echo "Created ticket $ticket_alias ($ticket_id): $title"
+            else
+                echo "Created ticket $ticket_id: $title"
+            fi
+            echo "$ticket_id"
         fi
-        echo "$ticket_id"
     )
 }
 
@@ -1750,12 +1763,20 @@ ticket_transition() {
             TRACKER_DIR="$REPO_ROOT/.tickets-tracker"
         fi
 
+        # Strip the --output/-o flag here (so it can appear before the id) and
+        # re-inject it as --output=<fmt> when delegating; ticket-transition.sh
+        # owns the actual format handling.
+        _resolve_output_format report "$@" || return 2
+        local _tr_fmt="$_OUTPUT_FMT"
+        _strip_output_flags "$@"
+        set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
+
         local ticket_id="$1"
         shift
         if ! ticket_id="$(_ticketlib_resolve_id "$ticket_id" "$TRACKER_DIR")"; then
             return 1
         fi
-        bash "$_TICKETLIB_DIR/ticket-transition.sh" "$ticket_id" "$@"
+        bash "$_TICKETLIB_DIR/ticket-transition.sh" "$ticket_id" "$@" --output="$_tr_fmt"
     )
     return $?
 }
@@ -2057,6 +2078,13 @@ ticket_delete() {
             TRACKER_DIR="$REPO_ROOT/.tickets-tracker"
         fi
 
+        # Resolve --output/-o (report: text|json) and strip it (ticket-output.sh
+        # is already sourced at the top of this lib).
+        _resolve_output_format report "$@" || return 2
+        local _del_fmt="$_OUTPUT_FMT"
+        _strip_output_flags "$@"
+        set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
+
         local user_approved=0
         local ticket_id=""
         local remaining_args=()
@@ -2245,30 +2273,38 @@ from ticket_reducer.marker import write_marker
 write_marker(sys.argv[1])
 " "$TICKET_DIR" 2>/dev/null || true
 
-        echo "Deleted ticket '$ticket_id'"
-
         # Scratch cleanup: remove per-ticket scratch dir (non-blocking; always returns 0)
         _scratch_cleanup_for_ticket "$ticket_id" 2>/dev/null || true
 
-        # ── Emit UNBLOCKED signals ──────────────────────────────────────────────
-        # Mirror ticket-transition.sh: detect tickets newly unblocked by this deletion.
+        # ── Detect tickets newly unblocked by this deletion (mirror transition) ──
+        local _unblocked_ids=""
         local _batch_close_json
         _batch_close_json=$(python3 "$_TICKETLIB_DIR/ticket-unblock.py" --batch-close "$TRACKER_DIR" "$ticket_id" 2>/dev/null) || true
         if [ -n "$_batch_close_json" ]; then
-            local _unblocked_ids
             _unblocked_ids=$(printf '%s' "$_batch_close_json" | python3 -c "
 import json, sys
 d = json.loads(sys.stdin.read())
 ids = d.get('newly_unblocked', [])
 print(','.join(ids)) if ids else None
 " 2>/dev/null) || _unblocked_ids=""
+        fi
+
+        # ── Output ──────────────────────────────────────────────────────────────
+        # --output json: {ticket_id, deleted, newly_unblocked[]}. Default (text):
+        # the "Deleted ..." line + the UNBLOCKED: signal.
+        if [ "$_del_fmt" = "json" ]; then
+            python3 -c '
+import json, sys
+ids = [x for x in sys.argv[2].split(",") if x]
+print(json.dumps({"ticket_id": sys.argv[1], "deleted": True, "newly_unblocked": ids}))' \
+                "$ticket_id" "$_unblocked_ids"
+        else
+            echo "Deleted ticket '$ticket_id'"
             if [ -n "$_unblocked_ids" ]; then
                 echo "UNBLOCKED: $_unblocked_ids"
             else
                 echo "UNBLOCKED: none"
             fi
-        else
-            echo "UNBLOCKED: none"
         fi
     )
 }

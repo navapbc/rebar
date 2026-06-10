@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/claim_result.schema.json",
+  "title": "ClaimResult",
+  "description": "Result of `rebar claim … --output json` (and the library claim() / MCP claim_ticket): {ticket_id, status, assignee}. status is always 'in_progress' on success; assignee is null when none was given. Exit 10 (ConcurrencyError) on a non-open ticket still applies and emits no JSON.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ticket_id", "status"],
+  "properties": {
+    "ticket_id": { "type": "string" },
+    "status": { "$ref": "common.schema.json#/$defs/ticket_status" },
+    "assignee": { "type": ["string", "null"] }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/create_result.schema.json",
+  "title": "CreateResult",
+  "description": "Result of `rebar create … --output json` (and the library create_ticket(return_alias=True) / MCP create_ticket): {id, alias, title}. The default text form prints a human summary line then the bare id (| tail -1).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["id"],
+  "properties": {
+    "id": { "type": "string" },
+    "alias": { "type": ["string", "null"] },
+    "title": { "type": "string" }
+  }
+}

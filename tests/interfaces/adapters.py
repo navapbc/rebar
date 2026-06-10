@@ -233,7 +233,10 @@ class McpAdapter(Adapter):
         return _unwrap(self._asyncio.run(self._srv.call_tool(tool, args)))
 
     def create(self, ticket_type: str, title: str, **kw: Any) -> str:
-        return self._call("create_ticket", ticket_type=ticket_type, title=title, **kw)
+        # create_ticket now returns {id, alias}; normalize to the bare id so the
+        # parity protocol (create -> id used downstream) holds across interfaces.
+        res = self._call("create_ticket", ticket_type=ticket_type, title=title, **kw)
+        return res["id"] if isinstance(res, dict) else res
 
     def show(self, tid: str) -> dict:
         return self._call("show_ticket", ticket_id=tid)

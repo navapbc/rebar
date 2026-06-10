@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/delete_result.schema.json",
+  "title": "DeleteResult",
+  "description": "Result of `rebar delete … --user-approved --output json`: {ticket_id, deleted, newly_unblocked[]}. delete is CLI/engine-only (intentionally not in the MCP write set). newly_unblocked lists tickets unblocked by the deletion.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ticket_id", "deleted", "newly_unblocked"],
+  "properties": {
+    "ticket_id": { "type": "string" },
+    "deleted": { "type": "boolean" },
+    "newly_unblocked": { "type": "array", "items": { "type": "string" } }
+  }
+}

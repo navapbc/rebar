@@ -16,6 +16,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/ticket-lib.sh"
+# Canonical structured-output flag (--output/-o); logic in ticket_output.py.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/ticket-output.sh"
+
+# Resolve --output/-o (report profile: text|json) and strip it from the args.
+_resolve_output_format report "$@" || exit 2
+_strip_output_flags "$@"
+set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
 
 REPO_ROOT="${PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
 TRACKER_DIR="${TICKETS_TRACKER_DIR:-$REPO_ROOT/.tickets-tracker}"
@@ -76,5 +84,10 @@ elif [ "$claim_exit" -ne 0 ]; then
     exit 1
 fi
 
-echo "CLAIMED: $ticket_id${assignee:+ (assignee: $assignee)}"
+if [ "$_OUTPUT_FMT" = "json" ]; then
+    python3 -c 'import json,sys; print(json.dumps({"ticket_id": sys.argv[1], "status": "in_progress", "assignee": (sys.argv[2] or None)}))' \
+        "$ticket_id" "$assignee"
+else
+    echo "CLAIMED: $ticket_id${assignee:+ (assignee: $assignee)}"
+fi
 exit 0

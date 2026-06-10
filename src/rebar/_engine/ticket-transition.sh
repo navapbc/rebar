@@ -14,6 +14,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=${_PLUGIN_ROOT}/scripts/ticket-lib.sh
 source "$SCRIPT_DIR/ticket-lib.sh"
+# Canonical structured-output flag (--output/-o); logic in ticket_output.py.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/ticket-output.sh"
+
+# Resolve --output/-o (report profile: text|json) and strip it before the
+# positional <id> [<current>] <target> + flag parsing below.
+_resolve_output_format report "$@" || exit 2
+_strip_output_flags "$@"
+set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
 
 REPO_ROOT="${PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
 TRACKER_DIR="$REPO_ROOT/.tickets-tracker"
@@ -387,6 +396,7 @@ if [ "$target_status" = "closed" ] && [ -n "$force_close_reason" ]; then
 fi
 
 # ── Step 4: Detect newly unblocked tickets (only on close) ───────────────────
+unblocked_ids=""
 if [ "$target_status" = "closed" ]; then
     # Use the batch_close_json captured in Step 1b (already computed open_children
     # and newly_unblocked in a single Python process — no second spawn needed).
@@ -397,24 +407,36 @@ d = json.loads(sys.stdin.read())
 ids = d.get('newly_unblocked', [])
 print(','.join(ids)) if ids else None
 " 2>/dev/null) || unblocked_ids=""
-
-        if [ -n "$unblocked_ids" ]; then
-            echo "UNBLOCKED: $unblocked_ids"
-        else
-            echo "UNBLOCKED: none"
-        fi
     else
         # batch_close_json was empty (e.g., unblock script failed) — warn but don't fail
         echo "Warning: batch-close JSON unavailable; unblock detection skipped" >&2
-        echo "UNBLOCKED: none"
     fi
 
-    # Compact-on-close: squash event log into SNAPSHOT (non-blocking)
+    # Compact-on-close: squash event log into SNAPSHOT (non-blocking). Silence its
+    # stdout (EVENT_COUNT / "compacted …") so it never pollutes the result stdout —
+    # critical for --output json, and cleaner for the text UNBLOCKED: line too.
     compact_script="${REBAR_COMPACT_SCRIPT:-$SCRIPT_DIR/ticket-compact.sh}"
-    bash "$compact_script" "$ticket_id" --threshold=0 --skip-sync 2>/dev/null || true
+    bash "$compact_script" "$ticket_id" --threshold=0 --skip-sync >/dev/null 2>&1 || true
 
     # Scratch cleanup: remove per-ticket scratch dir (non-blocking; always returns 0)
     _scratch_cleanup_for_ticket "$ticket_id" 2>/dev/null || true
+fi
+
+# ── Output ────────────────────────────────────────────────────────────────────
+# --output json: structured {ticket_id, from, to, newly_unblocked[]} for ANY
+# transition. Default (text): the close-only UNBLOCKED: line (unchanged).
+if [ "$_OUTPUT_FMT" = "json" ]; then
+    python3 -c '
+import json, sys
+ids = [x for x in sys.argv[4].split(",") if x]
+print(json.dumps({"ticket_id": sys.argv[1], "from": sys.argv[2], "to": sys.argv[3], "newly_unblocked": ids}))' \
+        "$ticket_id" "$current_status" "$target_status" "$unblocked_ids"
+elif [ "$target_status" = "closed" ]; then
+    if [ -n "$unblocked_ids" ]; then
+        echo "UNBLOCKED: $unblocked_ids"
+    else
+        echo "UNBLOCKED: none"
+    fi
 fi
 
 exit 0

@@ -147,6 +147,44 @@ def test_error_envelope(rebar_repo: Path) -> None:
     schemas.validator(schemas.ERROR_ENVELOPE).validate(json.loads(cp.stdout))
 
 
+# ── lifecycle result shapes (T3) ──────────────────────────────────────────────
+def test_lifecycle_result_shapes(rebar_repo: Path) -> None:
+    r = str(rebar_repo)
+    # create
+    created = _cli_json("create", "task", "Lifecycle", "--output", "json", cwd=r)
+    schemas.validator(schemas.CREATE_RESULT).validate(created)
+    tid = created["id"]
+    # claim
+    schemas.validator(schemas.CLAIM_RESULT).validate(
+        _cli_json("claim", tid, "--assignee=alice", "--output", "json", cwd=r)
+    )
+    # transition (and reopen, same shape)
+    schemas.validator(schemas.TRANSITION_RESULT).validate(
+        _cli_json("transition", tid, "in_progress", "closed", "--output", "json", cwd=r)
+    )
+    schemas.validator(schemas.TRANSITION_RESULT).validate(
+        _cli_json("reopen", tid, "--output", "json", cwd=r)
+    )
+    # delete
+    schemas.validator(schemas.DELETE_RESULT).validate(
+        _cli_json("delete", tid, "--user-approved", "--output", "json", cwd=r)
+    )
+
+
+def test_lifecycle_results_via_library(rebar_repo: Path) -> None:
+    r = str(rebar_repo)
+    created = rebar.create_ticket("task", "Lib lifecycle", return_alias=True, repo_root=r)
+    schemas.validator(schemas.CREATE_RESULT).validate(created)
+    tid = created["id"]
+    schemas.validator(schemas.CLAIM_RESULT).validate(
+        rebar.claim(tid, assignee="bob", repo_root=r)
+    )
+    schemas.validator(schemas.TRANSITION_RESULT).validate(
+        rebar.transition(tid, "in_progress", "closed", repo_root=r)
+    )
+    schemas.validator(schemas.TRANSITION_RESULT).validate(rebar.reopen(tid, repo_root=r))
+
+
 # ── MCP typed returns advertise an outputSchema ───────────────────────────────
 def test_mcp_read_tools_advertise_output_schema(rebar_repo: Path) -> None:
     """Every typed read tool advertises an MCP outputSchema (so agents get a

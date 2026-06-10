@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/transition_result.schema.json",
+  "title": "TransitionResult",
+  "description": "Result of `rebar transition … --output json` and `rebar reopen` (and the library transition()/reopen() / MCP transition_ticket/reopen_ticket): {ticket_id, from, to, newly_unblocked[]}. newly_unblocked lists tickets unblocked by a close (empty otherwise). Exit 10 (ConcurrencyError) on a stale current_status still applies and emits no JSON.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ticket_id", "from", "to", "newly_unblocked"],
+  "properties": {
+    "ticket_id": { "type": "string" },
+    "from": { "$ref": "common.schema.json#/$defs/ticket_status" },
+    "to": { "$ref": "common.schema.json#/$defs/ticket_status" },
+    "newly_unblocked": { "type": "array", "items": { "type": "string" } }
+  }
+}

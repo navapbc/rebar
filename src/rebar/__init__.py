@@ -87,7 +87,7 @@ def create_ticket(
     returns ``{"id": <16-hex>, "alias": <human alias>}`` so agents don't need a
     second ``show`` to learn the alias (WS5e).
     """
-    args = ["create", ticket_type, title]
+    args = ["create", ticket_type, title, "--output", "json"]
     if parent:
         args += ["--parent", parent]
     if priority is not None:
@@ -98,17 +98,13 @@ def create_ticket(
         args += ["--description", description]
     if tags:
         args += ["--tags", ",".join(tags)]
-    out = _ok(_run(args, repo_root=repo_root), what="create")
-    lines = [ln for ln in out.splitlines() if ln.strip()]
-    ticket_id = lines[-1].strip() if lines else ""
+    # The engine emits {id, alias, title} as one JSON object under --output json,
+    # so we read the alias straight from create (no second show() subprocess).
+    data = _json(_run(args, repo_root=repo_root), what="create")
+    ticket_id = data.get("id", "")
     if not return_alias:
         return ticket_id
-    alias = ""
-    try:
-        alias = (show_ticket(ticket_id, repo_root=repo_root) or {}).get("alias") or ""
-    except RebarError:
-        alias = ""
-    return {"id": ticket_id, "alias": alias}
+    return {"id": ticket_id, "alias": data.get("alias") or ""}
 
 
 def transition(
@@ -120,7 +116,10 @@ def transition(
     matches ``current_status`` (engine exit code 10), and :class:`RebarError`
     for other failures.
     """
-    cp = _run(["transition", ticket_id, current_status, target_status], repo_root=repo_root)
+    cp = _run(
+        ["transition", ticket_id, current_status, target_status, "--output", "json"],
+        repo_root=repo_root,
+    )
     if cp.returncode == 10:
         raise ConcurrencyError(
             f"transition rejected: {ticket_id} is no longer '{current_status}'. "
@@ -128,8 +127,9 @@ def transition(
             returncode=10,
             stderr=cp.stderr,
         )
-    _ok(cp, what="transition")
-    return {"id": ticket_id, "status": target_status}
+    # Single source of truth: return the engine's structured result
+    # {ticket_id, from, to, newly_unblocked[]} rather than re-deriving it.
+    return _json(cp, what="transition")
 
 
 def claim(ticket_id: str, *, assignee=None, repo_root=None) -> dict:
@@ -141,7 +141,7 @@ def claim(ticket_id: str, *, assignee=None, repo_root=None) -> dict:
     other failures. This is the optimistic-concurrency primitive parallel agents
     use to grab work without double-assignment.
     """
-    args = ["claim", ticket_id]
+    args = ["claim", ticket_id, "--output", "json"]
     if assignee:
         args += [f"--assignee={assignee}"]
     cp = _run(args, repo_root=repo_root)
@@ -152,8 +152,9 @@ def claim(ticket_id: str, *, assignee=None, repo_root=None) -> dict:
             returncode=10,
             stderr=cp.stderr,
         )
-    _ok(cp, what="claim")
-    return {"id": ticket_id, "status": "in_progress", "assignee": assignee}
+    # Single source of truth: return the engine's structured result
+    # {ticket_id, status, assignee} rather than re-deriving it.
+    return _json(cp, what="claim")
 
 
 def reopen(ticket_id: str, *, repo_root=None) -> dict:

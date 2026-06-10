@@ -50,6 +50,10 @@ __all__ = [
     "SCRATCH_ENVELOPE",
     "ERROR_ENVELOPE",
     "BRIDGE_FSCK",
+    "CREATE_RESULT",
+    "CLAIM_RESULT",
+    "TRANSITION_RESULT",
+    "DELETE_RESULT",
     "COMMON",
 ]
 
@@ -67,6 +71,10 @@ VERIFY_COMMANDS = "verify_commands"
 SCRATCH_ENVELOPE = "scratch_envelope"
 ERROR_ENVELOPE = "error_envelope"
 BRIDGE_FSCK = "bridge_fsck"
+CREATE_RESULT = "create_result"
+CLAIM_RESULT = "claim_result"
+TRANSITION_RESULT = "transition_result"
+DELETE_RESULT = "delete_result"
 
 # The authoritative map of every structured (--output json / always-JSON) output
 # to its schema. Keyed by command, or <command>.<interface> when an interface's
@@ -90,6 +98,11 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "scratch": SCRATCH_ENVELOPE,
     "show.not_found": ERROR_ENVELOPE,
     "bridge_fsck": BRIDGE_FSCK,
+    "create": CREATE_RESULT,
+    "claim": CLAIM_RESULT,
+    "transition": TRANSITION_RESULT,
+    "reopen": TRANSITION_RESULT,
+    "delete": DELETE_RESULT,
 }
 
 

@@ -248,6 +248,15 @@ run_rb list --output=json; assert_rc 0 "list --output=json (equals form)"
 run_rb show "$TASK" --format=llm; assert_rc_ne 0 "legacy show --format=llm rejected (removed)"
 run_rb show "$TASK" -o yaml; assert_rc_ne 0 "unsupported -o value rejected"; assert_contains "unsupported output format" "canonical error text"
 
+section "lifecycle --output json — create/claim/transition/reopen/delete result shapes"
+run_rb create task "PROBE: lifecycle json" --output json; assert_rc 0 "create --output json"
+assert_contains '"id"' "create json has id"; assert_contains '"alias"' "create json has alias"
+LCID=$(printf '%s' "$OUT" | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])' 2>/dev/null)
+run_rb claim "$LCID" --assignee probe -o json; assert_rc 0 "claim -o json"; assert_contains '"status": "in_progress"' "claim json status"
+run_rb transition "$LCID" in_progress closed --output json; assert_rc 0 "transition --output json"; assert_contains '"newly_unblocked"' "transition json shape"
+run_rb reopen "$LCID" -o json; assert_rc 0 "reopen -o json"; assert_contains '"to": "open"' "reopen json to=open"
+run_rb delete "$LCID" --user-approved --output json; assert_rc 0 "delete --output json"; assert_contains '"deleted": true' "delete json shape"
+
 section "single-reducer parity — show == list == search shape (bug f026)"
 SK="$("$RB" show "$TASK" | jq -S 'keys')"
 LK="$("$RB" list | jq -S --arg t "$TASK" '.[]|select(.ticket_id==$t)|keys')"

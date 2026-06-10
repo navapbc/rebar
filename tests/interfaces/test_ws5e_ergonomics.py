@@ -29,7 +29,10 @@ def test_reopen_closed_ticket(rebar_repo: Path) -> None:
     assert rebar.show_ticket(tid)["status"] == "closed"
 
     result = rebar.reopen(tid)
-    assert result["status"] == "open"
+    # reopen == transition(closed -> open); the library now returns the engine's
+    # single-source result shape {ticket_id, from, to, newly_unblocked}.
+    assert result["to"] == "open"
+    assert result["ticket_id"] == tid
     assert rebar.show_ticket(tid)["status"] == "open"
 
 

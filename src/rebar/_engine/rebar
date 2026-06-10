@@ -84,16 +84,16 @@ _print_subcommand_help() {
     local sub="$1"
     case "$sub" in
         init)         echo "Usage: rebar init [--silent]" ;;
-        create)       echo "Usage: rebar create <bug|epic|story|task> <title> [--parent <id>] [--priority <0-4>] [--assignee <name>] [--description <text>] [--tags <t1,t2>]" ;;
+        create)       echo "Usage: rebar create <bug|epic|story|task> <title> [--parent <id>] [--priority <0-4>] [--assignee <name>] [--description <text>] [--tags <t1,t2>] [--output json]" ;;
         show)         echo "Usage: rebar show [--output llm] <ticket_id> [<ticket_id> ...]" ;;
         list)         echo "Usage: rebar list [--status=<s>] [--type=<t>] [--priority=<n>] [--parent=<id>] [--has-tag=<tag>] [--without-tag=<tag>] [--include-archived] [--exclude-deleted] [--output llm]" ;;
         transition)
-            echo "Usage: rebar transition <ticket_id> <current_status> <target_status> [--reason=<text>] [--force] [--verdict-hash=<hash>] [--force-close=<reason>]"
+            echo "Usage: rebar transition <ticket_id> <current_status> <target_status> [--reason=<text>] [--force] [--verdict-hash=<hash>] [--force-close=<reason>] [--output json]"
             echo "       rebar transition <ticket_id> <target_status>   (auto-detects current status)"
             echo "  status: open | in_progress | closed | blocked"
             echo "  bug close requires --reason (prefix 'Fixed:' or 'Escalated to user:'); story/epic close requires --verdict-hash (or --force-close=<reason>)" ;;
-        claim)        echo "Usage: rebar claim <ticket_id> [--assignee=<name>]   (atomic open -> in_progress; exit 10 if already claimed)" ;;
-        reopen)       echo "Usage: rebar reopen <ticket_id>   (closed -> open; exit 10 if not currently closed)" ;;
+        claim)        echo "Usage: rebar claim <ticket_id> [--assignee=<name>] [--output json]   (atomic open -> in_progress; exit 10 if already claimed)" ;;
+        reopen)       echo "Usage: rebar reopen <ticket_id> [--output json]   (closed -> open; exit 10 if not currently closed)" ;;
         comment)      echo "Usage: rebar comment <ticket_id> <body>" ;;
         link)
             echo "Usage: rebar link <id1> <id2> <relation>   (relation REQUIRED)"
@@ -115,7 +115,7 @@ _print_subcommand_help() {
         ready)        echo "Usage: rebar ready [--output text|llm|json]   (lists tickets whose blockers are all closed)" ;;
         search)       echo "Usage: rebar search <query> [--status=<s>] [--type=<t>] [--has-tag=<tag>]" ;;
         archive)      echo "Usage: rebar archive <ticket_id>   (excludes from default list; idempotent)" ;;
-        delete)       echo "Usage: rebar delete <ticket_id> --user-approved   (destructive; requires explicit approval)" ;;
+        delete)       echo "Usage: rebar delete <ticket_id> --user-approved [--output json]   (destructive; requires explicit approval)" ;;
         set-file-impact)  echo "Usage: rebar set-file-impact <ticket_id> <json_array>   (array of {path,reason} objects)" ;;
         get-file-impact)  echo "Usage: rebar get-file-impact <ticket_id>" ;;
         set-verify-commands) echo "Usage: rebar set-verify-commands <ticket_id> <json_array>   (array of {dd_id,dd_text,command})" ;;
@@ -281,8 +281,14 @@ case "$subcommand" in
         # exit 10 if not currently closed).
         _ensure_initialized
         # shellcheck source=/dev/null
-        source "$SCRIPT_DIR/ticket-lib-api.sh"
-        _ticketlib_dispatch ticket_transition "$1" closed open
+        source "$SCRIPT_DIR/ticket-lib-api.sh"   # also sources ticket-output.sh
+        # Strip the --output/-o flag (it can precede the id), then re-inject it as
+        # --output=<fmt> so reopen carries it into the transition.
+        _resolve_output_format report "$@" || exit 2
+        _reopen_fmt="$_OUTPUT_FMT"
+        _strip_output_flags "$@"
+        set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
+        _ticketlib_dispatch ticket_transition "$1" closed open --output="$_reopen_fmt"
         exit $?
         ;;
     list)

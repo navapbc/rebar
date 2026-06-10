@@ -19,6 +19,15 @@ unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_COMMON_DIR 2>/dev/null || true
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./ticket-lib.sh
 source "$SCRIPT_DIR/ticket-lib.sh"
+# Canonical structured-output flag (--output/-o); logic in ticket_output.py.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/ticket-output.sh"
+
+# Resolve --output/-o (report profile: text|json) and strip it before the
+# positional <type> <title> + flag parsing below.
+_resolve_output_format report "$@" || exit 2
+_strip_output_flags "$@"
+set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
 
 REPO_ROOT="${PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
 TRACKER_DIR="${TICKETS_TRACKER_DIR:-$REPO_ROOT/.tickets-tracker}"
@@ -280,16 +289,21 @@ write_commit_event "$ticket_id" "$temp_event" || {
 # Clean up temp file (write_commit_event stages it, but original temp may remain)
 rm -f "$temp_event"
 
-# ── Output dual-format: human summary first, canonical ID last (both stdout) ──
-# SC3: both lines on stdout — human-readable summary line 1, canonical ID last.
-# Scripts extract the canonical ID via: ticket create ... | tail -1
-# Lead with the human-readable alias when available; canonical ID is parenthetical.
-if [ -n "$ticket_alias" ] && [ "$ticket_alias" != "$ticket_id" ]; then
-    echo "Created ticket $ticket_alias ($ticket_id): $title"
+# ── Output ────────────────────────────────────────────────────────────────────
+# --output json: one structured object {id, alias, title}. Default (text): the
+# human summary first, canonical ID last (both stdout; `| tail -1` id-scrape).
+if [ "$_OUTPUT_FMT" = "json" ]; then
+    python3 -c 'import json,sys; print(json.dumps({"id": sys.argv[1], "alias": (sys.argv[2] or None), "title": sys.argv[3]}))' \
+        "$ticket_id" "$ticket_alias" "$title"
 else
-    echo "Created ticket $ticket_id: $title"
+    # Lead with the human-readable alias when available; canonical ID is parenthetical.
+    if [ -n "$ticket_alias" ] && [ "$ticket_alias" != "$ticket_id" ]; then
+        echo "Created ticket $ticket_alias ($ticket_id): $title"
+    else
+        echo "Created ticket $ticket_id: $title"
+    fi
+    echo "$ticket_id"
 fi
-echo "$ticket_id"
 
 # ── Post-creation validation (warnings only, never blocks, exit 0) ───────────
 # Only applies to bug tickets.
