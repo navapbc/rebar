@@ -476,6 +476,13 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
 
 def _cmd_deps(argv: list[str], tracker: str) -> int:
     include_archived = "--include-archived" in argv
+    for arg in argv:
+        if arg.startswith("-") and arg != "--include-archived":
+            # Reject unknown options instead of silently dropping them
+            # (matching list/show/ready/search).
+            print(f"Error: unknown option '{arg}'", file=sys.stderr)
+            print("Usage: ticket deps <ticket_id> [--include-archived]", file=sys.stderr)
+            return 2
     pos = [a for a in argv if not a.startswith("-")]
     if not pos:
         print("Usage: ticket deps <ticket_id>", file=sys.stderr)
@@ -544,8 +551,17 @@ def _cmd_search(argv: list[str], tracker: str) -> int:
             has_tag = arg[len("--has-tag="):]
         elif arg == "--include-archived":
             include_archived = True
-        elif arg.startswith("--"):
-            continue  # tolerate unknown flags (matches the old shim)
+        elif arg.startswith("-"):
+            # Reject unknown options (e.g. the removed legacy `--json`) instead
+            # of silently ignoring them — matching list/show/ready. The old shim
+            # tolerated them; post-collapse there is no reason to.
+            print(f"Error: unknown option '{arg}'", file=sys.stderr)
+            print(
+                "Usage: ticket search <query> [--status=S] [--type=T] "
+                "[--has-tag=TAG] [--include-archived]",
+                file=sys.stderr,
+            )
+            return 2
         elif query is None:
             query = arg
     if query is None:
