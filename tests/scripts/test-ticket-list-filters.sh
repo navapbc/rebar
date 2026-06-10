@@ -28,7 +28,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-LIST_SCRIPT="$REPO_ROOT/src/rebar/_engine/ticket-list.sh"
+TICKET_DISPATCHER="$REPO_ROOT/src/rebar/_engine/ticket"
 LIB_API="$REPO_ROOT/src/rebar/_engine/ticket-lib-api.sh"
 
 source "$REPO_ROOT/tests/lib/assert.sh"
@@ -82,12 +82,12 @@ _make_tracker() {
 }
 
 # Run `ticket list` through a chosen implementation.
-#   $1 = impl: "script" (ticket-list.sh) | "inproc" (lib-api ticket_list)
+#   $1 = impl: "script" (dispatcher read arm -> ticket_reads.py) | "inproc" (lib-api ticket_list)
 #   $2 = tracker dir; rest = args
 _run_list() {
     local impl="$1" tracker="$2"; shift 2
     if [ "$impl" = "script" ]; then
-        TICKETS_TRACKER_DIR="$tracker" bash "$LIST_SCRIPT" "$@"
+        TICKETS_TRACKER_DIR="$tracker" bash "$TICKET_DISPATCHER" list "$@"
     else
         TICKETS_TRACKER_DIR="$tracker" ticket_list "$@"
     fi

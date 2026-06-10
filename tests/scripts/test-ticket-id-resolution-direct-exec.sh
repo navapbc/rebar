@@ -5,11 +5,11 @@
 # Behavioral tests for ticket ID resolution across dispatcher subcommands
 # that previously bypassed _ticketlib_dispatch (and a few additional callers
 # that share the same resolver layer):
-#   - ticket deps             -> src/rebar/_engine/ticket-graph.py
+#   - ticket deps             -> src/rebar/_engine/ticket-reads.py (deps arm)
 #   - ticket unlink           -> src/rebar/_engine/ticket-link.sh unlink
 #   - ticket revert           -> src/rebar/_engine/ticket-revert.sh
 #   - ticket list-descendants -> src/rebar/_engine/ticket-list-descendants.py
-#   - ticket ready --epic=    -> src/rebar/_engine/ticket-ready.py
+#   - ticket ready --epic=    -> src/rebar/_engine/ticket-reads.py (ready arm)
 #   - ticket edit --parent=   -> src/rebar/_engine/ticket-lib-api.sh ticket_edit
 #
 # Each subcommand must accept the four documented ID forms:

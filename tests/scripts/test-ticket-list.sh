@@ -16,7 +16,11 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 TICKET_SCRIPT="$REPO_ROOT/src/rebar/_engine/ticket"
-TICKET_LIST_SCRIPT="$REPO_ROOT/src/rebar/_engine/ticket-list.sh"
+# Single-source read (story 23d2-e0f3): the standalone ticket-list.sh shim was
+# collapsed into the dispatcher's `list` arm (-> ticket-reads.py). These tests
+# already exercise behavior through `$TICKET_SCRIPT list`; the existence gates
+# below now point at the dispatcher (the read entrypoint that must exist).
+TICKET_LIST_SCRIPT="$TICKET_SCRIPT"
 
 source "$REPO_ROOT/tests/lib/assert.sh"
 source "$REPO_ROOT/tests/lib/git-fixtures.sh"

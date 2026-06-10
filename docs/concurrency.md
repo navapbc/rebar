@@ -124,10 +124,9 @@ and the branch stays diverged. `rebar fsck` surfaces that divergence as a
 `PUSH_PENDING` notice (`ticket-fsck.sh`, Check 4.5) so it is not silent.
 
 ### Inbound — background sync (periodic, on reads/commands)
-`_reconverge_tickets` (`ticket-sync.sh`, called from the `rebar` dispatcher's
-`_ensure_initialized` and from `ticket-lifecycle.sh`) runs at most once per minute
-per clone. It runs **under the write lock** (`.ticket-write.lock`) so it cannot
-race a concurrent local appender's `git add`/`commit`. The policy:
+`_reconverge_tickets` (`ticket-sync.sh`) runs at most once per minute per clone.
+It runs **under the write lock** (`.ticket-write.lock`) so it cannot race a
+concurrent local appender's `git add`/`commit`. The policy:
 
 ```
 if tracker is in a rebase/merge recovery state:        # I9 / bug 637b
@@ -167,6 +166,34 @@ independently-initialized orphans conflicts on committed scaffolding (`.gitignor
 and would wedge reads with a half-finished merge. The unrelated-history case is the
 designated "discard stale auto-init orphan, adopt remote" recovery; it is the only
 remaining force-reset, and it is atomic (a single ref move, never a merge).
+
+### Read-freshness policy (uniform across CLI, library, and MCP)
+
+Every **read** — `show` / `list` / `ready` / `search` / `deps` — runs the same
+throttled (≤1/min) best-effort fetch + reconverge **before** replaying, so the
+result reflects collaborators' pushes within at most one minute. This is a single
+contract shared by all three interfaces: the CLI dispatcher's read arms, the
+library functions (`rebar.show_ticket`, `rebar.list_tickets`, …), **and** the MCP
+read tools all funnel through one implementation — `ticket_reads` in the engine
+(`src/rebar/_engine/ticket_reads.py`), with `rebar/_reads.py` as the
+library/MCP facade. `ticket_reads.ensure_fresh()` reuses the exact mechanism above:
+the `/tmp/.ticket-sync-<md5>` throttle marker **and** the `_reconverge_tickets`
+function in `ticket-sync.sh` (one fetch/merge implementation, no reinvention). The
+CLI and in-process reads share the same marker, so they never double-fetch within
+a minute.
+
+Previously this fetch lived only in the bash dispatcher's `_ensure_initialized`,
+so CLI reads synced but library/MCP reads did **not** — making MCP (the primary
+agent surface) the *stalest* interface. Collapsing the dual read path
+([story 23d2-e0f3](../session-logs/2026-06-09-architecture-review.md) Rec 2) moved
+freshness into the native read path so all three interfaces agree.
+
+**Opt out** of the fetch when you want a pure-local replay (offline, hot loops,
+or when a write already synced): set the environment variable `REBAR_NO_SYNC=1`
+(honored by all interfaces) or pass the `--no-sync` flag to any read subcommand
+(`rebar list --no-sync`). The reducer's local `.cache.json` (I3/I3a) is still used;
+only the network fetch/merge is skipped. (The test harnesses' `_TICKET_TEST_NO_SYNC=1`
+remains honored as well, for temp repos with no remote.)
 
 ---
 

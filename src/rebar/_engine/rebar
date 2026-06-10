@@ -94,8 +94,17 @@ _print_subcommand_help() {
     case "$sub" in
         init)         echo "Usage: rebar init [--silent]" ;;
         create)       echo "Usage: rebar create <bug|epic|story|task> <title> [--parent <id>] [--priority <0-4>] [--assignee <name>] [--description <text>] [--tags <t1,t2>] [--output json]" ;;
-        show)         echo "Usage: rebar show [--output llm] <ticket_id> [<ticket_id> ...]" ;;
-        list)         echo "Usage: rebar list [--status=<s>] [--type=<t>] [--priority=<n>] [--parent=<id>] [--has-tag=<tag>] [--without-tag=<tag>] [--include-archived] [--exclude-deleted] [--output llm]" ;;
+        show)         echo "Usage: rebar show [--output llm] [--no-sync] <ticket_id> [<ticket_id> ...]" ;;
+        list)
+            echo "Usage: rebar list [--status=<s>] [--type=<t>] [--priority=<n>] [--parent=<id>] [--has-tag=<tag>] [--without-tag=<tag>] [--include-archived] [--exclude-deleted] [--no-sync] [--output llm]"
+            echo "  --type=<type>      Filter by ticket type (bug, epic, story, task)"
+            echo "  --status=<status>  Filter by status (comma-separated for OR)"
+            echo "  --priority=<n>     Filter by priority 0-4 (comma-separated for OR; exact match; unset priority not matched)"
+            echo "  --parent=<id>      Filter to direct children of <id>"
+            echo "  --has-tag=<tag>    Filter to tickets having <tag> (comma-separated for OR);"
+            echo "                     tags matching ^detected_by: auto-intersect with --type=bug"
+            echo "  --without-tag=<tag>  Exclude tickets having ANY of <tag> (comma-separated)"
+            echo "  --no-sync          Skip the best-effort fetch/reconverge (also: REBAR_NO_SYNC=1)" ;;
         transition)
             echo "Usage: rebar transition <ticket_id> <current_status> <target_status> [--reason=<text>] [--force] [--verdict-hash=<hash>] [--force-close=<reason>] [--output json]"
             echo "       rebar transition <ticket_id> <target_status>   (auto-detects current status)"
@@ -109,7 +118,7 @@ _print_subcommand_help() {
             echo "  relation: blocks | depends_on | relates_to | duplicates | supersedes | discovered_from"
             echo "  blocking deps (blocks/depends_on) are promoted to a comparable hierarchy level" ;;
         unlink)       echo "Usage: rebar unlink <source> <target>   (no relation arg; removes the most-recent link between the pair — call repeatedly for multiple)" ;;
-        deps)         echo "Usage: rebar deps <ticket_id>" ;;
+        deps)         echo "Usage: rebar deps <ticket_id> [--include-archived] [--no-sync]" ;;
         edit)         echo "Usage: rebar edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] [--ticket_type=VALUE] [--description=VALUE] [--tags=VALUE] [--parent=VALUE]" ;;
         tag)          echo "Usage: rebar tag <ticket_id> <tag>" ;;
         untag)        echo "Usage: rebar untag <ticket_id> <tag>" ;;
@@ -121,8 +130,8 @@ _print_subcommand_help() {
         list-epics)   echo "Usage: rebar list-epics [--all] [--has-tag=<tag>] [--min-children=<n>] [--output json]" ;;
         list-descendants) echo "Usage: rebar list-descendants <root_ticket_id>   (BFS walk bucketed by type, JSON)" ;;
         next-batch)   echo "Usage: rebar next-batch <epic_id> [--output json]" ;;
-        ready)        echo "Usage: rebar ready [--output text|llm|json]   (lists tickets whose blockers are all closed)" ;;
-        search)       echo "Usage: rebar search <query> [--status=<s>] [--type=<t>] [--has-tag=<tag>]" ;;
+        ready)        echo "Usage: rebar ready [--output text|llm|json] [--epic=<id>] [--no-sync]   (lists tickets whose blockers are all closed)" ;;
+        search)       echo "Usage: rebar search <query> [--status=<s>] [--type=<t>] [--has-tag=<tag>] [--include-archived] [--no-sync]" ;;
         archive)      echo "Usage: rebar archive <ticket_id>   (excludes from default list; idempotent)" ;;
         delete)       echo "Usage: rebar delete <ticket_id> --user-approved [--output json]   (destructive; requires explicit approval)" ;;
         set-file-impact)  echo "Usage: rebar set-file-impact <ticket_id> <json_array>   (array of {path,reason} objects)" ;;
@@ -168,6 +177,14 @@ _ensure_initialized() {
             echo "Error: ticket system initialization failed. Run 'ticket init' manually." >&2
             exit 1
         }
+    fi
+    # _ensure_initialized init-only mode: the read arms (show/list/ready/search/
+    # deps) own freshness in the native Python path (ticket_reads.ensure_fresh,
+    # story 23d2-e0f3 — uniform CLI/library/MCP policy), so they request auto-init
+    # without the bash fetch/merge to avoid a double fetch. Both paths share the
+    # SAME /tmp/.ticket-sync-<md5> throttle marker, so this is just plumbing.
+    if [[ "${1:-}" == "--init-only" ]]; then
+        return
     fi
     # Sync ticket data from origin if not recently synced.
     # Works from both main repo and worktree contexts.
@@ -266,11 +283,10 @@ case "$subcommand" in
         exit $?
         ;;
     show)
-        _ensure_initialized
-        # shellcheck source=/dev/null
-        source "$SCRIPT_DIR/ticket-lib-api.sh"
-        _ticketlib_dispatch ticket_show "$@"
-        exit $?
+        # Single-source read: ticket_reads.py (story 23d2-e0f3). Auto-init only
+        # (freshness owned by the native Python read path; see _ensure_initialized).
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized --init-only; fi
+        exec python3 "$SCRIPT_DIR/ticket-reads.py" show "$@"
         ;;
     transition)
         _ensure_initialized
@@ -310,11 +326,10 @@ case "$subcommand" in
         exit $?
         ;;
     list)
-        _ensure_initialized
-        # shellcheck source=/dev/null
-        source "$SCRIPT_DIR/ticket-lib-api.sh"
-        _ticketlib_dispatch ticket_list "$@"
-        exit $?
+        # Single-source read: ticket_reads.py (story 23d2-e0f3). Auto-init only
+        # (freshness owned by the native Python read path; see _ensure_initialized).
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized --init-only; fi
+        exec python3 "$SCRIPT_DIR/ticket-reads.py" list "$@"
         ;;
     list-epics)
         if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized; fi
@@ -402,8 +417,10 @@ case "$subcommand" in
         exec bash "$SCRIPT_DIR/ticket-link.sh" unlink "$@"
         ;;
     deps)
-        _ensure_initialized
-        exec python3 "$SCRIPT_DIR/ticket-graph.py" "$@"
+        # Single-source read: ticket_reads.py (story 23d2-e0f3). Cycle-detection
+        # link logic still lives in ticket-graph.py; only the deps QUERY arm moved.
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized --init-only; fi
+        exec python3 "$SCRIPT_DIR/ticket-reads.py" deps "$@"
         ;;
     revert)
         # Skip _ensure_initialized when TICKETS_TRACKER_DIR is set (test environments
@@ -507,16 +524,15 @@ case "$subcommand" in
         exec bash "$SCRIPT_DIR/ticket-purge-bridge.sh" "$@"
         ;;
     ready)
-        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized; fi
-        # shellcheck source=/dev/null
-        source "$SCRIPT_DIR/ticket-lib-api.sh"
-        _ticketlib_dispatch ticket_ready "$@"
-        exit $?
+        # Single-source read: ticket_reads.py (story 23d2-e0f3).
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized --init-only; fi
+        exec python3 "$SCRIPT_DIR/ticket-reads.py" ready "$@"
         ;;
     search)
         # Full-text search (replay-derived; no committed index). Read-only.
-        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized; fi
-        exec python3 "$SCRIPT_DIR/ticket-search.py" "$@"
+        # Single-source read: ticket_reads.py (story 23d2-e0f3).
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized --init-only; fi
+        exec python3 "$SCRIPT_DIR/ticket-reads.py" search "$@"
         ;;
     summary)
         # REVIEW-DEFENSE: _ensure_initialized is intentionally omitted here.

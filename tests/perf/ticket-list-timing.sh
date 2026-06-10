@@ -23,7 +23,9 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-TICKET_LIST_SH="$REPO_ROOT/src/rebar/_engine/ticket-list.sh"
+# Single-source read (story 23d2-e0f3): ticket-list.sh was collapsed into the
+# dispatcher's `list` arm (-> ticket-reads.py). Benchmark the dispatcher path.
+TICKET_DISPATCHER="$REPO_ROOT/src/rebar/_engine/ticket"
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
 threshold_pct=20
@@ -45,8 +47,8 @@ for arg in "$@"; do
 done
 
 # ── Validate dependencies ─────────────────────────────────────────────────────
-if [ ! -x "$TICKET_LIST_SH" ]; then
-    echo "FAIL: ticket-list.sh not found or not executable: $TICKET_LIST_SH" >&2
+if [ ! -f "$TICKET_DISPATCHER" ]; then
+    echo "FAIL: rebar dispatcher not found: $TICKET_DISPATCHER" >&2
     exit 1
 fi
 
@@ -162,7 +164,7 @@ time_run() {
     # Clear per-ticket .cache.json files so every run is cold
     find "$TDIR" -name ".cache.json" -delete 2>/dev/null || true
     start=$(python3 -c "import time; print(int(time.monotonic() * 1000))")
-    TICKETS_TRACKER_DIR="$TDIR" bash "$TICKET_LIST_SH" > /dev/null 2>&1
+    TICKETS_TRACKER_DIR="$TDIR" bash "$TICKET_DISPATCHER" list > /dev/null 2>&1
     end=$(python3 -c "import time; print(int(time.monotonic() * 1000))")
     echo $(( end - start ))
 }

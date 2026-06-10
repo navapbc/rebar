@@ -47,8 +47,10 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REDUCER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "ticket-reducer.py"
-TICKET_SHOW_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "ticket-show.sh"
-TICKET_LIST_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "ticket-list.sh"
+# Single-source read path (story 23d2-e0f3): the standalone ticket-show.sh /
+# ticket-list.sh shims were collapsed into the dispatcher's read arms, which
+# call ticket-reads.py. Drive reads through the dispatcher (`ticket` -> `rebar`).
+TICKET_DISPATCHER = REPO_ROOT / "src" / "rebar" / "_engine" / "ticket"
 
 
 def _load_reducer() -> ModuleType:
@@ -297,17 +299,14 @@ def test_ticket_show_outputs_health_warning_when_unresolved_alerts(
     )
 
     result = subprocess.run(
-        ["bash", str(TICKET_SHOW_PATH), ticket_id],
+        ["bash", str(TICKET_DISPATCHER), "show", ticket_id],
         capture_output=True,
         text=True,
         cwd=str(tmp_path),
         env={
             **_subprocess_env(),
-            # ticket-show.sh uses TICKETS_TRACKER_DIR to bypass git rev-parse;
-            # GIT_DIR alone is insufficient because ticket-show.sh only has the
-            # TICKETS_TRACKER_DIR branch (not the GIT_DIR dirname fallback that
-            # ticket-list.sh has). Using TICKETS_TRACKER_DIR avoids needing a
-            # real git repo in tmp_path.
+            # TICKETS_TRACKER_DIR points the read at this fixture tracker and
+            # makes the dispatcher skip auto-init/sync — no real git repo needed.
             "TICKETS_TRACKER_DIR": str(tracker_dir),
         },
     )
@@ -364,13 +363,13 @@ def test_ticket_list_includes_bridge_alerts_in_output(
     )
 
     result = subprocess.run(
-        ["bash", str(TICKET_LIST_PATH)],
+        ["bash", str(TICKET_DISPATCHER), "list"],
         capture_output=True,
         text=True,
         cwd=str(tmp_path),
         env={
             **_subprocess_env(),
-            "GIT_DIR": str(tmp_path / ".git"),
+            "TICKETS_TRACKER_DIR": str(tracker_dir),
         },
     )
 

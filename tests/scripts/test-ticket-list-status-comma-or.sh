@@ -21,7 +21,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-LIST_SCRIPT="$REPO_ROOT/src/rebar/_engine/ticket-list.sh"
+TICKET_DISPATCHER="$REPO_ROOT/src/rebar/_engine/ticket"
 
 source "$REPO_ROOT/tests/lib/assert.sh"
 
@@ -85,7 +85,7 @@ test_single_call_valid_json() {
     local tracker; tracker=$(_make_tracker)
     local out rc=0
 
-    out=$(TICKETS_TRACKER_DIR="$tracker" bash "$LIST_SCRIPT" --status=open,in_progress 2>/dev/null) || rc=$?
+    out=$(TICKETS_TRACKER_DIR="$tracker" bash "$TICKET_DISPATCHER" list --status=open,in_progress 2>/dev/null) || rc=$?
     assert_eq "ticket-list with --status=open,in_progress exits 0" "0" "$rc"
 
     # Output must parse as a valid JSON array.
@@ -109,8 +109,8 @@ test_double_call_produces_invalid_json() {
     # Simulate the old pattern: concatenate two separate call outputs.
     local combined
     combined=$(
-        TICKETS_TRACKER_DIR="$tracker" bash "$LIST_SCRIPT" --status=open 2>/dev/null
-        TICKETS_TRACKER_DIR="$tracker" bash "$LIST_SCRIPT" --status=in_progress 2>/dev/null
+        TICKETS_TRACKER_DIR="$tracker" bash "$TICKET_DISPATCHER" list --status=open 2>/dev/null
+        TICKETS_TRACKER_DIR="$tracker" bash "$TICKET_DISPATCHER" list --status=in_progress 2>/dev/null
     )
 
     # Concatenated JSON arrays must fail to parse.

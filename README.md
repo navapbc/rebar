@@ -246,6 +246,23 @@ the write — it leaves the local commit intact and the branch diverged.
 `origin/tickets`, so unpushed activity is observable. See
 [`docs/concurrency.md`](docs/concurrency.md) for the push/merge-retry algorithm.
 
+### Reads share one freshness policy across CLI, library, and MCP
+
+Every **read** — `show`, `list`, `ready`, `search`, `deps` — first runs a
+throttled (**≤1/min**), best-effort `git fetch` + reconverge of the local
+`tickets` branch with `origin/tickets`, so a read reflects collaborators' pushes
+within at most a minute. This is **one contract shared by all three interfaces**:
+CLI, library (`rebar.list_tickets()`, …), and the MCP read tools all resolve
+through a single read implementation. (Previously only CLI reads synced, leaving
+MCP — the primary agent surface — with the *stalest* reads; that divergence is
+gone.)
+
+**Opt out** for a pure-local replay (offline work, tight loops, or right after a
+write that already synced): set `REBAR_NO_SYNC=1` (honored everywhere) or pass
+`--no-sync` to any read subcommand (e.g. `rebar list --no-sync`). Only the network
+fetch/merge is skipped; the local reduce/cache path is unchanged. See
+[`docs/concurrency.md`](docs/concurrency.md#read-freshness-policy-uniform-across-cli-library-and-mcp).
+
 ## Python library
 
 ```python

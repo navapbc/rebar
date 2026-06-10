@@ -27,7 +27,6 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-TICKET_LIST_SCRIPT="$PLUGIN_ROOT/src/rebar/_engine/ticket-list.sh"
 TICKET_DISPATCHER="$PLUGIN_ROOT/src/rebar/_engine/ticket"
 TICKET_REDUCER_DIR="$PLUGIN_ROOT/src/rebar/_engine"
 
@@ -120,7 +119,7 @@ test_bug_with_detected_by_tag_appears() {
     tracker_dir=$(_make_tracker)
 
     local output exit_code=0
-    output=$(TICKETS_TRACKER_DIR="$tracker_dir" bash "$TICKET_LIST_SCRIPT" \
+    output=$(TICKETS_TRACKER_DIR="$tracker_dir" bash "$TICKET_DISPATCHER" list \
         --has-tag=detected_by:tests 2>/dev/null) || exit_code=$?
 
     assert_eq "test1: --has-tag exits 0" "0" "$exit_code"
@@ -139,7 +138,7 @@ test_non_bug_excluded_from_detected_by_filter() {
     tracker_dir=$(_make_tracker)
 
     local output exit_code=0
-    output=$(TICKETS_TRACKER_DIR="$tracker_dir" bash "$TICKET_LIST_SCRIPT" \
+    output=$(TICKETS_TRACKER_DIR="$tracker_dir" bash "$TICKET_DISPATCHER" list \
         --has-tag=detected_by:tests 2>/dev/null) || exit_code=$?
 
     assert_eq "test2: --has-tag exits 0" "0" "$exit_code"
@@ -158,7 +157,7 @@ test_non_bug_included_for_non_detected_by_tag() {
     tracker_dir=$(_make_tracker)
 
     local output exit_code=0
-    output=$(TICKETS_TRACKER_DIR="$tracker_dir" bash "$TICKET_LIST_SCRIPT" \
+    output=$(TICKETS_TRACKER_DIR="$tracker_dir" bash "$TICKET_DISPATCHER" list \
         --has-tag=regression 2>/dev/null) || exit_code=$?
 
     assert_eq "test3: --has-tag=regression exits 0" "0" "$exit_code"
@@ -179,7 +178,7 @@ test_no_matching_tickets_exits_0_empty() {
     tracker_dir=$(_make_tracker)
 
     local output exit_code=0
-    output=$(TICKETS_TRACKER_DIR="$tracker_dir" bash "$TICKET_LIST_SCRIPT" \
+    output=$(TICKETS_TRACKER_DIR="$tracker_dir" bash "$TICKET_DISPATCHER" list \
         --has-tag=nonexistent-tag-xyz 2>/dev/null) || exit_code=$?
 
     assert_eq "test4: --has-tag=nonexistent exits 0" "0" "$exit_code"

@@ -18,7 +18,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-LIST_SCRIPT="$REPO_ROOT/src/rebar/_engine/ticket-list.sh"
+TICKET_DISPATCHER="$REPO_ROOT/src/rebar/_engine/ticket"
 LIB_API="$REPO_ROOT/src/rebar/_engine/ticket-lib-api.sh"
 
 source "$REPO_ROOT/tests/lib/assert.sh"
@@ -125,7 +125,7 @@ PY
 _run_list() {
     local impl="$1" tracker="$2"; shift 2
     if [ "$impl" = "script" ]; then
-        TICKETS_TRACKER_DIR="$tracker" bash "$LIST_SCRIPT" "$@"
+        TICKETS_TRACKER_DIR="$tracker" bash "$TICKET_DISPATCHER" list "$@"
     else
         TICKETS_TRACKER_DIR="$tracker" ticket_list "$@"
     fi
@@ -180,7 +180,7 @@ TR_SHORT=$(_make_tracker)
 # Probe: run ticket list --parent=eeee-eeee with the script and see if it returns results.
 # If resolve_ticket_id supports 8-hex, we get 2 children; if not, we get 0.
 # We assert 2 — if the resolver doesn't support 8-hex the test fails and we note it.
-got=$(TICKETS_TRACKER_DIR="$TR_SHORT" bash "$LIST_SCRIPT" --parent="$SHORT_ID" 2>/dev/null | _json_count)
+got=$(TICKETS_TRACKER_DIR="$TR_SHORT" bash "$TICKET_DISPATCHER" list --parent="$SHORT_ID" 2>/dev/null | _json_count)
 assert_eq "8-hex short-id filter returns 2 children [script]" "2" "$got"
 
 got=$(TICKETS_TRACKER_DIR="$TR_SHORT" ticket_list --parent="$SHORT_ID" 2>/dev/null | _json_count)

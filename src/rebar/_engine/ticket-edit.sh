@@ -187,7 +187,7 @@ for _i in "${!_parsed_pairs[@]}"; do
             # variant of this guard was caught by retro-review of PR #194
             # and explicitly disallowed; this implementation follows the
             # same allowlist pattern.
-            _new_parent_status=$(bash "$SCRIPT_DIR/ticket-show.sh" "$_new_parent_id" 2>/dev/null \
+            _new_parent_status=$(python3 "$SCRIPT_DIR/ticket-reads.py" show --no-sync "$_new_parent_id" 2>/dev/null \
                 | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('status','') or '')" 2>/dev/null) || _new_parent_status=""
             case "$_new_parent_status" in
                 open|in_progress)
@@ -206,7 +206,7 @@ for _i in "${!_parsed_pairs[@]}"; do
             _walk_id="$_new_parent_id"
             _walk_count=0
             while [ -n "$_walk_id" ] && [ "$_walk_count" -lt 64 ]; do
-                _walk_parent=$(bash "$SCRIPT_DIR/ticket-show.sh" "$_walk_id" 2>/dev/null \
+                _walk_parent=$(python3 "$SCRIPT_DIR/ticket-reads.py" show --no-sync "$_walk_id" 2>/dev/null \
                     | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('parent_id','') or '')" 2>/dev/null) || _walk_parent=""
                 if [ -z "$_walk_parent" ] || [ "$_walk_parent" = "None" ]; then
                     break

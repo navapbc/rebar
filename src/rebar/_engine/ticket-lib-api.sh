@@ -1577,7 +1577,7 @@ ticket_edit() {
                     # status crosses the gate. Empty (status lookup failed),
                     # closed, deleted, or any unrecognized state → reject.
                     local _new_parent_status
-                    _new_parent_status=$(bash "$_TICKETLIB_DIR/ticket-show.sh" "$_new_parent_id" 2>/dev/null \
+                    _new_parent_status=$(python3 "$_TICKETLIB_DIR/ticket-reads.py" show --no-sync "$_new_parent_id" 2>/dev/null \
                         | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('status','') or '')" 2>/dev/null) || _new_parent_status=""
                     case "$_new_parent_status" in
                         open|in_progress)
@@ -1596,7 +1596,7 @@ ticket_edit() {
                     # chain upward, refuse if ticket_id is reached.
                     local _walk_id="$_new_parent_id" _walk_count=0 _walk_parent
                     while [ -n "$_walk_id" ] && [ "$_walk_count" -lt 64 ]; do
-                        _walk_parent=$(bash "$_TICKETLIB_DIR/ticket-show.sh" "$_walk_id" 2>/dev/null \
+                        _walk_parent=$(python3 "$_TICKETLIB_DIR/ticket-reads.py" show --no-sync "$_walk_id" 2>/dev/null \
                             | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('parent_id','') or '')" 2>/dev/null) || _walk_parent=""
                         if [ -z "$_walk_parent" ] || [ "$_walk_parent" = "None" ]; then
                             break
@@ -1851,8 +1851,10 @@ ticket_summary() {
 
 # ── ticket_ready ───────────────────────────────────────────────────────────────
 ticket_ready() {
-    # Canonical implementation: ticket-ready.sh is the canonical implementation (no prior script).
-    bash "$_TICKETLIB_DIR/ticket-ready.sh" "$@"
+    # Single-source read: ticket_reads.py (story 23d2-e0f3). The dispatcher's
+    # `ready` arm calls ticket-reads.py directly; this wrapper is kept so any
+    # in-process caller of ticket_ready stays on the one read implementation.
+    python3 "$_TICKETLIB_DIR/ticket-reads.py" ready "$@"
     return $?
 }
 
