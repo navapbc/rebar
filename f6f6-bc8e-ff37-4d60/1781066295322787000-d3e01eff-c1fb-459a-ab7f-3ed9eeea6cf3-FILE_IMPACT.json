@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/mcp_server.py","reason":"block recover=True under readonly"},{"path":"tests/interfaces/test_mcp.py","reason":"readonly fsck-recover test"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781066295322787000,"uuid":"d3e01eff-c1fb-459a-ab7f-3ed9eeea6cf3"}
