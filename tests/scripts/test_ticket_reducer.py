@@ -1104,6 +1104,89 @@ def test_cache_miss_on_same_filename_content_change(
 
 
 # ---------------------------------------------------------------------------
+# Test 17b: Cache miss on same-SIZE in-place content rewrite (bug 1d76-b6d1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_cache_miss_on_same_size_inplace_rewrite(
+    tmp_path: Path, reducer: ModuleType
+) -> None:
+    """A same-byte-length in-place rewrite of an event file must invalidate cache.
+
+    Regression guard for bug 1d76-b6d1: the dir-hash keyed on filename+size only
+    cannot detect an equal-length overwrite (as produced by a git checkout/rebase
+    of the tickets branch or an fsck-recover cherry-pick), so reads served stale
+    state. The fix folds st_mtime_ns into the hash.
+
+    Setup: write a CREATE event with a title, warm the cache, then overwrite the
+    same file in place with a DIFFERENT title of the SAME byte length and bump
+    its mtime (as a checkout would). The next read must reflect the new title.
+    Also asserts the cache still HITS on an unchanged dir (no read-path
+    regression).
+    """
+    ticket_dir = tmp_path / "tkt-same-size-rewrite"
+    ticket_dir.mkdir()
+
+    create_filename = f"1742605200-{_UUID}-CREATE.json"
+    create_path = ticket_dir / create_filename
+
+    # Two titles of identical length -> identical JSON byte length on disk.
+    title_a = "AAAAAAAAAA"
+    title_b = "BBBBBBBBBB"
+    assert len(title_a) == len(title_b)
+
+    def _payload(title: str) -> dict:
+        return {
+            "timestamp": 1742605200,
+            "uuid": _UUID,
+            "event_type": "CREATE",
+            "env_id": "00000000-0000-4000-8000-000000000001",
+            "author": "Alice",
+            "data": {"ticket_type": "task", "title": title, "parent_id": None},
+        }
+
+    blob_a = json.dumps(_payload(title_a))
+    blob_b = json.dumps(_payload(title_b))
+    assert len(blob_a) == len(blob_b), "Setup: blobs must be equal byte length"
+
+    create_path.write_text(blob_a)
+
+    # First call — warm cache.
+    state1 = reducer.reduce_ticket(ticket_dir)
+    assert state1 is not None
+    assert state1["title"] == title_a, "Setup: first call must return original title"
+
+    cache_file = ticket_dir / ".cache.json"
+    assert cache_file.exists(), ".cache.json must be written after first call"
+
+    # No-change second call MUST hit the cache (cache still effective — no
+    # regression): the cache file must not be rewritten.
+    cache_mtime_before = cache_file.stat().st_mtime_ns
+    state_hit = reducer.reduce_ticket(ticket_dir)
+    assert state_hit == state1, "Unchanged dir must serve identical cached state"
+    assert cache_file.stat().st_mtime_ns == cache_mtime_before, (
+        "Unchanged dir must be a cache HIT (cache file must not be rewritten)"
+    )
+
+    # In-place same-size overwrite + mtime bump (simulating a git checkout).
+    create_path.write_text(blob_b)
+    st = create_path.stat()
+    os.utime(create_path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+    assert create_path.stat().st_size == st.st_size, "rewrite must be same size"
+
+    # Next read must reflect the new content (cache miss on same-size rewrite).
+    state2 = reducer.reduce_ticket(ticket_dir)
+    assert state2 is not None
+    assert state2["title"] == title_b, (
+        "After a same-size in-place rewrite, reduce_ticket() must recompute and "
+        f"return the updated title (cache miss on equal-length rewrite); "
+        f"got title={state2['title']!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Test 18: SNAPSHOT event restores compiled state
 # ---------------------------------------------------------------------------
 

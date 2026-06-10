@@ -36,19 +36,23 @@ def write_cache(cache_path: str, dir_hash: str, state: dict, ticket_dir: str) ->
 
 
 def compute_dir_hash(ticket_dir: str, event_filenames: list[str]) -> str:
-    """Compute a content hash based on event filenames and their file sizes.
+    """Compute a content hash based on event filenames, sizes, and mtimes.
 
-    Uses filename + file size (fast stat) to detect both additions/deletions and
-    in-place content overwrites (same filename, different size).
+    Uses filename + file size + modification time (a single fast stat per file)
+    to detect additions/deletions and in-place content overwrites — including a
+    same-byte-length rewrite (e.g. from a git checkout/rebase of the tickets
+    branch or an fsck-recover cherry-pick), which a filename+size key alone
+    cannot see. Folding in st_mtime_ns closes that stale-read gap.
     """
     hash_parts: list[str] = []
     for name in event_filenames:
         path = os.path.join(ticket_dir, name)
         try:
-            size = os.path.getsize(path)
+            st = os.stat(path)
+            size, mtime_ns = st.st_size, st.st_mtime_ns
         except OSError:
-            size = -1
-        hash_parts.append(f"{name}:{size}")
+            size, mtime_ns = -1, -1
+        hash_parts.append(f"{name}:{size}:{mtime_ns}")
     hash_parts.append(
         "marker:present"
         if os.path.exists(os.path.join(ticket_dir, ".archived"))
