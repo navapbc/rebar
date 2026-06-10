@@ -46,7 +46,7 @@ if [[ -z "$TODAY_DAYS" ]]; then
 fi
 
 # List open obligations
-LIST_JSON=$("$TICKET_CLI" ticket list --has-tag=obligation:rollout --status=open --format=llm 2>/dev/null) || {
+LIST_JSON=$("$TICKET_CLI" ticket list --has-tag=obligation:rollout --status=open --output llm 2>/dev/null) || {
     echo "check-obligations: ticket list failed" >&2
     exit 0
 }

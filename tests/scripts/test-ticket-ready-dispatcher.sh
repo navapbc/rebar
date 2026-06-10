@@ -280,15 +280,15 @@ test_ready_routes_through_dispatcher() {
         (( PASS++ ))
     fi
 
-    # Test 5: --format=llm outputs valid JSONL (each non-empty line is parseable JSON)
-    echo "Test 5: --format=llm outputs valid JSONL"
+    # Test 5: --output llm outputs valid JSONL (each non-empty line is parseable JSON)
+    echo "Test 5: --output llm outputs valid JSONL"
     _tracker=$(make_ready_fixture)
     _exit=0
-    _output=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" ready --format=llm 2>&1) || _exit=$?
+    _output=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" ready --output llm 2>&1) || _exit=$?
 
     local _jsonl_valid=1
     if [[ -z "$_output" ]]; then
-        echo "  FAIL: --format=llm produced empty output (RED — expected before GREEN)" >&2
+        echo "  FAIL: --output llm produced empty output (RED — expected before GREEN)" >&2
         (( FAIL++ ))
         _jsonl_valid=0
     else
@@ -298,7 +298,7 @@ test_ready_routes_through_dispatcher() {
         done | grep "^INVALID:" || true)
 
         if [[ -n "$_invalid_lines" ]]; then
-            echo "  FAIL: --format=llm output contains non-JSON lines (RED — expected before GREEN)" >&2
+            echo "  FAIL: --output llm output contains non-JSON lines (RED — expected before GREEN)" >&2
             echo "  Invalid lines: $_invalid_lines" >&2
             (( FAIL++ ))
             _jsonl_valid=0
@@ -306,7 +306,7 @@ test_ready_routes_through_dispatcher() {
     fi
 
     if [[ $_jsonl_valid -eq 1 ]]; then
-        echo "  PASS: --format=llm output is valid JSONL (exit $_exit)"
+        echo "  PASS: --output llm output is valid JSONL (exit $_exit)"
         (( PASS++ ))
     fi
 
@@ -331,14 +331,14 @@ test_ready_routes_through_dispatcher() {
         (( FAIL++ ))
     fi
 
-    # Test 7: --json outputs a single JSON ARRAY of compiled ticket states
+    # Test 7: --output json outputs a single JSON ARRAY of compiled ticket states
     # (ready set: task-a, task-c; blocked task-b excluded). The whole stdout
     # must parse as one JSON list — this is the shape the library `ready()` and
     # the MCP `ready_tickets` tool consume.
-    echo "Test 7: --json outputs a single JSON array of ready ticket states"
+    echo "Test 7: --output json outputs a single JSON array of ready ticket states"
     _tracker=$(make_ready_fixture)
     _exit=0
-    _output=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" ready --json 2>&1) || _exit=$?
+    _output=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" ready --output json 2>&1) || _exit=$?
 
     local _json_check
     _json_check=$(echo "$_output" | python3 -c "
@@ -352,10 +352,10 @@ print('OK')
 " 2>&1) || true
 
     if [[ "$_json_check" == "OK" ]] && [[ $_exit -eq 0 ]]; then
-        echo "  PASS: --json emits a JSON array with task-a, task-c; task-b excluded (exit $_exit)"
+        echo "  PASS: --output json emits a JSON array with task-a, task-c; task-b excluded (exit $_exit)"
         (( PASS++ ))
     else
-        echo "  FAIL: --json did not emit the expected JSON array (RED — expected before GREEN)" >&2
+        echo "  FAIL: --output json did not emit the expected JSON array (RED — expected before GREEN)" >&2
         echo "  Check: $_json_check" >&2
         echo "  Output: $_output" >&2
         (( FAIL++ ))

@@ -93,7 +93,7 @@ _run_list() {
     fi
 }
 
-# Extract the set of ticket IDs from --format=llm output (one JSON obj per line).
+# Extract the set of ticket IDs from --output llm output (one JSON obj per line).
 # Fail loud (exit 2) on a malformed line or a missing 'id' key so a broken parser
 # is never misattributed to broken filter logic — the cause is reported on stderr.
 _ids_of() {
@@ -121,7 +121,7 @@ print(' '.join(sorted(ids)))
 _assert_ids() {
     local label="$1" impl="$2" tracker="$3" expected="$4"; shift 4
     local got
-    got=$(_run_list "$impl" "$tracker" --format=llm "$@" 2>/dev/null | _ids_of)
+    got=$(_run_list "$impl" "$tracker" --output llm "$@" 2>/dev/null | _ids_of)
     assert_eq "$label [$impl]" "$expected" "$got"
 }
 
@@ -188,9 +188,9 @@ test_priority_out_of_range_errors
 test_priority_field_propagates() {
     local tracker; tracker=$(_make_tracker)
     local out
-    out=$(_run_list script "$tracker" --type=epic --priority=0 --format=llm 2>/dev/null)
+    out=$(_run_list script "$tracker" --type=epic --priority=0 --output llm 2>/dev/null)
     assert_contains "compiled llm output preserves priority as pr=0" '"pr":0' "$out"
-    out=$(_run_list inproc "$tracker" --type=epic --priority=0 --format=llm 2>/dev/null)
+    out=$(_run_list inproc "$tracker" --type=epic --priority=0 --output llm 2>/dev/null)
     assert_contains "in-process path also preserves pr=0" '"pr":0' "$out"
 }
 test_priority_field_propagates
@@ -199,8 +199,8 @@ test_priority_field_propagates
 test_cross_impl_equivalence() {
     local tracker; tracker=$(_make_tracker)
     local a b
-    a=$(_run_list script "$tracker" --format=llm --type=epic --status=open --priority=0 --without-tag=brainstorm:complete 2>/dev/null)
-    b=$(_run_list inproc "$tracker" --format=llm --type=epic --status=open --priority=0 --without-tag=brainstorm:complete 2>/dev/null)
+    a=$(_run_list script "$tracker" --output llm --type=epic --status=open --priority=0 --without-tag=brainstorm:complete 2>/dev/null)
+    b=$(_run_list inproc "$tracker" --output llm --type=epic --status=open --priority=0 --without-tag=brainstorm:complete 2>/dev/null)
     assert_eq "ticket-list.sh and lib-api ticket_list agree on the exemplar" "$a" "$b"
 }
 test_cross_impl_equivalence

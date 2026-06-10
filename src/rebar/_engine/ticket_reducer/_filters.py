@@ -2,7 +2,7 @@
 
 Both the standalone script (``ticket-list.sh``) and the in-process library
 (``ticket-lib-api.sh:ticket_list``) reduce the corpus and then narrow it by the
-same criteria, in both their default-JSON and ``--format=llm`` output branches —
+same criteria, in both their default-JSON and ``--output llm`` output branches —
 four call sites in total. Keeping the predicate chain here, instead of
 copy-pasting it into each inline ``python3 -c`` block, makes cross-implementation
 and cross-format equivalence *structural* rather than something the tests must

@@ -107,7 +107,7 @@ test_inbound_llm_keys() {
     _write_link "$tracker" "$ID_A" "$ID_B" "blocks"
 
     local out
-    out=$(TICKETS_TRACKER_DIR="$tracker" bash "$SHOW_SCRIPT" --format=llm "$ID_B" 2>/dev/null)
+    out=$(TICKETS_TRACKER_DIR="$tracker" bash "$SHOW_SCRIPT" --output llm "$ID_B" 2>/dev/null)
 
     assert_contains "llm output uses ibl key" '"ibl"' "$out"
     assert_contains "llm inbound entry uses abbreviated from_id key f" '"f":"'"$ID_A"'"' "$out"

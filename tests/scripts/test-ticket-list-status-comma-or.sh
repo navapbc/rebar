@@ -80,7 +80,7 @@ PY
 }
 
 # ── Test 1: single call --status=open,in_progress produces valid JSON array ──
-# Default format (no --format=llm) outputs a JSON array, which json.load accepts.
+# Default format (no --output llm) outputs a JSON array, which json.load accepts.
 test_single_call_valid_json() {
     local tracker; tracker=$(_make_tracker)
     local out rc=0

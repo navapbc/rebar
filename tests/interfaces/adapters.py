@@ -173,10 +173,10 @@ class CliAdapter(Adapter):
         return self._ok_json("deps", tid)
 
     def ready(self) -> Any:
-        return self._ok_json("ready", "--json")
+        return self._ok_json("ready", "--output", "json")
 
     def next_batch(self, epic_id: str) -> dict:
-        return self._ok_json("next-batch", epic_id, "--json")
+        return self._ok_json("next-batch", epic_id, "--output", "json")
 
     def search(self, query: str, **filters: Any) -> list[dict]:
         args = ["search", query]

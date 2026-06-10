@@ -1,7 +1,7 @@
 """Golden parity test: the compiled ticket state is produced by ONE reducer.
 
 After the single-reducer refactor (bug f026), `show`, `list`, `search`, the
-native `reduce_ticket`, and the `--format=llm` path all derive state from the
+native `reduce_ticket`, and the `--output llm` path all derive state from the
 Python `ticket_reducer`. This test pins that invariant by comparing the FULL
 top-level key set AND values across interfaces for a ticket that exercises every
 event type — the check the retired jq/Python schema-parity test could not make
@@ -106,14 +106,14 @@ def test_native_reduce_matches_interface_modulo_internal_keys(rebar_repo: Path) 
 
 
 def test_llm_parity_show_vs_list(rebar_repo: Path) -> None:
-    """`show --format=llm` and the `list --format=llm` element for the same ticket
+    """`show --output llm` and the `list --output llm` element for the same ticket
     are identical (both internal-marker-free)."""
     tid = _rich_ticket(rebar_repo)
     r = str(rebar_repo)
 
-    show_llm = json.loads(_cli("show", "--format=llm", tid, cwd=r).stdout)
+    show_llm = json.loads(_cli("show", "--output", "llm", tid, cwd=r).stdout)
     list_lines = [
-        json.loads(ln) for ln in _cli("list", "--format=llm", cwd=r).stdout.splitlines() if ln.strip()
+        json.loads(ln) for ln in _cli("list", "--output", "llm", cwd=r).stdout.splitlines() if ln.strip()
     ]
     list_llm = next(t for t in list_lines if t.get("id") == tid)
 

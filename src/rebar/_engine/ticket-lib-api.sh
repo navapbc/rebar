@@ -19,6 +19,12 @@ fi
 # Resolve library directory (used to find sibling scripts + python package).
 _TICKETLIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Canonical structured-output flag helpers (--output/-o). The format logic lives
+# once in ticket_output.py; this shim is sourced for _resolve_output_format /
+# _strip_output_flags used by ticket_show / ticket_list below.
+# shellcheck source=/dev/null
+source "$_TICKETLIB_DIR/ticket-output.sh"
+
 # ── Platform capability detection ────────────────────────────────────────────
 # Detect flock(1) availability at source-time so callers and internal functions
 # can branch without repeated command -v calls.
@@ -160,39 +166,39 @@ _ticketlib_dispatch() {
 # Uses bash+jq event reduction — zero python3 subprocess spawns on the default path.
 ticket_show() {
 
+    # Resolve the canonical --output/-o flag ONCE (reader profile: json|llm,
+    # default json) via the single source of truth (ticket_output.py), then strip
+    # it so neither the multi-ID scan nor the single-ID body re-parses format.
+    if ! _resolve_output_format reader "$@"; then return 2; fi
+    local _show_fmt="$_OUTPUT_FMT"
+    _strip_output_flags "$@"
+    set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
+
     # Multi-ID support (bug jira-dig-2565): if more than one positional ID is
-    # supplied, iterate and recurse single-ID for each, threading `--format=*`
-    # and any other flags through to each call. Default-format output is
-    # separated by a blank line between tickets; --format=llm output is one
+    # supplied, iterate and recurse single-ID for each, threading the resolved
+    # format (re-injected as `--output=<fmt>`) and any other flags. Default/json
+    # output is separated by a blank line between tickets; llm output is one
     # self-delimiting JSON object per line (NDJSON) and needs no separator.
     # The function returns 1 if any single-ID call failed, after processing
-    # all tickets so callers can scan the full output. The recursive call
-    # lands in this same function with exactly one positional ID and falls
-    # through to the single-ID implementation below.
-    local _ms_format_args=()
+    # all tickets so callers can scan the full output.
+    local _ms_flag_args=()
     local _ms_ids=()
     local _ms_arg
     for _ms_arg in "$@"; do
         case "$_ms_arg" in
-            --format=*|-*) _ms_format_args+=("$_ms_arg") ;;
-            *)             _ms_ids+=("$_ms_arg") ;;
+            -*) _ms_flag_args+=("$_ms_arg") ;;
+            *)  _ms_ids+=("$_ms_arg") ;;
         esac
     done
     if [ "${#_ms_ids[@]}" -gt 1 ]; then
-        local _ms_idx=0 _ms_rc=0 _ms_id _ms_is_llm=0 _ms_fa
-        for _ms_fa in "${_ms_format_args[@]}"; do
-            [ "$_ms_fa" = "--format=llm" ] && _ms_is_llm=1
-        done
+        local _ms_idx=0 _ms_rc=0 _ms_id
         for _ms_id in "${_ms_ids[@]}"; do
             _ms_idx=$((_ms_idx + 1))
-            if [ "$_ms_idx" -gt 1 ] && [ "$_ms_is_llm" -eq 0 ]; then
+            if [ "$_ms_idx" -gt 1 ] && [ "$_show_fmt" != "llm" ]; then
                 echo
             fi
-            if [ "${#_ms_format_args[@]}" -gt 0 ]; then
-                ticket_show "${_ms_format_args[@]}" "$_ms_id" || _ms_rc=1
-            else
-                ticket_show "$_ms_id" || _ms_rc=1
-            fi
+            ticket_show --output="$_show_fmt" \
+                ${_ms_flag_args[@]+"${_ms_flag_args[@]}"} "$_ms_id" || _ms_rc=1
         done
         return "$_ms_rc"
     fi
@@ -219,22 +225,17 @@ ticket_show() {
         fi
 
         _usage() {
-            echo "Usage: ticket show [--format=llm] <ticket_id> [<ticket_id> ...]" >&2
+            echo "Usage: ticket show [--output llm] <ticket_id> [<ticket_id> ...]" >&2
             return 1
         }
 
-        local format="default"
+        # Format already resolved + stripped by the caller (reader: json|llm).
+        # json is the default pretty rendering; llm is the minified short-key form.
+        local format="$_show_fmt"
         local ticket_id=""
         local arg
         for arg in "$@"; do
             case "$arg" in
-                --format=llm)
-                    format="llm"
-                    ;;
-                --format=*)
-                    echo "Error: unsupported format '${arg#--format=}'. Supported: llm" >&2
-                    return 1
-                    ;;
                 -*)
                     echo "Error: unknown option '$arg'" >&2
                     _usage
@@ -319,7 +320,7 @@ print(json.dumps(public_state(reduce_ticket(sys.argv[1])), ensure_ascii=False))
         # ── Output ────────────────────────────────────────────────────────────
         if [ "$format" = "llm" ]; then
             # LLM format via the single shared formatter ticket_reducer.llm_format
-            # to_llm (same one `list`/`ready --format=llm` use), so show and list
+            # to_llm (same one `list`/`ready --output llm` use), so show and list
             # emit identical LLM shapes (bug f026 — the old inline jq mapping had
             # drifted from to_llm). `state` is already public_state-filtered.
             printf '%s' "$state" | _SCRIPT_DIR="$_TICKETLIB_DIR" python3 -c '
@@ -348,6 +349,14 @@ print(json.dumps(to_llm(json.load(sys.stdin)), ensure_ascii=False, separators=("
 # In-process replacement for ticket-list.sh.
 ticket_list() {
 
+    # Resolve the canonical --output/-o flag (reader profile: json|llm, default
+    # json) via the single source of truth, then strip it; the option loop below
+    # only handles list's own filters. json emits a JSON array; llm emits JSONL.
+    if ! _resolve_output_format reader "$@"; then return 2; fi
+    local _list_fmt="$_OUTPUT_FMT"
+    _strip_output_flags "$@"
+    set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
+
     # Run the body with strict mode scoped to this function via a subshell.
     (
         set -euo pipefail
@@ -373,7 +382,7 @@ ticket_list() {
             TRACKER_DIR="$REPO_ROOT/.tickets-tracker"
         fi
 
-        local format="default"
+        local format="$_list_fmt"
         local include_archived=""
         local exclude_deleted_flag=""
         local filter_type=""
@@ -385,13 +394,6 @@ ticket_list() {
         local arg
         for arg in "$@"; do
             case "$arg" in
-                --format=llm)
-                    format="llm"
-                    ;;
-                --format=*)
-                    echo "Error: unsupported format '${arg#--format=}'. Supported: llm" >&2
-                    return 1
-                    ;;
                 --include-archived)
                     include_archived="true"
                     ;;
@@ -417,7 +419,7 @@ ticket_list() {
                     filter_without_tag="${arg#--without-tag=}"
                     ;;
                 --help|-h)
-                    echo "Usage: ticket list [--format=llm] [--include-archived] [--exclude-deleted] [--type=<type>] [--status=<status>] [--priority=<n>] [--parent=<id>] [--has-tag=<tag>] [--without-tag=<tag>]" >&2
+                    echo "Usage: ticket list [--output llm] [--include-archived] [--exclude-deleted] [--type=<type>] [--status=<status>] [--priority=<n>] [--parent=<id>] [--has-tag=<tag>] [--without-tag=<tag>]" >&2
                     echo "  --type=<type>      Filter by ticket type (bug, epic, story, task)" >&2
                     echo "  --status=<status>  Filter by status (comma-separated for OR)" >&2
                     echo "  --priority=<n>     Filter by priority 0-4 (comma-separated for OR; exact match; unset priority not matched)" >&2
@@ -429,7 +431,7 @@ ticket_list() {
                     ;;
                 -*)
                     echo "Error: unknown option '$arg'" >&2
-                    echo "Valid filters: --type --status --priority --parent --has-tag --without-tag --include-archived --exclude-deleted --format=llm" >&2
+                    echo "Valid filters: --type --status --priority --parent --has-tag --without-tag --include-archived --exclude-deleted --output llm" >&2
                     return 1
                     ;;
             esac

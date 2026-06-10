@@ -383,8 +383,8 @@ PYEOF
 }
 test_ticket_list_corrupt_create_event
 
-# ── Test 6: ticket list --format=llm outputs JSONL (one ticket per line) ──────
-echo "Test 6: ticket list --format=llm outputs JSONL (one ticket per line)"
+# ── Test 6: ticket list --output llm outputs JSONL (one ticket per line) ──────
+echo "Test 6: ticket list --output llm outputs JSONL (one ticket per line)"
 test_ticket_list_llm_format_jsonl() {
     _snapshot_fail
 
@@ -409,10 +409,10 @@ test_ticket_list_llm_format_jsonl() {
 
     local llm_output
     local exit_code=0
-    llm_output=$(cd "$repo" && bash "$TICKET_SCRIPT" list --format=llm 2>/dev/null) || exit_code=$?
+    llm_output=$(cd "$repo" && bash "$TICKET_SCRIPT" list --output llm 2>/dev/null) || exit_code=$?
 
     # Assert: exits 0
-    assert_eq "ticket list --format=llm exits 0" "0" "$exit_code"
+    assert_eq "ticket list --output llm exits 0" "0" "$exit_code"
 
     # Assert: each line is valid JSON (JSONL format)
     local check_result
@@ -480,8 +480,8 @@ PYEOF
 }
 test_ticket_list_llm_format_jsonl
 
-# ── Test 7: ticket list --format=llm uses shortened keys ──────────────────────
-echo "Test 7: ticket list --format=llm uses shortened keys (id, t, ttl, st)"
+# ── Test 7: ticket list --output llm uses shortened keys ──────────────────────
+echo "Test 7: ticket list --output llm uses shortened keys (id, t, ttl, st)"
 test_ticket_list_llm_format_shortened_keys() {
     _snapshot_fail
 
@@ -505,9 +505,9 @@ test_ticket_list_llm_format_shortened_keys() {
 
     local llm_output
     local exit_code=0
-    llm_output=$(cd "$repo" && bash "$TICKET_SCRIPT" list --format=llm 2>/dev/null) || exit_code=$?
+    llm_output=$(cd "$repo" && bash "$TICKET_SCRIPT" list --output llm 2>/dev/null) || exit_code=$?
 
-    assert_eq "ticket list --format=llm exits 0" "0" "$exit_code"
+    assert_eq "ticket list --output llm exits 0" "0" "$exit_code"
 
     # Assert: each line uses shortened keys and has no null values
     local check_result
@@ -569,8 +569,8 @@ PYEOF
 }
 test_ticket_list_llm_format_shortened_keys
 
-# ── Test 8: ticket list --format=llm with empty tracker → outputs nothing ──────
-echo "Test 8: ticket list --format=llm with empty tracker outputs nothing (not [])"
+# ── Test 8: ticket list --output llm with empty tracker → outputs nothing ──────
+echo "Test 8: ticket list --output llm with empty tracker outputs nothing (not [])"
 test_ticket_list_llm_format_empty_tracker() {
     _snapshot_fail
 
@@ -585,13 +585,13 @@ test_ticket_list_llm_format_empty_tracker() {
 
     local llm_output
     local exit_code=0
-    llm_output=$(cd "$repo" && bash "$TICKET_SCRIPT" list --format=llm 2>/dev/null) || exit_code=$?
+    llm_output=$(cd "$repo" && bash "$TICKET_SCRIPT" list --output llm 2>/dev/null) || exit_code=$?
 
     # Assert: exits 0
     assert_eq "empty llm list exits 0" "0" "$exit_code"
 
     # Assert: output is empty (not "[]" or any JSON array — matches documented 'nothing' behavior)
-    assert_eq "empty tracker --format=llm outputs nothing" "" "$llm_output"
+    assert_eq "empty tracker --output llm outputs nothing" "" "$llm_output"
 
     assert_pass_if_clean "test_ticket_list_llm_format_empty_tracker"
 }

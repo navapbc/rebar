@@ -203,7 +203,7 @@ def validate(*, repo_root=None) -> dict:
     returning {score, critical_issues, major_issues, minor_issues, warnings,
     suggestions}.
     """
-    cp = _run(["validate", "--json"], repo_root=repo_root)
+    cp = _run(["validate", "--output", "json"], repo_root=repo_root)
     return _json_or(cp.stdout, {"output": (cp.stdout or cp.stderr).strip()})
 
 
@@ -326,7 +326,7 @@ def next_batch(epic_id: str, *, repo_root=None) -> dict:
     """Next parallel batch of unblocked tickets under an epic's hierarchy (JSON).
 
     Still routed through the bash engine (the only read not yet in-process)."""
-    return _json(_run(["next-batch", epic_id, "--json"], repo_root=repo_root), what="next-batch")
+    return _json(_run(["next-batch", epic_id, "--output", "json"], repo_root=repo_root), what="next-batch")
 
 
 def search(

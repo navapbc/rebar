@@ -201,7 +201,7 @@ git toplevel of the working directory.
 
 **`validate` vs. the per-ticket gates.** `rebar validate` takes **no ticket id** —
 it scans the whole store and prints an overall tracker-health score (1-5, exit
-0-4) bucketed into critical / major / minor / warning findings (`--json`,
+0-4) bucketed into critical / major / minor / warning findings (`--output json`,
 `--terse`, `--verbose`, `--fix`). Passing it a ticket id errors. The *per-ticket*
 quality gates are separate commands that each take an `<id>`: `clarity-check`,
 `check-ac`, `quality-check`.

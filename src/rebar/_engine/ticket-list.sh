@@ -2,7 +2,7 @@
 # ticket-list.sh
 # List all tickets by compiling each ticket directory via the reducer.
 #
-# Usage: ticket-list.sh [--format=<fmt>] [--include-archived] [--exclude-deleted] [--type=<type>] [--status=<status>] [--parent=<id>] [--has-tag=<tag>]
+# Usage: ticket-list.sh [--output llm] [--include-archived] [--exclude-deleted] [--type=<type>] [--status=<status>] [--parent=<id>] [--has-tag=<tag>]
 #   Outputs a JSON array of compiled ticket states to stdout (default).
 #   --include-archived  Include archived tickets in the output (default: excluded).
 #   --exclude-deleted   Exclude deleted (tombstone) tickets (default: included; opt-in).
@@ -10,7 +10,7 @@
 #   --has-tag=<tag>     Filter to tickets that have <tag> in their tags list.
 #                       When <tag> matches ^detected_by:, automatically intersects
 #                       with --type=bug (only bug-type tickets are returned).
-#   --format=llm  Outputs JSONL (one minified ticket per line) with shortened keys,
+#   --output llm  Outputs JSONL (one minified ticket per line) with shortened keys,
 #                 stripped nulls/empty lists, and no verbose timestamps
 #                 (created_at and env_id are omitted; comment timestamps omitted).
 #                 Key mapping:
@@ -31,6 +31,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REDUCER="$SCRIPT_DIR/ticket-reducer.py"
+# Canonical structured-output flag (--output/-o); logic in ticket_output.py.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/ticket-output.sh"
 
 # Allow tests to inject a custom tracker directory via TICKETS_TRACKER_DIR env var.
 # When GIT_DIR is set (e.g., in tests), derive REPO_ROOT from its parent to avoid
@@ -46,7 +49,13 @@ else
 fi
 
 # ── Parse arguments ──────────────────────────────────────────────────────────
+# Resolve the canonical --output/-o flag (reader: json|llm, default json) and
+# strip it; the loop below only handles list's own filters.
+if ! _resolve_output_format reader "$@"; then exit 2; fi
 format="default"
+[ "$_OUTPUT_FMT" = "llm" ] && format="llm"
+_strip_output_flags "$@"
+set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
 include_archived=""
 exclude_deleted_flag=""
 filter_type=""
@@ -57,13 +66,6 @@ filter_priority=""
 filter_without_tag=""
 for arg in "$@"; do
     case "$arg" in
-        --format=llm)
-            format="llm"
-            ;;
-        --format=*)
-            echo "Error: unsupported format '${arg#--format=}'. Supported: llm" >&2
-            exit 1
-            ;;
         --include-archived)
             include_archived="true"
             ;;
@@ -89,8 +91,8 @@ for arg in "$@"; do
             filter_without_tag="${arg#--without-tag=}"
             ;;
         --help|-h)
-            echo "Usage: ticket-list.sh [--format=llm] [--include-archived] [--exclude-deleted] [--type=<type>] [--status=<status>] [--priority=<n>] [--parent=<id>] [--has-tag=<tag>] [--without-tag=<tag>]" >&2
-            echo "  --format=llm       Output JSONL with shortened keys" >&2
+            echo "Usage: ticket-list.sh [--output llm] [--include-archived] [--exclude-deleted] [--type=<type>] [--status=<status>] [--priority=<n>] [--parent=<id>] [--has-tag=<tag>] [--without-tag=<tag>]" >&2
+            echo "  --output llm       Output JSONL with shortened keys (-o llm)" >&2
             echo "  --include-archived  Include archived tickets" >&2
             echo "  --exclude-deleted   Exclude deleted (tombstone) tickets (default: included)" >&2
             echo "  --type=<type>      Filter by ticket type (bug, epic, story, task)" >&2
@@ -105,7 +107,7 @@ for arg in "$@"; do
             ;;
         -*)
             echo "Error: unknown option '$arg'" >&2
-            echo "Valid filters: --type --status --priority --parent --has-tag --without-tag --include-archived --exclude-deleted --format=llm" >&2
+            echo "Valid filters: --type --status --priority --parent --has-tag --without-tag --include-archived --exclude-deleted --output llm" >&2
             exit 1
             ;;
     esac

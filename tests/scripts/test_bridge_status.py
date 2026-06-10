@@ -5,7 +5,7 @@ before the implementation exists. All test functions must FAIL before
 ticket-bridge-status.sh is implemented and the dispatcher is updated.
 
 The command is:
-    ticket bridge-status [--format=json]
+    ticket bridge-status [--output json]
 
 Status file: $(git rev-parse --show-toplevel)/.tickets-tracker/.bridge-status.json
 Format:
@@ -21,7 +21,7 @@ Behaviors:
 - Status file present, success=true → show last_run_timestamp, status success
 - Status file present, success=false → show failure reason
 - Status file present, unresolved_conflicts > 0 → show conflict count
-- --format=json → output valid JSON with required keys
+- --output json → output valid JSON with required keys
 
 Test: python3 -m pytest tests/scripts/test_bridge_status.py
 All tests must return non-zero until ticket-bridge-status.sh is implemented.
@@ -251,14 +251,14 @@ def test_bridge_status_exits_nonzero_when_no_status_file(tmp_path: Path) -> None
 
 
 # ---------------------------------------------------------------------------
-# Test 5: --format=json outputs valid JSON with required keys
+# Test 5: --output json outputs valid JSON with required keys
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_bridge_status_json_output_format(tmp_path: Path) -> None:
-    """Given a valid .bridge-status.json, 'ticket bridge-status --format=json'
+    """Given a valid .bridge-status.json, 'ticket bridge-status --output json'
     must output valid JSON containing the keys:
         last_run_timestamp, success, error, unresolved_conflicts
 
@@ -277,10 +277,10 @@ def test_bridge_status_json_output_format(tmp_path: Path) -> None:
         },
     )
 
-    result = _run_bridge_status(tracker_dir, extra_args=["--format=json"])
+    result = _run_bridge_status(tracker_dir, extra_args=["--output", "json"])
 
     assert result.returncode == 0, (
-        f"bridge-status --format=json must exit 0 when status file is present.\n"
+        f"bridge-status --output json must exit 0 when status file is present.\n"
         f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
 
@@ -288,7 +288,7 @@ def test_bridge_status_json_output_format(tmp_path: Path) -> None:
         data = json.loads(result.stdout.strip())
     except json.JSONDecodeError as exc:
         pytest.fail(
-            f"bridge-status --format=json output is not valid JSON: {exc}\n"
+            f"bridge-status --output json output is not valid JSON: {exc}\n"
             f"stdout: {result.stdout!r}"
         )
 

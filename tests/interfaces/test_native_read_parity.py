@@ -174,7 +174,7 @@ def test_search_parity(seeded, args, kwargs):
 def test_ready_parity(seeded):
     repo, ids, _alias = seeded
     lib = rebar.ready(repo_root=str(repo))
-    assert lib == _bash(["ready", "--json"], str(repo))
+    assert lib == _bash(["ready", "--output", "json"], str(repo))
     ready_ids = {t["ticket_id"] for t in lib}
     assert ids["task_open"] not in ready_ids
     assert ids["task_blocker"] in ready_ids
@@ -185,7 +185,7 @@ def test_ready_parity_after_unblock(seeded):
     rebar.claim(ids["task_blocker"], assignee="t", repo_root=str(repo))
     rebar.transition(ids["task_blocker"], "in_progress", "closed", repo_root=str(repo))
     lib = rebar.ready(repo_root=str(repo))
-    assert lib == _bash(["ready", "--json"], str(repo))
+    assert lib == _bash(["ready", "--output", "json"], str(repo))
     assert ids["task_open"] in {t["ticket_id"] for t in lib}
 
 
@@ -209,5 +209,5 @@ def test_deps_archived_target_raises_both(seeded):
 def test_empty_store_parity(rebar_repo):
     repo = str(rebar_repo)
     assert rebar.list_tickets(repo_root=repo) == _bash(["list"], repo)
-    assert rebar.ready(repo_root=repo) == _bash(["ready", "--json"], repo)
+    assert rebar.ready(repo_root=repo) == _bash(["ready", "--output", "json"], repo)
     assert rebar.search("anything", repo_root=repo) == _bash(["search", "anything"], repo)

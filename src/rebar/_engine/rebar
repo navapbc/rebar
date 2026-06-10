@@ -17,7 +17,7 @@
 #   ticket unlink <source> <target>               — remove ONE link between an ordered pair (no relation arg;
 #                                                     removes the most-recent link; call repeatedly for multiple)
 #   ticket deps <ticket_id>                       — show dependency graph for a ticket (JSON)
-#   ticket bridge-status [--format=json]          — show last bridge run status
+#   ticket bridge-status [--output json]          — show last bridge run status
 #   ticket bridge-fsck [--tickets-tracker=<path>] — audit bridge mappings (orphans, duplicates, stale SYNCs)
 #   ticket tag <ticket_id> <tag>                  — add a tag to a ticket
 #   ticket untag <ticket_id> <tag>                — remove a tag from a ticket
@@ -50,18 +50,18 @@ _print_overview() {
     echo "  edit          Edit ticket fields (--title, --priority, --assignee, --ticket_type, --description, --tags)"
     echo "  tag           Add a tag to a ticket"
     echo "  untag         Remove a tag from a ticket"
-    echo "  validate      Repo-wide tracker health check (NO ticket id; scores the whole store 1-5, exit 0-4; --json, --terse, --verbose, --fix)"
+    echo "  validate      Repo-wide tracker health check (NO ticket id; scores the whole store 1-5, exit 0-4; --output json, --terse, --verbose, --fix)"
     echo "  clarity-check Score one ticket's clarity (<ticket_id>; exit 0=pass, 1=fail; JSON: score/verdict/threshold)"
     echo "  check-ac      Check one ticket has an Acceptance Criteria block (<ticket_id>; exit 0=pass, 1=fail; AC_CHECK: pass|fail)"
     echo "  quality-check Check one ticket's dispatch readiness (<ticket_id>; exit 0=pass, 1=fail; QUALITY: pass|fail)"
     echo "  purge-bridge  Remove non-project inbound bridge tickets (--keep=<KEY> [--dry-run])"
     echo "  summary       One-line ticket summary with blocking status for one or more IDs"
-    echo "  bridge-status Show last bridge run status [--format=json]"
+    echo "  bridge-status Show last bridge run status [--output json]"
     echo "  bridge-fsck   Audit bridge mappings (orphans, duplicates, stale SYNCs)"
     echo "  exists        O(1) presence check (exit 0=exists, 1=not found)"
     echo "  list-epics    List open epics [--all] [--has-tag=TAG] [--min-children=N]"
     echo "  list-descendants  BFS walk from a root ticket, bucketed by type (JSON)"
-    echo "  next-batch    Select next parallel agent batch for an epic [--json]"
+    echo "  next-batch    Select next parallel agent batch for an epic [--output json]"
     echo "  ready         List tickets ready to work (all blockers closed)"
     echo "  search        Full-text search over titles/descriptions/comments/tags (JSON)"
     echo "  archive       Archive an open ticket (excludes from default list; idempotent)"
@@ -85,8 +85,8 @@ _print_subcommand_help() {
     case "$sub" in
         init)         echo "Usage: rebar init [--silent]" ;;
         create)       echo "Usage: rebar create <bug|epic|story|task> <title> [--parent <id>] [--priority <0-4>] [--assignee <name>] [--description <text>] [--tags <t1,t2>]" ;;
-        show)         echo "Usage: rebar show [--format=llm] <ticket_id> [<ticket_id> ...]" ;;
-        list)         echo "Usage: rebar list [--status=<s>] [--type=<t>] [--priority=<n>] [--parent=<id>] [--has-tag=<tag>] [--without-tag=<tag>] [--include-archived] [--exclude-deleted] [--format=llm]" ;;
+        show)         echo "Usage: rebar show [--output llm] <ticket_id> [<ticket_id> ...]" ;;
+        list)         echo "Usage: rebar list [--status=<s>] [--type=<t>] [--priority=<n>] [--parent=<id>] [--has-tag=<tag>] [--without-tag=<tag>] [--include-archived] [--exclude-deleted] [--output llm]" ;;
         transition)
             echo "Usage: rebar transition <ticket_id> <current_status> <target_status> [--reason=<text>] [--force] [--verdict-hash=<hash>] [--force-close=<reason>]"
             echo "       rebar transition <ticket_id> <target_status>   (auto-detects current status)"
@@ -104,15 +104,15 @@ _print_subcommand_help() {
         edit)         echo "Usage: rebar edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] [--ticket_type=VALUE] [--description=VALUE] [--tags=VALUE] [--parent=VALUE]" ;;
         tag)          echo "Usage: rebar tag <ticket_id> <tag>" ;;
         untag)        echo "Usage: rebar untag <ticket_id> <tag>" ;;
-        validate)     echo "Usage: rebar validate [--quick|--full] [--fix] [--verbose] [--json] [--terse]   (repo-wide health check; takes NO ticket id)" ;;
+        validate)     echo "Usage: rebar validate [--quick|--full] [--fix] [--verbose] [--output json] [--terse]   (repo-wide health check; takes NO ticket id)" ;;
         clarity-check) echo "Usage: rebar clarity-check <ticket_id>   (exit 0=pass, 1=fail; JSON: score/verdict/threshold)" ;;
         check-ac)     echo "Usage: rebar check-ac <ticket_id>   (exit 0=pass, 1=fail; AC_CHECK: pass|fail)" ;;
         quality-check) echo "Usage: rebar quality-check <ticket_id>   (exit 0=pass, 1=fail; QUALITY: pass|fail)" ;;
         exists)       echo "Usage: rebar exists <ticket_id|alias>   (exit 0=exists, 1=not found)" ;;
         list-epics)   echo "Usage: rebar list-epics [--all] [--has-tag=<tag>] [--min-children=<n>]" ;;
         list-descendants) echo "Usage: rebar list-descendants <root_ticket_id>   (BFS walk bucketed by type, JSON)" ;;
-        next-batch)   echo "Usage: rebar next-batch <epic_id> [--json]" ;;
-        ready)        echo "Usage: rebar ready   (lists tickets whose blockers are all closed)" ;;
+        next-batch)   echo "Usage: rebar next-batch <epic_id> [--output json]" ;;
+        ready)        echo "Usage: rebar ready [--output text|llm|json]   (lists tickets whose blockers are all closed)" ;;
         search)       echo "Usage: rebar search <query> [--status=<s>] [--type=<t>] [--has-tag=<tag>]" ;;
         archive)      echo "Usage: rebar archive <ticket_id>   (excludes from default list; idempotent)" ;;
         delete)       echo "Usage: rebar delete <ticket_id> --user-approved   (destructive; requires explicit approval)" ;;
@@ -126,7 +126,7 @@ _print_subcommand_help() {
         compact-all)  echo "Usage: rebar compact-all [--dry-run] [--limit=<n>] [--no-commit]" ;;
         fsck)         echo "Usage: rebar fsck" ;;
         fsck-recover) echo "Usage: rebar fsck-recover [--tracker-dir <path>]" ;;
-        bridge-status) echo "Usage: rebar bridge-status [--format=json]" ;;
+        bridge-status) echo "Usage: rebar bridge-status [--output json]" ;;
         bridge-fsck)  echo "Usage: rebar bridge-fsck [--tickets-tracker=<path>]" ;;
         purge-bridge) echo "Usage: rebar purge-bridge --keep=<PROJECT_KEY> [--dry-run]" ;;
         revert)       echo "Usage: rebar revert <ticket_id> <target_uuid> [--reason=<text>]" ;;

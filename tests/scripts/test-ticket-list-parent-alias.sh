@@ -160,7 +160,7 @@ for IMPL in script inproc; do
     assert_eq "alias filter default-format returns 2 children [$IMPL]" "2" "$got"
 
     # 1b. Alias filter — llm format: should return 2 children
-    got=$(_run_list "$IMPL" "$TR" --parent=test-epic-alias --format=llm 2>/dev/null | _llm_count)
+    got=$(_run_list "$IMPL" "$TR" --parent=test-epic-alias --output llm 2>/dev/null | _llm_count)
     assert_eq "alias filter llm-format returns 2 children [$IMPL]" "2" "$got"
 
     # 2a. Canonical ID filter — default format (GREEN control; must not regress)
@@ -168,7 +168,7 @@ for IMPL in script inproc; do
     assert_eq "canonical-id filter default-format returns 2 [$IMPL]" "2" "$got"
 
     # 2b. Canonical ID filter — llm format (GREEN control)
-    got=$(_run_list "$IMPL" "$TR" --parent="$EPIC_ID" --format=llm 2>/dev/null | _llm_count)
+    got=$(_run_list "$IMPL" "$TR" --parent="$EPIC_ID" --output llm 2>/dev/null | _llm_count)
     assert_eq "canonical-id filter llm-format returns 2 [$IMPL]" "2" "$got"
 done
 

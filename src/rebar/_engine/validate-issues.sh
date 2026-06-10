@@ -11,7 +11,7 @@ set -euo pipefail
 # - Blocked issues with no clear path to resolution
 # - Consistency between task types and epic assignments
 #
-# Usage: ./scripts/validate-issues.sh [--quick] [--full] [--fix] [--verbose] [--json] [--terse]
+# Usage: ./scripts/validate-issues.sh [--quick] [--full] [--fix] [--verbose] [--output json] [--terse]
 #
 # Exit codes:
 #   0 - Score 5 (perfect health)
@@ -24,6 +24,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 TICKET_CMD="${TICKET_CMD:-$SCRIPT_DIR/ticket}"
+
+# Canonical structured-output flag (--output/-o). All format logic lives in
+# ticket_output.py; this resolves the validated format and strips the flag so
+# the option loop below only sees validate's own flags.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/ticket-output.sh"
 
 # Colors for output
 RED='\033[0;31m'
@@ -39,15 +45,17 @@ TERSE_MODE=false
 # Default to full mode for backwards compatibility
 QUICK_MODE=false
 
+# Resolve --output/-o (report profile: text|json) and strip it from the args.
+_resolve_output_format report "$@" || exit 2
+[ "$_OUTPUT_FMT" = "json" ] && JSON_OUTPUT=true
+_strip_output_flags "$@"
+set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
+
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         --verbose|-v)
             VERBOSE=true
-            shift
-            ;;
-        --json)
-            JSON_OUTPUT=true
             shift
             ;;
         --fix)
@@ -67,15 +75,15 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help|-h)
-            echo "Usage: $0 [--quick] [--full] [--fix] [--verbose] [--json] [--terse]"
+            echo "Usage: $0 [--quick] [--full] [--fix] [--verbose] [--output json] [--terse]"
             echo ""
             echo "Options:"
-            echo "  --quick    Run only the fast, high-value checks (~2 seconds)"
-            echo "  --full     Run all checks (default, same as no flag)"
-            echo "  --fix      Attempt to automatically fix issues (interactive)"
-            echo "  --verbose  Show detailed output"
-            echo "  --json     Output results in JSON format"
-            echo "  --terse    Single-line output on success; multi-line only when issues exist"
+            echo "  --quick        Run only the fast, high-value checks (~2 seconds)"
+            echo "  --full         Run all checks (default, same as no flag)"
+            echo "  --fix          Attempt to automatically fix issues (interactive)"
+            echo "  --verbose      Show detailed output"
+            echo "  --output json  Emit results as JSON (-o json; default is human text)"
+            echo "  --terse        Single-line output on success; multi-line only when issues exist"
             exit 0
             ;;
         *)

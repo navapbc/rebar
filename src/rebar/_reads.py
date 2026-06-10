@@ -128,8 +128,8 @@ def deps(ticket_id: str, *, repo_root=None) -> dict:
 
 
 def ready(*, repo_root=None) -> Any:
-    """Tickets ready to work (mirrors ``ticket-ready.py --json``: no epic filter
-    from the library entrypoint)."""
+    """Tickets ready to work (mirrors ``ticket-ready.py --output json``: no epic
+    filter from the library entrypoint)."""
     tracker = _tracker(repo_root)
     return [public_state(s) for s in find_ready_tickets(tracker)]
 

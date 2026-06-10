@@ -187,12 +187,12 @@ test_next_batch_routes_through_dispatcher() {
         (( FAIL++ ))
     fi
 
-    # Test 6: --json flag produces valid JSON with expected keys
+    # Test 6: --output json flag produces valid JSON with expected keys
     # Note: sprint-next-batch.sh prints a conflict matrix to stderr; capture stdout only.
-    echo "Test 6: --json flag produces valid JSON with expected keys"
+    echo "Test 6: --output json flag produces valid JSON with expected keys"
     _tracker=$(make_next_batch_fixture)
     _exit=0
-    _output=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" next-batch nb-epic --json 2>/dev/null) || _exit=$?
+    _output=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" next-batch nb-epic --output json 2>/dev/null) || _exit=$?
 
     if echo "$_output" | python3 -c "
 import json, sys
@@ -213,10 +213,10 @@ for entry in d.get('batch', []):
         print('Routing fields leaked: ' + ', '.join(sorted(leaked)), file=sys.stderr)
         sys.exit(1)
 " 2>/dev/null; then
-        echo "  PASS: --json output is valid JSON with required keys"
+        echo "  PASS: --output json output is valid JSON with required keys"
         (( PASS++ ))
     else
-        echo "  FAIL: --json output is not valid JSON or missing required keys (RED — expected before GREEN)" >&2
+        echo "  FAIL: --output json output is not valid JSON or missing required keys (RED — expected before GREEN)" >&2
         echo "  Output: $_output" >&2
         (( FAIL++ ))
     fi

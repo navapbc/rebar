@@ -16,7 +16,7 @@ set -euo pipefail
 #   ticket-next-batch.sh <epic-id> --limit=N          # Up to N tasks
 #   ticket-next-batch.sh <epic-id> --limit=0          # Empty batch (BATCH_SIZE: 0)
 #   ticket-next-batch.sh <epic-id> --limit=unlimited  # No cap (same as omitting --limit)
-#   ticket-next-batch.sh <epic-id> --json       # Machine-readable JSON output
+#   ticket-next-batch.sh <epic-id> --output json  # Machine-readable JSON output (-o json)
 #
 # Text output lines:
 #   EPIC: <id>  <title>
@@ -37,6 +37,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./rebar-config.sh
 source "$SCRIPT_DIR/rebar-config.sh"
+# Canonical structured-output flag (--output/-o); logic in ticket_output.py.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/ticket-output.sh"
 
 REPO_ROOT="$(_rebar_root)"
 if [ -z "$REPO_ROOT" ]; then
@@ -103,6 +106,12 @@ limit=0          # 0 = unlimited (no cap)
 limit_zero=false # true when user explicitly passes --limit=0 (empty batch)
 json_output=false
 
+# Resolve --output/-o (report profile: text|json) and strip it from the args.
+_resolve_output_format report "$@" || exit 2
+[ "$_OUTPUT_FMT" = "json" ] && json_output=true
+_strip_output_flags "$@"
+set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
+
 for arg in "$@"; do
     case "$arg" in
         --limit=*)
@@ -116,16 +125,13 @@ for arg in "$@"; do
                 limit_zero=true
             fi
             ;;
-        --json)
-            json_output=true
-            ;;
         --help|-h)
             sed -n '2,50p' "$0" | grep '^#' | sed 's/^# \?//'
             exit 0
             ;;
         -*)
             echo "Unknown flag: $arg" >&2
-            echo "Usage: ticket-next-batch.sh <epic-id> [--limit=N|unlimited] [--json]" >&2
+            echo "Usage: ticket-next-batch.sh <epic-id> [--limit=N|unlimited] [--output json]" >&2
             exit 2
             ;;
         *)
@@ -140,7 +146,7 @@ for arg in "$@"; do
 done
 
 if [ -z "$epic_id" ]; then
-    echo "Usage: ticket-next-batch.sh <epic-id> [--limit=N|unlimited] [--json]" >&2
+    echo "Usage: ticket-next-batch.sh <epic-id> [--limit=N|unlimited] [--output json]" >&2
     exit 2
 fi
 

@@ -2,13 +2,13 @@
 # ticket-show.sh
 # Show compiled state for one or more tickets by invoking the event reducer.
 #
-# Usage: ticket show [--format=<fmt>] [--include-scratch] <ticket_id> [<ticket_id> ...]
+# Usage: ticket show [--output llm] [--include-scratch] <ticket_id> [<ticket_id> ...]
 #   ticket_id: ID(s) of the ticket(s) to show. Multiple IDs print one
-#              compiled state per ticket; default format outputs each as a
+#              compiled state per ticket; default (json) outputs each as a
 #              standalone pretty-printed JSON document separated by blank
-#              lines; --format=llm emits one minified JSON object per line
+#              lines; --output llm emits one minified JSON object per line
 #              (NDJSON-compatible).
-#   --format=llm  Minified single-line JSON with shortened keys, stripped nulls,
+#   --output llm  Minified single-line JSON with shortened keys, stripped nulls,
 #                 and no verbose timestamps (created_at and env_id are omitted entirely).
 #                 Key mapping:
 #                   ticket_id   → id
@@ -43,6 +43,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=${_PLUGIN_ROOT}/scripts/ticket-lib.sh
 source "$SCRIPT_DIR/ticket-lib.sh"
+# Canonical structured-output flag (--output/-o); logic in ticket_output.py.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/ticket-output.sh"
 
 # Unset git hook env vars so git commands target the correct repo.
 unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_COMMON_DIR 2>/dev/null || true
@@ -57,26 +60,26 @@ fi
 
 # ── Usage ─────────────────────────────────────────────────────────────────────
 _usage() {
-    echo "Usage: ticket show [--format=llm] [--include-scratch] <ticket_id> [<ticket_id> ...]" >&2
+    echo "Usage: ticket show [--output llm] [--include-scratch] <ticket_id> [<ticket_id> ...]" >&2
     exit 1
 }
 
 # ── Parse arguments ──────────────────────────────────────────────────────────
+# Resolve the canonical --output/-o flag (reader: json|llm, default json) via the
+# single source of truth, then strip it so the loop only sees ids + own flags.
+if ! _resolve_output_format reader "$@"; then exit 2; fi
+format="default"
+[ "$_OUTPUT_FMT" = "llm" ] && format="llm"
+_strip_output_flags "$@"
+set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
+
 # Multi-ID support (bug jira-dig-2565): collect all positional args, not
 # just the first. Each ID is resolved and reduced independently below.
-format="default"
 include_scratch="false"
 ticket_ids=()
 
 for arg in "$@"; do
     case "$arg" in
-        --format=llm)
-            format="llm"
-            ;;
-        --format=*)
-            echo "Error: unsupported format '${arg#--format=}'. Supported: llm" >&2
-            exit 1
-            ;;
         --include-scratch)
             include_scratch="true"
             ;;

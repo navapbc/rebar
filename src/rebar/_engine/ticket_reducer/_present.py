@@ -5,7 +5,7 @@ The reducer keeps internal bookkeeping fields in its in-process state — notabl
 resolution markers used by transition/claim and compaction). Those must stay in
 the reducer for internal consumers, but they are NOT part of the public output
 contract and must not appear in ``show`` / ``list`` / ``search`` / ``ready`` /
-``--format=llm`` output.
+``--output llm`` output.
 
 Historically the jq ``show`` reducer omitted these keys while the Python reducer
 emitted them, which is exactly the show-vs-list shape divergence this filter (plus

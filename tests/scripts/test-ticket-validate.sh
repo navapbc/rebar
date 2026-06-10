@@ -3,7 +3,7 @@
 # RED integration tests for 'ticket validate' subcommand routing through the dispatcher.
 #
 # Tests verify that the dispatcher correctly routes 'ticket validate' to validate-issues.sh
-# and passes through all 5 exit tier values (0-4) and flags (--json, --terse).
+# and passes through all 5 exit tier values (0-4) and flags (--output json, --terse).
 #
 # RED STATE: Tests currently fail because the dispatcher does not have a 'validate'
 # case. They will pass (GREEN) after ticket-lib-api.sh ticket_validate() and the
@@ -262,24 +262,24 @@ else
     (( FAIL++ ))
 fi
 
-# ── Test 8: --json flag produces JSON-parseable output through dispatcher ─────
-echo "Test 8: --json flag produces JSON-parseable output through dispatcher"
+# ── Test 8: --output json flag produces JSON-parseable output through dispatcher ─────
+echo "Test 8: --output json flag produces JSON-parseable output through dispatcher"
 HEALTHY_JSON=$(_make_healthy_fixture)
 MOCK=$(make_ticket_cmd "$HEALTHY_JSON")
 
 json_output=""
 json_exit=0
-json_output=$(TICKET_CMD="$MOCK" "$DISPATCHER" validate --json 2>/dev/null) || json_exit=$?
+json_output=$(TICKET_CMD="$MOCK" "$DISPATCHER" validate --output json 2>/dev/null) || json_exit=$?
 
 # Must parse as valid JSON
 json_valid=0
 python3 -c "import json,sys; json.loads(sys.argv[1])" "$json_output" 2>/dev/null || json_valid=$?
 
 if [[ $json_valid -eq 0 ]]; then
-    echo "  PASS: --json flag produced JSON-parseable output through dispatcher"
+    echo "  PASS: --output json flag produced JSON-parseable output through dispatcher"
     (( PASS++ ))
 else
-    echo "  FAIL: --json flag did not produce parseable JSON through dispatcher (RED — expected before GREEN)" >&2
+    echo "  FAIL: --output json flag did not produce parseable JSON through dispatcher (RED — expected before GREEN)" >&2
     echo "  Output (first 5 lines): $(printf '%s\n' "$json_output" | head -5)" >&2
     (( FAIL++ ))
 fi

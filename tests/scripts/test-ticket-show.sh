@@ -198,8 +198,8 @@ sys.exit(0 if found else 1)
 }
 test_ticket_show_valid_json_with_embedded_json_comments
 
-# ── Test 4: ticket show --format=llm outputs minified single-line JSON ────────
-echo "Test 4: ticket show --format=llm outputs minified single-line JSON"
+# ── Test 4: ticket show --output llm outputs minified single-line JSON ────────
+echo "Test 4: ticket show --output llm outputs minified single-line JSON"
 test_ticket_show_llm_format_minified() {
     if [ ! -f "$TICKET_SHOW_SCRIPT" ]; then
         assert_eq "ticket-show.sh exists" "exists" "missing"
@@ -217,13 +217,13 @@ test_ticket_show_llm_format_minified() {
         return
     fi
 
-    # Run ticket show --format=llm
+    # Run ticket show --output llm
     local llm_output
     local exit_code=0
-    llm_output=$(cd "$repo" && bash "$TICKET_SCRIPT" show --format=llm "$ticket_id" 2>/dev/null) || exit_code=$?
+    llm_output=$(cd "$repo" && bash "$TICKET_SCRIPT" show --output llm "$ticket_id" 2>/dev/null) || exit_code=$?
 
     # Assert: exits 0
-    assert_eq "ticket show --format=llm exits 0" "0" "$exit_code"
+    assert_eq "ticket show --output llm exits 0" "0" "$exit_code"
 
     # Assert: output is a single line (minified JSON — no newlines)
     local line_count
@@ -293,8 +293,8 @@ PYEOF
 }
 test_ticket_show_llm_format_minified
 
-# ── Test 5: ticket show --format=llm token reduction >= 50% vs standard ──────
-echo "Test 5: ticket show --format=llm is at least 50% smaller than standard output"
+# ── Test 5: ticket show --output llm token reduction >= 50% vs standard ──────
+echo "Test 5: ticket show --output llm is at least 50% smaller than standard output"
 test_ticket_show_llm_token_reduction() {
     if [ ! -f "$TICKET_SHOW_SCRIPT" ]; then
         assert_eq "ticket-show.sh exists" "exists" "missing"
@@ -318,7 +318,7 @@ test_ticket_show_llm_token_reduction() {
 
     local standard_output llm_output
     standard_output=$(cd "$repo" && bash "$TICKET_SCRIPT" show "$ticket_id" 2>/dev/null) || true
-    llm_output=$(cd "$repo" && bash "$TICKET_SCRIPT" show --format=llm "$ticket_id" 2>/dev/null) || true
+    llm_output=$(cd "$repo" && bash "$TICKET_SCRIPT" show --output llm "$ticket_id" 2>/dev/null) || true
 
     if [ -z "$standard_output" ] || [ -z "$llm_output" ]; then
         assert_eq "both outputs non-empty for token reduction check" "non-empty" "empty"
@@ -678,14 +678,14 @@ test_ticket_show_accepts_multiple_ids() {
 
     # llm format: each ticket is one self-delimiting line of NDJSON.
     local llm_output="" llm_exit=0
-    llm_output=$(cd "$repo" && bash "$TICKET_SCRIPT" show --format=llm "$id_a" "$id_b" 2>/dev/null) || llm_exit=$?
+    llm_output=$(cd "$repo" && bash "$TICKET_SCRIPT" show --output llm "$id_a" "$id_b" 2>/dev/null) || llm_exit=$?
 
-    assert_eq "ticket show --format=llm with 2 ids exits 0" "0" "$llm_exit"
+    assert_eq "ticket show --output llm with 2 ids exits 0" "0" "$llm_exit"
     local llm_line_count
     llm_line_count=$(printf '%s\n' "$llm_output" | grep -c '^{' || true)
-    assert_eq "ticket show --format=llm with 2 ids emits 2 ndjson lines" "2" "$llm_line_count"
-    assert_contains "ticket show --format=llm output references id_a" "$id_a" "$llm_output"
-    assert_contains "ticket show --format=llm output references id_b" "$id_b" "$llm_output"
+    assert_eq "ticket show --output llm with 2 ids emits 2 ndjson lines" "2" "$llm_line_count"
+    assert_contains "ticket show --output llm output references id_a" "$id_a" "$llm_output"
+    assert_contains "ticket show --output llm output references id_b" "$id_b" "$llm_output"
 
     # Default format: each ticket is a pretty-printed JSON document; both
     # tickets must appear in the output.
@@ -703,7 +703,7 @@ test_ticket_show_accepts_multiple_ids() {
     # in the partial-failure case. Bug jira-dig-2565 follow-up review of
     # PR #282 (CodeRabbit).
     local mixed_output="" mixed_exit=0
-    mixed_output=$(cd "$repo" && bash "$TICKET_SCRIPT" show --format=llm "$id_a" "nonexistent-id-zzz9-yyyy" 2>/dev/null) || mixed_exit=$?
+    mixed_output=$(cd "$repo" && bash "$TICKET_SCRIPT" show --output llm "$id_a" "nonexistent-id-zzz9-yyyy" 2>/dev/null) || mixed_exit=$?
     assert_ne "ticket show with valid+invalid ids exits non-zero" "0" "$mixed_exit"
     assert_contains "ticket show with valid+invalid ids still emits the valid ticket" "$id_a" "$mixed_output"
 

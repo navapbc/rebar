@@ -2,8 +2,8 @@
 # ticket-bridge-status.sh
 # Show the status of the last bridge run.
 #
-# Usage: ticket bridge-status [--format=json]
-#   --format=json  Output raw JSON from status file (plus computed unresolved_alerts_count)
+# Usage: ticket bridge-status [--output json]
+#   --output json  Output raw JSON from status file (plus computed unresolved_alerts_count); -o json
 #
 # Status file: <repo_root>/.tickets-tracker/.bridge-status.json
 # Format:
@@ -23,6 +23,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Canonical structured-output flag (--output/-o); logic in ticket_output.py.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/ticket-output.sh"
+
 # Allow tests to inject a custom tracker directory via TICKETS_TRACKER_DIR env var.
 # When GIT_DIR is set (e.g., in tests), derive REPO_ROOT from its parent to avoid
 # requiring an actual git repository at that path.
@@ -40,22 +44,20 @@ STATUS_FILE="$TRACKER_DIR/.bridge-status.json"
 
 # ── Usage ─────────────────────────────────────────────────────────────────────
 _usage() {
-    echo "Usage: ticket bridge-status [--format=json]" >&2
+    echo "Usage: ticket bridge-status [--output json]" >&2
     exit 1
 }
 
 # ── Parse arguments ──────────────────────────────────────────────────────────
+# Resolve --output/-o (report profile: text|json) and strip it from the args.
+_resolve_output_format report "$@" || exit 1
 format="default"
+[ "$_OUTPUT_FMT" = "json" ] && format="json"
+_strip_output_flags "$@"
+set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
 
 for arg in "$@"; do
     case "$arg" in
-        --format=json)
-            format="json"
-            ;;
-        --format=*)
-            echo "Error: unsupported format '${arg#--format=}'. Supported: json" >&2
-            exit 1
-            ;;
         -*)
             echo "Error: unknown option '$arg'" >&2
             _usage
