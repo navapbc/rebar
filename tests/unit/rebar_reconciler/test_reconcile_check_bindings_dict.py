@@ -65,12 +65,9 @@ def test_reconcile_check_passes_dict_binding_store(tmp_path, monkeypatch):
 
     class _FakeFetcher:
         @staticmethod
-        def fetch_snapshot(pass_id, repo_root):
-            out = repo_root / "bridge_state" / "snapshots"
-            out.mkdir(parents=True, exist_ok=True)
-            p = out / f"{pass_id}.json"
-            p.write_text("{}")
-            return p
+        def compute_snapshot(pass_id, repo_root):
+            # No-write counterpart: reconcile-check must not write a snapshot.
+            return {}
 
     def _fake_try_load_step(name):
         if name == "reconcile_check":
@@ -139,12 +136,9 @@ def test_reconcile_check_uses_binding_store_module_when_available(tmp_path, monk
 
     class _FakeFetcher:
         @staticmethod
-        def fetch_snapshot(pass_id, repo_root):
-            out = repo_root / "bridge_state" / "snapshots"
-            out.mkdir(parents=True, exist_ok=True)
-            p = out / f"{pass_id}.json"
-            p.write_text("{}")
-            return p
+        def compute_snapshot(pass_id, repo_root):
+            # No-write counterpart: reconcile-check must not write a snapshot.
+            return {}
 
     def _fake_try_load_step(name):
         if name == "reconcile_check":

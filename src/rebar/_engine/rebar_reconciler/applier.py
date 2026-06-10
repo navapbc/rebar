@@ -2593,6 +2593,7 @@ def apply(
     client=None,
     mode=None,
     binding_store=None,
+    persist: bool = True,
 ):
     """Polymorphic dispatch entry point.
 
@@ -2850,7 +2851,11 @@ def apply(
     is_dry_run = mode_mod is not None and mode == mode_mod.Mode.DRY_RUN
     manifest_path = None
     try:
-        if not is_dry_run:
+        # When persist is False (cap-0 no-write modes), skip _apply_batch
+        # entirely so no manifest file (not even an empty one) is written.
+        # cap-0 already left mutations_input == [] so the batch would be a
+        # no-op write anyway; this just suppresses the file side effect.
+        if not is_dry_run and persist:
             manifest_path = _apply_batch(
                 outbound_list,
                 pass_id,
@@ -2955,6 +2960,13 @@ def apply(
             }
             for m in deferred_for_manifest
         ]
+
+        # No-write contract (cap-0 modes, persist=False): produce the full
+        # computed plan as a dict and RETURN it WITHOUT writing any manifest
+        # file. The caller (reconcile_once) surfaces this plan to stdout and
+        # treats manifest_path as None for tally purposes.
+        if not persist:
+            return rendered_with_meta
 
         # DRY_RUN may have skipped _apply_batch entirely (when mutations_input
         # was empty) — _apply_batch still wrote an empty manifest. Either way,

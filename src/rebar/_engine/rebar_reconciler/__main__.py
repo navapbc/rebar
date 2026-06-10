@@ -106,14 +106,15 @@ def _run_reconcile_check(repo_root: Path) -> int:
         return 1
 
     try:
-        # Fetch current Jira snapshot
+        # Fetch current Jira snapshot. reconcile-check is read-only — use
+        # compute_snapshot (no bridge_state/snapshots/<pass>.json write) so the
+        # diagnostic does not mutate the local store (ticket yaw-plait-doe).
         pass_id = datetime.datetime.now(datetime.timezone.utc).strftime(
             "%Y-%m-%dT%H-%M-%S"
         )
-        curr_path = fetcher.fetch_snapshot(pass_id, repo_root)
         import json as _json
 
-        jira_snapshot = _json.loads(curr_path.read_text())
+        jira_snapshot = fetcher.compute_snapshot(pass_id, repo_root)
 
         # Load local tickets from .tickets-tracker
         tracker_dir = repo_root / ".tickets-tracker"  # tickets-boundary-ok
@@ -233,6 +234,22 @@ def run_pass(
     computed = result.get("mutation_count", 0)
     applied = result.get("mutations_applied", computed)
     failures = result.get("mutation_failures", 0)
+
+    # No-write (cap-0) modes (dry-run / reconcile-check via reconcile_once):
+    # emit the COMPUTED plan as JSON to STDOUT so library callers
+    # (rebar.reconcile) and MCP receive the full plan. The human-readable
+    # OK/RECON summary goes to STDERR so it does not corrupt the JSON payload.
+    # Writing-mode output shape is unchanged (OK line on stdout, no JSON).
+    if result.get("no_write"):
+        import json as _json
+
+        print(
+            f"OK: dry-run computed {computed} mutations (0 applied, no writes)",
+            file=sys.stderr,
+        )
+        print(_json.dumps(result))
+        return 0
+
     if computed == 0 and applied == 0:
         print("OK: steady-state pass converged — 0 mutations")
     elif failures == 0:

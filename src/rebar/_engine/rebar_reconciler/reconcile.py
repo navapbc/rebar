@@ -503,6 +503,54 @@ def _mutation_matches_filter(mutation: Any, target_set: set[str]) -> bool:
     return False
 
 
+def _build_plan_entries(mutations) -> list[dict]:
+    """Build a list of per-mutation plan entries for the no-write report.
+
+    Each entry carries enough detail to be a useful plan:
+    ``{direction, action, target, local_id}``. Tolerates both typed Mutation
+    objects (``.direction``/``.action`` enums) and legacy dict mutations.
+    """
+    entries: list[dict] = []
+    for m in mutations:
+        direction = getattr(m, "direction", None)
+        action = getattr(m, "action", None)
+        if direction is not None or action is not None:
+            d = str(getattr(direction, "value", direction) or "")
+            a = str(getattr(action, "value", action) or "")
+            target = getattr(m, "target", None)
+            prov = getattr(m, "provenance", None) or {}
+            local_id = prov.get("local_id") if isinstance(prov, Mapping) else None
+        else:
+            d = str(m.get("direction", "") or "")
+            a = str(m.get("action", "") or "")
+            target = m.get("key") or m.get("target")
+            local_id = m.get("local_id")
+        entries.append(
+            {
+                "direction": d,
+                "action": a,
+                "target": target,
+                "local_id": local_id,
+            }
+        )
+    return entries
+
+
+class _NoOpSyncLogger:
+    """No-op stand-in for SyncLogger used by cap-0 (no-write) passes.
+
+    Implements the full surface ``reconcile_once`` calls on a sync logger
+    (``log`` and ``close``) but writes nothing — so a dry-run / reconcile-check
+    pass produces no ``sync-log-<pass>.jsonl`` file.
+    """
+
+    def log(self, *args, **kwargs) -> None:  # noqa: D401
+        return None
+
+    def close(self) -> None:
+        return None
+
+
 def reconcile_once(
     pass_id: str,
     repo_root: Path | None = None,
@@ -557,10 +605,29 @@ def reconcile_once(
     sync_logger_mod = _load("reconcile_sync_logger", "sync_logger.py")
 
     # -----------------------------------------------------------------------
+    # Persistence gating (ticket yaw-plait-doe).
+    #
+    # cap-0 modes (dry-run, reconcile-check) are documented as read-only: they
+    # run the full differ COMPUTATION and PRODUCE the report, but must write
+    # NOTHING to the local store. Every write point below is gated on `persist`.
+    #
+    # target_mode None defaults to LIVE → persists. dry-run / reconcile-check
+    # → cap 0 → persist=False. bootstrap-* / live → non-zero/None cap → persist.
+    # -----------------------------------------------------------------------
+    mode_mod = _load("rebar_reconciler.mode", "mode.py")
+    if target_mode is None:
+        persist = True
+    else:
+        persist = mode_mod.MODE_CAPS.get(target_mode) != 0
+
+    # -----------------------------------------------------------------------
     # Sync logger: create at pass start, close at pass end (finally block).
+    # In no-write mode use a no-op logger so no sync-log-<ts>.jsonl is created.
     # -----------------------------------------------------------------------
     log_path = repo_root / "bridge_state" / f"sync-log-{pass_id}.jsonl"
-    sync_logger = sync_logger_mod.SyncLogger(log_path)
+    sync_logger = (
+        sync_logger_mod.SyncLogger(log_path) if persist else _NoOpSyncLogger()
+    )
     sync_logger.log(
         "sync_pass_start",
         pass_id=pass_id,
@@ -659,9 +726,14 @@ def reconcile_once(
     else:
         prev_snapshot = {}
 
-    # Fetch current remote state
-    curr_path = fetcher.fetch_snapshot(pass_id, repo_root)
-    curr_snapshot: dict = json.loads(curr_path.read_text())
+    # Fetch current remote state. In no-write mode use compute_snapshot so no
+    # snapshot file is written; the differ runs identically on curr_snapshot.
+    if persist:
+        curr_path = fetcher.fetch_snapshot(pass_id, repo_root)
+        curr_snapshot: dict = json.loads(curr_path.read_text())
+    else:
+        curr_path = None
+        curr_snapshot = fetcher.compute_snapshot(pass_id, repo_root)
 
     # Check structural invariants on the post-fetch snapshot, before diffing.
     # check_at_most_one_local_id returns only the filed violations (capped
@@ -671,9 +743,17 @@ def reconcile_once(
     #
     # Filtered passes skip invariant bug-filing to avoid side effects on
     # pre-existing violations outside the test scope.
-    if filter_local_ids:
+    # Compose the bug-filing gate: invariant checks FILE local bug tickets
+    # (CREATE events), so they must be skipped both for filtered passes (scope
+    # leak) and for cap-0 no-write passes (ticket yaw-plait-doe).
+    skip_invariant_filing = (not persist) or bool(filter_local_ids)
+    if skip_invariant_filing:
+        _reason = "no-write mode" if not persist else "filtered pass"
+        # Diagnostic line → stderr so no-write mode keeps STDOUT a pure JSON
+        # payload (the computed plan) for library/MCP callers.
         print(  # noqa: T201
-            f"invariants: skipped (filtered pass, {len(curr_snapshot)} issues in snapshot)"
+            f"invariants: skipped ({_reason}, {len(curr_snapshot)} issues in snapshot)",
+            file=sys.stderr,
         )
     else:
         filed = invariants_mod.check_at_most_one_local_id(
@@ -690,7 +770,7 @@ def reconcile_once(
     #
     # Filtered passes skip this to avoid seeding repair mutations for
     # non-test tickets that would leak outside the filter scope.
-    if filter_local_ids:
+    if skip_invariant_filing:
         quarantine_keys: set[str] = set()
         seed_repair_property_mutations: list = []
     else:
@@ -743,6 +823,10 @@ def reconcile_once(
         if action_str != mut_mod_for_action.MutationAction.repair_property.value:
             continue
         if isinstance(follow_on, Mapping) and follow_on.get("kind") == "schema_drift":
+            # report_schema_drift FILES a local bug ticket + writes an alert
+            # record (CREATE events). Skip in no-write / filtered passes.
+            if skip_invariant_filing:
+                continue
             invariants_mod.report_schema_drift(
                 follow_on.get("target"),
                 follow_on.get("observed"),
@@ -1046,6 +1130,7 @@ def reconcile_once(
     # for tests/test_dispatch_coverage.py — it is no longer called from
     # reconcile_once.
     manifest_path = None
+    nowrite_plan: dict | None = None
     apply_exc: BaseException | None = None
     try:
         # Backward compatibility: tests stub applier.apply with a signature
@@ -1063,74 +1148,90 @@ def reconcile_once(
                 repo_root,
                 mode=target_mode,
                 binding_store=binding_store,
+                persist=persist,
             )
     except BaseException as exc:  # noqa: BLE001 — must re-raise after recording
         apply_exc = exc
         raise
     finally:
-        per_type_counts = health_mod.count_open_by_type(repo_root=repo_root)
-        if apply_exc is None:
-            health_mod.record_pass(
-                pass_id=pass_id,
-                pre_fsck=0,
-                post_fsck=0,
-                per_type_counts=per_type_counts,
-                local_mutation_count=len(mutations),
-                repo_root=repo_root,
-            )
-        else:
-            # Classify the failure: reschedule vs generic apply error.
-            failure_kind = (
-                "reschedule"
-                if type(apply_exc).__name__ == "RescheduleError"
-                else "apply_error"
-            )
-            health_mod.record_pass(
-                pass_id=pass_id,
-                pre_fsck=0,
-                post_fsck=0,
-                per_type_counts=per_type_counts,
-                local_mutation_count=0,
-                repo_root=repo_root,
-                failure_kind=failure_kind,
-            )
+        # In no-write mode, apply() returns the computed plan dict instead of
+        # a manifest Path. Capture it for the report and treat manifest_path
+        # as None so no on-disk manifest is expected by the tally below.
+        if not persist and isinstance(manifest_path, dict):
+            nowrite_plan = manifest_path
+            manifest_path = None
+        # health.record_pass writes a bridge_state/health/<ts>.json file —
+        # skip it in no-write mode (ticket yaw-plait-doe).
+        if persist:
+            per_type_counts = health_mod.count_open_by_type(repo_root=repo_root)
+            if apply_exc is None:
+                health_mod.record_pass(
+                    pass_id=pass_id,
+                    pre_fsck=0,
+                    post_fsck=0,
+                    per_type_counts=per_type_counts,
+                    local_mutation_count=len(mutations),
+                    repo_root=repo_root,
+                )
+            else:
+                # Classify the failure: reschedule vs generic apply error.
+                failure_kind = (
+                    "reschedule"
+                    if type(apply_exc).__name__ == "RescheduleError"
+                    else "apply_error"
+                )
+                health_mod.record_pass(
+                    pass_id=pass_id,
+                    pre_fsck=0,
+                    post_fsck=0,
+                    per_type_counts=per_type_counts,
+                    local_mutation_count=0,
+                    repo_root=repo_root,
+                    failure_kind=failure_kind,
+                )
 
     # -------------------------------------------------------------------
     # Post-apply: save binding store, advance snapshot, close sync logger.
     # -------------------------------------------------------------------
-    try:
-        binding_store.save()
-        # Commit the updated bindings.json to the tickets orphan branch so
-        # it survives a concurrent ``git merge origin/tickets`` in the
-        # ticket-CLI's _push_tickets_branch() between reconciler passes.
-        # Without this commit, local probe runs lose newly-created bindings on
-        # the next ticket-CLI push, causing the next reconciler pass to see
-        # bound tickets as unbound and generate CREATE rather than UPDATE
-        # mutations (regression: outbound scalar-field edits never land).
-        if not _commit_binding_store_snapshot(binding_store, repo_root, pass_id):
-            # Commit failed — bindings are on disk but NOT on the tickets branch.
-            # A concurrent ``git merge origin/tickets`` between now and the next
-            # pass can clobber the working-tree bindings.json with the remote
-            # version, making bound tickets appear unbound (cf93b2b7ad class).
-            # _commit_binding_store_snapshot already logged the error and filed
-            # the alert. Do NOT abort the pass — commit failure must never break
-            # sync.
+    # binding_store.save() writes .bridge_state/bindings.json; the commit
+    # helper writes/commits it to the tickets branch. Both are store writes —
+    # skip the entire block in no-write mode (ticket yaw-plait-doe).
+    if persist:
+        try:
+            binding_store.save()
+            # Commit the updated bindings.json to the tickets orphan branch so
+            # it survives a concurrent ``git merge origin/tickets`` in the
+            # ticket-CLI's _push_tickets_branch() between reconciler passes.
+            # Without this commit, local probe runs lose newly-created bindings
+            # on the next ticket-CLI push, causing the next reconciler pass to
+            # see bound tickets as unbound and generate CREATE rather than
+            # UPDATE mutations (regression: outbound scalar edits never land).
+            if not _commit_binding_store_snapshot(binding_store, repo_root, pass_id):
+                # Commit failed — bindings are on disk but NOT on the tickets
+                # branch. A concurrent ``git merge origin/tickets`` between now
+                # and the next pass can clobber the working-tree bindings.json
+                # with the remote version, making bound tickets appear unbound
+                # (cf93b2b7ad class). _commit_binding_store_snapshot already
+                # logged the error and filed the alert. Do NOT abort the pass —
+                # commit failure must never break sync.
+                print(  # noqa: T201
+                    "ERROR: reconcile: binding-store commit to tickets branch failed; "
+                    "bindings are at risk of clobber on the next 'git merge origin/tickets'. "
+                    "The current pass will complete normally. Check git state in "
+                    ".tickets-tracker and ensure the GHA commit-back step runs to persist "
+                    "bindings before the next reconciler pass.",
+                    file=sys.stderr,
+                )
+        except Exception as exc:  # noqa: BLE001
             print(  # noqa: T201
-                "ERROR: reconcile: binding-store commit to tickets branch failed; "
-                "bindings are at risk of clobber on the next 'git merge origin/tickets'. "
-                "The current pass will complete normally. Check git state in "
-                ".tickets-tracker and ensure the GHA commit-back step runs to persist "
-                "bindings before the next reconciler pass.",
+                f"reconcile: binding store save failed ({exc})",
                 file=sys.stderr,
             )
-    except Exception as exc:  # noqa: BLE001
-        print(  # noqa: T201
-            f"reconcile: binding store save failed ({exc})",
-            file=sys.stderr,
-        )
 
-    # Advance prev snapshot so the next call converges to zero mutations
-    shutil.copy2(curr_path, prev_path)
+        # Advance prev snapshot so the next call converges to zero mutations.
+        # Only in persist mode: curr_path is None in no-write mode and the
+        # prev_snapshot must stay untouched (no store write).
+        shutil.copy2(curr_path, prev_path)
 
     # Bug 85a1: surface the truthful applied-count and failure-count by parsing
     # the manifest written by _apply_batch. Before this fix, sync_pass_end and
@@ -1147,9 +1248,14 @@ def reconcile_once(
     # cannot be parsed, the counts conservatively default to (mutation_count, 0)
     # so existing callers reading mutations_applied receive a number consistent
     # with the prior contract.
+    # No-write (cap-0) mode: nothing is applied, so the tally is (0, 0) and the
+    # computed plan comes from the in-memory rendered dict (no manifest file).
     mutations_applied = len(mutations)
     mutation_failures = 0
-    if manifest_path is not None:
+    if nowrite_plan is not None:
+        mutations_applied = 0
+        mutation_failures = 0
+    elif manifest_path is not None:
         try:
             manifest_data = json.loads(Path(manifest_path).read_text())
             # Two manifest shapes coexist (bug 85a1 follow-up):
@@ -1193,6 +1299,13 @@ def reconcile_once(
         "mutation_failures": mutation_failures,
         "manifest_path": str(manifest_path),
     }
+    # No-write (cap-0) mode: surface the COMPUTED plan in the result so callers
+    # (rebar.reconcile / MCP) receive the detailed mutation plan even though no
+    # manifest file was written (ticket yaw-plait-doe).
+    if nowrite_plan is not None:
+        result["no_write"] = True
+        result["mode"] = getattr(target_mode, "value", str(target_mode))
+        result["plan"] = _build_plan_entries(mutations)
     if filter_local_ids:
         result["filtered"] = True
         result["filter_local_ids"] = sorted(filter_local_ids)

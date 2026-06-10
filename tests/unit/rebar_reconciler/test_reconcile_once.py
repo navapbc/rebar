@@ -360,3 +360,173 @@ def test_real_field_change_converges_after_one_pass(
         f"A genuine field change must produce mutation_count=1 on the detecting pass, "
         f"got {result2['mutation_count']}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Ticket yaw-plait-doe: cap-0 (dry-run / reconcile-check) modes must run the
+# full differ COMPUTATION but write NOTHING to the local store.
+# ---------------------------------------------------------------------------
+
+MODE_PATH = (
+    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mode.py"
+)
+
+
+@pytest.fixture(scope="module")
+def mode_mod():
+    """Load mode.py under the dotted key reconcile_once uses."""
+    return _load_module("rebar_reconciler.mode", MODE_PATH)
+
+
+def _make_jql_partitioned_acli(issues: list[dict]) -> types.ModuleType:
+    """Faithful acli stub that partitions by the active/Done JQL split.
+
+    The production fetcher issues TWO queries (active ``status != Done`` then
+    Done-recent). A real Jira partitions the set by status, so no key appears
+    in both. The simple ``_make_acli_module`` returns the same list for every
+    query, which spuriously triggers the cross-query dedup observability alert.
+    This stub returns an issue only for the query whose status-band matches,
+    mirroring production so the snapshot build emits no dedup alert.
+    """
+    mod = _make_acli_module(issues)
+    Base = mod.AcliClient
+
+    class _Partitioned(Base):
+        def search_issues(self, jql: str, **kwargs) -> list[dict]:
+            # Active query carries ``status != "Done"``; Done-recent carries
+            # ``status = "Done"``. Distinguish on the ``!=`` operator so the
+            # active substring (which also contains ``= "Done"``) isn't
+            # mis-classified as the Done query.
+            done = '= "Done"' in jql and '!= "Done"' not in jql
+            out = []
+            for issue in issues:
+                name = (issue.get("fields", {}).get("status") or {}).get("name", "")
+                is_done = name == "Done"
+                if done == is_done:
+                    out.append(issue)
+            return out
+
+    mod.AcliClient = _Partitioned
+    return mod
+
+
+def _patch_partitioned(fetcher_mod, applier_mod, issues: list[dict]):
+    """Like _patch_acli_and_concurrency but with the JQL-partitioned stub."""
+    import contextlib
+    from unittest.mock import patch
+
+    mock_acli = _make_jql_partitioned_acli(issues)
+    ok_concurrency = _make_ok_concurrency()
+
+    @contextlib.contextmanager
+    def _ctx():
+        with (
+            patch.object(fetcher_mod, "_load_acli", return_value=mock_acli),
+            patch.object(applier_mod, "_load_acli", return_value=mock_acli),
+        ):
+            original = applier_mod._load_concurrency
+            applier_mod._load_concurrency = lambda: ok_concurrency
+            try:
+                yield
+            finally:
+                applier_mod._load_concurrency = original
+
+    return _ctx()
+
+
+def _snapshot_tree(root: Path) -> set[str]:
+    """Return the set of relative file paths currently under *root*."""
+    return {
+        str(p.relative_to(root))
+        for p in root.rglob("*")
+        if p.is_file()
+    }
+
+
+def test_dry_run_reconcile_once_writes_nothing(
+    tmp_path, reconcile_mod, fetcher_mod, applier_mod, mode_mod
+):
+    """A DRY_RUN reconcile_once produces ZERO local writes.
+
+    The full differ runs (mutation_count reflects the computed plan), but NO
+    file may appear under bridge_state/ or .tickets-tracker/.bridge_state/ —
+    no snapshot, manifest, health record, sync-log, bindings, or prev_snapshot.
+    Encodes the fix for ticket yaw-plait-doe (cap-0 modes were persisting).
+    """
+    issues = _make_stable_issues()
+    pass_id = "dry-run-no-write"
+
+    before = _snapshot_tree(tmp_path)
+
+    with _patch_partitioned(fetcher_mod, applier_mod, issues):
+        result = reconcile_mod.reconcile_once(
+            pass_id, repo_root=tmp_path, target_mode=mode_mod.Mode.DRY_RUN
+        )
+
+    after = _snapshot_tree(tmp_path)
+    new_files = sorted(after - before)
+
+    assert new_files == [], (
+        f"DRY_RUN reconcile_once must write NOTHING, but created: {new_files}"
+    )
+
+    # The computed plan must still be produced — two stable issues with an
+    # empty prev snapshot yield non-zero computed mutations.
+    assert result["mutation_count"] > 0, (
+        "DRY_RUN must still COMPUTE the mutation plan; "
+        f"got mutation_count={result['mutation_count']}"
+    )
+    # Nothing applied; plan surfaced.
+    assert result["mutations_applied"] == 0
+    assert result.get("no_write") is True
+    assert result.get("mode") == "dry-run"
+    assert isinstance(result.get("plan"), list)
+    assert len(result["plan"]) == result["mutation_count"]
+    # Plan entries carry useful per-mutation detail.
+    for entry in result["plan"]:
+        assert set(entry) >= {"direction", "action", "target", "local_id"}
+
+
+def test_reconcile_check_reconcile_once_writes_nothing(
+    tmp_path, reconcile_mod, fetcher_mod, applier_mod, mode_mod
+):
+    """RECONCILE_CHECK is also a cap-0 mode → reconcile_once must not write."""
+    issues = _make_stable_issues()
+    pass_id = "reconcile-check-no-write"
+
+    before = _snapshot_tree(tmp_path)
+
+    with _patch_partitioned(fetcher_mod, applier_mod, issues):
+        result = reconcile_mod.reconcile_once(
+            pass_id, repo_root=tmp_path, target_mode=mode_mod.Mode.RECONCILE_CHECK
+        )
+
+    after = _snapshot_tree(tmp_path)
+    new_files = sorted(after - before)
+
+    assert new_files == [], (
+        f"RECONCILE_CHECK reconcile_once must write NOTHING, but created: {new_files}"
+    )
+    assert result["mutation_count"] > 0
+    assert result["mutations_applied"] == 0
+    assert result.get("no_write") is True
+
+
+def test_live_mode_reconcile_once_still_persists(
+    tmp_path, reconcile_mod, fetcher_mod, applier_mod, mode_mod
+):
+    """Writing modes (LIVE) keep persisting: a snapshot file IS written."""
+    issues = _make_stable_issues()
+    pass_id = "live-persists"
+
+    with _patch_partitioned(fetcher_mod, applier_mod, issues):
+        result = reconcile_mod.reconcile_once(
+            pass_id, repo_root=tmp_path, target_mode=mode_mod.Mode.LIVE
+        )
+
+    after = _snapshot_tree(tmp_path)
+    # The snapshot file is the canonical persistence artifact.
+    assert f"bridge_state/snapshots/{pass_id}.json" in after, (
+        f"LIVE must persist the snapshot; files: {sorted(after)}"
+    )
+    assert result.get("no_write") is not True

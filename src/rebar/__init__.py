@@ -462,6 +462,16 @@ def reconcile(mode: str = "dry-run", *, repo_root=None) -> dict:
     try:
         return json.loads(out)
     except json.JSONDecodeError:
+        # No-write modes (dry-run / reconcile-check) emit the computed plan as
+        # a JSON object on the FINAL stdout line; any preceding diagnostic
+        # lines are informational. Fall back to parsing the last line so the
+        # plan still reaches the caller (ticket yaw-plait-doe).
+        lines = [ln for ln in out.splitlines() if ln.strip()]
+        if lines:
+            try:
+                return json.loads(lines[-1])
+            except json.JSONDecodeError:
+                pass
         return {"mode": mode, "returncode": cp.returncode, "output": out, "stderr": cp.stderr}
 
 

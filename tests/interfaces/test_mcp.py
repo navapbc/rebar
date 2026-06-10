@@ -100,6 +100,67 @@ def test_reconcile_cap0_modes_allowed_in_both_gates(
             assert "disabled" not in str(exc).lower(), (mode, readonly, exc)
 
 
+@pytest.fixture
+def _empty_acli(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    """Put a fake `acli` on PATH that returns an EMPTY but valid issue list for
+    any search (`[]`). This lets a dry-run reconcile complete a real pass —
+    fetch → diff → (no-write) report — without touching real Jira, so the test
+    can assert the no-write contract end-to-end."""
+    import os
+    import stat
+
+    bindir = tmp_path / "empty-bin"
+    bindir.mkdir()
+    acli = bindir / "acli"
+    acli.write_text("#!/bin/sh\necho '[]'\nexit 0\n")
+    acli.chmod(acli.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    monkeypatch.setenv("PATH", str(bindir) + os.pathsep + os.environ.get("PATH", ""))
+    # Ensure no JIRA_* creds leak in → parent/comment REST enrichment degrades
+    # to {} (it never writes), keeping the pass fully offline.
+    for var in ("JIRA_URL", "JIRA_USER", "JIRA_API_TOKEN"):
+        monkeypatch.delenv(var, raising=False)
+    return bindir
+
+
+def _store_write_tree(repo) -> set[str]:
+    """Set of files under the reconciler's store-write locations."""
+    import pathlib
+
+    roots = [
+        pathlib.Path(repo) / "bridge_state",
+        pathlib.Path(repo) / ".tickets-tracker" / ".bridge_state",
+    ]
+    out: set[str] = set()
+    for r in roots:
+        if r.exists():
+            out |= {str(p.relative_to(repo)) for p in r.rglob("*") if p.is_file()}
+    return out
+
+
+def test_readonly_dry_run_reconcile_performs_zero_store_writes(
+    monkeypatch: pytest.MonkeyPatch, rebar_repo, _empty_acli
+) -> None:
+    """A REBAR_MCP_READONLY=1 server running reconcile(mode='dry-run') must
+    perform ZERO local-store writes — no snapshot / manifest / health /
+    sync-log / bindings / prev_snapshot file (ticket yaw-plait-doe). The
+    no-write contract holds universally, not only because of the readonly gate
+    (cap-0 dry-run is allowed under readonly), so the differ runs but nothing
+    is persisted."""
+    monkeypatch.setenv("REBAR_MCP_READONLY", "1")
+    monkeypatch.delenv("REBAR_MCP_ALLOW_RECONCILE_LIVE", raising=False)
+    srv = build_server()
+
+    before = _store_write_tree(rebar_repo)
+    result = asyncio.run(srv.call_tool("reconcile", {"mode": "dry-run"}))
+    after = _store_write_tree(rebar_repo)
+
+    new_files = sorted(after - before)
+    assert new_files == [], (
+        f"readonly dry-run reconcile must write NOTHING to the store, "
+        f"but created: {new_files} (result={result})"
+    )
+
+
 @pytest.mark.parametrize("mode", _MUTATING_MODES)
 def test_reconcile_mutating_refused_under_readonly(
     monkeypatch: pytest.MonkeyPatch, rebar_repo, mode, _loud_acli

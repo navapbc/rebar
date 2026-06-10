@@ -229,14 +229,16 @@ def collect(
     return issues
 
 
-def fetch_snapshot(
+def _build_snapshot(
     pass_id: str,
     repo_root: Path | None = None,
-) -> Path:
-    """Fetch all matching DIG issues across the two-JQL split and write a
-    normalized snapshot JSON.
+) -> dict:
+    """Fetch all matching DIG issues across the two-JQL split and build the
+    normalized snapshot dict — WITHOUT writing it to disk.
 
-    Issues two queries in order (see ``JQLS``):
+    This is the snapshot-BUILDING body shared by :func:`fetch_snapshot` (which
+    writes the result) and :func:`compute_snapshot` (which returns it without
+    writing). Issues two queries in order (see ``JQLS``):
 
       1. ``JQL_ACTIVE``  — active working set (``status != "Done"``).
       2. ``JQL_DONE_RECENT`` — Done issues, ``ORDER BY updated DESC``,
@@ -247,8 +249,10 @@ def fetch_snapshot(
     status partitions the set — but are tolerated for robustness) are
     deduped via ``seen_keys`` and emit a ``fetcher-dedup-suppressed`` alert.
 
-    Writes a deterministically-ordered JSON snapshot to
-    ``bridge_state/snapshots/<pass_id>.json``.
+    Note: the dedup-alert path (``alert_store.append``) is an observability
+    write that fires only on a cross-query duplicate, which the status
+    partition makes impossible in normal operation — it is not a snapshot-
+    persistence write and is preserved in both code paths.
 
     Raises:
         SilentTruncationError: Per-query ACLI ceiling hit, or same-token-
@@ -401,9 +405,44 @@ def fetch_snapshot(
             exc,
         )
 
+    return snapshot
+
+
+def fetch_snapshot(
+    pass_id: str,
+    repo_root: Path | None = None,
+) -> Path:
+    """Fetch the normalized Jira snapshot and WRITE it to disk, returning the path.
+
+    Builds the snapshot via :func:`_build_snapshot`, then writes a
+    deterministically-ordered JSON file to
+    ``bridge_state/snapshots/<pass_id>.json`` and returns that path. External
+    contract (Path return, on-disk file) is unchanged — ~18 callers/tests
+    depend on it.
+    """
+    if repo_root is None:
+        repo_root = Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])
+
+    snapshot = _build_snapshot(pass_id, repo_root)
+
     output_dir = repo_root / "bridge_state" / "snapshots"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{pass_id}.json"
     output_path.write_text(json.dumps(snapshot, sort_keys=True, indent=2))
 
     return output_path
+
+
+def compute_snapshot(
+    pass_id: str,
+    repo_root: Path | None = None,
+) -> dict:
+    """Fetch the normalized Jira snapshot and RETURN it as a dict — writing NOTHING.
+
+    Read-only counterpart to :func:`fetch_snapshot` for cap-0 (no-write) modes
+    (dry-run / reconcile-check). Performs the identical fetch + merge +
+    enrichment, but persists no snapshot file. The returned dict is byte-for-
+    byte equivalent (after ``json.dumps(..., sort_keys=True)``) to what
+    ``fetch_snapshot`` would have written, so the differ runs identically.
+    """
+    return _build_snapshot(pass_id, repo_root)
