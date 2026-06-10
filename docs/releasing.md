@@ -124,9 +124,6 @@ shipping a fixed version bump (re-run this step on the new version).
 ---
 
 ## Known follow-ups (not release-blocking)
-- **GitHub Actions Node 20 deprecation** (`actions/checkout@v4`,
-  `setup-python@v5`, `upload/download-artifact@v4`) — bump to Node-24-compatible
-  versions before GitHub forces the switch (deadline ~2026-06-16).
 - **Lock fallback asymmetry** — when util-linux `flock` is absent, the bash write
   paths use a `mkdir` lock while `ticket_txn.py` uses `fcntl.flock`; they don't
   mutually exclude. Pre-existing; unify on a Python-`fcntl` fallback when touched.
