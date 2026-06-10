@@ -19,6 +19,14 @@ set -euo pipefail
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Canonical structured-output flag (--output/-o); logic in ticket_output.py.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/ticket-output.sh"
+
+# Resolve --output/-o (report: text|json) and strip it from the args.
+_resolve_output_format report "$@" || exit 2
+_strip_output_flags "$@"
+set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
 
 if [ $# -ne 1 ]; then
     echo "Usage: issue-quality-check.sh <id>" >&2
@@ -27,12 +35,19 @@ fi
 
 ID="$1"
 
+# Emit one structured gate result {verdict, line_count, keyword_count, ac_items,
+# file_impact, reason} from the metrics in scope (default 0 before they're set).
+_qc_json() {  # <verdict> <reason>
+    python3 -c 'import json,sys; print(json.dumps({"verdict": sys.argv[1], "line_count": int(sys.argv[2]), "keyword_count": int(sys.argv[3]), "ac_items": int(sys.argv[4]), "file_impact": int(sys.argv[5]), "reason": sys.argv[6]}))' \
+        "$1" "${line_count:-0}" "${keyword_count:-0}" "${ac_items:-0}" "${file_impact_items:-0}" "$2"
+}
+
 # Get the full issue output (stays in script, not in orchestrator context).
 # TICKET_CMD is the sole interface post-v3 migration.
 TICKET_CMD="${TICKET_CMD:-$SCRIPT_DIR/ticket}"
 output=$("$TICKET_CMD" show "$ID" 2>/dev/null) || output=""
 if [ -z "$output" ]; then
-    echo "QUALITY: fail - could not load issue $ID, using inline prompt"
+    if [ "$_OUTPUT_FMT" = "json" ]; then _qc_json fail "could not load issue $ID"; else echo "QUALITY: fail - could not load issue $ID, using inline prompt"; fi
     exit 1
 fi
 
@@ -102,26 +117,26 @@ fi
 # Stories use prose done-definitions by design — no AC block required.
 if [ "$ticket_type" = "story" ]; then
     if [ "$line_count" -ge 5 ] && [ "$keyword_count" -ge 1 ]; then
-        echo "QUALITY: pass (story - prose done-definitions) ($line_count lines, $keyword_count criteria)"
+        if [ "$_OUTPUT_FMT" = "json" ]; then _qc_json pass "story - prose done-definitions"; else echo "QUALITY: pass (story - prose done-definitions) ($line_count lines, $keyword_count criteria)"; fi
         exit 0
     else
-        echo "QUALITY: fail - description too sparse ($line_count lines), using inline prompt"
+        if [ "$_OUTPUT_FMT" = "json" ]; then _qc_json fail "description too sparse ($line_count lines)"; else echo "QUALITY: fail - description too sparse ($line_count lines), using inline prompt"; fi
         exit 1
     fi
 fi
 
 # Phase 1: warn but don't enforce AC block requirement (tasks/bugs/epics)
 if [ "$ac_items" -ge 1 ]; then
-    echo "QUALITY: pass ($line_count lines, $keyword_count criteria, $ac_items AC items, $file_impact_items file impact)"
+    if [ "$_OUTPUT_FMT" = "json" ]; then _qc_json pass "$ac_items AC items, $file_impact_items file impact"; else echo "QUALITY: pass ($line_count lines, $keyword_count criteria, $ac_items AC items, $file_impact_items file impact)"; fi
     exit 0
 elif [ "$file_impact_items" -ge 1 ]; then
-    echo "QUALITY: pass ($line_count lines, $keyword_count criteria, $file_impact_items file impact)"
+    if [ "$_OUTPUT_FMT" = "json" ]; then _qc_json pass "$file_impact_items file impact"; else echo "QUALITY: pass ($line_count lines, $keyword_count criteria, $file_impact_items file impact)"; fi
     exit 0
 elif [ "$line_count" -ge 5 ] && [ "$keyword_count" -ge 1 ]; then
-    echo "QUALITY: pass (legacy - no AC/file impact) ($line_count lines, $keyword_count criteria)"
+    if [ "$_OUTPUT_FMT" = "json" ]; then _qc_json pass "legacy - no AC/file impact"; else echo "QUALITY: pass (legacy - no AC/file impact) ($line_count lines, $keyword_count criteria)"; fi
     echo "WARNING: Task lacks Acceptance block and File Impact section. Add via 'rebar comment <id> <note>'." >&2
     exit 0
 else
-    echo "QUALITY: fail - description too sparse ($line_count lines), using inline prompt"
+    if [ "$_OUTPUT_FMT" = "json" ]; then _qc_json fail "description too sparse ($line_count lines)"; else echo "QUALITY: fail - description too sparse ($line_count lines), using inline prompt"; fi
     exit 1
 fi

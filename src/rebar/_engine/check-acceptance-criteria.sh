@@ -9,17 +9,31 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TICKET_CMD="${TICKET_CMD:-$SCRIPT_DIR/ticket}"
+# Canonical structured-output flag (--output/-o); logic in ticket_output.py.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/ticket-output.sh"
+
+# Resolve --output/-o (report: text|json) and strip it from the args.
+_resolve_output_format report "$@" || exit 2
+_strip_output_flags "$@"
+set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
 
 ID="${1:?Usage: check-acceptance-criteria.sh <id>}"
+
+# Emit one structured gate result {verdict, criteria_count, reason}.
+_ac_json() {
+    python3 -c 'import json,sys; print(json.dumps({"verdict": sys.argv[1], "criteria_count": int(sys.argv[2]), "reason": sys.argv[3]}))' \
+        "$1" "$2" "$3"
+}
 
 # ticket show exits non-zero when a ticket is not found.
 # Capture output and check exit code to detect failure.
 output=$("$TICKET_CMD" show "$ID" 2>/dev/null) || {
-    echo "AC_CHECK: fail - could not load $ID"
+    if [ "$_OUTPUT_FMT" = "json" ]; then _ac_json fail 0 "could not load $ID"; else echo "AC_CHECK: fail - could not load $ID"; fi
     exit 1
 }
 if [ -z "$output" ]; then
-    echo "AC_CHECK: fail - could not load $ID"
+    if [ "$_OUTPUT_FMT" = "json" ]; then _ac_json fail 0 "could not load $ID"; else echo "AC_CHECK: fail - could not load $ID"; fi
     exit 1
 fi
 
@@ -55,9 +69,17 @@ ac_count=$(echo "$text" | awk '
 ac_count="${ac_count:-0}"
 
 if [ "$ac_count" -ge 1 ]; then
-    echo "AC_CHECK: pass ($ac_count criteria lines)"
+    if [ "$_OUTPUT_FMT" = "json" ]; then
+        _ac_json pass "$ac_count" "$ac_count criteria lines"
+    else
+        echo "AC_CHECK: pass ($ac_count criteria lines)"
+    fi
     exit 0
 else
-    echo "AC_CHECK: fail - no ACCEPTANCE CRITERIA section in $ID (use: rebar create with an '## Acceptance Criteria' section with checklist items)"
+    if [ "$_OUTPUT_FMT" = "json" ]; then
+        _ac_json fail 0 "no ACCEPTANCE CRITERIA section in $ID"
+    else
+        echo "AC_CHECK: fail - no ACCEPTANCE CRITERIA section in $ID (use: rebar create with an '## Acceptance Criteria' section with checklist items)"
+    fi
     exit 1
 fi

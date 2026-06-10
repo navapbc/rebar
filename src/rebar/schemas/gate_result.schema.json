@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/gate_result.schema.json",
+  "title": "GateResult",
+  "description": "Per-ticket quality-gate result, shared by `check-ac` and `quality-check` under --output json (and the library check_ac/quality_check, which add a convenience `passed`). `verdict` is the canonical pass/fail; gate-specific metrics appear as additional properties — check-ac adds criteria_count; quality-check adds line_count/keyword_count/ac_items/file_impact.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["verdict", "reason"],
+  "properties": {
+    "verdict": { "type": "string", "enum": ["pass", "fail"] },
+    "reason": { "type": "string" },
+    "passed": { "type": "boolean", "description": "Added by the library/MCP wrappers (verdict == 'pass')." },
+    "criteria_count": { "type": "integer" },
+    "line_count": { "type": "integer" },
+    "keyword_count": { "type": "integer" },
+    "ac_items": { "type": "integer" },
+    "file_impact": { "type": "integer" }
+  }
+}

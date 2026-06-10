@@ -185,6 +185,55 @@ def test_lifecycle_results_via_library(rebar_repo: Path) -> None:
     schemas.validator(schemas.TRANSITION_RESULT).validate(rebar.reopen(tid, repo_root=r))
 
 
+# ── report command shapes (T4) ────────────────────────────────────────────────
+def test_gate_results(rebar_repo: Path) -> None:
+    r = str(rebar_repo)
+    tid = rebar.create_ticket(
+        "task", "Gate probe",
+        description="Body line.\n\n## Acceptance Criteria\n- [ ] a\n- [ ] b", repo_root=r,
+    )
+    v = schemas.validator(schemas.GATE_RESULT)
+    # CLI --output json
+    v.validate(_cli_json("check-ac", tid, "--output", "json", cwd=r))
+    v.validate(_cli_json("quality-check", tid, "--output", "json", cwd=r))
+    # library (adds `passed`)
+    v.validate(rebar.check_ac(tid, repo_root=r))
+    v.validate(rebar.quality_check(tid, repo_root=r))
+
+
+def test_summary_shape(rebar_repo: Path) -> None:
+    r = str(rebar_repo)
+    a = rebar.create_ticket("task", "S a", repo_root=r)
+    b = rebar.create_ticket("task", "S b", repo_root=r)
+    v = schemas.validator(schemas.SUMMARY)
+    v.validate(_cli_json("summary", a, b, "--output", "json", cwd=r))
+    v.validate(rebar.summary(a, b, repo_root=r))
+
+
+def test_list_epics_shape_and_exit_codes(rebar_repo: Path) -> None:
+    r = str(rebar_repo)
+    v = schemas.validator(schemas.LIST_EPICS)
+    # no epics -> exit 1, still valid JSON
+    cp = _cli("list-epics", "--output", "json", cwd=r)
+    assert cp.returncode == 1
+    v.validate(json.loads(cp.stdout))
+    # one open epic -> exit 0
+    rebar.create_ticket("epic", "E1", repo_root=r)
+    cp = _cli("list-epics", "--output", "json", cwd=r)
+    assert cp.returncode == 0
+    v.validate(json.loads(cp.stdout))
+    v.validate(rebar.list_epics(repo_root=r))
+
+
+def test_fsck_and_bridge_fsck_shapes(rebar_repo: Path) -> None:
+    r = str(rebar_repo)
+    schemas.validator(schemas.FSCK).validate(_cli_json("fsck", "--output", "json", cwd=r))
+    schemas.validator(schemas.BRIDGE_FSCK).validate(
+        _cli_json("bridge-fsck", "--output", "json", cwd=r)
+    )
+    schemas.validator(schemas.BRIDGE_FSCK).validate(rebar.bridge_fsck(repo_root=r))
+
+
 # ── MCP typed returns advertise an outputSchema ───────────────────────────────
 def test_mcp_read_tools_advertise_output_schema(rebar_repo: Path) -> None:
     """Every typed read tool advertises an MCP outputSchema (so agents get a
@@ -197,7 +246,7 @@ def test_mcp_read_tools_advertise_output_schema(rebar_repo: Path) -> None:
     typed_read_tools = {
         "show_ticket", "list_tickets", "search", "ticket_deps", "ready_tickets",
         "next_batch", "clarity_check", "validate", "get_file_impact",
-        "get_verify_commands",
+        "get_verify_commands", "check_ac", "quality_check",
     }
     tools = {t.name: t for t in asyncio.run(build_server().list_tools())}
     for name in typed_read_tools:

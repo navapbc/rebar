@@ -54,6 +54,10 @@ __all__ = [
     "CLAIM_RESULT",
     "TRANSITION_RESULT",
     "DELETE_RESULT",
+    "GATE_RESULT",
+    "SUMMARY",
+    "LIST_EPICS",
+    "FSCK",
     "COMMON",
 ]
 
@@ -75,6 +79,10 @@ CREATE_RESULT = "create_result"
 CLAIM_RESULT = "claim_result"
 TRANSITION_RESULT = "transition_result"
 DELETE_RESULT = "delete_result"
+GATE_RESULT = "gate_result"
+SUMMARY = "summary"
+LIST_EPICS = "list_epics"
+FSCK = "fsck"
 
 # The authoritative map of every structured (--output json / always-JSON) output
 # to its schema. Keyed by command, or <command>.<interface> when an interface's
@@ -103,6 +111,11 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "transition": TRANSITION_RESULT,
     "reopen": TRANSITION_RESULT,
     "delete": DELETE_RESULT,
+    "check_ac": GATE_RESULT,
+    "quality_check": GATE_RESULT,
+    "summary": SUMMARY,
+    "list_epics": LIST_EPICS,
+    "fsck": FSCK,
 }
 
 

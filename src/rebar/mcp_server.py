@@ -97,6 +97,11 @@ try:
         status: str
         assignee: str | None = None
 
+    class GateResultOut(_Out):
+        verdict: str
+        reason: str
+        passed: bool | None = None
+
     # NOTE: transition/reopen return {ticket_id, from, to, newly_unblocked}; the
     # `from` key is a Python reserved word, so those tools return a plain dict
     # (FastMCP serializes it correctly) rather than a typed model.
@@ -104,7 +109,7 @@ except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     TicketStateOut = None  # type: ignore[assignment,misc]
     DepsGraphOut = ClarityResultOut = ValidateReportOut = None  # type: ignore[assignment,misc]
     NextBatchOut = FileImpactItemOut = VerifyCommandItemOut = None  # type: ignore[assignment,misc]
-    CreateResultOut = ClaimResultOut = None  # type: ignore[assignment,misc]
+    CreateResultOut = ClaimResultOut = GateResultOut = None  # type: ignore[assignment,misc]
 
 
 def _readonly() -> bool:
@@ -209,14 +214,16 @@ def build_server():
         return ClarityResultOut.model_validate(rebar.clarity_check(ticket_id))
 
     @mcp.tool()
-    def check_ac(ticket_id: str) -> dict:
-        """Check the ticket has an Acceptance Criteria block (passed / output)."""
-        return rebar.check_ac(ticket_id)
+    def check_ac(ticket_id: str) -> GateResultOut:
+        """Check the ticket has an Acceptance Criteria block
+        ({verdict, criteria_count, reason, passed})."""
+        return GateResultOut.model_validate(rebar.check_ac(ticket_id))
 
     @mcp.tool()
-    def quality_check(ticket_id: str) -> dict:
-        """Check ticket dispatch readiness (passed / output)."""
-        return rebar.quality_check(ticket_id)
+    def quality_check(ticket_id: str) -> GateResultOut:
+        """Check ticket dispatch readiness ({verdict, line_count, keyword_count,
+        ac_items, file_impact, reason, passed})."""
+        return GateResultOut.model_validate(rebar.quality_check(ticket_id))
 
     @mcp.tool()
     def validate() -> ValidateReportOut:
@@ -233,6 +240,27 @@ def build_server():
     def get_verify_commands(ticket_id: str) -> list[VerifyCommandItemOut]:
         """Get the DD-level verify-commands array for a ticket."""
         return [VerifyCommandItemOut.model_validate(e) for e in rebar.get_verify_commands(ticket_id)]
+
+    @mcp.tool()
+    def summary(ticket_ids: list[str]) -> list[dict]:
+        """One-line-per-ticket summary [{ticket_id, status, title, blocking_summary}]."""
+        return rebar.summary(*ticket_ids)
+
+    @mcp.tool()
+    def list_epics(
+        include_blocked: bool = False,
+        has_tag: str | None = None,
+        min_children: int | None = None,
+    ) -> dict:
+        """Open epics as {p0_bugs, epics}. include_blocked adds blocked epics."""
+        return rebar.list_epics(
+            include_blocked=include_blocked, has_tag=has_tag, min_children=min_children
+        )
+
+    @mcp.tool()
+    def bridge_fsck() -> dict:
+        """Audit bridge mappings -> {orphaned, duplicates, stale}."""
+        return rebar.bridge_fsck()
 
     @mcp.tool()
     def reconcile(mode: str = "dry-run") -> dict:

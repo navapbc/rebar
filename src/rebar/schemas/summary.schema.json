@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/summary.schema.json",
+  "title": "Summary",
+  "description": "Result of `rebar summary <id>… --output json`: one object per requested id. blocking_summary is 'ready' or 'blocked by: <ids>'. Unresolvable ids yield {status:'unknown', title:null, blocking_summary:null}.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": true,
+    "required": ["ticket_id", "status"],
+    "properties": {
+      "ticket_id": { "type": "string" },
+      "status": { "type": "string" },
+      "title": { "type": ["string", "null"] },
+      "blocking_summary": { "type": ["string", "null"] }
+    }
+  }
+}

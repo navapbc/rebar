@@ -25,6 +25,16 @@ set -euo pipefail
 #   2 — Open epics exist but all are blocked (details on stderr)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Canonical structured-output flag (--output/-o); logic in ticket_output.py.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/ticket-output.sh"
+
+# Resolve --output/-o (report: text|json) and strip it; exported to the python
+# emit block below as _LE_FMT (json emits {p0_bugs, epics}; exit 0/1/2 preserved).
+_resolve_output_format report "$@" || exit 2
+export _LE_FMT="$_OUTPUT_FMT"
+_strip_output_flags "$@"
+set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
 
 show_all=false
 # min_children and max_children are intentionally unset by default (use ${var+x} set-check)
@@ -347,9 +357,51 @@ if without_tag is not None:
     open_unblocked = [e for e in open_unblocked if _passes_without_tag_filter(e)]
     open_blocked   = [e for e in open_blocked   if _passes_without_tag_filter(e)]
 
+p0_bugs.sort(key=lambda x: x['id'])
+
+_fmt = os.environ.get('_LE_FMT', 'text')
+
+# Build set of IDs that are blocking other epics (needed by both formats).
+blocking_ids = set()
+for e in open_blocked:
+    for blocker_id in e.get('blockers', []):
+        # Only mark as BLOCKING if the blocker is itself an epic
+        blocker_entry = index.get(blocker_id, {})
+        if blocker_entry.get('type') == 'epic':
+            blocking_ids.add(blocker_id)
+
+# Exit code logic (shared by both formats):
+#   0 — at least one unblocked epic (in-progress or ready)
+#   2 — open epics exist but all are blocked
+#   1 — no open epics at all
+def _exit_code():
+    if in_progress or open_unblocked:
+        return 0
+    if open_blocked:
+        return 2
+    return 1
+
+if _fmt == 'json':
+    def _epic(e, blocked):
+        return {
+            'id': e['id'],
+            'alias': e.get('alias'),
+            'priority': e['priority'],
+            'title': e['title'],
+            'children_count': e['children'],
+            'blocking': e['id'] in blocking_ids,
+            'blocked': blocked,
+            'blockers': e.get('blockers', []),
+        }
+    epics = ([_epic(e, False) for e in in_progress]
+             + [_epic(e, False) for e in open_unblocked]
+             + [_epic(e, True) for e in open_blocked])
+    print(json.dumps({'p0_bugs': p0_bugs, 'epics': epics}))
+    sys.exit(_exit_code())
+
+# ── text format (unchanged) ───────────────────────────────────────────────────
 # Display P0 bugs above the epic list (if any exist) -- must come BEFORE the
 # 'no open epics' early exit so P0 bugs are always visible.
-p0_bugs.sort(key=lambda x: x['id'])
 if p0_bugs:
     print('P0 bugs requiring attention:')
     for bug in p0_bugs:
@@ -358,15 +410,6 @@ if p0_bugs:
 if not in_progress and not open_unblocked and not open_blocked:
     print('No open epics found.', file=sys.stderr)
     sys.exit(1)
-
-# Build set of IDs that are blocking other epics
-blocking_ids = set()
-for e in open_blocked:
-    for blocker_id in e.get('blockers', []):
-        # Only mark as BLOCKING if the blocker is itself an epic
-        blocker_entry = index.get(blocker_id, {})
-        if blocker_entry.get('type') == 'epic':
-            blocking_ids.add(blocker_id)
 
 # In-progress epics first (P* signals already claimed work)
 for e in in_progress:

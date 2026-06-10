@@ -21,6 +21,55 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
 TRACKER_DIR="$REPO_ROOT/.tickets-tracker"
 
+# Canonical structured-output flag (--output/-o); logic in ticket_output.py.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/ticket-output.sh"
+_resolve_output_format report "$@" || exit 2
+_strip_output_flags "$@"
+set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
+
+# --output json: re-run the (untouched) text scan, then transform its tagged
+# lines into {issues:[{kind,ticket_id?,filename?,detail}], fixed[], issue_count}.
+# Re-running in text mode keeps the scan logic in exactly one place.
+if [ "$_OUTPUT_FMT" = "json" ]; then
+    _fsck_rc=0
+    _fsck_text=$(bash "$0" ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"} 2>/dev/null) || _fsck_rc=$?
+    printf '%s' "$_fsck_text" | python3 -c '
+import json, re, sys
+issues, fixed = [], []
+for line in sys.stdin.read().splitlines():
+    if not line.strip():
+        continue
+    if line.startswith("FIXED:"):
+        fixed.append(line[len("FIXED:"):].strip())
+        continue
+    if line.startswith("fsck complete"):
+        continue
+    m = re.match(r"^([A-Z_]+):\s*(.*)$", line)
+    if not m:
+        continue
+    kind, rest = m.group(1).lower(), m.group(2)
+    item = {"kind": kind}
+    # Only the per-ticket kinds carry a "<ticket_id>[/<filename>] — <detail>"
+    # head; free-form notices (warn/push_pending) keep the whole text as detail.
+    structured = {"corrupt", "corrupt_create", "missing_create",
+                  "snapshot_inconsistent", "orphan_event"}
+    head, sep, detail = rest.partition(" — ")
+    if sep and kind in structured:
+        if "/" in head:
+            tid, _, fn = head.partition("/")
+            item["ticket_id"], item["filename"] = tid, fn
+        else:
+            item["ticket_id"] = head
+        item["detail"] = detail
+    else:
+        item["detail"] = rest
+    issues.append(item)
+print(json.dumps({"issues": issues, "fixed": fixed, "issue_count": len(issues)}))
+'
+    exit "$_fsck_rc"
+fi
+
 # ── Validate ticket system ───────────────────────────────────────────────────
 if [ ! -d "$TRACKER_DIR" ]; then
     echo "Error: ticket system not initialized (.tickets-tracker/ not found)." >&2

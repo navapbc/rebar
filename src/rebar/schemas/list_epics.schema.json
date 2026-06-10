@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/list_epics.schema.json",
+  "title": "ListEpics",
+  "description": "Result of `rebar list-epics --output json`: {p0_bugs, epics}. Exit codes are preserved (0=an unblocked epic exists, 1=no open epics, 2=all blocked). `blocking` marks an epic that blocks another epic; `blocked` marks one with open blockers.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["p0_bugs", "epics"],
+  "properties": {
+    "p0_bugs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "title"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" }
+        }
+      }
+    },
+    "epics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "title", "priority", "children_count", "blocking", "blocked", "blockers"],
+        "properties": {
+          "id": { "type": "string" },
+          "alias": { "type": ["string", "null"] },
+          "priority": { "$ref": "common.schema.json#/$defs/priority" },
+          "title": { "type": "string" },
+          "children_count": { "type": "integer" },
+          "blocking": { "type": "boolean" },
+          "blocked": { "type": "boolean" },
+          "blockers": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

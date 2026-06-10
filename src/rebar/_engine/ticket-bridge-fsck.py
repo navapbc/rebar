@@ -437,6 +437,20 @@ def _format_report(findings: dict) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point. Returns 0 on clean, 1 on issues."""
+    # Canonical --output/-o flag via the single source of truth (ticket_output),
+    # then argparse the rest. text -> human report; json -> {orphaned,duplicates,stale}.
+    _sys_dir = str(Path(__file__).resolve().parent)
+    if _sys_dir not in sys.path:
+        sys.path.insert(0, _sys_dir)
+    from ticket_output import OutputFormatError, parse_output
+
+    raw = list(sys.argv[1:]) if argv is None else list(argv)
+    try:
+        out_fmt, raw = parse_output(raw, "report")
+    except OutputFormatError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
     parser = argparse.ArgumentParser(
         description="Audit bridge mappings in the ticket system for anomalies."
     )
@@ -458,7 +472,7 @@ def main(argv: list[str] | None = None) -> int:
             "Primarily for testing — omit in production use."
         ),
     )
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw)
 
     # Resolve tracker path: explicit arg > env var > repo root default
     if args.tickets_tracker:
@@ -483,8 +497,10 @@ def main(argv: list[str] | None = None) -> int:
         tracker_path = repo_root / ".tickets-tracker"  # tickets-boundary-ok
 
     findings = audit_bridge_mappings(tracker_path, now_ts=args.now_ts)
-    report = _format_report(findings)
-    print(report)
+    if out_fmt == "json":
+        print(json.dumps({k: findings.get(k, []) for k in ("orphaned", "duplicates", "stale")}))
+    else:
+        print(_format_report(findings))
 
     has_issues = any(findings.get(k) for k in ("orphaned", "duplicates", "stale"))
     return 1 if has_issues else 0

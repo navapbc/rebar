@@ -184,15 +184,26 @@ def clarity_check(ticket_id: str, *, repo_root=None) -> dict:
 
 
 def check_ac(ticket_id: str, *, repo_root=None) -> dict:
-    """Check a ticket has an Acceptance Criteria block → {passed, output}."""
-    cp = _run(["check-ac", ticket_id], repo_root=repo_root)
-    return {"passed": cp.returncode == 0, "output": (cp.stdout + cp.stderr).strip()}
+    """Check a ticket has an Acceptance Criteria block.
+
+    Returns the engine's structured gate result {verdict, criteria_count, reason}
+    plus a convenience ``passed`` boolean (verdict == 'pass')."""
+    cp = _run(["check-ac", ticket_id, "--output", "json"], repo_root=repo_root)
+    data = _json_or(cp.stdout, {"verdict": "fail", "reason": (cp.stdout or cp.stderr).strip()})
+    data["passed"] = cp.returncode == 0
+    return data
 
 
 def quality_check(ticket_id: str, *, repo_root=None) -> dict:
-    """Check ticket dispatch readiness → {passed, output}."""
-    cp = _run(["quality-check", ticket_id], repo_root=repo_root)
-    return {"passed": cp.returncode == 0, "output": (cp.stdout + cp.stderr).strip()}
+    """Check ticket dispatch readiness.
+
+    Returns the engine's structured gate result {verdict, line_count,
+    keyword_count, ac_items, file_impact, reason} plus a convenience ``passed``
+    boolean (verdict == 'pass')."""
+    cp = _run(["quality-check", ticket_id, "--output", "json"], repo_root=repo_root)
+    data = _json_or(cp.stdout, {"verdict": "fail", "reason": (cp.stdout or cp.stderr).strip()})
+    data["passed"] = cp.returncode == 0
+    return data
 
 
 def validate(*, repo_root=None) -> dict:
@@ -360,6 +371,35 @@ def fsck(*, recover: bool = False, repo_root=None) -> str:
     return _ok(_run(args, repo_root=repo_root), what="fsck")
 
 
+def summary(*ticket_ids: str, repo_root=None) -> list:
+    """One-line-per-ticket summary as structured JSON: a list of
+    {ticket_id, status, title, blocking_summary}."""
+    out = _ok(_run(["summary", *ticket_ids, "--output", "json"], repo_root=repo_root), what="summary")
+    return _json_or(out, [])
+
+
+def list_epics(*, include_blocked: bool = False, has_tag=None, min_children=None, repo_root=None) -> dict:
+    """Open epics as structured JSON: {p0_bugs, epics}. ``include_blocked`` adds
+    blocked epics (the engine's ``--all``). list-epics encodes "no epics"/"all
+    blocked" as exit 1/2 — those are NORMAL here, not errors."""
+    args = ["list-epics", "--output", "json"]
+    if include_blocked:
+        args.append("--all")
+    if has_tag:
+        args.append(f"--has-tag={has_tag}")
+    if min_children is not None:
+        args.append(f"--min-children={min_children}")
+    cp = _run(args, repo_root=repo_root)
+    return _json_or(cp.stdout, {"p0_bugs": [], "epics": []})
+
+
+def bridge_fsck(*, repo_root=None) -> dict:
+    """Bridge-mapping audit as structured JSON: {orphaned, duplicates, stale}.
+    A nonzero exit (anomalies present) is NORMAL, not an error."""
+    cp = _run(["bridge-fsck", "--output", "json"], repo_root=repo_root)
+    return _json_or(cp.stdout, {"orphaned": [], "duplicates": [], "stale": []})
+
+
 # ── Reconciler (Jira sync) ────────────────────────────────────────────────────
 def reconcile(mode: str = "dry-run", *, repo_root=None) -> dict:
     """Run the Jira reconciler. Defaults to a non-mutating ``dry-run``.
@@ -420,6 +460,9 @@ __all__ = [
     "archive",
     "compact",
     "fsck",
+    "summary",
+    "list_epics",
+    "bridge_fsck",
     # quality gates + file-impact
     "clarity_check",
     "check_ac",
