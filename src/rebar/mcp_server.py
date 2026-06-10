@@ -1,7 +1,7 @@
 """rebar MCP server (FastMCP).
 
 Exposes the ticket system as MCP tools, built on the rebar Python library.
-Reads (``show``/``list``) use the library's subprocess wrappers (alias-aware);
+Reads (``show``/``list``) run in-process via rebar._reads (no subprocess);
 ``reconcile`` defaults to a non-mutating dry-run.
 
 Safety:
@@ -205,6 +205,11 @@ def build_server():
     def fsck(recover: bool = False) -> str:
         """Check ticket-store integrity (JSON validity, CREATE presence, lock
         cleanup). Set recover=True to run the recovery path."""
+        if recover and _readonly():
+            raise ValueError(
+                "fsck recover=True is a write operation and is disabled: this "
+                "server is read-only (REBAR_MCP_READONLY)"
+            )
         return rebar.fsck(recover=recover)
 
     # ── Quality gates + file-impact reads (WS5d) ───────────────────────────────
@@ -266,15 +271,32 @@ def build_server():
     def reconcile(mode: str = "dry-run") -> dict:
         """Run the Jira reconciler. Defaults to a non-mutating dry-run.
 
-        'live' mutates Jira and requires REBAR_MCP_ALLOW_RECONCILE_LIVE=1.
+        The Jira-mutating modes (bootstrap-strict, bootstrap-throttle, live) each
+        require REBAR_MCP_ALLOW_RECONCILE_LIVE=1 and are blocked under
+        REBAR_MCP_READONLY. reconcile-check / dry-run are non-mutating.
         """
-        if mode == "live" and os.environ.get(
-            "REBAR_MCP_ALLOW_RECONCILE_LIVE", ""
-        ).strip() not in ("1", "true", "yes"):
-            raise ValueError(
-                "live reconcile is disabled; set REBAR_MCP_ALLOW_RECONCILE_LIVE=1 to enable"
-            )
-        return rebar.reconcile(mode)
+        # Source the mode caps from the engine (single source of truth); the
+        # import resolves in-process because `import rebar` already put the
+        # engine dir on sys.path. Unknown mode -> ValueError -> clean tool error.
+        from rebar_reconciler.mode import MODE_CAPS, Mode
+
+        parsed = Mode.from_str(mode)
+        # Any cap != 0 mutates Jira (10/100/None — note LIVE's cap is None, so we
+        # gate on != 0, NOT > 0). cap-0 modes are non-mutating and always allowed.
+        if MODE_CAPS[parsed] != 0:
+            if _readonly():
+                raise ValueError(
+                    f"{parsed.value} reconcile is disabled: this server is "
+                    "read-only (REBAR_MCP_READONLY)"
+                )
+            if os.environ.get("REBAR_MCP_ALLOW_RECONCILE_LIVE", "").strip().lower() not in (
+                "1", "true", "yes",
+            ):
+                raise ValueError(
+                    f"{parsed.value} reconcile is disabled (mutating mode); "
+                    "set REBAR_MCP_ALLOW_RECONCILE_LIVE=1 to enable"
+                )
+        return rebar.reconcile(parsed.value)
 
     # ── Write tools (gated by REBAR_MCP_READONLY) ──────────────────────────────
     if not _readonly():
@@ -357,7 +379,8 @@ def build_server():
 
         @mcp.tool()
         def link_tickets(id1: str, id2: str, relation: str) -> str:
-            """Link two tickets (blocks | depends_on | relates_to)."""
+            """Link two tickets (one of the six canonical relations: blocks |
+            depends_on | relates_to | duplicates | supersedes | discovered_from)."""
             rebar.link(id1, id2, relation)
             return "ok"
 

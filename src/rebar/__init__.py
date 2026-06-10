@@ -12,6 +12,7 @@ for callers that want in-process bulk reads without subprocess overhead.
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import subprocess
 from typing import Any
@@ -19,7 +20,14 @@ from typing import Any
 from rebar import config
 from rebar._engine import dispatcher, engine_dir, engine_env, run
 
-__version__ = "0.3.0"
+try:
+    # Single source of truth: derive the version from the installed package
+    # metadata so it can never drift from the distribution version.
+    __version__ = importlib.metadata.version("nava-rebar")
+except importlib.metadata.PackageNotFoundError:  # pragma: no cover - dev checkout
+    # Not installed (e.g. running straight from a source tree without an editable
+    # install). Fall back to a sentinel rather than crashing import.
+    __version__ = "0+unknown"
 
 
 # ── Exceptions ───────────────────────────────────────────────────────────────
@@ -178,7 +186,17 @@ def _json_or(out: str, default):
 def clarity_check(ticket_id: str, *, repo_root=None) -> dict:
     """Score ticket clarity → {score, verdict, threshold, passed}."""
     cp = _run(["clarity-check", ticket_id], repo_root=repo_root)
-    data = _json_or(cp.stdout, {"output": (cp.stdout or cp.stderr).strip()})
+    data = _json_or(cp.stdout, None)
+    if not isinstance(data, dict) or "score" not in data:
+        # Schema-conformant structured failure (mirrors the sibling gates), so
+        # the result still validates against clarity_result.schema.json /
+        # ClarityResultOut. threshold 0 == "not evaluated" (do NOT hardcode 5).
+        data = {
+            "score": 0,
+            "verdict": "fail",
+            "threshold": 0,
+            "reason": (cp.stderr or cp.stdout).strip(),
+        }
     data["passed"] = cp.returncode == 0
     return data
 
@@ -263,7 +281,11 @@ def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> None:
 
 
 def link(id1: str, id2: str, relation: str, *, repo_root=None) -> None:
-    """Link two tickets (relation: blocks | depends_on | relates_to)."""
+    """Link two tickets.
+
+    ``relation`` must be one of the six canonical relations: blocks, depends_on,
+    relates_to, duplicates, supersedes, discovered_from.
+    """
     _ok(_run(["link", id1, id2, relation], repo_root=repo_root), what="link")
 
 
@@ -405,7 +427,9 @@ def reconcile(mode: str = "dry-run", *, repo_root=None) -> dict:
     """Run the Jira reconciler. Defaults to a non-mutating ``dry-run``.
 
     Modes: reconcile-check | dry-run | bootstrap-strict | bootstrap-throttle | live.
-    ``live`` mutates Jira and requires the ``acli`` binary + credentials.
+    The Jira-mutating modes are ``bootstrap-strict``, ``bootstrap-throttle`` and
+    ``live`` (each requires the ``acli`` binary + credentials); ``reconcile-check``
+    and ``dry-run`` are non-mutating.
     """
     root = str(config.repo_root(repo_root))
     cmd = [
