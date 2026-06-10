@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/_engine/ticket-lib-api.sh","reason":"element validation for file_impact + verify_commands"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781066329683711000,"uuid":"cec51d74-1e6d-476d-b4c7-9b99a69d22f9"}
