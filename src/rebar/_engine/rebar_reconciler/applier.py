@@ -544,6 +544,26 @@ _JIRA_TYPE_MAP: dict[str, str] = {
     "Sub-task": "task",
 }
 
+# rebar-status: annotation labels override the Jira workflow status on inbound
+# (blocked/cancelled have no live DIG workflow equivalent; the label is the
+# lossless encoding). Mirrors inbound_differ._REBAR_STATUS_LABEL_TO_LOCAL —
+# _apply_inbound_create applies the same precedence so a freshly imported
+# issue lands at the SAME local status the bound-ticket inbound differ would
+# compute on the next pass (ticket robe-creek-zealot).
+_REBAR_STATUS_LABEL_TO_LOCAL: dict[str, str] = {
+    "rebar-status:blocked": "blocked",
+    "rebar-status:cancelled": "cancelled",
+}
+
+# Bridge-internal label prefixes that must never leak into local ticket tags
+# at import time. Matches inbound_differ._EXCLUDED_PREFIXES minus "imported:"
+# (which is local-only and appended below, never present on Jira).
+_BRIDGE_INTERNAL_TAG_PREFIXES: tuple[str, ...] = (
+    "rebar-id:",
+    "rebar-id-",
+    "rebar-status:",
+)
+
 _JIRA_PRIORITY_MAP: dict[str, int] = {
     "Highest": 0,
     "High": 1,
@@ -589,11 +609,20 @@ def _jira_key_to_local_id(jira_key: str) -> str:
 
 
 def _jira_status_to_local(jira_status: str) -> str:
-    """Reverse-map a Jira status to a local status using config.local_to_jira_status.
+    """Reverse-map a Jira status to a local status using config.jira_to_local_status.
 
-    Ambiguous reverse mappings (multiple local statuses → same Jira status) are
-    resolved by lexicographic ordering of the local key, documented in
-    Implementation Notes of story bd19.
+    Uses the CANONICAL reverse map, not an inversion of local_to_jira_status.
+    The forward map is non-injective (blocked/in_progress → "In Progress";
+    closed/cancelled/deleted → "Done"), and the pre-fix lexicographic
+    tie-break over the inverted map picked the WRONG preimage: imported
+    "In Progress" issues materialised locally as blocked and "Done" issues
+    as cancelled (ticket robe-creek-zealot). blocked/cancelled are encoded
+    losslessly via rebar-status: annotation labels — callers that have the
+    issue's labels in hand (e.g. _apply_inbound_create) apply that override
+    BEFORE consulting this workflow-status map, mirroring
+    inbound_differ._map_jira_to_local_fields.
+
+    Unknown / unmapped statuses fall back to "open".
     """
     if not jira_status:
         return "open"
@@ -607,11 +636,10 @@ def _jira_status_to_local(jira_status: str) -> str:
             return "open"
         cfg_mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cfg_mod)  # type: ignore[union-attr]
-        mapping = getattr(cfg_mod, "local_to_jira_status", {}) or {}
+        mapping = getattr(cfg_mod, "jira_to_local_status", {}) or {}
     except Exception:
         return "open"
-    candidates = sorted(local for local, jira in mapping.items() if jira == jira_status)
-    return candidates[0] if candidates else "open"
+    return mapping.get(jira_status, "open")
 
 
 def _event_meta() -> tuple[int, str, str, str]:
@@ -812,7 +840,18 @@ def _apply_inbound_create(
     ticket_type = _JIRA_TYPE_MAP.get(issuetype, "task")
 
     tracker_dir = _resolve_tracker_dir(repo_root)
-    tags = list(payload.get("labels", []) or [])
+    # Labels live at the top level of both payload shapes (the flat differ
+    # shape IS fields); check fields first so a nested-"fields" payload that
+    # carries labels inside the wrapper is not missed.
+    raw_labels = list(fields.get("labels") or payload.get("labels") or [])
+    # Bridge-internal labels (rebar-id:*, rebar-status:*) are reconciler
+    # bookkeeping — they must not leak into local tags (the differs exclude
+    # them from label sync, so a leaked tag would never converge away).
+    tags = [
+        t
+        for t in raw_labels
+        if not (isinstance(t, str) and t.startswith(_BRIDGE_INTERNAL_TAG_PREFIXES))
+    ]
     if "imported:reconciler-bootstrap" not in tags:
         tags.append("imported:reconciler-bootstrap")
     # Parent sync (ticket 8b25): resolve the Jira parent field to a local id.
@@ -835,7 +874,12 @@ def _apply_inbound_create(
         "id": local_id,
         "ticket_type": ticket_type,
         "title": fields.get("summary", "") or jira_key,
-        "description": fields.get("description", "") or "",
+        # Live snapshots carry description as a raw ADF dict — normalize to
+        # plain text or the CREATE event stores a dict where the reducer
+        # expects a string (bug 1bb2 class), and the outbound differ then
+        # re-pushes the description on EVERY pass (dict never equals the
+        # ADF-decoded snapshot text). Ticket robe-creek-zealot.
+        "description": _normalize_adf_body(fields.get("description")),
         "parent_id": resolved_parent_id,
         "tags": tags,
     }
@@ -846,16 +890,46 @@ def _apply_inbound_create(
     create_path = _write_event_file(tracker_dir, local_id, "CREATE", create_data)
 
     # Status: write a STATUS event when the Jira status reverse-maps to
-    # something other than the reducer default ('open').
-    jira_status = _extract_name(fields.get("status"))
-    if jira_status:
-        local_status = _jira_status_to_local(jira_status)
-        if local_status and local_status != "open":
-            _write_event_file(
-                tracker_dir,
-                local_id,
-                "STATUS",
-                {"status": local_status, "current_status": "open"},
+    # something other than the reducer default ('open'). A rebar-status:
+    # annotation label takes precedence over the raw workflow status —
+    # same precedence as inbound_differ._map_jira_to_local_fields, so the
+    # import lands at the status the bound-ticket differ would compute.
+    local_status: str | None = None
+    for _lbl in raw_labels:
+        if isinstance(_lbl, str) and _lbl in _REBAR_STATUS_LABEL_TO_LOCAL:
+            local_status = _REBAR_STATUS_LABEL_TO_LOCAL[_lbl]
+            break
+    if local_status is None:
+        jira_status = _extract_name(fields.get("status"))
+        if jira_status:
+            local_status = _jira_status_to_local(jira_status)
+    if local_status and local_status != "open":
+        _write_event_file(
+            tracker_dir,
+            local_id,
+            "STATUS",
+            {"status": local_status, "current_status": "open"},
+        )
+
+    # Record the local<->jira binding NOW — we hold both ids. Without this,
+    # the outbound differ (whose bound/unbound signal is the binding store
+    # ALONE) sees the freshly imported ticket as unbound on the next pass and
+    # re-emits an outbound CREATE for it, converging only via create_one's
+    # dedup-skip JQL search — one wasted create + per-ticket Jira search per
+    # imported ticket (ticket robe-creek-zealot, 1-pass idempotency).
+    if binding_store is not None:
+        _bind_confirm = getattr(binding_store, "bind_confirm", None)
+        if _bind_confirm is not None:
+            _bind_confirm(local_id, jira_key)
+        else:
+            import sys as _sys
+
+            print(  # noqa: T201
+                f"WARNING: inbound_create: binding store lacks bind_confirm; "
+                f"{local_id!r}<->{jira_key!r} NOT bound at create — the next "
+                f"pass will re-emit an outbound create (dedup-skip will "
+                f"converge it).",
+                file=_sys.stderr,
             )
 
     # Write rebar-id label + local_id entity property back to Jira so the

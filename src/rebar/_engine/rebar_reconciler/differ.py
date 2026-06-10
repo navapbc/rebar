@@ -77,6 +77,34 @@ def _load_mutation() -> ModuleType:
     return mod
 
 
+# Bridge-internal label prefixes — written by the reconciler itself
+# (rebar-id:/rebar-id- identity labels from _apply_inbound_create /
+# create_one; rebar-status: annotation labels from outbound status logic;
+# imported: local-only bootstrap tags). Mirrors the _EXCLUDED_PREFIXES
+# tuples in outbound_differ.py / inbound_differ.py. The snapshot differ
+# compares the PREVIOUS pass's Jira snapshot against the current one, so
+# our own label write-back from the prior pass surfaces here as apparent
+# remote drift one pass later — and emitted a spurious (outbound, update)
+# echo for every freshly bound/imported issue (ticket robe-creek-zealot).
+_BRIDGE_INTERNAL_LABEL_PREFIXES: tuple[str, ...] = (
+    "rebar-id:",
+    "rebar-id-",
+    "imported:",
+    "rebar-status:",
+)
+
+
+def _non_internal_labels(value: Any) -> set[str]:
+    """The label set minus bridge-internal entries (non-list values → empty)."""
+    if not isinstance(value, (list, tuple)):
+        return set()
+    return {
+        v
+        for v in value
+        if isinstance(v, str) and not v.startswith(_BRIDGE_INTERNAL_LABEL_PREFIXES)
+    }
+
+
 def _derive_provenance(
     target: str,
     primary_fields: dict[str, Any] | None,
@@ -475,6 +503,15 @@ def compute_mutations(
                     continue
                 local_val = local_fields.get(field)
                 jira_val = jira_fields.get(field)
+                if field == "labels" and _non_internal_labels(
+                    local_val
+                ) == _non_internal_labels(jira_val):
+                    # Label drift confined to bridge-internal labels is our
+                    # own write-back from the prior pass (rebar-id: identity,
+                    # rebar-status: annotations) — not remote drift. Emitting
+                    # it produced a spurious one-pass-later (outbound, update)
+                    # echo per freshly bound issue (ticket robe-creek-zealot).
+                    continue
                 if local_val != jira_val:
                     if field in conflict_resolver.FIELD_CLASSES:
                         changed[field] = conflict_resolver.resolve_field(

@@ -208,15 +208,16 @@ _DRAFT9_CASES = [
     ),
     pytest.param(
         # (e2) label-divergent-rebar-id-local-only: local carries REBAR_ID_LABEL;
-        # Jira does NOT. The label sets differ → differ enters the labels-resolution
-        # branch and unions both sides. The contract requires that no resolved
-        # Mutation propose a write with a rebar-id-* label in its payload.
-        # NOTE: per Agent B's notes, conflict_resolver does NOT itself filter
-        # rebar-id labels — the contract is enforced end-to-end by the applier's
-        # _audit_rebar_id_label_writes guard. This test documents the divergent
-        # input shape; the applier-guard tail check below
-        # (test_applier_guard_blocks_resolver_rebar_id_label_writes) is the
-        # behavior that actually enforces the contract.
+        # Jira does NOT. The label sets differ ONLY in the bridge-internal
+        # identity label. Since ticket robe-creek-zealot the differ's
+        # present-in-both branch compares label sets with bridge-internal
+        # prefixes excluded (differ._non_internal_labels), so this drift is
+        # recognised as our own write-back echo and suppressed at the source —
+        # no labels mutation is proposed at all. (Historically this case was a
+        # strict xfail: the differ unioned both sides and only the applier's
+        # _audit_rebar_id_label_writes guard caught the rebar-id write
+        # post-resolution; that guard remains as defense-in-depth, see
+        # test_applier_guard_blocks_resolver_rebar_id_label_writes below.)
         {
             JIRA_KEY: {
                 "local_id": LOCAL_ID,
@@ -230,18 +231,11 @@ _DRAFT9_CASES = [
             }
         },
         id="label-divergent-rebar-id-local-only",
-        marks=pytest.mark.xfail(
-            reason=(
-                "conflict_resolver does not filter rebar-id-* labels from the union "
-                "payload; the applier guard catches this post-resolution. See "
-                "test_applier_guard_blocks_resolver_rebar_id_label_writes below."
-            ),
-            strict=True,
-        ),
     ),
     pytest.param(
         # (e3) label-divergent-rebar-id-jira-only: Jira carries REBAR_ID_LABEL;
-        # local does NOT. Symmetric inbound counterpart of (e2).
+        # local does NOT. Symmetric inbound counterpart of (e2) — suppressed
+        # at the differ since ticket robe-creek-zealot (see e2 note).
         {
             JIRA_KEY: {
                 "local_id": LOCAL_ID,
@@ -255,14 +249,6 @@ _DRAFT9_CASES = [
             }
         },
         id="label-divergent-rebar-id-jira-only",
-        marks=pytest.mark.xfail(
-            reason=(
-                "conflict_resolver does not filter rebar-id-* labels from the union "
-                "payload; the applier guard catches this post-resolution. See "
-                "test_applier_guard_blocks_resolver_rebar_id_label_writes below."
-            ),
-            strict=True,
-        ),
     ),
     pytest.param(
         # (f) link-create-edit-delete-bidirectional:

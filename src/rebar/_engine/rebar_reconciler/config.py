@@ -22,3 +22,26 @@ local_to_jira_status: dict[str, str] = {
     "cancelled": "Done",
     "deleted": "Done",
 }
+
+# Canonical reverse mapping: Jira workflow status -> local status. This is
+# NOT derivable from local_to_jira_status (the forward map is non-injective:
+# blocked/in_progress both map to "In Progress", closed/cancelled/deleted all
+# map to "Done"). The canonical preimage is the UNANNOTATED local status —
+# blocked/cancelled are reconstructed from rebar-status: annotation labels by
+# callers, never from the workflow status alone. Deriving the reverse map by
+# inverting local_to_jira_status (as applier._jira_status_to_local once did,
+# with lexicographic tie-breaking) imported "In Progress" as blocked and
+# "Done" as cancelled — ticket robe-creek-zealot.
+#
+# Must stay in lock-step with inbound_differ._JIRA_TO_LOCAL_STATUS (parity
+# is enforced by tests/unit/rebar_reconciler/test_config.py).
+jira_to_local_status: dict[str, str] = {
+    "To Do": "open",
+    "In Progress": "in_progress",
+    # "In Review" is a live DIG workflow state with no local equivalent;
+    # nearest local state (matches inbound_differ, ticket 929a).
+    "In Review": "in_progress",
+    "Blocked": "blocked",
+    "Done": "closed",
+    "Cancelled": "cancelled",
+}

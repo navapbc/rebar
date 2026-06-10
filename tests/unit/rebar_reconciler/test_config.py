@@ -102,3 +102,70 @@ def test_empty_mapping_kill_switch_safe() -> None:
     reloaded = _load_config()
     assert isinstance(reloaded.local_to_jira_status, dict)
     assert len(reloaded.local_to_jira_status) > 0
+
+
+# ---------------------------------------------------------------------------
+# jira_to_local_status — canonical reverse map (ticket robe-creek-zealot)
+# ---------------------------------------------------------------------------
+
+INBOUND_DIFFER_PATH = (
+    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "inbound_differ.py"
+)
+
+
+def test_jira_to_local_status_is_nonempty_str_dict(config: ModuleType) -> None:
+    mapping = config.jira_to_local_status
+    assert isinstance(mapping, dict) and mapping
+    assert all(
+        isinstance(k, str) and isinstance(v, str) for k, v in mapping.items()
+    )
+
+
+def test_jira_to_local_status_canonical_preimages(config: ModuleType) -> None:
+    """The non-injective forward map's canonical preimages: the UNANNOTATED
+    local statuses. (Pre-fix, a lexicographic inversion imported
+    'In Progress' as blocked and 'Done' as cancelled.)"""
+    mapping = config.jira_to_local_status
+    assert mapping["To Do"] == "open"
+    assert mapping["In Progress"] == "in_progress"
+    assert mapping["In Review"] == "in_progress"
+    assert mapping["Done"] == "closed"
+
+
+def test_jira_to_local_status_round_trips_through_forward_map(
+    config: ModuleType,
+) -> None:
+    """Every reverse-mapped local status forward-maps to a live Jira status,
+    and Jira statuses that exist in the forward map round-trip exactly
+    (To Do/In Progress/Done are fixed points of forward∘reverse)."""
+    fwd = config.local_to_jira_status
+    rev = config.jira_to_local_status
+    for jira_status, local_status in rev.items():
+        assert local_status in fwd, (
+            f"reverse-mapped local status {local_status!r} missing from "
+            "local_to_jira_status — preflight would abort on it"
+        )
+    for jira_status in ("To Do", "In Progress", "Done"):
+        assert fwd[rev[jira_status]] == jira_status
+
+
+def test_jira_to_local_status_parity_with_inbound_differ(
+    config: ModuleType,
+) -> None:
+    """config.jira_to_local_status must stay in lock-step with
+    inbound_differ._JIRA_TO_LOCAL_STATUS: _apply_inbound_create maps the
+    import's status through config, and the bound-ticket inbound differ maps
+    through its module constant — any drift re-opens the pass-2 churn this
+    map was added to fix (ticket robe-creek-zealot)."""
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "inbound_differ_for_config_parity", INBOUND_DIFFER_PATH
+    )
+    assert spec is not None and spec.loader is not None
+    inbound_differ = importlib.util.module_from_spec(spec)
+    # Register before exec: the module defines dataclasses, which resolve
+    # their namespace via sys.modules[cls.__module__] at class-creation time.
+    sys.modules["inbound_differ_for_config_parity"] = inbound_differ
+    spec.loader.exec_module(inbound_differ)  # type: ignore[union-attr]
+    assert config.jira_to_local_status == inbound_differ._JIRA_TO_LOCAL_STATUS

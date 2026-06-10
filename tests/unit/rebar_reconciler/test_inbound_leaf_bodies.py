@@ -523,8 +523,16 @@ def test_inbound_create_dedups_against_binding_store(applier, mut_mod, fixture_r
     """
 
     class _FakeBindingStore:
+        def __init__(self):
+            self.confirmed: dict[str, str] = {}
+
         def get_local_id(self, jira_key):
             return "uuid-bound-7" if jira_key == "DIG-77" else None
+
+        def bind_confirm(self, local_id, jira_key):
+            # ticket robe-creek-zealot: _apply_inbound_create now records the
+            # local<->jira binding at creation time.
+            self.confirmed[local_id] = jira_key
 
     mutation = _make_mutation(
         mut_mod,
@@ -554,6 +562,7 @@ def test_inbound_create_dedups_against_binding_store(applier, mut_mod, fixture_r
 
     # Regression guard: an UNBOUND inbound create still materialises normally —
     # the stand-down is scoped to bound keys.
+    unbound_store = _FakeBindingStore()
     unbound = _make_mutation(
         mut_mod,
         direction=mut_mod.MutationDirection.inbound,
@@ -561,11 +570,15 @@ def test_inbound_create_dedups_against_binding_store(applier, mut_mod, fixture_r
         target="DIG-88",
         payload={"fields": {"summary": "brand new", "issuetype": "Task"}},
     )
-    applier._apply_typed(
-        unbound, repo_root=fixture_repo, binding_store=_FakeBindingStore()
-    )
+    applier._apply_typed(unbound, repo_root=fixture_repo, binding_store=unbound_store)
     assert (fixture_repo / ".tickets-tracker" / "jira-dig-88").exists(), (
         "an unbound inbound create must still materialise a local ticket"
+    )
+    # ticket robe-creek-zealot: the create must record the binding at creation
+    # time so the next pass's outbound differ sees the import as bound (no
+    # re-emitted outbound create / dedup-skip round-trip).
+    assert unbound_store.confirmed == {"jira-dig-88": "DIG-88"}, (
+        "inbound create must bind_confirm(local_id, jira_key) at creation"
     )
 
 
@@ -799,3 +812,182 @@ def test_inbound_create_no_writeback_without_client(applier, mut_mod, fixture_re
     # Should not raise -- no client calls attempted.
     result = applier._apply_typed(mutation, client=None, repo_root=fixture_repo)
     assert result.payload["local_id"] == "jira-dig-701"
+
+
+# ---------------------------------------------------------------------------
+# 7. Ticket robe-creek-zealot — 1-pass idempotent inbound create
+#
+# _apply_inbound_create must materialise the import in the EXACT state the
+# binding-aware differs would compute for it, so the next pass nets zero
+# mutations: canonical status reverse-map (not lexicographic preimage),
+# rebar-status: annotation precedence, ADF description normalisation,
+# bridge-internal tag filtering, and bind_confirm at creation.
+# ---------------------------------------------------------------------------
+
+
+def _read_status_events(tracker_dir: Path, local_id: str) -> list[dict]:
+    return [
+        json.loads(p.read_text())
+        for p in _event_files(tracker_dir, local_id)
+        if "STATUS" in p.name
+    ]
+
+
+@pytest.mark.parametrize(
+    "jira_status, expected_local",
+    [
+        ("To Do", None),  # 'open' is the reducer default — no STATUS event
+        ("In Progress", "in_progress"),  # pre-fix: 'blocked' (wrong preimage)
+        ("In Review", "in_progress"),  # pre-fix: 'open' (unmapped fall-through)
+        ("Done", "closed"),  # pre-fix: 'cancelled' (wrong preimage)
+        ("Cancelled", "cancelled"),
+        ("Bogus Status", None),  # unmapped → 'open' default, no event
+    ],
+)
+def test_inbound_create_status_uses_canonical_reverse_map(
+    applier, mut_mod, fixture_repo, jira_status, expected_local
+):
+    """Imported statuses use config.jira_to_local_status, not an inversion of
+    the (non-injective) forward map (ticket robe-creek-zealot)."""
+    seq = 900 + abs(hash(jira_status)) % 90
+    mutation = _make_mutation(
+        mut_mod,
+        direction=mut_mod.MutationDirection.inbound,
+        action=mut_mod.MutationAction.create,
+        target=f"DIG-{seq}",
+        payload={
+            "fields": {
+                "summary": f"status map {jira_status}",
+                "issuetype": "Task",
+                "status": {"name": jira_status},
+            }
+        },
+    )
+    applier._apply_typed(mutation, repo_root=fixture_repo)
+    events = _read_status_events(fixture_repo / ".tickets-tracker", f"jira-dig-{seq}")
+    if expected_local is None:
+        assert events == [], f"{jira_status!r} must not write a STATUS event"
+    else:
+        assert [e["data"]["status"] for e in events] == [expected_local]
+
+
+def test_inbound_create_rebar_status_label_overrides_workflow_status(
+    applier, mut_mod, fixture_repo
+):
+    """A rebar-status: annotation label takes precedence over the raw Jira
+    workflow status (same precedence as the bound-ticket inbound differ), and
+    bridge-internal labels never leak into local tags."""
+    mutation = _make_mutation(
+        mut_mod,
+        direction=mut_mod.MutationDirection.inbound,
+        action=mut_mod.MutationAction.create,
+        target="DIG-911",
+        payload={
+            "fields": {
+                "summary": "blocked elsewhere",
+                "issuetype": "Bug",
+                "status": {"name": "In Progress"},
+                "labels": ["rebar-status:blocked", "team-x", "rebar-id:stale-id"],
+            }
+        },
+    )
+    applier._apply_typed(mutation, repo_root=fixture_repo)
+    tracker = fixture_repo / ".tickets-tracker"
+    events = _read_status_events(tracker, "jira-dig-911")
+    assert [e["data"]["status"] for e in events] == ["blocked"]
+    create_ev = _read_create(tracker, "jira-dig-911")
+    assert create_ev["data"]["tags"] == ["team-x", "imported:reconciler-bootstrap"], (
+        "bridge-internal labels (rebar-id:*, rebar-status:*) must not leak "
+        "into local tags"
+    )
+
+
+def test_inbound_create_normalizes_adf_description(applier, mut_mod, fixture_repo):
+    """A raw ADF description dict (the live snapshot shape) must be normalised
+    to plain text in the CREATE event — a stored dict corrupts the reducer
+    (bug 1bb2 class) and makes the outbound differ re-push the description on
+    every pass (ticket robe-creek-zealot)."""
+    adf = {
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [{"type": "text", "text": "Login flow."}],
+            }
+        ],
+    }
+    mutation = _make_mutation(
+        mut_mod,
+        direction=mut_mod.MutationDirection.inbound,
+        action=mut_mod.MutationAction.create,
+        target="DIG-912",
+        payload={
+            "fields": {
+                "summary": "adf import",
+                "issuetype": "Task",
+                "description": adf,
+            }
+        },
+    )
+    applier._apply_typed(mutation, repo_root=fixture_repo)
+    create_ev = _read_create(fixture_repo / ".tickets-tracker", "jira-dig-912")
+    desc = create_ev["data"]["description"]
+    assert isinstance(desc, str), "description must be normalised to plain text"
+    assert desc.strip() == "Login flow."
+
+
+def test_inbound_create_binds_at_creation(applier, mut_mod, fixture_repo):
+    """_apply_inbound_create must bind_confirm(local_id, jira_key) so the
+    outbound differ (binding-store-only bound signal) sees the import as
+    bound on the next pass — no re-emitted outbound create."""
+
+    class _RecordingStore:
+        def __init__(self):
+            self.confirmed: dict[str, str] = {}
+
+        def get_local_id(self, jira_key):
+            return None
+
+        def bind_confirm(self, local_id, jira_key):
+            self.confirmed[local_id] = jira_key
+
+    store = _RecordingStore()
+    mutation = _make_mutation(
+        mut_mod,
+        direction=mut_mod.MutationDirection.inbound,
+        action=mut_mod.MutationAction.create,
+        target="DIG-913",
+        payload={"fields": {"summary": "bind me", "issuetype": "Task"}},
+    )
+    result = applier._apply_typed(
+        mutation, repo_root=fixture_repo, binding_store=store
+    )
+    assert result.payload["local_id"] == "jira-dig-913"
+    assert store.confirmed == {"jira-dig-913": "DIG-913"}
+
+
+def test_inbound_create_tolerates_store_without_bind_confirm(
+    applier, mut_mod, fixture_repo, capsys
+):
+    """A legacy binding store lacking bind_confirm degrades gracefully: the
+    create still materialises and a WARNING is surfaced (the next pass then
+    converges via the outbound dedup-skip path, as before the fix)."""
+
+    class _LegacyStore:
+        def get_local_id(self, jira_key):
+            return None
+
+    mutation = _make_mutation(
+        mut_mod,
+        direction=mut_mod.MutationDirection.inbound,
+        action=mut_mod.MutationAction.create,
+        target="DIG-914",
+        payload={"fields": {"summary": "legacy store", "issuetype": "Task"}},
+    )
+    result = applier._apply_typed(
+        mutation, repo_root=fixture_repo, binding_store=_LegacyStore()
+    )
+    assert result.payload["local_id"] == "jira-dig-914"
+    assert (fixture_repo / ".tickets-tracker" / "jira-dig-914").exists()
+    assert "lacks bind_confirm" in capsys.readouterr().err

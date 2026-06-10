@@ -72,52 +72,99 @@ def applier_mod():
 
 
 def _make_acli_module(issues: list[dict]) -> types.ModuleType:
-    """Return a stub acli_integration module whose AcliClient returns issues."""
+    """Return a FAITHFUL stub acli_integration module over a mutable Jira state.
+
+    Ticket robe-creek-zealot: the previous stub returned the same static issue
+    list for every search and dropped every write on the floor. Real Jira
+    REFLECTS writes on subsequent reads — in particular the ``rebar-id:``
+    label / ``local_id`` entity-property write-back performed by
+    ``_apply_inbound_create`` is visible in the NEXT pass's search snapshot.
+    A stub that never reflects those writes silently under-tests idempotency
+    (the differ's own-write-back echo path is never exercised). All client
+    instances created from this module share one mutable state dict.
+    """
+    import copy as _copy
+    import json as _json
+
+    # key -> issue dict ({"key": ..., "fields": {...}}); deep-copied so the
+    # caller's literal is never mutated by reflected writes.
+    state: dict[str, dict] = {
+        i["key"]: _copy.deepcopy(i) for i in issues if i.get("key")
+    }
+    entity_props: dict[str, dict] = {}
+    created_counter = [0]
+
+    def _labels(key: str) -> list:
+        return state[key].setdefault("fields", {}).setdefault("labels", [])
 
     class _Client:
         def __init__(self, *args, **kwargs):
             pass
 
         def search_issues(self, jql: str, **kwargs) -> list[dict]:
-            return list(issues)
+            # create_one's dedup JQL: labels = "rebar-id:<local_id>"
+            if jql.strip().startswith('labels = "rebar-id:'):
+                want = jql.split('"')[1]
+                return [
+                    _json.loads(_json.dumps(i))
+                    for i in state.values()
+                    if want in (i.get("fields", {}).get("labels") or [])
+                ]
+            return [_json.loads(_json.dumps(i)) for i in state.values()]
 
         def create_issue(self, fields: dict) -> dict:
-            return {"key": "DIG-NEW"}
+            created_counter[0] += 1
+            key = f"DIG-NEW-{created_counter[0]}"
+            state[key] = {
+                "key": key,
+                "fields": {
+                    "summary": fields.get("title") or fields.get("summary", ""),
+                    "status": {"name": "To Do"},
+                    "labels": [],
+                },
+            }
+            return {"key": key}
 
         def update_issue(self, key: str, **fields) -> dict:
             # F3: applier unpacks fields as kwargs (real signature is
             # update_issue(jira_key, **kwargs)).
+            if key in state:
+                state[key].setdefault("fields", {}).update(fields)
             return {"key": key}
 
         def transition_issue(self, key: str, status: str) -> None:
-            return None
+            if key in state:
+                state[key].setdefault("fields", {})["status"] = {"name": status}
 
-        # Bug 85a1 / Gap 1+5+8: create_one + update_one now dispatch labels,
-        # comments, identity writes, and unassign-via-REST. The stub accepts
-        # these as no-ops so reconcile_once tests don't crash on AttributeError.
         def add_label(self, key: str, label: str) -> None:
-            return None
+            if key in state and label not in _labels(key):
+                _labels(key).append(label)
 
         def remove_label(self, key: str, label: str) -> None:
-            return None
+            if key in state and label in _labels(key):
+                _labels(key).remove(label)
 
         def add_comment(self, key: str, body: str) -> dict:
             return {"id": "stub-comment"}
 
+        def get_comments(self, key: str) -> list:
+            return []
+
         def set_entity_property(self, key: str, prop: str, value) -> None:
-            return None
+            entity_props.setdefault(key, {})[prop] = value
 
         def delete_issue(self, key: str) -> None:
-            return None
+            state.pop(key, None)
 
         def unassign_issue(self, key: str) -> None:
             return None
 
         def transition_issue_by_name(self, key: str, target: str) -> None:
-            return None
+            self.transition_issue(key, target)
 
     mock_mod = types.ModuleType("acli_integration")
     mock_mod.AcliClient = _Client
+    mock_mod._jira_state = state  # test-introspection seam
     return mock_mod
 
 
@@ -393,13 +440,17 @@ def _make_jql_partitioned_acli(issues: list[dict]) -> types.ModuleType:
 
     class _Partitioned(Base):
         def search_issues(self, jql: str, **kwargs) -> list[dict]:
+            # Dedup JQL (labels = "rebar-id:...") keeps the base behaviour.
+            if jql.strip().startswith('labels = "rebar-id:'):
+                return super().search_issues(jql, **kwargs)
             # Active query carries ``status != "Done"``; Done-recent carries
             # ``status = "Done"``. Distinguish on the ``!=`` operator so the
             # active substring (which also contains ``= "Done"``) isn't
-            # mis-classified as the Done query.
+            # mis-classified as the Done query. Partition over the LIVE
+            # state (base returns reflected writes), not the seed list.
             done = '= "Done"' in jql and '!= "Done"' not in jql
             out = []
-            for issue in issues:
+            for issue in super().search_issues(jql, **kwargs):
                 name = (issue.get("fields", {}).get("status") or {}).get("name", "")
                 is_done = name == "Done"
                 if done == is_done:
