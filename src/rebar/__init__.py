@@ -19,7 +19,7 @@ from typing import Any
 from rebar import config
 from rebar._engine import dispatcher, engine_dir, engine_env, run
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 
 # ── Exceptions ───────────────────────────────────────────────────────────────
