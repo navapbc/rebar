@@ -1717,4 +1717,112 @@ test_transition_bug_close_reason_prefix_validated() {
 }
 test_transition_bug_close_reason_prefix_validated
 
+# ── Test: archived -> open un-archive seam via `transition` ───────────────────
+# BUG f803-63ea: `archived` was an inescapable status — there was no CLI path
+# out of it. `rebar transition <id> archived open` must un-archive the ticket
+# (via the designed REVERT-of-ARCHIVED seam): exit 0, the ticket reappears in
+# the default list, and it becomes claimable again. `transition <id> archived
+# closed` must be rejected with a clear message. Happy-path transitions stay OK.
+echo "Test: transition archived->open un-archives; archived->closed rejected"
+test_transition_archived_to_open() {
+    _snapshot_fail
+    if [ ! -f "$TICKET_TRANSITION_SCRIPT" ]; then
+        assert_eq "ticket-transition.sh exists" "exists" "missing"
+        assert_pass_if_clean "test_transition_archived_to_open"
+        return
+    fi
+
+    local repo
+    repo=$(_make_test_repo)
+    local tracker_dir="$repo/.tickets-tracker"
+
+    local ticket_id
+    ticket_id=$(_create_ticket "$repo" task "Archived ticket recovery")
+    if [ -z "$ticket_id" ]; then
+        assert_eq "archived->open: ticket created" "non-empty" "empty"
+        assert_pass_if_clean "test_transition_archived_to_open"
+        return
+    fi
+
+    # Archive it via the real CLI archive subcommand.
+    (cd "$repo" && bash "$TICKET_SCRIPT" archive "$ticket_id" 2>/dev/null) || true
+    assert_eq "archived->open: precondition status is archived" "archived" "$(_get_ticket_status "$repo" "$ticket_id")"
+
+    # archived -> closed must be rejected (only `open` is a valid un-archive target).
+    local bad_exit=0 bad_out
+    bad_out=$(cd "$repo" && bash "$TICKET_SCRIPT" transition "$ticket_id" archived closed 2>&1) || bad_exit=$?
+    assert_ne "archived->closed exits non-zero" "0" "$bad_exit"
+    assert_eq "archived->closed leaves status archived" "archived" "$(_get_ticket_status "$repo" "$ticket_id")"
+    if [[ "$bad_out" =~ open|un-archive|unarchive ]]; then
+        assert_eq "archived->closed gives a clear message" "clear" "clear"
+    else
+        assert_eq "archived->closed gives a clear message" "clear" "unclear: $bad_out"
+    fi
+
+    # archived -> open must succeed (un-archive seam).
+    local ok_exit=0
+    (cd "$repo" && bash "$TICKET_SCRIPT" transition "$ticket_id" archived open 2>/dev/null) || ok_exit=$?
+    assert_eq "archived->open exits 0" "0" "$ok_exit"
+    assert_eq "archived->open: status is open" "open" "$(_get_ticket_status "$repo" "$ticket_id")"
+
+    # Ticket reappears in default `rebar list` (which excludes archived).
+    local in_list
+    in_list=$(cd "$repo" && bash "$TICKET_SCRIPT" list 2>/dev/null \
+        | python3 -c "import json,sys; ids=[t.get('ticket_id') for t in json.load(sys.stdin)]; print('yes' if sys.argv[1] in ids else 'no')" "$ticket_id" 2>/dev/null)
+    assert_eq "archived->open: ticket visible in default list" "yes" "$in_list"
+
+    # Ticket is claimable again (open -> in_progress + assignee, atomic).
+    local claim_exit=0
+    (cd "$repo" && bash "$TICKET_SCRIPT" claim "$ticket_id" --assignee=tester 2>/dev/null) || claim_exit=$?
+    assert_eq "archived->open: ticket is claimable" "0" "$claim_exit"
+    assert_eq "archived->open: claimed ticket is in_progress" "in_progress" "$(_get_ticket_status "$repo" "$ticket_id")"
+
+    # fsck stays clean after the un-archive round-trip.
+    local fsck_exit=0
+    (cd "$repo" && bash "$TICKET_SCRIPT" fsck 2>/dev/null >/dev/null) || fsck_exit=$?
+    assert_eq "archived->open: fsck clean" "0" "$fsck_exit"
+
+    assert_pass_if_clean "test_transition_archived_to_open"
+}
+test_transition_archived_to_open
+
+# ── Test: deleted+archived ticket reverted via this path stays deleted ────────
+# BUG f803-63ea deleted-interaction guard: a ticket that is deleted AND archived
+# must NOT be resurrected by the un-archive REVERT (the reducer guarantees this).
+echo "Test: deleted+archived ticket stays deleted after un-archive revert"
+test_transition_archived_open_does_not_resurrect_deleted() {
+    _snapshot_fail
+    if [ ! -f "$TICKET_TRANSITION_SCRIPT" ]; then
+        assert_eq "ticket-transition.sh exists" "exists" "missing"
+        assert_pass_if_clean "test_transition_archived_open_does_not_resurrect_deleted"
+        return
+    fi
+
+    local repo
+    repo=$(_make_test_repo)
+    local ticket_id
+    ticket_id=$(_create_ticket "$repo" task "Deleted and archived")
+    if [ -z "$ticket_id" ]; then
+        assert_pass_if_clean "test_transition_archived_open_does_not_resurrect_deleted"
+        return
+    fi
+
+    (cd "$repo" && bash "$TICKET_SCRIPT" archive "$ticket_id" 2>/dev/null) || true
+    (cd "$repo" && bash "$TICKET_SCRIPT" delete "$ticket_id" --user-approved 2>/dev/null) || true
+
+    # Attempt the un-archive seam; whatever its exit, the ticket must stay deleted.
+    (cd "$repo" && bash "$TICKET_SCRIPT" transition "$ticket_id" archived open 2>/dev/null) || true
+
+    local status
+    status=$(_get_ticket_status "$repo" "$ticket_id")
+    if [[ "$status" == "deleted" || -z "$status" ]]; then
+        assert_eq "deleted+archived not resurrected" "still-deleted" "still-deleted"
+    else
+        assert_eq "deleted+archived not resurrected" "still-deleted" "resurrected:$status"
+    fi
+
+    assert_pass_if_clean "test_transition_archived_open_does_not_resurrect_deleted"
+}
+test_transition_archived_open_does_not_resurrect_deleted
+
 print_summary

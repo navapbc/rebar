@@ -131,4 +131,18 @@ test_help_word_as_title_not_intercepted() {
 }
 test_help_word_as_title_not_intercepted
 
+# ── Test 8: transition help names the opt-in verdict gate config key ──────────
+# BUG f406-49ba: the help wording overstated the story/epic verdict-hash
+# requirement as unconditional. The gate is OPT-IN (off by default) and only
+# fires when verify.require_verdict_for_close=true in .rebar/config.conf. The
+# help string must NAME that config key (RED while the old wording stands).
+echo "Test 8: rebar help transition names verify.require_verdict_for_close (opt-in gate)"
+test_transition_help_names_verdict_config_key() {
+    local out exit_code=0
+    out=$(bash "$TICKET_SCRIPT" help transition 2>&1) || exit_code=$?
+    assert_eq "help transition exits 0" "0" "$exit_code"
+    assert_contains "help transition names the config key" "require_verdict_for_close" "$out"
+}
+test_transition_help_names_verdict_config_key
+
 print_summary

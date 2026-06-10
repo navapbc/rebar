@@ -35,7 +35,7 @@ _usage() {
     echo "  current_status / target_status: open | in_progress | closed | blocked" >&2
     echo "  --reason=<text>          Required when closing bug tickets. Must start with 'Fixed:' or 'Escalated to user:'." >&2
     echo "  --force                  Skip the unresolved-children guard when closing. Non-closed children remain unresolved." >&2
-    echo "  --verdict-hash=<hash>    Required when closing story/epic tickets. HMAC from compute-verdict-hash.sh." >&2
+    echo "  --verdict-hash=<hash>    HMAC from compute-verdict-hash.sh. Required for story/epic close ONLY when the opt-in gate verify.require_verdict_for_close=true is set in .rebar/config.conf (off by default)." >&2
     echo "  --force-close=<reason>   Bypass verdict-hash requirement for story/epic (requires user approval via hook)." >&2
     echo "  Examples:" >&2
     echo "    ticket transition abc1 open closed --reason=\"Fixed: patched null check in foo.sh\"" >&2
@@ -134,6 +134,50 @@ _validate_status() {
             ;;
     esac
 }
+
+# ── Un-archive seam: `transition <id> archived open` ─────────────────────────
+# `archived` is not in the _validate_status whitelist (open|in_progress|closed|
+# blocked), so it would otherwise be rejected as an invalid current_status — i.e.
+# there was no CLI path out of `archived`. The DESIGNED un-archive seam is a
+# REVERT of the latest live ARCHIVED event (ticket-revert.sh removes the
+# .archived marker; the reducer un-archives on REVERT-of-ARCHIVED). Handle it
+# here, BEFORE _validate_status, and exec ticket-revert.sh (ticket_txn.py is
+# never reached on this path).
+if [ "$current_status" = "archived" ]; then
+    if [ "$target_status" != "open" ]; then
+        echo "Error: from 'archived' the only valid transition is to 'open' (un-archive). Use: ticket transition $ticket_id archived open" >&2
+        exit 1
+    fi
+    archived_uuid=$(python3 - "$TRACKER_DIR/$ticket_id" <<'PYEOF'
+import json, os, sys
+tdir = sys.argv[1]
+archived, reverted = {}, set()
+for fname in os.listdir(tdir):
+    if fname.startswith('.') or not fname.endswith('.json'):
+        continue
+    try:
+        with open(os.path.join(tdir, fname), encoding='utf-8') as f:
+            ev = json.load(f)
+    except Exception:
+        continue
+    et = ev.get('event_type')
+    if et == 'ARCHIVED':
+        archived[ev.get('uuid', '')] = ev.get('timestamp', 0)
+    elif et == 'REVERT':
+        t = ev.get('data', {}).get('target_event_uuid', '')
+        if t:
+            reverted.add(t)
+live = [(ts, u) for u, ts in archived.items() if u and u not in reverted]
+if live:
+    print(max(live)[1])
+PYEOF
+    ) || archived_uuid=""
+    if [ -z "$archived_uuid" ]; then
+        echo "Error: no live ARCHIVED event (status may be stale)" >&2
+        exit 1
+    fi
+    exec env TICKETS_TRACKER_DIR="$TRACKER_DIR" bash "$SCRIPT_DIR/ticket-revert.sh" "$ticket_id" "$archived_uuid" --reason="un-archive via transition archived open"
+fi
 
 _validate_status "current_status" "$current_status"
 

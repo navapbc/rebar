@@ -73,7 +73,16 @@ def _transition(argv):
 
         # Optimistic concurrency check
         if actual_status != current_status:
-            print(f'Error: current status is "{actual_status}", not "{current_status}". Re-run: ticket transition {ticket_id} {actual_status} {target_status}', file=sys.stderr)
+            # Defensive hint: never suggest a command the transition validator
+            # rejects. `archived` is not in the transition whitelist
+            # (open|in_progress|closed|blocked); from `archived` the only valid
+            # transition is the un-archive seam `... archived open`. For any
+            # other actual_status, the generic re-run hint is valid.
+            if actual_status == 'archived':
+                hint = f'ticket transition {ticket_id} archived open  (un-archive; archived is otherwise inescapable via transition)'
+            else:
+                hint = f'ticket transition {ticket_id} {actual_status} {target_status}'
+            print(f'Error: current status is "{actual_status}", not "{current_status}". Re-run: {hint}', file=sys.stderr)
             os.close(fd)
             sys.exit(10)
 
