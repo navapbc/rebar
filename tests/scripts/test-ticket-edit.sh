@@ -760,4 +760,92 @@ test_ticket_edit_parent_rejects_multihop_cycle() {
 }
 test_ticket_edit_parent_rejects_multihop_cycle
 
+# ── Test 22: ticket edit --title= (empty) rejects (bug 4f50-5b13) ────────────
+# Without this guard, `--title=""` silently clobbers the title with an empty
+# string. The CLI (dispatcher path) must refuse empty --title values.
+echo ""
+echo "Test 22: ticket edit --title= (empty) rejects, title unchanged (RED before 4f50 fix)"
+test_ticket_edit_title_empty_rejects() {
+    local repo
+    repo=$(_make_test_repo)
+
+    local tkt
+    tkt=$(_create_ticket "$repo" "Title that must be preserved")
+    if [ -z "$tkt" ]; then
+        assert_eq "created ticket" "non-empty" "empty"
+        return
+    fi
+
+    local original_title
+    original_title=$(_get_ticket_field "$repo" "$tkt" "title")
+    if [ "$original_title" != "Title that must be preserved" ]; then
+        assert_eq "precondition: original title set" "Title that must be preserved" "$original_title"
+        return
+    fi
+
+    # Attempt empty title via the CLI dispatcher path
+    local exit_code=0
+    (cd "$repo" && bash "$TICKET_SCRIPT" edit "$tkt" --title= >/dev/null 2>&1) || exit_code=$?
+    assert_ne "ticket edit --title= (empty) exits nonzero" "0" "$exit_code"
+
+    # Verify the original title is intact (no silent clobber)
+    local after_title
+    after_title=$(_get_ticket_field "$repo" "$tkt" "title")
+    assert_eq "title preserved on rejected empty edit" "Title that must be preserved" "$after_title"
+}
+test_ticket_edit_title_empty_rejects
+
+# ── Test 23: ticket edit --title=<non-empty> still works (regression) ────────
+echo ""
+echo "Test 23: ticket edit --title=<non-empty> still works (regression guard)"
+test_ticket_edit_title_nonempty_still_works() {
+    local repo
+    repo=$(_make_test_repo)
+
+    local tkt
+    tkt=$(_create_ticket "$repo" "non-empty title edit test")
+    if [ -z "$tkt" ]; then
+        assert_eq "created ticket" "non-empty" "empty"
+        return
+    fi
+
+    local exit_code=0
+    (cd "$repo" && bash "$TICKET_SCRIPT" edit "$tkt" --title="Renamed" >/dev/null 2>&1) || exit_code=$?
+    assert_eq "ticket edit --title=<non-empty> exits 0" "0" "$exit_code"
+
+    local after
+    after=$(_get_ticket_field "$repo" "$tkt" "title")
+    assert_eq "title set correctly" "Renamed" "$after"
+}
+test_ticket_edit_title_nonempty_still_works
+
+# ── Test 24: ticket-edit.sh direct path also rejects empty --title ───────────
+echo ""
+echo "Test 24: ticket-edit.sh direct invocation rejects empty --title (bug 4f50)"
+test_ticket_edit_sh_title_empty_rejects() {
+    local repo
+    repo=$(_make_test_repo)
+
+    if [ ! -f "$TICKET_EDIT_SCRIPT" ]; then
+        assert_eq "ticket-edit.sh exists for direct title test" "exists" "missing"
+        return
+    fi
+
+    local tkt
+    tkt=$(_create_ticket "$repo" "Direct title must be preserved")
+    if [ -z "$tkt" ]; then
+        assert_eq "created ticket" "non-empty" "empty"
+        return
+    fi
+
+    local exit_code=0
+    (cd "$repo" && bash "$TICKET_EDIT_SCRIPT" "$tkt" --title= >/dev/null 2>&1) || exit_code=$?
+    assert_ne "ticket-edit.sh --title= (empty) exits nonzero" "0" "$exit_code"
+
+    local after_title
+    after_title=$(_get_ticket_field "$repo" "$tkt" "title")
+    assert_eq "title preserved on rejected empty edit (direct)" "Direct title must be preserved" "$after_title"
+}
+test_ticket_edit_sh_title_empty_rejects
+
 print_summary

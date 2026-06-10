@@ -485,4 +485,76 @@ PYEOF
 }
 test_set_file_impact_empty_array
 
+# ── Test 7: per-element schema validation (bug 100b-6146) ─────────────────────
+# Only array-ness was validated; junk elements violating the {path,reason}
+# contract were stored. set-file-impact must reject any element that is not an
+# object with string keys "path" and "reason", naming the offending index.
+echo "Test 7: ticket set-file-impact rejects malformed elements naming the bad index (RED before 100b fix)"
+test_set_file_impact_rejects_bad_elements() {
+    _snapshot_fail
+
+    local repo
+    repo=$(_make_test_repo)
+
+    local ticket_id
+    ticket_id=$(_create_ticket "$repo" task "Element validation test ticket")
+
+    if [ -z "$ticket_id" ]; then
+        assert_eq "ticket created for element validation test" "non-empty" "empty"
+        assert_pass_if_clean "test_set_file_impact_rejects_bad_elements"
+        return
+    fi
+
+    # Case A: scalar elements (not objects) -> exit non-zero, names index 0
+    local ec_a=0 out_a
+    out_a=$(cd "$repo" && \
+        _TICKET_TEST_NO_SYNC=1 \
+        bash "$TICKET_SCRIPT" set-file-impact "$ticket_id" '[42,"string"]' 2>&1) || ec_a=$?
+    assert_eq "scalar elements: exits non-zero" "1" \
+        "$([ "$ec_a" -ne 0 ] && echo 1 || echo 0)"
+    if [[ "$out_a" == *"file_impact[0]"* ]]; then
+        assert_eq "scalar elements: error names index 0" "names-0" "names-0"
+    else
+        assert_eq "scalar elements: error names index 0" "names-0" "$out_a"
+    fi
+
+    # Case B: missing "path" key -> exit non-zero, names index 0
+    local ec_b=0 out_b
+    out_b=$(cd "$repo" && \
+        _TICKET_TEST_NO_SYNC=1 \
+        bash "$TICKET_SCRIPT" set-file-impact "$ticket_id" '[{"reason":"x"}]' 2>&1) || ec_b=$?
+    assert_eq "missing path: exits non-zero" "1" \
+        "$([ "$ec_b" -ne 0 ] && echo 1 || echo 0)"
+    if [[ "$out_b" == *"file_impact[0]"* ]]; then
+        assert_eq "missing path: error names index 0" "names-0" "names-0"
+    else
+        assert_eq "missing path: error names index 0" "names-0" "$out_b"
+    fi
+
+    # Case C: valid first, malformed second (path not string) -> names index 1
+    local ec_c=0 out_c
+    out_c=$(cd "$repo" && \
+        _TICKET_TEST_NO_SYNC=1 \
+        bash "$TICKET_SCRIPT" set-file-impact "$ticket_id" \
+        '[{"path":"a","reason":"b"},{"path":7}]' 2>&1) || ec_c=$?
+    assert_eq "bad second element: exits non-zero" "1" \
+        "$([ "$ec_c" -ne 0 ] && echo 1 || echo 0)"
+    if [[ "$out_c" == *"file_impact[1]"* ]]; then
+        assert_eq "bad second element: error names index 1" "names-1" "names-1"
+    else
+        assert_eq "bad second element: error names index 1" "names-1" "$out_c"
+    fi
+
+    # Case D: fully valid array -> exit 0 (regression guard)
+    local ec_d=0
+    (cd "$repo" && \
+        _TICKET_TEST_NO_SYNC=1 \
+        bash "$TICKET_SCRIPT" set-file-impact "$ticket_id" \
+        '[{"path":"src/foo.py","reason":"modified"}]' 2>/dev/null) || ec_d=$?
+    assert_eq "valid array still exits 0" "0" "$ec_d"
+
+    assert_pass_if_clean "test_set_file_impact_rejects_bad_elements"
+}
+test_set_file_impact_rejects_bad_elements
+
 print_summary

@@ -1036,6 +1036,22 @@ ticket_set_file_impact() {
             return 1
         fi
 
+        # Per-element schema validation (bug 100b-6146): every element must be an
+        # object with string keys "path" and "reason". jq's `or` short-circuits so
+        # .value.path is never indexed on a non-object. Empty array [] passes
+        # naturally (no elements to fail), preserving the clear-array semantics.
+        local bad_idx
+        bad_idx=$(printf '%s' "$json_array" | jq -r '
+            [to_entries[]
+             | select((.value | type) != "object"
+                      or (.value.path   | type) != "string"
+                      or (.value.reason | type) != "string")
+             | .key] | first // empty' 2>/dev/null) || bad_idx=""
+        if [ -n "$bad_idx" ]; then
+            echo "Error: file_impact[$bad_idx] is invalid — every element must be an object with string keys \"path\" and \"reason\"" >&2
+            return 1
+        fi
+
         if ! ticket_id="$(_ticketlib_resolve_id "$ticket_id" "$TRACKER_DIR")"; then
             return 1
         fi
@@ -1199,6 +1215,23 @@ ticket_set_verify_commands() {
         json_type=$(printf '%s' "$json_array" | jq -r 'type' 2>/dev/null) || json_type="unknown"
         if [ "$json_type" != "array" ]; then
             echo "Error: verify_commands argument must be a JSON array, got '$json_type'" >&2
+            return 1
+        fi
+
+        # Per-element schema validation (bug 100b-6146): every element must be an
+        # object with string keys dd_id, dd_text and command. jq's `or`
+        # short-circuits so .value.<key> is never indexed on a non-object. Empty
+        # array [] passes naturally, preserving the clear-array semantics.
+        local bad_idx
+        bad_idx=$(printf '%s' "$json_array" | jq -r '
+            [to_entries[]
+             | select((.value | type) != "object"
+                      or (.value.dd_id   | type) != "string"
+                      or (.value.dd_text | type) != "string"
+                      or (.value.command | type) != "string")
+             | .key] | first // empty' 2>/dev/null) || bad_idx=""
+        if [ -n "$bad_idx" ]; then
+            echo "Error: verify_commands[$bad_idx] is invalid — every element must be an object with string keys \"dd_id\", \"dd_text\" and \"command\"" >&2
             return 1
         fi
 
@@ -1512,6 +1545,14 @@ ticket_edit() {
         for _i in "${!_parsed_pairs[@]}"; do
             _pair="${_parsed_pairs[_i]}"
             case "$_pair" in
+                title=*)
+                    # Reject empty --title= to prevent silent clobber of the
+                    # title with an empty string (bug 4f50-5b13).
+                    if [ -z "${_pair#title=}" ]; then
+                        echo "Error: --title requires a non-empty value (empty values silently clobber the title; bug 4f50)" >&2
+                        return 1
+                    fi
+                    ;;
                 description=*)
                     # Reject empty --description= to prevent silent clobber of
                     # multi-KB structured descriptions when a heredoc/$(cat ...)

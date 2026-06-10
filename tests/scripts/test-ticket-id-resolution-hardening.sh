@@ -314,7 +314,7 @@ test_set_file_impact_via_jira_key() {
         cd "$repo" || exit 1
         export _TICKET_TEST_NO_SYNC=1
         export TICKETS_TRACKER_DIR="$repo/.tickets-tracker"
-        _invoke_lib_op ticket_set_file_impact "$jira_key" '["src/rebar/_engine/ticket-lib-api.sh"]' >/dev/null 2>&1
+        _invoke_lib_op ticket_set_file_impact "$jira_key" '[{"path":"src/rebar/_engine/ticket-lib-api.sh","reason":"test"}]' >/dev/null 2>&1
     ) || exit_code=$?
 
     # RED: jira_key passed through unchanged → dir not found
@@ -365,7 +365,7 @@ test_get_file_impact_via_jira_key() {
         cd "$repo" || exit 1
         export _TICKET_TEST_NO_SYNC=1
         export TICKETS_TRACKER_DIR="$repo/.tickets-tracker"
-        _invoke_lib_op ticket_set_file_impact "$full_id" '["src/rebar/_engine/ticket.sh"]' >/dev/null 2>&1
+        _invoke_lib_op ticket_set_file_impact "$full_id" '[{"path":"src/rebar/_engine/ticket.sh","reason":"test"}]' >/dev/null 2>&1
     ) || true
 
     local exit_code=0

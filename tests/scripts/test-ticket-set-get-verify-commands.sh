@@ -281,6 +281,80 @@ test_last_write_wins() {
 }
 test_last_write_wins
 
+# ── Test 8: per-element schema validation (bug 100b-6146) ────────────────────
+# Only array-ness was validated; junk elements violating the
+# {dd_id,dd_text,command} contract were stored. set-verify-commands must reject
+# any element that is not an object with string keys dd_id/dd_text/command,
+# naming the offending index.
+echo "Test 8: set-verify-commands rejects malformed elements naming the bad index (RED before 100b fix)"
+test_set_verify_commands_rejects_bad_elements() {
+    _snapshot_fail
+
+    local repo
+    repo=$(_make_test_repo)
+
+    local ticket_id
+    ticket_id=$(_create_ticket "$repo" task "Element validation test")
+
+    if [ -z "$ticket_id" ]; then
+        assert_eq "ticket created" "non-empty" "empty"
+        assert_pass_if_clean "test_set_verify_commands_rejects_bad_elements"
+        return
+    fi
+
+    # Case A: object missing required keys -> exit non-zero, names index 0
+    local ec_a=0 out_a
+    out_a=$(cd "$repo" && \
+        _TICKET_TEST_NO_SYNC=1 \
+        bash "$TICKET_SCRIPT" set-verify-commands "$ticket_id" '[{"x":1}]' 2>&1) || ec_a=$?
+    assert_eq "missing keys: exits non-zero" "1" \
+        "$([ "$ec_a" -ne 0 ] && echo 1 || echo 0)"
+    if [[ "$out_a" == *"verify_commands[0]"* ]]; then
+        assert_eq "missing keys: error names index 0" "names-0" "names-0"
+    else
+        assert_eq "missing keys: error names index 0" "names-0" "$out_a"
+    fi
+
+    # Case B: scalar elements -> exit non-zero, names index 0
+    local ec_b=0 out_b
+    out_b=$(cd "$repo" && \
+        _TICKET_TEST_NO_SYNC=1 \
+        bash "$TICKET_SCRIPT" set-verify-commands "$ticket_id" '[42,"string"]' 2>&1) || ec_b=$?
+    assert_eq "scalar elements: exits non-zero" "1" \
+        "$([ "$ec_b" -ne 0 ] && echo 1 || echo 0)"
+    if [[ "$out_b" == *"verify_commands[0]"* ]]; then
+        assert_eq "scalar elements: error names index 0" "names-0" "names-0"
+    else
+        assert_eq "scalar elements: error names index 0" "names-0" "$out_b"
+    fi
+
+    # Case C: valid first, malformed second (command not string) -> names index 1
+    local ec_c=0 out_c
+    out_c=$(cd "$repo" && \
+        _TICKET_TEST_NO_SYNC=1 \
+        bash "$TICKET_SCRIPT" set-verify-commands "$ticket_id" \
+        '[{"dd_id":"dd-1","dd_text":"ok","command":"echo ok"},{"dd_id":"dd-2","dd_text":"x","command":7}]' 2>&1) || ec_c=$?
+    assert_eq "bad second element: exits non-zero" "1" \
+        "$([ "$ec_c" -ne 0 ] && echo 1 || echo 0)"
+    if [[ "$out_c" == *"verify_commands[1]"* ]]; then
+        assert_eq "bad second element: error names index 1" "names-1" "names-1"
+    else
+        assert_eq "bad second element: error names index 1" "names-1" "$out_c"
+    fi
+
+    # Case D: fully valid array -> exit 0 (regression guard)
+    local ec_d=0
+    (cd "$repo" && \
+        _TICKET_TEST_NO_SYNC=1 \
+        bash "$TICKET_SCRIPT" set-verify-commands "$ticket_id" \
+        '[{"dd_id":"dd-1","dd_text":"works","command":"pytest"}]' \
+    ) >/dev/null 2>&1 || ec_d=$?
+    assert_eq "valid array still exits 0" "0" "$ec_d"
+
+    assert_pass_if_clean "test_set_verify_commands_rejects_bad_elements"
+}
+test_set_verify_commands_rejects_bad_elements
+
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo ""
 echo "=== test-ticket-set-get-verify-commands.sh complete ==="

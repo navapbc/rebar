@@ -118,6 +118,14 @@ fi
 for _i in "${!_parsed_pairs[@]}"; do
     _pair="${_parsed_pairs[$_i]}"
     case "$_pair" in
+        title=*)
+            # Reject empty --title= to prevent silent clobber of the title
+            # with an empty string (bug 4f50-5b13).
+            if [ -z "${_pair#title=}" ]; then
+                echo "Error: --title requires a non-empty value (empty values silently clobber the title; bug 4f50)" >&2
+                exit 1
+            fi
+            ;;
         description=*)
             # Reject empty --description= to prevent silent clobber of multi-KB
             # structured descriptions when a heredoc/$(cat ...) substitution
