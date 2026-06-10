@@ -8,6 +8,15 @@ import json
 import os
 import sys
 
+# Reducer-logic cache version. The dir-hash captures EVENT-FILE changes, but not
+# changes to how the reducer PROJECTS those events into state. When the reducer's
+# projection semantics change, every previously-cached .cache.json would
+# otherwise serve a state compiled by the old logic. Folding this version into
+# the dir hash invalidates all caches on a bump. BUMP THIS whenever a processor's
+# projection changes.
+#   v2: process_revert now un-archives on REVERT-of-ARCHIVED (bug vocal-jig-apron)
+_REDUCER_CACHE_VERSION = 2
+
 
 def read_cache(cache_path: str, dir_hash: str) -> dict | None:
     """Return the cached state if dir_hash matches, else None (cache miss)."""
@@ -44,7 +53,7 @@ def compute_dir_hash(ticket_dir: str, event_filenames: list[str]) -> str:
     branch or an fsck-recover cherry-pick), which a filename+size key alone
     cannot see. Folding in st_mtime_ns closes that stale-read gap.
     """
-    hash_parts: list[str] = []
+    hash_parts: list[str] = [f"rv:{_REDUCER_CACHE_VERSION}"]
     for name in event_filenames:
         path = os.path.join(ticket_dir, name)
         try:

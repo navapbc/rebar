@@ -3209,9 +3209,9 @@ def test_reverted_archived_marker_is_orphan(
     A ticket with ARCHIVED + REVERT(targeting that ARCHIVED UUID) has a net
     non-archived state: _is_net_archived() must return False and trigger self-heal.
 
-    Note: the slow path still produces archived=True in state (process_revert does
-    not undo ARCHIVED — pre-existing behavior, separate from this fix). The marker
-    removal is what this test verifies; result set behaviour is not asserted here.
+    This test verifies the marker removal. The compiled-state un-archive
+    (process_revert clearing archived/status on REVERT-of-ARCHIVED) is covered
+    by test_revert_of_archived_unarchives_state below (bug vocal-jig-apron).
 
     Setup:
       - One ticket directory with CREATE + ARCHIVED + REVERT(target=ARCHIVED UUID) events.
@@ -3265,6 +3265,64 @@ def test_reverted_archived_marker_is_orphan(
         "reduce_all_tickets() must remove the .archived marker when the ARCHIVED event "
         "has been cancelled by a REVERT (net non-archived state); marker not removed"
     )
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_revert_of_archived_unarchives_state(reducer: ModuleType, tmp_path: Path) -> None:
+    """Bug vocal-jig-apron: reverting an ARCHIVED event must un-archive the
+    COMPILED STATE (not just remove the marker). Replay of CREATE + ARCHIVED +
+    REVERT(target=ARCHIVED) must yield archived=False, status=open, and the
+    ticket must reappear in the default (exclude_archived) projection.
+    """
+    tracker_dir = tmp_path / "tracker"
+    tracker_dir.mkdir()
+    ticket_dir = tracker_dir / "tkt-unarchive"
+    ticket_dir.mkdir()
+    archived_uuid = _UUID2
+
+    _write_event(ticket_dir, timestamp=1742605200, uuid=_UUID, event_type="CREATE",
+                 data={"ticket_type": "task", "title": "archived then reverted"})
+    _write_event(ticket_dir, timestamp=1742605300, uuid=archived_uuid,
+                 event_type="ARCHIVED", data={})
+    _write_event(ticket_dir, timestamp=1742605400, uuid=_UUID3, event_type="REVERT",
+                 data={"target_event_uuid": archived_uuid, "target_event_type": "ARCHIVED", "reason": ""})
+
+    state = reducer.reduce_ticket(str(ticket_dir))
+    assert state["archived"] is False, f"revert must clear archived; got {state!r}"
+    assert state["status"] == "open", f"revert of ARCHIVED must restore open; got {state['status']!r}"
+
+    visible = reducer.reduce_all_tickets(str(tracker_dir), exclude_archived=True)
+    assert any(t.get("ticket_id") == "tkt-unarchive" for t in visible), (
+        "un-archived ticket must reappear in the default exclude_archived projection"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_revert_of_archived_does_not_resurrect_deleted(reducer: ModuleType, tmp_path: Path) -> None:
+    """Bug vocal-jig-apron (guard): a DELETED ticket (delete writes
+    STATUS(deleted)+ARCHIVED) must NOT be resurrected to open by reverting the
+    ARCHIVED event — its terminal deleted status wins (process_archived never set
+    status=archived for it)."""
+    tracker_dir = tmp_path / "tracker"
+    tracker_dir.mkdir()
+    ticket_dir = tracker_dir / "tkt-deleted"
+    ticket_dir.mkdir()
+    archived_uuid = _UUID2
+
+    _write_event(ticket_dir, timestamp=1742605200, uuid=_UUID, event_type="CREATE",
+                 data={"ticket_type": "task", "title": "deleted ticket"})
+    _write_event(ticket_dir, timestamp=1742605250, uuid=_UUID3, event_type="STATUS",
+                 data={"status": "deleted", "current_status": "open"})
+    _write_event(ticket_dir, timestamp=1742605300, uuid=archived_uuid,
+                 event_type="ARCHIVED", data={})
+    _write_event(ticket_dir, timestamp=1742605400, uuid="cafef00d-dead-beef-dead-beefcafef00d",
+                 event_type="REVERT",
+                 data={"target_event_uuid": archived_uuid, "target_event_type": "ARCHIVED", "reason": ""})
+
+    state = reducer.reduce_ticket(str(ticket_dir))
+    assert state["status"] == "deleted", f"deleted must NOT be resurrected; got {state['status']!r}"
 
 
 # ---------------------------------------------------------------------------

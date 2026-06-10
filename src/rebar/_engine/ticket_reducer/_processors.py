@@ -244,7 +244,18 @@ def process_bridge_alert(state: dict, event: dict, data: dict, event_uuid: str) 
 
 
 def process_revert(state: dict, event: dict, data: dict, event_uuid: str) -> None:
-    """Apply a REVERT event: append a revert record to state.reverts."""
+    """Apply a REVERT event: append a revert record to state.reverts.
+
+    Reverting an ARCHIVED event also UN-ARCHIVES the projection (bug
+    vocal-jig-apron). The designed unarchive seam (``rebar revert <id>
+    <archived-uuid>``) removes the .archived marker and is recognised by the
+    list fast-path, but replay still re-applied the ARCHIVED event, leaving
+    compiled state at status=archived/archived=True (ticket stayed hidden).
+    Clear the archived projection so the ticket is visible again with status
+    open. A ticket that was DELETED (delete writes STATUS(deleted)+ARCHIVED)
+    keeps its terminal deleted status: process_archived never set
+    status=archived for it, so the ``== "archived"`` guard leaves it untouched.
+    """
     state["reverts"].append(
         {
             "uuid": event_uuid,
@@ -255,6 +266,10 @@ def process_revert(state: dict, event: dict, data: dict, event_uuid: str) -> Non
             "author": event.get("author"),
         }
     )
+    if data.get("target_event_type") == "ARCHIVED" and state.get("archived"):
+        state["archived"] = False
+        if state.get("status") == "archived":
+            state["status"] = "open"
 
 
 def process_edit(state: dict, data: dict) -> None:
