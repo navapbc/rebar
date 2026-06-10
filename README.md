@@ -140,7 +140,9 @@ name; or register it directly in your client config (zero pre-install via
 
 (Already pip/pipx-installed `nava-rebar[mcp]`? Use `"command": "rebar-mcp"`
 instead.) Server flags: `REBAR_MCP_READONLY=1` exposes only read tools;
-`reconcile` is dry-run unless `REBAR_MCP_ALLOW_RECONCILE_LIVE=1`.
+`reconcile` is dry-run unless `REBAR_MCP_ALLOW_RECONCILE_LIVE=1`. Both flags
+accept any case-insensitive truthy value — `1`, `true`, or `yes` (surrounding
+whitespace tolerated); anything else (incl. unset) is off.
 
 ### From source
 

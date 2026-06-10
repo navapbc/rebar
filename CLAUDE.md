@@ -56,7 +56,9 @@ shape) drawn from the canonical JSON Schemas — see
 `archive_ticket`, `compact_ticket`, `set_file_impact`, `set_verify_commands`.
 
 There is no `init` over MCP (operator bootstrap only). `reconcile` `live` mode
-additionally requires `REBAR_MCP_ALLOW_RECONCILE_LIVE=1`.
+additionally requires `REBAR_MCP_ALLOW_RECONCILE_LIVE=1`. Both env gates accept
+any case-insensitive truthy value (`1`/`true`/`yes`, whitespace tolerated);
+anything else (including unset) is off.
 
 ## Quality gates
 

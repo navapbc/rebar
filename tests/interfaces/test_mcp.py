@@ -49,6 +49,28 @@ def test_write_tools_present_by_default(monkeypatch: pytest.MonkeyPatch) -> None
     } <= names
 
 
+@pytest.mark.parametrize(
+    "val,expect_readonly",
+    [
+        ("1", True), ("true", True), ("TRUE", True), ("True", True),
+        ("yes", True), ("YES", True), ("Yes", True), (" true ", True),
+        ("", False), ("0", False), ("no", False), ("false", False),
+    ],
+)
+def test_readonly_truthy_parse_is_case_insensitive(
+    monkeypatch: pytest.MonkeyPatch, val, expect_readonly
+) -> None:
+    """Bug ship-mogul-glob: common truthy spellings (TRUE/Yes/…, whitespace
+    tolerated) must enable the readonly gate — the parse must not be
+    case-sensitive (TRUE previously failed OPEN, the dangerous direction)."""
+    monkeypatch.setenv("REBAR_MCP_READONLY", val)
+    write_present = "create_ticket" in _tool_names(build_server())
+    if expect_readonly:
+        assert not write_present, f"{val!r} must enable readonly (write tools hidden)"
+    else:
+        assert write_present, f"{val!r} must NOT enable readonly (write tools present)"
+
+
 def test_live_reconcile_refused_without_optin(monkeypatch: pytest.MonkeyPatch, rebar_repo) -> None:
     monkeypatch.delenv("REBAR_MCP_ALLOW_RECONCILE_LIVE", raising=False)
     srv = build_server()

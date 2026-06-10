@@ -133,8 +133,19 @@ except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     CreateResultOut = ClaimResultOut = GateResultOut = None  # type: ignore[assignment,misc]
 
 
+def _env_truthy(name: str) -> bool:
+    """Case-insensitive truthy parse for a boolean env gate.
+
+    Accepts 1 / true / yes (any case, surrounding whitespace tolerated). Used by
+    BOTH REBAR_MCP_READONLY and REBAR_MCP_ALLOW_RECONCILE_LIVE so a common
+    spelling like ``TRUE`` can never silently fail open on the readonly gate
+    (bug ship-mogul-glob).
+    """
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
+
+
 def _readonly() -> bool:
-    return os.environ.get("REBAR_MCP_READONLY", "").strip() in ("1", "true", "yes")
+    return _env_truthy("REBAR_MCP_READONLY")
 
 
 def _dump(item):
@@ -309,9 +320,7 @@ def build_server():
                     f"{parsed.value} reconcile is disabled: this server is "
                     "read-only (REBAR_MCP_READONLY)"
                 )
-            if os.environ.get("REBAR_MCP_ALLOW_RECONCILE_LIVE", "").strip().lower() not in (
-                "1", "true", "yes",
-            ):
+            if not _env_truthy("REBAR_MCP_ALLOW_RECONCILE_LIVE"):
                 raise ValueError(
                     f"{parsed.value} reconcile is disabled (mutating mode); "
                     "set REBAR_MCP_ALLOW_RECONCILE_LIVE=1 to enable"
