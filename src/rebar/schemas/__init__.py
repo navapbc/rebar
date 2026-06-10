@@ -92,6 +92,7 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "show": TICKET_STATE,
     "list": TICKET_STATE,
     "search": TICKET_STATE,
+    "ready": TICKET_STATE,
     "show.llm": TICKET_STATE_LLM,
     "list.llm": TICKET_STATE_LLM,
     "ready.llm": TICKET_STATE_LLM,

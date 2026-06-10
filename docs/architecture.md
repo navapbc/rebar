@@ -34,7 +34,11 @@ over one git-backed store.
   - **MCP server** (`src/rebar/mcp_server.py`) — FastMCP tools built on the library;
     write tools gated by `REBAR_MCP_READONLY`; `reconcile` defaults to dry-run.
   - The interface-parity tier (`tests/interfaces/`) asserts all three behave
-    identically over one store.
+    identically over one store, and that every structured output conforms to its
+    canonical JSON Schema (`src/rebar/schemas/`) — the machine-readable **output
+    contract**, documented in [output-schemas.md](output-schemas.md). One flag
+    (`--output`/`-o`) selects it; its parsing lives once in
+    `_engine/ticket_output.py` (no duplicate bash/Python logic).
 
 - **The engine** (`src/rebar/_engine/`) — the bash dispatcher (`rebar`, aliased
   `ticket`) routes subcommands to `ticket-*.sh` / `*.py` helpers. It must be

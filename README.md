@@ -199,6 +199,13 @@ body, search query, …) is treated as literal text, not a help request.
 Repo root is resolved from `REBAR_ROOT` (or `PROJECT_ROOT`), falling back to the
 git toplevel of the working directory.
 
+**Structured output.** Every data-returning command emits machine-readable JSON
+via the canonical `--output json` flag (short `-o json`; `--output llm` gives a
+token-minified shape for `show`/`list`/`ready`). Each distinct JSON shape is
+documented by a JSON Schema and validated across the CLI, library, and MCP in CI.
+See [docs/output-schemas.md](docs/output-schemas.md) for the per-command contract
+and the schema source-of-truth.
+
 **`validate` vs. the per-ticket gates.** `rebar validate` takes **no ticket id** —
 it scans the whole store and prints an overall tracker-health score (1-5, exit
 0-4) bucketed into critical / major / minor / warning findings (`--output json`,

@@ -6,6 +6,11 @@ file** in it. State is computed by replaying the events (the reducer,
 `src/rebar/_engine/ticket_reducer/`). Nothing is ever stored as compiled state
 except the local, rebuildable `.cache.json` (gitignored — see docs/concurrency.md).
 
+> This document is the **event** (write) schema. The **output** (read) contract —
+> the replay-derived JSON shapes that `show`/`list`/`deps`/… emit, each backed by
+> a JSON Schema under `src/rebar/schemas/` — is documented separately in
+> [output-schemas.md](output-schemas.md). Outputs are compiled state, not events.
+
 ## Filename contract (I2)
 
 ```

@@ -45,7 +45,10 @@ resolves the STATUS fork deterministically by UUID, so every clone agrees.
 **Reads (always available):** `show_ticket`, `list_tickets`, `search`,
 `ticket_deps`, `ready_tickets`, `next_batch`, `clarity_check`, `check_ac`,
 `quality_check`, `validate`, `get_file_impact`, `get_verify_commands`, `fsck`,
-`reconcile` (dry-run by default).
+`summary`, `list_epics`, `bridge_fsck`, `reconcile` (dry-run by default). The
+typed read tools advertise an `outputSchema` (a documented, validated return
+shape) drawn from the canonical JSON Schemas — see
+[docs/output-schemas.md](docs/output-schemas.md).
 
 **Writes (gated by `REBAR_MCP_READONLY=1`):** `create_ticket`,
 `transition_ticket`, `claim_ticket`, `reopen_ticket`, `comment_ticket`,
