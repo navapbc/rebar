@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"verify_commands":[{"command":".venv/bin/python -m pytest tests/interfaces/test_library.py -k version -q","dd_id":"DD1","dd_text":"module attr matches package metadata (guard test)"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1781066939286824000,"uuid":"0658ceb8-d385-478b-9322-34ea4ee766e1"}
