@@ -254,61 +254,16 @@ def _load_concurrency():
     return mod
 
 
-def _load_mode_module():
-    """Lazy-load mode.py under a stable key so MODE_CAPS / Mode are accessible.
-
-    Uses the SAME dotted key as __main__._MODE_KEY so a single module object
-    is shared with the entry-point loader; tests that pre-seed sys.modules
-    under that key see their stub here too.
-    """
-    key = "rebar_reconciler.mode"
-    if key in sys.modules:
-        return sys.modules[key]
-    mode_path = Path(__file__).parent / "mode.py"
-    spec = importlib.util.spec_from_file_location(key, mode_path)
-    if spec is None or spec.loader is None:
-        raise FileNotFoundError(f"mode.py not found at {mode_path}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[key] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
-
-
-def _load_manifest_renderer():
-    """Lazy-load manifest_renderer.py."""
-    key = "rebar_reconciler.manifest_renderer"
-    if key in sys.modules:
-        return sys.modules[key]
-    path = Path(__file__).parent / "manifest_renderer.py"
-    spec = importlib.util.spec_from_file_location(key, path)
-    if spec is None or spec.loader is None:
-        raise FileNotFoundError(f"manifest_renderer.py not found at {path}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[key] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
-
-
-def _mode_sort_key(m) -> tuple[str, str, str]:
-    """Deterministic ordering key for cap enforcement.
-
-    Outbound creates sort first (priority "0") so they land within the
-    bootstrap-strict cap window. Without this, 'inbound' < 'outbound'
-    lexicographically causes all cap slots to go to inbound mutations,
-    deferring outbound creates indefinitely (bug d5a2-3fc8).
-    """
-    d = getattr(m, "direction", None)
-    a = getattr(m, "action", None)
-    t = getattr(m, "target", None)
-    if isinstance(m, dict):
-        d = d if d is not None else m.get("direction", "")
-        a = a if a is not None else m.get("action", "")
-        t = t if t is not None else (m.get("key", "") or m.get("target", ""))
-    d_str = str(getattr(d, "value", d) or "")
-    a_str = str(getattr(a, "value", a) or "")
-    if d_str == "outbound" and a_str == "create":
-        d_str = "0_outbound_create"
-    return (d_str, a_str, str(t or ""))
+# Pass-planning policy (mode caps, suppression, manifest) lives in apply_planning.py.
+# Re-exported so apply() (resident) calls them + the _mode_sort_key reads resolve.
+from rebar_reconciler.apply_planning import (  # noqa: E402
+    _SuppressionIndex,
+    _emit_mode_manifest,
+    _load_manifest_renderer,
+    _load_mode_module,
+    _mode_sort_key,
+    _partition_by_mode_cap,
+)
 
 
 def apply(
@@ -325,20 +280,9 @@ def apply(
 
     Two call shapes:
       1. Typed single-mutation:  apply(mutation, *, client=None) -> ApplyResult
-         When the first positional argument is a Mutation instance, dispatch
-         via _LEAVES. Raises UnknownActionError for unregistered pairs (with
-         zero side-effects) and DirectionMismatchError if a leaf is invoked
-         with a mismatched direction.
       2. Legacy batch:            apply(mutations: list[dict], pass_id, ...) -> Path
-         Original manifest-writing batch dispatcher; behavior unchanged.
-
     Selection is by argument type at the top of the function.
     """
-    # Typed-mutation dispatch path: first arg is a Mutation instance.
-    # Duck-type rather than isinstance() because mutation.py may be loaded
-    # under different module names depending on how the importing test rig
-    # set up sys.modules — a strict isinstance() check would silently fall
-    # through to the legacy batch path and raise a confusing TypeError.
     mut_mod = _load_mutation_module()
     if isinstance(mutations, mut_mod.Mutation) or (
         type(mutations).__name__ == "Mutation"
@@ -349,86 +293,18 @@ def apply(
             mutations, client=client, repo_root=repo_root, binding_store=binding_store
         )
 
-    # Legacy batch path requires pass_id.
     if pass_id is None:
         raise TypeError(
             "apply() legacy batch form requires pass_id as the second argument"
         )
 
-    # -------------------------------------------------------------------------
-    # Mode-cap enforcement (story 286b).
-    #
-    # When *mode* is provided, look up the per-mode cap in MODE_CAPS and
-    # partition the incoming mutations into (applied, deferred). The applied
-    # list is what the direction-aware dispatch loop below actually executes;
-    # the deferred list is reported via the mode-specific manifest renderer.
-    #
-    # Cap semantics:
-    #   - cap is None    → uncapped (LIVE): apply all; manifest renderer is
-    #                      NOT invoked (LIVE writes no manifest file).
-    #   - cap == 0       → DRY_RUN: apply NOTHING (no leaf invoked, no batch
-    #                      iteration); manifest still written listing every
-    #                      mutation as deferred.
-    #   - cap > 0        → BOOTSTRAP_STRICT (10) / BOOTSTRAP_THROTTLE (100):
-    #                      sort by (direction, action, target), apply first
-    #                      `cap`, defer the rest.
-    #
-    # When *mode* is None (the call shape used by legacy callers that have not
-    # yet been migrated), behaviour is unchanged from before: apply everything,
-    # write the legacy flat manifest. This preserves the contract for the wide
-    # surface of existing tests under tests/unit/rebar_reconciler/.
-    # -------------------------------------------------------------------------
-    mutations_input = list(mutations or [])
-    deferred_for_manifest: list = []
-    # Hoist the mode module load to a single call per apply() invocation.
-    # Previously _load_mode_module() was called at three sites (cap lookup,
-    # DRY_RUN dispatch skip, manifest renderer dispatch); collapsing to one
-    # avoids redundant importlib work and a class-identity hazard if the
-    # module ever ends up loaded under multiple sys.modules keys mid-call.
-    mode_mod = _load_mode_module() if mode is not None else None
-    if mode is not None:
-        # Validate / coerce mode to a Mode enum member (findings #1/#2).
-        # Accepting raw strings would let MODE_CAPS.get() return None for
-        # unrecognised values, silently triggering the uncapped LIVE path.
-        if isinstance(mode, str):
-            mode = mode_mod.Mode.from_str(mode)
-        if not isinstance(mode, mode_mod.Mode):
-            raise TypeError(
-                f"mode must be a Mode enum member or a recognised mode string, "
-                f"got {type(mode).__name__}: {mode!r}"
-            )
-        cap = mode_mod.MODE_CAPS.get(mode)
-        # Sort deterministically before applying the cap so the applied /
-        # deferred partition is reproducible across passes.
-        ordered = sorted(mutations_input, key=_mode_sort_key)
-        if cap is None:
-            # LIVE: uncapped — proceed with all mutations through the normal
-            # dispatch path below. Manifest renderer is skipped post-apply.
-            mutations_input = ordered
-        elif cap == 0:
-            # DRY_RUN: skip the apply loop entirely. Every mutation is deferred.
-            deferred_for_manifest = ordered
-            mutations_input = []
-        else:
-            # BOOTSTRAP_STRICT / BOOTSTRAP_THROTTLE: cap then defer remainder.
-            mutations_input = ordered[:cap]
-            deferred_for_manifest = ordered[cap:]
+    # Mode-cap enforcement (story 286b): coerce mode + partition into applied/deferred.
+    mode, mode_mod, mutations_input, deferred_for_manifest = _partition_by_mode_cap(
+        mode, mutations
+    )
 
-    # Direction-aware dispatch (defect #8): partition typed Mutations by
-    # direction. Inbound Mutations route through _apply_typed per-mutation
-    # (so each one fires the inbound leaf from _LEAVES against the local
-    # tracker). Outbound Mutations are normalized to dicts and pass through
-    # _apply_batch (legacy manifest-writing path). Untyped dict entries
-    # default to the outbound batch path — that is the legacy contract.
-    #
-    # Previously this code path raised TypeError as a fail-closed guard
-    # against inbound traffic. The guard was correct in intent — routing
-    # inbound through _apply_batch would execute Jira-side outbound
-    # handlers — but the production path produces overwhelmingly inbound
-    # Mutations on first run (empty local mirror), so the guard blocked
-    # every pass. The actual fix is to route inbound through the existing
-    # _apply_typed handler (which already covers all (inbound, *) pairs in
-    # _LEAVES).
+    # Direction-aware dispatch (defect #8): inbound typed Mutations route through
+    # _apply_typed per-mutation; outbound/untyped go to the legacy _apply_batch.
     mutations_list = list(mutations_input)
 
     def _looks_like_mutation(m) -> bool:
@@ -452,45 +328,12 @@ def apply(
         else:
             outbound_or_untyped.append(m)
 
-    # Inbound: per-mutation dispatch via _apply_typed. Order preserved from
-    # the source list so observable behaviour is deterministic.
-    #
-    # suppress_pair follow-on contract (story bd19-d744-b8c7-4079): when a
-    # leaf returns a payload with follow_on={'kind': 'suppress_pair',
-    # 'local_id': X, 'jira_key': Y}, all subsequent inbound mutations
-    # targeting either X or Y AND all outbound batch entries targeting Y are
-    # dropped from this pass so the conflict signal is not stomped by stale
-    # follow-up mutations.
-    # Suppress-pair index: O(1) lookup. We maintain two sets of canonical
-    # identifiers (jira-keys-as-given and local_ids) plus a set of computed
-    # local-id forms (jira_key → _jira_key_to_local_id) so the third match-
-    # arm (computed-form: target=='DIG-7' suppresses subsequent
-    # target=='jira-dig-7') is also O(1). Replaces the prior O(n²) list
-    # scan flagged in PR #375 review thread 3306949610.
-    suppressed_targets: set[str] = set()
-    suppressed_pairs: set[tuple[str, str]] = set()
+    # suppress_pair follow-on contract (story bd19): a leaf emitting
+    # follow_on={'kind':'suppress_pair',...} drops subsequent inbound mutations
+    # for either id AND outbound batch entries for the jira_key this pass.
+    suppression = _SuppressionIndex()
 
-    def _is_suppressed(target: str) -> bool:
-        if not target:
-            return False
-        return target in suppressed_targets
-
-    def _record_suppression(local_id: str, jira_key: str) -> None:
-        suppressed_pairs.add((local_id, jira_key))
-        if jira_key:
-            suppressed_targets.add(jira_key)
-            # Computed-form: a later mutation targeting the local-id form of
-            # this jira_key (e.g. 'jira-dig-7' after suppressing 'DIG-7')
-            # must also be dropped.
-            suppressed_targets.add(_jira_key_to_local_id(jira_key))
-        if local_id:
-            suppressed_targets.add(local_id)
-
-    # Create an AcliClient for inbound leaves that need to write back to
-    # Jira (rebar-id label + local_id property). The caller (reconcile_once)
-    # does not pass a client — the fetcher creates its own for reading, and
-    # the legacy batch path (_apply_batch) creates its own for outbound writes.
-    # The inbound dispatch path needs its own for the write-back step.
+    # Create an AcliClient for inbound leaves that write back to Jira.
     if client is None and inbound_typed:
         acli_mod = _load_acli()
         client = acli_mod.AcliClient(
@@ -506,22 +349,14 @@ def apply(
             os.environ.get("JIRA_USER", "<unset>"),
         )
 
-    # Collect deferred bug-filing directives from inbound conflict leaves.
-    # These are processed AFTER _apply_batch returns to keep the apply path
-    # commit-free (bug d822 — the bug-filing CLI commits to the tickets
-    # branch, which would advance HEAD inside _apply_batch's drift-guarded
-    # loop and raise spurious HeadDriftError).
+    # Deferred bug-filing directives from inbound conflict leaves, processed
+    # AFTER _apply_batch to keep the apply path commit-free (bug d822).
     pending_bug_tickets: list[dict] = []
 
     for mut in inbound_typed:
-        # No-write (cap-0) modes must not APPLY: the inbound leaves write local
-        # CREATE events + Jira-side labels/properties. cap-0 already empties
-        # mutations_input upstream so this loop is a no-op today, but gate it
-        # explicitly so the no-write contract is self-enforcing rather than
-        # relying on that coupling (review M1).
         if not persist:
             break
-        if _is_suppressed(getattr(mut, "target", "")):
+        if suppression.is_suppressed(getattr(mut, "target", "")):
             continue
         result = _apply_typed(
             mut, client=client, repo_root=repo_root, binding_store=binding_store
@@ -535,7 +370,7 @@ def apply(
             else None
         )
         if isinstance(follow_on, dict) and follow_on.get("kind") == "suppress_pair":
-            _record_suppression(
+            suppression.record(
                 follow_on.get("local_id", ""), follow_on.get("jira_key", "")
             )
         pending = (
@@ -546,48 +381,25 @@ def apply(
         if isinstance(pending, dict):
             pending_bug_tickets.append(pending)
 
-    # Bug b859 (Part 0c): structured RECON line after inbound typed dispatch
-    # so operators see how many inbound mutations actually ran (vs were
-    # suppressed). Independent of the manifest tally because suppression
-    # decisions live only in this loop scope.
     print(  # noqa: T201
         f"RECON: typed_inbound_dispatched count={len(inbound_typed)} "
-        f"suppressed_pairs={len(suppressed_pairs)}",
+        f"suppressed_pairs={len(suppression.suppressed_pairs)}",
         file=sys.stderr,
     )
 
     # Outbound (or untyped dict): normalize typed Mutations to dicts so
     # _apply_batch can iterate, then route through the legacy batch path.
-    # _apply_batch handles an empty list cleanly (writes an empty manifest)
-    # so the all-inbound case still produces a manifest path for the caller.
     outbound_list = [
         _mutation_to_batch_dict(m) if _looks_like_mutation(m) else m
         for m in outbound_or_untyped
     ]
-    # Drop any outbound entries whose key matches a suppressed pair.
-    if suppressed_pairs:
+    if suppression.suppressed_pairs:
         outbound_list = [
-            d for d in outbound_list if not _is_suppressed(d.get("key", ""))
+            d for d in outbound_list if not suppression.is_suppressed(d.get("key", ""))
         ]
-    # In DRY_RUN, skip the legacy batch dispatcher entirely so the test
-    # contract ("neither _apply_typed nor _apply_batch is invoked") holds.
-    # The renderer block below writes the asymmetric manifest from scratch.
-    #
-    # Wrap _apply_batch in try/finally so deferred bug-filing runs even when
-    # _apply_batch raises (HeadDriftError, RescheduleError, etc.). Without
-    # this guarantee, an apply-batch exception unwinds apply() and the
-    # collected pending_bug_ticket directives are silently dropped — losing
-    # the operator's audit trail for conflicts that were already suppressed
-    # by the leaf's follow_on emission. The deferred-filing block runs
-    # outside the drift-guarded loop so its own commits cannot re-trigger
-    # the drift detector.
     is_dry_run = mode_mod is not None and mode == mode_mod.Mode.DRY_RUN
     manifest_path = None
     try:
-        # When persist is False (cap-0 no-write modes), skip _apply_batch
-        # entirely so no manifest file (not even an empty one) is written.
-        # cap-0 already left mutations_input == [] so the batch would be a
-        # no-op write anyway; this just suppresses the file side effect.
         if not is_dry_run and persist:
             manifest_path = _apply_batch(
                 outbound_list,
@@ -596,11 +408,6 @@ def apply(
                 binding_store=binding_store,
             )
     finally:
-        # Deferred bug-filing for inbound conflicts (bug d822). Skipped in
-        # DRY_RUN — that mode must not produce any side effects, and
-        # pending_bug_tickets is always empty there (inbound dispatch loop
-        # runs over an empty list under DRY_RUN). The is_dry_run guard is
-        # defense-in-depth.
         if pending_bug_tickets and not is_dry_run:
             cli_path = Path(
                 os.environ.get("REBAR_TICKET_CLI")
@@ -615,10 +422,6 @@ def apply(
                         pending.get("parent_id", ""),
                     )
                 except Exception as exc:  # noqa: BLE001
-                    # Bug-filing failure is non-fatal — the conflict is
-                    # still suppressed via the follow_on; only the audit
-                    # ticket is lost. Per-iteration except prevents one
-                    # failed filing from blocking the others.
                     print(  # noqa: T201
                         f"deferred_bug_filing_failed: "
                         f"local_id={pending.get('local_id')!r} "
@@ -626,110 +429,22 @@ def apply(
                         file=sys.stderr,
                     )
 
-    # -------------------------------------------------------------------------
-    # Mode-specific manifest emission (story 286b).
-    #
-    # When *mode* is provided, replace the flat legacy manifest with the
-    # asymmetric shape dispatched by manifest_renderer:
-    #
-    #   - DRY_RUN / BOOTSTRAP_STRICT  → render_dry_run_or_strict
-    #   - BOOTSTRAP_THROTTLE          → render_throttle
-    #   - LIVE                        → no manifest file; remove the legacy
-    #                                    write and return None
-    #
-    # The legacy manifest written by _apply_batch is left in place when
-    # mode is None (legacy callers depend on it). Otherwise we overwrite or
-    # remove it as required by the mode contract.
-    # -------------------------------------------------------------------------
+    # Mode-specific manifest emission (story 286b): the planner returns an
+    # (action, value) sentinel so this shell performs the early returns.
     if mode_mod is not None:
-        renderer_mod = _load_manifest_renderer()
-        applied_for_manifest = list(mutations_list)
-
-        if mode == mode_mod.Mode.LIVE:
-            # LIVE: no manifest file per contract. Remove the legacy manifest
-            # written by _apply_batch.
-            try:
-                if manifest_path is not None and Path(manifest_path).exists():
-                    Path(manifest_path).unlink()
-            except OSError:
-                pass
-            return None
-
-        if mode == mode_mod.Mode.BOOTSTRAP_THROTTLE:
-            rendered = renderer_mod.render_throttle(
-                applied_for_manifest, deferred_for_manifest
-            )
-        else:
-            # DRY_RUN and BOOTSTRAP_STRICT share the same renderer.
-            rendered = renderer_mod.render_dry_run_or_strict(
-                applied_for_manifest, deferred_for_manifest
-            )
-
-        rendered_with_meta = {
-            "pass_id": pass_id,
-            "mode": getattr(mode, "value", str(mode)),
-            "applied_count": rendered.get("applied_count", len(applied_for_manifest)),
-            "deferred_count": rendered.get(
-                "deferred_count", len(deferred_for_manifest)
-            ),
-            "outbound": rendered.get("outbound"),
-            "inbound": rendered.get("inbound"),
-        }
-        if "spot_check" in rendered:
-            rendered_with_meta["spot_check"] = rendered["spot_check"]
-        # Also expose the deferred mutations list (sorted) so tests and
-        # operators can audit exactly what was held back.
-        rendered_with_meta["deferred"] = [
-            {
-                "direction": str(
-                    getattr(getattr(m, "direction", ""), "value", "")
-                    or (m.get("direction", "") if isinstance(m, dict) else "")
-                ),
-                "action": str(
-                    getattr(getattr(m, "action", ""), "value", "")
-                    or (m.get("action", "") if isinstance(m, dict) else "")
-                ),
-                "target": _mode_sort_key(m)[2],
-            }
-            for m in deferred_for_manifest
-        ]
-
-        # No-write contract (cap-0 modes, persist=False): produce the full
-        # computed plan as a dict and RETURN it WITHOUT writing any manifest
-        # file. The caller (reconcile_once) surfaces this plan to stdout and
-        # treats manifest_path as None for tally purposes.
-        if not persist:
-            return rendered_with_meta
-
-        # DRY_RUN may have skipped _apply_batch entirely (when mutations_input
-        # was empty) — _apply_batch still wrote an empty manifest. Either way,
-        # the manifest_path is valid; overwrite with the asymmetric shape.
-        if manifest_path is None:
-            if repo_root is None:
-                repo_root_resolved = Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])
-            else:
-                repo_root_resolved = repo_root
-            snapshots_dir = repo_root_resolved / "bridge_state" / "snapshots"
-            snapshots_dir.mkdir(parents=True, exist_ok=True)
-            manifest_path = snapshots_dir / f"{pass_id}.manifest.json"
-        # Atomic write via tempfile + os.replace to avoid race conditions
-        # when concurrent DRY_RUN passes share the same pass_id (finding #3).
-        manifest_dir = Path(manifest_path).parent
-        manifest_dir.mkdir(parents=True, exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(
-            dir=manifest_dir,
-            prefix=f"{pass_id}.",
-            suffix=".json.tmp",
+        action, value = _emit_mode_manifest(
+            mode,
+            mode_mod,
+            mutations_list,
+            deferred_for_manifest,
+            pass_id,
+            manifest_path,
+            repo_root,
+            persist,
         )
-        try:
-            with os.fdopen(fd, "w") as tmp_f:
-                json.dump(rendered_with_meta, tmp_f, indent=2)
-            os.replace(tmp_path, str(manifest_path))
-        except BaseException:
-            # Clean up the temp file on any failure.
-            with contextlib.suppress(OSError):
-                os.unlink(tmp_path)
-            raise
+        if action == "RETURN":
+            return value
+        manifest_path = value
 
     return manifest_path
 
