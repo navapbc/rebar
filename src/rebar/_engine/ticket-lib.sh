@@ -478,7 +478,6 @@ write_commit_event() {
 # _push_tickets_branch <base_path>
 # Push the tickets branch to origin with retry logic for non-fast-forward.
 # Best-effort: push failures are logged but do not fail the caller.
-# ticket-lifecycle.sh has equivalent logic; this is the shared version.
 _push_tickets_branch() {
     local base_path="$1"
     local _remote

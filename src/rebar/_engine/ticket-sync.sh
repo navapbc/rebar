@@ -3,9 +3,8 @@
 #
 # Shared, self-contained reconvergence helper for the periodic background sync of
 # the local `tickets` branch with `origin/tickets`. Sourced by the `rebar`
-# dispatcher's _ensure_initialized and by ticket-lifecycle.sh so there is ONE
-# implementation of the cross-environment sync policy (no drift in concurrency
-# logic).
+# dispatcher's _ensure_initialized so there is ONE implementation of the
+# cross-environment sync policy (no drift in concurrency logic).
 #
 # Concurrency Doctrine (REMEDIATION_PROPOSAL.md §0, I1-I9):
 #   * Reconvergence is git MERGE-as-union, never rebase (bug 637b): event files
