@@ -68,14 +68,15 @@ def test_rollback_invokes_delete_via_call_with_retry(applier, mutation_mod):
 
     mutation = _make_outbound_create_mutation(mutation_mod)
 
-    real_call_with_retry = applier._call_with_retry
+    from rebar_reconciler import apply_outbound  # point-of-use: leaf calls retry here
+    real_call_with_retry = apply_outbound._call_with_retry
     captured: list[tuple] = []
 
     def spy(fn, *args, **kwargs):
         captured.append((fn, args, kwargs))
         return real_call_with_retry(fn, *args, **kwargs)
 
-    with patch.object(applier, "_call_with_retry", side_effect=spy):
+    with patch.object(apply_outbound, "_call_with_retry", side_effect=spy):
         with pytest.raises(RuntimeError, match="create failed"):
             applier._apply_outbound_create(mutation, client=client)
 

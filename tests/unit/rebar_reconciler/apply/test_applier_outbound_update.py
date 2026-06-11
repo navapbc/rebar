@@ -65,13 +65,14 @@ def test_allowlist_fields_routed_via_call_with_retry(applier):
     )
 
     captured: list[tuple] = []
-    real = applier._call_with_retry
+    from rebar_reconciler import apply_outbound  # point-of-use: leaf calls retry here
+    real = apply_outbound._call_with_retry
 
     def spy(fn, *args, **kwargs):
         captured.append((fn, args, kwargs))
         return real(fn, *args, **kwargs)
 
-    with patch.object(applier, "_call_with_retry", side_effect=spy):
+    with patch.object(apply_outbound, "_call_with_retry", side_effect=spy):
         result = applier._apply_outbound_update(mutation, client=client)
 
     # Verify update_issue invoked exactly once with the allowlisted subset.
