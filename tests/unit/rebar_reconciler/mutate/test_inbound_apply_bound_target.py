@@ -53,7 +53,11 @@ def applier():
 @pytest.fixture(autouse=True)
 def _reset_ticket_reducer_module_cache(applier):
     yield
-    applier._TICKET_REDUCER_MODULE = None
+    # The ticket-reducer lazy cache now lives in inbound_translate (its owner);
+    # reset it at point-of-use rather than on the applier facade.
+    from rebar_reconciler import inbound_translate
+
+    inbound_translate._TICKET_REDUCER_MODULE = None
 
 
 def _make_mutation(applier, target: str, payload: dict):
