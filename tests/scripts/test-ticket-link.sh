@@ -13,7 +13,7 @@
 #   7. ticket link <id1> <id2> relates_to → bidirectional LINK events in both dirs
 #
 # NOTE: Cycle detection tests are NOT in this file — cycle detection is in
-# ticket-graph.py (dso-dr38) and tested in test_ticket_graph.py (dso-zej9).
+# ticket-graph.py (dso-dr38) and tested in tests/scripts/graph/ (dso-zej9).
 #
 # Usage: bash tests/scripts/test-ticket-link.sh
 # Returns: exit non-zero (RED) until ticket-link.sh is implemented.

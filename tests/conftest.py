@@ -178,7 +178,7 @@ def _no_repo_commits(request: pytest.FixtureRequest) -> Iterator[None]:
             f"Test moved the repo HEAD ({before[:10]} -> {after[:10]}): it "
             "committed into the rebar checkout instead of an isolated tmp "
             "tracker. Isolate the git writes — pin GIT_CEILING_DIRECTORIES to the "
-            "tmp root (see tests/scripts/test_ticket_graph.py::"
+            "tmp root (see tests/scripts/graph/conftest.py::"
             "_isolate_git_from_enclosing_repo) or init the tracker as its own "
             f"git repo. Undo the stray commit(s) with: git reset --hard {before[:10]}"
         )
