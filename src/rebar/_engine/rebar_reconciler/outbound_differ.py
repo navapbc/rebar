@@ -171,7 +171,7 @@ def _load_comment_limits():
     """Lazy-load the sibling comment_limits module (same pattern as _load_adf).
 
     Bug 6afc-20ee-84e5-4dd5: the truncation rule MUST be identical on the send
-    path (acli-integration.add_comment) and this differ comparison path, so both
+    path (acli.add_comment) and this differ comparison path, so both
     import the single shared ``truncate_comment_body`` helper. Loaded by file
     path (not ``from . import``) because the differ may be imported via
     ``importlib.util.spec_from_file_location`` in tests, which does not establish

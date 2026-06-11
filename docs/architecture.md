@@ -91,12 +91,12 @@ remove). The **reconciler** (`rebar_reconciler/`) likewise stays in the engine
 dir: the library only ever reaches it as a subprocess (`python -m
 rebar_reconciler`) or by loading a single file by path (`mode.py` in
 `mcp_server.py`), never as an in-process package import — so it leaks no generic
-name onto the library path. Its internal `sys.modules` identity keys (the
-`spec_from_file_location` dotted-key scheme that copes with the test-package
-shadow and `acli-integration.py`'s hyphen) are **left as-is by deliberate
-decision**; turning them into ordinary imports is owned by `tangly-abbey-smelt`,
-which is sequenced after this repackage precisely because the package is now
-importable as `rebar.*` for it to build on.
+name onto the library path. `tangly-abbey-smelt` has since renamed
+`acli-integration.py` → `rebar_reconciler/acli.py` and turned the engine's
+acli loaders into ordinary `from rebar_reconciler import acli` package imports
+(the hyphen that forced `spec_from_file_location` is gone). The remaining
+by-path `sys.modules` dotted-key loaders that cope with the test-package shadow
+are unaffected.
 
 - **Storage** — a dedicated `tickets` git **orphan branch**, checked out as a
   worktree at `.tickets-tracker/`. Tickets are directories; mutations are
@@ -140,9 +140,9 @@ report runs in CI (`.github/workflows/test.yml`) so new offenders surface in PRs
 
 | File | LOC | Remedy |
 |------|----:|--------|
-| `rebar_reconciler/applier.py` | ~3480 | split along seams — ticket `tangly-abbey-smelt` |
+| ~~`rebar_reconciler/applier.py`~~ | ~~3480~~ → 776 | ✅ `tangly-abbey-smelt`: split into 10 cohesive modules (inbound_translate/pass_io/rebar_id_audit/apply_base/batch_dispatch/apply_outbound/apply_inbound/typed_dispatch/apply_planning + applier facade) |
 | `_engine/ticket-lib-api.sh` | ~2370 | retire via strangler-fig — ticket `adult-oxide-slave` |
-| `_engine/acli-integration.py` | ~2180 | split the Jira-client vs ADF concerns (reconciler) |
+| `rebar_reconciler/acli.py` | ~2180 | split the Jira-client (transport/REST/graph mixins) vs field/ADF concerns — `tangly-abbey-smelt` |
 | `_engine/ticket-lib.sh` | ~2000 | retire via strangler-fig — `adult-oxide-slave` |
 | `rebar_reconciler/reconcile.py` | ~1320 | split orchestration vs pass-driver seams |
 | `rebar_reconciler/outbound_differ.py` | ~1130 | split per-field differ seams |

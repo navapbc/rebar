@@ -7,7 +7,7 @@ so the add fails silently and the differ re-emits the comment on every pass
 
 The fix has two halves that MUST share one truncation function:
 
-  (send path) acli-integration.add_comment truncates the body so it lands; and
+  (send path) acli.add_comment truncates the body so it lands; and
   (differ path) outbound_differ._diff_comments truncates the expected local body
     BEFORE the membership test so the previously-truncated-then-landed Jira body
     matches and the diff stops re-emitting.
@@ -100,7 +100,7 @@ def _make_ticket_with_comments(ticket_id: str, comment_bodies: list[str]) -> dic
 # A non-excluded (i.e. human-class, NOT a machine marker) over-length body.
 # Send-path (add_comment) truncation is covered in
 # tests/scripts/test_acli_comment_length_guard.py (that suite's conftest sets
-# up the sys.path needed to import acli-integration.py).
+# up the sys.path needed to import rebar_reconciler/acli.py).
 _OVERSIZE_BODY = "X" * 38015
 
 

@@ -15,7 +15,7 @@ tree (see
 Rationale:
 
 * It works for module files whose path contains hyphens (e.g.
-  ``acli-integration.py``), which Python's import system cannot resolve as a
+  ``rebar_reconciler/acli.py``), which Python's import system cannot resolve as a
   regular module name.
 * It avoids implicit ``sys.path`` requirements — no conftest-level path
   manipulation is needed for tests to find the modules under test.
@@ -62,9 +62,9 @@ def _seed_dotted_namespace() -> None:
     import rebar_reconciler  # the test-dir package under pytest; engine pkg in prod
 
     # The test-dir package shadows the engine package, so dotted submodule
-    # imports against the ENGINE (e.g. acli-integration.py's module-level
+    # imports against the ENGINE (e.g. rebar_reconciler/acli.py's module-level
     # ``from rebar_reconciler.adf import ...`` / ``from rebar_reconciler.comment_limits
-    # import ...``, executed when reconcile_once loads acli-integration via
+    # import ...``, executed when reconcile_once loads acli via
     # _load) would fail to resolve — and _load registers the half-loaded module
     # in sys.modules before exec, poisoning the cache for sibling tests. Extend
     # this package's __path__ to include the engine's rebar_reconciler dir so ANY

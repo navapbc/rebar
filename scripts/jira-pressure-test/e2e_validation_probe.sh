@@ -27,7 +27,7 @@ set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 # This reference probe lives under scripts/jira-pressure-test/, so the rebar
-# engine (dispatcher, reconciler package, acli-integration.py) is anchored at
+# engine (dispatcher, reconciler package, rebar_reconciler/acli.py) is anchored at
 # the repo's src/rebar/_engine tree rather than a sibling of this script.
 _SCRIPTS_DIR="${REBAR_ENGINE_DIR:-${REPO_ROOT}/src/rebar/_engine}"
 TICKET_CLI="${REBAR_TICKET_CLI:-${_SCRIPTS_DIR}/rebar}"
@@ -84,9 +84,7 @@ get_jira_field() {
     cd "$RECONCILER_DIR"
     python3 -c "
 import importlib.util, sys, json
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 issue = mod.get_issue('${key}')
 fields = issue.get('fields', issue)
 val = fields.get('${field}', '')
@@ -111,9 +109,7 @@ get_jira_comments() {
     cd "$RECONCILER_DIR"
     python3 -c "
 import importlib.util, json
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 comments = mod.get_comments('${key}')
 for c in comments:
     body = c.get('body', '') if isinstance(c, dict) else str(c)
@@ -355,9 +351,7 @@ echo ""
 cd "$RECONCILER_DIR"
 if python3 -c "
 import importlib.util
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 mod.update_issue('${JIRA_KEY}', summary='E2E-PROBE: JIRA-EDITED ${PROBE_TS}')
 " 2>&1; then
     pass_test "Phase3.jira-edit-summary"
@@ -368,9 +362,7 @@ fi
 # Step 11: Add Jira comment via ACLI.
 if python3 -c "
 import importlib.util
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 mod.add_comment('${JIRA_KEY}', 'Probe comment from Jira')
 " 2>&1; then
     pass_test "Phase3.jira-add-comment"
@@ -457,9 +449,7 @@ echo ""
 cd "$RECONCILER_DIR"
 if python3 -c "
 import importlib.util, os
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],

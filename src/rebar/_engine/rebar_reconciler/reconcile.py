@@ -921,9 +921,9 @@ def reconcile_once(
     # The client is created here (rather than inside outbound_differ.py) so the
     # differ stays importable in test environments without JIRA_URL/JIRA_USER
     # env vars set, and to keep the I/O-free fixture path intact.
-    # Use "acli_integration" as the sys.modules key — same canonical key used
-    # by applier._load_acli() so the module is shared and not double-loaded.
-    acli_mod_for_comments = _load("acli_integration", "../acli-integration.py")
+    # The in-package acli transport module (rebar_reconciler.acli), shared via
+    # the canonical package key so it is not double-loaded.
+    from rebar_reconciler import acli as acli_mod_for_comments
     outbound_diff_client = acli_mod_for_comments.AcliClient(
         jira_url=os.environ.get("JIRA_URL", ""),
         user=os.environ.get("JIRA_USER", ""),

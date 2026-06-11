@@ -150,7 +150,7 @@ def test_inbound_conflict_leaf_does_not_invoke_subprocess(
 
 def _make_fake_acli_mod():
     """Build a minimal stub acli module so apply() can construct its client
-    without importing the real acli-integration.py (which has a known
+    without importing the real rebar_reconciler/acli.py (which has a known
     `rebar_reconciler.adf` ModuleNotFoundError under test load)."""
     import types
 

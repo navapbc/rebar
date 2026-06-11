@@ -115,7 +115,7 @@ def test_status_field_is_forwarded_to_update_issue(applier, monkeypatch):
     """Bug 85a1 (Gap 8): the REBAR_RECONCILER_STATUS_GATING gate has been
     removed. Status is now first-class — ``_apply_outbound_update`` passes
     it through to ``client.update_issue`` (which routes status to
-    ``transition_issue`` → REST POST /transitions inside acli-integration).
+    ``transition_issue`` → REST POST /transitions inside acli).
     """
     monkeypatch.delenv("REBAR_RECONCILER_STATUS_GATING", raising=False)
     client = SimpleNamespace(update_issue=MagicMock(return_value=None))

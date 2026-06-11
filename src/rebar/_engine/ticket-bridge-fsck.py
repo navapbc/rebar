@@ -272,13 +272,9 @@ def enumerate_open_count_skew_anomalies(tickets_dir: Path) -> list[dict]:
     """
     import importlib.util as _ilu
 
-    # Load AcliClient via importlib (no package install required)
-    acli_path = Path(__file__).parent / "acli-integration.py"
-    spec = _ilu.spec_from_file_location("acli_integration", acli_path)
-    if spec is None:
-        raise FileNotFoundError(f"acli-integration.py not found at {acli_path}")
-    acli_mod = _ilu.module_from_spec(spec)
-    spec.loader.exec_module(acli_mod)  # type: ignore[union-attr]
+    # Load the acli transport from the in-package module (engine dir is on
+    # PYTHONPATH via engine_env() for every reconciler subprocess).
+    from rebar_reconciler import acli as acli_mod
     # F1 fix: AcliClient() with no args raises TypeError — read credentials
     # from JIRA_* env vars. Operators running fsck without these set will
     # get an actionable RuntimeError instead of a cryptic constructor crash.

@@ -76,15 +76,10 @@ class SilentTruncationError(Exception):
 
 
 def _load_acli():
-    """Load acli-integration module via importlib."""
-    acli_path = Path(__file__).parent.parent / "acli-integration.py"
-    spec = importlib.util.spec_from_file_location("acli_integration", acli_path)
-    if spec is None:
-        raise FileNotFoundError(f"acli-integration.py not found at {acli_path}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules.setdefault("acli_integration", mod)
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    """Return the in-package acli transport module (rebar_reconciler.acli)."""
+    from rebar_reconciler import acli
+
+    return acli
 
 
 # Canonical dotted key matching the codebase convention used by __main__'s

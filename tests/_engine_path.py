@@ -23,4 +23,4 @@ def engine_dir() -> Path:
 
 
 def acli_path() -> Path:
-    return engine_dir() / "acli-integration.py"
+    return engine_dir() / "rebar_reconciler" / "acli.py"

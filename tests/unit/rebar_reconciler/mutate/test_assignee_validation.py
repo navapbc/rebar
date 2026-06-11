@@ -17,7 +17,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
-ACLI_PATH = SCRIPTS_DIR / "acli-integration.py"
+ACLI_PATH = SCRIPTS_DIR / "rebar_reconciler" / "acli.py"
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -33,7 +33,7 @@ if "rebar_reconciler.adf" not in sys.modules:
     _adf_mod = importlib.util.module_from_spec(_adf_spec)
     sys.modules["rebar_reconciler.adf"] = _adf_mod
     _adf_spec.loader.exec_module(_adf_mod)
-# acli-integration.py also imports ``from rebar_reconciler.comment_limits import ...``
+# acli.py also imports ``from rebar_reconciler.comment_limits import ...``
 # (bug 6afc-20ee-84e5-4dd5). Bootstrap it explicitly alongside adf.
 _CL_PATH = SCRIPTS_DIR / "rebar_reconciler" / "comment_limits.py"
 if "rebar_reconciler.comment_limits" not in sys.modules:
@@ -57,7 +57,7 @@ def _load_acli():
 @pytest.fixture(scope="module")
 def acli():
     if not ACLI_PATH.exists():
-        pytest.fail(f"acli-integration.py not found at {ACLI_PATH}")
+        pytest.fail(f"acli.py not found at {ACLI_PATH}")
     return _load_acli()
 
 

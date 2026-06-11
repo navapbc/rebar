@@ -34,7 +34,7 @@ if _SCRIPTS_DIR not in sys.path:
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ACLI_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "acli-integration.py"
+ACLI_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "acli.py"
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -48,7 +48,7 @@ def _load_module(name: str, path: Path) -> ModuleType:
 @pytest.fixture(scope="module")
 def acli_mod() -> ModuleType:
     if not ACLI_PATH.exists():
-        pytest.fail(f"acli-integration.py not found at {ACLI_PATH}")
+        pytest.fail(f"acli.py not found at {ACLI_PATH}")
     return _load_module("acli_integration", ACLI_PATH)
 
 

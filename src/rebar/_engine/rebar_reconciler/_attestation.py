@@ -53,7 +53,7 @@ def build_acli_client_from_env() -> Any:
 
     Returns:
         A configured ``AcliClient`` instance loaded from the sibling
-        ``acli-integration.py`` (under the rebar engine scripts dir) via importlib.
+        ``rebar_reconciler/acli.py`` (under the rebar engine scripts dir) via importlib.
 
     Raises:
         RuntimeError: If any required JIRA_* env var is missing or empty.
@@ -68,13 +68,7 @@ def build_acli_client_from_env() -> Any:
 
     import importlib.util  # local import — keeps top-level deps minimal
 
-    acli_path = Path(__file__).parent.parent / "acli-integration.py"
-    spec = importlib.util.spec_from_file_location("acli_integration", acli_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"acli-integration.py not found at {acli_path}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules.setdefault("acli_integration", mod)
-    spec.loader.exec_module(mod)
+    from rebar_reconciler import acli as mod
 
     return mod.AcliClient(
         jira_url=os.environ["JIRA_URL"],

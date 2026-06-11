@@ -75,6 +75,12 @@ def _run_probe_with_mocked_acli(
 
     mock_spec.loader.exec_module.side_effect = _fake_exec_module
 
+    # The probe now does `from rebar_reconciler import acli` (the file was renamed
+    # from acli-integration into the package; see below), so inject a fake acli module
+    # sys.modules rather than intercepting spec_from_file_location.
+    _fake_acli_mod = types.ModuleType("rebar_reconciler.acli")
+    _fake_acli_mod.AcliClient = mock_acli_cls  # type: ignore[attr-defined]
+
     # We need the real spec_from_file_location for the probe itself
     _real_spec_from_file = importlib.util.spec_from_file_location
     _real_module_from_spec = importlib.util.module_from_spec
@@ -87,7 +93,7 @@ def _run_probe_with_mocked_acli(
     def _patched_spec_from_file(
         name: str, path: object, *args: object, **kwargs: object
     ) -> object:
-        if "acli-integration" in str(path) or name == "acli_integration":
+        if "rebar_reconciler/acli" in str(path) or name == "acli_integration":
             return mock_spec
         return _real_spec_from_file(name, path, *args, **kwargs)  # type: ignore[arg-type]
 
@@ -100,8 +106,17 @@ def _run_probe_with_mocked_acli(
     captured = io.StringIO()
     exit_code: int | None = None
 
+    import rebar_reconciler
+
     patches: list[contextlib.AbstractContextManager] = [
         mock.patch.dict("os.environ", env, clear=False),
+        mock.patch.dict(
+            "sys.modules", {"rebar_reconciler.acli": _fake_acli_mod}
+        ),
+        # `from rebar_reconciler import acli` resolves the package ATTRIBUTE if
+        # present (set by a prior test's import), bypassing the sys.modules patch.
+        # Patch the attribute too so each probe run sees its own fake.
+        mock.patch.object(rebar_reconciler, "acli", _fake_acli_mod, create=True),
         mock.patch(
             "importlib.util.spec_from_file_location",
             side_effect=_patched_spec_from_file,

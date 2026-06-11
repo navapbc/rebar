@@ -1,6 +1,6 @@
 """Tests for live comment fetch in outbound_differ when snapshot lacks 'comment' field.
 
-Root cause: fetcher.fetch_snapshot → AcliClient.search_issues (acli-integration.py:1021+,
+Root cause: fetcher.fetch_snapshot → AcliClient.search_issues (rebar_reconciler/acli.py:1021+,
 `acli jira workitem search --jql ... --paginate --json`) returns issue fields WITHOUT
 the `comment` field (Jira search doesn't return comments). So in outbound_differ.py
 `_diff_comments`, `jira_issue.get("comment", {})` is ALWAYS {} on live runs →

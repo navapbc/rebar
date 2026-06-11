@@ -11,7 +11,7 @@ comment-sync loop).
 The fix has a convergence requirement that forces a SINGLE shared truncation
 function used by BOTH paths:
 
-  - the send path (``acli-integration.add_comment``) truncates the body before
+  - the send path (``acli.add_comment``) truncates the body before
     handing it to ACLI, so the comment actually lands; and
   - the differ comparison path (``outbound_differ._diff_comments``) applies the
     SAME truncation to the expected local body BEFORE the membership test, so a
@@ -28,7 +28,7 @@ back to the local ticket store — local comment content is the source of truth
 and stays untouched.
 
 This module is stdlib-only and pure so both the package-imported caller
-(``acli-integration.py``) and the importlib-by-path caller
+(``rebar_reconciler/acli.py``) and the importlib-by-path caller
 (``outbound_differ.py``, in tests) can load it without side effects.
 """
 

@@ -41,10 +41,10 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
 APPLIER_PATH = SCRIPTS_DIR / "rebar_reconciler" / "applier.py"
-ACLI_PATH = SCRIPTS_DIR / "acli-integration.py"
+ACLI_PATH = SCRIPTS_DIR / "rebar_reconciler" / "acli.py"
 ALERT_STORE_PATH = SCRIPTS_DIR / "rebar_reconciler" / "alert_store.py"
 
-# acli-integration.py imports ``from rebar_reconciler.adf import text_to_adf``,
+# acli.py imports ``from rebar_reconciler.adf import text_to_adf``,
 # which requires the rebar_reconciler package to be importable. Mirror the
 # bootstrap pattern from test_assignee_validation.py so the loader chain
 # resolves the same way under any cwd.
@@ -62,7 +62,7 @@ if "rebar_reconciler.adf" not in sys.modules:
     _adf_mod = importlib.util.module_from_spec(_adf_spec)
     sys.modules["rebar_reconciler.adf"] = _adf_mod
     _adf_spec.loader.exec_module(_adf_mod)  # type: ignore[union-attr]
-# acli-integration.py also imports ``from rebar_reconciler.comment_limits import ...``
+# acli.py also imports ``from rebar_reconciler.comment_limits import ...``
 # (bug 6afc-20ee-84e5-4dd5). Bootstrap it explicitly alongside adf so the loader
 # chain resolves regardless of which sibling test first registered the
 # ``rebar_reconciler`` namespace stub.

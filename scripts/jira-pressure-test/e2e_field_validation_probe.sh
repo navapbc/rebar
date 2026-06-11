@@ -37,7 +37,7 @@ fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 # This reference probe lives under scripts/jira-pressure-test/, so the rebar
-# engine (dispatcher, reconciler package, acli-integration.py) is anchored at
+# engine (dispatcher, reconciler package, rebar_reconciler/acli.py) is anchored at
 # the repo's src/rebar/_engine tree rather than a sibling of this script.
 _SCRIPTS_DIR="${REBAR_ENGINE_DIR:-${REPO_ROOT}/src/rebar/_engine}"
 TICKET_CLI="${REBAR_TICKET_CLI:-${_SCRIPTS_DIR}/rebar}"
@@ -147,9 +147,7 @@ get_jira_field() {
     cd "$RECONCILER_DIR"
     python3 -c "
 import importlib.util, sys, json, os
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 adf_spec = importlib.util.spec_from_file_location('adf', '${_SCRIPTS_DIR}/rebar_reconciler/adf.py')
 adf_mod = importlib.util.module_from_spec(adf_spec)
 adf_spec.loader.exec_module(adf_mod)
@@ -186,9 +184,7 @@ get_jira_comments() {
     cd "$RECONCILER_DIR"
     python3 -c "
 import importlib.util, json, os
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -325,9 +321,7 @@ print(json.dumps(kwargs))
 " "$@")
     python3 -c "
 import importlib.util, os, json, sys
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 kwargs = json.loads(sys.argv[1])
 mod.update_issue('${key}', **kwargs)
 " "$kwargs_json"
@@ -339,9 +333,7 @@ jira_update_priority() {
     cd "$RECONCILER_DIR"
     python3 -c "
 import importlib.util, os
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 mod.update_priority('${key}', '${priority_name}')"
 }
 
@@ -351,9 +343,7 @@ jira_update_issuetype() {
     cd "$RECONCILER_DIR"
     python3 -c "
 import importlib.util, os
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -368,9 +358,7 @@ jira_transition() {
     cd "$RECONCILER_DIR"
     python3 -c "
 import importlib.util, os
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 mod.transition_issue('${key}', '${status_name}')"
 }
 
@@ -380,9 +368,7 @@ jira_add_label() {
     cd "$RECONCILER_DIR"
     python3 -c "
 import importlib.util, os
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -397,9 +383,7 @@ jira_remove_label() {
     cd "$RECONCILER_DIR"
     python3 -c "
 import importlib.util, os
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -414,9 +398,7 @@ jira_add_comment() {
     cd "$RECONCILER_DIR"
     python3 -c "
 import importlib.util, os
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 mod.add_comment('${key}', '${body}')"
 }
 
@@ -425,9 +407,7 @@ jira_delete_issue() {
     cd "$RECONCILER_DIR"
     python3 -c "
 import importlib.util, os
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -453,9 +433,7 @@ fallback_cleanup() {
     cd "$RECONCILER_DIR"
     python3 -c "
 import importlib.util, os, json
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -501,9 +479,7 @@ pass_test "Phase0.env-vars"
 # Probe get_myself for assignee testing
 PROBE_USER=$(cd "$RECONCILER_DIR" && python3 -c "
 import importlib.util, os, json
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -1151,9 +1127,7 @@ fi
 if [ -n "$CHILD_JIRA_KEY" ] && [ -n "$EPIC_JIRA_KEY" ]; then
     child_parent_key=$(cd "$RECONCILER_DIR" && python3 -c "
 import importlib.util, os, json
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -1223,9 +1197,7 @@ if [ -n "$CHILD_LOCAL_ID" ] && [ -n "$EPIC2_LOCAL_ID" ]; then
     if [ -n "$CHILD_JIRA_KEY" ] && [ -n "$EPIC2_JIRA_KEY" ]; then
         new_parent_key=$(cd "$RECONCILER_DIR" && python3 -c "
 import importlib.util, os
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -1250,9 +1222,7 @@ fi
 if [ -n "$THIRD_JIRA_KEY" ] && [ -n "$EPIC_JIRA_KEY" ]; then
     cd "$RECONCILER_DIR" && python3 -c "
 import importlib.util, os
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -1337,9 +1307,7 @@ print(match[0] if match else '')
 
     dup_count=$(cd "$RECONCILER_DIR" && python3 -c "
 import importlib.util, os, json
-spec = importlib.util.spec_from_file_location('acli', '${_SCRIPTS_DIR}/acli-integration.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+from rebar_reconciler import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],

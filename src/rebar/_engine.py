@@ -1,7 +1,7 @@
 """Locate and invoke the bundled ticket engine.
 
 The engine (bash dispatcher + ``ticket-*.sh`` + the ``ticket_reducer`` /
-``ticket_graph`` / ``rebar_reconciler`` Python packages + ``acli-integration.py``)
+``ticket_graph`` / ``rebar_reconciler`` Python packages + ``rebar_reconciler/acli.py``)
 ships as package data under ``rebar/_engine/``. This module resolves that
 directory deterministically (editable or wheel install) and runs the dispatcher
 as a subprocess with an environment that pins repo-root and import paths.
