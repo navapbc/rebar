@@ -9,9 +9,9 @@ resolve_field dispatches to the correct strategy based on FIELD_CLASSES.
 
 Also exposes ProvenanceLedger — per-element provenance keyed by `element_key`
 (typically `"<field_name>:<element_value>"` for collection elements, or just
-`<field_name>` for scalars). Companion to the differ-level provenance_ledger
-module; the resolver-level ledger uses element-level keys so collection
-elements can be echo-suppressed individually.
+`<field_name>` for scalars). The ledger uses element-level keys so collection
+elements can be echo-suppressed individually; it is consumed by differ's
+`compute_mutations(..., ledger=)` echo-suppression path.
 """
 
 from __future__ import annotations
@@ -226,9 +226,8 @@ class ProvenanceLedger:
     for scalars). Each record carries `side` ('local'|'jira'), an ISO 8601
     UTC `timestamp`, and a `value_hash` for content-equality echo detection.
 
-    Companion to provenance_ledger.ProvenanceLedger (which uses target+payload
-    keys). The resolver-level ledger uses element-level keys so individual
-    collection elements can be echo-suppressed independently.
+    The ledger uses element-level keys so individual collection elements can be
+    echo-suppressed independently (vs whole target+payload keys).
     """
 
     def __init__(self) -> None:

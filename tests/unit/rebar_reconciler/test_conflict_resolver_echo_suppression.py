@@ -7,7 +7,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "differ.py"
-LEDGER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "provenance_ledger.py"
+LEDGER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "conflict_resolver.py"
 
 
 def _load(path, name):
@@ -25,7 +25,7 @@ def differ():
 
 @pytest.fixture(scope="module")
 def ledger_mod():
-    return _load(LEDGER_PATH, "provenance_ledger")
+    return _load(LEDGER_PATH, "conflict_resolver")
 
 
 def test_echo_suppressed_for_identical_elements(differ, ledger_mod):

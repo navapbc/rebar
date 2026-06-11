@@ -3,7 +3,7 @@
 RED task 902e-1eea-a505-451e — extend FIELD_CLASSES + thread ledger through
 resolve_field. Tests use a minimal fake ledger duck-typed to the
 ProvenanceLedger API (record(key, side, value)) to avoid coupling this test
-file to the (separately-merged) provenance_ledger module.
+file to the concrete conflict_resolver.ProvenanceLedger implementation.
 """
 
 from __future__ import annotations
