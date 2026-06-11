@@ -10,11 +10,11 @@ set -euo pipefail
 #
 # Exit codes:
 #   0 = quality sufficient (issue-as-prompt is safe)
-#   1 = too sparse (fall back to inline prompt)
+#   1 = too sparse (ticket is not dispatch-ready)
 #
 # Output (single line):
 #   QUALITY: pass (<line_count> lines, <keyword_count> criteria, <ac_items> AC items, <file_impact> file impact)
-#   QUALITY: fail - description too sparse (<line_count> lines), using inline prompt
+#   QUALITY: fail - description too sparse (<line_count> lines); add detail before dispatch
 
 set -euo pipefail
 
@@ -47,7 +47,7 @@ _qc_json() {  # <verdict> <reason>
 TICKET_CMD="${TICKET_CMD:-$SCRIPT_DIR/ticket}"
 output=$("$TICKET_CMD" show "$ID" 2>/dev/null) || output=""
 if [ -z "$output" ]; then
-    if [ "$_OUTPUT_FMT" = "json" ]; then _qc_json fail "could not load issue $ID"; else echo "QUALITY: fail - could not load issue $ID, using inline prompt"; fi
+    if [ "$_OUTPUT_FMT" = "json" ]; then _qc_json fail "could not load issue $ID"; else echo "QUALITY: fail - could not load issue $ID"; fi
     exit 1
 fi
 
@@ -120,7 +120,7 @@ if [ "$ticket_type" = "story" ]; then
         if [ "$_OUTPUT_FMT" = "json" ]; then _qc_json pass "story - prose done-definitions"; else echo "QUALITY: pass (story - prose done-definitions) ($line_count lines, $keyword_count criteria)"; fi
         exit 0
     else
-        if [ "$_OUTPUT_FMT" = "json" ]; then _qc_json fail "description too sparse ($line_count lines)"; else echo "QUALITY: fail - description too sparse ($line_count lines), using inline prompt"; fi
+        if [ "$_OUTPUT_FMT" = "json" ]; then _qc_json fail "description too sparse ($line_count lines)"; else echo "QUALITY: fail - description too sparse ($line_count lines); add detail before dispatch"; fi
         exit 1
     fi
 fi
@@ -137,6 +137,6 @@ elif [ "$line_count" -ge 5 ] && [ "$keyword_count" -ge 1 ]; then
     echo "WARNING: Task lacks Acceptance block and File Impact section. Add via 'rebar comment <id> <note>'." >&2
     exit 0
 else
-    if [ "$_OUTPUT_FMT" = "json" ]; then _qc_json fail "description too sparse ($line_count lines)"; else echo "QUALITY: fail - description too sparse ($line_count lines), using inline prompt"; fi
+    if [ "$_OUTPUT_FMT" = "json" ]; then _qc_json fail "description too sparse ($line_count lines)"; else echo "QUALITY: fail - description too sparse ($line_count lines); add detail before dispatch"; fi
     exit 1
 fi

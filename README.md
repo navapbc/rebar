@@ -213,7 +213,12 @@ it scans the whole store and prints an overall tracker-health score (1-5, exit
 0-4) bucketed into critical / major / minor / warning findings (`--output json`,
 `--terse`, `--verbose`, `--fix`). Passing it a ticket id errors. The *per-ticket*
 quality gates are separate commands that each take an `<id>`: `clarity-check`,
-`check-ac`, `quality-check`.
+`check-ac`, `quality-check`. They are **structural floor checks** — they verify a
+ticket is *shaped* like dispatchable work, not that the content is good. Every
+type needs an `## Acceptance Criteria` checklist (`- [ ]` items); `check-ac` and
+`clarity-check` both require it. See the per-type ticket template (Why/What/Scope
+for stories, Reproduction Steps for bugs, Success Criteria/Context for epics) in
+[CLAUDE.md](CLAUDE.md#ticket-template-the-gates-enforce).
 
 **Links.** `rebar link <id1> <id2> <relation>` **requires** a relation; the six
 relations are `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`,

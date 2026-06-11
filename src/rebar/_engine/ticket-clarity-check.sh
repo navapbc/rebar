@@ -227,8 +227,24 @@ if [[ -z "$SCORE" ]] || ! [[ "$SCORE" =~ ^[0-9]+$ ]]; then
     exit 2
 fi
 
+# ── Acceptance Criteria floor (one vocabulary with check-ac) ─────────────────
+# Clarity is a STRUCTURAL floor check, not semantic scoring. An Acceptance
+# Criteria checklist is the one heading every ticket type needs, and check-ac
+# enforces it on EVERY type — so clarity-check requires it too (for all types),
+# guaranteeing that a ticket which passes clarity also passes check-ac. Detection
+# mirrors check-acceptance-criteria.sh exactly.
+AC_COUNT=$(printf '%s\n' "$DESCRIPTION" | awk '
+  tolower($0) ~ /^## acceptance criteria/ { found=1; next }
+  found && /^## / { found=0; next }
+  found && /^- \[/ { count++ }
+  END { print count+0 }
+')
+AC_COUNT="${AC_COUNT:-0}"
+
 # ── Determine verdict and emit JSON ──────────────────────────────────────────
-if (( SCORE >= THRESHOLD )); then
+# Pass requires BOTH a sufficient structural score AND an Acceptance Criteria
+# checklist (the universal floor) — so clarity-pass implies check-ac-pass.
+if (( SCORE >= THRESHOLD )) && [ "$AC_COUNT" -ge 1 ]; then
     VERDICT="pass"
     EXIT_CODE=0
 else

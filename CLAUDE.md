@@ -71,6 +71,30 @@ score (1-5) bucketed into critical/major/minor/warning findings (e.g. orphaned
 tasks, cycles, cross-epic child deps). Use the per-ticket gates on the ticket
 you're working; use `validate` for store-level health.
 
+The per-ticket gates are **structural floor checks**, not semantic scoring:
+`clarity_check` is a heading/length/bullet heuristic, so it confirms a ticket is
+*shaped* like dispatchable work — it can't judge whether the content is actually
+good. Treat a pass as "well-formed enough to dispatch," not "high quality."
+
+### Ticket template the gates enforce
+
+Author descriptions to this per-type matrix so the gates pass first time. An
+**`## Acceptance Criteria`** block with `- [ ]` checklist items is the universal
+floor — `check_ac` requires it on **every** type, and `clarity_check` will not
+pass without it either (the two gates share one vocabulary). The per-type
+headings below are what `clarity_check` additionally rewards:
+
+| Ticket type | Required (all)            | Type-specific headings clarity rewards            |
+|-------------|---------------------------|---------------------------------------------------|
+| `task`      | `## Acceptance Criteria`  | file paths (e.g. `src/…/x.py`)                    |
+| `story`     | `## Acceptance Criteria`  | `## Why`, `## What`, `## Scope`                   |
+| `bug`       | `## Acceptance Criteria`  | `## Reproduction Steps`, Expected vs Actual       |
+| `epic`      | `## Acceptance Criteria`  | `## Success Criteria`, `## Context`               |
+
+Plus, for all types: a description ≥ ~200 chars and at least one bullet/checklist
+line. A ticket missing the `## Acceptance Criteria` checklist fails both gates
+regardless of how rich the rest of the description is.
+
 Record `set_file_impact` (the `{path,reason}` array that `next_batch` uses to
 avoid scheduling file-conflicting tickets together) and `set_verify_commands`
 (DD-level verification) so downstream scheduling and verification work.

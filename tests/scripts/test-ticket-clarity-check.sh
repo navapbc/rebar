@@ -488,10 +488,14 @@ test_threshold_override() {
 
     # Build a description that scores around 4-5 (length + headers + bullets)
     local moderate_desc
+    # Includes an Acceptance Criteria block: clarity-check requires the AC floor
+    # for a pass on every type (one vocabulary with check-ac), so this fixture
+    # isolates the THRESHOLD behaviour rather than tripping the AC floor.
     moderate_desc=$(python3 -c "
 desc = 'x' * 250
 desc += '\n\n## Background\n' + 'y' * 50 + '\n'
 desc += '- item one\n- item two\n'
+desc += '\n## Acceptance Criteria\n- [ ] criterion one\n'
 print(desc)
 ")
 
