@@ -279,7 +279,7 @@ def test_warn_mode_logs_and_does_not_raise(applier, errors_mod, caplog):
 def test_guard_mode_precedence(
     applier, errors_mod, env_val, config_val, expected_raises
 ):
-    """env var REBAR_ID_GUARD_MODE takes precedence over dso-config.conf key."""
+    """env var REBAR_ID_GUARD_MODE takes precedence over .rebar/config.conf key."""
     assert hasattr(applier, "_audit_rebar_id_label_writes"), (
         "_audit_rebar_id_label_writes not found in applier"
     )

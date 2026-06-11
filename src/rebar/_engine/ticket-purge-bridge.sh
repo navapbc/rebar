@@ -8,7 +8,7 @@
 # Scans .tickets-tracker/ for ticket directories prefixed with "jira-".
 # For each, reads the CREATE event to extract the Jira project key.
 # Deletes all jira-* ticket directories whose project key does NOT match --keep.
-# Does NOT touch non-jira-* tickets (migrated, dso-*, w20-*, etc.).
+# Does NOT touch non-jira-* tickets (migrated, native rebar IDs, etc.).
 #
 # After deletion, commits the removal on the tickets branch.
 set -euo pipefail

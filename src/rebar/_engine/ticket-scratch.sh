@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ticket-scratch.sh
-# Thin dispatcher routing `dso ticket scratch <verb> [args...]` to the
+# Thin dispatcher routing `rebar scratch <verb> [args...]` to the
 # per-verb implementation scripts:
 #   set   → ticket-scratch-set.sh   <ticket_id> <key> <value>
 #   get   → ticket-scratch-get.sh   <ticket_id> <key>

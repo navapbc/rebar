@@ -53,7 +53,7 @@ def build_acli_client_from_env() -> Any:
 
     Returns:
         A configured ``AcliClient`` instance loaded from the sibling
-        ``acli-integration.py`` (under the dso scripts dir) via importlib.
+        ``acli-integration.py`` (under the rebar engine scripts dir) via importlib.
 
     Raises:
         RuntimeError: If any required JIRA_* env var is missing or empty.

@@ -715,7 +715,7 @@ with open(sys.argv[1], 'w') as f:
 
     # Assert: warning appeared in stderr
     local has_warning
-    has_warning=$(echo "$stderr_out" | grep -ic "unknown schema_version\|schema_version=99\|DSO WARN" || true)
+    has_warning=$(echo "$stderr_out" | grep -ic "unknown schema_version\|schema_version=99" || true)
     assert_eq "stderr contains unknown-schema_version warning" "1" \
         "$([ "${has_warning:-0}" -gt 0 ] && echo 1 || echo 0)"
 }
@@ -984,13 +984,13 @@ with open(sys.argv[1], 'w') as f:
 
     # First call must have had a warning
     local first_has_warning
-    first_has_warning=$(echo "$first_stderr" | grep -ic "unknown schema_version\|schema_version=99\|DSO WARN" || true)
+    first_has_warning=$(echo "$first_stderr" | grep -ic "unknown schema_version\|schema_version=99" || true)
     assert_eq "first call emits warning" "1" \
         "$([ "${first_has_warning:-0}" -gt 0 ] && echo 1 || echo 0)"
 
     # Second call must NOT have a warning (deduplicated)
     local second_has_warning
-    second_has_warning=$(echo "$second_stderr" | grep -ic "unknown schema_version\|schema_version=99\|DSO WARN" || true)
+    second_has_warning=$(echo "$second_stderr" | grep -ic "unknown schema_version\|schema_version=99" || true)
     assert_eq "second call does NOT emit duplicate warning" "0" "$second_has_warning"
 }
 test_forward_compat_warning_deduplication

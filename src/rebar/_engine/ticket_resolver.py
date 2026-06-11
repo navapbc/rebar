@@ -1,6 +1,6 @@
 """Shared Python ticket-ID resolver.
 
-Mirrors ``plugins/dso/scripts/ticket-lib.sh::resolve_ticket_id`` so Python
+Mirrors ``ticket-lib.sh::resolve_ticket_id`` so Python
 CLIs accept the same ID forms (full 16-hex, 8-hex short, alias, jira_key,
 unique prefix >= 4 chars) as the bash dispatcher does.
 

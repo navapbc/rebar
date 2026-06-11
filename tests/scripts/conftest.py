@@ -98,7 +98,7 @@ def acli_capture(
 # _verify_created_issue, which calls urllib.request.urlopen directly when
 # JIRA_URL / JIRA_USER / JIRA_API_TOKEN are present in the environment (a
 # silent env-var behaviour switch). Under the socket guard (tests/conftest.py
-# _dso_network_guard) that real GET raises RuntimeError. This fixture mocks the
+# _network_guard) that real GET raises RuntimeError. This fixture mocks the
 # urlopen seam so create_issue tests stay fully offline without an
 # allow_network bridge. Mirrors the _mock_urlopen_verify helper landed for
 # test_acli_integration.py (commit 27024174e7, bug 1c68).

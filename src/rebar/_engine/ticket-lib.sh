@@ -591,7 +591,7 @@ _push_tickets_branch() {
 #
 # Args:
 #   tracker_dir: path to .tickets-tracker worktree (passed by caller)
-#   ticket_id:   ticket directory name (e.g., dso-abc1)
+#   ticket_id:   ticket directory name (e.g., abc1-def2-1234-5678)
 #
 # Outputs the status string to stdout. Exits non-zero on error.
 ticket_read_status() {
@@ -997,8 +997,8 @@ print(f'[compact_preconditions] snapshot written: {tmp_path}', file=sys.stderr)
 
 # _tag_add_checked <ticket_id> <tag>
 # Adds a tag to a ticket. Tags are free-form in rebar — there is no special
-# gating on any tag value. (The DSO Planning-Intelligence-Log gate on
-# "brainstorm:complete" was removed when rebar was decoupled from the plugin.)
+# gating on any tag value. (A plugin-era planning-log tag gate was removed when
+# rebar was decoupled from the plugin.)
 # Retained as a thin wrapper so existing call sites stay stable.
 _tag_add_checked() {
     local ticket_id="$1"

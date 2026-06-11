@@ -12,7 +12,7 @@
 # IMPORTANT — this script IS destructive. It modifies git state in the tracker
 # directory. The companion script ticket-fsck.sh remains strictly
 # non-destructive. Use this script ONLY when ticket-tracker corruption from
-# the stale-rebase bug has been confirmed (e.g., `dso ticket show <id>` returns
+# the stale-rebase bug has been confirmed (e.g., `rebar show <id>` returns
 # "no events" for tickets that were recently created or modified).
 #
 # Usage:

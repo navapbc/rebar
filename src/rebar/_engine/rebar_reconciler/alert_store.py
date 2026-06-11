@@ -18,7 +18,7 @@ else:  # pragma: no cover - Windows fallback, not exercised by CI
 
 _24H_NS = 24 * 3600 * 1_000_000_000
 
-# Canonical state-directory layout for the dso reconciler. The two-level
+# Canonical state-directory layout for the rebar reconciler. The two-level
 # bridge_state/<feature> structure is part of the documented bridge contract
 # (see the bridge README). Consuming projects override the *location* by
 # passing a different repo_root; the layout itself is fixed.

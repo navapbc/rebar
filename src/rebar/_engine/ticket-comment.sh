@@ -66,7 +66,7 @@ env_id=$(cat "$TRACKER_DIR/.env-id")
 author=$(git config user.name 2>/dev/null || echo "Unknown")
 
 temp_event=$(mktemp "$TRACKER_DIR/.tmp-comment-XXXXXX")
-# Write body to temp file to avoid ARG_MAX limits on large payloads (e.g. PREPLANNING_CONTEXT)
+# Write body to temp file to avoid ARG_MAX limits on large payloads (e.g. very large comment bodies)
 body_file=$(mktemp "$TRACKER_DIR/.tmp-body-XXXXXX")
 printf '%s' "$body" > "$body_file"
 

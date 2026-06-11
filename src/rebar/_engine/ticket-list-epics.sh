@@ -300,7 +300,7 @@ for tid, entry in index.items():
 
     deps = entry.get('deps', [])
     # An epic is blocked only by external deps — exclude deps that are its own children.
-    # Preplanning may mistakenly add child story IDs to the epic's deps field (bug w21-3w8y).
+    # A prior planning step could mistakenly add child story IDs to the epic's deps field (bug w21-3w8y).
     # Children are identified by having parent == this epic's ID.
     external_deps = [dep for dep in deps if dep_parent.get(dep, '') != tid]
     open_blockers = [dep for dep in external_deps if dep_status.get(dep, 'open') != 'closed']

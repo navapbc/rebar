@@ -1,4 +1,4 @@
-"""Health record module for the DSO reconciler.
+"""Health record module for the rebar reconciler.
 
 Writes structured JSON health records after each reconciler pass so operators
 can track fsck totals, per-type open counts, and mutation volume over time.
@@ -14,7 +14,7 @@ from pathlib import Path
 
 SCHEMA_VERSION = 1
 
-# Canonical state-directory layout for the dso reconciler. The two-level
+# Canonical state-directory layout for the rebar reconciler. The two-level
 # bridge_state/<feature> structure is part of the documented bridge contract
 # (see the bridge README). Consuming projects override the *location* by
 # passing a different repo_root; the layout itself is fixed.
@@ -115,7 +115,7 @@ def count_open_by_type(repo_root: Path | None = None) -> dict:
         ticket_type: str | None = None
         # Default to "open" so tickets with only a CREATE event (no explicit
         # STATUS transition yet) match the canonical reducer initial state
-        # (ticket_reducer/_state.py:make_initial_state in the dso scripts).
+        # (ticket_reducer/_state.py:make_initial_state in the rebar engine scripts).
         latest_status: str = "open"
         for ef in event_files:
             try:

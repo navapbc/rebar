@@ -221,7 +221,7 @@ _ensure_initialized() {
             marker_age=$(( now - marker_time ))
         fi
         # Sync at most once per minute to shrink the divergence window during
-        # rapid-fire ticket operations (brainstorm sessions). 87f3-3b57.
+        # rapid-fire ticket operations. 87f3-3b57.
         #
         # Reconvergence policy lives in _reconverge_tickets (ticket-sync.sh): it
         # detects local-ahead by HEAD (not the lagging branch ref — the WS3

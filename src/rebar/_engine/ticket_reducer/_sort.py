@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 # LINK events must always replay before UNLINK at the same Unix-second timestamp,
-# even when the UNLINK filename UUID sorts alphabetically before the LINK UUID (dso-jwan).
+# even when the UNLINK filename UUID sorts alphabetically before the LINK UUID.
 _EVENT_TYPE_ORDER: dict[str, int] = {"LINK": 0, "UNLINK": 1}
 
 

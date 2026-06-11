@@ -607,10 +607,8 @@ def _decorate_outbound_comment(body: str) -> str:
 #
 # These prefixes mark reconciler-generated machine comments that must NEVER be
 # mirrored outbound to Jira (they are internal monitoring noise, not human Jira
-# content). Only reconciler-internal markers are listed here — when rebar was
-# decoupled from the DSO plugin, the skill-to-skill payload prefixes
-# (PREPLANNING_CONTEXT / RESEARCH_FINDINGS / DEFENSE_RECORD / CHECKPOINT /
-# WORKTREE_TRACKING) were removed, since a standalone rebar never produces them.
+# content). Only reconciler-internal markers are listed here — a standalone
+# rebar produces no skill-to-skill payload comments, so none are listed.
 #
 # Kept here beside the comment-diff logic for locality with the only consumer
 # (_diff_comments). Human comments are never excluded.
@@ -745,7 +743,7 @@ def _diff_comments(
         raw = c.get("body", "") if isinstance(c, dict) else c
         body = _normalize_comment_body(raw)
         # Bug 6afc-20ee-84e5-4dd5: never mirror skill-to-skill machine-marker
-        # comments (PREPLANNING_CONTEXT:, etc.) outbound to Jira. Symmetric with
+        # comments (BRIDGE_CANARY_ALERT:, etc.) outbound to Jira. Symmetric with
         # the label _EXCLUDED_PREFIXES exclusion.
         if _is_machine_marker_comment(body):
             continue

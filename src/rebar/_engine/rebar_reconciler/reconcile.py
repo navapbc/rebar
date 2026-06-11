@@ -582,8 +582,8 @@ def reconcile_once(
     Args:
         pass_id:       Unique identifier for this reconciliation pass.
         repo_root:     Repository root directory.  Defaults to four levels
-                       above this file (rebar_reconciler/ → scripts/ → dso/ →
-                       plugins/ → repo root).
+                       above this file (rebar_reconciler/ → _engine/ → rebar/ →
+                       src/ → repo root).
         filter_local_ids:
                        When set, restricts which mutations reach the applier.
                        All three differs run on their full, unfiltered inputs

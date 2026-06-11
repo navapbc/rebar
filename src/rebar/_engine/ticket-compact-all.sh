@@ -61,7 +61,7 @@ import glob, os, sys
 
 # A ticket directory is any directory containing at least one event JSON file
 # (CREATE, STATUS, COMMENT, SNAPSHOT, SYNC, etc.). This covers both native
-# DSO tickets (xxxx-xxxx) and Jira-synced tickets (jira-PROJ-N).
+# Native rebar tickets (xxxx-xxxx) and Jira-synced tickets (jira-PROJ-N).
 # Excluded: non-ticket dirs like .review-events, .suggestions, .index.
 tracker_dir = sys.argv[1]
 for entry in sorted(os.scandir(tracker_dir), key=lambda e: e.name):

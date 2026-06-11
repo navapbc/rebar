@@ -139,8 +139,8 @@ RebarIdLabelWriteError = _errors_module.RebarIdLabelWriteError
 
 # Subject prefixes considered "benign" for HEAD-drift tolerance — i.e.,
 # external writers that don't conflict with in-flight outbound mutations.
-# Bug f058: parallel Claude sessions running `dso ticket transition` /
-# `dso ticket create` / etc. emit `ticket: <VERB>` commits to the tickets
+# Bug f058: parallel Claude sessions running `rebar transition` /
+# `rebar create` / etc. emit `ticket: <VERB>` commits to the tickets
 # branch during a reconciler pass. The suggestion subsystem emits
 # `suggestion: RECORD`. Other reconciler passes emit `acquire lock` /
 # `release lock`. Competing outbound writes emit `pass_record: <pass_id>`
@@ -3238,9 +3238,9 @@ def _apply_batch(
             # Re-check HEAD at the start of each iteration.
             #
             # Bug f058: the tickets orphan branch is shared with the ticket
-            # CLI (auto-commits via dso ticket create / transition / etc.)
+            # CLI (auto-commits via rebar create / transition / etc.)
             # and the suggestion subsystem. A parallel Claude session
-            # running `dso ticket transition <id> closed` triggers
+            # running `rebar transition <id> closed` triggers
             # auto-compact, which commits `ticket: COMPACT <id>` to
             # tickets — that doesn't conflict with the in-flight
             # outbound mutations, but the strict-equality drift check
