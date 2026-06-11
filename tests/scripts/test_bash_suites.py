@@ -26,15 +26,11 @@ from pathlib import Path
 import pytest
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent
-# Standalone suites live in suites/ (plus any legacy ones still at the top level).
-# Scoped on purpose — a blanket rglob would also sweep in fixture scripts named
-# test-*.sh under fixtures/ (test inputs, not suites to run).
-_SUITES = sorted(
-    {
-        *_SCRIPTS_DIR.glob("test-*.sh"),
-        *(_SCRIPTS_DIR / "suites").rglob("test-*.sh"),
-    }
-)
+# Standalone suites live flat in tests/scripts/. Non-recursive on purpose: many
+# suites resolve siblings via $SCRIPT_DIR-relative paths (e.g. $SCRIPT_DIR/../lib),
+# so they must stay at this level — and a recursive glob would also sweep in
+# fixture scripts named test-*.sh under fixtures/ (test inputs, not suites).
+_SUITES = sorted(_SCRIPTS_DIR.glob("test-*.sh"))
 
 # Per-suite wall-clock ceiling — generous (some suites spin up git worktrees and
 # exercise flock/concurrency), but bounded so a hung suite fails instead of
