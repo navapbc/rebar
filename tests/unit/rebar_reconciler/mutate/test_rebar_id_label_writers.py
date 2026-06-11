@@ -292,11 +292,15 @@ def test_guard_mode_precedence(
             os.environ["REBAR_ID_GUARD_MODE"] = env_val
         # else: env var remains absent
 
-        # Patch the internal config-reader if it exists
+        # Patch the internal config-reader at its point of use. The guard now
+        # lives in rebar_id_audit and calls its own _get_rebar_id_guard_mode_from_config,
+        # so patch it there (not on the applier facade re-export).
+        from rebar_reconciler import rebar_id_audit as _audit_mod
+
         _config_patcher = None
-        if hasattr(applier, "_get_rebar_id_guard_mode_from_config"):
+        if hasattr(_audit_mod, "_get_rebar_id_guard_mode_from_config"):
             _config_patcher = patch.object(
-                applier,
+                _audit_mod,
                 "_get_rebar_id_guard_mode_from_config",
                 return_value=config_val,
             )
