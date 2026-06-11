@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# tests/scripts/test-jira-credential-helper.sh
-# Behavioral tests for src/rebar/_engine/jira-credential-helper.sh
+# scripts/jira-onboarding-reference/test-jira-credential-helper.sh
+# Behavioral tests for the co-located reference helper jira-credential-helper.sh.
 #
 # Tests cover:
 #   1. test_detect_all_vars_set      — all 3 Jira vars in env → DETECTED lists all 3
@@ -14,7 +14,7 @@
 # Integration exemption: gh API calls unavailable in CI; script is tested via
 # env-variable stubbing only. No live Jira connection required.
 #
-# Usage: bash tests/scripts/test-jira-credential-helper.sh
+# Usage: bash scripts/jira-onboarding-reference/test-jira-credential-helper.sh
 # Returns: exit 0 if all tests pass, exit 1 if any fail
 
 # non-zero exit codes from _run_helper via || assignment. With '-e', expected
@@ -22,12 +22,10 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-REBAR_PLUGIN_DIR="$PLUGIN_ROOT/src/rebar/_engine"
 REPO_ROOT="$(cd "$SCRIPT_DIR" && git rev-parse --show-toplevel)"
-HELPER_SCRIPT="$REBAR_PLUGIN_DIR/jira-credential-helper.sh"
+HELPER_SCRIPT="$SCRIPT_DIR/jira-credential-helper.sh"
 
-source "$PLUGIN_ROOT/tests/lib/assert.sh"
+source "$REPO_ROOT/tests/lib/assert.sh"
 
 echo "=== test-jira-credential-helper.sh ==="
 

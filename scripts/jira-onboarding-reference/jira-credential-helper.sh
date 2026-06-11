@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # jira-credential-helper.sh
+#
+# REFERENCE / GROUNDWORK — see scripts/jira-onboarding-reference/README.md.
+# Not wired into the `rebar` dispatcher and not shipped in the published wheel;
+# kept as the basis for the planned Jira onboarding & configuration flow.
+#
 # Detect Jira credential environment variables and output structured status.
 #
 # Output format:
