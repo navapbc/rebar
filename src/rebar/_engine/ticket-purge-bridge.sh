@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# ticket-purge-bridge.sh — Canonical implementation — invoked by dispatcher (ticket purge-bridge)
-# and thin wrapper purge-non-project-tickets.sh.
+# ticket-purge-bridge.sh — Canonical implementation — invoked by dispatcher (ticket purge-bridge).
 # Remove Jira-sourced tickets (jira-* prefix, materialized by the reconciler's
 # inbound applier) from non-target Jira projects.
 #

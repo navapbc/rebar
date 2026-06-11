@@ -519,7 +519,8 @@ case "$subcommand" in
     purge-bridge)
         # Skip _ensure_initialized when TICKETS_TRACKER_DIR is set (test environments
         # provide their own tracker dir and should not trigger ticket-init.sh).
-        # purge-non-project-tickets.sh handles tracker initialization internally.
+        # Otherwise _ensure_initialized (above) provides the initialized tracker
+        # that ticket-purge-bridge.sh operates on.
         if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then
             _ensure_initialized
         fi
