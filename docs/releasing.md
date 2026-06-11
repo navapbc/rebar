@@ -121,6 +121,22 @@ REBAR="$(pipx environment --value PIPX_BIN_DIR)/rebar" PROBE_LIVE=1 bash scripts
 broken. Since **PyPI is immutable**, recover by *yanking* the bad version and
 shipping a fixed version bump (re-run this step on the new version).
 
+### Optional — live Jira capability preflight
+
+Before relying on Jira sync (or when validating bridge changes against a real
+Jira instance), run the Jira capability preflight:
+
+```bash
+export JIRA_URL=... JIRA_USER=... JIRA_API_TOKEN=...   # optional: JIRA_PROJECT
+rebar bridge-probe
+```
+
+`rebar bridge-probe` runs a six-step round-trip (create → label → property-write
+→ JQL-search → property-read → delete) against live Jira, creating and deleting a
+single throwaway issue. It prints `PROBE_PASS`/`PROBE_FAIL` per step and exits 0
+(all pass), 1 (a step failed), or 2 (missing credentials). For broader, manual
+field-level pressure tests see `scripts/jira-pressure-test/`.
+
 ---
 
 ## Known follow-ups (not release-blocking)

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""DSO Jira capability probe — six-step round-trip verification.
+"""rebar Jira capability probe — six-step round-trip verification.
 
-Verifies that all Jira operations required by the DSO bridge are functional:
-create, label, property-write, JQL-search, property-read, delete.
+Verifies that all Jira operations required by the rebar Jira bridge (reconciler)
+are functional: create, label, property-write, JQL-search, property-read, delete.
+
+Run it as a preflight before relying on Jira sync (`rebar bridge-probe`). It
+creates a throwaway Jira issue and deletes it again in the same run.
 
 Exit codes:
   0 — all six steps passed
@@ -60,8 +63,8 @@ def main() -> None:
     jira_url = os.environ.get("JIRA_URL", "")
     jira_user = os.environ.get("JIRA_USER", "")
     jira_api_token = os.environ.get("JIRA_API_TOKEN", "")
-    # Project is configurable via env var for plugin portability; default
-    # preserves the in-tree DIG project for the dso bridge use case.
+    # Project is configurable via env var for portability; default preserves
+    # the in-tree DIG project used by the rebar Jira bridge.
     # `or "DIG"` (not the second arg to .get) so an explicit empty-string
     # JIRA_PROJECT="" — common when a templated secret renders blank — falls
     # back to the default rather than being passed through as an empty key.
@@ -88,7 +91,7 @@ def main() -> None:
         # STEP 1: Create issue
         result = client.create_issue(
             {
-                "title": f"DSO capability probe {probe_uuid}",
+                "title": f"rebar capability probe {probe_uuid}",
                 "ticket_type": "task",
             }
         )

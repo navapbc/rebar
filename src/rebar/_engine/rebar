@@ -19,6 +19,7 @@
 #   ticket deps <ticket_id>                       — show dependency graph for a ticket (JSON)
 #   ticket bridge-status [--output json]          — show last bridge run status
 #   ticket bridge-fsck [--tickets-tracker=<path>] — audit bridge mappings (orphans, duplicates, stale SYNCs)
+#   ticket bridge-probe                           — preflight live Jira capability (create/label/search/delete round-trip)
 #   ticket tag <ticket_id> <tag>                  — add a tag to a ticket
 #   ticket untag <ticket_id> <tag>                — remove a tag from a ticket
 #   ticket summary <id> [<id> ...]                — one-line ticket summary with blocking status
@@ -59,6 +60,7 @@ _print_overview() {
     echo "  summary       One-line ticket summary with blocking status for one or more IDs"
     echo "  bridge-status Show last bridge run status [--output json]"
     echo "  bridge-fsck   Audit bridge mappings (orphans, duplicates, stale SYNCs)"
+    echo "  bridge-probe  Preflight live Jira capability (create/label/search/delete round-trip)"
     echo "  exists        O(1) presence check (exit 0=exists, 1=not found)"
     echo "  list-epics    List open epics [--all] [--has-tag=TAG] [--min-children=N]"
     echo "  list-descendants  BFS walk from a root ticket, bucketed by type (JSON)"
@@ -148,6 +150,7 @@ _print_subcommand_help() {
         fsck-recover) echo "Usage: rebar fsck-recover [--tracker-dir <path>]" ;;
         bridge-status) echo "Usage: rebar bridge-status [--output json]" ;;
         bridge-fsck)  echo "Usage: rebar bridge-fsck [--tickets-tracker=<path>] [--output json]" ;;
+        bridge-probe) echo "Usage: rebar bridge-probe   (requires JIRA_URL, JIRA_USER, JIRA_API_TOKEN; optional JIRA_PROJECT)" ;;
         purge-bridge) echo "Usage: rebar purge-bridge --keep=<PROJECT_KEY> [--dry-run]" ;;
         revert)       echo "Usage: rebar revert <ticket_id> <target_uuid> [--reason=<text>]" ;;
         resolve)      echo "Usage: rebar resolve <id_or_alias_or_prefix>" ;;
@@ -399,6 +402,14 @@ case "$subcommand" in
             _ensure_initialized
         fi
         exec python3 "$SCRIPT_DIR/ticket-bridge-fsck.py" "$@"
+        ;;
+    bridge-probe)
+        # jira-capability-probe.py: live Jira preflight — six-step round-trip
+        # (create/label/property-write/JQL-search/property-read/delete) against
+        # the configured Jira instance. Talks only to Jira (creates + deletes a
+        # throwaway issue); needs no local tracker, so _ensure_initialized is
+        # intentionally skipped. Requires JIRA_URL/JIRA_USER/JIRA_API_TOKEN.
+        exec python3 "$SCRIPT_DIR/jira-capability-probe.py" "$@"
         ;;
     link)
         _ensure_initialized
