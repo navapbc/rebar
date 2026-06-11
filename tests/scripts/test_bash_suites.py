@@ -40,9 +40,14 @@ _REQUIRES_LIVE: dict[str, str] = {}
 
 def _suite_env() -> dict[str, str]:
     env = dict(os.environ)
-    # Ensure the `rebar` console script (installed alongside this interpreter by
-    # `pip install -e`) is resolvable from the bash suites.
-    bindir = str(Path(sys.executable).resolve().parent)
+    # Put the interpreter's OWN bin dir first on PATH so the bash suites resolve
+    # the `rebar` console script installed next to it by `pip install -e` (the
+    # code under test) — not some other `rebar` earlier on the developer's PATH
+    # (e.g. a pipx/global install). Use `.parent` WITHOUT `.resolve()`: in a venv,
+    # `sys.executable` is a symlink to the base interpreter, so resolving it would
+    # point at the base interpreter's bin (which has no venv console scripts) and
+    # silently let a stale global `rebar` shadow the editable one.
+    bindir = str(Path(sys.executable).parent)
     env["PATH"] = bindir + os.pathsep + env.get("PATH", "")
     return env
 
