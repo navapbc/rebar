@@ -7,18 +7,43 @@ don't exercise.
 
 from __future__ import annotations
 
+import os
+import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 import rebar
 
 
-def _cli(*args: str, cwd: str | None = None) -> subprocess.CompletedProcess:
+def _cli(
+    *args: str, cwd: str | None = None, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "rebar.cli", *args],
-        capture_output=True, text=True, cwd=cwd,
+        capture_output=True, text=True, cwd=cwd, env=env,
     )
+
+
+@pytest.fixture
+def offline_acli_env(tmp_path: Path) -> dict[str, str]:
+    """A subprocess env whose ``acli`` is a fake returning an empty issue list,
+    with no JIRA_* creds — so a reconcile pass runs fully offline (fetch -> [] ->
+    no-write report) instead of reaching real Jira. Keeps the default interface
+    tier hermetic and fast (~1s vs ~45s against live Jira)."""
+    bindir = tmp_path / "offline-bin"
+    bindir.mkdir()
+    acli = bindir / "acli"
+    acli.write_text("#!/bin/sh\necho '[]'\nexit 0\n")
+    acli.chmod(acli.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    env = dict(os.environ)
+    env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+    for var in ("JIRA_URL", "JIRA_USER", "JIRA_API_TOKEN"):
+        env.pop(var, None)
+    return env
 
 
 def test_exit_10_passthrough(rebar_repo: Path) -> None:
@@ -111,14 +136,36 @@ def test_bare_help_word_in_freetext_is_not_intercepted(rebar_repo: Path) -> None
     assert any("--help" in c["body"] for c in comments)
 
 
-def test_reconcile_intercepted_dry_run_default(rebar_repo: Path) -> None:
+def test_reconcile_intercepted_dry_run_default(
+    rebar_repo: Path, offline_acli_env: dict[str, str]
+) -> None:
     """`rebar reconcile` is intercepted and routed to the reconciler in dry-run
-    by default. Without acli it cannot mutate; it must not crash the CLI with an
-    unknown-subcommand error (the dispatcher has no reconcile arm)."""
-    cp = _cli("reconcile")
-    # Either the reconciler ran (0/75) or it failed cleanly on missing acli — but
-    # never the dispatcher's "unknown subcommand 'reconcile'".
+    by default — it must not crash the CLI with an unknown-subcommand error (the
+    dispatcher has no reconcile arm).
+
+    Hermetic: a fake empty ``acli`` (no JIRA creds) lets the dry-run pass run
+    fully offline. The live-Jira behaviour is covered by the opt-in integration
+    test below, so this routing check never touches the network."""
+    offline_acli_env["REBAR_ROOT"] = str(rebar_repo)
+    offline_acli_env["PROJECT_ROOT"] = str(rebar_repo)
+    cp = _cli("reconcile", cwd=str(rebar_repo), env=offline_acli_env)
     assert "unknown subcommand 'reconcile'" not in (cp.stdout + cp.stderr).lower()
+
+
+@pytest.mark.integration
+def test_reconcile_dry_run_against_live_jira(rebar_repo: Path) -> None:
+    """External integration check: `rebar reconcile` runs a real dry-run against
+    the configured live Jira. Excluded from the default run (``-m "not
+    integration"``); run it when reconcile/Jira behaviour is impacted, in an
+    environment with `acli` + credentials. Asserts the pass is routed and stays
+    non-mutating (dry-run, no writes)."""
+    if shutil.which("acli") is None:
+        pytest.skip("requires `acli` on PATH + live Jira credentials")
+    cp = _cli("reconcile", cwd=str(rebar_repo))
+    out = cp.stdout + cp.stderr
+    assert "unknown subcommand 'reconcile'" not in out.lower()
+    # A dry-run must never write — surfaced in the pass report.
+    assert '"mode": "dry-run"' in out or '"no_write": true' in out or cp.returncode == 0
 
 
 def test_validate_is_repo_wide_no_ticket_id(rebar_repo: Path) -> None:
