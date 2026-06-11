@@ -666,34 +666,34 @@ def _resolve_tracker_dir(repo_root: Path | None) -> Path:
 
 
 def _read_latest_status(tracker_dir: Path, ticket_id: str) -> str:
-    """Return the latest status recorded for ``ticket_id`` (default ``"open"``).
+    """Return the current status of ``ticket_id`` per the CANONICAL reducer.
 
-    Mirrors the reducer's STATUS-processing semantics (see
-    ticket_reducer/_processors.py:process_status):
-    the reducer initialises ``state["status"]`` to ``"open"`` and advances it
-    only when a STATUS event arrives whose own ``current_status`` field
-    matches the current state. Reading the latest written ``data["status"]``
-    here gives the inbound leaf the value that the reducer would have in
-    state right before our new STATUS event lands, so the new event's
-    ``current_status`` is the PREVIOUS state (not the new one).
+    Used as the optimistic-concurrency ``current_status`` of the STATUS event the
+    reconciler pushes, so it must match what every clone's reducer computes. A
+    previous raw "last STATUS file wins" scan diverged from the reducer on two
+    real shapes (ticket vary-ion-fry):
+      * a COMPACTED ticket — its STATUS events are folded into a SNAPSHOT and the
+        standalone files are gone, so the scan returned "open";
+      * a STATUS FORK — resolved by lexically-lower event UUID, not file order.
+    Delegating to ``reduce_ticket`` removes the divergence (it handles SNAPSHOT
+    folding and UUID fork resolution).
 
-    Tolerant of missing tickets and unreadable event files — returns
-    ``"open"`` in either case, matching the reducer's initial state.
+    Tolerant of missing / unreadable / error tickets — returns ``"open"`` (the
+    reducer's initial state) in those cases.
     """
     ticket_dir = tracker_dir / ticket_id
     if not ticket_dir.is_dir():
         return "open"
-    latest_status = "open"
-    for ef in sorted(ticket_dir.glob("*.json")):
-        try:
-            event = json.loads(ef.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001
-            continue
-        if not isinstance(event, dict):
-            continue
-        if event.get("event_type") == "STATUS":
-            latest_status = event.get("data", {}).get("status", "") or latest_status
-    return latest_status
+    try:
+        state = _load_ticket_reducer().reduce_ticket(str(ticket_dir))
+    except Exception:  # noqa: BLE001 — stay tolerant, mirror the reducer's default
+        return "open"
+    status = state.get("status") if isinstance(state, dict) else None
+    # An error/fsck_needed projection has no real status; fall back to the
+    # reducer's initial state rather than pushing a sentinel to Jira.
+    if not isinstance(status, str) or status in ("", "error", "fsck_needed"):
+        return "open"
+    return status
 
 
 def _write_event_file(
