@@ -1,0 +1,65 @@
+name: test
+
+# Run the full test suite on every push and PR. rebar's safety story leans on
+# "the suite catches it", so this is the gate that makes that automatic (ticket
+# coily-conch-tag / Rec 3 of the 2026-06-09 architecture review).
+#
+# Coverage: the Python tiers (unit / scripts / interface) AND every standalone
+# bash suite under tests/scripts/test-*.sh, which the test_bash_suites.py collector
+# runs under pytest. The integration tier (live Jira / network) is excluded from
+# the default run via `-m "not integration"`; run it separately with credentials.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request: {}
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # The bash suites shell out to jq (ticket_show's reducer path). Ensure it is
+      # present on both runners (platform-compat lessons live in
+      # test-ticket-platform-compat.sh).
+      - name: Ensure jq is installed
+        shell: bash
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get update && sudo apt-get install -y jq; fi
+            if [ "$RUNNER_OS" = "macOS" ]; then brew install jq; fi
+          fi
+          jq --version
+
+      - name: Install rebar (editable) + test deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      # Git identity is required by the suites that build throwaway commit stores.
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+
+      - name: Run the full suite (Python tiers + bash collector; excludes live-Jira)
+        run: pytest -m "not integration" -q

@@ -334,10 +334,18 @@ interpreter without the `mcp` extra will **error** rather than skip.
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'                       # editable + pytest, mcp, jsonschema
-pytest                                        # full Python suite
+pytest -m "not integration"                   # the single entry point (CI runs this)
 pytest tests/interfaces                       # interface-parity tier only
-bash tests/scripts/test-ticket-create.sh      # bash engine tests
+pytest tests/scripts/test_bash_suites.py      # all bash engine suites, under pytest
 ```
+
+**`pytest` is the single entry point.** The standalone `tests/scripts/test-*.sh`
+bash suites are collected and run by `tests/scripts/test_bash_suites.py`, so a
+failing bash suite fails the Python run too — you no longer need to invoke them by
+hand. CI (`.github/workflows/test.yml`) runs `pytest -m "not integration"` on
+Ubuntu and macOS for every push and PR. The `integration` tier (live Jira /
+network) is **excluded** from that default run; run it explicitly with credentials
+via `pytest -m integration`.
 
 The Python suite is sub-divided by concern:
 
