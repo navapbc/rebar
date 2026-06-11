@@ -344,7 +344,9 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
         elif arg.startswith("-"):
             print(f"Error: unknown option '{arg}'", file=sys.stderr)
             print(usage, file=sys.stderr)
-            return 1
+            # Unrecognized option is a usage error (2), not a runtime error (1) —
+            # matching deps/ready/search (the canonical contract in exit-codes.md).
+            return 2
         else:
             ids.append(arg)
     if not ids:
@@ -439,7 +441,9 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
                 "--without-tag --include-archived --exclude-deleted --output llm",
                 file=sys.stderr,
             )
-            return 1
+            # Unrecognized option is a usage error (2), not a runtime error (1) —
+            # matching deps/ready/search (the canonical contract in exit-codes.md).
+            return 2
 
     # --priority: integers 0-4 (comma-separated for OR).
     pri = opts["priority"]
