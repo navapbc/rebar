@@ -21,7 +21,13 @@ Exit codes: 0 success; 10 optimistic-concurrency mismatch; 1 lock timeout /
 validation / generic; 2 git operation failure.
 """
 
+import os
 import sys
+
+# The I2 filename contract lives once in event_append (ticket pokey-matte-flute);
+# this critical section keeps its own lock/commit but shares the filename helper.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import event_append  # noqa: E402
 
 
 def _transition(argv):
@@ -203,7 +209,7 @@ def _transition(argv):
             json.dump(event, f, ensure_ascii=False)
 
         # Compute final filename and path
-        final_filename = f'{timestamp}-{event_uuid}-STATUS.json'
+        final_filename = event_append.event_filename(timestamp, event_uuid, 'STATUS')
         ticket_dir = os.path.join(tracker_dir, ticket_id)
         final_path = os.path.join(ticket_dir, final_filename)
 
@@ -342,7 +348,7 @@ def _claim(argv):
                 'parent_status_uuid': parent_status_uuid,
             },
         }
-        status_filename = f'{ts1}-{uuid1}-STATUS.json'
+        status_filename = event_append.event_filename(ts1, uuid1, 'STATUS')
         status_tmp = os.path.join(tracker_dir, f'.tmp-claim-{uuid1}')
         with open(status_tmp, 'w', encoding='utf-8') as f:
             json.dump(status_event, f, ensure_ascii=False)
@@ -363,7 +369,7 @@ def _claim(argv):
                 'author': author_val,
                 'data': {'fields': {'assignee': assignee}},
             }
-            edit_filename = f'{ts2}-{uuid2}-EDIT.json'
+            edit_filename = event_append.event_filename(ts2, uuid2, 'EDIT')
             edit_tmp = os.path.join(tracker_dir, f'.tmp-claim-{uuid2}')
             with open(edit_tmp, 'w', encoding='utf-8') as f:
                 json.dump(edit_event, f, ensure_ascii=False)

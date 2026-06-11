@@ -696,25 +696,44 @@ def _read_latest_status(tracker_dir: Path, ticket_id: str) -> str:
     return status
 
 
+_EVENT_APPEND_MODULE = None
+
+
+def _load_event_append():
+    """Lazy-load the shared event-append module (engine sibling, stdlib-only)."""
+    global _EVENT_APPEND_MODULE
+    if _EVENT_APPEND_MODULE is not None:
+        return _EVENT_APPEND_MODULE
+    scripts_dir = Path(__file__).resolve().parent.parent  # <engine>/
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    import event_append as _ea  # noqa: PLC0415 — lazy import by design
+
+    _EVENT_APPEND_MODULE = _ea
+    return _ea
+
+
 def _write_event_file(
     tracker_dir: Path, ticket_id: str, event_type: str, data: dict[str, Any]
 ) -> Path:
-    """Write a single ticket event JSON file. Returns the path written."""
+    """Write a single ticket event JSON file via the shared event-append module.
+
+    Acquires the ``.ticket-write.lock`` flock (I5) so the reconciler's event-file
+    write is serialized against a concurrent local agent (the gap fixed by ticket
+    pokey-matte-flute), and uses the shared I2 filename contract. Returns the path.
+    """
     ts, uuid_str, env_id, author = _event_meta()
-    event = {
-        "timestamp": ts,
-        "uuid": uuid_str,
-        "event_type": event_type,
-        "env_id": env_id,
-        "author": author,
-        "data": data,
-    }
-    ticket_dir = tracker_dir / ticket_id
-    ticket_dir.mkdir(parents=True, exist_ok=True)
-    fname = f"{ts}-{uuid_str}-{event_type}.json"
-    out = ticket_dir / fname
-    out.write_text(json.dumps(event, ensure_ascii=False), encoding="utf-8")
-    return out
+    ea = _load_event_append()
+    with ea.write_lock(tracker_dir):
+        return ea.append_event(
+            tracker_dir / ticket_id,
+            event_type,
+            data,
+            timestamp=ts,
+            uuid_str=uuid_str,
+            env_id=env_id,
+            author=author,
+        )
 
 
 def _extract_name(val, default=""):
