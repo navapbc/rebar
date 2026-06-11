@@ -182,7 +182,7 @@ test_migrate_file_impact_well_formed_fixture() {
     assert_eq "well-formed: data.file_impact matches expected" "$expected_impact" "$actual_impact"
 
     # Stamp file must exist
-    if [ -f "$repo/.claude/.file-impact-migration-v1" ]; then
+    if [ -f "$repo/.rebar/.file-impact-migration-v1" ]; then
         assert_eq "well-formed: stamp file written" "exists" "exists"
     else
         assert_eq "well-formed: stamp file written" "exists" "missing"
@@ -234,7 +234,7 @@ test_migrate_file_impact_malformed_fixture() {
     assert_eq "malformed: no FILE_IMPACT event written" "0" "$fi_count"
 
     # Stamp file must still be written (whole migration run completed)
-    if [ -f "$repo/.claude/.file-impact-migration-v1" ]; then
+    if [ -f "$repo/.rebar/.file-impact-migration-v1" ]; then
         assert_eq "malformed: stamp file still written" "exists" "exists"
     else
         assert_eq "malformed: stamp file still written" "exists" "missing"
@@ -284,7 +284,7 @@ test_migrate_file_impact_idempotency() {
     assert_eq "idempotency: no new FILE_IMPACT events written" "$fi_count_first" "$fi_count_second"
 
     # Stamp file must still be present
-    if [ -f "$repo/.claude/.file-impact-migration-v1" ]; then
+    if [ -f "$repo/.rebar/.file-impact-migration-v1" ]; then
         assert_eq "idempotency: stamp file still present" "exists" "exists"
     else
         assert_eq "idempotency: stamp file still present" "exists" "missing"
@@ -388,7 +388,7 @@ test_migrate_file_impact_git_commit_failure_cleanup() {
     assert_eq "commit-failure: FILE_IMPACT event file removed by cleanup" "0" "$fi_count"
 
     # Stamp file must NOT be written (migration did not complete)
-    if [ -f "$repo/.claude/.file-impact-migration-v1" ]; then
+    if [ -f "$repo/.rebar/.file-impact-migration-v1" ]; then
         assert_eq "commit-failure: stamp file not written" "missing" "exists"
     else
         assert_eq "commit-failure: stamp file not written" "missing" "missing"

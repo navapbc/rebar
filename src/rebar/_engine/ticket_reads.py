@@ -218,7 +218,7 @@ def _load_scratch(ticket_id: str, tracker: str) -> dict:
     scratch_base = os.environ.get("SCRATCH_BASE_DIR", "").strip()
     if not scratch_base:
         repo_root = os.path.dirname(os.path.abspath(tracker))
-        scratch_base = os.path.join(repo_root, ".claude", "scratch")
+        scratch_base = os.path.join(repo_root, ".rebar", "scratch")
     scratch_dir = os.path.join(scratch_base, ticket_id)
     data: dict[str, Any] = {}
     if os.path.isdir(scratch_dir):

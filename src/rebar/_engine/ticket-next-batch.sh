@@ -406,7 +406,7 @@ def extract_files(text):
         files.add(m.group(1).lstrip("./"))
 
     # Build directory-rooted path regex from config values + fixed dirs
-    dir_roots = {cfg_src_dir, cfg_test_dir, "app", ".claude", "plugins"}
+    dir_roots = {cfg_src_dir, cfg_test_dir, "app", ".rebar", "plugins"}
     if cfg_extra_dir_roots:
         for extra in cfg_extra_dir_roots.split(","):
             extra = extra.strip()

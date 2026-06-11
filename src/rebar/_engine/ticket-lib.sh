@@ -1690,7 +1690,7 @@ except Exception:
 # Args:
 #   ticket_id : ticket identifier (e.g., abcd-1234-efgh-5678)
 #   base_dir  : optional base directory that contains per-ticket scratch dirs
-#               (defaults to SCRATCH_BASE_DIR if set, else REPO_ROOT/.claude/scratch)
+#               (defaults to SCRATCH_BASE_DIR if set, else REPO_ROOT/.rebar/scratch)
 #
 # Behavior:
 #   - If the scratch dir does not exist: logs INFO, returns 0 (idempotent).
@@ -1731,7 +1731,7 @@ _scratch_cleanup_for_ticket() {
     if [ -z "$base_dir" ]; then
         local _rr
         _rr="$(GIT_DISCOVERY_ACROSS_FILESYSTEM=1 git rev-parse --show-toplevel 2>/dev/null)" || _rr=""
-        base_dir="${_rr}/.claude/scratch"
+        base_dir="${_rr}/.rebar/scratch"
     fi
 
     local scratch_dir="${base_dir}/${ticket_id}"
@@ -1798,7 +1798,7 @@ PYEOF
 #   key       : scratch key name (arbitrary lowercase identifier)
 #   base_dir  : optional base directory override (defaults to
 #               $SCRATCH_BASE_DIR if set, else
-#               REPO_ROOT/.claude/scratch/)
+#               REPO_ROOT/.rebar/scratch/)
 #
 # On valid inputs:
 #   Prints the resolved absolute path to stdout and exits 0.
@@ -1816,7 +1816,7 @@ _scratch_resolve_and_validate() {
     if [ -z "$base_dir" ]; then
         local _rr
         _rr="$(GIT_DISCOVERY_ACROSS_FILESYSTEM=1 git rev-parse --show-toplevel 2>/dev/null)" || _rr=""
-        base_dir="${_rr}/.claude/scratch"
+        base_dir="${_rr}/.rebar/scratch"
     fi
 
     # Delegate charset validation and path resolution to Python so the rules

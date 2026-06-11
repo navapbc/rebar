@@ -63,7 +63,7 @@ if [ ! -d "$_TRACKER_DIR" ]; then
 fi
 
 # ── Stamp file — keyed by migration ID "file-impact-v1" ─────────────────────
-_STAMP_FILE="$_TARGET/.claude/.file-impact-migration-v1"
+_STAMP_FILE="$_TARGET/.rebar/.file-impact-migration-v1"
 if [ -f "$_STAMP_FILE" ]; then
     echo "NOTICE: file-impact-v1 migration already applied — skipping" >&2
     exit 0

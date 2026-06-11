@@ -5,11 +5,11 @@
 #   ticket-scratch-clear.sh <ticket_id> [<key>]
 #
 # With key:    validates <ticket_id> and <key>, then removes the single scratch
-#              file at .claude/scratch/<ticket_id>/<key>. Missing target is OK.
+#              file at .rebar/scratch/<ticket_id>/<key>. Missing target is OK.
 #              Emits: {"status":"ok","ticket_id":"...","key":"...","removed":<0|1>}
 #
 # Without key: validates <ticket_id> only, then removes the entire per-ticket
-#              scratch directory at .claude/scratch/<ticket_id>/. Missing target
+#              scratch directory at .rebar/scratch/<ticket_id>/. Missing target
 #              is OK.
 #              Emits: {"status":"ok","ticket_id":"...","removed":<count>}
 #
@@ -18,7 +18,7 @@
 #   1  — invalid argument (structured JSON error envelope on stdout)
 #
 # Environment:
-#   SCRATCH_BASE_DIR — override base directory (default: REPO_ROOT/.claude/scratch)
+#   SCRATCH_BASE_DIR — override base directory (default: REPO_ROOT/.rebar/scratch)
 
 set -uo pipefail
 
@@ -47,7 +47,7 @@ if [ -n "${SCRATCH_BASE_DIR:-}" ]; then
     BASE_DIR="$SCRATCH_BASE_DIR"
 else
     REPO_ROOT="$(GIT_DISCOVERY_ACROSS_FILESYSTEM=1 git rev-parse --show-toplevel 2>/dev/null)" || REPO_ROOT=""
-    BASE_DIR="${REPO_ROOT}/.claude/scratch"
+    BASE_DIR="${REPO_ROOT}/.rebar/scratch"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════

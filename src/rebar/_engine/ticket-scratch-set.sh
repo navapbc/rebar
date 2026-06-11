@@ -18,7 +18,7 @@
 #
 # Environment:
 #   SCRATCH_BASE_DIR  Optional override for the scratch base directory
-#                     (default: REPO_ROOT/.claude/scratch/)
+#                     (default: REPO_ROOT/.rebar/scratch/)
 #   REBAR_TEST_CRASH    When set to "1", exits 1 between tempfile write and rename,
 #                     simulating a mid-write crash (for crash-safety tests only).
 

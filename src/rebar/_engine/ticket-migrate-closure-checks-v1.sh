@@ -62,7 +62,7 @@ if [ -f "$_TARGET/plugin.json" ]; then
 fi
 
 # ── Marker check (idempotency) ────────────────────────────────────────────────
-_MARKER_FILE="$_TARGET/.claude/.closure-checks-migration-v1"
+_MARKER_FILE="$_TARGET/.rebar/.closure-checks-migration-v1"
 if [ -f "$_MARKER_FILE" ]; then
     exit 0
 fi

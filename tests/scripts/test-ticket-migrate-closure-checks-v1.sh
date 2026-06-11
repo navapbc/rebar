@@ -14,7 +14,7 @@
 #   1. Migration exits 0
 #   2. 2 lacking-section epics now have "## Closure Checks" section in their descriptions
 #   3. Already-migrated epic is unchanged (no second "## Closure Checks" section added)
-#   4. Marker file .claude/.closure-checks-migration-v1 written at repo root
+#   4. Marker file .rebar/.closure-checks-migration-v1 written at repo root
 #   5. Re-run exits 0 immediately (idempotency — marker present) with no additional changes
 #   6. Dry-run: no files written, no marker created
 #
@@ -251,7 +251,7 @@ test_already_migrated_epic_is_unchanged() {
 test_already_migrated_epic_is_unchanged
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Test 5: Marker file .claude/.closure-checks-migration-v1 written at repo root
+# Test 5: Marker file .rebar/.closure-checks-migration-v1 written at repo root
 # ═══════════════════════════════════════════════════════════════════════════════
 echo "Test 5: marker file .closure-checks-migration-v1 written at repo root"
 test_marker_file_written() {
@@ -265,11 +265,11 @@ test_marker_file_written() {
     local repo
     repo=$(_make_test_repo)
     _setup_epic_fixture "$repo/.tickets-tracker"
-    mkdir -p "$repo/.claude"
+    mkdir -p "$repo/.rebar"
 
     (cd "$repo" && bash "$MIGRATE_SCRIPT") >/dev/null 2>&1 || true
 
-    if [ -f "$repo/.claude/.closure-checks-migration-v1" ]; then
+    if [ -f "$repo/.rebar/.closure-checks-migration-v1" ]; then
         assert_eq "marker file written" "exists" "exists"
     else
         assert_eq "marker file written" "exists" "missing"
@@ -294,7 +294,7 @@ test_rerun_with_marker_is_noop() {
     local repo
     repo=$(_make_test_repo)
     _setup_epic_fixture "$repo/.tickets-tracker"
-    mkdir -p "$repo/.claude"
+    mkdir -p "$repo/.rebar"
 
     # First run — performs migration
     (cd "$repo" && bash "$MIGRATE_SCRIPT") >/dev/null 2>&1 || true
@@ -349,7 +349,7 @@ test_plugin_source_repo_guard() {
     local repo
     repo=$(_make_test_repo)
     _setup_epic_fixture "$repo/.tickets-tracker"
-    mkdir -p "$repo/.claude"
+    mkdir -p "$repo/.rebar"
 
     # Simulate being inside the plugin source repo by placing plugin.json at repo root
     touch "$repo/plugin.json"
@@ -368,7 +368,7 @@ test_plugin_source_repo_guard() {
     fi
 
     # Marker file must NOT be written (guard bailed before making changes)
-    if [ -f "$repo/.claude/.closure-checks-migration-v1" ]; then
+    if [ -f "$repo/.rebar/.closure-checks-migration-v1" ]; then
         assert_eq "plugin-source-repo guard: marker NOT written" "not-written" "written"
     else
         assert_eq "plugin-source-repo guard: marker NOT written" "not-written" "not-written"
@@ -398,7 +398,7 @@ test_dryrun_no_changes() {
     local repo
     repo=$(_make_test_repo)
     _setup_epic_fixture "$repo/.tickets-tracker"
-    mkdir -p "$repo/.claude"
+    mkdir -p "$repo/.rebar"
 
     # Record state before dry-run
     local edits1_before edits2_before
@@ -425,7 +425,7 @@ test_dryrun_no_changes() {
     assert_eq "dry-run: no EDIT events on epic-no-section-2" "$edits2_before" "$edits2_after"
 
     # Marker file must NOT be written
-    if [ -f "$repo/.claude/.closure-checks-migration-v1" ]; then
+    if [ -f "$repo/.rebar/.closure-checks-migration-v1" ]; then
         assert_eq "dry-run: marker file NOT written" "not-written" "written"
     else
         assert_eq "dry-run: marker file NOT written" "not-written" "not-written"

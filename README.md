@@ -320,6 +320,11 @@ verify.require_verdict_for_close=true # opt-in (default: false) — gate story/e
                                       # close on a PASS verdict hash
 ```
 
+rebar keeps its writable state under `.rebar/` at the repo root. The `scratch`
+store defaults to `REPO_ROOT/.rebar/scratch/` (override with the
+`SCRATCH_BASE_DIR` environment variable), and one-shot migration stamps are
+written under `.rebar/` as well.
+
 ## Tests
 
 Run the suite from an environment with the `[dev]` extra installed (a venv is
