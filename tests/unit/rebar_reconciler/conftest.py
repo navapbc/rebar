@@ -8,9 +8,9 @@ Tests in this directory load modules under test via
 ``importlib.util.spec_from_file_location`` rather than ordinary ``import``
 statements. This is the established pattern across the wider reconciler test
 tree (see
-``tests/scripts/test_capability_check.py``,
-``tests/scripts/test_forward_compat_probe.py``,
-``tests/scripts/test_cursor_snapshot.py`` — all already on main).
+``tests/scripts/test_jira_capability_probe.py``,
+``tests/scripts/test_bridge_fsck.py``,
+``tests/scripts/test_bridge_alert_display.py``).
 
 Rationale:
 
