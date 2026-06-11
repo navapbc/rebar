@@ -8,10 +8,10 @@ import os
 import sys
 import uuid
 
-from ticket_graph._graph import check_cycle_at_level, check_would_create_cycle
-from ticket_graph._hierarchy import resolve_hierarchy_link
-from ticket_graph._loader import reduce_ticket
-from ticket_graph._status import _get_ticket_status
+from ._graph import check_cycle_at_level, check_would_create_cycle
+from ._hierarchy import resolve_hierarchy_link
+from ._loader import reduce_ticket
+from ._status import _get_ticket_status
 
 
 CANONICAL_RELATIONS: frozenset[str] = frozenset(

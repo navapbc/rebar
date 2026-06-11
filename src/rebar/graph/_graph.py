@@ -5,15 +5,15 @@ from __future__ import annotations
 import os
 from typing import Any
 
-import ticket_graph._loader as _loader_module
+from . import _loader as _loader_module
 
-from ticket_graph._blockers import _find_direct_blockers
-from ticket_graph._cache import (
+from ._blockers import _find_direct_blockers
+from ._cache import (
     _compute_cache_key,
     _read_graph_cache,
     _write_graph_cache,
 )
-from ticket_graph._status import _get_ticket_status
+from ._status import _get_ticket_status
 
 # Use module-level accessor so tests can patch _loader_module.reducer.reduce_all_tickets
 reduce_ticket = _loader_module.reduce_ticket

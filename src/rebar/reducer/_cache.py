@@ -83,7 +83,7 @@ def prepare_event_files(
     excluding .cache.json via glob's dotfile exclusion).  Empty list means no
     events in the directory.
     """
-    from ticket_reducer._sort import event_sort_key
+    from ._sort import event_sort_key
 
     cache_path = os.path.join(ticket_dir, ".cache.json")
 

@@ -2,7 +2,7 @@
 
 Exposes the two primary entry points so callers can do:
 
-    from ticket_reducer import reduce_ticket, reduce_all_tickets
+    from . import reduce_ticket, reduce_all_tickets
 
 without spawning a ticket-reducer.py subprocess.
 """
@@ -12,10 +12,10 @@ from __future__ import annotations
 import json
 import os
 
-from ticket_reducer._cache import prepare_event_files, write_cache
-from ticket_reducer._processors import replay_events
-from ticket_reducer._state import make_error_dict, make_initial_state
-from ticket_reducer.marker import remove_marker
+from ._cache import prepare_event_files, write_cache
+from ._processors import replay_events
+from ._state import make_error_dict, make_initial_state
+from .marker import remove_marker
 
 
 def _is_net_archived(ticket_dir: str) -> bool:

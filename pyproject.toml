@@ -22,7 +22,7 @@ dependencies = []
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.2"]
-dev = ["pytest>=8", "mcp>=1.2", "jsonschema>=4.18"]
+dev = ["pytest>=8", "mcp>=1.2", "jsonschema>=4.18", "hatchling>=1.18"]
 
 [project.scripts]
 rebar = "rebar.cli:main"
@@ -35,6 +35,15 @@ rebar-mcp = "rebar.mcp_server:main"
 packages = ["src/rebar"]
 artifacts = [
     "src/rebar/_engine/**/*",
+]
+# Never ship compiled bytecode. The `artifacts` glob above force-includes engine
+# files that .gitignore would otherwise drop, so spell out the bytecode exclusion
+# explicitly rather than relying on gitignore filtering (ticket fare-rant-clasp;
+# verified by tests/unit/test_engine_dir.py::test_wheel_has_no_bytecode).
+exclude = [
+    "**/__pycache__",
+    "**/*.pyc",
+    "**/*.pyo",
 ]
 
 [tool.hatch.build.targets.sdist]

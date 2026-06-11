@@ -11,7 +11,7 @@ import json
 import os
 import sys
 
-from ticket_reducer._version import KNOWN_EVENT_TYPES
+from ._version import KNOWN_EVENT_TYPES
 
 
 def process_create(
@@ -27,7 +27,7 @@ def process_create(
     Returns a fsck_needed error-state dict if required fields are missing,
     otherwise mutates state in-place and returns None.
     """
-    from ticket_reducer._state import make_error_dict
+    from ._state import make_error_dict
 
     if not data.get("ticket_type") or not data.get("title"):
         fsck_result = make_error_dict(ticket_id, "fsck_needed", "corrupt_create_event")
@@ -67,7 +67,7 @@ def process_create(
     if stored_alias:
         state["alias"] = stored_alias
     else:
-        from ticket_reducer._alias import compute_alias
+        from ._alias import compute_alias
 
         state["alias"] = compute_alias(ticket_id)
     state["description"] = data.get("description") or ""

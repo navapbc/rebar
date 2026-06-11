@@ -1,82 +1,31 @@
-"""Ticket reducer processor package.
+"""Compat shim: ``ticket_reducer`` → ``rebar.reducer``.
 
-Provides event-type processors, state helpers, sort utilities, cache
-management, and the public reduce API.
-
-Public re-exports:
-    reduce_ticket, reduce_all_tickets     — from _api (primary entry points)
-    make_initial_state, make_error_dict   — from _state
-    event_sort_key                        — from _sort
-    compute_dir_hash, read_cache,
-    write_cache                           — from _cache
-    process_create, process_status,
-    process_comment, process_link,
-    process_unlink, process_bridge_alert,
-    process_revert, process_edit,
-    process_archived, process_snapshot,
-    scan_for_latest_snapshot              — from _processors
-    to_llm                                — from llm_format
+The reducer is now a real subpackage (``rebar.reducer``); this thin shim keeps
+the old top-level name importable for engine subprocesses (bash heredocs +
+``ticket-reducer.py``) that run with only the engine dir on ``PYTHONPATH``.
+Aliasing the package object preserves identity (``ticket_reducer is
+rebar.reducer``) so submodule lookups resolve to the real package dir. Retire
+with the bash→Python strangler-fig ports that drop the old import names.
 """
 
-from ticket_reducer._api import reduce_ticket, reduce_all_tickets
-from ticket_reducer._state import make_error_dict, make_initial_state
-from ticket_reducer._sort import event_sort_key
-from ticket_reducer._inbound import find_inbound_relationships
-from ticket_reducer._filters import apply_ticket_filters
-from ticket_reducer.search import search_states
-from ticket_reducer._cache import (
-    compute_dir_hash,
-    prepare_event_files,
-    read_cache,
-    write_cache,
-)
-from ticket_reducer._processors import (
-    process_archived,
-    process_bridge_alert,
-    process_comment,
-    process_create,
-    process_edit,
-    process_link,
-    process_revert,
-    process_snapshot,
-    process_status,
-    process_unlink,
-    replay_events,
-    scan_for_latest_snapshot,
-)
-from ticket_reducer.marker import check_marker, remove_marker, write_marker
-from ticket_reducer.llm_format import to_llm
-from ticket_reducer._version import KNOWN_EVENT_TYPES, SCHEMA_VERSION
+import sys
+from pathlib import Path
 
-__all__ = [
-    "SCHEMA_VERSION",
-    "KNOWN_EVENT_TYPES",
-    "reduce_ticket",
-    "reduce_all_tickets",
-    "find_inbound_relationships",
-    "apply_ticket_filters",
-    "search_states",
-    "make_initial_state",
-    "make_error_dict",
-    "event_sort_key",
-    "compute_dir_hash",
-    "prepare_event_files",
-    "read_cache",
-    "write_cache",
-    "process_create",
-    "process_status",
-    "process_comment",
-    "process_link",
-    "process_unlink",
-    "process_bridge_alert",
-    "process_revert",
-    "process_edit",
-    "process_archived",
-    "process_snapshot",
-    "scan_for_latest_snapshot",
-    "replay_events",
-    "write_marker",
-    "remove_marker",
-    "check_marker",
-    "to_llm",
-]
+# Engine subprocesses may run a bare ``python3`` that only has the engine dir on
+# its import path, so make the ``rebar`` package importable from this shim's own
+# location (no-op when ``rebar`` is already importable, e.g. a wheel install).
+_root = str(Path(__file__).resolve().parents[3])
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
+import rebar.reducer as _real  # noqa: E402
+
+sys.modules[__name__] = _real
+
+# Mirror the real package's already-loaded submodules under the old prefix so
+# ``ticket_reducer.X is rebar.reducer.X`` (otherwise a fresh ``import
+# ticket_reducer.X`` would load a second copy and break re-export identity).
+_prefix = _real.__name__
+for _name, _mod in list(sys.modules.items()):
+    if _name.startswith(_prefix + "."):
+        sys.modules[__name__ + _name[len(_prefix):]] = _mod

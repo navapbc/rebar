@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from ticket_graph._loader import reduce_all_tickets, reduce_ticket
-from ticket_graph._relations import _BLOCKING_RELATIONS
+from ._loader import reduce_all_tickets, reduce_ticket
+from ._relations import _BLOCKING_RELATIONS
 
 # Relations whose links represent BLOCKING dependencies (single source of truth in
 # ticket_graph._relations). Only these are subject to hierarchy promotion — see

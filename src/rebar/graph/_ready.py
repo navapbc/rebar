@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ticket_reducer import reduce_all_tickets
-from ticket_graph._relations import _BLOCKING_RELATIONS
+from rebar.reducer import reduce_all_tickets
+from ._relations import _BLOCKING_RELATIONS
 
 _OPEN_STATUSES = {"open", "in_progress"}
 _CLOSED_STATUSES = {"closed"}

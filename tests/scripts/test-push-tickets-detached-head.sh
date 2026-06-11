@@ -5,7 +5,7 @@
 # When the .tickets-tracker worktree is in detached-HEAD mode (its normal
 # operating state), commits advance HEAD but do NOT update refs/heads/tickets.
 # `_push_tickets_branch` and the equivalent Python push in
-# ticket_graph/_links.py historically used `git push origin tickets`, which
+# graph/_links.py historically used `git push origin tickets`, which
 # pushes the LOCAL refs/heads/tickets ref. When that ref is stale, the push
 # fails as non-fast-forward against origin/tickets and the retry loop
 # exhausts without ever sending HEAD's commits.
@@ -21,7 +21,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 TICKET_LIB="$REPO_ROOT/src/rebar/_engine/ticket-lib.sh"
-LINKS_PY="$REPO_ROOT/src/rebar/_engine/ticket_graph/_links.py"
+LINKS_PY="$REPO_ROOT/src/rebar/graph/_links.py"
 
 source "$REPO_ROOT/tests/lib/assert.sh"
 

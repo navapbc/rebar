@@ -20,10 +20,14 @@ def _wordlist_path() -> str:
     env = os.environ.get("TICKET_WORDLIST_PATH")
     if env:
         return env
-    # This module lives at <engine>/ticket_reducer/_alias.py; the wordlist ships
-    # one level up at <engine>/resources/ticket-wordlist.txt.
+    # This module lives at <rebar>/reducer/_alias.py; the bundled wordlist ships
+    # with the engine at <rebar>/_engine/resources/ticket-wordlist.txt. (Engine
+    # subprocesses get TICKET_WORDLIST_PATH from engine_env() and never reach
+    # this fallback; it serves the in-process library path.)
     here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.normpath(os.path.join(here, "..", "resources", "ticket-wordlist.txt"))
+    return os.path.normpath(
+        os.path.join(here, "..", "_engine", "resources", "ticket-wordlist.txt")
+    )
 
 
 def _load() -> tuple[list[str], list[str]]:

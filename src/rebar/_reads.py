@@ -22,11 +22,9 @@ from typing import Any
 
 from rebar import config
 
-# Importing rebar._native ensures the bundled engine dir is on sys.path so the
-# native packages below resolve (idempotent; mirrors the library's native reads).
-import rebar._native  # noqa: F401
-
-import ticket_reads  # noqa: E402  (resolved via rebar._native's sys.path insert)
+# The single-source read implementation is a real subpackage now
+# (``rebar._engine_support.reads``); no sys.path manipulation needed.
+from rebar._engine_support import reads as ticket_reads
 
 
 def _tracker(repo_root: str | os.PathLike[str] | None) -> str:

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-import ticket_graph._loader as _loader_module
+from . import _loader as _loader_module
 
-from ticket_graph._status import _BLOCKING_RELATIONS
+from ._status import _BLOCKING_RELATIONS
 
 
 def _find_direct_blockers(

@@ -11,3 +11,8 @@ bridge_state/
 .claude/
 session-logs/
 CLAUDE.local.md
+
+# local test/build scratch (never commit)
+.pytest-tmp/
+dist/
+build/

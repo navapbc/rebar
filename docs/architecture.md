@@ -14,7 +14,7 @@ over one git-backed store.
                             │
               ┌─────────────┼───────────────────────────┐
               ▼             ▼                            ▼
-     append+commit    ticket_reducer/            rebar_reconciler/
+     append+commit    rebar.reducer              rebar_reconciler/
      (locked write     (pure replay → state)      (Jira bidirectional sync)
       path, I5)
                             │
@@ -49,12 +49,54 @@ over one git-backed store.
     status-transition and `claim` critical sections live in `ticket_txn.py`
     (one process: lock → reduce+verify → write → commit; exit 10 on optimistic-
     concurrency mismatch).
-  - **Reducer** (`ticket_reducer/`) — pure deterministic replay of the event log
-    into compiled state; local rebuildable `.cache.json` per ticket.
-  - **Graph** (`ticket_graph/`) — relations + cycle detection.
-  - **Reconciler** (`rebar_reconciler/`) — level-triggered, bidirectional Jira
-    sync; the one component with a grandfathered cross-client advisory lock
-    (`.reconciler-pass-lock`, single-writer-by-design).
+  - **Reducer** (`rebar.reducer`, code at `src/rebar/reducer/`) — pure
+    deterministic replay of the event log into compiled state; local rebuildable
+    `.cache.json` per ticket.
+  - **Graph** (`rebar.graph`, code at `src/rebar/graph/`) — relations + cycle
+    detection.
+  - **Reconciler** (`rebar_reconciler/`, in the engine dir) — level-triggered,
+    bidirectional Jira sync; the one component with a grandfathered cross-client
+    advisory lock (`.reconciler-pass-lock`, single-writer-by-design).
+
+### Python package layout & the engine import boundary
+
+The library, CLI, and MCP server are the `rebar` package; the engine ships as
+package **data** under `rebar/_engine/` (bash + `*.py` helpers exec'd as real
+files). Two import worlds meet at this boundary, and the rule (ticket
+`fare-rant-clasp`, Rec 5) is **the in-process library path never puts a generic
+top-level name on `sys.path`**:
+
+- **In-process (library / MCP reads).** The replay engine is real subpackages:
+  `rebar.reducer`, `rebar.graph`, and the in-process read surface
+  (`rebar._engine_support.{reads,resolver,output}`). `_native.py` / `_reads.py`
+  import these directly — no `sys.path` insertion of the engine dir, so after
+  `import rebar` a bare `import ticket_reducer` fails (guarded by
+  `tests/unit/test_engine_dir.py::test_library_path_exposes_no_generic_top_level_engine_names`).
+- **Subprocess (bash dispatcher + `python3` helpers).** `engine_env()` is the
+  ONE place the engine dir goes on an import path, and it is scoped to
+  subprocesses. It puts both the engine dir and the `rebar` package parent on
+  `PYTHONPATH`, so the engine's bare `python3` resolves the old top-level names —
+  now thin **compat shims** in `rebar/_engine/` (`ticket_reducer/`,
+  `ticket_graph/`, `ticket_reads.py`, `ticket_resolver.py`, `ticket_output.py`)
+  that re-export the `rebar.*` subpackages. Each shim does
+  `sys.modules[__name__] = <real module>`, so `ticket_reducer is rebar.reducer`
+  (one object, one cache); shims that bash also runs as scripts
+  (`ticket_output.py` via `ticket-output.sh`) forward `__main__` to the real
+  module. These shims exist only until the bash→Python strangler-fig ports
+  (`adult-oxide-slave`) drop the old import names.
+
+The write core `ticket_txn.py` is invoked by absolute path from bash and is never
+imported in-process, so it stays in the engine dir (no library-path exposure to
+remove). The **reconciler** (`rebar_reconciler/`) likewise stays in the engine
+dir: the library only ever reaches it as a subprocess (`python -m
+rebar_reconciler`) or by loading a single file by path (`mode.py` in
+`mcp_server.py`), never as an in-process package import — so it leaks no generic
+name onto the library path. Its internal `sys.modules` identity keys (the
+`spec_from_file_location` dotted-key scheme that copes with the test-package
+shadow and `acli-integration.py`'s hyphen) are **left as-is by deliberate
+decision**; turning them into ordinary imports is owned by `tangly-abbey-smelt`,
+which is sequenced after this repackage precisely because the package is now
+importable as `rebar.*` for it to build on.
 
 - **Storage** — a dedicated `tickets` git **orphan branch**, checked out as a
   worktree at `.tickets-tracker/`. Tickets are directories; mutations are

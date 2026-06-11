@@ -1,23 +1,16 @@
-"""In-process access to the engine's native Python packages.
+"""In-process access to the engine's native Python read API.
 
-Importing this module ensures the bundled engine directory is on ``sys.path``
-so the stdlib-only ``ticket_reducer`` / ``ticket_graph`` / ``rebar_reconciler``
-packages can be imported directly (no subprocess). It then re-exports the
-stable read-path entry points.
+The reducer is now a real subpackage (``rebar.reducer``), so the library imports
+it directly — no ``sys.path`` insertion of the engine dir, and therefore no
+generic top-level names (``ticket_reducer`` etc.) leaking onto the library import
+path (ticket ``fare-rant-clasp``). This module just re-exports the stable
+read-path entry points.
 """
 
 from __future__ import annotations
 
-import sys
-
 from rebar._engine import engine_dir
-
-_eng = str(engine_dir())
-if _eng not in sys.path:
-    sys.path.insert(0, _eng)
-
-# Native re-exports (read path — no subprocess).
-from ticket_reducer import (  # noqa: E402
+from rebar.reducer import (
     apply_ticket_filters,
     find_inbound_relationships,
     reduce_all_tickets,

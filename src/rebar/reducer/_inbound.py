@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import os
 
-from ticket_reducer._api import reduce_ticket
+from ._api import reduce_ticket
 
 # Source tickets in these terminal states are not surfaced as live
 # relationships — a deleted ticket's links are tombstoned, not active.

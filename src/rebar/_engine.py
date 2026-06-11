@@ -51,11 +51,17 @@ def wordlist_path() -> Path:
 
 
 def engine_env(repo_root: str | os.PathLike[str] | None = None) -> dict[str, str]:
-    """Environment for engine subprocesses.
+    """Environment for engine subprocesses (bash dispatcher + ``python3`` helpers).
 
-    - Prepends the engine dir to ``PYTHONPATH`` so bundled ``python3`` helpers
-      and ``python -m rebar_reconciler`` resolve ``ticket_reducer`` / ``ticket_graph``
-      / ``rebar_reconciler`` imports.
+    This is the ONLY place the engine dir is put on an import path — and it is
+    scoped to subprocesses, never the in-process library path (the library imports
+    ``rebar.reducer`` / ``rebar.graph`` / ``rebar._engine_support.*`` directly).
+
+    - Prepends the engine dir to ``PYTHONPATH`` so the engine's bare ``python3``
+      resolves the old top-level names (``ticket_reducer`` / ``ticket_graph`` /
+      ``ticket_reads`` …, now thin compat shims) and ``python -m rebar_reconciler``.
+      The shims self-bootstrap the ``rebar`` package onto ``sys.path`` from their
+      own location, so the subprocess does not need ``rebar`` pre-resolved.
     - Pins ``REBAR_ROOT`` *and* ``PROJECT_ROOT`` (the bash write path reads
       ``PROJECT_ROOT``; the reconciler reads ``REBAR_ROOT`` — they must agree).
     - Pins ``TICKET_WORDLIST_PATH`` so alias generation never falls back to hex
