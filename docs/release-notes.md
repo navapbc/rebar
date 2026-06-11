@@ -4,6 +4,15 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## Auto-push policy — `REBAR_PUSH`
+
+New env var (default `always`, unchanged behaviour): `always` pushes synchronously
+on every write, `async` pushes in a detached background job (so per-write network
+latency doesn't serialize a batch claim), `off` keeps commits local. All modes
+keep convergence semantics — `fsck` still reports `PUSH_PENDING`, non-fast-forward
+still fetches+merges+retries. Read at the `_push_tickets_branch` chokepoint, so
+CLI/library/MCP honour it uniformly. (ticket `hip-rod-graze`)
+
 ## Contract freeze (2026-06-09 breaking-change window)
 
 Story `fatty-cipher-range` froze three agent-facing contracts while the post-

@@ -136,6 +136,10 @@ event to the `tickets` branch **and** auto-pushes to `origin/tickets` when an
 propagates to the shared remote immediately. Push is best-effort: no remote means
 no push, and a push failure never fails the write (the commit stays local and
 diverged). `fsck` reports `PUSH_PENDING` when the local branch is ahead of origin.
+The **`REBAR_PUSH`** env var tunes this (default `always`): `async` pushes in the
+background so per-write network latency doesn't serialize a batch claim, and `off`
+keeps commits local — both still surface `PUSH_PENDING` via `fsck` (see
+`docs/concurrency.md`).
 
 ## Library quick reference
 

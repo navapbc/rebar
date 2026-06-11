@@ -65,7 +65,17 @@ lock** and reject on mismatch with **exit 10**, surfaced uniformly as
 All writes go through the flock-guarded append+commit path: atomic
 tmp-then-rename + `git add <event>` + `git commit`, all under
 `.tickets-tracker/.ticket-write.lock` (`_flock_stage_commit`,
-`ticket-lib.sh:270-...`, FD 200 at `:353`/`:493`). No side-channel writes.
+`ticket-lib.sh:270-...`, FD 200 at `:353`/`:493`). No side-channel writes. The
+reconciler's event-file write shares this lock via the `event_append` module
+(`write_lock` / `append_event`) rather than writing unserialized.
+
+**No-flock platforms.** Where util-linux `flock` is absent (default macOS),
+`_flock_stage_commit` falls back to an **atomic `mkdir` lock** (`mkdir` is atomic
+on POSIX). Its behaviour under many concurrent local agents is pinned by a CI
+stress test (`tests/scripts/test-mkdir-lock-stress.sh`, forced on Linux via the
+`REBAR_FORCE_MKDIR_LOCK=1` hook): N concurrent writers lose **zero** events and
+finish within a bounded wait — measured ~2 s for N=15, no starvation. Lost events
+or unbounded blow-up fail the test.
 
 ### I6 — No NEW cross-client lock; no shared mutable index
 Cross-client coordination is **only** git merge-as-union + optimistic
@@ -122,6 +132,18 @@ Push is **best-effort**: a failed push (no network, unresolvable non-fast-forwar
 recovery state) never fails the caller — it warns, leaves local commits intact,
 and the branch stays diverged. `rebar fsck` surfaces that divergence as a
 `PUSH_PENDING` notice (`ticket-fsck.sh`, Check 4.5) so it is not silent.
+
+**Push policy — `REBAR_PUSH`** (read at the `_push_tickets_branch` chokepoint, so
+CLI / library / MCP honour it uniformly; case/space-insensitive; default
+`always`):
+
+| value    | behaviour |
+|----------|-----------|
+| `always` | synchronous push before the write returns (default — real-time propagation is a first-order requirement). |
+| `async`  | return immediately; the (identical, best-effort) push runs in a detached background job. Convergence is unchanged — `fsck` still reports `PUSH_PENDING` until it lands, and a non-fast-forward still fetches+merges+retries. Use when an agent claims a batch and per-write network latency would serialize the run. |
+| `off`    | never push; commits stay local (`fsck` reports `PUSH_PENDING`). For offline/throwaway work. |
+
+Pinned by `tests/scripts/test-rebar-push-policy.sh`.
 
 ### Inbound — background sync (periodic, on reads/commands)
 `_reconverge_tickets` (`ticket-sync.sh`) runs at most once per minute per clone.

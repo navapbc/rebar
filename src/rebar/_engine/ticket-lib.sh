@@ -109,18 +109,23 @@ _flock_stage_commit() {
     # here.  If the binary in PATH is not util-linux, fall through to the mkdir
     # fallback unconditionally.
     local _flock_bin=""
-    if command -v flock >/dev/null 2>&1; then
-        if flock --version 2>&1 | grep -qi 'util-linux'; then
-            _flock_bin="$(command -v flock)"
+    # REBAR_FORCE_MKDIR_LOCK (test hook): force the no-flock mkdir fallback even
+    # where util-linux flock exists, so the macOS lock path can be stress-tested
+    # on Linux CI (see tests/scripts/test-mkdir-lock-stress.sh). Off by default.
+    if [ -z "${REBAR_FORCE_MKDIR_LOCK:-}" ]; then
+        if command -v flock >/dev/null 2>&1; then
+            if flock --version 2>&1 | grep -qi 'util-linux'; then
+                _flock_bin="$(command -v flock)"
+            fi
+            # Non-util-linux flock (e.g. BusyBox): leave _flock_bin empty → mkdir fallback
         fi
-        # Non-util-linux flock (e.g. BusyBox): leave _flock_bin empty → mkdir fallback
-    fi
-    if [ -z "$_flock_bin" ]; then
-        # Homebrew util-linux installs flock outside PATH on macOS
-        local _ul_flock
-        _ul_flock=$(find /opt/homebrew/Cellar/util-linux -name flock -path "*/bin/flock" 2>/dev/null | sort -V | tail -1)
-        if [ -n "$_ul_flock" ] && [ -x "$_ul_flock" ]; then
-            _flock_bin="$_ul_flock"
+        if [ -z "$_flock_bin" ]; then
+            # Homebrew util-linux installs flock outside PATH on macOS
+            local _ul_flock
+            _ul_flock=$(find /opt/homebrew/Cellar/util-linux -name flock -path "*/bin/flock" 2>/dev/null | sort -V | tail -1)
+            if [ -n "$_ul_flock" ] && [ -x "$_ul_flock" ]; then
+                _flock_bin="$_ul_flock"
+            fi
         fi
     fi
 
@@ -478,8 +483,32 @@ write_commit_event() {
 # _push_tickets_branch <base_path>
 # Push the tickets branch to origin with retry logic for non-fast-forward.
 # Best-effort: push failures are logged but do not fail the caller.
+#
+# Honours the REBAR_PUSH policy (case/space-insensitive; default "always"):
+#   always — synchronous best-effort push before the write returns (default;
+#            real-time propagation is a first-order requirement).
+#   async  — return immediately and push in a detached background job; still
+#            best-effort, and fsck still reports PUSH_PENDING until it lands.
+#   off    — never push; the commit stays local (fsck reports PUSH_PENDING).
+# The policy is read here, the one chokepoint every CLI/library/MCP write funnels
+# through, so all three interfaces honour it uniformly.
 _push_tickets_branch() {
     local base_path="$1"
+    local _push_mode
+    _push_mode=$(printf '%s' "${REBAR_PUSH:-always}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+    case "$_push_mode" in
+        off)
+            return 0  # policy: never push
+            ;;
+        async)
+            # Detach a synchronous push so the write isn't serialized behind
+            # network latency. REBAR_PUSH=always in the child selects the sync
+            # body below; ( ... & ) orphans it so it survives the parent's exit.
+            ( REBAR_PUSH=always _push_tickets_branch "$base_path" >/dev/null 2>&1 & )
+            return 0
+            ;;
+    esac
+    # mode: always (default) — synchronous best-effort push.
     local _remote
     _remote=$(git -C "$base_path" remote 2>/dev/null | head -1)
     if [ -z "$_remote" ]; then
