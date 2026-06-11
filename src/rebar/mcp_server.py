@@ -123,14 +123,29 @@ try:
         reason: str
         passed: bool | None = None
 
+    class ListEpicsOut(_Out):
+        # Mirrors src/rebar/schemas/list_epics.schema.json ({p0_bugs, epics}).
+        p0_bugs: list[dict] = []
+        epics: list[dict] = []
+
+    class BridgeFsckOut(_Out):
+        # Mirrors src/rebar/schemas/bridge_fsck.schema.json.
+        orphaned: list = []
+        duplicates: list = []
+        stale: list = []
+
     # NOTE: transition/reopen return {ticket_id, from, to, newly_unblocked}; the
     # `from` key is a Python reserved word, so those tools return a plain dict
-    # (FastMCP serializes it correctly) rather than a typed model.
+    # (FastMCP serializes it correctly) rather than a typed model. They therefore
+    # advertise no outputSchema by design — a documented exemption pinned in
+    # tests/interfaces/test_mcp_output_schema_coverage.py. Their CLI/library JSON
+    # is still pinned to transition_result by test_schema_outputs.py.
 except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     TicketStateOut = None  # type: ignore[assignment,misc]
     DepsGraphOut = ClarityResultOut = ValidateReportOut = None  # type: ignore[assignment,misc]
     NextBatchOut = FileImpactItemOut = VerifyCommandItemOut = None  # type: ignore[assignment,misc]
     CreateResultOut = ClaimResultOut = GateResultOut = None  # type: ignore[assignment,misc]
+    ListEpicsOut = BridgeFsckOut = None  # type: ignore[assignment,misc]
 
 
 def _env_truthy(name: str) -> bool:
@@ -298,16 +313,18 @@ def build_server():
         include_blocked: bool = False,
         has_tag: str | None = None,
         min_children: int | None = None,
-    ) -> dict:
+    ) -> ListEpicsOut:
         """Open epics as {p0_bugs, epics}. include_blocked adds blocked epics."""
-        return rebar.list_epics(
-            include_blocked=include_blocked, has_tag=has_tag, min_children=min_children
+        return ListEpicsOut.model_validate(
+            rebar.list_epics(
+                include_blocked=include_blocked, has_tag=has_tag, min_children=min_children
+            )
         )
 
     @mcp.tool()
-    def bridge_fsck() -> dict:
+    def bridge_fsck() -> BridgeFsckOut:
         """Audit bridge mappings -> {orphaned, duplicates, stale}."""
-        return rebar.bridge_fsck()
+        return BridgeFsckOut.model_validate(rebar.bridge_fsck())
 
     @mcp.tool()
     def reconcile(mode: str = "dry-run") -> dict:

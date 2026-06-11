@@ -72,12 +72,25 @@ The MCP server's pydantic models (`src/rebar/mcp_server.py`, e.g. `TicketStateOu
 not a second source of truth. Tests pin both:
 
 - `tests/interfaces/test_schema_outputs.py` — drives every shape's REAL engine
-  output (library + CLI) and validates it against its schema; asserts the typed
-  MCP read tools advertise an `outputSchema`.
+  output (library + CLI) and validates it against its schema.
+- `tests/interfaces/test_mcp_output_schema_coverage.py` — the **MCP coverage
+  guard**: the set of tools under test is sourced mechanically from
+  `list_tools()`, every outputSchema-advertising tool is driven on a fixture store
+  and its result validated against the canonical schema, and any advertiser
+  without a canonical shape must be a documented exemption (so a new MCP tool
+  cannot ship an unvalidated `outputSchema`).
 - `tests/interfaces/test_schema_coverage.py` — the **coverage guard**: every
   schema file is wired into `OUTPUT_SCHEMAS`, every registry entry resolves, and
   every command whose `--help` advertises `--output` is covered (so a new
   `--output` command without a schema fails CI).
+
+**MCP outputSchema exemptions (documented in the coverage test):** the write
+tools (`comment`/`tag`/`archive`/`edit`/`link`/`set_*`/`compact`/…) and the MCP
+`fsck` tool return a generic `{result: <str>}` ack with no canonical shape;
+`transition_ticket`/`reopen_ticket` advertise **no** `outputSchema` because their
+`{ticket_id, from, to, …}` result uses the Python reserved word `from` (they
+return a plain dict; their CLI/library JSON is still pinned to `transition_result`);
+`reconcile` has no canonical schema for its plan/result.
 
 Adding a new structured output therefore means: author the schema (reuse
 `common` `$ref`s), register it in `OUTPUT_SCHEMAS`, and add a conformance case —
