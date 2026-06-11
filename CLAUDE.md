@@ -99,6 +99,17 @@ Record `set_file_impact` (the `{path,reason}` array that `next_batch` uses to
 avoid scheduling file-conflicting tickets together) and `set_verify_commands`
 (DD-level verification) so downstream scheduling and verification work.
 
+## Module-size policy (when editing rebar itself)
+
+rebar is built to be edited by agents that load a unit whole. **Target 200–500
+LOC per file; soft cap 800.** When a unit grows past the cap, split it **only
+along call-graph seams that already exist** (extract a cluster of functions that
+already call each other) — never mechanically to hit a number, and **never create
+files < 100 LOC** by splitting. Prefer **deleting** oversized bash via the
+bash→Python strangler-fig migration over carving it into more bash. The current
+over-cap offenders and their planned remedies are tabulated in
+`docs/architecture.md` (a warn-only CI report flags new ones).
+
 ## Linking (relations + hierarchy promotion)
 
 - `link <id1> <id2> <relation>` **requires** a relation. The six relations:

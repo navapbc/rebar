@@ -61,5 +61,18 @@ jobs:
           git config --global user.name "rebar CI"
           git config --global init.defaultBranch main
 
+      # Warn-only module-size report (policy: target 200-500 LOC, soft cap 800;
+      # see docs/architecture.md). Informational — never fails the build; it just
+      # surfaces files that grew past the cap so new offenders are visible in PRs.
+      - name: Module-size report (warn-only)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "Files over the 800-LOC soft cap (policy: docs/architecture.md):"
+          over=$(find src/rebar -name '*.py' -o -name '*.sh' | grep -v __pycache__ \
+            | xargs wc -l 2>/dev/null \
+            | awk '$2 != "total" && $1 > 800 { printf "  %5d  %s\n", $1, $2 }' | sort -rn)
+          if [ -n "$over" ]; then echo "$over"; else echo "  (none — all units within the soft cap)"; fi
+
       - name: Run the full suite (Python tiers + bash collector; excludes live-Jira)
         run: pytest -m "not integration" -q

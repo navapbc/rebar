@@ -71,3 +71,42 @@ cross-client lock (except the grandfathered reconciler pass-lock). The full
 invariants (I1–I9) and the sync/reconvergence algorithm are in
 `docs/concurrency.md`; the agent-facing tool set and workflow are in
 `CLAUDE.md`.
+
+## Module-size policy
+
+rebar is built to be edited by agents, which read a unit whole. The balance is
+between *editability* (a file an agent can load and reason about in one pass) and
+*fragmentation* (so many tiny files that following a change means chasing imports).
+The policy:
+
+- **Target 200–500 LOC** per unit; a unit is one cohesive responsibility.
+- **Soft cap 800 LOC.** Over 800 is a smell to address — but only by a *real*
+  split, never a mechanical one.
+- **Split only along call-graph seams that already exist** — extract a cluster of
+  functions that already call each other and little else. Do not split a unit just
+  to hit a line count.
+- **Never create files < 100 LOC by splitting.** Two 60-line files that always
+  change together are worse than one 120-line file.
+- **Prefer deleting bash over splitting it.** An oversized `*.sh` should be retired
+  via the bash→Python strangler-fig migration (ticket `adult-oxide-slave`), not
+  carved into more bash.
+
+### Current offenders (> 800 LOC) and planned remedy
+
+Tracked so the over-cap set is visible, not silently growing. A warn-only size
+report runs in CI (`.github/workflows/test.yml`) so new offenders surface in PRs.
+
+| File | LOC | Remedy |
+|------|----:|--------|
+| `rebar_reconciler/applier.py` | ~3480 | split along seams — ticket `tangly-abbey-smelt` |
+| `_engine/ticket-lib-api.sh` | ~2370 | retire via strangler-fig — ticket `adult-oxide-slave` |
+| `_engine/acli-integration.py` | ~2180 | split the Jira-client vs ADF concerns (reconciler) |
+| `_engine/ticket-lib.sh` | ~2000 | retire via strangler-fig — `adult-oxide-slave` |
+| `rebar_reconciler/reconcile.py` | ~1320 | split orchestration vs pass-driver seams |
+| `rebar_reconciler/outbound_differ.py` | ~1130 | split per-field differ seams |
+| `_engine/ticket-next-batch.sh` | ~950 | retire via strangler-fig — `adult-oxide-slave` |
+| `_engine/validate-issues.sh` | ~945 | retire via strangler-fig — `adult-oxide-slave` |
+
+Files in the 500–800 band (`_advisory_lock.py`, `differ.py`, `inbound_differ.py`,
+`ticket_reads.py`, `__init__.py`, `ticket-link.sh`, `ticket-bridge-fsck.py`) are at
+the ceiling, not over it — watch, don't split preemptively.
