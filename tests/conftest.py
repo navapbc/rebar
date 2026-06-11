@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import shutil
 import socket
+import sys
 from pathlib import Path
 from typing import Iterator
 from unittest.mock import patch
@@ -29,6 +30,12 @@ from unittest.mock import patch
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Make tests/ importable so this conftest (and tests) can use the shared helpers
+# next to it (_isolation, _engine_path) regardless of pytest's import mode.
+_TESTS_DIR = str(Path(__file__).resolve().parent)
+if _TESTS_DIR not in sys.path:
+    sys.path.insert(0, _TESTS_DIR)
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -42,6 +49,12 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         "unit: mark a test as a unit test.",
+    )
+    config.addinivalue_line(
+        "markers",
+        "allow_repo_writes: opt out of the repo-isolation guard for a test that "
+        "legitimately commits to or mutates this checkout (none expected — tests "
+        "operate on disposable trackers under tmp_path).",
     )
 
 
@@ -126,3 +139,83 @@ def _no_repo_root_leaks() -> Iterator[None]:
             "Test leaked new entries into REPO_ROOT (use tmp_path or a "
             f"sandboxed temp dir): {sorted(leaked)}"
         )
+
+
+# ── Repo-isolation guard (no test may commit to / mutate this checkout) ───────
+#
+# Tests operate on disposable trackers under tmp_path, never the rebar checkout.
+# Two ways a test can break that, both invisible to the top-level leak guard
+# above:
+#   1. Commits — a write path (e.g. ticket-graph's _write_link_event running
+#      ``git -C <tracker> commit``) against a tracker that is NOT its own git
+#      repo: git walks UP and commits into this checkout. This once leaked dozens
+#      of ``ticket: link ...`` commits onto main.
+#   2. Working-tree writes into EXISTING tracked dirs (e.g. src/rebar/_engine/x),
+#      which `_no_repo_root_leaks` (new top-level entries only) cannot see.
+#
+# The per-test fixture catches (1) and pinpoints the offender; the session
+# backstop catches (2) anywhere in the tree. Both are cheap (a couple of `git`
+# calls). Opt a deliberate exception out with ``@pytest.mark.allow_repo_writes``.
+# Detection primitives live in tests/_isolation.py so the guard's self-test can
+# exercise the same code (tests/unit/test_repo_isolation_guard.py).
+
+from _isolation import head as _repo_head, porcelain as _repo_porcelain  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_repo_commits(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Fail any test that moves this checkout's HEAD (i.e. commits into it)."""
+    if request.node.get_closest_marker("allow_repo_writes"):
+        yield
+        return
+    before = _repo_head(_REPO_ROOT)
+    yield
+    if before is None:
+        return
+    after = _repo_head(_REPO_ROOT)
+    if after is not None and after != before:
+        pytest.fail(
+            f"Test moved the repo HEAD ({before[:10]} -> {after[:10]}): it "
+            "committed into the rebar checkout instead of an isolated tmp "
+            "tracker. Isolate the git writes — pin GIT_CEILING_DIRECTORIES to the "
+            "tmp root (see tests/scripts/test_ticket_graph.py::"
+            "_isolate_git_from_enclosing_repo) or init the tracker as its own "
+            f"git repo. Undo the stray commit(s) with: git reset --hard {before[:10]}"
+        )
+
+
+# Session-level working-tree backstop: snapshot `git status --porcelain` at the
+# start and compare at the end, failing the run if any NEW dirty entry appeared.
+# Compares net-new (not absolute) so a developer's pre-existing uncommitted work
+# never trips it. gitignored paths (e.g. .pytest-tmp/, __pycache__/) are excluded
+# by porcelain, so normal runs stay clean.
+_PORCELAIN_AT_START: set[str] | None = None
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    global _PORCELAIN_AT_START
+    _PORCELAIN_AT_START = _repo_porcelain(_REPO_ROOT)
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    if _PORCELAIN_AT_START is None:
+        return
+    after = _repo_porcelain(_REPO_ROOT)
+    if after is None:
+        return
+    leaked = sorted(after - _PORCELAIN_AT_START)
+    if not leaked:
+        return
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    msg = (
+        "REPO ISOLATION FAILURE: the test run left new changes in the checkout "
+        "(a test wrote into the working tree instead of tmp_path). Offending "
+        "entries from `git status --porcelain`:\n  " + "\n  ".join(leaked[:40])
+    )
+    if reporter is not None:
+        reporter.write_line("")
+        reporter.write_line(msg, red=True, bold=True)
+    else:  # pragma: no cover - terminalreporter always present under pytest
+        print(msg)
+    # Escalate the run to a failure so CI catches it even if every test "passed".
+    session.exitstatus = pytest.ExitCode.TESTS_FAILED
