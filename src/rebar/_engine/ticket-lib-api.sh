@@ -696,6 +696,8 @@ ticket_create() {
         case "$ticket_type" in
             bug|epic|story|task) ;;
             *)
+                _emit_error_envelope invalid_ticket_type "$ticket_type" \
+                    "invalid ticket type '$ticket_type'. Must be one of: bug, epic, story, task" 1
                 echo "Error: invalid ticket type '$ticket_type'. Must be one of: bug, epic, story, task" >&2
                 return 1
                 ;;
@@ -1313,6 +1315,12 @@ ticket_get_verify_commands() {
             TRACKER_DIR="$REPO_ROOT/.tickets-tracker"
         fi
 
+        # Resolve --output/-o so a failure can emit a machine-readable envelope in
+        # json mode; strip it before the arity check (json success shape unchanged).
+        if ! _resolve_output_format report "$@"; then return 2; fi
+        _strip_output_flags "$@"
+        set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
+
         if [ $# -lt 1 ]; then
             echo "Usage: ticket get-verify-commands <ticket_id>" >&2
             return 1
@@ -1325,7 +1333,9 @@ ticket_get_verify_commands() {
             return 1
         fi
 
+        local _raw_id="$ticket_id"
         if ! ticket_id="$(_ticketlib_resolve_id "$ticket_id" "$TRACKER_DIR")"; then
+            _emit_error_envelope ticket_not_found "$_raw_id" "Ticket '$_raw_id' not found" 1
             return 1
         fi
 
@@ -1812,9 +1822,11 @@ ticket_transition() {
         _strip_output_flags "$@"
         set -- ${_OUTPUT_ARGS[@]+"${_OUTPUT_ARGS[@]}"}
 
+        local _raw_id="$1"
         local ticket_id="$1"
         shift
         if ! ticket_id="$(_ticketlib_resolve_id "$ticket_id" "$TRACKER_DIR")"; then
+            _emit_error_envelope ticket_not_found "$_raw_id" "Ticket '$_raw_id' not found" 1
             return 1
         fi
         bash "$_TICKETLIB_DIR/ticket-transition.sh" "$ticket_id" "$@" --output="$_tr_fmt"
@@ -2158,7 +2170,9 @@ ticket_delete() {
             return 1
         fi
 
+        local _raw_id="$ticket_id"
         if ! ticket_id="$(_ticketlib_resolve_id "$ticket_id" "$TRACKER_DIR")"; then
+            _emit_error_envelope ticket_not_found "$_raw_id" "Ticket '$_raw_id' not found" 1
             return 1
         fi
 

@@ -93,7 +93,8 @@
       "properties": {
         "error": { "type": "string", "description": "Machine error code, e.g. 'ticket_not_found'." },
         "input": { "type": "string", "description": "The raw input that failed to resolve." },
-        "message": { "type": "string" }
+        "message": { "type": "string" },
+        "exit_code": { "type": "integer", "description": "Optional: the process exit code that accompanied this failure (see docs/exit-codes.md). Present on emitted failure envelopes; omitted by legacy read-not-found callers." }
       }
     }
   }

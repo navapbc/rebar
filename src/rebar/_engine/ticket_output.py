@@ -45,10 +45,18 @@ Two ways to use it:
 
 from __future__ import annotations
 
+import json
 import sys
 from typing import Iterable
 
-__all__ = ["PROFILES", "OutputFormatError", "allowed_for", "default_for", "parse_output"]
+__all__ = [
+    "PROFILES",
+    "OutputFormatError",
+    "allowed_for",
+    "default_for",
+    "parse_output",
+    "error_envelope",
+]
 
 # profile -> (default, allowed-tuple). The default is what an absent flag means.
 PROFILES: dict[str, tuple[str, tuple[str, ...]]] = {
@@ -133,13 +141,38 @@ def parse_output(
     return fmt, rest
 
 
+def error_envelope(error: str, input_str: str, message: str, exit_code=None) -> dict:
+    """Build the canonical machine-readable error envelope (common.schema.json
+    error_envelope). ``exit_code`` is optional (see docs/exit-codes.md). Single
+    source of truth for the failure shape every ``--output json`` command emits on
+    stdout, so agents never have to parse stderr prose."""
+    env = {"error": error, "input": input_str, "message": message}
+    if exit_code is not None and exit_code != "":
+        env["exit_code"] = int(exit_code)
+    return env
+
+
 def _main(argv: list[str]) -> int:
     """CLI shim for bash callers.
 
-    Usage: ``ticket_output.py resolve <profile> -- <args...>``
-    Prints the resolved format to stdout (exit 0); on a bad value prints
-    ``Error: ...`` to stderr and exits 2.
+    Usage:
+      ``ticket_output.py resolve <profile> -- <args...>``  — resolve --output.
+      ``ticket_output.py emit-error <error> <input> <message> [exit_code]``
+          — print a schema-valid error_envelope JSON object on stdout (exit 0).
+            Bash error branches call this in --output json mode so the failure is
+            machine-readable; the human stderr prose is printed separately.
     """
+    if argv and argv[0] == "emit-error":
+        rest = argv[1:]
+        if len(rest) < 3:
+            print(
+                "Usage: ticket_output.py emit-error <error> <input> <message> [exit_code]",
+                file=sys.stderr,
+            )
+            return 2
+        exit_code = rest[3] if len(rest) > 3 else None
+        print(json.dumps(error_envelope(rest[0], rest[1], rest[2], exit_code), ensure_ascii=False))
+        return 0
     if len(argv) < 2 or argv[0] != "resolve":
         print("Usage: ticket_output.py resolve <profile> -- <args...>", file=sys.stderr)
         return 2

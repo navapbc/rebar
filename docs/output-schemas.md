@@ -57,6 +57,26 @@ Structured via `--output json`:
 The authoritative version of this table is `schemas.OUTPUT_SCHEMAS` in
 `src/rebar/schemas/__init__.py` — the registry the coverage guard consumes.
 
+## `error_envelope` — the machine-readable failure channel
+
+When a command **fails** while `--output json` is requested, it emits an
+`error_envelope` (`{error, input, message[, exit_code]}`, `common.schema.json`) on
+**stdout** — so an agent's `json.load` always succeeds and it never has to parse
+human stderr prose. The human prose still goes to **stderr**; in text mode the
+envelope is suppressed (text-mode stdout is unchanged). The optional `exit_code`
+mirrors the process exit status (see [exit-codes.md](exit-codes.md)).
+
+The shared emitter is `ticket_output.error_envelope(...)` / the bash
+`_emit_error_envelope` helper (`ticket-output.sh`); every command's json-mode
+failure branch routes through it. Pinned by
+`tests/interfaces/test_error_envelope.py`.
+
+Not every non-zero exit is a "failure" in this sense: the per-ticket **gates**
+(`check-ac`/`quality-check`) use exit 1 as a *verdict*; **tolerant reads**
+(`summary`/`list-descendants`/`get-file-impact`/`scratch get`) return an empty
+result at exit 0; and `clarity-check` has its own always-JSON contract outside the
+`--output` system. Those are documented exemptions, not envelope cases.
+
 ## Source of truth & drift guard
 
 **The hand-authored JSON Schema files under `src/rebar/schemas/*.schema.json` are

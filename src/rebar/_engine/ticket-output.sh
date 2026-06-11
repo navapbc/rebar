@@ -33,6 +33,17 @@ _resolve_output_format() {
     return 0
 }
 
+# _emit_error_envelope <error_code> <input> <message> [exit_code]
+#   Prints a schema-valid error_envelope JSON object to stdout — but ONLY when the
+#   already-resolved _OUTPUT_FMT is "json". In text/llm mode it is a no-op, so the
+#   caller's existing human stderr prose stays the sole error channel and text-mode
+#   stdout remains byte-identical. Call it at a command's failure branch, just
+#   before the existing `echo "Error: ..." >&2; return <code>`.
+_emit_error_envelope() {
+    [ "${_OUTPUT_FMT:-}" = "json" ] || return 0
+    python3 "$_TICKET_OUTPUT_PY" emit-error "$1" "$2" "$3" "${4:-}"
+}
+
 _strip_output_flags() {
     _OUTPUT_ARGS=()
     local _skip=0 _a

@@ -173,10 +173,12 @@ trap 'rm -rf "$tmpdir"' EXIT
 # any nonexistent epic. Previously masked by a perf regression that made the
 # resolver time-out before reaching this code path.
 if ! "$TICKET_CMD" show "$epic_id" >"$tmpdir/epic.txt" 2>/dev/null; then
+    _emit_error_envelope ticket_not_found "$epic_id" "Could not load epic '$epic_id'" 1
     echo "Error: Could not load epic $epic_id" >&2
     exit 1
 fi
 if [ ! -s "$tmpdir/epic.txt" ]; then
+    _emit_error_envelope ticket_not_found "$epic_id" "Could not load epic '$epic_id' (empty output)" 1
     echo "Error: Could not load epic $epic_id (empty output)" >&2
     exit 1
 fi

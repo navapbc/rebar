@@ -52,7 +52,7 @@ from ticket_reducer.llm_format import to_llm  # noqa: E402
 from ticket_graph._graph import build_dep_graph  # noqa: E402
 from ticket_graph._ready import find_ready_tickets  # noqa: E402
 from ticket_resolver import resolve_ticket_id  # noqa: E402
-from ticket_output import OutputFormatError, parse_output  # noqa: E402
+from ticket_output import OutputFormatError, error_envelope, parse_output  # noqa: E402
 
 
 # ───────────────────────────── tracker resolution ────────────────────────────
@@ -364,15 +364,15 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
             # line (preserving the historical contract callers depend on).
             print(
                 json.dumps(
-                    {
-                        "error": "ticket_not_found",
-                        "input": raw_id,
-                        "message": f"Ticket '{raw_id}' not found",
-                    },
+                    error_envelope(
+                        "ticket_not_found", raw_id, f"Ticket '{raw_id}' not found", 1
+                    ),
                     ensure_ascii=False,
                 )
                 if "not found" in exc.message
-                else json.dumps({"error": "show_failed", "message": exc.message})
+                else json.dumps(
+                    error_envelope("show_failed", raw_id, exc.message, 1), ensure_ascii=False
+                )
             )
             print(f"Error: {exc.message}", file=sys.stderr)
             overall_rc = 1
@@ -494,6 +494,10 @@ def _cmd_deps(argv: list[str], tracker: str) -> int:
     try:
         result = deps_state(pos[0], tracker, include_archived=include_archived)
     except ReadError as exc:
+        # deps is a reader (always-JSON): emit a machine-readable error_envelope on
+        # stdout (like show) so callers' json.load succeeds, plus prose on stderr.
+        code = "ticket_not_found" if "not found" in exc.message else "deps_failed"
+        print(json.dumps(error_envelope(code, pos[0], exc.message, 1), ensure_ascii=False))
         print(f"Error: {exc.message}", file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False))

@@ -52,7 +52,10 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-ticket_id=$(TICKETS_TRACKER_DIR="$TRACKER_DIR" resolve_ticket_id "$raw_id") || exit 1
+ticket_id=$(TICKETS_TRACKER_DIR="$TRACKER_DIR" resolve_ticket_id "$raw_id") || {
+    _emit_error_envelope ticket_not_found "$raw_id" "Ticket '$raw_id' not found" 1
+    exit 1
+}
 
 # Ghost check (before the lock — read-only), mirrors ticket-transition.sh.
 if [ ! -d "$TRACKER_DIR/$ticket_id" ]; then
@@ -79,8 +82,11 @@ python3 "$SCRIPT_DIR/ticket_txn.py" claim \
 
 if [ "$claim_exit" -eq 10 ]; then
     # Optimistic-concurrency rejection — preserve exit 10 (ConcurrencyError).
+    _emit_error_envelope concurrency_conflict "$raw_id" \
+        "Ticket '$ticket_id' is not open (already claimed)" 10
     exit 10
 elif [ "$claim_exit" -ne 0 ]; then
+    _emit_error_envelope claim_failed "$raw_id" "Failed to claim ticket '$ticket_id'" 1
     exit 1
 fi
 
