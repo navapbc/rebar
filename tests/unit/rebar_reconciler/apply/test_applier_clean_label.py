@@ -54,13 +54,14 @@ def test_remove_label_payload_pinned(applier):
     mutation = _make_clean_label_mutation(applier, ["rebar-id-abc", "rebar-id-xyz"])
 
     captured: list[tuple] = []
-    real = applier._call_with_retry
+    from rebar_reconciler import apply_inbound  # point-of-use: leaf calls retry here
+    real = apply_inbound._call_with_retry
 
     def spy(fn, *args, **kwargs):
         captured.append((fn, args, kwargs))
         return real(fn, *args, **kwargs)
 
-    with patch.object(applier, "_call_with_retry", side_effect=spy):
+    with patch.object(apply_inbound, "_call_with_retry", side_effect=spy):
         result = applier._apply_inbound_clean_label(mutation, client=client)
 
     remove_calls = [c for c in captured if c[0] is client.remove_label]
