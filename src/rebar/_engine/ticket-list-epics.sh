@@ -16,6 +16,10 @@ set -euo pipefail
 #   ticket ID when no alias exists. For machine-parseable canonical IDs use
 #   `ticket show <alias>` or the ticket list command.
 #
+#   <child_count> is the TOTAL number of non-deleted direct children — open,
+#   in_progress, closed, and archived children all count; only deleted tombstones
+#   are excluded. It is NOT a count of open children.
+#
 # Blocked epics (with --all) are appended after unblocked, prefixed:
 #   BLOCKED\t<alias-or-id>\tP<priority>\t<title>\t<child_count>\t<blocker_ids>
 #

@@ -30,7 +30,7 @@
           "alias": { "type": ["string", "null"] },
           "priority": { "$ref": "common.schema.json#/$defs/priority" },
           "title": { "type": "string" },
-          "children_count": { "type": "integer" },
+          "children_count": { "type": "integer", "description": "Total non-deleted direct children of the epic: open, in_progress, closed, and archived children all count; only deleted tombstones are excluded. This is NOT a count of open children." },
           "blocking": { "type": "boolean" },
           "blocked": { "type": "boolean" },
           "blockers": { "type": "array", "items": { "type": "string" } }
