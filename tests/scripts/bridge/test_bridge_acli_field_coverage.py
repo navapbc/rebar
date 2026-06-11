@@ -56,7 +56,7 @@ class TestAcliClientCreateFieldExtraction:
             "description": "Test description",
         }
 
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             try:
                 client.create_issue(ticket_data_no_pri)
             except (KeyError, AttributeError):
@@ -81,7 +81,7 @@ class TestAcliClientCreateFieldExtraction:
             "title": "Test",
         }
 
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             try:
                 client.create_issue(ticket_data)
             except (KeyError, AttributeError):
@@ -107,7 +107,7 @@ class TestAcliClientCreateFieldExtraction:
             "description": "Important bug description",
         }
 
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             try:
                 client.create_issue(ticket_data)
             except TypeError:
@@ -145,7 +145,7 @@ class TestAcliClientCreateFieldExtraction:
             dumped_payloads.append(obj)
             original_dump(obj, fp, **kw)
 
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             with patch.object(acli_mod.json, "dump", side_effect=capturing_dump):
                 try:
                     client.create_issue(ticket_data)
@@ -211,7 +211,7 @@ class TestAcliClientCreateFieldExtraction:
             dumped_payloads.append(obj)
             original_dump(obj, fp, **kw)
 
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             with patch.object(acli_mod.json, "dump", side_effect=capturing_dump):
                 client.create_issue(ticket_data)
 
@@ -241,7 +241,7 @@ class TestAcliClientCreateFieldExtraction:
             dumped_payloads.append(obj)
             original_dump(obj, fp, **kw)
 
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             with patch.object(acli_mod.json, "dump", side_effect=capturing_dump):
                 client.create_issue(ticket_data)
 
@@ -270,7 +270,7 @@ class TestAcliClientCreateFieldExtraction:
             dumped_payloads.append(obj)
             original_dump(obj, fp, **kw)
 
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             with patch.object(acli_mod.json, "dump", side_effect=capturing_dump):
                 client.create_issue(ticket_data)
 
@@ -292,7 +292,7 @@ class TestAcliClientCreateFieldExtraction:
             "assignee": "alice",
         }
 
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             try:
                 client.create_issue(ticket_data)
             except TypeError:
@@ -321,8 +321,8 @@ class TestAcliClientUpdateFieldExtraction:
         client, captured_cmds, fake_run_acli = acli_capture
 
         with (
-            patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli),
-            patch.object(acli_mod, "update_priority") as mock_priority,
+            patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli),
+            patch.object(acli_mod.acli_cli_ops, "update_priority") as mock_priority,
         ):
             result = client.update_issue("TEST-1", priority="High")
 
@@ -342,7 +342,7 @@ class TestAcliClientUpdateFieldExtraction:
         """AcliClient.update_issue() should support sending description updates."""
         client, captured_cmds, fake_run_acli = acli_capture
 
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             client.update_issue("TEST-1", description="Updated desc")
 
         assert len(captured_cmds) >= 1
@@ -359,7 +359,7 @@ class TestAcliClientUpdateFieldExtraction:
 
         client, captured_cmds, fake_run_acli = acli_capture
 
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             client.update_issue("TEST-1", description="Test ADF conversion")
 
         assert len(captured_cmds) >= 1
@@ -383,7 +383,7 @@ class TestAcliClientUpdateFieldExtraction:
         """
         client, captured_cmds, fake_run_acli = acli_capture
 
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             with patch.object(
                 client, "validate_assignee_exists", return_value="acct-bob"
             ):
@@ -429,7 +429,7 @@ class TestAcliContractRegression:
         Regression check: if anyone reintroduces --label, this test fails.
         """
         client, captured_cmds, fake_run_acli = acli_capture
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             client.add_label("DIG-3802", "rebar-id:abc-123")
 
         assert len(captured_cmds) >= 1, "add_label must issue an ACLI command"
@@ -467,7 +467,7 @@ class TestAcliContractRegression:
             captured_payloads.append(obj)
             original_dump(obj, fp, **kw)
 
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             with patch.object(acli_mod.json, "dump", side_effect=capturing_dump):
                 client.add_label("DIG-3802", "rebar-id:abc-123")
 
@@ -498,7 +498,7 @@ class TestAcliContractRegression:
             captured_payloads.append(obj)
             original_dump(obj, fp, **kw)
 
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             with patch.object(acli_mod.json, "dump", side_effect=capturing_dump):
                 client.remove_label("DIG-3802", "obsolete-tag")
 
@@ -529,7 +529,7 @@ class TestAcliContractRegression:
             captured_payloads.append(obj)
             original_dump(obj, fp, **kw)
 
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             with patch.object(acli_mod.json, "dump", side_effect=capturing_dump):
                 client.create_issue(
                     {"ticket_type": "task", "title": "x", "priority": 1}
@@ -566,7 +566,7 @@ class TestAcliContractRegression:
             captured_payloads.append(obj)
             original_dump(obj, fp, **kw)
 
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             with patch.object(acli_mod.json, "dump", side_effect=capturing_dump):
                 client.create_issue(
                     {"ticket_type": "task", "title": "x", "priority": 1}
@@ -783,7 +783,7 @@ class TestAcliSanitizers:
     ) -> None:
         """The sanitizer must intercept invalid labels BEFORE the ACLI call."""
         client, captured_cmds, fake_run_acli = acli_capture
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             with pytest.raises(acli_mod.InvalidLabelError):
                 client.add_label("DIG-3802", "label with space")
         assert len(captured_cmds) == 0, (
@@ -802,7 +802,7 @@ class TestAcliSanitizers:
             captured_payloads.append(obj)
             original_dump(obj, fp, **kw)
 
-        with patch.object(acli_mod, "_run_acli", side_effect=fake_run_acli):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             with patch.object(acli_mod.json, "dump", side_effect=capturing_dump):
                 client.create_issue(
                     {
