@@ -164,11 +164,38 @@ if not acquired:
 # Re-list event files inside flock (authoritative).
 # Exclude *-SYNC.json — SYNC files are bridge metadata (Jira key mapping) and
 # must survive compaction so resolve_jira_key() works on post-compact events.
-event_files = sorted([
+candidate_files = sorted([
     os.path.join(ticket_dir, f)
     for f in os.listdir(ticket_dir)
     if f.endswith('.json') and not f.startswith('.') and not f.endswith('-SYNC.json')
 ])
+
+# Forward-compatibility (schema-version rule, ticket_reducer/_version.py): an event
+# whose event_type is UNKNOWN to this rebar was written by a newer clone. It must be
+# PRESERVED at the file level — never absorbed into the SNAPSHOT nor deleted — or an
+# older clone's compaction would destroy a newer clone's data. Partition unknown-type
+# files out of the compaction set; they are left on disk untouched.
+sys.path.insert(0, os.path.dirname(reducer_script))
+try:
+    from ticket_reducer._version import KNOWN_EVENT_TYPES
+except Exception:
+    # Fail-safe mirror of _version.KNOWN_EVENT_TYPES (kept in sync; the import path
+    # is reliable in practice, this only guards a pathological package-shadow case).
+    KNOWN_EVENT_TYPES = frozenset({
+        'CREATE', 'STATUS', 'COMMENT', 'LINK', 'UNLINK', 'BRIDGE_ALERT', 'REVERT',
+        'EDIT', 'FILE_IMPACT', 'VERIFY_COMMANDS', 'ARCHIVED', 'SNAPSHOT',
+    })
+
+event_files = []
+for fp in candidate_files:
+    try:
+        with open(fp, encoding='utf-8') as f:
+            etype = json.load(f).get('event_type', '')
+    except (json.JSONDecodeError, OSError):
+        etype = ''  # corrupt/unreadable: treat as compactable (preserves prior behavior)
+    if etype and etype not in KNOWN_EVENT_TYPES:
+        continue  # unknown-type event: preserve untouched, do not snapshot or delete
+    event_files.append(fp)
 event_count = len(event_files)
 
 # Re-check threshold inside flock — another process may have compacted

@@ -11,6 +11,8 @@ import json
 import os
 import sys
 
+from ticket_reducer._version import KNOWN_EVENT_TYPES
+
 
 def process_create(
     state: dict,
@@ -443,6 +445,11 @@ def replay_events(
             process_archived(state)
         elif event_type == "SNAPSHOT":
             process_snapshot(state, data)
-        # Unknown event types are silently ignored
+        elif event_type not in KNOWN_EVENT_TYPES:
+            # Forward compatibility (schema-version rule, see _version.py): an event
+            # kind a NEWER rebar introduced. Preserved-and-ignored — skipped here
+            # without error so the ticket stays readable; ticket-compact.sh keeps the
+            # file so an older clone's compaction doesn't destroy a newer clone's data.
+            pass
 
     return valid_event_count, None

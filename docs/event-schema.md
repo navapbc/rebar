@@ -46,6 +46,32 @@ Replay dispatch: `ticket_reducer/_processors.py` (`process_*`).
 | `SNAPSHOT` | compaction (`ticket-compact.sh`) | Folds a run of prior events into one compiled-state event under the write lock; the folded files are renamed `*.retired` (I1's only exception). `data.source_event_uuids` lists what it folded (fsck cross-checks this). |
 | `BRIDGE_ALERT` / `REVERT` / `SYNC` | reconciler / revert | Jira-bridge alerting, event reversal, and bridge sync bookkeeping. |
 
+## Schema version & forward compatibility
+
+The event log is the **wire format between clones running different rebar
+versions** — they share one `origin/tickets` and merge each other's event files
+as a union. The format carries an explicit version constant:
+`ticket_reducer/_version.py: SCHEMA_VERSION` (currently `1`). Bump it when the
+wire format changes in a way other clones must be aware of. There is **no**
+VERSION event and no version negotiation — cross-version safety is handled by a
+single rule:
+
+**Unknown event types are preserved-and-ignored.** `KNOWN_EVENT_TYPES`
+(`_version.py`) is the canonical set of types the reducer's replay dispatch
+applies — the `TYPE` rows above, minus the externally-scanned `PRECONDITIONS`
+(handled by `_compute_preconditions_summary` + its own `compact_preconditions`,
+not the main replay) and the bridge-only `SYNC`. An event whose `event_type` is
+**not** in that set was written by a newer rebar, and is handled two ways:
+
+- **ignored** at the state level — `_processors.replay` skips it without error,
+  so the ticket stays fully readable on the older clone;
+- **preserved** at the file level — `ticket-compact.sh` never folds it into a
+  SNAPSHOT nor deletes it, so an older clone's compaction cannot destroy a newer
+  clone's data. (The same treatment `*-SYNC.json` and `*-PRECONDITIONS*.json`
+  files already get.)
+
+Pinned by `tests/interfaces/test_event_schema_forward_compat.py`.
+
 ## Replay & fork determinism
 
 - Events replay in `${timestamp_ns}` filename order; the reducer is pure
@@ -63,7 +89,10 @@ Compaction runs under the per-clone write lock, writes a `SNAPSHOT` that folds
 the events it retires, and renames the folded files to `*.retired`. A remote
 clone appending a new (unique-named) event merges as a union; the SNAPSHOT must
 already fold any event its result depends on. Never retire an event a
-not-yet-folded state could still need.
+not-yet-folded state could still need. Compaction folds only events of a
+**known** type (`KNOWN_EVENT_TYPES`); unknown-type events (forward-compat payload
+from a newer rebar) are skipped — left on disk, never folded or deleted — per the
+schema-version rule above.
 
 See `docs/concurrency.md` for the I1–I9 invariants and the merge-as-union
 sync/reconvergence algorithm, and `docs/architecture.md` for the components.

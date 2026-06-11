@@ -46,8 +46,11 @@ from ticket_reducer._processors import (
 )
 from ticket_reducer.marker import check_marker, remove_marker, write_marker
 from ticket_reducer.llm_format import to_llm
+from ticket_reducer._version import KNOWN_EVENT_TYPES, SCHEMA_VERSION
 
 __all__ = [
+    "SCHEMA_VERSION",
+    "KNOWN_EVENT_TYPES",
     "reduce_ticket",
     "reduce_all_tickets",
     "find_inbound_relationships",
