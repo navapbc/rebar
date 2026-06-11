@@ -2,6 +2,11 @@
 # E2E Field Validation Probe — systematically tests bidirectional CRUD for
 # every field across 10 test tickets against live Jira.
 #
+# REFERENCE / MANUAL PRESSURE-TEST TOOLING — see scripts/jira-pressure-test/README.md.
+# This script is NOT part of the automated test suite and is NOT shipped in the
+# published wheel. It hits LIVE Jira and is run by hand to harden / pressure-test
+# the reconciler's Jira field sync. Do not wire it into CI.
+#
 # Phases:
 #   0. Pre-flight (env check, get_myself, save snapshot)
 #   1. Create 10 local tickets → sync outbound → verify all fields in Jira
@@ -13,7 +18,7 @@
 #   7. Reconciliation check — verify 0 discrepancies for probe keys
 #   8. Cleanup — delete all Jira issues + local tickets, restore snapshot
 #
-# Usage: invoked by reconcile-bridge.yml when mode=field-validate, or manually.
+# Usage: run manually from the repo root.
 # Requires: JIRA_URL, JIRA_USER, JIRA_API_TOKEN env vars.
 # Requires: REBAR_FIELD_VALIDATION_PROBE=1 to opt in (prevents accidental
 #           inclusion in generic test-discovery sweeps).
@@ -31,9 +36,11 @@ if [ "${REBAR_FIELD_VALIDATION_PROBE:-0}" != "1" ]; then
 fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-TICKET_CLI="${REBAR_TICKET_CLI:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)/rebar}"
-_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-_SCRIPTS_DIR="$(dirname "$_SCRIPT_DIR")"
+# This reference probe lives under scripts/jira-pressure-test/, so the rebar
+# engine (dispatcher, reconciler package, acli-integration.py) is anchored at
+# the repo's src/rebar/_engine tree rather than a sibling of this script.
+_SCRIPTS_DIR="${REBAR_ENGINE_DIR:-${REPO_ROOT}/src/rebar/_engine}"
+TICKET_CLI="${REBAR_TICKET_CLI:-${_SCRIPTS_DIR}/rebar}"
 RECONCILER_DIR="$_SCRIPTS_DIR"
 JIRA_PROJECT="${JIRA_PROJECT:-DIG}"
 PROBE_TS="$(date +%s)"
