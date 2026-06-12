@@ -240,6 +240,13 @@ def validate(*, repo_root=None) -> dict:
     returning {score, critical_issues, major_issues, minor_issues, warnings,
     suggestions}.
     """
+    from rebar._switch import uses_python
+
+    if uses_python("REBAR_COMPUTE"):
+        from rebar._engine_support import validate as _validate
+
+        tracker = str(config.tracker_dir(repo_root))
+        return _validate.validate_state(tracker)
     cp = _run(["validate", "--output", "json"], repo_root=repo_root)
     return _json_or(cp.stdout, {"output": (cp.stdout or cp.stderr).strip()})
 

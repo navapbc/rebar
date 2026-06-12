@@ -473,6 +473,13 @@ case "$subcommand" in
         exec python3 "$SCRIPT_DIR/ticket-commands.py" untag "$@"
         ;;
     validate)
+        # Tier C: REBAR_COMPUTE=python routes to the in-process port (which
+        # self-manages freshness on its in-process branch and honors the same
+        # TICKET_CMD injection bash uses for test isolation). Default 'bash' falls
+        # through to validate-issues.sh.
+        if _compute_python; then
+            exec python3 "$SCRIPT_DIR/ticket-reads.py" validate "$@"
+        fi
         # REVIEW-DEFENSE: _ensure_initialized is intentionally omitted here.
         # validate-issues.sh reads tickets via TICKET_CMD env var (injectable for tests).
         # In production TICKET_CMD defaults to the ticket script itself, which calls

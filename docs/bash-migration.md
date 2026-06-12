@@ -206,7 +206,27 @@ release of flipped defaults; each retired suite translated to pytest.
 > `sorted()`, making the diagnostic byte-stable (the selector's documented
 > "deterministic" contract). Batch **composition** is unaffected and still matches
 > bash exactly (pinned by `test_multi_overlap_batch_composition_matches_bash`).
-> Default stays `bash` pending the flip + soak. **Remaining: `validate`.**
+> Default stays `bash` pending the flip + soak.
+>
+> **`validate` ported behind `REBAR_COMPUTE`** (gawk-grove-site): `validate-issues.sh`
+> (9 `check_*` functions + 10 heredocs + score/exit assembly) is now
+> `rebar._engine_support.validate` (normalize → score → render → CLI) +
+> `validate_checks` (the nine checks, each returning an ordered `Finding` stream so
+> the severity buckets reproduce byte-for-byte). Reuses the shared `list_states`
+> read in-process; honors the same `TICKET_CMD` injection bash uses for test
+> isolation (subprocess when set, in-process `list_states` otherwise), so the
+> existing bash suite dual-runs. Per §1.4 the human **text / terse / verbose**
+> stderr + score-encoded exit are byte-identical across both switch values (ANSI
+> colors and the bash "shared cache" re-fetch verbose artifact included), while
+> `--output json` is pinned by **schema + semantic** equality (jq-vs-`json.dumps`
+> whitespace is outside the contract). Gate: `tests/interfaces/test_validate_compute.py`
+> (20 cases). Library `rebar.validate()` + MCP now in-process under the switch.
+>
+> **Tier C porting is complete** (next-batch + validate ported, list-epics
+> deprecated). Remaining for the tier: flip the `REBAR_COMPUTE` default to
+> `python`, soak, then retire the two bash scripts (~1,900 LOC, 12 heredocs) +
+> `REBAR_COMPUTE` and translate the suites — the architecture.md offender table
+> loses both compute entries at retirement.
 
 **Commands**: `next-batch` (`ticket-next-batch.sh`, ~954 LOC),
 `validate` (`validate-issues.sh`, ~945 LOC), `list-epics`

@@ -726,6 +726,15 @@ def _cmd_next_batch(argv: list[str], tracker: str) -> int:
     return next_batch.run(argv, tracker)
 
 
+def _cmd_validate(argv: list[str], tracker: str) -> int:
+    """Compute-heavy read (Tier C): repo-wide tracker-health check (NO ticket id;
+    score-encoded exit). Self-manages freshness, so ``main`` skips the global
+    pre-fetch for it (see ``_NO_PREFETCH``)."""
+    from rebar._engine_support import validate
+
+    return validate.run(argv, tracker)
+
+
 _COMMANDS = {
     "show": _cmd_show,
     "list": _cmd_list,
@@ -734,7 +743,13 @@ _COMMANDS = {
     "search": _cmd_search,
     "list-epics": _cmd_list_epics,
     "next-batch": _cmd_next_batch,
+    "validate": _cmd_validate,
 }
+
+# Subcommands that own their freshness policy (so main does not pre-fetch). The
+# bash validate arm deliberately omits init for test isolation under a mocked
+# TICKET_CMD; the port mirrors that and fetches only on its in-process branch.
+_NO_PREFETCH = {"validate"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -755,7 +770,8 @@ def main(argv: list[str] | None = None) -> int:
     no_sync = "--no-sync" in rest
     rest = [a for a in rest if a != "--no-sync"]
     tracker = tracker_dir()
-    ensure_fresh(tracker, no_sync=no_sync)
+    if sub not in _NO_PREFETCH:
+        ensure_fresh(tracker, no_sync=no_sync)
     return handler(rest, tracker)
 
 
