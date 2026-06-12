@@ -1,0 +1,71 @@
+"""Tier B leaf-write command implementations + CLI dispatcher.
+
+The library/MCP call the command functions (``leaf.comment`` etc.) in-process; the
+bash dispatcher reaches the same functions via :func:`main` (run by the
+``ticket-commands.py`` engine entrypoint) when ``REBAR_LEAF_WRITES=python``. One
+implementation, two callers — the Tier A read-path shape applied to writes.
+
+Each entry pins the command's argv arity and usage string to the bash function it
+replaces, so a too-few-args invocation prints the identical ``Usage:`` line and
+exits 1 under either implementation.
+"""
+
+from __future__ import annotations
+
+import sys
+from typing import Callable, NamedTuple
+
+from rebar._commands import leaf
+from rebar._commands._seam import CommandError
+
+
+class _Cmd(NamedTuple):
+    func: Callable[..., None]
+    min_args: int
+    usage: str
+
+
+# Registry of ported Tier B commands, keyed by the dispatcher subcommand name.
+# min_args / usage mirror the bash `[ $# -lt N ]` guards in ticket-lib-api.sh.
+_REGISTRY: dict[str, _Cmd] = {
+    "comment": _Cmd(leaf.comment, 2, "Usage: ticket comment <ticket_id> <body>"),
+    "set-file-impact": _Cmd(
+        leaf.set_file_impact, 2, "Usage: ticket set-file-impact <ticket_id> <json_array>"
+    ),
+    "set-verify-commands": _Cmd(
+        leaf.set_verify_commands,
+        2,
+        "Usage: ticket set-verify-commands <ticket_id> <json_array>",
+    ),
+}
+
+
+def is_ported(command: str) -> bool:
+    """True when ``command`` has a Python Tier B implementation registered."""
+    return command in _REGISTRY
+
+
+def main(argv: list[str]) -> int:
+    """CLI entry for the bash dispatcher's Python leaf-write route.
+
+    ``argv`` is ``[<command>, <args>...]``. Returns the process exit code; a
+    :class:`CommandError` prints its message to stderr and yields its return code
+    (mirroring the bash functions' stderr + exit contract).
+    """
+    if not argv:
+        print("Usage: ticket-commands.py <command> [args...]", file=sys.stderr)
+        return 1
+    command, args = argv[0], argv[1:]
+    entry = _REGISTRY.get(command)
+    if entry is None:
+        print(f"Error: unknown leaf-write command '{command}'", file=sys.stderr)
+        return 1
+    if len(args) < entry.min_args:
+        print(entry.usage, file=sys.stderr)
+        return 1
+    try:
+        entry.func(*args)
+    except CommandError as exc:
+        print(exc.message, file=sys.stderr)
+        return exc.returncode
+    return 0

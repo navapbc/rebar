@@ -1,0 +1,115 @@
+"""Tier B leaf-write commands ported to Python (docs/bash-migration.md §4).
+
+Each function here is the Python implementation of one ``ticket-lib-api.sh``
+leaf-write command, reached behind ``REBAR_LEAF_WRITES=python``. They validate and
+compose in Python, then append through the bash write seam (``_seam.append_event``
+→ ``ticket-append-event.sh`` → ``write_commit_event``) so the locked write path is
+unchanged until Tier D. Behaviour — validation order, error strings, exit codes,
+and the event envelope — mirrors the bash functions byte-for-byte so the per-command
+bash suite passes against either implementation.
+
+Ported so far: ``comment`` (COMMENT), ``set_file_impact`` (FILE_IMPACT),
+``set_verify_commands`` (VERIFY_COMMANDS) — the pure single-event appends. The
+state-reading leaf writes (tag/untag, archive) and the larger event-composers
+(create/edit/link/unlink/revert) are tracked as child tickets of the Tier B story.
+"""
+
+from __future__ import annotations
+
+import json
+
+from rebar._commands._seam import (
+    CommandError,
+    append_event,
+    require_id,
+    require_not_ghost,
+    tracker_dir,
+)
+
+
+def _jq_type(value) -> str:
+    """JSON type name as ``jq 'type'`` reports it (for byte-identical error text)."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return "unknown"
+
+
+def comment(ticket_id: str, body: str, *, repo_root=None) -> None:
+    """Append a COMMENT event (mirrors ``ticket_comment``)."""
+    tracker = tracker_dir(repo_root)
+    if not ticket_id:
+        raise CommandError("Error: ticket_id must be non-empty")
+    if not body:
+        raise CommandError("Error: comment body must be non-empty")
+    resolved = require_id(ticket_id, tracker)
+    require_not_ghost(resolved, tracker)
+    append_event(resolved, "COMMENT", {"body": body}, tracker, repo_root=repo_root)
+
+
+def _validate_json_array(payload: str, label: str, required_keys: tuple[str, ...]):
+    """Parse + validate a JSON-array payload of objects with string keys.
+
+    Reproduces the bash ``jq``-based validation order and error strings used by
+    ``ticket_set_file_impact`` / ``ticket_set_verify_commands``: valid JSON →
+    array type → per-element object-with-string-keys, returning the parsed list.
+    """
+    try:
+        parsed = json.loads(payload)
+    except (json.JSONDecodeError, TypeError):
+        raise CommandError(f"Error: {label} argument is not valid JSON") from None
+    if not isinstance(parsed, list):
+        raise CommandError(
+            f"Error: {label} argument must be a JSON array, got '{_jq_type(parsed)}'"
+        )
+    keylist = '", "'.join(required_keys)
+    for idx, elem in enumerate(parsed):
+        if not isinstance(elem, dict) or any(
+            not isinstance(elem.get(k), str) for k in required_keys
+        ):
+            raise CommandError(
+                f'Error: {label}[{idx}] is invalid — every element must be an '
+                f'object with string keys "{keylist}"'
+            )
+    return parsed
+
+
+def set_file_impact(ticket_id: str, json_array: str, *, repo_root=None) -> None:
+    """Append a FILE_IMPACT event (mirrors ``ticket_set_file_impact``)."""
+    tracker = tracker_dir(repo_root)
+    if not ticket_id:
+        raise CommandError("Error: ticket_id must be non-empty")
+    file_impact = _validate_json_array(json_array, "file_impact", ("path", "reason"))
+    resolved = require_id(ticket_id, tracker)
+    require_not_ghost(resolved, tracker)
+    append_event(
+        resolved, "FILE_IMPACT", {"file_impact": file_impact}, tracker, repo_root=repo_root
+    )
+
+
+def set_verify_commands(ticket_id: str, json_array: str, *, repo_root=None) -> None:
+    """Append a VERIFY_COMMANDS event (mirrors ``ticket_set_verify_commands``)."""
+    tracker = tracker_dir(repo_root)
+    if not ticket_id:
+        raise CommandError("Error: ticket_id must be non-empty")
+    verify_commands = _validate_json_array(
+        json_array, "verify_commands", ("dd_id", "dd_text", "command")
+    )
+    resolved = require_id(ticket_id, tracker)
+    require_not_ghost(resolved, tracker)
+    append_event(
+        resolved,
+        "VERIFY_COMMANDS",
+        {"verify_commands": verify_commands},
+        tracker,
+        repo_root=repo_root,
+    )

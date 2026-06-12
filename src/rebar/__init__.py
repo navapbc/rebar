@@ -254,6 +254,12 @@ def set_file_impact(ticket_id: str, impact, *, repo_root=None) -> None:
     """Record file impact (list of {path, reason} dicts, or a JSON string)."""
     import json as _json
     payload = impact if isinstance(impact, str) else _json.dumps(impact)
+    from rebar._commands import leaf
+
+    if _maybe_python_leaf(
+        leaf.set_file_impact, ticket_id, payload, repo_root=repo_root, what="set-file-impact"
+    ):
+        return
     _ok(_run(["set-file-impact", ticket_id, payload], repo_root=repo_root), what="set-file-impact")
 
 
@@ -268,10 +274,45 @@ def set_verify_commands(ticket_id: str, commands, *, repo_root=None) -> None:
     or a JSON string)."""
     import json as _json
     payload = commands if isinstance(commands, str) else _json.dumps(commands)
+    from rebar._commands import leaf
+
+    if _maybe_python_leaf(
+        leaf.set_verify_commands, ticket_id, payload, repo_root=repo_root, what="set-verify-commands"
+    ):
+        return
     _ok(_run(["set-verify-commands", ticket_id, payload], repo_root=repo_root), what="set-verify-commands")
 
 
+def _maybe_python_leaf(fn, *args, repo_root, what: str) -> bool:
+    """Run a ported Tier B leaf write in-process when REBAR_LEAF_WRITES=python.
+
+    Returns True if the Python path handled it; False to fall through to the bash
+    subprocess. A command failure is mapped onto RebarError so the exit-code
+    contract matches the subprocess path (docs/bash-migration.md §2: the switch is
+    checked at every interface — dispatcher for the CLI, here for library/MCP).
+    """
+    from rebar import _switch
+
+    if not _switch.leaf_writes_python():
+        return False
+    from rebar._commands._seam import CommandError
+
+    try:
+        fn(*args, repo_root=repo_root)
+    except CommandError as exc:
+        raise RebarError(
+            f"rebar {what} failed (exit {exc.returncode}): {exc.message}",
+            returncode=exc.returncode,
+            stderr=exc.message,
+        ) from None
+    return True
+
+
 def comment(ticket_id: str, body: str, *, repo_root=None) -> None:
+    from rebar._commands import leaf
+
+    if _maybe_python_leaf(leaf.comment, ticket_id, body, repo_root=repo_root, what="comment"):
+        return
     _ok(_run(["comment", ticket_id, body], repo_root=repo_root), what="comment")
 
 
