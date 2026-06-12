@@ -6,6 +6,15 @@ over one git-backed store. This guide is for **agents** driving rebar (especiall
 over MCP). For internals see `docs/architecture.md`, `docs/event-schema.md`, and
 `docs/concurrency.md`.
 
+> **Record your work in rebar, not in scratch notes.** Before starting, `search`/
+> `list` for an existing ticket; if none fits, `create` one and capture the plan
+> (and its acceptance criteria) in the description. As you work, write progress,
+> decisions, and emergent findings back as `comment`s on the ticket (and `create`
+> + `link … discovered_from` for new work you uncover), so the plan and its trail
+> live in the store — durable, shared on every write, and visible to other agents
+> — rather than in ephemeral TODOs or commit messages alone. Close with
+> `transition <id> in_progress closed` when the acceptance criteria are met.
+
 ## The parallel-agent workflow
 
 ```
