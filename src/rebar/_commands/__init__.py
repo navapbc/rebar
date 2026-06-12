@@ -51,6 +51,7 @@ _REGISTRY: dict[str, _Cmd] = {
 _ARGV_REGISTRY: dict[str, Callable[[list[str]], int]] = {
     "create": composer.create_cli,
     "edit": composer.edit_cli,
+    "link": composer.link_cli,
 }
 
 

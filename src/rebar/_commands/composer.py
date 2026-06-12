@@ -368,3 +368,66 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
         print(exc.message, file=sys.stderr)
         return exc.returncode
     return 0
+
+
+def link_core(src_raw: str, tgt_raw: str, relation: str, *, repo_root=None, quiet: bool = False) -> None:
+    """Resolve endpoints and add a LINK via the shared graph (mirrors ticket_link's
+    non-dry-run path → ticket-graph.py --link → add_dependency).
+
+    add_dependency owns relation validation, hierarchy promotion (+ the REDIRECT
+    note), the redundant-link guard, cycle detection, and the LINK event write —
+    the SAME function the bash path calls, so parity is structural. ``quiet``
+    suppresses add_dependency's stdout/stderr (the library facade discards it, as
+    the subprocess path did); the CLI lets it through. Raises :class:`CommandError`.
+    """
+    import contextlib
+    import io
+
+    from rebar.graph._links import CyclicDependencyError, add_dependency
+
+    tracker = tracker_dir(repo_root)
+    src_id = resolve_ticket_id(src_raw, str(tracker))
+    if src_id is None:
+        raise CommandError(f"Error: ticket '{src_raw}' does not exist")
+    tgt_id = resolve_ticket_id(tgt_raw, str(tracker))
+    if tgt_id is None:
+        raise CommandError(f"Error: ticket '{tgt_raw}' does not exist")
+    sink = io.StringIO()
+    try:
+        if quiet:
+            with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+                add_dependency(src_id, tgt_id, str(tracker), relation)
+        else:
+            add_dependency(src_id, tgt_id, str(tracker), relation)
+    except (CyclicDependencyError, ValueError) as exc:
+        raise CommandError(f"Error: {exc}") from None
+
+
+def link_cli(argv: list[str], *, repo_root=None) -> int:
+    """Dispatcher Python route for ``link``: parse --dry-run, resolve, delegate."""
+    dry_run = "--dry-run" in argv
+    rest = [a for a in argv if a != "--dry-run"]
+    if len(rest) < 3:
+        print("Usage: ticket link <id1> <id2> <relation>", file=sys.stderr)
+        return 1
+    src_raw, tgt_raw, relation = rest[0], rest[1], rest[2]
+
+    if dry_run:
+        # --dry-run preview is owned by ticket-link.sh (retired with the bash core).
+        tracker = tracker_dir(repo_root)
+        src_id = resolve_ticket_id(src_raw, str(tracker)) or src_raw
+        tgt_id = resolve_ticket_id(tgt_raw, str(tracker)) or tgt_raw
+        proc = subprocess.run(
+            ["bash", str(_engine.engine_dir() / "ticket-link.sh"), "link",
+             src_id, tgt_id, relation, "--dry-run"],
+            env=_engine.engine_env(repo_root),
+            check=False,
+        )
+        return proc.returncode
+
+    try:
+        link_core(src_raw, tgt_raw, relation, repo_root=repo_root)
+    except CommandError as exc:
+        print(exc.message, file=sys.stderr)
+        return exc.returncode
+    return 0

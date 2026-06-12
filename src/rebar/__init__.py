@@ -372,6 +372,20 @@ def link(id1: str, id2: str, relation: str, *, repo_root=None) -> None:
     ``relation`` must be one of the six canonical relations: blocks, depends_on,
     relates_to, duplicates, supersedes, discovered_from.
     """
+    from rebar import _switch
+
+    if _switch.leaf_writes_python():
+        from rebar._commands import composer
+        from rebar._commands._seam import CommandError
+
+        try:
+            composer.link_core(id1, id2, relation, repo_root=repo_root, quiet=True)
+        except CommandError as exc:
+            raise RebarError(
+                f"rebar link failed (exit {exc.returncode}): {exc.message}",
+                returncode=exc.returncode, stderr=exc.message,
+            ) from None
+        return
     _ok(_run(["link", id1, id2, relation], repo_root=repo_root), what="link")
 
 

@@ -185,6 +185,23 @@ def test_library_edit_python_rejects_bad_priority_and_empty_title(rebar_repo: Pa
         rebar.edit_ticket(tid, title="", repo_root=str(rebar_repo))
 
 
+def test_library_link_python_path(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
+    a = rebar.create_ticket("task", "link-a", repo_root=str(rebar_repo))
+    b = rebar.create_ticket("task", "link-b", repo_root=str(rebar_repo))
+    rebar.link(a, b, "relates_to", repo_root=str(rebar_repo))
+    deps = rebar.deps(a, repo_root=str(rebar_repo))
+    assert any(d.get("target_id") == b for d in deps.get("deps", []))
+
+
+def test_library_link_python_rejects_bad_relation(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
+    a = rebar.create_ticket("task", "link-bad-a", repo_root=str(rebar_repo))
+    b = rebar.create_ticket("task", "link-bad-b", repo_root=str(rebar_repo))
+    with pytest.raises(rebar.RebarError):
+        rebar.link(a, b, "not_a_relation", repo_root=str(rebar_repo))
+
+
 def test_library_archive_status_gate_python_path(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
     tid = _new_ticket(rebar_repo)
     rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))  # open -> in_progress

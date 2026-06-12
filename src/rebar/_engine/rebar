@@ -432,6 +432,9 @@ case "$subcommand" in
         ;;
     link)
         _ensure_initialized
+        if _leaf_writes_python; then
+            exec python3 "$SCRIPT_DIR/ticket-commands.py" link "$@"
+        fi
         # REVIEW-DEFENSE: link routes to ticket-graph.py (not ticket-link.sh) by design.
         # ticket-graph.py's add_dependency() performs link + cycle detection in one atomic
         # operation, which ticket-link.sh does not. unlink intentionally stays on
