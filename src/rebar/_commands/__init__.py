@@ -15,7 +15,7 @@ from __future__ import annotations
 import sys
 from typing import Callable, NamedTuple
 
-from rebar._commands import leaf
+from rebar._commands import composer, leaf
 from rebar._commands._seam import CommandError
 
 
@@ -46,10 +46,16 @@ _REGISTRY: dict[str, _Cmd] = {
     "archive": _Cmd(leaf.archive, 1, "Usage: ticket archive <ticket_id>", max_args=1),
 }
 
+# Variadic commands that parse their own full argv (flags, --output) and return an
+# exit code directly — the heavier event-composers (docs/bash-migration.md §4).
+_ARGV_REGISTRY: dict[str, Callable[[list[str]], int]] = {
+    "create": composer.create_cli,
+}
+
 
 def is_ported(command: str) -> bool:
     """True when ``command`` has a Python Tier B implementation registered."""
-    return command in _REGISTRY
+    return command in _REGISTRY or command in _ARGV_REGISTRY
 
 
 def main(argv: list[str]) -> int:
@@ -63,6 +69,13 @@ def main(argv: list[str]) -> int:
         print("Usage: ticket-commands.py <command> [args...]", file=sys.stderr)
         return 1
     command, args = argv[0], argv[1:]
+    argv_handler = _ARGV_REGISTRY.get(command)
+    if argv_handler is not None:
+        try:
+            return argv_handler(args)
+        except CommandError as exc:
+            print(exc.message, file=sys.stderr)
+            return exc.returncode
     entry = _REGISTRY.get(command)
     if entry is None:
         print(f"Error: unknown leaf-write command '{command}'", file=sys.stderr)

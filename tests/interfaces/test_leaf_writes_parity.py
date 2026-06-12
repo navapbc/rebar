@@ -130,6 +130,33 @@ def test_library_archive_python_path(rebar_repo: Path, monkeypatch: pytest.Monke
     rebar.archive(tid, repo_root=str(rebar_repo))
 
 
+def test_library_create_python_path(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
+    res = rebar.create_ticket(
+        "story", "py-created story", priority=1, tags=["a", "b"],
+        return_alias=True, repo_root=str(rebar_repo),
+    )
+    assert res["id"] and res["alias"]
+    state = rebar.show_ticket(res["id"], repo_root=str(rebar_repo))
+    assert state["title"] == "py-created story"
+    assert state["ticket_type"] == "story"
+    assert state["priority"] == 1
+    assert set(state["tags"]) == {"a", "b"}
+
+
+def test_library_create_python_rejects_bad_type(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
+    with pytest.raises(rebar.RebarError):
+        rebar.create_ticket("nonsense", "bad", repo_root=str(rebar_repo))
+
+
+def test_library_create_python_parent_child(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
+    epic = rebar.create_ticket("epic", "parent epic", repo_root=str(rebar_repo))
+    child = rebar.create_ticket("task", "child task", parent=epic, repo_root=str(rebar_repo))
+    assert rebar.show_ticket(child, repo_root=str(rebar_repo))["parent_id"] == epic
+
+
 def test_library_archive_status_gate_python_path(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
     tid = _new_ticket(rebar_repo)
     rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))  # open -> in_progress

@@ -295,6 +295,9 @@ case "$subcommand" in
         ;;
     create)
         _ensure_initialized
+        if _leaf_writes_python; then
+            exec python3 "$SCRIPT_DIR/ticket-commands.py" create "$@"
+        fi
         # shellcheck source=/dev/null
         source "$SCRIPT_DIR/ticket-lib-api.sh"
         _ticketlib_dispatch ticket_create "$@"

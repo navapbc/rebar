@@ -29,12 +29,24 @@ class CommandError(Exception):
 
     The CLI entrypoint prints ``message`` to stderr and exits ``returncode``; the
     library facade maps it onto ``RebarError`` so the exit-1 contract is unchanged.
+    ``error_code``/``input_str`` are set when the bash counterpart also emits a
+    ``--output json`` error envelope (e.g. invalid_ticket_type), so the CLI path can
+    reproduce that envelope before the stderr prose.
     """
 
-    def __init__(self, message: str, returncode: int = 1) -> None:
+    def __init__(
+        self,
+        message: str,
+        returncode: int = 1,
+        *,
+        error_code: str | None = None,
+        input_str: str = "",
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.returncode = returncode
+        self.error_code = error_code
+        self.input_str = input_str
 
 
 def tracker_dir(repo_root=None) -> Path:

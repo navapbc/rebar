@@ -113,6 +113,27 @@ def create_ticket(
         args += ["--description", description]
     if tags:
         args += ["--tags", ",".join(tags)]
+    # Tier B Python path (REBAR_LEAF_WRITES=python): compose in-process via the
+    # shared create_core (same validation/alias/event), bypassing the subprocess.
+    from rebar import _switch
+
+    if _switch.leaf_writes_python():
+        from rebar._commands import composer
+        from rebar._commands._seam import CommandError
+
+        try:
+            res = composer.create_core(
+                ticket_type, title, parent=parent, priority=priority, assignee=assignee,
+                description=description, tags=tags, repo_root=repo_root,
+            )
+        except CommandError as exc:
+            raise RebarError(
+                f"rebar create failed (exit {exc.returncode}): {exc.message}",
+                returncode=exc.returncode, stderr=exc.message,
+            ) from None
+        if not return_alias:
+            return res["id"]
+        return {"id": res["id"], "alias": res["alias"] or ""}
     # The engine emits {id, alias, title} as one JSON object under --output json,
     # so we read the alias straight from create (no second show() subprocess).
     data = _json(_run(args, repo_root=repo_root), what="create")
