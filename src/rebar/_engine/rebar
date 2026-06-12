@@ -62,7 +62,6 @@ _print_overview() {
     echo "  bridge-fsck   Audit bridge mappings (orphans, duplicates, stale SYNCs)"
     echo "  bridge-probe  Preflight live Jira capability (create/label/search/delete round-trip)"
     echo "  exists        O(1) presence check (exit 0=exists, 1=not found)"
-    echo "  list-epics    List open epics [--all] [--has-tag=TAG] [--min-children=N]"
     echo "  list-descendants  BFS walk from a root ticket, bucketed by type (JSON)"
     echo "  next-batch    Select next parallel agent batch for an epic [--output json]"
     echo "  ready         List tickets ready to work (all blockers closed)"
@@ -131,7 +130,7 @@ _print_subcommand_help() {
         check-ac)     echo "Usage: rebar check-ac <ticket_id> [--output json]   (exit 0=pass, 1=fail; AC_CHECK: pass|fail)" ;;
         quality-check) echo "Usage: rebar quality-check <ticket_id> [--output json]   (exit 0=pass, 1=fail; QUALITY: pass|fail)" ;;
         exists)       echo "Usage: rebar exists <ticket_id|alias>   (exit 0=exists, 1=not found)" ;;
-        list-epics)   echo "Usage: rebar list-epics [--all] [--has-tag=<tag>] [--min-children=<n>] [--output json]" ;;
+        list-epics)   echo "Usage: rebar list-epics [--all] [--has-tag=<tag>] [--min-children=<n>] [--output json]   (DEPRECATED — use 'rebar list --type=epic --status=open,in_progress --unblocked' + 'rebar list --type=bug --priority=0')" ;;
         list-descendants) echo "Usage: rebar list-descendants <root_ticket_id>   (BFS walk bucketed by type, JSON)" ;;
         next-batch)   echo "Usage: rebar next-batch <epic_id> [--output json]" ;;
         ready)        echo "Usage: rebar ready [--output text|llm|json] [--epic=<id>] [--no-sync]   (lists tickets whose blockers are all closed)" ;;

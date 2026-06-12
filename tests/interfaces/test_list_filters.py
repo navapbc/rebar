@@ -85,16 +85,23 @@ def scenario(rebar_repo: Path) -> dict:
     return s
 
 
-# ── children_count ───────────────────────────────────────────────────────────
-def test_children_count_present_on_every_item(scenario):
+# ── children_count (opt-in) ──────────────────────────────────────────────────
+def test_children_count_absent_by_default(scenario):
+    # OPT-IN: default list shape stays identical to show/search (single-reducer
+    # invariant, bug f026) — children_count appears only with with_children_count.
     for t in rebar.list_tickets(repo_root=str(scenario["repo"])):
+        assert "children_count" not in t
+
+
+def test_children_count_present_when_opted_in(scenario):
+    for t in rebar.list_tickets(with_children_count=True, repo_root=str(scenario["repo"])):
         assert "children_count" in t and isinstance(t["children_count"], int)
 
 
 def test_children_count_values(scenario):
     r = str(scenario["repo"])
     counts = {t["ticket_id"]: t["children_count"]
-              for t in rebar.list_tickets(repo_root=r)}
+              for t in rebar.list_tickets(with_children_count=True, repo_root=r)}
     assert counts[scenario["E1"]] == 3       # cA, cB(closed), cC(in_progress); cD deleted excluded
     assert counts[scenario["E2"]] == 1
     assert counts[scenario["E3"]] == 0
@@ -102,9 +109,17 @@ def test_children_count_values(scenario):
 
 
 def test_children_count_excludes_deleted_child(scenario):
-    e1 = next(t for t in rebar.list_tickets(repo_root=str(scenario["repo"]))
+    e1 = next(t for t in rebar.list_tickets(with_children_count=True, repo_root=str(scenario["repo"]))
               if t["ticket_id"] == scenario["E1"])
     assert e1["children_count"] == 3, "deleted child cD must not be counted"
+
+
+def test_cli_with_children_count_flag(scenario):
+    # default CLI list has no children_count; --with-children-count adds it
+    cp = _cli_list(scenario["repo"], "--type=epic")
+    assert all("children_count" not in t for t in json.loads(cp.stdout))
+    cp = _cli_list(scenario["repo"], "--type=epic", "--with-children-count")
+    assert all("children_count" in t for t in json.loads(cp.stdout))
 
 
 # ── --min-children ───────────────────────────────────────────────────────────

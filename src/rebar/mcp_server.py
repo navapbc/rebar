@@ -201,6 +201,7 @@ def build_server():
         exclude_deleted: bool = False,
         min_children: int | None = None,
         blocking_state: str = "",
+        with_children_count: bool = False,
     ) -> list[TicketStateOut]:
         """List tickets as a JSON array, with optional filters.
 
@@ -225,6 +226,7 @@ def build_server():
                 exclude_deleted=exclude_deleted,
                 min_children=min_children,
                 blocking_state=blocking_state,
+                with_children_count=with_children_count,
             )
         ]
 

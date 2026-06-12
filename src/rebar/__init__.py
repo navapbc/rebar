@@ -378,6 +378,7 @@ def list_tickets(
     exclude_deleted: bool = False,
     min_children: int | None = None,
     blocking_state: str = "",
+    with_children_count: bool = False,
     repo_root=None,
 ) -> list[dict]:
     """List tickets as a list of dicts, with optional filters.
@@ -385,9 +386,10 @@ def list_tickets(
     ``exclude_deleted`` drops tickets whose reduced status is ``deleted``. Note
     delete writes STATUS(deleted)+ARCHIVED, so the default list already hides
     tombstones via archived-exclusion; ``exclude_deleted`` only changes results
-    when combined with ``include_archived=True``. Each result carries a
-    ``children_count``; ``min_children`` keeps tickets with ≥ N direct children,
-    and ``blocking_state`` ("unblocked"/"blocked") filters by readiness.
+    when combined with ``include_archived=True``. ``min_children`` keeps tickets
+    with ≥ N direct children and ``blocking_state`` ("unblocked"/"blocked") filters
+    by readiness. ``with_children_count`` adds a ``children_count`` field (opt-in,
+    so the default shape matches show/search — the single-reducer invariant).
     """
     from rebar import _reads
     return _reads.list_tickets(
@@ -401,6 +403,7 @@ def list_tickets(
         exclude_deleted=exclude_deleted,
         min_children=min_children,
         blocking_state=blocking_state,
+        with_children_count=with_children_count,
         repo_root=repo_root,
     )
 
@@ -493,6 +496,7 @@ def list_epics(*, include_blocked: bool = False, has_tag=None, min_children=None
         blocking_state="" if include_blocked else "unblocked",
         has_tag=has_tag,
         min_children=min_children,
+        with_children_count=True,
         repo_root=repo_root,
     )
     p0_bugs = list_tickets(ticket_type="bug", priority=0, repo_root=repo_root)

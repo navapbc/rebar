@@ -45,10 +45,15 @@ resolves the STATUS fork deterministically by UUID, so every clone agrees.
 **Reads (always available):** `show_ticket`, `list_tickets`, `search`,
 `ticket_deps`, `ready_tickets`, `next_batch`, `clarity_check`, `check_ac`,
 `quality_check`, `validate`, `get_file_impact`, `get_verify_commands`, `fsck`,
-`summary`, `list_epics`, `bridge_fsck`, `reconcile` (dry-run by default). The
+`summary`, `bridge_fsck`, `reconcile` (dry-run by default). The
 typed read tools advertise an `outputSchema` (a documented, validated return
 shape) drawn from the canonical JSON Schemas — see
 [docs/output-schemas.md](docs/output-schemas.md).
+
+> `list_epics` is **deprecated** — it is now a thin wrapper over `list_tickets`.
+> Use `list_tickets(ticket_type="epic", status="open,in_progress",
+> blocking_state="unblocked", min_children=N, with_children_count=True)` for epics
+> and `list_tickets(ticket_type="bug", priority=0)` for P0 bugs.
 
 **Writes (gated by `REBAR_MCP_READONLY=1`):** `create_ticket`,
 `transition_ticket`, `claim_ticket`, `reopen_ticket`, `comment_ticket`,

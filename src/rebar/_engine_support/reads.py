@@ -257,14 +257,16 @@ def list_states(
     exclude_deleted: bool = False,
     min_children: int | None = None,
     blocking_state: str = "",
+    with_children_count: bool = False,
 ) -> list[dict]:
-    """List ticket states. Each result carries a ``children_count`` (direct
-    non-deleted children, from the reduced set). Two universal cross-ticket filters
-    reuse the same reducer/graph the bespoke ``list-epics`` used: ``min_children``
-    (keep tickets with ≥ N children) and ``blocking_state`` ("unblocked" = all
-    blockers closed via ``find_ready_tickets``; "blocked" = active with an open
-    blocker). These generalize what ``list-epics`` filtered by, so it becomes a
-    thin wrapper over ``list``."""
+    """List ticket states. Two universal cross-ticket filters reuse the same
+    reducer/graph the bespoke ``list-epics`` used: ``min_children`` (keep tickets
+    with ≥ N direct children) and ``blocking_state`` ("unblocked" = all blockers
+    closed via ``find_ready_tickets``; "blocked" = active with an open blocker).
+    ``with_children_count`` additionally surfaces a ``children_count`` field — kept
+    OPT-IN so the default list shape stays identical to show/search (the
+    single-reducer invariant, bug f026). These generalize what ``list-epics``
+    filtered by, so it becomes a thin wrapper over ``list``."""
     # detected_by:* tags are bug-only — auto-intersect with --type=bug.
     if has_tag.startswith("detected_by:") and not ticket_type:
         ticket_type = "bug"
@@ -303,10 +305,12 @@ def list_states(
             ]
     out = []
     for t in results:
-        ps = public_state(t)
-        ps["children_count"] = child_counts.get(t.get("ticket_id"), 0)
-        if min_children is not None and ps["children_count"] < min_children:
+        cc = child_counts.get(t.get("ticket_id"), 0)
+        if min_children is not None and cc < min_children:
             continue
+        ps = public_state(t)
+        if with_children_count:
+            ps["children_count"] = cc
         out.append(ps)
     return out
 
@@ -435,7 +439,7 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
     usage = (
         "Usage: ticket list [--output llm] [--include-archived] [--exclude-deleted] "
         "[--type=<type>] [--status=<status>] [--priority=<n>] [--parent=<id>] "
-        "[--has-tag=<tag>] [--without-tag=<tag>] [--min-children=<n>] [--unblocked|--blocked]"
+        "[--has-tag=<tag>] [--without-tag=<tag>] [--min-children=<n>] [--unblocked|--blocked] [--with-children-count]"
     )
     try:
         fmt, rest = parse_output(argv, "reader")
@@ -453,6 +457,7 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         "without_tag": "",
         "min_children": None,
         "blocking_state": "",
+        "with_children_count": False,
     }
     for arg in rest:
         if arg == "--include-archived":
@@ -484,6 +489,8 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
             opts["blocking_state"] = "unblocked"
         elif arg == "--blocked":
             opts["blocking_state"] = "blocked"
+        elif arg == "--with-children-count":
+            opts["with_children_count"] = True
         elif arg in ("--help", "-h"):
             print(usage, file=sys.stderr)
             return 0
@@ -491,8 +498,8 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
             print(f"Error: unknown option '{arg}'", file=sys.stderr)
             print(
                 "Valid filters: --type --status --priority --parent --has-tag "
-                "--without-tag --min-children --unblocked --blocked --include-archived "
-                "--exclude-deleted --output llm",
+                "--without-tag --min-children --unblocked --blocked --with-children-count "
+                "--include-archived --exclude-deleted --output llm",
                 file=sys.stderr,
             )
             # Unrecognized option is a usage error (2), not a runtime error (1) —
@@ -697,6 +704,7 @@ def _cmd_list_epics(argv: list[str], tracker: str) -> int:
         blocking_state="" if include_blocked else "unblocked",
         has_tag=has_tag,
         min_children=min_children,
+        with_children_count=True,
     )
     p0_bugs = list_states(tracker, ticket_type="bug", priority="0")
     if fmt == "json":
