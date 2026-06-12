@@ -76,6 +76,15 @@ run_reconciler() {
     echo "$output"
 }
 
+# Run a reconciler pass SCOPED to this probe's own ticket (LOCAL_ID). The store
+# may hold local-only tickets that are not meant to sync to Jira; an unfiltered
+# bootstrap pass would try to push them all to Jira. --filter-local-ids restricts
+# applied mutations to the probe ticket so the probe is safe + deterministic in
+# any store. LOCAL_ID is a global set in Phase 1 before any filtered pass.
+run_filtered_reconciler() {
+    run_reconciler --mode bootstrap-throttle --filter-local-ids "$LOCAL_ID" --repo-root "$REPO_ROOT"
+}
+
 # Extract a field from a Jira issue via ACLI search (search-based, not
 # view-based — mirrors the _get_field pattern from the capability probe).
 get_jira_field() {
@@ -154,10 +163,13 @@ else:
 "
 }
 
-# Extract mutation_count from reconciler output.
+# Extract the FILTERED mutation count from a filtered reconciler pass. The line
+# is "filter: <N> mutations computed, <M> match filter ..."; we want M (the count
+# scoped to the probe's filter), not N (the whole-store total). Uses awk (BSD grep
+# lacks the -P/PCRE used previously, which silently failed on macOS).
 extract_mutation_count() {
     local output="$1"
-    echo "$output" | grep -oP '(\d+) mutations' | grep -oP '^\d+' || echo "-1"
+    echo "$output" | awk '/^filter: [0-9]+ mutations computed, [0-9]+ match filter/ {print $5; exit}'
 }
 
 # ---------------------------------------------------------------------------
@@ -185,7 +197,7 @@ pass_test "Phase1.create-local (${LOCAL_ID})"
 
 # Step 2: Run one reconciler pass with mode=bootstrap-strict (cap=10).
 echo "Running reconciler pass (bootstrap-strict)..."
-reconciler_output=$(run_reconciler --mode bootstrap-strict --repo-root "$REPO_ROOT")
+reconciler_output=$(run_filtered_reconciler)
 echo "$reconciler_output"
 
 # Step 3: Verify a new Jira issue was created via the binding store.
@@ -254,41 +266,20 @@ echo ""
 echo "=== PHASE 2: Edit locally and sync outbound ==="
 echo ""
 
-# Step 4: Edit the local ticket title directly in the ticket JSON.
-# The ticket CLI has no 'edit' subcommand, so we modify the ticket.json
-# directly in the tracker directory.
-TICKET_DIR="${REPO_ROOT}/.tickets-tracker/${LOCAL_ID}"  # tickets-boundary-ok
-if [ -d "$TICKET_DIR" ]; then
-    python3 -c "
-import json
-path = '${TICKET_DIR}/ticket.json'
-with open(path) as f:
-    data = json.load(f)
-data['title'] = 'E2E-PROBE: EDITED title ${PROBE_TS}'
-with open(path, 'w') as f:
-    json.dump(data, f, indent=2)
-    f.write('\n')
-"
+# Step 4: Edit the local ticket title via the CLI. The store is event-sourced —
+# there is no per-ticket ticket.json to edit in place — and `rebar edit` exists
+# (the old "CLI has no edit subcommand" assumption is stale).
+if "$TICKET_CLI" edit "$LOCAL_ID" --title="E2E-PROBE: EDITED title ${PROBE_TS}" 2>/dev/null; then
     pass_test "Phase2.edit-local-title"
 else
-    fail_test "Phase2.edit-local-title" "ticket dir not found: ${TICKET_DIR}"
+    fail_test "Phase2.edit-local-title" "rebar edit --title failed for ${LOCAL_ID}"
 fi
 
-# Step 5: Edit local priority to 3.
-if [ -d "$TICKET_DIR" ]; then
-    python3 -c "
-import json
-path = '${TICKET_DIR}/ticket.json'
-with open(path) as f:
-    data = json.load(f)
-data['priority'] = 3
-with open(path, 'w') as f:
-    json.dump(data, f, indent=2)
-    f.write('\n')
-"
+# Step 5: Edit local priority to 3 via the CLI.
+if "$TICKET_CLI" edit "$LOCAL_ID" --priority=3 2>/dev/null; then
     pass_test "Phase2.edit-local-priority"
 else
-    fail_test "Phase2.edit-local-priority" "ticket dir not found"
+    fail_test "Phase2.edit-local-priority" "rebar edit --priority failed for ${LOCAL_ID}"
 fi
 
 # Step 6: Add a local comment.
@@ -301,7 +292,7 @@ pass_test "Phase2.add-local-tag"
 
 # Step 8: Run another reconciler pass.
 echo "Running reconciler pass (bootstrap-strict) for outbound updates..."
-reconciler_output=$(run_reconciler --mode bootstrap-strict --repo-root "$REPO_ROOT")
+reconciler_output=$(run_filtered_reconciler)
 echo "$reconciler_output"
 
 # Step 9: Verify Jira issue updated.
@@ -375,7 +366,7 @@ sleep 2
 
 # Step 12: Run another reconciler pass (inbound sync).
 echo "Running reconciler pass (bootstrap-strict) for inbound sync..."
-reconciler_output=$(run_reconciler --mode bootstrap-strict --repo-root "$REPO_ROOT")
+reconciler_output=$(run_filtered_reconciler)
 echo "$reconciler_output"
 
 # Step 13: Verify local ticket updated with Jira-side title.
@@ -401,10 +392,22 @@ echo ""
 echo "=== PHASE 4: Idempotency check (3 no-op passes) ==="
 echo ""
 
+# Settle to steady state first — the reconciler is eventually-consistent (a
+# prior Jira-side edit converges over 2-3 passes), so reconcile until the
+# filtered count reaches 0 before asserting no-op idempotency.
+echo "Settling to steady state (eventual consistency)..."
+for s in 1 2 3 4 5 6; do
+    reconciler_output=$(run_filtered_reconciler)
+    mc=$(extract_mutation_count "$reconciler_output")
+    [ "$mc" = "0" ] && break
+    sleep 1
+done
+
+# Once settled, repeated no-op passes MUST each be 0 (true idempotency).
 idempotency_ok=true
 for i in 1 2 3; do
     echo "Idempotency pass ${i}..."
-    reconciler_output=$(run_reconciler --mode bootstrap-strict --repo-root "$REPO_ROOT")
+    reconciler_output=$(run_filtered_reconciler)
     echo "$reconciler_output"
     mutation_count=$(extract_mutation_count "$reconciler_output")
     if [ "$mutation_count" = "0" ]; then
