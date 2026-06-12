@@ -131,7 +131,11 @@ The policy:
   change together are worse than one 120-line file.
 - **Prefer deleting bash over splitting it.** An oversized `*.sh` should be retired
   via the bash→Python strangler-fig migration (ticket `adult-oxide-slave`), not
-  carved into more bash.
+  carved into more bash. The tier ordering (B leaf writes → C compute → D
+  write/sync core → E dispatcher deletion), the per-tier kill-switch discipline
+  (default stays bash until dual-run parity is green + a dogfood soak passes;
+  switch deleted one release after the flip), and the concurrency validation
+  matrix are specified in [bash-migration.md](bash-migration.md).
 
 ### Current offenders (> 800 LOC) and planned remedy
 
