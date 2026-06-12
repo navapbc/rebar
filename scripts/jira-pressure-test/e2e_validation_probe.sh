@@ -121,7 +121,7 @@ for c in comments:
 get_local_field() {
     local ticket_id="$1"
     local field="$2"
-    "$TICKET_CLI" ticket show "$ticket_id" 2>/dev/null | python3 -c "
+    "$TICKET_CLI" show "$ticket_id" 2>/dev/null | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 val = data.get('${field}', '')
@@ -169,7 +169,7 @@ echo "=== PHASE 1: Create local ticket and sync outbound ==="
 echo ""
 
 # Step 1: Create a local test ticket with known field values.
-create_output=$("$TICKET_CLI" ticket create task "E2E-PROBE: sync validation ${PROBE_TS}" \
+create_output=$("$TICKET_CLI" create task "E2E-PROBE: sync validation ${PROBE_TS}" \
     -d "Description for E2E probe test" \
     --priority 1 \
     --tags "${PROBE_TAG},${E2E_TAG}" 2>&1)
@@ -292,11 +292,11 @@ else
 fi
 
 # Step 6: Add a local comment.
-"$TICKET_CLI" ticket comment "$LOCAL_ID" "Probe comment from local" 2>/dev/null || true
+"$TICKET_CLI" comment "$LOCAL_ID" "Probe comment from local" 2>/dev/null || true
 pass_test "Phase2.add-local-comment"
 
 # Step 7: Add a local tag.
-"$TICKET_CLI" ticket tag "$LOCAL_ID" "probe-edit-tag" 2>/dev/null || true
+"$TICKET_CLI" tag "$LOCAL_ID" "probe-edit-tag" 2>/dev/null || true
 pass_test "Phase2.add-local-tag"
 
 # Step 8: Run another reconciler pass.
@@ -464,7 +464,7 @@ else
 fi
 
 # Step 19: Delete the local test ticket.
-if "$TICKET_CLI" ticket delete "$LOCAL_ID" --user-approved 2>/dev/null; then
+if "$TICKET_CLI" delete "$LOCAL_ID" --user-approved 2>/dev/null; then
     pass_test "Phase6.delete-local-ticket (${LOCAL_ID})"
 else
     fail_test "Phase6.delete-local-ticket (${LOCAL_ID})"
