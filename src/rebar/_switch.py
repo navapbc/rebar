@@ -20,11 +20,18 @@ from __future__ import annotations
 import os
 import sys
 
-# Tier switches and their initial defaults. Defaults stay ``bash`` until a tier's
-# parity is green and its dogfood soak passes (the deliberate, per-tier flip is a
-# one-line change here). When a tier is retired, its entry is deleted.
+# Tier switches and their defaults. A tier's default stays ``bash`` until its
+# parity is green and its dogfood soak passes; then the default flips to
+# ``python`` here in one commit (the switch is retained as the rollback lever
+# until the tier is retired, when its entry is deleted).
+#
+# Tier B (``REBAR_LEAF_WRITES``) flipped to ``python`` on 2026-06-11 after the
+# soak documented in session-logs/2026-06-11-tier-b-soak.md (full dual-run parity,
+# 240-test interface tier, 77/77 live full-surface probe, fsck clean). Roll back a
+# single process with ``REBAR_LEAF_WRITES=bash``; revert this default by changing
+# the value back. The dispatcher's ``_leaf_writes_python`` fallback mirrors this.
 _TIERS: dict[str, str] = {
-    "REBAR_LEAF_WRITES": "bash",  # Tier B — leaf writes
+    "REBAR_LEAF_WRITES": "python",  # Tier B — leaf writes (flipped; bash = rollback)
     "REBAR_COMPUTE": "bash",  # Tier C — compute-heavy reads
     "REBAR_WRITE_CORE": "bash",  # Tier D — write/sync core
 }

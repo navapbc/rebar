@@ -23,10 +23,11 @@ import pytest
 import rebar
 from rebar import _switch
 
-# The exact lower+strip pipeline the dispatcher's _leaf_writes_python runs. Kept
-# here so the parity test pins the dispatcher's parse to _switch.resolve.
+# The exact body the dispatcher's _leaf_writes_python runs (default flipped to
+# python 2026-06-11: python unless an explicit "bash"). Kept here so the parity
+# test pins the dispatcher's parse to _switch.resolve.
 _BASH_RESOLVE = (
-    r"""printf '%s' "${REBAR_LEAF_WRITES:-bash}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]'"""
+    r"""_v=$(printf '%s' "${REBAR_LEAF_WRITES:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]'); [ "$_v" != "bash" ] && echo python || echo bash"""
 )
 
 _MATRIX = ["", "python", "PYTHON", " Python ", "bash", "BASH", "py", "bogus", "1", "true"]
@@ -42,13 +43,20 @@ def test_switch_resolution_matches_bash_idiom(value: str, monkeypatch: pytest.Mo
         capture_output=True,
         text=True,
         check=True,
-    ).stdout
+    ).stdout.strip()
     bash_uses_python = out == "python"
     assert py_uses_python == bash_uses_python
 
 
-def test_switch_unset_defaults_bash(monkeypatch: pytest.MonkeyPatch):
+def test_switch_unset_defaults_python(monkeypatch: pytest.MonkeyPatch):
+    # Tier B flipped 2026-06-11: the default is now python; bash is the rollback.
     monkeypatch.delenv("REBAR_LEAF_WRITES", raising=False)
+    assert _switch.resolve("REBAR_LEAF_WRITES") == "python"
+    assert _switch.leaf_writes_python() is True
+
+
+def test_switch_explicit_bash_is_rollback(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("REBAR_LEAF_WRITES", "bash")
     assert _switch.resolve("REBAR_LEAF_WRITES") == "bash"
     assert _switch.leaf_writes_python() is False
 
