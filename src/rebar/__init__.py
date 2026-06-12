@@ -358,6 +358,10 @@ def untag(ticket_id: str, tag: str, *, repo_root=None) -> None:
 
 
 def archive(ticket_id: str, *, repo_root=None) -> None:
+    from rebar._commands import leaf
+
+    if _maybe_python_leaf(leaf.archive, ticket_id, repo_root=repo_root, what="archive"):
+        return
     _ok(_run(["archive", ticket_id], repo_root=repo_root), what="archive")
 
 

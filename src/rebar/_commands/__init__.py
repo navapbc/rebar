@@ -23,6 +23,10 @@ class _Cmd(NamedTuple):
     func: Callable[..., None]
     min_args: int
     usage: str
+    # Max positional args; None = unbounded. The bash leaf functions guard arity
+    # with `[ $# -lt N ]` (extra args ignored) except archive's `[ $# -ne 1 ]`
+    # (extra args are a usage error). max_args pins that difference.
+    max_args: int | None = None
 
 
 # Registry of ported Tier B commands, keyed by the dispatcher subcommand name.
@@ -39,6 +43,7 @@ _REGISTRY: dict[str, _Cmd] = {
     ),
     "tag": _Cmd(leaf.tag, 2, "Usage: ticket tag <ticket_id> <tag>"),
     "untag": _Cmd(leaf.untag, 2, "Usage: ticket untag <ticket_id> <tag>"),
+    "archive": _Cmd(leaf.archive, 1, "Usage: ticket archive <ticket_id>", max_args=1),
 }
 
 
@@ -62,11 +67,15 @@ def main(argv: list[str]) -> int:
     if entry is None:
         print(f"Error: unknown leaf-write command '{command}'", file=sys.stderr)
         return 1
-    if len(args) < entry.min_args:
+    if len(args) < entry.min_args or (
+        entry.max_args is not None and len(args) > entry.max_args
+    ):
         print(entry.usage, file=sys.stderr)
         return 1
     try:
-        entry.func(*args)
+        # Pass exactly min_args positionals — the bash leaf functions read only
+        # their first N and ignore extras (where extras are even permitted).
+        entry.func(*args[: entry.min_args])
     except CommandError as exc:
         print(exc.message, file=sys.stderr)
         return exc.returncode

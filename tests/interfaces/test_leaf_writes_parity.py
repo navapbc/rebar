@@ -119,3 +119,20 @@ def test_library_tag_idempotent_python_path(rebar_repo: Path, monkeypatch: pytes
     assert tags.count("dup:tag") == 1
     # untag of an absent tag is graceful (no raise)
     rebar.untag(tid, "never:applied", repo_root=str(rebar_repo))
+
+
+def test_library_archive_python_path(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    tid = _new_ticket(rebar_repo)
+    monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
+    rebar.archive(tid, repo_root=str(rebar_repo))
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["archived"] is True
+    # idempotent: archiving again is a silent no-op
+    rebar.archive(tid, repo_root=str(rebar_repo))
+
+
+def test_library_archive_status_gate_python_path(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    tid = _new_ticket(rebar_repo)
+    rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))  # open -> in_progress
+    monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
+    with pytest.raises(rebar.RebarError):  # archive only works on open tickets
+        rebar.archive(tid, repo_root=str(rebar_repo))

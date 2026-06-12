@@ -102,6 +102,45 @@ def untag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
     )
 
 
+def archive(ticket_id: str, *, repo_root=None) -> None:
+    """Archive an open ticket (mirrors ``ticket_archive``).
+
+    Idempotent: an existing ``.archived`` marker or ARCHIVED event short-circuits
+    to a silent no-op (writing the marker if only the event was present, e.g. after
+    a clone). Status-gated: only ``open`` tickets may be archived. On success writes
+    an ARCHIVED event, the ``.archived`` marker, and prints the confirmation line.
+    """
+    from rebar.reducer import reduce_ticket
+    from rebar.reducer.marker import write_marker
+
+    tracker = tracker_dir(repo_root)
+    if not ticket_id:
+        raise CommandError("Error: ticket_id must be non-empty")
+    resolved = require_id(ticket_id, tracker)
+    ticket_dir = tracker / resolved
+
+    if (ticket_dir / ".archived").exists():
+        return
+    if ticket_dir.is_dir() and any(
+        p.name.endswith("-ARCHIVED.json") for p in ticket_dir.iterdir()
+    ):
+        write_marker(str(ticket_dir))
+        return
+
+    status = (reduce_ticket(str(ticket_dir)) or {}).get("status", "")
+    if not status:
+        raise CommandError(f"Error: could not read status for ticket '{resolved}'")
+    if status != "open":
+        raise CommandError(
+            f"Error: ticket '{resolved}' has status '{status}'; "
+            f"archive only works on open tickets"
+        )
+
+    append_event(resolved, "ARCHIVED", {}, tracker, repo_root=repo_root)
+    write_marker(str(ticket_dir))
+    print(f"Archived ticket '{resolved}'")
+
+
 def _validate_json_array(payload: str, label: str, required_keys: tuple[str, ...]):
     """Parse + validate a JSON-array payload of objects with string keys.
 
