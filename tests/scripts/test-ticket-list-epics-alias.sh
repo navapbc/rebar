@@ -19,7 +19,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-LIST_EPICS="$PLUGIN_ROOT/src/rebar/_engine/ticket-list-epics.sh"
+DISPATCHER="$PLUGIN_ROOT/src/rebar/_engine/ticket"   # list-epics routes to the python wrapper
 
 source "$SCRIPT_DIR/../lib/run_test.sh"
 
@@ -117,7 +117,7 @@ test_list_epics_shows_alias() {
     # Then the output contains 'swift-falcon-forest' and NOT 'epic-alias-1'
     echo "Test 1: Epic with alias shows alias in output (not raw ticket ID)"
     _tracker=$(make_tracker_with_aliased_epic)
-    _output=$(TICKETS_TRACKER_DIR="$_tracker" bash "$LIST_EPICS" 2>&1) || true
+    _output=$(TICKETS_TRACKER_DIR="$_tracker" bash "$DISPATCHER" list-epics 2>&1) || true
 
     if [[ "$_output" =~ "swift-falcon-forest" ]]; then
         echo "  PASS: alias 'swift-falcon-forest' appears in output"
@@ -135,7 +135,7 @@ test_list_epics_shows_alias() {
     # Then the first field of the output line is NOT 'epic-alias-1'
     echo "Test 2: Raw ticket ID is NOT used as display identifier when alias exists"
     _tracker=$(make_tracker_with_aliased_epic)
-    _output=$(TICKETS_TRACKER_DIR="$_tracker" bash "$LIST_EPICS" 2>&1) || true
+    _output=$(TICKETS_TRACKER_DIR="$_tracker" bash "$DISPATCHER" list-epics 2>&1) || true
 
     # The first tab-separated field should be the alias, not the raw ID
     local first_field
@@ -155,7 +155,7 @@ test_list_epics_shows_alias() {
     # Test 3: Epic title still appears alongside the alias
     echo "Test 3: Epic title 'Epic With Alias' still appears in output"
     _tracker=$(make_tracker_with_aliased_epic)
-    _output=$(TICKETS_TRACKER_DIR="$_tracker" bash "$LIST_EPICS" 2>&1) || true
+    _output=$(TICKETS_TRACKER_DIR="$_tracker" bash "$DISPATCHER" list-epics 2>&1) || true
 
     if [[ "$_output" =~ "Epic With Alias" ]]; then
         echo "  PASS: title 'Epic With Alias' appears in output"
@@ -170,7 +170,7 @@ test_list_epics_shows_alias() {
     # (regression guard — epics without aliases must still display something)
     echo "Test 4: Epic without alias shows computed alias or ticket ID (regression guard)"
     _tracker=$(make_tracker_no_alias)
-    _output=$(TICKETS_TRACKER_DIR="$_tracker" bash "$LIST_EPICS" 2>&1) || true
+    _output=$(TICKETS_TRACKER_DIR="$_tracker" bash "$DISPATCHER" list-epics 2>&1) || true
 
     if [[ "$_output" =~ "Epic Without Alias" ]]; then
         echo "  PASS: epic without alias still appears in output"

@@ -24,7 +24,6 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 TICKET_SCRIPT="$REPO_ROOT/src/rebar/_engine/ticket"
-LIST_EPICS_SCRIPT="$REPO_ROOT/src/rebar/_engine/ticket-list-epics.sh"
 REDUCER_PKG_DIR="$REPO_ROOT/src/rebar/_engine"
 
 source "$REPO_ROOT/tests/lib/assert.sh"
@@ -83,7 +82,7 @@ try:
 except Exception:
     print('')
 " 2>/dev/null) || alias=""
-        rows=$(cd "$r" && bash "$LIST_EPICS_SCRIPT" --all 2>/dev/null) || rows=""
+        rows=$(cd "$r" && bash "$TICKET_SCRIPT" list-epics --all 2>/dev/null) || rows=""
         printf '%s\n' "$rows" | awk -F'\t' -v id="$eid" -v al="$alias" '
             { c1=$1; gsub(/^BLOCKED/, "", c1) }
             ($1==id || $1==al || $2==id || $2==al) { print $NF; found=1; exit }

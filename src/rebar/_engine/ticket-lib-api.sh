@@ -789,13 +789,6 @@ ticket_ready() {
     return $?
 }
 
-# ── ticket_list_epics ──────────────────────────────────────────────────────────
-ticket_list_epics() {
-    # Canonical implementation: delegates to sprint-list-epics.sh (canonical; no prior script).
-    bash "$_TICKETLIB_DIR/ticket-list-epics.sh" "$@"
-    return $?
-}
-
 # ── ticket_list_descendants ────────────────────────────────────────────────────
 ticket_list_descendants() {
     # Canonical implementation: ticket-list-descendants.sh is the canonical implementation (no prior script).

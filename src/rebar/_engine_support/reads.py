@@ -654,7 +654,7 @@ def _cmd_search(argv: list[str], tracker: str) -> int:
 def _cmd_list_epics(argv: list[str], tracker: str) -> int:
     """DEPRECATED thin wrapper over the generic list: a deprecation warning, then
     exactly TWO generic calls — one for epics, one for P0 bugs — assembled into
-    ``{p0_bugs, epics}``. Replaces the bespoke ticket-list-epics.sh reduction.
+    ``{p0_bugs, epics}``. Replaces the retired bespoke list-epics reduction.
     Blocking-awareness is the generic blocking_state filter (default: unblocked)."""
     print(
         "WARNING: 'list-epics' is deprecated and will be removed in a future "
