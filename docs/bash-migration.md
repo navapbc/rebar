@@ -135,6 +135,20 @@ individually by being routed under the switch only once ported):
 
 ## 4. Tier B — leaf writes
 
+> **Status (in progress).** All eleven leaf-write commands are ported to
+> `rebar._commands` behind `REBAR_LEAF_WRITES` and switch-wired at BOTH interfaces
+> (the dispatcher arm → `ticket-commands.py`, and `rebar.__init__` for
+> library/MCP): `comment`, `set-file-impact`, `set-verify-commands`, `tag`,
+> `untag`, `archive`, `create`, `edit`, `link`, `unlink`, `revert`. The single
+> write seam (`ticket-append-event.sh`) and the switch helper (`rebar._switch`)
+> are in place. Each command's bash suite is **dual-run green against
+> `REBAR_LEAF_WRITES=bash` AND `=python`** (byte-identical), plus
+> `tests/interfaces/test_leaf_writes_parity.py`. **The default remains `bash`** —
+> the deliberate flip → one-release dogfood soak → retirement (switch + bash leaf
+> functions + dual-run wiring + suite translation) is tracked separately as
+> protocol steps 5–7 and is release-gated; it is NOT done in the porting work.
+
+
 **Commands**: `comment`, `tag`/`untag`, `set-file-impact`,
 `set-verify-commands`, `archive`, `scratch set|get|clear`, then the larger
 event-composers: `create`, `edit`, `link`/`unlink`, `revert`. (`transition`/
