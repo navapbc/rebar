@@ -15,7 +15,7 @@ from __future__ import annotations
 import sys
 from typing import Callable, NamedTuple
 
-from rebar._commands import composer, leaf
+from rebar._commands import composer, leaf, unlink as _unlink
 from rebar._commands._seam import CommandError
 
 
@@ -52,6 +52,7 @@ _ARGV_REGISTRY: dict[str, Callable[[list[str]], int]] = {
     "create": composer.create_cli,
     "edit": composer.edit_cli,
     "link": composer.link_cli,
+    "unlink": _unlink.unlink_cli,
     "revert": composer.revert_cli,
 }
 

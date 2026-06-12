@@ -390,6 +390,20 @@ def link(id1: str, id2: str, relation: str, *, repo_root=None) -> None:
 
 
 def unlink(id1: str, id2: str, *, repo_root=None) -> None:
+    from rebar import _switch
+
+    if _switch.leaf_writes_python():
+        from rebar._commands import unlink as _unlink_cmd
+        from rebar._commands._seam import CommandError
+
+        try:
+            _unlink_cmd.unlink_core(id1, id2, repo_root=repo_root)
+        except CommandError as exc:
+            raise RebarError(
+                f"rebar unlink failed (exit {exc.returncode}): {exc.message}",
+                returncode=exc.returncode, stderr=exc.message,
+            ) from None
+        return
     _ok(_run(["unlink", id1, id2], repo_root=repo_root), what="unlink")
 
 

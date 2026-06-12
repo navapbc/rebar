@@ -202,6 +202,24 @@ def test_library_link_python_rejects_bad_relation(rebar_repo: Path, monkeypatch:
         rebar.link(a, b, "not_a_relation", repo_root=str(rebar_repo))
 
 
+def test_library_unlink_python_roundtrip(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
+    a = rebar.create_ticket("task", "unlink-a", repo_root=str(rebar_repo))
+    b = rebar.create_ticket("task", "unlink-b", repo_root=str(rebar_repo))
+    rebar.link(a, b, "relates_to", repo_root=str(rebar_repo))
+    assert any(d.get("target_id") == b for d in rebar.deps(a, repo_root=str(rebar_repo)).get("deps", []))
+    rebar.unlink(a, b, repo_root=str(rebar_repo))
+    assert not any(d.get("target_id") == b for d in rebar.deps(a, repo_root=str(rebar_repo)).get("deps", []))
+
+
+def test_library_unlink_python_no_link_errors(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
+    a = rebar.create_ticket("task", "unlink-x", repo_root=str(rebar_repo))
+    b = rebar.create_ticket("task", "unlink-y", repo_root=str(rebar_repo))
+    with pytest.raises(rebar.RebarError):  # no LINK between the pair
+        rebar.unlink(a, b, repo_root=str(rebar_repo))
+
+
 def _event_uuid(tracker: Path, tid: str, suffix: str) -> str:
     import json as _json
 
