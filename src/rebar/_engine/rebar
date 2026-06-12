@@ -334,11 +334,10 @@ case "$subcommand" in
         exec python3 "$SCRIPT_DIR/ticket-reads.py" list "$@"
         ;;
     list-epics)
-        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized; fi
-        # shellcheck source=/dev/null
-        source "$SCRIPT_DIR/ticket-lib-api.sh"
-        _ticketlib_dispatch ticket_list_epics "$@"
-        exit $?
+        # DEPRECATED: list-epics is now a thin wrapper over the generic read path
+        # (deprecation warning + one epics call + one P0-bugs call -> {p0_bugs,epics}).
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized --init-only; fi
+        exec python3 "$SCRIPT_DIR/ticket-reads.py" list-epics "$@"
         ;;
     list-descendants)
         if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized; fi

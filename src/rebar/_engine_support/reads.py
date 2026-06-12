@@ -644,12 +644,79 @@ def _cmd_search(argv: list[str], tracker: str) -> int:
     return 0
 
 
+def _cmd_list_epics(argv: list[str], tracker: str) -> int:
+    """DEPRECATED thin wrapper over the generic list: a deprecation warning, then
+    exactly TWO generic calls — one for epics, one for P0 bugs — assembled into
+    ``{p0_bugs, epics}``. Replaces the bespoke ticket-list-epics.sh reduction.
+    Blocking-awareness is the generic blocking_state filter (default: unblocked)."""
+    print(
+        "WARNING: 'list-epics' is deprecated and will be removed in a future "
+        "release. Use 'rebar list --type=epic --status=open,in_progress --unblocked "
+        "[--min-children=N]' and 'rebar list --type=bug --priority=0'.",
+        file=sys.stderr,
+    )
+    try:
+        fmt, rest = parse_output(argv, "report")
+    except OutputFormatError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+    include_blocked = False
+    has_tag = ""
+    min_children: int | None = None
+    for arg in rest:
+        if arg == "--all":
+            include_blocked = True
+        elif arg.startswith("--has-tag="):
+            has_tag = arg[len("--has-tag="):]
+        elif arg.startswith("--min-children="):
+            raw = arg[len("--min-children="):]
+            if not raw.isdigit():
+                print(
+                    f"Error: --min-children expects a non-negative integer, got '{raw}'",
+                    file=sys.stderr,
+                )
+                return 2
+            min_children = int(raw)
+        elif arg in ("--help", "-h"):
+            print(
+                "Usage: ticket list-epics [--all] [--has-tag=<tag>] [--min-children=<n>] "
+                "[--output json]   (DEPRECATED — use 'list --type=epic ...')",
+                file=sys.stderr,
+            )
+            return 0
+        else:
+            print(f"Error: unknown option '{arg}'", file=sys.stderr)
+            return 2
+    if not os.path.isdir(tracker):
+        print("Error: ticket system not initialized. Run 'ticket init' first.", file=sys.stderr)
+        return 1
+    epics = list_states(
+        tracker,
+        ticket_type="epic",
+        status="open,in_progress",
+        blocking_state="" if include_blocked else "unblocked",
+        has_tag=has_tag,
+        min_children=min_children,
+    )
+    p0_bugs = list_states(tracker, ticket_type="bug", priority="0")
+    if fmt == "json":
+        print(json.dumps({"p0_bugs": p0_bugs, "epics": epics}, ensure_ascii=False))
+    else:
+        for e in epics:
+            print(
+                f"{e.get('alias') or e['ticket_id']}\tP{e.get('priority', '')}\t"
+                f"{e.get('title', '')}\t{e.get('children_count', 0)}"
+            )
+    return 0
+
+
 _COMMANDS = {
     "show": _cmd_show,
     "list": _cmd_list,
     "deps": _cmd_deps,
     "ready": _cmd_ready,
     "search": _cmd_search,
+    "list-epics": _cmd_list_epics,
 }
 
 

@@ -2,38 +2,37 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/list_epics.schema.json",
   "title": "ListEpics",
-  "description": "Result of `rebar list-epics --output json`: {p0_bugs, epics}. Exit codes are preserved (0=an unblocked epic exists, 1=no open epics, 2=all blocked). `blocking` marks an epic that blocks another epic; `blocked` marks one with open blockers.",
+  "description": "DEPRECATED. `rebar list-epics` is now a thin wrapper over the generic list — `{p0_bugs, epics}`, each an array of ticket_state objects (epics also carry `children_count`). Blocking-awareness is the generic `--unblocked`/`--blocked` filter (default: only unblocked epics). Prefer `list --type=epic --status=open,in_progress --unblocked [--min-children=N]` + `list --type=bug --priority=0`.",
   "type": "object",
   "additionalProperties": true,
   "required": ["p0_bugs", "epics"],
   "properties": {
     "p0_bugs": {
       "type": "array",
+      "description": "Priority-0 bugs as ticket_state objects (one generic `list --type=bug --priority=0` call).",
       "items": {
         "type": "object",
         "additionalProperties": true,
-        "required": ["id", "title"],
+        "required": ["ticket_id", "title"],
         "properties": {
-          "id": { "type": "string" },
+          "ticket_id": { "type": "string" },
           "title": { "type": "string" }
         }
       }
     },
     "epics": {
       "type": "array",
+      "description": "Epics as ticket_state objects (one generic `list --type=epic ...` call), each enriched with `children_count`.",
       "items": {
         "type": "object",
         "additionalProperties": true,
-        "required": ["id", "title", "priority", "children_count", "blocking", "blocked", "blockers"],
+        "required": ["ticket_id", "title", "priority", "children_count"],
         "properties": {
-          "id": { "type": "string" },
+          "ticket_id": { "type": "string" },
           "alias": { "type": ["string", "null"] },
           "priority": { "$ref": "common.schema.json#/$defs/priority" },
           "title": { "type": "string" },
-          "children_count": { "type": "integer", "description": "Total non-deleted direct children of the epic: open, in_progress, closed, and archived children all count; only deleted tombstones are excluded. This is NOT a count of open children." },
-          "blocking": { "type": "boolean" },
-          "blocked": { "type": "boolean" },
-          "blockers": { "type": "array", "items": { "type": "string" } }
+          "children_count": { "type": "integer", "description": "Total non-deleted direct children of the epic (deleted tombstones excluded)." }
         }
       }
     }

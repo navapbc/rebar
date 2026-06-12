@@ -468,18 +468,35 @@ def summary(*ticket_ids: str, repo_root=None) -> list:
 
 
 def list_epics(*, include_blocked: bool = False, has_tag=None, min_children=None, repo_root=None) -> dict:
-    """Open epics as structured JSON: {p0_bugs, epics}. ``include_blocked`` adds
-    blocked epics (the engine's ``--all``). list-epics encodes "no epics"/"all
-    blocked" as exit 1/2 — those are NORMAL here, not errors."""
-    args = ["list-epics", "--output", "json"]
-    if include_blocked:
-        args.append("--all")
-    if has_tag:
-        args.append(f"--has-tag={has_tag}")
-    if min_children is not None:
-        args.append(f"--min-children={min_children}")
-    cp = _run(args, repo_root=repo_root)
-    return _json_or(cp.stdout, {"p0_bugs": [], "epics": []})
+    """DEPRECATED — thin wrapper over the generic ``list``. Returns
+    ``{p0_bugs, epics}`` (both ``ticket_state`` arrays) by making exactly TWO
+    generic calls: one for epics, one for P0 bugs. Blocking-awareness is now the
+    generic ``blocking_state`` filter (``include_blocked=False`` → only unblocked
+    epics). Prefer composing the primitives directly::
+
+        rebar.list_tickets(ticket_type="epic", status="open,in_progress",
+                           blocking_state="unblocked", min_children=N)
+        rebar.list_tickets(ticket_type="bug", priority=0)
+    """
+    import warnings
+
+    warnings.warn(
+        "rebar.list_epics is deprecated; compose list_tickets(ticket_type='epic', "
+        "status='open,in_progress', blocking_state='unblocked', min_children=N) and "
+        "list_tickets(ticket_type='bug', priority=0).",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    epics = list_tickets(
+        ticket_type="epic",
+        status="open,in_progress",
+        blocking_state="" if include_blocked else "unblocked",
+        has_tag=has_tag,
+        min_children=min_children,
+        repo_root=repo_root,
+    )
+    p0_bugs = list_tickets(ticket_type="bug", priority=0, repo_root=repo_root)
+    return {"p0_bugs": p0_bugs, "epics": epics}
 
 
 def bridge_fsck(*, repo_root=None) -> dict:

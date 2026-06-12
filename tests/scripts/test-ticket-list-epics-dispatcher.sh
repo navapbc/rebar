@@ -223,48 +223,51 @@ test_list_epics_routes_through_dispatcher() {
         (( FAIL++ ))
     fi
 
-    # Test 4: In-progress epic shows P* prefix (not P1)
-    echo "Test 4: In-progress epic 'In Progress Beta' shows P* prefix (not P1)"
+    # Test 4: In-progress epic appears (wrapper lists open + in_progress epics;
+    # the bespoke 'P*' prefix was removed with the deprecation).
+    echo "Test 4: In-progress epic 'In Progress Beta' appears in list-epics"
     _tracker=$(make_tracker_epics_fixture)
-    _exit=0
-    _output=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" list-epics 2>&1) || _exit=$?
+    _output=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" list-epics 2>/dev/null) || true
 
-    if [[ "$_output" =~ P\* ]] && [[ "$_output" =~ In\ Progress\ Beta ]]; then
-        echo "  PASS: in-progress epic shows 'P*' prefix"
+    if [[ "$_output" =~ In\ Progress\ Beta ]]; then
+        echo "  PASS: in-progress epic appears in the wrapper output"
         (( PASS++ ))
     else
-        echo "  FAIL: in-progress epic does not show P* prefix (RED — expected before GREEN)" >&2
+        echo "  FAIL: in-progress epic missing from list-epics" >&2
         echo "  Output: $_output" >&2
         (( FAIL++ ))
     fi
 
-    # Test 5: With --all, BLOCKED prefix appears for epic-blocked-1
-    echo "Test 5: With --all, BLOCKED prefix appears for epic-blocked-1 (Blocked Epic Gamma)"
+    # Test 5: --all includes blocked epics; default (unblocked-only) excludes them.
+    # (The bespoke 'BLOCKED' inline marker was removed; blocked-awareness is now the
+    # generic --unblocked/--blocked filter that --all opts out of.)
+    echo "Test 5: --all includes blocked 'Blocked Epic Gamma'; default excludes it"
     _tracker=$(make_tracker_epics_fixture)
-    _exit=0
-    _output=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" list-epics --all 2>&1) || _exit=$?
+    _all=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" list-epics --all 2>/dev/null) || true
+    _def=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" list-epics 2>/dev/null) || true
 
-    if [[ "$_output" =~ BLOCKED ]] && [[ "$_output" =~ Blocked\ Epic\ Gamma ]]; then
-        echo "  PASS: BLOCKED prefix present for epic-blocked-1 with --all"
+    if [[ "$_all" =~ Blocked\ Epic\ Gamma ]] && [[ ! "$_def" =~ Blocked\ Epic\ Gamma ]]; then
+        echo "  PASS: --all includes the blocked epic; default excludes it"
         (( PASS++ ))
     else
-        echo "  FAIL: BLOCKED prefix missing with --all for epic-blocked-1 (RED — expected before GREEN)" >&2
-        echo "  Output: $_output" >&2
+        echo "  FAIL: --all/default blocked-epic filtering wrong" >&2
+        echo "  all=[$_all] default=[$_def]" >&2
         (( FAIL++ ))
     fi
 
-    # Test 6: Empty fixture exits 1 (no open epics)
-    echo "Test 6: Empty tracker exits 1 (no open epics)"
+    # Test 6: Empty tracker -> exit 0 + deprecation warning on stderr (the wrapper is
+    # a read composition; the bespoke exit 1/2 codes were removed).
+    echo "Test 6: Empty tracker exits 0 with a deprecation warning on stderr"
     _tracker=$(make_empty_tracker)
     _exit=0
-    _output=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" list-epics 2>&1) || _exit=$?
+    _err=$(TICKETS_TRACKER_DIR="$_tracker" "$DISPATCHER" list-epics 2>&1 >/dev/null) || _exit=$?
 
-    if [[ $_exit -eq 1 ]]; then
-        echo "  PASS: empty tracker returns exit 1"
+    if [[ $_exit -eq 0 ]] && [[ "$_err" =~ deprecated ]]; then
+        echo "  PASS: empty tracker exits 0 with a deprecation warning"
         (( PASS++ ))
     else
-        echo "  FAIL: empty tracker returned exit $_exit (expected 1) (RED — expected before GREEN)" >&2
-        echo "  Output: $_output" >&2
+        echo "  FAIL: empty tracker exit $_exit / deprecation warning missing" >&2
+        echo "  stderr: $_err" >&2
         (( FAIL++ ))
     fi
 }

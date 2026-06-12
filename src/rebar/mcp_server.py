@@ -321,12 +321,20 @@ def build_server():
         has_tag: str | None = None,
         min_children: int | None = None,
     ) -> ListEpicsOut:
-        """Open epics as {p0_bugs, epics}. include_blocked adds blocked epics."""
-        return ListEpicsOut.model_validate(
-            rebar.list_epics(
-                include_blocked=include_blocked, has_tag=has_tag, min_children=min_children
+        """DEPRECATED — thin wrapper over `list`. Returns {p0_bugs, epics} (ticket_state
+        arrays) from two generic calls. Prefer the `list_tickets` tool directly:
+        ticket_type='epic', status='open,in_progress', blocking_state='unblocked',
+        min_children=N — plus ticket_type='bug', priority=0 for the P0 bugs.
+        include_blocked=True drops the unblocked-only filter."""
+        import warnings
+
+        with warnings.catch_warnings():  # the tool's docstring is the deprecation signal
+            warnings.simplefilter("ignore", DeprecationWarning)
+            return ListEpicsOut.model_validate(
+                rebar.list_epics(
+                    include_blocked=include_blocked, has_tag=has_tag, min_children=min_children
+                )
             )
-        )
 
     @mcp.tool()
     def bridge_fsck() -> BridgeFsckOut:
