@@ -31,7 +31,10 @@ import sys
 # were deleted — Python is now the sole leaf-write implementation. The remaining
 # entries gate the tiers still to come.
 _TIERS: dict[str, str] = {
-    "REBAR_COMPUTE": "bash",  # Tier C — compute-heavy reads
+    # Tier C flipped to python on 2026-06-12 (next-batch + validate ported, dual-run
+    # byte/semantic-identical, interfaces tier green). The switch is retained as the
+    # rollback lever (REBAR_COMPUTE=bash) until the tier is retired post-soak.
+    "REBAR_COMPUTE": "python",  # Tier C — compute-heavy reads
     "REBAR_WRITE_CORE": "bash",  # Tier D — write/sync core
 }
 

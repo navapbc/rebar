@@ -223,9 +223,14 @@ release of flipped defaults; each retired suite translated to pytest.
 > (20 cases). Library `rebar.validate()` + MCP now in-process under the switch.
 >
 > **Tier C porting is complete** (next-batch + validate ported, list-epics
-> deprecated). Remaining for the tier: flip the `REBAR_COMPUTE` default to
-> `python`, soak, then retire the two bash scripts (~1,900 LOC, 12 heredocs) +
-> `REBAR_COMPUTE` and translate the suites — the architecture.md offender table
+> deprecated). **Default flipped to `python` on 2026-06-12** (step 5; `_switch`
+> default + the dispatcher `_compute_python` expansion/comparison + the parity
+> test's default-case moved together, the `ce2dfcf5` Tier-B pattern; rollback lever
+> `REBAR_COMPUTE=bash` retained). Flip evidence: 43 Tier-C parity cases + both bash
+> suites green under the unset default, interfaces tier 288/288, `fsck` clean.
+> **In soak** (step 6) for the rest of the release cycle. Remaining: after soak,
+> retire the two bash scripts (~1,900 LOC, 12 heredocs) + `REBAR_COMPUTE` +
+> `_compute_python` and translate the suites — the architecture.md offender table
 > loses both compute entries at retirement.
 
 **Commands**: `next-batch` (`ticket-next-batch.sh`, ~954 LOC),

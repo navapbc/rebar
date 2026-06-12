@@ -31,10 +31,13 @@ from rebar import _switch
 _PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 _DISPATCHER = _PLUGIN_ROOT / "src" / "rebar" / "_engine" / "ticket"
 
-# The exact lower+strip pipeline the dispatcher's _compute_python runs. Kept in
-# sync with that helper (a divergence makes test_switch_resolution_* fail).
+# The dispatcher's _compute_python verdict, byte-for-byte. Kept in sync with that
+# helper (a divergence makes test_switch_resolution_* fail). Echoes the helper's
+# bash/python decision so the test pins the VERDICT — correct under either default
+# (the expansion default + comparison flip together at cutover).
 _BASH_RESOLVE = (
-    r"""printf '%s' "${REBAR_COMPUTE:-bash}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]'"""
+    r"""_v=$(printf '%s' "${REBAR_COMPUTE:-python}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]'); """
+    r"""[ "$_v" != "bash" ] && echo python || echo bash"""
 )
 _MATRIX = ["", "python", "PYTHON", " Python ", "bash", "BASH", "py", "bogus", "1", "true"]
 
@@ -55,9 +58,10 @@ def test_switch_resolution_matches_bash_idiom(value: str, monkeypatch: pytest.Mo
     assert py_uses_python == bash_uses_python
 
 
-def test_switch_unset_defaults_bash(monkeypatch: pytest.MonkeyPatch):
+def test_switch_unset_defaults_python(monkeypatch: pytest.MonkeyPatch):
+    # Tier C default flipped to python on 2026-06-12 (rollback: REBAR_COMPUTE=bash).
     monkeypatch.delenv("REBAR_COMPUTE", raising=False)
-    assert _switch.resolve("REBAR_COMPUTE") == "bash"
+    assert _switch.resolve("REBAR_COMPUTE") == "python"
 
 
 # ───────────────────────────── fixtures ──────────────────────────────────────

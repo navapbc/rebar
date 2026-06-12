@@ -243,8 +243,11 @@ _ensure_initialized() {
 # the tier (the a93885ed/Tier-B pattern).
 _compute_python() {
     local _v
-    _v=$(printf '%s' "${REBAR_COMPUTE:-bash}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
-    [ "$_v" = "python" ]
+    # Default flipped to python on 2026-06-12 (mirrors rebar._switch). The
+    # expansion default and the comparison move together: unset/empty/unrecognized
+    # → python; only an explicit 'bash' selects the legacy path (the rollback lever).
+    _v=$(printf '%s' "${REBAR_COMPUTE:-python}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+    [ "$_v" != "bash" ]
 }
 
 if [ $# -lt 1 ]; then
