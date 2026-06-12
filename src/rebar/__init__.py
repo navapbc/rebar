@@ -342,10 +342,18 @@ def unlink(id1: str, id2: str, *, repo_root=None) -> None:
 
 
 def tag(ticket_id: str, tag: str, *, repo_root=None) -> None:
+    from rebar._commands import leaf
+
+    if _maybe_python_leaf(leaf.tag, ticket_id, tag, repo_root=repo_root, what="tag"):
+        return
     _ok(_run(["tag", ticket_id, tag], repo_root=repo_root), what="tag")
 
 
 def untag(ticket_id: str, tag: str, *, repo_root=None) -> None:
+    from rebar._commands import leaf
+
+    if _maybe_python_leaf(leaf.untag, ticket_id, tag, repo_root=repo_root, what="untag"):
+        return
     _ok(_run(["untag", ticket_id, tag], repo_root=repo_root), what="untag")
 
 

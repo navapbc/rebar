@@ -99,3 +99,23 @@ def test_library_python_path_rejects_bad_file_impact(rebar_repo: Path, monkeypat
     monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
     with pytest.raises(rebar.RebarError):
         rebar.set_file_impact(tid, [{"path": "x"}], repo_root=str(rebar_repo))
+
+
+def test_library_tag_roundtrip_python_path(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    tid = _new_ticket(rebar_repo)
+    monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
+    rebar.tag(tid, "area:api", repo_root=str(rebar_repo))
+    assert "area:api" in rebar.show_ticket(tid, repo_root=str(rebar_repo))["tags"]
+    rebar.untag(tid, "area:api", repo_root=str(rebar_repo))
+    assert "area:api" not in rebar.show_ticket(tid, repo_root=str(rebar_repo))["tags"]
+
+
+def test_library_tag_idempotent_python_path(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    tid = _new_ticket(rebar_repo)
+    monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
+    rebar.tag(tid, "dup:tag", repo_root=str(rebar_repo))
+    rebar.tag(tid, "dup:tag", repo_root=str(rebar_repo))  # idempotent — no second tag
+    tags = rebar.show_ticket(tid, repo_root=str(rebar_repo))["tags"]
+    assert tags.count("dup:tag") == 1
+    # untag of an absent tag is graceful (no raise)
+    rebar.untag(tid, "never:applied", repo_root=str(rebar_repo))

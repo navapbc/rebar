@@ -37,6 +37,8 @@ _REGISTRY: dict[str, _Cmd] = {
         2,
         "Usage: ticket set-verify-commands <ticket_id> <json_array>",
     ),
+    "tag": _Cmd(leaf.tag, 2, "Usage: ticket tag <ticket_id> <tag>"),
+    "untag": _Cmd(leaf.untag, 2, "Usage: ticket untag <ticket_id> <tag>"),
 }
 
 

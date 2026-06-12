@@ -81,8 +81,13 @@ def env_id(tracker: Path) -> str:
         return ""
 
 
-def author() -> str:
-    """Commit author name from git config, falling back to ``Unknown`` (bash parity)."""
+def author(fallback: str = "Unknown") -> str:
+    """Commit author name from git config, falling back to ``fallback`` (bash parity).
+
+    The fallback string differs by command: comment / file-impact / verify-commands
+    use ``Unknown``; the tag helpers use lowercase ``unknown``. Callers pass the
+    value their bash counterpart uses so a git-config-less environment matches.
+    """
     try:
         out = subprocess.run(
             ["git", "config", "user.name"],
@@ -95,7 +100,22 @@ def author() -> str:
             return name
     except OSError:
         pass
-    return "Unknown"
+    return fallback
+
+
+def current_tags(ticket_id: str, tracker: Path) -> list[str]:
+    """The compiled ``tags`` list for a ticket via the shared reducer (single source).
+
+    Mirrors the bash tag helpers, which reduce the ticket (``ticket_show``) to read
+    current tags before composing the next EDIT. Returns ``[]`` when the ticket has
+    no tags or cannot be reduced (the bash helpers swallow show failures too).
+    """
+    from rebar.reducer import reduce_ticket
+
+    try:
+        return list(reduce_ticket(str(tracker / ticket_id)).get("tags") or [])
+    except Exception:
+        return []
 
 
 def append_event(
@@ -105,6 +125,7 @@ def append_event(
     tracker: Path,
     *,
     repo_root=None,
+    author_fallback: str = "Unknown",
 ) -> None:
     """Compose an event and append it through the bash write seam.
 
@@ -122,7 +143,7 @@ def append_event(
         "uuid": uuid_str,
         "event_type": event_type,
         "env_id": env_id(tracker),
-        "author": author(),
+        "author": author(author_fallback),
         "data": data,
     }
 

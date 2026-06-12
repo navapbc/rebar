@@ -21,6 +21,7 @@ import json
 from rebar._commands._seam import (
     CommandError,
     append_event,
+    current_tags,
     require_id,
     require_not_ghost,
     tracker_dir,
@@ -54,6 +55,51 @@ def comment(ticket_id: str, body: str, *, repo_root=None) -> None:
     resolved = require_id(ticket_id, tracker)
     require_not_ghost(resolved, tracker)
     append_event(resolved, "COMMENT", {"body": body}, tracker, repo_root=repo_root)
+
+
+def tag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
+    """Add a tag via an EDIT event (mirrors ``ticket_tag`` → ``_tag_add``).
+
+    Idempotent: adding an already-present tag is a no-op (exit 0, no event). No
+    ghost check — matches the bash path, which resolves the id then tags.
+    """
+    tracker = tracker_dir(repo_root)
+    if not ticket_id or not tag_value:
+        raise CommandError("Error: ticket_id and tag must be non-empty")
+    resolved = require_id(ticket_id, tracker)
+    tags = current_tags(resolved, tracker)
+    if tag_value in tags:
+        return
+    append_event(
+        resolved,
+        "EDIT",
+        {"fields": {"tags": [*tags, tag_value]}},
+        tracker,
+        repo_root=repo_root,
+        author_fallback="unknown",
+    )
+
+
+def untag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
+    """Remove a tag via an EDIT event (mirrors ``ticket_untag`` → ``_tag_remove``).
+
+    Idempotent: removing an absent tag is a no-op (exit 0, no event).
+    """
+    tracker = tracker_dir(repo_root)
+    if not ticket_id or not tag_value:
+        raise CommandError("Error: ticket_id and tag must be non-empty")
+    resolved = require_id(ticket_id, tracker)
+    tags = current_tags(resolved, tracker)
+    if tag_value not in tags:
+        return
+    append_event(
+        resolved,
+        "EDIT",
+        {"fields": {"tags": [t for t in tags if t != tag_value]}},
+        tracker,
+        repo_root=repo_root,
+        author_fallback="unknown",
+    )
 
 
 def _validate_json_array(payload: str, label: str, required_keys: tuple[str, ...]):
