@@ -19,7 +19,13 @@ import sys
 import uuid as _uuid
 
 from rebar import _engine
-from rebar._commands._seam import append_event, CommandError, tracker_dir
+from rebar._commands._seam import (
+    append_event,
+    CommandError,
+    require_id,
+    require_not_ghost,
+    tracker_dir,
+)
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
 
@@ -216,4 +222,149 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
         else:
             print(f"Created ticket {tid}: {res['title']}")
         print(tid)
+    return 0
+
+
+_EDIT_FIELDS = ("title", "priority", "assignee", "ticket_type", "description", "tags", "parent")
+_EDIT_USAGE = (
+    "Usage: ticket edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] "
+    "[--ticket_type=VALUE] [--description=VALUE] [--tags=VALUE] [--parent=VALUE]"
+)
+
+
+def edit_core(ticket_id: str, fields: dict, *, repo_root=None) -> None:
+    """Validate fields and append an EDIT event (mirrors ``ticket_edit``).
+
+    Field guards: unknown-field reject, non-empty title/description, priority 0-4,
+    ticket_type enum, and the ``--parent`` cascade (``null`` detaches; else resolve
+    → exists → not-self → fail-closed status gate (open/in_progress only) → ancestor
+    cycle walk), mapping ``parent`` → ``parent_id`` in the event. Title gets the
+    U+2192→``->`` normalisation; numeric priority is stored as int.
+    """
+    from rebar.reducer import reduce_ticket
+
+    tracker = tracker_dir(repo_root)
+    for name in fields:
+        if name not in _EDIT_FIELDS:
+            raise CommandError(
+                f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}"
+            )
+    if not fields:
+        raise CommandError("Error: at least one --field=value pair is required")
+    if not (tracker / ".env-id").is_file():
+        raise CommandError("Error: ticket system not initialized. Run 'ticket init' first.")
+    resolved = require_id(ticket_id, tracker)
+    require_not_ghost(resolved, tracker)
+
+    out: dict = {}
+    for key, value in fields.items():
+        value = "" if value is None else str(value)
+        if key == "title":
+            if value == "":
+                raise CommandError(
+                    "Error: --title requires a non-empty value (empty values silently "
+                    "clobber the title; bug 4f50)"
+                )
+            out["title"] = value.replace("→", "->")
+        elif key == "description":
+            if value == "":
+                raise CommandError(
+                    "Error: --description requires a non-empty value (empty values "
+                    "silently clobber prior content; bug e78f-9f79)"
+                )
+            out["description"] = value
+        elif key == "priority":
+            if value not in ("0", "1", "2", "3", "4"):
+                raise CommandError(f"Error: invalid priority '{value}'. Must be 0-4")
+            out["priority"] = int(value)
+        elif key == "ticket_type":
+            if value not in _TYPES:
+                raise CommandError(
+                    f"Error: invalid ticket type '{value}'. Must be one of: bug, epic, story, task"
+                )
+            out["ticket_type"] = value
+        elif key == "parent":
+            out["parent_id"] = _resolve_new_parent(value, resolved, tracker, reduce_ticket)
+        else:  # assignee, tags
+            out[key] = value
+
+    append_event(resolved, "EDIT", {"fields": out}, tracker, repo_root=repo_root)
+
+
+def _resolve_new_parent(value: str, ticket_id: str, tracker, reduce_ticket) -> str:
+    """The ``--parent`` validation cascade; returns the resolved parent_id (or ""
+    for the ``null`` detach sentinel)."""
+    if value == "":
+        raise CommandError(
+            "Error: --parent requires a non-empty value (use --parent=null to detach)"
+        )
+    if value == "null":
+        return ""
+    new_parent = resolve_ticket_id(value, str(tracker))
+    if not new_parent or not (tracker / new_parent).is_dir():
+        raise CommandError(f"Error: parent ticket '{value}' does not exist")
+    if new_parent == ticket_id:
+        raise CommandError("Error: ticket cannot be its own parent")
+    status = (reduce_ticket(str(tracker / new_parent)) or {}).get("status", "") or ""
+    if status not in ("open", "in_progress"):
+        if status == "":
+            raise CommandError(
+                f"Error: cannot verify status of parent ticket '{new_parent}' — refusing "
+                f"to re-parent (fail-closed). Verify the ticket exists and is in an active "
+                f"state, then retry."
+            )
+        raise CommandError(
+            f"Error: cannot re-parent to {status} ticket '{new_parent}'. Reopen the parent "
+            f"first with: ticket transition {new_parent} {status} open"
+        )
+    walk_id, count = new_parent, 0
+    while walk_id and count < 64:
+        walk_parent = (reduce_ticket(str(tracker / walk_id)) or {}).get("parent_id", "") or ""
+        if not walk_parent or walk_parent == "None":
+            break
+        if walk_parent == ticket_id:
+            raise CommandError(
+                f"Error: cannot set parent — would create a cycle (ticket {ticket_id} is an "
+                f"ancestor of {new_parent})"
+            )
+        walk_id = walk_parent
+        count += 1
+    return new_parent
+
+
+def edit_cli(argv: list[str], *, repo_root=None) -> int:
+    """Dispatcher Python route for ``edit``: parse ticket_id + --field pairs."""
+    if len(argv) < 2:
+        print(_EDIT_USAGE, file=sys.stderr)
+        return 1
+    ticket_id, rest = argv[0], argv[1:]
+    fields: dict = {}
+    i, n = 0, len(rest)
+    while i < n:
+        arg = rest[i]
+        if arg.startswith("--") and "=" in arg:
+            name, val = arg[2:].split("=", 1)
+            if name not in _EDIT_FIELDS:
+                print(f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}", file=sys.stderr)
+                return 1
+            fields[name] = val
+            i += 1
+        elif arg.startswith("--"):
+            name = arg[2:]
+            if name not in _EDIT_FIELDS:
+                print(f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}", file=sys.stderr)
+                return 1
+            if i + 1 >= n:
+                print(f"Error: --{name} requires a value", file=sys.stderr)
+                return 1
+            fields[name] = rest[i + 1]
+            i += 2
+        else:
+            print(f"Error: unexpected argument '{arg}'", file=sys.stderr)
+            return 1
+    try:
+        edit_core(ticket_id, fields, repo_root=repo_root)
+    except CommandError as exc:
+        print(exc.message, file=sys.stderr)
+        return exc.returncode
     return 0

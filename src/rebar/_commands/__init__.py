@@ -50,6 +50,7 @@ _REGISTRY: dict[str, _Cmd] = {
 # exit code directly — the heavier event-composers (docs/bash-migration.md §4).
 _ARGV_REGISTRY: dict[str, Callable[[list[str]], int]] = {
     "create": composer.create_cli,
+    "edit": composer.edit_cli,
 }
 
 

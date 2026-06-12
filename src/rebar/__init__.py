@@ -339,13 +339,30 @@ def comment(ticket_id: str, body: str, *, repo_root=None) -> None:
 
 def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> None:
     """Edit ticket fields: title, priority, assignee, ticket_type, description, tags."""
-    args = ["edit", ticket_id]
+    normalized = {}
     for key, value in fields.items():
         if value is None:
             continue
         if key == "tags" and isinstance(value, (list, tuple)):
             value = ",".join(value)
-        args += [f"--{key}", str(value)]
+        normalized[key] = str(value)
+    from rebar import _switch
+
+    if _switch.leaf_writes_python():
+        from rebar._commands import composer
+        from rebar._commands._seam import CommandError
+
+        try:
+            composer.edit_core(ticket_id, normalized, repo_root=repo_root)
+        except CommandError as exc:
+            raise RebarError(
+                f"rebar edit failed (exit {exc.returncode}): {exc.message}",
+                returncode=exc.returncode, stderr=exc.message,
+            ) from None
+        return
+    args = ["edit", ticket_id]
+    for key, value in normalized.items():
+        args += [f"--{key}", value]
     _ok(_run(args, repo_root=repo_root), what="edit")
 
 

@@ -157,6 +157,34 @@ def test_library_create_python_parent_child(rebar_repo: Path, monkeypatch: pytes
     assert rebar.show_ticket(child, repo_root=str(rebar_repo))["parent_id"] == epic
 
 
+def test_library_edit_python_path(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    tid = _new_ticket(rebar_repo)
+    monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
+    rebar.edit_ticket(tid, title="renamed via python", priority=0, repo_root=str(rebar_repo))
+    state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
+    assert state["title"] == "renamed via python"
+    assert state["priority"] == 0
+
+
+def test_library_edit_python_reparent_and_detach(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
+    epic = rebar.create_ticket("epic", "edit-parent epic", repo_root=str(rebar_repo))
+    child = rebar.create_ticket("task", "edit-child", repo_root=str(rebar_repo))
+    rebar.edit_ticket(child, parent=epic, repo_root=str(rebar_repo))
+    assert rebar.show_ticket(child, repo_root=str(rebar_repo))["parent_id"] == epic
+    rebar.edit_ticket(child, parent="null", repo_root=str(rebar_repo))  # detach
+    assert not rebar.show_ticket(child, repo_root=str(rebar_repo)).get("parent_id")
+
+
+def test_library_edit_python_rejects_bad_priority_and_empty_title(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    tid = _new_ticket(rebar_repo)
+    monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
+    with pytest.raises(rebar.RebarError):
+        rebar.edit_ticket(tid, priority=99, repo_root=str(rebar_repo))
+    with pytest.raises(rebar.RebarError):
+        rebar.edit_ticket(tid, title="", repo_root=str(rebar_repo))
+
+
 def test_library_archive_status_gate_python_path(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
     tid = _new_ticket(rebar_repo)
     rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))  # open -> in_progress
