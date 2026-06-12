@@ -718,6 +718,14 @@ def _cmd_list_epics(argv: list[str], tracker: str) -> int:
     return 0
 
 
+def _cmd_next_batch(argv: list[str], tracker: str) -> int:
+    """Compute-heavy read (Tier C): the conflict-aware parallel batch selector.
+    Delegates to the faithful port; rendering/exit codes live there."""
+    from rebar._engine_support import next_batch
+
+    return next_batch.run(argv, tracker)
+
+
 _COMMANDS = {
     "show": _cmd_show,
     "list": _cmd_list,
@@ -725,6 +733,7 @@ _COMMANDS = {
     "ready": _cmd_ready,
     "search": _cmd_search,
     "list-epics": _cmd_list_epics,
+    "next-batch": _cmd_next_batch,
 }
 
 

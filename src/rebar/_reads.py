@@ -108,6 +108,19 @@ def ready(*, repo_root=None) -> Any:
     return ticket_reads.ready_states(tracker)
 
 
+def next_batch(epic_id: str, *, repo_root=None, limit: int = 0) -> dict:
+    """Conflict-aware parallel batch under an epic (Tier C, in-process). A missing
+    epic raises ``RebarError`` (the subprocess path's exit-1 contract)."""
+    from rebar._engine_support import next_batch as _nb
+
+    tracker = _tracker(repo_root)
+    _fresh(tracker)
+    try:
+        return _nb.next_batch_state(tracker, epic_id, limit=limit)
+    except ticket_reads.ReadError as exc:
+        raise _rebar_error(f"next-batch failed (exit 1): {exc.message}") from None
+
+
 def search(
     query: str,
     *,

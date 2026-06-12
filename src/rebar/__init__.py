@@ -423,7 +423,15 @@ def ready(*, repo_root=None) -> Any:
 def next_batch(epic_id: str, *, repo_root=None) -> dict:
     """Next parallel batch of unblocked tickets under an epic's hierarchy (JSON).
 
-    Still routed through the bash engine (the only read not yet in-process)."""
+    Tier C (``REBAR_COMPUTE``): the Python compute path runs in-process via the
+    shared read plumbing (like every other read); the default ``bash`` path still
+    subprocesses the legacy orchestrator until the post-soak flip."""
+    from rebar._switch import uses_python
+
+    if uses_python("REBAR_COMPUTE"):
+        from rebar import _reads
+
+        return _reads.next_batch(epic_id, repo_root=repo_root)
     return _json(_run(["next-batch", epic_id, "--output", "json"], repo_root=repo_root), what="next-batch")
 
 

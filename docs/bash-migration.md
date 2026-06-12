@@ -190,6 +190,24 @@ release of flipped defaults; each retired suite translated to pytest.
 
 ## 5. Tier C — compute-heavy read-side bash
 
+> **Progress (2026-06-12).** `list-epics` retired via deprecation (worm-burr-fly).
+> **`next-batch` ported behind `REBAR_COMPUTE`** (sure-beech-taunt): the two bash
+> heredocs are now `rebar._engine_support.next_batch` (selection/render/CLI) +
+> `next_batch_files` (the text→file-path heuristic, split on its own seam),
+> reusing `rebar.reducer`/`rebar.graph` + the shared `list_states` read path —
+> the library's last subprocessing read is now in-process. Dispatcher routes via
+> the `_compute_python` bash helper (the Tier B `_leaf_writes_python` pattern),
+> pinned to `rebar._switch` by `tests/interfaces/test_compute_parity` cases in
+> `test_next_batch_compute.py`. Dual-run is **byte-identical** across both switch
+> values for every deterministic scenario. **One surfaced deviation:** the bash
+> original's `conflict_file`/`conflict_with` *diagnostic* is non-deterministic —
+> it iterates an unordered `set`, so when a candidate overlaps on >1 file the
+> named file coin-flips per run under hash randomization. The port iterates
+> `sorted()`, making the diagnostic byte-stable (the selector's documented
+> "deterministic" contract). Batch **composition** is unaffected and still matches
+> bash exactly (pinned by `test_multi_overlap_batch_composition_matches_bash`).
+> Default stays `bash` pending the flip + soak. **Remaining: `validate`.**
+
 **Commands**: `next-batch` (`ticket-next-batch.sh`, ~954 LOC),
 `validate` (`validate-issues.sh`, ~945 LOC), `list-epics`
 (`ticket-list-epics.sh`, ~453 LOC); riders at the same shape:
