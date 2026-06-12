@@ -27,20 +27,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# REBAR_LEAF_WRITES — Tier B kill-switch (docs/bash-migration.md §3). Ported
-# leaf-write commands route through the Python rebar._commands implementation
-# (ticket-commands.py) unless this is explicitly set to "bash". Default flipped to
-# "python" on 2026-06-11 after the soak (session-logs/2026-06-11-tier-b-soak.md);
-# "bash" is the per-process rollback lever. Parsing mirrors rebar._switch.resolve
-# (the single source of truth, pinned by a parity test) and the REBAR_PUSH idiom:
-# case-insensitive, whitespace-stripped; an unrecognized value resolves to the
-# default (python) so an env typo never silently drops to the retiring bash path.
-_leaf_writes_python() {
-    local _v
-    _v=$(printf '%s' "${REBAR_LEAF_WRITES:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
-    [ "$_v" != "bash" ]
-}
-
 # Shared cross-environment reconvergence helper (_reconverge_tickets). Self-
 # contained; see ticket-sync.sh for the Concurrency Doctrine (§0) rationale.
 # shellcheck source=/dev/null
@@ -296,13 +282,7 @@ case "$subcommand" in
         ;;
     create)
         _ensure_initialized
-        if _leaf_writes_python; then
-            exec python3 "$SCRIPT_DIR/ticket-commands.py" create "$@"
-        fi
-        # shellcheck source=/dev/null
-        source "$SCRIPT_DIR/ticket-lib-api.sh"
-        _ticketlib_dispatch ticket_create "$@"
-        exit $?
+        exec python3 "$SCRIPT_DIR/ticket-commands.py" create "$@"
         ;;
     show)
         # Single-source read: ticket_reads.py (story 23d2-e0f3). Auto-init only
@@ -376,13 +356,7 @@ case "$subcommand" in
         ;;
     comment)
         _ensure_initialized
-        if _leaf_writes_python; then
-            exec python3 "$SCRIPT_DIR/ticket-commands.py" comment "$@"
-        fi
-        # shellcheck source=/dev/null
-        source "$SCRIPT_DIR/ticket-lib-api.sh"
-        _ticketlib_dispatch ticket_comment "$@"
-        exit $?
+        exec python3 "$SCRIPT_DIR/ticket-commands.py" comment "$@"
         ;;
     compact)
         _ensure_initialized
@@ -433,27 +407,11 @@ case "$subcommand" in
         ;;
     link)
         _ensure_initialized
-        if _leaf_writes_python; then
-            exec python3 "$SCRIPT_DIR/ticket-commands.py" link "$@"
-        fi
-        # REVIEW-DEFENSE: link routes to ticket-graph.py (not ticket-link.sh) by design.
-        # ticket-graph.py's add_dependency() performs link + cycle detection in one atomic
-        # operation, which ticket-link.sh does not. unlink intentionally stays on
-        # ticket-link.sh because its existing unlink logic correctly computes net-effective
-        # state and writes UNLINK events in the same format that ticket-graph.py reads.
-        # Both scripts write LINK/UNLINK events to the same append-only event log, so
-        # link and unlink remain consistent across the two implementations.
-        # shellcheck source=/dev/null
-        source "$SCRIPT_DIR/ticket-lib-api.sh"
-        _ticketlib_dispatch ticket_link "$@"
-        exit $?
+        exec python3 "$SCRIPT_DIR/ticket-commands.py" link "$@"
         ;;
     unlink)
         _ensure_initialized
-        if _leaf_writes_python; then
-            exec python3 "$SCRIPT_DIR/ticket-commands.py" unlink "$@"
-        fi
-        exec bash "$SCRIPT_DIR/ticket-link.sh" unlink "$@"
+        exec python3 "$SCRIPT_DIR/ticket-commands.py" unlink "$@"
         ;;
     deps)
         # Single-source read: ticket_reads.py (story 23d2-e0f3). Cycle-detection
@@ -467,10 +425,7 @@ case "$subcommand" in
         if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then
             _ensure_initialized
         fi
-        if _leaf_writes_python; then
-            exec python3 "$SCRIPT_DIR/ticket-commands.py" revert "$@"
-        fi
-        exec bash "$SCRIPT_DIR/ticket-revert.sh" "$@"
+        exec python3 "$SCRIPT_DIR/ticket-commands.py" revert "$@"
         ;;
     bridge-status)
         # Skip _ensure_initialized when TICKETS_TRACKER_DIR is set (test environments
@@ -482,13 +437,7 @@ case "$subcommand" in
         ;;
     edit)
         _ensure_initialized
-        if _leaf_writes_python; then
-            exec python3 "$SCRIPT_DIR/ticket-commands.py" edit "$@"
-        fi
-        # shellcheck source=/dev/null
-        source "$SCRIPT_DIR/ticket-lib-api.sh"
-        _ticketlib_dispatch ticket_edit "$@"
-        exit $?
+        exec python3 "$SCRIPT_DIR/ticket-commands.py" edit "$@"
         ;;
     exists)
         if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized; fi
@@ -499,23 +448,11 @@ case "$subcommand" in
         ;;
     tag)
         _ensure_initialized
-        if _leaf_writes_python; then
-            exec python3 "$SCRIPT_DIR/ticket-commands.py" tag "$@"
-        fi
-        # shellcheck source=/dev/null
-        source "$SCRIPT_DIR/ticket-lib-api.sh"
-        _ticketlib_dispatch ticket_tag "$@"
-        exit $?
+        exec python3 "$SCRIPT_DIR/ticket-commands.py" tag "$@"
         ;;
     untag)
         _ensure_initialized
-        if _leaf_writes_python; then
-            exec python3 "$SCRIPT_DIR/ticket-commands.py" untag "$@"
-        fi
-        # shellcheck source=/dev/null
-        source "$SCRIPT_DIR/ticket-lib-api.sh"
-        _ticketlib_dispatch ticket_untag "$@"
-        exit $?
+        exec python3 "$SCRIPT_DIR/ticket-commands.py" untag "$@"
         ;;
     validate)
         # REVIEW-DEFENSE: _ensure_initialized is intentionally omitted here.
@@ -600,13 +537,7 @@ case "$subcommand" in
         ;;
     archive)
         _ensure_initialized
-        if _leaf_writes_python; then
-            exec python3 "$SCRIPT_DIR/ticket-commands.py" archive "$@"
-        fi
-        # shellcheck source=/dev/null
-        source "$SCRIPT_DIR/ticket-lib-api.sh"
-        _ticketlib_dispatch ticket_archive "$@"
-        exit $?
+        exec python3 "$SCRIPT_DIR/ticket-commands.py" archive "$@"
         ;;
     delete)
         _ensure_initialized
@@ -617,13 +548,7 @@ case "$subcommand" in
         ;;
     set-file-impact)
         _ensure_initialized
-        if _leaf_writes_python; then
-            exec python3 "$SCRIPT_DIR/ticket-commands.py" set-file-impact "$@"
-        fi
-        # shellcheck source=/dev/null
-        source "$SCRIPT_DIR/ticket-lib-api.sh"
-        _ticketlib_dispatch ticket_set_file_impact "$@"
-        exit $?
+        exec python3 "$SCRIPT_DIR/ticket-commands.py" set-file-impact "$@"
         ;;
     get-file-impact)
         _ensure_initialized
@@ -634,13 +559,7 @@ case "$subcommand" in
         ;;
     set-verify-commands)
         _ensure_initialized
-        if _leaf_writes_python; then
-            exec python3 "$SCRIPT_DIR/ticket-commands.py" set-verify-commands "$@"
-        fi
-        # shellcheck source=/dev/null
-        source "$SCRIPT_DIR/ticket-lib-api.sh"
-        _ticketlib_dispatch ticket_set_verify_commands "$@"
-        exit $?
+        exec python3 "$SCRIPT_DIR/ticket-commands.py" set-verify-commands "$@"
         ;;
     get-verify-commands)
         _ensure_initialized

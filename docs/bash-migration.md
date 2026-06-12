@@ -135,16 +135,20 @@ individually by being routed under the switch only once ported):
 
 ## 4. Tier B — leaf writes
 
-> **Status: default flipped to `python` (2026-06-11).** All eleven leaf-write
-> commands are ported to `rebar._commands` and reached in-process by the dispatcher
-> (→ `ticket-commands.py`) and `rebar.__init__` (library/MCP): `comment`,
-> `set-file-impact`, `set-verify-commands`, `tag`, `untag`, `archive`, `create`,
-> `edit`, `link`, `unlink`, `revert`. Writes route through the single seam
-> (`ticket-append-event.sh`). Soak evidence:
-> session-logs/2026-06-11-tier-b-soak.md (full dual-run parity, 240-test interface
-> tier, 77/77 live full-surface probe, fsck clean). The **default is now
-> `python`**; `REBAR_LEAF_WRITES=bash` is the per-process rollback lever until
-> retirement (step 7) deletes the switch + the bash leaf bodies.
+> **Status: DONE — Tier B retired (2026-06-11).** All eleven leaf-write commands
+> (`comment`, `set-file-impact`, `set-verify-commands`, `tag`, `untag`, `archive`,
+> `create`, `edit`, `link`, `unlink`, `revert`) are implemented in
+> `rebar._commands` and reached in-process by the dispatcher (→
+> `ticket-commands.py`) and `rebar.__init__` (library/MCP); writes route through
+> the single seam (`ticket-append-event.sh`). After the soak (full dual-run parity,
+> 229-test interface tier, 77/77 live full-surface probe, fsck clean) the default
+> flipped to python (step 5) and the switch + the 9 bash `ticket_*` leaf functions
+> in `ticket-lib-api.sh` (~1260 LOC) + the dual-run wiring were deleted (step 7).
+> **Python is now the sole leaf-write implementation.** The leaf `.sh` suites stay
+> as python characterization tests (they exercise the dispatcher, now python); the
+> dead standalone `ticket-*.sh` wrappers + the "zero standalone shell harness"
+> end-state are deferred to Tier E (per §7). The reconciler's own bash event-write
+> path (Rec 7a) is separate from these dispatcher/library leaf writes.
 
 
 **Commands**: `comment`, `tag`/`untag`, `set-file-impact`,

@@ -102,45 +102,24 @@ def create_ticket(
     returns ``{"id": <16-hex>, "alias": <human alias>}`` so agents don't need a
     second ``show`` to learn the alias (WS5e).
     """
-    args = ["create", ticket_type, title, "--output", "json"]
-    if parent:
-        args += ["--parent", parent]
-    if priority is not None:
-        args += ["--priority", str(priority)]
-    if assignee:
-        args += ["--assignee", assignee]
-    if description is not None:
-        args += ["--description", description]
-    if tags:
-        args += ["--tags", ",".join(tags)]
-    # Tier B Python path (REBAR_LEAF_WRITES=python): compose in-process via the
-    # shared create_core (same validation/alias/event), bypassing the subprocess.
-    from rebar import _switch
+    # Composed in-process via the shared create_core (validation/alias/CREATE
+    # event); the bash create path was retired with the Tier B cutover.
+    from rebar._commands import composer
+    from rebar._commands._seam import CommandError
 
-    if _switch.leaf_writes_python():
-        from rebar._commands import composer
-        from rebar._commands._seam import CommandError
-
-        try:
-            res = composer.create_core(
-                ticket_type, title, parent=parent, priority=priority, assignee=assignee,
-                description=description, tags=tags, repo_root=repo_root,
-            )
-        except CommandError as exc:
-            raise RebarError(
-                f"rebar create failed (exit {exc.returncode}): {exc.message}",
-                returncode=exc.returncode, stderr=exc.message,
-            ) from None
-        if not return_alias:
-            return res["id"]
-        return {"id": res["id"], "alias": res["alias"] or ""}
-    # The engine emits {id, alias, title} as one JSON object under --output json,
-    # so we read the alias straight from create (no second show() subprocess).
-    data = _json(_run(args, repo_root=repo_root), what="create")
-    ticket_id = data.get("id", "")
+    try:
+        res = composer.create_core(
+            ticket_type, title, parent=parent, priority=priority, assignee=assignee,
+            description=description, tags=tags, repo_root=repo_root,
+        )
+    except CommandError as exc:
+        raise RebarError(
+            f"rebar create failed (exit {exc.returncode}): {exc.message}",
+            returncode=exc.returncode, stderr=exc.message,
+        ) from None
     if not return_alias:
-        return ticket_id
-    return {"id": ticket_id, "alias": data.get("alias") or ""}
+        return res["id"]
+    return {"id": res["id"], "alias": res["alias"] or ""}
 
 
 def transition(
@@ -277,11 +256,7 @@ def set_file_impact(ticket_id: str, impact, *, repo_root=None) -> None:
     payload = impact if isinstance(impact, str) else _json.dumps(impact)
     from rebar._commands import leaf
 
-    if _maybe_python_leaf(
-        leaf.set_file_impact, ticket_id, payload, repo_root=repo_root, what="set-file-impact"
-    ):
-        return
-    _ok(_run(["set-file-impact", ticket_id, payload], repo_root=repo_root), what="set-file-impact")
+    _python_leaf(leaf.set_file_impact, ticket_id, payload, repo_root=repo_root, what="set-file-impact")
 
 
 def get_verify_commands(ticket_id: str, *, repo_root=None) -> list:
@@ -297,25 +272,16 @@ def set_verify_commands(ticket_id: str, commands, *, repo_root=None) -> None:
     payload = commands if isinstance(commands, str) else _json.dumps(commands)
     from rebar._commands import leaf
 
-    if _maybe_python_leaf(
-        leaf.set_verify_commands, ticket_id, payload, repo_root=repo_root, what="set-verify-commands"
-    ):
-        return
-    _ok(_run(["set-verify-commands", ticket_id, payload], repo_root=repo_root), what="set-verify-commands")
+    _python_leaf(leaf.set_verify_commands, ticket_id, payload, repo_root=repo_root, what="set-verify-commands")
 
 
-def _maybe_python_leaf(fn, *args, repo_root, what: str) -> bool:
-    """Run a ported Tier B leaf write in-process when REBAR_LEAF_WRITES=python.
+def _python_leaf(fn, *args, repo_root, what: str) -> None:
+    """Run a Tier B leaf write in-process — the sole path since the cutover.
 
-    Returns True if the Python path handled it; False to fall through to the bash
-    subprocess. A command failure is mapped onto RebarError so the exit-code
-    contract matches the subprocess path (docs/bash-migration.md §2: the switch is
-    checked at every interface — dispatcher for the CLI, here for library/MCP).
+    Tier B retired its kill-switch after the soak (docs/bash-migration.md §4); the
+    library/MCP write surface now calls ``rebar._commands`` directly. A command
+    failure is mapped onto RebarError so the exit-code contract is unchanged.
     """
-    from rebar import _switch
-
-    if not _switch.leaf_writes_python():
-        return False
     from rebar._commands._seam import CommandError
 
     try:
@@ -326,15 +292,12 @@ def _maybe_python_leaf(fn, *args, repo_root, what: str) -> bool:
             returncode=exc.returncode,
             stderr=exc.message,
         ) from None
-    return True
 
 
 def comment(ticket_id: str, body: str, *, repo_root=None) -> None:
     from rebar._commands import leaf
 
-    if _maybe_python_leaf(leaf.comment, ticket_id, body, repo_root=repo_root, what="comment"):
-        return
-    _ok(_run(["comment", ticket_id, body], repo_root=repo_root), what="comment")
+    _python_leaf(leaf.comment, ticket_id, body, repo_root=repo_root, what="comment")
 
 
 def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> None:
@@ -346,24 +309,9 @@ def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> None:
         if key == "tags" and isinstance(value, (list, tuple)):
             value = ",".join(value)
         normalized[key] = str(value)
-    from rebar import _switch
+    from rebar._commands import composer
 
-    if _switch.leaf_writes_python():
-        from rebar._commands import composer
-        from rebar._commands._seam import CommandError
-
-        try:
-            composer.edit_core(ticket_id, normalized, repo_root=repo_root)
-        except CommandError as exc:
-            raise RebarError(
-                f"rebar edit failed (exit {exc.returncode}): {exc.message}",
-                returncode=exc.returncode, stderr=exc.message,
-            ) from None
-        return
-    args = ["edit", ticket_id]
-    for key, value in normalized.items():
-        args += [f"--{key}", value]
-    _ok(_run(args, repo_root=repo_root), what="edit")
+    _python_leaf(composer.edit_core, ticket_id, normalized, repo_root=repo_root, what="edit")
 
 
 def link(id1: str, id2: str, relation: str, *, repo_root=None) -> None:
@@ -372,63 +320,36 @@ def link(id1: str, id2: str, relation: str, *, repo_root=None) -> None:
     ``relation`` must be one of the six canonical relations: blocks, depends_on,
     relates_to, duplicates, supersedes, discovered_from.
     """
-    from rebar import _switch
+    from rebar._commands import composer
 
-    if _switch.leaf_writes_python():
-        from rebar._commands import composer
-        from rebar._commands._seam import CommandError
+    def _link(i, j, rel, *, repo_root):
+        composer.link_core(i, j, rel, repo_root=repo_root, quiet=True)
 
-        try:
-            composer.link_core(id1, id2, relation, repo_root=repo_root, quiet=True)
-        except CommandError as exc:
-            raise RebarError(
-                f"rebar link failed (exit {exc.returncode}): {exc.message}",
-                returncode=exc.returncode, stderr=exc.message,
-            ) from None
-        return
-    _ok(_run(["link", id1, id2, relation], repo_root=repo_root), what="link")
+    _python_leaf(_link, id1, id2, relation, repo_root=repo_root, what="link")
 
 
 def unlink(id1: str, id2: str, *, repo_root=None) -> None:
-    from rebar import _switch
+    from rebar._commands import unlink as _unlink_cmd
 
-    if _switch.leaf_writes_python():
-        from rebar._commands import unlink as _unlink_cmd
-        from rebar._commands._seam import CommandError
-
-        try:
-            _unlink_cmd.unlink_core(id1, id2, repo_root=repo_root)
-        except CommandError as exc:
-            raise RebarError(
-                f"rebar unlink failed (exit {exc.returncode}): {exc.message}",
-                returncode=exc.returncode, stderr=exc.message,
-            ) from None
-        return
-    _ok(_run(["unlink", id1, id2], repo_root=repo_root), what="unlink")
+    _python_leaf(_unlink_cmd.unlink_core, id1, id2, repo_root=repo_root, what="unlink")
 
 
 def tag(ticket_id: str, tag: str, *, repo_root=None) -> None:
     from rebar._commands import leaf
 
-    if _maybe_python_leaf(leaf.tag, ticket_id, tag, repo_root=repo_root, what="tag"):
-        return
-    _ok(_run(["tag", ticket_id, tag], repo_root=repo_root), what="tag")
+    _python_leaf(leaf.tag, ticket_id, tag, repo_root=repo_root, what="tag")
 
 
 def untag(ticket_id: str, tag: str, *, repo_root=None) -> None:
     from rebar._commands import leaf
 
-    if _maybe_python_leaf(leaf.untag, ticket_id, tag, repo_root=repo_root, what="untag"):
-        return
-    _ok(_run(["untag", ticket_id, tag], repo_root=repo_root), what="untag")
+    _python_leaf(leaf.untag, ticket_id, tag, repo_root=repo_root, what="untag")
 
 
 def archive(ticket_id: str, *, repo_root=None) -> None:
     from rebar._commands import leaf
 
-    if _maybe_python_leaf(leaf.archive, ticket_id, repo_root=repo_root, what="archive"):
-        return
-    _ok(_run(["archive", ticket_id], repo_root=repo_root), what="archive")
+    _python_leaf(leaf.archive, ticket_id, repo_root=repo_root, what="archive")
 
 
 def compact(ticket_id: str | None = None, *, repo_root=None) -> None:

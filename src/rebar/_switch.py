@@ -25,13 +25,12 @@ import sys
 # ``python`` here in one commit (the switch is retained as the rollback lever
 # until the tier is retired, when its entry is deleted).
 #
-# Tier B (``REBAR_LEAF_WRITES``) flipped to ``python`` on 2026-06-11 after the
-# soak documented in session-logs/2026-06-11-tier-b-soak.md (full dual-run parity,
-# 240-test interface tier, 77/77 live full-surface probe, fsck clean). Roll back a
-# single process with ``REBAR_LEAF_WRITES=bash``; revert this default by changing
-# the value back. The dispatcher's ``_leaf_writes_python`` fallback mirrors this.
+# Tier B (``REBAR_LEAF_WRITES``) was retired on 2026-06-11: after the soak
+# (full dual-run parity, 240-test interface tier, 77/77 live full-surface probe,
+# fsck clean) the default flipped to python and then the switch + bash leaf bodies
+# were deleted — Python is now the sole leaf-write implementation. The remaining
+# entries gate the tiers still to come.
 _TIERS: dict[str, str] = {
-    "REBAR_LEAF_WRITES": "python",  # Tier B — leaf writes (flipped; bash = rollback)
     "REBAR_COMPUTE": "bash",  # Tier C — compute-heavy reads
     "REBAR_WRITE_CORE": "bash",  # Tier D — write/sync core
 }
@@ -67,8 +66,3 @@ def resolve(switch: str) -> str:
 def uses_python(switch: str) -> bool:
     """True when the named tier switch selects the Python implementation."""
     return resolve(switch) == "python"
-
-
-def leaf_writes_python() -> bool:
-    """True when Tier B (``REBAR_LEAF_WRITES``) selects the Python leaf-write path."""
-    return uses_python("REBAR_LEAF_WRITES")

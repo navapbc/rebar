@@ -1,64 +1,19 @@
-"""Tier B (REBAR_LEAF_WRITES) parity tests — docs/bash-migration.md §3/§4.
+"""Tier B leaf-write behavioral tests — docs/bash-migration.md §4.
 
-Two guarantees:
-
-1. **Switch-resolution parity.** ``rebar._switch.resolve`` is the single source of
-   truth for parsing ``REBAR_LEAF_WRITES``; the bash dispatcher's
-   ``_leaf_writes_python`` helper must resolve every value to the same bash/python
-   verdict (it uses the identical ``tr`` lower+strip idiom, the ``REBAR_PUSH``
-   pattern). We pin them against a matrix including typos and mixed case.
-2. **Library in-process Python path.** With ``REBAR_LEAF_WRITES=python`` the ported
-   leaf writes (comment / set_file_impact / set_verify_commands) go through
-   ``rebar._commands`` + the bash append seam and produce state identical to the
-   bash path, read back via ``show_ticket``.
+Tier B was cut over (default flipped to python) and then retired (switch + bash
+leaf bodies deleted) on 2026-06-11, so ``rebar._commands`` is now the sole
+leaf-write implementation. These tests assert the in-process write path for every
+ported command produces the expected state, read back via ``show_ticket`` — the
+characterization that outlived the bash second implementation.
 """
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
 
 import rebar
-from rebar import _switch
-
-# The exact body the dispatcher's _leaf_writes_python runs (default flipped to
-# python 2026-06-11: python unless an explicit "bash"). Kept here so the parity
-# test pins the dispatcher's parse to _switch.resolve.
-_BASH_RESOLVE = (
-    r"""_v=$(printf '%s' "${REBAR_LEAF_WRITES:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]'); [ "$_v" != "bash" ] && echo python || echo bash"""
-)
-
-_MATRIX = ["", "python", "PYTHON", " Python ", "bash", "BASH", "py", "bogus", "1", "true"]
-
-
-@pytest.mark.parametrize("value", _MATRIX)
-def test_switch_resolution_matches_bash_idiom(value: str, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("REBAR_LEAF_WRITES", value)
-    py_uses_python = _switch.resolve("REBAR_LEAF_WRITES") == "python"
-    out = subprocess.run(
-        ["bash", "-c", _BASH_RESOLVE],
-        env={"REBAR_LEAF_WRITES": value, "PATH": "/usr/bin:/bin:/usr/local/bin"},
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    bash_uses_python = out == "python"
-    assert py_uses_python == bash_uses_python
-
-
-def test_switch_unset_defaults_python(monkeypatch: pytest.MonkeyPatch):
-    # Tier B flipped 2026-06-11: the default is now python; bash is the rollback.
-    monkeypatch.delenv("REBAR_LEAF_WRITES", raising=False)
-    assert _switch.resolve("REBAR_LEAF_WRITES") == "python"
-    assert _switch.leaf_writes_python() is True
-
-
-def test_switch_explicit_bash_is_rollback(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("REBAR_LEAF_WRITES", "bash")
-    assert _switch.resolve("REBAR_LEAF_WRITES") == "bash"
-    assert _switch.leaf_writes_python() is False
 
 
 def _new_ticket(repo: Path) -> str:

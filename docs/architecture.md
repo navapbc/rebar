@@ -145,7 +145,7 @@ report runs in CI (`.github/workflows/test.yml`) so new offenders surface in PRs
 | File | LOC | Remedy |
 |------|----:|--------|
 | ~~`rebar_reconciler/applier.py`~~ | ~~3480~~ → 776 | ✅ `tangly-abbey-smelt`: split into 10 cohesive modules (inbound_translate/pass_io/rebar_id_audit/apply_base/batch_dispatch/apply_outbound/apply_inbound/typed_dispatch/apply_planning + applier facade) |
-| `_engine/ticket-lib-api.sh` | ~2370 | retire via strangler-fig — ticket `adult-oxide-slave` |
+| `_engine/ticket-lib-api.sh` | ~2370 → 1109 | Tier B retired the 9 leaf-write functions; the remainder is read/compute, retiring via Tier C — `adult-oxide-slave` |
 | `rebar_reconciler/acli.py` | ~2180 | split the Jira-client (transport/REST/graph mixins) vs field/ADF concerns — `tangly-abbey-smelt` |
 | `_engine/ticket-lib.sh` | ~2000 | retire via strangler-fig — `adult-oxide-slave` |
 | `rebar_reconciler/reconcile.py` | ~1320 | split orchestration vs pass-driver seams |
