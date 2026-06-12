@@ -153,18 +153,14 @@ test_ticketlib_api_sourceability_strict_mode
 # Prints the function's stdout. Exits non-zero if the function is undefined or
 # fails. RED tests for unimplemented functions hit the "command not found" path.
 _invoke_lib_op() {
+    # Tier B retired the bash ticket_* leaf functions (now in rebar._commands).
+    # Characterize the live command path through the dispatcher, which routes to the
+    # Python implementation. Maps ticket_set_file_impact -> set-file-impact, etc.
     local op="$1"
     shift
-    TICKET_LIB_API="$TICKET_LIB_API" bash -c '
-        # shellcheck source=/dev/null
-        source "$TICKET_LIB_API" || exit 97
-        op="$1"
-        shift
-        if ! declare -f "$op" >/dev/null 2>&1; then
-            exit 98
-        fi
-        "$op" "$@"
-    ' _invoke_lib_op "$op" "$@"
+    local sub="${op#ticket_}"
+    sub="${sub//_/-}"
+    bash "$TICKET_SCRIPT" "$sub" "$@"
 }
 
 # ── Test 4: ticket_tag via library ────────────────────────────────────────────

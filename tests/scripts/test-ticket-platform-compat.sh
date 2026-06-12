@@ -45,18 +45,13 @@ _make_test_repo() {
 # ── Helper: source ticket-lib-api.sh in an isolated subshell, run an op ──────
 # Returns stdout from op; exits non-zero on source failure or op failure.
 _invoke_lib_op() {
+    # Tier B retired the bash ticket_* leaf functions (now in rebar._commands).
+    # Characterize the live command path through the dispatcher (Python impl).
     local op="$1"
     shift
-    TICKET_LIB_API="$TICKET_LIB_API" bash -c '
-        # shellcheck source=/dev/null
-        source "$TICKET_LIB_API" || exit 97
-        op="$1"
-        shift
-        if ! declare -f "$op" >/dev/null 2>&1; then
-            exit 98
-        fi
-        "$op" "$@"
-    ' _invoke_lib_op "$op" "$@"
+    local sub="${op#ticket_}"
+    sub="${sub//_/-}"
+    bash "$TICKET_SCRIPT" "$sub" "$@"
 }
 
 # ── Helper: extract field from ticket JSON output via python3 ─────────────────
@@ -208,21 +203,15 @@ test_flock_fallback_comment_succeeds() {
     # If the fallback is implemented, the comment write succeeds.
     # If not implemented, the write either fails (exits non-zero) or uses the flock
     # binary directly and the test checks that the result is identical.
+    # REBAR_FORCE_MKDIR_LOCK=1 forces the mkdir-fallback write core (the seam's
+    # _flock_stage_commit honors it) — the dispatcher equivalent of the retired
+    # _ticketlib_has_flock=0 override, against the live (python) command path.
     local exit_code=0
     (
         cd "$repo" || exit 1
-        # shellcheck disable=SC2030,SC2031
-        export _TICKET_TEST_NO_SYNC=1
-        # shellcheck disable=SC2030,SC2031
-        export TICKETS_TRACKER_DIR="$repo/.tickets-tracker"
-        TICKET_LIB_API="$TICKET_LIB_API" bash -c '
-            # shellcheck source=/dev/null
-            source "$TICKET_LIB_API" || exit 97
-            # Force flock fallback path
-            _ticketlib_has_flock=0
-            ticket_comment "$1" "fallback test body"
-        ' _subshell "$ticket_id" >/dev/null 2>&1
-    ) || exit_code=$?
+        _TICKET_TEST_NO_SYNC=1 TICKETS_TRACKER_DIR="$repo/.tickets-tracker" \
+            REBAR_FORCE_MKDIR_LOCK=1 bash "$TICKET_SCRIPT" comment "$ticket_id" "fallback test body"
+    ) >/dev/null 2>&1 || exit_code=$?
 
     # After a successful write, ticket_show must include the comment body.
     local show_output
@@ -255,16 +244,8 @@ test_flock_fallback_create_succeeds() {
     local created_id
     created_id=$(
         cd "$repo" || exit 1
-        # shellcheck disable=SC2030,SC2031
-        export _TICKET_TEST_NO_SYNC=1
-        # shellcheck disable=SC2030,SC2031
-        export TICKETS_TRACKER_DIR="$repo/.tickets-tracker"
-        TICKET_LIB_API="$TICKET_LIB_API" bash -c '
-            # shellcheck source=/dev/null
-            source "$TICKET_LIB_API" || exit 97
-            _ticketlib_has_flock=0
-            ticket_create task "flock fallback create test" | tail -1
-        ' 2>/dev/null
+        _TICKET_TEST_NO_SYNC=1 TICKETS_TRACKER_DIR="$repo/.tickets-tracker" \
+            REBAR_FORCE_MKDIR_LOCK=1 bash "$TICKET_SCRIPT" create task "flock fallback create test" 2>/dev/null | tail -1
     ) || true
 
     if [ -z "$created_id" ]; then
@@ -300,17 +281,9 @@ test_flock_fallback_tag_succeeds() {
 
     (
         cd "$repo" || exit 1
-        # shellcheck disable=SC2030,SC2031
-        export _TICKET_TEST_NO_SYNC=1
-        # shellcheck disable=SC2030,SC2031
-        export TICKETS_TRACKER_DIR="$repo/.tickets-tracker"
-        TICKET_LIB_API="$TICKET_LIB_API" bash -c '
-            # shellcheck source=/dev/null
-            source "$TICKET_LIB_API" || exit 97
-            _ticketlib_has_flock=0
-            ticket_tag "$1" flock-fallback-label
-        ' _subshell "$ticket_id" >/dev/null 2>&1
-    ) || true
+        _TICKET_TEST_NO_SYNC=1 TICKETS_TRACKER_DIR="$repo/.tickets-tracker" \
+            REBAR_FORCE_MKDIR_LOCK=1 bash "$TICKET_SCRIPT" tag "$ticket_id" flock-fallback-label
+    ) >/dev/null 2>&1 || true
 
     local show_output
     show_output=$(cd "$repo" && _TICKET_TEST_NO_SYNC=1 bash "$TICKET_SCRIPT" show "$ticket_id" 2>/dev/null) || true
@@ -349,30 +322,16 @@ test_flock_fallback_output_identical() {
     local id_a
     id_a=$(
         cd "$repo_a" || exit 1
-        # shellcheck disable=SC2030,SC2031
-        export _TICKET_TEST_NO_SYNC=1
-        # shellcheck disable=SC2030,SC2031
-        export TICKETS_TRACKER_DIR="$repo_a/.tickets-tracker"
-        TICKET_LIB_API="$TICKET_LIB_API" bash -c '
-            source "$TICKET_LIB_API" || exit 97
-            _ticketlib_has_flock=1
-            ticket_create task "compat test ticket" | tail -1
-        ' 2>/dev/null
+        _TICKET_TEST_NO_SYNC=1 TICKETS_TRACKER_DIR="$repo_a/.tickets-tracker" \
+            bash "$TICKET_SCRIPT" create task "compat test ticket" 2>/dev/null | tail -1
     ) || true
 
-    # Path B: forced fallback (flock=0)
+    # Path B: forced mkdir fallback (REBAR_FORCE_MKDIR_LOCK=1, was flock=0)
     local id_b
     id_b=$(
         cd "$repo_b" || exit 1
-        # shellcheck disable=SC2030,SC2031
-        export _TICKET_TEST_NO_SYNC=1
-        # shellcheck disable=SC2030,SC2031
-        export TICKETS_TRACKER_DIR="$repo_b/.tickets-tracker"
-        TICKET_LIB_API="$TICKET_LIB_API" bash -c '
-            source "$TICKET_LIB_API" || exit 97
-            _ticketlib_has_flock=0
-            ticket_create task "compat test ticket" | tail -1
-        ' 2>/dev/null
+        _TICKET_TEST_NO_SYNC=1 TICKETS_TRACKER_DIR="$repo_b/.tickets-tracker" \
+            REBAR_FORCE_MKDIR_LOCK=1 bash "$TICKET_SCRIPT" create task "compat test ticket" 2>/dev/null | tail -1
     ) || true
 
     if [ -z "$id_a" ] || [ -z "$id_b" ]; then
