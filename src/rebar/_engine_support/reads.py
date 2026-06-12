@@ -255,7 +255,16 @@ def list_states(
     without_tag: str = "",
     include_archived: bool = False,
     exclude_deleted: bool = False,
+    min_children: int | None = None,
+    blocking_state: str = "",
 ) -> list[dict]:
+    """List ticket states. Each result carries a ``children_count`` (direct
+    non-deleted children, from the reduced set). Two universal cross-ticket filters
+    reuse the same reducer/graph the bespoke ``list-epics`` used: ``min_children``
+    (keep tickets with ≥ N children) and ``blocking_state`` ("unblocked" = all
+    blockers closed via ``find_ready_tickets``; "blocked" = active with an open
+    blocker). These generalize what ``list-epics`` filtered by, so it becomes a
+    thin wrapper over ``list``."""
     # detected_by:* tags are bug-only — auto-intersect with --type=bug.
     if has_tag.startswith("detected_by:") and not ticket_type:
         ticket_type = "bug"
@@ -265,6 +274,13 @@ def list_states(
     results = reduce_all_tickets(
         tracker, exclude_archived=not include_archived, exclude_deleted=exclude_deleted
     )
+    # children_count: direct non-deleted children per ticket, counted over the
+    # reduced set BEFORE the narrowing filters (a closed child still counts).
+    child_counts: dict[str, int] = {}
+    for t in results:
+        pid = t.get("parent_id")
+        if pid:
+            child_counts[pid] = child_counts.get(pid, 0) + 1
     results = apply_ticket_filters(
         results,
         type_filter=ticket_type,
@@ -274,7 +290,25 @@ def list_states(
         priority_filter=priority,
         without_tag_filter=without_tag,
     )
-    return [public_state(t) for t in results]
+    if blocking_state in ("unblocked", "blocked"):
+        ready_ids = {s.get("ticket_id") for s in find_ready_tickets(tracker)}
+        if blocking_state == "unblocked":
+            results = [t for t in results if t.get("ticket_id") in ready_ids]
+        else:  # "blocked": active (open/in_progress) ticket with an unclosed blocker
+            results = [
+                t
+                for t in results
+                if t.get("ticket_id") not in ready_ids
+                and t.get("status") in ("open", "in_progress")
+            ]
+    out = []
+    for t in results:
+        ps = public_state(t)
+        ps["children_count"] = child_counts.get(t.get("ticket_id"), 0)
+        if min_children is not None and ps["children_count"] < min_children:
+            continue
+        out.append(ps)
+    return out
 
 
 def deps_state(ticket_id: str, tracker: str, *, include_archived: bool = False) -> dict:
@@ -401,7 +435,7 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
     usage = (
         "Usage: ticket list [--output llm] [--include-archived] [--exclude-deleted] "
         "[--type=<type>] [--status=<status>] [--priority=<n>] [--parent=<id>] "
-        "[--has-tag=<tag>] [--without-tag=<tag>]"
+        "[--has-tag=<tag>] [--without-tag=<tag>] [--min-children=<n>] [--unblocked|--blocked]"
     )
     try:
         fmt, rest = parse_output(argv, "reader")
@@ -417,6 +451,8 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         "has_tag": "",
         "priority": "",
         "without_tag": "",
+        "min_children": None,
+        "blocking_state": "",
     }
     for arg in rest:
         if arg == "--include-archived":
@@ -435,6 +471,19 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
             opts["priority"] = arg[len("--priority="):]
         elif arg.startswith("--without-tag="):
             opts["without_tag"] = arg[len("--without-tag="):]
+        elif arg.startswith("--min-children="):
+            raw = arg[len("--min-children="):]
+            if not raw.isdigit():
+                print(
+                    f"Error: --min-children expects a non-negative integer, got '{raw}'",
+                    file=sys.stderr,
+                )
+                return 2
+            opts["min_children"] = int(raw)
+        elif arg == "--unblocked":
+            opts["blocking_state"] = "unblocked"
+        elif arg == "--blocked":
+            opts["blocking_state"] = "blocked"
         elif arg in ("--help", "-h"):
             print(usage, file=sys.stderr)
             return 0
@@ -442,7 +491,8 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
             print(f"Error: unknown option '{arg}'", file=sys.stderr)
             print(
                 "Valid filters: --type --status --priority --parent --has-tag "
-                "--without-tag --include-archived --exclude-deleted --output llm",
+                "--without-tag --min-children --unblocked --blocked --include-archived "
+                "--exclude-deleted --output llm",
                 file=sys.stderr,
             )
             # Unrecognized option is a usage error (2), not a runtime error (1) —

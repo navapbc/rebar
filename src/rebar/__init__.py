@@ -376,6 +376,8 @@ def list_tickets(
     without_tag: str | None = None,
     include_archived: bool = False,
     exclude_deleted: bool = False,
+    min_children: int | None = None,
+    blocking_state: str = "",
     repo_root=None,
 ) -> list[dict]:
     """List tickets as a list of dicts, with optional filters.
@@ -383,7 +385,9 @@ def list_tickets(
     ``exclude_deleted`` drops tickets whose reduced status is ``deleted``. Note
     delete writes STATUS(deleted)+ARCHIVED, so the default list already hides
     tombstones via archived-exclusion; ``exclude_deleted`` only changes results
-    when combined with ``include_archived=True``.
+    when combined with ``include_archived=True``. Each result carries a
+    ``children_count``; ``min_children`` keeps tickets with ≥ N direct children,
+    and ``blocking_state`` ("unblocked"/"blocked") filters by readiness.
     """
     from rebar import _reads
     return _reads.list_tickets(
@@ -395,6 +399,8 @@ def list_tickets(
         without_tag=without_tag,
         include_archived=include_archived,
         exclude_deleted=exclude_deleted,
+        min_children=min_children,
+        blocking_state=blocking_state,
         repo_root=repo_root,
     )
 

@@ -68,6 +68,8 @@ def list_tickets(
     without_tag: str | None = None,
     include_archived: bool = False,
     exclude_deleted: bool = False,
+    min_children: int | None = None,
+    blocking_state: str = "",
     repo_root=None,
 ) -> list[dict]:
     tracker = _tracker(repo_root)
@@ -82,6 +84,8 @@ def list_tickets(
         without_tag=without_tag or "",
         include_archived=include_archived,
         exclude_deleted=exclude_deleted,
+        min_children=min_children,
+        blocking_state=blocking_state,
     )
 
 

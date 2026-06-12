@@ -199,13 +199,18 @@ def build_server():
         without_tag: str | None = None,
         include_archived: bool = False,
         exclude_deleted: bool = False,
+        min_children: int | None = None,
+        blocking_state: str = "",
     ) -> list[TicketStateOut]:
         """List tickets as a JSON array, with optional filters.
 
         ``exclude_deleted`` drops tickets whose reduced status is ``deleted``.
         delete writes STATUS(deleted)+ARCHIVED, so the default list already hides
         tombstones via archived-exclusion; ``exclude_deleted`` only changes
-        results when combined with ``include_archived=True``.
+        results when combined with ``include_archived=True``. Each item carries a
+        ``children_count``; ``min_children`` keeps tickets with >= N direct
+        children, and ``blocking_state`` ("unblocked"/"blocked") filters by
+        readiness (all blockers closed vs an open blocker).
         """
         return [
             TicketStateOut.model_validate(t)
@@ -218,6 +223,8 @@ def build_server():
                 without_tag=without_tag,
                 include_archived=include_archived,
                 exclude_deleted=exclude_deleted,
+                min_children=min_children,
+                blocking_state=blocking_state,
             )
         ]
 
