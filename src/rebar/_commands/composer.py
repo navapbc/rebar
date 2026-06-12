@@ -431,3 +431,87 @@ def link_cli(argv: list[str], *, repo_root=None) -> int:
         print(exc.message, file=sys.stderr)
         return exc.returncode
     return 0
+
+
+_REVERT_USAGE = (
+    "Usage: ticket revert <ticket_id> <target_uuid> [--reason=<text>]\n"
+    "  ticket_id:   ticket directory name\n"
+    "  target_uuid: UUID of the event to revert\n"
+    "  --reason=    optional reason text"
+)
+
+
+def revert_core(ticket_id: str, target_uuid: str, reason: str = "", *, repo_root=None) -> str:
+    """Append a REVERT event targeting an existing event (mirrors ticket-revert.sh).
+
+    Resolves the id, ghost-checks, finds the target event by UUID, rejects
+    REVERT-of-REVERT, then appends the REVERT event through the seam. Reverting an
+    ARCHIVED event also clears the ``.archived`` marker (the reducer un-archives).
+    Returns the resolved ticket id. Raises :class:`CommandError`.
+    """
+    from rebar.reducer.marker import remove_marker
+
+    tracker = tracker_dir(repo_root)
+    if not (tracker / ".env-id").is_file():
+        raise CommandError("Error: ticket system not initialized. Run 'ticket init' first.")
+    resolved = require_id(ticket_id, tracker)
+    ticket_dir = tracker / resolved
+    require_not_ghost(resolved, tracker)
+
+    target_type = None
+    for entry in sorted(os.listdir(ticket_dir)):
+        if entry.startswith(".") or not entry.endswith(".json"):
+            continue
+        try:
+            with open(ticket_dir / entry, encoding="utf-8") as fh:
+                ev = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if ev.get("uuid") == target_uuid:
+            target_type = ev.get("event_type", "")
+            break
+    if target_type is None:
+        raise CommandError(
+            f"Error: event not found: no event with UUID '{target_uuid}' in ticket '{resolved}'"
+        )
+    if target_type == "REVERT":
+        raise CommandError(
+            f"Error: cannot revert a REVERT event (target UUID '{target_uuid}' is a REVERT)"
+        )
+
+    append_event(
+        resolved,
+        "REVERT",
+        {"target_event_uuid": target_uuid, "target_event_type": target_type, "reason": reason},
+        tracker,
+        repo_root=repo_root,
+    )
+    if target_type == "ARCHIVED":
+        try:
+            remove_marker(str(ticket_dir))
+        except Exception:
+            pass
+    return resolved
+
+
+def revert_cli(argv: list[str], *, repo_root=None) -> int:
+    """Dispatcher Python route for ``revert``: parse args, print the confirmation."""
+    if len(argv) < 2:
+        print(_REVERT_USAGE, file=sys.stderr)
+        return 1
+    ticket_id, target_uuid = argv[0], argv[1]
+    reason = ""
+    for arg in argv[2:]:
+        if arg.startswith("--reason="):
+            reason = arg[len("--reason="):]
+        else:
+            print(f"Error: unknown argument '{arg}'", file=sys.stderr)
+            print(_REVERT_USAGE, file=sys.stderr)
+            return 1
+    try:
+        resolved = revert_core(ticket_id, target_uuid, reason, repo_root=repo_root)
+    except CommandError as exc:
+        print(exc.message, file=sys.stderr)
+        return exc.returncode
+    print(f"Reverted event '{target_uuid}' on ticket '{resolved}'")
+    return 0

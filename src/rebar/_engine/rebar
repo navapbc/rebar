@@ -463,6 +463,9 @@ case "$subcommand" in
         if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then
             _ensure_initialized
         fi
+        if _leaf_writes_python; then
+            exec python3 "$SCRIPT_DIR/ticket-commands.py" revert "$@"
+        fi
         exec bash "$SCRIPT_DIR/ticket-revert.sh" "$@"
         ;;
     bridge-status)

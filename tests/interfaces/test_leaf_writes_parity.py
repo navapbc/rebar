@@ -202,6 +202,45 @@ def test_library_link_python_rejects_bad_relation(rebar_repo: Path, monkeypatch:
         rebar.link(a, b, "not_a_relation", repo_root=str(rebar_repo))
 
 
+def _event_uuid(tracker: Path, tid: str, suffix: str) -> str:
+    import json as _json
+
+    for p in (tracker / tid).iterdir():
+        if p.name.endswith(suffix) and not p.name.startswith("."):
+            return _json.loads(p.read_text())["uuid"]
+    raise AssertionError(f"no {suffix} event for {tid}")
+
+
+def test_revert_core_unarchives_python_path(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    from rebar._commands import composer
+
+    monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
+    tid = _new_ticket(rebar_repo)
+    rebar.archive(tid, repo_root=str(rebar_repo))
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["archived"] is True
+    tracker = Path(rebar_repo) / ".tickets-tracker"
+    archived_uuid = _event_uuid(tracker, tid, "-ARCHIVED.json")
+    composer.revert_core(tid, archived_uuid, "undo archive", repo_root=str(rebar_repo))
+    # reverting the ARCHIVED event clears the marker → un-archived
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["archived"] is False
+
+
+def test_revert_core_rejects_revert_of_revert(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    from rebar._commands import composer
+    from rebar._commands._seam import CommandError
+
+    monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
+    tid = _new_ticket(rebar_repo)
+    tracker = Path(rebar_repo) / ".tickets-tracker"
+    create_uuid = _event_uuid(tracker, tid, "-CREATE.json")
+    composer.revert_core(tid, create_uuid, repo_root=str(rebar_repo))
+    revert_uuid = _event_uuid(tracker, tid, "-REVERT.json")
+    with pytest.raises(CommandError):
+        composer.revert_core(tid, revert_uuid, repo_root=str(rebar_repo))
+    with pytest.raises(CommandError):  # unknown uuid
+        composer.revert_core(tid, "no-such-uuid", repo_root=str(rebar_repo))
+
+
 def test_library_archive_status_gate_python_path(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
     tid = _new_ticket(rebar_repo)
     rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))  # open -> in_progress
