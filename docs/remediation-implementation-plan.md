@@ -70,10 +70,10 @@ parity claim corrected) and added concrete gotchas to the rest.
 
 | Item | Experiment result | Decisive gotcha surfaced |
 |------|-------------------|--------------------------|
-| **P2.1 HLC** | ✅ 2400 concurrent ticks via flock'd `next_tick()` — all unique, monotonic, 19-digit; int- and string-sort agree at equal width | `time_ns()` is 19 digits until **~year 2286**; string sort only breaks across *differing* widths → **stay 19-digit** |
+| **P2.1 HLC** | ✅ 2400 concurrent ticks via flock'd `next_tick()` — all unique/monotonic/19-digit (EXP4); and with **no cache file** a tick still exceeds `max(prefix)`, 19-digit (EXP4b) | `time_ns()` is 19 digits until **~year 2286**; string sort only breaks across *differing* widths → **stay 19-digit** |
 | **P2.1 / P1.0 `jq`** | ⚠️ **`json.dumps==jq -S -c` is NOT portable-safe** | jq parses numbers as float64; the 19-digit ns timestamp is **>2⁵³**. jq-1.7 preserves *literals* but **any arithmetic rounds it** (`.t+0`→`…655000`), and **jq ≤1.6 (default macOS) rounds on parse** → never let jq touch the event bytes |
 | **P1.0 canon** | ✅ re-serializing changes bytes but parsed dict is identical → replay-safe; AST guard caught all 7 live `.py` writers | bash linters can't see into heredocs → need a **regex prong** + allowlist the canonical helper |
-| **P2.3 tags** | ✅ delta ops converge over all merge orders (and, for the OR-Set variant tested, tombstone-by-tag is order-independent and a deterministic `seed:<tag>` avoids the duplication trap) | **git-bug uses delta-replay-order, not an OR-Set** → adopt the simpler proven design (no tombstones/seed) (below) |
+| **P2.3 tags** | ✅ the chosen delta ops converge over all merge orders; the OR-Set variant (validated but **rejected**) also converged — tombstone-by-tag order-independent, deterministic `seed:<tag>` avoids duplication | **git-bug uses delta-replay-order, not an OR-Set** → adopt the simpler proven design (no tombstones/seed) (below) |
 | **P1.4 gc** | ✅ discarded commit survives `gc --prune=14.days.ago`, dies at `--prune=now` | must use a conservative window on **both** `reflog expire` and `gc --prune`; never `--prune=now` |
 | **P1.1 query** | ✅ predicates + `OR` + negation + degrade-to-substring in ~40 lines | unknown `field:` must fall back to literal substring (no crash) |
 | **P2.2 identity** | ✅ gpg detached sign/verify/tamper round-trip over canonical bytes works | `ssh-keygen` may be **absent**; this env even force-signs commits → signing must be **opt-in/advisory** |
@@ -241,6 +241,16 @@ rounds on parse; jq-1.7 rounds under arithmetic), which would both break parity 
 bash heredoc writers call `python3 -m rebar._store.canonical` (or the importable
 helper) rather than inline `json.dump`/`jq`. Re-serialization is replay-safe
 (EXP-canon: bytes differ, parsed dict identical).
+
+> **Subprocess-cost caveat (decide at code time).** A `python3 -m
+> rebar._store.canonical` per event is a heavier subprocess than the current inline
+> `python3 -c` (it imports the `rebar` package, not just stdlib `json`). The bash
+> writers that emit **multiple** events in one command — the `delete` path
+> (STATUS + ARCHIVED + N×UNLINK) and a bulk `gc --compact-first` over many tickets —
+> should serialize **all** their events in a **single** helper invocation (pass the
+> event array on stdin, get canonical lines back), not one subprocess per event, so
+> the unification doesn't regress those paths' latency. Correctness is unaffected
+> either way (identical bytes).
 
 **Tests — the gate is structural, scanning Python AND bash.**
 - A parity test driving one event dict through **every live producer** (incl. the
@@ -476,8 +486,18 @@ makes the local file corruption-/race-proof — if `hlc.state` is missing, stale
 lost to a concurrent-process write race (git-bug documents the same race and
 shrugs it off for exactly this reason), the result is still correct because it is
 re-derived from the durable log. So the local-lock RMW is a fast path, not a
-correctness dependency. *(Experiment EXP4: 2400 concurrent flock'd ticks, all
-unique/monotonic/19-digit, seeded from a max-prefix floor.)*
+correctness dependency. *(EXP4: 2400 concurrent flock'd ticks, all unique/
+monotonic/19-digit; EXP4b: with no cache file, the tick still exceeds the ticket's
+`max(prefix)` and stays 19-digit.)*
+
+**Deliberate asymmetry — global cache, per-ticket witness.** `.rebar/hlc.state` is
+**one per-clone** integer (a union high-water-mark across *all* tickets), while the
+witness floor is the *target ticket's* `max(prefix)`. This is intentional: the
+global cache only ever moves the counter forward (so another ticket's activity
+advancing it is harmless to ordering), and the per-ticket witness supplies the
+cross-clone causal floor that a global cache alone would miss right after a fetch.
+A future implementer must **not** "fix" the apparent mismatch by making the cache
+per-ticket — that would weaken the monotonicity the single local lock provides.
 
 **Injectable clock** for tests: the physical source reads an override
 (`REBAR_HLC_NOW`) so the skewed-clock harness (below) can drive it — this injection
