@@ -37,6 +37,8 @@ _READS_INIT_ONLY = frozenset(
 )
 # Read-compute arm the dispatcher ran with NO _ensure_initialized (self-manages).
 _READS_NO_INIT = frozenset({"validate"})
+# Field-read arms the dispatcher ran with FULL _ensure_initialized (ticket-lib-api.sh).
+_FIELD_READS = frozenset({"get-file-impact", "get-verify-commands"})
 # Leaf-write arms: full auto-init + reconverge before the in-process write.
 _WRITES_FULL = frozenset(
     {
@@ -120,6 +122,14 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         from rebar._commands import main as commands_main
 
         return commands_main([sub, *rest])
+    if sub in _FIELD_READS:
+        ensure_initialized(init_only=False)
+        from rebar._engine_support import field_reads, reads
+
+        tracker = reads.tracker_dir()
+        if sub == "get-file-impact":
+            return field_reads.file_impact_cli(rest, tracker)
+        return field_reads.verify_commands_cli(rest, tracker)
     return _passthrough(sub, rest)
 
 

@@ -247,9 +247,12 @@ def validate(*, repo_root=None) -> dict:
 
 
 def get_file_impact(ticket_id: str, *, repo_root=None) -> list:
-    """Get the current file-impact array for a ticket."""
-    out = _ok(_run(["get-file-impact", ticket_id], repo_root=repo_root), what="get-file-impact")
-    return _json_or(out, [])
+    """Get the current file-impact array for a ticket ([] on a miss)."""
+    from rebar._engine_support import field_reads, reads
+
+    tracker = reads.tracker_dir(repo_root)
+    reads.ensure_fresh(tracker)
+    return field_reads.file_impact(ticket_id, tracker)
 
 
 def set_file_impact(ticket_id: str, impact, *, repo_root=None) -> None:
@@ -262,9 +265,22 @@ def set_file_impact(ticket_id: str, impact, *, repo_root=None) -> None:
 
 
 def get_verify_commands(ticket_id: str, *, repo_root=None) -> list:
-    """Get the current DD-level verify-commands array for a ticket."""
-    out = _ok(_run(["get-verify-commands", ticket_id], repo_root=repo_root), what="get-verify-commands")
-    return _json_or(out, [])
+    """Get the current DD-level verify-commands array for a ticket.
+
+    A missing ticket raises ``RebarError`` (the dispatcher's exit-1 contract),
+    unlike :func:`get_file_impact` which returns ``[]`` on a miss.
+    """
+    from rebar._engine_support import field_reads, reads
+    from rebar._engine_support.reads import ReadError
+
+    tracker = reads.tracker_dir(repo_root)
+    reads.ensure_fresh(tracker)
+    try:
+        return field_reads.verify_commands(ticket_id, tracker)
+    except ReadError as exc:
+        raise RebarError(
+            f"get-verify-commands failed (exit 1): {exc}", returncode=1, stderr=str(exc)
+        ) from None
 
 
 def set_verify_commands(ticket_id: str, commands, *, repo_root=None) -> None:

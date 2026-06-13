@@ -18,6 +18,7 @@ import pytest
 import rebar
 from rebar._cli import _help
 from rebar._cli import (
+    _FIELD_READS,
     _READS_INIT_ONLY,
     _READS_NO_INIT,
     _WRITES_FULL,
@@ -85,10 +86,11 @@ def test_routing_tables_cover_every_known_subcommand() -> None:
     dispatcher, which is fine transitionally — but the explicit in-process sets must
     never overlap (a command can't be both a read and a write arm).
     """
-    inproc = _READS_INIT_ONLY | _READS_NO_INIT | _WRITES_FULL
-    assert _READS_INIT_ONLY.isdisjoint(_WRITES_FULL)
-    assert _READS_INIT_ONLY.isdisjoint(_READS_NO_INIT)
-    assert _READS_NO_INIT.isdisjoint(_WRITES_FULL)
+    inproc = _READS_INIT_ONLY | _READS_NO_INIT | _WRITES_FULL | _FIELD_READS
+    sets = [_READS_INIT_ONLY, _READS_NO_INIT, _WRITES_FULL, _FIELD_READS]
+    for i in range(len(sets)):
+        for j in range(i + 1, len(sets)):
+            assert sets[i].isdisjoint(sets[j]), "in-process routing sets overlap"
     # Every in-process arm is a real, known subcommand (no typo in the tables).
     known = _help.known_subcommands()
     assert inproc <= known, f"in-process arms not in known subcommands: {inproc - known}"
