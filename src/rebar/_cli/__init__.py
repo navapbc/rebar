@@ -43,6 +43,9 @@ _FIELD_READS = frozenset({"get-file-impact", "get-verify-commands"})
 _LOOKUPS = frozenset({"exists", "resolve", "format"})
 # Graph-traversal arm the dispatcher ran with FULL _ensure_initialized.
 _DESCENDANTS = frozenset({"list-descendants"})
+# Per-ticket gate arms the dispatcher ran with NO _ensure_initialized (they read
+# transitively via `ticket show`, so the gate CLI itself does no auto-init).
+_GATES = frozenset({"clarity-check", "check-ac", "quality-check", "summary"})
 # Leaf-write arms: full auto-init + reconverge before the in-process write.
 _WRITES_FULL = frozenset(
     {
@@ -149,6 +152,17 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         from rebar._engine_support import descendants, reads
 
         return descendants.list_descendants_cli(rest, reads.tracker_dir())
+    if sub in _GATES:
+        from rebar._engine_support import gates, reads
+
+        tracker = reads.tracker_dir()
+        if sub == "check-ac":
+            return gates.check_ac_cli(rest, tracker)
+        if sub == "clarity-check":
+            return gates.clarity_check_cli(rest, tracker, os.path.dirname(tracker))
+        if sub == "quality-check":
+            return gates.quality_check_cli(rest, tracker)
+        return gates.summary_cli(rest, tracker)
     return _passthrough(sub, rest)
 
 

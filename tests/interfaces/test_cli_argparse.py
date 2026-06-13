@@ -20,6 +20,7 @@ from rebar._cli import _help
 from rebar._cli import (
     _DESCENDANTS,
     _FIELD_READS,
+    _GATES,
     _LOOKUPS,
     _READS_INIT_ONLY,
     _READS_NO_INIT,
@@ -89,9 +90,11 @@ def test_routing_tables_cover_every_known_subcommand() -> None:
     never overlap (a command can't be both a read and a write arm).
     """
     inproc = (
-        _READS_INIT_ONLY | _READS_NO_INIT | _WRITES_FULL | _FIELD_READS | _LOOKUPS | _DESCENDANTS
+        _READS_INIT_ONLY | _READS_NO_INIT | _WRITES_FULL | _FIELD_READS | _LOOKUPS | _DESCENDANTS | _GATES
     )
-    sets = [_READS_INIT_ONLY, _READS_NO_INIT, _WRITES_FULL, _FIELD_READS, _LOOKUPS, _DESCENDANTS]
+    sets = [
+        _READS_INIT_ONLY, _READS_NO_INIT, _WRITES_FULL, _FIELD_READS, _LOOKUPS, _DESCENDANTS, _GATES,
+    ]
     for i in range(len(sets)):
         for j in range(i + 1, len(sets)):
             assert sets[i].isdisjoint(sets[j]), "in-process routing sets overlap"

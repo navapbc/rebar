@@ -192,19 +192,23 @@ def _json_or(out: str, default):
 
 def clarity_check(ticket_id: str, *, repo_root=None) -> dict:
     """Score ticket clarity → {score, verdict, threshold, passed}."""
-    cp = _run(["clarity-check", ticket_id], repo_root=repo_root)
-    data = _json_or(cp.stdout, None)
-    if not isinstance(data, dict) or "score" not in data:
-        # Schema-conformant structured failure (mirrors the sibling gates), so
-        # the result still validates against clarity_result.schema.json /
-        # ClarityResultOut. threshold 0 == "not evaluated" (do NOT hardcode 5).
-        data = {
-            "score": 0,
-            "verdict": "fail",
-            "threshold": 0,
-            "reason": (cp.stderr or cp.stdout).strip(),
-        }
-    data["passed"] = cp.returncode == 0
+    import os as _os
+
+    from rebar._engine_support import gates, reads
+    from rebar._engine_support.reads import ReadError
+
+    tracker = reads.tracker_dir(repo_root)
+    reads.ensure_fresh(tracker)
+    try:
+        state = reads.show_state(ticket_id, tracker)
+    except ReadError as exc:
+        # Schema-conformant structured failure (threshold 0 == "not evaluated").
+        return {"score": 0, "verdict": "fail", "threshold": 0, "reason": str(exc), "passed": False}
+    threshold = gates._clarity_threshold(_os.path.dirname(tracker), None)
+    data, code = gates.clarity_check_compute(
+        (state.get("ticket_type") or "").strip(), state.get("description") or "", threshold
+    )
+    data["passed"] = code == 0
     return data
 
 
@@ -213,9 +217,12 @@ def check_ac(ticket_id: str, *, repo_root=None) -> dict:
 
     Returns the engine's structured gate result {verdict, criteria_count, reason}
     plus a convenience ``passed`` boolean (verdict == 'pass')."""
-    cp = _run(["check-ac", ticket_id, "--output", "json"], repo_root=repo_root)
-    data = _json_or(cp.stdout, {"verdict": "fail", "reason": (cp.stdout or cp.stderr).strip()})
-    data["passed"] = cp.returncode == 0
+    from rebar._engine_support import gates, reads
+
+    tracker = reads.tracker_dir(repo_root)
+    reads.ensure_fresh(tracker)
+    data, code = gates.check_ac_compute(ticket_id, tracker)
+    data["passed"] = code == 0
     return data
 
 
@@ -225,9 +232,12 @@ def quality_check(ticket_id: str, *, repo_root=None) -> dict:
     Returns the engine's structured gate result {verdict, line_count,
     keyword_count, ac_items, file_impact, reason} plus a convenience ``passed``
     boolean (verdict == 'pass')."""
-    cp = _run(["quality-check", ticket_id, "--output", "json"], repo_root=repo_root)
-    data = _json_or(cp.stdout, {"verdict": "fail", "reason": (cp.stdout or cp.stderr).strip()})
-    data["passed"] = cp.returncode == 0
+    from rebar._engine_support import gates, reads
+
+    tracker = reads.tracker_dir(repo_root)
+    reads.ensure_fresh(tracker)
+    data, code, _warn = gates.quality_check_compute(ticket_id, tracker)
+    data["passed"] = code == 0
     return data
 
 
@@ -487,8 +497,11 @@ def fsck(*, recover: bool = False, report_only: bool = False, repo_root=None) ->
 def summary(*ticket_ids: str, repo_root=None) -> list:
     """One-line-per-ticket summary as structured JSON: a list of
     {ticket_id, status, title, blocking_summary}."""
-    out = _ok(_run(["summary", *ticket_ids, "--output", "json"], repo_root=repo_root), what="summary")
-    return _json_or(out, [])
+    from rebar._engine_support import gates, reads
+
+    tracker = reads.tracker_dir(repo_root)
+    reads.ensure_fresh(tracker)
+    return [gates.summary_compute(tid, tracker) for tid in ticket_ids]
 
 
 def list_epics(*, include_blocked: bool = False, has_tag=None, min_children=None, repo_root=None) -> dict:
