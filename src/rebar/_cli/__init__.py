@@ -41,6 +41,8 @@ _READS_NO_INIT = frozenset({"validate"})
 _FIELD_READS = frozenset({"get-file-impact", "get-verify-commands"})
 # Resolution/display arms the dispatcher ran with FULL _ensure_initialized.
 _LOOKUPS = frozenset({"exists", "resolve", "format"})
+# Graph-traversal arm the dispatcher ran with FULL _ensure_initialized.
+_DESCENDANTS = frozenset({"list-descendants"})
 # Leaf-write arms: full auto-init + reconverge before the in-process write.
 _WRITES_FULL = frozenset(
     {
@@ -142,6 +144,11 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         if sub == "resolve":
             return lookups.resolve_cli(rest, tracker)
         return lookups.format_cli(rest, tracker, os.path.dirname(tracker))
+    if sub in _DESCENDANTS:
+        ensure_initialized(init_only=False)
+        from rebar._engine_support import descendants, reads
+
+        return descendants.list_descendants_cli(rest, reads.tracker_dir())
     return _passthrough(sub, rest)
 
 
