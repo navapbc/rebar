@@ -39,6 +39,8 @@ _READS_INIT_ONLY = frozenset(
 _READS_NO_INIT = frozenset({"validate"})
 # Field-read arms the dispatcher ran with FULL _ensure_initialized (ticket-lib-api.sh).
 _FIELD_READS = frozenset({"get-file-impact", "get-verify-commands"})
+# Resolution/display arms the dispatcher ran with FULL _ensure_initialized.
+_LOOKUPS = frozenset({"exists", "resolve", "format"})
 # Leaf-write arms: full auto-init + reconverge before the in-process write.
 _WRITES_FULL = frozenset(
     {
@@ -130,6 +132,16 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         if sub == "get-file-impact":
             return field_reads.file_impact_cli(rest, tracker)
         return field_reads.verify_commands_cli(rest, tracker)
+    if sub in _LOOKUPS:
+        ensure_initialized(init_only=False)
+        from rebar._engine_support import lookups, reads
+
+        tracker = reads.tracker_dir()
+        if sub == "exists":
+            return lookups.exists_cli(rest, tracker)
+        if sub == "resolve":
+            return lookups.resolve_cli(rest, tracker)
+        return lookups.format_cli(rest, tracker, os.path.dirname(tracker))
     return _passthrough(sub, rest)
 
 
