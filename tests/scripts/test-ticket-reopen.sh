@@ -35,8 +35,12 @@ _make_test_repo() {
 # ── Test 1: `rebar reopen` (no args) prints usage / exit 1 / no bash diag ─────
 echo "Test 1: rebar reopen (no args) prints usage and exits 1 with no bash diagnostic"
 test_reopen_no_args() {
-    local out exit_code=0
-    out=$(bash "$TICKET_SCRIPT" reopen 2>&1) || exit_code=$?
+    local out exit_code=0 repo
+    # Run inside an isolated ticket repo: `reopen` with no args still resolves the
+    # tracker (auto-init) before the usage check, so without this the tracker lands
+    # in REPO_ROOT (the `.tickets-tracker` leak the repo-root guard fails on).
+    repo=$(_make_test_repo)
+    out=$(cd "$repo" && bash "$TICKET_SCRIPT" reopen 2>&1) || exit_code=$?
     assert_eq "reopen no-args exits 1" "1" "$exit_code"
     assert_contains "reopen no-args shows usage" "Usage: rebar reopen" "$out"
     assert_not_contains "reopen no-args has no bash unbound-variable diagnostic" "unbound variable" "$out"
@@ -46,8 +50,9 @@ test_reopen_no_args
 # ── Test 2: `rebar reopen --output json` (flags only) also guarded ────────────
 echo "Test 2: rebar reopen --output json (flags only) prints usage and exits 1"
 test_reopen_flags_only() {
-    local out exit_code=0
-    out=$(bash "$TICKET_SCRIPT" reopen --output json 2>&1) || exit_code=$?
+    local out exit_code=0 repo
+    repo=$(_make_test_repo)
+    out=$(cd "$repo" && bash "$TICKET_SCRIPT" reopen --output json 2>&1) || exit_code=$?
     assert_eq "reopen flags-only exits 1" "1" "$exit_code"
     assert_contains "reopen flags-only shows usage" "Usage: rebar reopen" "$out"
     assert_not_contains "reopen flags-only has no bash unbound-variable diagnostic" "unbound variable" "$out"
