@@ -20,17 +20,20 @@ sketched at the end for sequencing only.*
    existing write lock) is allowed. New per-clone state is gitignored and
    rebuildable. New write events flow through the locked write path — no side
    channels (I5).
-2. **Writers and byte format — see P1.0 first.** Event serialization is scattered
-   across **eight** sites and only **one** is canonical
-   (`_store/event_append.py:56-61`, `json.dumps(sort_keys=True,
-   separators=(",",":"))`); the other **seven** write plain
-   `json.dumps(event, ensure_ascii=False)` (unsorted, non-compact). There is **no**
-   byte-parity test (the one cited in `_store/event_append.py:15`'s docstring does
-   not exist). Because every round of review has surfaced *another* non-canonical
-   writer, P1.0 does **not** hand-chase a list — it routes all event writes through
-   one helper **and adds a structural guard test** so a new non-canonical event
-   write can't regress. Every later field-touching item (P2.1, P2.2's detached
-   signature, P2.3) depends on it.
+2. **Writers and byte format — see P1.0 first.** Event serialization is **badly
+   scattered**: a sweep for `json.dump(... ensure_ascii=False)` over event writes
+   finds **15+** sites, only **one** canonical (`_store/event_append.py:56-61`,
+   `json.dumps(sort_keys=True, separators=(",",":"))`). Many are **retired/dead**
+   bash leaf scripts (`ticket-create.sh`, `ticket-edit.sh`, `ticket-comment.sh`,
+   `ticket-link.sh`, `ticket-lib.sh:275/374`) no longer on the live dispatch path;
+   the rest write plain non-canonical bytes. There is **no** byte-parity test (the
+   one cited in `_store/event_append.py:15`'s docstring does not exist). **Because
+   four review rounds each surfaced another writer, this plan does not treat any
+   hand-enumerated list as complete.** P1.0 routes every *live* event write through
+   one helper, deletes-or-conforms the dead writers, and — authoritatively — adds a
+   **structural guard** that scans Python *and bash heredocs* so any future
+   non-canonical event write fails CI. Every later field-touching item (P2.1, P2.2's
+   detached signature, P2.3) depends on it.
 3. **Live write/timestamp topology (verified).** The single `time.time_ns()`
    ordering timestamp is generated at **four** live seams, not one:
    - `_commands/_seam.py:153` — create / edit / comment / link / unlink / tag /
@@ -59,11 +62,11 @@ sketched at the end for sequencing only.*
 **Goal.** One event byte format and an executable parity gate, so later items
 that add/reorder event content rest on a real guarantee (closes review finding #6).
 
-**Seams — the full verified set (seven plain + one canonical).** Factor the
-canonical serializer into one shared, **lock-free** helper (e.g.
-`_store/event_append.canonical_bytes`) and route **every** event-file write through
-it. The complete current set of event serializers (verified by sweeping
-`json.dump(... ensure_ascii=False)` over event writes):
+**Seams — the LIVE writers (illustrative, NOT asserted complete; the guard is
+authoritative).** Factor the canonical serializer into one shared, **lock-free**
+helper (e.g. `_store/event_append.canonical_bytes`) and route every *live*
+event-file write through it. Known live writers (the guard, not this list, is the
+backstop):
 - `_store/event_append.py:56-61` — **canonical** (the target form);
 - `_engine/event_append.py:123` — reconciler events (batched commit);
 - `ticket_txn.py:219` — transition STATUS; `:351` — claim STATUS; `:372` — claim
@@ -72,30 +75,42 @@ it. The complete current set of event serializers (verified by sweeping
 - `graph/_links.py:145` — LINK events (own inline `fcntl.flock` + `git add`/commit
   at `:148-176`, bypassing `_store/event_append` entirely);
 - `ticket-delete-unlink-scan.py:149` — UNLINK delete-cascade events;
-- `ticket-compact.sh:274` — SNAPSHOT (bash inline `python3` heredoc; import the
-  helper there).
-Also fix the false guarantee in `_store/event_append.py:15`'s docstring (cites a
-test that doesn't exist) once the real test lands.
+- **`ticket-lib-api.sh:994` — STATUS(deleted); `:1017` — ARCHIVED** (the live
+  `delete` command, dispatcher `rebar:534-540` → `ticket_delete`; both raw
+  `json.dump` in inline `python3` heredocs, committed together at `:1022-1027`);
+- `ticket-compact.sh:274` — SNAPSHOT (bash inline `python3` heredoc).
 
-**Tests — make the gate structural, not a maintained list.**
-- A Python parity test that drives one event dict through **every** producer and
-  asserts byte-identical canonical output.
+**Retire the dead writers in the same pass.** The bash leaf scripts
+(`ticket-create.sh:274`, `ticket-edit.sh:266`, `ticket-comment.sh:91`,
+`ticket-link.sh:226/389`, `ticket-lib.sh:275/374`) are off the live dispatch path
+(writes flow through `_commands/_seam.py`); **delete them** (or conform + guard
+them) so they can't silently come back as a non-canonical path. The one-shot
+`ticket-migrate-*.sh` writers are exempt (run-once, pre-canonical history).
+Also fix the false guarantee in `_store/event_append.py:15`'s docstring once the
+real test lands.
+
+**Tests — the gate is structural, scanning Python AND bash.**
+- A parity test driving one event dict through **every live producer** (incl. the
+  bash `delete`/SNAPSHOT paths via subprocess) asserting byte-identical output.
 - Add `tests/scripts/test-ticket-write-commit-event.sh` (the name ground rule 2
   previously *assumed*).
-- **A structural guard** (AST/grep test over `src/rebar`) asserting no event-file
-  write uses a raw `json.dump(s)` — every committed `*-<TYPE>.json` write must go
-  through `canonical_bytes`. This is what stops the next round from finding an
-  eighth serializer. (Read/output/cache `json.dumps` are exempt by an allowlist or
-  by only scanning files that write `*-UUID-TYPE.json`.)
+- **A structural guard** that asserts no event-file write uses a raw
+  `json.dump(s)`: it must scan **both** `*.py` (AST) **and** the inline `python3`
+  heredocs inside `*.sh` (regex over heredoc bodies) — a Python-only AST scan would
+  miss exactly the `ticket-lib-api.sh:994/1017` / `ticket-compact.sh:274` class
+  that the last review round caught. Scope it to writes of `*-<UUID>-<TYPE>.json`
+  (event files), exempting read/output/cache `json.dumps` and the one-shot
+  migration scripts by an explicit allowlist.
 Folded/`*.retired` bytes are read, not re-serialized, so existing committed data is
 unaffected.
 
 **Risk.** Low-medium: changes committed bytes for reconciler/STATUS/LINK/UNLINK/
-SNAPSHOT events. *Mitigation:* only key order/whitespace changes (semantically
-identical JSON); the reducer parses by key, not bytes, so replay and existing data
-are unaffected; land standalone before any field additions.
+ARCHIVED/SNAPSHOT events. *Mitigation:* only key order/whitespace changes
+(semantically identical JSON); the reducer parses by key, not bytes, so replay and
+existing data are unaffected; land standalone before any field additions.
 
-**Effort.** ~1.5–2 days (seven call sites incl. the bash heredoc + the guard test).
+**Effort.** ~2–2.5 days (live call sites across Python + bash heredocs, dead-script
+cleanup, and the dual-language guard test).
 
 ---
 
@@ -398,7 +413,10 @@ most-recent pre-delta `EDIT.tags` for that ticket** (treat that prior tag set as
 implicit set of add-ops) before applying deltas. Equivalently: the *first*
 `TAG`/`UNTAG` writer snapshots current tags into seed add-ops. Test must cover
 **disjoint** pre-existing vs. delta tags (`EDIT(tags=[a,b])` then `TAG(c)` ⇒
-`{a,b,c}`, not `{c}`) — the same-tag interleave test alone would miss this.
+`{a,b,c}`, not `{c}`) — the same-tag interleave test alone would miss this. The
+"pre-delta" boundary is defined by **replay sort order** (the deterministic
+`event_sort_key`), not wall-clock, so it resolves identically on every clone even
+when a tag-setting EDIT and the first delta are concurrent.
 
 **Dual-write transition — and the replay rule that makes it safe.** For one
 transition release the writer *also* emits the legacy whole-field `EDIT` so
