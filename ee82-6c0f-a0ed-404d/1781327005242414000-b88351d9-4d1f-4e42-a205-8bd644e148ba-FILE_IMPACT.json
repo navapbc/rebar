@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/_engine_support/lookups.py","reason":"new in-process port"},{"path":"src/rebar/_cli/__init__.py","reason":"_LOOKUPS routing"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781327005242414000,"uuid":"b88351d9-4d1f-4e42-a205-8bd644e148ba"}
