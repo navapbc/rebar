@@ -207,9 +207,19 @@ def test_transition_stale_status_rejected_exit_10_no_event(seeded):
 # the gate. An *absent* config is the intended opt-out (gate stays off).
 
 
-@pytest.fixture
-def seeded_story(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """A repo with one in_progress STORY. Returns (tracker, story_id, env_id, root)."""
+# A verify config that ENABLES the gate but is unreadable (a stray invalid UTF-8
+# byte makes the line-iteration decode raise) — the path the fix must fail-closed.
+_CORRUPT_VERIFY_CONFIG = b"verify.require_verdict_for_close=true\n\xff bad\n"
+
+
+def _seed_in_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ticket_type: str = "story"
+):
+    """A repo with one in_progress ticket of *ticket_type*.
+
+    Returns (tracker, ticket_id, env_id, root). Setup only — open→in_progress is
+    not gated, so it is safe to run before a corrupt config is written.
+    """
     monkeypatch.setenv("_TICKET_TEST_NO_SYNC", "1")
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -219,12 +229,31 @@ def seeded_story(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("REBAR_ROOT", str(repo))
     monkeypatch.setenv("PROJECT_ROOT", str(repo))
     _run(repo, "init")
-    story_id = _run(repo, "create", "story", "verdict gate story").stdout.strip().splitlines()[-1]
+    tid = _run(repo, "create", ticket_type, f"verdict gate {ticket_type}").stdout.strip().splitlines()[-1]
     tracker = Path(os.path.realpath(repo / ".tickets-tracker"))
     env_id = (tracker / ".env-id").read_text().strip()
     # Move open -> in_progress so the next transition under test is the close.
-    assert _call(tracker, story_id, env_id, "open", "in_progress") == 0
-    return tracker, story_id, env_id, repo
+    assert _call(tracker, tid, env_id, "open", "in_progress") == 0
+    return tracker, tid, env_id, repo
+
+
+@pytest.fixture
+def seeded_story(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A repo with one in_progress STORY. Returns (tracker, story_id, env_id, root)."""
+    return _seed_in_progress(tmp_path, monkeypatch, "story")
+
+
+def _cli(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    """Drive the public ``rebar`` dispatcher (check=False so a blocked close, which
+    exits non-zero, is observed via returncode rather than raising)."""
+    return _engine.run(list(args), repo_root=str(repo), cwd=str(repo), check=False)
+
+
+def _status_via_cli(repo: Path, ticket_id: str) -> str:
+    """The ticket's current status read through the public ``show -o json`` path."""
+    import json
+
+    return json.loads(_cli(repo, "show", ticket_id, "-o", "json").stdout)["status"]
 
 
 def test_close_story_with_unreadable_verify_config_fails_closed(seeded_story):
@@ -249,3 +278,46 @@ def test_close_story_with_no_verify_config_is_opt_out(seeded_story):
     assert not (root / ".rebar" / "config.conf").exists()
     rc = _call(tracker, story_id, env_id, "in_progress", "closed")
     assert rc == 0, "with no verify config present the gate stays off; the close succeeds"
+
+
+# The following three drive the close through the PUBLIC dispatcher (rebar
+# transition …), asserting only observable behavior — exit code + the status read
+# back via `show` — so they exercise the fail-closed contract end-to-end rather
+# than the module's positional argv.
+
+
+def test_close_epic_with_unreadable_verify_config_fails_closed(tmp_path, monkeypatch):
+    # The gate fires for epics too (ticket_type in {story, epic}); a corrupt config
+    # must block an epic close, not only a story.
+    _tracker, epic_id, _env, repo = _seed_in_progress(tmp_path, monkeypatch, "epic")
+    (repo / ".rebar").mkdir(parents=True, exist_ok=True)
+    (repo / ".rebar" / "config.conf").write_bytes(_CORRUPT_VERIFY_CONFIG)
+
+    proc = _cli(repo, "transition", epic_id, "in_progress", "closed")
+    assert proc.returncode == 1, "an unreadable verify config must fail-closed for an epic"
+    assert _status_via_cli(repo, epic_id) == "in_progress", "a blocked close must not change status"
+
+
+def test_force_close_still_works_under_unreadable_verify_config(tmp_path, monkeypatch):
+    # Security-relevant: fail-closed must not TRAP a ticket. An operator can still
+    # --force-close even when a corrupt config has forced the gate on.
+    _tracker, story_id, _env, repo = _seed_in_progress(tmp_path, monkeypatch, "story")
+    (repo / ".rebar").mkdir(parents=True, exist_ok=True)
+    (repo / ".rebar" / "config.conf").write_bytes(_CORRUPT_VERIFY_CONFIG)
+
+    proc = _cli(repo, "transition", story_id, "in_progress", "closed", "--force-close=ops override")
+    assert proc.returncode == 0, "--force-close must bypass the (fail-closed) gate"
+    assert _status_via_cli(repo, story_id) == "closed"
+
+
+def test_rebar_config_override_unreadable_fails_closed(tmp_path, monkeypatch):
+    # The fix consults REBAR_CONFIG first; an unreadable *explicit* override must
+    # also fail-closed, not fall through to "closure allowed".
+    _tracker, story_id, _env, repo = _seed_in_progress(tmp_path, monkeypatch, "story")
+    override = tmp_path / "override.conf"
+    override.write_bytes(b"verify.require_verdict_for_close=true\n\xff\n")
+    monkeypatch.setenv("REBAR_CONFIG", str(override))
+
+    proc = _cli(repo, "transition", story_id, "in_progress", "closed")
+    assert proc.returncode == 1, "an unreadable REBAR_CONFIG override must fail-closed"
+    assert _status_via_cli(repo, story_id) == "in_progress"

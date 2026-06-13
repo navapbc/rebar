@@ -78,7 +78,7 @@ On top of that foundation, rebar adds what parallel agent work actually needs:
 ## Requirements
 
 **Runtime (system):**
-- Python ≥ 3.10
+- Python ≥ 3.11
 - `git`, `bash`, `jq` — required.
 - `flock` from **util-linux** — recommended for robust write serialization, but
   **not strictly required**: it is not on `PATH` by default on macOS
