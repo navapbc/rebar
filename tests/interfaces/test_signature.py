@@ -264,6 +264,108 @@ def test_verify_ghost_and_archived_tickets(rebar_repo: Path) -> None:
     assert out["verdict"] == "unsigned"
 
 
+# ── client-facing display: hex stripped, facts kept, llm compacted ────────────
+def test_show_strips_raw_hex_but_keeps_facts(rebar_repo: Path) -> None:
+    tid = _seed(rebar_repo)
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
+    sig = rebar.show_ticket(tid, repo_root=str(rebar_repo))["signature"]
+    # The raw HMAC hex (the "signature itself") is not in client output ...
+    assert "signature" not in sig
+    # ... but the facts a client needs ARE: the verified-steps manifest + key fp.
+    assert sig["manifest"] == MANIFEST
+    assert sig["key_id"]
+
+
+def test_llm_view_compacts_signature(rebar_repo: Path) -> None:
+    tid = _seed(rebar_repo)
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
+    llm = rebar.to_llm(rebar.show_ticket(tid, repo_root=str(rebar_repo)))
+    assert "sig" in llm
+    assert llm["sig"]["present"] is True
+    assert llm["sig"]["steps"] == len(MANIFEST)
+    assert "signature" not in llm["sig"]  # never the raw hex
+
+
+# ── close gate: story/epic require a certified signature (opt-in) ──────────────
+def _enable_gate(repo: Path) -> None:
+    (repo / ".rebar").mkdir(exist_ok=True)
+    (repo / ".rebar" / "config.conf").write_text("verify.require_signature_for_close=true\n")
+
+
+def _story(repo: Path) -> str:
+    tid = rebar.create_ticket(
+        "story", "Gate story",
+        description="B.\n\n## Acceptance Criteria\n- [ ] a", repo_root=str(repo),
+    )
+    rebar.transition(tid, "open", "in_progress", repo_root=str(repo))
+    return tid
+
+
+def test_close_gate_off_by_default(rebar_repo: Path) -> None:
+    tid = _story(rebar_repo)
+    out = rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert out["to"] == "closed"  # no gate, no signature needed
+
+
+def test_close_gate_blocks_without_signature_then_allows_after_sign(rebar_repo: Path) -> None:
+    _enable_gate(rebar_repo)
+    tid = _story(rebar_repo)
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert "certified signature" in ei.value.stderr
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "in_progress"
+
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
+    out = rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert out["to"] == "closed"
+
+
+def test_close_gate_stale_head_blocks(rebar_repo: Path) -> None:
+    _enable_gate(rebar_repo)
+    tid = _story(rebar_repo)
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
+    # Advance the CODE repo HEAD after signing → the attestation is now stale.
+    subprocess.run(["git", "commit", "--allow-empty", "-q", "-m", "advance"],
+                   cwd=str(rebar_repo), check=True, capture_output=True)
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert "different commit" in ei.value.stderr
+    # Re-signing at the new HEAD unblocks the close.
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
+    assert rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))["to"] == "closed"
+
+
+def test_close_gate_force_close_bypass(rebar_repo: Path) -> None:
+    _enable_gate(rebar_repo)
+    tid = _story(rebar_repo)
+    cp = _cli("transition", tid, "in_progress", "closed", "--force-close=verifier offline", cwd=rebar_repo)
+    assert cp.returncode == 0, cp.stderr
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "closed"
+
+
+def test_close_gate_does_not_apply_to_tasks(rebar_repo: Path) -> None:
+    _enable_gate(rebar_repo)
+    tid = rebar.create_ticket("task", "T", repo_root=str(rebar_repo))
+    rebar.transition(tid, "open", "in_progress", repo_root=str(rebar_repo))
+    out = rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert out["to"] == "closed"  # gate is story/epic only
+
+
+# ── validate: store-wide signature integrity ──────────────────────────────────
+def test_validate_flags_tampered_signature(rebar_repo: Path) -> None:
+    tid = _seed(rebar_repo)
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
+    # A clean signature is not flagged.
+    clean = rebar.validate(repo_root=str(rebar_repo))
+    assert not any("[SIGNATURE]" in m for m in clean["major_issues"])
+    # Tamper, then validate flags it MAJOR and names the ticket.
+    _forge_signature_event(rebar_repo, tid, MANIFEST + ["SECRETLY ADDED"])
+    rep = rebar.validate(repo_root=str(rebar_repo))
+    sig_majors = [m for m in rep["major_issues"] if "[SIGNATURE]" in m]
+    assert sig_majors, f"tampered signature not flagged: {rep['major_issues']}"
+    assert any(tid in m for m in sig_majors)
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 def test_cli_sign_and_verify(rebar_repo: Path) -> None:
     tid = _seed(rebar_repo)

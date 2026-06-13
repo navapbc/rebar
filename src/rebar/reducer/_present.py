@@ -30,6 +30,12 @@ INTERNAL_KEYS: frozenset[str] = frozenset(
 _INTERNAL_SUBKEYS: dict[str, frozenset[str]] = {
     # source_count is the count of folded precondition sources — internal detail.
     "preconditions_summary": frozenset({"source_count"}),
+    # The raw HMAC hex is the secret-ish artifact clients never need: they want the
+    # FACT of a signature (the verified-steps manifest + env key fingerprint) and
+    # its validity via `verify-signature` / fsck / validate — not the signature
+    # itself. The reducer keeps the full record (the close gate and verify read it
+    # directly); only the public interface output drops the hex.
+    "signature": frozenset({"signature"}),
 }
 
 

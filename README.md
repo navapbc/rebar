@@ -356,11 +356,20 @@ Optional `.rebar/config.conf` (or `.rebar.conf`) at the repo root, flat
 `key=value`:
 
 ```ini
-ticket.display_mode=auto             # auto | canonical | alias | short
+ticket.display_mode=auto                # auto | canonical | alias | short
 ticket_clarity.threshold=70
-verify.require_verdict_for_close=true # opt-in (default: false) — gate story/epic
-                                      # close on a PASS verdict hash
+verify.require_signature_for_close=true # opt-in (default: false) — gate story/epic
+                                        # close on a certified signature at the
+                                        # current HEAD (`rebar sign`). The legacy
+                                        # name verify.require_verdict_for_close is
+                                        # still honored as an alias.
 ```
+
+When the close gate is enabled, closing a story/epic requires a **certified
+signature made at the current HEAD** — sign a manifest of verified steps
+(`rebar sign <id> '[...]'`) then `rebar transition <id> closed`; re-sign if HEAD
+moved, or bypass with `--force-close=<reason>`. This replaces the older
+`--verdict-hash`/`compute-verdict-hash.sh` gate, which is now deprecated.
 
 rebar keeps its writable state under `.rebar/` at the repo root. The `scratch`
 store defaults to `REPO_ROOT/.rebar/scratch/` (override with the

@@ -35,11 +35,11 @@ _usage() {
     echo "  current_status / target_status: open | in_progress | closed | blocked" >&2
     echo "  --reason=<text>          Required when closing bug tickets. Must start with 'Fixed:' or 'Escalated to user:'." >&2
     echo "  --force                  Skip the unresolved-children guard when closing. Non-closed children remain unresolved." >&2
-    echo "  --verdict-hash=<hash>    HMAC from compute-verdict-hash.sh. Required for story/epic close ONLY when the opt-in gate verify.require_verdict_for_close=true is set in .rebar/config.conf (off by default)." >&2
-    echo "  --force-close=<reason>   Bypass verdict-hash requirement for story/epic (requires user approval via hook)." >&2
+    echo "  --verdict-hash=<hash>    DEPRECATED (ignored): the story/epic close gate now requires a certified signature ('rebar sign'), not a verdict hash." >&2
+    echo "  --force-close=<reason>   Bypass the signature requirement for story/epic (requires user approval via hook)." >&2
     echo "  Examples:" >&2
     echo "    ticket transition abc1 open closed --reason=\"Fixed: patched null check in foo.sh\"" >&2
-    echo "    ticket transition abc1 closed --verdict-hash=abc123...  # close story with verified verdict" >&2
+    echo "    rebar sign abc1 '[\"tests: PASS\"]' && ticket transition abc1 closed  # close story with a certified signature" >&2
     echo "    ticket transition abc1 closed --force-close=\"verifier timed out\"  # bypass with reason" >&2
     exit 1
 }

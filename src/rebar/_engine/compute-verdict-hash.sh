@@ -23,6 +23,12 @@ if [ $# -lt 2 ]; then
     exit 1
 fi
 
+# DEPRECATED: the story/epic close gate now uses the signature system
+# (`rebar sign <id> <manifest>` + `rebar verify-signature`), not this verdict
+# hash. This script remains only for backward compatibility; its output no longer
+# satisfies the close gate. Migrate to: rebar sign <id> '["step: PASS", ...]'.
+echo "Warning: compute-verdict-hash.sh is deprecated; the close gate now uses 'rebar sign'/'rebar verify-signature'." >&2
+
 TICKET_ID="$1"
 VERDICT="$2"
 
