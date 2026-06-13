@@ -20,13 +20,17 @@ sketched at the end for sequencing only.*
    existing write lock) is allowed. New per-clone state is gitignored and
    rebuildable. New write events flow through the locked write path — no side
    channels (I5).
-2. **Writers and byte format — see P1.0 first.** There are **two** committers and
-   they are **not** byte-identical today: `_store/event_append.py:56-61` writes
-   canonical `json.dumps(sort_keys=True, separators=(",",":"))`, while the
-   reconciler/txn helper `_engine/event_append.py:123` writes plain
-   `json.dumps(event, ensure_ascii=False)` (unsorted, non-compact). There is **no**
-   byte-parity test in `tests/scripts/`. **P1.0 unifies them and adds the test;
-   every later item that adds or reorders fields depends on it.**
+2. **Writers and byte format — see P1.0 first.** **Four** event serializers exist
+   and only one is canonical: `_store/event_append.py:56-61` writes canonical
+   `json.dumps(sort_keys=True, separators=(",",":"))`, while **three** others write
+   plain `json.dumps(event, ensure_ascii=False)` (unsorted, non-compact) — the
+   reconciler helper `_engine/event_append.py:123`, the STATUS/claim path
+   `ticket_txn.py:219` (which renames+commits directly, bypassing
+   `stage_and_commit`), and SNAPSHOT compaction `ticket-compact.sh:274`. There is
+   **no** byte-parity test in `tests/scripts/` (the one cited in
+   `_store/event_append.py:15`'s docstring does not exist). **P1.0 unifies all four
+   and adds the test; every later item that adds or reorders fields — P2.1, P2.2's
+   detached signature, P2.3 — depends on it.**
 3. **Live write/timestamp topology (verified).** The single `time.time_ns()`
    ordering timestamp is generated at **four** live seams, not one:
    - `_commands/_seam.py:153` — create / edit / comment / link / unlink / tag /
@@ -52,27 +56,33 @@ sketched at the end for sequencing only.*
 
 ## P1.0 — Prerequisite: unify the canonical event-byte format (enables P1.3/P2.x)
 
-**Goal.** One committer byte format and an executable parity gate, so later items
+**Goal.** One event byte format and an executable parity gate, so later items
 that add/reorder event content rest on a real guarantee (closes review finding #6).
 
-**Seams.** Make `_engine/event_append.py:123` serialize with the **same**
-canonical form as `_store/event_append.py` (`sort_keys=True,
-separators=(",",":"), ensure_ascii=False`, no trailing newline). Factor the
-serializer into one shared helper (e.g. `_store/event_append.canonical_bytes`)
-and have the reconciler/txn path import it rather than re-implement.
+**Seams — all four serializers (not just the reconciler).** Factor the canonical
+serializer into one shared helper (e.g. `_store/event_append.canonical_bytes`) and
+route **every** event producer through it:
+- `_engine/event_append.py:123` (reconciler) — import the helper;
+- `ticket_txn.py:219` (STATUS/claim) — replace its `json.dump(event, …,
+  ensure_ascii=False)`; this path renames+commits inline (`:236-243`), so the
+  helper must be importable without pulling in `stage_and_commit`'s lock;
+- `ticket-compact.sh:274` (SNAPSHOT) — its inline `python3` writer must use the
+  same canonical form (import the helper in the heredoc).
+Also fix the false guarantee in `_store/event_append.py:15`'s docstring (it cites a
+test that doesn't exist) once the real test lands.
 
 **Tests.** Add `tests/scripts/test-ticket-write-commit-event.sh` (the test ground
-rule 2 previously *assumed* existed) **and** a Python parity test asserting both
-committers emit byte-identical output for the same event dict. Re-run the full
-reconciler + compaction suites — folded/`*.retired` bytes must be unaffected
-(they are read, not re-serialized).
+rule 2 previously *assumed* existed) **and** a Python parity test that drives an
+event dict through **all four** producers and asserts byte-identical output. Re-run
+the reconciler + compaction suites — folded/`*.retired` bytes are read, not
+re-serialized, so existing committed data is unaffected.
 
-**Risk.** Low-medium: changes committed bytes for reconciler events. *Mitigation:*
-only key order/whitespace changes (semantically identical JSON); reducer parses
-by key, not bytes, so replay is unaffected; land standalone before any field
-additions.
+**Risk.** Low-medium: changes committed bytes for reconciler/STATUS/SNAPSHOT
+events. *Mitigation:* only key order/whitespace changes (semantically identical
+JSON); the reducer parses by key, not bytes, so replay and existing data are
+unaffected; land standalone before any field additions.
 
-**Effort.** ~0.5–1 day.
+**Effort.** ~1–1.5 days (four call sites incl. the bash heredoc).
 
 ---
 
@@ -220,10 +230,21 @@ ordering compare them **as integers**, not strings:
 - Change `reducer/_sort.py:event_sort_key` (line 21) from `ts_segment =
   name.split("-")[0]` (string-compared) to `int(ts_segment)` (with a safe
   fallback for malformed names), preserving the existing `(ts, type_order, name)`
-  tuple and the LINK<UNLINK tiebreak.
-- Audit and align the **other filename-order sites** that do the same split:
-  `ticket_txn.py` (fork scan), reconciler scans, and any `_api.py` listing — route
-  them through the one `event_sort_key`.
+  tuple and the LINK<UNLINK tiebreak (its two consumers, `reducer/__init__.py`
+  and `reducer/_cache.py:102`, don't depend on the element's type, and no test
+  pins it as a string — so the change is caller-safe).
+- Align the **other filename-order sites** (verified enumeration — all are
+  width-hazard-exposed string compares today):
+  - `graph/_links.py:53` — `os.path.basename(x[1]).split("-")[0]` (LINK/UNLINK
+    ordering); switch the first key element to `int(...)`.
+  - `_commands/unlink.py:47` — `x[1].name.split("-")[0]`; same fix.
+  - `ticket_txn.py:187-190` — the STATUS-fork scan uses a **bare `sorted()`** over
+    full filenames (whole-string lexical), *not* a `split("-")[0]` prefix.
+    **Behavior note:** fork *resolution* is UUID-keyed and skew-independent
+    (unaffected), but the scan picks "most recent STATUS" by filename order, so it
+    must move to integer-prefix ordering too; verify the change against the
+    STATUS-chain `parent_status_uuid` advancement (which *does* depend on order).
+  Factor a single `int`-prefix comparator so all four sites share one impl.
 Under integer comparison, old + new interleave correctly regardless of digit
 width, and in practice the HLC stays 19 digits until year ~2286 (ns rollover to 20
 digits), so even **string**-comparing older clones order correctly for ~250 years
@@ -300,8 +321,14 @@ rename but **no** per-event commit). So:
   (events already carry `author`/`env_id` at the seam). Optionally store a
   **detached signature over the event's canonical bytes** (depends on P1.0's single
   byte format) in an additive optional field — verifiable independent of git
-  commits, and preserved correctly through compaction (the SNAPSHOT's `data`
-  retains each folded event's recorded identity) and reconciler batching.
+  commits, and preserved through reconciler batching.
+  - **Compaction caveat (in scope).** Today a SNAPSHOT stores only
+    `source_event_uuids` (`ticket-compact.sh:263`), **not** per-event author/
+    signature — so folded events' identity would be lost on compaction. P2.2 must
+    extend the SNAPSHOT payload to carry the recorded identity (and signature, if
+    present) of each folded event, and `process_snapshot`
+    (`reducer/_processors.py:337-341`) to surface it, so verification still reads
+    back through `*.retired` folds.
 - **Secondary — optional commit signing.** When `identity.sign=true` / `REBAR_SIGN=1`,
   also `git commit -S` in the locked commit step for the single-event Python/STATUS
   paths, as a complementary commit-DAG integrity layer — explicitly **not** the
@@ -321,7 +348,8 @@ in-event signature check surfaces `unverified` (not silently trusted); a folded
 
 **Risk.** Medium — key management / platform variance (GPG vs SSH). *Mitigations:*
 fully opt-in; advisory verification (never blocks); falls back to recorded-identity
-when signing unavailable; default install experience unchanged.  **Effort.** ~3 days.
+when signing unavailable; default install experience unchanged.  **Effort.** ~3–4
+days (incl. extending the SNAPSHOT payload + `process_snapshot`).
 
 ---
 
@@ -343,10 +371,20 @@ set-union cannot express it — hence a new event type is unavoidable).
 types → **`SCHEMA_VERSION` bump** and the preserve-and-ignore path: an **older
 clone treats `TAG`/`UNTAG` as unknown → preserved but not applied, so tags written
 by a newer clone are invisible on the old clone** until upgrade. Tags are advisory
-(not blocking/scheduling), so this degradation is acceptable; document it, and have
-the writer *also* keep the legacy whole-field `EDIT` for one transition release
-(dual-write) so mixed-version fleets still see tags, retiring the EDIT in the
-release after. Pin with `test_event_schema_forward_compat.py`.
+(not blocking/scheduling), so this degradation is acceptable.
+
+**Dual-write transition — and the replay rule that makes it safe.** For one
+transition release the writer *also* emits the legacy whole-field `EDIT` so
+mixed-version fleets still see tags. **Critical:** a v2 reducer must NOT apply both,
+or the EDIT's wholesale `state["tags"]` assignment (`process_edit`,
+`reducer/_processors.py:283-302`) replayed after a concurrent `TAG`/`UNTAG` would
+clobber the OR-Set merge and reintroduce last-writer-wins. So the rule is: **once a
+ticket has any `TAG`/`UNTAG` event, the v2 reducer treats tags as delta-owned and
+ignores the `tags` key of every `EDIT` on that ticket** (the legacy EDIT then
+serves *only* old clones). Pin this with a replay test (interleave EDIT and TAG for
+the same tag; v2 result must equal the OR-Set result regardless of ordering).
+Retire the legacy EDIT in the release after. Forward-compat pinned by
+`test_event_schema_forward_compat.py`.
 
 **Tests.** Two-clone CRDT convergence (add `x` vs add `y` → both; add vs concurrent
 remove → deterministic add-wins/observed-remove), reusing the P2.1 skewed-clock
