@@ -57,6 +57,112 @@ sketched at the end for sequencing only.*
 
 ---
 
+## Experimental validation & convergence with proven art
+
+Before committing to the items below, each surviving change was **prototyped and
+measured** (scripts under a scratch repo, results reproduced here) and checked
+against how **proven OSS projects** solve the same problem (git-bug, Riak,
+Akka, Automerge/Yjs, TUF/sigstore). The experiments confirmed feasibility; the
+proven-art review changed two designs materially (P2.3 simplified; P1.0's
+parity claim corrected) and added concrete gotchas to the rest.
+
+### Scorecard (all prototyped; ✅ = validated)
+
+| Item | Experiment result | Decisive gotcha surfaced |
+|------|-------------------|--------------------------|
+| **P2.1 HLC** | ✅ 2400 concurrent ticks via flock'd `next_tick()` — all unique, monotonic, 19-digit; int- and string-sort agree at equal width | `time_ns()` is 19 digits until **~year 2286**; string sort only breaks across *differing* widths → **stay 19-digit** |
+| **P2.1 / P1.0 `jq`** | ⚠️ **`json.dumps==jq -S -c` is NOT portable-safe** | jq parses numbers as float64; the 19-digit ns timestamp is **>2⁵³**. jq-1.7 preserves *literals* but **any arithmetic rounds it** (`.t+0`→`…655000`), and **jq ≤1.6 (default macOS) rounds on parse** → never let jq touch the event bytes |
+| **P1.0 canon** | ✅ re-serializing changes bytes but parsed dict is identical → replay-safe; AST guard caught all 7 live `.py` writers | bash linters can't see into heredocs → need a **regex prong** + allowlist the canonical helper |
+| **P2.3 tags** | ✅ delta ops converge over all merge orders (and, for the OR-Set variant tested, tombstone-by-tag is order-independent and a deterministic `seed:<tag>` avoids the duplication trap) | **git-bug uses delta-replay-order, not an OR-Set** → adopt the simpler proven design (no tombstones/seed) (below) |
+| **P1.4 gc** | ✅ discarded commit survives `gc --prune=14.days.ago`, dies at `--prune=now` | must use a conservative window on **both** `reflog expire` and `gc --prune`; never `--prune=now` |
+| **P1.1 query** | ✅ predicates + `OR` + negation + degrade-to-substring in ~40 lines | unknown `field:` must fall back to literal substring (no crash) |
+| **P2.2 identity** | ✅ gpg detached sign/verify/tamper round-trip over canonical bytes works | `ssh-keygen` may be **absent**; this env even force-signs commits → signing must be **opt-in/advisory** |
+
+### Proven-art convergence & the resulting refinements
+
+- **P2.1 clock — matches git-bug's shipped design, with one robustness rule.**
+  git-bug persists a single `uint64` Lamport counter in a **local file**
+  (`clocks/<name>`), advances it monotonically, and — critically — treats that
+  file as a **disposable cache**: the authoritative value rides *inside git*
+  (as tree-entry names) and is **re-seeded by witnessing `max` over history**
+  (`entity/dag/clock.go` `Witnesser`/`ReadAllClocks`; `util/lamport/*`). rebar's
+  authoritative clock value is *already* the filename prefix in the shared log,
+  so **`.rebar/hlc.state` must be a pure cache**: `next_tick()` issues
+  `max(hlc.state, max(prefix of the target ticket's events after sync),
+  time_ns()) + 1`. The per-ticket `max(prefix)` witness is what gives cross-clone
+  causal correctness (git-bug's witness-on-merge); it makes the local file
+  corruption-/race-proof (git-bug shrugs off the same persistence race for this
+  reason). Keep the UUID tiebreak — git-bug confirms "logical-time, then
+  lexicographic content-id." *Divergence:* rebar uses an HLC (wall-aligned)
+  where git-bug uses pure Lamport + display-only wall-clock; justified for
+  human-readable filenames, but ordering stays driven by the integer + UUID
+  tiebreak, never by wall-clock alone.
+  [git-bug model](https://github.com/git-bug/git-bug/blob/master/doc/design/data-model.md)
+
+- **P2.3 tags — SIMPLIFIED to git-bug's proven delta-replay model; drop the OR-Set.**
+  The closest analogue, git-bug, does **not** use an OR-Set for labels: its
+  `LabelChangeOperation` carries explicit `Added`/`Removed` lists and resolves a
+  concurrent add+remove of the same label by **whichever op replays last in the
+  deterministic order** (Lamport clock, then op-id) — *not* CRDT add-wins
+  ([op_label_change.go](https://github.com/git-bug/git-bug/blob/master/entities/bug/op_label_change.go)).
+  Once rebar has HLC+UUID total ordering (P2.1), this comes for free and it
+  **fixes the original whole-field-clobber bug** (concurrent `TAG x`‖`TAG y` →
+  both survive) without any OR-Set machinery. The full OR-Set (observed-remove +
+  per-add UUID tags) is **over-engineered for advisory tags** and carries three
+  hazards the research surfaced: unbounded tombstone growth (Riak/Akka bound it
+  with version-vector "dots", not tombstones —
+  [riak_dt_orswot](https://github.com/basho/riak_dt/blob/develop/src/riak_dt_orswot.erl));
+  a **causal-stability requirement for safe compaction** (collapsing an OR-Set at
+  a non-stable point silently loses a concurrent add or resurrects a removed
+  element — Akka's documented "old data merged after marker expiry → value not
+  correct"); and a **seeding-divergence trap** (independently minted seed tags
+  duplicate — the Yjs "initial content duplicated" bug, fixed by *deterministic*
+  seed identity). rebar has **no causal-stability detector**, so the OR-Set would
+  force its SNAPSHOT compaction to exempt tag tombstones indefinitely. The
+  delta-replay-order model has **none** of these problems (no tombstones, normal
+  compaction). Adopt it; cite ORSWOT/Radicle-Automerge as the upgrade path **only
+  if** true concurrent add-wins semantics are ever required (they aren't for
+  advisory tags). *(Validated experimentally: delta ops converge across all merge
+  orders; the legacy whole-field EDIT must still be ignored once a delta exists —
+  that rule is unchanged.)*
+
+- **P1.0 / P2.2 — one Python serializer; sign literal bytes (TUF/sigstore lesson).**
+  The "`json.dumps == jq -S -c`" parity assertion is **unsafe** (jq float64
+  rounding of the >2⁵³ timestamp, version-dependent). The TUF/sigstore ecosystem's
+  hard-won lesson is "**canonicalization is a footgun; sign the literal bytes**"
+  ([sigstore DSSE](https://docs.sigstore.dev/about/bundle/),
+  [python-tuf #457](https://github.com/theupdateframework/python-tuf/issues/457)).
+  So: route **every** event write through **one Python `canonical_bytes` helper**
+  (bash heredocs call `python3 -m rebar._store.canonical`), drop jq from the
+  event-write path entirely, and have P2.2's optional signature cover the **exact
+  canonical bytes** of the event (excluding the signature field). With a single
+  serializer the cross-impl canonicalization problem disappears. The guard is
+  Semgrep (`.py`, keyed on the `json.dump(s)` call, helper allowlisted) **plus** a
+  pre-commit `pygrep` regex for `.sh` heredocs (linters don't parse heredocs).
+  [Semgrep shell](https://semgrep.dev/blog/2021/scanning-shell-scripts-with-semgrep/),
+  [pre-commit pygrep-hooks](https://github.com/pre-commit/pygrep-hooks).
+
+- **P2.2 identity — matches git-bug (optional, detached, advisory); note rotation limit.**
+  git-bug records author as a reference and makes signing **optional** and
+  **detached** (OpenPGP over the commit), verifying against keys the identity
+  declared **valid at that Lamport time** (`ValidKeysAtTime`,
+  `entity/dag/operation_pack.go`). rebar's "in-event recorded identity + optional
+  detached signature, advisory verification" matches the simple end; the one
+  thing it **cannot** express without versioned, time-anchored identities is **key
+  rotation** — document that limit and the forward-compat path (identity versions)
+  now, since git-bug needed a migration tool to retrofit it.
+
+- **P1.4 gc — exact recipe.** `git reflog expire --expire=<window>
+  --expire-unreachable=<window> --all` then `git gc --prune=<window>.ago`, with a
+  conservative default (14 days). Akka's pruning teaches the same discipline (gate
+  discard on dissemination + a TTL marker, never wall-clock alone) — here the
+  window must exceed the worst-case offline/un-pushed interval, not just the
+  ≤1/min sync cadence.
+
+The item write-ups below incorporate these refinements.
+
+---
+
 ## P1.0 — Prerequisite: unify the canonical event-byte format (enables P1.3/P2.x)
 
 **Goal.** One event byte format and an executable parity gate, so later items
@@ -124,11 +230,25 @@ The one-shot `ticket-migrate-*.sh` writers are exempt (run-once, pre-canonical
 history). Also fix the false guarantee in `_store/event_append.py:15`'s docstring
 once the real test lands.
 
+**Canonical form: one Python helper; no jq (validated).** The single canonical
+serializer is `json.dumps(sort_keys=True, separators=(",",":"), ensure_ascii=False)`
+(EXP2: byte-equal to `jq -S -c` **only** with `ensure_ascii=False` — `世界`
+diverges otherwise). But **do not assert Python↔jq parity** and keep jq out of the
+event path entirely: EXP-jq shows jq parses the >2⁵³ timestamp as float64 (jq ≤1.6
+rounds on parse; jq-1.7 rounds under arithmetic), which would both break parity and
+**corrupt the ordering key**. This matches the TUF/sigstore industry lesson —
+"canonicalization across implementations is a footgun; standardize on one." So all
+bash heredoc writers call `python3 -m rebar._store.canonical` (or the importable
+helper) rather than inline `json.dump`/`jq`. Re-serialization is replay-safe
+(EXP-canon: bytes differ, parsed dict identical).
+
 **Tests — the gate is structural, scanning Python AND bash.**
 - A parity test driving one event dict through **every live producer** (incl. the
-  bash `delete`/SNAPSHOT paths via subprocess) asserting byte-identical output.
+  bash `delete`/SNAPSHOT paths via subprocess) asserting byte-identical output
+  **against the one Python helper** (Python↔Python, not Python↔jq).
 - Add `tests/scripts/test-ticket-write-commit-event.sh` (the name ground rule 2
-  previously *assumed*).
+  previously *assumed*). Include a fuzz case with a >2⁵³ integer + non-ASCII to pin
+  the gotchas EXP-jq/EXP2 surfaced.
 - **A structural guard** that asserts no event write uses a raw `json.dump(s)`: it
   must scan **both** `*.py` (AST) **and** the inline `python3` heredocs inside
   `*.sh` (regex over heredoc bodies) — a Python-only AST scan would miss exactly
@@ -261,10 +381,16 @@ reflog") — **not** in `ticket-sync.sh`, which is now a ~21-line shim. The cost
 **Design.** Operator-only command `rebar gc` (**not** over MCP, like `init`) that,
 under the write lock (I5) and only when not mid-recovery (reuse
 `rebar._store.lock.check_no_rebase_in_progress` — note: **no** leading underscore):
-1. `git reflog expire --expire=<window>` with a **conservative default**
-   (`gc.reflog_window`, default 14 days ≫ the ≤1/min sync cadence) so recent
-   recovery history survives;
-2. `git gc`/`repack -ad`; 3. report bytes reclaimed.
+1. `git reflog expire --expire=<window> --expire-unreachable=<window> --all`
+   (**both** flags — EXP6 showed an unreachable discarded commit is governed by
+   `--expire-unreachable`/`--prune`, not the default reflog expiry);
+2. `git gc --prune=<window>.ago` (**never `--prune=now`** — EXP6: the discarded
+   commit survives `--prune=14.days.ago` but is destroyed by `--prune=now`);
+   with a **conservative default** `gc.reflog_window` = 14 days that must exceed the
+   worst-case offline/un-pushed interval (Akka's pruning teaches the same: gate
+   discard on dissemination + a TTL, never wall-clock alone), not merely the ≤1/min
+   sync cadence;
+3. report bytes reclaimed.
 Pair with compaction: a `--compact-first` flag runs per-ticket `compact` over
 eligible tickets first (I1/I9-safe: SNAPSHOT folds, `*.retired` renames union),
 and document a "compact then gc" cadence in `docs/concurrency.md`.
@@ -337,12 +463,37 @@ seams (ground rule 3) call the same helper:
   `rebar._store.hlc.next_tick()`;
 - bash (`ticket-compact.sh`) → `python3 -m rebar._store.hlc next` (one impl, no
   bash/Python drift).
-Seed/migrate: on first tick `next_tick()` initializes `last_seen` from
-`max(existing event prefix)` across the worktree, so a fresh clone of a populated
-store never regresses below existing events. **Injectable clock** for tests: the
-physical source reads an override (`REBAR_HLC_NOW`) so the skewed-clock harness
-(below) can drive it — this injection point does not exist today and is part of
-this item's scope (finding #10).
+**The clock file is a disposable CACHE, not the source of truth (git-bug-validated
+robustness rule).** git-bug treats its persisted `clocks/<name>` file as a
+reconstructable cache — the authoritative value rides in the shared git history,
+re-seeded by *witnessing `max` over it*. rebar's authoritative clock value is
+*already* the filename prefix in the shared event log, so **never trust
+`.rebar/hlc.state` alone**: each `next_tick()` issues
+`max(hlc.state, max(prefix of the TARGET TICKET's events after sync),
+time_ns()) + 1`. Witnessing the ticket's own `max(prefix)` is what gives cross-
+clone causal correctness (clone B that pulled clone A's event sorts after it) and
+makes the local file corruption-/race-proof — if `hlc.state` is missing, stale, or
+lost to a concurrent-process write race (git-bug documents the same race and
+shrugs it off for exactly this reason), the result is still correct because it is
+re-derived from the durable log. So the local-lock RMW is a fast path, not a
+correctness dependency. *(Experiment EXP4: 2400 concurrent flock'd ticks, all
+unique/monotonic/19-digit, seeded from a max-prefix floor.)*
+
+**Injectable clock** for tests: the physical source reads an override
+(`REBAR_HLC_NOW`) so the skewed-clock harness (below) can drive it — this injection
+point does not exist today and is part of this item's scope (finding #10).
+
+**Width invariant (validated).** `time_ns()` is 19 digits until ~year 2286
+(EXP1), and equal-width integers sort identically as strings and ints; string sort
+only diverges across *different* widths. The HLC must therefore **stay 19 digits**
+— which `max(physical_ns, last+1)` does in practice (the `+1` floor only advances
+beyond wall-clock by the number of sub-nanosecond-spaced events, never ~10⁹×). New
+clones compare prefixes as ints (skew-immune); old clones still string-compare
+correctly because the width is unchanged. **Corollary (critical, from EXP-jq):**
+the prefix is a >2⁵³ integer, and `jq` parses numbers as float64 — jq ≤1.6 rounds
+it on parse and even jq-1.7 rounds it under any arithmetic. **No bash/jq step may
+ever read, re-emit, or compute on the timestamp**; this is a second reason P1.0
+routes all serialization through the one Python helper (jq never touches events).
 
 **Reducer.** STATUS forks already resolve by UUID (skew-independent,
 `reducer/_processors.py:78-120`) — keep that UUID tiebreak for exact-equal
@@ -392,9 +543,14 @@ rename but **no** per-event commit). So:
 - **Primary — recorded identity per event.** Resolve an author identity from
   `git config user.email`/`user.name` at write time and stamp the event `author`
   (events already carry `author`/`env_id` at the seam). Optionally store a
-  **detached signature over the event's canonical bytes** (depends on P1.0's single
-  byte format) in an additive optional field — verifiable independent of git
-  commits, and preserved through reconciler batching.
+  **detached signature over the event's canonical bytes with the signature field
+  excluded** (i.e. sign `canonical_bytes({event without "sig"})` — covering
+  `author`, `timestamp`, `uuid`, and `data`) in an additive optional field. This
+  is the OCI/sigstore "sign the literal bytes" model (EXP-gpg: ed25519 detached
+  sign/verify/tamper round-trip works), and it's safe **because P1.0 makes the
+  canonical bytes single-impl** — verifiable independent of git commits and
+  preserved through reconciler batching. git-bug validates the shape: author is a
+  reference, signing is optional and detached.
   - **Compaction caveat (in scope).** Today a SNAPSHOT stores only
     `source_event_uuids` (`ticket-compact.sh:263`), **not** per-event author/
     signature — so folded events' identity would be lost on compaction. P2.2 must
@@ -419,69 +575,84 @@ in-event signature check surfaces `unverified` (not silently trusted); a folded
 (compacted) signed event still verifies through the SNAPSHOT; zero-config path →
 `unsigned`, no errors; MCP parity for the new read annotations.
 
-**Risk.** Medium — key management / platform variance (GPG vs SSH). *Mitigations:*
-fully opt-in; advisory verification (never blocks); falls back to recorded-identity
-when signing unavailable; default install experience unchanged.  **Effort.** ~3–4
-days (incl. extending the SNAPSHOT payload + `process_snapshot`).
+**Key-rotation limitation (state it; git-bug's lesson).** git-bug's most valuable
+trick is `ValidKeysAtTime(editTime)` — verifying against the keys the author's
+*versioned* identity declared valid as of that logical time, so key rotation is
+causally sound. rebar's flat in-event identity **cannot express rotation**: a
+rotated/revoked key can't be distinguished from a forgery at a past time. For
+advisory verification this is acceptable; **document it**, and note the forward-
+compat path (versioned identity entities with HLC-stamped key sets) so it can be
+retrofitted — git-bug needed a dedicated migration tool to add this later, so flag
+it now.
+
+**Risk.** Medium — key management / platform variance. *Mitigations:* fully opt-in;
+advisory verification (never blocks); falls back to recorded-identity when signing
+unavailable (EXP3: `ssh-keygen` may be absent, and some environments force commit
+signing — so signing must never be assumed present); default install unchanged.
+**Effort.** ~3–4 days (incl. extending the SNAPSHOT payload + `process_snapshot`).
 
 ---
 
-### P2.3 — Tag (and collection-field) convergence as a CRDT (re-homed from P1.3)
+### P2.3 — Tag convergence via delta events + deterministic replay order (re-homed from P1.3)
 
 **Goal.** Concurrent tag add/remove on two clones converge deterministically
-instead of clobbering (the real fix the false-premise P1.3 promised).
+instead of clobbering the whole field (the real fix the false-premise P1.3
+promised).
 
-**Design — OR-Set, new delta events.** Introduce `TAG`/`UNTAG` event types (or a
-single `TAGSET` delta carrying add/remove ops), each op keyed by its event UUID so
-adds and removes form an **observed-remove set**: an `UNTAG` removes only the add
-ops it observed; concurrent re-adds survive. Reroute `_commands/leaf.tag/untag`
-and `edit(tags=)` to emit deltas; add `process_tag/process_untag` to
-`reducer/_processors.py`; add the types to `KNOWN_EVENT_TYPES` /
-`EVENT_TYPES`. Removal is genuinely expressible (a whole-field EDIT or a naive
-set-union cannot express it — hence a new event type is unavoidable).
+> **Design changed after proven-art review (see the validation section).** The
+> earlier draft proposed a full **OR-Set** (observed-remove, per-add UUID tags).
+> The closest battle-tested analogue, **git-bug**, deliberately does **not** do
+> that for labels — and the OR-Set's tombstone-growth + causal-stability-compaction
+> + seeding-divergence hazards are real and a poor fit for rebar (no causal-
+> stability detector). **Adopt git-bug's simpler, proven model instead.**
 
-**Wire/schema — and its real forward-compat cost (state it honestly).** New event
-types → **`SCHEMA_VERSION` bump** and the preserve-and-ignore path: an **older
-clone treats `TAG`/`UNTAG` as unknown → preserved but not applied, so tags written
-by a newer clone are invisible on the old clone** until upgrade. Tags are advisory
-(not blocking/scheduling), so this degradation is acceptable.
+**Design — delta events resolved by the existing total order.** Introduce `TAG` /
+`UNTAG` delta events (mirroring git-bug's `LabelChangeOperation` `Added`/`Removed`
+lists). The reducer applies them as **mutations of the current `state["tags"]`
+list in replay order**: `TAG t` adds `t` (set-union, dedup), `UNTAG t` removes `t`.
+Because P2.1 gives a deterministic total order (HLC prefix, UUID tiebreak), every
+clone converges:
+- concurrent `TAG x`‖`TAG y` → **both survive** (the original clobber bug is fixed —
+  each op is a delta, not a whole-field replace);
+- concurrent `TAG c`‖`UNTAG c` → the one that **sorts last wins**, deterministically
+  on every clone (git-bug's exact semantics; fine for advisory tags).
+Reroute `_commands/leaf.tag/untag` and `edit(tags=)` to emit deltas; add
+`process_tag`/`process_untag` to `reducer/_processors.py`; add the types to
+`KNOWN_EVENT_TYPES`/`EVENT_TYPES`. **No OR-Set, no observed-remove tombstones, no
+seed minting, no special compaction handling** — deltas fold under the normal
+SNAPSHOT path because there is no causal metadata to preserve.
 
-**Migration — seed the OR-Set from existing tags (do this or lose them).** Tags are
-*currently* stored **only** as whole-field `EDIT` data (`leaf.tag/untag` at
-`_commands/leaf.py:76,98`; `edit(tags=)`), so every existing ticket carries its
-tags in EDIT events. The convergence rule below ("ignore EDIT tags once a delta
-exists") would therefore **silently drop all pre-existing tags** the moment the
-first `TAG`/`UNTAG` lands. **The reducer MUST seed the OR-Set from the
-most-recent pre-delta `EDIT.tags` for that ticket** (treat that prior tag set as an
-implicit set of add-ops) before applying deltas. Equivalently: the *first*
-`TAG`/`UNTAG` writer snapshots current tags into seed add-ops. Test must cover
-**disjoint** pre-existing vs. delta tags (`EDIT(tags=[a,b])` then `TAG(c)` ⇒
-`{a,b,c}`, not `{c}`) — the same-tag interleave test alone would miss this. The
-"pre-delta" boundary is defined by **replay sort order** (the deterministic
-`event_sort_key`), not wall-clock, so it resolves identically on every clone even
-when a tag-setting EDIT and the first delta are concurrent.
+**No seeding trap, no OR-Set seed step.** Because `TAG`/`UNTAG` mutate the
+*current* replayed `state["tags"]` (which already reflects any pre-existing
+whole-field `EDIT`), pre-existing tags are carried forward automatically —
+`EDIT(tags=[a,b])` then `TAG(c)` ⇒ `[a,b,c]` with no seed logic. This sidesteps the
+Yjs/Automerge "independent-seed duplication" trap entirely (no per-replica tags are
+minted). *(The OR-Set version needed a deterministic `seed:<tag>` step here; the
+delta-mutation model needs none.)*
 
-**Dual-write transition — and the replay rule that makes it safe.** For one
+**Wire/schema + forward-compat cost (unchanged from the OR-Set plan).** New event
+types → **`SCHEMA_VERSION` bump 2** and preserve-and-ignore: an older clone treats
+`TAG`/`UNTAG` as unknown → preserved but not applied, so newer-clone tag changes are
+invisible there until upgrade. Tags are advisory, so acceptable.
+
+**Dual-write transition — the one replay rule that still matters.** For one
 transition release the writer *also* emits the legacy whole-field `EDIT` so
-mixed-version fleets still see tags. **Critical:** a v2 reducer must NOT apply both,
-or the EDIT's wholesale `state["tags"]` assignment (`process_edit`,
-`reducer/_processors.py:283-302`) replayed after a concurrent `TAG`/`UNTAG` would
-clobber the OR-Set merge and reintroduce last-writer-wins. So the rule is: **once a
-ticket has any `TAG`/`UNTAG` event, the v2 reducer seeds the OR-Set from the last
-pre-delta EDIT (above) and thereafter ignores the `tags` key of every `EDIT` on
-that ticket** (the legacy EDIT then serves *only* old clones). Pin with two replay
-tests: same-tag interleave (ordering-independent) **and** disjoint pre-existing/
-delta tags (seeding). Retire the legacy EDIT in the release after. Forward-compat
-pinned by `test_event_schema_forward_compat.py`.
+old clones still see tags. **Critical (kept from before):** a v2 reducer must
+**ignore the `tags` key of every `EDIT` once the ticket has any `TAG`/`UNTAG`
+event**, else the wholesale `state["tags"]` assignment (`process_edit`,
+`reducer/_processors.py:283-302`) replayed after a delta would clobber the delta
+result. The legacy EDIT then serves *only* old clones. Retire it the release after.
 
-**Tests.** Two-clone CRDT convergence (add `x` vs add `y` → both; add vs concurrent
-remove → deterministic add-wins/observed-remove), reusing the P2.1 skewed-clock
-harness. Mixed-version dual-write test (old clone still sees tags during the
-transition release).
+**Tests.** Two-clone convergence (add `x`‖add `y` → both; add `c`‖remove `c` →
+deterministic last-writer-in-order, identical on both clones), reusing P2.1's
+skewed-clock harness; pre-existing-EDIT-then-delta carries tags forward; mixed-
+version dual-write (old clone still sees tags; v2 ignores the legacy EDIT once
+delta-owned); forward-compat pinned by `test_event_schema_forward_compat.py`.
 
-**Risk.** Medium (wire change + reducer semantics). *Mitigations:* dual-write
-transition; advisory field; convergence test as the gate.  **Effort.** ~2–3 days
-(rides P2.1's harness and `SCHEMA_VERSION` bump).
+**Risk.** Low–medium (wire change + reducer mutation rule), **lower than the OR-Set
+design** it replaces (no tombstones/seeding/compaction-stability). *Mitigations:*
+dual-write transition; advisory field; convergence test as the gate; rides P2.1's
+total order. **Effort.** ~1.5–2 days (down from ~2–3; the OR-Set machinery is gone).
 
 ---
 
