@@ -77,37 +77,51 @@ backstop):
 - `ticket-delete-unlink-scan.py:149` — UNLINK delete-cascade events;
 - **`ticket-lib-api.sh:994` — STATUS(deleted); `:1017` — ARCHIVED** (the live
   `delete` command, dispatcher `rebar:534-540` → `ticket_delete`; both raw
-  `json.dump` in inline `python3` heredocs, committed together at `:1022-1027`);
+  `json.dump` in inline `python3` heredocs, committed with the UNLINK cascade +
+  tombstone at `:1045-1046`);
+- **`ticket-comment.sh:90-91` — COMMENT, still LIVE** via `ticket-transition.sh:439`,
+  which runs it to write the `--force-close=<reason>` audit comment on every
+  force-close transition (`--force-close` is a live, documented flag,
+  `ticket-transition.sh:33,102-111`). Raw `json.dump`, non-canonical;
 - `ticket-compact.sh:274` — SNAPSHOT (bash inline `python3` heredoc).
 
-**Retire the dead write *paths* — but mind one still-live script.** The
-event-write branches in the bash leaf scripts (`ticket-create.sh:274`,
-`ticket-edit.sh:266`, `ticket-comment.sh:91`, `ticket-link.sh:226/389`,
-`ticket-lib.sh:275/374`) are off the live committed-write path (creates/edits/
-comments/links flow through `_commands/_seam.py` / `graph/_links.py`). Delete the
-ones with **no** remaining live caller (`ticket-create.sh`, `ticket-edit.sh`,
-`ticket-comment.sh` — verified no live `bash …ticket-*.sh` invocation). **Caveat:
-`ticket-link.sh` is NOT deletable** — `composer.link_cli` still shells out to it
-for the `link --dry-run` *preview* (`_commands/composer.py:414-424`); that path
-passes `--dry-run` and writes **no** event, so its `:226` serializer never runs on
-the live path. Keep the script (or migrate the dry-run preview to Python to fully
-retire it); the guard's event-file scoping (`*-<TYPE>.json` writes only) means the
-dry-run preview won't trip it regardless. The one-shot `ticket-migrate-*.sh`
-writers are exempt (run-once, pre-canonical history). Also fix the false guarantee
-in `_store/event_append.py:15`'s docstring once the real test lands.
+**Retire the dead write *paths* — but two bash scripts stay live.** The
+event-write branches in `ticket-create.sh:274`, `ticket-edit.sh:266`,
+`ticket-lib.sh:275/374`, and `ticket-link.sh:226/389` are off the live
+committed-write path (creates/edits/links flow through `_commands/_seam.py` /
+`graph/_links.py`). Only `ticket-create.sh` and `ticket-edit.sh` have **no**
+remaining live caller and are safe to delete. **Two are NOT deletable and must be
+canonicalized in place, not removed:**
+- `ticket-comment.sh` — **live**: `ticket-transition.sh:439` invokes it for the
+  `--force-close` audit comment (see the live-writers list above). Conform its
+  `:90-91` serializer to `canonical_bytes` and include it in the parity set.
+- `ticket-link.sh` — still invoked by `composer.link_cli` for the `link --dry-run`
+  *preview* (`_commands/composer.py:414-424`); that path passes `--dry-run` and
+  writes **no** event, so its `:226` serializer never runs live. Keep the script
+  (or migrate the preview to Python); it can't trip the guard since it writes no
+  event file on that path.
+The one-shot `ticket-migrate-*.sh` writers are exempt (run-once, pre-canonical
+history). Also fix the false guarantee in `_store/event_append.py:15`'s docstring
+once the real test lands.
 
 **Tests — the gate is structural, scanning Python AND bash.**
 - A parity test driving one event dict through **every live producer** (incl. the
   bash `delete`/SNAPSHOT paths via subprocess) asserting byte-identical output.
 - Add `tests/scripts/test-ticket-write-commit-event.sh` (the name ground rule 2
   previously *assumed*).
-- **A structural guard** that asserts no event-file write uses a raw
-  `json.dump(s)`: it must scan **both** `*.py` (AST) **and** the inline `python3`
-  heredocs inside `*.sh` (regex over heredoc bodies) — a Python-only AST scan would
-  miss exactly the `ticket-lib-api.sh:994/1017` / `ticket-compact.sh:274` class
-  that the last review round caught. Scope it to writes of `*-<UUID>-<TYPE>.json`
-  (event files), exempting read/output/cache `json.dumps` and the one-shot
-  migration scripts by an explicit allowlist.
+- **A structural guard** that asserts no event write uses a raw `json.dump(s)`: it
+  must scan **both** `*.py` (AST) **and** the inline `python3` heredocs inside
+  `*.sh` (regex over heredoc bodies) — a Python-only AST scan would miss exactly
+  the `ticket-lib-api.sh:994/1017` / `ticket-comment.sh:91` / `ticket-compact.sh:274`
+  class that review caught. **Key the guard on the serialized value being an
+  event** — a dict literal carrying an `event_type` key — **not** on the
+  destination filename: nearly every writer serializes to a `.tmp-*` path and
+  *then* renames to the final `*-<TYPE>.json` (e.g. `ticket-comment.sh` →
+  `.tmp-comment-*`, `ticket_txn.py:218/350/371` → `.tmp-transition/claim-*`,
+  `ticket-compact.sh:273` → `…json.tmp`), so a filename-scoped guard would catch
+  only the two direct-name writers (`graph/_links.py:144`,
+  `ticket-delete-unlink-scan.py:148`) and miss the rest. Exempt read/output/cache
+  `json.dumps` and the one-shot migration scripts via an explicit allowlist.
 Folded/`*.retired` bytes are read, not re-serialized, so existing committed data is
 unaffected.
 
