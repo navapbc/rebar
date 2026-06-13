@@ -228,7 +228,11 @@ test_next_batch_no_epic_exits_nonzero() {
     # Test 7: No args exits non-zero (usage error)
     echo "Test 7: No args exits non-zero"
     _exit=0
-    _output=$("$DISPATCHER" next-batch 2>&1) || _exit=$?
+    # Sandbox the tracker: the no-args arm still runs _ensure_initialized
+    # (--init-only), which would auto-init .tickets-tracker into the checkout
+    # (REPO_ROOT leak in CI). A set TICKETS_TRACKER_DIR skips auto-init; the arity
+    # error fires before the tracker is touched, so output/exit are unchanged.
+    _output=$(TICKETS_TRACKER_DIR="$(mktemp -d)" "$DISPATCHER" next-batch 2>&1) || _exit=$?
 
     if [[ $_exit -ne 0 ]]; then
         echo "  PASS: 'ticket next-batch' with no args exits non-zero (exit $_exit)"

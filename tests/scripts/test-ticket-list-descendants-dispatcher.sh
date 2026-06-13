@@ -201,7 +201,11 @@ test_list_descendants_routes_through_dispatcher() {
     # Test 6: No args (missing root ID) exits non-zero
     echo "Test 6: No args exits non-zero"
     _exit=0
-    _output=$("$DISPATCHER" list-descendants 2>&1) || _exit=$?
+    # Sandbox the tracker: the no-args arm still runs _ensure_initialized, which
+    # would auto-init .tickets-tracker into the checkout (REPO_ROOT leak in CI).
+    # A set TICKETS_TRACKER_DIR makes the dispatcher skip auto-init; the arity
+    # error fires before the tracker is touched, so output/exit are unchanged.
+    _output=$(TICKETS_TRACKER_DIR="$(mktemp -d)" "$DISPATCHER" list-descendants 2>&1) || _exit=$?
 
     if [[ $_exit -ne 0 ]]; then
         echo "  PASS: list-descendants with no args exits non-zero (exit $_exit)"

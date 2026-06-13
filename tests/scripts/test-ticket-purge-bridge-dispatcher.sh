@@ -142,7 +142,11 @@ test_purge_bridge_routes_through_dispatcher() {
     # Test 6: No args — exits non-zero
     echo "Test 6: No args handled gracefully (exit non-zero)"
     _exit=0
-    _output=$("$DISPATCHER" purge-bridge 2>&1) || _exit=$?
+    # Sandbox the tracker: the no-args arm still runs _ensure_initialized, which
+    # would auto-init .tickets-tracker into the checkout (REPO_ROOT leak in CI).
+    # A set TICKETS_TRACKER_DIR skips auto-init; the arity error fires before the
+    # tracker is touched, so output/exit are unchanged.
+    _output=$(TICKETS_TRACKER_DIR="$(mktemp -d)" "$DISPATCHER" purge-bridge 2>&1) || _exit=$?
 
     if [[ $_exit -ne 0 ]]; then
         echo "  PASS: purge-bridge with no args handled gracefully (exit $_exit)"

@@ -75,4 +75,8 @@ jobs:
           if [ -n "$over" ]; then echo "$over"; else echo "  (none — all units within the soft cap)"; fi
 
       - name: Run the full suite (Python tiers + bash collector; excludes live-Jira)
-        run: pytest -m "not integration" -q
+        # Pin --basetemp under the runner temp (not /tmp): on long (10-16 min) runs
+        # the macOS tmp-cleaner reaps pytest's default /tmp/pytest-of-* basetemp
+        # mid-run, producing a spurious FileNotFoundError cascade. -p no:cacheprovider
+        # keeps a stale cache from leaking across runs.
+        run: pytest -m "not integration" -q -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
