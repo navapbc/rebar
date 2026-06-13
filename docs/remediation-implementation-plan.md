@@ -68,7 +68,14 @@ helper (e.g. `_store/event_append.canonical_bytes`) and route every *live*
 event-file write through it. Known live writers (the guard, not this list, is the
 backstop):
 - `_store/event_append.py:56-61` — **canonical** (the target form);
-- `_engine/event_append.py:123` — reconciler events (batched commit);
+- `_engine/event_append.py:123` — reconciler inbound events (batched commit);
+- `rebar_reconciler/batch_dispatch.py:221-232` — **BRIDGE_ALERT**, a *separate*
+  live reconciler writer with its **own** plain `json.dumps` directly to
+  `{ts}-{uuid}-BRIDGE_ALERT.json` (does **not** go through
+  `_engine/event_append`); reachable on the live reconcile path. (This omission —
+  found only by sweeping for the `event_type` dict shape, not by following
+  `event_append` callers — is precisely why the **guard, not this list, is the
+  backstop**.)
 - `ticket_txn.py:219` — transition STATUS; `:351` — claim STATUS; `:372` — claim
   EDIT (all rename+commit inline at `:236-243`, **not** via `stage_and_commit`, so
   the helper must not pull in that lock);
@@ -87,11 +94,15 @@ backstop):
 
 **Retire the dead write *paths* — but two bash scripts stay live.** The
 event-write branches in `ticket-create.sh:274`, `ticket-edit.sh:266`,
-`ticket-lib.sh:275/374`, and `ticket-link.sh:226/389` are off the live
-committed-write path (creates/edits/links flow through `_commands/_seam.py` /
-`graph/_links.py`). Only `ticket-create.sh` and `ticket-edit.sh` have **no**
-remaining live caller and are safe to delete. **Two are NOT deletable and must be
-canonicalized in place, not removed:**
+`ticket-revert.sh:147`, `ticket-lib.sh:275/374`, and `ticket-link.sh:226/389` are
+off the live committed-write path (creates/edits/links/**reverts** flow through
+`_commands/_seam.py` / `graph/_links.py` — `revert` dispatches to Python
+`revert_core` → canonical `append_event`, `rebar:419-425`). `ticket-create.sh`,
+`ticket-edit.sh`, and `ticket-revert.sh` have **no** remaining live caller and are
+safe to delete. (The `PRECONDITIONS` writers at `ticket-lib.sh:503/648` are a
+separate **millisecond**-prefixed, externally-scanned family with no dispatcher/CLI
+caller — out of scope for the ns-HLC change, but still subject to the byte guard.)
+**Two are NOT deletable and must be canonicalized in place, not removed:**
 - `ticket-comment.sh` — **live**: `ticket-transition.sh:439` invokes it for the
   `--force-close` audit comment (see the live-writers list above). Conform its
   `:90-91` serializer to `canonical_bytes` and include it in the parity set.
