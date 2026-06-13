@@ -323,6 +323,27 @@ def process_verify_commands(state: dict, event: dict, data: dict) -> None:
     state["verify_commands"] = data.get("verify_commands") or []
 
 
+def process_signature(state: dict, event: dict, data: dict) -> None:
+    """Apply a SIGNATURE event: replace state.signature (last-writer-wins).
+
+    Stores the latest cryptographic attestation — the manifest of verified steps,
+    the HMAC signature, the environment key fingerprint, and audit metadata — so
+    ``verify-signature`` can recompute and certify it. Mirrors the FILE_IMPACT /
+    VERIFY_COMMANDS last-writer-wins shape, so the record survives compaction (the
+    compactor builds the SNAPSHOT compiled_state via this reducer). The signed-at
+    timestamp falls back to the event timestamp for forward-compat records.
+    """
+    state["signature"] = {
+        "manifest": data.get("manifest") or [],
+        "algorithm": data.get("algorithm"),
+        "signature": data.get("signature"),
+        "key_id": data.get("key_id"),
+        "head_sha": data.get("head_sha"),
+        "signed_at": data.get("signed_at") or event.get("timestamp"),
+        "author": event.get("author"),
+    }
+
+
 def process_archived(state: dict) -> None:
     """Apply an ARCHIVED event: mark ticket archived and reflect in status field.
 
@@ -441,6 +462,8 @@ def replay_events(
             process_file_impact(state, event, data)
         elif event_type == "VERIFY_COMMANDS":
             process_verify_commands(state, event, data)
+        elif event_type == "SIGNATURE":
+            process_signature(state, event, data)
         elif event_type == "ARCHIVED":
             process_archived(state)
         elif event_type == "SNAPSHOT":

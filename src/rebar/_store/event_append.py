@@ -36,6 +36,7 @@ EVENT_TYPES = frozenset(
     {
         "CREATE", "STATUS", "COMMENT", "LINK", "UNLINK", "SNAPSHOT",
         "SYNC", "REVERT", "EDIT", "ARCHIVED", "FILE_IMPACT", "VERIFY_COMMANDS",
+        "SIGNATURE",
     }
 )
 
@@ -93,7 +94,7 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
         raise StoreError(
             f"Error: invalid event_type '{event_type}'. Must be one of: CREATE, STATUS, "
             "COMMENT, LINK, UNLINK, SNAPSHOT, SYNC, REVERT, EDIT, ARCHIVED, FILE_IMPACT, "
-            "VERIFY_COMMANDS",
+            "VERIFY_COMMANDS, SIGNATURE",
             1,
         )
 

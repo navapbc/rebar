@@ -188,6 +188,8 @@ rebar ready                                   # tickets with all blockers closed
 rebar next-batch <epic-id>                    # unblocked tickets under an epic's hierarchy
 rebar validate                                # repo-wide tracker health (NO ticket id; whole-store score 1-5)
 rebar clarity-check <id> / check-ac <id> / quality-check <id>   # per-ticket quality gates
+rebar sign <id> '["ran tests: PASS", "lint clean"]'   # HMAC-sign a manifest of verified steps
+rebar verify-signature <id>                   # certify the steps match the signature (exit 0=certified)
 rebar reconcile [--mode dry-run|reconcile-check|live]   # Jira sync (default: dry-run)
 ```
 
@@ -229,6 +231,30 @@ same pair you call `unlink` repeatedly. Note that **blocking** links
 (`blocks`/`depends_on`) may be promoted up the parent hierarchy when created (see
 below), so `unlink` must target the **promoted (ancestor)** endpoint to remove
 such a link.
+
+### Signing a manifest of verified steps
+
+`rebar sign <id> <manifest>` records a **cryptographic attestation** on a ticket:
+a manifest (a JSON array of verified-step strings) plus an HMAC-SHA256 signature
+computed with a key that is **specific to the environment** rebar runs in. The key
+is resolved from `REBAR_SIGNING_KEY` (injected out-of-band into a shared
+deployment — e.g. an MCP server) or, failing that, a per-environment
+`.signing-key` file generated on first use (gitignored, never committed, never
+shared). `rebar verify-signature <id>` recomputes the HMAC with the local key and
+**certifies** that the recorded steps still match the signature:
+
+```bash
+rebar sign abcd-1234 '["unit tests: PASS", "security review: clean", "deployed to staging"]'
+rebar verify-signature abcd-1234        # SIGNATURE: certified — verified steps match the signature
+```
+
+The signature binds both the ticket id and the manifest, so it cannot be replayed
+onto another ticket and any edit to the step list invalidates it. Because the key
+never leaves the environment, `verify-signature` reports `foreign_key` (rather
+than `certified`) when a record was signed by a *different* environment — only the
+environment that holds the key can certify its own attestations. The signature is
+stored as a normal append-only `SIGNATURE` event, so it replays into `show`
+output, survives compaction, and flows to other clones like any other write.
 
 ### Hierarchy promotion of blocking links
 
@@ -285,6 +311,10 @@ except rebar.ConcurrencyError:
     ...                                          # ticket changed since last read
 
 result = rebar.reconcile("dry-run")              # Jira sync (non-mutating)
+
+# Cryptographic attestation (environment-bound HMAC):
+rebar.sign_manifest(tid, ["unit tests: PASS", "security review: clean"])
+verdict = rebar.verify_signature(tid)            # {"verified": True, "verdict": "certified", ...}
 
 # Native, in-process reads (no subprocess):
 from rebar import reduce_all_tickets, reduce_ticket

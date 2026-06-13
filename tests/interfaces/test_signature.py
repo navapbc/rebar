@@ -1,0 +1,210 @@
+"""Cross-interface tests for ticket manifest signing (library / CLI / MCP).
+
+Pins that all three interfaces sign a manifest of verified steps with the
+environment-specific key, that ``verify-signature`` certifies a clean manifest
+and rejects tampering / foreign-environment keys / unsigned tickets, that the
+signature survives compaction, and that the MCP write tool is gated by
+REBAR_MCP_READONLY while the read tool is not.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+import rebar
+
+MANIFEST = ["ran unit tests: PASS", "lint clean", "manual smoke OK"]
+
+
+def _cli(*args: str, cwd: Path, **env: str) -> subprocess.CompletedProcess:
+    e = dict(os.environ)
+    e.update(env)
+    return subprocess.run(
+        [sys.executable, "-m", "rebar.cli", *args],
+        capture_output=True, text=True, cwd=str(cwd), env=e,
+    )
+
+
+def _seed(repo: Path) -> str:
+    return rebar.create_ticket(
+        "task", "Sign me",
+        description="Body.\n\n## Acceptance Criteria\n- [ ] a",
+        repo_root=str(repo),
+    )
+
+
+# ── library ───────────────────────────────────────────────────────────────────
+def test_library_sign_then_certify(rebar_repo: Path) -> None:
+    tid = _seed(rebar_repo)
+    rec = rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
+    assert rec["ticket_id"] == tid
+    assert rec["algorithm"] == "HMAC-SHA256"
+    assert rec["manifest"] == MANIFEST
+    assert rec["signature"] and rec["key_id"]
+
+    out = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    assert out["verified"] is True
+    assert out["verdict"] == "certified"
+    assert out["manifest"] == MANIFEST
+
+
+def test_signature_appears_in_show(rebar_repo: Path) -> None:
+    tid = _seed(rebar_repo)
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
+    state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
+    assert state["signature"]["manifest"] == MANIFEST
+
+
+def test_library_unsigned_ticket(rebar_repo: Path) -> None:
+    tid = _seed(rebar_repo)
+    out = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    assert out["verified"] is False and out["verdict"] == "unsigned"
+
+
+def test_library_sign_bad_manifest_raises(rebar_repo: Path) -> None:
+    tid = _seed(rebar_repo)
+    with pytest.raises(rebar.RebarError):
+        rebar.sign_manifest(tid, "not json", repo_root=str(rebar_repo))
+
+
+def test_verify_unresolvable_ticket_raises(rebar_repo: Path) -> None:
+    with pytest.raises(rebar.RebarError):
+        rebar.verify_signature("nope-nope-nope", repo_root=str(rebar_repo))
+
+
+# ── tamper / foreign-key detection ────────────────────────────────────────────
+def _forge_signature_event(repo: Path, tid: str, new_manifest: list[str]) -> None:
+    """Append a fresh SIGNATURE event whose manifest was altered but whose
+    signature is copied from the genuine one — i.e. a tampered record."""
+    import glob
+    import uuid as _uuid
+
+    tdir = repo / ".tickets-tracker" / tid
+    latest = sorted(glob.glob(str(tdir / "*-SIGNATURE.json")))[-1]
+    ev = json.loads(Path(latest).read_text())
+    ev["uuid"] = str(_uuid.uuid4())
+    ev["timestamp"] = int(ev["timestamp"]) + 1000
+    ev["data"] = {**ev["data"], "manifest": new_manifest}
+    (tdir / f'{ev["timestamp"]}-{ev["uuid"]}-SIGNATURE.json').write_text(
+        json.dumps(ev, ensure_ascii=False)
+    )
+    for cache in glob.glob(str(tdir / ".cache.json")):
+        os.remove(cache)
+
+
+def test_tampered_manifest_is_rejected(rebar_repo: Path) -> None:
+    tid = _seed(rebar_repo)
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
+    _forge_signature_event(rebar_repo, tid, MANIFEST + ["SECRETLY ADDED STEP"])
+    out = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    assert out["verified"] is False
+    assert out["verdict"] == "mismatch"
+
+
+def test_foreign_environment_key_cannot_certify(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    tid = _seed(rebar_repo)
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
+    # A different environment (different signing key) must not be able to certify.
+    monkeypatch.setenv("REBAR_SIGNING_KEY", "a-totally-different-environment-key")
+    out = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    assert out["verified"] is False
+    assert out["verdict"] == "foreign_key"
+
+
+def test_injected_env_key_round_trips(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The shared-deployment path: the key is injected via REBAR_SIGNING_KEY rather
+    # than read from disk. Signing and certifying under the same injected key works.
+    monkeypatch.setenv("REBAR_SIGNING_KEY", "shared-deployment-key")
+    tid = _seed(rebar_repo)
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
+    assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "certified"
+
+
+# ── compaction survival ───────────────────────────────────────────────────────
+def test_signature_survives_compaction(rebar_repo: Path) -> None:
+    tid = _seed(rebar_repo)
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
+    cp = _cli("compact", tid, "--threshold=0", cwd=rebar_repo, TICKET_SYNC_CMD="true")
+    assert cp.returncode == 0, cp.stderr
+    snaps = list((rebar_repo / ".tickets-tracker" / tid).glob("*-SNAPSHOT.json"))
+    assert snaps, "expected a SNAPSHOT after compaction"
+    out = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    assert out["verdict"] == "certified"
+    assert out["manifest"] == MANIFEST
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+def test_cli_sign_and_verify(rebar_repo: Path) -> None:
+    tid = _seed(rebar_repo)
+    s = _cli("sign", tid, json.dumps(MANIFEST), cwd=rebar_repo)
+    assert s.returncode == 0, s.stderr
+    assert s.stdout.startswith("SIGNED ")
+
+    v = _cli("verify-signature", tid, cwd=rebar_repo)
+    assert v.returncode == 0
+    assert "certified" in v.stdout
+
+    vj = _cli("verify-signature", tid, "--output", "json", cwd=rebar_repo)
+    assert vj.returncode == 0
+    assert json.loads(vj.stdout)["verified"] is True
+
+
+def test_cli_verify_unsigned_exits_1(rebar_repo: Path) -> None:
+    tid = _seed(rebar_repo)
+    v = _cli("verify-signature", tid, cwd=rebar_repo)
+    assert v.returncode == 1
+    assert "unsigned" in v.stdout
+
+
+def test_cli_sign_usage_on_missing_args(rebar_repo: Path) -> None:
+    tid = _seed(rebar_repo)
+    s = _cli("sign", tid, cwd=rebar_repo)
+    assert s.returncode == 1
+    assert s.stderr.startswith("Usage: rebar sign")
+
+
+# ── MCP ───────────────────────────────────────────────────────────────────────
+def _mcp_call(tool: str, args: dict):
+    pytest.importorskip("mcp")
+    from adapters import _unwrap  # tests/interfaces on sys.path
+
+    from rebar.mcp_server import build_server
+
+    srv = build_server()
+    return _unwrap(asyncio.run(srv.call_tool(tool, args)))
+
+
+def _mcp_tools() -> set[str]:
+    pytest.importorskip("mcp")
+    from rebar.mcp_server import build_server
+
+    return {t.name for t in asyncio.run(build_server().list_tools())}
+
+
+def test_mcp_sign_and_verify(rebar_repo: Path) -> None:
+    tid = _seed(rebar_repo)
+    rec = _mcp_call("sign_manifest", {"ticket_id": tid, "manifest": MANIFEST})
+    assert rec["manifest"] == MANIFEST
+    out = _mcp_call("verify_signature", {"ticket_id": tid})
+    assert out["verified"] is True and out["verdict"] == "certified"
+
+
+def test_mcp_readonly_gates_sign_but_not_verify(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tid = _seed(rebar_repo)
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
+    monkeypatch.setenv("REBAR_MCP_READONLY", "1")
+    tools = _mcp_tools()
+    assert "sign_manifest" not in tools, "write tool must be hidden on a read-only server"
+    assert "verify_signature" in tools, "verify is a read and must stay available"
+    # verify still works read-only
+    out = _mcp_call("verify_signature", {"ticket_id": tid})
+    assert out["verdict"] == "certified"

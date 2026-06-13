@@ -46,6 +46,9 @@ _DESCENDANTS = frozenset({"list-descendants"})
 # Per-ticket gate arms the dispatcher ran with NO _ensure_initialized (they read
 # transitively via `ticket show`, so the gate CLI itself does no auto-init).
 _GATES = frozenset({"clarity-check", "check-ac", "quality-check", "summary"})
+# Signature arms (native, no bash counterpart): `sign` is a write, `verify-signature`
+# a read; both need an initialized store + the environment signing key.
+_SIGNING = frozenset({"sign", "verify-signature"})
 # Leaf-write arms: full auto-init + reconverge before the in-process write.
 _WRITES_FULL = frozenset(
     {
@@ -163,6 +166,13 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         if sub == "quality-check":
             return gates.quality_check_cli(rest, tracker)
         return gates.summary_cli(rest, tracker)
+    if sub in _SIGNING:
+        ensure_initialized(init_only=False)
+        from rebar import signing
+
+        if sub == "sign":
+            return signing.sign_cli(rest)
+        return signing.verify_signature_cli(rest)
     return _passthrough(sub, rest)
 
 

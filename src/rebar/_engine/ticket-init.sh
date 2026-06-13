@@ -326,6 +326,7 @@ if ! git -C "$TRACKER_DIR" show tickets:.gitignore &>/dev/null 2>&1; then
     cat > "$TRACKER_DIR/.gitignore" <<'GITIGNORE'
 .env-id
 .closure-key
+.signing-key
 .state-cache
 .scratch/
 .cache.json
@@ -347,6 +348,13 @@ else
             git -C "$TRACKER_DIR" show tickets:.gitignore > "$TRACKER_DIR/.gitignore"
         fi
         echo ".closure-key" >> "$TRACKER_DIR/.gitignore"
+        _gitignore_updated=true
+    fi
+    if ! echo "$_gitignore_content" | grep -qFx '.signing-key' 2>/dev/null; then
+        if [ "$_gitignore_updated" = false ]; then
+            git -C "$TRACKER_DIR" show tickets:.gitignore > "$TRACKER_DIR/.gitignore"
+        fi
+        echo ".signing-key" >> "$TRACKER_DIR/.gitignore"
         _gitignore_updated=true
     fi
     # I3a: the per-ticket reducer cache (.cache.json) is local + rebuildable and
@@ -427,6 +435,15 @@ fi
 # HMAC-based verdict hashes for story/epic closure. Gitignored and local.
 if [ ! -f "$TRACKER_DIR/.closure-key" ]; then
     python3 -c "import uuid; print(uuid.uuid4())" > "$TRACKER_DIR/.closure-key"
+fi
+
+# ── Generate signing-key (manifest signature gate) ───────────────────────────
+# Used by `rebar sign` / `rebar verify-signature` to produce/certify HMAC-based
+# signatures over a ticket's manifest of verified steps. Environment-specific:
+# gitignored and local, so only this environment can sign or certify. Can be
+# overridden out-of-band by the REBAR_SIGNING_KEY env var (shared deployments).
+if [ ! -f "$TRACKER_DIR/.signing-key" ]; then
+    python3 -c "import uuid; print(uuid.uuid4())" > "$TRACKER_DIR/.signing-key"
 fi
 
 # ── Set gc.auto=0 on the tickets worktree ─────────────────────────────────────
