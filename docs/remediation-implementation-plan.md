@@ -80,14 +80,21 @@ backstop):
   `json.dump` in inline `python3` heredocs, committed together at `:1022-1027`);
 - `ticket-compact.sh:274` — SNAPSHOT (bash inline `python3` heredoc).
 
-**Retire the dead writers in the same pass.** The bash leaf scripts
-(`ticket-create.sh:274`, `ticket-edit.sh:266`, `ticket-comment.sh:91`,
-`ticket-link.sh:226/389`, `ticket-lib.sh:275/374`) are off the live dispatch path
-(writes flow through `_commands/_seam.py`); **delete them** (or conform + guard
-them) so they can't silently come back as a non-canonical path. The one-shot
-`ticket-migrate-*.sh` writers are exempt (run-once, pre-canonical history).
-Also fix the false guarantee in `_store/event_append.py:15`'s docstring once the
-real test lands.
+**Retire the dead write *paths* — but mind one still-live script.** The
+event-write branches in the bash leaf scripts (`ticket-create.sh:274`,
+`ticket-edit.sh:266`, `ticket-comment.sh:91`, `ticket-link.sh:226/389`,
+`ticket-lib.sh:275/374`) are off the live committed-write path (creates/edits/
+comments/links flow through `_commands/_seam.py` / `graph/_links.py`). Delete the
+ones with **no** remaining live caller (`ticket-create.sh`, `ticket-edit.sh`,
+`ticket-comment.sh` — verified no live `bash …ticket-*.sh` invocation). **Caveat:
+`ticket-link.sh` is NOT deletable** — `composer.link_cli` still shells out to it
+for the `link --dry-run` *preview* (`_commands/composer.py:414-424`); that path
+passes `--dry-run` and writes **no** event, so its `:226` serializer never runs on
+the live path. Keep the script (or migrate the dry-run preview to Python to fully
+retire it); the guard's event-file scoping (`*-<TYPE>.json` writes only) means the
+dry-run preview won't trip it regardless. The one-shot `ticket-migrate-*.sh`
+writers are exempt (run-once, pre-canonical history). Also fix the false guarantee
+in `_store/event_append.py:15`'s docstring once the real test lands.
 
 **Tests — the gate is structural, scanning Python AND bash.**
 - A parity test driving one event dict through **every live producer** (incl. the
