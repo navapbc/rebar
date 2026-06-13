@@ -145,7 +145,12 @@ def _transition(argv):
                                 val = _line.strip().split('=', 1)[1].strip().lower()
                                 if val in ('true', '1', 'yes'):
                                     require_verdict = True
-                except Exception as _cfg_exc:
+                except (OSError, UnicodeDecodeError) as _cfg_exc:
+                    # Narrow to the realistic config-read failures (I/O + decode);
+                    # the prefix check above guarantees the split is safe, so any
+                    # OTHER exception is a genuine bug and should surface (it still
+                    # hits the outer handler and blocks the close — also fail-safe)
+                    # rather than be silently absorbed as "config unreadable".
                     print(
                         f'Warning: could not read verify config {config_path} '
                         f'({_cfg_exc}); requiring a verdict to close {ticket_type} '
