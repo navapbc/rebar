@@ -112,8 +112,8 @@ individually by being routed under the switch only once ported):
 
 | Switch | Tier | Values | Initial default |
 |--------|------|--------|-----------------|
-| `REBAR_LEAF_WRITES` | B | `bash` \| `python` | `bash` |
-| `REBAR_COMPUTE` | C | `bash` \| `python` | `bash` |
+| ~~`REBAR_LEAF_WRITES`~~ | B | `bash` \| `python` | retired 2026-06-11 |
+| ~~`REBAR_COMPUTE`~~ | C | `bash` \| `python` | retired 2026-06-12 |
 | `REBAR_WRITE_CORE` | D | `bash` \| `python` | `bash` |
 
 (Tier E has no switch — it deletes the dispatcher after D's switch is gone.)
@@ -190,48 +190,35 @@ release of flipped defaults; each retired suite translated to pytest.
 
 ## 5. Tier C — compute-heavy read-side bash
 
-> **Progress (2026-06-12).** `list-epics` retired via deprecation (worm-burr-fly).
-> **`next-batch` ported behind `REBAR_COMPUTE`** (sure-beech-taunt): the two bash
-> heredocs are now `rebar._engine_support.next_batch` (selection/render/CLI) +
-> `next_batch_files` (the text→file-path heuristic, split on its own seam),
-> reusing `rebar.reducer`/`rebar.graph` + the shared `list_states` read path —
-> the library's last subprocessing read is now in-process. Dispatcher routes via
-> the `_compute_python` bash helper (the Tier B `_leaf_writes_python` pattern),
-> pinned to `rebar._switch` by `tests/interfaces/test_compute_parity` cases in
-> `test_next_batch_compute.py`. Dual-run is **byte-identical** across both switch
-> values for every deterministic scenario. **One surfaced deviation:** the bash
-> original's `conflict_file`/`conflict_with` *diagnostic* is non-deterministic —
-> it iterates an unordered `set`, so when a candidate overlaps on >1 file the
-> named file coin-flips per run under hash randomization. The port iterates
-> `sorted()`, making the diagnostic byte-stable (the selector's documented
-> "deterministic" contract). Batch **composition** is unaffected and still matches
-> bash exactly (pinned by `test_multi_overlap_batch_composition_matches_bash`).
-> Default stays `bash` pending the flip + soak.
+> **Status: DONE — Tier C retired (2026-06-12).** All three compute commands are
+> Python: `list-epics` retired via deprecation (worm-burr-fly); `next-batch`
+> (sure-beech-taunt) is `rebar._engine_support.next_batch` (selection/render/CLI) +
+> `next_batch_files` (the text→file-path heuristic, split on its own seam);
+> `validate` (gawk-grove-site) is `rebar._engine_support.validate` (normalize →
+> score → render → CLI) + `validate_checks` (the nine checks, each returning an
+> ordered `Finding` stream so the severity buckets reproduce byte-for-byte). All
+> reuse `rebar.reducer`/`rebar.graph` + the shared `list_states` read in-process —
+> the library/MCP's last subprocessing reads are gone.
 >
-> **`validate` ported behind `REBAR_COMPUTE`** (gawk-grove-site): `validate-issues.sh`
-> (9 `check_*` functions + 10 heredocs + score/exit assembly) is now
-> `rebar._engine_support.validate` (normalize → score → render → CLI) +
-> `validate_checks` (the nine checks, each returning an ordered `Finding` stream so
-> the severity buckets reproduce byte-for-byte). Reuses the shared `list_states`
-> read in-process; honors the same `TICKET_CMD` injection bash uses for test
-> isolation (subprocess when set, in-process `list_states` otherwise), so the
-> existing bash suite dual-runs. Per §1.4 the human **text / terse / verbose**
-> stderr + score-encoded exit are byte-identical across both switch values (ANSI
-> colors and the bash "shared cache" re-fetch verbose artifact included), while
-> `--output json` is pinned by **schema + semantic** equality (jq-vs-`json.dumps`
-> whitespace is outside the contract). Gate: `tests/interfaces/test_validate_compute.py`
-> (20 cases). Library `rebar.validate()` + MCP now in-process under the switch.
+> The lifecycle ran the full §2 protocol: ported behind `REBAR_COMPUTE`, dual-run
+> byte/semantic-identical (text/terse/verbose stderr + exit byte-pinned; JSON by
+> schema+semantic per §1.4), **flipped** to python (step 5), **soaked** — the
+> dogfood full-surface probe passed 141/141 isolated AND live (store verified
+> unchanged), live cross-checks byte/semantic-equal, `fsck` clean — then **retired**
+> (step 7, gawk-grove-site child 785b-7c9f): deleted `ticket-next-batch.sh` +
+> `validate-issues.sh` (~1,900 LOC, 12 heredocs), the `REBAR_COMPUTE` switch + the
+> dispatcher `_compute_python` helper + both dual-impl arms + the `ticket_next_batch`
+> /`ticket_validate` bash wrappers, in one commit. The dual-run parity suites were
+> translated to python-only characterization (`test_next_batch_compute.py`,
+> `test_validate_compute.py`); the `.sh` characterization suites stay (they now
+> exercise the python dispatcher) and the "zero standalone shell harness" end-state
+> is deferred to Tier E, mirroring Tier B.
 >
-> **Tier C porting is complete** (next-batch + validate ported, list-epics
-> deprecated). **Default flipped to `python` on 2026-06-12** (step 5; `_switch`
-> default + the dispatcher `_compute_python` expansion/comparison + the parity
-> test's default-case moved together, the `ce2dfcf5` Tier-B pattern; rollback lever
-> `REBAR_COMPUTE=bash` retained). Flip evidence: 43 Tier-C parity cases + both bash
-> suites green under the unset default, interfaces tier 288/288, `fsck` clean.
-> **In soak** (step 6) for the rest of the release cycle. Remaining: after soak,
-> retire the two bash scripts (~1,900 LOC, 12 heredocs) + `REBAR_COMPUTE` +
-> `_compute_python` and translate the suites — the architecture.md offender table
-> loses both compute entries at retirement.
+> **One surfaced behavior change, intentional:** the bash `next-batch`
+> `conflict_file`/`conflict_with` *diagnostic* was non-deterministic (it iterated an
+> unordered `set`, so on a >1-file overlap the named file coin-flipped per run). The
+> port iterates `sorted()`, making the diagnostic byte-stable — the selector's
+> documented "deterministic" contract. Batch **composition** was never affected.
 
 **Commands**: `next-batch` (`ticket-next-batch.sh`, ~954 LOC),
 `validate` (`validate-issues.sh`, ~945 LOC), `list-epics`
@@ -254,9 +241,10 @@ These are read-only compute over replayed state — orchestration around
   dual-run gate includes fixture stores with crafted file-impact overlaps
   and asserts identical batch composition byte-for-byte.
 
-**Exit criteria**: the three big scripts deleted (~2,350 LOC, 12 heredocs),
-`REBAR_COMPUTE` retired, suites translated. The architecture.md offender
-table loses both bash compute entries.
+**Exit criteria (met 2026-06-12)**: the three big scripts deleted (~2,350 LOC, 12
+heredocs — `list-epics` under worm-burr-fly, the two compute scripts under
+gawk-grove-site), `REBAR_COMPUTE` retired, suites translated. The architecture.md
+offender table lost both bash compute entries.
 
 ## 6. Tier D — the write/sync core (the crux; LAST before E)
 

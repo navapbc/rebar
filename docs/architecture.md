@@ -150,8 +150,6 @@ report runs in CI (`.github/workflows/test.yml`) so new offenders surface in PRs
 | `_engine/ticket-lib.sh` | ~2000 | retire via strangler-fig — `adult-oxide-slave` |
 | `rebar_reconciler/reconcile.py` | ~1320 | split orchestration vs pass-driver seams |
 | `rebar_reconciler/outbound_differ.py` | ~1130 | split per-field differ seams |
-| `_engine/ticket-next-batch.sh` | ~950 | retire via strangler-fig — `adult-oxide-slave` |
-| `_engine/validate-issues.sh` | ~945 | retire via strangler-fig — `adult-oxide-slave` |
 
 Files in the 500–800 band (`_advisory_lock.py`, `differ.py`, `inbound_differ.py`,
 `ticket_reads.py`, `__init__.py`, `ticket-link.sh`, `ticket-bridge-fsck.py`) are at

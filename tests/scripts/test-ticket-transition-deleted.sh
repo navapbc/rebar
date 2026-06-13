@@ -2,13 +2,13 @@
 # tests/scripts/test-ticket-transition-deleted.sh
 # RED tests for transition rejection of 'deleted' target status and
 # CLOSED_STATUSES coverage in ticket-transition.sh, ticket-unblock.py,
-# and ticket-next-batch.sh.
+# and the next-batch port (rebar._engine_support.next_batch).
 #
 # All test functions MUST FAIL until the features they test are implemented:
 #   - ticket-transition.sh: reject 'deleted' as a target_status with instructional error
 #   - ticket-transition.sh: CLOSED_STATUSES inline Python includes 'deleted'
 #   - ticket-unblock.py: _CLOSED_STATUSES set includes 'deleted'
-#   - ticket-next-batch.sh: CLOSED_STATUSES in batch logic includes 'deleted'
+#   - next_batch.py: _CLOSED_STATUSES in batch logic includes 'deleted'
 #
 # Usage: bash tests/scripts/test-ticket-transition-deleted.sh
 # Returns: exit non-zero (RED) until all features are implemented.
@@ -22,7 +22,9 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 TICKET_SCRIPT="$REPO_ROOT/src/rebar/_engine/ticket"
 TICKET_TRANSITION_SCRIPT="$REPO_ROOT/src/rebar/_engine/ticket-transition.sh"
 TICKET_UNBLOCK_SCRIPT="$REPO_ROOT/src/rebar/_engine/ticket-unblock.py"
-TICKET_NEXT_BATCH_SCRIPT="$REPO_ROOT/src/rebar/_engine/ticket-next-batch.sh"
+# next-batch is now the Python port reached via the dispatcher (Tier C retired the
+# bash ticket-next-batch.sh); the CLOSED_STATUSES static check below points at it.
+TICKET_NEXT_BATCH_IMPL="$REPO_ROOT/src/rebar/_engine_support/next_batch.py"
 
 HASH_SCRIPT="$REPO_ROOT/src/rebar/_engine/compute-verdict-hash.sh"
 
@@ -284,7 +286,7 @@ with open(sys.argv[4], 'w') as f:
 }
 test_closed_statuses_includes_deleted_in_ticket_unblock
 
-# ── Test 5: CLOSED_STATUSES in ticket-next-batch.sh includes 'deleted' ────────
+# ── Test 5: next-batch (Python port) treats a tombstoned-deleted blocker as closed ─
 # Epic has child task A which depends_on task B (tombstoned as deleted via .tombstone.json).
 # next-batch should include A (B is deleted/terminal so A is unblocked).
 # Fails RED because:
@@ -362,7 +364,7 @@ with open(sys.argv[4], 'w') as f:
     batch_exit=0
     batch_output=$(cd "$repo" && \
         TICKETS_TRACKER_DIR="$tracker_dir" \
-        bash "$TICKET_NEXT_BATCH_SCRIPT" "$epic_id" 2>/dev/null) || batch_exit=$?
+        bash "$TICKET_SCRIPT" next-batch "$epic_id" 2>/dev/null) || batch_exit=$?
 
     # Assert: next-batch exits 0
     assert_eq "ticket-next-batch exits 0" "0" "$batch_exit"
@@ -497,11 +499,11 @@ test_closed_statuses_deleted_present_in_all_three_files() {
 
     transition_sh_has=$(grep -c "'deleted'" "$REPO_ROOT/src/rebar/_engine/ticket-transition.sh" 2>/dev/null) || transition_sh_has=0
     unblock_py_has=$(grep -c '"deleted"' "$REPO_ROOT/src/rebar/_engine/ticket-unblock.py" 2>/dev/null) || unblock_py_has=0
-    next_batch_has=$(grep -c '"deleted"' "$REPO_ROOT/src/rebar/_engine/ticket-next-batch.sh" 2>/dev/null) || next_batch_has=0
+    next_batch_has=$(grep -c '"deleted"' "$TICKET_NEXT_BATCH_IMPL" 2>/dev/null) || next_batch_has=0
 
     assert_ne "'deleted' present in ticket-transition.sh" "0" "$transition_sh_has"
     assert_ne "'deleted' present in ticket-unblock.py" "0" "$unblock_py_has"
-    assert_ne "'deleted' present in ticket-next-batch.sh" "0" "$next_batch_has"
+    assert_ne "'deleted' present in next_batch.py (_CLOSED_STATUSES)" "0" "$next_batch_has"
 
     assert_pass_if_clean "test_closed_statuses_deleted_present_in_all_three_files"
 }
@@ -563,7 +565,7 @@ with open(sys.argv[4], 'w') as f:
     batch_exit=0
     batch_output=$(cd "$repo" && \
         TICKETS_TRACKER_DIR="$tracker_dir" \
-        bash "$TICKET_NEXT_BATCH_SCRIPT" "$epic_id" 2>/dev/null) || batch_exit=$?
+        bash "$TICKET_SCRIPT" next-batch "$epic_id" 2>/dev/null) || batch_exit=$?
 
     assert_eq "next-batch exits 0" "0" "$batch_exit"
     assert_contains "task A in batch when blocks-relation blocker is deleted" \

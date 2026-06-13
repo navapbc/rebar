@@ -25,16 +25,13 @@ import sys
 # ``python`` here in one commit (the switch is retained as the rollback lever
 # until the tier is retired, when its entry is deleted).
 #
-# Tier B (``REBAR_LEAF_WRITES``) was retired on 2026-06-11: after the soak
-# (full dual-run parity, 240-test interface tier, 77/77 live full-surface probe,
-# fsck clean) the default flipped to python and then the switch + bash leaf bodies
-# were deleted — Python is now the sole leaf-write implementation. The remaining
-# entries gate the tiers still to come.
+# Retired tiers (switch + bash impl deleted together, the a93885ed pattern):
+#   - Tier B (``REBAR_LEAF_WRITES``), 2026-06-11 — Python is the sole leaf-write impl.
+#   - Tier C (``REBAR_COMPUTE``), 2026-06-12 — after the flip-to-python soak passed
+#     (full-surface probe 141/141 isolated + live, fsck clean), the switch + the two
+#     bash compute scripts were deleted; Python is the sole next-batch/validate impl.
+# The remaining entry gates Tier D, still to come.
 _TIERS: dict[str, str] = {
-    # Tier C flipped to python on 2026-06-12 (next-batch + validate ported, dual-run
-    # byte/semantic-identical, interfaces tier green). The switch is retained as the
-    # rollback lever (REBAR_COMPUTE=bash) until the tier is retired post-soak.
-    "REBAR_COMPUTE": "python",  # Tier C — compute-heavy reads
     "REBAR_WRITE_CORE": "bash",  # Tier D — write/sync core
 }
 

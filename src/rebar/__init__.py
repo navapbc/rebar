@@ -240,15 +240,10 @@ def validate(*, repo_root=None) -> dict:
     returning {score, critical_issues, major_issues, minor_issues, warnings,
     suggestions}.
     """
-    from rebar._switch import uses_python
+    from rebar._engine_support import validate as _validate
 
-    if uses_python("REBAR_COMPUTE"):
-        from rebar._engine_support import validate as _validate
-
-        tracker = str(config.tracker_dir(repo_root))
-        return _validate.validate_state(tracker)
-    cp = _run(["validate", "--output", "json"], repo_root=repo_root)
-    return _json_or(cp.stdout, {"output": (cp.stdout or cp.stderr).strip()})
+    tracker = str(config.tracker_dir(repo_root))
+    return _validate.validate_state(tracker)
 
 
 def get_file_impact(ticket_id: str, *, repo_root=None) -> list:
@@ -430,16 +425,11 @@ def ready(*, repo_root=None) -> Any:
 def next_batch(epic_id: str, *, repo_root=None) -> dict:
     """Next parallel batch of unblocked tickets under an epic's hierarchy (JSON).
 
-    Tier C (``REBAR_COMPUTE``): the Python compute path runs in-process via the
-    shared read plumbing (like every other read); the default ``bash`` path still
-    subprocesses the legacy orchestrator until the post-soak flip."""
-    from rebar._switch import uses_python
+    Runs in-process via the shared read plumbing, like every other read (Tier C
+    retired the bash orchestrator)."""
+    from rebar import _reads
 
-    if uses_python("REBAR_COMPUTE"):
-        from rebar import _reads
-
-        return _reads.next_batch(epic_id, repo_root=repo_root)
-    return _json(_run(["next-batch", epic_id, "--output", "json"], repo_root=repo_root), what="next-batch")
+    return _reads.next_batch(epic_id, repo_root=repo_root)
 
 
 def search(

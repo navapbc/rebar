@@ -444,7 +444,7 @@ def next_batch_state(tracker: str, epic_id: str, *, limit: int = 0) -> dict[str,
 
 
 # ───────────────────────────── CLI entrypoint ────────────────────────────────
-_USAGE = "ticket-next-batch.sh <epic-id> [--limit=N|unlimited] [--output json]"
+_USAGE = "rebar next-batch <epic-id> [--limit=N|unlimited] [--output json]"
 
 
 def run(argv: list[str], tracker: str) -> int:

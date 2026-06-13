@@ -750,12 +750,6 @@ ticket_exists() {
     return $?
 }
 
-# ── ticket_validate ────────────────────────────────────────────────────────────
-ticket_validate() {
-    bash "$_TICKETLIB_DIR/validate-issues.sh" "$@"
-    return $?
-}
-
 # ── ticket_clarity_check ───────────────────────────────────────────────────────
 ticket_clarity_check() {
     bash "$_TICKETLIB_DIR/ticket-clarity-check.sh" "$@"
@@ -796,12 +790,6 @@ ticket_list_descendants() {
     return $?
 }
 
-# ── ticket_next_batch ─────────────────────────────────────────────────────────
-ticket_next_batch() {
-    # Canonical implementation: ticket-next-batch.sh is the canonical implementation (no prior script).
-    bash "$_TICKETLIB_DIR/ticket-next-batch.sh" "$@"
-    return $?
-}
 # ── ticket_format ────────────────────────────────────────────────────────────
 # In-process wrapper for format_ticket_id().
 ticket_format() {

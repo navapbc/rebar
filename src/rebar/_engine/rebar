@@ -234,22 +234,6 @@ _ensure_initialized() {
     fi
 }
 
-# Tier C kill-switch (REBAR_COMPUTE): true when the Python compute path is
-# selected for ported read commands. Parsing MIRRORS rebar._switch.resolve (the
-# single source of truth) and the REBAR_PUSH idiom: case-insensitive, whitespace-
-# stripped; any unrecognized value falls back to the tier default ('bash' until
-# the post-soak flip). A parity test (tests/interfaces/test_compute_parity.py)
-# pins this helper's verdict to _switch across a typo/case matrix. Retired with
-# the tier (the a93885ed/Tier-B pattern).
-_compute_python() {
-    local _v
-    # Default flipped to python on 2026-06-12 (mirrors rebar._switch). The
-    # expansion default and the comparison move together: unset/empty/unrecognized
-    # → python; only an explicit 'bash' selects the legacy path (the rollback lever).
-    _v=$(printf '%s' "${REBAR_COMPUTE:-python}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
-    [ "$_v" != "bash" ]
-}
-
 if [ $# -lt 1 ]; then
     _usage
 fi
@@ -362,18 +346,10 @@ case "$subcommand" in
         exit $?
         ;;
     next-batch)
-        # Tier C: REBAR_COMPUTE=python routes to the in-process port (freshness
-        # owned by the native read path, like show/list — _ensure_initialized
-        # --init-only). Default 'bash' falls through to the legacy orchestrator.
-        if _compute_python; then
-            if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized --init-only; fi
-            exec python3 "$SCRIPT_DIR/ticket-reads.py" next-batch "$@"
-        fi
-        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized; fi
-        # shellcheck source=/dev/null
-        source "$SCRIPT_DIR/ticket-lib-api.sh"
-        _ticketlib_dispatch ticket_next_batch "$@"
-        exit $?
+        # In-process Python compute (Tier C retired the bash orchestrator).
+        # Freshness owned by the native read path, like show/list (--init-only).
+        if [ -z "${TICKETS_TRACKER_DIR:-}" ]; then _ensure_initialized --init-only; fi
+        exec python3 "$SCRIPT_DIR/ticket-reads.py" next-batch "$@"
         ;;
     comment)
         _ensure_initialized
@@ -476,23 +452,11 @@ case "$subcommand" in
         exec python3 "$SCRIPT_DIR/ticket-commands.py" untag "$@"
         ;;
     validate)
-        # Tier C: REBAR_COMPUTE=python routes to the in-process port (which
+        # In-process Python compute (Tier C retired validate-issues.sh). The port
         # self-manages freshness on its in-process branch and honors the same
-        # TICKET_CMD injection bash uses for test isolation). Default 'bash' falls
-        # through to validate-issues.sh.
-        if _compute_python; then
-            exec python3 "$SCRIPT_DIR/ticket-reads.py" validate "$@"
-        fi
-        # REVIEW-DEFENSE: _ensure_initialized is intentionally omitted here.
-        # validate-issues.sh reads tickets via TICKET_CMD env var (injectable for tests).
-        # In production TICKET_CMD defaults to the ticket script itself, which calls
-        # _ensure_initialized when it runs ticket list — initialization is transitive.
-        # Calling _ensure_initialized here would break test isolation where TICKET_CMD
-        # is mocked and no real ticket store exists.
-        # shellcheck source=/dev/null
-        source "$SCRIPT_DIR/ticket-lib-api.sh"
-        _ticketlib_dispatch ticket_validate "$@"
-        exit $?
+        # TICKET_CMD injection used for test isolation, so — like the bash arm
+        # before it — _ensure_initialized is intentionally omitted here.
+        exec python3 "$SCRIPT_DIR/ticket-reads.py" validate "$@"
         ;;
     clarity-check)
         # REVIEW-DEFENSE: _ensure_initialized is intentionally omitted here.
