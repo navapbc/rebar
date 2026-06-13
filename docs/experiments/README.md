@@ -19,6 +19,25 @@ in the plan's scorecard; the scripts here let you reproduce them.
 | EXP8 | P1.1 query parser | predicates + OR + negation + degrade-to-substring in ~40 LOC |
 | EXP-gpg | P2.2 signing | ed25519 detached sign/verify/tamper round-trip over canonical bytes |
 
+### Real-code de-risking (run against the installed `rebar` + a live `.tickets-tracker`)
+
+| Exp | Validates | Key result |
+|-----|-----------|-----------|
+| EXP-R1 | P2.3 bug is real | the **real reducer** silently clobbers one of two concurrent whole-field tag EDITs |
+| EXP-R5 | P2.3 fix | delta ops on the real reduced base → both concurrent adds survive |
+| EXP-R2 | P2.1 sort change | `event_sort_key` ts segment is `str`; int-order == string-order on real filenames; malformed fallback ok |
+| EXP-R3 | P1.0 | real `_canonical_bytes` ≠ plain dumps; parsed dicts identical (replay-safe) |
+| EXP-R4 | P2.3 wire-compat | real reducer preserve-and-ignores an unknown `TAG` event (no crash) |
+| EXP-R6 | P1.4 | gc recipe on the real orphan-branch worktree: 26→0 loose objects; reads survive |
+| EXP-R7 | P1.0 | `python3 -m rebar._store.<submodule>` works → bash heredocs can call the canonical helper |
+| EXP-R9/R9b | P1.0 guard | `event_write_guard.py` flags exactly 7 py + 7 sh writers, 0 false positives (no semgrep needed) |
+| EXP-R10 | P1.1 | confirmed real `search_states` / `apply_ticket_filters` signatures |
+| EXP-R11 | test harness | 31 reducer/sort/filter/search tests pass in 2.5 s (needs `[dev]` extra) |
+| EXP-R8 | P2.2 / robustness | rebar writes succeed under the env's forced commit signing; ambient signing is a latent portability note |
+
+`event_write_guard.py` is a **committed, reusable artifact** (stdlib-only) — the
+reference implementation for P1.0's CI guard. Run `python3 docs/experiments/event_write_guard.py src/rebar`.
+
 > These are throwaway prototypes for design validation, not production code. The
 > production implementations live under `src/rebar/` per the plan. `hlc_prototype.py`
 > now demonstrates **both** the local-lock fast path (`next_tick`) and the

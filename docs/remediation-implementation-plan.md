@@ -161,6 +161,48 @@ parity claim corrected) and added concrete gotchas to the rest.
 
 The item write-ups below incorporate these refinements.
 
+### Implementation de-risking against the REAL code & tools (EXP-R*)
+
+The conceptual prototypes above were re-run against the **installed rebar package,
+a live `.tickets-tracker` store, and the actual tooling** to verify syntax,
+command/API behavior, and integration seams before finalizing — the moving parts
+most likely to bite during implementation.
+
+| # | Validated against real code/tools | Result |
+|---|-----------------------------------|--------|
+| **EXP-R1** | the **real reducer** (`rebar.reduce_ticket`) on two concurrent whole-field tag EDITs | **bug reproduced**: clone A's `gamma` survives, clone B's `delta` is silently clobbered — P2.3's target bug is real, not hypothetical |
+| **EXP-R5** | the delta fix on the real reduced state | both concurrent adds survive — the fix resolves EXP-R1 |
+| **EXP-R2** | `rebar.reducer._sort.event_sort_key` | ts segment is a **`str`** today; int-key order **==** string-key order on real filenames; malformed names (`.cache.json`) take the fallback → the P2.1 int comparator change is safe |
+| **EXP-R3** | the real `_store.event_append._canonical_bytes` vs plain `json.dumps` | bytes differ (P1.0 needed); parsed dicts identical (re-serialize is **replay-safe**) |
+| **EXP-R4** | the real reducer on an injected unknown `TAG` event | **preserve-and-ignored** — ticket stays readable, no crash; `TAG ∉ KNOWN_EVENT_TYPES` today → P2.3's wire-compat path works |
+| **EXP-R6** | the P1.4 gc recipe on the **real orphan-branch worktree** | 26→0 loose objects packed; `rebar show` still reads correctly afterward |
+| **EXP-R7** | `python3 -m rebar._store.<submodule>` (the bash-calls-Python seam) | works; emits canonical sorted output — P1.0's heredoc→helper mechanism is sound |
+| **EXP-R9/R9b** | the **zero-dependency** structural guard (`docs/experiments/event_write_guard.py`) | flags **exactly 7 Python + 7 bash** event writers (== the plan's live-writer set), **0 false positives** across 73 read/output `json.dumps`; the committed artifact runs against the real tree |
+| **EXP-R10** | real `search_states` / `apply_ticket_filters` signatures | confirmed the exact P1.1 integration points (`search_states(states, query, *, status, ticket_type, has_tag)`) |
+| **EXP-R11** | the real test harness | `pytest` needs the `[dev]` extra; once installed, **31 reducer/sort/filter/search tests pass in 2.5 s** → the new convergence/guard/sort tests have a fast, working home |
+
+**Three new implementation gotchas surfaced (folded into the items):**
+
+1. **No `semgrep`/`ast-grep`/`pre-commit` in the environment** → the P1.0 guard must
+   be the **stdlib-only** pure-Python AST scanner + a bash regex prong (committed as
+   `docs/experiments/event_write_guard.py`), **not** semgrep. EXP-R9 proves it is
+   precise (0 false positives). *(Supersedes the earlier "Semgrep + pygrep"
+   recommendation — semgrep is simply absent here.)*
+2. **The bash prong is a false-positive factory if naive.** ~10 read/output `.sh`
+   (`issue-summary.sh`, `ticket-clarity-check.sh`, `ticket-scratch-*.sh`,
+   `ticket-fsck.sh`, …) contain `json.dump` but write **no event** — so the bash
+   prong must scope on **`json.dump` co-occurring with an `'event_type'` dict**, plus
+   the dead/migration allowlist (EXP-R9b: this cleanly isolates the 7 live writers).
+3. **The environment force-signs commits** (`commit.gpgsign=true`, `gpg.format=ssh`),
+   and rebar's `git commit --no-verify` does **not** bypass `-S`. rebar writes still
+   *succeeded* here (the env's signing server handled it, with stderr noise), so it's
+   a **latent** portability risk, not a blocker — but P2.2 should note that *ambient*
+   commit signing already happens regardless of rebar, and rebar may want to pin
+   `-c commit.gpgsign=false` on its internal per-event commits so a misconfigured
+   signer can't fail writes.
+
+The item write-ups below incorporate these refinements.
+
 ---
 
 ## P1.0 — Prerequisite: unify the canonical event-byte format (enables P1.3/P2.x)
@@ -259,11 +301,16 @@ helper) rather than inline `json.dump`/`jq`. Re-serialization is replay-safe
 - Add `tests/scripts/test-ticket-write-commit-event.sh` (the name ground rule 2
   previously *assumed*). Include a fuzz case with a >2⁵³ integer + non-ASCII to pin
   the gotchas EXP-jq/EXP2 surfaced.
-- **A structural guard** that asserts no event write uses a raw `json.dump(s)`: it
-  must scan **both** `*.py` (AST) **and** the inline `python3` heredocs inside
-  `*.sh` (regex over heredoc bodies) — a Python-only AST scan would miss exactly
-  the `ticket-lib-api.sh:994/1017` / `ticket-comment.sh:91` / `ticket-compact.sh:274`
-  class that review caught. **Key the guard on the serialized value being an
+- **A structural guard** that asserts no event write uses a raw `json.dump(s)`.
+  **Use the stdlib-only scanner already prototyped and committed at
+  `docs/experiments/event_write_guard.py`** — NOT semgrep/ast-grep, which are
+  **absent** from this environment (EXP-R9; adding them would be new CI deps for a
+  pytest-based repo). It must scan **both** `*.py` (AST) **and** the inline
+  `python3` heredocs inside `*.sh` (regex), because a Python-only AST scan would
+  miss the `ticket-lib-api.sh:994/1017` / `ticket-comment.sh:91` /
+  `ticket-compact.sh:274` class. EXP-R9/R9b proved this scanner flags **exactly the
+  7 Python + 7 bash** live writers with **zero** false positives across 73
+  read/output `json.dumps` sites. **Key the guard on the serialized value being an
   event** — a dict literal carrying an `event_type` key — **not** on the
   destination filename: nearly every writer serializes to a `.tmp-*` path and
   *then* renames to the final `*-<TYPE>.json` (e.g. `ticket-comment.sh` →
@@ -272,8 +319,12 @@ helper) rather than inline `json.dump`/`jq`. Re-serialization is replay-safe
   only the **direct-name** writers (`graph/_links.py:144`,
   `ticket-delete-unlink-scan.py:148`, `ticket-revert.sh:170-174`, and the delete
   STATUS/ARCHIVED heredocs at `ticket-lib-api.sh:992-994/1015-1017`) and miss the
-  temp-then-rename rest. Exempt read/output/cache
-  `json.dumps` and the one-shot migration scripts via an explicit allowlist.
+  temp-then-rename rest. For the **bash** prong specifically (EXP-R9b), scope on
+  `json.dump` **co-occurring with an `'event_type'` dict** — a bare `json.dump`-in-
+  `.sh` grep false-positives on ~10 read/output scripts (`issue-summary.sh`,
+  `ticket-clarity-check.sh`, `ticket-scratch-*.sh`, `ticket-fsck.sh`, …) that emit
+  JSON but write no event. Exempt read/output/cache `json.dumps`, the canonical
+  helper, and the one-shot migration scripts via an explicit allowlist.
 Folded/`*.retired` bytes are read, not re-serialized, so existing committed data is
 unaffected.
 
@@ -582,6 +633,12 @@ rename but **no** per-event commit). So:
   also `git commit -S` in the locked commit step for the single-event Python/STATUS
   paths, as a complementary commit-DAG integrity layer — explicitly **not** the
   per-event authority (so its weakness under compaction/batching is harmless).
+  *Real-env note (EXP-R8):* **ambient** commit signing already happens regardless of
+  rebar when the host sets `commit.gpgsign=true` (this environment does, via SSH +
+  a signing server) — rebar's `git commit --no-verify` does **not** bypass `-S`.
+  Writes still succeeded here, but rebar should pin `-c commit.gpgsign=false` on its
+  internal per-event commits unless `REBAR_SIGN` is set, so a misconfigured host
+  signer can't fail an otherwise-valid write.
 - **Verification is advisory.** `show`/`fsck` surface
   `identity: verified|unverified|unsigned` per event/ticket; replay never *rejects*
   (one bad push must not wedge a store, and cross-clone rejection is unenforceable).
