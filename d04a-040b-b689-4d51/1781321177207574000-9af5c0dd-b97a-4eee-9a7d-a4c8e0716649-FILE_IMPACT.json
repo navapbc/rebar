@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/cli.py","reason":"entrypoint cutover to rebar._cli.main"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781321177207574000,"uuid":"9af5c0dd-b97a-4eee-9a7d-a4c8e0716649"}
