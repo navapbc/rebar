@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from adapters import CliAdapter, LibraryAdapter, McpAdapter
 
 

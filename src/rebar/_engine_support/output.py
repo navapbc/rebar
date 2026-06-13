@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Iterable
+from collections.abc import Iterable
 
 __all__ = [
     "PROFILES",

@@ -51,7 +51,7 @@ class Mode(str, Enum):
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_str(cls, value: str) -> "Mode":
+    def from_str(cls, value: str) -> Mode:
         """Return the Mode whose string value matches *value*.
 
         Raises:

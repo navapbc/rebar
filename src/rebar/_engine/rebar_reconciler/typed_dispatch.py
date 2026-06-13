@@ -13,7 +13,8 @@ Imports downward only (apply_base + the leaf modules); never imports applier.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from rebar_reconciler.apply_base import (
     ApplyResult,

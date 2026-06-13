@@ -65,20 +65,18 @@ def _build_dispatch_table() -> dict[tuple[str, str], object]:
     applier = _load("reconcile_applier", "applier.py")
 
     return {
-        ("inbound", "create"): getattr(applier, "_apply_inbound_create"),
-        ("inbound", "update"): getattr(applier, "_apply_inbound_update"),
-        ("inbound", "delete"): getattr(applier, "_apply_inbound_delete"),
-        ("inbound", "probe"): getattr(applier, "_apply_inbound_probe"),
-        ("inbound", "clean_label"): getattr(applier, "_apply_inbound_clean_label"),
-        ("inbound", "repair_property"): getattr(
-            applier, "_apply_inbound_repair_property"
-        ),
-        ("inbound", "conflict"): getattr(applier, "_apply_inbound_conflict"),
-        ("outbound", "create"): getattr(applier, "_apply_outbound_create"),
-        ("outbound", "update"): getattr(applier, "_apply_outbound_update"),
-        ("outbound", "delete"): getattr(applier, "_apply_outbound_delete"),
-        ("outbound", "probe"): getattr(applier, "_apply_outbound_probe"),
-        ("outbound", "conflict"): getattr(applier, "_apply_outbound_conflict"),
+        ("inbound", "create"): applier._apply_inbound_create,
+        ("inbound", "update"): applier._apply_inbound_update,
+        ("inbound", "delete"): applier._apply_inbound_delete,
+        ("inbound", "probe"): applier._apply_inbound_probe,
+        ("inbound", "clean_label"): applier._apply_inbound_clean_label,
+        ("inbound", "repair_property"): applier._apply_inbound_repair_property,
+        ("inbound", "conflict"): applier._apply_inbound_conflict,
+        ("outbound", "create"): applier._apply_outbound_create,
+        ("outbound", "update"): applier._apply_outbound_update,
+        ("outbound", "delete"): applier._apply_outbound_delete,
+        ("outbound", "probe"): applier._apply_outbound_probe,
+        ("outbound", "conflict"): applier._apply_outbound_conflict,
     }
 
 

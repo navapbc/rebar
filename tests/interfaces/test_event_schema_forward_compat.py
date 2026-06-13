@@ -24,8 +24,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 import rebar
 
 FUTURE_TYPE = "FUTURE_TYPE"

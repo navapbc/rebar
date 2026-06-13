@@ -58,17 +58,22 @@ exclude = [
 include = ["src/rebar", "tests", "README.md"]
 
 [tool.ruff]
-# Engine ships as package data but is normal Python; lint it too. The gating
-# rule set is the flake8 "real-bug" smoke set (syntax errors + undefined names +
-# bad assert/string-literal forms) — the class that catches NameError-on-error-path
-# bugs like a missing `import urllib` in an `except` clause. The broader stylistic
-# set (unused imports, etc.) is run advisory in CI to ratchet down over time
-# without a destabilizing one-shot mass-fix.
+# Engine ships as package data but is normal Python; lint it too. The gating set
+# below is the subset the whole tree is CLEAN for — so `ruff check` passes and
+# prevents regressions. It starts from the flake8 "real-bug" smoke set (syntax
+# errors + undefined names — the class that catches NameError-on-error-path bugs
+# like a missing `import urllib` in an `except`) and adds the rule families that
+# were swept clean: redefinitions (F811), modernizations (UP), and the safe
+# bugbear/style checks (B009, B012, F541, E401). The remaining stylistic set
+# (unused imports F401, line length E501, import order I001, …) runs advisory in
+# CI to ratchet down over time without a destabilizing one-shot mass-fix; F401 in
+# the reconciler re-export facades is tracked as a dedicated bug (it needs
+# executable reconciler integration tests + `__all__` before it can be swept).
 target-version = "py310"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E9", "F63", "F7", "F82"]
+select = ["E9", "F63", "F7", "F82", "F811", "F541", "UP", "B009", "B012", "E401"]
 
 [tool.mypy]
 # Scoped, opt-in type checking. The pure in-process library core

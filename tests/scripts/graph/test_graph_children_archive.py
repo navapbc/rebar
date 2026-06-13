@@ -8,31 +8,18 @@ conftest.py; event-writing helpers + the module loader in _helpers.py.
 from __future__ import annotations
 
 import json
-import os
 import tempfile
-import time
 from pathlib import Path
 from types import ModuleType
 
 import pytest
-
 from _helpers import (
-    REPO_ROOT,
     SCRIPT_PATH,
-    _UUID_A,
-    _UUID_B,
-    _UUID_C,
-    _UUID_D,
-    _get_check_cycle_at_level,
-    _load_module,
-    _make_ticket,
     _write_archive_event,
     _write_blocks_link,
     _write_link_event,
     _write_ticket,
 )
-
-
 
 # ---------------------------------------------------------------------------
 # Parent-child (children) tests — bug 8cbf-e13b
@@ -106,7 +93,6 @@ def test_compute_archive_eligible_regression(graph: ModuleType, tmp_path: Path) 
         compute_archive_eligible returns ticket-eligible (not ticket-already-archived,
         since it's already archived).
     """
-    import tempfile
 
     tracker_dir = Path(tempfile.mkdtemp()) / "tracker"
     tracker_dir.mkdir(parents=True)
@@ -160,7 +146,6 @@ def test_transitive_traversal_includes_archived_midchain(
 
     Expected: check_would_create_cycle('ticket-c', 'ticket-a', 'blocks', ...) == True
     """
-    import tempfile
 
     tracker_dir = Path(tempfile.mkdtemp()) / "tracker"
     tracker_dir.mkdir(parents=True)
@@ -312,7 +297,6 @@ def test_build_dep_graph_excludes_archived_children(
     To make it GREEN: add exclude_archived parameter to build_dep_graph
     (default True) and filter children by archived status.
     """
-    import tempfile
 
     tracker_dir = Path(tempfile.mkdtemp()) / "tracker"
     tracker_dir.mkdir(parents=True)
@@ -362,7 +346,6 @@ def test_build_dep_graph_excludes_archived_blockers(
 
     This test is RED — archived exclusion in blockers is not yet implemented.
     """
-    import tempfile
 
     tracker_dir = Path(tempfile.mkdtemp()) / "tracker"
     tracker_dir.mkdir(parents=True)
@@ -413,7 +396,6 @@ def test_deps_cli_include_archived(tmp_path: Path) -> None:
     without-flag case incorrectly includes the archived child.
     """
     import subprocess
-    import tempfile
 
     tracker_dir = Path(tempfile.mkdtemp()) / "tracker"
     tracker_dir.mkdir(parents=True)
@@ -510,7 +492,6 @@ def test_deps_archived_direct_target_error(tmp_path: Path) -> None:
     This test is RED — the archived-ticket-direct-query guard is not yet implemented.
     """
     import subprocess
-    import tempfile
 
     tracker_dir = Path(tempfile.mkdtemp()) / "tracker"
     tracker_dir.mkdir(parents=True)

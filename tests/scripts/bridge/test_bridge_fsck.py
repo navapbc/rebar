@@ -187,7 +187,7 @@ def _write_bridge_alert_event(
 
 def _run_bridge_fsck(
     tickets_tracker: Path,
-) -> "subprocess.CompletedProcess[str]":
+) -> subprocess.CompletedProcess[str]:
     """Invoke 'ticket bridge-fsck' via the dispatcher and return the result."""
     return subprocess.run(
         ["bash", str(TICKET_DISPATCHER), "bridge-fsck"],

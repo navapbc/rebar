@@ -10,16 +10,11 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
-import warnings
 from pathlib import Path
 from types import ModuleType
 
 import pytest
-
 from _events import _UUID, _UUID2, _UUID3, REPO_ROOT, _write_event
-
-
 
 # ---------------------------------------------------------------------------
 # Tests: reduce_all_tickets() .archived marker fast-skip (c125-f82e)
@@ -86,9 +81,9 @@ def test_reduce_all_tickets_skips_dir_with_archived_marker(
     called_dirs: list[str] = []
 
     def spy_reduce_ticket(
-        ticket_dir_path: "str | os.PathLike[str]",
+        ticket_dir_path: str | os.PathLike[str],
         **kwargs: object,
-    ) -> "dict | None":
+    ) -> dict | None:
         called_dirs.append(str(ticket_dir_path))
         return original_reduce_ticket(ticket_dir_path, **kwargs)
 
@@ -168,9 +163,9 @@ def test_reduce_all_tickets_fallback_without_marker_correct_state(
     called_dirs: list[str] = []
 
     def spy_reduce_ticket(
-        ticket_dir_path: "str | os.PathLike[str]",
+        ticket_dir_path: str | os.PathLike[str],
         **kwargs: object,
-    ) -> "dict | None":
+    ) -> dict | None:
         called_dirs.append(str(ticket_dir_path))
         return original_reduce_ticket(ticket_dir_path, **kwargs)
 

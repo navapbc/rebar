@@ -54,10 +54,15 @@ def _acquire_write_lock(tracker_dir):
 
 
 def _transition(argv):
-    import fcntl, json, os, subprocess, sys, time, uuid
+    import fcntl
+    import json
+    import os
+    import subprocess
+    import sys
+    import time
+    import uuid
 
-    lock_path = argv[1]
-    tracker_dir = argv[2]
+    tracker_dir = argv[2]  # argv[1] is the legacy lock-path positional (unused; lock derives from tracker_dir)
     ticket_id = argv[3]
     current_status = argv[4]
     target_status = argv[5]
@@ -71,8 +76,6 @@ def _transition(argv):
     # Import reduce_ticket directly (single-process: eliminates subprocess for state read)
     sys.path.insert(0, os.path.dirname(os.path.abspath(reducer_path)))
     from ticket_reducer import reduce_ticket
-
-    timeout = 30
 
     # Acquire flock
     handle = _acquire_write_lock(tracker_dir)
@@ -159,13 +162,14 @@ def _transition(argv):
                     # The STATUS event data will include the force_close_reason for audit
                 elif verdict_hash_arg:
                     # Verify the hash by independently computing the expected HMAC
-                    import hmac, hashlib
+                    import hmac
+                    import hashlib
                     key_file = os.path.join(tracker_dir, '.closure-key')
                     if not os.path.isfile(key_file):
-                        print(f'Error: .closure-key not found. Run ticket init to generate it.', file=sys.stderr)
+                        print('Error: .closure-key not found. Run ticket init to generate it.', file=sys.stderr)
                         handle.release()
                         sys.exit(1)
-                    with open(key_file, 'r') as _kf:
+                    with open(key_file) as _kf:
                         key = _kf.read().strip().encode()
                     try:
                         head_sha = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True, timeout=5).stdout.strip()
@@ -175,17 +179,17 @@ def _transition(argv):
                     expected_hash = hmac.new(key, expected_data, hashlib.sha256).hexdigest()
                     if not hmac.compare_digest(verdict_hash_arg, expected_hash):
                         print(f'Error: verdict hash mismatch for {ticket_type} {ticket_id}.', file=sys.stderr)
-                        print(f'  This means the completion verifier did not produce a PASS verdict at the current HEAD.', file=sys.stderr)
-                        print(f'  Recovery: produce a PASS completion verdict, then run compute-verdict-hash.sh.', file=sys.stderr)
-                        print(f'  Override: use --force-close="<reason>" to bypass (requires user approval).', file=sys.stderr)
+                        print('  This means the completion verifier did not produce a PASS verdict at the current HEAD.', file=sys.stderr)
+                        print('  Recovery: produce a PASS completion verdict, then run compute-verdict-hash.sh.', file=sys.stderr)
+                        print('  Override: use --force-close="<reason>" to bypass (requires user approval).', file=sys.stderr)
                         handle.release()
                         sys.exit(1)
                 else:
                     print(f'Error: closing a {ticket_type} requires --verdict-hash (from compute-verdict-hash.sh after completion verifier PASS).', file=sys.stderr)
-                    print(f'  Recovery: produce a PASS completion verdict, then:', file=sys.stderr)
+                    print('  Recovery: produce a PASS completion verdict, then:', file=sys.stderr)
                     print(f'    bash compute-verdict-hash.sh {ticket_id} PASS  # produces the hash', file=sys.stderr)
                     print(f'    ticket transition {ticket_id} closed --verdict-hash=<hash-from-above>', file=sys.stderr)
-                    print(f'  Override: use --force-close="<reason>" to bypass (requires user approval).', file=sys.stderr)
+                    print('  Override: use --force-close="<reason>" to bypass (requires user approval).', file=sys.stderr)
                     handle.release()
                     sys.exit(1)
 
@@ -287,10 +291,15 @@ def _claim(argv):
     assignee. The STATUS event carries parent_status_uuid so concurrent cross-clone
     claims resolve via the reducer's skew-independent UUID fork tie-break (I8).
     """
-    import fcntl, json, os, subprocess, sys, time, uuid
+    import fcntl
+    import json
+    import os
+    import subprocess
+    import sys
+    import time
+    import uuid
 
-    lock_path = argv[1]
-    tracker_dir = argv[2]
+    tracker_dir = argv[2]  # argv[1] is the legacy lock-path positional (unused; lock derives from tracker_dir)
     ticket_id = argv[3]
     env_id_val = argv[4]
     author_val = argv[5]
@@ -300,8 +309,6 @@ def _claim(argv):
     # Import reduce_ticket directly (must self-insert: bash sets no PYTHONPATH).
     sys.path.insert(0, os.path.dirname(os.path.abspath(reducer_path)))
     from ticket_reducer import reduce_ticket
-
-    timeout = 30
 
     # Acquire flock (identical pattern to _transition).
     handle = _acquire_write_lock(tracker_dir)

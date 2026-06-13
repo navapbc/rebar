@@ -8,18 +8,12 @@ conftest.py; event-writing helpers (`_write_event`, `_UUID*`) in _events.py.
 from __future__ import annotations
 
 import json
-import os
-import sys
-import time
 import warnings
 from pathlib import Path
 from types import ModuleType
 
 import pytest
-
-from _events import _UUID, _UUID2, _UUID3, REPO_ROOT, _write_event
-
-
+from _events import _UUID, _UUID2, _UUID3, _write_event
 
 # ---------------------------------------------------------------------------
 # Test 1: reducer compiles a single CREATE event to ticket state
