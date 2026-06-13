@@ -12,15 +12,13 @@ invariant I5 (single locked write path) holds unchanged.
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
-import tempfile
 import time
 import uuid as _uuid
 from pathlib import Path
 
-from rebar import _engine, config
+from rebar import config
 from rebar._engine_support.resolver import resolve_ticket_id
 
 
@@ -142,14 +140,15 @@ def append_event(
     """Compose an event and append it through the single locked write path.
 
     Builds the canonical event envelope (``{timestamp, uuid, event_type, env_id,
-    author, data}``). Under ``REBAR_WRITE_CORE=python`` (Tier D) the locked
-    commit + push runs IN-PROCESS via ``rebar._store.event_append.write_and_push``;
-    otherwise it stages to a temp file and delegates to the bash seam
-    ``ticket-append-event.sh`` → ``write_commit_event`` (which re-canonicalises via
-    ``jq -S -c`` to the same bytes). Either way raises :class:`CommandError`
-    carrying the exit code on failure (e.g. 75 = rebase/merge guard).
+    author, data}``) and commits + pushes IN-PROCESS via
+    ``rebar._store.event_append.write_and_push`` (the canonical committer owns
+    serialisation; it never re-derives the envelope fields composed here). Raises
+    :class:`CommandError` carrying the exit code on failure (e.g. 75 = rebase/merge
+    guard). (Tier D retired the bash seam; ``rebar._store`` is the sole write core.)
     """
-    from rebar._switch import uses_python
+    from rebar._store import event_append as _store_append
+    from rebar._store.event_append import StoreError
+    from rebar._store.lock import LockTimeout, RebaseGuard
 
     timestamp, uuid_str = time.time_ns(), str(_uuid.uuid4())
     event = {
@@ -160,39 +159,7 @@ def append_event(
         "author": author(author_fallback),
         "data": data,
     }
-
-    if uses_python("REBAR_WRITE_CORE"):
-        # In-process locked commit + best-effort push (the canonical committer owns
-        # serialisation; it never re-derives the envelope fields composed above).
-        from rebar._store import event_append as _store_append
-        from rebar._store.event_append import StoreError
-        from rebar._store.lock import LockTimeout, RebaseGuard
-
-        try:
-            _store_append.write_and_push(str(tracker), ticket_id, event)
-        except (StoreError, RebaseGuard, LockTimeout) as exc:
-            raise CommandError(str(exc), returncode=getattr(exc, "returncode", 1)) from None
-        return
-
-    tracker.mkdir(parents=True, exist_ok=True)
-    fd, staged = tempfile.mkstemp(prefix=".tmp-event-", dir=str(tracker))
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(event, fh, ensure_ascii=False)
-        seam = _engine.engine_dir() / "ticket-append-event.sh"
-        proc = subprocess.run(
-            ["bash", str(seam), ticket_id, staged],
-            env=_engine.engine_env(repo_root),
-            cwd=str(config.repo_root(repo_root)),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode != 0:
-            msg = proc.stderr.strip() or "Error: failed to write and commit event"
-            raise CommandError(msg, returncode=proc.returncode)
-    finally:
-        try:
-            os.unlink(staged)
-        except OSError:
-            pass
+        _store_append.write_and_push(str(tracker), ticket_id, event)
+    except (StoreError, RebaseGuard, LockTimeout) as exc:
+        raise CommandError(str(exc), returncode=getattr(exc, "returncode", 1)) from None

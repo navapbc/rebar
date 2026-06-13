@@ -163,25 +163,15 @@ def ensure_fresh(tracker: str, *, no_sync: bool = False) -> None:
             marker_age = 9999
         if marker_age < 60:
             return
-        # Reconverge: in-process under REBAR_WRITE_CORE=python (Tier D), else the
-        # shared bash helper. The throttle/marker above is the single owner — the
-        # reconverge itself is throttle-free in both impls.
-        from rebar._switch import uses_python
+        # Reconverge in-process (Tier D retired the bash helper; rebar._store.sync is
+        # the sole impl). The throttle/marker above is the single owner — reconverge
+        # itself is throttle-free.
+        from rebar._store import sync as _store_sync
 
-        if uses_python("REBAR_WRITE_CORE"):
-            from rebar._store import sync as _store_sync
-
-            try:
-                _store_sync.reconverge(tracker_abs)
-            except Exception:
-                pass
-        else:
-            sync_sh = str(_SCRIPTS_DIR / "ticket-sync.sh")
-            subprocess.run(
-                ["bash", "-c", f'source "$1"; _reconverge_tickets "$2"', "_", sync_sh, tracker_abs],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+        try:
+            _store_sync.reconverge(tracker_abs)
+        except Exception:
+            pass
         try:
             with open(marker, "w") as fh:
                 fh.write(str(now))

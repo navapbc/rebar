@@ -255,7 +255,7 @@ test_ticket_edit_description() {
 
     # Edit description
     local edit_exit=0
-    (cd "$repo" && bash "$TICKET_EDIT_SCRIPT" "$ticket_id" --description="Updated description text") 2>/dev/null || edit_exit=$?
+    (cd "$repo" && bash "$TICKET_SCRIPT" edit "$ticket_id" --description "Updated description text") 2>/dev/null || edit_exit=$?
     assert_eq "ticket edit --description exits 0" "0" "$edit_exit"
 
     # Verify via ticket show
@@ -290,7 +290,7 @@ test_ticket_edit_tags_field() {
 
     # Edit tags field
     local edit_exit=0
-    (cd "$repo" && bash "$TICKET_EDIT_SCRIPT" "$ticket_id" --tags="alpha,beta,gamma") 2>/dev/null || edit_exit=$?
+    (cd "$repo" && bash "$TICKET_SCRIPT" edit "$ticket_id" --tags "alpha,beta,gamma") 2>/dev/null || edit_exit=$?
     assert_eq "ticket edit --tags exits 0" "0" "$edit_exit"
 
     # Verify via ticket show — tags should be present in the JSON output
@@ -386,7 +386,7 @@ test_ticket_edit_tags_stored_as_array() {
     fi
 
     # Set tags as comma-separated string
-    (cd "$repo" && bash "$TICKET_EDIT_SCRIPT" "$ticket_id" --tags="foo,bar,baz") 2>/dev/null || true
+    (cd "$repo" && bash "$TICKET_SCRIPT" edit "$ticket_id" --tags "foo,bar,baz") 2>/dev/null || true
 
     local show_output
     show_output=$(cd "$repo" && bash "$TICKET_SCRIPT" show "$ticket_id" 2>/dev/null) || true

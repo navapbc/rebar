@@ -41,12 +41,19 @@ def push_tickets_branch(base_path: str) -> None:
         return
     if mode == "async":
         # Detach a synchronous push (REBAR_PUSH=always) that survives parent exit.
+        # The dispatcher launches the CLI as a bare `python3` whose `rebar`
+        # importability comes from a parent sys.path bootstrap the child does NOT
+        # inherit — so put the rebar `src` dir on the child's PYTHONPATH and have the
+        # -c stub re-insert it (parents[2] of this file == .../src).
+        src = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         child_env = {**os.environ, "REBAR_PUSH": "always"}
+        child_env["PYTHONPATH"] = src + (os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else "")
         try:
             subprocess.Popen(
                 [sys.executable, "-c",
-                 "import sys; from rebar._store import push; push.push_tickets_branch(sys.argv[1])",
-                 base_path],
+                 "import sys; sys.path.insert(0, sys.argv[2]); "
+                 "from rebar._store import push; push.push_tickets_branch(sys.argv[1])",
+                 base_path, src],
                 env=child_env,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
                 start_new_session=True,  # orphan it (own session); survives parent exit

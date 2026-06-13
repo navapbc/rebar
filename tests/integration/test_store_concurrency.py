@@ -67,19 +67,17 @@ def _count_events(repo: Path, ticket_id: str, suffix: str) -> int:
 
 
 @pytest.mark.skipif(not _has_store_build(), reason="on-PATH rebar lacks rebar._store (run pipx install --editable .)")
-def test_stiff_mop_lane_mixed_impl_writer_storm(clone: Path):
-    """N comments on one ticket, half via bash-forced-mkdir and half via the python
-    core (fcntl+mkdir), land with ZERO loss and a clean fsck — the dual-leg lock
-    mutually excludes the two mechanisms (the stiff-mop-lane fix)."""
-    tid = _create(clone, "task", "storm target", {"REBAR_WRITE_CORE": "python"})
+def test_concurrent_writer_storm_no_loss(clone: Path):
+    """N concurrent comments on one ticket land with ZERO loss and a clean fsck —
+    the unified dual-leg (fcntl+mkdir) lock serialises every writer correctly under
+    contention. (Tier D retired the bash core, so this is the durable single-impl
+    descendant of the stiff-mop-lane mixed-impl gate: the mkdir leg is always taken,
+    which is exactly what closed the gap.)"""
+    tid = _create(clone, "task", "storm target", {})
     n = 16
 
     def writer(i: int):
-        if i % 2 == 0:
-            env = {"REBAR_WRITE_CORE": "bash", "REBAR_FORCE_MKDIR_LOCK": "1"}
-        else:
-            env = {"REBAR_WRITE_CORE": "python"}
-        env = {**os.environ, "REBAR_NO_SYNC": "1", **env}
+        env = {**os.environ, "REBAR_NO_SYNC": "1"}
         return subprocess.run(
             [_REBAR, "comment", tid, f"note-{i}"],
             cwd=clone, env=env, capture_output=True, text=True,

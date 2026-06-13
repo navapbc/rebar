@@ -31,7 +31,7 @@ source "$REPO_ROOT/tests/lib/assert.sh"
 echo "=== test-ticket-help-overview-coverage.sh ==="
 
 # Arms intentionally not advertised in the overview (internal only).
-ALLOWLIST="help"
+ALLOWLIST="help list-epics"
 
 _is_allowlisted() {
     local arm="$1" a
