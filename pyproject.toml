@@ -76,6 +76,12 @@ select = ["E9", "F63", "F7", "F82"]
 # tree (engine helpers, reconciler) is checked advisory-only for now.
 python_version = "3.10"
 ignore_missing_imports = true
+# Report errors ONLY in the files passed on the command line, never in modules
+# reached via import. This pins the gating scope to exactly the named packages so
+# the gate cannot go red because some *other* (not-yet-clean) module is later
+# imported by the core. The advisory full-tree run still reports everything,
+# because there every file is named on the command line.
+follow_imports = "silent"
 
 [tool.coverage.run]
 source = ["rebar"]
