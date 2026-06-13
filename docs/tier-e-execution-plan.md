@@ -1,0 +1,136 @@
+# Tier E execution plan + handoff (delete the bash dispatcher — the LAST tier)
+
+Story: **adult-oxide-slave** (`8784-c2d7-c395-4478`). Tier E kickoff: **lad-cipher-arena**
+(`4387-8fae-9c8b-444b`). Canonical durable plan: `docs/bash-migration.md` §7. This file is the
+opus-reviewed cluster decomposition + the live handoff state. End-state AC: **one implementation +
+three facades (lib/CLI/MCP); zero standalone shell tests; no embedded heredocs; no `_engine/*.sh`.**
+Tier E has NO kill-switch — it is a structural cutover; rollback is `git revert`.
+
+## STATUS (2026-06-13) — read this first
+
+**Done, green, pushed to `origin/main` (HEAD `482bbed8`):**
+
+| Cluster | Commit | What |
+|---|---|---|
+| E0 | `3a53e20` | argparse CLI package `rebar._cli` (help/overview/error byte-pinned via package-data goldens) + auto-init/freshness middleware (`_ensure_initialized` port) + `tests/golden/cli_help/`. No cutover. |
+| E1 | `c64c889` | `cli.py:main` cut over to `rebar._cli.main`. Dispatcher now reachable only via the transitional category-B passthrough. |
+| E2.1 | `a3a7eb2` | `get-file-impact`, `get-verify-commands` → `rebar._engine_support.field_reads`. |
+| E2.2 | `ee29e91` | `exists`, `resolve`, `format` → `rebar._engine_support.lookups`. |
+| E2.3 | `d81650a` | `list-descendants` → `rebar._engine_support.descendants`. |
+| E2.4 | `482bbed` | `clarity-check`, `check-ac`, `quality-check`, `summary` → `rebar._engine_support.gates`. |
+| CI fix | `9760b2b` | Pre-existing CI: bash-suite REPO_ROOT `.tickets-tracker` leak (3 arity tests sandboxed) + macOS tmp-cleaner race (pinned `--basetemp`). |
+
+E2 (read-ish/quality) is COMPLETE and closed. Checkpoint full suite: **1660 passed, 0 failed**.
+
+**In-process now (argparse routes these to `rebar.*`, library rewired off `_run`):** all category-A
+(reads + leaf writes) + `get-file-impact`, `get-verify-commands`, `exists`, `resolve`, `format`,
+`list-descendants`, `clarity-check`, `check-ac`, `quality-check`, `summary`. The matching bash stays
+as a **parity-pinned second impl** (see Sequencing below).
+
+**Still bash (category-B passthrough to the dispatcher) — REMAINING WORK:** `transition`, `reopen`,
+`claim`, `compact`, `compact-all`, `scratch`, `delete` (→ **E3**); `init`, `fsck`, `fsck-recover`
+(→ **E4**); `bridge-status`, `purge-bridge` (→ **E5**). Plus reconciler rewire (E5b), `ticket_txn`
+relocation (E5c), shim deletion (E6), dispatcher deletion (E7), suite translation (E8), close (E9).
+
+### RESUME HERE → E3 (write/lifecycle), coupled to E5c
+
+`transition`/`reopen`/`claim` wrap `ticket_txn.py` (already Python). But `ticket_txn.py` lives in the
+engine dir and does a **bare `import event_append`** (the standalone `_engine/event_append.py`). It
+**cannot** be imported in-process by adding the engine dir to `sys.path` — that violates the
+`test_engine_dir.py::test_library_path_exposes_no_generic_top_level_engine_names` guard (Tier D
+invariant). So **E3 is coupled to E5c**: relocate `ticket_txn.py`'s critical section into
+`rebar._commands`/`rebar._store` (using `rebar._store.event_append`/`lock` directly) so it's
+importable as `rebar.*`, then port `transition`/`reopen`/`claim` in-process over it. **This touches the
+single locked write path + the optimistic-concurrency exit-10 contract — do the opus-reviewed sub-plan
+FIRST (per the working pattern) and re-run the concurrency matrix** (writer storm, claim storm,
+two-clone cross-clone convergence: `tests/integration/test_concurrency_regression.py`, `-m integration`).
+
+## The established per-command pattern (followed for E0–E2; keep doing this)
+
+1. **Characterize** the bash arm empirically (run the dispatcher over a fixture store; capture exact
+   stdout/stderr/exit for success/miss/arity/empty + both `--output` modes).
+2. **Port** to `rebar.*` reusing `rebar.reducer`/`rebar.graph`/`rebar._commands`/`rebar._store`/
+   `rebar._engine_support` (resolver, output, reads). Never re-implement; error strings from one place.
+3. **Route** argparse in-process (add a `frozenset` routing set in `rebar/_cli/__init__.py`; pick the
+   init policy to match the dispatcher arm: full / `--init-only` / none) and **rewire the library**
+   function off `_run` to the in-process helper.
+4. **Dual-run parity test** (`tests/interfaces/test_e2_*.py`): compare `rebar._cli.main(argv)`
+   (capsys) vs `bash dispatcher(argv)` (subprocess, `engine_env`) byte-for-byte over one store. This is
+   the no-kill-switch equivalent of the Tier B/C/D dual-run; the bash is the pinned second impl.
+5. **Gate:** fast interfaces tier + live-binary smoke; **commit green**; record a per-command rebar
+   child ticket (claim → set_file_impact → comment → close). Full suite at cluster boundaries.
+
+**NO bash is deleted in E2–E5.** The `.sh` suites invoke `$DISPATCHER` (`_engine/ticket`) DIRECTLY, not
+the argparse `rebar`, so a port does not redirect them — the bash impl stays live + tested until the
+dispatcher AND its suites retire together. Deletion consolidates in **E7** (dispatcher + machinery +
+`ticket-lib*.sh` + standalone `.sh`) and **E8** (`.sh` suites → pytest), sequenced so the dispatcher
+and the suites that call it retire together. Each parity test is deleted with its bash second-impl.
+
+## Cluster decomposition (each = one child ticket under the kickoff)
+
+- **E3 — write/lifecycle:** `transition`/`reopen`/`claim` (needs E5c `ticket_txn` relocation first),
+  then `compact`/`compact-all` (port `ticket-compact*.sh` over `rebar._store`), `scratch` (filesystem),
+  `delete` (destructive: STATUS(deleted)+tombstone+UNLINK events + atomic commit through the write
+  core; `--user-approved` guard; children guard; reuses `ticket-delete-unlink-scan.py` logic). Write
+  commands re-run the concurrency matrix.
+- **E5c — relocate `ticket_txn.py`** into `rebar._commands`/`rebar._store`; stop `import event_append`
+  (bare); delete `_engine/event_append.py` only after the reconciler (E5b) + `ticket_txn` stop
+  importing it. Sequence with E3.
+- **E4 — `init`/`fsck`/`fsck-recover`** (HIGHEST RISK; isolated soak each): orphan-branch + worktree
+  bootstrap, index.lock cleanup, dangling-commit/interrupted-rebase recovery. No in-process
+  predecessor. Byte-parity goldens + recovery/concurrency tests. The auto-init middleware (§1a, already
+  in `rebar._cli._init`) calls the ported `init` once it lands (transitionally subprocesses
+  `ticket-init.sh` today).
+- **E5 — `bridge-status`/`purge-bridge`** (bridge surface; `bridge-fsck`/`bridge-probe` already py).
+- **E5b — rewire `rebar_reconciler`** off the bare `ticket_reducer` → `rebar.reducer` and bare
+  `event_append` → `rebar._store.event_append` (drop the `sys.path` dances in `inbound_translate.py`),
+  and off `engine_env`. Decide reconcile's launch (in-process entry preferred). Update `cli.py`/library
+  `reconcile`. **⚠ LIVE-DIG JIRA GATE binds here (and E5):** before close, run a live end-to-end probe
+  against the real Jira **DIG** project (`JIRA_PROJECT=DIG`; `JIRA_URL`/`JIRA_USER`/`JIRA_API_TOKEN`
+  are in the env), validating EVERY field bidirectionally (outbound rebar→Jira via
+  `apply_outbound`/`outbound_differ`/`adf`; inbound Jira→rebar via
+  `apply_inbound`/`inbound_differ`/`inbound_translate`; field list from `jira_fields.py`), all edge
+  cases, create→validate→delete throwaway DIG issues with cleanup verified. PAUSE for the user's
+  go-ahead before the first live DIG writes.
+- **E6 — delete the compat shims** (`ticket_reducer/`, `ticket_graph/`, `ticket_reads.py`,
+  `ticket_resolver.py`, `ticket_output.py`) after rewiring every importer (engine `.py` helpers,
+  `reducer/_processors.py`, `_engine_support/output.py`, the graph/interface tests, the
+  `ticket-id-concurrency/run.sh` integration helper) to `rebar.*`. Assert-gone test per shim.
+- **E7 — delete the dispatcher + machinery:** `_engine/rebar`, `engine_env()`/PYTHONPATH machinery,
+  `engine_dir()` zipimport assertion, jq prerequisite, flock(1)/mkdir discovery. Surviving genuine py
+  helpers (`jira-capability-probe.py`, `ticket-bridge-fsck.py`) get an in-process invocation path.
+  Retire the machinery tests in the SAME commit (`test_engine_dir.py`, `tests/_engine_path.py`,
+  `test_ticket_txn.py`, `test_schema_coverage.py` engine refs). Assert `_engine/*.sh` count == 0.
+- **E8 — translate the bash harness to pytest:** ~107 `.sh` total (94 under `tests/scripts/` + 13
+  elsewhere incl. `tests/integration/ticket-id-concurrency/run.sh`). Delete
+  `tests/lib/{suite-engine,assert}.sh` + the collector. Gate: zero `tests/**/*.sh`; full pytest green.
+- **E9 — docs + close:** `docs/architecture.md` offender table → empty + engine-import-boundary note;
+  `docs/bash-migration.md` §7 → DONE; exhaustive live-dogfood validation (probe isolated + PROBE_LIVE,
+  full suite + integration matrix + mixed-version, all three interfaces, fsck clean, perf, goldens);
+  soak-evidence comment; close adult-oxide-slave.
+
+## Environment / gotchas (heed all)
+
+- **Live build:** on-PATH `rebar` is the editable working tree (`pipx install --editable . --force`;
+  the `.pth` points at `src/`). Revert with `pipx install nava-rebar --force`.
+- **Dev pytest venv:** `/tmp/rebar-dev` (`python3 -m venv /tmp/rebar-dev && /tmp/rebar-dev/bin/pip
+  install -e '.[dev]'`). Run `pytest -m "not integration"`; integration matrix needs `-m integration`.
+- **Always** pass a fixed `--basetemp=/tmp/rebar-bt-X` (macOS tmp-cleaner race). `pytest | tee` reports
+  tee's exit — read the actual `N passed, M failed`. Never `git stash` with uncommitted migration work.
+- Committed event bytes: `json.dumps(ensure_ascii=False, separators=(',',':'), sort_keys=True)` no
+  newline (== `jq -S -c`). Preserve through any write-path change.
+- Commit trailer: `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`. Commit to
+  `main` directly is allowed; push/tag/publish follow the user's direction.
+
+## Per-cluster gates + risks
+
+Gates: characterize → port (reuse, don't re-implement) → byte-parity (stdout/stderr/exit, text +
+`--output json`) → cut over → dogfood soak → retire in clean green commits. Preserve I1–I9, the
+exit-code contract (10/75/…), the single-reducer `show==list==search` shape (f026), JSON-schema
+conformance, ANSI/text byte-pins. Module-size: 200–500 target, 800 cap, no <100-LOC shards; test files
+<1000 LOC.
+
+Top risks: (1) reconciler shim + `engine_env` ImportError vector (E5b — rewire before E6/E7);
+(2) `ticket_txn`/bare `event_append` half-migrated hybrid (E5c — relocate, delete bare module last);
+(3) init/fsck bootstrap parity (E4 — isolated soak); (4) compat-shim deletion ordering (E6 — grep-gated
+assert-gone, rewire before delete); (5) test undercount — 107 `.sh`, not 83.
