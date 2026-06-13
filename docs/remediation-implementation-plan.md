@@ -622,26 +622,35 @@ Reroute `_commands/leaf.tag/untag` and `edit(tags=)` to emit deltas; add
 seed minting, no special compaction handling** — deltas fold under the normal
 SNAPSHOT path because there is no causal metadata to preserve.
 
-**No seeding trap, no OR-Set seed step.** Because `TAG`/`UNTAG` mutate the
-*current* replayed `state["tags"]` (which already reflects any pre-existing
-whole-field `EDIT`), pre-existing tags are carried forward automatically —
-`EDIT(tags=[a,b])` then `TAG(c)` ⇒ `[a,b,c]` with no seed logic. This sidesteps the
-Yjs/Automerge "independent-seed duplication" trap entirely (no per-replica tags are
-minted). *(The OR-Set version needed a deterministic `seed:<tag>` step here; the
-delta-mutation model needs none.)*
+**No seeding trap — but the first-delta BOUNDARY is load-bearing (get this exact).**
+Because `TAG`/`UNTAG` mutate the *current* replayed `state["tags"]`, pre-existing
+tags are carried forward automatically with no synthetic seed ops — *provided the
+reducer applies EDIT.tags up to, and only up to, the first delta.* The precise rule
+(validated by EXP5b's `started` boundary) is: **in replay order, EDIT.tags are
+applied while no `TAG`/`UNTAG` has yet been seen; the first delta freezes the base
+and every EDIT.tags from then on is ignored.** So `EDIT(tags=[a,b])` → base
+`[a,b]`, then `TAG(c)` → `[a,b,c]`. ⚠️ **Do NOT implement the rule as "globally
+ignore EDIT.tags if the ticket has any delta"** — that pre-scan would wipe the
+pre-delta `[a,b]` base and yield `[c]`, **re-introducing the exact tag-loss bug**
+this item exists to prevent. The boundary is defined by the deterministic
+`event_sort_key` order, so it resolves identically on every clone. This also
+sidesteps the Yjs/Automerge "independent-seed duplication" trap (no per-replica
+tags are minted at all). *(The OR-Set variant needed a deterministic `seed:<tag>`
+step; the delta-mutation model folds the same idea into the boundary rule.)*
 
 **Wire/schema + forward-compat cost (unchanged from the OR-Set plan).** New event
 types → **`SCHEMA_VERSION` bump 2** and preserve-and-ignore: an older clone treats
 `TAG`/`UNTAG` as unknown → preserved but not applied, so newer-clone tag changes are
 invisible there until upgrade. Tags are advisory, so acceptable.
 
-**Dual-write transition — the one replay rule that still matters.** For one
-transition release the writer *also* emits the legacy whole-field `EDIT` so
-old clones still see tags. **Critical (kept from before):** a v2 reducer must
-**ignore the `tags` key of every `EDIT` once the ticket has any `TAG`/`UNTAG`
-event**, else the wholesale `state["tags"]` assignment (`process_edit`,
-`reducer/_processors.py:283-302`) replayed after a delta would clobber the delta
-result. The legacy EDIT then serves *only* old clones. Retire it the release after.
+**Dual-write transition — the same boundary rule covers it.** For one transition
+release the writer *also* emits the legacy whole-field `EDIT` so old clones still
+see tags. The boundary rule above already handles this: any legacy `EDIT.tags` that
+sorts **after** the first delta is ignored on v2 (it would otherwise let
+`process_edit`'s wholesale `state["tags"]` assignment,
+`reducer/_processors.py:283-302`, clobber the delta result), while serving old
+clones normally. A legacy `EDIT` that sorts **before** the first delta correctly
+contributes to the base. Retire the legacy EDIT the release after.
 
 **Tests.** Two-clone convergence (add `x`‖add `y` → both; add `c`‖remove `c` →
 deterministic last-writer-in-order, identical on both clones), reusing P2.1's
