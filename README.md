@@ -256,6 +256,13 @@ environment that holds the key can certify its own attestations. The signature i
 stored as a normal append-only `SIGNATURE` event, so it replays into `show`
 output, survives compaction, and flows to other clones like any other write.
 
+The signing key is a shared secret (HMAC), so the attestation proves a signature
+was produced by a holder of the environment key and that the steps are unaltered
+since — it is **not** a public-key identity. Anyone who can read the
+`.signing-key` file (written `0600`, owner-only) or the injected `REBAR_SIGNING_KEY`
+can forge a `certified` record, so protect read access to the environment
+accordingly.
+
 ### Hierarchy promotion of blocking links
 
 For **blocking** dependencies only (`blocks`, `depends_on`), rebar promotes the

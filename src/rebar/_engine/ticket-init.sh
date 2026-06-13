@@ -444,6 +444,7 @@ fi
 # overridden out-of-band by the REBAR_SIGNING_KEY env var (shared deployments).
 if [ ! -f "$TRACKER_DIR/.signing-key" ]; then
     python3 -c "import uuid; print(uuid.uuid4())" > "$TRACKER_DIR/.signing-key"
+    chmod 600 "$TRACKER_DIR/.signing-key" 2>/dev/null || true
 fi
 
 # ── Set gc.auto=0 on the tickets worktree ─────────────────────────────────────

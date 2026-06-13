@@ -105,6 +105,27 @@ def test_verify_unsigned() -> None:
     assert out["verified"] is False and out["verdict"] == "unsigned"
 
 
+def test_every_verdict_has_uniform_shape() -> None:
+    # A consumer must be able to read manifest/step_count regardless of verdict
+    # (no KeyError on the unsigned path — there is no outputSchema to enforce it).
+    keys = {"verified", "verdict", "reason", "manifest", "step_count", "key_id", "signed_at", "head_sha"}
+    certified = signing.verify_record(_record("t", ["a"], KEY), "t", KEY)
+    unsigned = signing.verify_record(None, "t", KEY)
+    foreign = signing.verify_record(_record("t", ["a"], OTHER), "t", KEY)
+    for out in (certified, unsigned, foreign):
+        assert keys <= set(out), f"{out['verdict']} missing keys: {keys - set(out)}"
+    assert unsigned["manifest"] == [] and unsigned["step_count"] == 0
+
+
+def test_verify_missing_key_id_fails_closed() -> None:
+    # A record with a signature but no fingerprint cannot be attributed to an
+    # environment; verifying with a foreign key must NOT certify (fail closed).
+    rec = _record("t", ["a"], OTHER)
+    rec["key_id"] = ""  # strip the fingerprint
+    out = signing.verify_record(rec, "t", KEY)
+    assert out["verified"] is False and out["verdict"] == "mismatch"
+
+
 def test_verify_mismatch_on_tampered_manifest() -> None:
     rec = _record("t", ["a", "b"], KEY)
     rec["manifest"] = ["a", "b", "sneaky extra step"]  # tamper, keep old signature
@@ -131,6 +152,23 @@ def test_verify_mismatch_when_ticket_id_differs() -> None:
 def test_signing_key_prefers_env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("REBAR_SIGNING_KEY", "injected")
     assert signing.signing_key(tmp_path) == b"injected"
+
+
+def test_signing_key_env_is_stripped_for_file_symmetry(monkeypatch, tmp_path) -> None:
+    # An injected key copied with a trailing newline must fingerprint identically
+    # to the bare value (the file form strips), so sign-here/verify-here agrees.
+    monkeypatch.setenv("REBAR_SIGNING_KEY", "abc-key\n")
+    assert signing.signing_key(tmp_path) == b"abc-key"
+
+
+def test_signing_key_file_is_owner_only(monkeypatch, tmp_path) -> None:
+    import os as _os
+    import stat
+
+    monkeypatch.delenv("REBAR_SIGNING_KEY", raising=False)
+    signing.signing_key(tmp_path)
+    mode = stat.S_IMODE(_os.stat(tmp_path / ".signing-key").st_mode)
+    assert mode == 0o600, f"signing key world/group-readable: {oct(mode)}"
 
 
 def test_signing_key_generates_and_gitignores(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

@@ -96,20 +96,29 @@ def signing_key(tracker: str | os.PathLike[str]) -> bytes:
     UUID4 generated + gitignored on first use). Raises :class:`SigningError` if a
     key can be neither read nor generated.
     """
+    # Strip surrounding whitespace so an injected key copied with a trailing
+    # newline fingerprints identically to the file form (which also strips).
     env_key = os.environ.get("REBAR_SIGNING_KEY")
-    if env_key:
-        return env_key.encode("utf-8")
+    if env_key and env_key.strip():
+        return env_key.strip().encode("utf-8")
 
     tracker_path = Path(tracker)
     key_file = tracker_path / ".signing-key"
     if not key_file.exists():
+        # Create with 0o600 (O_EXCL closes the create-race: a concurrent creator
+        # just means we fall through to read the key it wrote).
         try:
-            key_file.write_text(str(_uuid.uuid4()) + "\n", encoding="utf-8")
+            fd = os.open(str(key_file), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            pass
         except OSError as exc:
             raise SigningError(
                 f"Error: could not create signing key at {key_file}: {exc}"
             ) from None
-        _ensure_gitignored(tracker_path, ".signing-key")
+        else:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(str(_uuid.uuid4()) + "\n")
+            _ensure_gitignored(tracker_path, ".signing-key")
     try:
         return key_file.read_text(encoding="utf-8").strip().encode("utf-8")
     except OSError as exc:
@@ -187,26 +196,25 @@ def verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict:
       here; the signing environment must verify it).
     * ``unsigned``    — the ticket carries no signature.
     """
-    if not record:
-        return {
-            "verified": False,
-            "verdict": "unsigned",
-            "reason": "ticket has no signature",
-        }
-
+    record = record or {}
     manifest = record.get("manifest") or []
     stored_sig = record.get("signature") or ""
     stored_fp = record.get("key_id") or ""
     local_fp = key_fingerprint(key)
 
+    # Every verdict carries the same keys (uniform contract): consumers can read
+    # result["manifest"]/["step_count"] regardless of outcome, including unsigned.
     base = {
         "manifest": manifest,
         "step_count": len(manifest),
         "algorithm": record.get("algorithm"),
-        "key_id": stored_fp,
+        "key_id": stored_fp or None,
         "signed_at": record.get("signed_at"),
         "head_sha": record.get("head_sha"),
     }
+
+    if not stored_sig:
+        return {**base, "verified": False, "verdict": "unsigned", "reason": "ticket has no signature"}
 
     if stored_fp and stored_fp != local_fp:
         return {
@@ -219,6 +227,9 @@ def verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict:
             ),
         }
 
+    # No stored fingerprint (a hand-written / forward-compat record) cannot be
+    # attributed to an environment — fall through to the HMAC check, which fails
+    # CLOSED (mismatch, never certified) when it was actually signed elsewhere.
     expected = compute_signature(ticket_id, manifest, key)
     if hmac.compare_digest(expected, stored_sig):
         return {
