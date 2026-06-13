@@ -1,0 +1,1 @@
+Usage: rebar clarity-check <ticket_id>   (exit 0=pass, 1=fail; JSON: score/verdict/threshold)

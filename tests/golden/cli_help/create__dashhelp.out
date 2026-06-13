@@ -1,0 +1,1 @@
+Usage: rebar create <bug|epic|story|task> <title> [--parent <id>] [--priority <0-4>] [--assignee <name>] [--description <text>] [--tags <t1,t2>] [--output json]

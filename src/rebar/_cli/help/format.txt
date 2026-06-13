@@ -1,0 +1,1 @@
+Usage: rebar format <ticket_id> [mode]

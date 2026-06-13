@@ -1,0 +1,1 @@
+Usage: rebar set-verify-commands <ticket_id> <json_array>   (array of {dd_id,dd_text,command})

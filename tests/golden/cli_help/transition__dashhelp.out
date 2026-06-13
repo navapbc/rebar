@@ -1,0 +1,6 @@
+Usage: rebar transition <ticket_id> <current_status> <target_status> [--reason=<text>] [--force] [--verdict-hash=<hash>] [--force-close=<reason>] [--output json]
+       rebar transition <ticket_id> <target_status>   (auto-detects current status)
+  status: open | in_progress | closed | blocked
+  bug close requires --reason (prefix 'Fixed:' or 'Escalated to user:').
+  story/epic close requires --verdict-hash (or --force-close=<reason>) ONLY when the
+  opt-in gate verify.require_verdict_for_close=true is set in .rebar/config.conf (off by default).

@@ -1,0 +1,1 @@
+Usage: rebar search <query> [--status=<s>] [--type=<t>] [--has-tag=<tag>] [--include-archived] [--no-sync]

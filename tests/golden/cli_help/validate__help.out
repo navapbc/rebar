@@ -1,0 +1,1 @@
+Usage: rebar validate [--quick|--full] [--fix] [--verbose] [--output json] [--terse]   (repo-wide health check; takes NO ticket id)

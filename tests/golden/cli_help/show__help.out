@@ -1,0 +1,1 @@
+Usage: rebar show [--output llm] [--no-sync] <ticket_id> [<ticket_id> ...]

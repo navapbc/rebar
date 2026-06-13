@@ -1,0 +1,1 @@
+Usage: rebar scratch <set|get|clear> <ticket_id> [<key> [<value>]]

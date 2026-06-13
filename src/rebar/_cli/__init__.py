@@ -1,0 +1,179 @@
+"""The rebar argparse CLI (Tier E).
+
+A real in-process Python CLI replacing the bash dispatcher (``_engine/rebar``).
+During E0 this module is built and tested but NOT yet the entrypoint —
+``rebar.cli:main`` keeps delegating to the bash dispatcher until the E1 cutover —
+so the surface can be proven byte-identical first.
+
+Structure mirrors the dispatcher exactly:
+
+* ``argparse`` owns top-level tokenization (subcommand + REMAINDER); per-command
+  flag parsing stays in each command's existing implementation, so argument-error
+  byte-parity is preserved (those messages come from the unchanged impls).
+* Help / overview / unknown-subcommand output is byte-identical to the dispatcher
+  via the pinned package-data strings in :mod:`rebar._cli._help`.
+* Category-A commands (reads + leaf writes) dispatch **in-process** to
+  ``rebar._engine_support.reads.main`` / ``rebar._commands.main`` with the
+  dispatcher's per-command auto-init policy (:mod:`rebar._cli._init`).
+* Category-B commands (not yet ported) **transitionally subprocess** the bash
+  dispatcher exactly as today; they migrate in-process in E2-E5.
+* ``reconcile`` routes to ``python -m rebar_reconciler`` (the dispatcher has no
+  reconcile arm), preserving ``cli.py``'s behavior.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+import sys
+
+from rebar._cli import _help
+from rebar._cli._init import ensure_initialized
+
+# Read arms that auto-init only; the read path owns its own throttled reconverge.
+_READS_INIT_ONLY = frozenset(
+    {"show", "list", "list-epics", "next-batch", "deps", "ready", "search"}
+)
+# Read-compute arm the dispatcher ran with NO _ensure_initialized (self-manages).
+_READS_NO_INIT = frozenset({"validate"})
+# Leaf-write arms: full auto-init + reconverge before the in-process write.
+_WRITES_FULL = frozenset(
+    {
+        "create",
+        "comment",
+        "link",
+        "unlink",
+        "revert",
+        "edit",
+        "tag",
+        "untag",
+        "archive",
+        "set-file-impact",
+        "set-verify-commands",
+    }
+)
+
+
+def _reconcile(argv: list[str]) -> int:
+    """``rebar reconcile`` → ``python -m rebar_reconciler`` (mirrors cli.py)."""
+    from rebar import config
+    from rebar._engine import engine_env
+
+    root = str(config.repo_root())
+    args = list(argv)
+    if not any(a == "--repo-root" or a.startswith("--repo-root=") for a in args):
+        args += ["--repo-root", root]
+    if not any(a == "--mode" or a.startswith("--mode=") for a in args):
+        args += ["--mode", "dry-run"]
+    return subprocess.call(
+        ["python3", "-m", "rebar_reconciler", *args], env=engine_env(root)
+    )
+
+
+def _passthrough(sub: str, rest: list[str]) -> int:
+    """Transitionally run a not-yet-ported command via the bash dispatcher.
+
+    The dispatcher runs its own ``_ensure_initialized``, so the middleware is
+    deliberately not applied here. Output streams inherit (no capture) so the user
+    sees the command's output directly, exactly as ``cli.py`` does today.
+    """
+    from rebar._engine import dispatcher, engine_env
+
+    env = engine_env()
+    cwd = env.get("REBAR_ROOT") or env.get("PROJECT_ROOT")
+    if not (cwd and os.path.isdir(cwd)):
+        cwd = None
+    return subprocess.call(
+        ["bash", str(dispatcher()), sub, *rest], env=env, cwd=cwd
+    )
+
+
+def _emit_subcommand_help(sub: str) -> int:
+    """Print ``sub``'s usage (``_print_subcommand_help`` parity).
+
+    Known subcommand → stdout, exit 0. Unknown → error + blank + overview all to
+    stderr, exit 1 (the dispatcher's ``*)`` arm).
+    """
+    text = _help.subcommand_help(sub)
+    if text is not None:
+        sys.stdout.write(text)
+        return 0
+    sys.stderr.write(f"Error: unknown subcommand '{sub}'\n\n")
+    sys.stderr.write(_help.overview())
+    return 1
+
+
+def _dispatch(sub: str, rest: list[str]) -> int:
+    """Route a known subcommand to its in-process or passthrough implementation."""
+    if sub in _READS_INIT_ONLY:
+        ensure_initialized(init_only=True)
+        from rebar._engine_support import reads
+
+        return reads.main([sub, *rest])
+    if sub in _READS_NO_INIT:
+        from rebar._engine_support import reads
+
+        return reads.main([sub, *rest])
+    if sub in _WRITES_FULL:
+        ensure_initialized(init_only=False)
+        from rebar._commands import main as commands_main
+
+        return commands_main([sub, *rest])
+    return _passthrough(sub, rest)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """rebar CLI entry. Returns the process exit code.
+
+    Control flow mirrors the bash dispatcher's help-interception-before-dispatch
+    order so no command is executed on a help request and the streams/exit codes
+    match the pinned goldens.
+    """
+    argv = list(sys.argv[1:] if argv is None else argv)
+
+    # reconcile intercept (the dispatcher has no reconcile arm).
+    if argv and argv[0] == "reconcile":
+        return _reconcile(argv[1:])
+
+    # No subcommand: overview to stdout, exit 1 (the dispatcher's _usage).
+    if not argv:
+        sys.stdout.write(_help.overview())
+        return 1
+
+    first = argv[0]
+
+    # Top-level help: `rebar help [<sub>]`, `rebar --help`, `rebar -h`.
+    if first in ("help", "--help", "-h"):
+        if len(argv) >= 2:
+            return _emit_subcommand_help(argv[1])
+        sys.stdout.write(_help.overview())
+        return 0
+
+    sub, rest = first, argv[1:]
+
+    # `rebar <sub> --help|-h` as the FIRST arg after the subcommand → usage, no exec.
+    if rest and rest[0] in ("--help", "-h"):
+        return _emit_subcommand_help(sub)
+
+    # Unknown subcommand: error to stderr + overview to stdout, exit 1.
+    if sub not in _help.known_subcommands():
+        sys.stderr.write(f"Error: unknown subcommand '{sub}'\n")
+        sys.stdout.write(_help.overview())
+        return 1
+
+    return _dispatch(sub, rest)
+
+
+# argparse scaffold — a real ArgumentParser owns top-level tokenization. Help and
+# errors are intercepted in main() so the byte-exact dispatcher contract wins; the
+# parser exists so the CLI is argparse-structured and gains its tokenization.
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="rebar", add_help=False)
+    parser.add_argument("subcommand", nargs="?")
+    parser.add_argument("args", nargs=argparse.REMAINDER)
+    return parser
+
+
+if __name__ == "__main__":
+    sys.exit(main())

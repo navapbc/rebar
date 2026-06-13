@@ -1,0 +1,1 @@
+Usage: rebar reopen <ticket_id> [--output json]   (closed -> open; exit 10 if not currently closed)

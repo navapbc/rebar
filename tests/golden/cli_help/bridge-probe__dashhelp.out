@@ -1,0 +1,1 @@
+Usage: rebar bridge-probe   (requires JIRA_URL, JIRA_USER, JIRA_API_TOKEN; optional JIRA_PROJECT)

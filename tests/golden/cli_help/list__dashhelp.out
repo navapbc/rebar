@@ -1,0 +1,9 @@
+Usage: rebar list [--status=<s>] [--type=<t>] [--priority=<n>] [--parent=<id>] [--has-tag=<tag>] [--without-tag=<tag>] [--include-archived] [--exclude-deleted] [--no-sync] [--output llm]
+  --type=<type>      Filter by ticket type (bug, epic, story, task)
+  --status=<status>  Filter by status (comma-separated for OR)
+  --priority=<n>     Filter by priority 0-4 (comma-separated for OR; exact match; unset priority not matched)
+  --parent=<id>      Filter to direct children of <id>
+  --has-tag=<tag>    Filter to tickets having <tag> (comma-separated for OR);
+                     tags matching ^detected_by: auto-intersect with --type=bug
+  --without-tag=<tag>  Exclude tickets having ANY of <tag> (comma-separated)
+  --no-sync          Skip the best-effort fetch/reconverge (also: REBAR_NO_SYNC=1)

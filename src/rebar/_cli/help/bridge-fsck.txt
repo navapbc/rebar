@@ -1,0 +1,1 @@
+Usage: rebar bridge-fsck [--tickets-tracker=<path>] [--output json]

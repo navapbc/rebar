@@ -1,0 +1,1 @@
+Usage: rebar get-verify-commands <ticket_id>

@@ -1,0 +1,1 @@
+Usage: rebar revert <ticket_id> <target_uuid> [--reason=<text>]

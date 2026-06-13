@@ -1,0 +1,1 @@
+Usage: rebar deps <ticket_id> [--include-archived] [--no-sync]

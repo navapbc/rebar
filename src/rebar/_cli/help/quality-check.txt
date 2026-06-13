@@ -1,0 +1,1 @@
+Usage: rebar quality-check <ticket_id> [--output json]   (exit 0=pass, 1=fail; QUALITY: pass|fail)

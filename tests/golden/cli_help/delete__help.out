@@ -1,0 +1,1 @@
+Usage: rebar delete <ticket_id> --user-approved [--output json]   (destructive; requires explicit approval)

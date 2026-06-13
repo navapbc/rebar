@@ -1,0 +1,1 @@
+Usage: rebar tag <ticket_id> <tag>

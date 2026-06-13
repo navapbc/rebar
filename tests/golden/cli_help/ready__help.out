@@ -1,0 +1,1 @@
+Usage: rebar ready [--output text|llm|json] [--epic=<id>] [--no-sync]   (lists tickets whose blockers are all closed)

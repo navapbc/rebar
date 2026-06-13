@@ -1,0 +1,1 @@
+Usage: rebar check-ac <ticket_id> [--output json]   (exit 0=pass, 1=fail; AC_CHECK: pass|fail)

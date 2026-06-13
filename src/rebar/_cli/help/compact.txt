@@ -1,0 +1,1 @@
+Usage: rebar compact <ticket_id> [--threshold=<n>]

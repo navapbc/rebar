@@ -1,0 +1,22 @@
+usage: rebar_reconciler [-h] [--repo-root REPO_ROOT] [--mode MODE]
+                        [--dry-run-enumerate]
+                        [--filter-local-ids FILTER_LOCAL_IDS]
+
+options:
+  -h, --help            show this help message and exit
+  --repo-root REPO_ROOT
+                        Repository root (default: auto-detect from script
+                        location)
+  --mode MODE           Rollout-safety mode: reconcile-check | dry-run |
+                        bootstrap-strict | bootstrap-throttle | live (default:
+                        live)
+  --dry-run-enumerate   Print the list of ticket-tracker entries that the
+                        reconciler would enumerate (after .scratch/ exclusion)
+                        and exit without running a pass. Each entry is printed
+                        as an absolute path, one per line.
+  --filter-local-ids FILTER_LOCAL_IDS
+                        Comma-separated list of local ticket IDs. When set,
+                        all three differs run on their full unfiltered inputs
+                        (same code paths as production) but only mutations
+                        targeting these IDs (or their bound Jira keys) reach
+                        the applier. For validation use only.
