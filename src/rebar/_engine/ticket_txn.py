@@ -127,18 +127,29 @@ def _transition(argv):
             # Check config: verify.require_verdict_for_close (default: false — opt-in).
             # The verdict-hash gate is OFF unless the repo explicitly enables it.
             require_verdict = False
-            try:
-                _cfg_root = os.environ.get('REBAR_ROOT') or os.environ.get('PROJECT_ROOT') or tracker_dir.rsplit('/', 1)[0]
-                config_path = os.environ.get('REBAR_CONFIG') or os.path.join(_cfg_root, '.rebar', 'config.conf')
-                if os.path.isfile(config_path):
-                    with open(config_path) as _cf:
+            _cfg_root = os.environ.get('REBAR_ROOT') or os.environ.get('PROJECT_ROOT') or tracker_dir.rsplit('/', 1)[0]
+            config_path = os.environ.get('REBAR_CONFIG') or os.path.join(_cfg_root, '.rebar', 'config.conf')
+            # Fail-CLOSED on read error: a *present* gate config we cannot read/parse
+            # must never silently disable the verification gate. A corrupt or
+            # unreadable config requires the verdict (block) and surfaces the error,
+            # rather than defaulting to "closure allowed". An absent config is the
+            # intended opt-out (gate stays off).
+            if os.path.isfile(config_path):
+                try:
+                    with open(config_path, encoding='utf-8') as _cf:
                         for _line in _cf:
                             if _line.strip().startswith('verify.require_verdict_for_close='):
                                 val = _line.strip().split('=', 1)[1].strip().lower()
                                 if val in ('true', '1', 'yes'):
                                     require_verdict = True
-            except Exception:
-                pass
+                except Exception as _cfg_exc:
+                    print(
+                        f'Warning: could not read verify config {config_path} '
+                        f'({_cfg_exc}); requiring a verdict to close {ticket_type} '
+                        f'{ticket_id} (fail-closed).',
+                        file=sys.stderr,
+                    )
+                    require_verdict = True
 
             if require_verdict:
                 if force_close_reason_arg:

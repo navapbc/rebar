@@ -199,3 +199,53 @@ def test_transition_stale_status_rejected_exit_10_no_event(seeded):
 
     after = _status_events(tracker, ticket_id)
     assert after == before, "a rejected transition must NOT write a STATUS event"
+
+
+# ── Verdict-hash gate: fail-CLOSED on an unreadable config ────────────────────
+# Regression for the fail-open hole: a *present* verify config that cannot be
+# read/parsed must require the verdict (block the close), never silently disable
+# the gate. An *absent* config is the intended opt-out (gate stays off).
+
+
+@pytest.fixture
+def seeded_story(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A repo with one in_progress STORY. Returns (tracker, story_id, env_id, root)."""
+    monkeypatch.setenv("_TICKET_TEST_NO_SYNC", "1")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t.com"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "T"], check=True)
+    monkeypatch.setenv("REBAR_ROOT", str(repo))
+    monkeypatch.setenv("PROJECT_ROOT", str(repo))
+    _run(repo, "init")
+    story_id = _run(repo, "create", "story", "verdict gate story").stdout.strip().splitlines()[-1]
+    tracker = Path(os.path.realpath(repo / ".tickets-tracker"))
+    env_id = (tracker / ".env-id").read_text().strip()
+    # Move open -> in_progress so the next transition under test is the close.
+    assert _call(tracker, story_id, env_id, "open", "in_progress") == 0
+    return tracker, story_id, env_id, repo
+
+
+def test_close_story_with_unreadable_verify_config_fails_closed(seeded_story):
+    tracker, story_id, env_id, root = seeded_story
+    cfg_dir = root / ".rebar"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    # The gate-enabling line is present, but a stray invalid UTF-8 byte makes the
+    # line-iteration decode raise — the path the fix must treat as fail-closed.
+    (cfg_dir / "config.conf").write_bytes(b"verify.require_verdict_for_close=true\n\xff bad\n")
+
+    before = _status_events(tracker, story_id)
+    # Close with an empty verdict-hash: gate ON (fail-closed) must reject.
+    rc = _call(tracker, story_id, env_id, "in_progress", "closed")
+    assert rc == 1, "an unreadable verify config must fail CLOSED (block the story close)"
+    after = _status_events(tracker, story_id)
+    assert after == before, "a blocked close must not append a STATUS event"
+
+
+def test_close_story_with_no_verify_config_is_opt_out(seeded_story):
+    tracker, story_id, env_id, root = seeded_story
+    # Control: no config at all → the gate is opt-in/off → the story closes.
+    assert not (root / ".rebar" / "config.conf").exists()
+    rc = _call(tracker, story_id, env_id, "in_progress", "closed")
+    assert rc == 0, "with no verify config present the gate stays off; the close succeeds"

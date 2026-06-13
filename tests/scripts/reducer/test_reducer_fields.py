@@ -13,6 +13,7 @@ import sys
 import time
 import warnings
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import urllib.error
 from typing import Any
 
 from rebar_reconciler.jira_fields import _sanitize_label

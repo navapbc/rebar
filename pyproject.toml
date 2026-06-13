@@ -22,7 +22,15 @@ dependencies = []
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.2"]
-dev = ["pytest>=8", "mcp>=1.2", "jsonschema>=4.18", "hatchling>=1.18"]
+dev = [
+    "pytest>=8",
+    "mcp>=1.2",
+    "jsonschema>=4.18",
+    "hatchling>=1.18",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "pytest-cov>=5",
+]
 
 [project.scripts]
 rebar = "rebar.cli:main"
@@ -48,6 +56,30 @@ exclude = [
 
 [tool.hatch.build.targets.sdist]
 include = ["src/rebar", "tests", "README.md"]
+
+[tool.ruff]
+# Engine ships as package data but is normal Python; lint it too. The gating
+# rule set is the flake8 "real-bug" smoke set (syntax errors + undefined names +
+# bad assert/string-literal forms) — the class that catches NameError-on-error-path
+# bugs like a missing `import urllib` in an `except` clause. The broader stylistic
+# set (unused imports, etc.) is run advisory in CI to ratchet down over time
+# without a destabilizing one-shot mass-fix.
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.mypy]
+# Scoped, opt-in type checking. The pure in-process library core
+# (reducer / graph / _store) is kept type-clean and gated in CI; the rest of the
+# tree (engine helpers, reconciler) is checked advisory-only for now.
+python_version = "3.10"
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["rebar"]
+branch = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

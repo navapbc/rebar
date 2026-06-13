@@ -16,3 +16,10 @@ CLAUDE.local.md
 .pytest-tmp/
 dist/
 build/
+
+# lint / type-check / coverage artifacts
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/

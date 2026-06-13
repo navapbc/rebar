@@ -72,7 +72,7 @@ def compute_dir_hash(ticket_dir: str, event_filenames: list[str]) -> str:
 
 def prepare_event_files(
     ticket_dir: str,
-) -> tuple[str, str, list[str], str | None]:
+) -> tuple[str, str, list[str], dict | None]:
     """Build sorted event file list and compute dir_hash; check cache.
 
     Returns (cache_path, dir_hash, event_files, cached_state_json_or_none).
