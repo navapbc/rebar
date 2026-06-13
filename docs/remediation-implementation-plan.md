@@ -20,17 +20,17 @@ sketched at the end for sequencing only.*
    existing write lock) is allowed. New per-clone state is gitignored and
    rebuildable. New write events flow through the locked write path — no side
    channels (I5).
-2. **Writers and byte format — see P1.0 first.** **Four** event serializers exist
-   and only one is canonical: `_store/event_append.py:56-61` writes canonical
-   `json.dumps(sort_keys=True, separators=(",",":"))`, while **three** others write
-   plain `json.dumps(event, ensure_ascii=False)` (unsorted, non-compact) — the
-   reconciler helper `_engine/event_append.py:123`, the STATUS/claim path
-   `ticket_txn.py:219` (which renames+commits directly, bypassing
-   `stage_and_commit`), and SNAPSHOT compaction `ticket-compact.sh:274`. There is
-   **no** byte-parity test in `tests/scripts/` (the one cited in
-   `_store/event_append.py:15`'s docstring does not exist). **P1.0 unifies all four
-   and adds the test; every later item that adds or reorders fields — P2.1, P2.2's
-   detached signature, P2.3 — depends on it.**
+2. **Writers and byte format — see P1.0 first.** Event serialization is scattered
+   across **eight** sites and only **one** is canonical
+   (`_store/event_append.py:56-61`, `json.dumps(sort_keys=True,
+   separators=(",",":"))`); the other **seven** write plain
+   `json.dumps(event, ensure_ascii=False)` (unsorted, non-compact). There is **no**
+   byte-parity test (the one cited in `_store/event_append.py:15`'s docstring does
+   not exist). Because every round of review has surfaced *another* non-canonical
+   writer, P1.0 does **not** hand-chase a list — it routes all event writes through
+   one helper **and adds a structural guard test** so a new non-canonical event
+   write can't regress. Every later field-touching item (P2.1, P2.2's detached
+   signature, P2.3) depends on it.
 3. **Live write/timestamp topology (verified).** The single `time.time_ns()`
    ordering timestamp is generated at **four** live seams, not one:
    - `_commands/_seam.py:153` — create / edit / comment / link / unlink / tag /
@@ -59,30 +59,43 @@ sketched at the end for sequencing only.*
 **Goal.** One event byte format and an executable parity gate, so later items
 that add/reorder event content rest on a real guarantee (closes review finding #6).
 
-**Seams — all four serializers (not just the reconciler).** Factor the canonical
-serializer into one shared helper (e.g. `_store/event_append.canonical_bytes`) and
-route **every** event producer through it:
-- `_engine/event_append.py:123` (reconciler) — import the helper;
-- `ticket_txn.py:219` (STATUS/claim) — replace its `json.dump(event, …,
-  ensure_ascii=False)`; this path renames+commits inline (`:236-243`), so the
-  helper must be importable without pulling in `stage_and_commit`'s lock;
-- `ticket-compact.sh:274` (SNAPSHOT) — its inline `python3` writer must use the
-  same canonical form (import the helper in the heredoc).
-Also fix the false guarantee in `_store/event_append.py:15`'s docstring (it cites a
+**Seams — the full verified set (seven plain + one canonical).** Factor the
+canonical serializer into one shared, **lock-free** helper (e.g.
+`_store/event_append.canonical_bytes`) and route **every** event-file write through
+it. The complete current set of event serializers (verified by sweeping
+`json.dump(... ensure_ascii=False)` over event writes):
+- `_store/event_append.py:56-61` — **canonical** (the target form);
+- `_engine/event_append.py:123` — reconciler events (batched commit);
+- `ticket_txn.py:219` — transition STATUS; `:351` — claim STATUS; `:372` — claim
+  EDIT (all rename+commit inline at `:236-243`, **not** via `stage_and_commit`, so
+  the helper must not pull in that lock);
+- `graph/_links.py:145` — LINK events (own inline `fcntl.flock` + `git add`/commit
+  at `:148-176`, bypassing `_store/event_append` entirely);
+- `ticket-delete-unlink-scan.py:149` — UNLINK delete-cascade events;
+- `ticket-compact.sh:274` — SNAPSHOT (bash inline `python3` heredoc; import the
+  helper there).
+Also fix the false guarantee in `_store/event_append.py:15`'s docstring (cites a
 test that doesn't exist) once the real test lands.
 
-**Tests.** Add `tests/scripts/test-ticket-write-commit-event.sh` (the test ground
-rule 2 previously *assumed* existed) **and** a Python parity test that drives an
-event dict through **all four** producers and asserts byte-identical output. Re-run
-the reconciler + compaction suites — folded/`*.retired` bytes are read, not
-re-serialized, so existing committed data is unaffected.
+**Tests — make the gate structural, not a maintained list.**
+- A Python parity test that drives one event dict through **every** producer and
+  asserts byte-identical canonical output.
+- Add `tests/scripts/test-ticket-write-commit-event.sh` (the name ground rule 2
+  previously *assumed*).
+- **A structural guard** (AST/grep test over `src/rebar`) asserting no event-file
+  write uses a raw `json.dump(s)` — every committed `*-<TYPE>.json` write must go
+  through `canonical_bytes`. This is what stops the next round from finding an
+  eighth serializer. (Read/output/cache `json.dumps` are exempt by an allowlist or
+  by only scanning files that write `*-UUID-TYPE.json`.)
+Folded/`*.retired` bytes are read, not re-serialized, so existing committed data is
+unaffected.
 
-**Risk.** Low-medium: changes committed bytes for reconciler/STATUS/SNAPSHOT
-events. *Mitigation:* only key order/whitespace changes (semantically identical
-JSON); the reducer parses by key, not bytes, so replay and existing data are
-unaffected; land standalone before any field additions.
+**Risk.** Low-medium: changes committed bytes for reconciler/STATUS/LINK/UNLINK/
+SNAPSHOT events. *Mitigation:* only key order/whitespace changes (semantically
+identical JSON); the reducer parses by key, not bytes, so replay and existing data
+are unaffected; land standalone before any field additions.
 
-**Effort.** ~1–1.5 days (four call sites incl. the bash heredoc).
+**Effort.** ~1.5–2 days (seven call sites incl. the bash heredoc + the guard test).
 
 ---
 
@@ -238,13 +251,15 @@ ordering compare them **as integers**, not strings:
   - `graph/_links.py:53` — `os.path.basename(x[1]).split("-")[0]` (LINK/UNLINK
     ordering); switch the first key element to `int(...)`.
   - `_commands/unlink.py:47` — `x[1].name.split("-")[0]`; same fix.
-  - `ticket_txn.py:187-190` — the STATUS-fork scan uses a **bare `sorted()`** over
-    full filenames (whole-string lexical), *not* a `split("-")[0]` prefix.
-    **Behavior note:** fork *resolution* is UUID-keyed and skew-independent
-    (unaffected), but the scan picks "most recent STATUS" by filename order, so it
-    must move to integer-prefix ordering too; verify the change against the
-    STATUS-chain `parent_status_uuid` advancement (which *does* depend on order).
-  Factor a single `int`-prefix comparator so all four sites share one impl.
+  - `ticket_txn.py:187-190` (transition) **and** `ticket_txn.py:318` (claim) — both
+    compute `parent_status_uuid` via a **bare `sorted()`** over full filenames
+    (whole-string lexical), *not* a `split("-")[0]` prefix. **Behavior note:** fork
+    *resolution* is UUID-keyed and skew-independent (unaffected), and the
+    `sorted(...)[-1]` "most recent STATUS" pick agrees between string and integer
+    order while names stay 19 digits (~year 2286), so this is safe in practice; move
+    both to integer-prefix ordering for correctness and verify against STATUS-chain
+    advancement.
+  Factor a single `int`-prefix comparator so all five sites share one impl.
 Under integer comparison, old + new interleave correctly regardless of digit
 width, and in practice the HLC stays 19 digits until year ~2286 (ns rollover to 20
 digits), so even **string**-comparing older clones order correctly for ~250 years
@@ -373,18 +388,30 @@ clone treats `TAG`/`UNTAG` as unknown → preserved but not applied, so tags wri
 by a newer clone are invisible on the old clone** until upgrade. Tags are advisory
 (not blocking/scheduling), so this degradation is acceptable.
 
+**Migration — seed the OR-Set from existing tags (do this or lose them).** Tags are
+*currently* stored **only** as whole-field `EDIT` data (`leaf.tag/untag` at
+`_commands/leaf.py:76,98`; `edit(tags=)`), so every existing ticket carries its
+tags in EDIT events. The convergence rule below ("ignore EDIT tags once a delta
+exists") would therefore **silently drop all pre-existing tags** the moment the
+first `TAG`/`UNTAG` lands. **The reducer MUST seed the OR-Set from the
+most-recent pre-delta `EDIT.tags` for that ticket** (treat that prior tag set as an
+implicit set of add-ops) before applying deltas. Equivalently: the *first*
+`TAG`/`UNTAG` writer snapshots current tags into seed add-ops. Test must cover
+**disjoint** pre-existing vs. delta tags (`EDIT(tags=[a,b])` then `TAG(c)` ⇒
+`{a,b,c}`, not `{c}`) — the same-tag interleave test alone would miss this.
+
 **Dual-write transition — and the replay rule that makes it safe.** For one
 transition release the writer *also* emits the legacy whole-field `EDIT` so
 mixed-version fleets still see tags. **Critical:** a v2 reducer must NOT apply both,
 or the EDIT's wholesale `state["tags"]` assignment (`process_edit`,
 `reducer/_processors.py:283-302`) replayed after a concurrent `TAG`/`UNTAG` would
 clobber the OR-Set merge and reintroduce last-writer-wins. So the rule is: **once a
-ticket has any `TAG`/`UNTAG` event, the v2 reducer treats tags as delta-owned and
-ignores the `tags` key of every `EDIT` on that ticket** (the legacy EDIT then
-serves *only* old clones). Pin this with a replay test (interleave EDIT and TAG for
-the same tag; v2 result must equal the OR-Set result regardless of ordering).
-Retire the legacy EDIT in the release after. Forward-compat pinned by
-`test_event_schema_forward_compat.py`.
+ticket has any `TAG`/`UNTAG` event, the v2 reducer seeds the OR-Set from the last
+pre-delta EDIT (above) and thereafter ignores the `tags` key of every `EDIT` on
+that ticket** (the legacy EDIT then serves *only* old clones). Pin with two replay
+tests: same-tag interleave (ordering-independent) **and** disjoint pre-existing/
+delta tags (seeding). Retire the legacy EDIT in the release after. Forward-compat
+pinned by `test_event_schema_forward_compat.py`.
 
 **Tests.** Two-clone CRDT convergence (add `x` vs add `y` → both; add vs concurrent
 remove → deterministic add-wins/observed-remove), reusing the P2.1 skewed-clock
