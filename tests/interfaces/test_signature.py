@@ -140,6 +140,130 @@ def test_signature_survives_compaction(rebar_repo: Path) -> None:
     assert out["manifest"] == MANIFEST
 
 
+# ── sign / compact interplay ──────────────────────────────────────────────────
+def test_sign_compact_sign_compact_latest_wins(rebar_repo: Path) -> None:
+    # The latest signature must win and verify across TWO snapshot round-trips —
+    # exercises the SNAPSHOT fold + post-snapshot replay for the signature field.
+    tid = _seed(rebar_repo)
+    rebar.sign_manifest(tid, ["v1: first"], repo_root=str(rebar_repo))
+    assert _cli("compact", tid, "--threshold=0", cwd=rebar_repo, TICKET_SYNC_CMD="true").returncode == 0
+    rebar.sign_manifest(tid, ["v2: second", "v2: more"], repo_root=str(rebar_repo))
+    assert _cli("compact", tid, "--threshold=0", cwd=rebar_repo, TICKET_SYNC_CMD="true").returncode == 0
+
+    out = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    assert out["verdict"] == "certified"
+    assert out["manifest"] == ["v2: second", "v2: more"]
+
+
+def test_concurrent_signatures_converge_by_basename(rebar_repo: Path) -> None:
+    # Two SIGNATURE events at the SAME timestamp, different uuids: the reducer
+    # sorts event files by basename, so the lexicographically-greater uuid is
+    # applied last (wins) — deterministically, independent of write order.
+    from rebar import signing
+
+    tid = _seed(rebar_repo)
+    tracker = str(rebar_repo / ".tickets-tracker")
+    tdir = rebar_repo / ".tickets-tracker" / tid
+    key = signing.signing_key(tracker)
+    ts = 1_781_000_000_000_000_000
+
+    def _write(uid: str, manifest: list[str]) -> None:
+        ev = {
+            "timestamp": ts, "uuid": uid, "event_type": "SIGNATURE",
+            "env_id": "e", "author": "a",
+            "data": {
+                "manifest": manifest, "algorithm": signing.ALGORITHM,
+                "signature": signing.compute_signature(tid, manifest, key),
+                "key_id": signing.key_fingerprint(key), "head_sha": "x", "signed_at": ts,
+            },
+        }
+        (tdir / f"{ts}-{uid}-SIGNATURE.json").write_text(json.dumps(ev))
+
+    # Write the higher-uuid one FIRST so disk discovery order != winner order.
+    _write("ffffffff-0000-4000-8000-000000000002", ["WINNER"])
+    _write("00000000-0000-4000-8000-000000000001", ["loser"])
+    for c in tdir.glob(".cache.json"):
+        c.unlink()
+
+    out = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    assert out["manifest"] == ["WINNER"]
+    assert out["verdict"] == "certified"
+
+
+# ── cross-environment via a REAL key-file swap (not just env override) ─────────
+def test_foreign_key_round_trip_via_file_swap(rebar_repo: Path) -> None:
+    import uuid as _uuid
+
+    tid = _seed(rebar_repo)
+    keyfile = rebar_repo / ".tickets-tracker" / ".signing-key"
+    env_a = keyfile.read_text()
+
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))            # signed by A
+    assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "certified"
+
+    # Become environment B (different key on disk).
+    keyfile.write_text(str(_uuid.uuid4()) + "\n")
+    assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "foreign_key"
+
+    # B re-signs → certified in B; A's restored key then sees B's signature foreign.
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
+    assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "certified"
+    keyfile.write_text(env_a)
+    assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "foreign_key"
+
+
+def test_readonly_verify_does_not_mint_key(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A verify on a key-less environment must not write a .signing-key (a read
+    # tool persisting a secret a read-only deployment never asked for).
+    tid = _seed(rebar_repo)
+    keyfile = rebar_repo / ".tickets-tracker" / ".signing-key"
+    keyfile.unlink()
+    monkeypatch.delenv("REBAR_SIGNING_KEY", raising=False)
+    out = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    assert out["verdict"] == "unsigned"
+    assert not keyfile.exists(), "verify minted a signing key as a side effect"
+
+
+# ── malformed reduced state must not crash verify (fail closed) ────────────────
+def test_verify_survives_non_dict_signature_state(rebar_repo: Path) -> None:
+    import time as _time
+    import uuid as _uuid
+
+    tid = _seed(rebar_repo)
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
+    state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
+    # Forge a latest SNAPSHOT whose compiled_state.signature is a NON-dict string
+    # (a corrupt / forward-compat snapshot). It must verify cleanly, not crash.
+    state["signature"] = "totally-not-a-dict"
+    ts = _time.time_ns()
+    uid = str(_uuid.uuid4())
+    tdir = rebar_repo / ".tickets-tracker" / tid
+    snap = {
+        "timestamp": ts, "uuid": uid, "event_type": "SNAPSHOT",
+        "env_id": "e", "author": "a",
+        "data": {"compiled_state": state, "source_event_uuids": []},
+    }
+    (tdir / f"{ts}-{uid}-SNAPSHOT.json").write_text(json.dumps(snap))
+    for c in tdir.glob(".cache.json"):
+        c.unlink()
+
+    out = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    assert out["verified"] is False
+    assert out["verdict"] in ("unsigned", "mismatch")
+    # And the CLI surfaces a clean exit, not a traceback.
+    cp = _cli("verify-signature", tid, cwd=rebar_repo)
+    assert cp.returncode == 1
+    assert "Traceback" not in cp.stderr
+
+
+def test_verify_ghost_and_archived_tickets(rebar_repo: Path) -> None:
+    # Archived (and never-signed) tickets verify as unsigned, never crash.
+    tid = _seed(rebar_repo)
+    rebar.archive(tid, repo_root=str(rebar_repo))
+    out = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    assert out["verdict"] == "unsigned"
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 def test_cli_sign_and_verify(rebar_repo: Path) -> None:
     tid = _seed(rebar_repo)

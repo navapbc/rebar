@@ -171,10 +171,109 @@ def test_signing_key_file_is_owner_only(monkeypatch, tmp_path) -> None:
     assert mode == 0o600, f"signing key world/group-readable: {oct(mode)}"
 
 
-def test_signing_key_generates_and_gitignores(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+def test_signing_key_generates_and_is_stable(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.delenv("REBAR_SIGNING_KEY", raising=False)
     k1 = signing.signing_key(tmp_path)
     assert (tmp_path / ".signing-key").exists()
-    assert ".signing-key" in (tmp_path / ".gitignore").read_text()
+    assert k1  # non-empty
     # stable across calls (does not regenerate)
     assert signing.signing_key(tmp_path) == k1
+
+
+@pytest.mark.parametrize("envval", ["", "   ", "\n"])
+def test_signing_key_blank_env_falls_back_to_file(monkeypatch, tmp_path, envval) -> None:
+    # An empty / whitespace-only REBAR_SIGNING_KEY must NOT be used as the key
+    # (it would fingerprint to a fixed, attacker-knowable value); fall back to file.
+    monkeypatch.setenv("REBAR_SIGNING_KEY", envval)
+    k = signing.signing_key(tmp_path)
+    assert (tmp_path / ".signing-key").exists()
+    assert k == (tmp_path / ".signing-key").read_text().strip().encode()
+
+
+def test_signing_key_read_only_does_not_create_file(monkeypatch, tmp_path) -> None:
+    # The verify path resolves read-only: a missing key must NOT be minted on disk.
+    monkeypatch.delenv("REBAR_SIGNING_KEY", raising=False)
+    k = signing.signing_key(tmp_path, create_if_missing=False)
+    assert not (tmp_path / ".signing-key").exists()
+    assert k == b""  # the _NO_KEY sentinel certifies nothing
+
+
+def test_signing_key_no_runtime_gitignore_pollution(monkeypatch, tmp_path) -> None:
+    # Generating the key on demand must not dirty a worktree .gitignore (N1) —
+    # the committed gitignore (ticket-init.sh) owns ignoring .signing-key.
+    monkeypatch.delenv("REBAR_SIGNING_KEY", raising=False)
+    (tmp_path / ".gitignore").write_text(".cache.json\n")
+    signing.signing_key(tmp_path)
+    assert (tmp_path / ".gitignore").read_text() == ".cache.json\n"
+
+
+def test_concurrent_first_use_keys_agree(monkeypatch, tmp_path) -> None:
+    # S1 regression: N threads racing the on-demand key generation (file absent,
+    # no env key) must ALL resolve the SAME key/fingerprint — never a torn empty
+    # read that splits one environment into two.
+    import threading
+
+    monkeypatch.delenv("REBAR_SIGNING_KEY", raising=False)
+    barrier = threading.Barrier(16)
+    results: list[str] = []
+    lock = threading.Lock()
+
+    def worker() -> None:
+        barrier.wait()
+        fp = signing.key_fingerprint(signing.signing_key(tmp_path))
+        with lock:
+            results.append(fp)
+
+    threads = [threading.Thread(target=worker) for _ in range(16)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(set(results)) == 1, f"threads disagreed on key: {set(results)}"
+    # and the resolved fingerprint matches the file that actually landed
+    assert results[0] == signing.key_fingerprint(
+        (tmp_path / ".signing-key").read_text().strip().encode()
+    )
+
+
+# ── verify_record fails closed on malformed records ───────────────────────────
+@pytest.mark.parametrize("bad", ["a string", ["a", "list"], 42, 3.14, True])
+def test_verify_record_non_dict_never_raises(bad) -> None:
+    out = signing.verify_record(bad, "t", KEY)  # must not raise AttributeError
+    assert out["verified"] is False
+    assert out["verdict"] in ("unsigned", "mismatch")
+    assert out["manifest"] == [] and out["step_count"] == 0
+
+
+def test_verify_record_non_list_manifest_reports_zero_steps() -> None:
+    rec = {"manifest": {"not": "a list"}, "signature": "deadbeef", "key_id": signing.key_fingerprint(KEY)}
+    out = signing.verify_record(rec, "t", KEY)
+    assert out["verified"] is False and out["verdict"] == "mismatch"
+    assert out["step_count"] == 0  # honest count, not len(dict)
+
+
+def test_verify_record_empty_signature_is_unsigned() -> None:
+    rec = {"manifest": ["a"], "signature": "", "key_id": signing.key_fingerprint(KEY)}
+    out = signing.verify_record(rec, "t", KEY)
+    assert out["verdict"] == "unsigned"
+
+
+# ── process_signature is last-writer-wins (the merge contract) ────────────────
+def test_process_signature_is_last_writer_wins() -> None:
+    from rebar.reducer._processors import process_signature
+    from rebar.reducer._state import make_initial_state
+
+    ev_a = {"uuid": "aaaa", "timestamp": 1, "author": "x", "data": {"manifest": ["A"], "signature": "sa", "key_id": "k"}}
+    ev_b = {"uuid": "bbbb", "timestamp": 2, "author": "x", "data": {"manifest": ["B"], "signature": "sb", "key_id": "k"}}
+
+    # Whichever is applied LAST wins — the reducer fixes a deterministic apply
+    # order (basename sort) so the on-disk replay is convergent (see the interface
+    # test for the end-to-end reduce-from-files proof).
+    s = make_initial_state()
+    process_signature(s, ev_a, ev_a["data"])
+    process_signature(s, ev_b, ev_b["data"])
+    assert s["signature"]["manifest"] == ["B"]
+    s = make_initial_state()
+    process_signature(s, ev_b, ev_b["data"])
+    process_signature(s, ev_a, ev_a["data"])
+    assert s["signature"]["manifest"] == ["A"]

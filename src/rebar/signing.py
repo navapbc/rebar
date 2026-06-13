@@ -69,32 +69,24 @@ class SigningError(Exception):
 
 
 # ── Key management (environment-specific secret) ──────────────────────────────
-def _ensure_gitignored(tracker: Path, name: str) -> None:
-    """Make sure ``<tracker>/.gitignore`` lists ``name`` (append if missing).
-
-    Defensive parity with ``ticket-init.sh`` for stores initialised before the
-    signing key existed: the key file must never be committed. Best-effort — a
-    failure here never blocks signing (the locked write path only ever ``git
-    add``s the specific event file, so an un-ignored key is not auto-committed).
-    """
-    gitignore = tracker / ".gitignore"
-    try:
-        existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
-        if name not in existing.split():
-            with gitignore.open("a", encoding="utf-8") as fh:
-                if existing and not existing.endswith("\n"):
-                    fh.write("\n")
-                fh.write(name + "\n")
-    except OSError:
-        pass
+# Sentinel returned when a read-only resolution finds no key. It fingerprints
+# deterministically and certifies nothing (a real signature can never match it),
+# so a verify on a key-less environment yields unsigned/foreign_key — never a
+# false certify — without minting a persistent secret as a side effect.
+_NO_KEY = b""
 
 
-def signing_key(tracker: str | os.PathLike[str]) -> bytes:
+def signing_key(
+    tracker: str | os.PathLike[str], *, create_if_missing: bool = True
+) -> bytes:
     """Resolve the environment's signing key as raw bytes.
 
-    Order: ``REBAR_SIGNING_KEY`` (non-empty) > ``<tracker>/.signing-key`` (a
-    UUID4 generated + gitignored on first use). Raises :class:`SigningError` if a
-    key can be neither read nor generated.
+    Order: ``REBAR_SIGNING_KEY`` (non-empty after stripping) > the per-environment
+    ``<tracker>/.signing-key`` file. With ``create_if_missing=True`` (signing) a
+    missing file is generated as a fresh UUID4 (0o600, atomic). With
+    ``create_if_missing=False`` (verifying) a missing file is NOT created — the
+    function returns the empty ``_NO_KEY`` sentinel so a read-only verify never
+    writes a secret to disk. Raises :class:`SigningError` only on a real I/O error.
     """
     # Strip surrounding whitespace so an injected key copied with a trailing
     # newline fingerprints identically to the file form (which also strips).
@@ -102,27 +94,47 @@ def signing_key(tracker: str | os.PathLike[str]) -> bytes:
     if env_key and env_key.strip():
         return env_key.strip().encode("utf-8")
 
-    tracker_path = Path(tracker)
-    key_file = tracker_path / ".signing-key"
+    key_file = Path(tracker) / ".signing-key"
     if not key_file.exists():
-        # Create with 0o600 (O_EXCL closes the create-race: a concurrent creator
-        # just means we fall through to read the key it wrote).
-        try:
-            fd = os.open(str(key_file), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:
-            pass
-        except OSError as exc:
-            raise SigningError(
-                f"Error: could not create signing key at {key_file}: {exc}"
-            ) from None
-        else:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(str(_uuid.uuid4()) + "\n")
-            _ensure_gitignored(tracker_path, ".signing-key")
+        if not create_if_missing:
+            return _NO_KEY
+        _generate_key_file(key_file)
     try:
         return key_file.read_text(encoding="utf-8").strip().encode("utf-8")
     except OSError as exc:
         raise SigningError(f"Error: could not read signing key: {exc}") from None
+
+
+def _generate_key_file(key_file: Path) -> None:
+    """Atomically create ``key_file`` with a fresh UUID4 key (0o600).
+
+    Write the full key to a unique temp (``mkstemp`` → 0o600, O_EXCL, distinct
+    per thread AND per process), then ``os.link`` it into place. The link is
+    atomic and fails closed if the target already exists, so exactly ONE creator
+    ever lands a key and every reader observes the complete file — never the
+    empty/torn window an in-place O_EXCL+write would expose, and never two
+    divergent keys for one environment (S1). A lost race (target exists) is
+    fine: we drop our temp and the caller reads the winner's key.
+    """
+    import tempfile
+
+    fd, tmp = tempfile.mkstemp(prefix=".signing-key.", dir=str(key_file.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(str(_uuid.uuid4()) + "\n")
+        try:
+            os.link(tmp, str(key_file))  # atomic exclusive create
+        except FileExistsError:
+            pass  # someone else won the race; their key stays
+    except OSError as exc:
+        raise SigningError(
+            f"Error: could not create signing key at {key_file}: {exc}"
+        ) from None
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 
 def key_fingerprint(key: bytes) -> str:
@@ -196,10 +208,18 @@ def verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict:
       here; the signing environment must verify it).
     * ``unsigned``    — the ticket carries no signature.
     """
-    record = record or {}
-    manifest = record.get("manifest") or []
+    # Fail closed on any malformed record: a non-dict signature value (e.g. a
+    # corrupt or forward-compat SNAPSHOT compiled_state) must yield a clean
+    # verdict, never an AttributeError that crashes the CLI/MCP caller.
+    record = record if isinstance(record, dict) else {}
+    raw_manifest = record.get("manifest")
+    manifest = raw_manifest if isinstance(raw_manifest, list) else []
     stored_sig = record.get("signature") or ""
+    if not isinstance(stored_sig, str):
+        stored_sig = ""
     stored_fp = record.get("key_id") or ""
+    if not isinstance(stored_fp, str):
+        stored_fp = ""
     local_fp = key_fingerprint(key)
 
     # Every verdict carries the same keys (uniform contract): consumers can read
@@ -325,7 +345,10 @@ def verify_signature(ticket_id: str, *, repo_root=None) -> dict:
     if resolved is None:
         raise SigningError(f"Error: ticket '{ticket_id}' not found")
     state = reduce_ticket(os.path.join(tracker, resolved)) or {}
-    key = signing_key(tracker)
+    # Verify is a READ: never mint a key on disk (a read-only deployment must not
+    # write a secret). A key-less environment can only ever report unsigned/
+    # foreign_key, which is the honest answer.
+    key = signing_key(tracker, create_if_missing=False)
     result = verify_record(state.get("signature"), resolved, key)
     result["ticket_id"] = resolved
     return result
