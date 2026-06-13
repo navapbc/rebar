@@ -90,22 +90,31 @@ backstop):
   which runs it to write the `--force-close=<reason>` audit comment on every
   force-close transition (`--force-close` is a live, documented flag,
   `ticket-transition.sh:33,102-111`). Raw `json.dump`, non-canonical;
+- **`ticket-revert.sh:170-174` — REVERT, still LIVE** via `ticket-transition.sh:179`,
+  which `exec`s it on the `archived → open` un-archive seam (same pattern as
+  comment↔force-close). Raw `json.dump` to the **direct** final name (no temp+
+  rename), committed at `:190-192`. (The `revert` *CLI command* itself is canonical
+  — it dispatches to Python `revert_core` → `append_event`, `rebar:419-425`; only
+  this transition-driven bash path is raw.)
 - `ticket-compact.sh:274` — SNAPSHOT (bash inline `python3` heredoc).
 
-**Retire the dead write *paths* — but two bash scripts stay live.** The
+**Retire the dead write *paths* — but three bash scripts stay live.** The
 event-write branches in `ticket-create.sh:274`, `ticket-edit.sh:266`,
-`ticket-revert.sh:147`, `ticket-lib.sh:275/374`, and `ticket-link.sh:226/389` are
-off the live committed-write path (creates/edits/links/**reverts** flow through
-`_commands/_seam.py` / `graph/_links.py` — `revert` dispatches to Python
-`revert_core` → canonical `append_event`, `rebar:419-425`). `ticket-create.sh`,
-`ticket-edit.sh`, and `ticket-revert.sh` have **no** remaining live caller and are
-safe to delete. (The `PRECONDITIONS` writers at `ticket-lib.sh:503/648` are a
-separate **millisecond**-prefixed, externally-scanned family with no dispatcher/CLI
-caller — out of scope for the ns-HLC change, but still subject to the byte guard.)
-**Two are NOT deletable and must be canonicalized in place, not removed:**
+`ticket-lib.sh:275/374`, and `ticket-link.sh:226/389` are off the live
+committed-write path (creates/edits/links flow through `_commands/_seam.py` /
+`graph/_links.py`). Only `ticket-create.sh` and `ticket-edit.sh` have **no**
+remaining live caller and are safe to delete. (The `PRECONDITIONS` writers at
+`ticket-lib.sh:503/648` are a separate **millisecond**-prefixed, externally-scanned
+family with no dispatcher/CLI caller — out of scope for the ns-HLC change, but still
+subject to the byte guard.) **Three are NOT deletable and must be canonicalized in
+place, not removed** — note the recurring trap: `ticket-transition.sh` delegates to
+"retired-looking" leaf scripts on its seams:
 - `ticket-comment.sh` — **live**: `ticket-transition.sh:439` invokes it for the
   `--force-close` audit comment (see the live-writers list above). Conform its
   `:90-91` serializer to `canonical_bytes` and include it in the parity set.
+- `ticket-revert.sh` — **live**: `ticket-transition.sh:179` `exec`s it on the
+  `archived → open` un-archive seam. Conform its `:170-174` raw `json.dump` to
+  `canonical_bytes`; it's a **direct-name** writer (guard bucket below).
 - `ticket-link.sh` — still invoked by `composer.link_cli` for the `link --dry-run`
   *preview* (`_commands/composer.py:414-424`); that path passes `--dry-run` and
   writes **no** event, so its `:226` serializer never runs live. Keep the script
@@ -130,8 +139,10 @@ once the real test lands.
   *then* renames to the final `*-<TYPE>.json` (e.g. `ticket-comment.sh` →
   `.tmp-comment-*`, `ticket_txn.py:218/350/371` → `.tmp-transition/claim-*`,
   `ticket-compact.sh:273` → `…json.tmp`), so a filename-scoped guard would catch
-  only the two direct-name writers (`graph/_links.py:144`,
-  `ticket-delete-unlink-scan.py:148`) and miss the rest. Exempt read/output/cache
+  only the **direct-name** writers (`graph/_links.py:144`,
+  `ticket-delete-unlink-scan.py:148`, `ticket-revert.sh:170-174`, and the delete
+  STATUS/ARCHIVED heredocs at `ticket-lib-api.sh:992-994/1015-1017`) and miss the
+  temp-then-rename rest. Exempt read/output/cache
   `json.dumps` and the one-shot migration scripts via an explicit allowlist.
 Folded/`*.retired` bytes are read, not re-serialized, so existing committed data is
 unaffected.
