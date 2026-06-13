@@ -23,7 +23,7 @@ echo "=== test-ticket-compact-all.sh ==="
 echo ""
 
 _CLEANUP_DIRS=()
-_cleanup() { rm -rf "${_CLEANUP_DIRS[@]}" 2>/dev/null || true; }
+_cleanup() { rm -rf "${_CLEANUP_DIRS[@]+"${_CLEANUP_DIRS[@]}"}" 2>/dev/null || true; }
 trap _cleanup EXIT
 
 _make_test_repo() {

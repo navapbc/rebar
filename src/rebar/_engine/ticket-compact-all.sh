@@ -56,7 +56,10 @@ fi
 # ── Discover tickets without SNAPSHOTs ───────────────────────────────────────
 # Uses Python for filesystem scan to avoid triggering the tickets-tracker-guard
 # pre-bash hook (which blocks direct shell access to .tickets-tracker/).
-mapfile -t needs_compact < <(python3 - "$TRACKER_DIR" <<'PYEOF'
+needs_compact=()
+while IFS= read -r _ticket_name; do
+    needs_compact+=("$_ticket_name")
+done < <(python3 - "$TRACKER_DIR" <<'PYEOF'
 import glob, os, sys
 
 # A ticket directory is any directory containing at least one event JSON file
