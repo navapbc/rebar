@@ -248,6 +248,35 @@ offender table lost both bash compute entries.
 
 ## 6. Tier D — the write/sync core (the crux; LAST before E)
 
+> **Status: DONE — Tier D retired (2026-06-12).** The bash write/sync core
+> (`_flock_stage_commit`, `write_commit_event`, `_push_tickets_branch`,
+> `_reconverge_tickets`, `_check_no_rebase_in_progress`) is now `rebar._store`:
+> `lock.py` (the ONE fcntl+mkdir dual-leg lock + 637b guard), `event_append.py`
+> (canonical commit, exit 0/1/75), `push.py` (REBAR_PUSH modes + non-FF merge/stash
+> dance + async), `sync.py` (reconverge). ALL writers share `rebar._store.lock`: the
+> leaf-write seam (in-process), `ticket_txn` (transition/claim/reopen), compaction,
+> and the reconciler-inbound writer — closing the `stiff-mop-lane` fcntl-vs-mkdir gap
+> on every platform class. Read reconverge runs in-process; the dispatcher's one bash
+> freshness caller delegates via a thin `ticket-sync.sh` shim.
+>
+> Lifecycle (full §2 protocol): ported behind `REBAR_WRITE_CORE`, dual-run
+> byte/semantic-identical (committed bytes == `jq -S -c`; exit codes; push/sync
+> behaviour), **flipped** to python, **soaked** (full-surface probe 141/141 isolated
+> + live, store unchanged, fsck clean, 285+ interfaces/integration green), then
+> **retired** (chilly-hyena-jet): deleted the bash core + the `ticket-append-event.sh`
+> seam + `rebar._switch` (the last kill-switch — Tiers B/C/D all retired) + the
+> bash-internal test suites (~5,240 LOC net), in one commit. Gates: `rebar._store`
+> unit (15), the mixed-impl/all-python writer storm + claim storm, the two-clone
+> concurrency-regression, push-policy (incl. async). Full non-integration suite
+> 1555/0.
+>
+> **One deliberate deviation from the plan below:** the dual-leg **mkdir lock is
+> KEPT** (not dropped at retirement). A gradual-upgrade fleet still has old bash-core
+> peers (mkdir/flock); dropping it now could re-expose stiff-mop-lane against an old
+> peer on a mkdir host. It converges on plain `fcntl` once the ecosystem has fully
+> migrated — a release-level follow-up, not a code flip. (`REBAR_FORCE_MKDIR_LOCK`
+> died with the bash core; the Python lock always takes both legs in the window.)
+
 **Scope**: port `_flock_stage_commit`, `write_commit_event`,
 `_push_tickets_branch`, `_reconverge_tickets`, and
 `_check_no_rebase_in_progress` (`ticket-lib.sh` / `ticket-sync.sh`) into a

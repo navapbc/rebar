@@ -44,11 +44,13 @@ over one git-backed store.
   `ticket`) routes subcommands to `ticket-*.sh` / `*.py` helpers. It must be
   installed UNPACKED to a real directory (no zipimport; `_engine.py:engine_dir()`
   asserts this).
-  - **Write path** — all mutations go through the flock-guarded append+commit
-    path (`ticket-lib.sh` `_flock_stage_commit`, `.ticket-write.lock`). The
-    status-transition and `claim` critical sections live in `ticket_txn.py`
-    (one process: lock → reduce+verify → write → commit; exit 10 on optimistic-
-    concurrency mismatch).
+  - **Write path** — all mutations go through ONE locked append+commit path in
+    `rebar._store` (Tier D): `lock.py` (the unified fcntl+mkdir dual-leg lock on
+    `.ticket-write.lock`), `event_append.py` (canonical commit), `push.py`,
+    `sync.py`. The status-transition and `claim` critical sections live in
+    `ticket_txn.py` (one process: lock → reduce+verify → write → commit; exit 10 on
+    optimistic-concurrency mismatch); they, compaction, and the reconciler-inbound
+    writer all acquire the same `rebar._store.lock`.
   - **Reducer** (`rebar.reducer`, code at `src/rebar/reducer/`) — pure
     deterministic replay of the event log into compiled state; local rebuildable
     `.cache.json` per ticket.
@@ -147,7 +149,7 @@ report runs in CI (`.github/workflows/test.yml`) so new offenders surface in PRs
 | ~~`rebar_reconciler/applier.py`~~ | ~~3480~~ → 776 | ✅ `tangly-abbey-smelt`: split into 10 cohesive modules (inbound_translate/pass_io/rebar_id_audit/apply_base/batch_dispatch/apply_outbound/apply_inbound/typed_dispatch/apply_planning + applier facade) |
 | `_engine/ticket-lib-api.sh` | ~2370 → 1109 | Tier B retired the 9 leaf-write functions; the remainder is read/compute, retiring via Tier C — `adult-oxide-slave` |
 | `rebar_reconciler/acli.py` | ~2180 | split the Jira-client (transport/REST/graph mixins) vs field/ADF concerns — `tangly-abbey-smelt` |
-| `_engine/ticket-lib.sh` | ~2000 | retire via strangler-fig — `adult-oxide-slave` |
+| `_engine/ticket-lib.sh` | ~1550 | Tier D extracted the write/sync core to `rebar._store`; the remainder (read helpers + vestigial leaf-write wrappers) retires with the dispatcher in Tier E — `adult-oxide-slave` |
 | `rebar_reconciler/reconcile.py` | ~1320 | split orchestration vs pass-driver seams |
 | `rebar_reconciler/outbound_differ.py` | ~1130 | split per-field differ seams |
 
