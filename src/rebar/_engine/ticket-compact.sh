@@ -144,19 +144,15 @@ threshold = int(sys.argv[6])
 reducer_script = sys.argv[7]
 no_commit = sys.argv[8] == 'true'
 
-# ── Acquire flock ────────────────────────────────────────────────────────
-fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
-deadline = time.monotonic() + timeout
-acquired = False
-while time.monotonic() < deadline:
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        acquired = True
-        break
-    except (IOError, OSError):
-        time.sleep(0.1)
-if not acquired:
-    os.close(fd)
+# ── Acquire the unified write lock (Tier D: fcntl + mkdir dual leg, so compaction
+# mutually excludes bash leaf-writes on every platform class — stiff-mop-lane) ──
+_src = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(reducer_script))))
+if _src not in sys.path:
+    sys.path.insert(0, _src)
+from rebar._store import lock as _store_lock
+try:
+    handle = _store_lock.acquire(tracker_dir, timeout=timeout, attempts=1, dual_window=True)
+except _store_lock.LockTimeout:
     sys.exit(1)
 
 # ── Lock acquired — all operations below are under flock ─────────────────
@@ -200,7 +196,7 @@ event_count = len(event_files)
 
 # Re-check threshold inside flock — another process may have compacted
 if event_count <= threshold:
-    os.close(fd)
+    handle.release()
     # Exit 10 = below-threshold-inside-flock (distinct from lock-timeout exit 1)
     sys.exit(10)
 
@@ -213,7 +209,7 @@ try:
     compiled_state_json = result.stdout
 except subprocess.CalledProcessError:
     print(f'Error: reducer failed for ticket {ticket_id} (corrupt or ghost ticket)', file=sys.stderr)
-    os.close(fd)
+    handle.release()
     sys.exit(3)
 
 # Validate compiled state is not an error state
@@ -221,7 +217,7 @@ compiled_state = json.loads(compiled_state_json)
 status = compiled_state.get('status', '')
 if status in ('error', 'fsck_needed'):
     print(f"Error: ticket {ticket_id} has status '{status}' — cannot compact", file=sys.stderr)
-    os.close(fd)
+    handle.release()
     sys.exit(3)
 
 # Extract UUIDs from each event file
@@ -313,14 +309,14 @@ if not no_commit:
             )
     except subprocess.CalledProcessError as e:
         print(f'Error: git compact commit failed: {e.stderr}', file=sys.stderr)
-        os.close(fd)
+        handle.release()
         sys.exit(2)
 
 # Emit event count for the shell wrapper's summary message
 print(f'EVENT_COUNT={event_count}')
 
 # Release lock
-os.close(fd)
+handle.release()
 sys.exit(0)
 PYEOF
 

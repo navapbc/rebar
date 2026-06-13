@@ -29,6 +29,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import sys
 import time
 import uuid as _uuid
 from contextlib import contextmanager
@@ -45,12 +46,32 @@ def event_filename(timestamp: int, uuid_str: str, event_type: str) -> str:
 
 @contextmanager
 def write_lock(tracker_dir: str | os.PathLike, timeout: float = 30.0) -> Iterator[None]:
-    """Hold the exclusive ``.ticket-write.lock`` flock for the tracker (I5).
+    """Hold the exclusive ``.ticket-write.lock`` for the tracker (I5).
 
-    Polls LOCK_EX|LOCK_NB until acquired or ``timeout`` seconds elapse (raising
-    ``TimeoutError``). Mirrors the acquire loop in ticket_txn.py so the reconciler
-    and local agents contend on the SAME lock file.
-    """
+    Since Tier D this delegates to the ONE unified lock
+    (:func:`rebar._store.lock.write_lock`), which takes BOTH ``fcntl.flock`` and the
+    mkdir leg so the reconciler mutually excludes bash leaf-writes on every platform
+    class (the stiff-mop-lane fix). Falls back to the historical fcntl-only acquire
+    if the ``rebar`` package is not importable (defensive — keeps this module's
+    stdlib-only contract intact for any bare-engine caller)."""
+    try:
+        _src = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if _src not in sys.path:
+            sys.path.insert(0, _src)
+        from rebar._store import lock as _store_lock
+    except Exception:
+        _store_lock = None
+
+    if _store_lock is not None:
+        try:
+            with _store_lock.write_lock(tracker_dir, timeout=int(timeout), attempts=1, dual_window=True):
+                yield
+        except _store_lock.LockTimeout as exc:
+            # Preserve this function's historical TimeoutError contract.
+            raise TimeoutError(str(exc)) from None
+        return
+
+    # Fallback: historical fcntl-only acquire.
     lock_path = os.path.join(str(tracker_dir), WRITE_LOCK_NAME)
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
     deadline = time.monotonic() + timeout

@@ -54,7 +54,7 @@ with open(sys.argv[1], encoding='utf-8') as f:
 # Find the flock acquire line
 acquire_idx = None
 for i, line in enumerate(lines):
-    if 'fcntl.LOCK_EX' in line and 'fcntl.flock' in line:
+    if '_acquire_write_lock(' in line:
         acquire_idx = i
         break
 
@@ -66,7 +66,7 @@ if acquire_idx is None:
 # (closing the file descriptor releases the advisory lock)
 release_idx = None
 for i in range(acquire_idx + 1, len(lines)):
-    if 'os.close(fd)' in lines[i]:
+    if 'handle.release()' in lines[i]:
         release_idx = i
         break
 
@@ -109,7 +109,7 @@ with open(sys.argv[1], encoding='utf-8') as f:
 # Find the flock acquire line
 acquire_idx = None
 for i, line in enumerate(lines):
-    if 'fcntl.LOCK_EX' in line and 'fcntl.flock' in line:
+    if '_acquire_write_lock(' in line:
         acquire_idx = i
         break
 
@@ -122,7 +122,7 @@ if acquire_idx is None:
 # is the actual lock release after the critical section completes.
 release_idx = None
 for i in range(acquire_idx + 1, len(lines)):
-    if 'os.close(fd)' in lines[i]:
+    if 'handle.release()' in lines[i]:
         release_idx = i  # keep updating to get the last one
 
 if release_idx is None:
@@ -139,7 +139,7 @@ PYEOF
 import sys
 with open(sys.argv[1]) as f:
     content = f.read()
-if 'fcntl.LOCK_EX' not in content:
+if '_acquire_write_lock(' not in content:
     print("FLOCK_ACQUIRE_NOT_FOUND")
 PYEOF2
         ) || true

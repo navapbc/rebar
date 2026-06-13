@@ -139,16 +139,18 @@ def append_event(
     repo_root=None,
     author_fallback: str = "Unknown",
 ) -> None:
-    """Compose an event and append it through the bash write seam.
+    """Compose an event and append it through the single locked write path.
 
-    Builds the same event envelope the bash command path builds
-    (``{timestamp, uuid, event_type, env_id, author, data}``), stages it to a temp
-    file inside the tracker (same filesystem as the seam's atomic rename), and
-    delegates to ``ticket-append-event.sh`` → ``write_commit_event``. The seam
-    re-canonicalises via ``jq -S -c`` so the committed bytes are identical to the
-    bash path. Raises :class:`CommandError` carrying the seam's exit code on
-    failure (e.g. 75 = rebase/merge guard).
+    Builds the canonical event envelope (``{timestamp, uuid, event_type, env_id,
+    author, data}``). Under ``REBAR_WRITE_CORE=python`` (Tier D) the locked
+    commit + push runs IN-PROCESS via ``rebar._store.event_append.write_and_push``;
+    otherwise it stages to a temp file and delegates to the bash seam
+    ``ticket-append-event.sh`` → ``write_commit_event`` (which re-canonicalises via
+    ``jq -S -c`` to the same bytes). Either way raises :class:`CommandError`
+    carrying the exit code on failure (e.g. 75 = rebase/merge guard).
     """
+    from rebar._switch import uses_python
+
     timestamp, uuid_str = time.time_ns(), str(_uuid.uuid4())
     event = {
         "timestamp": timestamp,
@@ -158,6 +160,19 @@ def append_event(
         "author": author(author_fallback),
         "data": data,
     }
+
+    if uses_python("REBAR_WRITE_CORE"):
+        # In-process locked commit + best-effort push (the canonical committer owns
+        # serialisation; it never re-derives the envelope fields composed above).
+        from rebar._store import event_append as _store_append
+        from rebar._store.event_append import StoreError
+        from rebar._store.lock import LockTimeout, RebaseGuard
+
+        try:
+            _store_append.write_and_push(str(tracker), ticket_id, event)
+        except (StoreError, RebaseGuard, LockTimeout) as exc:
+            raise CommandError(str(exc), returncode=getattr(exc, "returncode", 1)) from None
+        return
 
     tracker.mkdir(parents=True, exist_ok=True)
     fd, staged = tempfile.mkstemp(prefix=".tmp-event-", dir=str(tracker))

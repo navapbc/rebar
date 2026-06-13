@@ -25,9 +25,32 @@ import os
 import sys
 
 # The I2 filename contract lives once in event_append (ticket pokey-matte-flute);
-# this critical section keeps its own lock/commit but shares the filename helper.
+# this critical section keeps its own commit but shares the filename helper and —
+# since Tier D — the ONE unified write lock.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import event_append  # noqa: E402
+
+# Bootstrap the `rebar` package (this runs as a bare `python3` subprocess with only
+# the engine dir on sys.path) so the unified write lock is importable. __file__ =
+# .../src/rebar/_engine/ticket_txn.py → three dirnames up = .../src (the dir that
+# contains the `rebar` package).
+_REBAR_SRC = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _REBAR_SRC not in sys.path:
+    sys.path.insert(0, _REBAR_SRC)
+from rebar._store import lock as _store_lock  # noqa: E402
+
+
+def _acquire_write_lock(tracker_dir):
+    """Acquire the unified write lock (fcntl + mkdir dual leg, 30s) for a txn
+    critical section. The dual leg makes this mutually exclusive with bash
+    leaf-writes on every platform class (the stiff-mop-lane fix); the budget (30s,
+    ``attempts=1``) preserves ticket_txn's historical timeout. Held across the whole
+    re-read → write → commit section; ``handle.release()`` drops it at each exit."""
+    try:
+        return _store_lock.acquire(tracker_dir, timeout=30, attempts=1, dual_window=True)
+    except _store_lock.LockTimeout:
+        print('Error: could not acquire lock', file=sys.stderr)
+        sys.exit(1)
 
 
 def _transition(argv):
@@ -52,27 +75,14 @@ def _transition(argv):
     timeout = 30
 
     # Acquire flock
-    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
-    deadline = time.monotonic() + timeout
-    acquired = False
-    while time.monotonic() < deadline:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            acquired = True
-            break
-        except (IOError, OSError):
-            time.sleep(0.1)
-    if not acquired:
-        os.close(fd)
-        print('Error: could not acquire lock', file=sys.stderr)
-        sys.exit(1)
+    handle = _acquire_write_lock(tracker_dir)
 
     # Lock acquired — read current state via direct reduce_ticket import (no subprocess)
     try:
         state = reduce_ticket(os.path.join(tracker_dir, ticket_id))
         if state is None:
             print('Error: reducer returned no state (ticket may be corrupt or missing events)', file=sys.stderr)
-            os.close(fd)
+            handle.release()
             sys.exit(1)
 
         actual_status = state.get('status', '')
@@ -89,7 +99,7 @@ def _transition(argv):
             else:
                 hint = f'ticket transition {ticket_id} {actual_status} {target_status}'
             print(f'Error: current status is "{actual_status}", not "{current_status}". Re-run: {hint}', file=sys.stderr)
-            os.close(fd)
+            handle.release()
             sys.exit(10)
 
         # Bug-close-reason guard
@@ -100,13 +110,13 @@ def _transition(argv):
             if ticket_type == 'bug':
                 if not close_reason:
                     print('Error: closing a bug ticket requires --reason with prefix "Fixed:" or "Escalated to user:"', file=sys.stderr)
-                    os.close(fd)
+                    handle.release()
                     sys.exit(1)
                 # Validate required prefix: accept Fixed (covers Fixed:, Fixed in, etc.)
                 # and case-insensitive escalat prefix (covers Escalated to user: variants).
                 if not (close_reason.startswith('Fixed') or close_reason.lower().startswith('escalat')):
                     print('Error: --reason must start with "Fixed:" or "Escalated to user:"', file=sys.stderr)
-                    os.close(fd)
+                    handle.release()
                     sys.exit(1)
 
         # ── Verdict hash gate (story/epic closure) ────────────────────────────
@@ -142,7 +152,7 @@ def _transition(argv):
                     key_file = os.path.join(tracker_dir, '.closure-key')
                     if not os.path.isfile(key_file):
                         print(f'Error: .closure-key not found. Run ticket init to generate it.', file=sys.stderr)
-                        os.close(fd)
+                        handle.release()
                         sys.exit(1)
                     with open(key_file, 'r') as _kf:
                         key = _kf.read().strip().encode()
@@ -157,7 +167,7 @@ def _transition(argv):
                         print(f'  This means the completion verifier did not produce a PASS verdict at the current HEAD.', file=sys.stderr)
                         print(f'  Recovery: produce a PASS completion verdict, then run compute-verdict-hash.sh.', file=sys.stderr)
                         print(f'  Override: use --force-close="<reason>" to bypass (requires user approval).', file=sys.stderr)
-                        os.close(fd)
+                        handle.release()
                         sys.exit(1)
                 else:
                     print(f'Error: closing a {ticket_type} requires --verdict-hash (from compute-verdict-hash.sh after completion verifier PASS).', file=sys.stderr)
@@ -165,7 +175,7 @@ def _transition(argv):
                     print(f'    bash compute-verdict-hash.sh {ticket_id} PASS  # produces the hash', file=sys.stderr)
                     print(f'    ticket transition {ticket_id} closed --verdict-hash=<hash-from-above>', file=sys.stderr)
                     print(f'  Override: use --force-close="<reason>" to bypass (requires user approval).', file=sys.stderr)
-                    os.close(fd)
+                    handle.release()
                     sys.exit(1)
 
         # Compute parent_status_uuid: UUID of the most recent prior STATUS event for this ticket,
@@ -239,15 +249,15 @@ def _transition(argv):
             os.remove(final_path)
         except (OSError, NameError):
             pass
-        os.close(fd)
+        handle.release()
         sys.exit(2)
     except Exception as e:
         print(f'Error: {e}', file=sys.stderr)
-        os.close(fd)
+        handle.release()
         sys.exit(1)
 
     # Release lock
-    os.close(fd)
+    handle.release()
     sys.exit(0)
 
 
@@ -283,20 +293,7 @@ def _claim(argv):
     timeout = 30
 
     # Acquire flock (identical pattern to _transition).
-    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
-    deadline = time.monotonic() + timeout
-    acquired = False
-    while time.monotonic() < deadline:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            acquired = True
-            break
-        except (IOError, OSError):
-            time.sleep(0.1)
-    if not acquired:
-        os.close(fd)
-        print('Error: could not acquire lock', file=sys.stderr)
-        sys.exit(1)
+    handle = _acquire_write_lock(tracker_dir)
 
     status_path = None
     edit_path = None
@@ -305,12 +302,12 @@ def _claim(argv):
         state = reduce_ticket(os.path.join(tracker_dir, ticket_id))
         if state is None:
             print('Error: reducer returned no state (ticket may be corrupt or missing events)', file=sys.stderr)
-            os.close(fd)
+            handle.release()
             sys.exit(1)
         actual_status = state.get('status', '')
         if actual_status != 'open':
             print(f'Error: cannot claim {ticket_id}: status is "{actual_status}", not "open" (already claimed or not claimable).', file=sys.stderr)
-            os.close(fd)
+            handle.release()
             sys.exit(10)
 
         ticket_dir_path = os.path.join(tracker_dir, ticket_id)
@@ -401,14 +398,14 @@ def _claim(argv):
                     os.remove(_p)
                 except OSError:
                     pass
-        os.close(fd)
+        handle.release()
         sys.exit(2)
     except Exception as e:
         print(f'Error: {e}', file=sys.stderr)
-        os.close(fd)
+        handle.release()
         sys.exit(1)
 
-    os.close(fd)
+    handle.release()
     sys.exit(0)
 
 
