@@ -1,47 +1,22 @@
-"""rebar CLI.
+"""rebar CLI entrypoint.
 
-Delegates to the bundled bash dispatcher for all ticket subcommands, and
-intercepts ``rebar reconcile`` to route it to ``python -m rebar_reconciler``
-(the engine dispatcher itself has no reconcile arm).
+Thin facade over the in-process argparse CLI (:mod:`rebar._cli`). Tier E (story
+adult-oxide-slave) replaced the bash dispatcher delegation here with the native
+Python CLI; ``rebar._cli.main`` owns help/overview/error parity, the auto-init
+middleware, in-process dispatch for ported commands, and the transitional
+subprocess fallback for commands not yet ported. ``reconcile`` is handled inside
+``rebar._cli`` (the engine dispatcher never had a reconcile arm).
 """
 
 from __future__ import annotations
 
-import os
-import subprocess
 import sys
 
-from rebar import config
-from rebar._engine import dispatcher, engine_env
-
-
-def _reconcile(argv: list[str]) -> int:
-    """rebar reconcile [--mode MODE] [--repo-root ROOT] [extra rebar_reconciler args]."""
-    root = str(config.repo_root())
-    args = list(argv)
-    if not any(a == "--repo-root" or a.startswith("--repo-root=") for a in args):
-        args += ["--repo-root", root]
-    if not any(a == "--mode" or a.startswith("--mode=") for a in args):
-        args += ["--mode", "dry-run"]
-    return subprocess.call(
-        ["python3", "-m", "rebar_reconciler", *args],
-        env=engine_env(root),
-    )
+from rebar._cli import main as _main
 
 
 def main() -> None:
-    argv = sys.argv[1:]
-    if argv and argv[0] == "reconcile":
-        sys.exit(_reconcile(argv[1:]))
-    env = engine_env()
-    # Run the dispatcher inside the repo root so its cwd-relative git operations
-    # resolve the right repository even when invoked from elsewhere.
-    cwd = env.get("REBAR_ROOT") or env.get("PROJECT_ROOT")
-    if not (cwd and os.path.isdir(cwd)):
-        cwd = None
-    sys.exit(
-        subprocess.call(["bash", str(dispatcher()), *argv], env=env, cwd=cwd)
-    )
+    sys.exit(_main(sys.argv[1:]))
 
 
 if __name__ == "__main__":
