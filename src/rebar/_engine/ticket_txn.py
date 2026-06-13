@@ -158,19 +158,22 @@ def _transition(argv):
                     result = _signing.verify_record(state.get('signature'), ticket_id, key)
                     if not result['verified']:
                         print(f'Error: closing a {ticket_type} requires a certified signature (verdict: {result["verdict"]}).', file=sys.stderr)
-                        print(f'  Recovery: sign a manifest of verified steps, then close:', file=sys.stderr)
+                        print('  Recovery: sign a manifest of verified steps, then close:', file=sys.stderr)
                         print(f'    rebar sign {ticket_id} \'["step one: PASS", "step two: PASS"]\'', file=sys.stderr)
                         print(f'    rebar transition {ticket_id} closed', file=sys.stderr)
-                        print(f'  Override: use --force-close="<reason>" to bypass (requires user approval).', file=sys.stderr)
+                        print('  Override: use --force-close="<reason>" to bypass (requires user approval).', file=sys.stderr)
                         handle.release()
                         sys.exit(1)
                     # Git-state binding: the attestation must be for the current HEAD.
-                    head_sha = _signing._head_sha(_rebar_config.repo_root())
-                    if result.get('head_sha') != head_sha:
+                    # An unresolvable HEAD ('unknown') must NEVER satisfy the binding —
+                    # otherwise 'unknown' == 'unknown' would silently void the freshness
+                    # guard in a repo with no commits / no resolvable HEAD.
+                    head_sha = _signing.head_sha(_rebar_config.repo_root())
+                    if head_sha == 'unknown' or result.get('head_sha') != head_sha:
                         print(f'Error: the signature for {ticket_type} {ticket_id} was made at a different commit', file=sys.stderr)
                         print(f'  (signed at {result.get("head_sha")}, HEAD is {head_sha}). Re-sign at the current HEAD:', file=sys.stderr)
                         print(f'    rebar sign {ticket_id} \'[...verified steps...]\'', file=sys.stderr)
-                        print(f'  Override: use --force-close="<reason>" to bypass (requires user approval).', file=sys.stderr)
+                        print('  Override: use --force-close="<reason>" to bypass (requires user approval).', file=sys.stderr)
                         handle.release()
                         sys.exit(1)
 

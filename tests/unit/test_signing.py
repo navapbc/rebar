@@ -80,6 +80,13 @@ def test_key_fingerprint_is_stable_and_distinct() -> None:
     assert KEY.decode() not in signing.key_fingerprint(KEY)
 
 
+# ── head_sha sentinel ─────────────────────────────────────────────────────────
+def test_head_sha_unknown_on_non_git(tmp_path) -> None:
+    # The freshness-binding sentinel: unresolvable HEAD -> 'unknown' (callers must
+    # treat it as never-matching, never as a value, so the gate can't be voided).
+    assert signing.head_sha(str(tmp_path)) == "unknown"
+
+
 # ── verify_record verdicts ────────────────────────────────────────────────────
 def _record(ticket_id: str, manifest: list[str], key: bytes) -> dict:
     return {

@@ -292,6 +292,13 @@ def _enable_gate(repo: Path) -> None:
     (repo / ".rebar" / "config.conf").write_text("verify.require_signature_for_close=true\n")
 
 
+def _commit(repo: Path, msg: str = "c") -> None:
+    """Give the code repo a resolvable HEAD (the fixture inits with an unborn
+    HEAD; real repos have commits, and the gate's freshness binding requires one)."""
+    subprocess.run(["git", "commit", "--allow-empty", "-q", "-m", msg],
+                   cwd=str(repo), check=True, capture_output=True)
+
+
 def _story(repo: Path) -> str:
     tid = rebar.create_ticket(
         "story", "Gate story",
@@ -308,6 +315,7 @@ def test_close_gate_off_by_default(rebar_repo: Path) -> None:
 
 
 def test_close_gate_blocks_without_signature_then_allows_after_sign(rebar_repo: Path) -> None:
+    _commit(rebar_repo)
     _enable_gate(rebar_repo)
     tid = _story(rebar_repo)
     with pytest.raises(rebar.RebarError) as ei:
@@ -321,18 +329,35 @@ def test_close_gate_blocks_without_signature_then_allows_after_sign(rebar_repo: 
 
 
 def test_close_gate_stale_head_blocks(rebar_repo: Path) -> None:
+    _commit(rebar_repo, "base")
     _enable_gate(rebar_repo)
     tid = _story(rebar_repo)
     rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
     # Advance the CODE repo HEAD after signing → the attestation is now stale.
-    subprocess.run(["git", "commit", "--allow-empty", "-q", "-m", "advance"],
-                   cwd=str(rebar_repo), check=True, capture_output=True)
+    _commit(rebar_repo, "advance")
     with pytest.raises(rebar.RebarError) as ei:
         rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
     assert "different commit" in ei.value.stderr
     # Re-signing at the new HEAD unblocks the close.
     rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
     assert rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))["to"] == "closed"
+
+
+def test_close_gate_blocks_when_head_unresolvable(rebar_repo: Path) -> None:
+    # S1 regression: in a repo with no resolvable HEAD, head_sha is 'unknown' on
+    # BOTH the recorded signature and the recomputed gate value. The freshness
+    # binding must NOT treat 'unknown' == 'unknown' as a match (that would silently
+    # void the guard) — the close must be blocked even with a certified signature.
+    from rebar import config, signing
+    assert signing.head_sha(config.repo_root(str(rebar_repo))) == "unknown", "fixture should have an unborn HEAD"
+    _enable_gate(rebar_repo)
+    tid = _story(rebar_repo)
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
+    assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "certified"
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert "different commit" in ei.value.stderr
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "in_progress"
 
 
 def test_close_gate_force_close_bypass(rebar_repo: Path) -> None:

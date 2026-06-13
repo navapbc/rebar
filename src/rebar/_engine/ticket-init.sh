@@ -430,12 +430,11 @@ if [ ! -f "$TRACKER_DIR/.env-id" ]; then
     python3 -c "import uuid; print(uuid.uuid4())" > "$TRACKER_DIR/.env-id"
 fi
 
-# ── Generate closure-key (verdict hash gate) ─────────────────────────────────
-# Used by compute-verdict-hash.sh and ticket-transition.sh to produce/verify
-# HMAC-based verdict hashes for story/epic closure. Gitignored and local.
-if [ ! -f "$TRACKER_DIR/.closure-key" ]; then
-    python3 -c "import uuid; print(uuid.uuid4())" > "$TRACKER_DIR/.closure-key"
-fi
+# ── .closure-key (DEPRECATED verdict-hash gate) ──────────────────────────────
+# The story/epic close gate now uses the signature system (.signing-key), so init
+# no longer mints .closure-key. The deprecated compute-verdict-hash.sh still
+# self-generates it on demand if invoked; the .gitignore entry is kept so that
+# vestigial file stays ignored.
 
 # ── Generate signing-key (manifest signature gate) ───────────────────────────
 # Used by `rebar sign` / `rebar verify-signature` to produce/certify HMAC-based

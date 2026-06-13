@@ -30,8 +30,8 @@ REDUCER="$SCRIPT_DIR/ticket-reducer.py"
 
 # ── Usage ─────────────────────────────────────────────────────────────────────
 _usage() {
-    echo "Usage: ticket transition <ticket_id> <current_status> <target_status> [--reason=<text>] [--force] [--verdict-hash=<hash>] [--force-close=<reason>]" >&2
-    echo "       ticket transition <ticket_id> <target_status> [--reason=<text>] [--force] [--verdict-hash=<hash>] [--force-close=<reason>]  (auto-detects current status)" >&2
+    echo "Usage: ticket transition <ticket_id> <current_status> <target_status> [--reason=<text>] [--force] [--force-close=<reason>]" >&2
+    echo "       ticket transition <ticket_id> <target_status> [--reason=<text>] [--force] [--force-close=<reason>]  (auto-detects current status)" >&2
     echo "  current_status / target_status: open | in_progress | closed | blocked" >&2
     echo "  --reason=<text>          Required when closing bug tickets. Must start with 'Fixed:' or 'Escalated to user:'." >&2
     echo "  --force                  Skip the unresolved-children guard when closing. Non-closed children remain unresolved." >&2
@@ -435,7 +435,7 @@ fi
 
 # ── Step 3b: Write force-close audit comment (if applicable) ─────────────────
 if [ "$target_status" = "closed" ] && [ -n "$force_close_reason" ]; then
-    _FC_COMMENT="FORCE_CLOSE: verdict hash bypassed by user approval. Reason: \"$force_close_reason\". Session: ${SESSION_ID:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}."
+    _FC_COMMENT="FORCE_CLOSE: signature gate bypassed by user approval. Reason: \"$force_close_reason\". Session: ${SESSION_ID:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}."
     bash "$SCRIPT_DIR/ticket-comment.sh" "$ticket_id" "$_FC_COMMENT" 2>/dev/null || true
 fi
 

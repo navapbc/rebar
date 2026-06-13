@@ -267,7 +267,13 @@ def verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict:
 
 
 # ── git audit metadata ────────────────────────────────────────────────────────
-def _head_sha(repo_root) -> str:
+def head_sha(repo_root) -> str:
+    """Current HEAD sha of ``repo_root``, or ``'unknown'`` when unresolvable.
+
+    Recorded on every signature (audit metadata) and recomputed by the close gate
+    for its freshness binding — a public helper so that load-bearing integration
+    point isn't reaching into a private name. ``'unknown'`` is a sentinel callers
+    must treat as "no resolvable HEAD", never as a matchable value."""
     try:
         out = subprocess.run(
             ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
@@ -315,7 +321,7 @@ def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> dict:
         "algorithm": ALGORITHM,
         "signature": signature,
         "key_id": key_fingerprint(key),
-        "head_sha": _head_sha(config.repo_root(repo_root)),
+        "head_sha": head_sha(config.repo_root(repo_root)),
         "signed_at": time.time_ns(),
     }
     try:
