@@ -23,7 +23,9 @@ _MAX_RETRIES = 3
 
 
 def _push_mode() -> str:
-    return "".join((os.environ.get("REBAR_PUSH", "always")).lower().split())
+    # bash ${REBAR_PUSH:-always}: unset OR empty → "always" (the `:-` form), then
+    # lowercase + strip whitespace.
+    return "".join((os.environ.get("REBAR_PUSH") or "always").lower().split())
 
 
 def _git(base: str, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:

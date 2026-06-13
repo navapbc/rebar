@@ -30,9 +30,14 @@ import sys
 #   - Tier C (``REBAR_COMPUTE``), 2026-06-12 — after the flip-to-python soak passed
 #     (full-surface probe 141/141 isolated + live, fsck clean), the switch + the two
 #     bash compute scripts were deleted; Python is the sole next-batch/validate impl.
-# The remaining entry gates Tier D, still to come.
+# Tier D (``REBAR_WRITE_CORE``) flipped to python on 2026-06-12: rebar._store is the
+# write/sync core (one unified fcntl+mkdir lock, canonical commit, push, reconverge);
+# the leaf-write seam + read reconverge run in-process under python, while ticket_txn,
+# compaction, and the reconciler-inbound write_lock adopt the unified lock
+# unconditionally (the stiff-mop-lane fix). Retained as the rollback lever
+# (REBAR_WRITE_CORE=bash) through the soak until retirement.
 _TIERS: dict[str, str] = {
-    "REBAR_WRITE_CORE": "bash",  # Tier D — write/sync core
+    "REBAR_WRITE_CORE": "python",  # Tier D — write/sync core
 }
 
 _VALID = ("bash", "python")
