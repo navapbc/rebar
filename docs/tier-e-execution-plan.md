@@ -23,7 +23,57 @@ Full non-integration suite green at **1805 passed / 0 failed** (E6.5a milestone,
 clean — no false positive). NB: the `_no_repo_commits` guard trips if a `git commit`
 runs DURING a background full-suite run; do not commit while one is in flight.
 
-### RESUME HERE → E8 batch 2, then E7 (atomic cutover), then E9
+### RESUME HERE → finish E7d (delete the engine), then E9
+
+**DONE since the milestone (committed to local main):** E8 batch 1 (`f7c6f5d8`) + batch 2
+(`f859a526`) — all GAP suites translated to in-process pytest. E7a (`5ce73a9d`) —
+rewired reducer/graph pytest tiers off the shims. E7c (`6cda0262`) — deleted the
+ENTIRE bash-dependent test side: 14 dispatcher parity tests, ALL `.sh` suites,
+`tests/lib/*.sh`, the `test_bash_suites.py` collector, `test_ticket_txn.py`,
+isolation-rules fixtures. **Zero `tests/**/*.sh`. Full suite 1667 passed / 0 failed
+(3 min).** E7d(partial) (`50210575`) — reducer `conftest` fixture → `rebar.reducer`.
+KEPT: `test_e3_txn_bytes.py` (pure in-process byte guard).
+
+**E7d remaining (the engine deletion) — these SURVIVING tests still touch the engine:**
+1. **graph tier** — `tests/scripts/graph/conftest.py`+`_helpers.py` `graph` fixture
+   spec-loads `ticket-graph.py` for its FLAT api (`build_dep_graph`,
+   `check_cycle_at_level`, …) which `rebar.graph/__init__` does NOT surface. Fix:
+   either expose that flat surface from `rebar.graph` (cleanest) or have the fixture
+   build it from the `rebar.graph._*` submodules. (reducer was a clean swap; graph
+   isn't.)
+2. **`tests/scripts/graph/test_graph_children_archive.py` + `test_graph_hierarchy_resolve.py`**
+   — subprocess `python3 ticket-graph.py {compute-archive-eligible,resolve-hierarchy-link}`
+   via `SCRIPT_PATH`; repoint to the in-process `rebar.graph._hierarchy` funcs or drop.
+3. **`tests/scripts/test_ticket_unblock.py`** — spec-loads + subprocesses
+   `ticket-unblock.py` (a SHIM → `rebar.graph._unblock`); repoint to `rebar.graph._unblock`.
+4. **`tests/scripts/bridge/test_bridge_alert_display.py`** — spec-loads
+   `ticket-reducer.py` + subprocesses; repoint to `rebar.reducer`.
+5. **`tests/unit/test_ticket_delete_unlink_scan.py`** — subprocesses
+   `ticket-delete-unlink-scan.py`; repoint to `rebar._commands.delete.scan_and_write_unlinks`.
+6. **`tests/scripts/reducer/test_ticket_alias_backfill.py`** — subprocesses
+   `ticket-alias-compute.py` + `ticket-alias-resolve.py`; repoint to
+   `rebar.reducer._alias.compute_alias` + `rebar._engine_support.resolver`.
+
+**Then the deletions + library surgery (one commit once 1-6 are green):**
+- DELETE `_engine/rebar`+`ticket` + all 36 `_engine/*.sh` + dispatcher-only `.py`
+  (`ticket-reducer.py`,`ticket-graph.py`,`ticket-reads.py`,`ticket-commands.py`,
+  `ticket-delete-unlink-scan.py`,`ticket-alias-compute.py`,`ticket-alias-resolve.py`,
+  `ticket-list-descendants.py`,`ticket-unblock.py`,`ticket-bridge-fsck.py`) + the 5
+  shims (`ticket_reducer/`,`ticket_graph/`,`ticket_reads.py`,`ticket_resolver.py`,
+  `ticket_output.py`) + `ticket_txn.py`.
+- KEEP `_engine/rebar_reconciler/`, `jira-capability-probe.py`, `resources/`.
+- `_engine.py`: delete `dispatcher()` + `run()`; **KEEP `engine_dir()`,`engine_env()`,
+  `wordlist_path()`** (reconciler + bridge-probe subprocess launches + `reducer._alias`
+  need them).
+- `__init__.py`: delete the dead `_run()` + the `run`/`dispatcher` import.
+- `_cli/__init__.py`: delete the dead `_passthrough()` + its `dispatcher`/`engine_env` import.
+- `tests/unit/test_engine_dir.py`: change `dispatcher().is_file()` → assert the engine
+  dir / wordlist / reconciler exist (KEEP the rest — engine_dir survives + the
+  no-top-level-names guard is now MORE important). `_engine_path.py` SURVIVES (locates
+  the still-present engine dir for the reconciler).
+- Verify full pytest green; opus-review the cutover.
+
+### (superseded) original E8→E7→E9 sketch
 
 **E8 batch 2 (translate the remaining GAP suites, additive, before E7):**
 - `test-ticket-list-has-tag.sh` — only the `detected_by:`∩bug-type rule if not already in `test_list_filters.py`.
