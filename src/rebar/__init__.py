@@ -549,9 +549,24 @@ def fsck(*, recover: bool = False, report_only: bool = False, repo_root=None) ->
     can run plain fsck without any git-state write (the stale lock is reported,
     not removed)."""
     if recover:
-        # fsck-recover not yet ported in-process (Tier E E4) — subprocess for now.
-        env_extra = {"REBAR_FSCK_NO_MUTATE": "1"} if report_only else None
-        return _ok(_run(["fsck-recover"], repo_root=repo_root, env_extra=env_extra), what="fsck")
+        # In-process fsck-recover (Tier E E4). report_only has no effect on the
+        # recover path (it has no index.lock mutation toggle); preserved for API
+        # compatibility. Output captured; exit!=0 raises (prior _ok contract).
+        import contextlib as _ctx
+        import io as _io
+
+        from rebar._commands import fsck_recover as _fr
+
+        _out, _err = _io.StringIO(), _io.StringIO()
+        with _ctx.redirect_stdout(_out), _ctx.redirect_stderr(_err):
+            _rc = _fr.fsck_recover_cli([], repo_root=repo_root)
+        if _rc != 0:
+            raise RebarError(
+                f"rebar fsck failed (exit {_rc}): {(_err.getvalue() or _out.getvalue()).strip()}",
+                returncode=_rc,
+                stderr=_err.getvalue(),
+            )
+        return _out.getvalue()
 
     # In-process fsck (Tier E E4). Output is captured; exit!=0 (issues found) raises,
     # preserving the prior _ok(_run(...)) contract.
