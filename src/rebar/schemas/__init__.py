@@ -58,6 +58,7 @@ __all__ = [
     "SUMMARY",
     "LIST_EPICS",
     "FSCK",
+    "REVIEW_RESULT",
     "COMMON",
 ]
 
@@ -83,6 +84,10 @@ GATE_RESULT = "gate_result"
 SUMMARY = "summary"
 LIST_EPICS = "list_epics"
 FSCK = "fsck"
+# rebar.llm — output of an LLM review operation (`rebar review`). The MCP tool is
+# exempt (live LLM call → plain dict, no outputSchema); the CLI/library JSON path
+# is pinned to this schema via the "review" key below.
+REVIEW_RESULT = "review_result"
 
 # The authoritative map of every structured (--output json / always-JSON) output
 # to its schema. Keyed by command, or <command>.<interface> when an interface's
@@ -117,6 +122,7 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "summary": SUMMARY,
     "list_epics": LIST_EPICS,
     "fsck": FSCK,
+    "review": REVIEW_RESULT,
 }
 
 

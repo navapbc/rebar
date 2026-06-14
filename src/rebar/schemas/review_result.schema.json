@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/review_result.schema.json",
+  "title": "ReviewResult",
+  "description": "Output of an LLM review operation (rebar.llm, e.g. `rebar review <id> <reviewer>`). The load-bearing field is `findings` (an array of `finding`); everything else is provenance about what was reviewed, which reviewers ran, and which backend/model/trace produced it. Emitted by the CLI/library `--output json` path; the MCP `review_ticket` tool returns the same shape as a plain dict but advertises no outputSchema (it makes a live LLM call and is a documented NO_SCHEMA_EXEMPT).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["findings"],
+  "properties": {
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/finding" }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "What was reviewed.",
+      "properties": {
+        "kind": { "type": "string", "description": "e.g. 'ticket', 'ticket_graph', 'code'." },
+        "ticket_ids": { "type": "array", "items": { "type": "string" } },
+        "commits": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "reviewers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Reviewer prompt ids that ran."
+    },
+    "runner": { "type": "string", "description": "Execution backend that produced this result: 'langgraph', 'langflow', 'fake', …" },
+    "model": { "type": ["string", "null"], "description": "Model id used (when applicable; null for non-LLM/fake runners)." },
+    "trace_id": { "type": ["string", "null"], "description": "Langfuse trace id, when tracing is enabled; null otherwise." },
+    "summary": { "type": "string", "description": "Optional reviewer-written summary of the review." }
+  }
+}
