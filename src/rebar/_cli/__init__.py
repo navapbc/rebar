@@ -46,6 +46,8 @@ _DESCENDANTS = frozenset({"list-descendants"})
 # Per-ticket gate arms the dispatcher ran with NO _ensure_initialized (they read
 # transitively via `ticket show`, so the gate CLI itself does no auto-init).
 _GATES = frozenset({"clarity-check", "check-ac", "quality-check", "summary"})
+# Write/lifecycle arms (E3): full auto-init + reconverge before the in-process write.
+_LIFECYCLE = frozenset({"transition", "reopen"})
 # Leaf-write arms: full auto-init + reconverge before the in-process write.
 _WRITES_FULL = frozenset(
     {
@@ -124,6 +126,13 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         from rebar._engine_support import reads
 
         return reads.main([sub, *rest])
+    if sub in _LIFECYCLE:
+        ensure_initialized(init_only=False)
+        from rebar._commands import transition as _transition
+
+        if sub == "reopen":
+            return _transition.reopen_cli(rest)
+        return _transition.transition_cli(rest)
     if sub in _WRITES_FULL:
         ensure_initialized(init_only=False)
         from rebar._commands import main as commands_main
