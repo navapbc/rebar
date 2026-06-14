@@ -23,7 +23,9 @@ echo "=== test-ticket-compact-all.sh ==="
 echo ""
 
 _CLEANUP_DIRS=()
-_cleanup() { rm -rf "${_CLEANUP_DIRS[@]}" 2>/dev/null || true; }
+# Guard the array expansion: under bash 3.2 + `set -u`, "${arr[@]}" on an empty
+# array raises "unbound variable" (macOS default bash), so only expand when set.
+_cleanup() { [ "${#_CLEANUP_DIRS[@]}" -eq 0 ] || rm -rf "${_CLEANUP_DIRS[@]}" 2>/dev/null || true; }
 trap _cleanup EXIT
 
 _make_test_repo() {

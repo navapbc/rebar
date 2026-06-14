@@ -87,7 +87,7 @@ _run_sut_capture() {
     shift
     local extra_args=("$@")
     _SUT_EXIT=0
-    _SUT_OUTPUT=$(echo "$json_input" | bash "$SUT" --stdin "${extra_args[@]}" 2>/dev/null) || _SUT_EXIT=$?
+    _SUT_OUTPUT=$(echo "$json_input" | bash "$SUT" --stdin ${extra_args[@]+"${extra_args[@]}"} 2>/dev/null) || _SUT_EXIT=$?
 }
 
 # ── Helper: extract a JSON field from SUT output ─────────────────────────────

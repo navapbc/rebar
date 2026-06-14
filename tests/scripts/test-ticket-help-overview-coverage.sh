@@ -42,7 +42,12 @@ _is_allowlisted() {
 }
 
 # Extract every public dispatch arm (4-space indent), splitting alternations.
-mapfile -t ARMS < <(
+# `read` loop instead of `mapfile`/`readarray` (bash 4+) so this runs on the
+# macOS default bash 3.2 too.
+ARMS=()
+while IFS= read -r _arm; do
+    [ -n "$_arm" ] && ARMS+=("$_arm")
+done < <(
     grep -E '^    [a-z][a-z0-9-]*(\|[a-z0-9-]+)*\)' "$DISPATCHER" \
         | sed -E 's/^    //; s/\).*$//' \
         | tr '|' '\n' \
@@ -55,7 +60,7 @@ assert_ne "found dispatcher arms" "0" "${#ARMS[@]}"
 HELP_OUT=$(bash "$TICKET_SCRIPT" help 2>&1)
 
 missing=()
-for arm in "${ARMS[@]}"; do
+for arm in ${ARMS[@]+"${ARMS[@]}"}; do
     [ -z "$arm" ] && continue
     if _is_allowlisted "$arm"; then
         continue

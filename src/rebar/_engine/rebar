@@ -305,7 +305,6 @@ case "$subcommand" in
     reopen)
         # Thin convenience over transition: closed -> open (optimistic concurrency,
         # exit 10 if not currently closed).
-        _ensure_initialized
         # shellcheck source=/dev/null
         source "$SCRIPT_DIR/ticket-lib-api.sh"   # also sources ticket-output.sh
         # Strip the --output/-o flag (it can precede the id), then re-inject it as
@@ -318,11 +317,14 @@ case "$subcommand" in
         # (e.g. `rebar reopen --output json`) are caught too. Without this,
         # `$1` below dereferences an unset positional under `set -u` and bash
         # emits a raw `unbound variable` diagnostic instead of the Usage
-        # contract (matching sibling arms claim/archive).
+        # contract (matching sibling arms claim/archive). Runs BEFORE
+        # _ensure_initialized so a usage error never auto-inits a tracker (which
+        # would leak .tickets-tracker into the cwd repo — test isolation).
         if [ $# -lt 1 ]; then
             _print_subcommand_help reopen >&2
             exit 1
         fi
+        _ensure_initialized
         _ticketlib_dispatch ticket_transition "$1" closed open --output="$_reopen_fmt"
         exit $?
         ;;
