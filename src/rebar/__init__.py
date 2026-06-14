@@ -697,9 +697,17 @@ def list_epics(*, include_blocked: bool = False, has_tag=None, min_children=None
 
 def bridge_fsck(*, repo_root=None) -> dict:
     """Bridge-mapping audit as structured JSON: {orphaned, duplicates, stale}.
-    A nonzero exit (anomalies present) is NORMAL, not an error."""
-    cp = _run(["bridge-fsck", "--output", "json"], repo_root=repo_root)
-    return _json_or(cp.stdout, {"orphaned": [], "duplicates": [], "stale": []})
+    A nonzero exit (anomalies present) is NORMAL, not an error.
+
+    In-process (Tier E E6.5a): runs the audit via ``rebar._engine_support.
+    bridge_fsck.audit_bridge_mappings`` instead of subprocessing the dispatcher.
+    """
+    from pathlib import Path
+    from rebar._engine_support.bridge_fsck import audit_bridge_mappings
+
+    tracker = config.tracker_dir(repo_root)
+    findings = audit_bridge_mappings(Path(tracker))
+    return {k: findings.get(k, []) for k in ("orphaned", "duplicates", "stale")}
 
 
 # ── Reconciler (Jira sync) ────────────────────────────────────────────────────

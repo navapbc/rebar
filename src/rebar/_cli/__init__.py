@@ -55,7 +55,7 @@ _LIFECYCLE = frozenset({"transition", "reopen", "claim"})
 _COMPACT = frozenset({"compact", "compact-all"})
 # Bridge arms (E5): full auto-init UNLESS TICKETS_TRACKER_DIR is injected (test
 # tracker), matching the dispatcher's `bridge-status`/`purge-bridge` arms.
-_BRIDGE = frozenset({"bridge-status", "purge-bridge"})
+_BRIDGE = frozenset({"bridge-status", "bridge-fsck", "purge-bridge"})
 # Leaf-write arms: full auto-init + reconverge before the in-process write.
 _WRITES_FULL = frozenset(
     {
@@ -183,6 +183,10 @@ def _dispatch(sub: str, rest: list[str]) -> int:
             from rebar._engine_support import bridge
 
             return bridge.bridge_status_cli(rest, tracker)
+        if sub == "bridge-fsck":
+            from rebar._engine_support import bridge_fsck
+
+            return bridge_fsck.main(rest)
         from rebar._commands import purge_bridge
 
         return purge_bridge.purge_bridge_cli(rest)
