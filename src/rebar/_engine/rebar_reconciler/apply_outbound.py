@@ -24,7 +24,7 @@ from rebar_reconciler.apply_base import (
     _direction_guard,
     _load_mutation_module,
 )
-from rebar_reconciler.batch_dispatch import _call_with_retry, delete_one
+from rebar_reconciler.batch_dispatch import JiraAPIError, _call_with_retry, delete_one
 
 logger = logging.getLogger(__name__)
 

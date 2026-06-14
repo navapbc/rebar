@@ -23,19 +23,68 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    name: lint + type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install rebar (editable) + dev deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      # GATING: the flake8 "real-bug" smoke set (configured in pyproject
+      # [tool.ruff.lint]) — syntax errors + undefined names. This is the gate that
+      # catches NameError-on-error-path bugs (e.g. a missing `import urllib` used
+      # only inside an `except` clause).
+      - name: ruff — real-bug rules (gating)
+        run: ruff check src tests
+
+      # ADVISORY: the broader stylistic set (unused imports, etc.). Reported into
+      # the job summary as a ratchet view; the step always SUCCEEDS (green) so the
+      # pre-existing nits don't show as a perpetual red ✗ that erodes signal —
+      # promote a rule to the gating set above once its count reaches zero.
+      - name: ruff — full set (advisory, non-gating)
+        run: |
+          echo "### Advisory ruff (full set) — non-gating ratchet" >> "$GITHUB_STEP_SUMMARY"
+          ruff check --select E,F,W,I,UP,B --statistics src tests \
+            | tee -a "$GITHUB_STEP_SUMMARY" || true
+
+      # GATING: the pure in-process library core is kept type-clean.
+      - name: mypy — library core (gating)
+        run: mypy src/rebar/reducer src/rebar/graph src/rebar/_store
+
+      # ADVISORY: the rest of the tree (engine helpers, reconciler) — same
+      # green-with-summary treatment as the advisory ruff step above.
+      - name: mypy — full tree (advisory, non-gating)
+        run: |
+          echo "### Advisory mypy (full tree) — non-gating ratchet" >> "$GITHUB_STEP_SUMMARY"
+          mypy src/rebar 2>&1 | tail -1 | tee -a "$GITHUB_STEP_SUMMARY" || true
+
   test:
-    name: pytest (${{ matrix.os }})
+    name: pytest (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        # requires-python is >= 3.11 (the reconciler uses enum.StrEnum, new in
+        # 3.11), so test the full supported range on Linux. macOS runs only the
+        # primary interpreter (runner cost) — its value is the platform-compat
+        # coverage (flock/mkdir lock, gtimeout), not the Python rev.
         os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12"]
+        exclude:
+          - os: macos-latest
+            python-version: "3.11"
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
 
       # The bash suites shell out to jq (ticket_show's reducer path). Ensure it is
       # present on both runners (platform-compat lessons live in
@@ -79,4 +128,12 @@ jobs:
         # the macOS tmp-cleaner reaps pytest's default /tmp/pytest-of-* basetemp
         # mid-run, producing a spurious FileNotFoundError cascade. -p no:cacheprovider
         # keeps a stale cache from leaking across runs.
-        run: pytest -m "not integration" -q -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
+        #
+        # Coverage is reported (term-missing) but NOT gated: the bash suites run
+        # rebar as a subprocess so they don't count toward in-process coverage, and
+        # a hard floor would be misleading until that's reconciled. The number is
+        # surfaced for visibility / ratcheting, not as a pass/fail.
+        run: >-
+          pytest -m "not integration" -q -p no:cacheprovider
+          --basetemp="${{ runner.temp }}/rebar-basetemp"
+          --cov=rebar --cov-report=term-missing:skip-covered

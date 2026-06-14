@@ -87,7 +87,7 @@ class BindingStore:
     def _load(self) -> dict[str, Any]:
         if self._path.exists():
             try:
-                with open(self._path, "r", encoding="utf-8") as f:
+                with open(self._path, encoding="utf-8") as f:
                     return json.load(f)
             except (json.JSONDecodeError, ValueError, OSError) as exc:
                 # Fail CLOSED: corrupt or conflict-marked bindings.json must
@@ -120,7 +120,7 @@ class BindingStore:
         if not self._retired_path.exists():
             return set()
         try:
-            with open(self._retired_path, "r", encoding="utf-8") as f:
+            with open(self._retired_path, encoding="utf-8") as f:
                 data = json.load(f)
             retired = data.get("retired", {})
             if isinstance(retired, dict):
@@ -144,7 +144,7 @@ class BindingStore:
         if not self._retired_path.exists():
             return {}
         try:
-            with open(self._retired_path, "r", encoding="utf-8") as f:
+            with open(self._retired_path, encoding="utf-8") as f:
                 data = json.load(f)
             retired = data.get("retired", {})
             return retired if isinstance(retired, dict) else {}

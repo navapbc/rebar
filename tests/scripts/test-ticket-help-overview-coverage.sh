@@ -42,7 +42,10 @@ _is_allowlisted() {
 }
 
 # Extract every public dispatch arm (4-space indent), splitting alternations.
-mapfile -t ARMS < <(
+ARMS=()
+while IFS= read -r _arm; do
+    ARMS+=("$_arm")
+done < <(
     grep -E '^    [a-z][a-z0-9-]*(\|[a-z0-9-]+)*\)' "$DISPATCHER" \
         | sed -E 's/^    //; s/\).*$//' \
         | tr '|' '\n' \

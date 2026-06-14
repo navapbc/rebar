@@ -8,31 +8,13 @@ conftest.py; event-writing helpers + the module loader in _helpers.py.
 from __future__ import annotations
 
 import json
-import os
-import tempfile
-import time
 from pathlib import Path
 from types import ModuleType
 
 import pytest
-
 from _helpers import (
-    REPO_ROOT,
-    SCRIPT_PATH,
-    _UUID_A,
-    _UUID_B,
-    _UUID_C,
-    _UUID_D,
-    _get_check_cycle_at_level,
-    _load_module,
-    _make_ticket,
-    _write_archive_event,
-    _write_blocks_link,
-    _write_link_event,
     _write_ticket,
 )
-
-
 
 # ---------------------------------------------------------------------------
 # add_dependency hierarchy integration tests (story 983e-7fff)
@@ -137,8 +119,8 @@ def test_add_dependency_cross_story_emits_redirect_json_to_stdout(
     Expected: stdout contains JSON with "redirected": true plus original/resolved
     IDs reflecting the task being promoted to its epic ancestor.
     """
-    import io
     import contextlib
+    import io
 
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()

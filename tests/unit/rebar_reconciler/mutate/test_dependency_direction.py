@@ -14,8 +14,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parents[4]
 ENGINE = REPO_ROOT / "src" / "rebar" / "_engine"
 RECON = ENGINE / "rebar_reconciler"

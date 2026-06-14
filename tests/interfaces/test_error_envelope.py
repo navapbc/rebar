@@ -29,7 +29,6 @@ from pathlib import Path
 
 import pytest
 
-import rebar
 from rebar import schemas
 
 jsonschema = pytest.importorskip("jsonschema")

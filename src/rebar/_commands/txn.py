@@ -214,24 +214,38 @@ def _verdict_gate(
     :class:`CommandError` on a missing/mismatched hash; a force-close reason
     bypasses with a stderr warning (the wrapper writes the audit comment)."""
     require_verdict = False
-    try:
-        cfg_root = (
-            os.environ.get("REBAR_ROOT")
-            or os.environ.get("PROJECT_ROOT")
-            or tracker_dir.rsplit("/", 1)[0]
-        )
-        config_path = os.environ.get("REBAR_CONFIG") or os.path.join(
-            cfg_root, ".rebar", "config.conf"
-        )
-        if os.path.isfile(config_path):
-            with open(config_path) as cf:
+    cfg_root = (
+        os.environ.get("REBAR_ROOT")
+        or os.environ.get("PROJECT_ROOT")
+        or tracker_dir.rsplit("/", 1)[0]
+    )
+    config_path = os.environ.get("REBAR_CONFIG") or os.path.join(
+        cfg_root, ".rebar", "config.conf"
+    )
+    # Fail-CLOSED on read error: a *present* gate config we cannot read/parse must
+    # never silently disable the verification gate — require the verdict (block) and
+    # surface the error. An absent config is the intended opt-out (gate stays off).
+    # Narrow to the realistic config-read failures (I/O + decode); the prefix check
+    # guarantees the split is safe, so any other exception is a genuine bug that
+    # should surface (it still blocks the close via the outer handler — also fail-safe).
+    if os.path.isfile(config_path):
+        try:
+            with open(config_path, encoding="utf-8") as cf:
                 for line in cf:
                     if line.strip().startswith("verify.require_verdict_for_close="):
                         val = line.strip().split("=", 1)[1].strip().lower()
                         if val in ("true", "1", "yes"):
                             require_verdict = True
-    except Exception:
-        pass
+        except (OSError, UnicodeDecodeError) as cfg_exc:
+            import sys
+
+            print(
+                f"Warning: could not read verify config {config_path} "
+                f"({cfg_exc}); requiring a verdict to close {ticket_type} "
+                f"{ticket_id} (fail-closed).",
+                file=sys.stderr,
+            )
+            require_verdict = True
 
     if not require_verdict:
         return

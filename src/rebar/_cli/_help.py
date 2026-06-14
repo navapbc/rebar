@@ -20,7 +20,7 @@ Streams matter (the dispatcher distinguishes them, so the goldens do too):
 from __future__ import annotations
 
 import importlib.resources
-from functools import lru_cache
+from functools import cache
 
 # The canonical help text lives as package data so it ships in the wheel/editable
 # install (hatchling includes all files under ``src/rebar``). One file per key:
@@ -28,7 +28,7 @@ from functools import lru_cache
 _PKG = "rebar._cli.help"
 
 
-@lru_cache(maxsize=None)
+@cache
 def _load(name: str) -> str | None:
     """Return the raw bytes-as-text of ``help/<name>.txt``, or ``None`` if absent.
 

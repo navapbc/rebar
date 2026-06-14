@@ -16,7 +16,6 @@ from pathlib import Path
 import pytest
 
 import rebar
-from rebar._cli import _help
 from rebar._cli import (
     _DESCENDANTS,
     _FIELD_READS,
@@ -25,6 +24,7 @@ from rebar._cli import (
     _READS_INIT_ONLY,
     _READS_NO_INIT,
     _WRITES_FULL,
+    _help,
     main,
 )
 

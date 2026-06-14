@@ -7,32 +7,16 @@ conftest.py; event-writing helpers + the module loader in _helpers.py.
 
 from __future__ import annotations
 
-import json
 import os
-import tempfile
 import time
 from pathlib import Path
 from types import ModuleType
 
 import pytest
-
 from _helpers import (
-    REPO_ROOT,
-    SCRIPT_PATH,
-    _UUID_A,
-    _UUID_B,
-    _UUID_C,
-    _UUID_D,
-    _get_check_cycle_at_level,
-    _load_module,
-    _make_ticket,
-    _write_archive_event,
     _write_blocks_link,
-    _write_link_event,
     _write_ticket,
 )
-
-
 
 # ---------------------------------------------------------------------------
 # Performance
@@ -127,7 +111,6 @@ def test_graph_cache_key_invalidated_on_same_size_rewrite(tmp_path: Path) -> Non
     invalidates the cache — filename+size alone cannot see it and would serve a
     stale graph through deps/ready/next-batch.
     """
-    import os
 
     from ticket_graph._cache import _compute_cache_key
 

@@ -21,8 +21,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS = REPO_ROOT / "src" / "rebar" / "_engine"
 sys.path.insert(0, str(SCRIPTS))
 
-from ticket_reducer._alias import compute_alias  # noqa: E402
 from ticket_reducer import reduce_ticket  # noqa: E402
+from ticket_reducer._alias import compute_alias  # noqa: E402
 
 
 def test_compute_alias_full_id_three_words():

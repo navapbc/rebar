@@ -60,7 +60,7 @@ def _tracker(repo: Path) -> Path:
 def _expire_sync_marker(tracker: Path) -> None:
     """Delete the once-a-minute sync marker so the next read actually syncs."""
     h = hashlib.md5(str(tracker).encode()).hexdigest()[:12]
-    for cand in (f"/tmp/.ticket-sync-{h}", f"/tmp/.ticket-sync-fallback"):
+    for cand in (f"/tmp/.ticket-sync-{h}", "/tmp/.ticket-sync-fallback"):
         try:
             os.unlink(cand)
         except FileNotFoundError:

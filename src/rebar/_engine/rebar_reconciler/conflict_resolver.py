@@ -83,7 +83,7 @@ _PROVENANCE_CAP = 50
 def resolve_set_valued(
     local_set: Any,
     remote_set: Any,
-    provenance_record: Optional[Any],
+    provenance_record: Any | None,
 ) -> list[Any]:
     """Union of both sets; updates provenance_record with a FIFO cap of 50."""
     seen: set[Any] = set()
@@ -145,9 +145,9 @@ def resolve_field(
     field_name: str,
     local_val: Any,
     remote_val: Any,
-    provenance_record: Optional[Any] = None,
+    provenance_record: Any | None = None,
     *,
-    ledger: Optional[Any] = None,
+    ledger: Any | None = None,
 ) -> Any:
     """Dispatch to the correct resolver based on FIELD_CLASSES.
 
@@ -233,7 +233,7 @@ class ProvenanceLedger:
     def __init__(self) -> None:
         self._records: dict[str, list[dict[str, Any]]] = {}
 
-    def record(self, element_key: str, side: Optional[str] = None, value: Any = None) -> None:
+    def record(self, element_key: str, side: str | None = None, value: Any = None) -> None:
         """Append an entry for `element_key`.
 
         Accepts both positional (`record(key, side, value)`) and keyword

@@ -47,7 +47,7 @@ def tracker(tmp_path: Path) -> Path:
 
 def _store_with_binding(
     repo_root: Path, local_id: str, jira_key: str
-) -> "BindingStore":
+) -> BindingStore:
     bs = BindingStore(repo_root / ".tickets-tracker")
     bs.bind_confirm(local_id, jira_key)
     bs.save()

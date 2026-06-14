@@ -243,6 +243,7 @@ def test_delete_one_treats_404_as_success(applier):
 def test_delete_one_propagates_non_404_jira_errors(applier):
     """F5: 4xx other than 404 must still propagate from delete_one."""
     from unittest.mock import MagicMock
+
     import pytest as _pytest
 
     client = MagicMock()

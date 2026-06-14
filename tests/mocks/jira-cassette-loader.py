@@ -45,7 +45,7 @@ class Cassette:
         self._cursor: dict[tuple[str, str], int] = {}
 
     @classmethod
-    def from_file(cls, path: str) -> "Cassette":
+    def from_file(cls, path: str) -> Cassette:
         records: list[dict] = []
         with open(path) as f:
             for line in f:
