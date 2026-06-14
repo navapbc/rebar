@@ -23,7 +23,6 @@ All tests must fail (ERROR/FAILED) until ticket-unblock.py is implemented.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 from types import ModuleType
@@ -31,30 +30,19 @@ from types import ModuleType
 import pytest
 
 # ---------------------------------------------------------------------------
-# Module loading — filename has hyphens so we use importlib
+# Module under test — in-process package (Tier E E7d). The unblock logic lives
+# in rebar.graph._unblock; the bash-era engine shim (_engine/ticket-unblock.py)
+# only re-exported these functions and is being deleted, so we import the
+# package module directly rather than spec-loading the deleted helper.
 # ---------------------------------------------------------------------------
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "ticket-unblock.py"
-
-
-def _load_module() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("ticket_unblock", SCRIPT_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
-    return module
+import rebar.graph._unblock as ticket_unblock  # noqa: E402
 
 
 @pytest.fixture(scope="module")
 def unblock() -> ModuleType:
-    """Return the ticket-unblock module, failing all tests if absent (RED)."""
-    if not SCRIPT_PATH.exists():
-        pytest.fail(
-            f"ticket-unblock.py not found at {SCRIPT_PATH} — "
-            "this is expected RED state; implement the script to make tests pass."
-        )
-    return _load_module()
+    """Return the rebar.graph._unblock module (in-process unblock logic)."""
+    return ticket_unblock
 
 
 # ---------------------------------------------------------------------------
@@ -749,50 +737,36 @@ def test_batch_close_empty_tracker(unblock: ModuleType) -> None:
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_batch_close_cli_outputs_json(tmp_path: Path) -> None:
-    """--batch-close via subprocess produces valid JSON output.
+def test_batch_close_returns_json_serializable_shape(
+    unblock: ModuleType, tmp_path: Path
+) -> None:
+    """batch_close_operations returns a JSON-serializable dict with the expected
+    top-level keys.
 
-    Invokes ticket-unblock.py with --batch-close and a tracker_dir argument,
-    then asserts the stdout is parseable JSON with the expected top-level keys.
+    The deleted ticket-unblock.py CLI exposed this via `--batch-close <dir> <id>`
+    as `print(json.dumps(result))`. The CLI envelope had no behaviour of its own
+    beyond serializing this dict, so we exercise the in-process function and
+    assert the same JSON shape (keys + json.dumps round-trips) directly.
     """
-    import subprocess
-    import tempfile
-
-    tmp = tempfile.mkdtemp()
-    tracker_dir = Path(tmp)
+    tracker_dir = tmp_path / "tracker"
+    tracker_dir.mkdir()
 
     # Write a minimal ticket so the tracker is not empty
     _write_ticket(tracker_dir, "ticket-x", status="open")
 
-    proc = subprocess.run(
-        [
-            "python3",
-            str(SCRIPT_PATH),
-            "--batch-close",
-            str(tracker_dir),
-            "ticket-x",
-        ],
-        capture_output=True,
-        text=True,
+    result = unblock.batch_close_operations(
+        ticket_ids=["ticket-x"],
+        tracker_dir=str(tracker_dir),
     )
 
-    assert proc.returncode == 0, (
-        f"Expected exit 0 for --batch-close, got {proc.returncode}. "
-        f"stderr: {proc.stderr!r}"
-    )
-
-    try:
-        output = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        pytest.fail(
-            f"--batch-close output is not valid JSON: {exc}\nstdout: {proc.stdout!r}"
-        )
+    # The dict must be JSON-serializable (the CLI's only job was json.dumps).
+    output = json.loads(json.dumps(result))
 
     assert "open_children" in output, (
-        f"Expected 'open_children' key in JSON output, got {output!r}"
+        f"Expected 'open_children' key in result, got {output!r}"
     )
     assert "newly_unblocked" in output, (
-        f"Expected 'newly_unblocked' key in JSON output, got {output!r}"
+        f"Expected 'newly_unblocked' key in result, got {output!r}"
     )
 
 

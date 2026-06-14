@@ -33,39 +33,27 @@ All tests must return FAIL (AssertionError or pytest failure) before implementat
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import subprocess
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
+import rebar.reducer as ticket_reducer
+
 # ---------------------------------------------------------------------------
-# Module loading — filename has hyphens so we use importlib
+# Module under test — in-process package (Tier E E7d). The reducer logic lives
+# in rebar.reducer; the bash-era engine shim (_engine/ticket-reducer.py) and the
+# ticket-show.sh/ticket-list.sh read shims are being deleted, so we drive the
+# reducer via the package and the read commands via the in-process read
+# handlers (rebar._engine_support.reads) rather than subprocessing helpers.
 # ---------------------------------------------------------------------------
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-REDUCER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "ticket-reducer.py"
-# Single-source read path (story 23d2-e0f3): the standalone ticket-show.sh /
-# ticket-list.sh shims were collapsed into the dispatcher's read arms, which
-# call ticket-reads.py. Drive reads through the dispatcher (`ticket` -> `rebar`).
-TICKET_DISPATCHER = REPO_ROOT / "src" / "rebar" / "_engine" / "ticket"
-
-
-def _load_reducer() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("ticket_reducer", REDUCER_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
-    return module
 
 
 @pytest.fixture(scope="module")
 def reducer() -> ModuleType:
-    """Return the ticket-reducer module."""
-    assert REDUCER_PATH.exists(), f"ticket-reducer.py not found at {REDUCER_PATH}"
-    return _load_reducer()
+    """Return the rebar.reducer module (in-process reducer logic)."""
+    return ticket_reducer
 
 
 # ---------------------------------------------------------------------------
@@ -259,17 +247,21 @@ def test_reducer_no_alerts_when_none_present(
 
 
 # ---------------------------------------------------------------------------
-# Test 4: ticket-show.sh outputs health warning when unresolved alerts exist
+# Test 4: `show` surfaces a bridge alert indicator when unresolved alerts exist
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_ticket_show_outputs_health_warning_when_unresolved_alerts(
-    tmp_path: Path,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """ticket-show.sh output contains bridge alert indicator for tickets with unresolved alerts."""
-    # Build a minimal tickets-tracker directory structure in tmp_path
+    """The in-process `show` read surfaces a bridge alert indicator for tickets
+    with unresolved alerts (in the printed state JSON and/or the stderr warning).
+    """
+    from rebar._engine_support.reads import _cmd_show
+
+    # Build a minimal tickets-tracker directory structure
     tracker_dir = tmp_path / ".tickets-tracker"
     tracker_dir.mkdir()
     ticket_id = "tkt-alert-004"
@@ -298,41 +290,35 @@ def test_ticket_show_outputs_health_warning_when_unresolved_alerts(
         ticket_id=ticket_id,
     )
 
-    result = subprocess.run(
-        ["bash", str(TICKET_DISPATCHER), "show", ticket_id],
-        capture_output=True,
-        text=True,
-        cwd=str(tmp_path),
-        env={
-            **_subprocess_env(),
-            # TICKETS_TRACKER_DIR points the read at this fixture tracker and
-            # makes the dispatcher skip auto-init/sync — no real git repo needed.
-            "TICKETS_TRACKER_DIR": str(tracker_dir),
-        },
-    )
+    rc = _cmd_show([ticket_id], str(tracker_dir))
+    captured = capsys.readouterr()
+    combined_output = captured.out + captured.err
 
-    combined_output = result.stdout + result.stderr
+    assert rc == 0, f"show returned {rc}; stderr: {captured.err!r}"
     # The output (stdout JSON or stderr warning) must contain some indication of bridge alerts
     assert any(
         indicator in combined_output
         for indicator in ("BRIDGE_ALERT", "bridge_alert", "bridge_alerts", "⚠")
     ), (
-        f"ticket-show.sh output must contain bridge alert indicator for unresolved alerts.\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"show output must contain bridge alert indicator for unresolved alerts.\n"
+        f"stdout: {captured.out!r}\nstderr: {captured.err!r}"
     )
 
 
 # ---------------------------------------------------------------------------
-# Test 5: ticket-list.sh includes bridge_alerts in output for alerted tickets
+# Test 5: `list` includes bridge_alerts in output for alerted tickets
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_ticket_list_includes_bridge_alerts_in_output(
-    tmp_path: Path,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """ticket-list.sh output includes non-empty bridge_alerts for tickets with alerts."""
+    """The in-process `list` read surfaces bridge_alerts for tickets with alerts
+    (in the printed state JSON and/or the stderr warning)."""
+    from rebar._engine_support.reads import _cmd_list
+
     # Build minimal tracker directory
     tracker_dir = tmp_path / ".tickets-tracker"
     tracker_dir.mkdir()
@@ -362,36 +348,16 @@ def test_ticket_list_includes_bridge_alerts_in_output(
         ticket_id=ticket_id,
     )
 
-    result = subprocess.run(
-        ["bash", str(TICKET_DISPATCHER), "list"],
-        capture_output=True,
-        text=True,
-        cwd=str(tmp_path),
-        env={
-            **_subprocess_env(),
-            "TICKETS_TRACKER_DIR": str(tracker_dir),
-        },
-    )
+    rc = _cmd_list([], str(tracker_dir))
+    captured = capsys.readouterr()
+    combined_output = captured.out + captured.err
 
-    combined_output = result.stdout + result.stderr
+    assert rc == 0, f"list returned {rc}; stderr: {captured.err!r}"
     # The list output must surface bridge_alerts for the ticket
     assert any(
         indicator in combined_output
         for indicator in ("bridge_alerts", "BRIDGE_ALERT", "bridge_alert")
     ), (
-        f"ticket-list.sh output must include bridge_alerts for tickets with unresolved alerts.\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"list output must include bridge_alerts for tickets with unresolved alerts.\n"
+        f"stdout: {captured.out!r}\nstderr: {captured.err!r}"
     )
-
-
-# ---------------------------------------------------------------------------
-# Subprocess helper
-# ---------------------------------------------------------------------------
-
-
-def _subprocess_env() -> dict[str, str]:
-    """Return a clean env dict for subprocess calls, inheriting PATH."""
-    import os
-
-    env = {k: v for k, v in os.environ.items()}
-    return env
