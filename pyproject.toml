@@ -53,6 +53,11 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.10",
     "pytest-cov>=5",
+    # Pull the full agents stack so the rebar.llm validation tests (provider
+    # construction for Claude + ChatGPT, MCP/Langfuse paths) RUN in CI rather than
+    # skipping. Self-referential extra — kept here, not in core, so `pip install
+    # nava-rebar` stays dependency-free.
+    "nava-rebar[agents]",
 ]
 
 [project.scripts]
