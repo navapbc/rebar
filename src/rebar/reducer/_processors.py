@@ -186,7 +186,8 @@ def process_link(
     resolved_target = raw_target
     if tracker_dir and raw_target:
         try:
-            from ticket_resolver import resolve_ticket_id  # local import avoids circular dep
+            # local import avoids a module-load circular dep with the resolver
+            from rebar._engine_support.resolver import resolve_ticket_id
 
             canonical = resolve_ticket_id(raw_target, tracker_dir)
             if canonical:

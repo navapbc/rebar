@@ -43,11 +43,9 @@ def applier():
 
 @pytest.fixture(scope="module")
 def reduce_ticket():
-    if str(_ENGINE_DIR) not in sys.path:
-        sys.path.insert(0, str(_ENGINE_DIR))
-    import ticket_reducer
+    import rebar.reducer
 
-    return ticket_reducer.reduce_ticket
+    return rebar.reducer.reduce_ticket
 
 
 def _write(ticket_dir: Path, ts: int, uuid: str, event_type: str, data: dict) -> None:
