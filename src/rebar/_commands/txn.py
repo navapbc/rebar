@@ -107,7 +107,7 @@ def transition_core(
 
     Re-reads the ticket under the lock and rejects with :class:`ConcurrencyMismatch`
     (exit 10) if its status is not ``current_status``. Applies the bug-close-reason
-    and (opt-in) story/epic verdict-hash guards. Raises :class:`CommandError` for
+    and (opt-in) story/epic signature-close guards. Raises :class:`CommandError` for
     validation / git failures. Returns ``None`` on success (the wrapper computes
     newly_unblocked + output separately)."""
     handle = _acquire_write_lock(tracker_dir)
