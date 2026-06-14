@@ -1,1 +1,0 @@
-{"timestamp": 1781480220387970471, "uuid": "68d50f19-0f97-47a3-b312-0588b799096d", "event_type": "STATUS", "env_id": "3619ba0c-d6af-4b68-b37e-a2e90c707f03", "author": "Claude", "parent_status_uuid": "d1cf985a-05f1-4623-8b57-bd9584351997", "data": {"status": "closed", "current_status": "in_progress", "parent_status_uuid": "d1cf985a-05f1-4623-8b57-bd9584351997"}}
