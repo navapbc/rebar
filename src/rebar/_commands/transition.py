@@ -148,21 +148,20 @@ def _scratch_cleanup(repo_root: str, ticket_id: str) -> None:
 
 
 def _compact_on_close(repo_root: str, ticket_id: str) -> None:
-    """Compact-on-close: squash the event log into a SNAPSHOT (non-blocking, stdout
-    silenced). Still subprocesses ticket-compact.sh until compact is ported in E3."""
-    from rebar._engine import dispatcher, engine_env
+    """Compact-on-close: squash the event log into a SNAPSHOT (non-blocking, output
+    silenced). In-process via rebar._commands.compact (Tier E E3 rewired this off
+    the ticket-compact.sh subprocess); --threshold=0 --skip-sync, commit kept."""
+    import contextlib
+    import io
 
-    script = os.environ.get("REBAR_COMPACT_SCRIPT") or os.path.join(
-        os.path.dirname(str(dispatcher())), "ticket-compact.sh"
-    )
+    from rebar._commands import compact as _compact
+
     try:
-        subprocess.run(
-            ["bash", script, ticket_id, "--threshold=0", "--skip-sync"],
-            env=engine_env(repo_root),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except OSError:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            _compact.compact_cli(
+                [ticket_id, "--threshold=0", "--skip-sync"], repo_root=repo_root
+            )
+    except Exception:
         pass
 
 

@@ -424,8 +424,24 @@ def archive(ticket_id: str, *, repo_root=None) -> None:
 
 
 def compact(ticket_id: str | None = None, *, repo_root=None) -> None:
-    args = ["compact"] + ([ticket_id] if ticket_id else [])
-    _ok(_run(args, repo_root=repo_root), what="compact")
+    # In-process (Tier E E3): compact-on-id via the shared compaction core
+    # (ticket-compact.sh retired from this path). Output is captured (the bash
+    # library wrapper captured it too); failures raise RebarError.
+    import contextlib
+    import io
+
+    from rebar._commands import compact as _compact
+
+    out, err = io.StringIO(), io.StringIO()
+    argv = [ticket_id] if ticket_id else []
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = _compact.compact_cli(argv, repo_root=repo_root)
+    if rc != 0:
+        raise RebarError(
+            f"rebar compact failed (exit {rc}): {err.getvalue().strip()}",
+            returncode=rc,
+            stderr=err.getvalue(),
+        )
 
 
 # ── Read path (in-process via rebar._reads; alias-aware, returns parsed JSON) ──

@@ -48,6 +48,8 @@ _DESCENDANTS = frozenset({"list-descendants"})
 _GATES = frozenset({"clarity-check", "check-ac", "quality-check", "summary"})
 # Write/lifecycle arms (E3): full auto-init + reconverge before the in-process write.
 _LIFECYCLE = frozenset({"transition", "reopen", "claim"})
+# Compaction arms (E3): full auto-init before the in-process SNAPSHOT write.
+_COMPACT = frozenset({"compact", "compact-all"})
 # Leaf-write arms: full auto-init + reconverge before the in-process write.
 _WRITES_FULL = frozenset(
     {
@@ -135,6 +137,13 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         if sub == "claim":
             return _transition.claim_cli(rest)
         return _transition.transition_cli(rest)
+    if sub in _COMPACT:
+        ensure_initialized(init_only=False)
+        from rebar._commands import compact as _compact
+
+        if sub == "compact-all":
+            return _compact.compact_all_cli(rest)
+        return _compact.compact_cli(rest)
     if sub in _WRITES_FULL:
         ensure_initialized(init_only=False)
         from rebar._commands import main as commands_main
