@@ -30,7 +30,7 @@ import fcntl
 import os
 import time
 from contextlib import contextmanager
-from typing import Iterator
+from collections.abc import Iterator
 
 WRITE_LOCK_NAME = ".ticket-write.lock"
 MKDIR_LOCK_NAME = ".ticket-write.lock.d"

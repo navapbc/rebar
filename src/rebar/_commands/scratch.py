@@ -210,6 +210,6 @@ def scratch_cli(argv: list[str], *, repo_root=None) -> int:
     if verb == "clear":
         return _clear(rest)
     sys.stdout.write(
-        '{"status":"error","code":"unknown_verb","verb":"%s"}\n' % verb
+        f'{{"status":"error","code":"unknown_verb","verb":"{verb}"}}\n'
     )
     return 1

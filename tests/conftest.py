@@ -23,8 +23,8 @@ import os
 import shutil
 import socket
 import sys
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 from unittest.mock import patch
 
 import pytest
@@ -121,24 +121,23 @@ def _no_repo_root_leaks() -> Iterator[None]:
     finally:
         after = set(os.listdir(_REPO_ROOT))
         leaked = after - before
-        if not leaked:
-            return
-        for name in leaked:
-            target = _REPO_ROOT / name
-            if target.is_dir():
-                shutil.rmtree(target, ignore_errors=True)
-            else:
-                try:
-                    target.unlink()
-                except OSError:
-                    # Cleanup is best-effort — pytest.fail() below already
-                    # surfaces the leak. Suppressing keeps a permissions or
-                    # races race from masking the real failure.
-                    pass
-        pytest.fail(
-            "Test leaked new entries into REPO_ROOT (use tmp_path or a "
-            f"sandboxed temp dir): {sorted(leaked)}"
-        )
+        if leaked:
+            for name in leaked:
+                target = _REPO_ROOT / name
+                if target.is_dir():
+                    shutil.rmtree(target, ignore_errors=True)
+                else:
+                    try:
+                        target.unlink()
+                    except OSError:
+                        # Cleanup is best-effort — pytest.fail() below already
+                        # surfaces the leak. Suppressing keeps a permissions or
+                        # races race from masking the real failure.
+                        pass
+            pytest.fail(
+                "Test leaked new entries into REPO_ROOT (use tmp_path or a "
+                f"sandboxed temp dir): {sorted(leaked)}"
+            )
 
 
 # ── Repo-isolation guard (no test may commit to / mutate this checkout) ───────
@@ -159,7 +158,8 @@ def _no_repo_root_leaks() -> Iterator[None]:
 # Detection primitives live in tests/_isolation.py so the guard's self-test can
 # exercise the same code (tests/unit/test_repo_isolation_guard.py).
 
-from _isolation import head as _repo_head, porcelain as _repo_porcelain  # noqa: E402
+from _isolation import head as _repo_head  # noqa: E402
+from _isolation import porcelain as _repo_porcelain
 
 
 @pytest.fixture(autouse=True)

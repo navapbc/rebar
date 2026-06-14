@@ -10,7 +10,10 @@ name = "nava-rebar"
 version = "0.5.0"
 description = "Event-sourced ticket system with a Jira reconciler — CLI, Python library, and MCP server."
 readme = "README.md"
-requires-python = ">=3.10"
+# Floor is 3.11: the reconciler uses enum.StrEnum (new in 3.11) — see
+# rebar_reconciler/mutation.py / inbound_probe.py. (Was previously declared
+# >=3.10, but that never actually worked; corrected here.)
+requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = []
@@ -22,7 +25,15 @@ dependencies = []
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.2"]
-dev = ["pytest>=8", "mcp>=1.2", "jsonschema>=4.18", "hatchling>=1.18"]
+dev = [
+    "pytest>=8",
+    "mcp>=1.2",
+    "jsonschema>=4.18",
+    "hatchling>=1.18",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "pytest-cov>=5",
+]
 
 [project.scripts]
 rebar = "rebar.cli:main"
@@ -48,6 +59,46 @@ exclude = [
 
 [tool.hatch.build.targets.sdist]
 include = ["src/rebar", "tests", "README.md"]
+
+[tool.ruff]
+# Engine ships as package data but is normal Python; lint it too. The gating set
+# below is the subset the whole tree is CLEAN for — so `ruff check` passes and
+# prevents regressions. It starts from the flake8 "real-bug" smoke set (syntax
+# errors + undefined names — the class that catches NameError-on-error-path bugs
+# like a missing `import urllib` in an `except`) and adds the rule families that
+# were swept clean: redefinitions (F811), modernizations (UP), and the safe
+# bugbear/style checks (B009, B012, F541, E401). The remaining stylistic set
+# (unused imports F401, line length E501, import order I001, …) runs advisory in
+# CI to ratchet down over time without a destabilizing one-shot mass-fix; F401 in
+# the reconciler re-export facades is tracked as a dedicated bug (it needs
+# executable reconciler integration tests + `__all__` before it can be swept).
+#
+# target-version is intentionally kept at the conservative py310 floor (not py311)
+# even though requires-python is >=3.11: it keeps the gating UP set from pushing
+# 3.11-only idioms (e.g. datetime.UTC) and a risky str+Enum -> StrEnum migration
+# as mandatory fixes. Code clean for a py310 target runs fine on 3.11/3.12.
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82", "F811", "F541", "UP", "B009", "B012", "E401"]
+
+[tool.mypy]
+# Scoped, opt-in type checking. The pure in-process library core
+# (reducer / graph / _store) is kept type-clean and gated in CI; the rest of the
+# tree (engine helpers, reconciler) is checked advisory-only for now.
+python_version = "3.11"
+ignore_missing_imports = true
+# Report errors ONLY in the files passed on the command line, never in modules
+# reached via import. This pins the gating scope to exactly the named packages so
+# the gate cannot go red because some *other* (not-yet-clean) module is later
+# imported by the core. The advisory full-tree run still reports everything,
+# because there every file is named on the command line.
+follow_imports = "silent"
+
+[tool.coverage.run]
+source = ["rebar"]
+branch = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

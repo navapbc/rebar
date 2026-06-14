@@ -17,9 +17,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-import rebar
-
 from adapters import McpAdapter
+
+import rebar
 
 
 def _cli(*args: str, cwd: str | None = None) -> subprocess.CompletedProcess:

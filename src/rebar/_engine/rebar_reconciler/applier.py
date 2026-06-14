@@ -26,7 +26,8 @@ import time
 import urllib.error
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 

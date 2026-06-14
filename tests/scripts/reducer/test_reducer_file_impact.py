@@ -7,18 +7,12 @@ conftest.py; event-writing helpers (`_write_event`, `_UUID*`) in _events.py.
 
 from __future__ import annotations
 
-import json
-import os
 import sys
-import time
-import warnings
 from pathlib import Path
+from types import ModuleType
 
 import pytest
-
 from _events import _UUID, _UUID2, _UUID3, REPO_ROOT, _write_event
-
-
 
 # ---------------------------------------------------------------------------
 # Tests: FILE_IMPACT event type (story 2985-f04d, task a0a3-09d7)
@@ -30,8 +24,8 @@ _SCRIPTS_DIR_FI = str(REPO_ROOT / "src" / "rebar" / "_engine")
 if _SCRIPTS_DIR_FI not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR_FI)
 
-from ticket_reducer._state import make_initial_state as _make_initial_state  # noqa: E402
 from ticket_reducer._state import make_error_dict as _make_error_dict  # noqa: E402
+from ticket_reducer._state import make_initial_state as _make_initial_state  # noqa: E402
 
 
 @pytest.mark.unit

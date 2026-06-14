@@ -17,7 +17,7 @@ _SCRIPTS_DIR = str(Path(__file__).resolve().parents[3] / "src" / "rebar" / "_eng
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
-from ticket_reducer.llm_format import to_llm, shorten_comment, shorten_dep  # noqa: E402
+from ticket_reducer.llm_format import shorten_comment, shorten_dep, to_llm  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Fixture shim — provides a 'mod' namespace with the three public functions

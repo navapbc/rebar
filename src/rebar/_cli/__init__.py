@@ -90,10 +90,13 @@ def _reconcile(argv: list[str]) -> int:
 def _passthrough(sub: str, rest: list[str]) -> int:
     """Transitionally run a not-yet-ported command via the bash dispatcher.
 
-    The dispatcher runs its own ``_ensure_initialized``, so the middleware is
-    deliberately not applied here. Output streams inherit (no capture) so the user
-    sees the command's output directly, exactly as ``cli.py`` does today.
+    The dispatcher would silently auto-init, so we run the in-process consent gate
+    FIRST (Tier E E4): on an uninitialized repo this prompts (TTY) or errors
+    (non-interactive) before any bash runs, closing the last silent-init path. Once
+    the tracker exists the dispatcher's own ``_ensure_initialized`` is a no-op.
+    Output streams inherit (no capture) so the user sees output directly.
     """
+    ensure_initialized(init_only=False)
     from rebar._engine import dispatcher, engine_env
 
     env = engine_env()
@@ -122,6 +125,11 @@ def _emit_subcommand_help(sub: str) -> int:
 
 def _dispatch(sub: str, rest: list[str]) -> int:
     """Route a known subcommand to its in-process or passthrough implementation."""
+    if sub == "init":
+        # Explicit bootstrap — NEVER triggers auto-init (it IS init).
+        from rebar._commands import init as _init_cmd
+
+        return _init_cmd.init_cli(rest)
     if sub == "scratch":
         # Filesystem-only per-ticket store — NO auto-init (matches the dispatcher).
         from rebar._commands import scratch
@@ -157,6 +165,19 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         from rebar._commands import delete as _delete
 
         return _delete.delete_cli(rest)
+    if sub == "fsck":
+        ensure_initialized(init_only=False)
+        from rebar._commands import fsck as _fsck
+
+        return _fsck.fsck_cli(rest)
+    if sub == "fsck-recover":
+        # The recover path resolves its own tracker (honors TICKETS_TRACKER_DIR /
+        # --tracker-dir); the dispatcher only auto-inits when no tracker is injected.
+        if not os.environ.get("TICKETS_TRACKER_DIR"):
+            ensure_initialized(init_only=False)
+        from rebar._commands import fsck_recover as _fsck_recover
+
+        return _fsck_recover.fsck_recover_cli(rest)
     if sub in _WRITES_FULL:
         ensure_initialized(init_only=False)
         from rebar._commands import main as commands_main

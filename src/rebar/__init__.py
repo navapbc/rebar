@@ -79,8 +79,16 @@ def _json(cp: subprocess.CompletedProcess, *, what: str) -> Any:
 
 # ── Initialization ───────────────────────────────────────────────────────────
 def init_repo(*, repo_root=None) -> None:
-    """Initialize the ticket system (orphan ``tickets`` branch + worktree)."""
-    _ok(_run(["init"], repo_root=repo_root), what="init")
+    """Initialize the ticket system (orphan ``tickets`` branch + worktree).
+
+    This is the explicit library init path (Tier E E4, in-process): it always
+    bootstraps and never prompts. Other library calls do NOT auto-init — they
+    require this to have run first (or ``rebar init`` interactively)."""
+    from rebar._commands import init as _init_cmd
+
+    rc = _init_cmd.init_core(repo_root, silent=True)
+    if rc != 0:
+        raise RebarError(f"rebar init failed (exit {rc})", returncode=rc)
 
 
 # ── Write path (subprocess → dispatcher) ─────────────────────────────────────
@@ -593,9 +601,54 @@ def fsck(*, recover: bool = False, report_only: bool = False, repo_root=None) ->
     ``.git/index.lock`` — so a read-only surface (MCP under REBAR_MCP_READONLY)
     can run plain fsck without any git-state write (the stale lock is reported,
     not removed)."""
-    args = ["fsck-recover"] if recover else ["fsck"]
-    env_extra = {"REBAR_FSCK_NO_MUTATE": "1"} if report_only else None
-    return _ok(_run(args, repo_root=repo_root, env_extra=env_extra), what="fsck")
+    if recover:
+        # In-process fsck-recover (Tier E E4). report_only has no effect on the
+        # recover path (it has no index.lock mutation toggle); preserved for API
+        # compatibility. Output captured; exit!=0 raises (prior _ok contract).
+        import contextlib as _ctx
+        import io as _io
+
+        from rebar._commands import fsck_recover as _fr
+
+        _out, _err = _io.StringIO(), _io.StringIO()
+        with _ctx.redirect_stdout(_out), _ctx.redirect_stderr(_err):
+            _rc = _fr.fsck_recover_cli([], repo_root=repo_root)
+        if _rc != 0:
+            raise RebarError(
+                f"rebar fsck failed (exit {_rc}): {(_err.getvalue() or _out.getvalue()).strip()}",
+                returncode=_rc,
+                stderr=_err.getvalue(),
+            )
+        return _out.getvalue()
+
+    # In-process fsck (Tier E E4). Output is captured; exit!=0 (issues found) raises,
+    # preserving the prior _ok(_run(...)) contract.
+    import contextlib
+    import io
+    import os as _os
+
+    from rebar._commands import fsck as _fsck_mod
+
+    out, err = io.StringIO(), io.StringIO()
+    _prev = _os.environ.get("REBAR_FSCK_NO_MUTATE")
+    if report_only:
+        _os.environ["REBAR_FSCK_NO_MUTATE"] = "1"
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = _fsck_mod.fsck_cli([], repo_root=repo_root)
+    finally:
+        if report_only:
+            if _prev is None:
+                _os.environ.pop("REBAR_FSCK_NO_MUTATE", None)
+            else:
+                _os.environ["REBAR_FSCK_NO_MUTATE"] = _prev
+    if rc != 0:
+        raise RebarError(
+            f"rebar fsck failed (exit {rc}): {(err.getvalue() or out.getvalue()).strip()}",
+            returncode=rc,
+            stderr=err.getvalue(),
+        )
+    return out.getvalue()
 
 
 def summary(*ticket_ids: str, repo_root=None) -> list:

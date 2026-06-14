@@ -222,17 +222,20 @@ def _signature_gate(
     (the wrapper writes the audit comment). Replaces the legacy verdict-hash gate;
     ``--verdict-hash`` is deprecated and ignored."""
     require_sig = False
-    try:
-        cfg_root = (
-            os.environ.get("REBAR_ROOT")
-            or os.environ.get("PROJECT_ROOT")
-            or tracker_dir.rsplit("/", 1)[0]
-        )
-        config_path = os.environ.get("REBAR_CONFIG") or os.path.join(
-            cfg_root, ".rebar", "config.conf"
-        )
-        if os.path.isfile(config_path):
-            with open(config_path) as cf:
+    cfg_root = (
+        os.environ.get("REBAR_ROOT")
+        or os.environ.get("PROJECT_ROOT")
+        or tracker_dir.rsplit("/", 1)[0]
+    )
+    config_path = os.environ.get("REBAR_CONFIG") or os.path.join(
+        cfg_root, ".rebar", "config.conf"
+    )
+    # Fail-CLOSED on read error: a *present* gate config we cannot read/parse must
+    # never silently disable the verification gate — require a signature (block) and
+    # surface the error. An absent config is the intended opt-out (gate stays off).
+    if os.path.isfile(config_path):
+        try:
+            with open(config_path, encoding="utf-8") as cf:
                 for line in cf:
                     s = line.strip()
                     # New name + legacy alias (back-compat for existing configs).
@@ -242,8 +245,16 @@ def _signature_gate(
                         val = s.split("=", 1)[1].strip().lower()
                         if val in ("true", "1", "yes"):
                             require_sig = True
-    except Exception:
-        pass
+        except (OSError, UnicodeDecodeError) as cfg_exc:
+            import sys
+
+            print(
+                f"Warning: could not read verify config {config_path} "
+                f"({cfg_exc}); requiring a signature to close {ticket_type} "
+                f"{ticket_id} (fail-closed).",
+                file=sys.stderr,
+            )
+            require_sig = True
 
     if not require_sig:
         return

@@ -34,7 +34,6 @@ pytest.importorskip("referencing")
 
 from adapters import _unwrap  # noqa: E402  (tests/interfaces is on sys.path)
 
-
 # ── disposition: every outputSchema advertiser is classified here ─────────────
 # value is either a canonical schema name (validate the real result against it)
 # or EXEMPT with a one-line reason.

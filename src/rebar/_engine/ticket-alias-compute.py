@@ -21,7 +21,7 @@ def load_words(path):
     adjs, nouns = [], []
     section = "adj"
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             for line in f:
                 line = line.rstrip("\n")
                 if line == "# NOUNS":
@@ -33,7 +33,7 @@ def load_words(path):
                     adjs.append(line.strip())
                 else:
                     nouns.append(line.strip())
-    except (OSError, IOError):
+    except OSError:
         # Intentional: wordlist is optional. Caller checks for empty lists and
         # falls back to the hex-alias path (main() prints hex_id[:8] + FALLBACK).
         pass
