@@ -1,18 +1,22 @@
-"""In-process ``transition`` / ``reopen`` (Tier E E3).
+"""In-process ``transition`` / ``reopen`` / ``claim`` wrappers (Tier E E3).
 
-Ports the bash ``ticket-transition.sh`` wrapper (+ the ``ticket_transition``
-lib-api id-resolution layer) over the relocated locked core
-:func:`rebar._commands.txn.transition_core`. The wrapper owns everything around the
-locked write: ``--output`` parsing, the 2-arg current-status autodetect, the
-``archived → open`` un-archive seam, status validation, the idempotent no-op, the
-ghost / init checks, the open-children close guard, ``newly_unblocked`` detection
-(via :func:`rebar.graph._unblock.batch_close_operations`), the force-close audit
-comment, compact-on-close, per-ticket scratch cleanup, and the
-``{ticket_id,from,to,newly_unblocked}`` json / ``UNBLOCKED:`` text output.
+Ports the bash ``ticket-transition.sh`` / ``ticket-claim.sh`` wrappers (+ the
+``ticket_transition`` lib-api id-resolution layer) over the relocated locked cores
+in :mod:`rebar._commands.txn` (``transition_core`` / ``claim_core``). The wrappers
+own everything around the locked write: ``--output`` parsing, the 2-arg
+current-status autodetect, the ``archived → open`` un-archive seam, status
+validation, the idempotent no-op, the ghost / init checks, the open-children close
+guard, ``newly_unblocked`` detection (via
+:func:`rebar.graph._unblock.batch_close_operations`), the force-close audit
+comment, compact-on-close, per-ticket scratch cleanup, the
+``{ticket_id,from,to,newly_unblocked}`` json / ``UNBLOCKED:`` text output, and
+claim's ``_emit_error_envelope`` (ticket_not_found / concurrency_conflict /
+claim_failed) + ``CLAIMED:`` output.
 
-Byte-parity with the dispatcher is pinned by ``tests/interfaces/test_e3_transition.py``.
-No bash is deleted here (the ``.sh`` suites still drive the dispatcher); compact-on-close
-still subprocesses ``ticket-compact.sh`` until compact is ported, then rewires.
+Byte-parity with the dispatcher is pinned by ``tests/interfaces/test_e3_transition.py``
+and ``test_e3_claim.py``. No bash is deleted here (the ``.sh`` suites still drive
+the dispatcher); compact-on-close still subprocesses ``ticket-compact.sh`` until
+compact is ported, then rewires.
 """
 
 from __future__ import annotations
@@ -439,6 +443,135 @@ def transition_cli(argv: list[str], *, repo_root=None) -> int:
     elif target_status == "closed":
         ids = result["newly_unblocked"]
         sys.stdout.write(f"UNBLOCKED: {','.join(ids) if ids else 'none'}\n")
+    return 0
+
+
+_CLAIM_USAGE = (
+    "Usage: ticket claim <ticket_id> [--assignee=<name>]\n"
+    "  Claims an OPEN ticket (-> in_progress) and sets its assignee atomically.\n"
+    "  Exits 10 if the ticket is not open (someone else already claimed it).\n"
+)
+
+
+def _parse_assignee(args: list[str]) -> str:
+    """Parse [--assignee[=]<name>] from claim's args (other tokens skipped),
+    mirroring ticket-claim.sh. Raises :class:`CommandError` on a value-less flag."""
+    assignee = ""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith("--assignee="):
+            assignee = a[len("--assignee="):]
+            i += 1
+        elif a == "--assignee":
+            if i + 1 >= len(args):
+                raise CommandError("Error: --assignee requires a value", returncode=1)
+            assignee = args[i + 1]
+            i += 2
+        else:
+            i += 1
+    return assignee
+
+
+def claim_compute(ticket_id: str, *, assignee: str = "", repo_root=None) -> dict:
+    """Claim an ALREADY-RESOLVED ticket (ghost/init checks + the locked claim core).
+    Returns ``{ticket_id, status, assignee}``; raises :class:`ConcurrencyMismatch`
+    (exit 10) / :class:`CommandError`."""
+    tracker = str(config.tracker_dir(repo_root))
+    ticket_dir = os.path.join(tracker, ticket_id)
+    if not os.path.isdir(ticket_dir):
+        raise CommandError(f"Error: ticket '{ticket_id}' does not exist", returncode=1)
+    if not any(
+        (n.endswith("-CREATE.json") or n.endswith("-SNAPSHOT.json")) and not n.startswith(".")
+        for n in os.listdir(ticket_dir)
+    ):
+        raise CommandError(
+            f"Error: ticket {ticket_id} has no CREATE or SNAPSHOT event", returncode=1
+        )
+    if not os.path.isfile(os.path.join(tracker, ".env-id")):
+        raise CommandError(
+            "Error: ticket system not initialized. Run 'ticket init' first.", returncode=1
+        )
+
+    from rebar._commands import _seam
+
+    env_id = _seam.env_id(config.tracker_dir(repo_root))
+    author = _seam.author("Unknown")
+    txn.claim_core(tracker, ticket_id, env_id=env_id, author=author, assignee=assignee)
+    return {"ticket_id": ticket_id, "status": "in_progress", "assignee": assignee or None}
+
+
+def claim_cli(argv: list[str], *, repo_root=None) -> int:
+    """``rebar claim`` entry: parse ``--output`` / ``--assignee``, resolve, run the
+    locked claim core, and emit the dispatcher-identical CLAIMED / error-envelope
+    output."""
+    try:
+        fmt, rest = parse_output(argv, "report")
+    except OutputFormatError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 2
+    if len(rest) < 1:
+        sys.stderr.write(_CLAIM_USAGE)
+        return 1
+
+    raw_id = rest[0]
+    try:
+        assignee = _parse_assignee(rest[1:])
+    except CommandError as exc:
+        sys.stderr.write(exc.message + "\n")
+        return exc.returncode
+
+    tracker = str(config.tracker_dir(repo_root))
+    ticket_id = resolve_ticket_id(raw_id, tracker)
+    if ticket_id is None:
+        if fmt == "json":
+            sys.stdout.write(
+                json.dumps(
+                    error_envelope("ticket_not_found", raw_id, f"Ticket '{raw_id}' not found", 1)
+                )
+                + "\n"
+            )
+        sys.stderr.write(f"Error: ticket '{raw_id}' not found\n")
+        return 1
+
+    try:
+        claim_compute(ticket_id, assignee=assignee, repo_root=repo_root)
+    except ConcurrencyMismatch as exc:
+        sys.stderr.write(exc.message + "\n")
+        if fmt == "json":
+            sys.stdout.write(
+                json.dumps(
+                    error_envelope(
+                        "concurrency_conflict",
+                        raw_id,
+                        f"Ticket '{ticket_id}' is not open (already claimed)",
+                        10,
+                    )
+                )
+                + "\n"
+            )
+        return 10
+    except CommandError as exc:
+        sys.stderr.write(exc.message + "\n")
+        if fmt == "json":
+            sys.stdout.write(
+                json.dumps(
+                    error_envelope(
+                        "claim_failed", raw_id, f"Failed to claim ticket '{ticket_id}'", 1
+                    )
+                )
+                + "\n"
+            )
+        return 1
+
+    if fmt == "json":
+        sys.stdout.write(
+            json.dumps({"ticket_id": ticket_id, "status": "in_progress", "assignee": assignee or None})
+            + "\n"
+        )
+    else:
+        suffix = f" (assignee: {assignee})" if assignee else ""
+        sys.stdout.write(f"CLAIMED: {ticket_id}{suffix}\n")
     return 0
 
 

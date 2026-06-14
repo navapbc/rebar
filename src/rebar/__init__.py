@@ -181,20 +181,38 @@ def claim(ticket_id: str, *, assignee=None, repo_root=None) -> dict:
     other failures. This is the optimistic-concurrency primitive parallel agents
     use to grab work without double-assignment.
     """
-    args = ["claim", ticket_id, "--output", "json"]
-    if assignee:
-        args += [f"--assignee={assignee}"]
-    cp = _run(args, repo_root=repo_root)
-    if cp.returncode == 10:
-        raise ConcurrencyError(
-            f"claim rejected: {ticket_id} is not open (already claimed). "
-            f"{cp.stderr.strip()}",
-            returncode=10,
-            stderr=cp.stderr,
+    # In-process (Tier E E3): resolve the id, then run the shared claim core
+    # (ticket-claim.sh was retired from this path). Returns the structured result
+    # {ticket_id, status, assignee}.
+    from rebar._commands import transition as _transition
+    from rebar._commands._seam import CommandError
+    from rebar._commands.txn import ConcurrencyMismatch
+    from rebar._engine_support.resolver import resolve_ticket_id
+
+    tracker = str(config.tracker_dir(repo_root))
+    resolved = resolve_ticket_id(ticket_id, tracker)
+    if resolved is None:
+        raise RebarError(
+            f"rebar claim failed (exit 1): Error: ticket '{ticket_id}' not found",
+            returncode=1,
+            stderr=f"Error: ticket '{ticket_id}' not found\n",
         )
-    # Single source of truth: return the engine's structured result
-    # {ticket_id, status, assignee} rather than re-deriving it.
-    return _json(cp, what="claim")
+    try:
+        return _transition.claim_compute(
+            resolved, assignee=assignee or "", repo_root=repo_root
+        )
+    except ConcurrencyMismatch as exc:
+        raise ConcurrencyError(
+            f"claim rejected: {ticket_id} is not open (already claimed). {exc.message}",
+            returncode=10,
+            stderr=exc.message,
+        ) from None
+    except CommandError as exc:
+        raise RebarError(
+            f"rebar claim failed (exit {exc.returncode}): {exc.message}",
+            returncode=exc.returncode,
+            stderr=exc.message,
+        ) from None
 
 
 def reopen(ticket_id: str, *, repo_root=None) -> dict:

@@ -47,7 +47,7 @@ _DESCENDANTS = frozenset({"list-descendants"})
 # transitively via `ticket show`, so the gate CLI itself does no auto-init).
 _GATES = frozenset({"clarity-check", "check-ac", "quality-check", "summary"})
 # Write/lifecycle arms (E3): full auto-init + reconverge before the in-process write.
-_LIFECYCLE = frozenset({"transition", "reopen"})
+_LIFECYCLE = frozenset({"transition", "reopen", "claim"})
 # Leaf-write arms: full auto-init + reconverge before the in-process write.
 _WRITES_FULL = frozenset(
     {
@@ -132,6 +132,8 @@ def _dispatch(sub: str, rest: list[str]) -> int:
 
         if sub == "reopen":
             return _transition.reopen_cli(rest)
+        if sub == "claim":
+            return _transition.claim_cli(rest)
         return _transition.transition_cli(rest)
     if sub in _WRITES_FULL:
         ensure_initialized(init_only=False)
