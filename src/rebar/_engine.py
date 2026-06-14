@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import importlib.resources
 import os
+import shutil
 import subprocess
+import sys
 from functools import lru_cache
 from pathlib import Path
 
@@ -45,6 +47,28 @@ def dispatcher() -> Path:
     return engine_dir() / "rebar"
 
 
+def in_process_cli() -> str:
+    """Path to the in-process ``rebar`` CLI used as a single-executable ticket reader.
+
+    The reconciler (``rebar_reconciler/{applier,invariants,reconcile}.py``) and
+    ``validate`` invoke ``$REBAR_TICKET_CLI`` as one executable (``[cli, "list"]``)
+    to read local tickets. Historically that was the bash dispatcher; post-Tier-E
+    it is the ``rebar`` console script (``rebar.cli:main`` → ``rebar._cli.main``),
+    which is fully in-process and never touches the bash engine.
+
+    Because callers treat the value as a single token, this returns the console
+    script path rather than the multi-token ``python -m rebar`` (the package
+    ``__main__`` entry, which exists as the import-path-independent fallback).
+    Resolution prefers the console script next to the running interpreter (the
+    venv/pipx ``bin`` dir — hermetic, independent of ``PATH``), then falls back to
+    a ``PATH`` lookup. When neither is found we return the best-effort
+    interpreter-adjacent path; callers warn and degrade to an empty list, as before.
+    """
+    bindir = Path(sys.executable).parent
+    found = shutil.which("rebar", path=str(bindir)) or shutil.which("rebar")
+    return found if found else str(bindir / "rebar")
+
+
 def wordlist_path() -> Path:
     """Path to the alias wordlist shipped with the engine."""
     return engine_dir() / "resources" / "ticket-wordlist.txt"
@@ -72,7 +96,7 @@ def engine_env(repo_root: str | os.PathLike[str] | None = None) -> dict[str, str
     existing = env.get("PYTHONPATH")
     env["PYTHONPATH"] = eng + (os.pathsep + existing if existing else "")
     env["TICKET_WORDLIST_PATH"] = str(wordlist_path())
-    env.setdefault("REBAR_TICKET_CLI", str(dispatcher()))
+    env.setdefault("REBAR_TICKET_CLI", in_process_cli())
 
     if repo_root is not None:
         root = str(Path(repo_root).resolve())

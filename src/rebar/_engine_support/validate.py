@@ -6,11 +6,13 @@ Faithful in-process port of ``validate-issues.sh``: normalize every ticket from
 finding stream, and render text / ``--terse`` / ``--output json`` exactly as bash
 did — including the ANSI colors and the score-encoded exit (``exit == 5 - score``).
 
-Data source mirrors bash precisely: bash reads via ``$TICKET_CMD list`` (default
-the dispatcher itself); so when ``TICKET_CMD`` is set in the environment (test
-injection) we subprocess it, and otherwise we read in-process via
-``list_states`` — the Tier C win, byte-equivalent because the dispatcher's ``list``
-arm is itself ``list_states``.
+Data source: when ``TICKET_CMD`` is set in the environment (test injection) we
+subprocess ``$TICKET_CMD list``, and otherwise we read in-process via
+``list_states`` — the Tier C win, byte-equivalent because the CLI's ``list`` arm
+is itself ``list_states``. The default ticket command (used only for the
+interface-contract *suggestion* text, never subprocessed in production) is the
+in-process ``rebar`` CLI (:func:`rebar._engine.in_process_cli`), not the retired
+bash dispatcher.
 
 Output contract (docs/bash-migration.md §1.4): ``--output json`` is pinned by JSON
 **schema + semantic** equality (jq vs ``json.dumps`` whitespace differs and is not
@@ -50,9 +52,9 @@ _ALWAYS_SHOWN = {"critical", "major", "minor", "warning"}
 
 
 def _default_ticket_cmd() -> str:
-    from rebar._engine import engine_dir
+    from rebar._engine import in_process_cli
 
-    return str(engine_dir() / "ticket")
+    return in_process_cli()
 
 
 # ───────────────────────────── data + normalization ──────────────────────────
