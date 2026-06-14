@@ -265,6 +265,51 @@ def test_verify_record_empty_signature_is_unsigned() -> None:
     assert out["verdict"] == "unsigned"
 
 
+# ── empty key (_NO_KEY) must never certify (security regression) ──────────────
+def test_empty_key_never_certifies_even_with_crafted_signature() -> None:
+    # The attack: in a key-less environment the key is b"" (_NO_KEY). HMAC under an
+    # empty key is computable by anyone, so a crafted record whose signature was
+    # made with the empty key must NOT be certified (would bypass the close gate).
+    forged = ["forged: PASS"]
+    crafted = {
+        "manifest": forged,
+        "signature": signing.compute_signature("t", forged, signing._NO_KEY),
+        "key_id": signing.key_fingerprint(signing._NO_KEY),
+    }
+    out = signing.verify_record(crafted, "t", signing._NO_KEY)
+    assert out["verified"] is False
+    assert out["verdict"] == "foreign_key"
+
+
+def test_empty_key_unsigned_ticket_still_unsigned() -> None:
+    assert signing.verify_record(None, "t", signing._NO_KEY)["verdict"] == "unsigned"
+
+
+def test_signing_key_empty_file_raises_on_sign(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("REBAR_SIGNING_KEY", raising=False)
+    (tmp_path / ".signing-key").write_text("   \n")  # whitespace-only == empty
+    with pytest.raises(SigningError, match="empty"):
+        signing.signing_key(tmp_path, create_if_missing=True)
+
+
+def test_signing_key_empty_file_is_no_key_on_verify(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("REBAR_SIGNING_KEY", raising=False)
+    (tmp_path / ".signing-key").write_text("\n\n")
+    assert signing.signing_key(tmp_path, create_if_missing=False) == signing._NO_KEY
+
+
+def test_process_signature_coerces_non_list_manifest() -> None:
+    # A non-list manifest (e.g. a dict) must not be persisted into reduced state.
+    from rebar.reducer._processors import process_signature
+    from rebar.reducer._state import make_initial_state
+
+    s = make_initial_state()
+    ev = {"uuid": "u", "timestamp": 1, "author": "a",
+          "data": {"manifest": {"not": "a list"}, "signature": "x", "key_id": "k"}}
+    process_signature(s, ev, ev["data"])
+    assert s["signature"]["manifest"] == []
+
+
 # ── process_signature is last-writer-wins (the merge contract) ────────────────
 def test_process_signature_is_last_writer_wins() -> None:
     from rebar.reducer._processors import process_signature

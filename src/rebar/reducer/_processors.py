@@ -333,8 +333,12 @@ def process_signature(state: dict, event: dict, data: dict) -> None:
     compactor builds the SNAPSHOT compiled_state via this reducer). The signed-at
     timestamp falls back to the event timestamp for forward-compat records.
     """
+    _manifest = data.get("manifest")
     state["signature"] = {
-        "manifest": data.get("manifest") or [],
+        # Coerce to a list: never persist a non-list truthy value (e.g. a dict)
+        # into reduced state, which would leak a malformed shape into show/MCP
+        # output (security-adjacent state — fail closed, like verify_record).
+        "manifest": _manifest if isinstance(_manifest, list) else [],
         "algorithm": data.get("algorithm"),
         "signature": data.get("signature"),
         "key_id": data.get("key_id"),

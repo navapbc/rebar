@@ -360,6 +360,24 @@ def test_close_gate_blocks_when_head_unresolvable(rebar_repo: Path) -> None:
     assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "in_progress"
 
 
+def test_close_gate_blocks_in_keyless_environment(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Security regression: a key-less environment must NOT be able to certify (and
+    # thus close), even with an existing signature — an empty key is forgeable.
+    _commit(rebar_repo)
+    _enable_gate(rebar_repo)
+    tid = _story(rebar_repo)
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
+    assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "certified"
+    # Drop the env key entirely (simulate a deployment with no configured key).
+    (rebar_repo / ".tickets-tracker" / ".signing-key").unlink()
+    monkeypatch.delenv("REBAR_SIGNING_KEY", raising=False)
+    assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "foreign_key"
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert "certified signature" in ei.value.stderr
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "in_progress"
+
+
 def test_close_gate_force_close_bypass(rebar_repo: Path) -> None:
     _enable_gate(rebar_repo)
     tid = _story(rebar_repo)

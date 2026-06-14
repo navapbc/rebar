@@ -86,7 +86,10 @@ def signing_key(
     missing file is generated as a fresh UUID4 (0o600, atomic). With
     ``create_if_missing=False`` (verifying) a missing file is NOT created — the
     function returns the empty ``_NO_KEY`` sentinel so a read-only verify never
-    writes a secret to disk. Raises :class:`SigningError` only on a real I/O error.
+    writes a secret to disk. An empty / whitespace-only key file is treated as
+    corruption: a signing caller gets a :class:`SigningError` (an empty key is
+    attacker-guessable and must never sign), a verify caller gets ``_NO_KEY``
+    (so it certifies nothing). Raises :class:`SigningError` on a real I/O error.
     """
     # Strip surrounding whitespace so an injected key copied with a trailing
     # newline fingerprints identically to the file form (which also strips).
@@ -100,9 +103,21 @@ def signing_key(
             return _NO_KEY
         _generate_key_file(key_file)
     try:
-        return key_file.read_text(encoding="utf-8").strip().encode("utf-8")
+        raw = key_file.read_text(encoding="utf-8").strip()
     except OSError as exc:
         raise SigningError(f"Error: could not read signing key: {exc}") from None
+    if not raw:
+        # Empty/whitespace-only key file: an empty key is forgeable by anyone, so
+        # it must never be used. Read-only verifies degrade to _NO_KEY (certify
+        # nothing); a signing caller must fail loudly rather than emit a forgeable
+        # signature.
+        if not create_if_missing:
+            return _NO_KEY
+        raise SigningError(
+            f"Error: signing key at {key_file} is empty (corrupt). Remove it to "
+            "regenerate, or set REBAR_SIGNING_KEY."
+        )
+    return raw.encode("utf-8")
 
 
 def _generate_key_file(key_file: Path) -> None:
@@ -204,8 +219,8 @@ def verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict:
 
     * ``certified``   — the manifest matches the signature under this key.
     * ``mismatch``    — the steps no longer match (manifest altered / bad sig).
-    * ``foreign_key`` — signed by a *different* environment's key (cannot certify
-      here; the signing environment must verify it).
+    * ``foreign_key`` — signed by a *different* environment's key, OR this
+      environment has no usable key — either way it cannot be certified here.
     * ``unsigned``    — the ticket carries no signature.
     """
     # Fail closed on any malformed record: a non-dict signature value (e.g. a
@@ -220,7 +235,6 @@ def verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict:
     stored_fp = record.get("key_id") or ""
     if not isinstance(stored_fp, str):
         stored_fp = ""
-    local_fp = key_fingerprint(key)
 
     # Every verdict carries the same keys (uniform contract): consumers can read
     # result["manifest"]/["step_count"] regardless of outcome, including unsigned.
@@ -236,6 +250,19 @@ def verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict:
     if not stored_sig:
         return {**base, "verified": False, "verdict": "unsigned", "reason": "ticket has no signature"}
 
+    # An empty key (the _NO_KEY sentinel: no .signing-key, no REBAR_SIGNING_KEY, or
+    # a corrupt empty key file) can NEVER certify — HMAC under an empty key is
+    # forgeable by anyone, so a crafted signature must not be accepted. A key-less
+    # environment treats every signature as un-certifiable (foreign).
+    if not key:
+        return {
+            **base,
+            "verified": False,
+            "verdict": "foreign_key",
+            "reason": "this environment has no signing key; it cannot certify any signature",
+        }
+
+    local_fp = key_fingerprint(key)
     if stored_fp and stored_fp != local_fp:
         return {
             **base,
