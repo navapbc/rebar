@@ -53,6 +53,9 @@ _SIGNING = frozenset({"sign", "verify-signature"})
 _LIFECYCLE = frozenset({"transition", "reopen", "claim"})
 # Compaction arms (E3): full auto-init before the in-process SNAPSHOT write.
 _COMPACT = frozenset({"compact", "compact-all"})
+# Bridge arms (E5): full auto-init UNLESS TICKETS_TRACKER_DIR is injected (test
+# tracker), matching the dispatcher's `bridge-status`/`purge-bridge` arms.
+_BRIDGE = frozenset({"bridge-status", "purge-bridge"})
 # Leaf-write arms: full auto-init + reconverge before the in-process write.
 _WRITES_FULL = frozenset(
     {
@@ -165,6 +168,20 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         from rebar._commands import delete as _delete
 
         return _delete.delete_cli(rest)
+    if sub in _BRIDGE:
+        # The dispatcher auto-inits only when no test tracker is injected.
+        if not os.environ.get("TICKETS_TRACKER_DIR"):
+            ensure_initialized(init_only=False)
+        from rebar import config
+
+        tracker = str(config.tracker_dir())
+        if sub == "bridge-status":
+            from rebar._engine_support import bridge
+
+            return bridge.bridge_status_cli(rest, tracker)
+        from rebar._commands import purge_bridge
+
+        return purge_bridge.purge_bridge_cli(rest)
     if sub == "fsck":
         ensure_initialized(init_only=False)
         from rebar._commands import fsck as _fsck
