@@ -112,6 +112,45 @@ def test_resolve_citations_downgrades_unresolved(tmp_path: Path) -> None:
     assert kinds == ["file", "source", "source", "source"]
 
 
+def test_resolve_citations_rejects_denied_state_paths(tmp_path: Path) -> None:
+    """A citation into .git/.tickets-tracker/.bridge_state must be downgraded — the
+    file-tool sandbox guarantee has to hold in the OUTPUT too (PR #6 review)."""
+    from rebar.llm.findings import build_result, resolve_citations
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("[core]\n", encoding="utf-8")
+    (tmp_path / ".bridge_state").mkdir()
+    (tmp_path / ".bridge_state" / "map.json").write_text("{}\n", encoding="utf-8")
+    result = build_result(
+        [{"severity": "high", "dimension": "d", "detail": "x", "citations": [
+            {"kind": "file", "path": ".git/config", "line_start": 1},
+            {"kind": "file", "path": ".bridge_state/map.json", "line_start": 1},
+        ]}],
+        runner="fake",
+    )
+    resolve_citations(result, str(tmp_path))
+    kinds = [c["kind"] for c in result["findings"][0]["citations"]]
+    assert kinds == ["source", "source"]  # both denied -> downgraded
+
+
+def test_read_file_tool_caps_without_slurping(tmp_path: Path) -> None:
+    """read_file streams and caps at _READ_MAX_LINES (PR #6 review)."""
+    pytest.importorskip("langchain_core")
+    from rebar.llm.runner import _READ_MAX_LINES, _filesystem_tools
+
+    big = tmp_path / "big.txt"
+    big.write_text("".join(f"line {i}\n" for i in range(1, _READ_MAX_LINES + 501)),
+                   encoding="utf-8")
+    read_file = {t.name: t for t in _filesystem_tools(str(tmp_path))}["read_file"]
+    out = read_file.invoke({"path": "big.txt"})
+    assert "truncated" in out
+    assert out.count("\n") <= _READ_MAX_LINES + 1  # capped, not the full file
+    # a narrow range returns exactly that window, no truncation note
+    narrow = read_file.invoke({"path": "big.txt", "line_start": 5, "line_end": 7})
+    assert "truncated" not in narrow and narrow.startswith("5: line 5")
+    assert narrow.strip().endswith("7: line 7")
+
+
 def test_validate_rejects_bad_result() -> None:
     pytest.importorskip("jsonschema")
     from rebar.llm.findings import FindingsError, validate_result

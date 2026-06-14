@@ -61,6 +61,28 @@ def infer_provider(model: str, explicit: str | None = None) -> str | None:
     return None
 
 
+def denied_paths(root: str) -> tuple[str, ...]:
+    """Realpaths the agent must never read OR cite: git internals, reconciler
+    state, and the live event store — resolved from rebar.config.tracker_dir(root)
+    so the TICKETS_TRACKER_DIR override (a relocated/renamed store) is covered too.
+    Shared by the file tools (read) and citation resolution (output) so neither can
+    leak internal state."""
+    candidates = [
+        os.path.join(root, ".git"),
+        os.path.join(root, ".bridge_state"),
+        os.path.join(root, ".tickets-tracker"),
+    ]
+    try:
+        candidates.append(str(_root_config.tracker_dir(root)))
+    except Exception:
+        pass
+    return tuple(dict.fromkeys(os.path.realpath(p) for p in candidates))
+
+
+def is_denied(abs_path: str, denied: tuple[str, ...]) -> bool:
+    return any(abs_path == d or abs_path.startswith(d + os.sep) for d in denied)
+
+
 def _env_truthy(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
 

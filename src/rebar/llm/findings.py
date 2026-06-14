@@ -138,13 +138,18 @@ def validate_result(result: dict) -> dict:
 
 
 def resolve_citations(result: dict, repo_path: str | None) -> dict:
-    """Resolve every ``kind=file`` citation against the real repo: drop the path/
-    lines (downgrading to a ``source`` note) when the file doesn't exist or the
-    cited lines fall outside the file. This guarantees a shipped ``file:line``
-    citation actually resolves — agents hallucinate line numbers otherwise."""
+    """Resolve every ``kind=file`` citation against the real repo: downgrade to a
+    ``source`` note when the file doesn't exist, falls outside the repo, points at
+    a denied internal-state path (``.git`` / ``.tickets-tracker`` / ``.bridge_state``
+    — the same deny-list the file tools enforce, so the sandbox guarantee holds in
+    the OUTPUT too), or cites lines beyond the file. Guarantees a shipped
+    ``file:line`` citation actually resolves — agents hallucinate otherwise."""
     if not repo_path:
         return result
+    from rebar.llm.config import denied_paths, is_denied
+
     root = os.path.realpath(repo_path)
+    denied = denied_paths(root)
     for finding in result.get("findings", []):
         for cit in finding.get("citations", []):
             if cit.get("kind") != "file":
@@ -155,6 +160,9 @@ def resolve_citations(result: dict, repo_path: str | None) -> dict:
             abs_path = os.path.realpath(os.path.join(root, path))
             if not (abs_path == root or abs_path.startswith(root + os.sep)) or not os.path.isfile(abs_path):
                 _downgrade(cit, f"unresolved file citation: {path}")
+                continue
+            if is_denied(abs_path, denied):
+                _downgrade(cit, f"internal state path not citable: {path}")
                 continue
             # Test `is not None` (not truthiness): the schema treats line_start=0 /
             # omitted as "whole file", which must not be conflated with absent.

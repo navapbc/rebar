@@ -23,6 +23,8 @@ from typing import Protocol, runtime_checkable
 
 from rebar.llm import findings as _findings
 from rebar.llm.config import LLMConfig
+from rebar.llm.config import denied_paths as _denied_realpaths
+from rebar.llm.config import is_denied as _is_denied
 from rebar.llm.errors import LLMConfigError, StructuredOutputError
 
 
@@ -234,29 +236,6 @@ def _mcp_tools(servers: dict) -> list:
         return pool.submit(asyncio.run, _load()).result()
 
 
-def _denied_realpaths(root: str) -> tuple[str, ...]:
-    """Realpaths the file tools must never expose: git internals, reconciler state,
-    and the live event store — resolved from rebar.config.tracker_dir(root) so the
-    TICKETS_TRACKER_DIR override (a relocated/renamed store) is covered too, not
-    just the default `.tickets-tracker` name."""
-    paths = [
-        os.path.join(root, ".git"),
-        os.path.join(root, ".bridge_state"),
-        os.path.join(root, ".tickets-tracker"),
-    ]
-    try:
-        from rebar import config as _cfg
-
-        paths.append(str(_cfg.tracker_dir(root)))
-    except Exception:
-        pass
-    return tuple(dict.fromkeys(os.path.realpath(p) for p in paths))
-
-
-def _is_denied(abs_path: str, denied: tuple[str, ...]) -> bool:
-    return any(abs_path == d or abs_path.startswith(d + os.sep) for d in denied)
-
-
 def _safe_path(root: str, rel: str, denied: tuple[str, ...]) -> str:
     """Resolve ``rel`` under ``root``, refusing traversal and any denied state path
     (by realpath). Raises ValueError (surfaced to the agent as a tool error)."""
@@ -288,13 +267,25 @@ def _filesystem_tools(repo_path: str | None) -> list:
         """Read a repo file, returning lines as `<lineno>: <content>`. Optionally
         restrict to the [line_start, line_end] range (1-based; line_end<=0 = end)."""
         target = _safe_path(root, path, denied)
-        with open(target, encoding="utf-8", errors="replace") as fh:
-            lines = fh.readlines()
         lo = max(1, line_start)
-        hi = len(lines) if line_end <= 0 else min(line_end, len(lines))
-        hi = min(hi, lo + _READ_MAX_LINES - 1)  # cap a single read
-        body = "".join(f"{i}: {lines[i - 1]}" for i in range(lo, hi + 1)) or "(empty)"
-        if hi < (len(lines) if line_end <= 0 else min(line_end, len(lines))):
+        hard_hi = lo + _READ_MAX_LINES - 1  # read at most _READ_MAX_LINES lines
+        requested_end = line_end if line_end > 0 else None
+        out: list[str] = []
+        hit_cap = False
+        # Stream the file; never read more than the returned window into memory,
+        # so the cap holds even on a huge file (a narrow range stays cheap).
+        with open(target, encoding="utf-8", errors="replace") as fh:
+            for i, line in enumerate(fh, 1):
+                if i < lo:
+                    continue
+                if i > hard_hi:
+                    hit_cap = True  # more lines exist beyond the cap window
+                    break
+                if requested_end is not None and i > requested_end:
+                    break
+                out.append(f"{i}: {line}")
+        body = "".join(out) or "(empty)"
+        if hit_cap:
             body += f"\n… (truncated at {_READ_MAX_LINES} lines; request a narrower range)"
         return body
 
