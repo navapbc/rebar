@@ -138,6 +138,50 @@ def _review(argv: list[str]) -> int:
     return 0
 
 
+def _review_code(argv: list[str]) -> int:
+    """``rebar review-code`` → rebar.llm.review_code (native, like reconcile/review).
+
+    Reviews a git range (``--base``/``--head``) or a ``--diff-file`` with one or
+    more reviewers; JSON output conforms to the ``review_result`` schema."""
+    import argparse
+    import json as _json
+
+    parser = argparse.ArgumentParser(
+        prog="rebar review-code",
+        description="Run an LLM code review of a change (git range or diff file) and "
+        "emit aggregated structured findings. Needs the 'agents' extra + an API key.",
+    )
+    parser.add_argument("--base", default="HEAD~1", help="base git ref (default HEAD~1)")
+    parser.add_argument("--head", default="HEAD", help="head git ref (default HEAD)")
+    parser.add_argument("--diff-file", help="review this unified-diff file instead of a git range")
+    parser.add_argument("--reviewer", action="append", dest="reviewers",
+                        help="reviewer id (repeatable; default: deterministic selection)")
+    parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
+    args = parser.parse_args(argv)
+
+    from rebar import llm
+
+    diff_text = None
+    if args.diff_file:
+        try:
+            with open(args.diff_file, encoding="utf-8", errors="replace") as fh:
+                diff_text = fh.read()
+        except OSError as exc:
+            sys.stderr.write(f"Error: cannot read --diff-file: {exc}\n")
+            return 1
+    try:
+        result = llm.review_code(base=args.base, head=args.head, diff_text=diff_text,
+                                 reviewers=args.reviewers)
+    except llm.LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    if args.output == "json":
+        sys.stdout.write(_json.dumps(result) + "\n")
+    else:
+        _render_review_text(result)
+    return 0
+
+
 def _render_review_text(result: dict) -> None:
     """Human-readable rendering of a review_result."""
     findings = result.get("findings", [])
@@ -326,6 +370,10 @@ def main(argv: list[str] | None = None) -> int:
     # review intercept (native rebar.llm op; not a dispatcher arm, like reconcile).
     if argv and argv[0] == "review":
         return _review(argv[1:])
+
+    # review-code intercept (native rebar.llm code-review op).
+    if argv and argv[0] == "review-code":
+        return _review_code(argv[1:])
 
     # No subcommand: overview to stdout, exit 1 (the dispatcher's _usage).
     if not argv:

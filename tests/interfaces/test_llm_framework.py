@@ -422,6 +422,70 @@ def test_deepagents_runner_assembles(tmp_path: Path) -> None:
     assert agent is not None
 
 
+# ── code review + multi-reviewer aggregation ──────────────────────────────────
+def test_aggregate_findings_clusters_and_ranks() -> None:
+    from rebar.llm.aggregate import aggregate_findings
+
+    r1 = {"reviewers": ["a"], "findings": [
+        {"severity": "high", "dimension": "security", "detail": "sql injection",
+         "citations": [{"kind": "file", "path": "db.py", "line_start": 10}]},
+        {"severity": "low", "dimension": "style", "detail": "naming"},
+    ]}
+    r2 = {"reviewers": ["b"], "findings": [
+        {"severity": "medium", "dimension": "security", "detail": "sqli risk",
+         "citations": [{"kind": "file", "path": "db.py", "line_start": 12}]},
+    ]}
+    merged = aggregate_findings([r1, r2])
+    assert len(merged) == 2  # the two db.py security findings cluster into one
+    top = merged[0]
+    assert top["dimension"] == "security" and top["severity"] == "high"  # representative
+    assert top["agreement"] == 2 and top["reviewers"] == ["a", "b"]
+    assert len(top["citations"]) == 2  # citations unioned
+    assert merged[1]["dimension"] == "style"  # ranked below (lower severity/agreement)
+
+
+def test_select_code_reviewers_rules() -> None:
+    from rebar.llm.code_review import select_code_reviewers
+
+    assert select_code_reviewers(["README.md"]) == ["code-quality"]
+    sel = select_code_reviewers(["src/rebar/auth.py", "tests/test_x.py"])
+    assert sel[0] == "code-quality" and "security" in sel and "tests" in sel
+
+
+def test_review_code_end_to_end(tmp_path: Path) -> None:
+    import rebar.llm as llm
+    from rebar.llm.config import LLMConfig
+
+    diff = "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n+print('hi')\n"
+    runner = llm.FakeRunner(
+        findings=[{"severity": "high", "dimension": "code-quality", "detail": "bug",
+                   "citations": [{"kind": "source", "description": "from the diff"}]}],
+        summary="s",
+    )
+    result = llm.review_code(
+        diff_text=diff, changed_files=["x.py"], reviewers=["code-quality", "security"],
+        config=LLMConfig(repo_path=str(tmp_path)), runner=runner,
+    )
+    schemas.validator(schemas.REVIEW_RESULT).validate(result)
+    assert result["target"]["kind"] == "code" and result["target"]["files"] == ["x.py"]
+    assert set(result["reviewers"]) == {"code-quality", "security"}
+    # both reviewers raised the same finding → aggregated with agreement 2
+    assert result["findings"][0]["agreement"] == 2
+    assert sorted(result["findings"][0]["reviewers"]) == ["code-quality", "security"]
+
+
+def test_review_code_derives_changed_files_from_diff(tmp_path: Path) -> None:
+    import rebar.llm as llm
+    from rebar.llm.config import LLMConfig
+
+    diff = "--- a/a.py\n+++ b/a.py\n@@\n+x\n--- a/b.py\n+++ b/b.py\n@@\n+y\n"
+    result = llm.review_code(
+        diff_text=diff, reviewers=["code-quality"],
+        config=LLMConfig(repo_path=str(tmp_path)), runner=llm.FakeRunner(findings=[]),
+    )
+    assert set(result["target"]["files"]) == {"a.py", "b.py"}  # parsed from +++ lines
+
+
 # ── review_ticket end-to-end (FakeRunner against a real store) ────────────────
 def _seed(repo: Path) -> str:
     r = str(repo)

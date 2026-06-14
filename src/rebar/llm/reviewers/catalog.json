@@ -8,6 +8,15 @@
     "default": true,
     "applies_to": []
   },
+  "code-quality": {
+    "dimension": "code-quality",
+    "title": "Code quality reviewer",
+    "description": "Reviews a code change (commits/diff) for correctness, bugs, edge cases, clarity, and maintainability. The default reviewer for the code-review operation.",
+    "langfuse_prompt": "rebar-code-quality",
+    "fallback_file": "code_quality.md",
+    "default": false,
+    "applies_to": []
+  },
   "security": {
     "dimension": "security",
     "title": "Security reviewer",

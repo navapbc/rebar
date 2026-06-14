@@ -89,6 +89,9 @@ NO_SCHEMA_EXEMPT: dict[str, str] = {
                      "by design — it must NOT be auto-driven on the fixture store in "
                      "CI. The CLI/library --output json path IS pinned to "
                      "review_result via OUTPUT_SCHEMAS['review'].",
+    "review_code": "rebar.llm code-review op: live LLM call(s) over a git range, "
+                   "returns an aggregated review_result as a plain dict (no "
+                   "outputSchema) — same exemption rationale as review_ticket.",
 }
 
 

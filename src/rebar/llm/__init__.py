@@ -34,6 +34,8 @@ from rebar.llm.errors import (
     LLMRunnerError,
     StructuredOutputError,
 )
+from rebar.llm.aggregate import aggregate_findings
+from rebar.llm.code_review import review_code, select_code_reviewers
 from rebar.llm.findings import build_result, normalize_finding, validate_result
 from rebar.llm.operations import review_ticket, select_reviewers
 from rebar.llm.prompts import Reviewer, get_reviewer, load_catalog
@@ -48,7 +50,10 @@ from rebar.llm.runner import (
 __all__ = [
     # operations
     "review_ticket",
+    "review_code",
     "select_reviewers",
+    "select_code_reviewers",
+    "aggregate_findings",
     # config / diagnostics
     "LLMConfig",
     "available_backends",

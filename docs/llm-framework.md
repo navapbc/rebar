@@ -181,6 +181,8 @@ export ANTHROPIC_API_KEY=...            # model credentials
 rebar review --check                    # show backend/credential availability
 rebar review <ticket-id> ticket-quality # JSON review_result on stdout
 rebar review <epic-id> --graph -o text  # review an epic + its children, human output
+rebar review-code --base main --head HEAD    # multi-reviewer code review of a git range
+rebar review-code --diff-file change.diff -o text   # review a diff file, human output
 ```
 
 ```python
@@ -208,12 +210,16 @@ dict (the `review_result` shape) and advertises no `outputSchema` by design.
 ## How the motivating examples map
 
 1. **LLM review of a ticket / ticket-graph** — the shipped `review_ticket` op.
-2. **Code review over commits + tickets, deterministic reviewer selection** — a
-   future op: `select_reviewers(changed_files)` (the rule layer) → run each reviewer
-   as a pass → aggregate findings. The selection rules and finding contract are
-   already here; multi-reviewer aggregation (cluster → consensus → rank by
-   severity×agreement) is a documented future extension, intentionally not built
-   for the single-reviewer milestone.
+2. **Code review over a change with deterministic reviewer selection** — the
+   shipped `review_code` op (library `rebar.llm.review_code`, CLI `rebar
+   review-code`, gated MCP `review_code`). Diff-centric but agentic: reads the git
+   range (or a supplied `diff_text`), selects reviewers deterministically
+   (`select_code_reviewers` — `code-quality` always, plus catalog reviewers whose
+   `applies_to` globs match the changed files), runs each as its own pass, and
+   **aggregates** results (`aggregate.aggregate_findings`: cluster → consensus →
+   rank by severity×agreement; each finding carries `agreement` + `reviewers`). A
+   lightweight repo "orientation" seeds the changed-file layout (a full
+   tree-sitter/PageRank repo-map à la Aider is a future enhancement).
 3. **Scan open epics related to a spec (batched API calls)** — a future op shaped as
    a batch evaluator rather than a single agent loop; it reuses the same findings
    contract and (optionally) a non-agent runner behind the same protocol.
