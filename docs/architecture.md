@@ -117,6 +117,20 @@ are unaffected.
   `origin` remote exists, so local ticket activity is shared with the remote
   immediately (best-effort; see `docs/concurrency.md` "Outbound — push").
 
+- **Init vs. symlink (two distinct concepts).** *Initializing* a store materializes
+  the orphan `tickets` branch + the linked worktree and edits `.git/info/exclude`
+  — it mutates the host repo, so it requires consent (an interactive `[Y/n]`
+  confirmation, or an explicit `rebar init` / `rebar.init_repo`); it is never done
+  silently in automation. *Symlinking* is different: when the host repo is itself a
+  linked git worktree whose MAIN repo is already initialized, `init` just creates a
+  `.tickets-tracker` symlink to the main repo's store. That only adds a local link
+  to an EXISTING store and leaves the underlying repo untouched, so the auto-init
+  gate creates it **automatically, without a prompt** — even non-interactively. The
+  discriminator is `rebar._commands.init.pending_init_is_symlink`; the gate lives in
+  `rebar._cli._init` (`_create_tracker`). Writes from a worktree still serialize on
+  the main store: the write lock resolves the symlink via `realpath` so the
+  symlinked and real-path callers contend on the same lock file.
+
 ## Concurrency model (summary)
 
 Every mutation is a new globally-unique append-only event; state is pure replay;

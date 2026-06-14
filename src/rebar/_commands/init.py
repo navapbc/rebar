@@ -322,17 +322,42 @@ def _gen_local_files(tracker: str) -> None:
             pass
 
 
-def _init_via_symlink(repo: str, tracker: str, silent: bool) -> int:
+def _main_worktree_tracker(repo: str) -> str | None:
+    """Path to the MAIN worktree's ``.tickets-tracker`` — the real store a linked
+    worktree symlinks to — or None when the main worktree can't be resolved. Does
+    NOT check whether that path exists / is initialized; callers decide."""
     wl = _git(repo, "worktree", "list", "--porcelain").stdout
-    main_wt = ""
     for line in wl.splitlines():
         if line.startswith("worktree "):
-            main_wt = line[len("worktree "):]
-            break
-    if not main_wt:
+            return os.path.join(line[len("worktree "):], ".tickets-tracker")
+    return None
+
+
+def pending_init_is_symlink(repo_root=None) -> bool:
+    """True when initializing THIS repo would be a pure symlink to an
+    already-initialized store — i.e. the host repo is a linked git worktree
+    (``.git`` is a *file*) and the MAIN worktree already has a ``.tickets-tracker``.
+
+    This is the predicate that tells the two init concepts apart. A *first-time*
+    init materializes an orphan ``tickets`` branch + a linked worktree and edits
+    ``.git/info/exclude`` — it mutates the host repo, so it needs consent. Creating
+    this symlink, by contrast, only adds a local link to an EXISTING store and
+    leaves the underlying repo's state untouched, so the auto-init gate may create
+    it automatically, without a prompt."""
+    repo = _resolve_repo_root(repo_root)
+    if repo is None:
+        return False
+    if not os.path.isfile(os.path.join(repo, ".git")):
+        return False
+    main_tracker = _main_worktree_tracker(repo)
+    return bool(main_tracker) and os.path.isdir(main_tracker)
+
+
+def _init_via_symlink(repo: str, tracker: str, silent: bool) -> int:
+    main_tracker = _main_worktree_tracker(repo)
+    if main_tracker is None:
         sys.stderr.write("Error: could not detect main worktree path via git worktree list\n")
         return 1
-    main_tracker = os.path.join(main_wt, ".tickets-tracker")
     if not os.path.isdir(main_tracker):
         sys.stderr.write(
             "Error: Run ticket init from the main repo first, then re-run from the worktree.\n"
