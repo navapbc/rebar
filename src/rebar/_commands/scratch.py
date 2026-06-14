@@ -1,12 +1,14 @@
-"""In-process ``scratch`` set/get/clear (Tier E E3).
+"""In-process ``scratch`` set/get/clear.
 
-Ports ticket-scratch.sh + ticket-scratch-{set,get,clear}.sh. Scratch is a
-filesystem-only per-ticket key/value store under ``<repo>/.rebar/scratch/``
-(``SCRATCH_BASE_DIR`` overrides) — NO ticket store, NO write lock, NO auto-init.
-Values are wrapped ``{"ts":<iso8601>,"value":<str>}`` and written atomically
-(same-dir tmp + fsync + rename). All structured output is JSON on stdout (default
-``json.dumps`` separators, except the compact ``unknown_verb`` envelope, matching
-the bash printf). Byte-parity pinned by ``tests/interfaces/test_e3_scratch.py``.
+Scratch is a filesystem-only per-ticket key/value store under
+``<repo>/.rebar/scratch/`` (``SCRATCH_BASE_DIR`` overrides) — NO ticket store, NO
+write lock, NO auto-init. Values are wrapped ``{"ts":<iso8601>,"value":<str>}`` and
+written atomically (same-dir tmp + fsync + rename). All structured output is JSON on
+stdout (default ``json.dumps`` separators, except the compact ``unknown_verb``
+envelope).
+
+``base_dir`` / ``cleanup_for_ticket`` are the shared scratch-location helpers that
+the transition and delete close paths reuse to purge a ticket's scratch dir.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -24,11 +27,26 @@ _MAX_BYTES = 98304
 _CONTROL_RE = re.compile(r"[\x00-\x1f]")
 
 
-def _base_dir() -> str:
+def base_dir(repo_root=None) -> str:
+    """The scratch base directory: ``$SCRATCH_BASE_DIR`` if set, else
+    ``<repo_root or config.repo_root()>/.rebar/scratch``."""
     base = os.environ.get("SCRATCH_BASE_DIR")
     if base:
         return base
-    return os.path.join(str(config.repo_root()), ".rebar", "scratch")
+    root = repo_root if repo_root is not None else str(config.repo_root())
+    return os.path.join(str(root), ".rebar", "scratch")
+
+
+def cleanup_for_ticket(repo_root, ticket_id: str) -> None:
+    """Best-effort removal of a ticket's scratch dir (silenced)."""
+    try:
+        shutil.rmtree(os.path.join(base_dir(repo_root), ticket_id), ignore_errors=True)
+    except OSError:
+        pass
+
+
+def _base_dir() -> str:
+    return base_dir()
 
 
 def _validate_component(value: str, field_name: str, code: str) -> dict | None:
@@ -204,8 +222,6 @@ def _clear(args: list[str]) -> int:
     removed = 0
     if os.path.isdir(ticket_dir):
         removed = sum(1 for e in os.scandir(ticket_dir) if e.is_file())
-        import shutil
-
         shutil.rmtree(ticket_dir)
     _emit({"status": "ok", "ticket_id": ticket_id, "removed": removed})
     return 0

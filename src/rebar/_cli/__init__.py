@@ -1,24 +1,16 @@
-"""The rebar argparse CLI (Tier E).
+"""The rebar argparse CLI — the ``rebar`` entrypoint.
 
-A real in-process Python CLI replacing the bash dispatcher (``_engine/rebar``).
-During E0 this module is built and tested but NOT yet the entrypoint —
-``rebar.cli:main`` keeps delegating to the bash dispatcher until the E1 cutover —
-so the surface can be proven byte-identical first.
-
-Structure mirrors the dispatcher exactly:
+An in-process Python CLI. Its structure:
 
 * ``argparse`` owns top-level tokenization (subcommand + REMAINDER); per-command
-  flag parsing stays in each command's existing implementation, so argument-error
-  byte-parity is preserved (those messages come from the unchanged impls).
-* Help / overview / unknown-subcommand output is byte-identical to the dispatcher
-  via the pinned package-data strings in :mod:`rebar._cli._help`.
-* Category-A commands (reads + leaf writes) dispatch **in-process** to
+  flag parsing stays in each command's own implementation, so argument-error
+  messages come from the unchanged impls.
+* Help / overview / unknown-subcommand output comes from the pinned package-data
+  strings in :mod:`rebar._cli._help`.
+* Read and leaf-write commands dispatch **in-process** to
   ``rebar._engine_support.reads.main`` / ``rebar._commands.main`` with the
-  dispatcher's per-command auto-init policy (:mod:`rebar._cli._init`).
-* Category-B commands (not yet ported) **transitionally subprocess** the bash
-  dispatcher exactly as today; they migrate in-process in E2-E5.
-* ``reconcile`` routes to ``python -m rebar_reconciler`` (the dispatcher has no
-  reconcile arm), preserving ``cli.py``'s behavior.
+  per-command auto-init policy (:mod:`rebar._cli._init`).
+* ``reconcile`` routes to ``python -m rebar_reconciler``.
 """
 
 from __future__ import annotations

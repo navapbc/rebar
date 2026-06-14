@@ -1,34 +1,26 @@
-"""In-process ``transition`` / ``reopen`` / ``claim`` wrappers (Tier E E3).
+"""In-process ``transition`` / ``reopen`` / ``claim`` wrappers.
 
-Ports the bash ``ticket-transition.sh`` / ``ticket-claim.sh`` wrappers (+ the
-``ticket_transition`` lib-api id-resolution layer) over the relocated locked cores
-in :mod:`rebar._commands.txn` (``transition_core`` / ``claim_core``). The wrappers
-own everything around the locked write: ``--output`` parsing, the 2-arg
-current-status autodetect, the ``archived → open`` un-archive seam, status
-validation, the idempotent no-op, the ghost / init checks, the open-children close
-guard, ``newly_unblocked`` detection (via
+These wrappers drive the locked write cores in :mod:`rebar._commands.txn`
+(``transition_core`` / ``claim_core``) and own everything around the locked write:
+``--output`` parsing, the 2-arg current-status autodetect, the ``archived → open``
+un-archive seam, status validation, the idempotent no-op, the ghost / init checks,
+the open-children close guard, ``newly_unblocked`` detection (via
 :func:`rebar.graph._unblock.batch_close_operations`), the force-close audit
 comment, compact-on-close, per-ticket scratch cleanup, the
 ``{ticket_id,from,to,newly_unblocked}`` json / ``UNBLOCKED:`` text output, and
-claim's ``_emit_error_envelope`` (ticket_not_found / concurrency_conflict /
-claim_failed) + ``CLAIMED:`` output.
-
-Byte-parity with the dispatcher is pinned by ``tests/interfaces/test_e3_transition.py``
-and ``test_e3_claim.py``. No bash is deleted here (the ``.sh`` suites still drive
-the dispatcher); compact-on-close still subprocesses ``ticket-compact.sh`` until
-compact is ported, then rewires.
+claim's error-envelope (ticket_not_found / concurrency_conflict / claim_failed) +
+``CLAIMED:`` output.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 
 from rebar import config
-from rebar._commands import txn
+from rebar._commands import scratch, txn
 from rebar._commands._seam import CommandError
 from rebar._commands.txn import ConcurrencyMismatch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
@@ -136,20 +128,10 @@ def _validate_status(label: str, value: str) -> None:
     )
 
 
-def _scratch_cleanup(repo_root: str, ticket_id: str) -> None:
-    """Best-effort per-ticket scratch dir removal (silenced, like the bash
-    ``_scratch_cleanup_for_ticket`` call on close)."""
-    base = os.environ.get("SCRATCH_BASE_DIR") or os.path.join(repo_root, ".rebar", "scratch")
-    try:
-        shutil.rmtree(os.path.join(base, ticket_id), ignore_errors=True)
-    except OSError:
-        pass
-
-
 def _compact_on_close(repo_root: str, ticket_id: str) -> None:
     """Compact-on-close: squash the event log into a SNAPSHOT (non-blocking, output
-    silenced). In-process via rebar._commands.compact (Tier E E3 rewired this off
-    the ticket-compact.sh subprocess); --threshold=0 --skip-sync, commit kept."""
+    silenced). In-process via rebar._commands.compact; --threshold=0 --skip-sync,
+    commit kept."""
     import contextlib
     import io
 
@@ -272,7 +254,7 @@ def transition_compute(
 
     if target_status == "closed":
         _compact_on_close(repo_root_str, ticket_id)
-        _scratch_cleanup(repo_root_str, ticket_id)
+        scratch.cleanup_for_ticket(repo_root_str, ticket_id)
 
     return {
         "ticket_id": ticket_id,

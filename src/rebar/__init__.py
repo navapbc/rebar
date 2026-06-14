@@ -48,25 +48,6 @@ class ConcurrencyError(RebarError):
     """
 
 
-# ── Internals ────────────────────────────────────────────────────────────────
-def _ok(cp: subprocess.CompletedProcess, *, what: str) -> str:
-    if cp.returncode != 0:
-        raise RebarError(
-            f"rebar {what} failed (exit {cp.returncode}): {cp.stderr.strip()}",
-            returncode=cp.returncode,
-            stderr=cp.stderr,
-        )
-    return cp.stdout
-
-
-def _json(cp: subprocess.CompletedProcess, *, what: str) -> Any:
-    out = _ok(cp, what=what)
-    try:
-        return json.loads(out)
-    except json.JSONDecodeError as exc:
-        raise RebarError(f"rebar {what}: could not parse JSON output: {exc}") from exc
-
-
 # ── Initialization ───────────────────────────────────────────────────────────
 def init_repo(*, repo_root=None) -> None:
     """Initialize the ticket system (orphan ``tickets`` branch + worktree).

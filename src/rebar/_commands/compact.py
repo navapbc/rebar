@@ -1,16 +1,14 @@
-"""In-process ``compact`` / ``compact-all`` (Tier E E3).
+"""In-process ``compact`` / ``compact-all``.
 
-Ports ``ticket-compact.sh`` (+ the ``ticket_compact`` lib-api id resolver) and
-``ticket-compact-all.sh``. compaction squashes a ticket's event log into ONE
-SNAPSHOT event under the unified write lock: re-list events inside the lock,
-partition out forward-compat unknown-type events (never absorbed/deleted),
-re-check the threshold, reduce the current state, write the SNAPSHOT, delete the
-originals, invalidate the reducer cache, and ``git add -A`` + commit atomically.
+Compaction squashes a ticket's event log into ONE SNAPSHOT event under the unified
+write lock: re-list events inside the lock, partition out forward-compat
+unknown-type events (never absorbed/deleted), re-check the threshold, reduce the
+current state, write the SNAPSHOT, delete the originals, invalidate the reducer
+cache, and ``git add -A`` + commit atomically.
 
-Reuses ``rebar._store.lock`` (the fcntl+mkdir dual-leg lock — stiff-mop-lane),
-``rebar.reducer.reduce_ticket`` (in-process, no subprocess), and
-``event_append.event_filename``. SNAPSHOT bytes keep ``json.dump(ensure_ascii=False)``
-(unsorted) for parity. Byte-parity pinned by ``tests/interfaces/test_e3_compact.py``.
+Reuses ``rebar._store.lock`` (the fcntl+mkdir dual-leg lock),
+``rebar.reducer.reduce_ticket`` (in-process), and ``event_append.event_filename``.
+SNAPSHOT bytes use ``json.dump(ensure_ascii=False)`` (unsorted).
 """
 
 from __future__ import annotations
@@ -21,13 +19,13 @@ import subprocess
 import sys
 import time
 import uuid
+from pathlib import Path
 
 from rebar import config
+from rebar._commands import _seam
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._store import event_append, lock
 from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
-
-_DEFAULT_ENV_ID = "00000000-0000-4000-8000-000000000000"
 
 
 def _usage() -> int:
@@ -119,11 +117,7 @@ def _compact_locked(
             except (json.JSONDecodeError, OSError):
                 source_uuids.append(os.path.basename(fp))
 
-        try:
-            with open(os.path.join(tracker, ".env-id"), encoding="utf-8") as f:
-                env_id = f.read().strip()
-        except OSError:
-            env_id = _DEFAULT_ENV_ID
+        env_id = _seam.env_id(Path(tracker))
         author = _git_author()
 
         snapshot_uuid = str(uuid.uuid4())
