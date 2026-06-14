@@ -32,9 +32,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-FETCHER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
-)
+FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
 
 # Split-JQL contract (bug f6cc-b174-9e9a-435c). fetch_snapshot now issues
 # TWO queries (active first, then Done-recent). Both must reach
@@ -61,8 +59,7 @@ def fetcher():
     """Load the fetcher module, failing all tests if absent."""
     if not FETCHER_PATH.exists():
         pytest.fail(
-            f"fetcher.py not found at {FETCHER_PATH} — "
-            "implement the module to make tests pass."
+            f"fetcher.py not found at {FETCHER_PATH} — implement the module to make tests pass."
         )
     return _load_fetcher()
 
@@ -86,13 +83,10 @@ class _PaginatingClient:
         self.calls: list[dict] = []
 
     def search_issues(self, jql: str, start_at: int = 0, max_results: int = 50) -> dict:
-        self.calls.append(
-            {"jql": jql, "start_at": start_at, "max_results": max_results}
-        )
+        self.calls.append({"jql": jql, "start_at": start_at, "max_results": max_results})
         end = min(start_at + max_results, self._total)
         issues = [
-            {"key": f"DIG-{i}", "fields": {"summary": f"issue {i}"}}
-            for i in range(start_at, end)
+            {"key": f"DIG-{i}", "fields": {"summary": f"issue {i}"}} for i in range(start_at, end)
         ]
         return {
             "issues": issues,
@@ -143,9 +137,7 @@ def test_iter_pages_is_a_generator(fetcher):
 
 def test_collect_wrapper_drains_iter_pages(fetcher):
     """fetcher exposes a ``collect`` wrapper that flattens all pages."""
-    assert hasattr(fetcher, "collect"), (
-        "fetcher must expose `collect(client, jql, page_size=...)`"
-    )
+    assert hasattr(fetcher, "collect"), "fetcher must expose `collect(client, jql, page_size=...)`"
     client = _PaginatingClient(total=250, page_size=100)
     issues = fetcher.collect(client, ANY_JQL, page_size=100)
     assert isinstance(issues, list)
@@ -235,9 +227,7 @@ def test_fetch_snapshot_paginates_through_full_result_set(tmp_path, fetcher):
     mock_acli, holder = _make_paginating_acli(total=250, page_size=100)
 
     with patch.object(fetcher, "_load_acli", return_value=mock_acli):
-        result_path = fetcher.fetch_snapshot(
-            "2026-05-24-pass-pagination", repo_root=tmp_path
-        )
+        result_path = fetcher.fetch_snapshot("2026-05-24-pass-pagination", repo_root=tmp_path)
 
     parsed = json.loads(result_path.read_text())
     assert len(parsed) == 250

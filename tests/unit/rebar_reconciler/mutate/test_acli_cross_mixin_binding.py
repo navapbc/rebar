@@ -210,9 +210,7 @@ def test_delete_comment_dispatches_to_rest(client: Any, acli_mod: ModuleType) ->
     assert calls[0][1].endswith("/rest/api/3/issue/DIG-1/comment/9")
 
 
-def test_update_priority_method_dispatches_to_rest(
-    client: Any, acli_mod: ModuleType
-) -> None:
+def test_update_priority_method_dispatches_to_rest(client: Any, acli_mod: ModuleType) -> None:
     # The AcliClient.update_priority METHOD (graph mixin) is REST PUT — distinct
     # from the module-level update_priority free function.
     cm, calls = _patch_urlopen(acli_mod, {})

@@ -245,9 +245,7 @@ def text_to_adf(text: str) -> dict[str, Any]:
     paragraphs: list[dict[str, Any]] = []
     for line in text.split("\n"):
         if line:
-            paragraphs.append(
-                {"type": "paragraph", "content": [{"type": "text", "text": line}]}
-            )
+            paragraphs.append({"type": "paragraph", "content": [{"type": "text", "text": line}]})
         else:
             paragraphs.append({"type": "paragraph", "content": []})
     return {"type": "doc", "version": 1, "content": paragraphs}

@@ -37,13 +37,29 @@ def _validate_component(value: str, field_name: str, code: str) -> dict | None:
     if not value:
         return {"status": "error", "code": code, "reason": f"{field_name} must not be empty"}
     if value.startswith("."):
-        return {"status": "error", "code": code, "reason": f"{field_name} must not start with a dot: {value!r}"}
+        return {
+            "status": "error",
+            "code": code,
+            "reason": f"{field_name} must not start with a dot: {value!r}",
+        }
     if ".." in value:
-        return {"status": "error", "code": code, "reason": f"{field_name} must not contain '..': {value!r}"}
+        return {
+            "status": "error",
+            "code": code,
+            "reason": f"{field_name} must not contain '..': {value!r}",
+        }
     if "/" in value:
-        return {"status": "error", "code": code, "reason": f"{field_name} must not contain '/': {value!r}"}
+        return {
+            "status": "error",
+            "code": code,
+            "reason": f"{field_name} must not contain '/': {value!r}",
+        }
     if _CONTROL_RE.search(value):
-        return {"status": "error", "code": code, "reason": f"{field_name} must not contain control characters: {value!r}"}
+        return {
+            "status": "error",
+            "code": code,
+            "reason": f"{field_name} must not contain control characters: {value!r}",
+        }
     return None
 
 
@@ -143,10 +159,15 @@ def _get(args: list[str]) -> int:
     try:
         stored = json.loads(content)
     except json.JSONDecodeError as exc:
-        _emit({
-            "status": "error", "code": "malformed_envelope",
-            "reason": str(exc), "ticket_id": ticket_id, "key": key,
-        })
+        _emit(
+            {
+                "status": "error",
+                "code": "malformed_envelope",
+                "reason": str(exc),
+                "ticket_id": ticket_id,
+                "key": key,
+            }
+        )
         return 1
     _emit({"status": "hit", "ts": stored.get("ts", ""), "value": stored.get("value", "")})
     return 0
@@ -209,7 +230,5 @@ def scratch_cli(argv: list[str], *, repo_root=None) -> int:
         return _get(rest)
     if verb == "clear":
         return _clear(rest)
-    sys.stdout.write(
-        f'{{"status":"error","code":"unknown_verb","verb":"{verb}"}}\n'
-    )
+    sys.stdout.write(f'{{"status":"error","code":"unknown_verb","verb":"{verb}"}}\n')
     return 1

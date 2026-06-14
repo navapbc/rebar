@@ -171,9 +171,7 @@ def _stub_modules(
     }
 
 
-def _patch_and_run(
-    reconcile_mod, stubs, repo_root, pass_id="test-pass", target_mode=None
-):
+def _patch_and_run(reconcile_mod, stubs, repo_root, pass_id="test-pass", target_mode=None):
     """Patch reconcile_mod._load to return stubs, then call reconcile_once."""
     original_load = reconcile_mod._load
 
@@ -226,9 +224,7 @@ class TestOutboundCreate:
             comments=[],
             labels=[{"action": "add", "label": "team-a"}],
         )
-        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = [
-            om
-        ]
+        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = [om]
 
         result = _patch_and_run(reconcile_mod, stubs, repo_root)
 
@@ -272,9 +268,7 @@ class TestOutboundUpdate:
             comments=[],
             labels=[],
         )
-        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = [
-            om
-        ]
+        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = [om]
 
         result = _patch_and_run(reconcile_mod, stubs, repo_root)
 
@@ -417,9 +411,7 @@ class TestCapCombined:
             comments=[],
             labels=[],
         )
-        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = [
-            om
-        ]
+        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = [om]
 
         result = _patch_and_run(reconcile_mod, stubs, repo_root)
 

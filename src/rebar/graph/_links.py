@@ -27,9 +27,7 @@ class CyclicDependencyError(Exception):
     pass
 
 
-def _is_active_link(
-    source_id: str, target_id: str, relation: str, tracker_dir: str
-) -> bool:
+def _is_active_link(source_id: str, target_id: str, relation: str, tracker_dir: str) -> bool:
     """Return True if a net-active LINK exists from source_id to target_id with the given relation.
 
     Falls back to scanning SNAPSHOT compiled_state.deps[] when no *-LINK.json files
@@ -41,12 +39,8 @@ def _is_active_link(
         return False
 
     _event_order = {"LINK": 0, "UNLINK": 1}
-    link_files = [
-        ("LINK", f) for f in _glob.glob(os.path.join(ticket_dir, "*-LINK.json"))
-    ]
-    unlink_files = [
-        ("UNLINK", f) for f in _glob.glob(os.path.join(ticket_dir, "*-UNLINK.json"))
-    ]
+    link_files = [("LINK", f) for f in _glob.glob(os.path.join(ticket_dir, "*-LINK.json"))]
+    unlink_files = [("UNLINK", f) for f in _glob.glob(os.path.join(ticket_dir, "*-UNLINK.json"))]
     all_events = sorted(
         link_files + unlink_files,
         key=lambda x: (
@@ -268,16 +262,12 @@ def add_dependency(
     # Step 0: Validate relation grammar before touching disk
     if relation not in CANONICAL_RELATIONS:
         canonical_list = ", ".join(sorted(CANONICAL_RELATIONS))
-        raise ValueError(
-            f"invalid relation '{relation}': must be one of {canonical_list}"
-        )
+        raise ValueError(f"invalid relation '{relation}': must be one of {canonical_list}")
 
     # Step 1: Resolve hierarchy. The relation is passed through so the resolver
     # can gate promotion: only blocking deps (blocks/depends_on) are promoted to
     # a comparable type-tier; all other relations link the exact pair.
-    hierarchy_result = resolve_hierarchy_link(
-        source_id, target_id, tracker_dir, relation
-    )
+    hierarchy_result = resolve_hierarchy_link(source_id, target_id, tracker_dir, relation)
 
     if "error" in hierarchy_result:
         raise ValueError(hierarchy_result["error"])
@@ -320,20 +310,18 @@ def add_dependency(
 
     resolved_source_dir = os.path.join(tracker_dir, resolved_source)
     resolved_source_state = (
-        reduce_ticket(resolved_source_dir)
-        if os.path.isdir(resolved_source_dir)
-        else None
+        reduce_ticket(resolved_source_dir) if os.path.isdir(resolved_source_dir) else None
     )
     level = (
-        (resolved_source_state.get("ticket_type") or "").lower()
-        if resolved_source_state
-        else ""
+        (resolved_source_state.get("ticket_type") or "").lower() if resolved_source_state else ""
     )
     # Only the cycle-capable relations (blocks / depends_on) are subject to the
     # per-level cycle guard; relates_to / duplicates / supersedes / discovered_from
     # are non-blocking and never cycle-inducing (mirrors check_would_create_cycle).
-    if relation in ("blocks", "depends_on") and level and check_cycle_at_level(
-        resolved_source, resolved_target, level, tracker_dir
+    if (
+        relation in ("blocks", "depends_on")
+        and level
+        and check_cycle_at_level(resolved_source, resolved_target, level, tracker_dir)
     ):
         if resolved_source == resolved_target:
             raise CyclicDependencyError(

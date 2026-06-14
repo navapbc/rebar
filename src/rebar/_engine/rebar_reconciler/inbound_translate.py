@@ -127,9 +127,7 @@ def _jira_status_to_local(jira_status: str) -> str:
     try:
         # Late-load config without polluting module namespace.
         config_path = Path(__file__).parent / "config.py"
-        spec = importlib.util.spec_from_file_location(
-            "rebar_reconciler_config", config_path
-        )
+        spec = importlib.util.spec_from_file_location("rebar_reconciler_config", config_path)
         if spec is None or spec.loader is None:
             return "open"
         cfg_mod = importlib.util.module_from_spec(spec)
@@ -159,7 +157,11 @@ def _resolve_tracker_dir(repo_root: Path | None) -> Path:
     if override:
         return Path(override)
     if repo_root is None:
-        repo_root = Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])
+        repo_root = Path(
+            os.environ.get("REBAR_ROOT")
+            or os.environ.get("PROJECT_ROOT")
+            or Path(__file__).resolve().parents[4]
+        )
     return Path(repo_root) / ".tickets-tracker"  # tickets-boundary-ok
 
 

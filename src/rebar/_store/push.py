@@ -18,7 +18,9 @@ import subprocess
 import sys
 
 _NON_FF = re.compile(r"non-fast-forward|rejected|fetch first", re.IGNORECASE)
-_DIRTY_WD = re.compile(r"would be overwritten by merge|local changes.*would be overwritten", re.IGNORECASE)
+_DIRTY_WD = re.compile(
+    r"would be overwritten by merge|local changes.*would be overwritten", re.IGNORECASE
+)
 _MAX_RETRIES = 3
 
 
@@ -29,9 +31,7 @@ def _push_mode() -> str:
 
 
 def _git(base: str, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", "-C", base, *args], capture_output=True, text=True, env=env
-    )
+    return subprocess.run(["git", "-C", base, *args], capture_output=True, text=True, env=env)
 
 
 def push_tickets_branch(base_path: str) -> None:
@@ -47,15 +47,23 @@ def push_tickets_branch(base_path: str) -> None:
         # -c stub re-insert it (parents[2] of this file == .../src).
         src = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         child_env = {**os.environ, "REBAR_PUSH": "always"}
-        child_env["PYTHONPATH"] = src + (os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else "")
+        child_env["PYTHONPATH"] = src + (
+            os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else ""
+        )
         try:
             subprocess.Popen(
-                [sys.executable, "-c",
-                 "import sys; sys.path.insert(0, sys.argv[2]); "
-                 "from rebar._store import push; push.push_tickets_branch(sys.argv[1])",
-                 base_path, src],
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; sys.path.insert(0, sys.argv[2]); "
+                    "from rebar._store import push; push.push_tickets_branch(sys.argv[1])",
+                    base_path,
+                    src,
+                ],
                 env=child_env,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
                 start_new_session=True,  # orphan it (own session); survives parent exit
                 close_fds=True,
             )
@@ -75,7 +83,10 @@ def push_tickets_branch(base_path: str) -> None:
             return
         stderr = res.stderr or ""
         if not _NON_FF.search(stderr):
-            print(f"Warning: tickets branch push failed (exit {res.returncode}): {stderr}", file=sys.stderr)
+            print(
+                f"Warning: tickets branch push failed (exit {res.returncode}): {stderr}",
+                file=sys.stderr,
+            )
             return  # non-retriable class — best-effort
 
         # Non-fast-forward: reconcile by MERGE (not rebase).
@@ -93,28 +104,49 @@ def push_tickets_branch(base_path: str) -> None:
             return  # best-effort
 
         merge = _git(
-            base_path, "merge", "origin/tickets", "--no-edit",
-            "-m", "Merge origin/tickets (auto-reconcile during push retry)",
+            base_path,
+            "merge",
+            "origin/tickets",
+            "--no-edit",
+            "-m",
+            "Merge origin/tickets (auto-reconcile during push retry)",
         )
         if merge.returncode == 0:
             continue  # merged clean — retry push next iter
 
         if _DIRTY_WD.search(merge.stderr or ""):
             # Dirty working tree (e.g. reconciler .bridge_state/* files): stash → merge → pop.
-            stash = _git(base_path, "stash", "push", "--quiet", "-m", "_push_tickets_branch:auto-stash")
+            stash = _git(
+                base_path, "stash", "push", "--quiet", "-m", "_push_tickets_branch:auto-stash"
+            )
             if stash.returncode != 0:
-                print(f"Warning: tickets branch push failed: stash failed (attempt {attempt})", file=sys.stderr)
+                print(
+                    f"Warning: tickets branch push failed: stash failed (attempt {attempt})",
+                    file=sys.stderr,
+                )
                 continue
-            merge2 = _git(base_path, "merge", "origin/tickets", "--no-edit",
-                          "-m", "Merge origin/tickets (auto-reconcile, post-stash)")
+            merge2 = _git(
+                base_path,
+                "merge",
+                "origin/tickets",
+                "--no-edit",
+                "-m",
+                "Merge origin/tickets (auto-reconcile, post-stash)",
+            )
             _git(base_path, "stash", "pop", "--quiet")  # pop unconditionally
             if merge2.returncode != 0:
                 _git(base_path, "merge", "--abort")
-                print(f"Warning: tickets branch merge failed after stash recovery (attempt {attempt})", file=sys.stderr)
+                print(
+                    f"Warning: tickets branch merge failed after stash recovery (attempt {attempt})",
+                    file=sys.stderr,
+                )
             continue
 
         # Real content conflict — retry won't help, but continue so _MAX_RETRIES is honored.
         _git(base_path, "merge", "--abort")
-        print(f"Warning: tickets branch push failed (merge conflict, attempt {attempt})", file=sys.stderr)
+        print(
+            f"Warning: tickets branch push failed (merge conflict, attempt {attempt})",
+            file=sys.stderr,
+        )
 
     print(f"Warning: tickets branch push failed after {_MAX_RETRIES} retries", file=sys.stderr)

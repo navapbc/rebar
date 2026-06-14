@@ -115,8 +115,7 @@ def test_outbound_differ_excludes_colon_form_rebar_id_label(
     rebar_id_mutations = [
         lm
         for lm in label_mutations
-        if isinstance(lm.get("label"), str)
-        and lm["label"].startswith("rebar-id:")
+        if isinstance(lm.get("label"), str) and lm["label"].startswith("rebar-id:")
     ]
     assert rebar_id_mutations == [], (
         f"Outbound differ emitted mutations for rebar-id:* labels: "

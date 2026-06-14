@@ -76,7 +76,6 @@ def _get_commit_subject(repo_root, commit_sha: str) -> str:
     return result.stdout.strip()
 
 
-
 # ---------------------------------------------------------------------------
 # Per-leaf stub handlers.
 #
@@ -180,9 +179,7 @@ def _apply_outbound_update(mutation, *, client=None, repo_root=None) -> ApplyRes
     # Filter to allowlist. Non-allowlisted fields are silently dropped.
     # "parent" is extracted before forwarding to update_issue — ACLI edit
     # does not support reparenting; route via client.set_parent (REST PUT).
-    allowed = {
-        k: v for k, v in changed_fields.items() if k in _OUTBOUND_UPDATE_ALLOWLIST
-    }
+    allowed = {k: v for k, v in changed_fields.items() if k in _OUTBOUND_UPDATE_ALLOWLIST}
     # Route parent reparent via client.set_parent (ticket 8b25).
     parent_key = allowed.pop("parent", None)
     if parent_key is not None:
@@ -284,12 +281,7 @@ def _apply_outbound_update(mutation, *, client=None, repo_root=None) -> ApplyRes
     # callers can distinguish a genuine no-op (no diff) from a misconfigured
     # mutation that carried only non-allowlisted fields.
     # parent_key is counted as work even when popped from allowed (ticket 8b25).
-    if (
-        not allowed
-        and not labels_applied
-        and not comments_applied
-        and parent_key is None
-    ):
+    if not allowed and not labels_applied and not comments_applied and parent_key is None:
         logger.warning(
             "_apply_outbound_update: no-op for %s — changed_fields %r "
             "produced zero allowlisted fields and no labels/comments; "
@@ -326,13 +318,9 @@ def _apply_outbound_delete(mutation, *, client=None, repo_root=None) -> ApplyRes
     except JiraAPIError as exc:
         if getattr(exc, "status_code", None) == 404:
             # Already-gone is the post-state we want — treat as success.
-            return ApplyResult(
-                mutation.direction, mutation.action, {"already_gone": True}
-            )
+            return ApplyResult(mutation.direction, mutation.action, {"already_gone": True})
         raise
-    return ApplyResult(
-        mutation.direction, mutation.action, {"deleted": mutation.target}
-    )
+    return ApplyResult(mutation.direction, mutation.action, {"deleted": mutation.target})
 
 
 def _apply_outbound_probe(mutation, *, client=None, repo_root=None) -> ApplyResult:

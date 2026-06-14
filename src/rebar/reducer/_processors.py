@@ -172,9 +172,7 @@ def process_comment(state: dict, event: dict, data: dict) -> None:
     state["comments"].append(_entry)
 
 
-def process_link(
-    state: dict, event: dict, data: dict, tracker_dir: str | None = None
-) -> None:
+def process_link(state: dict, event: dict, data: dict, tracker_dir: str | None = None) -> None:
     """Apply a LINK event: append a dep entry to state.deps.
 
     When tracker_dir is provided, attempt to resolve an alias-form or short-hex
@@ -206,9 +204,7 @@ def process_link(
 def process_unlink(state: dict, data: dict) -> None:
     """Apply an UNLINK event: remove the dep entry matching link_uuid (noop if unknown)."""
     link_uuid_to_remove = data.get("link_uuid")
-    state["deps"] = [
-        d for d in state["deps"] if d.get("link_uuid") != link_uuid_to_remove
-    ]
+    state["deps"] = [d for d in state["deps"] if d.get("link_uuid") != link_uuid_to_remove]
 
 
 def process_bridge_alert(state: dict, event: dict, data: dict, event_uuid: str) -> None:
@@ -386,9 +382,7 @@ def scan_for_latest_snapshot(
             continue
         if event.get("event_type") == "SNAPSHOT":
             latest_snapshot_idx = idx
-            snapshot_source_uuids = set(
-                event.get("data", {}).get("source_event_uuids", [])
-            )
+            snapshot_source_uuids = set(event.get("data", {}).get("source_event_uuids", []))
 
     return latest_snapshot_idx, snapshot_source_uuids
 

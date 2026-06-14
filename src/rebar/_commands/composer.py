@@ -111,9 +111,7 @@ def create_core(
             p.name.endswith(("-CREATE.json", "-SNAPSHOT.json")) and not p.name.startswith(".")
             for p in pdir.iterdir()
         ):
-            raise CommandError(
-                f"Error: parent ticket '{resolved}' has no CREATE or SNAPSHOT event"
-            )
+            raise CommandError(f"Error: parent ticket '{resolved}' has no CREATE or SNAPSHOT event")
         if (reduce_ticket(str(pdir)) or {}).get("status") == "closed":
             raise CommandError(
                 f"Error: cannot create child of closed ticket '{resolved}'. "
@@ -172,37 +170,58 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
     while i < n:
         a = args[i]
         if a in ("--parent",) and i + 1 < n:
-            parent = args[i + 1]; i += 2
+            parent = args[i + 1]
+            i += 2
         elif a.startswith("--parent="):
-            parent = a[len("--parent="):]; i += 1
+            parent = a[len("--parent=") :]
+            i += 1
         elif a in ("--priority", "-p") and i + 1 < n:
-            priority = args[i + 1]; i += 2
+            priority = args[i + 1]
+            i += 2
         elif a.startswith("--priority="):
-            priority = a[len("--priority="):]; i += 1
+            priority = a[len("--priority=") :]
+            i += 1
         elif a in ("--assignee",) and i + 1 < n:
-            assignee = args[i + 1]; i += 2
+            assignee = args[i + 1]
+            i += 2
         elif a.startswith("--assignee="):
-            assignee = a[len("--assignee="):]; i += 1
+            assignee = a[len("--assignee=") :]
+            i += 1
         elif a in ("--description", "-d") and i + 1 < n:
-            description = args[i + 1]; i += 2
+            description = args[i + 1]
+            i += 2
         elif a.startswith("--description="):
-            description = a[len("--description="):]; i += 1
+            description = a[len("--description=") :]
+            i += 1
         elif a in ("--tags",) and i + 1 < n:
-            tags = f"{tags},{args[i + 1]}" if tags else args[i + 1]; i += 2
+            tags = f"{tags},{args[i + 1]}" if tags else args[i + 1]
+            i += 2
         elif a.startswith("--tags="):
-            v = a[len("--tags="):]
-            tags = f"{tags},{v}" if tags else v; i += 1
+            v = a[len("--tags=") :]
+            tags = f"{tags},{v}" if tags else v
+            i += 1
         else:
-            parent = a; i += 1  # bare positional → parent (backward-compatible)
+            parent = a
+            i += 1  # bare positional → parent (backward-compatible)
 
     try:
         res = create_core(
-            ticket_type, title, parent=parent, priority=priority, assignee=assignee,
-            description=description, tags=tags, repo_root=repo_root,
+            ticket_type,
+            title,
+            parent=parent,
+            priority=priority,
+            assignee=assignee,
+            description=description,
+            tags=tags,
+            repo_root=repo_root,
         )
     except CommandError as exc:
         if fmt == "json" and exc.error_code:
-            print(json.dumps(error_envelope(exc.error_code, exc.input_str, exc.message, exc.returncode)))
+            print(
+                json.dumps(
+                    error_envelope(exc.error_code, exc.input_str, exc.message, exc.returncode)
+                )
+            )
         print(exc.message, file=sys.stderr)
         return exc.returncode
 
@@ -239,9 +258,7 @@ def edit_core(ticket_id: str, fields: dict, *, repo_root=None) -> None:
     tracker = tracker_dir(repo_root)
     for name in fields:
         if name not in _EDIT_FIELDS:
-            raise CommandError(
-                f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}"
-            )
+            raise CommandError(f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}")
     if not fields:
         raise CommandError("Error: at least one --field=value pair is required")
     if not (tracker / ".env-id").is_file():
@@ -338,14 +355,20 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
         if arg.startswith("--") and "=" in arg:
             name, val = arg[2:].split("=", 1)
             if name not in _EDIT_FIELDS:
-                print(f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}", file=sys.stderr)
+                print(
+                    f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}",
+                    file=sys.stderr,
+                )
                 return 1
             fields[name] = val
             i += 1
         elif arg.startswith("--"):
             name = arg[2:]
             if name not in _EDIT_FIELDS:
-                print(f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}", file=sys.stderr)
+                print(
+                    f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}",
+                    file=sys.stderr,
+                )
                 return 1
             if i + 1 >= n:
                 print(f"Error: --{name} requires a value", file=sys.stderr)
@@ -363,7 +386,9 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
     return 0
 
 
-def link_core(src_raw: str, tgt_raw: str, relation: str, *, repo_root=None, quiet: bool = False) -> None:
+def link_core(
+    src_raw: str, tgt_raw: str, relation: str, *, repo_root=None, quiet: bool = False
+) -> None:
     """Resolve endpoints and add a LINK via the shared graph (mirrors ticket_link's
     non-dry-run path → ticket-graph.py --link → add_dependency).
 
@@ -522,7 +547,7 @@ def revert_cli(argv: list[str], *, repo_root=None) -> int:
     reason = ""
     for arg in argv[2:]:
         if arg.startswith("--reason="):
-            reason = arg[len("--reason="):]
+            reason = arg[len("--reason=") :]
         else:
             print(f"Error: unknown argument '{arg}'", file=sys.stderr)
             print(_REVERT_USAGE, file=sys.stderr)

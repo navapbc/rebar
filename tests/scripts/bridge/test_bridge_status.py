@@ -204,8 +204,7 @@ def test_bridge_status_shows_unresolved_conflicts(tmp_path: Path) -> None:
     )
     combined_output = result.stdout + result.stderr
     assert "3" in combined_output, (
-        f"Output must contain unresolved_conflicts count '3'.\n"
-        f"Got stdout: {result.stdout!r}"
+        f"Output must contain unresolved_conflicts count '3'.\nGot stdout: {result.stdout!r}"
     )
     # Verify the output relates the number to conflicts, not a random '3'
     lower_output = combined_output.lower()

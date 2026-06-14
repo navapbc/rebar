@@ -28,9 +28,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-CONFIG_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "config.py"
-)
+CONFIG_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "config.py"
 
 
 def _load_config() -> ModuleType:
@@ -60,11 +58,11 @@ def test_excluded_fields_has_exactly_two_elements(config: ModuleType) -> None:
 
 
 def test_excluded_fields_contains_local_id(config: ModuleType) -> None:
-    assert 'local_id' in config.EXCLUDED_FIELDS
+    assert "local_id" in config.EXCLUDED_FIELDS
 
 
 def test_excluded_fields_contains_rebar_id(config: ModuleType) -> None:
-    assert 'rebar-id' in config.EXCLUDED_FIELDS
+    assert "rebar-id" in config.EXCLUDED_FIELDS
 
 
 # ---------------------------------------------------------------------------
@@ -116,9 +114,7 @@ INBOUND_DIFFER_PATH = (
 def test_jira_to_local_status_is_nonempty_str_dict(config: ModuleType) -> None:
     mapping = config.jira_to_local_status
     assert isinstance(mapping, dict) and mapping
-    assert all(
-        isinstance(k, str) and isinstance(v, str) for k, v in mapping.items()
-    )
+    assert all(isinstance(k, str) and isinstance(v, str) for k, v in mapping.items())
 
 
 def test_jira_to_local_status_canonical_preimages(config: ModuleType) -> None:

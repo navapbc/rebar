@@ -351,18 +351,14 @@ def search_state(
     states = reduce_all_tickets(
         tracker, exclude_archived=not include_archived, exclude_deleted=True
     )
-    results = search_states(
-        states, query, status=status, ticket_type=ticket_type, has_tag=has_tag
-    )
+    results = search_states(states, query, status=status, ticket_type=ticket_type, has_tag=has_tag)
     return [public_state(t) for t in results]
 
 
 # ───────────────────────────── CLI command handlers ──────────────────────────
 def _bridge_alert_warning(states: list[dict]) -> str | None:
     alerted = sum(
-        1
-        for t in states
-        if any(not a.get("resolved", False) for a in t.get("bridge_alerts", []))
+        1 for t in states if any(not a.get("resolved", False) for a in t.get("bridge_alerts", []))
     )
     if alerted > 0:
         return (
@@ -407,9 +403,7 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
             # line (preserving the historical contract callers depend on).
             print(
                 json.dumps(
-                    error_envelope(
-                        "ticket_not_found", raw_id, f"Ticket '{raw_id}' not found", 1
-                    ),
+                    error_envelope("ticket_not_found", raw_id, f"Ticket '{raw_id}' not found", 1),
                     ensure_ascii=False,
                 )
                 if "not found" in exc.message
@@ -466,19 +460,19 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         elif arg == "--exclude-deleted":
             opts["exclude_deleted"] = True
         elif arg.startswith("--type="):
-            opts["ticket_type"] = arg[len("--type="):]
+            opts["ticket_type"] = arg[len("--type=") :]
         elif arg.startswith("--status="):
-            opts["status"] = arg[len("--status="):]
+            opts["status"] = arg[len("--status=") :]
         elif arg.startswith("--parent="):
-            opts["parent"] = arg[len("--parent="):]
+            opts["parent"] = arg[len("--parent=") :]
         elif arg.startswith("--has-tag="):
-            opts["has_tag"] = arg[len("--has-tag="):]
+            opts["has_tag"] = arg[len("--has-tag=") :]
         elif arg.startswith("--priority="):
-            opts["priority"] = arg[len("--priority="):]
+            opts["priority"] = arg[len("--priority=") :]
         elif arg.startswith("--without-tag="):
-            opts["without_tag"] = arg[len("--without-tag="):]
+            opts["without_tag"] = arg[len("--without-tag=") :]
         elif arg.startswith("--min-children="):
-            raw = arg[len("--min-children="):]
+            raw = arg[len("--min-children=") :]
             if not raw.isdigit():
                 print(
                     f"Error: --min-children expects a non-negative integer, got '{raw}'",
@@ -581,7 +575,7 @@ def _cmd_ready(argv: list[str], tracker: str) -> int:
             i += 2
             continue
         if arg.startswith("--epic="):
-            epic = arg[len("--epic="):]
+            epic = arg[len("--epic=") :]
             i += 1
             continue
         if arg.startswith("-"):
@@ -614,11 +608,11 @@ def _cmd_search(argv: list[str], tracker: str) -> int:
     include_archived = False
     for arg in argv:
         if arg.startswith("--status="):
-            status = arg[len("--status="):]
+            status = arg[len("--status=") :]
         elif arg.startswith("--type="):
-            ticket_type = arg[len("--type="):]
+            ticket_type = arg[len("--type=") :]
         elif arg.startswith("--has-tag="):
-            has_tag = arg[len("--has-tag="):]
+            has_tag = arg[len("--has-tag=") :]
         elif arg == "--include-archived":
             include_archived = True
         elif arg.startswith("-"):
@@ -675,9 +669,9 @@ def _cmd_list_epics(argv: list[str], tracker: str) -> int:
         if arg == "--all":
             include_blocked = True
         elif arg.startswith("--has-tag="):
-            has_tag = arg[len("--has-tag="):]
+            has_tag = arg[len("--has-tag=") :]
         elif arg.startswith("--min-children="):
-            raw = arg[len("--min-children="):]
+            raw = arg[len("--min-children=") :]
             if not raw.isdigit():
                 print(
                     f"Error: --min-children expects a non-negative integer, got '{raw}'",

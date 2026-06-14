@@ -37,6 +37,7 @@ import pytest
 # Reducer under test — ``rebar.reducer``.
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def reducer() -> ModuleType:
     """Return the in-process ``rebar.reducer`` module (reduce_ticket et al.)."""
@@ -100,9 +101,7 @@ def _base_create_data(title: str = "Original Title") -> dict:
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_applies_edit_event_to_title(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_applies_edit_event_to_title(tmp_path: Path, reducer: ModuleType) -> None:
     """An EDIT event with fields.title overwrites the title from the CREATE event."""
     ticket_dir = _make_ticket_dir(tmp_path, "tkt-edit-title")
 
@@ -124,9 +123,7 @@ def test_reducer_applies_edit_event_to_title(
     state = reducer.reduce_ticket(ticket_dir)
 
     assert state is not None, "reduce_ticket must return a dict"
-    assert state["title"] == "Updated", (
-        f"EDIT event must update title; got {state.get('title')!r}"
-    )
+    assert state["title"] == "Updated", f"EDIT event must update title; got {state.get('title')!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -136,9 +133,7 @@ def test_reducer_applies_edit_event_to_title(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_applies_edit_event_to_priority(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_applies_edit_event_to_priority(tmp_path: Path, reducer: ModuleType) -> None:
     """An EDIT event with fields.priority overwrites the priority field."""
     ticket_dir = _make_ticket_dir(tmp_path, "tkt-edit-priority")
 
@@ -160,9 +155,7 @@ def test_reducer_applies_edit_event_to_priority(
     state = reducer.reduce_ticket(ticket_dir)
 
     assert state is not None, "reduce_ticket must return a dict"
-    assert state["priority"] == 1, (
-        f"EDIT event must update priority; got {state.get('priority')!r}"
-    )
+    assert state["priority"] == 1, f"EDIT event must update priority; got {state.get('priority')!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -172,9 +165,7 @@ def test_reducer_applies_edit_event_to_priority(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_applies_edit_event_to_assignee(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_applies_edit_event_to_assignee(tmp_path: Path, reducer: ModuleType) -> None:
     """An EDIT event with fields.assignee sets the assignee on the ticket state."""
     ticket_dir = _make_ticket_dir(tmp_path, "tkt-edit-assignee")
 
@@ -232,12 +223,8 @@ def test_reducer_applies_multiple_fields_in_single_edit(
     state = reducer.reduce_ticket(ticket_dir)
 
     assert state is not None, "reduce_ticket must return a dict"
-    assert state["title"] == "New", (
-        f"EDIT event must update title; got {state.get('title')!r}"
-    )
-    assert state["priority"] == 0, (
-        f"EDIT event must update priority; got {state.get('priority')!r}"
-    )
+    assert state["title"] == "New", f"EDIT event must update title; got {state.get('title')!r}"
+    assert state["priority"] == 0, f"EDIT event must update priority; got {state.get('priority')!r}"
     assert state["assignee"] == "Bob", (
         f"EDIT event must update assignee; got {state.get('assignee')!r}"
     )
@@ -250,9 +237,7 @@ def test_reducer_applies_multiple_fields_in_single_edit(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_applies_sequential_edit_events(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_applies_sequential_edit_events(tmp_path: Path, reducer: ModuleType) -> None:
     """When two EDIT events update the same field, the later timestamp wins."""
     ticket_dir = _make_ticket_dir(tmp_path, "tkt-edit-sequential")
 
@@ -293,9 +278,7 @@ def test_reducer_applies_sequential_edit_events(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_edit_does_not_affect_unedited_fields(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_edit_does_not_affect_unedited_fields(tmp_path: Path, reducer: ModuleType) -> None:
     """An EDIT event that only touches priority must leave title unchanged."""
     ticket_dir = _make_ticket_dir(tmp_path, "tkt-edit-isolation")
 
@@ -318,9 +301,7 @@ def test_reducer_edit_does_not_affect_unedited_fields(
 
     assert state is not None, "reduce_ticket must return a dict"
     # The EDIT event must be applied (priority updated) — this fails RED if EDIT is ignored
-    assert state["priority"] == 1, (
-        f"EDIT event must update priority; got {state.get('priority')!r}"
-    )
+    assert state["priority"] == 1, f"EDIT event must update priority; got {state.get('priority')!r}"
     # And the unedited field must be preserved
     assert state["title"] == "Keep me", (
         f"EDIT event must not change unedited fields; title got {state.get('title')!r}"

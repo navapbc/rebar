@@ -199,9 +199,7 @@ def test_resolver_nonzero_exit_propagates_to_resolve_ticket_id(tmp_path, capsys)
     result = resolve_ticket_id("some-alias", str(bad_tracker))
     err = capsys.readouterr().err
     assert result is None, "resolver failure must not resolve to a ticket"
-    assert "cannot list" in err, (
-        f"expected explicit resolver diagnostic in stderr; got {err!r}"
-    )
+    assert "cannot list" in err, f"expected explicit resolver diagnostic in stderr; got {err!r}"
 
 
 def test_load_warns_once_when_wordlist_missing(tmp_path, capsys, monkeypatch):

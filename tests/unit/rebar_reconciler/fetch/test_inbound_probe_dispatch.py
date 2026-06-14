@@ -17,15 +17,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
-)
-PROBE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "inbound_probe.py"
-)
-MUTATION_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
-)
+RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
+PROBE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "inbound_probe.py"
+MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
 
 
 def _load(path: Path, name: str):
@@ -82,9 +76,7 @@ def test_hard_delete_emits_inbound_delete(reconcile, probe_mod, mut_mod):
     assert delete_muts[0].target == "PROJ-1"
 
 
-def test_trash_restore_emits_no_follow_on_writes_audit_log(
-    reconcile, probe_mod, mut_mod, capsys
-):
+def test_trash_restore_emits_no_follow_on_writes_audit_log(reconcile, probe_mod, mut_mod, capsys):
     """PRESENT_RESOLVED (trash_restore) → NO follow-on; one audit-log entry."""
     mut = _make_probe_mutation(mut_mod, target="PROJ-1")
     result = probe_mod.ProbeResult(

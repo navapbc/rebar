@@ -29,7 +29,11 @@ from rebar._engine_support.output import OutputFormatError, parse_output
 from rebar.reducer import reduce_ticket
 
 _STRUCTURED_KINDS = {
-    "corrupt", "corrupt_create", "missing_create", "snapshot_inconsistent", "orphan_event",
+    "corrupt",
+    "corrupt_create",
+    "missing_create",
+    "snapshot_inconsistent",
+    "orphan_event",
 }
 
 
@@ -38,7 +42,7 @@ def _resolve_tracker_git_dir(tracker: str) -> str:
     if os.path.isfile(tracker_git):
         with open(tracker_git, encoding="utf-8") as f:
             gitdir = f.read().strip()
-        gitdir = gitdir[len("gitdir: "):] if gitdir.startswith("gitdir: ") else gitdir
+        gitdir = gitdir[len("gitdir: ") :] if gitdir.startswith("gitdir: ") else gitdir
         if not gitdir.startswith("/"):
             gitdir = os.path.join(tracker, gitdir)
         return gitdir
@@ -128,7 +132,9 @@ def _scan(tracker: str, no_mutate: bool) -> tuple[list[str], int]:
     for ticket_id in _ticket_dirs(tracker):
         ticket_dir = os.path.join(tracker, ticket_id)
         for snap_name in sorted(
-            n for n in os.listdir(ticket_dir) if n.endswith("-SNAPSHOT.json") and not n.startswith(".")
+            n
+            for n in os.listdir(ticket_dir)
+            if n.endswith("-SNAPSHOT.json") and not n.startswith(".")
         ):
             lines.extend(c4 := _check_snapshot(ticket_dir, ticket_id, snap_name))
             issue_count += len(c4)
@@ -213,7 +219,7 @@ def _transform_json(text: str) -> str:
         if not line.strip():
             continue
         if line.startswith("FIXED:"):
-            fixed.append(line[len("FIXED:"):].strip())
+            fixed.append(line[len("FIXED:") :].strip())
             continue
         if line.startswith("fsck complete"):
             continue

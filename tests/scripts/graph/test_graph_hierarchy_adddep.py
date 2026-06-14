@@ -84,9 +84,7 @@ def test_add_dependency_cross_story_redirects_to_story_level(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_add_dependency_redundant_link_exits_nonzero(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_add_dependency_redundant_link_exits_nonzero(graph: ModuleType, tmp_path: Path) -> None:
     """Task-to-direct-parent link is redundant: add_dependency raises ValueError.
 
     Setup:
@@ -100,9 +98,7 @@ def test_add_dependency_redundant_link_exits_nonzero(
     tracker_dir.mkdir()
 
     _write_ticket(tracker_dir, "story-parent", ticket_type="story")
-    _write_ticket(
-        tracker_dir, "task-child", parent_id="story-parent", ticket_type="task"
-    )
+    _write_ticket(tracker_dir, "task-child", parent_id="story-parent", ticket_type="task")
 
     with pytest.raises(ValueError, match="redundant"):
         graph.add_dependency("story-parent", "task-child", str(tracker_dir))
@@ -161,9 +157,7 @@ def test_add_dependency_cross_story_emits_redirect_json_to_stdout(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_add_dependency_same_parent_still_works(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_add_dependency_same_parent_still_works(graph: ModuleType, tmp_path: Path) -> None:
     """Same-parent tasks: add_dependency writes LINK normally (no redirect).
 
     Setup:
@@ -208,9 +202,7 @@ def test_add_dependency_same_parent_still_works(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_dep_graph_correctness_after_cross_story_link(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_dep_graph_correctness_after_cross_story_link(graph: ModuleType, tmp_path: Path) -> None:
     """Cross-tier task→story link is promoted to story level; task-level link NOT written.
 
     Under the type-tier model, a task (tier 0) blocking a story (tier 1) is
@@ -251,9 +243,7 @@ def test_dep_graph_correctness_after_cross_story_link(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_add_dependency_rejects_non_canonical_relation(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_add_dependency_rejects_non_canonical_relation(graph: ModuleType, tmp_path: Path) -> None:
     """add_dependency raises ValueError for a non-canonical relation ('blocked_by').
 
     Bug 61b8-bb44-fb04-402c: the ticket-graph.py --link path (add_dependency in

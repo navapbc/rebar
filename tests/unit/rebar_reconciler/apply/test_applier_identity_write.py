@@ -22,9 +22,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_applier():
@@ -41,8 +39,7 @@ def applier():
     """Load the applier module, failing all tests if absent."""
     if not APPLIER_PATH.exists():
         pytest.fail(
-            f"applier.py not found at {APPLIER_PATH} — "
-            "implement the module to make tests pass."
+            f"applier.py not found at {APPLIER_PATH} — implement the module to make tests pass."
         )
     return _load_applier()
 
@@ -155,6 +152,7 @@ def test_add_label_transient_5xx_absorbed_by_retry_no_rollback(applier):
 
     # Patch time.sleep to keep the retry backoff cheap in tests.
     from rebar_reconciler import batch_dispatch  # point-of-use: create_one retry lives here
+
     with patch.object(batch_dispatch, "time") as mock_time:
         mock_time.sleep = MagicMock()
         result = applier.create_one(mutation, client, rest_calls=0)
@@ -171,8 +169,7 @@ def test_add_label_transient_5xx_absorbed_by_retry_no_rollback(applier):
 
     # add_label was retried (called twice): once raising 503, once succeeding.
     assert client.add_label.call_count == 2, (
-        f"Expected add_label to be retried after 503; got call_count="
-        f"{client.add_label.call_count}"
+        f"Expected add_label to be retried after 503; got call_count={client.add_label.call_count}"
     )
 
 
@@ -194,6 +191,7 @@ def test_set_entity_property_transient_5xx_absorbed_by_retry_no_rollback(applier
     mutation = _make_create_mutation(local_id)
 
     from rebar_reconciler import batch_dispatch  # point-of-use: create_one retry lives here
+
     with patch.object(batch_dispatch, "time") as mock_time:
         mock_time.sleep = MagicMock()
         result = applier.create_one(mutation, client, rest_calls=0)
@@ -215,8 +213,8 @@ def test_label_written_before_entity_property(applier):
     client.search_issues.return_value = []
     client.create_issue.return_value = {"key": "DIG-999"}
     client.add_label.side_effect = lambda *a, **kw: call_order.append("add_label")
-    client.set_entity_property.side_effect = (
-        lambda *a, **kw: call_order.append("set_entity_property")
+    client.set_entity_property.side_effect = lambda *a, **kw: call_order.append(
+        "set_entity_property"
     )
 
     mutation = _make_create_mutation(local_id)

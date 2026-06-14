@@ -22,9 +22,7 @@ _UUID4 = "11111111-2222-3333-4444-555555555555"
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_reads_priority_from_create_event(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_reads_priority_from_create_event(tmp_path: Path, reducer: ModuleType) -> None:
     """CREATE event with priority in data must surface as state['priority']."""
     ticket_dir = tmp_path / "tkt-priority"
     ticket_dir.mkdir()
@@ -40,16 +38,12 @@ def test_reducer_reads_priority_from_create_event(
     state = reducer.reduce_ticket(ticket_dir)
 
     assert state is not None, "reduce_ticket returned None"
-    assert state["priority"] == 2, (
-        f"Expected state['priority'] == 2, got {state.get('priority')!r}"
-    )
+    assert state["priority"] == 2, f"Expected state['priority'] == 2, got {state.get('priority')!r}"
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_reads_assignee_from_create_event(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_reads_assignee_from_create_event(tmp_path: Path, reducer: ModuleType) -> None:
     """CREATE event with assignee in data must surface as state['assignee']."""
     ticket_dir = tmp_path / "tkt-assignee"
     ticket_dir.mkdir()
@@ -72,9 +66,7 @@ def test_reducer_reads_assignee_from_create_event(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_priority_defaults_to_none_when_absent(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_priority_defaults_to_none_when_absent(tmp_path: Path, reducer: ModuleType) -> None:
     """CREATE event without priority must still produce state['priority'] is None."""
     ticket_dir = tmp_path / "tkt-no-priority"
     ticket_dir.mkdir()
@@ -98,9 +90,7 @@ def test_reducer_priority_defaults_to_none_when_absent(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_assignee_defaults_to_none_when_absent(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_assignee_defaults_to_none_when_absent(tmp_path: Path, reducer: ModuleType) -> None:
     """CREATE event without assignee must still produce state['assignee'] is None."""
     ticket_dir = tmp_path / "tkt-no-assignee"
     ticket_dir.mkdir()
@@ -185,12 +175,8 @@ def test_create_event_with_tags(tmp_path: Path, reducer: ModuleType) -> None:
     state = reducer.reduce_ticket(ticket_dir)
 
     assert state is not None, "reduce_ticket must return a dict for a CREATE event"
-    assert "tags" in state, (
-        "state must include a 'tags' field when CREATE event has tags data"
-    )
-    assert state["tags"] == ["CLI_user"], (
-        f"Expected tags=['CLI_user'], got {state.get('tags')!r}"
-    )
+    assert "tags" in state, "state must include a 'tags' field when CREATE event has tags data"
+    assert state["tags"] == ["CLI_user"], f"Expected tags=['CLI_user'], got {state.get('tags')!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -237,9 +223,7 @@ def test_create_event_without_tags(tmp_path: Path, reducer: ModuleType) -> None:
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_comment_adf_dict_body_coerced_to_string(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_comment_adf_dict_body_coerced_to_string(tmp_path: Path, reducer: ModuleType) -> None:
     """COMMENT event with ADF dict body must store body as string, not dict.
 
     Without the fix: currently fails because reducer stores data.get('body', '') verbatim,
@@ -258,9 +242,7 @@ def test_comment_adf_dict_body_coerced_to_string(
     adf_body = {
         "type": "doc",
         "version": 1,
-        "content": [
-            {"type": "paragraph", "content": [{"type": "text", "text": "hello"}]}
-        ],
+        "content": [{"type": "paragraph", "content": [{"type": "text", "text": "hello"}]}],
     }
     _write_event(
         ticket_dir,
@@ -309,9 +291,7 @@ def test_comment_body_with_embedded_json_survives_round_trip(
         event_type="CREATE",
         data={"ticket_type": "task", "title": "Embedded JSON test"},
     )
-    embedded = (
-        '{"checkpoint": 3, "status": "ok", "details": {"files": ["a.py", "b.py"]}}'
-    )
+    embedded = '{"checkpoint": 3, "status": "ok", "details": {"files": ["a.py", "b.py"]}}'
     _write_event(
         ticket_dir,
         timestamp=1742605201,
@@ -375,9 +355,7 @@ def test_comment_empty_dict_body_coerced_to_json_string(
     assert state is not None
     assert len(state["comments"]) == 1
     body = state["comments"][0]["body"]
-    assert isinstance(body, str), (
-        f"comment body must be a string, not {type(body).__name__!r}"
-    )
+    assert isinstance(body, str), f"comment body must be a string, not {type(body).__name__!r}"
     assert body == "{}", (
         f"empty dict body must be coerced to '{{}}' via json.dumps, not {body!r} (6bc8-91bc)"
     )

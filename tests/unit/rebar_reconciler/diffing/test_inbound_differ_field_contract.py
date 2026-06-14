@@ -53,6 +53,7 @@ def outbound_differ() -> ModuleType:
     # Stub ADF to avoid heavy dependency in this contract test
     _ADF_KEY = "rebar_reconciler.adf"
     import types
+
     adf_stub = types.ModuleType(_ADF_KEY)
     adf_stub.adf_to_text = lambda x: str(x) if isinstance(x, str) else ""  # type: ignore[attr-defined]
     _prev = sys.modules.get(_ADF_KEY)
@@ -86,8 +87,7 @@ def test_outbound_to_inbound_field_contains_parent(inbound_differ: ModuleType) -
         "See 183fd51ac2 and docs/designs/sync-hardening-proposal.md Item 3."
     )
     assert field_map["parent"] == "parent_id", (
-        f"_OUTBOUND_TO_INBOUND_FIELD['parent'] must be 'parent_id', "
-        f"got {field_map['parent']!r}"
+        f"_OUTBOUND_TO_INBOUND_FIELD['parent'] must be 'parent_id', got {field_map['parent']!r}"
     )
 
 

@@ -89,9 +89,7 @@ def _reconcile(argv: list[str]) -> int:
     # reconciler imports ``rebar.*`` in-package (Tier E E5b), so it needs the
     # rebar-capable interpreter; engine_env keeps the engine dir on PYTHONPATH so
     # the top-level ``rebar_reconciler`` package still resolves.
-    return subprocess.call(
-        [sys.executable, "-m", "rebar_reconciler", *args], env=engine_env(root)
-    )
+    return subprocess.call([sys.executable, "-m", "rebar_reconciler", *args], env=engine_env(root))
 
 
 def _bridge_probe(argv: list[str]) -> int:
@@ -250,9 +248,7 @@ def _dispatch(sub: str, rest: list[str]) -> int:
     # unknown subcommands before reaching _dispatch. Arriving here means a
     # subcommand was added to the known set without an in-process arm — a wiring
     # bug, surfaced loudly rather than silently mis-dispatched.
-    raise RuntimeError(
-        f"rebar: subcommand {sub!r} is known but has no in-process handler"
-    )
+    raise RuntimeError(f"rebar: subcommand {sub!r} is known but has no in-process handler")
 
 
 def main(argv: list[str] | None = None) -> int:

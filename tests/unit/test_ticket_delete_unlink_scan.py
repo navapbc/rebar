@@ -99,9 +99,7 @@ def test_unlink_scan_inbound_link_writes_unlink_file(tmp_path: Path) -> None:
     rc, written_paths = _run_helper(tracker, deleted_id)
 
     assert rc == 0, f"Helper exited {rc}"
-    assert len(written_paths) >= 1, (
-        f"Expected at least 1 UNLINK path printed; got {written_paths}"
-    )
+    assert len(written_paths) >= 1, f"Expected at least 1 UNLINK path printed; got {written_paths}"
     unlink_files = list(ticket_a.glob("*-UNLINK.json"))
     assert len(unlink_files) >= 1, (
         f"Expected UNLINK file in ticket_a dir; found: {list(ticket_a.iterdir())}"
@@ -138,9 +136,7 @@ def test_unlink_scan_outbound_link_writes_unlink_file(tmp_path: Path) -> None:
     rc, written_paths = _run_helper(tracker, deleted_id)
 
     assert rc == 0, f"Helper exited {rc}"
-    assert len(written_paths) >= 1, (
-        f"Expected at least 1 UNLINK path printed; got {written_paths}"
-    )
+    assert len(written_paths) >= 1, f"Expected at least 1 UNLINK path printed; got {written_paths}"
     unlink_files = list(deleted_ticket.glob("*-UNLINK.json"))
     assert len(unlink_files) >= 1, (
         f"Expected UNLINK file in deleted_ticket dir; found: {list(deleted_ticket.iterdir())}"
@@ -192,9 +188,7 @@ def test_unlink_scan_already_cancelled_link_is_skipped(tmp_path: Path) -> None:
     rc, written_paths = _run_helper(tracker, deleted_id)
 
     assert rc == 0, f"Helper exited {rc}"
-    new_unlinks = [
-        p for p in written_paths if Path(p).name != f"{ts2}-{unlink_uuid}-UNLINK.json"
-    ]
+    new_unlinks = [p for p in written_paths if Path(p).name != f"{ts2}-{unlink_uuid}-UNLINK.json"]
     assert len(new_unlinks) == 0, (
         f"Expected no new UNLINK files for already-cancelled link; got {new_unlinks}"
     )

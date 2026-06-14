@@ -23,15 +23,9 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
-)
-FETCHER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
-)
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
+FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_module(name: str, path: Path):
@@ -48,8 +42,7 @@ def reconcile_mod():
     """Load reconcile.py, failing all tests if absent."""
     if not RECONCILE_PATH.exists():
         pytest.fail(
-            f"reconcile.py not found at {RECONCILE_PATH} — "
-            "implement the module to make tests pass."
+            f"reconcile.py not found at {RECONCILE_PATH} — implement the module to make tests pass."
         )
     return _load_module("reconcile", RECONCILE_PATH)
 
@@ -88,9 +81,7 @@ def _make_acli_module(issues: list[dict]) -> types.ModuleType:
 
     # key -> issue dict ({"key": ..., "fields": {...}}); deep-copied so the
     # caller's literal is never mutated by reflected writes.
-    state: dict[str, dict] = {
-        i["key"]: _copy.deepcopy(i) for i in issues if i.get("key")
-    }
+    state: dict[str, dict] = {i["key"]: _copy.deepcopy(i) for i in issues if i.get("key")}
     entity_props: dict[str, dict] = {}
     created_counter = [0]
 
@@ -414,9 +405,7 @@ def test_real_field_change_converges_after_one_pass(
 # full differ COMPUTATION but write NOTHING to the local store.
 # ---------------------------------------------------------------------------
 
-MODE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mode.py"
-)
+MODE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mode.py"
 
 
 @pytest.fixture(scope="module")
@@ -487,11 +476,7 @@ def _patch_partitioned(fetcher_mod, applier_mod, issues: list[dict]):
 
 def _snapshot_tree(root: Path) -> set[str]:
     """Return the set of relative file paths currently under *root*."""
-    return {
-        str(p.relative_to(root))
-        for p in root.rglob("*")
-        if p.is_file()
-    }
+    return {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()}
 
 
 def test_dry_run_reconcile_once_writes_nothing(
@@ -517,9 +502,7 @@ def test_dry_run_reconcile_once_writes_nothing(
     after = _snapshot_tree(tmp_path)
     new_files = sorted(after - before)
 
-    assert new_files == [], (
-        f"DRY_RUN reconcile_once must write NOTHING, but created: {new_files}"
-    )
+    assert new_files == [], f"DRY_RUN reconcile_once must write NOTHING, but created: {new_files}"
 
     # The computed plan must still be produced — two stable issues with an
     # empty prev snapshot yield non-zero computed mutations.

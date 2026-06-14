@@ -18,9 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-INVARIANTS_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "invariants.py"
-)
+INVARIANTS_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "invariants.py"
 
 
 def _load_invariants() -> ModuleType:
@@ -315,9 +313,7 @@ def test_extract_ticket_id_picks_last_canonical_match(
         "Created ticket aaaa-bbbb-cccc-dddd (alias of 1111-2222-3333-4444): t\n"
         "1111-2222-3333-4444\n"
     )
-    assert (
-        invariants._extract_ticket_id(stdout) == "1111-2222-3333-4444"
-    )
+    assert invariants._extract_ticket_id(stdout) == "1111-2222-3333-4444"
 
 
 def test_garbage_cli_output_leaves_alert_unpatched(

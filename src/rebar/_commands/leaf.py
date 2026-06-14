@@ -121,9 +121,7 @@ def archive(ticket_id: str, *, repo_root=None) -> None:
 
     if (ticket_dir / ".archived").exists():
         return
-    if ticket_dir.is_dir() and any(
-        p.name.endswith("-ARCHIVED.json") for p in ticket_dir.iterdir()
-    ):
+    if ticket_dir.is_dir() and any(p.name.endswith("-ARCHIVED.json") for p in ticket_dir.iterdir()):
         write_marker(str(ticket_dir))
         return
 
@@ -132,8 +130,7 @@ def archive(ticket_id: str, *, repo_root=None) -> None:
         raise CommandError(f"Error: could not read status for ticket '{resolved}'")
     if status != "open":
         raise CommandError(
-            f"Error: ticket '{resolved}' has status '{status}'; "
-            f"archive only works on open tickets"
+            f"Error: ticket '{resolved}' has status '{status}'; archive only works on open tickets"
         )
 
     append_event(resolved, "ARCHIVED", {}, tracker, repo_root=repo_root)
@@ -162,7 +159,7 @@ def _validate_json_array(payload: str, label: str, required_keys: tuple[str, ...
             not isinstance(elem.get(k), str) for k in required_keys
         ):
             raise CommandError(
-                f'Error: {label}[{idx}] is invalid — every element must be an '
+                f"Error: {label}[{idx}] is invalid — every element must be an "
                 f'object with string keys "{keylist}"'
             )
     return parsed

@@ -137,7 +137,15 @@ def _get_rebar_id_guard_mode_from_config() -> str | None:
         elif _root:
             config_path = Path(_root) / ".rebar" / "config.conf"
         else:
-            config_path = Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4]) / ".rebar" / "config.conf"
+            config_path = (
+                Path(
+                    os.environ.get("REBAR_ROOT")
+                    or os.environ.get("PROJECT_ROOT")
+                    or Path(__file__).resolve().parents[4]
+                )
+                / ".rebar"
+                / "config.conf"
+            )
         if not config_path.exists():
             return None
         for line in config_path.read_text(encoding="utf-8").splitlines():

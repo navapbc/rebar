@@ -28,22 +28,8 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-INBOUND_PATH = (
-    REPO_ROOT
-    / "src"
-    / "rebar"
-    / "_engine"
-    / "rebar_reconciler"
-    / "inbound_differ.py"
-)
-OUTBOUND_PATH = (
-    REPO_ROOT
-    / "src"
-    / "rebar"
-    / "_engine"
-    / "rebar_reconciler"
-    / "outbound_differ.py"
-)
+INBOUND_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "inbound_differ.py"
+OUTBOUND_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
 
 
 def _load(name: str, path: Path):
@@ -69,9 +55,7 @@ def _adf(text: str) -> dict:
     return {
         "type": "doc",
         "version": 1,
-        "content": [
-            {"type": "paragraph", "content": [{"type": "text", "text": text}]}
-        ],
+        "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}],
     }
 
 
@@ -111,9 +95,7 @@ def test_inbound_filters_outbound_echo_by_marker(inbound):
         "comments": [
             {
                 "id": "10002",
-                "body": _adf_with_marker(
-                    "Probe outbound comment", inbound.RECONCILER_MARKER
-                ),
+                "body": _adf_with_marker("Probe outbound comment", inbound.RECONCILER_MARKER),
             },
         ]
     }
@@ -173,9 +155,7 @@ def test_inbound_handles_string_body_legacy(inbound):
     }
     local_ticket = {"comments": []}
     out = inbound._diff_comments_inbound(jira_fields, local_ticket)
-    assert out == [
-        {"action": "add", "body": "Plain string body", "jira_comment_id": "20001"}
-    ]
+    assert out == [{"action": "add", "body": "Plain string body", "jira_comment_id": "20001"}]
 
 
 def test_inbound_skips_blank_bodies(inbound):
@@ -229,9 +209,7 @@ def test_outbound_normalize_strips_marker_for_dedup(outbound):
                             "content": [
                                 {
                                     "type": "paragraph",
-                                    "content": [
-                                        {"type": "text", "text": "First probe comment"}
-                                    ],
+                                    "content": [{"type": "text", "text": "First probe comment"}],
                                 },
                                 {
                                     "type": "paragraph",
@@ -248,6 +226,4 @@ def test_outbound_normalize_strips_marker_for_dedup(outbound):
         }
     }
     out = outbound._diff_comments(ticket, "DIG-1", jira_snapshot)
-    assert out == [], (
-        f"local body matches Jira (echo stripped) — no diff expected; got {out!r}"
-    )
+    assert out == [], f"local body matches Jira (echo stripped) — no diff expected; got {out!r}"

@@ -20,6 +20,7 @@ import os
 
 import rebar
 
+
 # The reconcile tool gates modes by the engine's canonical MODE_CAPS table, which
 # lives in the bundled engine at rebar_reconciler/mode.py. We load it ONCE here by
 # FILE PATH (not `from rebar_reconciler.mode import ...`) and bind the names as
@@ -310,7 +311,9 @@ def build_server():
     @mcp.tool()
     def get_verify_commands(ticket_id: str) -> list[VerifyCommandItemOut]:
         """Get the DD-level verify-commands array for a ticket."""
-        return [VerifyCommandItemOut.model_validate(e) for e in rebar.get_verify_commands(ticket_id)]
+        return [
+            VerifyCommandItemOut.model_validate(e) for e in rebar.get_verify_commands(ticket_id)
+        ]
 
     @mcp.tool()
     def summary(ticket_ids: list[str]) -> list[dict]:
@@ -408,9 +411,7 @@ def build_server():
             )
 
         @mcp.tool()
-        def transition_ticket(
-            ticket_id: str, current_status: str, target_status: str
-        ) -> dict:
+        def transition_ticket(ticket_id: str, current_status: str, target_status: str) -> dict:
             """Transition a ticket's status (optimistic concurrency). Returns the
             engine result {ticket_id, from, to, newly_unblocked}."""
             return rebar.transition(ticket_id, current_status, target_status)

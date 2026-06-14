@@ -146,8 +146,7 @@ def audit_bridge_mappings(
                 # comparisons (legacy seconds-scale SYNC vs. ns-scale BRIDGE_ALERT)
                 # are handled correctly.
                 has_post_sync_alert = any(
-                    _to_ns(alert.get("timestamp", 0)) > sync_ts_ns
-                    for alert in bridge_alert_events
+                    _to_ns(alert.get("timestamp", 0)) > sync_ts_ns for alert in bridge_alert_events
                 )
                 if not has_post_sync_alert:
                     stale.append(
@@ -273,6 +272,7 @@ def enumerate_open_count_skew_anomalies(tickets_dir: Path) -> list[dict]:
     # uses audit_bridge_mappings only); kept for the anomaly contract / tests. It
     # requires the reconciler importable as the top-level ``rebar_reconciler``.
     from rebar_reconciler import acli as acli_mod
+
     # F1 fix: AcliClient() with no args raises TypeError — read credentials
     # from JIRA_* env vars. Operators running fsck without these set will
     # get an actionable RuntimeError instead of a cryptic constructor crash.
@@ -385,27 +385,21 @@ def _format_report(findings: dict) -> str:
 
     lines: list[str] = ["=== Bridge FSck Report ==="]
     lines.append(f"Orphans: {len(orphaned)}" if orphaned else "Orphans: none found")
-    lines.append(
-        f"Duplicates: {len(duplicates)}" if duplicates else "Duplicates: none found"
-    )
+    lines.append(f"Duplicates: {len(duplicates)}" if duplicates else "Duplicates: none found")
     lines.append(f"Stale SYNCs: {len(stale)}" if stale else "Stale SYNCs: none found")
 
     if orphaned:
         lines.append("")
         lines.append("--- Orphaned Mappings ---")
         for entry in orphaned:
-            lines.append(
-                f"  orphan: ticket={entry['ticket_id']} jira_key={entry['jira_key']}"
-            )
+            lines.append(f"  orphan: ticket={entry['ticket_id']} jira_key={entry['jira_key']}")
 
     if duplicates:
         lines.append("")
         lines.append("--- Duplicate Jira Mappings ---")
         for entry in duplicates:
             ticket_list = ", ".join(entry["ticket_ids"])
-            lines.append(
-                f"  duplicate: jira_key={entry['jira_key']} tickets=[{ticket_list}]"
-            )
+            lines.append(f"  duplicate: jira_key={entry['jira_key']} tickets=[{ticket_list}]")
 
     if stale:
         lines.append("")

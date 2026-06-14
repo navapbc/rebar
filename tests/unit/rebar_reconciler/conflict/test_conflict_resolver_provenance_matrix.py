@@ -133,8 +133,7 @@ def test_bidirectional_apply_once_then_idempotent(differ, field, old, new, origi
 
     pass1 = differ.compute_mutations(prev, next_)
     assert len(pass1) >= 1, (
-        f"field={field} origin={origin}: pass 1 emitted no mutations "
-        "— expected apply-once mutation"
+        f"field={field} origin={origin}: pass 1 emitted no mutations — expected apply-once mutation"
     )
 
     # Advance BOTH sides by applying the emitted mutation (post-write convergence).
@@ -276,8 +275,7 @@ def test_counter_edit_not_suppressed(differ, field, old, new):
     # not an echo. Expect a non-empty mutation list for this field.
     pass2 = differ.compute_mutations(prev_after, next_after)
     field_changes = [
-        m for m in pass2
-        if m.action.value == "update" and field in dict(m.payload or {})
+        m for m in pass2 if m.action.value == "update" and field in dict(m.payload or {})
     ]
     assert field_changes, (
         f"counter-edit on {field}: pass 2 should emit a mutation reflecting "

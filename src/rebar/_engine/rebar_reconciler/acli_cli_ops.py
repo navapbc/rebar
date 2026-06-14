@@ -188,9 +188,7 @@ def create_issue(
     if parent_key:
         kwargs["parent"] = parent_key
 
-    result = _create_issue_no_json(
-        project, issue_type, summary, acli_cmd=acli_cmd, **kwargs
-    )
+    result = _create_issue_no_json(project, issue_type, summary, acli_cmd=acli_cmd, **kwargs)
     # field is present in the ACLI command. _create_issue_no_json returns None only
     # on that specific permission error. When no assignee kwarg is provided, the
     # --assignee flag is never sent, so this error cannot occur and result will
@@ -252,8 +250,7 @@ def _create_issue_no_json(
         return acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd)
     except subprocess.CalledProcessError as exc:
         if exc.stderr and (
-            _ASSIGNEE_PERMISSION_ERROR in exc.stderr
-            or _ASSIGNEE_NOT_FOUND_ERROR in exc.stderr
+            _ASSIGNEE_PERMISSION_ERROR in exc.stderr or _ASSIGNEE_NOT_FOUND_ERROR in exc.stderr
         ):
             return None
         raise
@@ -294,8 +291,7 @@ def _create_from_json_payload(
         return acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd)
     except subprocess.CalledProcessError as exc:
         if exc.stderr and (
-            _ASSIGNEE_PERMISSION_ERROR in exc.stderr
-            or _ASSIGNEE_NOT_FOUND_ERROR in exc.stderr
+            _ASSIGNEE_PERMISSION_ERROR in exc.stderr or _ASSIGNEE_NOT_FOUND_ERROR in exc.stderr
         ):
             return None
         raise
@@ -418,9 +414,9 @@ def update_priority(
         return
     url = f"{jira_url.rstrip('/')}/rest/api/3/issue/{jira_key}"
     creds = base64.b64encode(f"{user}:{api_token}".encode()).decode()
-    data = json.dumps(
-        {"fields": {"priority": {"name": priority_name}}}, ensure_ascii=False
-    ).encode("utf-8")
+    data = json.dumps({"fields": {"priority": {"name": priority_name}}}, ensure_ascii=False).encode(
+        "utf-8"
+    )
     req = urllib.request.Request(
         url,
         data=data,

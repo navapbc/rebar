@@ -89,7 +89,7 @@ def _gitdir(tracker: str) -> str | None:
                 line = f.read().strip()
         except OSError:
             return None
-        gd = line[len("gitdir:"):].strip() if line.startswith("gitdir:") else ""
+        gd = line[len("gitdir:") :].strip() if line.startswith("gitdir:") else ""
         if gd and not os.path.isabs(gd):
             gd = os.path.join(tracker, gd)
         return gd or None

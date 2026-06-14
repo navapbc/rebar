@@ -36,7 +36,10 @@ def _cli(*args: str, cwd: str, **env: str) -> subprocess.CompletedProcess:
     e.update(env)
     return subprocess.run(
         [sys.executable, "-m", "rebar.cli", *args],
-        capture_output=True, text=True, cwd=cwd, env=e,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        env=e,
     )
 
 
@@ -62,7 +65,8 @@ def _write_future_event(repo: Path, tid: str) -> Path:
 
 def _seed(repo: Path) -> str:
     return rebar.create_ticket(
-        "task", "Forward-compat task",
+        "task",
+        "Forward-compat task",
         description="Body.\n\n## Acceptance Criteria\n- [ ] a",
         repo_root=str(repo),
     )

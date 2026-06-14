@@ -35,15 +35,11 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_applier():
-    spec = importlib.util.spec_from_file_location(
-        "applier_drift_tolerance", APPLIER_PATH
-    )
+    spec = importlib.util.spec_from_file_location("applier_drift_tolerance", APPLIER_PATH)
     mod = importlib.util.module_from_spec(spec)
     sys.modules["applier_drift_tolerance"] = mod
     spec.loader.exec_module(mod)

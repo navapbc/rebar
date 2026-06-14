@@ -105,8 +105,7 @@ def _make_jira_snapshot_with_comments(
         ]
     else:
         jira_comments = [
-            {"id": str(100 + i), "body": body}
-            for i, body in enumerate(comment_bodies)
+            {"id": str(100 + i), "body": body} for i, body in enumerate(comment_bodies)
         ]
 
     return {
@@ -237,9 +236,7 @@ def test_empty_jira_comments_emits_all_local_as_adds(
 
     assert len(result) == 1
     m = result[0]
-    assert len(m.comments) == 2, (
-        f"Expected 2 comment adds (empty Jira list), got {len(m.comments)}"
-    )
+    assert len(m.comments) == 2, f"Expected 2 comment adds (empty Jira list), got {len(m.comments)}"
     # Each emitted body contains the local text (plus RECONCILER_MARKER decoration).
     emitted_texts = {c["body"] for c in m.comments}
     for body in local_bodies:

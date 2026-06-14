@@ -214,9 +214,7 @@ def _iter_pages(client, jql: str, page_size: int = 100, cap: int | None = None):
         start_at += page_size
 
 
-def collect(
-    client, jql: str, page_size: int = 100, cap: int | None = None
-) -> list[dict]:
+def collect(client, jql: str, page_size: int = 100, cap: int | None = None) -> list[dict]:
     """Drain ``_iter_pages`` into a single flat list of issues."""
     issues: list[dict] = []
     for page in _iter_pages(client, jql, page_size=page_size, cap=cap):
@@ -255,7 +253,11 @@ def _build_snapshot(
         Any exception raised by ``AcliClient.search_issues()`` propagates out.
     """
     if repo_root is None:
-        repo_root = Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])
+        repo_root = Path(
+            os.environ.get("REBAR_ROOT")
+            or os.environ.get("PROJECT_ROOT")
+            or Path(__file__).resolve().parents[4]
+        )
 
     acli_mod = _load_acli()
     client = acli_mod.AcliClient(
@@ -416,7 +418,11 @@ def fetch_snapshot(
     depend on it.
     """
     if repo_root is None:
-        repo_root = Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])
+        repo_root = Path(
+            os.environ.get("REBAR_ROOT")
+            or os.environ.get("PROJECT_ROOT")
+            or Path(__file__).resolve().parents[4]
+        )
 
     snapshot = _build_snapshot(pass_id, repo_root)
 

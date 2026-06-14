@@ -99,9 +99,7 @@ def test_is_active_link_same_second_unlink_sorts_after_link(
     # _is_active_link must return False: the UNLINK cancels the LINK, net state = inactive
     # With the bug: returns True (UNLINK replayed before LINK → LINK appears active again)
     # With the fix: returns False (LINK always replays before UNLINK at same timestamp)
-    result = graph._is_active_link(
-        "src-ticket", "tgt-ticket", "blocks", str(tracker_dir)
-    )
+    result = graph._is_active_link("src-ticket", "tgt-ticket", "blocks", str(tracker_dir))
     assert result is False, (
         "_is_active_link returned True but the link was cancelled by an UNLINK event. "
         "This indicates same-second UNLINK is sorting before LINK — the timestamp "
@@ -197,12 +195,8 @@ def test_write_link_event_push_gives_up_on_merge_conflict(
     push_fail = MagicMock(
         returncode=1, stdout="", stderr="error: non-fast-forward updates were rejected"
     )
-    rebase_fail = MagicMock(
-        returncode=1, stdout="", stderr="CONFLICT (content): Merge conflict"
-    )
-    merge_fail = MagicMock(
-        returncode=1, stdout="", stderr="CONFLICT (content): Merge conflict"
-    )
+    rebase_fail = MagicMock(returncode=1, stdout="", stderr="CONFLICT (content): Merge conflict")
+    merge_fail = MagicMock(returncode=1, stdout="", stderr="CONFLICT (content): Merge conflict")
 
     # git add, git commit, git remote, git push (fail), git fetch,
     # git rebase (fail), git rebase --abort, git merge (fail), git merge --abort

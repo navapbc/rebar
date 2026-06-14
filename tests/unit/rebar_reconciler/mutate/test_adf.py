@@ -24,9 +24,7 @@ ADF_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "adf.p
 
 def _load_adf() -> ModuleType:
     spec = importlib.util.spec_from_file_location("adf", ADF_PATH)
-    assert spec is not None and spec.loader is not None, (
-        f"Cannot load adf module from {ADF_PATH}"
-    )
+    assert spec is not None and spec.loader is not None, f"Cannot load adf module from {ADF_PATH}"
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     return mod
@@ -369,9 +367,7 @@ class TestAdfToTextTable:
                                     "content": [
                                         {
                                             "type": "paragraph",
-                                            "content": [
-                                                {"type": "text", "text": "Name"}
-                                            ],
+                                            "content": [{"type": "text", "text": "Name"}],
                                         }
                                     ],
                                 },
@@ -380,9 +376,7 @@ class TestAdfToTextTable:
                                     "content": [
                                         {
                                             "type": "paragraph",
-                                            "content": [
-                                                {"type": "text", "text": "Value"}
-                                            ],
+                                            "content": [{"type": "text", "text": "Value"}],
                                         }
                                     ],
                                 },
@@ -647,9 +641,7 @@ class TestAdfToTextComplex:
                                     "content": [
                                         {
                                             "type": "paragraph",
-                                            "content": [
-                                                {"type": "text", "text": "Col"}
-                                            ],
+                                            "content": [{"type": "text", "text": "Col"}],
                                         }
                                     ],
                                 },
@@ -663,9 +655,7 @@ class TestAdfToTextComplex:
                                     "content": [
                                         {
                                             "type": "paragraph",
-                                            "content": [
-                                                {"type": "text", "text": "val"}
-                                            ],
+                                            "content": [{"type": "text", "text": "val"}],
                                         }
                                     ],
                                 },

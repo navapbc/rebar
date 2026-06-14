@@ -62,7 +62,9 @@ def _golden_cases() -> list[tuple[str, list[str]]]:
     return cases
 
 
-@pytest.mark.parametrize("name,argv", _golden_cases(), ids=lambda v: v if isinstance(v, str) else None)
+@pytest.mark.parametrize(
+    "name,argv", _golden_cases(), ids=lambda v: v if isinstance(v, str) else None
+)
 def test_help_byte_parity(name: str, argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
     """Every help/overview/error invocation matches the dispatcher byte-for-byte."""
     want_out, want_err, want_code = _golden(name)
@@ -90,10 +92,22 @@ def test_routing_tables_cover_every_known_subcommand() -> None:
     never overlap (a command can't be both a read and a write arm).
     """
     inproc = (
-        _READS_INIT_ONLY | _READS_NO_INIT | _WRITES_FULL | _FIELD_READS | _LOOKUPS | _DESCENDANTS | _GATES
+        _READS_INIT_ONLY
+        | _READS_NO_INIT
+        | _WRITES_FULL
+        | _FIELD_READS
+        | _LOOKUPS
+        | _DESCENDANTS
+        | _GATES
     )
     sets = [
-        _READS_INIT_ONLY, _READS_NO_INIT, _WRITES_FULL, _FIELD_READS, _LOOKUPS, _DESCENDANTS, _GATES,
+        _READS_INIT_ONLY,
+        _READS_NO_INIT,
+        _WRITES_FULL,
+        _FIELD_READS,
+        _LOOKUPS,
+        _DESCENDANTS,
+        _GATES,
     ]
     for i in range(len(sets)):
         for j in range(i + 1, len(sets)):

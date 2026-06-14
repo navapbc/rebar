@@ -28,9 +28,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-HEALTH_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "health.py"
-)
+HEALTH_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "health.py"
 
 
 def _load_health() -> ModuleType:
@@ -73,9 +71,7 @@ def _make_create_event(ticket_dir: Path, filename: str, ticket_type: str = "task
 # ---------------------------------------------------------------------------
 
 
-def test_capture_baseline_creates_baseline_file(
-    health: ModuleType, tmp_path: Path
-) -> None:
+def test_capture_baseline_creates_baseline_file(health: ModuleType, tmp_path: Path) -> None:
     """capture_baseline() writes a JSON file to bridge_state/health/<pass_id>_baseline.json."""
     pass_id = "baseline-pass-001"
     out_path = health.capture_baseline(pass_id=pass_id, repo_root=tmp_path)
@@ -102,9 +98,7 @@ def test_capture_baseline_fields(health: ModuleType, tmp_path: Path) -> None:
     assert before_ns <= data["timestamp_ns"] <= after_ns
 
 
-def test_capture_baseline_no_tickets_dir_returns_zero(
-    health: ModuleType, tmp_path: Path
-) -> None:
+def test_capture_baseline_no_tickets_dir_returns_zero(health: ModuleType, tmp_path: Path) -> None:
     """When no .tickets-tracker/ dir exists, pre_pass_fsck_total is 0."""
     pass_id = "baseline-no-tracker"
     # tmp_path has no .tickets-tracker directory
@@ -115,9 +109,7 @@ def test_capture_baseline_no_tickets_dir_returns_zero(
     assert data["pre_pass_fsck_total"] == 0
 
 
-def test_capture_baseline_counts_open_tickets(
-    health: ModuleType, tmp_path: Path
-) -> None:
+def test_capture_baseline_counts_open_tickets(health: ModuleType, tmp_path: Path) -> None:
     """With a fake .tickets-tracker/, counts only tickets with latest STATUS='open'."""
     tracker_dir = tmp_path / ".tickets-tracker"
 
@@ -153,9 +145,7 @@ def test_capture_baseline_not_implemented_error_not_raised(
     assert result is not None
 
 
-def test_capture_baseline_counts_create_only_as_open(
-    health: ModuleType, tmp_path: Path
-) -> None:
+def test_capture_baseline_counts_create_only_as_open(health: ModuleType, tmp_path: Path) -> None:
     """A ticket with only a CREATE event (no STATUS yet) counts as open.
 
     Matches ticket_reducer/_state.py:make_initial_state which initializes

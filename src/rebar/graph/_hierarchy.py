@@ -64,9 +64,7 @@ def _tier_of_ticket(ticket_id: str, tracker_dir: str) -> int:
     return _tier_of(state.get("ticket_type"))
 
 
-def _promote_to_tier(
-    chain: list[str], target_tier: int, tracker_dir: str
-) -> tuple[str, bool]:
+def _promote_to_tier(chain: list[str], target_tier: int, tracker_dir: str) -> tuple[str, bool]:
     """Promote the head of ``chain`` UP to the nearest ancestor whose tier matches
     ``target_tier``.
 
@@ -185,14 +183,10 @@ def resolve_hierarchy_link(
         pass
     elif source_tier < target_tier:
         # Source is lower: promote it up to the target's (higher) tier.
-        resolved_source, _ = _promote_to_tier(
-            source_chain, target_tier, tracker_dir
-        )
+        resolved_source, _ = _promote_to_tier(source_chain, target_tier, tracker_dir)
     else:
         # Target is lower: promote it up to the source's (higher) tier.
-        resolved_target, _ = _promote_to_tier(
-            target_chain, source_tier, tracker_dir
-        )
+        resolved_target, _ = _promote_to_tier(target_chain, source_tier, tracker_dir)
 
     was_redirected = (resolved_source != source_id) or (resolved_target != target_id)
 

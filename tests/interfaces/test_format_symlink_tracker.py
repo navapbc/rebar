@@ -25,9 +25,7 @@ def _format(argv: list[str], capsys: pytest.CaptureFixture[str]) -> tuple[str, i
 
 
 @pytest.fixture
-def symlinked_tracker(
-    rebar_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> str:
+def symlinked_tracker(rebar_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     """A symlink pointing at the repo's real tracker; sets TICKETS_TRACKER_DIR to it."""
     link = tmp_path / "tracker-link"
     link.symlink_to(rebar_repo / ".tickets-tracker")

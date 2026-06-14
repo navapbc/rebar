@@ -123,9 +123,9 @@ def test_inbound_remove_suppressed_when_outbound_adds_same_label(
     # Inbound must not emit a REMOVE for 'ob-added'.
     for m in result:
         for lm in m.labels:
-            assert not (
-                lm.get("action") == "remove" and lm.get("label") == "ob-added"
-            ), f"Inbound emitted contradictory REMOVE ob-added: {m}"
+            assert not (lm.get("action") == "remove" and lm.get("label") == "ob-added"), (
+                f"Inbound emitted contradictory REMOVE ob-added: {m}"
+            )
     # One label REMOVE was suppressed.
     assert suppressed == 1
 
@@ -451,9 +451,9 @@ def test_combined_field_and_label_suppression_same_jira_key(
             f"Inbound emitted contradictory description update: {m}"
         )
         for lm in m.labels:
-            assert not (
-                lm.get("action") == "remove" and lm.get("label") == "ob-added"
-            ), f"Inbound emitted contradictory REMOVE ob-added: {m}"
+            assert not (lm.get("action") == "remove" and lm.get("label") == "ob-added"), (
+                f"Inbound emitted contradictory REMOVE ob-added: {m}"
+            )
             assert not (lm.get("action") == "add" and lm.get("label") == "ib-add"), (
                 f"Inbound emitted contradictory ADD ib-add: {m}"
             )

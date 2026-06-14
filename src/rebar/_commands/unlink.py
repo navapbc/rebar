@@ -58,7 +58,10 @@ def _get_link_info(ticket_dir: Path, target_id: str) -> tuple[str, str]:
         uuid = ev.get("uuid", "")
         if ev_type == "LINK":
             if uuid:
-                active[uuid] = (data.get("target_id", data.get("target", "")), data.get("relation", ""))
+                active[uuid] = (
+                    data.get("target_id", data.get("target", "")),
+                    data.get("relation", ""),
+                )
         else:
             link_uuid = data.get("link_uuid", "")
             if link_uuid:

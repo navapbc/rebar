@@ -28,14 +28,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-ALERT_STORE_PATH = (
-    REPO_ROOT
-    / "src"
-    / "rebar"
-    / "_engine"
-    / "rebar_reconciler"
-    / "alert_store.py"
-)
+ALERT_STORE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "alert_store.py"
 
 
 def _load_alert_store() -> ModuleType:
@@ -96,9 +89,7 @@ def test_concurrent_appends_produce_no_malformed_lines(
     jsonl_file = jsonl_files[0]
 
     lines = jsonl_file.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == expected_total, (
-        f"Expected {expected_total} lines, got {len(lines)}"
-    )
+    assert len(lines) == expected_total, f"Expected {expected_total} lines, got {len(lines)}"
 
     # Every line must be a valid JSON object with the expected fields.
     seen_keys: set[str] = set()
@@ -106,10 +97,7 @@ def test_concurrent_appends_produce_no_malformed_lines(
         try:
             rec = json.loads(line)
         except json.JSONDecodeError as exc:
-            pytest.fail(
-                f"Line {idx} is malformed JSONL "
-                f"(concurrency corruption): {line!r} ({exc})"
-            )
+            pytest.fail(f"Line {idx} is malformed JSONL (concurrency corruption): {line!r} ({exc})")
         assert isinstance(rec, dict), f"Line {idx} parsed but is not a dict: {rec!r}"
         assert "key" in rec, f"Line {idx} missing 'key': {rec!r}"
         assert "thread_id" in rec, f"Line {idx} missing 'thread_id': {rec!r}"
@@ -118,11 +106,8 @@ def test_concurrent_appends_produce_no_malformed_lines(
 
     # No record lost, no record duplicated.
     expected_keys = {
-        f"concurrent-{t}-{s}"
-        for t in range(threads)
-        for s in range(records_per_thread)
+        f"concurrent-{t}-{s}" for t in range(threads) for s in range(records_per_thread)
     }
     assert seen_keys == expected_keys, (
-        f"Missing keys: {expected_keys - seen_keys}; "
-        f"unexpected keys: {seen_keys - expected_keys}"
+        f"Missing keys: {expected_keys - seen_keys}; unexpected keys: {seen_keys - expected_keys}"
     )

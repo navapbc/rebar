@@ -20,9 +20,7 @@ import rebar
 
 
 def _git_out(*args: str, cwd: Path) -> str:
-    return subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True
-    ).stdout
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True).stdout
 
 
 def test_cache_json_in_committed_tracker_gitignore(rebar_repo: Path) -> None:

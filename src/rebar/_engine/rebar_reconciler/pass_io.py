@@ -39,9 +39,7 @@ class RescheduleError(Exception):
     """
 
     def __init__(self, attempt_count: int, last_error: str) -> None:
-        super().__init__(
-            f"reject_and_reschedule after {attempt_count} attempt(s): {last_error}"
-        )
+        super().__init__(f"reject_and_reschedule after {attempt_count} attempt(s): {last_error}")
         self.attempt_count = attempt_count
         self.last_error = last_error
 
@@ -89,9 +87,7 @@ def _load_alert_store():
     AssigneeNotFoundError per bug 17b5) without aborting the pass.
     """
     alert_path = Path(__file__).parent / "alert_store.py"
-    spec = importlib.util.spec_from_file_location(
-        "rebar_reconciler_alert_store", alert_path
-    )
+    spec = importlib.util.spec_from_file_location("rebar_reconciler_alert_store", alert_path)
     if spec is None:
         raise FileNotFoundError(f"alert_store.py not found at {alert_path}")
     mod = importlib.util.module_from_spec(spec)
@@ -127,9 +123,7 @@ def _write_mapping_json_atomic(mapping_path: Path, data: dict) -> None:
         data:         Complete dict to serialize.
     """
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_fd, tmp_path = tempfile.mkstemp(
-        dir=mapping_path.parent, suffix=".tmp", prefix="mapping_"
-    )
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=mapping_path.parent, suffix=".tmp", prefix="mapping_")
     try:
         with os.fdopen(tmp_fd, "w") as fh:
             json.dump(data, fh, indent=2)

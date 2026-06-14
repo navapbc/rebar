@@ -79,9 +79,7 @@ def test_library_path_exposes_no_generic_top_level_engine_names():
         "print('OK')\n"
     )
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
-    cp = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, env=env
-    )
+    cp = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, env=env)
     assert cp.returncode == 0, (
         "generic top-level engine names leaked onto the library import path:\n"
         f"stdout={cp.stdout!r}\nstderr={cp.stderr!r}"
@@ -113,9 +111,5 @@ def test_wheel_contains_no_compiled_bytecode(tmp_path):
     assert wheels, f"no wheel produced, got: {built}"
 
     with zipfile.ZipFile(wheels[0]) as zf:
-        bad = [
-            n
-            for n in zf.namelist()
-            if n.endswith((".pyc", ".pyo")) or "__pycache__" in n
-        ]
+        bad = [n for n in zf.namelist() if n.endswith((".pyc", ".pyo")) or "__pycache__" in n]
     assert not bad, f"wheel shipped compiled bytecode: {bad[:20]}"

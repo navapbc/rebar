@@ -18,9 +18,7 @@ import re
 # would otherwise miss. Matched by substring so they join overlap detection.
 KNOWN_EXTENSIONLESS = ("rebar",)
 
-_AC_LINE_RE = re.compile(
-    r"^\s*(?:AC\s+\w[\w\s]*:|Acceptance\s+criteria\s*:)", re.IGNORECASE
-)
+_AC_LINE_RE = re.compile(r"^\s*(?:AC\s+\w[\w\s]*:|Acceptance\s+criteria\s*:)", re.IGNORECASE)
 
 
 def _read_config_value(key: str) -> str:
@@ -99,9 +97,7 @@ def extract_files(text: str, cfg: PathConfig) -> set[str]:
         files.add(m.group(1).lstrip("./"))
 
     # Python module notation.
-    for m in re.finditer(
-        r"\b((?:" + re.escape(cfg.src_dir) + r"|app)(?:\.\w+)+)\b", text
-    ):
+    for m in re.finditer(r"\b((?:" + re.escape(cfg.src_dir) + r"|app)(?:\.\w+)+)\b", text):
         files.add(m.group(1).replace(".", "/") + ".py")
 
     # Known extension-less dispatcher files (matched by substring).
@@ -115,7 +111,7 @@ def extract_files(text: str, cfg: PathConfig) -> set[str]:
     implied = set()
     for f in files:
         if f.startswith(src_prefix) and f.endswith(".py"):
-            inner = f[len(src_prefix):]
+            inner = f[len(src_prefix) :]
             parts = inner.rsplit("/", 1)
             if len(parts) == 2:
                 test_path = f"{test_unit_prefix}{parts[0]}/test_{parts[1]}"

@@ -68,9 +68,7 @@ if "rebar_reconciler.adf" not in sys.modules:
 # ``rebar_reconciler`` namespace stub.
 _CL_PATH = SCRIPTS_DIR / "rebar_reconciler" / "comment_limits.py"
 if "rebar_reconciler.comment_limits" not in sys.modules:
-    _cl_spec = importlib.util.spec_from_file_location(
-        "rebar_reconciler.comment_limits", _CL_PATH
-    )
+    _cl_spec = importlib.util.spec_from_file_location("rebar_reconciler.comment_limits", _CL_PATH)
     _cl_mod = importlib.util.module_from_spec(_cl_spec)
     sys.modules["rebar_reconciler.comment_limits"] = _cl_mod
     _cl_spec.loader.exec_module(_cl_mod)  # type: ignore[union-attr]
@@ -191,9 +189,7 @@ def test_assignee_not_found_soft_fails_batch_continues(
     # Alert record DID land for the bad one
     records = _read_alert_records(tmp_path)
     assignee_alerts = [
-        r
-        for r in records
-        if "assignee" in r.get("kind", "") and r.get("key") == "DIG-4276"
+        r for r in records if "assignee" in r.get("kind", "") and r.get("key") == "DIG-4276"
     ]
     assert len(assignee_alerts) >= 1, (
         f"expected an assignee-unresolved alert for DIG-4276; got records: {records}"
@@ -232,11 +228,9 @@ def test_assignee_not_found_alone_does_not_raise(
                 repo_root=tmp_path,
             )
         except acli_mod.AssigneeNotFoundError as exc:
-            pytest.fail(
-                f"single-mutation batch with bad assignee must not raise: {exc!r}"
-            )
+            pytest.fail(f"single-mutation batch with bad assignee must not raise: {exc!r}")
 
     records = _read_alert_records(tmp_path)
-    assert any(
-        r.get("key") == "DIG-4276" and "assignee" in r.get("kind", "") for r in records
-    ), f"expected assignee alert; got {records}"
+    assert any(r.get("key") == "DIG-4276" and "assignee" in r.get("kind", "") for r in records), (
+        f"expected assignee alert; got {records}"
+    )

@@ -56,8 +56,7 @@ def _sync_before_compact() -> int:
     if cp.returncode != 0:
         err = (cp.stderr or "").strip()
         sys.stderr.write(
-            f"Error: ticket sync failed (exit {cp.returncode})"
-            f"{': ' + err if err else ''}\n"
+            f"Error: ticket sync failed (exit {cp.returncode}){': ' + err if err else ''}\n"
         )
         return cp.returncode
     return 0
@@ -109,9 +108,7 @@ def _compact_locked(
             return 1
         status = compiled_state.get("status", "")
         if status in ("error", "fsck_needed"):
-            sys.stderr.write(
-                f"Error: ticket {ticket_id} has status '{status}' — cannot compact\n"
-            )
+            sys.stderr.write(f"Error: ticket {ticket_id} has status '{status}' — cannot compact\n")
             return 1
 
         source_uuids = []
@@ -205,7 +202,7 @@ def compact_cli(argv: list[str], *, repo_root=None) -> int:
     no_commit = False
     for a in argv[1:]:
         if a.startswith("--threshold="):
-            threshold = int(a[len("--threshold="):])
+            threshold = int(a[len("--threshold=") :])
         elif a == "--skip-sync":
             skip_sync = True
         elif a == "--no-commit":
@@ -216,7 +213,10 @@ def compact_cli(argv: list[str], *, repo_root=None) -> int:
 
     if not (
         os.path.isdir(tracker)
-        and (os.path.isfile(os.path.join(tracker, ".git")) or os.path.isdir(os.path.join(tracker, ".git")))
+        and (
+            os.path.isfile(os.path.join(tracker, ".git"))
+            or os.path.isdir(os.path.join(tracker, ".git"))
+        )
     ):
         sys.stderr.write("Error: ticket system not initialized. Run 'ticket init' first.\n")
         return 1
@@ -230,8 +230,7 @@ def compact_cli(argv: list[str], *, repo_root=None) -> int:
         if rc != 0:
             return rc
         if any(
-            f.endswith("-SNAPSHOT.json") and not f.startswith(".")
-            for f in os.listdir(ticket_dir)
+            f.endswith("-SNAPSHOT.json") and not f.startswith(".") for f in os.listdir(ticket_dir)
         ):
             sys.stdout.write(f"skipping compaction for {ticket_id} — remote SNAPSHOT exists\n")
             return 0
@@ -281,7 +280,7 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
         if a == "--dry-run":
             dry_run = True
         elif a.startswith("--limit="):
-            limit = int(a[len("--limit="):])
+            limit = int(a[len("--limit=") :])
         elif a == "--no-commit":
             no_commit = True
         elif a in ("--help", "-h"):
@@ -348,7 +347,11 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
             sys.stdout.write("No staged changes (SNAPSHOTs may already have been committed).\n")
         else:
             _git(
-                tracker, "commit", "-q", "--no-verify", "-m",
+                tracker,
+                "commit",
+                "-q",
+                "--no-verify",
+                "-m",
                 f"chore: backfill SNAPSHOT files for {compacted} tickets (ticket-compact-all)",
             )
             sys.stdout.write("Committed.\n")

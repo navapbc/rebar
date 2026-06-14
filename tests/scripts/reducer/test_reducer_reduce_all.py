@@ -87,9 +87,7 @@ def test_reduce_all_tickets_skips_dir_with_archived_marker(
         called_dirs.append(str(ticket_dir_path))
         return original_reduce_ticket(ticket_dir_path, **kwargs)
 
-    with unittest.mock.patch.object(
-        reducer, "reduce_ticket", side_effect=spy_reduce_ticket
-    ):
+    with unittest.mock.patch.object(reducer, "reduce_ticket", side_effect=spy_reduce_ticket):
         results = reducer.reduce_all_tickets(str(tracker_dir), exclude_archived=True)
 
     # Verify the archived ticket dir was NOT processed by reduce_ticket()
@@ -169,16 +167,12 @@ def test_reduce_all_tickets_fallback_without_marker_correct_state(
         called_dirs.append(str(ticket_dir_path))
         return original_reduce_ticket(ticket_dir_path, **kwargs)
 
-    with unittest.mock.patch.object(
-        _api_mod, "reduce_ticket", side_effect=spy_reduce_ticket
-    ):
+    with unittest.mock.patch.object(_api_mod, "reduce_ticket", side_effect=spy_reduce_ticket):
         results = reducer.reduce_all_tickets(str(tracker_dir), exclude_archived=False)
 
     # Verify reduce_ticket() WAS called for the crash-scenario dir (slow path)
     archived_dir_str = str(ticket_dir)
-    assert any(
-        os.path.normpath(d) == os.path.normpath(archived_dir_str) for d in called_dirs
-    ), (
+    assert any(os.path.normpath(d) == os.path.normpath(archived_dir_str) for d in called_dirs), (
         "reduce_all_tickets(exclude_archived=False) must call reduce_ticket() for dirs "
         "with ARCHIVED event but no .archived marker (slow-path fallback); "
         f"reduce_ticket was called for dirs: {called_dirs}"
@@ -313,9 +307,7 @@ def test_cache_hash_stable_when_no_marker_change(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_orphan_marker_removed_and_slow_path_taken(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_orphan_marker_removed_and_slow_path_taken(tmp_path: Path, reducer: ModuleType) -> None:
     """reduce_all_tickets() must detect an orphan .archived marker (no matching
     *-ARCHIVED.json event) and self-heal by removing it, then fall back to slow
     path and return the correct active (non-archived) state.
@@ -438,9 +430,7 @@ def test_valid_marker_not_removed(tmp_path: Path, reducer: ModuleType) -> None:
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_orphan_marker_cache_miss_on_self_heal(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_orphan_marker_cache_miss_on_self_heal(tmp_path: Path, reducer: ModuleType) -> None:
     """After orphan self-heal removes .archived marker, a second reduce_all_tickets()
     call must also return the correct active state (cache invalidated by marker removal).
 
@@ -486,8 +476,7 @@ def test_orphan_marker_cache_miss_on_self_heal(
 
     ids_first = [r.get("ticket_id") for r in results_first]
     assert "tkt-orphan-cache" in ids_first, (
-        "First call must return the ticket after orphan self-heal; "
-        f"got ids_first={ids_first}"
+        f"First call must return the ticket after orphan self-heal; got ids_first={ids_first}"
     )
 
     # Second call — cache must NOT serve stale archived=True; marker is absent now
@@ -501,9 +490,7 @@ def test_orphan_marker_cache_miss_on_self_heal(
     )
 
     # Both calls must agree on active (non-archived) state
-    state_second = next(
-        r for r in results_second if r.get("ticket_id") == "tkt-orphan-cache"
-    )
+    state_second = next(r for r in results_second if r.get("ticket_id") == "tkt-orphan-cache")
     assert not state_second.get("archived"), (
         "Second call: ticket must not have archived=True after orphan self-heal; "
         f"got state['archived']={state_second.get('archived')!r}"
@@ -568,9 +555,7 @@ def test_cache_hash_differs_after_marker_removal(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reverted_archived_marker_is_orphan(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reverted_archived_marker_is_orphan(tmp_path: Path, reducer: ModuleType) -> None:
     """reduce_all_tickets() must remove a .archived marker when the ARCHIVED event
     has been cancelled by a subsequent REVERT (net non-archived state).
 
@@ -649,16 +634,29 @@ def test_revert_of_archived_unarchives_state(reducer: ModuleType, tmp_path: Path
     ticket_dir.mkdir()
     archived_uuid = _UUID2
 
-    _write_event(ticket_dir, timestamp=1742605200, uuid=_UUID, event_type="CREATE",
-                 data={"ticket_type": "task", "title": "archived then reverted"})
-    _write_event(ticket_dir, timestamp=1742605300, uuid=archived_uuid,
-                 event_type="ARCHIVED", data={})
-    _write_event(ticket_dir, timestamp=1742605400, uuid=_UUID3, event_type="REVERT",
-                 data={"target_event_uuid": archived_uuid, "target_event_type": "ARCHIVED", "reason": ""})
+    _write_event(
+        ticket_dir,
+        timestamp=1742605200,
+        uuid=_UUID,
+        event_type="CREATE",
+        data={"ticket_type": "task", "title": "archived then reverted"},
+    )
+    _write_event(
+        ticket_dir, timestamp=1742605300, uuid=archived_uuid, event_type="ARCHIVED", data={}
+    )
+    _write_event(
+        ticket_dir,
+        timestamp=1742605400,
+        uuid=_UUID3,
+        event_type="REVERT",
+        data={"target_event_uuid": archived_uuid, "target_event_type": "ARCHIVED", "reason": ""},
+    )
 
     state = reducer.reduce_ticket(str(ticket_dir))
     assert state["archived"] is False, f"revert must clear archived; got {state!r}"
-    assert state["status"] == "open", f"revert of ARCHIVED must restore open; got {state['status']!r}"
+    assert state["status"] == "open", (
+        f"revert of ARCHIVED must restore open; got {state['status']!r}"
+    )
 
     visible = reducer.reduce_all_tickets(str(tracker_dir), exclude_archived=True)
     assert any(t.get("ticket_id") == "tkt-unarchive" for t in visible), (
@@ -679,15 +677,30 @@ def test_revert_of_archived_does_not_resurrect_deleted(reducer: ModuleType, tmp_
     ticket_dir.mkdir()
     archived_uuid = _UUID2
 
-    _write_event(ticket_dir, timestamp=1742605200, uuid=_UUID, event_type="CREATE",
-                 data={"ticket_type": "task", "title": "deleted ticket"})
-    _write_event(ticket_dir, timestamp=1742605250, uuid=_UUID3, event_type="STATUS",
-                 data={"status": "deleted", "current_status": "open"})
-    _write_event(ticket_dir, timestamp=1742605300, uuid=archived_uuid,
-                 event_type="ARCHIVED", data={})
-    _write_event(ticket_dir, timestamp=1742605400, uuid="cafef00d-dead-beef-dead-beefcafef00d",
-                 event_type="REVERT",
-                 data={"target_event_uuid": archived_uuid, "target_event_type": "ARCHIVED", "reason": ""})
+    _write_event(
+        ticket_dir,
+        timestamp=1742605200,
+        uuid=_UUID,
+        event_type="CREATE",
+        data={"ticket_type": "task", "title": "deleted ticket"},
+    )
+    _write_event(
+        ticket_dir,
+        timestamp=1742605250,
+        uuid=_UUID3,
+        event_type="STATUS",
+        data={"status": "deleted", "current_status": "open"},
+    )
+    _write_event(
+        ticket_dir, timestamp=1742605300, uuid=archived_uuid, event_type="ARCHIVED", data={}
+    )
+    _write_event(
+        ticket_dir,
+        timestamp=1742605400,
+        uuid="cafef00d-dead-beef-dead-beefcafef00d",
+        event_type="REVERT",
+        data={"target_event_uuid": archived_uuid, "target_event_type": "ARCHIVED", "reason": ""},
+    )
 
     state = reducer.reduce_ticket(str(ticket_dir))
     assert state["status"] == "deleted", f"deleted must NOT be resurrected; got {state['status']!r}"

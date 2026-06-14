@@ -24,12 +24,8 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
-CONCURRENCY_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_concurrency.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+CONCURRENCY_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_concurrency.py"
 
 
 def _load_applier():
@@ -55,8 +51,7 @@ def applier():
     """Load the applier module, failing all tests if absent."""
     if not APPLIER_PATH.exists():
         pytest.fail(
-            f"applier.py not found at {APPLIER_PATH} — "
-            "implement the module to make tests pass."
+            f"applier.py not found at {APPLIER_PATH} — implement the module to make tests pass."
         )
     return _load_applier()
 
@@ -127,9 +122,7 @@ def test_apply_success_attempt1(tmp_path, applier, concurrency):
         applier._load_concurrency = original_load_concurrency
 
     expected_path = tmp_path / "bridge_state" / "snapshots" / f"{pass_id}.manifest.json"
-    assert result == expected_path, (
-        f"Expected manifest path {expected_path}, got {result!r}"
-    )
+    assert result == expected_path, f"Expected manifest path {expected_path}, got {result!r}"
     assert expected_path.exists(), "Manifest file must exist on disk"
 
 
@@ -170,9 +163,7 @@ def test_apply_success_after_retry(tmp_path, applier, concurrency):
         applier._load_concurrency = original_load_concurrency
 
     expected_path = tmp_path / "bridge_state" / "snapshots" / f"{pass_id}.manifest.json"
-    assert result == expected_path, (
-        f"Expected manifest path after retry, got {result!r}"
-    )
+    assert result == expected_path, f"Expected manifest path after retry, got {result!r}"
     assert call_count["n"] == 1, "rebase_retry must be called exactly once by apply()"
 
 

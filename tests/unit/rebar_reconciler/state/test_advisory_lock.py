@@ -35,13 +35,9 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-LOCK_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_advisory_lock.py"
-)
+LOCK_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_advisory_lock.py"
 MODE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mode.py"
-CONCURRENCY_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_concurrency.py"
-)
+CONCURRENCY_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_concurrency.py"
 
 
 def _load_mode_module() -> ModuleType:
@@ -54,9 +50,7 @@ def _load_mode_module() -> ModuleType:
 
 
 def _load_concurrency_module() -> ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        "rebar_reconciler_concurrency", CONCURRENCY_PATH
-    )
+    spec = importlib.util.spec_from_file_location("rebar_reconciler_concurrency", CONCURRENCY_PATH)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules["rebar_reconciler_concurrency"] = mod
@@ -65,9 +59,7 @@ def _load_concurrency_module() -> ModuleType:
 
 
 def _load_advisory_lock_module() -> ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        "rebar_reconciler_advisory_lock", LOCK_PATH
-    )
+    spec = importlib.util.spec_from_file_location("rebar_reconciler_advisory_lock", LOCK_PATH)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules["rebar_reconciler_advisory_lock"] = mod
@@ -84,8 +76,7 @@ def advisory_lock() -> ModuleType:
     """Return the _advisory_lock module; fail all tests if absent."""
     if not LOCK_PATH.exists():
         pytest.fail(
-            f"_advisory_lock.py not found at {LOCK_PATH} — "
-            "implement the module to make tests pass."
+            f"_advisory_lock.py not found at {LOCK_PATH} — implement the module to make tests pass."
         )
     return _load_advisory_lock_module()
 
@@ -177,9 +168,7 @@ def tmp_git_repo_with_lock(tmp_git_repo_with_tickets: Path) -> tuple[Path, str]:
 # ---------------------------------------------------------------------------
 
 
-def test_check_pass_lock_absent(
-    advisory_lock: ModuleType, tmp_git_repo_with_tickets: Path
-) -> None:
+def test_check_pass_lock_absent(advisory_lock: ModuleType, tmp_git_repo_with_tickets: Path) -> None:
     """check_pass_lock returns False when no lock file on tickets branch."""
     result = advisory_lock.check_pass_lock(tmp_git_repo_with_tickets)
     assert result is False, (
@@ -188,9 +177,7 @@ def test_check_pass_lock_absent(
     )
 
 
-def test_check_pass_lock_present(
-    advisory_lock: ModuleType, tmp_git_repo_with_lock: tuple
-) -> None:
+def test_check_pass_lock_present(advisory_lock: ModuleType, tmp_git_repo_with_lock: tuple) -> None:
     """check_pass_lock returns True when .reconciler-pass-lock present on tickets."""
     repo, _pass_id = tmp_git_repo_with_lock
     result = advisory_lock.check_pass_lock(repo)
@@ -200,9 +187,7 @@ def test_check_pass_lock_present(
     )
 
 
-def test_missing_tickets_branch_fails_closed(
-    advisory_lock: ModuleType, tmp_git_repo: Path
-) -> None:
+def test_missing_tickets_branch_fails_closed(advisory_lock: ModuleType, tmp_git_repo: Path) -> None:
     """check_pass_lock raises ReconcileLockError when tickets branch is missing.
 
     Per fail-CLOSED discipline: a missing tickets branch must raise
@@ -311,9 +296,7 @@ def test_release_pass_lock_ownership_check(
     assert any(
         "pass_id" in w.lower() or "mismatch" in w.lower() or "owner" in w.lower()
         for w in warning_texts
-    ), (
-        f"Expected a warning about pass_id mismatch; got caplog records: {caplog.records}"
-    )
+    ), f"Expected a warning about pass_id mismatch; got caplog records: {caplog.records}"
 
     # Cleanup: release with correct id
     advisory_lock.release_pass_lock(pass_id_x, repo)

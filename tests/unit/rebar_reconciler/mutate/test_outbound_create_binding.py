@@ -15,15 +15,9 @@ from types import ModuleType
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
-)
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
-MUTATION_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
-)
+RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
 OUTBOUND_DIFFER_PATH = (
     REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
 )
@@ -79,9 +73,7 @@ def test_outbound_create_batch_dict_has_local_id_end_to_end(
         "comments": [],
     }
     binding_store = StubBindingStore()
-    mutations = outbound_differ_mod.compute_outbound_mutations(
-        [ticket], {}, binding_store
-    )
+    mutations = outbound_differ_mod.compute_outbound_mutations([ticket], {}, binding_store)
     assert len(mutations) == 1
     om = mutations[0]
     assert om.action == "create"
@@ -160,9 +152,7 @@ def test_create_one_populates_binding_store(applier_mod):
     )
 
     assert result is not None
-    mock_binding_store.bind_confirm.assert_called_once_with(
-        "test-bind-1234", "DIG-9999"
-    )
+    mock_binding_store.bind_confirm.assert_called_once_with("test-bind-1234", "DIG-9999")
 
 
 def test_cap_sort_prioritizes_outbound_creates(applier_mod, mutation_mod):

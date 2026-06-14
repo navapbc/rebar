@@ -35,7 +35,9 @@ def fixture_root(tmp_path: Path) -> Path:
     valid.mkdir(parents=True)
     scratch.mkdir(parents=True)
     (valid / "1000000000-create.json").write_text(
-        json.dumps({"event_type": "CREATE", "data": {"ticket_type": "task", "title": "Fixture ticket"}})
+        json.dumps(
+            {"event_type": "CREATE", "data": {"ticket_type": "task", "title": "Fixture ticket"}}
+        )
     )
     (scratch / "plan.json").write_text(
         json.dumps({"scratch": True, "note": "agent planning data — not a ticket event"})
@@ -56,7 +58,9 @@ def _load_health():
 def _dry_run_enumerate(root: Path) -> str:
     cp = subprocess.run(
         [sys.executable, "-m", "rebar_reconciler", "--repo-root", str(root), "--dry-run-enumerate"],
-        env=engine_env(str(root)), capture_output=True, text=True,
+        env=engine_env(str(root)),
+        capture_output=True,
+        text=True,
     )
     assert cp.returncode == 0, f"--dry-run-enumerate failed: {cp.stderr}"
     return cp.stdout

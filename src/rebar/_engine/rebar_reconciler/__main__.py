@@ -114,18 +114,14 @@ def _run_reconcile_check(repo_root: Path) -> int:
 
     fetcher = _try_load_step("fetcher")
     if fetcher is None:
-        print(
-            "ERROR: fetcher.py not found — cannot load Jira snapshot", file=sys.stderr
-        )
+        print("ERROR: fetcher.py not found — cannot load Jira snapshot", file=sys.stderr)
         return 1
 
     try:
         # Fetch current Jira snapshot. reconcile-check is read-only — use
         # compute_snapshot (no bridge_state/snapshots/<pass>.json write) so the
         # diagnostic does not mutate the local store (ticket yaw-plait-doe).
-        pass_id = datetime.datetime.now(datetime.timezone.utc).strftime(
-            "%Y-%m-%dT%H-%M-%S"
-        )
+        pass_id = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
         import json as _json
 
         jira_snapshot = fetcher.compute_snapshot(pass_id, repo_root)
@@ -151,9 +147,7 @@ def _run_reconcile_check(repo_root: Path) -> int:
         # `.items()` call). Bug 0776: load binding_store.py directly via the
         # same factory reconcile.py uses.
         binding_store_mod = _try_load_step("binding_store")
-        if binding_store_mod is None or not hasattr(
-            binding_store_mod, "load_binding_store"
-        ):
+        if binding_store_mod is None or not hasattr(binding_store_mod, "load_binding_store"):
             # Minimal stub: no bindings. all_bindings() returns a dict to
             # match the protocol reconcile_check expects.
             class _EmptyBindings:
@@ -195,7 +189,11 @@ def run_pass(
     generated and a sub-second race could record mismatched pass_ids.
     """
     if repo_root is None:
-        repo_root = Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])
+        repo_root = Path(
+            os.environ.get("REBAR_ROOT")
+            or os.environ.get("PROJECT_ROOT")
+            or Path(__file__).resolve().parents[4]
+        )
 
     reconcile = _try_load_step("reconcile")
     if reconcile is None:
@@ -211,12 +209,8 @@ def run_pass(
     applier = _try_load_step("applier")
 
     if pass_id is None:
-        pass_id = datetime.datetime.now(datetime.timezone.utc).strftime(
-            "%Y-%m-%dT%H-%M-%S"
-        )
-    reschedule_error_cls = (
-        getattr(applier, "RescheduleError", None) if applier else None
-    )
+        pass_id = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+    reschedule_error_cls = getattr(applier, "RescheduleError", None) if applier else None
     exit_reschedule = getattr(applier, "EXIT_RESCHEDULE", 75) if applier else 75
 
     try:
@@ -269,10 +263,7 @@ def run_pass(
     elif failures == 0:
         print(f"OK: applied {applied} of {computed} mutations")
     else:
-        print(
-            f"OK: applied {applied} of {computed} mutations "
-            f"({failures} failed)"
-        )
+        print(f"OK: applied {applied} of {computed} mutations ({failures} failed)")
     return 0
 
 
@@ -330,7 +321,13 @@ def main(argv: list[str] | None = None) -> int:
     # calls below (which declare repo_root: Path, not Optional) never see
     # None and accidentally invoke `git -C None ...` (bug 5be7-d657-1dde-4237).
     repo_root = (
-        Path(args.repo_root) if args.repo_root else Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])
+        Path(args.repo_root)
+        if args.repo_root
+        else Path(
+            os.environ.get("REBAR_ROOT")
+            or os.environ.get("PROJECT_ROOT")
+            or Path(__file__).resolve().parents[4]
+        )
     )
 
     # --dry-run-enumerate: list enumerable ticket directories and exit.
@@ -338,7 +335,13 @@ def main(argv: list[str] | None = None) -> int:
     # the flag is usable in test fixtures without a live Jira config or lock state.
     if getattr(args, "dry_run_enumerate", False):
         resolved_root = (
-            repo_root if repo_root is not None else Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])
+            repo_root
+            if repo_root is not None
+            else Path(
+                os.environ.get("REBAR_ROOT")
+                or os.environ.get("PROJECT_ROOT")
+                or Path(__file__).resolve().parents[4]
+            )
         )
         tickets_dir = resolved_root / ".tickets-tracker"
         if not tickets_dir.is_dir():
@@ -380,8 +383,7 @@ def main(argv: list[str] | None = None) -> int:
     # Step 2a: pass-lock check (dd-3)
     if advisory.check_pass_lock(repo_root):
         print(
-            "reconcile: .reconciler-pass-lock present on tickets branch "
-            "— another pass in flight",
+            "reconcile: .reconciler-pass-lock present on tickets branch — another pass in flight",
             file=sys.stderr,
         )
         return 3
@@ -418,13 +420,10 @@ def main(argv: list[str] | None = None) -> int:
         acquired = True
         filter_local_ids: set[str] | None = None
         if args.filter_local_ids is not None:
-            parsed = {
-                s.strip() for s in args.filter_local_ids.split(",") if s.strip()
-            }
+            parsed = {s.strip() for s in args.filter_local_ids.split(",") if s.strip()}
             if not parsed:
                 print(
-                    "ERROR: --filter-local-ids must contain at least one "
-                    "non-empty ID",
+                    "ERROR: --filter-local-ids must contain at least one non-empty ID",
                     file=sys.stderr,
                 )
                 return 2
@@ -440,6 +439,7 @@ def main(argv: list[str] | None = None) -> int:
         # the traceback so operators can root-cause. Both go to stderr.
         print(f"ERROR: run_pass raised: {exc}", file=sys.stderr)
         import traceback as _tb
+
         _tb.print_exc(file=sys.stderr)
         return 1
     finally:
@@ -449,8 +449,7 @@ def main(argv: list[str] | None = None) -> int:
             except Exception as _rel_exc:  # noqa: BLE001
                 # Release failure must not mask the original error path.
                 print(
-                    f"WARN: release_pass_lock failed for pass_id={pass_id!r}: "
-                    f"{_rel_exc!r}",
+                    f"WARN: release_pass_lock failed for pass_id={pass_id!r}: {_rel_exc!r}",
                     file=sys.stderr,
                 )
 

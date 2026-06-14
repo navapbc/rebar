@@ -69,7 +69,10 @@ def test_compacted_ticket_status_matches_reducer(applier, reduce_ticket, tmp_pat
     # A compacted ticket: a single SNAPSHOT whose compiled_state is closed; the
     # original CREATE/STATUS files were retired into it (none remain on disk).
     _write(
-        tdir, 5000, "5555-5555-5555-4555", "SNAPSHOT",
+        tdir,
+        5000,
+        "5555-5555-5555-4555",
+        "SNAPSHOT",
         {
             "compiled_state": {
                 "ticket_id": tid,
@@ -98,11 +101,17 @@ def test_status_fork_resolution_matches_reducer(applier, reduce_ticket, tmp_path
     # event (…-4001, status=closed) wins. But a raw "last STATUS file wins" scan
     # returns the file-order-last event (…-4fff, status=in_progress) — the divergence.
     _write(
-        tdir, 200, "0000-0000-0000-4001", "STATUS",
+        tdir,
+        200,
+        "0000-0000-0000-4001",
+        "STATUS",
         {"current_status": "open", "status": "closed", "parent_status_uuid": parent},
     )
     _write(
-        tdir, 300, "ffff-ffff-ffff-4fff", "STATUS",
+        tdir,
+        300,
+        "ffff-ffff-ffff-4fff",
+        "STATUS",
         {"current_status": "open", "status": "in_progress", "parent_status_uuid": parent},
     )
     reducer_status = reduce_ticket(str(tdir))["status"]

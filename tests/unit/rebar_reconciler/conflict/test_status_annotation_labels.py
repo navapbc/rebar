@@ -372,10 +372,7 @@ def test_inbound_dso_status_blocked_label_overrides_jira_status(
 
     # Local is already "blocked"; Jira says "In Progress" but has rebar-status:blocked.
     # No status change should be emitted (local is correct).
-    status_changes = [
-        m for m in mutations
-        if m.local_id == "local-1" and "status" in m.fields
-    ]
+    status_changes = [m for m in mutations if m.local_id == "local-1" and "status" in m.fields]
     assert status_changes == [], (
         f"Inbound must NOT overwrite local 'blocked' when rebar-status:blocked is present. "
         f"Got: {status_changes}"
@@ -408,13 +405,8 @@ def test_inbound_dso_status_blocked_label_sets_local_blocked_when_local_is_open(
         local_tickets_by_id=local_tickets,
     )
 
-    status_mutations = [
-        m for m in mutations
-        if m.local_id == "local-1" and "status" in m.fields
-    ]
-    assert len(status_mutations) == 1, (
-        f"Expected 1 status mutation. Got: {mutations}"
-    )
+    status_mutations = [m for m in mutations if m.local_id == "local-1" and "status" in m.fields]
+    assert len(status_mutations) == 1, f"Expected 1 status mutation. Got: {mutations}"
     assert status_mutations[0].fields["status"] == "blocked", (
         f"inbound with rebar-status:blocked label must set status='blocked', "
         f"got: {status_mutations[0].fields['status']!r}"
@@ -447,10 +439,7 @@ def test_inbound_dso_status_cancelled_label_sets_local_cancelled(
         local_tickets_by_id=local_tickets,
     )
 
-    status_mutations = [
-        m for m in mutations
-        if m.local_id == "local-2" and "status" in m.fields
-    ]
+    status_mutations = [m for m in mutations if m.local_id == "local-2" and "status" in m.fields]
     assert len(status_mutations) == 1
     assert status_mutations[0].fields["status"] == "cancelled", (
         f"inbound with rebar-status:cancelled must set status='cancelled', "
@@ -491,10 +480,7 @@ def test_inbound_in_review_maps_to_in_progress(inbound_differ: ModuleType) -> No
         local_tickets_by_id=local_tickets,
     )
 
-    status_mutations = [
-        m for m in mutations
-        if m.local_id == "local-3" and "status" in m.fields
-    ]
+    status_mutations = [m for m in mutations if m.local_id == "local-3" and "status" in m.fields]
     assert len(status_mutations) == 1, (
         f"Expected 1 status mutation for 'In Review' → 'in_progress'. Got: {mutations}"
     )
@@ -590,13 +576,10 @@ def test_inbound_dso_status_labels_excluded_from_local_tag_sync(
     label_adds = []
     for m in mutations:
         if m.local_id == "local-1":
-            label_adds.extend(
-                lb["label"] for lb in m.labels if lb.get("action") == "add"
-            )
+            label_adds.extend(lb["label"] for lb in m.labels if lb.get("action") == "add")
 
     assert "rebar-status:blocked" not in label_adds, (
-        f"rebar-status:blocked must NOT be added as a local user tag. "
-        f"Got label adds: {label_adds}"
+        f"rebar-status:blocked must NOT be added as a local user tag. Got label adds: {label_adds}"
     )
     # real-user-tag should still come through
     assert "real-user-tag" in label_adds, (

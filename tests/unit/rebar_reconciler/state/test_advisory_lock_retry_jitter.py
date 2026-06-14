@@ -25,12 +25,8 @@ from unittest.mock import patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-LOCK_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_advisory_lock.py"
-)
-CONCURRENCY_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_concurrency.py"
-)
+LOCK_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_advisory_lock.py"
+CONCURRENCY_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_concurrency.py"
 
 
 def _load_concurrency_module() -> ModuleType:
@@ -83,9 +79,7 @@ def _ok_result(conc_mod):
 def _error_result(conc_mod):
     return conc_mod.Result(
         ok=False,
-        event=conc_mod.ConcurrencyEvent(
-            kind="abort_due_to_error", message="boom", attempt=1
-        ),
+        event=conc_mod.ConcurrencyEvent(kind="abort_due_to_error", message="boom", attempt=1),
     )
 
 
@@ -163,8 +157,7 @@ def test_backoff_timing_increases_between_retries(lock_mod, conc_mod, monkeypatc
         # Cap of 5s applies as an upper ceiling regardless of jitter.
         hi = min(hi, 5.0)
         assert lo <= actual <= hi, (
-            f"sleep {actual:.3f}s out of expected jitter band [{lo:.3f}, {hi:.3f}] "
-            f"for base {base}"
+            f"sleep {actual:.3f}s out of expected jitter band [{lo:.3f}, {hi:.3f}] for base {base}"
         )
 
 
@@ -184,9 +177,7 @@ def test_budget_one_is_fail_fast(lock_mod, conc_mod, monkeypatch):
                 lock_mod.acquire_pass_lock("test-pass-id", Path("/fake/repo"))
 
     assert call_count["n"] == 1
-    assert sleep_mock.call_count == 0, (
-        "Budget=1 must not sleep (fail-fast preservation)"
-    )
+    assert sleep_mock.call_count == 0, "Budget=1 must not sleep (fail-fast preservation)"
 
 
 def test_non_drift_error_fails_fast_without_retry(lock_mod, conc_mod, monkeypatch):

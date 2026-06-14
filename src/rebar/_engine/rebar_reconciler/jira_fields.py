@@ -87,9 +87,7 @@ def _sanitize_label(label: str) -> str:
     differs from what the caller asked for.
     """
     if not isinstance(label, str):
-        raise InvalidLabelError(
-            f"Label must be str, got {type(label).__name__}: {label!r}"
-        )
+        raise InvalidLabelError(f"Label must be str, got {type(label).__name__}: {label!r}")
     stripped = label.strip()
     if not stripped:
         raise InvalidLabelError(f"Label is empty after strip: {label!r}")
@@ -98,9 +96,7 @@ def _sanitize_label(label: str) -> str:
             f"Label contains internal whitespace (not allowed by Jira): {label!r}"
         )
     if "," in stripped:
-        raise InvalidLabelError(
-            f"Label contains comma (not allowed by Jira): {label!r}"
-        )
+        raise InvalidLabelError(f"Label contains comma (not allowed by Jira): {label!r}")
     if len(stripped) > _JIRA_LABEL_MAX_CHARS:
         raise InvalidLabelError(
             f"Label exceeds Jira's {_JIRA_LABEL_MAX_CHARS}-char limit "
@@ -121,9 +117,7 @@ def _sanitize_summary(summary: str) -> str:
     A truncation warning is emitted so the operator can investigate.
     """
     if not isinstance(summary, str):
-        raise ValueError(
-            f"Summary must be str, got {type(summary).__name__}: {summary!r}"
-        )
+        raise ValueError(f"Summary must be str, got {type(summary).__name__}: {summary!r}")
     stripped = summary.strip()
     if not stripped:
         raise ValueError(f"Summary is empty after strip: {summary!r}")
@@ -158,9 +152,7 @@ def _sanitize_comment(body: str) -> str:
     in-memory, send-side only).
     """
     if not isinstance(body, str):
-        raise ValueError(
-            f"Comment body must be str, got {type(body).__name__}: {body!r}"
-        )
+        raise ValueError(f"Comment body must be str, got {type(body).__name__}: {body!r}")
     truncated = _truncate_comment_body(body)
     if truncated is not body and len(truncated) != len(body):
         logger.warning(

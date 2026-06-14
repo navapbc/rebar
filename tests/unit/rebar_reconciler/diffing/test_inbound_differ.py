@@ -471,6 +471,5 @@ def test_inbound_label_diff_does_not_remove_local_colon_form_rebar_id(
     for m in result:
         for lm in m.labels:
             assert not (
-                lm.get("action") == "remove"
-                and str(lm.get("label", "")).startswith("rebar-id:")
+                lm.get("action") == "remove" and str(lm.get("label", "")).startswith("rebar-id:")
             ), f"Inbound differ emitted spurious REMOVE for rebar-id label: {lm}"

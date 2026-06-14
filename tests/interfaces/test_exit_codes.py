@@ -35,7 +35,9 @@ MISSING = "zzzz-zzzz-zzzz-0000"
 def _cli(*args: str, cwd: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "rebar.cli", *args],
-        capture_output=True, text=True, cwd=cwd,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
     )
 
 
@@ -47,7 +49,8 @@ def _seed(repo: Path) -> str:
     """Create one open task carrying an Acceptance Criteria block (so the
     per-ticket gates have something well-formed to score), return its id."""
     return rebar.create_ticket(
-        "task", "Conformance task",
+        "task",
+        "Conformance task",
         description="Body of a well-formed ticket.\n\n## Acceptance Criteria\n- [ ] a",
         repo_root=str(repo),
     )
@@ -65,24 +68,30 @@ def test_success_paths_exit_0(rebar_repo: Path) -> None:
 
 
 # ── 1: runtime errors ─────────────────────────────────────────────────────────
-@pytest.mark.parametrize("cmd", [
-    ("show", MISSING),
-    ("deps", MISSING),
-    ("check-ac", MISSING),
-    ("quality-check", MISSING),
-    ("comment", MISSING, "body"),
-    ("tag", MISSING, "atag"),
-    ("transition", MISSING, "open", "closed"),
-])
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        ("show", MISSING),
+        ("deps", MISSING),
+        ("check-ac", MISSING),
+        ("quality-check", MISSING),
+        ("comment", MISSING, "body"),
+        ("tag", MISSING, "atag"),
+        ("transition", MISSING, "open", "closed"),
+    ],
+)
 def test_ticket_not_found_exits_1(rebar_repo: Path, cmd: tuple) -> None:
     assert _rc(*cmd, cwd=str(rebar_repo)) == 1
 
 
-@pytest.mark.parametrize("cmd", [
-    ("show",),            # missing required <ticket_id>
-    ("create",),          # missing required <type> <title>
-    ("deps",),            # missing required <ticket_id>
-])
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        ("show",),  # missing required <ticket_id>
+        ("create",),  # missing required <type> <title>
+        ("deps",),  # missing required <ticket_id>
+    ],
+)
 def test_missing_required_arg_exits_1(rebar_repo: Path, cmd: tuple) -> None:
     assert _rc(*cmd, cwd=str(rebar_repo)) == 1
 
@@ -96,13 +105,16 @@ def test_link_without_relation_exits_1(rebar_repo: Path) -> None:
 # ── 2: usage errors (unrecognized option) ─────────────────────────────────────
 # Every read command rejects an unknown --option with exit 2. show and list were
 # the historical stragglers (returned 1); the canonical contract is 2 uniformly.
-@pytest.mark.parametrize("base", [
-    ("show",),
-    ("list",),
-    ("deps",),
-    ("ready",),
-    ("search", "q"),
-])
+@pytest.mark.parametrize(
+    "base",
+    [
+        ("show",),
+        ("list",),
+        ("deps",),
+        ("ready",),
+        ("search", "q"),
+    ],
+)
 def test_unknown_option_exits_2(rebar_repo: Path, base: tuple) -> None:
     tid = _seed(rebar_repo)
     args = tuple(a if a != "q" else "query" for a in base)

@@ -51,7 +51,11 @@ def record_pass(
         Path to the written JSON health record file.
     """
     if repo_root is None:
-        repo_root = Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])  # four levels up from rebar_reconciler/
+        repo_root = Path(
+            os.environ.get("REBAR_ROOT")
+            or os.environ.get("PROJECT_ROOT")
+            or Path(__file__).resolve().parents[4]
+        )  # four levels up from rebar_reconciler/
     health_dir = repo_root / _STATE_SUBDIR / _HEALTH_SUBDIR
     health_dir.mkdir(parents=True, exist_ok=True)
     record = {
@@ -96,9 +100,15 @@ def count_open_by_type(repo_root: Path | None = None) -> dict:
         directory is absent.
     """
     if repo_root is None:
-        repo_root = Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])  # repo root from rebar_reconciler/
+        repo_root = Path(
+            os.environ.get("REBAR_ROOT")
+            or os.environ.get("PROJECT_ROOT")
+            or Path(__file__).resolve().parents[4]
+        )  # repo root from rebar_reconciler/
 
-    tickets_dir = repo_root / _TICKETS_TRACKER_SUBDIR  # tickets-boundary-ok: direct event read for perf
+    tickets_dir = (
+        repo_root / _TICKETS_TRACKER_SUBDIR
+    )  # tickets-boundary-ok: direct event read for perf
     counts: dict[str, int] = {}
     if not tickets_dir.is_dir():
         return counts
@@ -109,7 +119,7 @@ def count_open_by_type(repo_root: Path | None = None) -> dict:
         # Skip .scratch/ — it is a scratch-space for agent scratch data, not a
         # ticket directory.  Including it would cause key errors when the health
         # reader tries to parse scratch JSON envelopes as ticket events.
-        if '.scratch' in ticket_dir.parts:
+        if ".scratch" in ticket_dir.parts:
             continue
         event_files = sorted(ticket_dir.glob("*.json"))
         ticket_type: str | None = None
@@ -165,7 +175,11 @@ def capture_baseline(pass_id: str, repo_root: Path | None = None) -> Path:
         Path to the written JSON baseline file.
     """
     if repo_root is None:
-        repo_root = Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])  # repo root from rebar_reconciler/
+        repo_root = Path(
+            os.environ.get("REBAR_ROOT")
+            or os.environ.get("PROJECT_ROOT")
+            or Path(__file__).resolve().parents[4]
+        )  # repo root from rebar_reconciler/
 
     # Count total open tickets across all types as the baseline fsck total.
     tickets_dir = repo_root / _TICKETS_TRACKER_SUBDIR  # tickets-boundary-ok
@@ -175,7 +189,7 @@ def capture_baseline(pass_id: str, repo_root: Path | None = None) -> Path:
             if not ticket_dir.is_dir():
                 continue
             # Skip .scratch/ — scratch-space entries are not ticket directories.
-            if '.scratch' in ticket_dir.parts:
+            if ".scratch" in ticket_dir.parts:
                 continue
             # Walk all events. Tickets with only a CREATE (no STATUS yet)
             # default to "open" to match the canonical reducer initial state

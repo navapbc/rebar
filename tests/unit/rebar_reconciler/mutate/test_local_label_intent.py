@@ -72,7 +72,9 @@ def test_unions_tags_across_create_and_edits(
     ticket_dir = tracker / "ticket-1"
     _write_event(ticket_dir, _make_event("CREATE", {"tags": ["initial"]}))
     _write_event(ticket_dir, _make_event("EDIT", {"fields": {"tags": ["initial", "added"]}}))
-    _write_event(ticket_dir, _make_event("EDIT", {"fields": {"tags": ["initial"]}}))  # removed "added"
+    _write_event(
+        ticket_dir, _make_event("EDIT", {"fields": {"tags": ["initial"]}})
+    )  # removed "added"
 
     result = local_label_intent.compute_label_intent_set("ticket-1", tracker)
 
@@ -167,9 +169,7 @@ def test_inbound_origin_edit_excluded_from_intent(
 
     assert "labelprobe" in result
     assert "user-added" in result
-    assert "ib-added" not in result, (
-        "inbound-origin EDIT leaked into intent set"
-    )
+    assert "ib-added" not in result, "inbound-origin EDIT leaked into intent set"
 
 
 def test_malformed_event_json_skipped_not_raised(

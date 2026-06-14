@@ -584,9 +584,7 @@ def compute_inbound_mutations(
             # Bound but local ticket missing — skip (may be deleted locally)
             continue
 
-        changed = _diff_jira_vs_local(
-            jira_fields, local_ticket, binding_store=binding_store
-        )
+        changed = _diff_jira_vs_local(jira_fields, local_ticket, binding_store=binding_store)
         label_mutations = _diff_labels_inbound(jira_fields, local_ticket)
         comment_mutations = _diff_comments_inbound(jira_fields, local_ticket)
 
@@ -598,9 +596,7 @@ def compute_inbound_mutations(
             # is updating the same field.
             if changed:
                 pre_field_count = len(changed)
-                changed = {
-                    k: v for k, v in changed.items() if k not in ob_entry["fields"]
-                }
+                changed = {k: v for k, v in changed.items() if k not in ob_entry["fields"]}
                 suppression_count += pre_field_count - len(changed)
             # Labels: drop inbound ADD when outbound REMOVES the same label,
             # and inbound REMOVE when outbound ADDS the same label.

@@ -310,9 +310,7 @@ class TestAcliClientCreateFieldExtraction:
 class TestAcliClientUpdateFieldExtraction:
     """Test which fields AcliClient.update_issue() sends for non-status field updates."""
 
-    def test_acli_update_routes_priority_to_rest(
-        self, acli_mod: Any, acli_capture: Any
-    ) -> None:
+    def test_acli_update_routes_priority_to_rest(self, acli_mod: Any, acli_capture: Any) -> None:
         """AcliClient.update_issue() routes priority to update_priority (REST PUT).
 
         ACLI workitem edit does not support --priority. Priority updates are
@@ -336,9 +334,7 @@ class TestAcliClientUpdateFieldExtraction:
         # acli_cmd comes from the fixture's AcliClient (acli_cmd=["echo"])
         mock_priority.assert_called_once_with("TEST-1", "High", acli_cmd=["echo"])
 
-    def test_acli_update_sends_description(
-        self, acli_mod: Any, acli_capture: Any
-    ) -> None:
+    def test_acli_update_sends_description(self, acli_mod: Any, acli_capture: Any) -> None:
         """AcliClient.update_issue() should support sending description updates."""
         client, captured_cmds, fake_run_acli = acli_capture
 
@@ -384,9 +380,7 @@ class TestAcliClientUpdateFieldExtraction:
         client, captured_cmds, fake_run_acli = acli_capture
 
         with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
-            with patch.object(
-                client, "validate_assignee_exists", return_value="acct-bob"
-            ):
+            with patch.object(client, "validate_assignee_exists", return_value="acct-bob"):
                 client.update_issue("TEST-1", assignee="bob")
 
         assert len(captured_cmds) >= 1
@@ -442,12 +436,10 @@ class TestAcliContractRegression:
             f"add_label must use --from-json for additive label semantics. Got: {cmd}"
         )
         assert "--yes" in cmd, (
-            f"--from-json edit requires --yes to skip the confirmation prompt. "
-            f"Got: {cmd}"
+            f"--from-json edit requires --yes to skip the confirmation prompt. Got: {cmd}"
         )
         assert cmd[:4] == ["jira", "workitem", "edit", "--from-json"], (
-            f"add_label command must start with 'jira workitem edit --from-json'. "
-            f"Got: {cmd[:4]}"
+            f"add_label command must start with 'jira workitem edit --from-json'. Got: {cmd[:4]}"
         )
 
     def test_add_label_payload_uses_labelsToAdd_field(
@@ -474,8 +466,7 @@ class TestAcliContractRegression:
         assert captured_payloads, "add_label must json.dump a --from-json payload"
         payload = captured_payloads[0]
         assert payload.get("issues") == ["DIG-3802"], (
-            f"Payload 'issues' must be a single-element list with the Jira key. "
-            f"Got: {payload!r}"
+            f"Payload 'issues' must be a single-element list with the Jira key. Got: {payload!r}"
         )
         assert payload.get("labelsToAdd") == ["rebar-id:abc-123"], (
             f"Payload must use 'labelsToAdd' (additive). 'labels' would be "
@@ -531,9 +522,7 @@ class TestAcliContractRegression:
 
         with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             with patch.object(acli_mod.json, "dump", side_effect=capturing_dump):
-                client.create_issue(
-                    {"ticket_type": "task", "title": "x", "priority": 1}
-                )
+                client.create_issue({"ticket_type": "task", "title": "x", "priority": 1})
 
         assert captured_payloads
         payload = captured_payloads[0]
@@ -568,9 +557,7 @@ class TestAcliContractRegression:
 
         with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             with patch.object(acli_mod.json, "dump", side_effect=capturing_dump):
-                client.create_issue(
-                    {"ticket_type": "task", "title": "x", "priority": 1}
-                )
+                client.create_issue({"ticket_type": "task", "title": "x", "priority": 1})
 
         payload = captured_payloads[0]
         assert "priority" not in payload, (
@@ -586,9 +573,7 @@ class TestAcliContractRegression:
 
     # --- DELETE contract --------------------------------------------------
 
-    def test_delete_issue_uses_key_and_yes_flags(
-        self, acli_mod: Any, acli_capture: Any
-    ) -> None:
+    def test_delete_issue_uses_key_and_yes_flags(self, acli_mod: Any, acli_capture: Any) -> None:
         """DELETE MUST use --key and --yes (skip interactive confirmation).
 
         delete_issue calls subprocess.run directly (not via _run_acli), so we
@@ -621,20 +606,14 @@ class TestAcliContractRegression:
         assert acli_args[:3] == ["jira", "workitem", "delete"], (
             f"DELETE command must start with 'jira workitem delete'. Got: {acli_args[:3]}"
         )
-        assert (
-            "--key" in acli_args
-            and acli_args[acli_args.index("--key") + 1] == "DIG-3802"
-        )
+        assert "--key" in acli_args and acli_args[acli_args.index("--key") + 1] == "DIG-3802"
         assert "--yes" in acli_args, (
-            f"DELETE requires --yes or it hangs on the interactive prompt. "
-            f"Got: {acli_args}"
+            f"DELETE requires --yes or it hangs on the interactive prompt. Got: {acli_args}"
         )
 
     # --- TRANSITION contract (module-level function) ----------------------
 
-    def test_transition_issue_uses_rest_transitions_endpoint(
-        self, acli_mod: Any
-    ) -> None:
+    def test_transition_issue_uses_rest_transitions_endpoint(self, acli_mod: Any) -> None:
         """TRANSITION MUST use REST POST /rest/api/3/issue/{key}/transitions (bug 85a1 Gap 8).
 
         The previous ACLI-based ``workitem transition`` subcommand silently
@@ -669,9 +648,7 @@ class TestAcliContractRegression:
         assert rest_get_calls == ["/rest/api/3/issue/DIG-3802/transitions"], (
             f"transition_issue must GET /transitions; got: {rest_get_calls}"
         )
-        assert len(rest_post_calls) == 1, (
-            f"expected one POST; got {len(rest_post_calls)}"
-        )
+        assert len(rest_post_calls) == 1, f"expected one POST; got {len(rest_post_calls)}"
         path, body = rest_post_calls[0]
         assert path == "/rest/api/3/issue/DIG-3802/transitions"
         assert body == {"transition": {"id": "31"}}

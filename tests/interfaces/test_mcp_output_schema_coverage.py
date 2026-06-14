@@ -74,14 +74,14 @@ EXEMPT_GENERIC: dict[str, str] = {
     "set_file_impact": "string ack; no canonical shape",
     "set_verify_commands": "string ack; no canonical shape",
     "fsck": "MCP fsck returns a human summary string; the canonical `fsck` schema "
-            "describes the CLI/library `--output json` shape, not the MCP string",
+    "describes the CLI/library `--output json` shape, not the MCP string",
 }
 
 # Tools that HAVE a canonical schema but advertise NO outputSchema by design.
 NO_SCHEMA_EXEMPT: dict[str, str] = {
     "transition_ticket": "returns {ticket_id, from, to, …}; `from` is a Python "
-                         "reserved word, so it returns a plain dict (no pydantic "
-                         "model). CLI/library JSON pinned to transition_result.",
+    "reserved word, so it returns a plain dict (no pydantic "
+    "model). CLI/library JSON pinned to transition_result.",
     "reopen_ticket": "same {…, from, …} shape as transition; reserved word.",
     "reconcile": "no canonical schema for the reconcile plan/result shape.",
 }
@@ -129,12 +129,16 @@ def _seed(repo: Path) -> dict:
     r = str(repo)
     epic = rebar.create_ticket("epic", "Epic", repo_root=r)
     task = rebar.create_ticket(
-        "task", "Task",
+        "task",
+        "Task",
         description="Body.\n\n## Acceptance Criteria\n- [ ] a",
-        parent=epic, repo_root=r,
+        parent=epic,
+        repo_root=r,
     )
     rebar.set_file_impact(task, [{"path": "a.py", "reason": "r"}], repo_root=r)
-    rebar.set_verify_commands(task, [{"dd_id": "D1", "dd_text": "t", "command": "echo"}], repo_root=r)
+    rebar.set_verify_commands(
+        task, [{"dd_id": "D1", "dd_text": "t", "command": "echo"}], repo_root=r
+    )
     # A spare open ticket to exercise claim_ticket without disturbing `task`.
     claimable = rebar.create_ticket("task", "Claimable", repo_root=r)
     return {"epic": epic, "task": task, "claimable": claimable, "repo": r}

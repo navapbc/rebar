@@ -21,9 +21,7 @@ from _events import _UUID, _UUID2, _UUID3, _write_event
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_snapshot_event_restores_compiled_state(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_snapshot_event_restores_compiled_state(tmp_path: Path, reducer: ModuleType) -> None:
     """A SNAPSHOT event with compiled_state in data must restore that state directly.
 
     Without the fix: ticket-reducer.py does not yet handle SNAPSHOT events. The reducer
@@ -72,9 +70,7 @@ def test_snapshot_event_restores_compiled_state(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_snapshot_plus_post_snapshot_events_applied(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_snapshot_plus_post_snapshot_events_applied(tmp_path: Path, reducer: ModuleType) -> None:
     """A STATUS event after a SNAPSHOT (not in source_event_uuids) must be applied.
 
     Without the fix: SNAPSHOT handling not yet implemented.
@@ -191,9 +187,7 @@ def test_snapshot_deduplicates_events_in_source_event_uuids(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_snapshot_only_ticket_returns_compiled_state(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_snapshot_only_ticket_returns_compiled_state(tmp_path: Path, reducer: ModuleType) -> None:
     """A ticket with only a SNAPSHOT event (no CREATE) must return the compiled_state.
 
     Without the fix: SNAPSHOT handling not yet implemented; reducer currently returns None
@@ -225,9 +219,7 @@ def test_snapshot_only_ticket_returns_compiled_state(
 
     state = reducer.reduce_ticket(ticket_dir)
 
-    assert state is not None, (
-        "SNAPSHOT-only ticket must return compiled_state, not None"
-    )
+    assert state is not None, "SNAPSHOT-only ticket must return compiled_state, not None"
     assert state["title"] == "Snapshot only ticket", (
         f"SNAPSHOT compiled_state must be used; got title={state['title']!r}"
     )
@@ -328,9 +320,7 @@ def test_cache_invalidation_after_compaction_file_deletion(
     # Second call — cache must be invalidated (file count changed), SNAPSHOT applied
     state2 = reducer.reduce_ticket(ticket_dir)
 
-    assert state2 is not None, (
-        "After compaction, reduce_ticket must return SNAPSHOT compiled_state"
-    )
+    assert state2 is not None, "After compaction, reduce_ticket must return SNAPSHOT compiled_state"
     assert state2["title"] == "Compacted title", (
         "After compaction + cache invalidation, title must come from SNAPSHOT; "
         f"got title={state2['title']!r}"
@@ -408,9 +398,7 @@ def test_integ_cache_warm_before_compaction_returns_correct_state_after(
 
     # Verify cache was written after warm
     cache_file = ticket_dir / ".cache.json"
-    assert cache_file.exists(), (
-        ".cache.json must be written after first reduce_ticket() call"
-    )
+    assert cache_file.exists(), ".cache.json must be written after first reduce_ticket() call"
 
     # Simulate compaction: delete all 4 event files, write SNAPSHOT
     for f in ticket_dir.glob("*.json"):

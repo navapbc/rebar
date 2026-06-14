@@ -109,9 +109,7 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 def _write_inline_conftest(pytester, repo_root: Path) -> None:
-    pytester.makeconftest(
-        _INLINE_CONFTEST.format(tests_dir=str(_TESTS_DIR), root=str(repo_root))
-    )
+    pytester.makeconftest(_INLINE_CONFTEST.format(tests_dir=str(_TESTS_DIR), root=str(repo_root)))
 
 
 def test_guard_fails_a_test_that_commits(pytester, tmp_path):

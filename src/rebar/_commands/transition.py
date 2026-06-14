@@ -88,7 +88,7 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str, str]:
     while i < len(args):
         a = args[i]
         if a.startswith("--reason="):
-            reason = a[len("--reason="):]
+            reason = a[len("--reason=") :]
             i += 1
         elif a == "--reason":
             if i + 1 >= len(args):
@@ -99,7 +99,7 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str, str]:
             force = True
             i += 1
         elif a.startswith("--verdict-hash="):
-            verdict_hash = a[len("--verdict-hash="):]
+            verdict_hash = a[len("--verdict-hash=") :]
             i += 1
         elif a == "--verdict-hash":
             if i + 1 >= len(args):
@@ -107,7 +107,7 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str, str]:
             verdict_hash = args[i + 1]
             i += 2
         elif a.startswith("--force-close="):
-            force_close = a[len("--force-close="):]
+            force_close = a[len("--force-close=") :]
             i += 1
         elif a == "--force-close":
             if i + 1 >= len(args):
@@ -131,8 +131,7 @@ def _validate_status(label: str, value: str) -> None:
             returncode=1,
         )
     raise CommandError(
-        f"Error: invalid {label} '{value}'. Must be one of: open, in_progress, "
-        "closed, blocked",
+        f"Error: invalid {label} '{value}'. Must be one of: open, in_progress, closed, blocked",
         returncode=1,
     )
 
@@ -158,9 +157,7 @@ def _compact_on_close(repo_root: str, ticket_id: str) -> None:
 
     try:
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            _compact.compact_cli(
-                [ticket_id, "--threshold=0", "--skip-sync"], repo_root=repo_root
-            )
+            _compact.compact_cli([ticket_id, "--threshold=0", "--skip-sync"], repo_root=repo_root)
     except Exception:
         pass
 
@@ -230,9 +227,7 @@ def transition_compute(
                 sys.stderr.write(
                     f"Warning: closing ticket '{ticket_id}' with {count} unresolved "
                     "(non-closed) child ticket(s) (--force).\n"
-                    "The following children are not yet closed:\n"
-                    + "\n".join(open_children)
-                    + "\n"
+                    "The following children are not yet closed:\n" + "\n".join(open_children) + "\n"
                 )
             else:
                 raise CommandError(
@@ -292,7 +287,9 @@ def _short_head(tracker: str) -> str:
     try:
         return subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         ).stdout.strip()
     except Exception:
         return ""
@@ -319,7 +316,8 @@ def _unarchive(ticket_id: str, target_status: str, tracker: str, repo_root_str: 
 
     try:
         resolved = revert_core(
-            ticket_id, archived_uuid,
+            ticket_id,
+            archived_uuid,
             "un-archive via transition archived open",
             repo_root=repo_root_str,
         )
@@ -463,7 +461,7 @@ def _parse_assignee(args: list[str]) -> str:
     while i < len(args):
         a = args[i]
         if a.startswith("--assignee="):
-            assignee = a[len("--assignee="):]
+            assignee = a[len("--assignee=") :]
             i += 1
         elif a == "--assignee":
             if i + 1 >= len(args):
@@ -568,7 +566,9 @@ def claim_cli(argv: list[str], *, repo_root=None) -> int:
 
     if fmt == "json":
         sys.stdout.write(
-            json.dumps({"ticket_id": ticket_id, "status": "in_progress", "assignee": assignee or None})
+            json.dumps(
+                {"ticket_id": ticket_id, "status": "in_progress", "assignee": assignee or None}
+            )
             + "\n"
         )
     else:

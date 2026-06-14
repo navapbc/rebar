@@ -493,9 +493,7 @@ def _diff_fields(
             # Jira key string. Extract the Jira-side parent key for comparison.
             jira_parent_raw = jira_fields.get("parent")
             jira_parent_key = (
-                jira_parent_raw.get("key")
-                if isinstance(jira_parent_raw, dict)
-                else None
+                jira_parent_raw.get("key") if isinstance(jira_parent_raw, dict) else None
             )
             if local_val != jira_parent_key:
                 changed[field_name] = local_val
@@ -535,8 +533,7 @@ def _diff_fields(
                 if len(_j) > 80:
                     _j = _j[:77] + "..."
                 print(  # noqa: T201
-                    f"RECON: field_diff ticket={ticket_id} "
-                    f"field={field_name} local={_l} jira={_j}",
+                    f"RECON: field_diff ticket={ticket_id} field={field_name} local={_l} jira={_j}",
                     file=sys.stderr,
                 )
     return changed
@@ -555,8 +552,7 @@ def _map_comments_for_create(ticket: dict[str, Any]) -> list[dict[str, Any]]:
     """
     comments = ticket.get("comments", [])
     return [
-        {"action": "add", "body": _decorate_outbound_comment(c.get("body", ""))}
-        for c in comments
+        {"action": "add", "body": _decorate_outbound_comment(c.get("body", ""))} for c in comments
     ]
 
 
@@ -759,9 +755,7 @@ def _diff_comments(
             # Decorate the outbound body with the reconciler marker so the
             # inbound differ can identify (and filter) our own echoes on the
             # next pass (Gap 1 loop-breaker).
-            mutations.append(
-                {"action": "add", "body": _decorate_outbound_comment(body)}
-            )
+            mutations.append({"action": "add", "body": _decorate_outbound_comment(body)})
     return mutations
 
 
@@ -801,9 +795,7 @@ def _diff_labels(
     every existing test and call site).
     """
     local_tags: set[str] = set(
-        t
-        for t in ticket.get("tags", [])
-        if not any(t.startswith(p) for p in _EXCLUDED_PREFIXES)
+        t for t in ticket.get("tags", []) if not any(t.startswith(p) for p in _EXCLUDED_PREFIXES)
     )
     jira_labels: set[str] = set(
         label
@@ -851,15 +843,10 @@ def _diff_status_annotation_labels(
     """
     mutations: list[dict[str, Any]] = []
     desired_annotation = _STATUS_ANNOTATION_LABEL.get(local_status)
-    jira_annotation_labels = {
-        label for label in jira_labels if label.startswith("rebar-status:")
-    }
+    jira_annotation_labels = {label for label in jira_labels if label.startswith("rebar-status:")}
 
     # Add desired annotation if not already present
-    if (
-        desired_annotation is not None
-        and desired_annotation not in jira_annotation_labels
-    ):
+    if desired_annotation is not None and desired_annotation not in jira_annotation_labels:
         mutations.append({"action": "add", "label": desired_annotation})
 
     # Remove stale annotations (rebar-status: labels that no longer match)
@@ -940,9 +927,7 @@ def compute_outbound_mutations(
     # Select the K least-recently-GET'd (sorted by last_get_pass ascending; the
     # "" never-GET'd sentinel sorts first), bounding servicing of every absent
     # key to <= ceil(N/K) passes (anti-starvation, I3/I4).
-    _budget = _env_int(
-        "RECONCILER_ABSENT_GET_BUDGET", _DEFAULT_ABSENT_GET_BUDGET, minimum=1
-    )
+    _budget = _env_int("RECONCILER_ABSENT_GET_BUDGET", _DEFAULT_ABSENT_GET_BUDGET, minimum=1)
     _absent_candidates: list[str] = []
     _seen_absent: set[str] = set()
     # Without a client we cannot direct-GET, so there is nothing to select.
@@ -967,9 +952,7 @@ def compute_outbound_mutations(
     # permits Epic parents on this project, so emitting such a parent mutation
     # would re-fail (HTTP 400) every pass. Cheap O(n) build over local state.
     local_ticket_types: dict[str, str] = {
-        t["ticket_id"]: t.get("ticket_type", "")
-        for t in local_tickets
-        if t.get("ticket_id")
+        t["ticket_id"]: t.get("ticket_type", "") for t in local_tickets if t.get("ticket_id")
     }
 
     for ticket in local_tickets:
@@ -1079,9 +1062,7 @@ def compute_outbound_mutations(
             # Comments use the resolved snapshot (the one-key overlay for the
             # bounded-GET path) so the GET's native fields.comment.comments is
             # consulted with NO second network call (C3).
-            comment_mutations = _diff_comments(
-                ticket, jira_key, comment_snapshot, client=client
-            )
+            comment_mutations = _diff_comments(ticket, jira_key, comment_snapshot, client=client)
             # bug a06c: intent-gated REMOVE. When local_label_intent is
             # provided but lacks an entry for this local_id, fall back to
             # an empty intent set (lazy first-pass safety: suppresses all

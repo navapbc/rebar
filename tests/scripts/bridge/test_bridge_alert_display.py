@@ -117,9 +117,7 @@ def _make_ticket_dir(tmp_path: Path, ticket_id: str = "tkt-alert-001") -> Path:
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_detects_unresolved_bridge_alert(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_detects_unresolved_bridge_alert(tmp_path: Path, reducer: ModuleType) -> None:
     """A ticket with one BRIDGE_ALERT has bridge_alerts list with one unresolved entry."""
     ticket_dir = _make_ticket_dir(tmp_path)
 
@@ -162,9 +160,7 @@ def test_reducer_detects_unresolved_bridge_alert(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_alert_resolved_by_resolution_event(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_alert_resolved_by_resolution_event(tmp_path: Path, reducer: ModuleType) -> None:
     """A BRIDGE_ALERT followed by a resolving BRIDGE_ALERT (resolved=True) marks it resolved."""
     ticket_dir = _make_ticket_dir(tmp_path, "tkt-alert-002")
 
@@ -225,9 +221,7 @@ def test_reducer_alert_resolved_by_resolution_event(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_no_alerts_when_none_present(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_no_alerts_when_none_present(tmp_path: Path, reducer: ModuleType) -> None:
     """A ticket with only a CREATE event has bridge_alerts == [] or key absent."""
     ticket_dir = _make_ticket_dir(tmp_path, "tkt-alert-003")
 

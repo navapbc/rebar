@@ -83,7 +83,6 @@ logger = logging.getLogger(__name__)
 # _text_to_adf is imported from rebar_reconciler.adf (canonical location)
 
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -179,7 +178,6 @@ def update_issue(
 
     result = acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd)
     return json.loads(result.stdout)
-
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +321,6 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         """Add a comment to a Jira issue via ACLI."""
         return acli_cli_ops.add_comment(jira_key, body, acli_cmd=self._acli_cmd)
 
-
     def search_issues(
         self,
         jql: str,
@@ -407,28 +404,13 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         )
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
-                self._myself_cache: dict[str, Any] = json.loads(
-                    resp.read().decode("utf-8")
-                )
+                self._myself_cache: dict[str, Any] = json.loads(resp.read().decode("utf-8"))
         except (urllib.error.URLError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             logging.warning("get_myself: failed to fetch /rest/api/2/myself: %s", exc)
             # missing keys gracefully (defaulting to UTC), and caching prevents a
             # second network failure on the same run from the verify+fetch double-call.
             self._myself_cache = {}
         return self._myself_cache
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     def transition_issue_by_name(self, jira_key: str, target_status: str) -> None:
         """Transition a Jira issue to *target_status* via REST.
@@ -455,13 +437,9 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         by project+issuetype produces incorrect hits for an issue mid-
         workflow.
         """
-        transitions_resp = self._direct_rest_get(
-            f"/rest/api/3/issue/{jira_key}/transitions"
-        )
+        transitions_resp = self._direct_rest_get(f"/rest/api/3/issue/{jira_key}/transitions")
         transitions = (
-            transitions_resp.get("transitions", [])
-            if isinstance(transitions_resp, dict)
-            else []
+            transitions_resp.get("transitions", []) if isinstance(transitions_resp, dict) else []
         )
         target_lower = target_status.strip().lower()
         match_id = None
@@ -511,9 +489,7 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         ``ValueError`` when neither scope arg is supplied.
         """
         if not (issue_key or project_key):
-            raise ValueError(
-                "validate_assignee_exists: issue_key or project_key required"
-            )
+            raise ValueError("validate_assignee_exists: issue_key or project_key required")
         query_part = f"query={urllib.parse.quote(assignee)}"
         scope_part = (
             f"issueKey={urllib.parse.quote(issue_key)}"
@@ -523,9 +499,7 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         path = f"/rest/api/3/user/assignable/search?{query_part}&{scope_part}"
         users = self._direct_rest_get(path)
         if not isinstance(users, list) or not users:
-            scope_label = (
-                f"issue={issue_key!r}" if issue_key else f"project={project_key!r}"
-            )
+            scope_label = f"issue={issue_key!r}" if issue_key else f"project={project_key!r}"
             raise AssigneeNotFoundError(
                 f"validate_assignee_exists: no assignable user matches "
                 f"{assignee!r} for {scope_label}"
@@ -608,16 +582,6 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
             body = {"fields": {"parent": None}}
         self._direct_rest_put_raw(f"/rest/api/3/issue/{jira_key}", body)
 
-
-
-
-
-
-
-
-
-
-
     def delete_issue(
         self,
         jira_key: str,
@@ -670,4 +634,3 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
                 raise PermissionError(msg) from exc
             raise
         return {"status": "deleted", "key": jira_key}
-

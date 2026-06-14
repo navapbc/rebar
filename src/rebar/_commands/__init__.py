@@ -85,9 +85,7 @@ def main(argv: list[str]) -> int:
     if entry is None:
         print(f"Error: unknown leaf-write command '{command}'", file=sys.stderr)
         return 1
-    if len(args) < entry.min_args or (
-        entry.max_args is not None and len(args) > entry.max_args
-    ):
+    if len(args) < entry.min_args or (entry.max_args is not None and len(args) > entry.max_args):
         print(entry.usage, file=sys.stderr)
         return 1
     try:

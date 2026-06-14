@@ -50,9 +50,7 @@ def test_to_llm_importable_from_package() -> None:
     """
     from rebar.reducer.llm_format import to_llm  # noqa: PLC0415 — intentional RED import
 
-    assert callable(to_llm), (
-        "to_llm imported from rebar.reducer.llm_format must be callable"
-    )
+    assert callable(to_llm), "to_llm imported from rebar.reducer.llm_format must be callable"
 
 
 # ---------------------------------------------------------------------------
@@ -101,9 +99,7 @@ def test_to_llm_key_mapping_via_package() -> None:
     result = to_llm(state)
 
     assert result.get("id") == "abc-123", "ticket_id must be mapped to 'id'"
-    assert "ticket_id" not in result, (
-        "original 'ticket_id' key must not appear in output"
-    )
+    assert "ticket_id" not in result, "original 'ticket_id' key must not appear in output"
     assert result.get("t") == "story", "ticket_type must be mapped to 't'"
     assert result.get("ttl") == "My title", "title must be mapped to 'ttl'"
     assert result.get("st") == "open", "status must be mapped to 'st'"
@@ -111,9 +107,7 @@ def test_to_llm_key_mapping_via_package() -> None:
     assert result.get("pid") == "epic-1", "parent_id must be mapped to 'pid'"
     assert result.get("pr") == 2, "priority must be mapped to 'pr'"
     assert result.get("asn") == "bob", "assignee must be mapped to 'asn'"
-    assert result.get("desc") == "A short description", (
-        "description must be mapped to 'desc'"
-    )
+    assert result.get("desc") == "A short description", "description must be mapped to 'desc'"
     assert "cm" in result, "comments must be mapped to 'cm'"
     assert "comments" not in result, "original 'comments' key must not appear in output"
     assert "dp" in result, "deps must be mapped to 'dp'"
@@ -161,14 +155,10 @@ def test_to_llm_omits_none_via_package() -> None:
     assert result.get("au") == "alice"
 
     # None values must be omitted
-    assert "pid" not in result, (
-        "parent_id=None must be omitted (no 'pid' key in output)"
-    )
+    assert "pid" not in result, "parent_id=None must be omitted (no 'pid' key in output)"
     assert "asn" not in result, "assignee=None must be omitted (no 'asn' key in output)"
     assert "pr" not in result, "priority=None must be omitted (no 'pr' key in output)"
-    assert "desc" not in result, (
-        "description=None must be omitted (no 'desc' key in output)"
-    )
+    assert "desc" not in result, "description=None must be omitted (no 'desc' key in output)"
 
     # OMIT_KEYS fields must be dropped entirely
     assert "created_at" not in result, "created_at must be omitted (in OMIT_KEYS)"
@@ -197,9 +187,7 @@ def test_to_llm_importable_from_top_level_package() -> None:
     """
     from rebar.reducer import to_llm  # noqa: PLC0415 — intentional RED import
 
-    assert callable(to_llm), (
-        "to_llm imported from rebar.reducer (top-level) must be callable"
-    )
+    assert callable(to_llm), "to_llm imported from rebar.reducer (top-level) must be callable"
 
     # Smoke-check: verify it is the same function as the one from the sub-module
     from rebar.reducer.llm_format import to_llm as to_llm_direct  # noqa: PLC0415

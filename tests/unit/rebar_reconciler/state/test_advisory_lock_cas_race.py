@@ -37,9 +37,7 @@ from types import ModuleType
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-LOCK_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_advisory_lock.py"
-)
+LOCK_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_advisory_lock.py"
 
 
 def _load_advisory_lock_module() -> ModuleType:
@@ -114,9 +112,7 @@ def _advance_tickets_ref(repo: Path) -> None:
         old = _git(["rev-parse", "tickets"], repo).stdout.strip()
         marker = wt / f"concurrent-{time.time_ns()}.txt"
         marker.write_text("concurrent writer\n")
-        subprocess.run(
-            ["git", "add", marker.name], cwd=str(wt), check=True, capture_output=True
-        )
+        subprocess.run(["git", "add", marker.name], cwd=str(wt), check=True, capture_output=True)
         subprocess.run(
             ["git", "commit", "-m", "concurrent writer commit"],
             cwd=str(wt),

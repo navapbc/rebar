@@ -24,9 +24,7 @@ from _helpers import (
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_graph_ready_to_work_all_blockers_closed(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_graph_ready_to_work_all_blockers_closed(graph: ModuleType, tmp_path: Path) -> None:
     """Ticket B is ready_to_work=True when its only blocker (A) is closed.
 
     Setup:
@@ -51,9 +49,7 @@ def test_graph_ready_to_work_all_blockers_closed(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_graph_ready_to_work_blocker_still_open(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_graph_ready_to_work_blocker_still_open(graph: ModuleType, tmp_path: Path) -> None:
     """Ticket B is ready_to_work=False when its blocker (A) is still open.
 
     Setup:
@@ -78,9 +74,7 @@ def test_graph_ready_to_work_blocker_still_open(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_graph_ready_to_work_direct_blockers_only(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_graph_ready_to_work_direct_blockers_only(graph: ModuleType, tmp_path: Path) -> None:
     """Ticket B is ready_to_work=False when at least one direct blocker is open.
 
     Setup:
@@ -133,9 +127,7 @@ def test_graph_deps_output_schema(graph: ModuleType, tmp_path: Path) -> None:
     assert isinstance(result["ready_to_work"], bool), (
         f"ready_to_work must be bool, got {type(result['ready_to_work'])}"
     )
-    assert isinstance(result["deps"], list), (
-        f"deps must be list, got {type(result['deps'])}"
-    )
+    assert isinstance(result["deps"], list), f"deps must be list, got {type(result['deps'])}"
     assert isinstance(result["blockers"], list), (
         f"blockers must be list, got {type(result['blockers'])}"
     )
@@ -148,9 +140,7 @@ def test_graph_deps_output_schema(graph: ModuleType, tmp_path: Path) -> None:
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_graph_archived_ticket_treated_as_closed(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_graph_archived_ticket_treated_as_closed(graph: ModuleType, tmp_path: Path) -> None:
     """A missing blocker directory (archived/tombstoned) is treated as satisfied.
 
     Setup:
@@ -201,9 +191,7 @@ def test_graph_archived_ticket_treated_as_closed(
             "relation": "depends_on",
         },
     }
-    with open(
-        ticket_b_dir / "1500-link-ticket-b-depends_on-ticket-a-LINK.json", "w"
-    ) as f:
+    with open(ticket_b_dir / "1500-link-ticket-b-depends_on-ticket-a-LINK.json", "w") as f:
         json.dump(link_event, f)
 
     # ticket-a directory intentionally absent (archived/tombstoned)
@@ -221,9 +209,7 @@ def test_graph_archived_ticket_treated_as_closed(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_graph_tombstone_tombstone_json_respected(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_graph_tombstone_tombstone_json_respected(graph: ModuleType, tmp_path: Path) -> None:
     """A blocker with .tombstone.json {'status': 'closed'} is treated as closed.
 
     Setup:

@@ -112,9 +112,7 @@ def _dispatch_mutation(mutation: Any, context: Any = None) -> Any:
 
     leaf = _DISPATCH_TABLE.get(key)
     if leaf is None:
-        raise NotImplementedError(
-            f"no dispatch arm for (direction={d!r}, action={a!r})"
-        )
+        raise NotImplementedError(f"no dispatch arm for (direction={d!r}, action={a!r})")
     return leaf(mutation, client=context)
 
 
@@ -195,8 +193,7 @@ def preflight_status_mapping(mutations) -> None:
         # legitimately-mapped values.
         if status and status not in mapping and status not in set(mapping.values()):
             raise StatusMappingError(
-                f"local status {status!r} not in local_to_jira_status mapping "
-                f"(target={target})"
+                f"local status {status!r} not in local_to_jira_status mapping (target={target})"
             )
 
 
@@ -265,9 +262,7 @@ def _commit_binding_store_snapshot(
         # change (only bindings-retired.json staged) would be silently skipped.
         # Match on basename membership over the staged-file lines instead.
         _staged_basenames = {
-            os.path.basename(line.strip())
-            for line in status.stdout.splitlines()
-            if line.strip()
+            os.path.basename(line.strip()) for line in status.stdout.splitlines() if line.strip()
         }
         if not ({"bindings.json", "bindings-retired.json"} & _staged_basenames):
             return True  # Already up-to-date; nothing to commit.
@@ -342,9 +337,7 @@ def _load(name: str, relpath: str):
     return mod
 
 
-def _audit_log_probe(
-    branch_label: str, issue_key: str, detail: dict | None = None
-) -> None:
+def _audit_log_probe(branch_label: str, issue_key: str, detail: dict | None = None) -> None:
     """Write a single audit-log entry to stderr for log-only probe branches.
 
     Used by :func:`route_inbound_probe` for branches that produce no follow-on
@@ -594,7 +587,11 @@ def reconcile_once(
         where N is the number of mutations dispatched in this pass.
     """
     if repo_root is None:
-        repo_root = Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])
+        repo_root = Path(
+            os.environ.get("REBAR_ROOT")
+            or os.environ.get("PROJECT_ROOT")
+            or Path(__file__).resolve().parents[4]
+        )
 
     fetcher = _load("reconcile_fetcher", "fetcher.py")
     differ = _load("reconcile_differ", "differ.py")
@@ -604,9 +601,7 @@ def reconcile_once(
     binding_store_mod = _load("reconcile_binding_store", "binding_store.py")
     outbound_differ_mod = _load("reconcile_outbound_differ", "outbound_differ.py")
     inbound_differ_mod = _load("reconcile_inbound_differ", "inbound_differ.py")
-    local_label_intent_mod = _load(
-        "reconcile_local_label_intent", "local_label_intent.py"
-    )
+    local_label_intent_mod = _load("reconcile_local_label_intent", "local_label_intent.py")
     sync_logger_mod = _load("reconcile_sync_logger", "sync_logger.py")
 
     # -----------------------------------------------------------------------
@@ -630,9 +625,7 @@ def reconcile_once(
     # In no-write mode use a no-op logger so no sync-log-<ts>.jsonl is created.
     # -----------------------------------------------------------------------
     log_path = repo_root / "bridge_state" / f"sync-log-{pass_id}.jsonl"
-    sync_logger = (
-        sync_logger_mod.SyncLogger(log_path) if persist else _NoOpSyncLogger()
-    )
+    sync_logger = sync_logger_mod.SyncLogger(log_path) if persist else _NoOpSyncLogger()
     sync_logger.log(
         "sync_pass_start",
         pass_id=pass_id,
@@ -706,8 +699,7 @@ def reconcile_once(
                         "key": _alert_key,
                         "severity": "critical",
                         "reason": (
-                            f"prev_snapshot.json corrupt/unparseable at {prev_path}: "
-                            f"{_exc}"
+                            f"prev_snapshot.json corrupt/unparseable at {prev_path}: {_exc}"
                         ),
                         "pass_id": pass_id,
                         "file": str(prev_path),
@@ -761,9 +753,7 @@ def reconcile_once(
             file=sys.stderr,
         )
     else:
-        filed = invariants_mod.check_at_most_one_local_id(
-            curr_snapshot, repo_root=repo_root
-        )
+        filed = invariants_mod.check_at_most_one_local_id(curr_snapshot, repo_root=repo_root)
         print(  # noqa: T201
             f"invariants: scanned={len(curr_snapshot)} filed={len(filed)} (cap=5)"
         )
@@ -818,9 +808,7 @@ def reconcile_once(
             # Typed Mutation shape. Normalise enum/string for comparison.
             action_str = getattr(action_attr, "value", action_attr)
             payload = getattr(_m, "payload", None) or {}
-            follow_on = (
-                payload.get("follow_on") if isinstance(payload, Mapping) else None
-            )
+            follow_on = payload.get("follow_on") if isinstance(payload, Mapping) else None
         else:
             # Legacy dict shape.
             action_str = _m.get("action")
@@ -921,6 +909,7 @@ def reconcile_once(
     # The in-package acli transport module (rebar_reconciler.acli), shared via
     # the canonical package key so it is not double-loaded.
     from rebar_reconciler import acli as acli_mod_for_comments
+
     outbound_diff_client = acli_mod_for_comments.AcliClient(
         jira_url=os.environ.get("JIRA_URL", ""),
         user=os.environ.get("JIRA_USER", ""),
@@ -1182,9 +1171,7 @@ def reconcile_once(
             else:
                 # Classify the failure: reschedule vs generic apply error.
                 failure_kind = (
-                    "reschedule"
-                    if type(apply_exc).__name__ == "RescheduleError"
-                    else "apply_error"
+                    "reschedule" if type(apply_exc).__name__ == "RescheduleError" else "apply_error"
                 )
                 health_mod.record_pass(
                     pass_id=pass_id,
@@ -1284,8 +1271,7 @@ def reconcile_once(
                 mutation_failures = sum(1 for o in outcomes if o.get("error"))
         except Exception as exc:  # noqa: BLE001
             print(  # noqa: T201
-                f"reconcile: manifest tally read failed ({exc}) — "
-                f"falling back to computed count",
+                f"reconcile: manifest tally read failed ({exc}) — falling back to computed count",
                 file=sys.stderr,
             )
 

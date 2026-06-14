@@ -42,10 +42,7 @@ def _help_arms() -> dict[str, str]:
     (``rebar._cli._help``), the authoritative per-command usage."""
     from rebar._cli import _help
 
-    return {
-        sub: (_help.subcommand_help(sub) or "")
-        for sub in _help.known_subcommands()
-    }
+    return {sub: (_help.subcommand_help(sub) or "") for sub in _help.known_subcommands()}
 
 
 # Commands that advertise --output json but do not yet have a registered output

@@ -37,9 +37,7 @@ if "rebar_reconciler.adf" not in sys.modules:
 # (bug 6afc-20ee-84e5-4dd5). Bootstrap it explicitly alongside adf.
 _CL_PATH = SCRIPTS_DIR / "rebar_reconciler" / "comment_limits.py"
 if "rebar_reconciler.comment_limits" not in sys.modules:
-    _cl_spec = importlib.util.spec_from_file_location(
-        "rebar_reconciler.comment_limits", _CL_PATH
-    )
+    _cl_spec = importlib.util.spec_from_file_location("rebar_reconciler.comment_limits", _CL_PATH)
     _cl_mod = importlib.util.module_from_spec(_cl_spec)
     sys.modules["rebar_reconciler.comment_limits"] = _cl_mod
     _cl_spec.loader.exec_module(_cl_mod)

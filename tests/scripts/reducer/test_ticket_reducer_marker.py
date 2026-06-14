@@ -129,9 +129,7 @@ def test_check_marker_false_without_marker(ticket_dir: Path) -> None:
     """
     from rebar.reducer import check_marker
 
-    assert not (ticket_dir / ".archived").exists(), (
-        "Pre-condition: .archived must not exist"
-    )
+    assert not (ticket_dir / ".archived").exists(), "Pre-condition: .archived must not exist"
 
     result = check_marker(ticket_dir)
 
@@ -183,9 +181,7 @@ def test_remove_marker_idempotent(ticket_dir: Path) -> None:
     """
     from rebar.reducer import remove_marker
 
-    assert not (ticket_dir / ".archived").exists(), (
-        "Pre-condition: .archived must not exist"
-    )
+    assert not (ticket_dir / ".archived").exists(), "Pre-condition: .archived must not exist"
 
     # Must not raise
     try:
@@ -208,9 +204,7 @@ def test_remove_marker_idempotent(ticket_dir: Path) -> None:
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_write_marker_error_tolerance(
-    tmp_path: Path, capsys: pytest.CaptureFixture
-) -> None:  # type: ignore[type-arg]
+def test_write_marker_error_tolerance(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:  # type: ignore[type-arg]
     """Given write_marker is called on a ticket_dir where .archived cannot be created
     (e.g., dir is a non-existent path), when write_marker is called, then no exception
     is raised (the function logs to stderr and returns gracefully).

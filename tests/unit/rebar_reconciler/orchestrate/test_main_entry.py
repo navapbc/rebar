@@ -28,9 +28,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-MAIN_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "__main__.py"
-)
+MAIN_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "__main__.py"
 RECONCILER_PKG = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
 
 
@@ -49,8 +47,7 @@ def main_mod():
     """Load the __main__ module, failing all tests if absent."""
     if not MAIN_PATH.exists():
         pytest.fail(
-            f"__main__.py not found at {MAIN_PATH} — "
-            "implement the module to make tests pass."
+            f"__main__.py not found at {MAIN_PATH} — implement the module to make tests pass."
         )
     return _load_main_module()
 
@@ -61,11 +58,15 @@ def _make_stub_reconcile(return_value=None, side_effect=None) -> types.ModuleTyp
     if side_effect is not None:
         stub.reconcile_once = MagicMock(side_effect=side_effect)  # type: ignore[attr-defined]
     else:
-        rv = return_value if return_value is not None else {
-            "pass_id": "test-pass",
-            "mutation_count": 0,
-            "manifest_path": "/tmp/manifest.json",
-        }
+        rv = (
+            return_value
+            if return_value is not None
+            else {
+                "pass_id": "test-pass",
+                "mutation_count": 0,
+                "manifest_path": "/tmp/manifest.json",
+            }
+        )
         stub.reconcile_once = MagicMock(return_value=rv)  # type: ignore[attr-defined]
     return stub
 
@@ -89,11 +90,13 @@ def test_run_pass_returns_0_when_all_steps_absent(main_mod, tmp_path):
 
 def test_run_pass_returns_0_when_reconcile_succeeds(main_mod, tmp_path):
     """run_pass() returns 0 when reconcile.reconcile_once returns a result dict."""
-    stub = _make_stub_reconcile(return_value={
-        "pass_id": "p-001",
-        "mutation_count": 3,
-        "manifest_path": str(tmp_path / "manifest.json"),
-    })
+    stub = _make_stub_reconcile(
+        return_value={
+            "pass_id": "p-001",
+            "mutation_count": 3,
+            "manifest_path": str(tmp_path / "manifest.json"),
+        }
+    )
 
     with patch.object(main_mod, "_try_load_step", return_value=stub):
         rc = main_mod.run_pass(repo_root=tmp_path)
@@ -127,19 +130,13 @@ def test_run_pass_returns_75_on_reschedule_error(main_mod, tmp_path):
     # Load the real applier so we use the real RescheduleError and EXIT_RESCHEDULE
     import importlib.util
 
-    applier_path = (
-        REPO_ROOT
-        / "src"
-        / "rebar"
-        / "_engine"
-        / "rebar_reconciler"
-        / "applier.py"
-    )
+    applier_path = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
     spec = importlib.util.spec_from_file_location("applier_for_reschedule_test", applier_path)
     applier_mod = importlib.util.module_from_spec(spec)
     # Python 3.14: dataclass introspection reads sys.modules.get(cls.__module__).__dict__
     # during class construction; the module must be registered before exec.
     import sys as _sys
+
     _sys.modules["applier_for_reschedule_test"] = applier_mod
     spec.loader.exec_module(applier_mod)
 
@@ -182,16 +179,21 @@ def test_main_returns_0_when_reconcile_succeeds(main_mod, tmp_path):
     advisory_stub.release_pass_lock = MagicMock(return_value=None)
 
     mode_stub = types.ModuleType("_mode_stub")
+
     # Provide a real Mode-like object for LIVE
     class _FakeMode:  # noqa: N801
         value = "live"
+
         @classmethod
         def from_str(cls, v):
             return cls()
+
         def rank(self):
             return 3
+
         LIVE = None  # patched below
         RECONCILE_CHECK = "reconcile-check-sentinel"  # sentinel; never == _FakeMode()
+
     _FakeMode.LIVE = _FakeMode()
     mode_stub.Mode = _FakeMode
 
@@ -202,8 +204,10 @@ def test_main_returns_0_when_reconcile_succeeds(main_mod, tmp_path):
             return mode_stub
         raise ImportError(f"Unexpected _load_sibling_keyed call: {filename}")
 
-    with patch.object(main_mod, "_try_load_step", return_value=stub), \
-         patch.object(main_mod, "_load_sibling_keyed", side_effect=_fake_load_sibling):
+    with (
+        patch.object(main_mod, "_try_load_step", return_value=stub),
+        patch.object(main_mod, "_load_sibling_keyed", side_effect=_fake_load_sibling),
+    ):
         rc = main_mod.main(["--repo-root", str(tmp_path)])
 
     assert rc == 0

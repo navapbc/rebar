@@ -85,14 +85,10 @@ def _run_probe_with_mocked_acli(
     _real_spec_from_file = importlib.util.spec_from_file_location
     _real_module_from_spec = importlib.util.module_from_spec
 
-    probe_spec = _real_spec_from_file(
-        f"jira_capability_probe_{module_suffix}", PROBE_PATH
-    )
+    probe_spec = _real_spec_from_file(f"jira_capability_probe_{module_suffix}", PROBE_PATH)
     probe_mod = _real_module_from_spec(probe_spec)
 
-    def _patched_spec_from_file(
-        name: str, path: object, *args: object, **kwargs: object
-    ) -> object:
+    def _patched_spec_from_file(name: str, path: object, *args: object, **kwargs: object) -> object:
         if "rebar_reconciler/acli" in str(path) or name == "acli_integration":
             return mock_spec
         return _real_spec_from_file(name, path, *args, **kwargs)  # type: ignore[arg-type]
@@ -110,9 +106,7 @@ def _run_probe_with_mocked_acli(
 
     patches: list[contextlib.AbstractContextManager] = [
         mock.patch.dict("os.environ", env, clear=False),
-        mock.patch.dict(
-            "sys.modules", {"rebar_reconciler.acli": _fake_acli_mod}
-        ),
+        mock.patch.dict("sys.modules", {"rebar_reconciler.acli": _fake_acli_mod}),
         # `from rebar_reconciler import acli` resolves the package ATTRIBUTE if
         # present (set by a prior test's import), bypassing the sys.modules patch.
         # Patch the attribute too so each probe run sees its own fake.
@@ -121,9 +115,7 @@ def _run_probe_with_mocked_acli(
             "importlib.util.spec_from_file_location",
             side_effect=_patched_spec_from_file,
         ),
-        mock.patch(
-            "importlib.util.module_from_spec", side_effect=_patched_module_from_spec
-        ),
+        mock.patch("importlib.util.module_from_spec", side_effect=_patched_module_from_spec),
         mock.patch("sys.stdout", captured),
     ]
     if extra_patches:
@@ -154,9 +146,7 @@ def _run_probe_no_acli(
     _real_spec_from_file = importlib.util.spec_from_file_location
     _real_module_from_spec = importlib.util.module_from_spec
 
-    probe_spec = _real_spec_from_file(
-        f"jira_capability_probe_{module_suffix}", PROBE_PATH
-    )
+    probe_spec = _real_spec_from_file(f"jira_capability_probe_{module_suffix}", PROBE_PATH)
     probe_mod = _real_module_from_spec(probe_spec)
 
     captured = io.StringIO()

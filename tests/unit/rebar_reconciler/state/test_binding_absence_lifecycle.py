@@ -45,9 +45,7 @@ def tracker(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _store_with_binding(
-    repo_root: Path, local_id: str, jira_key: str
-) -> BindingStore:
+def _store_with_binding(repo_root: Path, local_id: str, jira_key: str) -> BindingStore:
     bs = BindingStore(repo_root / ".tickets-tracker")
     bs.bind_confirm(local_id, jira_key)
     bs.save()
@@ -90,9 +88,7 @@ def test_retires_after_grace_consecutive_404s(tracker: Path) -> None:
     # Soft-delete: live binding removed.
     assert bs.get_jira_key("loc-2") is None
     # Reversible: present in retired file.
-    retired_path = (
-        tracker / ".tickets-tracker" / ".bridge_state" / "bindings-retired.json"
-    )
+    retired_path = tracker / ".tickets-tracker" / ".bridge_state" / "bindings-retired.json"
     assert retired_path.exists()
     data = json.loads(retired_path.read_text())
     assert "DIG-2" in data["retired"]

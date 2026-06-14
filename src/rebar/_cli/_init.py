@@ -100,15 +100,15 @@ def _confirm_and_init(repo_root: str) -> None:
     except EOFError:
         answer = ""
     if answer not in ("", "y", "yes"):
-        sys.stderr.write("Aborted: ticket system not initialized. Run 'rebar init' to initialize.\n")
+        sys.stderr.write(
+            "Aborted: ticket system not initialized. Run 'rebar init' to initialize.\n"
+        )
         raise SystemExit(1)
 
     from rebar._commands import init as _init_cmd
 
     if _init_cmd.init_core(repo_root, silent=False) != 0:
-        sys.stderr.write(
-            "Error: ticket system initialization failed. Run 'rebar init' manually.\n"
-        )
+        sys.stderr.write("Error: ticket system initialization failed. Run 'rebar init' manually.\n")
         raise SystemExit(1)
 
 

@@ -28,6 +28,7 @@ def _load_module() -> ModuleType:
 
     return rebar.graph
 
+
 def _write_ticket(
     tracker_dir: Path,
     ticket_id: str,
@@ -74,6 +75,7 @@ def _write_ticket(
 
     return ticket_dir
 
+
 def _write_blocks_link(
     tracker_dir: Path,
     blocker_id: str,
@@ -105,9 +107,8 @@ def _write_blocks_link(
     with open(blocker_dir / filename, "w") as f:
         json.dump(link_event, f)
 
-def _write_archive_event(
-    tracker_dir: Path, ticket_id: str, timestamp: int = 3000
-) -> None:
+
+def _write_archive_event(tracker_dir: Path, ticket_id: str, timestamp: int = 3000) -> None:
     """Write an ARCHIVED event to ticket_id's directory.
 
     This marks the ticket as archived in the event-sourced state.
@@ -125,6 +126,7 @@ def _write_archive_event(
     }
     with open(ticket_dir / f"{timestamp}-archive-{ticket_id}-ARCHIVED.json", "w") as f:
         json.dump(archive_event, f)
+
 
 def _make_ticket(tracker: Path, ticket_id: str, ticket_type: str = "task") -> Path:
     """Write a minimal ticket directory with a CREATE event. Returns the ticket dir."""
@@ -145,6 +147,7 @@ def _make_ticket(tracker: Path, ticket_id: str, ticket_type: str = "task") -> Pa
     with open(ticket_dir / f"1000-create-{ticket_id}-CREATE.json", "w") as f:
         json.dump(create_event, f)
     return ticket_dir
+
 
 def _write_link_event(
     source_id: str,
@@ -171,6 +174,7 @@ def _write_link_event(
     filename = f"{timestamp}-{link_uuid}-LINK.json"
     with open(source_dir / filename, "w") as f:
         json.dump(link_event, f)
+
 
 def _get_check_cycle_at_level():  # type: ignore[no-untyped-def]
     """Load check_cycle_at_level from ticket-graph module."""

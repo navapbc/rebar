@@ -19,9 +19,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_applier():
@@ -38,8 +36,7 @@ def applier():
     """Load the applier module, failing all tests if absent."""
     if not APPLIER_PATH.exists():
         pytest.fail(
-            f"applier.py not found at {APPLIER_PATH} — "
-            "implement the module to make tests pass."
+            f"applier.py not found at {APPLIER_PATH} — implement the module to make tests pass."
         )
     return _load_applier()
 

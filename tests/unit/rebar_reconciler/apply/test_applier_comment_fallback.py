@@ -22,9 +22,7 @@ from unittest.mock import MagicMock
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_applier():
@@ -88,8 +86,7 @@ def test_zero_update_issue_retries_on_400(applier):
     applier.update_one(mutation, client)
 
     assert client.update_issue.call_count == 1, (
-        f"400 illegal-transition must not be retried; "
-        f"got {client.update_issue.call_count} calls"
+        f"400 illegal-transition must not be retried; got {client.update_issue.call_count} calls"
     )
 
 

@@ -38,9 +38,7 @@ _USAGE = "Usage: ticket-purge-bridge.sh --keep=<PROJECT_KEY> [--dry-run]"
 
 def _project_key(ticket_dir: str) -> str:
     """Jira project key from the first CREATE event; '' on miss/no-hyphen/error."""
-    creates = sorted(
-        p.path for p in os.scandir(ticket_dir) if p.name.endswith("-CREATE.json")
-    )
+    creates = sorted(p.path for p in os.scandir(ticket_dir) if p.name.endswith("-CREATE.json"))
     if not creates:
         return ""
     try:
@@ -58,7 +56,7 @@ def purge_bridge_cli(argv: list[str], *, repo_root=None) -> int:
     dry_run = False
     for arg in argv:
         if arg.startswith("--keep="):
-            keep_project = arg[len("--keep="):]
+            keep_project = arg[len("--keep=") :]
         elif arg == "--dry-run":
             dry_run = True
         else:
@@ -74,9 +72,7 @@ def purge_bridge_cli(argv: list[str], *, repo_root=None) -> int:
         sys.stderr.write(f"Error: tracker directory not found at {tracker}\n")
         return 1
 
-    sys.stdout.write(
-        f"Scanning for non-{keep_project} Jira-sourced tickets (jira-* prefix)...\n"
-    )
+    sys.stdout.write(f"Scanning for non-{keep_project} Jira-sourced tickets (jira-* prefix)...\n")
 
     delete_list: list[str] = []
     keep_count = skip_count = 0
@@ -126,18 +122,30 @@ def _commit_deletion(tracker: str, deleted: int, keep_project: str) -> None:
     a failed commit (nothing staged) prints ``Nothing to commit`` rather than
     erroring, since the deleted dirs may have been untracked.
     """
-    in_worktree = subprocess.run(
-        ["git", "-C", tracker, "rev-parse", "--git-dir"],
-        capture_output=True, text=True,
-    ).returncode == 0
+    in_worktree = (
+        subprocess.run(
+            ["git", "-C", tracker, "rev-parse", "--git-dir"],
+            capture_output=True,
+            text=True,
+        ).returncode
+        == 0
+    )
     if not in_worktree:
         return
     sys.stdout.write("Committing deletion on tickets branch...\n")
     subprocess.run(["git", "-C", tracker, "add", "-A"], capture_output=True, text=True)
     cp = subprocess.run(
-        ["git", "-C", tracker, "commit", "--no-verify", "-m",
-         f"purge: remove {deleted} non-{keep_project} Jira-sourced (jira-*) tickets"],
-        capture_output=True, text=True,
+        [
+            "git",
+            "-C",
+            tracker,
+            "commit",
+            "--no-verify",
+            "-m",
+            f"purge: remove {deleted} non-{keep_project} Jira-sourced (jira-*) tickets",
+        ],
+        capture_output=True,
+        text=True,
     )
     if cp.returncode != 0:
         sys.stdout.write("Nothing to commit\n")

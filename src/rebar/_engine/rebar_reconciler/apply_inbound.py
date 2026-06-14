@@ -87,7 +87,11 @@ def _apply_inbound_create(
         bound_local_id = binding_store.get_local_id(jira_key)
         if bound_local_id:
             if repo_root is None:
-                repo_root = Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])
+                repo_root = Path(
+                    os.environ.get("REBAR_ROOT")
+                    or os.environ.get("PROJECT_ROOT")
+                    or Path(__file__).resolve().parents[4]
+                )
             mapping_path = repo_root / "bridge_state" / "mapping.json"
             _write_mapping_atomic(mapping_path, bound_local_id, jira_key)
             return ApplyResult(
@@ -504,9 +508,7 @@ def _apply_inbound_delete(mutation, *, client=None, repo_root=None) -> ApplyResu
         # the outbound re-create runs in the same pass. Tracked separately.
     elif branch == "redirect":
         new_key = payload.get("new_jira_key", "")
-        new_local_id = (
-            _jira_key_to_local_id(new_key) if new_key else local_id + "-redirected"
-        )
+        new_local_id = _jira_key_to_local_id(new_key) if new_key else local_id + "-redirected"
         src = tracker_dir / local_id
         dst = tracker_dir / new_local_id
         # Collision protection (PR #375 review thread 3307104042): when both
@@ -547,11 +549,7 @@ def _apply_inbound_delete(mutation, *, client=None, repo_root=None) -> ApplyResu
             tracker_dir,
             local_id,
             "COMMENT",
-            {
-                "comment": (
-                    f"reconciler: Jira issue {target} entered recoverable trash state."
-                )
-            },
+            {"comment": (f"reconciler: Jira issue {target} entered recoverable trash state.")},
         )
     else:
         # Unknown branch: record observable evidence; do not raise so the pass
@@ -618,9 +616,7 @@ def _apply_inbound_clean_label(mutation, *, client=None, repo_root=None) -> Appl
     return ApplyResult(mutation.direction, mutation.action, {"removed": removed})
 
 
-def _apply_inbound_repair_property(
-    mutation, *, client=None, repo_root=None
-) -> ApplyResult:
+def _apply_inbound_repair_property(mutation, *, client=None, repo_root=None) -> ApplyResult:
     """Repair a missing ``local_id`` entity property on a Jira issue.
 
     Delegates to the existing :func:`inbound_repair_property` implementation
@@ -660,9 +656,7 @@ def _apply_inbound_conflict(mutation, *, client=None, repo_root=None) -> ApplyRe
     jira_key = mutation.target
     local_id = payload.get("local_id", "")
     reason = payload.get("reason", "unspecified")
-    parent_id = payload.get("parent_id") or _rebar_env(
-        "RECONCILER_CONFLICT_PARENT_ID", ""
-    )
+    parent_id = payload.get("parent_id") or _rebar_env("RECONCILER_CONFLICT_PARENT_ID", "")
     title = f"[Reconciler conflict]: pair ({local_id!r}, {jira_key!r}) -> {reason}"
     description = (
         f"Reconciler detected a conflict on (local_id={local_id!r}, "

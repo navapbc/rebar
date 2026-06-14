@@ -68,9 +68,7 @@ if "rebar_reconciler.adf" not in sys.modules:
 # ``rebar_reconciler`` namespace stub.
 _CL_PATH = SCRIPTS_DIR / "rebar_reconciler" / "comment_limits.py"
 if "rebar_reconciler.comment_limits" not in sys.modules:
-    _cl_spec = importlib.util.spec_from_file_location(
-        "rebar_reconciler.comment_limits", _CL_PATH
-    )
+    _cl_spec = importlib.util.spec_from_file_location("rebar_reconciler.comment_limits", _CL_PATH)
     _cl_mod = importlib.util.module_from_spec(_cl_spec)
     sys.modules["rebar_reconciler.comment_limits"] = _cl_mod
     _cl_spec.loader.exec_module(_cl_mod)  # type: ignore[union-attr]
@@ -138,9 +136,7 @@ def _make_404() -> urllib.error.HTTPError:
 
 
 def _read_manifest_outcomes(repo_root: Path, pass_id: str) -> list[dict]:
-    manifest_path = (
-        repo_root / "bridge_state" / "snapshots" / f"{pass_id}.manifest.json"
-    )
+    manifest_path = repo_root / "bridge_state" / "snapshots" / f"{pass_id}.manifest.json"
     if not manifest_path.is_file():
         return []
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -199,8 +195,7 @@ def test_http_404_on_update_soft_fails_batch_continues(
             )
         except urllib.error.HTTPError as exc:
             pytest.fail(
-                f"applier.apply propagated HTTPError 404 instead of "
-                f"soft-failing the batch: {exc!r}"
+                f"applier.apply propagated HTTPError 404 instead of soft-failing the batch: {exc!r}"
             )
 
     # Both mutations were attempted; the good one DID run.

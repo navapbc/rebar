@@ -268,9 +268,7 @@ def _seed_working_set(state: _FakeJiraState) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_pass_2_over_unchanged_remote_is_idempotent(
-    git_repo, reconciler_modules, monkeypatch
-):
+def test_pass_2_over_unchanged_remote_is_idempotent(git_repo, reconciler_modules, monkeypatch):
     """Pass 1 imports the remote working set; pass 2 over the UNCHANGED remote
     computes zero mutations and issues zero Jira writes (1-pass idempotency,
     ticket robe-creek-zealot AC)."""
@@ -293,9 +291,7 @@ def test_pass_2_over_unchanged_remote_is_idempotent(
     )
 
 
-def test_import_materialises_faithfully_and_binds(
-    git_repo, reconciler_modules, monkeypatch
-):
+def test_import_materialises_faithfully_and_binds(git_repo, reconciler_modules, monkeypatch):
     """The pass-1 import lands in the exact state the binding-aware differs
     would compute: canonical status reverse-map, normalised ADF description,
     confirmed binding recorded at creation (not via next-pass dedup-skip)."""
@@ -314,9 +310,7 @@ def test_import_materialises_faithfully_and_binds(
 
     # Canonical status reverse-map: In Progress -> in_progress (NOT blocked),
     # Done -> closed (NOT cancelled), To Do -> open (no STATUS event).
-    assert [e["data"]["status"] for e in _events("jira-dig-1", "STATUS")] == [
-        "in_progress"
-    ]
+    assert [e["data"]["status"] for e in _events("jira-dig-1", "STATUS")] == ["in_progress"]
     assert _events("jira-dig-2", "STATUS") == []
     assert [e["data"]["status"] for e in _events("jira-dig-3", "STATUS")] == ["closed"]
 
@@ -325,9 +319,7 @@ def test_import_materialises_faithfully_and_binds(
     assert create_1["data"]["description"].strip() == "Login flow."
 
     # Binding recorded as confirmed at creation time.
-    bindings = json.loads(
-        (tracker / ".bridge_state" / "bindings.json").read_text()
-    )["bindings"]
+    bindings = json.loads((tracker / ".bridge_state" / "bindings.json").read_text())["bindings"]
     for local_id, jira_key in (
         ("jira-dig-1", "DIG-1"),
         ("jira-dig-2", "DIG-2"),

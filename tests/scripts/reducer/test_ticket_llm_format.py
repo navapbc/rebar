@@ -208,9 +208,7 @@ class TestShortenDep:
         assert mod.shorten_dep(42) == 42
 
     def test_unknown_dep_keys_passed_through(self, mod):
-        result = mod.shorten_dep(
-            {"target_id": "t-2", "relation": "blocks", "meta": "info"}
-        )
+        result = mod.shorten_dep({"target_id": "t-2", "relation": "blocks", "meta": "info"})
         assert result.get("meta") == "info"
 
 
@@ -222,11 +220,7 @@ class TestShortenDep:
 class TestToLlmSubkeyShortening:
     def test_comments_subkeys_shortened(self, mod):
         result = mod.to_llm(
-            {
-                "comments": [
-                    {"body": "lgtm", "author": "alice", "timestamp": "2026-01-01"}
-                ]
-            }
+            {"comments": [{"body": "lgtm", "author": "alice", "timestamp": "2026-01-01"}]}
         )
         cm = result["cm"]
         assert len(cm) == 1

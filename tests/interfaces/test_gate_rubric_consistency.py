@@ -22,7 +22,10 @@ import pytest
 import rebar
 
 _AC = "\n## Acceptance Criteria\n- [ ] first criterion\n- [ ] second criterion\n"
-_FILLER = "This ticket describes a cohesive unit of work in enough detail for an agent to act on it without guessing. " * 3
+_FILLER = (
+    "This ticket describes a cohesive unit of work in enough detail for an agent to act on it without guessing. "
+    * 3
+)
 
 # Well-formed ticket per type: the per-type headings clarity rewards PLUS the
 # universal Acceptance Criteria checklist. All should pass both gates.
@@ -41,7 +44,9 @@ NO_AC = {t: d.replace(_AC, "\n") for t, d in WELL_FORMED.items()}
 def _cli_rc(*args: str, cwd: str) -> int:
     return subprocess.run(
         [sys.executable, "-m", "rebar.cli", *args],
-        capture_output=True, text=True, cwd=cwd,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
     ).returncode
 
 

@@ -51,8 +51,7 @@ def count_unresolved_alerts(tracker: str) -> int:
         alerts: dict[str, dict] = {}
         try:
             alert_paths = sorted(
-                p.path for p in os.scandir(entry.path)
-                if p.name.endswith("-BRIDGE_ALERT.json")
+                p.path for p in os.scandir(entry.path) if p.name.endswith("-BRIDGE_ALERT.json")
             )
         except OSError:
             # Unreadable ticket dir → skip silently (the bash glob did too).

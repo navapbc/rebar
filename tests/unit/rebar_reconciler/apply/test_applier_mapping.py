@@ -25,9 +25,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_applier():
@@ -44,8 +42,7 @@ def applier():
     """Load the applier module, failing all tests if absent."""
     if not APPLIER_PATH.exists():
         pytest.fail(
-            f"applier.py not found at {APPLIER_PATH} — "
-            "implement the module to make tests pass."
+            f"applier.py not found at {APPLIER_PATH} — implement the module to make tests pass."
         )
     return _load_applier()
 
@@ -58,9 +55,7 @@ def applier():
 def _make_mock_client(search_return=None, create_return=None):
     """Return a mock AcliClient."""
     client = MagicMock()
-    client.search_issues.return_value = (
-        search_return if search_return is not None else []
-    )
+    client.search_issues.return_value = search_return if search_return is not None else []
     client.create_issue.return_value = (
         create_return if create_return is not None else {"key": "DIG-999", "status": "created"}
     )
@@ -114,9 +109,7 @@ def test_mapping_json_preserves_existing_entries(applier, tmp_path):
     client = _make_mock_client(search_return=[existing_issue])
 
     mutation = _make_create_mutation("new-id")
-    applier.create_one(
-        mutation, client, rest_calls=0, repo_root=tmp_path
-    )
+    applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
 
     data = json.loads(mapping_path.read_text())
     assert data.get("old-id") == "DIG-1", "Pre-existing entry should be preserved"
@@ -128,14 +121,10 @@ def test_mapping_json_not_written_on_jql_miss(applier, tmp_path):
     client = _make_mock_client(search_return=[])
 
     mutation = _make_create_mutation("tick-miss1")
-    applier.create_one(
-        mutation, client, rest_calls=0, repo_root=tmp_path
-    )
+    applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
 
     mapping_path = tmp_path / "bridge_state" / "mapping.json"
-    assert not mapping_path.exists(), (
-        "mapping.json should NOT be created on JQL miss"
-    )
+    assert not mapping_path.exists(), "mapping.json should NOT be created on JQL miss"
 
 
 # ---------------------------------------------------------------------------
@@ -149,9 +138,7 @@ def _make_mock_concurrency():
     # Always return the same HEAD SHA so no drift is detected
     mock_concurrency.snapshot_head.return_value = "abc1234def567890" * 2  # 32-char sha
     # rebase_retry just calls the callback immediately and returns ok=True
-    mock_concurrency.rebase_retry.side_effect = lambda repo_root, fn: (
-        types.SimpleNamespace(ok=True)
-    )
+    mock_concurrency.rebase_retry.side_effect = lambda repo_root, fn: types.SimpleNamespace(ok=True)
     return mock_concurrency
 
 
@@ -169,8 +156,10 @@ def test_manifest_contains_dedup_event_on_hit(applier, tmp_path):
     # env-derived (jira_url, user, api_token) credentials.
     fake_acli = types.SimpleNamespace(AcliClient=lambda **_: mock_client)
     fake_concurrency = _make_mock_concurrency()
-    with patch.object(applier, "_load_acli", return_value=fake_acli), \
-         patch.object(applier, "_load_concurrency", return_value=fake_concurrency):
+    with (
+        patch.object(applier, "_load_acli", return_value=fake_acli),
+        patch.object(applier, "_load_concurrency", return_value=fake_concurrency),
+    ):
         manifest_path = applier.apply(
             [_make_create_mutation("tick-ev1")],
             pass_id="test-pass-ev1",
@@ -194,8 +183,10 @@ def test_manifest_events_empty_on_no_hits(applier, tmp_path):
     fake_acli = types.SimpleNamespace(AcliClient=lambda **_: mock_client)
     fake_concurrency = _make_mock_concurrency()
 
-    with patch.object(applier, "_load_acli", return_value=fake_acli), \
-         patch.object(applier, "_load_concurrency", return_value=fake_concurrency):
+    with (
+        patch.object(applier, "_load_acli", return_value=fake_acli),
+        patch.object(applier, "_load_concurrency", return_value=fake_concurrency),
+    ):
         manifest_path = applier.apply(
             [_make_create_mutation("tick-noev1")],
             pass_id="test-pass-noev1",
@@ -203,9 +194,7 @@ def test_manifest_events_empty_on_no_hits(applier, tmp_path):
         )
 
     manifest = json.loads(manifest_path.read_text())
-    assert manifest.get("events") == [], (
-        "No events expected when JQL returns no hits"
-    )
+    assert manifest.get("events") == [], "No events expected when JQL returns no hits"
 
 
 def test_manifest_events_populated_for_each_hit(applier, tmp_path):
@@ -221,8 +210,10 @@ def test_manifest_events_populated_for_each_hit(applier, tmp_path):
         _make_create_mutation("tick-multi1"),
         _make_create_mutation("tick-multi2"),
     ]
-    with patch.object(applier, "_load_acli", return_value=fake_acli), \
-         patch.object(applier, "_load_concurrency", return_value=fake_concurrency):
+    with (
+        patch.object(applier, "_load_acli", return_value=fake_acli),
+        patch.object(applier, "_load_concurrency", return_value=fake_concurrency),
+    ):
         manifest_path = applier.apply(
             mutations,
             pass_id="test-pass-multi",
@@ -305,9 +296,7 @@ def test_load_mapping_returns_empty_dict_for_non_dict_json(applier, tmp_path):
     mapping_path.write_text(json.dumps([1, 2, 3]))
 
     loaded = applier._load_mapping(mapping_path)
-    assert loaded == {}, (
-        f"_load_mapping must return {{}} for non-dict JSON; got {loaded!r}"
-    )
+    assert loaded == {}, f"_load_mapping must return {{}} for non-dict JSON; got {loaded!r}"
 
     # And a subsequent write must succeed cleanly, replacing the corrupt list
     applier._write_mapping_atomic(mapping_path, "tick-recover", "DIG-RECOVER")

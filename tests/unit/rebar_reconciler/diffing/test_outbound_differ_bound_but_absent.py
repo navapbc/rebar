@@ -94,9 +94,7 @@ class StubBindingStore:
 
 
 def _http_error(code: int) -> urllib.error.HTTPError:
-    return urllib.error.HTTPError(
-        url="http://x/issue/X", code=code, msg="err", hdrs=None, fp=None
-    )
+    return urllib.error.HTTPError(url="http://x/issue/X", code=code, msg="err", hdrs=None, fp=None)
 
 
 def _ticket(tid: str, **over) -> dict:
@@ -162,9 +160,7 @@ def test_absent_alive_divergent_emits_update(od):
     store = StubBindingStore({"loc-1": jira_key})
     client = MagicMock()
     # GET returns the OLD title — divergent from local "NEW TITLE".
-    client.get_issue_by_rest.return_value = {
-        "fields": {"summary": "OLD TITLE", "labels": []}
-    }
+    client.get_issue_by_rest.return_value = {"fields": {"summary": "OLD TITLE", "labels": []}}
     result = od.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},  # key absent
@@ -317,9 +313,7 @@ def test_single_200_resets_counter(od, binding_store_mod, tmp_path, monkeypatch)
             client=client,
             pass_id=f"p{i}",
         )
-    assert not bs.is_retired(jira_key), (
-        "a 200 mid-sequence must reset the consecutive-404 counter"
-    )
+    assert not bs.is_retired(jira_key), "a 200 mid-sequence must reset the consecutive-404 counter"
 
 
 # ===========================================================================
@@ -376,9 +370,7 @@ def test_recovered_this_pass_syncs(od):
     ticket = _ticket("loc-1", title="Edited locally")
     store = StubBindingStore({"loc-1": jira_key})
     client = MagicMock()
-    client.get_issue_by_rest.return_value = {
-        "fields": {"summary": "Stale", "labels": []}
-    }
+    client.get_issue_by_rest.return_value = {"fields": {"summary": "Stale", "labels": []}}
     result = od.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
@@ -479,9 +471,7 @@ def test_idempotency_two_passes(od):
 # ===========================================================================
 
 
-def test_rotation_services_all_within_ceil_n_over_k(
-    od, binding_store_mod, tmp_path, monkeypatch
-):
+def test_rotation_services_all_within_ceil_n_over_k(od, binding_store_mod, tmp_path, monkeypatch):
     monkeypatch.setenv("RECONCILER_ABSENT_GET_BUDGET", "2")
     monkeypatch.setenv("RECONCILER_ABSENT_RETIRE_GRACE", "100")  # never retire
     N = 7
@@ -582,9 +572,7 @@ def test_rest_issue_to_snapshot_fields_parity(od):
     # The fetcher stores a verbatim sorted copy of the SEARCH fields subset.
     fetcher_entry = {
         k: get_payload["fields"][k]
-        for k in sorted(
-            {"summary", "description", "parent", "priority", "status", "assignee"}
-        )
+        for k in sorted({"summary", "description", "parent", "priority", "status", "assignee"})
     }
     helper_out = od._rest_issue_to_snapshot_fields(get_payload)
     intersect = set(helper_out) & set(fetcher_entry)

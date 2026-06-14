@@ -23,9 +23,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_applier():
@@ -42,8 +40,7 @@ def applier():
     """Load the applier module, failing all tests if absent."""
     if not APPLIER_PATH.exists():
         pytest.fail(
-            f"applier.py not found at {APPLIER_PATH} — "
-            "implement the module to make tests pass."
+            f"applier.py not found at {APPLIER_PATH} — implement the module to make tests pass."
         )
     return _load_applier()
 
@@ -81,14 +78,14 @@ def test_search_called_before_create_on_miss(applier):
 
     client = MagicMock()
     client.search_issues.side_effect = lambda *a, **kw: call_order.append("search") or []
-    client.create_issue.side_effect = lambda *a, **kw: call_order.append("create") or {"key": "DIG-1"}
+    client.create_issue.side_effect = lambda *a, **kw: (
+        call_order.append("create") or {"key": "DIG-1"}
+    )
 
     mutation = _make_create_mutation("tick-0001")
     result = applier.create_one(mutation, client, rest_calls=0)
 
-    assert call_order == ["search", "create"], (
-        f"Expected search before create, got: {call_order}"
-    )
+    assert call_order == ["search", "create"], f"Expected search before create, got: {call_order}"
     assert result is not None
     assert result.get("key") == "DIG-1"
 

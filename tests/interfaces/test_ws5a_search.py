@@ -13,7 +13,9 @@ import rebar
 def _cli_search(repo: Path, *args: str) -> list:
     cp = subprocess.run(
         [sys.executable, "-m", "rebar.cli", "search", *args],
-        cwd=str(repo), capture_output=True, text=True,
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
         env={**_env(repo)},
     )
     assert cp.returncode == 0, cp.stderr
@@ -22,6 +24,7 @@ def _cli_search(repo: Path, *args: str) -> list:
 
 def _env(repo: Path) -> dict:
     import os
+
     e = dict(os.environ)
     e["REBAR_ROOT"] = str(repo)
     e["PROJECT_ROOT"] = str(repo)

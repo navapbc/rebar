@@ -36,8 +36,12 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
-BINDING_STORE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "binding_store.py"
-OUTBOUND_DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
+BINDING_STORE_PATH = (
+    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "binding_store.py"
+)
+OUTBOUND_DIFFER_PATH = (
+    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
+)
 
 
 def _load_module(name: str, path: Path):
@@ -93,23 +97,33 @@ def _init_tickets_git_repo(tracker_dir: Path) -> None:
     calls have a valid parent.
     """
     tracker_dir.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-b", "tickets", str(tracker_dir)],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(tracker_dir), "config", "user.email", "test@test.com"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(tracker_dir), "config", "user.name", "Test"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "init", "-b", "tickets", str(tracker_dir)], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(tracker_dir), "config", "user.email", "test@test.com"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(tracker_dir), "config", "user.name", "Test"],
+        check=True,
+        capture_output=True,
+    )
     # Create an initial empty commit so the branch exists
-    subprocess.run(["git", "-C", str(tracker_dir), "commit",
-                    "--allow-empty", "-m", "init", "--no-verify"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(tracker_dir), "commit", "--allow-empty", "-m", "init", "--no-verify"],
+        check=True,
+        capture_output=True,
+    )
 
 
 def _binding_in_tickets_head(tracker_dir: Path, local_id: str, jira_key: str) -> bool:
     """Return True if the tickets branch HEAD's bindings.json contains local_id→jira_key."""
     result = subprocess.run(
         ["git", "-C", str(tracker_dir), "show", "HEAD:.bridge_state/bindings.json"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         return False
@@ -124,7 +138,10 @@ def _binding_in_tickets_head(tracker_dir: Path, local_id: str, jira_key: str) ->
 
 
 def test_binding_store_committed_to_tickets_branch_after_reconcile_pass(
-    tmp_path, reconcile_mod, binding_store_mod, outbound_differ_mod,
+    tmp_path,
+    reconcile_mod,
+    binding_store_mod,
+    outbound_differ_mod,
 ):
     """After reconcile_once saves a new binding, bindings.json is committed to the
     tickets orphan branch.
@@ -152,12 +169,13 @@ def test_binding_store_committed_to_tickets_branch_after_reconcile_pass(
     # Commit the empty bindings.json so it's on the tickets branch.
     subprocess.run(
         ["git", "-C", str(tracker_dir), "add", ".bridge_state/bindings.json"],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
-        ["git", "-C", str(tracker_dir), "commit", "--no-verify",
-         "-m", "init bindings"],
-        check=True, capture_output=True,
+        ["git", "-C", str(tracker_dir), "commit", "--no-verify", "-m", "init bindings"],
+        check=True,
+        capture_output=True,
     )
 
     # Add a confirmed binding (simulating Phase-1 reconciler creating a Jira issue).
@@ -175,9 +193,9 @@ def test_binding_store_committed_to_tickets_branch_after_reconcile_pass(
     # Demonstrate the regression: 'git merge origin/tickets' (simulated by
     # restoring from HEAD) overwrites the working-tree file with the empty version.
     subprocess.run(
-        ["git", "-C", str(tracker_dir), "checkout", "HEAD", "--",
-         ".bridge_state/bindings.json"],
-        check=True, capture_output=True,
+        ["git", "-C", str(tracker_dir), "checkout", "HEAD", "--", ".bridge_state/bindings.json"],
+        check=True,
+        capture_output=True,
     )
     reloaded = binding_store_mod.load_binding_store(tmp_path)
     assert reloaded.get_jira_key("probe-ticket-1") is None, (
@@ -204,9 +222,9 @@ def test_binding_store_committed_to_tickets_branch_after_reconcile_pass(
     # scenario), restoring from the tickets branch HEAD gives back the new binding.
     bindings_path.write_text(json.dumps(empty_bindings))
     subprocess.run(
-        ["git", "-C", str(tracker_dir), "checkout", "HEAD", "--",
-         ".bridge_state/bindings.json"],
-        check=True, capture_output=True,
+        ["git", "-C", str(tracker_dir), "checkout", "HEAD", "--", ".bridge_state/bindings.json"],
+        check=True,
+        capture_output=True,
     )
     restored = binding_store_mod.load_binding_store(tmp_path)
     assert restored.get_jira_key("probe-ticket-1") == "DIG-5999", (
@@ -217,7 +235,9 @@ def test_binding_store_committed_to_tickets_branch_after_reconcile_pass(
 
 
 def test_outbound_update_generated_when_bindings_present(
-    tmp_path, outbound_differ_mod, binding_store_mod,
+    tmp_path,
+    outbound_differ_mod,
+    binding_store_mod,
 ):
     """Integration seam test: compute_outbound_mutations generates UPDATE (not CREATE)
     for a bound ticket with changed scalar fields.
@@ -259,7 +279,7 @@ def test_outbound_update_generated_when_bindings_present(
         "title": "UPDATED TITLE — Phase 2 edit",
         "description": "Updated description",
         "status": "open",
-        "priority": 3,   # Changed from 0 (Highest) to 3 (Low)
+        "priority": 3,  # Changed from 0 (Highest) to 3 (Low)
         "ticket_type": "task",
         "assignee": "",
         "tags": ["field-probe-test"],

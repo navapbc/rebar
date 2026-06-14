@@ -56,9 +56,7 @@ def test_build_dep_graph_includes_children(graph: ModuleType, tmp_path: Path) ->
     )
 
 
-def test_build_dep_graph_children_empty_when_no_children(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_build_dep_graph_children_empty_when_no_children(graph: ModuleType, tmp_path: Path) -> None:
     """build_dep_graph must return an empty 'children' list when no tickets
     have parent_id matching the queried ticket."""
     tracker_dir = tmp_path / "tracker"
@@ -70,9 +68,7 @@ def test_build_dep_graph_children_empty_when_no_children(
     result = graph.build_dep_graph("lonely-ticket", str(tracker_dir))
 
     assert "children" in result, "build_dep_graph result missing 'children' field"
-    assert result["children"] == [], (
-        f"Expected empty children, got {result['children']}"
-    )
+    assert result["children"] == [], f"Expected empty children, got {result['children']}"
 
 
 @pytest.mark.unit
@@ -115,8 +111,7 @@ def test_compute_archive_eligible_regression(graph: ModuleType, tmp_path: Path) 
         )
 
         assert "ticket-already-archived" not in eligible, (
-            f"ticket-already-archived is already archived, must not be re-eligible; "
-            f"got {eligible}"
+            f"ticket-already-archived is already archived, must not be re-eligible; got {eligible}"
         )
 
         assert "ticket-open" not in eligible, (
@@ -130,9 +125,7 @@ def test_compute_archive_eligible_regression(graph: ModuleType, tmp_path: Path) 
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_transitive_traversal_includes_archived_midchain(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_transitive_traversal_includes_archived_midchain(graph: ModuleType, tmp_path: Path) -> None:
     """Transitive blocker traversal must NOT skip archived tickets mid-chain — regression guard.
 
     GREEN: This test passes today and must continue passing after archived exclusion
@@ -203,13 +196,9 @@ def test_check_would_create_cycle_no_false_positive_for_transitive_depends_on(
     _write_ticket(tracker_dir, "ticket-c", status="open")
 
     # ticket-a depends_on ticket-c: LINK in ticket-a's dir
-    _write_link_event(
-        "ticket-a", "ticket-c", "depends_on", str(tracker_dir), timestamp=1500
-    )
+    _write_link_event("ticket-a", "ticket-c", "depends_on", str(tracker_dir), timestamp=1500)
     # ticket-c depends_on ticket-b: LINK in ticket-c's dir
-    _write_link_event(
-        "ticket-c", "ticket-b", "depends_on", str(tracker_dir), timestamp=1501
-    )
+    _write_link_event("ticket-c", "ticket-b", "depends_on", str(tracker_dir), timestamp=1501)
 
     # Redundant transitive edge: A→B is already implied by A→C→B, but is NOT a cycle.
     would_cycle = graph.check_would_create_cycle(
@@ -250,18 +239,12 @@ def test_add_dependency_allows_redundant_transitive_depends_on(
     _write_ticket(tracker_dir, "ticket-b", status="open")
     _write_ticket(tracker_dir, "ticket-c", status="open")
 
-    _write_link_event(
-        "ticket-a", "ticket-c", "depends_on", str(tracker_dir), timestamp=1500
-    )
-    _write_link_event(
-        "ticket-c", "ticket-b", "depends_on", str(tracker_dir), timestamp=1501
-    )
+    _write_link_event("ticket-a", "ticket-c", "depends_on", str(tracker_dir), timestamp=1500)
+    _write_link_event("ticket-c", "ticket-b", "depends_on", str(tracker_dir), timestamp=1501)
 
     # Must not raise CyclicDependencyError — redundant transitive edge is allowed
     try:
-        graph.add_dependency(
-            "ticket-a", "ticket-b", str(tracker_dir), relation="depends_on"
-        )
+        graph.add_dependency("ticket-a", "ticket-b", str(tracker_dir), relation="depends_on")
     except graph.CyclicDependencyError as exc:
         pytest.fail(
             f"add_dependency raised CyclicDependencyError for a redundant transitive "
@@ -279,9 +262,7 @@ def test_add_dependency_allows_redundant_transitive_depends_on(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_build_dep_graph_excludes_archived_children(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_build_dep_graph_excludes_archived_children(graph: ModuleType, tmp_path: Path) -> None:
     """build_dep_graph must exclude archived tickets from the children list by default.
 
     Setup:
@@ -302,12 +283,8 @@ def test_build_dep_graph_excludes_archived_children(
 
     try:
         _write_ticket(tracker_dir, "epic-001", ticket_type="epic")
-        _write_ticket(
-            tracker_dir, "story-active", parent_id="epic-001", ticket_type="story"
-        )
-        _write_ticket(
-            tracker_dir, "story-archived", parent_id="epic-001", ticket_type="story"
-        )
+        _write_ticket(tracker_dir, "story-active", parent_id="epic-001", ticket_type="story")
+        _write_ticket(tracker_dir, "story-archived", parent_id="epic-001", ticket_type="story")
         _write_archive_event(tracker_dir, "story-archived")
 
         result = graph.build_dep_graph("epic-001", str(tracker_dir))
@@ -329,9 +306,7 @@ def test_build_dep_graph_excludes_archived_children(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_build_dep_graph_excludes_archived_blockers(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_build_dep_graph_excludes_archived_blockers(graph: ModuleType, tmp_path: Path) -> None:
     """build_dep_graph must exclude archived tickets from the blockers list by default.
 
     Setup:
@@ -353,12 +328,8 @@ def test_build_dep_graph_excludes_archived_blockers(
         _write_ticket(tracker_dir, "ticket-active-blocker", status="open")
         _write_ticket(tracker_dir, "ticket-archived-blocker", status="open")
         _write_ticket(tracker_dir, "ticket-target", status="open")
-        _write_blocks_link(
-            tracker_dir, "ticket-active-blocker", "ticket-target", timestamp=1500
-        )
-        _write_blocks_link(
-            tracker_dir, "ticket-archived-blocker", "ticket-target", timestamp=1501
-        )
+        _write_blocks_link(tracker_dir, "ticket-active-blocker", "ticket-target", timestamp=1500)
+        _write_blocks_link(tracker_dir, "ticket-archived-blocker", "ticket-target", timestamp=1501)
         _write_archive_event(tracker_dir, "ticket-archived-blocker")
 
         result = graph.build_dep_graph("ticket-target", str(tracker_dir))
@@ -376,5 +347,3 @@ def test_build_dep_graph_excludes_archived_blockers(
         import shutil
 
         shutil.rmtree(str(tracker_dir.parent), ignore_errors=True)
-
-

@@ -28,7 +28,7 @@ def _mock_ticket_cmd(tmp_path: Path, tickets: list[dict]) -> str:
     script.write_text(
         "#!/usr/bin/env bash\n"
         'case "${1:-}" in\n'
-        f'  list) cat {tmp_path / "tickets.json"} ;;\n'
+        f"  list) cat {tmp_path / 'tickets.json'} ;;\n"
         "  *) exit 0 ;;\n"
         "esac\n"
     )
@@ -61,7 +61,10 @@ def _dep(target):
 
 # Fixtures spanning the score tiers (exit == 5 - score).
 _HEALTHY = [_ticket("he", "open", "epic"), _ticket("ht", "open", "task", "he")]  # 5
-_ONE_CRIT = [_ticket("ce", "open", "epic"), _ticket("cc", "open", "task", "ce", deps=[_dep("ce")])]  # 3
+_ONE_CRIT = [
+    _ticket("ce", "open", "epic"),
+    _ticket("cc", "open", "task", "ce", deps=[_dep("ce")]),
+]  # 3
 _FOUR_CRIT = [_ticket("e", "open", "epic")] + [
     _ticket(f"c{i}", "open", "task", "e", deps=[_dep("e")]) for i in range(4)
 ]  # 1
@@ -80,8 +83,13 @@ _ORPHAN_PLUS_CRIT = [
 # ───────────────────────────── score → exit tiers ────────────────────────────
 @pytest.mark.parametrize(
     "name,tickets,expect_score",
-    [("healthy", _HEALTHY, 5), ("dup_minor", _DUP, 4), ("one_crit", _ONE_CRIT, 3),
-     ("orphan_crit", _ORPHAN_PLUS_CRIT, 2), ("four_crit", _FOUR_CRIT, 1)],
+    [
+        ("healthy", _HEALTHY, 5),
+        ("dup_minor", _DUP, 4),
+        ("one_crit", _ONE_CRIT, 3),
+        ("orphan_crit", _ORPHAN_PLUS_CRIT, 2),
+        ("four_crit", _FOUR_CRIT, 1),
+    ],
 )
 def test_score_tier_and_exit(tmp_path: Path, name, tickets, expect_score):
     """exit == 5 - score (the docs/exit-codes.md contract), and the JSON report
@@ -91,13 +99,22 @@ def test_score_tier_and_exit(tmp_path: Path, name, tickets, expect_score):
     d = json.loads(r.stdout)
     assert d["score"] == expect_score
     assert r.returncode == 5 - expect_score
-    assert set(d) == {"score", "critical_issues", "major_issues", "minor_issues", "warnings", "suggestions"}
+    assert set(d) == {
+        "score",
+        "critical_issues",
+        "major_issues",
+        "minor_issues",
+        "warnings",
+        "suggestions",
+    }
 
 
 def test_critical_message_golden(tmp_path: Path):
     cmd = _mock_ticket_cmd(tmp_path, _ONE_CRIT)
     d = json.loads(_run(cmd, "--output", "json").stdout)
-    assert d["critical_issues"] == ["Child->parent dependency: cc depends on its parent ce - Ticket cc"]
+    assert d["critical_issues"] == [
+        "Child->parent dependency: cc depends on its parent ce - Ticket cc"
+    ]
 
 
 # ───────────────────────────── human output goldens ──────────────────────────
@@ -132,6 +149,13 @@ def test_library_and_mcp_shape(monkeypatch):
     monkeypatch.setenv("REBAR_NO_SYNC", "1")
     monkeypatch.delenv("TICKET_CMD", raising=False)
     d = rebar.validate()  # real store, in-process
-    assert set(d) == {"score", "critical_issues", "major_issues", "minor_issues", "warnings", "suggestions"}
+    assert set(d) == {
+        "score",
+        "critical_issues",
+        "major_issues",
+        "minor_issues",
+        "warnings",
+        "suggestions",
+    }
     assert 1 <= d["score"] <= 5
     ValidateReportOut.model_validate(d)

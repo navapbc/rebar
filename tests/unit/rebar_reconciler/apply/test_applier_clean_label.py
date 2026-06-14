@@ -18,9 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_applier():
@@ -55,6 +53,7 @@ def test_remove_label_payload_pinned(applier):
 
     captured: list[tuple] = []
     from rebar_reconciler import apply_inbound  # point-of-use: leaf calls retry here
+
     real = apply_inbound._call_with_retry
 
     def spy(fn, *args, **kwargs):

@@ -65,9 +65,7 @@ class StubBindingStore:
 
 
 def _make_jira_snapshot_with_comments(jira_key: str, comment_bodies: list[str]) -> dict:
-    jira_comments = [
-        {"id": str(100 + i), "body": body} for i, body in enumerate(comment_bodies)
-    ]
+    jira_comments = [{"id": str(100 + i), "body": body} for i, body in enumerate(comment_bodies)]
     return {
         jira_key: {
             "summary": "Some issue",
@@ -137,12 +135,7 @@ def test_oversize_comment_converges_over_two_passes(
     # transform here using the SAME shared helper to model what Jira stores.
     comment_limits = _load_module(
         "comment_limits_conv_test",
-        REPO_ROOT
-        / "src"
-        / "rebar"
-        / "_engine"
-        / "rebar_reconciler"
-        / "comment_limits.py",
+        REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "comment_limits.py",
     )
     landed_body = comment_limits.truncate_comment_body(emitted_body)
     assert len(landed_body) <= _JIRA_COMMENT_MAX_CHARS, (

@@ -25,12 +25,8 @@ from unittest.mock import patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
-MUTATION_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
 
 # Narrow set of sys.modules keys this test owns. Other tests' modules are
 # not evicted so they don't suffer cross-test interference.
@@ -80,9 +76,7 @@ def _make_outbound_create(mut_mod, target="DIG-100", payload=None):
     )
 
 
-def test_list_of_mutation_normalized_to_dict_before_apply_batch(
-    applier_and_mutation, tmp_path
-):
+def test_list_of_mutation_normalized_to_dict_before_apply_batch(applier_and_mutation, tmp_path):
     """applier.apply([Mutation], ...) must pass list-of-dict (not list-of-
     Mutation) to _apply_batch. Assert observable behavior: _apply_batch
     is called with dicts having the expected keys; no Mutation leaks.
@@ -127,9 +121,7 @@ def test_normalized_dict_is_json_serializable(applier_and_mutation, tmp_path):
             )
 
 
-def test_empty_fields_does_not_fall_through_to_full_payload(
-    applier_and_mutation, tmp_path
-):
+def test_empty_fields_does_not_fall_through_to_full_payload(applier_and_mutation, tmp_path):
     """payload.get('fields', payload) — NOT `or payload`. An intentionally
     empty fields dict must reach _apply_batch as {} (not as the full
     payload), to prevent leaking local_id / follow_on into batch fields.
@@ -164,9 +156,7 @@ def _make_inbound_create(mut_mod, target="local-abc"):
     )
 
 
-def test_inbound_mutations_dispatched_per_mutation_via_apply_typed(
-    applier_and_mutation, tmp_path
-):
+def test_inbound_mutations_dispatched_per_mutation_via_apply_typed(applier_and_mutation, tmp_path):
     """`apply(list[Mutation], pass_id, repo_root)` with inbound Mutations
     routes each one through `_apply_typed` (per-mutation dispatch via the
     _LEAVES registry) rather than the outbound batch path. Defect #8 — the
@@ -184,8 +174,7 @@ def test_inbound_mutations_dispatched_per_mutation_via_apply_typed(
 
     # Each inbound Mutation reached _apply_typed exactly once, in order.
     assert at.call_count == len(inbound), (
-        f"Expected {len(inbound)} per-mutation _apply_typed dispatches; "
-        f"got {at.call_count}"
+        f"Expected {len(inbound)} per-mutation _apply_typed dispatches; got {at.call_count}"
     )
     dispatched_targets = [c.args[0].target for c in at.call_args_list]
     assert dispatched_targets == [m.target for m in inbound]
@@ -204,9 +193,7 @@ def test_inbound_mutations_dispatched_per_mutation_via_apply_typed(
         ), f"Inbound Mutation leaked into _apply_batch: {passed!r}"
 
 
-def test_mixed_inbound_and_outbound_partitioned_correctly(
-    applier_and_mutation, tmp_path
-):
+def test_mixed_inbound_and_outbound_partitioned_correctly(applier_and_mutation, tmp_path):
     """When `mutations` mixes inbound + outbound, the inbound ones go
     through `_apply_typed` (per-mutation) and the outbound ones go through
     `_apply_batch` (normalized to dicts). No mutation crosses paths."""
@@ -232,20 +219,15 @@ def test_mixed_inbound_and_outbound_partitioned_correctly(
     # Outbound: batch dispatch via _apply_batch (1 call with 2 dicts).
     assert ab.call_count == 1
     batch_arg = ab.call_args[0][0]
-    assert len(batch_arg) == 2, (
-        f"Expected 2 outbound dicts; got {len(batch_arg)}: {batch_arg!r}"
-    )
+    assert len(batch_arg) == 2, f"Expected 2 outbound dicts; got {len(batch_arg)}: {batch_arg!r}"
     assert all(isinstance(m, dict) for m in batch_arg), (
-        f"Outbound items were not normalized to dicts: "
-        f"{[type(m).__name__ for m in batch_arg]}"
+        f"Outbound items were not normalized to dicts: {[type(m).__name__ for m in batch_arg]}"
     )
     batch_keys = {m["key"] for m in batch_arg}
     assert batch_keys == {"DIG-1", "DIG-2"}
 
 
-def test_all_inbound_does_not_crash_when_outbound_batch_is_empty(
-    applier_and_mutation, tmp_path
-):
+def test_all_inbound_does_not_crash_when_outbound_batch_is_empty(applier_and_mutation, tmp_path):
     """When `mutations` is entirely inbound, the outbound batch path
     receives an empty list (or is skipped). Either way, `apply()` does
     not raise — defect #8 production scenario (empty local mirror,

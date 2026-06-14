@@ -109,8 +109,7 @@ def _apply_typed(mutation, *, client=None, repo_root=None, binding_store=None) -
     if handler is None:
         errs = _load_errors_module()
         raise errs.UnknownActionError(
-            f"unknown (direction={mutation.direction.value!s}, "
-            f"action={mutation.action.value!s})"
+            f"unknown (direction={mutation.direction.value!s}, action={mutation.action.value!s})"
         )
     # Audit: derive leaf_name from the (direction, action) pair and run the
     # rebar-id label write guard before any leaf side-effect occurs.
@@ -126,9 +125,7 @@ def _apply_typed(mutation, *, client=None, repo_root=None, binding_store=None) -
 
     try:
         sig = _inspect.signature(handler)
-        _has_var_kw = any(
-            p.kind is _inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-        )
+        _has_var_kw = any(p.kind is _inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
         accepts_repo_root = "repo_root" in sig.parameters or _has_var_kw
         accepts_binding_store = "binding_store" in sig.parameters or _has_var_kw
     except (TypeError, ValueError):

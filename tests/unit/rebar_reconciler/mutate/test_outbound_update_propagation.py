@@ -38,9 +38,7 @@ from unittest.mock import MagicMock
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_applier():
@@ -250,9 +248,7 @@ def test_update_one_does_not_pass_bogus_kwargs_to_update_issue(applier):
     assert "comments" not in kwargs, (
         f"client.update_issue received bogus 'comments' kwarg: {kwargs!r}"
     )
-    assert "labels" not in kwargs, (
-        f"client.update_issue received bogus 'labels' kwarg: {kwargs!r}"
-    )
+    assert "labels" not in kwargs, f"client.update_issue received bogus 'labels' kwarg: {kwargs!r}"
     assert "changed_fields" not in kwargs, (
         f"client.update_issue received bogus 'changed_fields' kwarg: {kwargs!r}"
     )

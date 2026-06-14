@@ -381,9 +381,7 @@ class AcliGraphMixin:
             {"fields": {"issuetype": {"name": type_name}}},
         )
 
-    def update_comment(
-        self, jira_key: str, comment_id: str, body: str
-    ) -> dict[str, Any]:
+    def update_comment(self, jira_key: str, comment_id: str, body: str) -> dict[str, Any]:
         """Update an existing comment on a Jira issue via ACLI.
 
         Probe-validated: ``acli jira workitem comment update`` works correctly.

@@ -27,9 +27,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_applier():
@@ -66,6 +64,7 @@ def test_allowlist_fields_routed_via_call_with_retry(applier):
 
     captured: list[tuple] = []
     from rebar_reconciler import apply_outbound  # point-of-use: leaf calls retry here
+
     real = apply_outbound._call_with_retry
 
     def spy(fn, *args, **kwargs):
@@ -99,9 +98,7 @@ def test_non_allowlist_fields_silently_dropped(applier):
         remove_label=MagicMock(),
         add_comment=MagicMock(),
     )
-    mutation = _make_outbound_update_mutation(
-        applier, {"custom_field": "x"}
-    )
+    mutation = _make_outbound_update_mutation(applier, {"custom_field": "x"})
 
     result = applier._apply_outbound_update(mutation, client=client)
 
@@ -119,9 +116,7 @@ def test_status_field_is_forwarded_to_update_issue(applier, monkeypatch):
     """
     monkeypatch.delenv("REBAR_RECONCILER_STATUS_GATING", raising=False)
     client = SimpleNamespace(update_issue=MagicMock(return_value=None))
-    mutation = _make_outbound_update_mutation(
-        applier, {"status": "Done", "summary": "x"}
-    )
+    mutation = _make_outbound_update_mutation(applier, {"status": "Done", "summary": "x"})
 
     applier._apply_outbound_update(mutation, client=client)
 
@@ -306,6 +301,7 @@ def test_empty_changed_fields_with_only_labels_no_noop_warning(applier, caplog):
     """A mutation with empty changed_fields but non-empty labels
     must NOT emit the no-op warning — the work set is non-empty."""
     import logging
+
     client = SimpleNamespace(
         update_issue=MagicMock(return_value=None),
         add_label=MagicMock(),
@@ -336,6 +332,7 @@ def test_truly_empty_mutation_emits_loud_warning(applier, caplog):
     be emitted so operators can detect misconfigured mutations instead of
     receiving a silent success."""
     import logging
+
     client = SimpleNamespace(
         update_issue=MagicMock(return_value=None),
         add_label=MagicMock(),

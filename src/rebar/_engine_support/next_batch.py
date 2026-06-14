@@ -128,9 +128,7 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
             if child not in descendants:
                 descendants.add(child)
                 queue.append(child)
-    parent_ids_with_children = {
-        pid for pid in parent_map if pid in descendants and parent_map[pid]
-    }
+    parent_ids_with_children = {pid for pid in parent_map if pid in descendants and parent_map[pid]}
 
     # Open/in_progress tickets via the shared list path (== ``rebar list``).
     from rebar._engine_support import reads as _reads
@@ -168,8 +166,7 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
             d
             for d in (t.get("deps") or [])
             if d.get("relation") == "depends_on"
-            and ticket_status_map.get(d.get("target_id", ""), "closed")
-            not in _CLOSED_STATUSES
+            and ticket_status_map.get(d.get("target_id", ""), "closed") not in _CLOSED_STATUSES
         ]
         if open_depends_on:
             continue
@@ -218,8 +215,7 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
             continue
         if any(
             d.get("relation") == "depends_on"
-            and ticket_status_map.get(d.get("target_id", ""), "closed")
-            not in _CLOSED_STATUSES
+            and ticket_status_map.get(d.get("target_id", ""), "closed") not in _CLOSED_STATUSES
             for d in (t.get("deps") or [])
         ):
             _blocked_ids.add(tid)
@@ -490,7 +486,7 @@ def run(argv: list[str], tracker: str) -> int:
 
     for arg in rest:
         if arg.startswith("--limit="):
-            val = arg[len("--limit="):]
+            val = arg[len("--limit=") :]
             if val == "unlimited":
                 limit = 0
             elif not val.isdigit():

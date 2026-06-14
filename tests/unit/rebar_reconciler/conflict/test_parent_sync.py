@@ -133,9 +133,7 @@ def _make_ticket(
 class TestOutboundParent:
     """Outbound parent/child sync tests."""
 
-    def test_create_with_bound_parent_carries_parent_key(
-        self, outbound_differ: ModuleType
-    ) -> None:
+    def test_create_with_bound_parent_carries_parent_key(self, outbound_differ: ModuleType) -> None:
         """Outbound CREATE with bound parent_id → fields carries parent key."""
         # parent local_id "parent-1" is bound to "DIG-10"
         store = StubOutboundBindingStore({"parent-1": "DIG-10"})
@@ -169,9 +167,7 @@ class TestOutboundParent:
             f"parent should be absent for unbound parent_id, got: {mut.fields}"
         )
 
-    def test_create_without_parent_id_no_parent_field(
-        self, outbound_differ: ModuleType
-    ) -> None:
+    def test_create_without_parent_id_no_parent_field(self, outbound_differ: ModuleType) -> None:
         """Outbound CREATE with no parent_id → no parent field emitted."""
         store = StubOutboundBindingStore({})
         ticket = _make_ticket(ticket_id="orphan-1")
@@ -182,9 +178,7 @@ class TestOutboundParent:
         assert len(mutations) == 1
         assert "parent" not in mutations[0].fields
 
-    def test_reparent_bound_ticket_emits_parent_change(
-        self, outbound_differ: ModuleType
-    ) -> None:
+    def test_reparent_bound_ticket_emits_parent_change(self, outbound_differ: ModuleType) -> None:
         """Bound ticket with changed parent_id → update mutation carries parent field."""
         # child-3 is bound to DIG-30; parent-3 is bound to DIG-20
         store = StubOutboundBindingStore({"child-3": "DIG-30", "parent-3": "DIG-20"})
@@ -206,9 +200,7 @@ class TestOutboundParent:
             [ticket], jira_snapshot=jira_snapshot, binding_store=store
         )
         # An update mutation should be emitted because parent changed
-        update_muts = [
-            m for m in mutations if m.action == "update" and m.local_id == "child-3"
-        ]
+        update_muts = [m for m in mutations if m.action == "update" and m.local_id == "child-3"]
         assert len(update_muts) == 1, (
             f"Expected exactly one update mutation for child-3, got: {mutations}"
         )
@@ -216,9 +208,7 @@ class TestOutboundParent:
             f"Expected parent='DIG-20' in update fields, got: {update_muts[0].fields}"
         )
 
-    def test_no_reparent_when_parent_unchanged(
-        self, outbound_differ: ModuleType
-    ) -> None:
+    def test_no_reparent_when_parent_unchanged(self, outbound_differ: ModuleType) -> None:
         """Bound ticket with same parent on both sides → no parent in update fields."""
         store = StubOutboundBindingStore({"child-4": "DIG-40", "parent-4": "DIG-41"})
         ticket = _make_ticket(ticket_id="child-4", parent_id="parent-4")
@@ -238,9 +228,7 @@ class TestOutboundParent:
         mutations = outbound_differ.compute_outbound_mutations(
             [ticket], jira_snapshot=jira_snapshot, binding_store=store
         )
-        update_muts = [
-            m for m in mutations if m.action == "update" and m.local_id == "child-4"
-        ]
+        update_muts = [m for m in mutations if m.action == "update" and m.local_id == "child-4"]
         # Either no mutation or mutation without parent in fields
         if update_muts:
             assert "parent" not in update_muts[0].fields, (
@@ -273,9 +261,7 @@ class TestInboundParent:
                 "parent": {"key": "DIG-49"},
             }
         }
-        store = StubInboundBindingStore(
-            {"DIG-50": "jira-dig-50", "DIG-49": "jira-dig-49"}
-        )
+        store = StubInboundBindingStore({"DIG-50": "jira-dig-50", "DIG-49": "jira-dig-49"})
         local_tickets: dict[str, dict] = {
             "jira-dig-50": {
                 "ticket_id": "jira-dig-50",
@@ -296,16 +282,12 @@ class TestInboundParent:
         )
         assert len(mutations) == 1, f"Expected 1 inbound mutation, got: {mutations}"
         mut = mutations[0]
-        assert "parent_id" in mut.fields, (
-            f"Expected parent_id in inbound fields, got: {mut.fields}"
-        )
+        assert "parent_id" in mut.fields, f"Expected parent_id in inbound fields, got: {mut.fields}"
         assert mut.fields["parent_id"] == "jira-dig-49", (
             f"Expected parent_id='jira-dig-49', got: {mut.fields.get('parent_id')}"
         )
 
-    def test_inbound_skips_parent_when_unbound(
-        self, inbound_differ: ModuleType
-    ) -> None:
+    def test_inbound_skips_parent_when_unbound(self, inbound_differ: ModuleType) -> None:
         """Inbound diff: parent key not in binding store → parent_id NOT in fields."""
         jira_snapshot = {
             "DIG-51": {
@@ -359,9 +341,7 @@ class TestInboundParent:
                 "parent": {"key": "DIG-53"},  # new parent
             }
         }
-        store = StubInboundBindingStore(
-            {"DIG-52": "jira-dig-52", "DIG-53": "jira-dig-53"}
-        )
+        store = StubInboundBindingStore({"DIG-52": "jira-dig-52", "DIG-53": "jira-dig-53"})
         local_tickets: dict[str, dict] = {
             "jira-dig-52": {
                 "ticket_id": "jira-dig-52",
@@ -385,9 +365,7 @@ class TestInboundParent:
             f"Expected updated parent_id, got: {mutations[0].fields}"
         )
 
-    def test_inbound_no_diff_when_parent_matches(
-        self, inbound_differ: ModuleType
-    ) -> None:
+    def test_inbound_no_diff_when_parent_matches(self, inbound_differ: ModuleType) -> None:
         """Inbound diff: Jira parent matches local parent → no parent_id in fields."""
         jira_snapshot = {
             "DIG-54": {
@@ -401,9 +379,7 @@ class TestInboundParent:
                 "parent": {"key": "DIG-55"},
             }
         }
-        store = StubInboundBindingStore(
-            {"DIG-54": "jira-dig-54", "DIG-55": "jira-dig-55"}
-        )
+        store = StubInboundBindingStore({"DIG-54": "jira-dig-54", "DIG-55": "jira-dig-55"})
         local_tickets: dict[str, dict] = {
             "jira-dig-54": {
                 "ticket_id": "jira-dig-54",
@@ -513,9 +489,7 @@ class TestApplierInboundUpdateParent:
         key = "applier_parent_update_test"
         return _load(key, APPLIER_PATH)
 
-    def test_inbound_update_writes_parent_id_in_edit_event(
-        self, tmp_path: Path
-    ) -> None:
+    def test_inbound_update_writes_parent_id_in_edit_event(self, tmp_path: Path) -> None:
         """_apply_inbound_update: parent_id in fields → EDIT event carries parent_id."""
         import json
         import os
@@ -687,7 +661,6 @@ class TestFetcherParentEnrichment:
         original_load = fetcher_mod._load_acli
         fetcher_mod._load_acli = lambda: _StubAcliMod
 
-
         bridge_state = tmp_path / "bridge_state" / "snapshots"
         bridge_state.mkdir(parents=True)
 
@@ -699,9 +672,7 @@ class TestFetcherParentEnrichment:
         import json
 
         snapshot = json.loads(output_path.read_text())
-        assert "DIG-90" in snapshot, (
-            f"DIG-90 missing from snapshot: {list(snapshot.keys())}"
-        )
+        assert "DIG-90" in snapshot, f"DIG-90 missing from snapshot: {list(snapshot.keys())}"
         # After enrichment, the snapshot entry should have a parent field
         assert snapshot["DIG-90"].get("parent") == {"key": "DIG-91"}, (
             f"Expected parent field in snapshot['DIG-90'], got: {snapshot['DIG-90']}"
@@ -749,9 +720,7 @@ class TestFetcherParentEnrichment:
 
         try:
             # Should NOT raise even though parent enrichment fails
-            output_path = fetcher_mod.fetch_snapshot(
-                "test-degrade-pass", repo_root=tmp_path
-            )
+            output_path = fetcher_mod.fetch_snapshot("test-degrade-pass", repo_root=tmp_path)
         finally:
             pass
 

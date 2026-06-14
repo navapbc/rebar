@@ -122,9 +122,7 @@ def _write_link(
         json.dump(link_event, f)
 
 
-def _write_comment(
-    tracker_dir: Path, ticket_id: str, body: str, timestamp: int = 1700
-) -> None:
+def _write_comment(tracker_dir: Path, ticket_id: str, body: str, timestamp: int = 1700) -> None:
     ticket_dir = tracker_dir / ticket_id
     ticket_dir.mkdir(parents=True, exist_ok=True)
     comment_event = {

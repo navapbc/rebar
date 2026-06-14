@@ -65,9 +65,7 @@ _PRIORITY_LOCAL_TO_JIRA: dict[int, str] = {
     3: "Low",
     4: "Lowest",
 }
-_PRIORITY_JIRA_TO_LOCAL: dict[str, int] = {
-    v: k for k, v in _PRIORITY_LOCAL_TO_JIRA.items()
-}
+_PRIORITY_JIRA_TO_LOCAL: dict[str, int] = {v: k for k, v in _PRIORITY_LOCAL_TO_JIRA.items()}
 
 # Issue type mapping: local type ↔ Jira issuetype
 _TYPE_LOCAL_TO_JIRA: dict[str, str] = {
@@ -152,11 +150,7 @@ def _compare_pair(
     # title ↔ summary
     local_title = local_ticket.get("title", local_ticket.get("summary"))
     jira_summary = jira_issue.get("summary", jira_issue.get("title"))
-    if (
-        local_title != jira_summary
-        and local_title is not None
-        and jira_summary is not None
-    ):
+    if local_title != jira_summary and local_title is not None and jira_summary is not None:
         discs.append(
             {
                 "local_id": local_id,
@@ -266,9 +260,7 @@ def reconcile_check(
 
     # Unbound counts
     unbound_local = sum(
-        1
-        for t in local_tickets
-        if (t.get("ticket_id") or t.get("id", "")) not in bound_local_ids
+        1 for t in local_tickets if (t.get("ticket_id") or t.get("id", "")) not in bound_local_ids
     )
     unbound_jira = sum(
         1
@@ -315,8 +307,7 @@ def format_report(report: dict[str, Any]) -> str:
     for oj in report["orphaned_jira"]:
         lines.append(f"  {oj} — has rebar-id-* label but no local binding")
     lines.append(
-        f"Unbound: {report['unbound_local']} local tickets, "
-        f"{report['unbound_jira']} Jira issues"
+        f"Unbound: {report['unbound_local']} local tickets, {report['unbound_jira']} Jira issues"
     )
     return "\n".join(lines)
 

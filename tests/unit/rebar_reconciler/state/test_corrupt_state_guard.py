@@ -197,9 +197,7 @@ class TestPrevSnapshotCorrupt:
         when it exists, falling back to verifying the invariant via a probe.
     """
 
-    def test_prev_snapshot_json_parse_error_helper(
-        self, tmp_path: Path
-    ) -> None:
+    def test_prev_snapshot_json_parse_error_helper(self, tmp_path: Path) -> None:
         """prev_snapshot.json with invalid JSON must raise JSONDecodeError or
         be caught and the pass must abort without emitting comment mutations.
 
@@ -300,9 +298,9 @@ class TestPrevSnapshotCorrupt:
             binding_store=StubBindingStore(),
         )
         comment_adds = [
-            m for m in result if m.action == "update" and any(
-                c.get("action") == "add" for c in m.comments
-            )
+            m
+            for m in result
+            if m.action == "update" and any(c.get("action") == "add" for c in m.comments)
         ]
         assert comment_adds == [], (
             "When curr_snapshot has the Jira comments, no comment-add must be emitted. "
@@ -333,9 +331,9 @@ class TestPrevSnapshotCorrupt:
         )
         # Bug 4292 fix: even with empty snapshot + no client, zero adds emitted.
         comment_adds_no_client = [
-            m for m in result_no_client if m.action == "update" and any(
-                c.get("action") == "add" for c in m.comments
-            )
+            m
+            for m in result_no_client
+            if m.action == "update" and any(c.get("action") == "add" for c in m.comments)
         ]
         assert len(comment_adds_no_client) == 0, (
             "Bug 4292 defense-in-depth: when snapshot lacks 'comment' field and "
@@ -358,9 +356,7 @@ class TestHealthyStateRegression:
     Ensures the corruption-guard changes do not break the happy path.
     """
 
-    def test_healthy_snapshot_deduplicates_comments(
-        self, outbound_differ_mod: ModuleType
-    ) -> None:
+    def test_healthy_snapshot_deduplicates_comments(self, outbound_differ_mod: ModuleType) -> None:
         """When prev_snapshot.json is healthy, comment dedup still works.
 
         This mirrors the existing test_outbound_differ_comment_dedup.py fixtures
@@ -403,10 +399,7 @@ class TestHealthyStateRegression:
                 "assignee": "",
                 "labels": [],
                 "comment": {
-                    "comments": [
-                        {"id": str(i), "body": b}
-                        for i, b in enumerate(existing_bodies)
-                    ],
+                    "comments": [{"id": str(i), "body": b} for i, b in enumerate(existing_bodies)],
                     "total": len(existing_bodies),
                 },
             }

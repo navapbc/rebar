@@ -226,9 +226,7 @@ def test_bridge_fsck_detects_orphaned_ticket(tmp_path: Path, fsck: ModuleType) -
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_bridge_fsck_detects_duplicate_jira_mapping(
-    tmp_path: Path, fsck: ModuleType
-) -> None:
+def test_bridge_fsck_detects_duplicate_jira_mapping(tmp_path: Path, fsck: ModuleType) -> None:
     """audit_bridge_mappings() must detect when two different local tickets
     both have SYNC events mapping to the same jira_key.
 
@@ -292,9 +290,7 @@ def test_bridge_fsck_detects_duplicate_jira_mapping(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_bridge_fsck_detects_stale_sync_events(
-    tmp_path: Path, fsck: ModuleType
-) -> None:
+def test_bridge_fsck_detects_stale_sync_events(tmp_path: Path, fsck: ModuleType) -> None:
     """audit_bridge_mappings() must detect SYNC events older than 30 days
     with no subsequent BRIDGE_ALERT activity.
 
@@ -347,9 +343,7 @@ def test_bridge_fsck_detects_stale_sync_events(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_bridge_fsck_clean_output_when_no_issues(
-    tmp_path: Path, fsck: ModuleType
-) -> None:
+def test_bridge_fsck_clean_output_when_no_issues(tmp_path: Path, fsck: ModuleType) -> None:
     """audit_bridge_mappings() must return empty findings for a clean ticket
     with a valid, recent SYNC mapping.
 
@@ -432,9 +426,7 @@ def test_bridge_fsck_exit_code(tmp_path: Path, fsck: ModuleType) -> None:
     # Pass --now-ts so stale detection is deterministic regardless of when tests run.
     exit_code_issues: int | None = None
     try:
-        result = fsck.main(
-            ["--tickets-tracker", str(tracker_issues), "--now-ts", str(_NOW_TS)]
-        )
+        result = fsck.main(["--tickets-tracker", str(tracker_issues), "--now-ts", str(_NOW_TS)])
         exit_code_issues = result if isinstance(result, int) else 1
     except SystemExit as exc:
         exit_code_issues = exc.code if isinstance(exc.code, int) else 1
@@ -461,16 +453,13 @@ def test_bridge_fsck_exit_code(tmp_path: Path, fsck: ModuleType) -> None:
 
     exit_code_clean: int | None = None
     try:
-        result = fsck.main(
-            ["--tickets-tracker", str(tracker_clean), "--now-ts", str(_NOW_TS)]
-        )
+        result = fsck.main(["--tickets-tracker", str(tracker_clean), "--now-ts", str(_NOW_TS)])
         exit_code_clean = result if isinstance(result, int) else 0
     except SystemExit as exc:
         exit_code_clean = exc.code if isinstance(exc.code, int) else 1
 
     assert exit_code_clean == 0, (
-        f"ticket bridge-fsck must exit 0 when no issues are found; "
-        f"got exit code: {exit_code_clean}"
+        f"ticket bridge-fsck must exit 0 when no issues are found; got exit code: {exit_code_clean}"
     )
 
 
@@ -498,9 +487,7 @@ def test_bridge_fsck_mixed_precision_alert_does_not_suppress_stale(
 
     # Legacy SYNC: seconds-scale timestamp, >30 days before _NOW_TS
     legacy_stale_ts = 1742605200 - (31 * 24 * 3600)  # seconds-scale, stale
-    _write_create_event(
-        ticket_dir, timestamp=legacy_stale_ts - 3600, title="Mixed ticket"
-    )
+    _write_create_event(ticket_dir, timestamp=legacy_stale_ts - 3600, title="Mixed ticket")
     _write_sync_event(
         ticket_dir,
         jira_key="DSO-MIXED",

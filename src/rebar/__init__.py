@@ -107,22 +107,27 @@ def create_ticket(
 
     try:
         res = composer.create_core(
-            ticket_type, title, parent=parent, priority=priority, assignee=assignee,
-            description=description, tags=tags, repo_root=repo_root,
+            ticket_type,
+            title,
+            parent=parent,
+            priority=priority,
+            assignee=assignee,
+            description=description,
+            tags=tags,
+            repo_root=repo_root,
         )
     except CommandError as exc:
         raise RebarError(
             f"rebar create failed (exit {exc.returncode}): {exc.message}",
-            returncode=exc.returncode, stderr=exc.message,
+            returncode=exc.returncode,
+            stderr=exc.message,
         ) from None
     if not return_alias:
         return res["id"]
     return {"id": res["id"], "alias": res["alias"] or ""}
 
 
-def transition(
-    ticket_id: str, current_status: str, target_status: str, *, repo_root=None
-) -> dict:
+def transition(ticket_id: str, current_status: str, target_status: str, *, repo_root=None) -> dict:
     """Transition a ticket's status with optimistic concurrency.
 
     Raises :class:`ConcurrencyError` if the ticket's actual status no longer
@@ -151,8 +156,7 @@ def transition(
         )
     except ConcurrencyMismatch as exc:
         raise ConcurrencyError(
-            f"transition rejected: {ticket_id} is no longer '{current_status}'. "
-            f"{exc.message}",
+            f"transition rejected: {ticket_id} is no longer '{current_status}'. {exc.message}",
             returncode=10,
             stderr=exc.message,
         ) from None
@@ -196,9 +200,7 @@ def claim(ticket_id: str, *, assignee=None, repo_root=None) -> dict:
             stderr=f"Error: ticket '{ticket_id}' not found\n",
         )
     try:
-        return _transition.claim_compute(
-            resolved, assignee=assignee or "", repo_root=repo_root
-        )
+        return _transition.claim_compute(resolved, assignee=assignee or "", repo_root=repo_root)
     except ConcurrencyMismatch as exc:
         raise ConcurrencyError(
             f"claim rejected: {ticket_id} is not open (already claimed). {exc.message}",
@@ -225,6 +227,7 @@ def reopen(ticket_id: str, *, repo_root=None) -> dict:
 # non-raising _run and report a `passed` boolean rather than raising.
 def _json_or(out: str, default):
     import json as _json
+
     try:
         return _json.loads(out)
     except Exception:
@@ -309,10 +312,13 @@ def get_file_impact(ticket_id: str, *, repo_root=None) -> list:
 def set_file_impact(ticket_id: str, impact, *, repo_root=None) -> None:
     """Record file impact (list of {path, reason} dicts, or a JSON string)."""
     import json as _json
+
     payload = impact if isinstance(impact, str) else _json.dumps(impact)
     from rebar._commands import leaf
 
-    _python_leaf(leaf.set_file_impact, ticket_id, payload, repo_root=repo_root, what="set-file-impact")
+    _python_leaf(
+        leaf.set_file_impact, ticket_id, payload, repo_root=repo_root, what="set-file-impact"
+    )
 
 
 def get_verify_commands(ticket_id: str, *, repo_root=None) -> list:
@@ -338,10 +344,17 @@ def set_verify_commands(ticket_id: str, commands, *, repo_root=None) -> None:
     """Record DD-level verify commands (list of {dd_id, dd_text, command} dicts,
     or a JSON string)."""
     import json as _json
+
     payload = commands if isinstance(commands, str) else _json.dumps(commands)
     from rebar._commands import leaf
 
-    _python_leaf(leaf.set_verify_commands, ticket_id, payload, repo_root=repo_root, what="set-verify-commands")
+    _python_leaf(
+        leaf.set_verify_commands,
+        ticket_id,
+        payload,
+        repo_root=repo_root,
+        what="set-verify-commands",
+    )
 
 
 def _python_leaf(fn, *args, repo_root, what: str) -> None:
@@ -493,6 +506,7 @@ def verify_signature(ticket_id: str, *, repo_root=None) -> dict:
 def show_ticket(ticket_id: str, *, repo_root=None) -> dict:
     """Compiled ticket state as a dict (alias/short-id aware)."""
     from rebar import _reads
+
     return _reads.show_ticket(ticket_id, repo_root=repo_root)
 
 
@@ -522,6 +536,7 @@ def list_tickets(
     so the default shape matches show/search — the single-reducer invariant).
     """
     from rebar import _reads
+
     return _reads.list_tickets(
         status=status,
         ticket_type=ticket_type,
@@ -541,12 +556,14 @@ def list_tickets(
 def deps(ticket_id: str, *, repo_root=None) -> dict:
     """Dependency graph for a ticket (JSON)."""
     from rebar import _reads
+
     return _reads.deps(ticket_id, repo_root=repo_root)
 
 
 def ready(*, repo_root=None) -> Any:
     """Tickets ready to work (all blockers closed)."""
     from rebar import _reads
+
     return _reads.ready(repo_root=repo_root)
 
 
@@ -575,6 +592,7 @@ def search(
     :func:`list_tickets`). Query terms are whitespace-split and matched
     case-insensitively (AND)."""
     from rebar import _reads
+
     return _reads.search(
         query,
         status=status,
@@ -651,7 +669,9 @@ def summary(*ticket_ids: str, repo_root=None) -> list:
     return [gates.summary_compute(tid, tracker) for tid in ticket_ids]
 
 
-def list_epics(*, include_blocked: bool = False, has_tag=None, min_children=None, repo_root=None) -> dict:
+def list_epics(
+    *, include_blocked: bool = False, has_tag=None, min_children=None, repo_root=None
+) -> dict:
     """DEPRECATED — thin wrapper over the generic ``list``. Returns
     ``{p0_bugs, epics}`` (both ``ticket_state`` arrays) by making exactly TWO
     generic calls: one for epics, one for P0 bugs. Blocking-awareness is now the
@@ -714,12 +734,15 @@ def reconcile(mode: str = "dry-run", *, repo_root=None) -> dict:
     # on the rebar-capable interpreter. engine_env still puts the engine dir on
     # PYTHONPATH so the top-level ``rebar_reconciler`` package resolves.
     cmd = [
-        sys.executable, "-m", "rebar_reconciler",
-        "--mode", mode, "--repo-root", root,
+        sys.executable,
+        "-m",
+        "rebar_reconciler",
+        "--mode",
+        mode,
+        "--repo-root",
+        root,
     ]
-    cp = subprocess.run(
-        cmd, env=engine_env(root), text=True, capture_output=True, check=False
-    )
+    cp = subprocess.run(cmd, env=engine_env(root), text=True, capture_output=True, check=False)
     if cp.returncode not in (0, 75):  # 75 == EXIT_RESCHEDULE
         raise RebarError(
             f"reconcile ({mode}) failed (exit {cp.returncode}): {cp.stderr.strip()}",

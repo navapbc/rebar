@@ -37,7 +37,9 @@ def repo_with_origin(
     repo = tmp_path / "work"
     subprocess.run(
         ["git", "init", "-q", "--bare", str(origin)],
-        check=True, capture_output=True, text=True,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     repo.mkdir()
     _git("init", "-q", cwd=repo)

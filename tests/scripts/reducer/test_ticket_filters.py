@@ -81,9 +81,11 @@ def test_priority_unset_never_matches() -> None:
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_without_tag_excludes_any_listed(corpus) -> None:
-    assert _ids(
-        apply_ticket_filters(corpus, without_tag_filter="foo,brainstorm:complete")
-    ) == ["a", "c", "e"]
+    assert _ids(apply_ticket_filters(corpus, without_tag_filter="foo,brainstorm:complete")) == [
+        "a",
+        "c",
+        "e",
+    ]
 
 
 @pytest.mark.unit
@@ -96,9 +98,7 @@ def test_has_tag_comma_is_or(corpus) -> None:
 @pytest.mark.scripts
 def test_has_and_without_intersect_then_exclude(corpus) -> None:
     assert _ids(
-        apply_ticket_filters(
-            corpus, tag_filter="rev", without_tag_filter="brainstorm:complete"
-        )
+        apply_ticket_filters(corpus, tag_filter="rev", without_tag_filter="brainstorm:complete")
     ) == ["a"]
 
 

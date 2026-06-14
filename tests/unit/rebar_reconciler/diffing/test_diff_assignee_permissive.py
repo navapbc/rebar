@@ -23,20 +23,11 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = (
-    REPO_ROOT
-    / "src"
-    / "rebar"
-    / "_engine"
-    / "rebar_reconciler"
-    / "outbound_differ.py"
-)
+DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
 
 
 def _load_differ():
-    spec = importlib.util.spec_from_file_location(
-        "outbound_differ_assignee_test", DIFFER_PATH
-    )
+    spec = importlib.util.spec_from_file_location("outbound_differ_assignee_test", DIFFER_PATH)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules["outbound_differ_assignee_test"] = mod

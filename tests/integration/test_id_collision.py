@@ -32,8 +32,7 @@ def test_zero_canonical_id_collisions() -> None:
     for tid in ids:
         assert _CANONICAL_RE.match(tid), f"malformed canonical id: {tid!r}"
     assert len(set(ids)) == len(ids), (
-        f"canonical id collision in {_N} generated ids "
-        f"({len(ids) - len(set(ids))} duplicate(s))"
+        f"canonical id collision in {_N} generated ids ({len(ids) - len(set(ids))} duplicate(s))"
     )
 
 

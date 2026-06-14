@@ -1,4 +1,5 @@
 """RED→GREEN tests for differ (inbound, probe) emission on absent jira partner."""
+
 import importlib.util
 from pathlib import Path
 
@@ -13,6 +14,7 @@ def _load(path, name):
     spec = importlib.util.spec_from_file_location(name, path)
     m = importlib.util.module_from_spec(spec)
     import sys
+
     sys.modules[name] = m
     spec.loader.exec_module(m)
     return m
@@ -38,9 +40,11 @@ def test_emits_probe_for_absent_only(differ, mut):
         "DIG-200": {"local_id": "id-Y"},  # DIG-100 missing
     }
     mutations = differ.compute_mutations(local_state, jira_state)
-    probe_muts = [m for m in mutations
-                  if m.direction == mut.MutationDirection.inbound
-                  and m.action == mut.MutationAction.probe]
+    probe_muts = [
+        m
+        for m in mutations
+        if m.direction == mut.MutationDirection.inbound and m.action == mut.MutationAction.probe
+    ]
     assert len(probe_muts) == 1, f"expected 1 (inbound, probe), got {len(probe_muts)}: {probe_muts}"
     assert probe_muts[0].target == "DIG-100"
     # provenance should reference the local target

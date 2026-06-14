@@ -174,9 +174,7 @@ def test_pre_existing_rebar_id_produces_zero_creates(tmp_path, differ, applier):
         return m.get("action") if isinstance(m, dict) else None
 
     def _mut_key(m):
-        return getattr(m, "target", None) or (
-            m.get("key") if isinstance(m, dict) else None
-        )
+        return getattr(m, "target", None) or (m.get("key") if isinstance(m, dict) else None)
 
     # Step 1 — differ: a bound Jira issue (carries a rebar-id:<local_id> label)
     # present in the Jira snapshot but absent from the local snapshot must NOT
@@ -207,21 +205,15 @@ def test_pre_existing_rebar_id_produces_zero_creates(tmp_path, differ, applier):
     ):
         applier.apply(mutations, "pass-001", repo_root=tmp_path)
 
-    assert fake_client.creates == [], (
-        "a label-bound issue must never trigger create_issue"
-    )
+    assert fake_client.creates == [], "a label-bound issue must never trigger create_issue"
 
     # Step 3 — regression guard: a genuinely-unbound Jira issue (no rebar-id
     # label) STILL produces an inbound create. The stand-down is scoped to
     # bound issues; without this, 4354 would over-suppress legitimate creates.
-    unbound_snapshot: dict = {
-        "DIG-888": {"summary": "Brand new", "status": "open", "labels": []}
-    }
+    unbound_snapshot: dict = {"DIG-888": {"summary": "Brand new", "status": "open", "labels": []}}
     unbound_mutations = differ.compute_mutations({}, unbound_snapshot)
     unbound_creates = [
-        m
-        for m in unbound_mutations
-        if _mut_action(m) == "create" and _mut_key(m) == "DIG-888"
+        m for m in unbound_mutations if _mut_action(m) == "create" and _mut_key(m) == "DIG-888"
     ]
     assert unbound_creates, (
         "a genuinely-unbound Jira issue must still produce an inbound create; "

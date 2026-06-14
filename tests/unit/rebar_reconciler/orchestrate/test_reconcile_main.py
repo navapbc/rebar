@@ -85,9 +85,7 @@ def _seed_sys_modules(request):
     newly_added: list[str] = []
 
     # Step 1: seed the rebar_reconciler namespace package
-    for pkg in (
-        "rebar_reconciler",
-    ):
+    for pkg in ("rebar_reconciler",):
         if pkg not in sys.modules:
             sys.modules[pkg] = types.ModuleType(pkg)
             newly_added.append(pkg)
@@ -207,13 +205,9 @@ def test_phase_gate_requires_removal_to_advance(main_mod, fetcher_sentinel, tmp_
             return_value=True,
         ),
     ):
-        rc_blocked = main_mod.main(
-            ["--mode=bootstrap-throttle", "--repo-root", str(tmp_path)]
-        )
+        rc_blocked = main_mod.main(["--mode=bootstrap-throttle", "--repo-root", str(tmp_path)])
 
-    assert rc_blocked != 0, (
-        f"Expected non-zero rc when phase gate blocks, got {rc_blocked}"
-    )
+    assert rc_blocked != 0, f"Expected non-zero rc when phase gate blocks, got {rc_blocked}"
 
     # Second: phase gate absent + full pass mock → proceeds
     stub_reconcile = types.ModuleType("stub_reconcile_phase_gate")
@@ -244,9 +238,7 @@ def test_phase_gate_requires_removal_to_advance(main_mod, fetcher_sentinel, tmp_
         ),
         patch.object(main_mod, "_try_load_step", return_value=stub_reconcile),
     ):
-        rc_open = main_mod.main(
-            ["--mode=bootstrap-throttle", "--repo-root", str(tmp_path)]
-        )
+        rc_open = main_mod.main(["--mode=bootstrap-throttle", "--repo-root", str(tmp_path)])
 
     assert rc_open == 0, (
         f"Expected 0 rc when phase gate is open and reconcile_once succeeds, got {rc_open}"
@@ -401,9 +393,7 @@ def test_no_mode_flag_defaults_to_live(main_mod, tmp_path):
     ):
         rc = main_mod.main(["--repo-root", str(tmp_path)])
 
-    assert rc == 0, (
-        f"Expected 0 rc when no --mode flag given (defaults to live), got {rc}"
-    )
+    assert rc == 0, f"Expected 0 rc when no --mode flag given (defaults to live), got {rc}"
     stub_reconcile.reconcile_once.assert_called_once()
 
 
@@ -453,9 +443,7 @@ def test_main_without_repo_root_does_not_pass_none_to_advisory(main_mod):
     ):
         main_mod.main(["--mode=dry-run"])
 
-    assert check_pass_lock_mock.call_count >= 1, (
-        "check_pass_lock must be called when main() runs"
-    )
+    assert check_pass_lock_mock.call_count >= 1, "check_pass_lock must be called when main() runs"
     actual_repo_root_arg = check_pass_lock_mock.call_args[0][0]
     assert isinstance(actual_repo_root_arg, Path), (
         f"check_pass_lock must receive a Path, not {type(actual_repo_root_arg).__name__!r} "
@@ -516,9 +504,7 @@ def test_main_without_repo_root_passes_resolved_repo_root(main_mod, monkeypatch)
     ):
         main_mod.main(["--mode=dry-run"])
 
-    assert check_pass_lock_mock.call_count >= 1, (
-        "check_pass_lock must be called when main() runs"
-    )
+    assert check_pass_lock_mock.call_count >= 1, "check_pass_lock must be called when main() runs"
     actual_repo_root_arg = check_pass_lock_mock.call_args[0][0]
     assert isinstance(actual_repo_root_arg, Path), (
         f"Expected a Path, got {type(actual_repo_root_arg).__name__!r}: {actual_repo_root_arg!r}"
@@ -526,12 +512,7 @@ def test_main_without_repo_root_passes_resolved_repo_root(main_mod, monkeypatch)
     # The resolved default must point at a directory containing the rebar_reconciler package,
     # confirming it is the actual project repo root (not an arbitrary or null path).
     expected_marker = (
-        actual_repo_root_arg
-        / "src"
-        / "rebar"
-        / "_engine"
-        / "rebar_reconciler"
-        / "__main__.py"
+        actual_repo_root_arg / "src" / "rebar" / "_engine" / "rebar_reconciler" / "__main__.py"
     )
     assert expected_marker.exists(), (
         f"Resolved repo_root {actual_repo_root_arg!r} does not contain "

@@ -1,4 +1,5 @@
 """RED tests for differ ProvenanceLedger echo suppression."""
+
 import importlib.util
 import sys
 from pathlib import Path

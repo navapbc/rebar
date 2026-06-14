@@ -40,7 +40,9 @@ MISSING = "zzzz-zzzz-zzzz-0000"
 def _cli(*args: str, cwd: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "rebar.cli", *args],
-        capture_output=True, text=True, cwd=cwd,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
     )
 
 
@@ -81,7 +83,9 @@ def test_failure_emits_error_envelope_json(case, rebar_repo: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("case", [c for c in CASES if c[2] == "text"], ids=[c[0] for c in CASES if c[2] == "text"])
+@pytest.mark.parametrize(
+    "case", [c for c in CASES if c[2] == "text"], ids=[c[0] for c in CASES if c[2] == "text"]
+)
 def test_text_mode_failure_stdout_stays_empty(case, rebar_repo: Path) -> None:
     """Report-profile commands: a failure WITHOUT --output json must not leak an
     envelope to stdout (text-mode byte-identical; prose stays on stderr)."""

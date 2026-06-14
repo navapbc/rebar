@@ -46,13 +46,19 @@ def _scratch_counts(repo: Path) -> tuple[int, int, int]:
     main_exclude = (repo / ".git" / "info" / "exclude").read_text()
     gitignore = subprocess.run(
         ["git", "-C", str(tracker), "show", "tickets:.gitignore"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     ).stdout
     wt_git = subprocess.run(
         ["git", "-C", str(tracker), "rev-parse", "--git-dir"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
-    wt_exclude_path = Path(tracker) / wt_git / "info" / "exclude" if not Path(wt_git).is_absolute() else Path(wt_git) / "info" / "exclude"
+    wt_exclude_path = (
+        Path(tracker) / wt_git / "info" / "exclude"
+        if not Path(wt_git).is_absolute()
+        else Path(wt_git) / "info" / "exclude"
+    )
     wt_exclude = wt_exclude_path.read_text() if wt_exclude_path.is_file() else ""
     return _count(main_exclude), _count(gitignore), _count(wt_exclude)
 

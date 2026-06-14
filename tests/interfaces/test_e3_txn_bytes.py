@@ -19,7 +19,9 @@ import rebar
 
 
 def _newest(ticket_dir: Path, suffix: str) -> Path:
-    files = sorted(p for p in ticket_dir.iterdir() if p.name.endswith(suffix) and not p.name.startswith("."))
+    files = sorted(
+        p for p in ticket_dir.iterdir() if p.name.endswith(suffix) and not p.name.startswith(".")
+    )
     assert files, f"no {suffix} event in {ticket_dir}"
     return files[-1]
 

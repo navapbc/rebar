@@ -33,16 +33,35 @@ def _tool_params(tool) -> set[str]:
 def test_mcp_exposes_expected_tools() -> None:
     names = set(_mcp_tools())
     expected = {
-        "show_ticket", "list_tickets", "ticket_deps", "ready_tickets",
-        "next_batch", "search", "reconcile", "create_ticket", "transition_ticket",
-        "claim_ticket", "reopen_ticket",
-        "comment_ticket", "edit_ticket", "link_tickets", "unlink_tickets",
-        "tag_ticket", "untag_ticket", "archive_ticket",
-        "compact_ticket", "fsck",
+        "show_ticket",
+        "list_tickets",
+        "ticket_deps",
+        "ready_tickets",
+        "next_batch",
+        "search",
+        "reconcile",
+        "create_ticket",
+        "transition_ticket",
+        "claim_ticket",
+        "reopen_ticket",
+        "comment_ticket",
+        "edit_ticket",
+        "link_tickets",
+        "unlink_tickets",
+        "tag_ticket",
+        "untag_ticket",
+        "archive_ticket",
+        "compact_ticket",
+        "fsck",
         # WS5d: quality gates + file-impact over MCP
-        "clarity_check", "check_ac", "quality_check", "validate",
-        "get_file_impact", "set_file_impact",
-        "get_verify_commands", "set_verify_commands",
+        "clarity_check",
+        "check_ac",
+        "quality_check",
+        "validate",
+        "get_file_impact",
+        "set_file_impact",
+        "get_verify_commands",
+        "set_verify_commands",
     }
     assert expected <= names, f"missing MCP tools: {expected - names}"
 
@@ -70,11 +89,35 @@ def test_library_public_api() -> None:
     import rebar
 
     for fn in (
-        "init_repo", "create_ticket", "transition", "claim", "reopen", "comment", "edit_ticket",
-        "link", "unlink", "tag", "untag", "archive", "compact", "fsck",
-        "clarity_check", "check_ac", "quality_check", "validate",
-        "get_file_impact", "set_file_impact", "get_verify_commands", "set_verify_commands",
-        "show_ticket", "list_tickets", "deps", "ready", "next_batch", "search", "reconcile",
+        "init_repo",
+        "create_ticket",
+        "transition",
+        "claim",
+        "reopen",
+        "comment",
+        "edit_ticket",
+        "link",
+        "unlink",
+        "tag",
+        "untag",
+        "archive",
+        "compact",
+        "fsck",
+        "clarity_check",
+        "check_ac",
+        "quality_check",
+        "validate",
+        "get_file_impact",
+        "set_file_impact",
+        "get_verify_commands",
+        "set_verify_commands",
+        "show_ticket",
+        "list_tickets",
+        "deps",
+        "ready",
+        "next_batch",
+        "search",
+        "reconcile",
     ):
         assert callable(getattr(rebar, fn)), fn
     assert not hasattr(rebar, "classify")
@@ -84,9 +127,10 @@ def test_library_public_api() -> None:
 def _cli_usage() -> str:
     cp = subprocess.run(
         [sys.executable, "-m", "rebar.cli", "no-such-subcommand"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
-    return (cp.stdout + cp.stderr)
+    return cp.stdout + cp.stderr
 
 
 def test_cli_usage_has_no_classify() -> None:
@@ -98,7 +142,8 @@ def test_cli_usage_has_no_classify() -> None:
 def test_cli_rejects_classify() -> None:
     cp = subprocess.run(
         [sys.executable, "-m", "rebar.cli", "classify"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert cp.returncode != 0
     assert "unknown subcommand" in (cp.stdout + cp.stderr).lower()

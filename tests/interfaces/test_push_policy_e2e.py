@@ -39,7 +39,9 @@ def repo_with_origin(
     repo = tmp_path / "work"
     subprocess.run(
         ["git", "init", "-q", "--bare", str(origin)],
-        check=True, capture_output=True, text=True,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     repo.mkdir()
     _git("init", "-q", cwd=repo)
@@ -55,7 +57,8 @@ def repo_with_origin(
 def _origin_ref(origin: Path) -> str:
     r = subprocess.run(
         ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/tickets"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return r.stdout.strip() or "NONE"
 

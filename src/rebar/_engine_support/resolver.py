@@ -109,9 +109,7 @@ def resolve_ticket_id(ticket_id: str, tracker_dir: str) -> str | None:
         return ticket_id
 
     if _FULL_ID_RE.match(ticket_id):
-        return (
-            ticket_id if os.path.isdir(os.path.join(tracker_dir, ticket_id)) else None
-        )
+        return ticket_id if os.path.isdir(os.path.join(tracker_dir, ticket_id)) else None
 
     if _SHORT_ID_RE.match(ticket_id):
         if os.path.isdir(os.path.join(tracker_dir, ticket_id)):

@@ -22,15 +22,11 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_applier():
-    spec = importlib.util.spec_from_file_location(
-        "applier_bridge_alert", APPLIER_PATH
-    )
+    spec = importlib.util.spec_from_file_location("applier_bridge_alert", APPLIER_PATH)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules["applier_bridge_alert"] = mod
@@ -43,8 +39,7 @@ def applier():
     """Load the applier module, failing all tests if absent."""
     if not APPLIER_PATH.exists():
         pytest.fail(
-            f"applier.py not found at {APPLIER_PATH} — "
-            "implement the module to make tests pass."
+            f"applier.py not found at {APPLIER_PATH} — implement the module to make tests pass."
         )
     return _load_applier()
 
@@ -87,9 +82,7 @@ def test_bridge_alert_emitted_on_set_entity_property_failure(applier, tmp_path):
     with pytest.raises(RuntimeError, match="property write failed"):
         applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
 
-    alert_files = list(
-        (tmp_path / ".tickets-tracker" / local_id).glob("*-BRIDGE_ALERT.json")
-    )
+    alert_files = list((tmp_path / ".tickets-tracker" / local_id).glob("*-BRIDGE_ALERT.json"))
     assert len(alert_files) == 1, (
         f"Expected exactly 1 BRIDGE_ALERT file, found {len(alert_files)}: {alert_files}"
     )
@@ -104,9 +97,7 @@ def test_bridge_alert_tag_is_create_identity_write_failed(applier, tmp_path):
     with pytest.raises(RuntimeError):
         applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
 
-    alert_files = list(
-        (tmp_path / ".tickets-tracker" / local_id).glob("*-BRIDGE_ALERT.json")
-    )
+    alert_files = list((tmp_path / ".tickets-tracker" / local_id).glob("*-BRIDGE_ALERT.json"))
     assert len(alert_files) == 1
     payload = json.loads(alert_files[0].read_text())
     data = payload.get("data", {})
@@ -127,9 +118,7 @@ def test_bridge_alert_emitted_on_add_label_failure(applier, tmp_path):
     with pytest.raises(RuntimeError, match="label write failed"):
         applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
 
-    alert_files = list(
-        (tmp_path / ".tickets-tracker" / local_id).glob("*-BRIDGE_ALERT.json")
-    )
+    alert_files = list((tmp_path / ".tickets-tracker" / local_id).glob("*-BRIDGE_ALERT.json"))
     assert len(alert_files) == 1, (
         f"Expected exactly 1 BRIDGE_ALERT file, found {len(alert_files)}: {alert_files}"
     )

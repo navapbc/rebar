@@ -67,10 +67,7 @@ class Cassette:
         idx = self._cursor.get(key, 0)
         for offset, rec in enumerate(self.records[idx:]):
             req = rec.get("request", {})
-            if (
-                req.get("method", "").upper() == method.upper()
-                and req.get("url") == url
-            ):
+            if req.get("method", "").upper() == method.upper() and req.get("url") == url:
                 self._cursor[key] = idx + offset + 1
                 return rec.get("response", {})
         raise KeyError(f"No recorded response for {method} {url}")

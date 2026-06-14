@@ -44,15 +44,9 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
-MUTATION_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
-)
-ERRORS_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_errors.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
+ERRORS_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_errors.py"
 
 
 # ---------------------------------------------------------------------------
@@ -184,9 +178,7 @@ def _make_inbound_update_mutation_with_rebar_id_label(mut_mod):
     )
 
 
-def test_apply_raises_for_unauthorized_rebar_id_label_mutation(
-    applier, mut_mod, errors_mod
-):
+def test_apply_raises_for_unauthorized_rebar_id_label_mutation(applier, mut_mod, errors_mod):
     """BEHAVIORAL GREEN: apply() with inbound_update + rebar-id-* label mutation raises RebarIdLabelWriteError.
 
     After wiring _audit_rebar_id_label_writes into apply(), this call must raise.
@@ -241,15 +233,9 @@ def test_warn_mode_logs_and_does_not_raise(applier, errors_mod, caplog):
     warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert warning_records, "Expected at least one WARNING log record in warn mode"
     log_text = " ".join(r.getMessage() for r in warning_records)
-    assert "REBAR_ID_GUARD" in log_text, (
-        f"Expected 'REBAR_ID_GUARD' in warning; got: {log_text!r}"
-    )
-    assert "inbound_update" in log_text, (
-        f"Expected leaf name in warning; got: {log_text!r}"
-    )
-    assert "rebar-id-warn-test" in log_text, (
-        f"Expected payload in warning; got: {log_text!r}"
-    )
+    assert "REBAR_ID_GUARD" in log_text, f"Expected 'REBAR_ID_GUARD' in warning; got: {log_text!r}"
+    assert "inbound_update" in log_text, f"Expected leaf name in warning; got: {log_text!r}"
+    assert "rebar-id-warn-test" in log_text, f"Expected payload in warning; got: {log_text!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -276,9 +262,7 @@ def test_warn_mode_logs_and_does_not_raise(applier, errors_mod, caplog):
         "default_raise_when_both_unset",
     ],
 )
-def test_guard_mode_precedence(
-    applier, errors_mod, env_val, config_val, expected_raises
-):
+def test_guard_mode_precedence(applier, errors_mod, env_val, config_val, expected_raises):
     """env var REBAR_ID_GUARD_MODE takes precedence over .rebar/config.conf key."""
     assert hasattr(applier, "_audit_rebar_id_label_writes"), (
         "_audit_rebar_id_label_writes not found in applier"

@@ -37,14 +37,13 @@ def _init_git_repo(path: Path) -> None:
     subprocess.run(["git", "-C", str(path), "add", ".dummy"], check=True)
     subprocess.run(["git", "-C", str(path), "commit", "-q", "-m", "seed"], check=True)
 
+
 # ---------------------------------------------------------------------------
 # Module loading
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_applier():
@@ -61,8 +60,7 @@ def applier():
     """Load the applier module, failing all tests if absent."""
     if not APPLIER_PATH.exists():
         pytest.fail(
-            f"applier.py not found at {APPLIER_PATH} — "
-            "implement the module to make tests pass."
+            f"applier.py not found at {APPLIER_PATH} — implement the module to make tests pass."
         )
     return _load_applier()
 
@@ -145,12 +143,8 @@ def test_empty_mutations_produces_manifest_with_zero_count(tmp_path, applier):
 
     assert manifest_path.exists(), "Manifest must be written even for empty mutations"
     data = json.loads(manifest_path.read_text())
-    assert data["mutation_count"] == 0, (
-        f"Expected mutation_count=0, got {data['mutation_count']}"
-    )
-    assert data["mutations"] == [], (
-        f"Expected empty mutations list, got {data['mutations']}"
-    )
+    assert data["mutation_count"] == 0, f"Expected mutation_count=0, got {data['mutation_count']}"
+    assert data["mutations"] == [], f"Expected empty mutations list, got {data['mutations']}"
 
 
 def test_create_action_routes_to_create_issue(tmp_path, applier):
@@ -231,9 +225,7 @@ def test_delete_one_treats_404_as_success(applier):
     from unittest.mock import MagicMock
 
     client = MagicMock()
-    client.delete_issue.side_effect = applier.JiraAPIError(
-        "Issue does not exist", status_code=404
-    )
+    client.delete_issue.side_effect = applier.JiraAPIError("Issue does not exist", status_code=404)
 
     mutation = {"action": "delete", "key": "DSO-GONE"}
     # Must NOT raise — 404 on delete is success.
@@ -247,9 +239,7 @@ def test_delete_one_propagates_non_404_jira_errors(applier):
     import pytest as _pytest
 
     client = MagicMock()
-    client.delete_issue.side_effect = applier.JiraAPIError(
-        "Forbidden", status_code=403
-    )
+    client.delete_issue.side_effect = applier.JiraAPIError("Forbidden", status_code=403)
     mutation = {"action": "delete", "key": "DSO-FORBIDDEN"}
     with _pytest.raises(applier.JiraAPIError):
         applier.delete_one(mutation, client)
@@ -300,9 +290,7 @@ def test_apply_constructs_client_with_env_derived_args(tmp_path, applier, monkey
     )
 
 
-def test_apply_constructs_client_with_empty_strings_when_env_unset(
-    tmp_path, applier, monkeypatch
-):
+def test_apply_constructs_client_with_empty_strings_when_env_unset(tmp_path, applier, monkeypatch):
     """When credential env vars are absent, apply() must still construct
     AcliClient with empty-string defaults (so test/CI shims that don't set
     the env still work), EXCEPT jira_project which falls back to the

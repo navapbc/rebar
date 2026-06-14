@@ -35,9 +35,7 @@ pytestmark = pytest.mark.integration
 
 # ─────────────────────────── helpers ────────────────────────────────────────
 def _git(*args: str, cwd: Path, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", *args], cwd=str(cwd), check=check, capture_output=True, text=True
-    )
+    return subprocess.run(["git", *args], cwd=str(cwd), check=check, capture_output=True, text=True)
 
 
 _CLI = _engine.in_process_cli()

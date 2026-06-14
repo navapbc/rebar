@@ -32,9 +32,7 @@ def _has_store_build() -> bool:
     if not _REBAR:
         return False
     # The on-PATH rebar must be the build that has rebar._store wired.
-    probe = subprocess.run(
-        [_REBAR, "--help"], capture_output=True, text=True, env={**os.environ}
-    )
+    probe = subprocess.run([_REBAR, "--help"], capture_output=True, text=True, env={**os.environ})
     return probe.returncode == 0
 
 
@@ -52,7 +50,12 @@ def clone(tmp_path: Path):
 def _create(repo: Path, ttype: str, title: str, env_extra: dict) -> str:
     env = {**os.environ, "REBAR_NO_SYNC": "1", **env_extra}
     out = subprocess.run(
-        [_REBAR, "create", ttype, title], cwd=repo, env=env, capture_output=True, text=True, check=True
+        [_REBAR, "create", ttype, title],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
     import re
 
@@ -63,10 +66,15 @@ def _create(repo: Path, ttype: str, title: str, env_extra: dict) -> str:
 
 def _count_events(repo: Path, ticket_id: str, suffix: str) -> int:
     tdir = repo / ".tickets-tracker" / ticket_id
-    return len([p for p in tdir.iterdir() if p.name.endswith(suffix) and not p.name.startswith(".")])
+    return len(
+        [p for p in tdir.iterdir() if p.name.endswith(suffix) and not p.name.startswith(".")]
+    )
 
 
-@pytest.mark.skipif(not _has_store_build(), reason="on-PATH rebar lacks rebar._store (run pipx install --editable .)")
+@pytest.mark.skipif(
+    not _has_store_build(),
+    reason="on-PATH rebar lacks rebar._store (run pipx install --editable .)",
+)
 def test_concurrent_writer_storm_no_loss(clone: Path):
     """N concurrent comments on one ticket land with ZERO loss and a clean fsck —
     the unified dual-leg (fcntl+mkdir) lock serialises every writer correctly under
@@ -80,7 +88,10 @@ def test_concurrent_writer_storm_no_loss(clone: Path):
         env = {**os.environ, "REBAR_NO_SYNC": "1"}
         return subprocess.run(
             [_REBAR, "comment", tid, f"note-{i}"],
-            cwd=clone, env=env, capture_output=True, text=True,
+            cwd=clone,
+            env=env,
+            capture_output=True,
+            text=True,
         )
 
     with ThreadPoolExecutor(max_workers=n) as ex:
@@ -93,8 +104,11 @@ def test_concurrent_writer_storm_no_loss(clone: Path):
 
     # fsck clean (no index.lock corruption, no missing CREATE, etc.).
     fsck = subprocess.run(
-        [_REBAR, "fsck", "--output", "json"], cwd=clone,
-        env={**os.environ, "REBAR_NO_SYNC": "1"}, capture_output=True, text=True,
+        [_REBAR, "fsck", "--output", "json"],
+        cwd=clone,
+        env={**os.environ, "REBAR_NO_SYNC": "1"},
+        capture_output=True,
+        text=True,
     )
     assert json.loads(fsck.stdout).get("issue_count") == 0
 
@@ -111,7 +125,8 @@ def test_claim_storm_one_winner(clone: Path):
             [_REBAR, "claim", tid, "--assignee", f"agent-{i}"],
             cwd=clone,
             env={**os.environ, "REBAR_NO_SYNC": "1", "REBAR_WRITE_CORE": "python"},
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
 
     with ThreadPoolExecutor(max_workers=n) as ex:
@@ -120,4 +135,4 @@ def test_claim_storm_one_winner(clone: Path):
     winners = [r for r in results if r.returncode == 0]
     losers = [r for r in results if r.returncode == 10]
     assert len(winners) == 1, f"expected 1 winner, got {len(winners)}"
-    assert len(losers) == n - 1, f"expected {n-1} exit-10 losers, got {len(losers)}"
+    assert len(losers) == n - 1, f"expected {n - 1} exit-10 losers, got {len(losers)}"

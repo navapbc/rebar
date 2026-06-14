@@ -34,8 +34,18 @@ from rebar._store.lock import LockTimeout, RebaseGuard  # re-export for callers
 # I2 event-type enum (matches write_commit_event's `case` allow-list).
 EVENT_TYPES = frozenset(
     {
-        "CREATE", "STATUS", "COMMENT", "LINK", "UNLINK", "SNAPSHOT",
-        "SYNC", "REVERT", "EDIT", "ARCHIVED", "FILE_IMPACT", "VERIFY_COMMANDS",
+        "CREATE",
+        "STATUS",
+        "COMMENT",
+        "LINK",
+        "UNLINK",
+        "SNAPSHOT",
+        "SYNC",
+        "REVERT",
+        "EDIT",
+        "ARCHIVED",
+        "FILE_IMPACT",
+        "VERIFY_COMMANDS",
         "SIGNATURE",
     }
 )
@@ -57,9 +67,9 @@ def event_filename(timestamp: int, uuid_str: str, event_type: str) -> str:
 def _canonical_bytes(event: dict[str, Any]) -> bytes:
     """The committed bytes (== ``jq -S -c '.'``): sorted keys, compact separators,
     ``ensure_ascii=False``, no trailing newline."""
-    return json.dumps(
-        event, ensure_ascii=False, separators=(",", ":"), sort_keys=True
-    ).encode("utf-8")
+    return json.dumps(event, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode(
+        "utf-8"
+    )
 
 
 def _ensure_gc_auto_zero(tracker: str) -> None:
@@ -69,7 +79,8 @@ def _ensure_gc_auto_zero(tracker: str) -> None:
         return
     cur = subprocess.run(
         ["git", "-C", tracker, "config", "--get", "gc.auto"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     if cur != "0":
         subprocess.run(["git", "-C", tracker, "config", "gc.auto", "0"], check=False)
@@ -123,11 +134,13 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
                 raise StoreError("Error: atomic rename failed", 1)
             add = subprocess.run(
                 ["git", "-C", tracker, "add", relative_path],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             commit = subprocess.run(
                 ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             if add.returncode != 0 or commit.returncode != 0:
                 _silent_unlink(final_path)

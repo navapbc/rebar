@@ -23,15 +23,11 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_applier():
-    spec = importlib.util.spec_from_file_location(
-        "applier_provenance_tests", APPLIER_PATH
-    )
+    spec = importlib.util.spec_from_file_location("applier_provenance_tests", APPLIER_PATH)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules["applier_provenance_tests"] = mod
@@ -44,8 +40,7 @@ def applier():
     """Load the applier module, failing all tests if absent."""
     if not APPLIER_PATH.exists():
         pytest.fail(
-            f"applier.py not found at {APPLIER_PATH} — "
-            "implement the module to make tests pass."
+            f"applier.py not found at {APPLIER_PATH} — implement the module to make tests pass."
         )
     return _load_applier()
 
@@ -123,9 +118,7 @@ def test_provenance_persisted_for_labels_field(applier, tmp_path):
         f"mapping['DIG-123'] must have 'field_provenance' key, got: {data['DIG-123']!r}"
     )
     provenance = data["DIG-123"]["field_provenance"]
-    assert "labels" in provenance, (
-        f"field_provenance must contain 'labels', got: {provenance!r}"
-    )
+    assert "labels" in provenance, f"field_provenance must contain 'labels', got: {provenance!r}"
     assert isinstance(provenance["labels"], list), (
         f"provenance_record for 'labels' must be a list, got: {type(provenance['labels'])}"
     )
@@ -182,9 +175,7 @@ def test_provenance_written_atomically(applier, tmp_path):
 
     mapping_path = tmp_path / "bridge_state" / "mapping.json"
     # At least one os.replace call should target the mapping.json path
-    mapping_renames = [
-        (src, dst) for src, dst in rename_calls if dst == str(mapping_path)
-    ]
+    mapping_renames = [(src, dst) for src, dst in rename_calls if dst == str(mapping_path)]
     assert len(mapping_renames) >= 1, (
         f"Expected at least one atomic rename to mapping.json, got: {rename_calls!r}"
     )
@@ -218,9 +209,7 @@ def test_provenance_preserves_existing_mapping_entries(applier, tmp_path):
         applier.apply([mutation], pass_id="test-prov-preserve", repo_root=tmp_path)
 
     data = json.loads(mapping_path.read_text())
-    assert data.get("old-local-id") == "DIG-1", (
-        "Pre-existing mapping entry must be preserved"
-    )
+    assert data.get("old-local-id") == "DIG-1", "Pre-existing mapping entry must be preserved"
     assert "DIG-999" in data, "New provenance entry for DIG-999 must be present"
 
 

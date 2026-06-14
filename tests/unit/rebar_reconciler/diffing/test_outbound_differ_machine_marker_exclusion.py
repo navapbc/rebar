@@ -53,9 +53,7 @@ class StubBindingStore:
 
 
 def _make_jira_snapshot_with_comments(jira_key: str, comment_bodies: list[str]) -> dict:
-    jira_comments = [
-        {"id": str(100 + i), "body": body} for i, body in enumerate(comment_bodies)
-    ]
+    jira_comments = [{"id": str(100 + i), "body": body} for i, body in enumerate(comment_bodies)]
     return {
         jira_key: {
             "summary": "Some issue",
@@ -132,9 +130,7 @@ def test_human_comment_still_emitted_alongside_excluded_marker(
     comment_mutations = [m for m in result if m.comments]
     assert len(comment_mutations) == 1
     emitted = comment_mutations[0].comments
-    assert len(emitted) == 1, (
-        f"Exactly one (human) comment should be emitted; got {emitted}"
-    )
+    assert len(emitted) == 1, f"Exactly one (human) comment should be emitted; got {emitted}"
     assert human_body in emitted[0]["body"]
     assert "BRIDGE_CANARY_ALERT" not in emitted[0]["body"]
 

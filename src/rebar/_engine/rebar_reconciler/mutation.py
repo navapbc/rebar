@@ -92,9 +92,7 @@ def serialize_manifest(mutations: Iterable[Mutation]) -> tuple[str, str]:
     Sort by (direction.value, action.value, target). Pure — no I/O, no time.
     Returns (json_text, sha256_hash_hex).
     """
-    sorted_muts = sorted(
-        mutations, key=lambda m: (m.direction.value, m.action.value, m.target)
-    )
+    sorted_muts = sorted(mutations, key=lambda m: (m.direction.value, m.action.value, m.target))
     items = [
         {
             "direction": m.direction.value,

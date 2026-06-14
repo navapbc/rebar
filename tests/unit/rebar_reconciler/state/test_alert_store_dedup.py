@@ -1,4 +1,5 @@
 """Tests for alert_store.py — JSONL append and 24h UTC-boundary dedup readback."""
+
 from __future__ import annotations
 
 import json
@@ -214,7 +215,9 @@ def test_patch_bug_filed_preserves_non_target_lines_byte_identical(tmp_path):
     # identically: extra whitespace inside the JSON object, an unusual key
     # order, and a Unicode character that would be re-encoded as a \\u escape
     # if we passed it through json.dumps() with default ensure_ascii=True.
-    quirky_line_1 = '{ "resolved" : false, "key" : "other-key-1", "timestamp_ns" : 1, "note" : "café" }'
+    quirky_line_1 = (
+        '{ "resolved" : false, "key" : "other-key-1", "timestamp_ns" : 1, "note" : "café" }'
+    )
     quirky_line_2 = '{"z":1,"a":2,"key":"other-key-2","resolved":false}'
     target_original = json.dumps(
         {"key": "target-key", "timestamp_ns": time.time_ns(), "resolved": False}

@@ -44,8 +44,7 @@ def detect_newly_unblocked(
     ``sync-resolution``."""
     if event_source not in _VALID_EVENT_SOURCES:
         raise ValueError(
-            f"Invalid event_source {event_source!r}. "
-            f"Must be one of: {sorted(_VALID_EVENT_SOURCES)}"
+            f"Invalid event_source {event_source!r}. Must be one of: {sorted(_VALID_EVENT_SOURCES)}"
         )
 
     tracker_path = Path(tracker_dir)
@@ -153,8 +152,7 @@ def batch_close_operations(
     open_children: list[str] = [
         tid
         for tid, state in ts.items()
-        if state.get("parent_id") in ticket_ids_set
-        and not _is_closed(state.get("status", "open"))
+        if state.get("parent_id") in ticket_ids_set and not _is_closed(state.get("status", "open"))
     ]
 
     newly_unblocked = detect_newly_unblocked(

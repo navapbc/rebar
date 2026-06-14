@@ -110,13 +110,9 @@ def _make_snapshot_without_comment_field(jira_key: str) -> dict:
     }
 
 
-def _make_snapshot_with_comment_field(
-    jira_key: str, comment_bodies: list[str]
-) -> dict:
+def _make_snapshot_with_comment_field(jira_key: str, comment_bodies: list[str]) -> dict:
     """Build a snapshot entry WITH a 'comment' field (fixture/synthetic shape)."""
-    jira_comments = [
-        {"id": str(100 + i), "body": body} for i, body in enumerate(comment_bodies)
-    ]
+    jira_comments = [{"id": str(100 + i), "body": body} for i, body in enumerate(comment_bodies)]
     return {
         jira_key: {
             "summary": "Some issue",
@@ -212,9 +208,7 @@ def test_no_comment_field_client_returns_subset_emits_missing_only(
     snapshot = _make_snapshot_without_comment_field(jira_key)
 
     # Client returns only the 2 already-synced comments
-    jira_comment_dicts = [
-        {"id": str(i), "body": body} for i, body in enumerate(existing_in_jira)
-    ]
+    jira_comment_dicts = [{"id": str(i), "body": body} for i, body in enumerate(existing_in_jira)]
     client = _make_stub_client(jira_comment_dicts)
 
     result = outbound_differ.compute_outbound_mutations(
@@ -238,8 +232,7 @@ def test_no_comment_field_client_returns_subset_emits_missing_only(
     )
     emitted_body = comment_mutations[0].comments[0]["body"]
     assert new_local_body in emitted_body, (
-        f"Expected the new comment body in the emitted add. "
-        f"Got: {emitted_body!r}"
+        f"Expected the new comment body in the emitted add. Got: {emitted_body!r}"
     )
 
 
@@ -287,9 +280,7 @@ def test_no_comment_field_client_raises_skips_comment_mutations(
 
     # A warning must be emitted to stderr
     captured = capsys.readouterr()
-    assert captured.err, (
-        "Expected a warning on stderr when get_comments raises, got none."
-    )
+    assert captured.err, "Expected a warning on stderr when get_comments raises, got none."
     assert jira_key in captured.err, (
         f"Expected the jira_key {jira_key!r} in the warning. Got: {captured.err!r}"
     )

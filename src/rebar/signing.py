@@ -76,9 +76,7 @@ class SigningError(Exception):
 _NO_KEY = b""
 
 
-def signing_key(
-    tracker: str | os.PathLike[str], *, create_if_missing: bool = True
-) -> bytes:
+def signing_key(tracker: str | os.PathLike[str], *, create_if_missing: bool = True) -> bytes:
     """Resolve the environment's signing key as raw bytes.
 
     Order: ``REBAR_SIGNING_KEY`` (non-empty after stripping) > the per-environment
@@ -142,9 +140,7 @@ def _generate_key_file(key_file: Path) -> None:
         except FileExistsError:
             pass  # someone else won the race; their key stays
     except OSError as exc:
-        raise SigningError(
-            f"Error: could not create signing key at {key_file}: {exc}"
-        ) from None
+        raise SigningError(f"Error: could not create signing key at {key_file}: {exc}") from None
     finally:
         try:
             os.unlink(tmp)
@@ -177,9 +173,7 @@ def parse_manifest(payload) -> list[str]:
         except (json.JSONDecodeError, TypeError):
             raise SigningError("Error: manifest argument is not valid JSON") from None
     if not isinstance(data, list):
-        raise SigningError(
-            "Error: manifest must be a JSON array of verified-step strings"
-        )
+        raise SigningError("Error: manifest must be a JSON array of verified-step strings")
     if not data:
         raise SigningError("Error: manifest must contain at least one verified step")
     steps: list[str] = []
@@ -248,7 +242,12 @@ def verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict:
     }
 
     if not stored_sig:
-        return {**base, "verified": False, "verdict": "unsigned", "reason": "ticket has no signature"}
+        return {
+            **base,
+            "verified": False,
+            "verdict": "unsigned",
+            "reason": "ticket has no signature",
+        }
 
     # An empty key (the _NO_KEY sentinel: no .signing-key, no REBAR_SIGNING_KEY, or
     # a corrupt empty key file) can NEVER certify — HMAC under an empty key is
