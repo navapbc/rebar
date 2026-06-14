@@ -13,10 +13,9 @@ import json
 import os
 import shutil
 import sys
-from pathlib import Path
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
-
 
 # ---------------------------------------------------------------------------
 # Typed-mutation dispatch table

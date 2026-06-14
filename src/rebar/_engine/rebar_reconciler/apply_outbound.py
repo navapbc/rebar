@@ -389,7 +389,6 @@ def _apply_outbound_conflict(mutation, *, client=None, repo_root=None) -> ApplyR
 # apply()'s suppression index resolve them as module globals.
 from rebar_reconciler.inbound_translate import (  # noqa: E402
     _ADF_KEY_APPLIER,
-    _AdfModule_Applier,
     _BRIDGE_INTERNAL_TAG_PREFIXES,
     _JIRA_PRIORITY_MAP,
     _JIRA_TYPE_MAP,
@@ -397,6 +396,7 @@ from rebar_reconciler.inbound_translate import (  # noqa: E402
     _REBAR_STATUS_LABEL_TO_LOCAL,
     _TICKET_REDUCER_MODULE,
     _VALID_PRIORITY_RANGE,
+    _AdfModule_Applier,
     _event_meta,
     _extract_name,
     _jira_key_to_local_id,

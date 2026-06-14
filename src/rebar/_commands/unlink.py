@@ -16,7 +16,7 @@ import json
 import sys
 from pathlib import Path
 
-from rebar._commands._seam import append_event, CommandError, tracker_dir
+from rebar._commands._seam import CommandError, append_event, tracker_dir
 from rebar._engine_support.resolver import resolve_ticket_id
 
 _USAGE = (

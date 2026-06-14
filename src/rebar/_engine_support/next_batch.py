@@ -22,10 +22,10 @@ import os
 import sys
 from typing import Any
 
-from rebar.reducer import reduce_all_tickets, reduce_ticket
+from rebar._engine_support.next_batch_files import PathConfig, extract_files
 from rebar._engine_support.output import error_envelope
 from rebar._engine_support.resolver import resolve_ticket_id
-from rebar._engine_support.next_batch_files import PathConfig, extract_files
+from rebar.reducer import reduce_all_tickets, reduce_ticket
 
 _CLOSED_STATUSES = {"closed", "done", "completed", "deleted"}
 # Files that are shared-by-design and support concurrent additive edits.

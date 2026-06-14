@@ -13,7 +13,6 @@ from ._hierarchy import resolve_hierarchy_link
 from ._loader import reduce_ticket
 from ._status import _get_ticket_status
 
-
 CANONICAL_RELATIONS: frozenset[str] = frozenset(
     # discovered_from: emergent-work provenance (B discovered_from A). Directional
     # (no reciprocal LINK), non-blocking, never cycle-inducing — see _graph.py.

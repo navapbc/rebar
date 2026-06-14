@@ -18,8 +18,8 @@ import sys
 import uuid as _uuid
 
 from rebar._commands._seam import (
-    append_event,
     CommandError,
+    append_event,
     require_id,
     require_not_ghost,
     tracker_dir,

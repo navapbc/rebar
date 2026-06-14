@@ -19,10 +19,10 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
-
 
 # Reconciler loop-breaker marker (Gap 1). Outbound comments embed this
 # token; inbound passes filter any Jira comment whose body contains it

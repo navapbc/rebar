@@ -331,9 +331,8 @@ def test_clarity_check_missing_ticket_mcp_clean(
 def test_mcp_link_docstring_lists_all_relations(rebar_repo) -> None:
     """The MCP link_tickets docstring must mention all six canonical relations
     (sourced from the engine's CANONICAL_RELATIONS — single source of truth)."""
-    from rebar.graph._links import CANONICAL_RELATIONS
-
     import rebar  # noqa: F401
+    from rebar.graph._links import CANONICAL_RELATIONS
 
     srv = build_server()
     tools = {t.name: t for t in asyncio.run(srv.list_tools())}

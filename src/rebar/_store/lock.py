@@ -29,8 +29,8 @@ import errno
 import fcntl
 import os
 import time
-from contextlib import contextmanager
 from collections.abc import Iterator
+from contextlib import contextmanager
 
 WRITE_LOCK_NAME = ".ticket-write.lock"
 MKDIR_LOCK_NAME = ".ticket-write.lock.d"

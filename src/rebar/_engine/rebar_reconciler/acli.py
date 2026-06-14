@@ -22,9 +22,21 @@ import urllib.request
 from typing import Any
 
 from rebar_reconciler import acli_cli_ops, acli_subprocess
+
+# Module-level ACLI issue ops live in acli_cli_ops; the AcliClient methods
+# delegate to them via ``acli_cli_ops.<name>``. Only the private helpers below
+# are pulled in by name for internal use.
+from rebar_reconciler.acli_cli_ops import (
+    _attach_parent_guarded,
+    _create_from_json_payload,
+    _create_issue_from_json,
+    _create_issue_no_json,
+    _extract_parent_key,
+    _parse_acli_comments,
+    _verify_created_issue,
+)
 from rebar_reconciler.acli_graph import AcliGraphMixin
 from rebar_reconciler.acli_rest import AcliRestMixin
-from rebar_reconciler.adf import text_to_adf as _text_to_adf  # canonical location
 
 # Subprocess transport floor (process exec + retry + typed mutation errors) lives
 # in acli_subprocess; re-exported here so acli.<name> keeps resolving. The seam
@@ -45,29 +57,17 @@ from rebar_reconciler.acli_subprocess import (
     _check_mutation_failure,
     _run_acli,
 )
-
-# Module-level ACLI issue ops live in acli_cli_ops; the AcliClient methods
-# delegate to them via ``acli_cli_ops.<name>``. Only the private helpers below
-# are pulled in by name for internal use.
-from rebar_reconciler.acli_cli_ops import (
-    _attach_parent_guarded,
-    _create_from_json_payload,
-    _create_issue_from_json,
-    _create_issue_no_json,
-    _extract_parent_key,
-    _parse_acli_comments,
-    _verify_created_issue,
-)
+from rebar_reconciler.adf import text_to_adf as _text_to_adf  # canonical location
 
 # Field sanitization + local↔Jira value maps live in jira_fields; re-exported
 # here so ``acli.<name>`` keeps resolving for callers and the characterization
 # suites (point-of-use read access).
 from rebar_reconciler.jira_fields import (
-    InvalidLabelError,
     _JIRA_LABEL_MAX_CHARS,
     _JIRA_SUMMARY_MAX_CHARS,
     _LOCAL_PRIORITY_TO_JIRA,
     _LOCAL_STATUS_TO_JIRA,
+    InvalidLabelError,
     _sanitize_comment,
     _sanitize_label,
     _sanitize_summary,

@@ -203,9 +203,9 @@ def create_one(
             # Emit BRIDGE_ALERT for identity-write rollback so the event is
             # surfaced in the tickets-tracker for observability.  # tickets-boundary-ok
             try:
-                import uuid as _uuid
-                import time as _time
                 import json as _json
+                import time as _time
+                import uuid as _uuid
 
                 _alert_root = (
                     repo_root

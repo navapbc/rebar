@@ -45,6 +45,10 @@ from rebar._engine import engine_dir as _engine_dir
 # importable here and the read packages import as real ``rebar.*`` subpackages.
 _SCRIPTS_DIR = _engine_dir()
 
+from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
+from rebar._engine_support.resolver import resolve_ticket_id
+from rebar.graph._graph import build_dep_graph
+from rebar.graph._ready import find_ready_tickets
 from rebar.reducer import (
     apply_ticket_filters,
     reduce_all_tickets,
@@ -53,10 +57,6 @@ from rebar.reducer import (
 )
 from rebar.reducer._present import public_state
 from rebar.reducer.llm_format import to_llm
-from rebar.graph._graph import build_dep_graph
-from rebar.graph._ready import find_ready_tickets
-from rebar._engine_support.resolver import resolve_ticket_id
-from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 
 
 # ───────────────────────────── tracker resolution ────────────────────────────

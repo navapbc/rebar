@@ -25,7 +25,8 @@ import importlib.util
 import os
 import sys
 import urllib.error
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 

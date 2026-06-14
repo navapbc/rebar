@@ -17,6 +17,8 @@ import logging
 
 from rebar_reconciler.comment_limits import (  # shared send/diff truncation
     _JIRA_COMMENT_MAX_CHARS,
+)
+from rebar_reconciler.comment_limits import (
     truncate_comment_body as _truncate_comment_body,
 )
 

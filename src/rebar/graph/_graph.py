@@ -6,7 +6,6 @@ import os
 from typing import Any
 
 from . import _loader as _loader_module
-
 from ._blockers import _find_direct_blockers
 from ._cache import (
     _compute_cache_key,

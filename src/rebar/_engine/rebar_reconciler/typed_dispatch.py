@@ -13,20 +13,13 @@ Imports downward only (apply_base + the leaf modules); never imports applier.
 
 from __future__ import annotations
 
-from typing import Any
 from collections.abc import Callable
+from typing import Any
 
 from rebar_reconciler.apply_base import (
     ApplyResult,
     _load_errors_module,
     _load_mutation_module,
-)
-from rebar_reconciler.apply_outbound import (
-    _apply_outbound_conflict,
-    _apply_outbound_create,
-    _apply_outbound_delete,
-    _apply_outbound_probe,
-    _apply_outbound_update,
 )
 from rebar_reconciler.apply_inbound import (
     _apply_inbound_clean_label,
@@ -36,6 +29,13 @@ from rebar_reconciler.apply_inbound import (
     _apply_inbound_probe,
     _apply_inbound_repair_property,
     _apply_inbound_update,
+)
+from rebar_reconciler.apply_outbound import (
+    _apply_outbound_conflict,
+    _apply_outbound_create,
+    _apply_outbound_delete,
+    _apply_outbound_probe,
+    _apply_outbound_update,
 )
 from rebar_reconciler.rebar_id_audit import _audit_rebar_id_label_writes
 

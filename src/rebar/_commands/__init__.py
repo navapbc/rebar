@@ -13,10 +13,11 @@ exits 1 under either implementation.
 from __future__ import annotations
 
 import sys
-from typing import NamedTuple
 from collections.abc import Callable
+from typing import NamedTuple
 
-from rebar._commands import composer, leaf, unlink as _unlink
+from rebar._commands import composer, leaf
+from rebar._commands import unlink as _unlink
 from rebar._commands._seam import CommandError
 
 

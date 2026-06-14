@@ -24,10 +24,10 @@ import sys
 import tempfile
 import time
 import urllib.error
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -62,20 +62,32 @@ def _rebar_env(name: str, default: str | None = None) -> str | None:
 # ApplyResult/mutation/_errors loaders + _direction_guard). Re-exported so the
 # resident leaves, _apply_typed, and applier.<name> refs resolve.
 from rebar_reconciler.apply_base import (  # noqa: E402
+    _MUTATION_KEY,
     ApplyResult,
     DirectionMismatchError,
     RebarIdLabelWriteError,
     StatusMappingError,
     UnknownActionError,
-    _ErrorsModule,
-    _MUTATION_KEY,
-    _MutationModule,
     _direction_guard,
     _errors_module,
+    _ErrorsModule,
     _load_errors_module,
     _load_mutation_module,
+    _MutationModule,
 )
 
+# Inbound leaf appliers live in apply_inbound.py.
+# Re-exported so _build_leaves (resident) binds them.
+from rebar_reconciler.apply_inbound import (  # noqa: E402
+    _apply_inbound_clean_label,
+    _apply_inbound_conflict,
+    _apply_inbound_create,
+    _apply_inbound_delete,
+    _apply_inbound_probe,
+    _apply_inbound_repair_property,
+    _apply_inbound_update,
+    inbound_repair_property,
+)
 
 # Subject prefixes considered "benign" for HEAD-drift tolerance — i.e.,
 # external writers that don't conflict with in-flight outbound mutations.
@@ -102,7 +114,6 @@ from rebar_reconciler.apply_outbound import (  # noqa: E402
 # Re-imported so the resident inbound leaves resolve them as module globals.
 from rebar_reconciler.inbound_translate import (  # noqa: E402
     _ADF_KEY_APPLIER,
-    _AdfModule_Applier,
     _BRIDGE_INTERNAL_TAG_PREFIXES,
     _JIRA_PRIORITY_MAP,
     _JIRA_TYPE_MAP,
@@ -110,6 +121,7 @@ from rebar_reconciler.inbound_translate import (  # noqa: E402
     _REBAR_STATUS_LABEL_TO_LOCAL,
     _TICKET_REDUCER_MODULE,
     _VALID_PRIORITY_RANGE,
+    _AdfModule_Applier,
     _event_meta,
     _extract_name,
     _jira_key_to_local_id,
@@ -120,20 +132,6 @@ from rebar_reconciler.inbound_translate import (  # noqa: E402
     _resolve_priority,
     _resolve_tracker_dir,
     _write_event_file,
-)
-
-
-# Inbound leaf appliers live in apply_inbound.py.
-# Re-exported so _build_leaves (resident) binds them.
-from rebar_reconciler.apply_inbound import (  # noqa: E402
-    _apply_inbound_clean_label,
-    _apply_inbound_conflict,
-    _apply_inbound_create,
-    _apply_inbound_delete,
-    _apply_inbound_probe,
-    _apply_inbound_repair_property,
-    _apply_inbound_update,
-    inbound_repair_property,
 )
 
 
@@ -170,31 +168,19 @@ def _file_conflict_bug_ticket(cli_path: Path, title: str, description: str, pare
 
 # The typed-dispatch routing table + dispatcher live in typed_dispatch.py.
 # Re-exported so apply() (resident) + test_leaves_registry_coverage resolve.
-from rebar_reconciler.typed_dispatch import (  # noqa: E402
-    _LEAF_NAMES,
-    _LEAVES,
-    _apply_typed,
-    _build_leaves,
+# Outbound batch dispatch + Jira-call retry live in batch_dispatch.py.
+# Re-exported so resident _apply_batch/apply()/outbound leaves and the
+# patch.object(applier, '_call_with_retry'/'JiraAPIError') tests resolve.
+from rebar_reconciler.batch_dispatch import (  # noqa: E402
+    JiraAPIError,
+    RetryExhaustedError,
+    _call_with_retry,
+    _is_illegal_transition_400,
+    _mutation_to_batch_dict,
+    create_one,
+    delete_one,
+    update_one,
 )
-
-
-# ---------------------------------------------------------------------------
-# rebar-id label write authorization contract
-# ---------------------------------------------------------------------------
-
-# rebar-id label-write authorization lives in rebar_id_audit.py.
-# Re-exported so _apply_typed/_apply_batch (resident) and test_errors.py's
-# getattr(applier, ...) reads resolve.
-from rebar_reconciler.rebar_id_audit import (  # noqa: E402
-    _AUTHORIZED_REBAR_ID_LABEL_ACTIONS,
-    _AUTHORIZED_REBAR_ID_LABEL_WRITERS,
-    _AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC,
-    _BatchAuditView,
-    _audit_rebar_id_label_writes,
-    _get_rebar_id_guard_mode_from_config,
-    _is_rebar_id_label_write_mutation,
-)
-
 
 # Pass-write persistence + the reschedule contract live in pass_io.py.
 # Re-exported so apply()/_apply_batch and __main__'s getattr(applier, ...) resolve.
@@ -211,18 +197,26 @@ from rebar_reconciler.pass_io import (  # noqa: E402
     _write_pass_record,
 )
 
-# Outbound batch dispatch + Jira-call retry live in batch_dispatch.py.
-# Re-exported so resident _apply_batch/apply()/outbound leaves and the
-# patch.object(applier, '_call_with_retry'/'JiraAPIError') tests resolve.
-from rebar_reconciler.batch_dispatch import (  # noqa: E402
-    JiraAPIError,
-    RetryExhaustedError,
-    _call_with_retry,
-    _is_illegal_transition_400,
-    _mutation_to_batch_dict,
-    create_one,
-    delete_one,
-    update_one,
+# ---------------------------------------------------------------------------
+# rebar-id label write authorization contract
+# ---------------------------------------------------------------------------
+# rebar-id label-write authorization lives in rebar_id_audit.py.
+# Re-exported so _apply_typed/_apply_batch (resident) and test_errors.py's
+# getattr(applier, ...) reads resolve.
+from rebar_reconciler.rebar_id_audit import (  # noqa: E402
+    _AUTHORIZED_REBAR_ID_LABEL_ACTIONS,
+    _AUTHORIZED_REBAR_ID_LABEL_WRITERS,
+    _AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC,
+    _audit_rebar_id_label_writes,
+    _BatchAuditView,
+    _get_rebar_id_guard_mode_from_config,
+    _is_rebar_id_label_write_mutation,
+)
+from rebar_reconciler.typed_dispatch import (  # noqa: E402
+    _LEAF_NAMES,
+    _LEAVES,
+    _apply_typed,
+    _build_leaves,
 )
 
 
@@ -252,12 +246,12 @@ def _load_concurrency():
 # Pass-planning policy (mode caps, suppression, manifest) lives in apply_planning.py.
 # Re-exported so apply() (resident) calls them + the _mode_sort_key reads resolve.
 from rebar_reconciler.apply_planning import (  # noqa: E402
-    _SuppressionIndex,
     _emit_mode_manifest,
     _load_manifest_renderer,
     _load_mode_module,
     _mode_sort_key,
     _partition_by_mode_cap,
+    _SuppressionIndex,
 )
 
 

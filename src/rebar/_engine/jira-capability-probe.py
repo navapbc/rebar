@@ -31,7 +31,6 @@ from pathlib import Path
 # Load the acli transport from the in-package module (the engine dir is on
 # PYTHONPATH via engine_env() for every reconciler subprocess).
 # ---------------------------------------------------------------------------
-
 from rebar_reconciler import acli as _acli_mod
 
 AcliClient = _acli_mod.AcliClient

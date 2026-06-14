@@ -26,7 +26,7 @@ from pathlib import Path
 
 from rebar import config
 from rebar._commands import scratch
-from rebar._engine_support.output import error_envelope, parse_output, OutputFormatError
+from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar.graph._unblock import batch_close_operations
 from rebar.reducer import reduce_all_tickets

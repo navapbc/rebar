@@ -693,6 +693,7 @@ def bridge_fsck(*, repo_root=None) -> dict:
     bridge_fsck.audit_bridge_mappings`` instead of subprocessing the dispatcher.
     """
     from pathlib import Path
+
     from rebar._engine_support.bridge_fsck import audit_bridge_mappings
 
     tracker = config.tracker_dir(repo_root)

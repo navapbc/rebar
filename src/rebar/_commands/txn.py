@@ -290,7 +290,8 @@ def _signature_gate(
         print(f"  Reason: {force_close_reason}", file=sys.stderr)
         return
 
-    from rebar import config as _config, signing as _signing
+    from rebar import config as _config
+    from rebar import signing as _signing
 
     key = _signing.signing_key(tracker_dir, create_if_missing=False)
     result = _signing.verify_record(state.get("signature"), ticket_id, key)

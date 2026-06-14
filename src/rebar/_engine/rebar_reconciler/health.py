@@ -6,9 +6,8 @@ can track fsck totals, per-type open counts, and mutation volume over time.
 
 from __future__ import annotations
 
-import os
-
 import json
+import os
 import time
 from pathlib import Path
 

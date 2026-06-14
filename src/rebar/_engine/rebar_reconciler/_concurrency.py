@@ -9,10 +9,10 @@ This module is inert on its own; callers are wired by subsequent tasks.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from collections.abc import Callable
 
 
 @dataclass

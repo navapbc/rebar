@@ -27,7 +27,6 @@ from rebar_reconciler.apply_base import (
     _load_mutation_module,
 )
 from rebar_reconciler.batch_dispatch import _call_with_retry
-from rebar_reconciler.pass_io import _write_mapping_atomic
 from rebar_reconciler.inbound_translate import (
     _BRIDGE_INTERNAL_TAG_PREFIXES,
     _JIRA_TYPE_MAP,
@@ -42,6 +41,7 @@ from rebar_reconciler.inbound_translate import (
     _resolve_tracker_dir,
     _write_event_file,
 )
+from rebar_reconciler.pass_io import _write_mapping_atomic
 
 
 def _rebar_env(name: str, default: str | None = None) -> str | None:

@@ -66,12 +66,13 @@ include = ["src/rebar", "tests", "README.md"]
 # prevents regressions. It starts from the flake8 "real-bug" smoke set (syntax
 # errors + undefined names — the class that catches NameError-on-error-path bugs
 # like a missing `import urllib` in an `except`) and adds the rule families that
-# were swept clean: redefinitions (F811), modernizations (UP), and the safe
-# bugbear/style checks (B009, B012, F541, E401). The remaining stylistic set
-# (unused imports F401, line length E501, import order I001, …) runs advisory in
-# CI to ratchet down over time without a destabilizing one-shot mass-fix; F401 in
-# the reconciler re-export facades is tracked as a dedicated bug (it needs
-# executable reconciler integration tests + `__all__` before it can be swept).
+# were swept clean: redefinitions (F811), modernizations (UP), import sorting (I),
+# and the safe bugbear/style checks (B009, B012, F541, E401). The goal is to ratchet
+# the full recommended set (E, F, W, I, UP, B) into the gating list as each family
+# reaches zero; the advisory CI step (which runs the full set) tracks the remaining
+# counts. Still advisory pending a sweep: most of E (E501 line-length), the rest of
+# F (F401 unused-import — many are reconciler re-export facades that need `__all__`;
+# F841), W, and the rest of B (B007/B017/B904/B905).
 #
 # target-version is intentionally kept at the conservative py310 floor (not py311)
 # even though requires-python is >=3.11: it keeps the gating UP set from pushing
@@ -86,7 +87,7 @@ line-length = 100
 [tool.ruff.format]
 
 [tool.ruff.lint]
-select = ["E9", "F63", "F7", "F82", "F811", "F541", "UP", "B009", "B012", "E401"]
+select = ["E9", "F63", "F7", "F82", "F811", "F541", "UP", "I", "B009", "B012", "E401"]
 
 [tool.mypy]
 # Scoped, opt-in type checking. The pure in-process library core

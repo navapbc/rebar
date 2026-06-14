@@ -14,8 +14,8 @@ import json
 import sys
 from collections import deque
 
-from rebar.reducer import reduce_all_tickets
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar.reducer import reduce_all_tickets
 
 _TYPE_TO_BUCKET = {"epic": "epics", "story": "stories", "task": "tasks", "bug": "bugs"}
 
