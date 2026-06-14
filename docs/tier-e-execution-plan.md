@@ -16,11 +16,28 @@ Tier E has NO kill-switch — it is a structural cutover; rollback is `git rever
 | E5b | `fb1b7fa7` | reconciler rewired off bare `event_append`/`ticket_reducer` → `rebar._store`/`rebar.reducer`; reconcile launch `python3`→`sys.executable`. **LIVE-DIG probe PASSED** (DIG-5764 create→validate-all-fields→inbound→delete, zero residue). Opus-reviewed APPROVE-WITH-NITS (fixes applied). |
 | E5c | `c7b36bd0` | deleted the bare `_engine/event_append.py` + its obsolete test. |
 | E6a | `b3cbfe6a` | rewired the rebar PACKAGE off the shims (`reducer/_processors.py`→`_engine_support.resolver`; interface/reconciler tests→`rebar.graph`/`rebar.reducer`). |
-| E6.5a (1/6) | (pending) | `composer._compute_alias` → `rebar.reducer._alias.compute_alias` (alias-compute subprocess severed). |
+| E6.5a (6/6) | `11c0784e`…`656958a1` | ALL in-process→engine subprocess deps severed: alias-compute, alias-resolve, link `--dry-run`, un-archive, bridge-fsck in-process; bridge-probe + reconcile launch via `sys.executable`. **`rebar._run` + `_cli._passthrough` are now DEAD** (every CLI subcommand runs in-process; dispatcher fully bypassed). Two live-DIG probes passed (DIG-5764 field round-trip; bridge-probe 6-step), zero residue. |
+| E8 batch 1 | `f7c6f5d8` | 4 GAP bash suites → in-process pytest (cache-gitignored, push-policy e2e, help-overview drift, fsck PUSH_PENDING); 11 tests green. |
 
-Full non-integration suite green at 1805+ (one "error" in background runs is a false
-positive: the `_no_repo_commits` guard trips when a `git commit` runs DURING the
-suite — do not commit while a background full-suite is running).
+Full non-integration suite green at **1805 passed / 0 failed** (E6.5a milestone,
+clean — no false positive). NB: the `_no_repo_commits` guard trips if a `git commit`
+runs DURING a background full-suite run; do not commit while one is in flight.
+
+### RESUME HERE → E8 batch 2, then E7 (atomic cutover), then E9
+
+**E8 batch 2 (translate the remaining GAP suites, additive, before E7):**
+- `test-ticket-list-has-tag.sh` — only the `detected_by:`∩bug-type rule if not already in `test_list_filters.py`.
+- `tests/test-reconciler-scratch-exclude.sh` — reconciler `--dry-run-enumerate` excludes `.scratch/` (launch `sys.executable -m rebar_reconciler` with `engine_env`; reconciler STAYS).
+- `test-format-ticket-id-symlink.sh` — resolve/format with a symlinked tracker.
+- `tests/test-ticket-init-idempotent.sh` — re-init idempotent `.git/info/exclude` upgrade (no dup lines).
+- `test-ticket-transition-open-children-perf.sh` — CORRECTNESS only, BOUNDED (~20-30 children), drop wall-clock asserts (flaky).
+- `tests/integration/ticket-id-collision/run.sh` — `@pytest.mark.integration`, BOUNDED (~500-1000 ids), id/alias uniqueness + deterministic replay.
+
+**E7 (ONE atomic commit — see the grounded plan below):** delete `_engine/rebar`+`ticket`+all 36 `.sh`+the dispatcher-only `.py` helpers (`ticket-reducer.py`/`ticket-graph.py`/`ticket-reads.py`/`ticket-commands.py`/`ticket-delete-unlink-scan.py`/`ticket-alias-*.py`/`ticket-list-descendants.py`/`ticket-unblock.py`)+the now-shim `ticket-bridge-fsck.py`+`ticket_txn.py`+the 5 compat shims; SAME commit delete ALL `tests/scripts/test-*.sh` + the few elsewhere + `tests/lib/*.sh` + `tests/scripts/test_bash_suites.py` collector + the 15 `test_eN_*.py` parity tests + `test_e3_txn_bytes.py` + machinery tests (`test_engine_dir.py`, `tests/_engine_path.py`, `test_ticket_txn.py`) + the conftest engine-`sys.path` inserts. KEEP: `_engine/rebar_reconciler/` + `jira-capability-probe.py` + `resources/ticket-wordlist.txt` (genuine tools the reconciler/probe/alias still use via `sys.executable`+engine_env). In `_engine.py`: `engine_dir`/`engine_env`/`wordlist_path` must SURVIVE (the reconciler + bridge-probe subprocess launches + `reducer._alias` need them); delete only `dispatcher()`/`run()`. Verify full pytest green (pytest-only, zero `tests/**/*.sh`). **opus-review the E7 cutover.**
+
+**E9:** docs (architecture offender table→empty; bash-migration §7 DONE; help golden now `_cli/_help`-anchored) + exhaustive dogfood + close `adult-oxide-slave` then `nervy-hold-dip`.
+
+⚠ A worker subagent crashed mid-draft on E8 batch 2 (socket error); redo batch 2 fresh.
 
 ### CRITICAL — E6.5a prerequisites (grounded 2026-06-14; MORE than the original E6/E7 text)
 
