@@ -13,7 +13,6 @@ from types import ModuleType
 
 import pytest
 from _helpers import (
-    SCRIPT_PATH,
     _write_ticket,
 )
 
@@ -253,65 +252,6 @@ def test_resolve_hierarchy_link_is_redundant_direct_parent(
     assert result["is_redundant"] is True, (
         f"is_redundant=True expected when source is direct parent of target, got {result!r}"
     )
-
-
-@pytest.mark.unit
-@pytest.mark.scripts
-def test_resolve_hierarchy_link_cli_outputs_json(
-    graph: ModuleType, tmp_path: Path
-) -> None:
-    """CLI subcommand resolve-hierarchy-link outputs valid JSON.
-
-    Setup:
-        - orphan-x: task (no parent)
-        - orphan-y: task (no parent)
-
-    Verify: python3 ticket-graph.py resolve-hierarchy-link orphan-x orphan-y
-            --tickets-dir=... outputs JSON with required keys.
-    """
-    import subprocess
-
-    tracker_dir = tmp_path / "tracker"
-    tracker_dir.mkdir()
-
-    _write_ticket(tracker_dir, "orphan-x", ticket_type="task")
-    _write_ticket(tracker_dir, "orphan-y", ticket_type="task")
-
-    result = subprocess.run(
-        [
-            "python3",
-            str(SCRIPT_PATH),
-            "resolve-hierarchy-link",
-            "orphan-x",
-            "orphan-y",
-            f"--tickets-dir={tracker_dir}",
-        ],
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 0, (
-        f"CLI returned non-zero exit code {result.returncode}. "
-        f"stdout={result.stdout!r} stderr={result.stderr!r}"
-    )
-    try:
-        output = json.loads(result.stdout)
-    except json.JSONDecodeError as e:
-        pytest.fail(f"CLI output is not valid JSON: {e!r}. stdout={result.stdout!r}")
-
-    required_keys = {
-        "resolved_source",
-        "resolved_target",
-        "was_redirected",
-        "is_redundant",
-    }
-    missing = required_keys - set(output.keys())
-    assert not missing, f"CLI output missing keys {missing}. Got: {output!r}"
-
-
-# ---------------------------------------------------------------------------
-# Type-tier comparability for BLOCKING deps only (new semantics)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit

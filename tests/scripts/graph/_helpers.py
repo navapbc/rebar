@@ -8,14 +8,12 @@ The `graph` fixture + autouse git-isolation fixture live in conftest.py.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 from types import ModuleType
 
 # graph/_helpers.py -> graph -> scripts -> tests -> <repo>
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SCRIPT_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "ticket-graph.py"
 
 _UUID_A = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
 _UUID_B = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"
@@ -24,11 +22,11 @@ _UUID_D = "dddddddd-dddd-4ddd-dddd-dddddddddddd"
 
 
 def _load_module() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("ticket_graph", SCRIPT_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
-    return module
+    """Return the canonical graph package (Tier E E7d: was the hyphenated
+    ticket-graph.py CLI wrapper, which only re-exported rebar.graph)."""
+    import rebar.graph
+
+    return rebar.graph
 
 def _write_ticket(
     tracker_dir: Path,
