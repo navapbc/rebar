@@ -120,25 +120,45 @@ def test_validate_rejects_bad_result() -> None:
         validate_result({"findings": [{"severity": "nope", "dimension": "d", "detail": "x"}]})
 
 
-def test_pydantic_mirror_matches_schema() -> None:
+def test_pydantic_mirror_field_sets_match_schema() -> None:
+    """Pin the Pydantic structured-output model to the JSON Schema $defs so the two
+    can't drift (the schema is the source of truth)."""
     pytest.importorskip("pydantic")
-    pytest.importorskip("jsonschema")
-    from rebar.llm.findings import findings_response_model
+    model = findings_response_model = __import__(
+        "rebar.llm.findings", fromlist=["findings_response_model"]
+    ).findings_response_model
+    Review = model()
+    Finding = Review.model_fields["findings"].annotation.__args__[0]
+    Citation = Finding.model_fields["citations"].annotation.__args__[0]
 
-    model = findings_response_model()
-    inst = model(findings=[{"severity": "high", "dimension": "security", "detail": "x",
-                            "citations": [{"kind": "file", "path": "a.py", "line_start": 1}]}])
-    dumped = inst.model_dump()
-    # each finding (sans None fields) must validate against the canonical $def
-    validator = schemas.validator(schemas.REVIEW_RESULT)
-    cleaned = {"findings": [
-        {k: v for k, v in f.items() if v is not None
-         and not (k == "citations" and not v)}
-        for f in dumped["findings"]
-    ]}
-    for f in cleaned["findings"]:
-        f["citations"] = [{k: v for k, v in c.items() if v is not None} for c in f.get("citations", [])]
-    validator.validate(cleaned)
+    common = schemas.load("common")["$defs"]
+    assert set(Finding.model_fields) == set(common["finding"]["properties"]), (
+        "Pydantic Finding fields drifted from common.schema.json finding $def"
+    )
+    assert set(Citation.model_fields) == set(common["citation"]["properties"]), (
+        "Pydantic Citation fields drifted from common.schema.json citation $def"
+    )
+
+
+def test_normalize_clamps_soft_fields() -> None:
+    from rebar.llm.findings import normalize_finding
+
+    f = normalize_finding({
+        "severity": "high", "dimension": "d", "detail": "x", "confidence": 2.5,
+        "citations": [{"kind": "file", "path": "a.py", "line_start": -3}],
+    })
+    assert f["confidence"] == 1.0  # clamped into [0,1]
+    assert "line_start" not in f["citations"][0]  # negative line dropped
+
+
+def test_framework_errors_are_llmerror() -> None:
+    """H1: the expected failure modes are catchable as one LLMError vocabulary."""
+    import rebar.llm as llm
+    from rebar.llm.findings import FindingsError
+    from rebar.llm.prompts import ReviewerError
+
+    assert issubclass(FindingsError, llm.LLMError)
+    assert issubclass(ReviewerError, llm.LLMError)
 
 
 # ── config + runner selection ─────────────────────────────────────────────────
@@ -146,12 +166,15 @@ def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     from rebar.llm.config import LLMConfig
 
     monkeypatch.setenv("REBAR_LLM_RUNNER", "fake")
-    monkeypatch.setenv("REBAR_LLM_MODEL", "claude-test")
+    monkeypatch.setenv("REBAR_LLM_MODEL", "gpt-4o")
+    monkeypatch.setenv("REBAR_LLM_MODEL_PROVIDER", "openai")
+    monkeypatch.setenv("REBAR_LLM_BASE_URL", "http://localhost:1234/v1")
     monkeypatch.setenv("REBAR_LLM_MAX_ITERS", "7")
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk")
     cfg = LLMConfig.from_env(repo_root=".")
-    assert cfg.runner == "fake" and cfg.model == "claude-test" and cfg.max_iterations == 7
+    assert cfg.runner == "fake" and cfg.model == "gpt-4o" and cfg.max_iterations == 7
+    assert cfg.model_provider == "openai" and cfg.base_url == "http://localhost:1234/v1"
     assert cfg.langfuse.enabled is True
 
 
@@ -223,6 +246,15 @@ def test_review_ticket_graph_includes_children(rebar_repo: Path) -> None:
     assert len(result["target"]["ticket_ids"]) >= 2  # epic + its task
 
 
+def test_review_ticket_unknown_reviewer_is_llmerror(rebar_repo: Path) -> None:
+    import rebar.llm as llm
+
+    epic = _seed(rebar_repo)
+    with pytest.raises(llm.LLMError):
+        llm.review_ticket(epic, "no-such-reviewer", repo_root=str(rebar_repo),
+                          runner=llm.FakeRunner())
+
+
 # ── CLI surface ───────────────────────────────────────────────────────────────
 def test_cli_review_check(capsys: pytest.CaptureFixture) -> None:
     from rebar._cli import main
@@ -246,6 +278,17 @@ def test_cli_review_with_fake_runner(rebar_repo: Path, monkeypatch: pytest.Monke
     result = json.loads(out)
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
     assert result["runner"] == "fake" and result["findings"] == []
+
+
+def test_cli_review_bad_reviewer_is_graceful(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch,
+                                             capsys: pytest.CaptureFixture) -> None:
+    epic = _seed(rebar_repo)
+    monkeypatch.setenv("REBAR_LLM_RUNNER", "fake")
+    from rebar._cli import main
+
+    rc = main(["review", epic, "no-such-reviewer"])
+    err = capsys.readouterr().err
+    assert rc == 1 and "Error:" in err  # clean error, not a traceback
 
 
 # ── MCP surface ───────────────────────────────────────────────────────────────

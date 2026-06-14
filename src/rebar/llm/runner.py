@@ -25,10 +25,6 @@ from rebar.llm import findings as _findings
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMConfigError, StructuredOutputError
 
-# Directories the read-only file tools must never expose to the agent (the live
-# event store, git internals, reconciler state).
-_DENY_DIRS = (".git", ".tickets-tracker", ".bridge_state")
-
 
 @dataclass
 class RunRequest:
@@ -111,15 +107,15 @@ class LangGraphRunner:
 
     def run(self, req: RunRequest) -> dict:
         cfg = self._config
-        create_agent, ToolStrategy, ChatAnthropic = _import_langgraph()
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            raise LLMConfigError(
-                "ANTHROPIC_API_KEY is not set — the langgraph runner needs model "
-                "credentials. Export ANTHROPIC_API_KEY (or use a FakeRunner override)."
-            )
-        model = ChatAnthropic(model=cfg.model, max_tokens=cfg.max_tokens, timeout=cfg.timeout_s)
+        create_agent, ToolStrategy, init_chat_model = _import_langgraph()
+        model = _build_model(cfg, init_chat_model)
         tools = _filesystem_tools(cfg.repo_path) + _mcp_tools(cfg.mcp_servers)
         response_model = _findings.findings_response_model()
+        # ToolStrategy (not ProviderStrategy) is deliberate: it is provider-PORTABLE
+        # (works across Anthropic/OpenAI/Gemini), with in-loop self-correction
+        # (handle_errors). NOTE: ToolStrategy forces tool_choice, which Anthropic
+        # rejects when *extended thinking* is enabled (HTTP 400) — so do NOT enable
+        # thinking on the model here. A missing structured_response is handled below.
         agent = create_agent(
             model,
             tools,
@@ -131,6 +127,11 @@ class LangGraphRunner:
             if callbacks:
                 invoke_cfg["callbacks"] = callbacks
             if req.langfuse_prompt is not None:
+                # Best-effort prompt→trace linkage. NOTE: Langfuse's first-class
+                # linkage attaches `langfuse_prompt` to a LangChain PromptTemplate's
+                # metadata; create_agent builds messages internally (no template),
+                # so this run-level metadata may not register the link in every SDK
+                # version. Harmless and forward-compatible if it doesn't.
                 invoke_cfg["metadata"] = {"langfuse_prompt": req.langfuse_prompt}
             outcome = agent.invoke(
                 {"messages": [{"role": "user", "content": req.instructions}]},
@@ -177,37 +178,96 @@ def _import_langgraph():
     try:
         from langchain.agents import create_agent
         from langchain.agents.structured_output import ToolStrategy
-        from langchain_anthropic import ChatAnthropic
+        from langchain.chat_models import init_chat_model
     except ImportError as exc:
         raise LLMConfigError(
             "the langgraph runner needs the 'agents' extra. Install it with: "
             "pip install 'nava-rebar[agents]'"
         ) from exc
-    return create_agent, ToolStrategy, ChatAnthropic
+    return create_agent, ToolStrategy, init_chat_model
+
+
+def _build_model(cfg: LLMConfig, init_chat_model):
+    """Construct the chat model for any provider via init_chat_model (provider is
+    inferred from the model name unless cfg.model_provider is set). We never pass
+    `temperature`: claude-opus-4.x reject it (HTTP 400), and other providers use
+    their own default. base_url/api_key enable OpenAI-compatible local servers."""
+    kwargs: dict = {"max_tokens": cfg.max_tokens, "timeout": cfg.timeout_s}
+    if cfg.base_url:
+        kwargs["base_url"] = cfg.base_url
+    if cfg.api_key:
+        kwargs["api_key"] = cfg.api_key
+    try:
+        return init_chat_model(cfg.model, model_provider=cfg.model_provider, **kwargs)
+    except ImportError as exc:
+        raise LLMConfigError(
+            f"the provider for model '{cfg.model}' needs its LangChain integration "
+            f"package (e.g. langchain-openai / langchain-google-genai): {exc}"
+        ) from exc
 
 
 def _mcp_tools(servers: dict) -> list:
+    """Load MCP tools (langchain-mcp-adapters). get_tools() is async; run it on a
+    private loop in a worker thread so this works even when the caller is already
+    inside a running event loop (asyncio.run() would raise there)."""
     if not servers:
         return []
     import asyncio
 
     from langchain_mcp_adapters.client import MultiServerMCPClient
 
-    client = MultiServerMCPClient(servers)
-    return asyncio.run(client.get_tools())
+    async def _load():
+        return await MultiServerMCPClient(servers).get_tools()
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_load())  # no loop running — the common (sync) case
+    # A loop is already running in this thread: run our own loop in a worker.
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, _load()).result()
 
 
-def _safe_path(root: str, rel: str) -> str:
-    """Resolve ``rel`` under ``root``, refusing traversal and the deny-listed
-    state directories. Raises ValueError (surfaced to the agent as a tool error)."""
+def _denied_realpaths(root: str) -> tuple[str, ...]:
+    """Realpaths the file tools must never expose: git internals, reconciler state,
+    and the live event store — resolved from rebar.config.tracker_dir(root) so the
+    TICKETS_TRACKER_DIR override (a relocated/renamed store) is covered too, not
+    just the default `.tickets-tracker` name."""
+    paths = [
+        os.path.join(root, ".git"),
+        os.path.join(root, ".bridge_state"),
+        os.path.join(root, ".tickets-tracker"),
+    ]
+    try:
+        from rebar import config as _cfg
+
+        paths.append(str(_cfg.tracker_dir(root)))
+    except Exception:
+        pass
+    return tuple(dict.fromkeys(os.path.realpath(p) for p in paths))
+
+
+def _is_denied(abs_path: str, denied: tuple[str, ...]) -> bool:
+    return any(abs_path == d or abs_path.startswith(d + os.sep) for d in denied)
+
+
+def _safe_path(root: str, rel: str, denied: tuple[str, ...]) -> str:
+    """Resolve ``rel`` under ``root``, refusing traversal and any denied state path
+    (by realpath). Raises ValueError (surfaced to the agent as a tool error)."""
     abs_path = os.path.realpath(os.path.join(root, rel))
     if abs_path != root and not abs_path.startswith(root + os.sep):
         raise ValueError(f"path escapes the repository root: {rel}")
-    rest = abs_path[len(root):].lstrip(os.sep)
-    parts = rest.split(os.sep) if rest else []
-    if parts and parts[0] in _DENY_DIRS:
+    if _is_denied(abs_path, denied):
         raise ValueError(f"path is not accessible to review: {rel}")
     return abs_path
+
+
+# Cap how much a single tool call can read/scan so an agent loop can't blow up
+# latency/cost on a huge file or tree.
+_READ_MAX_LINES = 2000
+_SCAN_MAX_FILES = 5000
 
 
 def _filesystem_tools(repo_path: str | None) -> list:
@@ -217,27 +277,32 @@ def _filesystem_tools(repo_path: str | None) -> list:
     from langchain_core.tools import tool
 
     root = os.path.realpath(repo_path or ".")
+    denied = _denied_realpaths(root)
 
     @tool
     def read_file(path: str, line_start: int = 1, line_end: int = 0) -> str:
         """Read a repo file, returning lines as `<lineno>: <content>`. Optionally
         restrict to the [line_start, line_end] range (1-based; line_end<=0 = end)."""
-        target = _safe_path(root, path)
+        target = _safe_path(root, path, denied)
         with open(target, encoding="utf-8", errors="replace") as fh:
             lines = fh.readlines()
         lo = max(1, line_start)
         hi = len(lines) if line_end <= 0 else min(line_end, len(lines))
-        return "".join(f"{i}: {lines[i - 1]}" for i in range(lo, hi + 1)) or "(empty)"
+        hi = min(hi, lo + _READ_MAX_LINES - 1)  # cap a single read
+        body = "".join(f"{i}: {lines[i - 1]}" for i in range(lo, hi + 1)) or "(empty)"
+        if hi < (len(lines) if line_end <= 0 else min(line_end, len(lines))):
+            body += f"\n… (truncated at {_READ_MAX_LINES} lines; request a narrower range)"
+        return body
 
     @tool
     def list_directory(path: str = ".") -> str:
         """List entries of a repo directory (directories suffixed with '/')."""
-        target = _safe_path(root, path)
+        target = _safe_path(root, path, denied)
         entries = []
         for name in sorted(os.listdir(target)):
-            if name in _DENY_DIRS:
-                continue
             full = os.path.join(target, name)
+            if _is_denied(os.path.realpath(full), denied):
+                continue
             entries.append(name + ("/" if os.path.isdir(full) else ""))
         return "\n".join(entries) or "(empty)"
 
@@ -247,15 +312,22 @@ def _filesystem_tools(repo_path: str | None) -> list:
         matches (capped at max_results)."""
         import re
 
-        base = _safe_path(root, path)
+        base = _safe_path(root, path, denied)
         try:
             rx = re.compile(pattern)
         except re.error as exc:
             return f"invalid regex: {exc}"
         hits: list[str] = []
+        scanned = 0
         for dirpath, dirnames, filenames in os.walk(base):
-            dirnames[:] = [d for d in dirnames if d not in _DENY_DIRS]
+            dirnames[:] = [
+                d for d in dirnames
+                if not _is_denied(os.path.realpath(os.path.join(dirpath, d)), denied)
+            ]
             for fn in filenames:
+                if scanned >= _SCAN_MAX_FILES:
+                    return "\n".join(hits) + "\n… (scan limit reached)"
+                scanned += 1
                 full = os.path.join(dirpath, fn)
                 rel = os.path.relpath(full, root)
                 try:
@@ -290,8 +362,17 @@ def _trace(cfg: LLMConfig):
         yield (None, [])
         return
     try:
-        with client.start_as_current_span(name="rebar.review") as span:
-            yield (getattr(span, "trace_id", None), [handler])
-    except Exception:
-        # Span API drift across SDK versions shouldn't fail the review — still trace.
-        yield (None, [handler])
+        try:
+            with client.start_as_current_span(name="rebar.review") as span:
+                yield (getattr(span, "trace_id", None), [handler])
+        except Exception:
+            # Span API drift across SDK versions shouldn't fail the review — still trace.
+            yield (None, [handler])
+    finally:
+        # The v3 SDK buffers spans on a background thread; a short-lived process
+        # (CLI run) can exit before they flush, silently losing the trace. Flush
+        # before returning. Best-effort — never fail the review on a tracing hiccup.
+        try:
+            client.flush()
+        except Exception:
+            pass

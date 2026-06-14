@@ -75,6 +75,13 @@ class LangfuseConfig:
 class LLMConfig:
     runner: str = "langgraph"
     model: str = DEFAULT_MODEL
+    # Provider is OPTIONAL: LangChain's init_chat_model infers it from the model
+    # name (claude-*→anthropic, gpt-*→openai, gemini-*→google_genai). Set it
+    # explicitly for ambiguous names or OpenAI-compatible local servers
+    # (LMStudio/Ollama/vLLM: model_provider="openai" + base_url).
+    model_provider: str | None = None
+    base_url: str | None = None  # OpenAI-compatible endpoint (local models)
+    api_key: str | None = None  # explicit key (e.g. a dummy key for local servers)
     max_tokens: int = 8000
     max_iterations: int = 25
     timeout_s: int = 600
@@ -104,6 +111,9 @@ class LLMConfig:
         return cls(
             runner=runner,
             model=(os.environ.get("REBAR_LLM_MODEL") or DEFAULT_MODEL).strip(),
+            model_provider=(os.environ.get("REBAR_LLM_MODEL_PROVIDER") or "").strip() or None,
+            base_url=os.environ.get("REBAR_LLM_BASE_URL") or None,
+            api_key=os.environ.get("REBAR_LLM_API_KEY") or None,
             max_tokens=_env_int("REBAR_LLM_MAX_TOKENS", 8000),
             max_iterations=_env_int("REBAR_LLM_MAX_ITERS", 25),
             timeout_s=_env_int("REBAR_LLM_TIMEOUT", 600),
@@ -129,17 +139,22 @@ def available_backends() -> dict:
     """
     return {
         "langchain": _module_available("langchain") and _module_available("langgraph"),
-        "langchain_anthropic": _module_available("langchain_anthropic"),
+        # model-provider integrations (langchain-anthropic ships with the extra;
+        # the others are opt-in installs for OpenAI / Gemini).
+        "provider_anthropic": _module_available("langchain_anthropic"),
+        "provider_openai": _module_available("langchain_openai"),
+        "provider_google": _module_available("langchain_google_genai"),
         "langchain_mcp_adapters": _module_available("langchain_mcp_adapters"),
         "langfuse": _module_available("langfuse"),
-        "anthropic_sdk": _module_available("anthropic"),
         "anthropic_api_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
+        "openai_api_key": bool(os.environ.get("OPENAI_API_KEY")),
         "langfuse_configured": LangfuseConfig.from_env().enabled,
         "langflow_url": bool(os.environ.get("LANGFLOW_URL")),
     }
 
 
 def agents_extra_installed() -> bool:
-    """True when the ``nava-rebar[agents]`` extra is importable (the langgraph path)."""
+    """True when the ``nava-rebar[agents]`` extra is importable (the langgraph path,
+    default Anthropic provider). Other providers (OpenAI/Gemini) are opt-in extras."""
     b = available_backends()
-    return b["langchain"] and b["langchain_anthropic"] and b["langchain_mcp_adapters"]
+    return b["langchain"] and b["provider_anthropic"] and b["langchain_mcp_adapters"]

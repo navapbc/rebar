@@ -15,13 +15,18 @@ import os
 from typing import Any
 
 from rebar import schemas
+from rebar.llm.errors import LLMError
 
 SEVERITIES = ("critical", "high", "medium", "low", "info")
 CITATION_KINDS = ("file", "url", "source")
 
 
-class FindingsError(ValueError):
-    """Raised when review output cannot be coerced into a valid ReviewResult."""
+class FindingsError(LLMError):
+    """Raised when review output cannot be coerced into a valid ReviewResult.
+
+    Subclasses ``LLMError`` so the CLI/MCP/library layers catch it with the same
+    ``except LLMError`` as every other framework failure (a schema-invalid model
+    response is an *expected* failure mode, not an uncaught traceback)."""
 
 
 def _coerce_citation(raw: Any) -> dict:
@@ -45,9 +50,16 @@ def _coerce_citation(raw: Any) -> dict:
     for line_key in ("line_start", "line_end"):
         if line_key in c and c[line_key] is not None:
             try:
-                c[line_key] = int(c[line_key])
+                value = int(c[line_key])
             except (TypeError, ValueError):
                 c.pop(line_key, None)
+                continue
+            # Negative line numbers violate the schema's `minimum: 0`; drop rather
+            # than let one bad citation field fail validation of the whole review.
+            if value < 0:
+                c.pop(line_key, None)
+            else:
+                c[line_key] = value
     return c
 
 
@@ -66,6 +78,14 @@ def normalize_finding(raw: dict, *, reviewer_id: str | None = None) -> dict:
     if not isinstance(cits, list):
         cits = [cits]
     f["citations"] = [_coerce_citation(c) for c in cits]
+    # `confidence` is a soft, optional field — clamp to [0,1] (or drop if
+    # non-numeric) so a sloppy model value can't sink an otherwise-good review.
+    conf = f.get("confidence")
+    if conf is not None:
+        try:
+            f["confidence"] = min(1.0, max(0.0, float(conf)))
+        except (TypeError, ValueError):
+            f.pop("confidence", None)
     if reviewer_id and not f.get("reviewer_id"):
         f["reviewer_id"] = reviewer_id
     return f
@@ -136,14 +156,16 @@ def resolve_citations(result: dict, repo_path: str | None) -> dict:
             if not (abs_path == root or abs_path.startswith(root + os.sep)) or not os.path.isfile(abs_path):
                 _downgrade(cit, f"unresolved file citation: {path}")
                 continue
+            # Test `is not None` (not truthiness): the schema treats line_start=0 /
+            # omitted as "whole file", which must not be conflated with absent.
             start, end = cit.get("line_start"), cit.get("line_end")
-            if start or end:
+            if start is not None or end is not None:
                 try:
                     with open(abs_path, encoding="utf-8", errors="replace") as fh:
                         n = sum(1 for _ in fh)
                 except OSError:
                     continue
-                if (start and start > n) or (end and end > n):
+                if (start is not None and start > n) or (end is not None and end > n):
                     note = f"{path} (cited lines {start}-{end} exceed file length {n})"
                     _downgrade(cit, note)
     return result
@@ -180,6 +202,7 @@ def findings_response_model():
         title: str | None = Field(default=None, description="Optional short headline.")
         citations: list[Citation] = Field(default_factory=list, description="Evidence: file+line / url / freeform.")
         confidence: float | None = Field(default=None, description="Optional confidence 0..1.")
+        reviewer_id: str | None = Field(default=None, description="Reviewer that produced this finding.")
 
     class ReviewFindings(BaseModel):
         """Structured output of an LLM review: the findings and an optional summary."""

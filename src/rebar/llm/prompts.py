@@ -20,11 +20,15 @@ import re
 from dataclasses import dataclass, field
 from importlib.resources import files
 
+from rebar.llm.errors import LLMConfigError
+
 _VAR = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
 
 
-class ReviewerError(KeyError):
-    """Raised when a reviewer id is not in the catalog."""
+class ReviewerError(LLMConfigError):
+    """Raised when a reviewer id is not in the catalog. Subclasses ``LLMConfigError``
+    (hence ``LLMError``) so a bad reviewer id surfaces as a clean error across all
+    three interfaces rather than an uncaught ``KeyError`` traceback."""
 
 
 @dataclass

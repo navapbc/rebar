@@ -51,11 +51,35 @@ seam:
 | Runner | When | Notes |
 |--------|------|-------|
 | `LangGraphRunner` | default, in-process | `langchain.agents.create_agent` + `ToolStrategy` (robust in-loop structured output; the legacy `create_react_agent(response_format=…)` makes a context-losing post-loop call and is avoided). Tools: read-only, line-numbered repo file tools + MCP via `MultiServerMCPClient`. Tracing: Langfuse callback. Needs `nava-rebar[agents]` + `ANTHROPIC_API_KEY`. |
-| `LangflowRunner` | other environments | Documented **stub**. The protocol seam is defined so a hosted Langflow deployment (`POST /api/v1/run/{flow_id}`, `x-api-key`) can be wired without touching the operation layer; the resolved prompt/context is passed as `input_value` and the flow is a thin transport. This environment can't run Langflow, so it raises a clear error until configured. |
+| `LangflowRunner` | other environments | Documented **stub**. The protocol seam is defined so a hosted Langflow deployment (`POST /api/v1/run/{flow_id}`, header `x-api-key`, body `{"input_value", "input_type":"chat", "output_type":"chat"}`) can be wired without touching the operation layer. When implementing it, note the response text is **deeply nested** (`data["outputs"][0]["outputs"][0]["outputs"]["message"]["message"]`, shape varies by output component) — extraction must walk it defensively. This environment can't run Langflow, so it raises a clear error until configured. |
 | `FakeRunner` | offline / tests | Returns canned findings — the dependency-injection seam that makes the whole pipeline (and all three interfaces) testable with no model, network, or extra. |
 
 Select with `REBAR_LLM_RUNNER` (`langgraph` default / `langflow` / `fake`), or pass
 an explicit `runner=` to an operation.
+
+## Model providers (not Anthropic-only)
+
+The LangGraph runner builds its model with LangChain's `init_chat_model`, so it is
+**provider-agnostic**. The provider is inferred from the model name (`claude-*` →
+Anthropic, `gpt-*` → OpenAI, `gemini-*` → Google) or set explicitly with
+`REBAR_LLM_MODEL_PROVIDER`:
+
+```bash
+REBAR_LLM_MODEL=gpt-4o REBAR_LLM_MODEL_PROVIDER=openai rebar review <id>
+REBAR_LLM_MODEL=gemini-2.5-pro REBAR_LLM_MODEL_PROVIDER=google_genai rebar review <id>
+# local OpenAI-compatible server (LMStudio / Ollama / vLLM):
+REBAR_LLM_MODEL=local-model REBAR_LLM_MODEL_PROVIDER=openai \
+  REBAR_LLM_BASE_URL=http://localhost:1234/v1 REBAR_LLM_API_KEY=not-needed rebar review <id>
+```
+
+The `[agents]` extra ships only `langchain-anthropic` (the default); other providers
+need their integration package (`pip install langchain-openai` /
+`langchain-google-genai`) — a missing one raises a clear error. We deliberately
+**never send `temperature`** (claude-opus-4.x reject it; other providers use their
+default). Structured output uses `ToolStrategy` precisely because it is
+provider-*portable* (unlike provider-native strategies). One caveat: `ToolStrategy`
+forces tool choice, which Anthropic rejects when **extended thinking** is enabled —
+so thinking is left off on the model.
 
 ## Findings contract
 
@@ -113,6 +137,9 @@ for the future code-review op's "deterministic reviewer-selection rules."
 |-----|---------|---------|
 | `REBAR_LLM_RUNNER` | `langgraph` | in-process backend (`langgraph`/`langflow`/`fake`) |
 | `REBAR_LLM_MODEL` | `claude-opus-4-8` | model id |
+| `REBAR_LLM_MODEL_PROVIDER` | inferred | provider for `init_chat_model` (`anthropic`/`openai`/`google_genai`/…); inferred from the model name if unset |
+| `REBAR_LLM_BASE_URL` | — | OpenAI-compatible endpoint (LMStudio/Ollama/vLLM) |
+| `REBAR_LLM_API_KEY` | — | explicit model key (e.g. a dummy key for a local server) |
 | `REBAR_LLM_MAX_TOKENS` | `8000` | per-response token ceiling |
 | `REBAR_LLM_MAX_ITERS` | `25` | agent-loop recursion cap |
 | `REBAR_LLM_TIMEOUT` | `600` | per-operation seconds |
@@ -124,8 +151,13 @@ for the future code-review op's "deterministic reviewer-selection rules."
 | `REBAR_MCP_ALLOW_LLM` | off | gate the MCP `review_ticket` tool (it makes a live, billable call) |
 
 Langfuse is **no-op unless both keys are set** (gated before the handler is even
-constructed — the reliable degradation pattern). Heavy deps are an optional extra;
-a missing extra/credential raises a clear, actionable error.
+constructed — the reliable degradation pattern). The runner wraps each run in a
+span and **flushes before returning** so short-lived CLI processes don't lose
+traces (the v3 SDK buffers on a background thread). Prompt→trace linkage is
+best-effort: Langfuse's first-class linkage attaches `langfuse_prompt` to a
+LangChain `PromptTemplate`, but `create_agent` builds messages internally, so the
+link may not register in every SDK version. Heavy deps are an optional extra; a
+missing extra/credential raises a clear, actionable error.
 
 ## Using it
 
