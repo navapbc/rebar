@@ -49,9 +49,15 @@ def count_unresolved_alerts(tracker: str) -> int:
         if not entry.is_dir() or entry.name.startswith("."):
             continue
         alerts: dict[str, dict] = {}
-        for event_path in sorted(
-            p.path for p in os.scandir(entry.path) if p.name.endswith("-BRIDGE_ALERT.json")
-        ):
+        try:
+            alert_paths = sorted(
+                p.path for p in os.scandir(entry.path)
+                if p.name.endswith("-BRIDGE_ALERT.json")
+            )
+        except OSError:
+            # Unreadable ticket dir → skip silently (the bash glob did too).
+            continue
+        for event_path in alert_paths:
             try:
                 with open(event_path, encoding="utf-8") as fh:
                     event = json.load(fh)

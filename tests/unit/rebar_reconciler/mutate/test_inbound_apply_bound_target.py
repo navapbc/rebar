@@ -383,7 +383,11 @@ def test_inbound_label_add_does_not_wipe_tags_when_reducer_fails(
     # Simulate the failure mode observed in the live probe: the reducer
     # raises mid-apply (e.g., transient I/O error, malformed event during
     # concurrent write). Patch the reducer module's reduce_ticket to raise.
-    reducer_mod = applier._load_ticket_reducer()
+    # The lazy reducer loader now lives in inbound_translate (its owner) and
+    # returns rebar.reducer; patch reduce_ticket there (Tier E E5b).
+    from rebar_reconciler import inbound_translate
+
+    reducer_mod = inbound_translate._load_ticket_reducer()
     monkeypatch.setattr(
         reducer_mod,
         "reduce_ticket",

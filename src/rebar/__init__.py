@@ -15,6 +15,7 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import subprocess
+import sys
 from typing import Any
 
 from rebar import config
@@ -711,8 +712,12 @@ def reconcile(mode: str = "dry-run", *, repo_root=None) -> dict:
     and ``dry-run`` are non-mutating.
     """
     root = str(config.repo_root(repo_root))
+    # Launch under THIS interpreter (sys.executable), not a bare ``python3``: Tier E
+    # E5b rewired the reconciler onto in-package ``rebar.*`` imports, so it must run
+    # on the rebar-capable interpreter. engine_env still puts the engine dir on
+    # PYTHONPATH so the top-level ``rebar_reconciler`` package resolves.
     cmd = [
-        "python3", "-m", "rebar_reconciler",
+        sys.executable, "-m", "rebar_reconciler",
         "--mode", mode, "--repo-root", root,
     ]
     cp = subprocess.run(

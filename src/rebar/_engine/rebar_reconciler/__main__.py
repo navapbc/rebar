@@ -24,6 +24,20 @@ import os
 import sys
 from pathlib import Path
 
+# Defensive rebar bootstrap (Tier E E5b): the reconciler now imports the
+# in-package ``rebar.*`` store/reducer at runtime. The supported launchers
+# (`rebar reconcile` / `rebar.reconcile()`) use ``sys.executable``, so ``rebar``
+# is already importable there. This fallback covers a bare ``python -m
+# rebar_reconciler`` launched with only the engine dir on PYTHONPATH (the historic
+# GHA shape): this file lives at <site>/rebar/_engine/rebar_reconciler/__main__.py,
+# so parents[3] is the dir containing the ``rebar`` package.
+try:
+    import rebar  # noqa: F401
+except ImportError:  # pragma: no cover - bare-interpreter fallback
+    _pkg_parent = str(Path(__file__).resolve().parents[3])
+    if _pkg_parent not in sys.path:
+        sys.path.insert(0, _pkg_parent)
+
 # Dotted-name keys used for sys.modules seeding so that both production code
 # and unit tests (which pre-seed sys.modules with these exact keys) share the
 # same module objects and patch() targets resolve correctly.

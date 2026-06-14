@@ -85,8 +85,12 @@ def _reconcile(argv: list[str]) -> int:
         args += ["--repo-root", root]
     if not any(a == "--mode" or a.startswith("--mode=") for a in args):
         args += ["--mode", "dry-run"]
+    # Launch under THIS interpreter (sys.executable), not a bare ``python3``: the
+    # reconciler imports ``rebar.*`` in-package (Tier E E5b), so it needs the
+    # rebar-capable interpreter; engine_env keeps the engine dir on PYTHONPATH so
+    # the top-level ``rebar_reconciler`` package still resolves.
     return subprocess.call(
-        ["python3", "-m", "rebar_reconciler", *args], env=engine_env(root)
+        [sys.executable, "-m", "rebar_reconciler", *args], env=engine_env(root)
     )
 
 
