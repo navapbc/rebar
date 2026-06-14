@@ -87,6 +87,89 @@ def _reconcile(argv: list[str]) -> int:
     )
 
 
+def _review(argv: list[str]) -> int:
+    """``rebar review`` → rebar.llm.review_ticket (native; not a dispatcher arm).
+
+    Like ``reconcile``, this is intercepted in main() before the bash-golden help
+    system, so it owns its own ``--help``. JSON output conforms to the
+    ``review_result`` schema (OUTPUT_SCHEMAS['review'])."""
+    import argparse
+    import json as _json
+
+    parser = argparse.ArgumentParser(
+        prog="rebar review",
+        description="Run an LLM review of a ticket (or its ticket-graph) and emit "
+        "structured findings. Needs the 'agents' extra + ANTHROPIC_API_KEY; see "
+        "`rebar review --check`.",
+    )
+    parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")
+    parser.add_argument(
+        "reviewer_id", nargs="?", default=None,
+        help="reviewer from the catalog (default: the catalog's default reviewer)",
+    )
+    parser.add_argument(
+        "--graph", action="store_true",
+        help="also review the ticket's descendants, as one unit",
+    )
+    parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
+    parser.add_argument(
+        "--check", action="store_true",
+        help="print backend/credential availability and exit",
+    )
+    args = parser.parse_args(argv)
+
+    from rebar import llm
+
+    if args.check:
+        sys.stdout.write(_json.dumps(llm.available_backends(), indent=2) + "\n")
+        return 0
+    if not args.ticket_id:
+        parser.error("ticket_id is required")
+    ensure_initialized(init_only=True)
+    try:
+        result = llm.review_ticket(args.ticket_id, args.reviewer_id, graph=args.graph)
+    except llm.LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    if args.output == "json":
+        sys.stdout.write(_json.dumps(result) + "\n")
+    else:
+        _render_review_text(result)
+    return 0
+
+
+def _render_review_text(result: dict) -> None:
+    """Human-readable rendering of a review_result."""
+    findings = result.get("findings", [])
+    target = result.get("target", {})
+    ids = ", ".join(target.get("ticket_ids", [])) or "?"
+    sys.stdout.write(
+        f"Review of {ids} ({result.get('runner')}/{result.get('model') or 'n/a'}) — "
+        f"{len(findings)} finding(s)\n"
+    )
+    if result.get("summary"):
+        sys.stdout.write(f"\n{result['summary']}\n")
+    for f in findings:
+        sys.stdout.write(f"\n[{f.get('severity', '?').upper()}] ({f.get('dimension')}) ")
+        if f.get("title"):
+            sys.stdout.write(f"{f['title']}\n")
+        else:
+            sys.stdout.write("\n")
+        sys.stdout.write(f"  {f.get('detail', '')}\n")
+        for c in f.get("citations", []):
+            if c.get("kind") == "file":
+                loc = c.get("path", "")
+                if c.get("line_start"):
+                    loc += f":{c['line_start']}"
+                    if c.get("line_end") and c["line_end"] != c["line_start"]:
+                        loc += f"-{c['line_end']}"
+                sys.stdout.write(f"    @ {loc}\n")
+            elif c.get("kind") == "url":
+                sys.stdout.write(f"    @ {c.get('url', '')}\n")
+            else:
+                sys.stdout.write(f"    - {c.get('description', '')}\n")
+
+
 def _passthrough(sub: str, rest: list[str]) -> int:
     """Transitionally run a not-yet-ported command via the bash dispatcher.
 
@@ -239,6 +322,10 @@ def main(argv: list[str] | None = None) -> int:
     # reconcile intercept (the dispatcher has no reconcile arm).
     if argv and argv[0] == "reconcile":
         return _reconcile(argv[1:])
+
+    # review intercept (native rebar.llm op; not a dispatcher arm, like reconcile).
+    if argv and argv[0] == "review":
+        return _review(argv[1:])
 
     # No subcommand: overview to stdout, exit 1 (the dispatcher's _usage).
     if not argv:

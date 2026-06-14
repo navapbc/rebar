@@ -379,6 +379,27 @@ def build_server():
                 )
         return rebar.reconcile(parsed.value)
 
+    @mcp.tool()
+    def review_ticket(
+        ticket_id: str, reviewer_id: str | None = None, graph: bool = False
+    ) -> dict:
+        """Run an LLM review of a ticket (or its graph) -> a review_result dict
+        {findings[], target, reviewers, runner, model, trace_id, summary}.
+
+        DISABLED unless REBAR_MCP_ALLOW_LLM=1: this makes a live, billable LLM call
+        and reaches the network + filesystem (it is not a plain store read). It
+        needs the 'agents' extra + ANTHROPIC_API_KEY. Returns a plain dict and
+        advertises NO outputSchema by design — the result is model-produced, so it
+        is a documented NO_SCHEMA_EXEMPT and is not auto-driven in CI."""
+        if not _env_truthy("REBAR_MCP_ALLOW_LLM"):
+            raise ValueError(
+                "review_ticket is disabled: it makes a live, billable LLM call. "
+                "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
+            )
+        import rebar.llm
+
+        return rebar.llm.review_ticket(ticket_id, reviewer_id, graph=graph)
+
     # ── Write tools (gated by REBAR_MCP_READONLY) ──────────────────────────────
     if not _readonly():
 

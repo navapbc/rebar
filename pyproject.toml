@@ -25,6 +25,24 @@ dependencies = []
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.2"]
+# LLM agent-operations framework (rebar.llm). OPTIONAL — never required by core
+# rebar (the engine stays stdlib-only, `dependencies = []`). The default in-process
+# runner is the LangChain/LangGraph stack — the one agent runtime native to BOTH
+# Langflow and Langfuse — but everything here is imported lazily, so `import rebar`
+# and even `import rebar.llm` stay dependency-free; only *running* an operation
+# needs this extra. langchain/langgraph are pinned to the v1 line (the
+# `langchain.agents.create_agent` API); langfuse forces pydantic v2. The Langflow
+# runner needs no dependency (a stubbed REST seam); custom read-only filesystem
+# tools avoid langchain-community.
+agents = [
+    "langchain>=1,<2",
+    "langgraph>=1,<2",
+    "langchain-anthropic>=0.3",
+    "langchain-mcp-adapters>=0.3",
+    "langfuse>=3",
+    "anthropic>=0.40",
+    "pydantic>=2",
+]
 dev = [
     "pytest>=8",
     "mcp>=1.2",

@@ -1,0 +1,29 @@
+{
+  "ticket-quality": {
+    "dimension": "ticket-quality",
+    "title": "Ticket quality reviewer",
+    "description": "Reviews a ticket (or ticket graph) for clarity, acceptance criteria, scope, dependencies, and implementation risk. The default reviewer for the `review` operation.",
+    "langfuse_prompt": "rebar-ticket-quality",
+    "fallback_file": "ticket_quality.md",
+    "default": true,
+    "applies_to": []
+  },
+  "security": {
+    "dimension": "security",
+    "title": "Security reviewer",
+    "description": "Looks for security-relevant concerns (authn/authz, secrets, input handling, injection, unsafe deserialization).",
+    "langfuse_prompt": "rebar-security",
+    "fallback_file": "security.md",
+    "default": false,
+    "applies_to": ["**/auth*", "**/*secret*", "**/security/**", "**/signing*"]
+  },
+  "tests": {
+    "dimension": "test-coverage",
+    "title": "Test-coverage reviewer",
+    "description": "Assesses whether changes are adequately covered by tests and flags missing edge cases.",
+    "langfuse_prompt": "rebar-tests",
+    "fallback_file": "tests.md",
+    "default": false,
+    "applies_to": ["**/test_*.py", "**/*_test.py", "tests/**"]
+  }
+}
