@@ -11,8 +11,7 @@ subprocess ``$TICKET_CMD list``, and otherwise we read in-process via
 ``list_states`` — the Tier C win, byte-equivalent because the CLI's ``list`` arm
 is itself ``list_states``. The default ticket command (used only for the
 interface-contract *suggestion* text, never subprocessed in production) is the
-in-process ``rebar`` CLI (:func:`rebar._engine.in_process_cli`), not the retired
-bash dispatcher.
+in-process ``rebar`` CLI (:func:`rebar._engine.in_process_cli`).
 
 Output contract (docs/bash-migration.md §1.4): ``--output json`` is pinned by JSON
 **schema + semantic** equality (jq vs ``json.dumps`` whitespace differs and is not

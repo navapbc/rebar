@@ -1,11 +1,8 @@
-"""validate characterization (Tier C, post-retirement) — docs/bash-migration.md §5.
+"""validate characterization — docs/bash-migration.md §5.
 
-Tier C was retired on 2026-06-12: the bash ``validate-issues.sh`` and the
-``REBAR_COMPUTE`` switch are gone, so this no longer dual-runs bash-vs-python. It
-is now the durable python characterization (the a93885ed pattern): the score→exit
-tiers, the JSON report shape, the human text/terse goldens, and library/schema —
-driven through the dispatcher with the same ``TICKET_CMD`` injection the port
-honors.
+The python characterization of ``validate``: the score→exit tiers, the JSON
+report shape, the human text/terse goldens, and the library/schema — driven
+through the CLI with the same ``TICKET_CMD`` injection seam ``validate`` honors.
 """
 
 from __future__ import annotations
@@ -20,9 +17,8 @@ import pytest
 
 from rebar._engine import in_process_cli
 
-# Drive the in-process rebar CLI (Tier E7: the bash dispatcher is deleted). The
-# validate arm honors the same TICKET_CMD injection seam the bash arm did, so
-# this remains the durable python characterization of the production output.
+# Drive the in-process rebar CLI; the validate arm honors the TICKET_CMD
+# injection seam, so this characterizes the production output.
 _CLI = in_process_cli()
 
 

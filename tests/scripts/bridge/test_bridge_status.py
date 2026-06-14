@@ -45,9 +45,9 @@ from rebar._engine import in_process_cli
 REPO_ROOT = Path(
     subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
 )
-# Drive the in-process rebar CLI (Tier E7: the bash dispatcher is deleted). The
-# bridge-status arm is fully in-process; with TICKETS_TRACKER_DIR injected the
-# auto-init consent gate is bypassed (ensure_initialized returns early).
+# Drive the in-process rebar CLI; the bridge-status arm is fully in-process, and
+# with TICKETS_TRACKER_DIR injected the auto-init consent gate is bypassed
+# (ensure_initialized returns early).
 _CLI = in_process_cli()
 
 # ---------------------------------------------------------------------------

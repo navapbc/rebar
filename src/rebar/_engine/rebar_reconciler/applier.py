@@ -402,9 +402,10 @@ def apply(
             )
     finally:
         if pending_bug_tickets and not is_dry_run:
+            from rebar._engine import in_process_cli
+
             cli_path = Path(
-                os.environ.get("REBAR_TICKET_CLI")
-                or (Path(__file__).resolve().parent.parent / "rebar")
+                os.environ.get("REBAR_TICKET_CLI") or in_process_cli()
             )
             for pending in pending_bug_tickets:
                 try:

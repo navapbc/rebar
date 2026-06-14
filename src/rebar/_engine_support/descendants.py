@@ -76,8 +76,7 @@ def list_descendants(root_id: str, tracker: str) -> dict:
 
 def list_descendants_cli(argv: list[str], tracker: str) -> int:
     if not argv:
-        # Preserve the engine script's exact usage string (parity).
-        sys.stderr.write("Usage: ticket-list-descendants.py <ticket_id>\n")
+        sys.stderr.write("Usage: rebar list-descendants <ticket_id>\n")
         return 1
     # Graceful: pass the raw input through when resolution misses (documented
     # empty-arrays contract).

@@ -110,27 +110,6 @@ def _bridge_probe(argv: list[str]) -> int:
     return subprocess.call([sys.executable, script, *argv], env=engine_env())
 
 
-def _passthrough(sub: str, rest: list[str]) -> int:
-    """Transitionally run a not-yet-ported command via the bash dispatcher.
-
-    The dispatcher would silently auto-init, so we run the in-process consent gate
-    FIRST (Tier E E4): on an uninitialized repo this prompts (TTY) or errors
-    (non-interactive) before any bash runs, closing the last silent-init path. Once
-    the tracker exists the dispatcher's own ``_ensure_initialized`` is a no-op.
-    Output streams inherit (no capture) so the user sees output directly.
-    """
-    ensure_initialized(init_only=False)
-    from rebar._engine import dispatcher, engine_env
-
-    env = engine_env()
-    cwd = env.get("REBAR_ROOT") or env.get("PROJECT_ROOT")
-    if not (cwd and os.path.isdir(cwd)):
-        cwd = None
-    return subprocess.call(
-        ["bash", str(dispatcher()), sub, *rest], env=env, cwd=cwd
-    )
-
-
 def _emit_subcommand_help(sub: str) -> int:
     """Print ``sub``'s usage (``_print_subcommand_help`` parity).
 
@@ -267,7 +246,13 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         return signing.verify_signature_cli(rest)
     if sub == "bridge-probe":
         return _bridge_probe(rest)
-    return _passthrough(sub, rest)
+    # Every known subcommand is routed in-process above, and main() rejects
+    # unknown subcommands before reaching _dispatch. Arriving here means a
+    # subcommand was added to the known set without an in-process arm — a wiring
+    # bug, surfaced loudly rather than silently mis-dispatched.
+    raise RuntimeError(
+        f"rebar: subcommand {sub!r} is known but has no in-process handler"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

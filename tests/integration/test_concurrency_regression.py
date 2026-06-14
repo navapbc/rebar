@@ -40,9 +40,24 @@ def _git(*args: str, cwd: Path, check: bool = True) -> subprocess.CompletedProce
     )
 
 
+_CLI = _engine.in_process_cli()
+
+
 def _engine_run(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-    """Run a rebar engine subcommand against *repo* via the real dispatcher."""
-    return _engine.run(list(args), repo_root=str(repo), cwd=str(repo), check=check)
+    """Run a rebar subcommand against *repo* via the in-process CLI.
+
+    ``engine_env`` pins REBAR_ROOT/PROJECT_ROOT so the command's cwd-relative git
+    operations resolve the right repository. This drives the Python
+    write/sync/lock path under real cross-process concurrency — the contract this
+    harness characterizes."""
+    return subprocess.run(
+        [_CLI, *args],
+        cwd=str(repo),
+        env=_engine.engine_env(repo_root=str(repo)),
+        text=True,
+        capture_output=True,
+        check=check,
+    )
 
 
 def _make_repo(remote: Path, path: Path) -> Path:
@@ -112,9 +127,8 @@ def two_clones(tmp_path: Path):
     _git("commit", "-q", "--allow-empty", "-m", "init", cwd=repo_a)
     _git("push", "-q", "-u", "origin", "HEAD:main", cwd=repo_a)
 
-    # Init tickets in A (no sync during setup), seed a ticket, push the branch.
-    env_no_sync = {"_TICKET_TEST_NO_SYNC": "1"}
-    _engine.run(["init"], repo_root=str(repo_a), cwd=str(repo_a))
+    # Init tickets in A, seed a ticket, push the branch.
+    _engine_run(repo_a, "init")
     seed = _create(repo_a, "task", "seed shared ticket")
     tracker_a = _tracker(repo_a)
     _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
@@ -123,7 +137,7 @@ def two_clones(tmp_path: Path):
     # B clones main + the tickets branch, then mounts it via init.
     repo_b = _make_repo(remote, tmp_path / "b")
     _git("fetch", "-q", "origin", "tickets", cwd=repo_b)
-    _engine.run(["init"], repo_root=str(repo_b), cwd=str(repo_b))
+    _engine_run(repo_b, "init")
     tracker_b = _tracker(repo_b)
     # Ensure B's tickets branch points at origin/tickets (shared base).
     _git("fetch", "-q", "origin", "tickets", cwd=tracker_b)

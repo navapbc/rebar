@@ -1,13 +1,13 @@
 """rebar — event-sourced ticket system with a Jira reconciler.
 
-Three interfaces over one engine:
+Three interfaces over one implementation:
   * CLI:     the ``rebar`` console script (rebar.cli)
-  * Library: this package (write-path subprocess wrappers + native reads)
+  * Library: this package — in-process reads and writes over the git-backed store
   * MCP:     the ``rebar-mcp`` console script (rebar.mcp_server)
 
-The write path wraps the bundled bash dispatcher; reads return parsed JSON.
-The stdlib-only native read API (ticket_reducer / ticket_graph) is re-exported
-for callers that want in-process bulk reads without subprocess overhead.
+Ticket reads and writes run in-process against the event-sourced store (the Jira
+reconciler runs as a subprocess). The reducer and graph APIs (``rebar.reducer`` /
+``rebar.graph``) are re-exported for callers that want in-process bulk reads.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import sys
 from typing import Any
 
 from rebar import config
-from rebar._engine import dispatcher, engine_dir, engine_env, run
+from rebar._engine import engine_dir, engine_env
 
 try:
     # Single source of truth: derive the version from the installed package
@@ -49,17 +49,6 @@ class ConcurrencyError(RebarError):
 
 
 # ── Internals ────────────────────────────────────────────────────────────────
-def _run(args, *, repo_root=None, check=True, input=None, env_extra=None):
-    return run(
-        args,
-        repo_root=repo_root,
-        input=input,
-        check=False,
-        capture=True,
-        env_extra=env_extra,
-    )
-
-
 def _ok(cp: subprocess.CompletedProcess, *, what: str) -> str:
     if cp.returncode != 0:
         raise RebarError(
@@ -766,7 +755,6 @@ from rebar._native import (  # noqa: E402
 __all__ = [
     "__version__",
     "engine_dir",
-    "dispatcher",
     "config",
     # exceptions
     "RebarError",

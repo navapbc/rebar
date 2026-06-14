@@ -1,9 +1,9 @@
 """WS4: the engine must resolve to a REAL on-disk directory (no zipimport).
 
-rebar's engine is bash + python helpers exec'd as real files. ``engine_dir()``
-asserts the resolved path is a real directory and raises a clear RuntimeError
-otherwise, so a zip-imported / mispackaged install fails loudly instead of with
-an opaque bash error.
+rebar's engine assets (the ``rebar_reconciler`` package + the Jira capability
+probe) are exec'd as real files. ``engine_dir()`` asserts the resolved path is a
+real directory and raises a clear RuntimeError otherwise, so a zip-imported /
+mispackaged install fails loudly instead of with an opaque import error.
 """
 
 from __future__ import annotations
@@ -19,9 +19,11 @@ from rebar import _engine
 def test_engine_dir_is_real_on_disk_directory():
     p = _engine.engine_dir()
     assert p.is_dir(), f"engine_dir() must be a real directory, got {p!s}"
-    # The dispatcher and the alias wordlist must be present as real files.
-    assert _engine.dispatcher().is_file()
+    # The engine assets must be present as real files/dirs: the reconciler, the
+    # Jira probe, and the alias wordlist (what engine_env launches/needs).
     assert _engine.wordlist_path().is_file()
+    assert (p / "rebar_reconciler").is_dir()
+    assert (p / "jira-capability-probe.py").is_file()
 
 
 def test_engine_dir_rejects_non_directory(monkeypatch):
@@ -45,10 +47,11 @@ def test_library_path_exposes_no_generic_top_level_engine_names():
     """AC1: importing the library must not make generic engine module names
     importable as top-level packages.
 
-    The engine's Python is now real ``rebar.*`` subpackages; the library no
-    longer inserts the engine dir onto ``sys.path``. So after ``import rebar``,
-    bare ``import ticket_reducer`` (etc.) must fail — those names only resolve
-    inside engine subprocesses (via ``engine_env``'s PYTHONPATH compat shims).
+    The engine's Python is real ``rebar.*`` subpackages; the library does not
+    insert the engine dir onto ``sys.path``. So after ``import rebar``, bare
+    ``import ticket_reducer`` (etc.) must fail — those names are not ``rebar``
+    modules, and ``rebar_reconciler`` resolves only inside engine subprocesses
+    via ``engine_env``'s PYTHONPATH (which this probe strips).
 
     Run in a clean subprocess: this tier's conftest deliberately puts the engine
     dir on ``sys.path`` for the engine unit tests, which would mask the check.

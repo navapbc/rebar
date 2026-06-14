@@ -34,8 +34,7 @@ from types import ModuleType
 import pytest
 
 # ---------------------------------------------------------------------------
-# Reducer under test — the in-process implementation (Tier E7: the bash-era
-# ``ticket-reducer.py`` helper was deleted; ``rebar.reducer`` is the sole impl).
+# Reducer under test — ``rebar.reducer``.
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")

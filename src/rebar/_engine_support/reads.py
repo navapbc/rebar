@@ -757,7 +757,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
         print(
-            "Usage: ticket-reads.py <show|list|deps|ready|search> [args...]",
+            "Usage: rebar <show|list|deps|ready|search> [args...]",
             file=sys.stderr,
         )
         return 1

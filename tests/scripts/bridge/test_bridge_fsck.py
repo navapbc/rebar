@@ -56,9 +56,8 @@ from types import ModuleType
 import pytest
 
 # ---------------------------------------------------------------------------
-# Audit implementation under test — the in-process bridge-fsck (Tier E7: the
-# bash-era ``ticket-bridge-fsck.py`` helper was deleted; the sole impl now lives
-# in ``rebar._engine_support.bridge_fsck``, exposing audit_bridge_mappings/main).
+# Audit implementation under test — ``rebar._engine_support.bridge_fsck``
+# (exposing audit_bridge_mappings/main).
 # ---------------------------------------------------------------------------
 
 

@@ -443,10 +443,9 @@ def _read_local_tickets(repo_root: Path, *, no_sync: bool = False) -> list[dict]
     import os as _os  # local import to avoid top-level dep
     import subprocess as _sp  # local import to avoid top-level dep
 
-    cli = Path(
-        _os.environ.get("REBAR_TICKET_CLI")
-        or (Path(__file__).resolve().parent.parent / "rebar")
-    )
+    from rebar._engine import in_process_cli
+
+    cli = Path(_os.environ.get("REBAR_TICKET_CLI") or in_process_cli())
     if not cli.exists():
         print(  # noqa: T201
             "reconcile: ticket CLI not found — local_tickets=[]",

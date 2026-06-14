@@ -1,10 +1,7 @@
-"""next-batch characterization (Tier C, post-retirement) — docs/bash-migration.md §5.
+"""next-batch characterization — docs/bash-migration.md §5.
 
-Tier C was retired on 2026-06-12: the bash ``ticket-next-batch.sh`` and the
-``REBAR_COMPUTE`` switch are gone, so this file no longer dual-runs bash-vs-python.
-It is now the durable python characterization that outlived the second
-implementation (the a93885ed pattern): golden output for the conflict-aware
-selector, the determinism fix, error/exit contracts, and library/schema shape.
+The python characterization of the conflict-aware selector: golden output, the
+determinism fix, error/exit contracts, and the library/schema shape.
 """
 
 from __future__ import annotations
@@ -18,9 +15,8 @@ import pytest
 
 from rebar._engine import in_process_cli
 
-# Drive the in-process rebar CLI (Tier E7: the bash dispatcher is deleted). The
-# next-batch arm routes to the same in-process compute the bash arm called, so
-# this stays a faithful characterization of the production output.
+# Drive the in-process rebar CLI; the next-batch arm routes to the in-process
+# compute, so this characterizes the production output.
 _CLI = in_process_cli()
 
 
