@@ -46,23 +46,18 @@ def _new_ticket_id() -> str:
 
 
 def _compute_alias(ticket_id: str) -> str:
-    """Human alias via the shared ticket-alias-compute.py (same script bash calls).
+    """Human alias via the in-process reducer (``rebar.reducer._alias``).
 
-    Honors TICKET_WORDLIST_PATH (engine_env sets it), else the bundled wordlist.
-    Emits the same ``WARN: ...hex fallback...`` line bash does when the wordlist is
-    missing. Returns the alias (or the hex fallback the script prints).
+    Tier E E6.5a: replaced the ``ticket-alias-compute.py`` subprocess with the
+    canonical in-process helper — byte-identical adj-noun-noun derivation, the same
+    8-hex fallback when the wordlist is unavailable (it self-resolves the bundled
+    wordlist and honours ``TICKET_WORDLIST_PATH``), and its own one-shot WARN. The
+    ``or`` guards the ``None`` a malformed (<8-hex) id would return; native ids are
+    always 16-hex so this is belt-and-suspenders.
     """
-    script = _engine.engine_dir() / "ticket-alias-compute.py"
-    wordlist = os.environ.get("TICKET_WORDLIST_PATH") or str(_engine.wordlist_path())
-    proc = subprocess.run(
-        [sys.executable, str(script), ticket_id, wordlist],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if "FALLBACK" in proc.stderr:
-        print("WARN: ticket-wordlist.txt not found — using hex fallback alias", file=sys.stderr)
-    return proc.stdout.strip()
+    from rebar.reducer._alias import compute_alias
+
+    return compute_alias(ticket_id) or ticket_id.replace("-", "")[:8]
 
 
 def create_core(

@@ -6,7 +6,43 @@ opus-reviewed cluster decomposition + the live handoff state. End-state AC: **on
 three facades (lib/CLI/MCP); zero standalone shell tests; no embedded heredocs; no `_engine/*.sh`.**
 Tier E has NO kill-switch — it is a structural cutover; rollback is `git revert`.
 
-## STATUS (2026-06-13) — read this first
+## STATUS (2026-06-14, session 2) — read this FIRST
+
+**Done this session, committed to local `main` (NOT pushed — awaiting user direction):**
+
+| Cluster | Commit | What |
+|---|---|---|
+| E5 | `fd94e4b1` | `bridge-status` + `purge-bridge` in-process (`_engine_support/bridge.py`, `_commands/purge_bridge.py`); 10 byte-parity tests. |
+| E5b | `fb1b7fa7` | reconciler rewired off bare `event_append`/`ticket_reducer` → `rebar._store`/`rebar.reducer`; reconcile launch `python3`→`sys.executable`. **LIVE-DIG probe PASSED** (DIG-5764 create→validate-all-fields→inbound→delete, zero residue). Opus-reviewed APPROVE-WITH-NITS (fixes applied). |
+| E5c | `c7b36bd0` | deleted the bare `_engine/event_append.py` + its obsolete test. |
+| E6a | `b3cbfe6a` | rewired the rebar PACKAGE off the shims (`reducer/_processors.py`→`_engine_support.resolver`; interface/reconciler tests→`rebar.graph`/`rebar.reducer`). |
+| E6.5a (1/6) | (pending) | `composer._compute_alias` → `rebar.reducer._alias.compute_alias` (alias-compute subprocess severed). |
+
+Full non-integration suite green at 1805+ (one "error" in background runs is a false
+positive: the `_no_repo_commits` guard trips when a `git commit` runs DURING the
+suite — do not commit while a background full-suite is running).
+
+### CRITICAL — E6.5a prerequisites (grounded 2026-06-14; MORE than the original E6/E7 text)
+
+Before ANY engine deletion (E7), every in-process `rebar.*` path that still
+subprocesses the engine MUST be severed, or deleting the engine silently breaks
+production. Grounded list (grep of `src/rebar` excl. `_engine/`+reconciler):
+1. ✅ `composer._compute_alias` → `reducer._alias.compute_alias` (byte-parity verified).
+2. ⬜ `_engine_support/resolver.py` → still subprocesses `ticket-alias-resolve.py`; port the alias/jira_key scan in-process.
+3. ⬜ `composer.link_cli` `--dry-run` → subprocesses `ticket-link.sh --dry-run` (normal link is already in-process via `link_core`); port or drop the dry-run preview.
+4. ⬜ `transition._unarchive` (`archived→open`) → subprocesses `ticket-revert.sh`; port the REVERT-latest-ARCHIVED logic in-process (reuse `rebar._commands` revert core).
+5. ⬜ `rebar.bridge_fsck()` (+ MCP) → `_run(["bridge-fsck"])` → dispatcher → `ticket-bridge-fsck.py`; port to `rebar._engine_support.bridge_fsck`, add a `_cli` `bridge-fsck` arm.
+6. ⬜ `bridge-probe` (`_cli._passthrough`) → dispatcher → `jira-capability-probe.py`; port to `rebar._commands.bridge_probe`, add a `_cli` arm. **LIVE-DIG gate binds (now user-authorized).**
+   Plus: `validate._raw_tickets` subprocesses `$TICKET_CMD list` ONLY when `TICKET_CMD` is injected (a TEST seam; production is in-process `list_states`) — update those tests in E8. `reads.py`/`transition._short_head`/`_init.py` subprocess only `git` (benign, stays).
+
+### Then (opus-grounded ordering): E8 → E7 → E9
+- **E8 (before E7):** write the ~11 TRANSLATE pytest tests (in-process) for the confirmed coverage GAPs BEFORE deleting bash sources (fsck PUSH_PENDING; has-tag `detected_by`∩bug; reconciler `.scratch/` exclusion; init exclude idempotent upgrade; close O(open-children); id-collision opt-in; symlink-resolve; cache-gitignored; help-drift; push-policy residue) + 1 `sync`-invariant regression test. ~56 suites are DELETE-redundant (covered by `test_eN_*`/reducer/graph/interface tiers), ~17 DELETE-machinery.
+- **E7 (atomic, one commit):** delete `_engine/rebar`+`ticket`+all 36 `.sh`+dispatcher-only `.py` helpers+the 5 shims+`ticket_txn.py`; SAME commit delete all `.sh` suites + `tests/lib/*.sh` + the `test_bash_suites.py` collector + the 15 `test_eN_*.py` parity tests + machinery tests (`test_engine_dir.py`, `_engine_path.py`, `test_ticket_txn.py`) + the conftest engine-`sys.path` inserts + `engine_env`/`engine_dir`/`dispatcher`/`run` (keep/relocate `wordlist_path` for `_alias`).
+- **E9:** docs (architecture offender table→empty; bash-migration §7 DONE; help golden now `_cli/_help`-anchored) + exhaustive dogfood + close `adult-oxide-slave` then `nervy-hold-dip`.
+
+---
+
+## STATUS (2026-06-13) — prior session
 
 **Done, green, pushed to `origin/main` (HEAD `482bbed8`):**
 
