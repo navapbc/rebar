@@ -46,6 +46,10 @@ _DESCENDANTS = frozenset({"list-descendants"})
 # Per-ticket gate arms the dispatcher ran with NO _ensure_initialized (they read
 # transitively via `ticket show`, so the gate CLI itself does no auto-init).
 _GATES = frozenset({"clarity-check", "check-ac", "quality-check", "summary"})
+# Write/lifecycle arms (E3): full auto-init + reconverge before the in-process write.
+_LIFECYCLE = frozenset({"transition", "reopen", "claim"})
+# Compaction arms (E3): full auto-init before the in-process SNAPSHOT write.
+_COMPACT = frozenset({"compact", "compact-all"})
 # Leaf-write arms: full auto-init + reconverge before the in-process write.
 _WRITES_FULL = frozenset(
     {
@@ -115,6 +119,11 @@ def _emit_subcommand_help(sub: str) -> int:
 
 def _dispatch(sub: str, rest: list[str]) -> int:
     """Route a known subcommand to its in-process or passthrough implementation."""
+    if sub == "scratch":
+        # Filesystem-only per-ticket store — NO auto-init (matches the dispatcher).
+        from rebar._commands import scratch
+
+        return scratch.scratch_cli(rest)
     if sub in _READS_INIT_ONLY:
         ensure_initialized(init_only=True)
         from rebar._engine_support import reads
@@ -124,6 +133,27 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         from rebar._engine_support import reads
 
         return reads.main([sub, *rest])
+    if sub in _LIFECYCLE:
+        ensure_initialized(init_only=False)
+        from rebar._commands import transition as _transition
+
+        if sub == "reopen":
+            return _transition.reopen_cli(rest)
+        if sub == "claim":
+            return _transition.claim_cli(rest)
+        return _transition.transition_cli(rest)
+    if sub in _COMPACT:
+        ensure_initialized(init_only=False)
+        from rebar._commands import compact as _compact
+
+        if sub == "compact-all":
+            return _compact.compact_all_cli(rest)
+        return _compact.compact_cli(rest)
+    if sub == "delete":
+        ensure_initialized(init_only=False)
+        from rebar._commands import delete as _delete
+
+        return _delete.delete_cli(rest)
     if sub in _WRITES_FULL:
         ensure_initialized(init_only=False)
         from rebar._commands import main as commands_main

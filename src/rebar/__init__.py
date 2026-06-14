@@ -131,20 +131,45 @@ def transition(
     matches ``current_status`` (engine exit code 10), and :class:`RebarError`
     for other failures.
     """
-    cp = _run(
-        ["transition", ticket_id, current_status, target_status, "--output", "json"],
-        repo_root=repo_root,
-    )
-    if cp.returncode == 10:
+    # In-process (Tier E E3): resolve the id, then run the shared transition core
+    # (ticket-transition.sh was retired from this path). The structured result
+    # {ticket_id, from, to, newly_unblocked[]} is the single source of truth.
+    from rebar._commands import transition as _transition
+    from rebar._commands._seam import CommandError
+    from rebar._commands.txn import ConcurrencyMismatch
+    from rebar._engine_support.resolver import resolve_ticket_id
+
+    tracker = str(config.tracker_dir(repo_root))
+    resolved = resolve_ticket_id(ticket_id, tracker)
+    if resolved is None:
+        raise RebarError(
+            f"rebar transition failed (exit 1): Error: ticket '{ticket_id}' not found",
+            returncode=1,
+            stderr=f"Error: ticket '{ticket_id}' not found\n",
+        )
+    try:
+        result = _transition.transition_compute(
+            resolved, current_status, target_status, repo_root=repo_root
+        )
+    except ConcurrencyMismatch as exc:
         raise ConcurrencyError(
             f"transition rejected: {ticket_id} is no longer '{current_status}'. "
-            f"{cp.stderr.strip()}",
+            f"{exc.message}",
             returncode=10,
-            stderr=cp.stderr,
-        )
-    # Single source of truth: return the engine's structured result
-    # {ticket_id, from, to, newly_unblocked[]} rather than re-deriving it.
-    return _json(cp, what="transition")
+            stderr=exc.message,
+        ) from None
+    except CommandError as exc:
+        raise RebarError(
+            f"rebar transition failed (exit {exc.returncode}): {exc.message}",
+            returncode=exc.returncode,
+            stderr=exc.message,
+        ) from None
+    return {
+        "ticket_id": result["ticket_id"],
+        "from": result["from"],
+        "to": result["to"],
+        "newly_unblocked": result["newly_unblocked"],
+    }
 
 
 def claim(ticket_id: str, *, assignee=None, repo_root=None) -> dict:
@@ -156,20 +181,38 @@ def claim(ticket_id: str, *, assignee=None, repo_root=None) -> dict:
     other failures. This is the optimistic-concurrency primitive parallel agents
     use to grab work without double-assignment.
     """
-    args = ["claim", ticket_id, "--output", "json"]
-    if assignee:
-        args += [f"--assignee={assignee}"]
-    cp = _run(args, repo_root=repo_root)
-    if cp.returncode == 10:
-        raise ConcurrencyError(
-            f"claim rejected: {ticket_id} is not open (already claimed). "
-            f"{cp.stderr.strip()}",
-            returncode=10,
-            stderr=cp.stderr,
+    # In-process (Tier E E3): resolve the id, then run the shared claim core
+    # (ticket-claim.sh was retired from this path). Returns the structured result
+    # {ticket_id, status, assignee}.
+    from rebar._commands import transition as _transition
+    from rebar._commands._seam import CommandError
+    from rebar._commands.txn import ConcurrencyMismatch
+    from rebar._engine_support.resolver import resolve_ticket_id
+
+    tracker = str(config.tracker_dir(repo_root))
+    resolved = resolve_ticket_id(ticket_id, tracker)
+    if resolved is None:
+        raise RebarError(
+            f"rebar claim failed (exit 1): Error: ticket '{ticket_id}' not found",
+            returncode=1,
+            stderr=f"Error: ticket '{ticket_id}' not found\n",
         )
-    # Single source of truth: return the engine's structured result
-    # {ticket_id, status, assignee} rather than re-deriving it.
-    return _json(cp, what="claim")
+    try:
+        return _transition.claim_compute(
+            resolved, assignee=assignee or "", repo_root=repo_root
+        )
+    except ConcurrencyMismatch as exc:
+        raise ConcurrencyError(
+            f"claim rejected: {ticket_id} is not open (already claimed). {exc.message}",
+            returncode=10,
+            stderr=exc.message,
+        ) from None
+    except CommandError as exc:
+        raise RebarError(
+            f"rebar claim failed (exit {exc.returncode}): {exc.message}",
+            returncode=exc.returncode,
+            stderr=exc.message,
+        ) from None
 
 
 def reopen(ticket_id: str, *, repo_root=None) -> dict:
@@ -381,8 +424,24 @@ def archive(ticket_id: str, *, repo_root=None) -> None:
 
 
 def compact(ticket_id: str | None = None, *, repo_root=None) -> None:
-    args = ["compact"] + ([ticket_id] if ticket_id else [])
-    _ok(_run(args, repo_root=repo_root), what="compact")
+    # In-process (Tier E E3): compact-on-id via the shared compaction core
+    # (ticket-compact.sh retired from this path). Output is captured (the bash
+    # library wrapper captured it too); failures raise RebarError.
+    import contextlib
+    import io
+
+    from rebar._commands import compact as _compact
+
+    out, err = io.StringIO(), io.StringIO()
+    argv = [ticket_id] if ticket_id else []
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = _compact.compact_cli(argv, repo_root=repo_root)
+    if rc != 0:
+        raise RebarError(
+            f"rebar compact failed (exit {rc}): {err.getvalue().strip()}",
+            returncode=rc,
+            stderr=err.getvalue(),
+        )
 
 
 # ── Read path (in-process via rebar._reads; alias-aware, returns parsed JSON) ──
