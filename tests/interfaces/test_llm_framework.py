@@ -319,12 +319,16 @@ def test_runner_selection_and_stubs() -> None:
     from rebar.llm.config import LLMConfig
     from rebar.llm.errors import LLMConfigError
     from rebar.llm.runner import (
-        FakeRunner, LangflowRunner, LangGraphRunner, RunRequest, get_runner,
+        DeepAgentsRunner, FakeRunner, LangflowRunner, LangGraphRunner, RunRequest,
+        get_runner,
     )
 
     assert isinstance(get_runner(LLMConfig(runner="fake")), FakeRunner)
     assert isinstance(get_runner(LLMConfig(runner="langflow")), LangflowRunner)
     assert isinstance(get_runner(LLMConfig(runner="langgraph")), LangGraphRunner)
+    assert isinstance(get_runner(LLMConfig(runner="deepagents")), DeepAgentsRunner)
+    # The DEFAULT (review) runner is langgraph, NOT deepagents.
+    assert isinstance(get_runner(LLMConfig()), LangGraphRunner)
     fake = FakeRunner(findings=[{"severity": "low", "dimension": "d", "detail": "x"}])
     assert isinstance(get_runner(LLMConfig(runner="langgraph"), override=fake), FakeRunner)
 
@@ -340,6 +344,36 @@ def test_runner_selection_and_stubs() -> None:
     if not _module_available("langchain"):
         with pytest.raises(LLMConfigError):
             LangGraphRunner(LLMConfig(repo_path=".")).run(req)
+    # deepagents runner without the extra installed gives the same clear error.
+    if not _module_available("deepagents"):
+        with pytest.raises(LLMConfigError):
+            DeepAgentsRunner(LLMConfig(repo_path=".")).run(req)
+
+
+def test_deepagents_runner_assembles(tmp_path: Path) -> None:
+    """The opt-in deepagents runner wires a read-only, repo-rooted deep agent with
+    our findings schema (construction only; no model call). Skips without the lib."""
+    pytest.importorskip("deepagents")
+    pytest.importorskip("langchain_anthropic")
+    from rebar.llm import findings as F
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.runner import _build_model, _import_deepagents, _import_langgraph
+
+    _, ToolStrategy, init_chat_model = _import_langgraph()
+    create_deep_agent, FilesystemBackend, FilesystemPermission = _import_deepagents()
+    model = _build_model(
+        LLMConfig(model="claude-opus-4-8", api_key="test", repo_path=str(tmp_path)),
+        init_chat_model,
+    )
+    agent = create_deep_agent(
+        model=model,
+        tools=[],
+        system_prompt="review",
+        backend=FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True),
+        permissions=[FilesystemPermission(operations=["write"], paths=["/**"], mode="deny")],
+        response_format=ToolStrategy(F.findings_response_model(), handle_errors=True),
+    )
+    assert agent is not None
 
 
 # ── review_ticket end-to-end (FakeRunner against a real store) ────────────────

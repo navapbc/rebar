@@ -113,7 +113,6 @@ class LangGraphRunner:
         create_agent, ToolStrategy, init_chat_model = _import_langgraph()
         model = _build_model(cfg, init_chat_model)
         tools = _filesystem_tools(cfg.repo_path) + _mcp_tools(cfg.mcp_servers)
-        response_model = _findings.findings_response_model()
         # ToolStrategy (not ProviderStrategy) is deliberate: it is provider-PORTABLE
         # (works across Anthropic/OpenAI/Gemini), with in-loop self-correction
         # (handle_errors). NOTE: ToolStrategy forces tool_choice, which Anthropic
@@ -123,45 +122,49 @@ class LangGraphRunner:
             model,
             tools,
             system_prompt=req.system_prompt,
-            response_format=ToolStrategy(response_model, handle_errors=True),
+            response_format=ToolStrategy(_findings.findings_response_model(), handle_errors=True),
         )
-        invoke_cfg: dict = {"recursion_limit": cfg.max_iterations}
-        with _trace(cfg) as (trace_id, callbacks):
-            if callbacks:
-                invoke_cfg["callbacks"] = callbacks
-            if req.langfuse_prompt is not None:
-                # Best-effort prompt→trace linkage. NOTE: Langfuse's first-class
-                # linkage attaches `langfuse_prompt` to a LangChain PromptTemplate's
-                # metadata; create_agent builds messages internally (no template),
-                # so this run-level metadata may not register the link in every SDK
-                # version. Harmless and forward-compatible if it doesn't.
-                invoke_cfg["metadata"] = {"langfuse_prompt": req.langfuse_prompt}
-            outcome = agent.invoke(
-                {"messages": [{"role": "user", "content": req.instructions}]},
-                config=invoke_cfg,
-            )
-        structured = outcome.get("structured_response")
-        if structured is None:
-            # #36349: a plain-text turn yields no structured payload. An empty
-            # review is indistinguishable from a clean one, so fail loudly rather
-            # than silently returning zero findings.
-            raise StructuredOutputError(
-                "the agent returned no structured findings (no structured_response). "
-                "Treating this as a failed review rather than a clean one."
-            )
-        data = structured.model_dump() if hasattr(structured, "model_dump") else dict(structured)
-        result = _findings.build_result(
-            data.get("findings", []),
-            runner=self.name,
-            model=cfg.model,
-            trace_id=trace_id,
-            target=req.target,
-            reviewers=req.reviewers,
-            summary=data.get("summary"),
-            reviewer_id=req.reviewers[0] if len(req.reviewers) == 1 else None,
+        outcome, trace_id = _invoke(agent, cfg, req)
+        return _finalize_review(outcome, cfg, req, self.name, trace_id)
+
+
+# ── DeepAgents runner (opt-in harness) ────────────────────────────────────────
+class DeepAgentsRunner:
+    """Run the operation on LangChain's deepagents harness (planning, subagents,
+    large-result eviction) instead of our bare create_agent loop.
+
+    OPT-IN (``REBAR_LLM_RUNNER=deepagents``): the review default stays the
+    ``langgraph`` runner with our own read-only, citation-disciplined file tools —
+    this runner is the seam for future deepagents-based task types. It uses
+    deepagents' native filesystem over a repo-rooted ``FilesystemBackend``, made
+    **read-only** via a write-denying ``FilesystemPermission`` (confined to the
+    repo root). NOTE: our state-dir deny-list (`.git`/`.tickets-tracker`/
+    `.bridge_state`) is enforced on the citation OUTPUT (resolve_citations) rather
+    than on reads here; use the default langgraph runner for read-side deny-listing.
+    Output is still constrained to our findings schema, so it returns a review_result."""
+
+    name = "deepagents"
+
+    def __init__(self, config: LLMConfig):
+        self._config = config
+
+    def run(self, req: RunRequest) -> dict:
+        cfg = self._config
+        _, ToolStrategy, init_chat_model = _import_langgraph()
+        create_deep_agent, FilesystemBackend, FilesystemPermission = _import_deepagents()
+        model = _build_model(cfg, init_chat_model)
+        backend = FilesystemBackend(root_dir=cfg.repo_path or ".", virtual_mode=True)
+        read_only = [FilesystemPermission(operations=["write"], paths=["/**"], mode="deny")]
+        agent = create_deep_agent(
+            model=model,
+            tools=_mcp_tools(cfg.mcp_servers),  # deepagents supplies its own ls/read/grep/glob
+            system_prompt=req.system_prompt,
+            backend=backend,
+            permissions=read_only,
+            response_format=ToolStrategy(_findings.findings_response_model(), handle_errors=True),
         )
-        _findings.resolve_citations(result, cfg.repo_path)
-        return _findings.validate_result(result)
+        outcome, trace_id = _invoke(agent, cfg, req)
+        return _finalize_review(outcome, cfg, req, self.name, trace_id)
 
 
 def get_runner(config: LLMConfig, *, override: Runner | None = None) -> Runner:
@@ -173,7 +176,55 @@ def get_runner(config: LLMConfig, *, override: Runner | None = None) -> Runner:
         return FakeRunner()
     if config.runner == "langflow":
         return LangflowRunner(config)
+    if config.runner == "deepagents":
+        return DeepAgentsRunner(config)
     return LangGraphRunner(config)
+
+
+def _invoke(agent, cfg: LLMConfig, req: RunRequest) -> tuple[dict, str | None]:
+    """Invoke a compiled agent under the (optional) Langfuse trace, returning
+    ``(outcome, trace_id)``. Shared by the langgraph + deepagents runners."""
+    invoke_cfg: dict = {"recursion_limit": cfg.max_iterations}
+    with _trace(cfg) as (trace_id, callbacks):
+        if callbacks:
+            invoke_cfg["callbacks"] = callbacks
+        if req.langfuse_prompt is not None:
+            # Best-effort prompt→trace linkage (see note: create_agent builds
+            # messages internally, so this run-level metadata may not register).
+            invoke_cfg["metadata"] = {"langfuse_prompt": req.langfuse_prompt}
+        outcome = agent.invoke(
+            {"messages": [{"role": "user", "content": req.instructions}]},
+            config=invoke_cfg,
+        )
+    return outcome, trace_id
+
+
+def _finalize_review(outcome: dict, cfg: LLMConfig, req: RunRequest,
+                     runner_name: str, trace_id: str | None) -> dict:
+    """Turn an agent outcome into a validated review_result. Shared by the
+    langgraph + deepagents runners."""
+    structured = outcome.get("structured_response")
+    if structured is None:
+        # A plain-text turn yields no structured payload. An empty review is
+        # indistinguishable from a clean one, so fail loudly rather than silently
+        # returning zero findings.
+        raise StructuredOutputError(
+            "the agent returned no structured findings (no structured_response). "
+            "Treating this as a failed review rather than a clean one."
+        )
+    data = structured.model_dump() if hasattr(structured, "model_dump") else dict(structured)
+    result = _findings.build_result(
+        data.get("findings", []),
+        runner=runner_name,
+        model=cfg.model,
+        trace_id=trace_id,
+        target=req.target,
+        reviewers=req.reviewers,
+        summary=data.get("summary"),
+        reviewer_id=req.reviewers[0] if len(req.reviewers) == 1 else None,
+    )
+    _findings.resolve_citations(result, cfg.repo_path)
+    return _findings.validate_result(result)
 
 
 # ── lazy imports + helpers ────────────────────────────────────────────────────
@@ -188,6 +239,18 @@ def _import_langgraph():
             "pip install 'nava-rebar[agents]'"
         ) from exc
     return create_agent, ToolStrategy, init_chat_model
+
+
+def _import_deepagents():
+    try:
+        from deepagents import FilesystemPermission, create_deep_agent
+        from deepagents.backends.filesystem import FilesystemBackend
+    except ImportError as exc:
+        raise LLMConfigError(
+            "the deepagents runner needs the 'agents' extra (deepagents). "
+            "Install it with: pip install 'nava-rebar[agents]'"
+        ) from exc
+    return create_deep_agent, FilesystemBackend, FilesystemPermission
 
 
 def _build_model(cfg: LLMConfig, init_chat_model):

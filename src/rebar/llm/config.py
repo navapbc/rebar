@@ -29,7 +29,11 @@ from importlib.util import find_spec
 from rebar import config as _root_config
 
 DEFAULT_MODEL = "claude-opus-4-8"
-RUNNERS = ("langgraph", "langflow", "fake")
+# Execution backends. `langgraph` is the default for review; `deepagents` is an
+# opt-in harness (planning/subagents/eviction) intended mainly for future
+# task types — review stays on langgraph. `langflow` is a REST stub; `fake` is
+# the offline test seam.
+RUNNERS = ("langgraph", "deepagents", "langflow", "fake")
 
 # Model-name prefix → provider, mirroring LangChain init_chat_model inference (used
 # for diagnostics + clear errors; init_chat_model does the authoritative dispatch).
@@ -195,6 +199,7 @@ def available_backends() -> dict:
         "provider_anthropic": _module_available("langchain_anthropic"),
         "provider_openai": _module_available("langchain_openai"),
         "provider_google": _module_available("langchain_google_genai"),
+        "deepagents": _module_available("deepagents"),
         "langchain_mcp_adapters": _module_available("langchain_mcp_adapters"),
         "langfuse": _module_available("langfuse"),
         "anthropic_api_key": bool(os.environ.get("ANTHROPIC_API_KEY")),

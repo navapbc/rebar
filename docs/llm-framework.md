@@ -50,12 +50,13 @@ seam:
 
 | Runner | When | Notes |
 |--------|------|-------|
-| `LangGraphRunner` | default, in-process | `langchain.agents.create_agent` + `ToolStrategy` (robust in-loop structured output; the legacy `create_react_agent(response_format=…)` makes a context-losing post-loop call and is avoided). Tools: read-only, line-numbered repo file tools + MCP via `MultiServerMCPClient`. Tracing: Langfuse callback. Needs `nava-rebar[agents]` + `ANTHROPIC_API_KEY`. |
+| `LangGraphRunner` | **default, in-process; the review runner** | `langchain.agents.create_agent` + `ToolStrategy` (robust in-loop structured output; the legacy `create_react_agent(response_format=…)` makes a context-losing post-loop call and is avoided). Tools: read-only, line-numbered repo file tools + MCP via `MultiServerMCPClient`. Tracing: Langfuse callback. Needs `nava-rebar[agents]` + `ANTHROPIC_API_KEY`. |
+| `DeepAgentsRunner` | **opt-in** (`REBAR_LLM_RUNNER=deepagents`) | Runs on LangChain's [deepagents](https://github.com/langchain-ai/deepagents) harness (planning, subagents, large-result eviction) via `create_deep_agent`, with deepagents' native filesystem over a repo-rooted `FilesystemBackend` made **read-only** by a write-denying `FilesystemPermission`, plus our findings schema (so it still returns a `review_result`). **The review default stays `langgraph`** with our own citation-disciplined tools — this runner is the seam for future deepagents-based task types. Caveat: the rebar state-dir deny-list is enforced on citation *output* here, not on reads (use `langgraph` for read-side deny-listing). |
 | `LangflowRunner` | other environments | Documented **stub**. The protocol seam is defined so a hosted Langflow deployment (`POST /api/v1/run/{flow_id}`, header `x-api-key`, body `{"input_value", "input_type":"chat", "output_type":"chat"}`) can be wired without touching the operation layer. When implementing it, note the response text is **deeply nested** (`data["outputs"][0]["outputs"][0]["outputs"]["message"]["message"]`, shape varies by output component) — extraction must walk it defensively. This environment can't run Langflow, so it raises a clear error until configured. |
 | `FakeRunner` | offline / tests | Returns canned findings — the dependency-injection seam that makes the whole pipeline (and all three interfaces) testable with no model, network, or extra. |
 
-Select with `REBAR_LLM_RUNNER` (`langgraph` default / `langflow` / `fake`), or pass
-an explicit `runner=` to an operation.
+Select with `REBAR_LLM_RUNNER` (`langgraph` default / `deepagents` / `langflow` /
+`fake`), or pass an explicit `runner=` to an operation.
 
 ## Model providers (not Anthropic-only)
 
@@ -148,7 +149,7 @@ for the future code-review op's "deterministic reviewer-selection rules."
 
 | Var | Default | Purpose |
 |-----|---------|---------|
-| `REBAR_LLM_RUNNER` | `langgraph` | in-process backend (`langgraph`/`langflow`/`fake`) |
+| `REBAR_LLM_RUNNER` | `langgraph` | execution backend (`langgraph`/`deepagents`/`langflow`/`fake`) |
 | `REBAR_LLM_MODEL` | `claude-opus-4-8` | model id |
 | `REBAR_LLM_MODEL_PROVIDER` | inferred | provider for `init_chat_model` (`anthropic`/`openai`/`google_genai`/…); inferred from the model name if unset |
 | `REBAR_LLM_BASE_URL` | — | OpenAI-compatible endpoint (LMStudio/Ollama/vLLM) |
