@@ -91,6 +91,24 @@ def _git(tracker_dir: str, *args: str) -> None:
         raise CommandError(f"Error: git operation failed: {cp.stderr}", returncode=2)
 
 
+def _unstage(tracker_dir: str, *abs_paths: str | None) -> None:
+    """Best-effort: drop ``abs_paths`` from the git index (and working tree). On a
+    commit failure the event file was already ``git add``-ed; removing it from disk
+    alone leaves it STAGED, so the next write's commit would sweep the orphaned
+    event in. Reset the index entry too. Held under the write lock, so this is the
+    sole writer. Never raises (cleanup path)."""
+    rels = [os.path.relpath(p, tracker_dir) for p in abs_paths if p]
+    if not rels:
+        return
+    try:
+        subprocess.run(
+            ["git", "-C", tracker_dir, "reset", "-q", "--", *rels],
+            capture_output=True, text=True,
+        )
+    except OSError:
+        pass
+
+
 def transition_core(
     tracker_dir: str,
     ticket_id: str,
@@ -191,6 +209,7 @@ def transition_core(
         _git(tracker_dir, "commit", "-q", "--no-verify", "-m", f"ticket: STATUS {ticket_id}")
     except CommandError:
         if final_path is not None:
+            _unstage(tracker_dir, final_path)  # drop from index (not just disk)
             try:
                 os.remove(final_path)
             except OSError:
@@ -393,6 +412,7 @@ def claim_core(
         _git(tracker_dir, "add", *rel_paths)
         _git(tracker_dir, "commit", "-q", "--no-verify", "-m", f"ticket: CLAIM {ticket_id}")
     except CommandError:
+        _unstage(tracker_dir, status_path, edit_path)  # drop from index (not just disk)
         for p in (status_path, edit_path):
             if p:
                 try:

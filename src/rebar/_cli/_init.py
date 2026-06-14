@@ -48,7 +48,9 @@ def _resolve_repo_root() -> str:
 
     Exits 1 with the dispatcher's exact message when none resolves.
     """
-    root = os.environ.get("PROJECT_ROOT") or os.environ.get("REBAR_ROOT")
+    # Same precedence as config.repo_root (REBAR_ROOT > PROJECT_ROOT > git) so the
+    # gate inspects the SAME repo the commands operate on and init writes to.
+    root = os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT")
     if not root:
         root = _git_toplevel()
     if not root:
@@ -123,7 +125,13 @@ def ensure_initialized(*, init_only: bool) -> None:
         return
 
     repo_root = _resolve_repo_root()
-    if not (Path(repo_root) / ".tickets-tracker").is_dir():
+    # Check existence at the SAME location init writes / commands read
+    # (config.tracker_dir), not a hard-coded repo_root/.tickets-tracker — otherwise a
+    # REBAR_ROOT/PROJECT_ROOT that differs from the git toplevel would re-prompt
+    # forever (the check never sees the tracker init actually created).
+    from rebar import config
+
+    if not config.tracker_dir(repo_root).is_dir():
         _confirm_and_init(repo_root)
 
     if init_only:

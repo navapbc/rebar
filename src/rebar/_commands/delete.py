@@ -134,7 +134,17 @@ def scan_and_write_unlinks(tracker: str, deleted_id: str, env_id: str, author: s
 
 # ── delete orchestration ─────────────────────────────────────────────────────
 def _git(tracker: str, *args: str):
-    return subprocess.run(["git", "-C", tracker, *args], capture_output=True, text=True)
+    """Run a git op in the tracker, raising :class:`CommandError` (exit 2) on
+    failure — so a failed DELETE add/commit aborts loudly instead of reporting
+    success on an uncommitted store (bash ran under ``set -e``)."""
+    from rebar._commands._seam import CommandError
+
+    cp = subprocess.run(["git", "-C", tracker, *args], capture_output=True, text=True)
+    if cp.returncode != 0:
+        raise CommandError(
+            f"Error: git operation failed during delete: {cp.stderr.strip()}", returncode=2
+        )
+    return cp
 
 
 def _children(tracker: str, parent_id: str) -> list[str]:
@@ -231,6 +241,7 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
             return 1
 
     from rebar._commands import _seam
+    from rebar._commands._seam import CommandError
 
     try:
         with open(os.path.join(tracker, ".env-id"), encoding="utf-8") as f:
@@ -239,28 +250,51 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
         env_id = "unknown"
     author = _seam.author("Unknown")
 
-    unlink_paths = scan_and_write_unlinks(tracker, ticket_id, env_id, author)
+    # The atomic write+commit aborts loudly on any git failure (a failed commit must
+    # NOT report success and leave the store half-deleted). On failure, roll back the
+    # specific files this delete wrote — targeted, since delete holds no write lock
+    # (a `git reset --hard` could clobber a concurrent writer's uncommitted work).
+    unlink_paths: list[str] = []
+    written: list[str] = []
+    try:
+        unlink_paths = scan_and_write_unlinks(tracker, ticket_id, env_id, author)
+        written.extend(p for p in unlink_paths if p)
 
-    if already_tombstoned:
-        # Re-invocation: commit any straggler UNLINKs, then exit 0 silently.
-        staged = [_rel(tracker, p) for p in unlink_paths if p]
-        if staged:
-            _git(tracker, "add", *staged)
-            _git(tracker, "commit", "-q", "--no-verify", "-m",
-                 f"ticket: UNLINK cleanup for already-deleted {ticket_id}")
-        return 0
+        if already_tombstoned:
+            # Re-invocation: commit any straggler UNLINKs, then exit 0 silently.
+            staged = [_rel(tracker, p) for p in unlink_paths if p]
+            if staged:
+                _git(tracker, "add", *staged)
+                _git(tracker, "commit", "-q", "--no-verify", "-m",
+                     f"ticket: UNLINK cleanup for already-deleted {ticket_id}")
+            return 0
 
-    status_path = _write_event(ticket_dir, "STATUS", env_id, author, {"status": "deleted"})
-    archived_path = _write_event(ticket_dir, "ARCHIVED", env_id, author, {})
-    tombstone_path = os.path.join(ticket_dir, ".tombstone.json")
-    with open(tombstone_path, "w", encoding="utf-8") as f:
-        json.dump({"status": "deleted"}, f, ensure_ascii=False)
+        status_path = _write_event(ticket_dir, "STATUS", env_id, author, {"status": "deleted"})
+        written.append(status_path)
+        archived_path = _write_event(ticket_dir, "ARCHIVED", env_id, author, {})
+        written.append(archived_path)
+        tombstone_path = os.path.join(ticket_dir, ".tombstone.json")
+        with open(tombstone_path, "w", encoding="utf-8") as f:
+            json.dump({"status": "deleted"}, f, ensure_ascii=False)
+        written.append(tombstone_path)
 
-    stage = [_rel(tracker, p) for p in unlink_paths if p]
-    stage += [_rel(tracker, status_path), _rel(tracker, archived_path),
-              f"{ticket_id}/.tombstone.json"]
-    _git(tracker, "add", *stage)
-    _git(tracker, "commit", "-q", "--no-verify", "-m", f"ticket: DELETE {ticket_id}")
+        stage = [_rel(tracker, p) for p in written]
+        _git(tracker, "add", *stage)
+        _git(tracker, "commit", "-q", "--no-verify", "-m", f"ticket: DELETE {ticket_id}")
+    except CommandError as exc:
+        # Roll back: unstage + remove every file this (failed) delete wrote, so the
+        # store is left exactly as before — no half-deleted, wedged-on-rerun state.
+        rels = [_rel(tracker, p) for p in written]
+        if rels:
+            subprocess.run(["git", "-C", tracker, "reset", "-q", "--", *rels],
+                           capture_output=True, text=True)
+        for p in written:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+        sys.stderr.write(exc.message + "\n")
+        return exc.returncode
 
     try:
         write_marker(ticket_dir)
