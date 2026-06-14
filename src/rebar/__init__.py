@@ -548,9 +548,39 @@ def fsck(*, recover: bool = False, report_only: bool = False, repo_root=None) ->
     ``.git/index.lock`` — so a read-only surface (MCP under REBAR_MCP_READONLY)
     can run plain fsck without any git-state write (the stale lock is reported,
     not removed)."""
-    args = ["fsck-recover"] if recover else ["fsck"]
-    env_extra = {"REBAR_FSCK_NO_MUTATE": "1"} if report_only else None
-    return _ok(_run(args, repo_root=repo_root, env_extra=env_extra), what="fsck")
+    if recover:
+        # fsck-recover not yet ported in-process (Tier E E4) — subprocess for now.
+        env_extra = {"REBAR_FSCK_NO_MUTATE": "1"} if report_only else None
+        return _ok(_run(["fsck-recover"], repo_root=repo_root, env_extra=env_extra), what="fsck")
+
+    # In-process fsck (Tier E E4). Output is captured; exit!=0 (issues found) raises,
+    # preserving the prior _ok(_run(...)) contract.
+    import contextlib
+    import io
+    import os as _os
+
+    from rebar._commands import fsck as _fsck_mod
+
+    out, err = io.StringIO(), io.StringIO()
+    _prev = _os.environ.get("REBAR_FSCK_NO_MUTATE")
+    if report_only:
+        _os.environ["REBAR_FSCK_NO_MUTATE"] = "1"
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = _fsck_mod.fsck_cli([], repo_root=repo_root)
+    finally:
+        if report_only:
+            if _prev is None:
+                _os.environ.pop("REBAR_FSCK_NO_MUTATE", None)
+            else:
+                _os.environ["REBAR_FSCK_NO_MUTATE"] = _prev
+    if rc != 0:
+        raise RebarError(
+            f"rebar fsck failed (exit {rc}): {(err.getvalue() or out.getvalue()).strip()}",
+            returncode=rc,
+            stderr=err.getvalue(),
+        )
+    return out.getvalue()
 
 
 def summary(*ticket_ids: str, repo_root=None) -> list:
