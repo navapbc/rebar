@@ -26,7 +26,7 @@ from rebar.llm import findings as _findings
 from rebar.llm.config import LLMConfig
 from rebar.llm.config import denied_paths as _denied_realpaths
 from rebar.llm.config import is_denied as _is_denied
-from rebar.llm.errors import LLMConfigError, StructuredOutputError
+from rebar.llm.errors import LLMConfigError, LLMRunnerError, StructuredOutputError
 
 
 @dataclass
@@ -76,16 +76,19 @@ class FakeRunner:
         return _findings.validate_result(result)
 
 
-# ── Langflow runner (stub — protocol seam for hosted deployments) ──────────────
+# ── Langflow runner (hosted-deployment backend over REST) ─────────────────────
 class LangflowRunner:
     """Run an operation against a hosted Langflow deployment via its REST API
-    (``POST /api/v1/run/{flow_id}``, header ``x-api-key``).
+    (``POST {LANGFLOW_URL}/api/v1/run/{flow_id}``, header ``x-api-key``).
 
-    Stubbed in this milestone (this environment can't run Langflow). The protocol
-    seam is defined so a deployment elsewhere can be wired without touching the
-    operation layer: the resolved prompt/context is passed as ``input_value`` and
-    the flow is a thin transport that returns the same findings shape. Set
-    ``LANGFLOW_URL`` (+ ``LANGFLOW_API_KEY``) and implement ``run`` to enable."""
+    The resolved reviewer prompt + task is sent as ``input_value`` (chat in/out);
+    the flow is a thin transport whose final message must be **findings JSON**
+    (``{"findings": [...], "summary": ...}`` or a bare findings list — the
+    ReviewFindings shape). We extract that message from Langflow's deeply-nested
+    response, parse it, and run it through the same normalize/validate/citation
+    pipeline as every other runner. Configure ``LANGFLOW_URL``,
+    ``LANGFLOW_FLOW_ID`` (+ optional ``LANGFLOW_API_KEY``). Uses stdlib urllib —
+    no extra dependency."""
 
     name = "langflow"
 
@@ -93,12 +96,121 @@ class LangflowRunner:
         self._config = config
 
     def run(self, req: RunRequest) -> dict:
-        raise NotImplementedError(
-            "the Langflow runner is a stub in this release. Run a Langflow "
-            "deployment, set LANGFLOW_URL (+ LANGFLOW_API_KEY), and use the default "
-            "langgraph runner (REBAR_LLM_RUNNER=langgraph) in environments without "
-            "Langflow. See docs/llm-framework.md."
+        cfg = self._config
+        if not cfg.langflow_url or not cfg.langflow_flow_id:
+            raise LLMConfigError(
+                "the langflow runner needs LANGFLOW_URL and LANGFLOW_FLOW_ID set "
+                "(+ optional LANGFLOW_API_KEY). See docs/llm-framework.md."
+            )
+        payload = {
+            "input_value": f"{req.system_prompt}\n\n{req.instructions}",
+            "input_type": "chat",
+            "output_type": "chat",
+        }
+        raw = _langflow_post(cfg, payload)
+        text = _langflow_extract_text(raw)
+        findings, summary = _parse_findings_json(text)
+        result = _findings.build_result(
+            findings,
+            runner=self.name,
+            model=cfg.model,
+            trace_id=None,
+            target=req.target,
+            reviewers=req.reviewers,
+            summary=summary,
+            reviewer_id=req.reviewers[0] if len(req.reviewers) == 1 else None,
         )
+        _findings.resolve_citations(result, cfg.repo_path)
+        return _findings.validate_result(result)
+
+
+def _langflow_post(cfg: LLMConfig, payload: dict) -> dict:
+    """POST to the Langflow run endpoint, returning the parsed JSON response."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    url = f"{cfg.langflow_url.rstrip('/')}/api/v1/run/{cfg.langflow_flow_id}"
+    headers = {"Content-Type": "application/json"}
+    if cfg.langflow_api_key:
+        headers["x-api-key"] = cfg.langflow_api_key
+    request = urllib.request.Request(  # noqa: S310 (operator-configured URL)
+        url, data=json.dumps(payload).encode(), headers=headers, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=cfg.timeout_s) as resp:
+            return json.loads(resp.read().decode("utf-8", "replace"))
+    except (urllib.error.URLError, OSError) as exc:
+        raise LLMRunnerError(f"Langflow request to {url} failed: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise LLMRunnerError(f"Langflow returned non-JSON: {exc}") from exc
+
+
+def _langflow_extract_text(raw: dict) -> str:
+    """Pull the flow's final message text out of Langflow's deeply-nested run
+    response. The shape varies by output component, so try the documented path
+    then fall back to a recursive search for a message/text string."""
+    try:
+        outs = raw["outputs"][0]["outputs"][0]
+        results = outs.get("results") or {}
+        msg = results.get("message")
+        if isinstance(msg, dict):
+            txt = msg.get("text")
+            if isinstance(txt, str) and txt.strip():
+                return txt
+            inner = msg.get("message")
+            if isinstance(inner, str) and inner.strip():
+                return inner
+    except (KeyError, IndexError, TypeError):
+        pass
+    found = _deep_find_text(raw)
+    if found:
+        return found
+    raise StructuredOutputError("could not extract a message from the Langflow response")
+
+
+def _deep_find_text(obj, _depth: int = 0) -> str | None:
+    """Recursively find the first non-empty string under a 'text'/'message' key."""
+    if _depth > 8:
+        return None
+    if isinstance(obj, dict):
+        for key in ("text", "message"):
+            val = obj.get(key)
+            if isinstance(val, str) and val.strip():
+                return val
+        for val in obj.values():
+            found = _deep_find_text(val, _depth + 1)
+            if found:
+                return found
+    elif isinstance(obj, list):
+        for item in obj:
+            found = _deep_find_text(item, _depth + 1)
+            if found:
+                return found
+    return None
+
+
+def _parse_findings_json(text: str) -> tuple[list, str | None]:
+    """Parse the flow's findings JSON (tolerating ```json fences). Returns
+    (findings, summary)."""
+    import json
+
+    t = text.strip()
+    if t.startswith("```"):
+        t = t.strip("`").strip()
+        if t[:4].lower() == "json":
+            t = t[4:].strip()
+    try:
+        obj = json.loads(t)
+    except json.JSONDecodeError as exc:
+        raise StructuredOutputError(
+            f"Langflow output was not valid findings JSON: {exc}"
+        ) from exc
+    if isinstance(obj, list):
+        return obj, None
+    if isinstance(obj, dict):
+        return obj.get("findings") or [], obj.get("summary")
+    raise StructuredOutputError("Langflow findings JSON had an unexpected shape")
 
 
 # ── LangGraph runner (default in-process backend) ─────────────────────────────

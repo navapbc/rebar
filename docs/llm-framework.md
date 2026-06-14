@@ -52,7 +52,7 @@ seam:
 |--------|------|-------|
 | `LangGraphRunner` | **default, in-process; the review runner** | `langchain.agents.create_agent` + `ToolStrategy` (robust in-loop structured output; the legacy `create_react_agent(response_format=…)` makes a context-losing post-loop call and is avoided). Tools: read-only, line-numbered repo file tools + MCP via `MultiServerMCPClient`. Tracing: Langfuse callback. Needs `nava-rebar[agents]` + `ANTHROPIC_API_KEY`. |
 | `DeepAgentsRunner` | **opt-in** (`REBAR_LLM_RUNNER=deepagents`) | Runs on LangChain's [deepagents](https://github.com/langchain-ai/deepagents) harness (planning, subagents, large-result eviction) via `create_deep_agent`, with deepagents' native filesystem over a repo-rooted `FilesystemBackend` made **read-only** by a write-denying `FilesystemPermission`, plus our findings schema (so it still returns a `review_result`). **The review default stays `langgraph`** with our own citation-disciplined tools — this runner is the seam for future deepagents-based task types. Caveat: the rebar state-dir deny-list is enforced on citation *output* here, not on reads (use `langgraph` for read-side deny-listing). |
-| `LangflowRunner` | other environments | Documented **stub**. The protocol seam is defined so a hosted Langflow deployment (`POST /api/v1/run/{flow_id}`, header `x-api-key`, body `{"input_value", "input_type":"chat", "output_type":"chat"}`) can be wired without touching the operation layer. When implementing it, note the response text is **deeply nested** (`data["outputs"][0]["outputs"][0]["outputs"]["message"]["message"]`, shape varies by output component) — extraction must walk it defensively. This environment can't run Langflow, so it raises a clear error until configured. |
+| `LangflowRunner` | hosted Langflow (`REBAR_LLM_RUNNER=langflow`) | Calls a hosted deployment: `POST {LANGFLOW_URL}/api/v1/run/{LANGFLOW_FLOW_ID}`, header `x-api-key`, body `{"input_value", "input_type":"chat", "output_type":"chat"}` (stdlib urllib — no extra dep). The flow is a thin transport whose final message must be **findings JSON** (`{"findings":[…],"summary":…}` or a bare list); we extract it from Langflow's deeply-nested response (defensive walk + recursive fallback) and run it through the same normalize/validate/citation pipeline. Configure `LANGFLOW_URL`/`LANGFLOW_FLOW_ID` (+ optional `LANGFLOW_API_KEY`); a clear error if unset. |
 | `FakeRunner` | offline / tests | Returns canned findings — the dependency-injection seam that makes the whole pipeline (and all three interfaces) testable with no model, network, or extra. |
 
 Select with `REBAR_LLM_RUNNER` (`langgraph` default / `deepagents` / `langflow` /
@@ -161,7 +161,7 @@ for the future code-review op's "deterministic reviewer-selection rules."
 | `REBAR_LLM_MCP_SERVERS` | `{}` | JSON of MCP servers (`langchain-mcp-adapters` shape) |
 | `ANTHROPIC_API_KEY` | — | model credentials (required to run langgraph) |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` | — | tracing + prompts (auto-enabled when both keys present) |
-| `LANGFLOW_URL` / `LANGFLOW_API_KEY` | — | Langflow deployment (langflow runner) |
+| `LANGFLOW_URL` / `LANGFLOW_FLOW_ID` / `LANGFLOW_API_KEY` | — | hosted Langflow deployment (langflow runner) |
 | `REBAR_MCP_ALLOW_LLM` | off | gate the MCP `review_ticket` tool (it makes a live, billable call) |
 
 Langfuse is **no-op unless both keys are set** (gated before the handler is even

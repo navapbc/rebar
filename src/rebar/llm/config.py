@@ -145,6 +145,7 @@ class LLMConfig:
     langfuse: LangfuseConfig = field(default_factory=LangfuseConfig)
     langflow_url: str | None = None
     langflow_api_key: str | None = None
+    langflow_flow_id: str | None = None
 
     @classmethod
     def from_env(cls, *, repo_root=None) -> LLMConfig:
@@ -177,6 +178,7 @@ class LLMConfig:
             langfuse=LangfuseConfig.from_env(),
             langflow_url=os.environ.get("LANGFLOW_URL") or None,
             langflow_api_key=os.environ.get("LANGFLOW_API_KEY") or None,
+            langflow_flow_id=os.environ.get("LANGFLOW_FLOW_ID") or None,
         )
 
 

@@ -333,9 +333,6 @@ def test_runner_selection_and_stubs() -> None:
     assert isinstance(get_runner(LLMConfig(runner="langgraph"), override=fake), FakeRunner)
 
     req = RunRequest(system_prompt="s", instructions="i", config=LLMConfig(repo_path="."))
-    # Langflow runner is a documented stub.
-    with pytest.raises(NotImplementedError):
-        LangflowRunner(LLMConfig()).run(req)
     # LangGraph runner without the 'agents' extra (langchain) gives a clear install
     # error. Guard on langchain's actual absence — when it IS installed, running
     # needs real credentials, which this offline test does not exercise.
@@ -348,6 +345,55 @@ def test_runner_selection_and_stubs() -> None:
     if not _module_available("deepagents"):
         with pytest.raises(LLMConfigError):
             DeepAgentsRunner(LLMConfig(repo_path=".")).run(req)
+
+
+def test_langflow_parse_helpers() -> None:
+    from rebar.llm.runner import _deep_find_text, _langflow_extract_text, _parse_findings_json
+
+    nested = {"outputs": [{"outputs": [{"results": {"message": {"text": "hello"}}}]}]}
+    assert _langflow_extract_text(nested) == "hello"
+    # recursive fallback for an unexpected shape
+    assert _deep_find_text({"a": {"b": [{"message": "deep"}]}}) == "deep"
+    # findings JSON, incl. ```json fences and a bare list
+    findings, summary = _parse_findings_json('{"findings": [{"severity":"low"}], "summary":"s"}')
+    assert findings == [{"severity": "low"}] and summary == "s"
+    fenced, _ = _parse_findings_json('```json\n[{"severity":"high"}]\n```')
+    assert fenced == [{"severity": "high"}]
+
+
+def test_langflow_runner_missing_config() -> None:
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.errors import LLMConfigError
+    from rebar.llm.runner import LangflowRunner, RunRequest
+
+    req = RunRequest(system_prompt="s", instructions="i", config=LLMConfig())
+    with pytest.raises(LLMConfigError):
+        LangflowRunner(LLMConfig()).run(req)
+
+
+def test_langflow_runner_end_to_end_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LangflowRunner extracts the flow's findings JSON from a nested response and
+    runs it through the shared normalize/validate/citation pipeline."""
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.runner import LangflowRunner, RunRequest
+    from rebar.llm import runner as runner_mod
+
+    findings_json = json.dumps({
+        "findings": [{"severity": "high", "dimension": "security", "detail": "x",
+                      "citations": [{"kind": "source", "description": "from the flow"}]}],
+        "summary": "one issue",
+    })
+    raw = {"outputs": [{"outputs": [{"results": {"message": {"text": findings_json}}}]}]}
+    monkeypatch.setattr(runner_mod, "_langflow_post", lambda cfg, payload: raw)
+
+    cfg = LLMConfig(runner="langflow", langflow_url="http://lf", langflow_flow_id="f1",
+                    repo_path=".")
+    req = RunRequest(system_prompt="s", instructions="i", config=cfg,
+                     reviewers=["ticket-quality"], target={"kind": "ticket", "ticket_ids": ["T1"]})
+    result = LangflowRunner(cfg).run(req)
+    schemas.validator(schemas.REVIEW_RESULT).validate(result)
+    assert result["runner"] == "langflow" and result["summary"] == "one issue"
+    assert result["findings"][0]["severity"] == "high"
 
 
 def test_deepagents_runner_assembles(tmp_path: Path) -> None:
