@@ -300,9 +300,10 @@ def _short_head(tracker: str) -> str:
 
 def _unarchive(ticket_id: str, target_status: str, tracker: str, repo_root_str: str) -> int:
     """The ``archived → open`` un-archive seam: REVERT the latest live ARCHIVED
-    event. Subprocesses ticket-revert.sh exactly as the bash ``exec`` did (its
-    stdout/stderr/exit become this command's); ``--output`` and the UNBLOCKED block
-    are skipped on this path."""
+    event IN-PROCESS via :func:`rebar._commands.composer.revert_core` (Tier E
+    E6.5a — replacing the ticket-revert.sh subprocess). Same REVERT event +
+    ``.archived`` marker clear + ``Reverted event …`` confirmation the bash
+    ``exec`` produced; ``--output`` and the UNBLOCKED block are skipped here."""
     if target_status != "open":
         sys.stderr.write(
             "Error: from 'archived' the only valid transition is to 'open' "
@@ -313,18 +314,20 @@ def _unarchive(ticket_id: str, target_status: str, tracker: str, repo_root_str: 
     if not archived_uuid:
         sys.stderr.write("Error: no live ARCHIVED event (status may be stale)\n")
         return 1
-    from rebar._engine import dispatcher, engine_env
+    from rebar._commands._seam import CommandError
+    from rebar._commands.composer import revert_core
 
-    script = os.path.join(os.path.dirname(str(dispatcher())), "ticket-revert.sh")
-    env = engine_env(repo_root_str)
-    env["TICKETS_TRACKER_DIR"] = tracker
-    return subprocess.call(
-        [
-            "bash", script, ticket_id, archived_uuid,
-            "--reason=un-archive via transition archived open",
-        ],
-        env=env,
-    )
+    try:
+        resolved = revert_core(
+            ticket_id, archived_uuid,
+            "un-archive via transition archived open",
+            repo_root=repo_root_str,
+        )
+    except CommandError as exc:
+        sys.stderr.write(exc.message + "\n")
+        return exc.returncode
+    sys.stdout.write(f"Reverted event '{archived_uuid}' on ticket '{resolved}'\n")
+    return 0
 
 
 def _latest_live_archived_uuid(ticket_dir: str) -> str:
