@@ -119,6 +119,11 @@ def _emit_subcommand_help(sub: str) -> int:
 
 def _dispatch(sub: str, rest: list[str]) -> int:
     """Route a known subcommand to its in-process or passthrough implementation."""
+    if sub == "scratch":
+        # Filesystem-only per-ticket store — NO auto-init (matches the dispatcher).
+        from rebar._commands import scratch
+
+        return scratch.scratch_cli(rest)
     if sub in _READS_INIT_ONLY:
         ensure_initialized(init_only=True)
         from rebar._engine_support import reads
