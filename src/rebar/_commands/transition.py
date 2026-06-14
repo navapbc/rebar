@@ -40,22 +40,22 @@ _VALID_STATUSES = ("open", "in_progress", "closed", "blocked")
 
 _USAGE = (
     "Usage: ticket transition <ticket_id> <current_status> <target_status> "
-    "[--reason=<text>] [--force] [--verdict-hash=<hash>] [--force-close=<reason>]\n"
+    "[--reason=<text>] [--force] [--force-close=<reason>]\n"
     "       ticket transition <ticket_id> <target_status> [--reason=<text>] [--force] "
-    "[--verdict-hash=<hash>] [--force-close=<reason>]  (auto-detects current status)\n"
+    "[--force-close=<reason>]  (auto-detects current status)\n"
     "  current_status / target_status: open | in_progress | closed | blocked\n"
     "  --reason=<text>          Required when closing bug tickets. Must start with "
     "'Fixed:' or 'Escalated to user:'.\n"
     "  --force                  Skip the unresolved-children guard when closing. "
     "Non-closed children remain unresolved.\n"
-    "  --verdict-hash=<hash>    HMAC from compute-verdict-hash.sh. Required for "
-    "story/epic close ONLY when the opt-in gate verify.require_verdict_for_close=true "
-    "is set in .rebar/config.conf (off by default).\n"
-    "  --force-close=<reason>   Bypass verdict-hash requirement for story/epic "
+    "  --verdict-hash=<hash>    DEPRECATED (ignored): the story/epic close gate now "
+    "requires a certified signature ('rebar sign'), not a verdict hash.\n"
+    "  --force-close=<reason>   Bypass the signature requirement for story/epic "
     "(requires user approval via hook).\n"
     "  Examples:\n"
     '    ticket transition abc1 open closed --reason="Fixed: patched null check in foo.sh"\n'
-    "    ticket transition abc1 closed --verdict-hash=abc123...  # close story with verified verdict\n"
+    "    rebar sign abc1 '[\"tests: PASS\"]' && ticket transition abc1 closed  "
+    "# close story with a certified signature\n"
     '    ticket transition abc1 closed --force-close="verifier timed out"  # bypass with reason\n'
 )
 
@@ -265,7 +265,7 @@ def transition_compute(
     if target_status == "closed" and force_close:
         session = os.environ.get("SESSION_ID") or _short_head(tracker) or "unknown"
         body = (
-            "FORCE_CLOSE: verdict hash bypassed by user approval. "
+            "FORCE_CLOSE: signature gate bypassed by user approval. "
             f'Reason: "{force_close}". Session: {session}.'
         )
         try:

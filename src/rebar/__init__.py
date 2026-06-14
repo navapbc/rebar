@@ -452,6 +452,51 @@ def compact(ticket_id: str | None = None, *, repo_root=None) -> None:
         )
 
 
+# ── Cryptographic manifest signing (environment-bound) ────────────────────────
+def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> dict:
+    """Sign a manifest of verified steps for a ticket with the environment key.
+
+    ``manifest`` is a list of verified-step strings (or a JSON-array string).
+    Computes an HMAC-SHA256 signature with the environment-specific signing key
+    (``REBAR_SIGNING_KEY`` or the gitignored ``.signing-key``), persists it as a
+    SIGNATURE event, and returns the record
+    ``{ticket_id, manifest, algorithm, signature, key_id, head_sha, signed_at}``.
+    """
+    from rebar import signing
+    from rebar.signing import SigningError
+
+    try:
+        return signing.sign_manifest(ticket_id, manifest, repo_root=repo_root)
+    except SigningError as exc:
+        raise RebarError(
+            f"rebar sign failed (exit {exc.returncode}): {exc.message}",
+            returncode=exc.returncode,
+            stderr=exc.message,
+        ) from None
+
+
+def verify_signature(ticket_id: str, *, repo_root=None) -> dict:
+    """Certify a ticket's recorded verified steps against its signature.
+
+    Returns a verdict dict ``{ticket_id, verified, verdict, reason, manifest,
+    ...}``. ``verdict`` is ``certified`` (steps match the signature under this
+    environment's key), ``mismatch`` (steps altered / signature invalid),
+    ``foreign_key`` (signed by a different environment), or ``unsigned``. Raises
+    :class:`RebarError` only when the ticket id cannot be resolved.
+    """
+    from rebar import signing
+    from rebar.signing import SigningError
+
+    try:
+        return signing.verify_signature(ticket_id, repo_root=repo_root)
+    except SigningError as exc:
+        raise RebarError(
+            f"rebar verify-signature failed (exit {exc.returncode}): {exc.message}",
+            returncode=exc.returncode,
+            stderr=exc.message,
+        ) from None
+
+
 # ── Read path (in-process via rebar._reads; alias-aware, returns parsed JSON) ──
 # Reads compute from the native ticket_reducer/ticket_graph packages in-process —
 # no subprocess. (next_batch is the lone exception: still the bash orchestrator.)
@@ -740,6 +785,9 @@ __all__ = [
     "set_file_impact",
     "get_verify_commands",
     "set_verify_commands",
+    # cryptographic manifest signing
+    "sign_manifest",
+    "verify_signature",
     # read path
     "show_ticket",
     "list_tickets",

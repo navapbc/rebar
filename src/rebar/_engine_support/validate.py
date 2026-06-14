@@ -82,6 +82,69 @@ def _raw_tickets(tracker: str) -> list[dict]:
     return reads.list_states(tracker)
 
 
+def signature_findings(tracker: str) -> list:
+    """Store-wide signature integrity: certify every ticket's recorded signature.
+
+    Reduces each ticket RAW (the public list strips the HMAC hex, so verification
+    must read the reducer state directly) and recomputes the HMAC with this
+    environment's key. A tampered manifest → MAJOR; a signature made by a DIFFERENT
+    environment → MINOR (can't be certified here). ``certified``/``unsigned`` emit
+    nothing. When this environment has no key (read-only / foreign clone) the check
+    no-ops rather than flagging everything foreign — absence of a key is not an
+    integrity failure. Operates on closed tickets too (signatures gate closure),
+    which ``normalize_issues`` drops — hence the separate raw pass.
+    """
+    from rebar import signing
+    from rebar._engine_support.validate_checks import Finding
+    from rebar.reducer import reduce_ticket
+
+    out: list = []
+    try:
+        key = signing.signing_key(tracker, create_if_missing=False)
+    except Exception:  # noqa: BLE001
+        return out
+    if not key:  # _NO_KEY: nothing to certify against here.
+        return out
+    try:
+        entries = sorted(os.listdir(tracker))
+    except OSError:
+        return out
+    for name in entries:
+        if name.startswith("."):
+            continue
+        tdir = os.path.join(tracker, name)
+        if not os.path.isdir(tdir):
+            continue
+        # Cheap pre-filter: only reduce tickets that actually carry a signature
+        # event, so an unsigned store costs nothing here.
+        try:
+            if not any(f.endswith("-SIGNATURE.json") for f in os.listdir(tdir)):
+                continue
+        except OSError:
+            continue
+        try:
+            state = reduce_ticket(tdir)
+        except Exception:  # noqa: BLE001 — never let one bad ticket fail the scan
+            continue
+        record = (state or {}).get("signature")
+        if not record:
+            continue
+        verdict = signing.verify_record(record, name, key).get("verdict")
+        if verdict == "mismatch":
+            out.append(Finding(
+                "major",
+                f"[SIGNATURE] {name}: signature does not match its verified-steps "
+                f"manifest (tampered or invalid)",
+            ))
+        elif verdict == "foreign_key":
+            out.append(Finding(
+                "minor",
+                f"[SIGNATURE] {name}: signed by a different environment "
+                f"(cannot certify here)",
+            ))
+    return out
+
+
 def normalize_issues(tickets: list[dict]) -> list[dict]:
     """Port of the ``get_shared_issues_json`` heredoc: drop error/closed/[LOCK]
     tickets and project each onto the internal schema the checks consume."""
@@ -264,6 +327,7 @@ def validate_state(tracker: str, *, quick: bool = False) -> dict[str, Any]:
     ({score, critical_issues, major_issues, minor_issues, warnings, suggestions})."""
     issues = normalize_issues(_raw_tickets(tracker))
     findings = run_checks(issues, quick=quick, ticket_cmd=os.environ.get("TICKET_CMD") or _default_ticket_cmd())
+    findings += signature_findings(tracker)
     buckets = _bucket(findings)
     return to_json_dict(calculate_score(buckets), buckets)
 
@@ -318,6 +382,7 @@ def run(argv: list[str], tracker: str) -> int:
     ticket_cmd = os.environ.get("TICKET_CMD") or _default_ticket_cmd()
     issues = normalize_issues(_raw_tickets(tracker))
     findings = run_checks(issues, quick=quick, ticket_cmd=ticket_cmd)
+    findings += signature_findings(tracker)
     buckets = _bucket(findings)
     score = calculate_score(buckets)
 

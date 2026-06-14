@@ -43,6 +43,7 @@ KEY_MAP = {
     "conflicts": "cf",
     "inbound_links": "ibl",
     "children": "ch",
+    "signature": "sig",
 }
 
 # Fields omitted from LLM format (verbose timestamps / system metadata)
@@ -94,6 +95,22 @@ def shorten_dep(d: object) -> object:
     return out
 
 
+def shorten_signature(s: object) -> object:
+    """Compact a signature record for the LLM view: the FACT of a signature, not
+    the signature itself. Keeps presence + verified-step count + the env key
+    fingerprint; drops the (already public_state-stripped) HMAC hex, algorithm,
+    and verbose timestamps. Live validity is a `verify-signature` concern."""
+    if not isinstance(s, dict):
+        return s
+    manifest = s.get("manifest")
+    out: dict = {"present": True}
+    if isinstance(manifest, list):
+        out["steps"] = len(manifest)
+    if s.get("key_id"):
+        out["key"] = s["key_id"]
+    return out
+
+
 def shorten_inbound(d: object) -> object:
     """Shorten an inbound-link dict (from_id/relation) to abbreviated keys."""
     if not isinstance(d, dict):
@@ -123,5 +140,7 @@ def to_llm(state: dict) -> dict:
             v = [shorten_dep(d) for d in v]
         elif k == "inbound_links":
             v = [shorten_inbound(e) for e in v]
+        elif k == "signature":
+            v = shorten_signature(v)
         out[short_k] = v
     return out

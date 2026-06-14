@@ -1603,25 +1603,33 @@ test_transition_backward_in_progress_to_open() {
 }
 test_transition_backward_in_progress_to_open
 
-# ── GAP-9: the verdict-hash close gate is OPT-IN (off by default; enforced when on) ──
-# The story/epic verdict-hash gate is OFF by default: close without a hash must
-# succeed. With verify.require_verdict_for_close=true it is enforced — the
-# OMITTED-hash case must fail (non-zero exit) and leave the ticket open, while a
-# valid hash (from _verdict_hash) still succeeds as a control.
+# ── GAP-9: the signature close gate is OPT-IN (off by default; enforced when on) ──
+# The story/epic close gate is OFF by default: close without a signature must
+# succeed. With verify.require_signature_for_close=true it is enforced — closing
+# WITHOUT a certified signature must fail (non-zero exit) and leave the ticket
+# open, while signing a manifest first (`rebar sign`) lets the close succeed.
+# (Replaces the legacy verdict-hash gate; --verdict-hash is now deprecated.)
 echo ""
-echo "GAP-9: verdict-hash close gate is opt-in (off by default, enforced when enabled)"
-test_transition_story_epic_close_requires_verdict_hash() {
+echo "GAP-9: signature close gate is opt-in (off by default, enforced when enabled)"
+# Sign a manifest of verified steps via the (python) CLI — the gate then certifies
+# it. Uses the installed `rebar` package, independent of the bash dispatcher.
+_sign_ticket() {
+    local repo="$1" tid="$2"
+    (cd "$repo" && PROJECT_ROOT="$repo" REBAR_ROOT="$repo" \
+        python3 -m rebar.cli sign "$tid" '["verified steps: PASS"]' >/dev/null 2>&1)
+}
+test_transition_story_epic_close_requires_signature() {
     _snapshot_fail
 
     local repo
     repo=$(_make_test_repo)
 
-    # Default (no config): gate is OFF — story close WITHOUT a hash succeeds.
+    # Default (no config): gate is OFF — story close WITHOUT a signature succeeds.
     local def_tid def_exit=0
     def_tid=$(_create_ticket "$repo" story "Gap9 default-off close")
     if [ -n "$def_tid" ]; then
         (cd "$repo" && bash "$TICKET_SCRIPT" transition "$def_tid" open closed 2>/dev/null) || def_exit=$?
-        assert_eq "gap9: default (gate off) story close WITHOUT hash succeeds" "0" "$def_exit"
+        assert_eq "gap9: default (gate off) story close WITHOUT signature succeeds" "0" "$def_exit"
         assert_eq "gap9: default-off story is closed" "closed" "$(_get_ticket_status "$repo" "$def_tid")"
     else
         assert_eq "gap9: default story created" "non-empty" "empty"
@@ -1629,7 +1637,7 @@ test_transition_story_epic_close_requires_verdict_hash() {
 
     # Opt IN to the gate via repo config, then enforcement applies.
     mkdir -p "$repo/.rebar"
-    echo "verify.require_verdict_for_close=true" > "$repo/.rebar/config.conf"
+    echo "verify.require_signature_for_close=true" > "$repo/.rebar/config.conf"
 
     local ttype
     for ttype in story epic; do
@@ -1640,29 +1648,39 @@ test_transition_story_epic_close_requires_verdict_hash() {
             continue
         fi
 
-        # OMITTED verdict hash — must be rejected (gate enabled).
+        # NO signature — must be rejected (gate enabled).
         local exit_code=0
-        local stderr_out
-        stderr_out=$(cd "$repo" && bash "$TICKET_SCRIPT" transition "$tid" open closed 2>&1) || exit_code=$?
-        assert_eq "gap9: $ttype close WITHOUT --verdict-hash exits non-zero" "1" \
+        (cd "$repo" && bash "$TICKET_SCRIPT" transition "$tid" open closed 2>/dev/null) || exit_code=$?
+        assert_eq "gap9: $ttype close WITHOUT signature exits non-zero" "1" \
             "$([ "$exit_code" -ne 0 ] && echo 1 || echo 0)"
 
         # Ticket must remain open (no bypass).
-        local status_after
-        status_after=$(_get_ticket_status "$repo" "$tid")
-        assert_eq "gap9: $ttype still open after rejected close" "open" "$status_after"
+        assert_eq "gap9: $ttype still open after rejected close" "open" \
+            "$(_get_ticket_status "$repo" "$tid")"
 
-        # Control: WITH a valid verdict hash the close succeeds.
+        # Control: after signing a manifest of verified steps the close succeeds.
+        _sign_ticket "$repo" "$tid"
         local ok_exit=0
-        (cd "$repo" && bash "$TICKET_SCRIPT" transition "$tid" open closed \
-            --verdict-hash="$(_verdict_hash "$repo" "$tid")" 2>/dev/null) || ok_exit=$?
-        assert_eq "gap9: $ttype close WITH valid --verdict-hash exits 0" "0" "$ok_exit"
-        assert_eq "gap9: $ttype is closed with valid hash" "closed" "$(_get_ticket_status "$repo" "$tid")"
+        (cd "$repo" && bash "$TICKET_SCRIPT" transition "$tid" open closed 2>/dev/null) || ok_exit=$?
+        assert_eq "gap9: $ttype close WITH a certified signature exits 0" "0" "$ok_exit"
+        assert_eq "gap9: $ttype is closed after signing" "closed" "$(_get_ticket_status "$repo" "$tid")"
     done
 
-    assert_pass_if_clean "test_transition_story_epic_close_requires_verdict_hash"
+    # Legacy alias: verify.require_verdict_for_close still enables the gate.
+    local legacy_repo legacy_tid legacy_exit=0
+    legacy_repo=$(_make_test_repo)
+    mkdir -p "$legacy_repo/.rebar"
+    echo "verify.require_verdict_for_close=true" > "$legacy_repo/.rebar/config.conf"
+    legacy_tid=$(_create_ticket "$legacy_repo" story "Gap9 legacy-alias close")
+    if [ -n "$legacy_tid" ]; then
+        (cd "$legacy_repo" && bash "$TICKET_SCRIPT" transition "$legacy_tid" open closed 2>/dev/null) || legacy_exit=$?
+        assert_eq "gap9: legacy alias still enforces (close WITHOUT signature fails)" "1" \
+            "$([ "$legacy_exit" -ne 0 ] && echo 1 || echo 0)"
+    fi
+
+    assert_pass_if_clean "test_transition_story_epic_close_requires_signature"
 }
-test_transition_story_epic_close_requires_verdict_hash
+test_transition_story_epic_close_requires_signature
 
 # ── GAP-10: closing a BUG with an invalid --reason PREFIX is rejected ──────────
 # --reason is required for bug close and must start with 'Fixed:' or

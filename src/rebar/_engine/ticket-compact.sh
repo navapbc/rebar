@@ -179,7 +179,7 @@ except Exception:
     # is reliable in practice, this only guards a pathological package-shadow case).
     KNOWN_EVENT_TYPES = frozenset({
         'CREATE', 'STATUS', 'COMMENT', 'LINK', 'UNLINK', 'BRIDGE_ALERT', 'REVERT',
-        'EDIT', 'FILE_IMPACT', 'VERIFY_COMMANDS', 'ARCHIVED', 'SNAPSHOT',
+        'EDIT', 'FILE_IMPACT', 'VERIFY_COMMANDS', 'SIGNATURE', 'ARCHIVED', 'SNAPSHOT',
     })
 
 event_files = []

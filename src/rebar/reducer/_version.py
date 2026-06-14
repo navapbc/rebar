@@ -38,6 +38,7 @@ KNOWN_EVENT_TYPES = frozenset(
         "EDIT",
         "FILE_IMPACT",
         "VERIFY_COMMANDS",
+        "SIGNATURE",
         "ARCHIVED",
         "SNAPSHOT",
     }

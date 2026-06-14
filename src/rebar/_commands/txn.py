@@ -107,7 +107,7 @@ def transition_core(
 
     Re-reads the ticket under the lock and rejects with :class:`ConcurrencyMismatch`
     (exit 10) if its status is not ``current_status``. Applies the bug-close-reason
-    and (opt-in) story/epic verdict-hash guards. Raises :class:`CommandError` for
+    and (opt-in) story/epic signature-close guards. Raises :class:`CommandError` for
     validation / git failures. Returns ``None`` on success (the wrapper computes
     newly_unblocked + output separately)."""
     handle = _acquire_write_lock(tracker_dir)
@@ -153,10 +153,10 @@ def transition_core(
                     returncode=1,
                 )
 
-        # Verdict-hash gate (story/epic closure; opt-in via config).
+        # Signature gate (story/epic closure; opt-in via config).
         if target_status == "closed" and ticket_type in ("story", "epic"):
-            _verdict_gate(
-                tracker_dir, ticket_id, ticket_type, verdict_hash, force_close_reason
+            _signature_gate(
+                tracker_dir, ticket_id, ticket_type, state, verdict_hash, force_close_reason
             )
 
         ticket_dir_path = os.path.join(tracker_dir, ticket_id)
@@ -202,18 +202,26 @@ def transition_core(
         handle.release()
 
 
-def _verdict_gate(
+def _signature_gate(
     tracker_dir: str,
     ticket_id: str,
     ticket_type: str,
+    state: dict,
     verdict_hash: str,
     force_close_reason: str,
 ) -> None:
-    """Story/epic close verdict-hash gate (OFF unless
-    ``verify.require_verdict_for_close=true`` in ``.rebar/config.conf``). Raises
-    :class:`CommandError` on a missing/mismatched hash; a force-close reason
-    bypasses with a stderr warning (the wrapper writes the audit comment)."""
-    require_verdict = False
+    """Story/epic close gate: require a CERTIFIED signature made at the current HEAD
+    (OFF unless ``verify.require_signature_for_close=true`` — legacy alias
+    ``verify.require_verdict_for_close=true`` — in ``.rebar/config.conf``).
+
+    A manifest of verified steps is HMAC-signed with the environment key
+    (`rebar sign <id> <manifest>`) and recomputed/certified here; the signature
+    must also have been made at the current HEAD so a stale attestation cannot
+    close work whose code has since changed. Raises :class:`CommandError` when the
+    ticket is not certified; a force-close reason bypasses with a stderr warning
+    (the wrapper writes the audit comment). Replaces the legacy verdict-hash gate;
+    ``--verdict-hash`` is deprecated and ignored."""
+    require_sig = False
     cfg_root = (
         os.environ.get("REBAR_ROOT")
         or os.environ.get("PROJECT_ROOT")
@@ -223,85 +231,79 @@ def _verdict_gate(
         cfg_root, ".rebar", "config.conf"
     )
     # Fail-CLOSED on read error: a *present* gate config we cannot read/parse must
-    # never silently disable the verification gate — require the verdict (block) and
+    # never silently disable the verification gate — require a signature (block) and
     # surface the error. An absent config is the intended opt-out (gate stays off).
-    # Narrow to the realistic config-read failures (I/O + decode); the prefix check
-    # guarantees the split is safe, so any other exception is a genuine bug that
-    # should surface (it still blocks the close via the outer handler — also fail-safe).
     if os.path.isfile(config_path):
         try:
             with open(config_path, encoding="utf-8") as cf:
                 for line in cf:
-                    if line.strip().startswith("verify.require_verdict_for_close="):
-                        val = line.strip().split("=", 1)[1].strip().lower()
+                    s = line.strip()
+                    # New name + legacy alias (back-compat for existing configs).
+                    if s.startswith("verify.require_signature_for_close=") or s.startswith(
+                        "verify.require_verdict_for_close="
+                    ):
+                        val = s.split("=", 1)[1].strip().lower()
                         if val in ("true", "1", "yes"):
-                            require_verdict = True
+                            require_sig = True
         except (OSError, UnicodeDecodeError) as cfg_exc:
             import sys
 
             print(
                 f"Warning: could not read verify config {config_path} "
-                f"({cfg_exc}); requiring a verdict to close {ticket_type} "
+                f"({cfg_exc}); requiring a signature to close {ticket_type} "
                 f"{ticket_id} (fail-closed).",
                 file=sys.stderr,
             )
-            require_verdict = True
+            require_sig = True
 
-    if not require_verdict:
+    if not require_sig:
         return
 
-    if force_close_reason:
-        # Force-close with reason — the wrapper writes the audit comment; the core
-        # only emits the warning (to stderr) via a non-fatal CommandError? No: this
-        # path must SUCCEED. Print the warning and proceed.
-        import sys
+    import sys
 
+    if verdict_hash:
+        print(
+            "Warning: --verdict-hash is deprecated and ignored; the close gate now "
+            "uses signatures (rebar sign <id> <manifest>).",
+            file=sys.stderr,
+        )
+
+    if force_close_reason:
         print(
             f"Warning: closing {ticket_type} {ticket_id} via --force-close "
-            "(verdict hash bypassed)",
+            "(signature gate bypassed)",
             file=sys.stderr,
         )
         print(f"  Reason: {force_close_reason}", file=sys.stderr)
         return
 
-    if verdict_hash:
-        import hashlib
-        import hmac
+    from rebar import config as _config, signing as _signing
 
-        key_file = os.path.join(tracker_dir, ".closure-key")
-        if not os.path.isfile(key_file):
-            raise CommandError(
-                "Error: .closure-key not found. Run ticket init to generate it.",
-                returncode=1,
-            )
-        with open(key_file) as kf:
-            key = kf.read().strip().encode()
-        try:
-            head_sha = subprocess.run(
-                ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5
-            ).stdout.strip()
-        except Exception:
-            head_sha = "unknown"
-        expected_data = f"{ticket_id}|PASS|{head_sha}".encode()
-        expected_hash = hmac.new(key, expected_data, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(verdict_hash, expected_hash):
-            raise CommandError(
-                f"Error: verdict hash mismatch for {ticket_type} {ticket_id}.\n"
-                "  This means the completion verifier did not produce a PASS verdict at the current HEAD.\n"
-                "  Recovery: produce a PASS completion verdict, then run compute-verdict-hash.sh.\n"
-                '  Override: use --force-close="<reason>" to bypass (requires user approval).',
-                returncode=1,
-            )
-        return
-
-    raise CommandError(
-        f"Error: closing a {ticket_type} requires --verdict-hash (from compute-verdict-hash.sh after completion verifier PASS).\n"
-        "  Recovery: produce a PASS completion verdict, then:\n"
-        f"    bash compute-verdict-hash.sh {ticket_id} PASS  # produces the hash\n"
-        f"    ticket transition {ticket_id} closed --verdict-hash=<hash-from-above>\n"
-        '  Override: use --force-close="<reason>" to bypass (requires user approval).',
-        returncode=1,
-    )
+    key = _signing.signing_key(tracker_dir, create_if_missing=False)
+    result = _signing.verify_record(state.get("signature"), ticket_id, key)
+    if not result["verified"]:
+        raise CommandError(
+            f'Error: closing a {ticket_type} requires a certified signature '
+            f'(verdict: {result["verdict"]}).\n'
+            "  Recovery: sign a manifest of verified steps, then close:\n"
+            f"    rebar sign {ticket_id} '[\"step one: PASS\", \"step two: PASS\"]'\n"
+            f"    rebar transition {ticket_id} closed\n"
+            '  Override: use --force-close="<reason>" to bypass (requires user approval).',
+            returncode=1,
+        )
+    # Git-state binding: the attestation must be for the current HEAD. An
+    # unresolvable HEAD ('unknown') must NEVER satisfy the binding — otherwise
+    # 'unknown' == 'unknown' would silently void the freshness guard.
+    head_sha = _signing.head_sha(_config.repo_root())
+    if head_sha == "unknown" or result.get("head_sha") != head_sha:
+        raise CommandError(
+            f"Error: the signature for {ticket_type} {ticket_id} was made at a "
+            f"different commit (signed at {result.get('head_sha')}, HEAD is {head_sha}).\n"
+            f"  Recovery: re-sign at the current HEAD:\n"
+            f"    rebar sign {ticket_id} '[...verified steps...]'\n"
+            '  Override: use --force-close="<reason>" to bypass (requires user approval).',
+            returncode=1,
+        )
 
 
 def claim_core(

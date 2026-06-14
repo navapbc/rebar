@@ -344,6 +344,16 @@ def build_server():
         return BridgeFsckOut.model_validate(rebar.bridge_fsck())
 
     @mcp.tool()
+    def verify_signature(ticket_id: str) -> dict:
+        """Certify a ticket's verified-steps manifest against its signature.
+
+        Recomputes the HMAC with THIS environment's signing key and returns
+        {ticket_id, verified, verdict, reason, manifest, ...}. verdict is
+        'certified' (steps match), 'mismatch' (altered/invalid), 'foreign_key'
+        (signed by a different environment), or 'unsigned'. Read-only."""
+        return rebar.verify_signature(ticket_id)
+
+    @mcp.tool()
     def reconcile(mode: str = "dry-run") -> dict:
         """Run the Jira reconciler. Defaults to a non-mutating dry-run.
 
@@ -500,6 +510,17 @@ def build_server():
             """Record DD-level verify commands (list of {dd_id, dd_text, command})."""
             rebar.set_verify_commands(ticket_id, [_dump(e) for e in commands])
             return "ok"
+
+        @mcp.tool()
+        def sign_manifest(ticket_id: str, manifest: list[str]) -> dict:
+            """Sign a manifest of verified steps with the environment signing key.
+
+            Computes an HMAC-SHA256 over the steps with this environment's key
+            (REBAR_SIGNING_KEY or the gitignored .signing-key) and records a
+            SIGNATURE event. Returns {ticket_id, manifest, algorithm, signature,
+            key_id, head_sha, signed_at}. Use verify_signature to certify it
+            later — only this environment (holding the key) can certify."""
+            return rebar.sign_manifest(ticket_id, manifest)
 
     return mcp
 

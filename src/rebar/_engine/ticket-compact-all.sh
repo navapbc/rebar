@@ -56,9 +56,12 @@ fi
 # ── Discover tickets without SNAPSHOTs ───────────────────────────────────────
 # Uses Python for filesystem scan to avoid triggering the tickets-tracker-guard
 # pre-bash hook (which blocks direct shell access to .tickets-tracker/).
+# `read` loop instead of `mapfile`/`readarray` (bash 4+) so this runs on the
+# macOS default bash 3.2 too — under 3.2 `mapfile` is absent, leaving the list
+# empty and silently compacting nothing.
 needs_compact=()
-while IFS= read -r _ticket_name; do
-    needs_compact+=("$_ticket_name")
+while IFS= read -r _ticket; do
+    [ -n "$_ticket" ] && needs_compact+=("$_ticket")
 done < <(python3 - "$TRACKER_DIR" <<'PYEOF'
 import glob, os, sys
 

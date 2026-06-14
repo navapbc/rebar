@@ -2,7 +2,7 @@
 
 Port of ticket-init.sh. Creates (or mounts) the orphan ``tickets`` branch as a
 linked worktree at ``.tickets-tracker/``, commits ``.gitignore`` +
-``.pre-commit-config.yaml`` on it, generates ``.env-id`` + ``.closure-key``, sets
+``.pre-commit-config.yaml`` on it, generates ``.env-id`` + ``.signing-key``, sets
 ``gc.auto=0``, and excludes the tracker from the host repo. Idempotent: re-running
 on an initialized repo recovers any stale rebase/merge on the tickets branch and
 returns 0. A 30s mkdir lock (``.git/ticket-init.lock``) serializes concurrent
@@ -25,6 +25,7 @@ import uuid
 
 _GITIGNORE = """.env-id
 .closure-key
+.signing-key
 .state-cache
 .scratch/
 .cache.json
@@ -295,11 +296,22 @@ def _commit_precommit(tracker: str) -> None:
 
 
 def _gen_local_files(tracker: str) -> None:
-    for name in (".env-id", ".closure-key"):
-        path = os.path.join(tracker, name)
-        if not os.path.isfile(path):
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(str(uuid.uuid4()) + "\n")
+    # .env-id: per-environment identity. .signing-key: the manifest-signature gate
+    # key (chmod 600). The legacy .closure-key (verdict-hash gate) is NO LONGER
+    # minted — the signature system supersedes it — but stays gitignored for
+    # back-compat with stores that still carry one.
+    env_path = os.path.join(tracker, ".env-id")
+    if not os.path.isfile(env_path):
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.write(str(uuid.uuid4()) + "\n")
+    key_path = os.path.join(tracker, ".signing-key")
+    if not os.path.isfile(key_path):
+        with open(key_path, "w", encoding="utf-8") as f:
+            f.write(str(uuid.uuid4()) + "\n")
+        try:
+            os.chmod(key_path, 0o600)
+        except OSError:
+            pass
 
 
 def _init_via_symlink(repo: str, tracker: str, silent: bool) -> int:

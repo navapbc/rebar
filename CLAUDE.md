@@ -53,8 +53,9 @@ resolves the STATUS fork deterministically by UUID, so every clone agrees.
 
 **Reads (always available):** `show_ticket`, `list_tickets`, `search`,
 `ticket_deps`, `ready_tickets`, `next_batch`, `clarity_check`, `check_ac`,
-`quality_check`, `validate`, `get_file_impact`, `get_verify_commands`, `fsck`,
-`summary`, `bridge_fsck`, `reconcile` (dry-run by default). The
+`quality_check`, `validate`, `get_file_impact`, `get_verify_commands`,
+`verify_signature`, `fsck`, `summary`, `bridge_fsck`, `reconcile` (dry-run by
+default). The
 typed read tools advertise an `outputSchema` (a documented, validated return
 shape) drawn from the canonical JSON Schemas — see
 [docs/output-schemas.md](docs/output-schemas.md).
@@ -67,7 +68,9 @@ shape) drawn from the canonical JSON Schemas — see
 **Writes (gated by `REBAR_MCP_READONLY=1`):** `create_ticket`,
 `transition_ticket`, `claim_ticket`, `reopen_ticket`, `comment_ticket`,
 `edit_ticket`, `link_tickets`, `unlink_tickets`, `tag_ticket`, `untag_ticket`,
-`archive_ticket`, `compact_ticket`, `set_file_impact`, `set_verify_commands`.
+`archive_ticket`, `compact_ticket`, `set_file_impact`, `set_verify_commands`,
+`sign_manifest` (HMAC-signs a manifest of verified steps with the environment key;
+`verify_signature` certifies it).
 
 There is no `init` over MCP (operator bootstrap only). `reconcile` `live` mode
 additionally requires `REBAR_MCP_ALLOW_RECONCILE_LIVE=1`. Both env gates accept

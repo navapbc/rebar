@@ -107,12 +107,12 @@ _print_subcommand_help() {
             echo "  --without-tag=<tag>  Exclude tickets having ANY of <tag> (comma-separated)"
             echo "  --no-sync          Skip the best-effort fetch/reconverge (also: REBAR_NO_SYNC=1)" ;;
         transition)
-            echo "Usage: rebar transition <ticket_id> <current_status> <target_status> [--reason=<text>] [--force] [--verdict-hash=<hash>] [--force-close=<reason>] [--output json]"
+            echo "Usage: rebar transition <ticket_id> <current_status> <target_status> [--reason=<text>] [--force] [--force-close=<reason>] [--output json]"
             echo "       rebar transition <ticket_id> <target_status>   (auto-detects current status)"
             echo "  status: open | in_progress | closed | blocked"
             echo "  bug close requires --reason (prefix 'Fixed:' or 'Escalated to user:')."
-            echo "  story/epic close requires --verdict-hash (or --force-close=<reason>) ONLY when the"
-            echo "  opt-in gate verify.require_verdict_for_close=true is set in .rebar/config.conf (off by default)." ;;
+            echo "  story/epic close requires a certified signature ('rebar sign'; or --force-close=<reason>) ONLY when"
+            echo "  the opt-in gate verify.require_signature_for_close=true is set in .rebar/config.conf (off by default)." ;;
         claim)        echo "Usage: rebar claim <ticket_id> [--assignee=<name>] [--output json]   (atomic open -> in_progress; exit 10 if already claimed)" ;;
         reopen)       echo "Usage: rebar reopen <ticket_id> [--output json]   (closed -> open; exit 10 if not currently closed)" ;;
         comment)      echo "Usage: rebar comment <ticket_id> <body>" ;;
@@ -305,7 +305,6 @@ case "$subcommand" in
     reopen)
         # Thin convenience over transition: closed -> open (optimistic concurrency,
         # exit 10 if not currently closed).
-        _ensure_initialized
         # shellcheck source=/dev/null
         source "$SCRIPT_DIR/ticket-lib-api.sh"   # also sources ticket-output.sh
         # Strip the --output/-o flag (it can precede the id), then re-inject it as
@@ -318,11 +317,14 @@ case "$subcommand" in
         # (e.g. `rebar reopen --output json`) are caught too. Without this,
         # `$1` below dereferences an unset positional under `set -u` and bash
         # emits a raw `unbound variable` diagnostic instead of the Usage
-        # contract (matching sibling arms claim/archive).
+        # contract (matching sibling arms claim/archive). Runs BEFORE
+        # _ensure_initialized so a usage error never auto-inits a tracker (which
+        # would leak .tickets-tracker into the cwd repo — test isolation).
         if [ $# -lt 1 ]; then
             _print_subcommand_help reopen >&2
             exit 1
         fi
+        _ensure_initialized
         _ticketlib_dispatch ticket_transition "$1" closed open --output="$_reopen_fmt"
         exit $?
         ;;

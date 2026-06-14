@@ -38,6 +38,8 @@ Subcommands:
   get-file-impact  Get the current file impact array for a ticket (JSON)
   set-verify-commands  Record DD-level verify commands (JSON array of {dd_id,dd_text,command})
   get-verify-commands  Get the current verify commands array for a ticket (JSON)
+  sign             Sign a ticket's manifest of verified steps with the environment key (JSON array of strings)
+  verify-signature Certify that a ticket's verified steps match its signature (exit 0=certified)
   scratch          Manage per-ticket scratch values (set/get/clear)
   delete        Delete a ticket (destructive; requires --user-approved)
   compact       Compact a ticket's event log [--threshold=<n>]

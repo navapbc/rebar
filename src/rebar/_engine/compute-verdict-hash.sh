@@ -14,14 +14,20 @@
 #   key:  contents of <tracker-dir>/.closure-key
 #   data: "<ticket-id>|<verdict>|<head-sha>"
 #
-# The .closure-key is generated at ticket system init (alongside .env-id).
-# It is gitignored and local to each environment.
+# The .closure-key is self-generated on first use below (init no longer mints it
+# — the close gate moved to the signature system). It is gitignored and local.
 set -euo pipefail
 
 if [ $# -lt 2 ]; then
     echo "Usage: compute-verdict-hash.sh <ticket-id> <verdict>" >&2
     exit 1
 fi
+
+# DEPRECATED: the story/epic close gate now uses the signature system
+# (`rebar sign <id> <manifest>` + `rebar verify-signature`), not this verdict
+# hash. This script remains only for backward compatibility; its output no longer
+# satisfies the close gate. Migrate to: rebar sign <id> '["step: PASS", ...]'.
+echo "Warning: compute-verdict-hash.sh is deprecated; the close gate now uses 'rebar sign'/'rebar verify-signature'." >&2
 
 TICKET_ID="$1"
 VERDICT="$2"
