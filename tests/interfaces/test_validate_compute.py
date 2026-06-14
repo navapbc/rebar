@@ -18,8 +18,12 @@ from pathlib import Path
 
 import pytest
 
-_PLUGIN_ROOT = Path(__file__).resolve().parents[2]
-_DISPATCHER = _PLUGIN_ROOT / "src" / "rebar" / "_engine" / "ticket"
+from rebar._engine import in_process_cli
+
+# Drive the in-process rebar CLI (Tier E7: the bash dispatcher is deleted). The
+# validate arm honors the same TICKET_CMD injection seam the bash arm did, so
+# this remains the durable python characterization of the production output.
+_CLI = in_process_cli()
 
 
 def _mock_ticket_cmd(tmp_path: Path, tickets: list[dict]) -> str:
@@ -38,7 +42,7 @@ def _mock_ticket_cmd(tmp_path: Path, tickets: list[dict]) -> str:
 
 def _run(ticket_cmd: str, *args: str) -> subprocess.CompletedProcess:
     env = {**os.environ, "TICKET_CMD": ticket_cmd, "REBAR_NO_SYNC": "1"}
-    return subprocess.run([str(_DISPATCHER), "validate", *args], env=env, capture_output=True, text=True)
+    return subprocess.run([_CLI, "validate", *args], env=env, capture_output=True, text=True)
 
 
 def _ticket(tid, status, ttype, parent=None, title=None, desc="yes", notes="", deps=None):

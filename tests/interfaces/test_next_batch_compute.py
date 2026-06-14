@@ -16,8 +16,12 @@ from pathlib import Path
 
 import pytest
 
-_PLUGIN_ROOT = Path(__file__).resolve().parents[2]
-_DISPATCHER = _PLUGIN_ROOT / "src" / "rebar" / "_engine" / "ticket"
+from rebar._engine import in_process_cli
+
+# Drive the in-process rebar CLI (Tier E7: the bash dispatcher is deleted). The
+# next-batch arm routes to the same in-process compute the bash arm called, so
+# this stays a faithful characterization of the production output.
+_CLI = in_process_cli()
 
 
 # ───────────────────────────── fixtures ──────────────────────────────────────
@@ -72,7 +76,7 @@ def _multi_overlap(base: Path) -> None:
 
 def _run(tracker: Path, *args: str) -> subprocess.CompletedProcess:
     env = {**os.environ, "TICKETS_TRACKER_DIR": str(tracker), "REBAR_NO_SYNC": "1", "_TICKET_TEST_NO_SYNC": "1"}
-    return subprocess.run([str(_DISPATCHER), "next-batch", *args], env=env, capture_output=True, text=True)
+    return subprocess.run([_CLI, "next-batch", *args], env=env, capture_output=True, text=True)
 
 
 @pytest.fixture

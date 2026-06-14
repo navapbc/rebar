@@ -36,6 +36,8 @@ from pathlib import Path
 
 import pytest
 
+from rebar._engine import in_process_cli
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -43,7 +45,10 @@ import pytest
 REPO_ROOT = Path(
     subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
 )
-TICKET_CMD = REPO_ROOT / "src" / "rebar" / "_engine" / "ticket"
+# Drive the in-process rebar CLI (Tier E7: the bash dispatcher is deleted). The
+# bridge-status arm is fully in-process; with TICKETS_TRACKER_DIR injected the
+# auto-init consent gate is bypassed (ensure_initialized returns early).
+_CLI = in_process_cli()
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -58,22 +63,19 @@ def _run_bridge_status(
     *,
     env_override: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
-    """Invoke 'ticket bridge-status' with the given tracker dir and optional args.
+    """Invoke 'rebar bridge-status' with the given tracker dir and optional args.
 
-    Passes TICKETS_TRACKER_DIR so the script reads from tmp_path rather than the
-    real repository's .tickets-tracker directory.
+    Passes TICKETS_TRACKER_DIR so the command reads from tmp_path rather than the
+    real repository's .tickets-tracker directory (and bypasses the auto-init gate).
     """
     env = {
         **os.environ,
         "TICKETS_TRACKER_DIR": str(tracker_dir),
-        # Prevent the dispatcher's _ensure_initialized from invoking ticket-init.sh
-        # by pointing GIT_DIR at an existing directory. The actual git repo works fine.
-        "GIT_DIR": str(REPO_ROOT / ".git"),
     }
     if env_override:
         env.update(env_override)
 
-    cmd = ["bash", str(TICKET_CMD), "bridge-status"] + (extra_args or [])
+    cmd = [_CLI, "bridge-status"] + (extra_args or [])
     return subprocess.run(
         cmd,
         capture_output=True,

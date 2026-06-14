@@ -49,40 +49,25 @@ All tests must return non-zero until ticket-bridge-fsck.py is implemented.
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import subprocess
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
 # ---------------------------------------------------------------------------
-# Module loading — filename has hyphens so we use importlib
+# Audit implementation under test — the in-process bridge-fsck (Tier E7: the
+# bash-era ``ticket-bridge-fsck.py`` helper was deleted; the sole impl now lives
+# in ``rebar._engine_support.bridge_fsck``, exposing audit_bridge_mappings/main).
 # ---------------------------------------------------------------------------
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-SCRIPT_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "ticket-bridge-fsck.py"
-TICKET_DISPATCHER = REPO_ROOT / "src" / "rebar" / "_engine" / "ticket"
-
-
-def _load_module() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("ticket_bridge_fsck", SCRIPT_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
-    return module
 
 
 @pytest.fixture(scope="module")
 def fsck() -> ModuleType:
-    """Return the ticket-bridge-fsck module, failing all tests if absent (RED)."""
-    if not SCRIPT_PATH.exists():
-        pytest.fail(
-            f"ticket-bridge-fsck.py not found at {SCRIPT_PATH} — "
-            "this is expected RED state; implement the script to make tests pass."
-        )
-    return _load_module()
+    """Return the in-process ``rebar._engine_support.bridge_fsck`` module."""
+    from rebar._engine_support import bridge_fsck
+
+    return bridge_fsck
 
 
 # ---------------------------------------------------------------------------
@@ -183,22 +168,6 @@ def _write_bridge_alert_event(
     path = ticket_dir / filename
     path.write_text(json.dumps(payload))
     return path
-
-
-def _run_bridge_fsck(
-    tickets_tracker: Path,
-) -> subprocess.CompletedProcess[str]:
-    """Invoke 'ticket bridge-fsck' via the dispatcher and return the result."""
-    return subprocess.run(
-        ["bash", str(TICKET_DISPATCHER), "bridge-fsck"],
-        capture_output=True,
-        text=True,
-        env={
-            "HOME": str(REPO_ROOT),
-            "PATH": "/usr/bin:/bin:/usr/local/bin",
-            "TICKETS_TRACKER_DIR": str(tickets_tracker),
-        },
-    )
 
 
 # ---------------------------------------------------------------------------

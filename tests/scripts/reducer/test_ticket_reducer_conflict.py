@@ -15,7 +15,6 @@ Test: python3 -m pytest tests/scripts/test_ticket_reducer_conflict.py -q
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 from types import ModuleType
@@ -23,30 +22,17 @@ from types import ModuleType
 import pytest
 
 # ---------------------------------------------------------------------------
-# Module loading — filename has hyphens so we use importlib
+# Reducer under test — the in-process implementation (Tier E7: the bash-era
+# ``ticket-reducer.py`` helper was deleted; ``rebar.reducer`` is the sole impl).
 # ---------------------------------------------------------------------------
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-SCRIPT_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "ticket-reducer.py"
-
-
-def _load_module() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("ticket_reducer", SCRIPT_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
-    return module
 
 
 @pytest.fixture(scope="module")
 def reducer() -> ModuleType:
-    """Return the ticket-reducer module, failing all tests if absent (RED)."""
-    if not SCRIPT_PATH.exists():
-        pytest.fail(
-            f"ticket-reducer.py not found at {SCRIPT_PATH} — "
-            "this is expected RED state; implement the script to make tests pass."
-        )
-    return _load_module()
+    """Return the in-process ``rebar.reducer`` module (reduce_ticket et al.)."""
+    import rebar.reducer as reducer_mod
+
+    return reducer_mod
 
 
 def _write_event(
