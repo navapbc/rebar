@@ -117,7 +117,13 @@ the MCP server via Homebrew users, install the `[mcp]` extra with pipx/uvx below
 pipx install nava-rebar              # isolated CLI on PATH: rebar
 pip  install nava-rebar              # library: import rebar
 pip  install 'nava-rebar[mcp]'       # + MCP server: rebar-mcp
+pip  install 'nava-rebar[agents]'    # + LLM agent operations: `rebar review` (rebar.llm)
 ```
+
+The `[agents]` extra adds the optional **LLM agent-operations framework**
+(`rebar.llm`) — tool-using agents that review tickets/code and emit structured
+findings, over library / CLI (`rebar review`) / MCP. It is never required by core
+rebar (the engine stays stdlib-only); see [docs/llm-framework.md](docs/llm-framework.md).
 
 ### MCP server — from the MCP Registry
 

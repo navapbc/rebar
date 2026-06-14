@@ -53,6 +53,7 @@ Structured via `--output json`:
 | `summary`                        | `summary`                 |
 | `list-epics`                     | `list_epics`              |
 | `fsck`                           | `fsck`                    |
+| `review` (CLI/library)           | `review_result`           |
 
 The authoritative version of this table is `schemas.OUTPUT_SCHEMAS` in
 `src/rebar/schemas/__init__.py` — the registry the coverage guard consumes.
@@ -110,7 +111,13 @@ tools (`comment`/`tag`/`archive`/`edit`/`link`/`set_*`/`compact`/…) and the MC
 `transition_ticket`/`reopen_ticket` advertise **no** `outputSchema` because their
 `{ticket_id, from, to, …}` result uses the Python reserved word `from` (they
 return a plain dict; their CLI/library JSON is still pinned to `transition_result`);
-`reconcile` has no canonical schema for its plan/result.
+`reconcile` has no canonical schema for its plan/result; and `review_ticket`
+(`rebar.llm`) returns a plain dict because it makes a **live LLM call** — it must
+not be auto-driven on the fixture store in CI, so it advertises no `outputSchema`
+and is a documented exemption. Its **CLI/library** `--output json` path *is* pinned
+to `review_result` via `OUTPUT_SCHEMAS["review"]` (the model-produced shape is still
+normalized + schema-validated before it is returned; see
+[llm-framework.md](llm-framework.md)).
 
 Adding a new structured output therefore means: author the schema (reuse
 `common` `$ref`s), register it in `OUTPUT_SCHEMAS`, and add a conformance case —
