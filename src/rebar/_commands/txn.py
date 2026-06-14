@@ -1,0 +1,395 @@
+"""The status-transition + claim locked critical section, in-process (Tier E E5c).
+
+This module IS the lock-holding, committing core for a status transition and for
+an atomic claim. It was relocated from ``_engine/ticket_txn.py`` (the bash-era
+heredoc extraction) into the ``rebar`` package so the CLI/library can call it
+in-process — without putting the engine dir on ``sys.path`` (the ``test_engine_dir``
+guard, a Tier D invariant). The old ``_engine/ticket_txn.py`` is now a thin shim
+that re-exits 10/1/2 for the bash dispatcher leg until E7.
+
+Each core runs as ONE critical section in ONE process: acquire the unified write
+lock (``rebar._store.lock`` — fcntl + mkdir dual leg, the ``stiff-mop-lane`` fix),
+re-read + verify the current status (exit 10 / :class:`ConcurrencyMismatch` on
+optimistic-concurrency mismatch), apply the close-time guards, write the
+append-only event file(s), and ``git add``+``commit`` — releasing the lock only
+after the commit. Do NOT split the commit out: it would reopen a lost-update
+window (REMEDIATION_PROPOSAL §0 I4/I5, docs/concurrency.md).
+
+**Byte-parity contract.** Event files are written with
+``json.dump(event, ensure_ascii=False)`` (default separators, UNSORTED keys) —
+byte-identical to the former ``ticket_txn.py`` heredoc. This deliberately does NOT
+use ``rebar._store.event_append.stage_and_commit``/``write_and_push`` (which sort
+keys and re-acquire the lock per event); canonicalising these bytes is epic P1.0's
+scope, not E5c's. Only ``event_filename`` is shared.
+
+Failure signalling: these cores **raise** rather than ``sys.exit``. exit-10
+optimistic-concurrency mismatch → :class:`ConcurrencyMismatch`; everything else →
+:class:`CommandError` carrying the exact stderr text + exit code (1 generic /
+2 git). The caller (CLI/library/shim) emits ``message`` to stderr and maps the
+exit code.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import time
+import uuid
+
+from rebar._commands._seam import CommandError
+from rebar._store import event_append, lock
+from rebar.reducer import reduce_ticket
+
+
+class ConcurrencyMismatch(CommandError):
+    """Optimistic-concurrency rejection (exit 10): the ticket's actual status no
+    longer matches the caller's expectation, or a claim target is not ``open``."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, returncode=10)
+
+
+def _acquire_write_lock(tracker_dir: str) -> lock.LockHandle:
+    """Acquire the unified write lock (fcntl + mkdir dual leg, 30s) for a txn
+    critical section — mutually exclusive with bash leaf-writes on every platform
+    class (the ``stiff-mop-lane`` fix). ``attempts=1`` preserves ticket_txn's 30s
+    budget. Held across the whole re-read → write → commit section."""
+    try:
+        return lock.acquire(tracker_dir, timeout=30, attempts=1, dual_window=True)
+    except lock.LockTimeout:
+        raise CommandError("Error: could not acquire lock", returncode=1) from None
+
+
+def _parent_status_uuid(ticket_dir_path: str) -> str | None:
+    """UUID of the most recent prior STATUS event for this ticket, or None if this
+    is the first. STATUS event files sort by filename (timestamp prefix ⇒
+    chronological)."""
+    try:
+        status_files = sorted(
+            f
+            for f in os.listdir(ticket_dir_path)
+            if f.endswith("-STATUS.json") and not f.startswith(".")
+        )
+        if status_files:
+            most_recent = os.path.join(ticket_dir_path, status_files[-1])
+            with open(most_recent, encoding="utf-8") as sf:
+                prev = json.load(sf)
+            return prev.get("uuid") or None
+    except Exception:
+        return None
+    return None
+
+
+def _git(tracker_dir: str, *args: str) -> None:
+    """Run a git command in the tracker, raising :class:`CommandError` (exit 2) on
+    failure with the exact bash stderr prefix."""
+    cp = subprocess.run(
+        ["git", "-C", tracker_dir, *args], capture_output=True, text=True
+    )
+    if cp.returncode != 0:
+        raise CommandError(f"Error: git operation failed: {cp.stderr}", returncode=2)
+
+
+def transition_core(
+    tracker_dir: str,
+    ticket_id: str,
+    current_status: str,
+    target_status: str,
+    *,
+    env_id: str,
+    author: str,
+    close_reason: str = "",
+    verdict_hash: str = "",
+    force_close_reason: str = "",
+) -> None:
+    """Write the append-only STATUS(``target_status``) event under the write lock.
+
+    Re-reads the ticket under the lock and rejects with :class:`ConcurrencyMismatch`
+    (exit 10) if its status is not ``current_status``. Applies the bug-close-reason
+    and (opt-in) story/epic verdict-hash guards. Raises :class:`CommandError` for
+    validation / git failures. Returns ``None`` on success (the wrapper computes
+    newly_unblocked + output separately)."""
+    handle = _acquire_write_lock(tracker_dir)
+    final_path = None
+    try:
+        state = reduce_ticket(os.path.join(tracker_dir, ticket_id))
+        if state is None:
+            raise CommandError(
+                "Error: reducer returned no state (ticket may be corrupt or missing events)",
+                returncode=1,
+            )
+
+        actual_status = state.get("status", "")
+        if actual_status != current_status:
+            if actual_status == "archived":
+                hint = (
+                    f"ticket transition {ticket_id} archived open  "
+                    "(un-archive; archived is otherwise inescapable via transition)"
+                )
+            else:
+                hint = f"ticket transition {ticket_id} {actual_status} {target_status}"
+            raise ConcurrencyMismatch(
+                f'Error: current status is "{actual_status}", not "{current_status}". '
+                f"Re-run: {hint}"
+            )
+
+        ticket_type = state.get("ticket_type", "")
+
+        # Bug-close-reason guard.
+        if target_status == "closed" and ticket_type == "bug":
+            if not close_reason:
+                raise CommandError(
+                    'Error: closing a bug ticket requires --reason with prefix '
+                    '"Fixed:" or "Escalated to user:"',
+                    returncode=1,
+                )
+            if not (
+                close_reason.startswith("Fixed")
+                or close_reason.lower().startswith("escalat")
+            ):
+                raise CommandError(
+                    'Error: --reason must start with "Fixed:" or "Escalated to user:"',
+                    returncode=1,
+                )
+
+        # Signature gate (story/epic closure; opt-in via config).
+        if target_status == "closed" and ticket_type in ("story", "epic"):
+            _signature_gate(
+                tracker_dir, ticket_id, ticket_type, state, verdict_hash, force_close_reason
+            )
+
+        ticket_dir_path = os.path.join(tracker_dir, ticket_id)
+        parent_status_uuid = _parent_status_uuid(ticket_dir_path)
+
+        timestamp = time.time_ns()
+        event_uuid = str(uuid.uuid4())
+        event = {
+            "timestamp": timestamp,
+            "uuid": event_uuid,
+            "event_type": "STATUS",
+            "env_id": env_id,
+            "author": author,
+            "parent_status_uuid": parent_status_uuid,
+            "data": {
+                "status": target_status,
+                "current_status": current_status,
+                "parent_status_uuid": parent_status_uuid,
+            },
+        }
+
+        temp_path = os.path.join(tracker_dir, f".tmp-transition-{event_uuid}")
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(event, f, ensure_ascii=False)
+
+        final_filename = event_append.event_filename(timestamp, event_uuid, "STATUS")
+        final_path = os.path.join(ticket_dir_path, final_filename)
+        os.rename(temp_path, final_path)
+
+        _git(tracker_dir, "config", "gc.auto", "0")
+        _git(tracker_dir, "add", f"{ticket_id}/{final_filename}")
+        _git(tracker_dir, "commit", "-q", "--no-verify", "-m", f"ticket: STATUS {ticket_id}")
+    except CommandError:
+        if final_path is not None:
+            try:
+                os.remove(final_path)
+            except OSError:
+                pass
+        raise
+    except Exception as exc:
+        raise CommandError(f"Error: {exc}", returncode=1) from None
+    finally:
+        handle.release()
+
+
+def _signature_gate(
+    tracker_dir: str,
+    ticket_id: str,
+    ticket_type: str,
+    state: dict,
+    verdict_hash: str,
+    force_close_reason: str,
+) -> None:
+    """Story/epic close gate: require a CERTIFIED signature made at the current HEAD
+    (OFF unless ``verify.require_signature_for_close=true`` — legacy alias
+    ``verify.require_verdict_for_close=true`` — in ``.rebar/config.conf``).
+
+    A manifest of verified steps is HMAC-signed with the environment key
+    (`rebar sign <id> <manifest>`) and recomputed/certified here; the signature
+    must also have been made at the current HEAD so a stale attestation cannot
+    close work whose code has since changed. Raises :class:`CommandError` when the
+    ticket is not certified; a force-close reason bypasses with a stderr warning
+    (the wrapper writes the audit comment). Replaces the legacy verdict-hash gate;
+    ``--verdict-hash`` is deprecated and ignored."""
+    require_sig = False
+    try:
+        cfg_root = (
+            os.environ.get("REBAR_ROOT")
+            or os.environ.get("PROJECT_ROOT")
+            or tracker_dir.rsplit("/", 1)[0]
+        )
+        config_path = os.environ.get("REBAR_CONFIG") or os.path.join(
+            cfg_root, ".rebar", "config.conf"
+        )
+        if os.path.isfile(config_path):
+            with open(config_path) as cf:
+                for line in cf:
+                    s = line.strip()
+                    # New name + legacy alias (back-compat for existing configs).
+                    if s.startswith("verify.require_signature_for_close=") or s.startswith(
+                        "verify.require_verdict_for_close="
+                    ):
+                        val = s.split("=", 1)[1].strip().lower()
+                        if val in ("true", "1", "yes"):
+                            require_sig = True
+    except Exception:
+        pass
+
+    if not require_sig:
+        return
+
+    import sys
+
+    if verdict_hash:
+        print(
+            "Warning: --verdict-hash is deprecated and ignored; the close gate now "
+            "uses signatures (rebar sign <id> <manifest>).",
+            file=sys.stderr,
+        )
+
+    if force_close_reason:
+        print(
+            f"Warning: closing {ticket_type} {ticket_id} via --force-close "
+            "(signature gate bypassed)",
+            file=sys.stderr,
+        )
+        print(f"  Reason: {force_close_reason}", file=sys.stderr)
+        return
+
+    from rebar import config as _config, signing as _signing
+
+    key = _signing.signing_key(tracker_dir, create_if_missing=False)
+    result = _signing.verify_record(state.get("signature"), ticket_id, key)
+    if not result["verified"]:
+        raise CommandError(
+            f'Error: closing a {ticket_type} requires a certified signature '
+            f'(verdict: {result["verdict"]}).\n'
+            "  Recovery: sign a manifest of verified steps, then close:\n"
+            f"    rebar sign {ticket_id} '[\"step one: PASS\", \"step two: PASS\"]'\n"
+            f"    rebar transition {ticket_id} closed\n"
+            '  Override: use --force-close="<reason>" to bypass (requires user approval).',
+            returncode=1,
+        )
+    # Git-state binding: the attestation must be for the current HEAD. An
+    # unresolvable HEAD ('unknown') must NEVER satisfy the binding — otherwise
+    # 'unknown' == 'unknown' would silently void the freshness guard.
+    head_sha = _signing.head_sha(_config.repo_root())
+    if head_sha == "unknown" or result.get("head_sha") != head_sha:
+        raise CommandError(
+            f"Error: the signature for {ticket_type} {ticket_id} was made at a "
+            f"different commit (signed at {result.get('head_sha')}, HEAD is {head_sha}).\n"
+            f"  Recovery: re-sign at the current HEAD:\n"
+            f"    rebar sign {ticket_id} '[...verified steps...]'\n"
+            '  Override: use --force-close="<reason>" to bypass (requires user approval).',
+            returncode=1,
+        )
+
+
+def claim_core(
+    tracker_dir: str,
+    ticket_id: str,
+    *,
+    env_id: str,
+    author: str,
+    assignee: str = "",
+) -> None:
+    """Atomic claim: move an ``open`` ticket to ``in_progress`` AND set its assignee
+    in ONE locked critical section (single commit). Rejects with
+    :class:`ConcurrencyMismatch` (exit 10) if the ticket is not ``open``.
+
+    Both the STATUS(in_progress) and EDIT(assignee) events are fresh UUID-named
+    files written and committed in ONE commit before the lock releases, so no
+    reader on any clone ever observes in_progress without the assignee (I2/I8;
+    docs/concurrency.md)."""
+    handle = _acquire_write_lock(tracker_dir)
+    status_path = None
+    edit_path = None
+    try:
+        state = reduce_ticket(os.path.join(tracker_dir, ticket_id))
+        if state is None:
+            raise CommandError(
+                "Error: reducer returned no state (ticket may be corrupt or missing events)",
+                returncode=1,
+            )
+        actual_status = state.get("status", "")
+        if actual_status != "open":
+            raise ConcurrencyMismatch(
+                f'Error: cannot claim {ticket_id}: status is "{actual_status}", not '
+                '"open" (already claimed or not claimable).'
+            )
+
+        ticket_dir_path = os.path.join(tracker_dir, ticket_id)
+        parent_status_uuid = _parent_status_uuid(ticket_dir_path)
+        rel_paths = []
+
+        # STATUS(open -> in_progress).
+        ts1 = time.time_ns()
+        uuid1 = str(uuid.uuid4())
+        status_event = {
+            "timestamp": ts1,
+            "uuid": uuid1,
+            "event_type": "STATUS",
+            "env_id": env_id,
+            "author": author,
+            "parent_status_uuid": parent_status_uuid,
+            "data": {
+                "status": "in_progress",
+                "current_status": "open",
+                "parent_status_uuid": parent_status_uuid,
+            },
+        }
+        status_filename = event_append.event_filename(ts1, uuid1, "STATUS")
+        status_tmp = os.path.join(tracker_dir, f".tmp-claim-{uuid1}")
+        with open(status_tmp, "w", encoding="utf-8") as f:
+            json.dump(status_event, f, ensure_ascii=False)
+        status_path = os.path.join(ticket_dir_path, status_filename)
+        os.rename(status_tmp, status_path)
+        rel_paths.append(f"{ticket_id}/{status_filename}")
+
+        # EDIT(assignee) — only when supplied. ts2 sampled AFTER ts1 so STATUS sorts
+        # before EDIT in replay (cosmetic: disjoint fields).
+        if assignee:
+            ts2 = time.time_ns()
+            uuid2 = str(uuid.uuid4())
+            edit_event = {
+                "timestamp": ts2,
+                "uuid": uuid2,
+                "event_type": "EDIT",
+                "env_id": env_id,
+                "author": author,
+                "data": {"fields": {"assignee": assignee}},
+            }
+            edit_filename = event_append.event_filename(ts2, uuid2, "EDIT")
+            edit_tmp = os.path.join(tracker_dir, f".tmp-claim-{uuid2}")
+            with open(edit_tmp, "w", encoding="utf-8") as f:
+                json.dump(edit_event, f, ensure_ascii=False)
+            edit_path = os.path.join(ticket_dir_path, edit_filename)
+            os.rename(edit_tmp, edit_path)
+            rel_paths.append(f"{ticket_id}/{edit_filename}")
+
+        # gc.auto=0, then stage BOTH events and commit ONCE (atomic).
+        _git(tracker_dir, "config", "gc.auto", "0")
+        _git(tracker_dir, "add", *rel_paths)
+        _git(tracker_dir, "commit", "-q", "--no-verify", "-m", f"ticket: CLAIM {ticket_id}")
+    except CommandError:
+        for p in (status_path, edit_path):
+            if p:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+        raise
+    except Exception as exc:
+        raise CommandError(f"Error: {exc}", returncode=1) from None
+    finally:
+        handle.release()
