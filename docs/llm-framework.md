@@ -72,9 +72,10 @@ REBAR_LLM_MODEL=local-model REBAR_LLM_MODEL_PROVIDER=openai \
   REBAR_LLM_BASE_URL=http://localhost:1234/v1 REBAR_LLM_API_KEY=not-needed rebar review <id>
 ```
 
-The `[agents]` extra ships only `langchain-anthropic` (the default); other providers
-need their integration package (`pip install langchain-openai` /
-`langchain-google-genai`) — a missing one raises a clear error. We deliberately
+The `[agents]` extra ships both **`langchain-anthropic` (Claude, the default)** and
+**`langchain-openai` (ChatGPT + OpenAI-compatible local servers)** out of the box;
+other providers need their integration package (`pip install langchain-google-genai`
+for Gemini) — a missing one raises a clear error naming the package. We deliberately
 **never send `temperature`** (claude-opus-4.x reject it; other providers use their
 default). Structured output uses `ToolStrategy` precisely because it is
 provider-*portable* (unlike provider-native strategies). One caveat: `ToolStrategy`

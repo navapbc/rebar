@@ -31,6 +31,35 @@ from rebar import config as _root_config
 DEFAULT_MODEL = "claude-opus-4-8"
 RUNNERS = ("langgraph", "langflow", "fake")
 
+# Model-name prefix → provider, mirroring LangChain init_chat_model inference (used
+# for diagnostics + clear errors; init_chat_model does the authoritative dispatch).
+_PROVIDER_PREFIXES = (
+    ("claude", "anthropic"),
+    ("gpt-", "openai"), ("gpt4", "openai"), ("o1", "openai"), ("o3", "openai"),
+    ("chatgpt", "openai"),
+    ("gemini", "google_genai"),
+)
+# provider → the LangChain integration package a client project must install.
+PROVIDER_PACKAGES = {
+    "anthropic": "langchain-anthropic",
+    "openai": "langchain-openai",
+    "google_genai": "langchain-google-genai",
+}
+
+
+def infer_provider(model: str, explicit: str | None = None) -> str | None:
+    """Resolve the provider for a model: an explicit setting, a ``provider:model``
+    prefix, or inference from the model name. Returns None if undeterminable."""
+    if explicit:
+        return explicit
+    if ":" in model:
+        return model.split(":", 1)[0]
+    low = model.lower()
+    for prefix, provider in _PROVIDER_PREFIXES:
+        if low.startswith(prefix):
+            return provider
+    return None
+
 
 def _env_truthy(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")

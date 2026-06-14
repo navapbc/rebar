@@ -162,6 +162,66 @@ def test_framework_errors_are_llmerror() -> None:
 
 
 # ── config + runner selection ─────────────────────────────────────────────────
+def test_infer_provider() -> None:
+    from rebar.llm.config import infer_provider
+
+    assert infer_provider("claude-opus-4-8") == "anthropic"
+    assert infer_provider("gpt-4o") == "openai"
+    assert infer_provider("chatgpt-4o-latest") == "openai"
+    assert infer_provider("gemini-2.5-pro") == "google_genai"
+    assert infer_provider("openai:gpt-4o") == "openai"  # provider:model form
+    assert infer_provider("local-model", explicit="openai") == "openai"
+    assert infer_provider("mystery-model") is None
+
+
+def test_build_model_wiring_is_provider_agnostic() -> None:
+    """_build_model must pass model/provider/base_url/api_key straight through to
+    init_chat_model and never inject temperature (claude-opus-4.x reject it)."""
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.runner import _build_model
+
+    captured: dict = {}
+
+    def fake_init(model, model_provider=None, **kw):
+        captured.update(model=model, provider=model_provider, kw=kw)
+        return object()
+
+    _build_model(
+        LLMConfig(model="gpt-4o", model_provider="openai", base_url="http://h/v1",
+                  api_key="k", max_tokens=123, timeout_s=7),
+        fake_init,
+    )
+    assert captured["model"] == "gpt-4o" and captured["provider"] == "openai"
+    assert captured["kw"]["base_url"] == "http://h/v1" and captured["kw"]["api_key"] == "k"
+    assert captured["kw"]["max_tokens"] == 123 and captured["kw"]["timeout"] == 7
+    assert "temperature" not in captured["kw"]
+
+
+def test_build_model_constructs_claude_and_chatgpt() -> None:
+    """Validate the real multi-provider path: Claude -> ChatAnthropic, ChatGPT ->
+    ChatOpenAI (construction only; no API call). Skips when the libs are absent."""
+    pytest.importorskip("langchain")
+    pytest.importorskip("langchain_anthropic")
+    pytest.importorskip("langchain_openai")
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.runner import _build_model, _import_langgraph
+
+    _, _, init_chat_model = _import_langgraph()
+    claude = _build_model(LLMConfig(model="claude-opus-4-8", api_key="test"), init_chat_model)
+    assert type(claude).__name__ == "ChatAnthropic"
+    assert getattr(claude, "temperature", None) is None  # never sent
+    gpt = _build_model(
+        LLMConfig(model="gpt-4o", model_provider="openai", api_key="test"), init_chat_model
+    )
+    assert type(gpt).__name__ == "ChatOpenAI"
+    # OpenAI-compatible local server (LMStudio/Ollama/vLLM) via base_url.
+    local = _build_model(
+        LLMConfig(model="m", model_provider="openai", api_key="x", base_url="http://h/v1"),
+        init_chat_model,
+    )
+    assert type(local).__name__ == "ChatOpenAI"
+
+
 def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     from rebar.llm.config import LLMConfig
 
@@ -179,7 +239,6 @@ def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_runner_selection_and_stubs() -> None:
-    import rebar.llm as llm
     from rebar.llm.config import LLMConfig
     from rebar.llm.errors import LLMConfigError
     from rebar.llm.runner import (
@@ -196,8 +255,12 @@ def test_runner_selection_and_stubs() -> None:
     # Langflow runner is a documented stub.
     with pytest.raises(NotImplementedError):
         LangflowRunner(LLMConfig()).run(req)
-    # LangGraph runner without the 'agents' extra gives a clear install error.
-    if not llm.agents_extra_installed():
+    # LangGraph runner without the 'agents' extra (langchain) gives a clear install
+    # error. Guard on langchain's actual absence — when it IS installed, running
+    # needs real credentials, which this offline test does not exercise.
+    from rebar.llm.config import _module_available
+
+    if not _module_available("langchain"):
         with pytest.raises(LLMConfigError):
             LangGraphRunner(LLMConfig(repo_path=".")).run(req)
 

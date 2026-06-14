@@ -37,12 +37,14 @@ mcp = ["mcp>=1.2"]
 agents = [
     "langchain>=1,<2",
     "langgraph>=1,<2",
-    "langchain-anthropic>=0.3",
+    "langchain-anthropic>=0.3",  # Claude (default provider)
+    "langchain-openai>=0.2",     # ChatGPT / OpenAI-compatible local servers
     "langchain-mcp-adapters>=0.3",
     "langfuse>=3",
-    "anthropic>=0.40",
     "pydantic>=2",
 ]
+# Additional model providers are opt-in (keep the default extra lean):
+#   pip install langchain-google-genai   # Gemini
 dev = [
     "pytest>=8",
     "mcp>=1.2",

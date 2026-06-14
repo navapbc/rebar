@@ -200,9 +200,13 @@ def _build_model(cfg: LLMConfig, init_chat_model):
     try:
         return init_chat_model(cfg.model, model_provider=cfg.model_provider, **kwargs)
     except ImportError as exc:
+        from rebar.llm.config import PROVIDER_PACKAGES, infer_provider
+
+        provider = infer_provider(cfg.model, cfg.model_provider)
+        pkg = PROVIDER_PACKAGES.get(provider or "", "the provider's langchain integration")
         raise LLMConfigError(
-            f"the provider for model '{cfg.model}' needs its LangChain integration "
-            f"package (e.g. langchain-openai / langchain-google-genai): {exc}"
+            f"model '{cfg.model}' needs the {provider or 'provider'} integration "
+            f"package: pip install {pkg}"
         ) from exc
 
 

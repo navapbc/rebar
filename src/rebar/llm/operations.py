@@ -66,10 +66,12 @@ def _assemble_context(ticket_id: str, *, graph: bool, repo_root) -> tuple[str, l
     blocks = [_format_ticket(ticket)]
     ids = [resolved_id]
     if graph:
+        from collections import deque
+
         seen = {resolved_id}
-        frontier = [resolved_id]
+        frontier = deque([resolved_id])
         while frontier:
-            parent = frontier.pop(0)
+            parent = frontier.popleft()
             children = rebar.list_tickets(parent=parent, repo_root=repo_root)
             for child in sorted(children, key=lambda c: c.get("ticket_id", "")):
                 cid = child.get("ticket_id")
