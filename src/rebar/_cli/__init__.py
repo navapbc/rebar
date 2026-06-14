@@ -182,6 +182,47 @@ def _review_code(argv: list[str]) -> int:
     return 0
 
 
+def _scan_spec(argv: list[str]) -> int:
+    """``rebar scan-spec`` → rebar.llm.scan_epics_for_spec (native op).
+
+    Scans open epics against a spec for gaps/conflicts/overlaps; JSON output
+    conforms to the ``review_result`` schema."""
+    import argparse
+    import json as _json
+
+    parser = argparse.ArgumentParser(
+        prog="rebar scan-spec",
+        description="Batch-scan open epics against a specification and emit "
+        "structured findings (gaps/conflicts/overlaps). Needs the 'agents' extra.",
+    )
+    parser.add_argument("--spec-file", required=True, help="path to the specification text")
+    parser.add_argument("--batch-size", type=int, default=5, help="epics per batch (default 5)")
+    parser.add_argument("--epic", action="append", dest="epics",
+                        help="restrict to these epic ids (repeatable; default: all open epics)")
+    parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
+    args = parser.parse_args(argv)
+
+    try:
+        with open(args.spec_file, encoding="utf-8", errors="replace") as fh:
+            spec_text = fh.read()
+    except OSError as exc:
+        sys.stderr.write(f"Error: cannot read --spec-file: {exc}\n")
+        return 1
+    ensure_initialized(init_only=True)  # reads epics from the store
+    from rebar import llm
+
+    try:
+        result = llm.scan_epics_for_spec(spec_text, epics=args.epics, batch_size=args.batch_size)
+    except llm.LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    if args.output == "json":
+        sys.stdout.write(_json.dumps(result) + "\n")
+    else:
+        _render_review_text(result)
+    return 0
+
+
 def _render_review_text(result: dict) -> None:
     """Human-readable rendering of a review_result."""
     findings = result.get("findings", [])
@@ -374,6 +415,10 @@ def main(argv: list[str] | None = None) -> int:
     # review-code intercept (native rebar.llm code-review op).
     if argv and argv[0] == "review-code":
         return _review_code(argv[1:])
+
+    # scan-spec intercept (native rebar.llm batch spec-scan op).
+    if argv and argv[0] == "scan-spec":
+        return _scan_spec(argv[1:])
 
     # No subcommand: overview to stdout, exit 1 (the dispatcher's _usage).
     if not argv:

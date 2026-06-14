@@ -423,6 +423,23 @@ def build_server():
 
         return rebar.llm.review_code(base=base, head=head, reviewers=reviewers)
 
+    @mcp.tool()
+    def scan_spec(spec_text: str, batch_size: int = 5) -> dict:
+        """Batch-scan the store's open epics against a specification -> a
+        review_result dict (gaps/conflicts/overlaps), epics evaluated in batches.
+
+        DISABLED unless REBAR_MCP_ALLOW_LLM=1 (live, billable LLM call(s)). Needs
+        the 'agents' extra + an API key. Returns a plain dict and advertises NO
+        outputSchema by design (documented NO_SCHEMA_EXEMPT)."""
+        if not _env_truthy("REBAR_MCP_ALLOW_LLM"):
+            raise ValueError(
+                "scan_spec is disabled: it makes live, billable LLM call(s). "
+                "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
+            )
+        import rebar.llm
+
+        return rebar.llm.scan_epics_for_spec(spec_text, batch_size=batch_size)
+
     # ── Write tools (gated by REBAR_MCP_READONLY) ──────────────────────────────
     if not _readonly():
 

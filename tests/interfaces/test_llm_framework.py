@@ -486,6 +486,31 @@ def test_review_code_derives_changed_files_from_diff(tmp_path: Path) -> None:
     assert set(result["target"]["files"]) == {"a.py", "b.py"}  # parsed from +++ lines
 
 
+# ── batch spec scan ───────────────────────────────────────────────────────────
+def test_scan_epics_for_spec_batches(rebar_repo: Path) -> None:
+    import rebar.llm as llm
+    from rebar.llm.config import LLMConfig
+
+    for i in range(3):
+        rebar.create_ticket("epic", f"Epic {i}",
+                            description=f"Body {i}.\n\n## Acceptance Criteria\n- [ ] x",
+                            repo_root=str(rebar_repo))
+    runner = llm.FakeRunner(
+        findings=[{"severity": "high", "dimension": "spec-alignment", "detail": "gap",
+                   "citations": [{"kind": "source", "description": "epic"}]}],
+    )
+    result = llm.scan_epics_for_spec(
+        "The system must do X and Y.", batch_size=2,
+        config=LLMConfig(repo_path=str(rebar_repo)), runner=runner, repo_root=str(rebar_repo),
+    )
+    schemas.validator(schemas.REVIEW_RESULT).validate(result)
+    assert result["target"]["kind"] == "spec_scan"
+    assert len(result["target"]["ticket_ids"]) == 3  # all open epics scanned
+    # 3 epics @ batch_size 2 → 2 batches → FakeRunner's finding once per batch
+    assert len(result["findings"]) == 2
+    assert result["reviewers"] == ["spec-alignment"]
+
+
 # ── review_ticket end-to-end (FakeRunner against a real store) ────────────────
 def _seed(repo: Path) -> str:
     r = str(repo)

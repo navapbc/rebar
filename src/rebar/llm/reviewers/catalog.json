@@ -17,6 +17,15 @@
     "default": false,
     "applies_to": []
   },
+  "spec-alignment": {
+    "dimension": "spec-alignment",
+    "title": "Spec-alignment reviewer",
+    "description": "Evaluates a batch of epics against a spec: coverage gaps, conflicts/contradictions, and scope overlaps. Used by the batch spec-scan operation.",
+    "langfuse_prompt": "rebar-spec-alignment",
+    "fallback_file": "spec_alignment.md",
+    "default": false,
+    "applies_to": []
+  },
   "security": {
     "dimension": "security",
     "title": "Security reviewer",

@@ -92,6 +92,9 @@ NO_SCHEMA_EXEMPT: dict[str, str] = {
     "review_code": "rebar.llm code-review op: live LLM call(s) over a git range, "
                    "returns an aggregated review_result as a plain dict (no "
                    "outputSchema) — same exemption rationale as review_ticket.",
+    "scan_spec": "rebar.llm batch spec-scan op: live LLM call(s) over the store's "
+                 "epics, returns a review_result as a plain dict (no outputSchema) "
+                 "— same exemption rationale as review_ticket.",
 }
 
 

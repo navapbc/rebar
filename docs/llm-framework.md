@@ -183,6 +183,7 @@ rebar review <ticket-id> ticket-quality # JSON review_result on stdout
 rebar review <epic-id> --graph -o text  # review an epic + its children, human output
 rebar review-code --base main --head HEAD    # multi-reviewer code review of a git range
 rebar review-code --diff-file change.diff -o text   # review a diff file, human output
+rebar scan-spec --spec-file spec.md --batch-size 5   # scan open epics against a spec
 ```
 
 ```python
@@ -220,9 +221,11 @@ dict (the `review_result` shape) and advertises no `outputSchema` by design.
    rank by severity×agreement; each finding carries `agreement` + `reviewers`). A
    lightweight repo "orientation" seeds the changed-file layout (a full
    tree-sitter/PageRank repo-map à la Aider is a future enhancement).
-3. **Scan open epics related to a spec (batched API calls)** — a future op shaped as
-   a batch evaluator rather than a single agent loop; it reuses the same findings
-   contract and (optionally) a non-agent runner behind the same protocol.
+3. **Scan open epics against a spec (batched)** — the shipped `scan_epics_for_spec`
+   op (library, CLI `rebar scan-spec`, gated MCP `scan_spec`). A batch evaluator:
+   it pulls the store's open epics, evaluates them against the spec in batches
+   (one runner pass each, bounded cost) for coverage gaps / conflicts / overlaps,
+   and concatenates + ranks the findings — reusing the same findings contract.
 
 ## Deployment notes
 

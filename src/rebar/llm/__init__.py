@@ -39,6 +39,7 @@ from rebar.llm.code_review import review_code, select_code_reviewers
 from rebar.llm.findings import build_result, normalize_finding, validate_result
 from rebar.llm.operations import review_ticket, select_reviewers
 from rebar.llm.prompts import Reviewer, get_reviewer, load_catalog
+from rebar.llm.spec_scan import scan_epics_for_spec
 from rebar.llm.runner import (
     DeepAgentsRunner,
     FakeRunner,
@@ -51,6 +52,7 @@ __all__ = [
     # operations
     "review_ticket",
     "review_code",
+    "scan_epics_for_spec",
     "select_reviewers",
     "select_code_reviewers",
     "aggregate_findings",
