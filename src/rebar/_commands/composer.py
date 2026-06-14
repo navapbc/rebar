@@ -14,11 +14,9 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import uuid as _uuid
 
-from rebar import _engine
 from rebar._commands._seam import (
     append_event,
     CommandError,
@@ -398,6 +396,42 @@ def link_core(src_raw: str, tgt_raw: str, relation: str, *, repo_root=None, quie
         raise CommandError(f"Error: {exc}") from None
 
 
+def _link_dry_run(src_raw: str, tgt_raw: str, relation: str, *, repo_root=None) -> int:
+    """In-process ``link --dry-run`` preview (Tier E E6.5a — replaces the
+    ticket-link.sh subprocess). Resolves endpoints, asks the shared hierarchy
+    resolver what WOULD happen, and prints the byte-identical ``[DRY RUN]`` line
+    without writing any event. Missing tickets error like the bash _check_ticket_
+    exists; a resolver failure falls back to the plain "Would create" preview."""
+    from rebar.graph._hierarchy import resolve_hierarchy_link
+
+    tracker = str(tracker_dir(repo_root))
+    src_id = resolve_ticket_id(src_raw, tracker)
+    if src_id is None:
+        print(f"Error: ticket '{src_raw}' does not exist", file=sys.stderr)
+        return 1
+    tgt_id = resolve_ticket_id(tgt_raw, tracker)
+    if tgt_id is None:
+        print(f"Error: ticket '{tgt_raw}' does not exist", file=sys.stderr)
+        return 1
+    try:
+        res = resolve_hierarchy_link(src_id, tgt_id, tracker, relation)
+    except Exception:  # noqa: BLE001 — resolver unavailable → plain preview (bash parity)
+        print(f"[DRY RUN] Would create: {src_id} {relation} {tgt_id} (no event written)")
+        return 0
+    if res.get("is_redundant"):
+        print(
+            f"[DRY RUN] Would reject: {src_id} {relation} {tgt_id} — "
+            "redundant link (direct child) (no event written)"
+        )
+    elif res.get("was_redirected"):
+        rs = res.get("resolved_source", src_id)
+        rt = res.get("resolved_target", tgt_id)
+        print(f"[DRY RUN] Would promote: {rs} {relation} {rt} (no event written)")
+    else:
+        print(f"[DRY RUN] Would create: {src_id} {relation} {tgt_id} (no event written)")
+    return 0
+
+
 def link_cli(argv: list[str], *, repo_root=None) -> int:
     """Dispatcher Python route for ``link``: parse --dry-run, resolve, delegate."""
     dry_run = "--dry-run" in argv
@@ -408,17 +442,7 @@ def link_cli(argv: list[str], *, repo_root=None) -> int:
     src_raw, tgt_raw, relation = rest[0], rest[1], rest[2]
 
     if dry_run:
-        # --dry-run preview is owned by ticket-link.sh (retired with the bash core).
-        tracker = tracker_dir(repo_root)
-        src_id = resolve_ticket_id(src_raw, str(tracker)) or src_raw
-        tgt_id = resolve_ticket_id(tgt_raw, str(tracker)) or tgt_raw
-        proc = subprocess.run(
-            ["bash", str(_engine.engine_dir() / "ticket-link.sh"), "link",
-             src_id, tgt_id, relation, "--dry-run"],
-            env=_engine.engine_env(repo_root),
-            check=False,
-        )
-        return proc.returncode
+        return _link_dry_run(src_raw, tgt_raw, relation, repo_root=repo_root)
 
     try:
         link_core(src_raw, tgt_raw, relation, repo_root=repo_root)
