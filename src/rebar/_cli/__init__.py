@@ -94,6 +94,22 @@ def _reconcile(argv: list[str]) -> int:
     )
 
 
+def _bridge_probe(argv: list[str]) -> int:
+    """``rebar bridge-probe`` → live Jira capability preflight.
+
+    Launches the genuine python probe (``jira-capability-probe.py``) under
+    ``sys.executable`` with ``engine_env`` (so the engine's
+    ``rebar_reconciler.acli`` transport resolves) — replacing the bash-dispatcher
+    passthrough (Tier E E6.5a). Talks only to Jira (creates + deletes a throwaway
+    issue); needs no local tracker, so NO auto-init (matches the dispatcher arm).
+    Output streams inherit so the operator sees the PROBE_PASS/FAIL lines directly.
+    """
+    from rebar._engine import engine_dir, engine_env
+
+    script = str(engine_dir() / "jira-capability-probe.py")
+    return subprocess.call([sys.executable, script, *argv], env=engine_env())
+
+
 def _passthrough(sub: str, rest: list[str]) -> int:
     """Transitionally run a not-yet-ported command via the bash dispatcher.
 
@@ -249,6 +265,8 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         if sub == "sign":
             return signing.sign_cli(rest)
         return signing.verify_signature_cli(rest)
+    if sub == "bridge-probe":
+        return _bridge_probe(rest)
     return _passthrough(sub, rest)
 
 
