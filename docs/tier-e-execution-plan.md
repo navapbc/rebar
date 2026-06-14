@@ -23,7 +23,29 @@ Full non-integration suite green at **1805 passed / 0 failed** (E6.5a milestone,
 clean — no false positive). NB: the `_no_repo_commits` guard trips if a `git commit`
 runs DURING a background full-suite run; do not commit while one is in flight.
 
-### RESUME HERE → finish E7d (delete the engine), then E9
+### RESUME HERE → E7e (sever reconciler/validate off the dispatcher), then delete the engine, then E9
+
+⚠ **NEW BLOCKER discovered (must fix BEFORE deleting the dispatcher):** the
+RECONCILER (which STAYS) and `validate` invoke the bash dispatcher as a subprocess:
+- `engine_env()` sets `REBAR_TICKET_CLI = dispatcher()`; the reconciler reads it in
+  `rebar_reconciler/{applier.py:406, invariants.py:26, reconcile.py:447}` and runs
+  `[cli_path, list/show/...]` to read local tickets + file-conflict bug tickets.
+- `_engine_support/validate.py:_default_ticket_cmd()` returns `engine_dir()/ticket`;
+  `run_checks(ticket_cmd=...)` → `check_interface_contracts` subprocesses it (used
+  even when `TICKET_CMD` is unset, i.e. production).
+Fix (E7e): give rebar an in-process CLI entry the reconciler can invoke as a single
+executable — add `src/rebar/__main__.py` (so `python -m rebar` runs `rebar._cli.main`)
+and repoint `REBAR_TICKET_CLI` + `_default_ticket_cmd` at the in-process CLI (e.g. the
+`rebar` console script via `shutil.which`, or `[sys.executable,"-m","rebar"]` — but the
+callers treat it as one path, so a `__main__.py` + console-script path is cleanest).
+Then RE-RUN a live reconciler dry-run (DIG) to confirm it still reads local tickets.
+
+**E7d test-side DONE** (committed): graph `rebar.graph/__init__` flat API + fixture
+off `ticket-graph.py` (`4b8a0f28`); the last 4 helper-coupled tests rewired to
+in-process `rebar.*` (`a02a27dd`). **NO surviving test references any engine helper.**
+Broad suite (interfaces+unit+scripts) 1662 passed.
+
+Original E7d resume (now gated on E7e first):
 
 **DONE since the milestone (committed to local main):** E8 batch 1 (`f7c6f5d8`) + batch 2
 (`f859a526`) — all GAP suites translated to in-process pytest. E7a (`5ce73a9d`) —
