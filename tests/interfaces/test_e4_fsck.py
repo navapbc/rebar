@@ -87,6 +87,16 @@ def test_fsck_corrupt_create_parity(rebar_repo: Path, capsys: pytest.CaptureFixt
     _both(["fsck", "--output", "json"], rebar_repo, capsys)
 
 
+def test_fsck_ignores_hidden_dirs(rebar_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Hidden dirs (.bridge_state, .git, …) are NOT ticket dirs — fsck must skip
+    them (the bash `*/` glob does), not flag them MISSING_CREATE."""
+    rebar.create_ticket("task", "real", repo_root=str(rebar_repo))
+    (rebar_repo / ".tickets-tracker" / ".bridge_state").mkdir()
+    _both(["fsck"], rebar_repo, capsys)
+    out, _, code = _inproc(["fsck"], capsys)
+    assert "no issues found" in out and code == 0
+
+
 def test_fsck_library_clean(rebar_repo: Path) -> None:
     rebar.create_ticket("task", "lib clean", repo_root=str(rebar_repo))
     out = rebar.fsck(repo_root=str(rebar_repo))

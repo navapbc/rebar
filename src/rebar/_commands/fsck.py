@@ -48,8 +48,12 @@ def _resolve_tracker_git_dir(tracker: str) -> str:
 
 
 def _ticket_dirs(tracker: str) -> list[str]:
+    # Skip hidden dirs (.git, .bridge_state, …): the bash `"$TRACKER_DIR"/*/` glob
+    # never matches dot-dirs, and ticket ids never start with '.'.
     return sorted(
-        d for d in os.listdir(tracker) if os.path.isdir(os.path.join(tracker, d))
+        d
+        for d in os.listdir(tracker)
+        if not d.startswith(".") and os.path.isdir(os.path.join(tracker, d))
     )
 
 
