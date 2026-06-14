@@ -59,21 +59,51 @@ def _resolve_repo_root() -> str:
     return root
 
 
-def _auto_init(repo_root: str) -> None:
-    """Bootstrap the tracker when absent (the dispatcher's ``ticket-init.sh --silent``).
+def _is_interactive() -> bool:
+    """True only when both stdin and stderr are TTYs — i.e. a human can answer a
+    prompt. CI/pipes/tests are non-interactive."""
+    try:
+        return sys.stdin.isatty() and sys.stderr.isatty()
+    except (AttributeError, ValueError):
+        return False
 
-    Transitional: until Tier E ports ``init`` in-process, auto-init subprocesses the
-    bundled dispatcher's ``init --silent`` arm — the same code the dispatcher ran.
+
+def _confirm_and_init(repo_root: str) -> None:
+    """Auto-init gate (Tier E E4): the ticket store is NEVER created without consent.
+
+    Interactive (TTY): prompt ``[Y/n]`` (default Yes); a No aborts. Non-interactive
+    (CI/pipe/library/MCP-shaped): error — no silent creation. The explicit
+    ``rebar init`` / :func:`rebar.init_repo` paths bypass this gate entirely. init
+    runs in-process via :func:`rebar._commands.init.init_core`.
+
+    Prior-art rationale: git-attached trackers split into silent-implicit creation
+    (git-bug/git-appraise, ref-only storage — invisible, cheap to auto-create) and
+    explicit-init (git-issue/bugs-everywhere/Fossil). rebar joins the explicit camp
+    and goes further (consent or explicit, never silent in automation) because its
+    init mutates the WORKING TREE — an orphan ``tickets`` branch, a linked worktree,
+    and ``.git/info/exclude`` edits — a far heavier footprint than git-bug's refs,
+    so silently materializing it on a stray read would surprise the user.
     """
-    from rebar._engine import dispatcher, engine_env
+    if not _is_interactive():
+        sys.stderr.write(
+            "Error: ticket system not initialized. Run 'rebar init' first "
+            "(auto-init requires an interactive terminal).\n"
+        )
+        raise SystemExit(1)
 
-    r = subprocess.run(
-        ["bash", str(dispatcher()), "init", "--silent"],
-        stdout=subprocess.DEVNULL,
-        env=engine_env(repo_root),
-        cwd=repo_root,
-    )
-    if r.returncode != 0:
+    sys.stderr.write("Ticket system not initialized in this repo. Initialize now? [Y/n] ")
+    sys.stderr.flush()
+    try:
+        answer = input().strip().lower()
+    except EOFError:
+        answer = ""
+    if answer not in ("", "y", "yes"):
+        sys.stderr.write("Aborted: ticket system not initialized. Run 'rebar init' to initialize.\n")
+        raise SystemExit(1)
+
+    from rebar._commands import init as _init_cmd
+
+    if _init_cmd.init_core(repo_root, silent=False) != 0:
         sys.stderr.write(
             "Error: ticket system initialization failed. Run 'rebar init' manually.\n"
         )
@@ -81,7 +111,12 @@ def _auto_init(repo_root: str) -> None:
 
 
 def ensure_initialized(*, init_only: bool) -> None:
-    """Port of the dispatcher's ``_ensure_initialized`` for in-process arms."""
+    """Auto-init + freshness gate for in-process CLI arms.
+
+    Unlike the legacy dispatcher (which silently auto-initialized), this NEVER
+    creates the store without an interactive confirmation (TTY) — non-interactive
+    callers must run ``rebar init`` / :func:`rebar.init_repo` explicitly first.
+    """
     # Explicit tracker injected → the caller manages init/freshness (do not
     # auto-init the cwd repo's tracker). Matches the dispatcher's first guard.
     if os.environ.get("TICKETS_TRACKER_DIR"):
@@ -89,7 +124,7 @@ def ensure_initialized(*, init_only: bool) -> None:
 
     repo_root = _resolve_repo_root()
     if not (Path(repo_root) / ".tickets-tracker").is_dir():
-        _auto_init(repo_root)
+        _confirm_and_init(repo_root)
 
     if init_only:
         return

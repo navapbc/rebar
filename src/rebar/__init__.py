@@ -79,8 +79,16 @@ def _json(cp: subprocess.CompletedProcess, *, what: str) -> Any:
 
 # ── Initialization ───────────────────────────────────────────────────────────
 def init_repo(*, repo_root=None) -> None:
-    """Initialize the ticket system (orphan ``tickets`` branch + worktree)."""
-    _ok(_run(["init"], repo_root=repo_root), what="init")
+    """Initialize the ticket system (orphan ``tickets`` branch + worktree).
+
+    This is the explicit library init path (Tier E E4, in-process): it always
+    bootstraps and never prompts. Other library calls do NOT auto-init — they
+    require this to have run first (or ``rebar init`` interactively)."""
+    from rebar._commands import init as _init_cmd
+
+    rc = _init_cmd.init_core(repo_root, silent=True)
+    if rc != 0:
+        raise RebarError(f"rebar init failed (exit {rc})", returncode=rc)
 
 
 # ── Write path (subprocess → dispatcher) ─────────────────────────────────────
