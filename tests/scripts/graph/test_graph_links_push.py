@@ -134,7 +134,7 @@ def test_write_link_event_retries_on_non_fast_forward(
     if _scripts_dir not in sys.path:
         sys.path.insert(0, _scripts_dir)
 
-    from ticket_graph._links import _write_link_event as _real_write_link_event
+    from rebar.graph._links import _write_link_event as _real_write_link_event
 
     # Sandbox cwd to tmp_path so any relative file write under test stays inside
     # the auto-cleaned fixture rather than landing in REPO_ROOT.
@@ -182,7 +182,7 @@ def test_write_link_event_push_gives_up_on_merge_conflict(
     if _scripts_dir not in sys.path:
         sys.path.insert(0, _scripts_dir)
 
-    from ticket_graph._links import _write_link_event as _real_write_link_event
+    from rebar.graph._links import _write_link_event as _real_write_link_event
 
     # Sandbox cwd to tmp_path so any relative file write under test stays inside
     # the auto-cleaned fixture rather than landing in REPO_ROOT.

@@ -23,7 +23,7 @@ SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from ticket_reducer import apply_ticket_filters  # noqa: E402
+from rebar.reducer import apply_ticket_filters  # noqa: E402
 
 
 def _t(tid: str, **kw) -> dict:

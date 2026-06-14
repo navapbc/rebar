@@ -24,8 +24,8 @@ _SCRIPTS_DIR_FI = str(REPO_ROOT / "src" / "rebar" / "_engine")
 if _SCRIPTS_DIR_FI not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR_FI)
 
-from ticket_reducer._state import make_error_dict as _make_error_dict  # noqa: E402
-from ticket_reducer._state import make_initial_state as _make_initial_state  # noqa: E402
+from rebar.reducer._state import make_error_dict as _make_error_dict  # noqa: E402
+from rebar.reducer._state import make_initial_state as _make_initial_state  # noqa: E402
 
 
 @pytest.mark.unit

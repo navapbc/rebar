@@ -157,7 +157,7 @@ def test_reduce_all_tickets_fallback_without_marker_correct_state(
 
     # Spy on reduce_ticket to verify it IS called for this dir.
     # reduce_all_tickets lives in ticket_reducer._api, so patch the name there.
-    import ticket_reducer._api as _api_mod
+    import rebar.reducer._api as _api_mod
 
     original_reduce_ticket = _api_mod.reduce_ticket
     called_dirs: list[str] = []
@@ -206,7 +206,7 @@ _SCRIPTS_DIR = str(REPO_ROOT / "src" / "rebar" / "_engine")
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
-from ticket_reducer._cache import compute_dir_hash as _compute_dir_hash  # noqa: E402
+from rebar.reducer._cache import compute_dir_hash as _compute_dir_hash  # noqa: E402
 
 
 @pytest.mark.unit

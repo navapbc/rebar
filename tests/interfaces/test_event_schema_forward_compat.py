@@ -76,7 +76,7 @@ def _load_version_module():
     engine_dir = Path(rebar.__file__).resolve().parent / "_engine"
     if str(engine_dir) not in sys.path:
         sys.path.insert(0, str(engine_dir))
-    from ticket_reducer import _version
+    from rebar.reducer import _version
 
     return _version
 

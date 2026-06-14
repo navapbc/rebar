@@ -53,7 +53,7 @@ ID_D = "dddd-dddd-dddd-dddd"
 def inbound():
     """Import find_inbound_relationships, failing (RED) until it exists."""
     try:
-        from ticket_reducer import find_inbound_relationships  # noqa: WPS433
+        from rebar.reducer import find_inbound_relationships  # noqa: WPS433
     except ImportError as exc:  # pragma: no cover - RED guard
         pytest.fail(
             "ticket_reducer.find_inbound_relationships not importable — "

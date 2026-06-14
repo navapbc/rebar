@@ -288,7 +288,7 @@ def test_cycle_detection_ignores_suggestions_dir(tmp_path: Path) -> None:
     if _scripts_dir not in sys.path:
         sys.path.insert(0, _scripts_dir)
 
-    from ticket_graph._graph import _get_all_blocked_by
+    from rebar.graph._graph import _get_all_blocked_by
 
     tracker_dir = tmp_path / ".tickets-tracker"
     tracker_dir.mkdir()

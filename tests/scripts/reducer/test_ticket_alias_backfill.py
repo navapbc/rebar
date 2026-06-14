@@ -21,8 +21,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS = REPO_ROOT / "src" / "rebar" / "_engine"
 sys.path.insert(0, str(SCRIPTS))
 
-from ticket_reducer import reduce_ticket  # noqa: E402
-from ticket_reducer._alias import compute_alias  # noqa: E402
+from rebar.reducer import reduce_ticket  # noqa: E402
+from rebar.reducer._alias import compute_alias  # noqa: E402
 
 
 def test_compute_alias_full_id_three_words():
@@ -237,7 +237,7 @@ def test_load_warns_once_when_wordlist_missing(tmp_path, capsys, monkeypatch):
     diagnostic — silent fallback to the 8-hex alias hides a real
     misconfiguration. The warning must appear exactly once per process even
     across many _load() calls (cache + warned-flag both prevent re-emission)."""
-    from ticket_reducer import _alias as alias_mod
+    from rebar.reducer import _alias as alias_mod
 
     # Reset the module-level cache + warned flag so this test starts clean
     monkeypatch.setattr(alias_mod, "_WORDS_CACHE", None)

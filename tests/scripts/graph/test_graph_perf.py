@@ -112,7 +112,7 @@ def test_graph_cache_key_invalidated_on_same_size_rewrite(tmp_path: Path) -> Non
     stale graph through deps/ready/next-batch.
     """
 
-    from ticket_graph._cache import _compute_cache_key
+    from rebar.graph._cache import _compute_cache_key
 
     tracker = tmp_path / "tracker"
     (tracker / "0000-aaaa-bbbb-cccc").mkdir(parents=True)
