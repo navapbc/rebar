@@ -119,6 +119,18 @@ model mirrors it (pinned by a test). Correctness guarantees:
 - **Read-only, sandboxed.** The agent's file tools are read-only and confined to
   the repo, with `.git` / `.tickets-tracker` / `.bridge_state` denied. No
   write/edit/bash tools in a *review* op.
+- **Built for large files/projects** (the patterns SWE-agent / deepagents / Claude
+  Code converge on, where windowing is a *correctness* lever, not just cost):
+  `read_file` is **windowed** — it returns a capped number of lines and tells the
+  model the next `line_start` to page with, and clips overlong (minified/generated)
+  lines. `list_directory` / `search_files` **hide vendored/generated and
+  `.gitignore`'d paths** (via `git ls-files` + a noise list) and cap their output
+  with a "narrow your query" hint — so an explicitly named file is still readable,
+  but discovery doesn't drown the agent in `node_modules`/build output.
+- **Tool-awareness steering.** The operation's instructions name the tools, tell
+  the agent to *use them rather than guess*, how to page large files, and to ground
+  every finding in real tool output (cite `path:line`, never invent) — the
+  prompt-level reliability technique used by Claude Code / SWE-agent.
 
 ## Reviewer registry
 

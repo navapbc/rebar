@@ -17,6 +17,7 @@ extra); a missing extra raises a clear, actionable error.
 from __future__ import annotations
 
 import os
+import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
@@ -247,25 +248,86 @@ def _safe_path(root: str, rel: str, denied: tuple[str, ...]) -> str:
     return abs_path
 
 
-# Cap how much a single tool call can read/scan so an agent loop can't blow up
-# latency/cost on a huge file or tree.
-_READ_MAX_LINES = 2000
-_SCAN_MAX_FILES = 5000
+# Per-call caps so an agent loop can't blow up latency/cost/context on a huge file
+# or tree. read_file is windowed (page with line_start/line_end), long lines are
+# truncated, and discovery output is capped — the patterns SWE-agent/deepagents/
+# Claude Code converge on (windowing is a *correctness* lever, not just cost).
+_READ_MAX_LINES = 2000        # max lines returned by one read_file call
+_READ_MAX_LINE_CHARS = 2000   # per-line cap (minified/generated lines)
+_SCAN_MAX_FILES = 5000        # max files scanned by one search_files call
+_SEARCH_MAX_LINE_CHARS = 500  # per-matched-line cap
+
+# Vendored/generated dirs + binary/lock suffixes hidden from DISCOVERY
+# (list_directory/search_files) so the agent isn't drowned on large projects.
+# read_file is NOT filtered by these — an explicitly named file is always readable
+# (only the security deny-list blocks it).
+_NOISE_DIRS = frozenset({
+    "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache",
+    ".ruff_cache", ".tox", "dist", "build", ".next", "target", ".gradle",
+    ".idea", ".vscode", ".cache", "coverage", "htmlcov",
+})
+_NOISE_SUFFIXES = (
+    ".lock", ".min.js", ".min.css", ".map", ".pyc", ".pyo", ".so", ".o", ".a",
+    ".class", ".jar", ".bin", ".woff", ".woff2", ".ttf", ".eot", ".png", ".jpg",
+    ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip", ".gz", ".tar", ".whl",
+)
+
+
+def _git_tracked(root: str) -> set[str] | None:
+    """Realpaths git considers part of the project (tracked + untracked but NOT
+    gitignored), or None if not a git repo / git is unavailable. Lets discovery
+    hide .gitignore'd build output — the `git ls-files` approach code-review-graph
+    uses — without us reimplementing .gitignore parsing."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", root, "ls-files", "-z", "--cached", "--others",
+             "--exclude-standard"],
+            capture_output=True, timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    names = proc.stdout.decode("utf-8", "replace").split("\0")
+    return {os.path.realpath(os.path.join(root, n)) for n in names if n}
+
+
+def _discovery_filter(root: str):
+    """(skip_dir, skip_file) predicates hiding vendored/generated/gitignored paths
+    from the discovery tools. Computed once per tool-set construction."""
+    tracked = _git_tracked(root)
+
+    def skip_dir(name: str) -> bool:
+        return name in _NOISE_DIRS
+
+    def skip_file(abs_path: str, name: str) -> bool:
+        if name.endswith(_NOISE_SUFFIXES):
+            return True
+        return tracked is not None and abs_path not in tracked
+
+    return skip_dir, skip_file
 
 
 def _filesystem_tools(repo_path: str | None) -> list:
     """Read-only, sandboxed file tools rooted at ``repo_path``. Output is
     line-numbered (``<lineno>: <content>``) so the agent can cite ``path:line``
-    accurately — the proven citation-reliability technique. No write/edit/bash."""
+    accurately — the proven citation-reliability technique. Reads are windowed,
+    long lines truncated, and discovery hides vendored/generated/gitignored noise.
+    No write/edit/bash."""
     from langchain_core.tools import tool
 
     root = os.path.realpath(repo_path or ".")
     denied = _denied_realpaths(root)
+    skip_dir, skip_file = _discovery_filter(root)
 
     @tool
     def read_file(path: str, line_start: int = 1, line_end: int = 0) -> str:
-        """Read a repo file, returning lines as `<lineno>: <content>`. Optionally
-        restrict to the [line_start, line_end] range (1-based; line_end<=0 = end)."""
+        """Read a repository file as line-numbered text (`<lineno>: <content>`) so
+        you can cite exact `path:line` locations. Each call returns a capped window
+        of lines; PAGE through large files with line_start/line_end (1-based;
+        line_end<=0 means to the end) rather than guessing — when output is
+        truncated the result tells you the next line_start. Overlong lines are
+        clipped. Prefer reading the specific region you need."""
         target = _safe_path(root, path, denied)
         lo = max(1, line_start)
         hard_hi = lo + _READ_MAX_LINES - 1  # read at most _READ_MAX_LINES lines
@@ -283,28 +345,51 @@ def _filesystem_tools(repo_path: str | None) -> list:
                     break
                 if requested_end is not None and i > requested_end:
                     break
-                out.append(f"{i}: {line}")
-        body = "".join(out) or "(empty)"
+                text = line.rstrip("\n")
+                if len(text) > _READ_MAX_LINE_CHARS:
+                    text = text[:_READ_MAX_LINE_CHARS] + (
+                        f" …(+{len(text) - _READ_MAX_LINE_CHARS} chars truncated)"
+                    )
+                out.append(f"{i}: {text}")
+        if not out:
+            return "(no lines in range; file may be empty or shorter than line_start)"
+        body = "\n".join(out)
         if hit_cap:
-            body += f"\n… (truncated at {_READ_MAX_LINES} lines; request a narrower range)"
+            nxt = lo + _READ_MAX_LINES
+            body += (
+                f"\n… (output truncated at {_READ_MAX_LINES} lines; more remain — "
+                f"call read_file with line_start={nxt} to continue)"
+            )
         return body
 
     @tool
     def list_directory(path: str = ".") -> str:
-        """List entries of a repo directory (directories suffixed with '/')."""
+        """List entries of a repo directory (directories end with '/'). Vendored/
+        generated and git-ignored entries are hidden to cut noise; you can still
+        read_file any specific path that isn't shown."""
         target = _safe_path(root, path, denied)
-        entries = []
+        entries: list[str] = []
+        hidden = 0
         for name in sorted(os.listdir(target)):
             full = os.path.join(target, name)
-            if _is_denied(os.path.realpath(full), denied):
+            rp = os.path.realpath(full)
+            if _is_denied(rp, denied):
                 continue
-            entries.append(name + ("/" if os.path.isdir(full) else ""))
-        return "\n".join(entries) or "(empty)"
+            is_dir = os.path.isdir(full)
+            if (is_dir and skip_dir(name)) or (not is_dir and skip_file(rp, name)):
+                hidden += 1
+                continue
+            entries.append(name + ("/" if is_dir else ""))
+        body = "\n".join(entries) or "(empty)"
+        if hidden:
+            body += f"\n… ({hidden} ignored/generated item(s) hidden)"
+        return body
 
     @tool
     def search_files(pattern: str, path: str = ".", max_results: int = 50) -> str:
-        """Regex-search repo files under `path`; returns `path:lineno: line`
-        matches (capped at max_results)."""
+        """Regex-search repo file CONTENTS under `path`; returns `path:lineno: line`
+        matches (capped at max_results). Vendored/generated and git-ignored files
+        are skipped. If you hit the cap, narrow the pattern or `path`."""
         import re
 
         base = _safe_path(root, path, denied)
@@ -317,21 +402,32 @@ def _filesystem_tools(repo_path: str | None) -> list:
         for dirpath, dirnames, filenames in os.walk(base):
             dirnames[:] = [
                 d for d in dirnames
-                if not _is_denied(os.path.realpath(os.path.join(dirpath, d)), denied)
+                if not skip_dir(d)
+                and not _is_denied(os.path.realpath(os.path.join(dirpath, d)), denied)
             ]
-            for fn in filenames:
-                if scanned >= _SCAN_MAX_FILES:
-                    return "\n".join(hits) + "\n… (scan limit reached)"
-                scanned += 1
+            for fn in sorted(filenames):
                 full = os.path.join(dirpath, fn)
+                rp = os.path.realpath(full)
+                if _is_denied(rp, denied) or skip_file(rp, fn):
+                    continue
+                if scanned >= _SCAN_MAX_FILES:
+                    return "\n".join(hits) + (
+                        f"\n… (scan limit of {_SCAN_MAX_FILES} files reached; narrow `path`)"
+                    )
+                scanned += 1
                 rel = os.path.relpath(full, root)
                 try:
                     with open(full, encoding="utf-8", errors="replace") as fh:
                         for i, line in enumerate(fh, 1):
                             if rx.search(line):
-                                hits.append(f"{rel}:{i}: {line.rstrip()}")
+                                text = line.rstrip()
+                                if len(text) > _SEARCH_MAX_LINE_CHARS:
+                                    text = text[:_SEARCH_MAX_LINE_CHARS] + " …"
+                                hits.append(f"{rel}:{i}: {text}")
                                 if len(hits) >= max_results:
-                                    return "\n".join(hits)
+                                    return "\n".join(hits) + (
+                                        f"\n… ({max_results}-match cap; narrow the pattern)"
+                                    )
                 except OSError:
                     continue
         return "\n".join(hits) or "(no matches)"

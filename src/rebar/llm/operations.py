@@ -118,12 +118,22 @@ def review_ticket(
         "repo_path": cfg.repo_path or "",
     }
     system_prompt, langfuse_prompt = prompts.resolve_prompt(reviewer, variables, cfg.langfuse)
+    # Tool-awareness steering: name the tools, tell the agent to USE them (not
+    # guess), how to page large files, and to ground every claim in tool output —
+    # the prompt-level reliability technique used by Claude Code / SWE-agent.
     instructions = (
         f"Review ticket {ids[0]}"
-        + (" and its child tickets, as a unit," if graph else "")
-        + f", along the '{reviewer.dimension}' dimension. Use your read-only file "
-        "tools to ground every finding in the actual repository, then return your "
-        "findings via the structured output."
+        + (" together with its child tickets, as a unit," if graph else "")
+        + f", along the '{reviewer.dimension}' dimension.\n\n"
+        "You have read-only repository tools — USE them, do not rely on memory or "
+        "guess at the code:\n"
+        "- list_directory(path): explore structure (generated/ignored files are hidden)\n"
+        "- search_files(regex, path): locate code; returns `path:line` matches\n"
+        "- read_file(path, line_start, line_end): read exact lines; PAGE large "
+        "files with the line range instead of assuming their contents.\n\n"
+        "Ground EVERY finding in what the tools actually return — cite real "
+        "`path:line` from read_file output and never invent paths, line numbers, "
+        "or file contents. Then report your findings via the structured output."
     )
 
     req = RunRequest(

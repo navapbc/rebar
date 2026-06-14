@@ -134,7 +134,8 @@ def test_resolve_citations_rejects_denied_state_paths(tmp_path: Path) -> None:
 
 
 def test_read_file_tool_caps_without_slurping(tmp_path: Path) -> None:
-    """read_file streams and caps at _READ_MAX_LINES (PR #6 review)."""
+    """read_file streams and caps at _READ_MAX_LINES, and tells the agent how to
+    page (PR #6 review + windowing research)."""
     pytest.importorskip("langchain_core")
     from rebar.llm.runner import _READ_MAX_LINES, _filesystem_tools
 
@@ -144,11 +145,48 @@ def test_read_file_tool_caps_without_slurping(tmp_path: Path) -> None:
     read_file = {t.name: t for t in _filesystem_tools(str(tmp_path))}["read_file"]
     out = read_file.invoke({"path": "big.txt"})
     assert "truncated" in out
+    assert f"line_start={_READ_MAX_LINES + 1}" in out  # paging guidance for next window
     assert out.count("\n") <= _READ_MAX_LINES + 1  # capped, not the full file
     # a narrow range returns exactly that window, no truncation note
     narrow = read_file.invoke({"path": "big.txt", "line_start": 5, "line_end": 7})
     assert "truncated" not in narrow and narrow.startswith("5: line 5")
     assert narrow.strip().endswith("7: line 7")
+
+
+def test_read_file_truncates_overlong_lines(tmp_path: Path) -> None:
+    pytest.importorskip("langchain_core")
+    from rebar.llm.runner import _READ_MAX_LINE_CHARS, _filesystem_tools
+
+    (tmp_path / "min.js").write_text("x" * (_READ_MAX_LINE_CHARS + 4000) + "\n",
+                                     encoding="utf-8")
+    read_file = {t.name: t for t in _filesystem_tools(str(tmp_path))}["read_file"]
+    out = read_file.invoke({"path": "min.js"})
+    assert "chars truncated" in out
+    assert len(out) < _READ_MAX_LINE_CHARS + 500  # the 4000-char tail was clipped
+
+
+def test_discovery_hides_noise_and_gitignored(rebar_repo: Path) -> None:
+    """list_directory/search_files hide vendored/generated + .gitignore'd files, but
+    read_file can still access an explicitly named one (large-project handling)."""
+    pytest.importorskip("langchain_core")
+    from rebar.llm.runner import _filesystem_tools
+
+    (rebar_repo / ".gitignore").write_text("secret.txt\n", encoding="utf-8")
+    (rebar_repo / "secret.txt").write_text("TOKEN=abc\n", encoding="utf-8")
+    (rebar_repo / "visible.py").write_text("TOKEN_marker = 1\n", encoding="utf-8")
+    (rebar_repo / "node_modules").mkdir()
+    (rebar_repo / "node_modules" / "dep.js").write_text("TOKEN_marker\n", encoding="utf-8")
+
+    tools = {t.name: t for t in _filesystem_tools(str(rebar_repo))}
+    listing = tools["list_directory"].invoke({"path": "."})
+    assert "visible.py" in listing
+    assert "secret.txt" not in listing and "node_modules" not in listing
+    # search skips the gitignored file and the vendored dir, finds the tracked one
+    found = tools["search_files"].invoke({"pattern": "TOKEN_marker"})
+    assert "visible.py" in found
+    assert "secret.txt" not in found and "node_modules" not in found
+    # but an explicitly named ignored file is still readable (not a security deny)
+    assert "TOKEN=abc" in tools["read_file"].invoke({"path": "secret.txt"})
 
 
 def test_validate_rejects_bad_result() -> None:
