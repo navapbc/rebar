@@ -149,6 +149,11 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         if sub == "compact-all":
             return _compact.compact_all_cli(rest)
         return _compact.compact_cli(rest)
+    if sub == "delete":
+        ensure_initialized(init_only=False)
+        from rebar._commands import delete as _delete
+
+        return _delete.delete_cli(rest)
     if sub in _WRITES_FULL:
         ensure_initialized(init_only=False)
         from rebar._commands import main as commands_main
