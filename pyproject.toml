@@ -80,6 +80,11 @@ include = ["src/rebar", "tests", "README.md"]
 target-version = "py310"
 line-length = 100
 
+# Formatting: ruff's recommended defaults (Black-compatible — double quotes,
+# space indentation, magic trailing comma honored). `line-length` is inherited
+# from [tool.ruff] above. `ruff format --check src tests` gates in CI.
+[tool.ruff.format]
+
 [tool.ruff.lint]
 select = ["E9", "F63", "F7", "F82", "F811", "F541", "UP", "B009", "B012", "E401"]
 

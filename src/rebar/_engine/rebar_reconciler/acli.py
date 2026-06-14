@@ -47,7 +47,8 @@ from rebar_reconciler.acli_subprocess import (
 )
 
 # Module-level ACLI issue ops live in acli_cli_ops; the AcliClient methods
-# delegate to them. Re-exported so acli.<name> keeps resolving for callers.
+# delegate to them via ``acli_cli_ops.<name>``. Only the private helpers below
+# are pulled in by name for internal use.
 from rebar_reconciler.acli_cli_ops import (
     _attach_parent_guarded,
     _create_from_json_payload,
@@ -56,11 +57,6 @@ from rebar_reconciler.acli_cli_ops import (
     _extract_parent_key,
     _parse_acli_comments,
     _verify_created_issue,
-    add_comment,
-    create_issue,
-    get_comments,
-    get_issue,
-    update_priority,
 )
 
 # Field sanitization + local↔Jira value maps live in jira_fields; re-exported
