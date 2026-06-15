@@ -130,6 +130,45 @@ follow_imports = "silent"
 source = ["rebar"]
 branch = true
 
+# ── Mutation testing (mutmut 3.x) ─────────────────────────────────────────────
+# Scope is deliberately bounded to the highest-value behavioral cores (see
+# docs/mutation-testing.md). mutmut walks every .py under `source_paths`, so
+# `only_mutate` restricts the actually-mutated set to the core modules; the test
+# selection runs only the focused tests that cover those cores so each mutant is
+# evaluated in seconds, not minutes. Invocation + scope + score are documented in
+# docs/mutation-testing.md.
+[tool.mutmut]
+source_paths = ["src/rebar"]
+only_mutate = [
+    "src/rebar/signing.py",
+    "src/rebar/_engine_support/gates.py",
+    "src/rebar/_engine_support/next_batch.py",
+    "src/rebar/_engine_support/validate.py",
+    "src/rebar/reducer/_processors.py",
+]
+# Fast, fail-fast runner over the dev venv; -p no:randomly for determinism and a
+# fixed basetemp to dodge the macOS tmp race. The test selection is scoped to the
+# files that exercise the mutated cores (see docs/mutation-testing.md for the
+# per-module mapping); widen it when broadening `only_mutate`.
+pytest_add_cli_args = ["-x", "-q", "-p", "no:randomly", "--basetemp=/tmp/rebar-pytest-mut"]
+pytest_add_cli_args_test_selection = [
+    # signing.py
+    "tests/unit/test_signing.py",
+    "tests/interfaces/test_signature.py",
+    # reducer/_processors.py (the fast, rich reducer characterization suite)
+    "tests/scripts/reducer/",
+    "tests/interfaces/test_reducer_single_source.py",
+    # _engine_support/next_batch.py
+    "tests/interfaces/test_next_batch_compute.py",
+    "tests/interfaces/test_next_batch_behavior.py",
+    # _engine_support/validate.py
+    "tests/interfaces/test_validate_compute.py",
+    # _engine_support/gates.py
+    "tests/interfaces/test_gate_rubric_consistency.py",
+    "tests/interfaces/test_ws5d_quality_fileimpact.py",
+    "tests/interfaces/test_close_gate_story_epic.py",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

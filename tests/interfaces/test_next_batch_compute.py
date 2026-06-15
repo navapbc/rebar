@@ -383,5 +383,21 @@ def test_library_and_mcp_shape(tracker: Path, monkeypatch):
     monkeypatch.setenv("TICKETS_TRACKER_DIR", str(tracker))
     monkeypatch.setenv("REBAR_NO_SYNC", "1")
     d = rebar.next_batch("nb-epic")
-    assert d["batch_size"] == 2
+    # Observable result (not just the size): the resolved epic, the selected
+    # tickets with their own fields, and the blocked-story skip — so a regression
+    # in the field mapping or the selection is caught, not only a count change.
+    assert d["epic_id"] == "nb-epic"
+    assert d["epic_title"] == "NB Epic"
+    assert d["batch_size"] == 2 and d["available_pool"] == 2
+    assert [b["id"] for b in d["batch"]] == ["nb-task-1", "nb-task-2"]
+    assert d["batch"][0] == {
+        "id": "nb-task-1",
+        "title": "NB Task One",
+        "priority": 2,
+        "type": "task",
+        "files": [],
+        "files_likely_read": [],
+    }
+    assert [s["id"] for s in d["skipped_blocked_story"]] == ["nb-task-3"]
+    assert d["skipped_blocked_story"][0]["blocked_story"] == "nb-story-2"
     NextBatchOut.model_validate(d)

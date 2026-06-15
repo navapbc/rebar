@@ -26,3 +26,8 @@ htmlcov/
 
 # Serena MCP (local code-navigation tooling; per-developer)
 .serena/
+
+# mutmut mutation-testing working copy + result DB (docs/mutation-testing.md)
+mutants/
+.mutmut-cache
+html/
