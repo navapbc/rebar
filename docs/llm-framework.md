@@ -197,6 +197,19 @@ MCP: the `review_ticket` tool is exposed but **disabled unless
 `REBAR_MCP_ALLOW_LLM=1`** (it has cost/network side-effects). It returns a plain
 dict (the `review_result` shape) and advertises no `outputSchema` by design.
 
+## Live validation
+
+The live agent path makes real, billable model calls, so its tests are marked
+`integration` and excluded from the default CI run. Two ways to run them:
+
+- **CI (recommended):** add an `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`)
+  repository secret and dispatch the **`llm-live-validation`** workflow from the
+  Actions tab (`.github/workflows/llm-live.yml`). It installs `.[dev]`, runs the
+  integration tests, and **fails** if no key secret is set. Add `LANGFUSE_*`
+  secrets to also exercise tracing.
+- **Locally:** `ANTHROPIC_API_KEY=… pytest -m integration tests/interfaces/test_llm_live.py`
+  (needs the `agents` extra). The tests skip when no key/extra is present.
+
 ## Adding an operation or reviewer
 
 - **New reviewer:** add an entry to `reviewers/catalog.json` (+ a packaged `*.md`
