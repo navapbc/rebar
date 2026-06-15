@@ -103,6 +103,7 @@ class InboundMutation:
     fields: dict[str, Any]  # changed fields only
     comments: list[dict[str, Any]] = dataclass_field(default_factory=list)
     labels: list[dict[str, Any]] = dataclass_field(default_factory=list)
+    links: list[dict[str, Any]] = dataclass_field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +406,99 @@ def _diff_comments_inbound(
     return mutations
 
 
+# ---------------------------------------------------------------------------
+# Link diff (story 25ae-92e6-2927-49b6, Cycle 2)
+# ---------------------------------------------------------------------------
+#
+# Reverse map: Jira link-type name -> rebar relation. Canonical definition is
+# acli_graph._JIRA_LINK_TO_RELATION (Cycle 1); re-declared locally because the
+# differ is loaded standalone via spec_from_file_location in tests (no package
+# context). Keep in sync with acli_graph. ``Blocks`` reverses to ``blocks``
+# (the OUTWARD direction); the inbound differ uses link directionality
+# (inwardIssue vs outwardIssue) to pick ``blocks`` vs ``depends_on``.
+_JIRA_LINK_TO_RELATION: dict[str, str] = {
+    "Blocks": "blocks",
+    "Relates": "relates_to",
+}
+
+
+def _diff_links_inbound(
+    jira_fields: dict[str, Any],
+    local_ticket: dict[str, Any],
+    binding_store: Any,
+) -> list[dict[str, Any]]:
+    """Reflect Jira issuelinks into rebar relations. ADD-only.
+
+    Direction semantics (verified live): for the local issue X carrying this
+    ``issuelinks`` array, an entry naming the OTHER issue Y as
+    ``inwardIssue.key`` with ``type.name == "Blocks"`` means **X blocks Y**
+    (X is the outward/blocker side) -> rebar relation ``blocks`` on X targeting
+    Y. An entry naming Y as ``outwardIssue.key`` with Blocks means **Y blocks X**
+    == **X depends_on Y** -> rebar relation ``depends_on`` on X targeting Y.
+    For the symmetric ``Relates`` type, either side maps to ``relates_to``.
+
+    For each link entry:
+      - resolve the other-issue Jira key -> local id (skip unbound, retry next
+        pass);
+      - reverse-map ``type.name`` (+ direction) to a rebar relation (skip
+        link types with no mapping);
+      - emit ``{"action":"add","target_id":<local>,"relation":<rel>}`` only when
+        the local ticket does NOT already carry a matching dep (no churn).
+
+    No REMOVE mutations (additive-only, mirroring ``_diff_labels_inbound``'s
+    inbound ADD semantics for the link direction).
+    """
+    issuelinks = jira_fields.get("issuelinks") or []
+    if not isinstance(issuelinks, list):
+        return []
+
+    # Existing local deps as a {(relation, target_id)} set for dedup.
+    existing_deps: set[tuple[str, str]] = set()
+    for dep in local_ticket.get("deps") or []:
+        if isinstance(dep, dict):
+            rel = dep.get("relation")
+            tgt = dep.get("target_id")
+            if rel and tgt:
+                existing_deps.add((rel, tgt))
+
+    mutations: list[dict[str, Any]] = []
+    emitted: set[tuple[str, str]] = set()
+    for link in issuelinks:
+        if not isinstance(link, dict):
+            continue
+        link_type = link.get("type") or {}
+        type_name = link_type.get("name") if isinstance(link_type, dict) else None
+        if not type_name:
+            continue
+        base_relation = _JIRA_LINK_TO_RELATION.get(type_name)
+        if base_relation is None:
+            continue  # link type with no rebar relation mapping — skip
+
+        inward = link.get("inwardIssue")
+        outward = link.get("outwardIssue")
+        if isinstance(inward, dict) and inward.get("key"):
+            # X (local) is OUTWARD side: X <type> Y -> base relation.
+            other_key = inward.get("key")
+            relation = base_relation
+        elif isinstance(outward, dict) and outward.get("key"):
+            # X (local) is INWARD side: Y <type> X. For Blocks this is
+            # "Y blocks X" == "X depends_on Y"; symmetric Relates is unchanged.
+            other_key = outward.get("key")
+            relation = "depends_on" if base_relation == "blocks" else base_relation
+        else:
+            continue
+
+        target_id = binding_store.get_local_id(other_key)
+        if not target_id:
+            continue  # unbound — retry next pass
+        key = (relation, target_id)
+        if key in existing_deps or key in emitted:
+            continue  # local already carries this dep — no churn
+        emitted.add(key)
+        mutations.append({"action": "add", "target_id": target_id, "relation": relation})
+    return mutations
+
+
 def _diff_labels_inbound(
     jira_fields: dict[str, Any], local_ticket: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -487,6 +581,9 @@ def _build_outbound_context(
       - "label_adds": set of labels being added outbound
       - "label_removes": set of labels being removed outbound
       - "fields": set of field names being updated outbound
+      - "link_add_keys": set of target Jira keys being link-added outbound
+        (story 25ae Cycle 2 — echo-suppression for link adds: an outbound
+        link push for key Y must not be re-reflected inbound the same pass)
     """
     ctx: dict[str, dict[str, Any]] = {}
     if not outbound_mutations:
@@ -497,8 +594,18 @@ def _build_outbound_context(
             continue
         entry = ctx.setdefault(
             jira_key,
-            {"label_adds": set(), "label_removes": set(), "fields": set()},
+            {
+                "label_adds": set(),
+                "label_removes": set(),
+                "fields": set(),
+                "link_add_keys": set(),
+            },
         )
+        for lk in getattr(om, "links", []) or []:
+            if not isinstance(lk, dict):
+                continue
+            if lk.get("action") == "add" and lk.get("to_key"):
+                entry["link_add_keys"].add(lk.get("to_key"))
         for lm in getattr(om, "labels", []) or []:
             action = lm.get("action") if isinstance(lm, dict) else None
             label = lm.get("label") if isinstance(lm, dict) else None
@@ -587,6 +694,7 @@ def compute_inbound_mutations(
         changed = _diff_jira_vs_local(jira_fields, local_ticket, binding_store=binding_store)
         label_mutations = _diff_labels_inbound(jira_fields, local_ticket)
         comment_mutations = _diff_comments_inbound(jira_fields, local_ticket)
+        link_mutations = _diff_links_inbound(jira_fields, local_ticket, binding_store)
 
         # Bidirectional suppression (bug 3bf8): filter out inbound mutations
         # that would clobber a just-emitted outbound change for this target.
@@ -613,8 +721,24 @@ def compute_inbound_mutations(
                         continue
                     filtered_labels.append(lm)
                 label_mutations = filtered_labels
+            # Links: drop an inbound link-ADD when the SAME pass's outbound is
+            # link-ADDING to the same target key (echo of our own push). The
+            # inbound link mutation carries the LOCAL target_id; map it back to
+            # the target Jira key to compare against the outbound link_add_keys.
+            if link_mutations and ob_entry["link_add_keys"]:
+                _get_jira_key = getattr(binding_store, "get_jira_key", None)
+                filtered_links: list[dict[str, Any]] = []
+                for lk in link_mutations:
+                    target_key = (
+                        _get_jira_key(lk.get("target_id")) if _get_jira_key is not None else None
+                    )
+                    if target_key and target_key in ob_entry["link_add_keys"]:
+                        suppression_count += 1
+                        continue
+                    filtered_links.append(lk)
+                link_mutations = filtered_links
 
-        if changed or label_mutations or comment_mutations:
+        if changed or label_mutations or comment_mutations or link_mutations:
             mutations.append(
                 InboundMutation(
                     jira_key=jira_key,
@@ -623,6 +747,7 @@ def compute_inbound_mutations(
                     fields=changed,
                     labels=label_mutations,
                     comments=comment_mutations,
+                    links=link_mutations,
                 )
             )
 

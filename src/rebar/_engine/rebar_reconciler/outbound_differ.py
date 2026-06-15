@@ -825,6 +825,116 @@ def _diff_labels(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Link diff (story 25ae-92e6-2927-49b6, Cycle 2)
+# ---------------------------------------------------------------------------
+#
+# Relation <-> Jira link-type mapping. The canonical definition lives in
+# acli_graph._RELATION_TO_JIRA_LINK (Cycle 1), but the differ is loaded
+# standalone via spec_from_file_location in tests (no package context, so
+# ``from rebar_reconciler.acli_graph import ...`` is not reliably importable
+# and would pull the whole ACLI client import chain). We re-declare a local
+# copy here — the same single-source-of-vocabulary pattern as the local
+# _LOCAL_TO_JIRA_* constants above. Keep in sync with acli_graph.
+#
+# Each entry maps a rebar relation -> (jira_link_type, swap_endpoints).
+# ``swap_endpoints`` records that "A relation B" maps to a Jira link with the
+# endpoints reversed: "A depends_on B" == "B blocks A". Relations with no
+# reliable Jira link type (duplicates / supersedes / discovered_from) are
+# intentionally ABSENT and SKIPPED by the differ.
+_RELATION_TO_JIRA_LINK: dict[str, tuple[str, bool]] = {
+    "blocks": ("Blocks", False),
+    "depends_on": ("Blocks", True),  # A depends_on B == B blocks A
+    "relates_to": ("Relates", False),
+}
+
+
+def _existing_jira_links(jira_fields: dict[str, Any]) -> set[tuple[str, str]]:
+    """Index a Jira issue's ``issuelinks`` as a ``{(type_name, target_key)}`` set.
+
+    Direction semantics (verified live): for the issue X carrying this
+    ``issuelinks`` array, an entry with ``inwardIssue.key == Y`` names X as the
+    OUTWARD (e.g. blocker) side and Y the inward side; an entry with
+    ``outwardIssue.key == Y`` names Y the outward side. The dedup key we build is
+    ``(type_name, the-other-issue-key)`` REGARDLESS of direction — an ADD-only
+    outbound diff just needs to know "does a link of this type to that key
+    already exist in either direction", which is what avoids per-pass churn.
+    """
+    existing: set[tuple[str, str]] = set()
+    for link in jira_fields.get("issuelinks") or []:
+        if not isinstance(link, dict):
+            continue
+        link_type = link.get("type") or {}
+        type_name = link_type.get("name") if isinstance(link_type, dict) else None
+        if not type_name:
+            continue
+        for side_key in ("inwardIssue", "outwardIssue"):
+            side = link.get(side_key)
+            if isinstance(side, dict) and side.get("key"):
+                existing.add((type_name, side.get("key")))
+    return existing
+
+
+def _diff_links(
+    ticket: dict[str, Any],
+    jira_fields: dict[str, Any],
+    binding_store: Any,
+) -> list[dict[str, Any]]:
+    """Compare a local ticket's ``deps`` to its Jira issuelinks. ADD-only.
+
+    For each local dep ``{target_id, relation, link_uuid}``:
+      - resolve ``target_id`` -> Jira key (skip unbound, mirroring the
+        parent-unbound skip in ``_map_local_to_jira_fields``);
+      - map ``relation`` -> Jira link type via ``_RELATION_TO_JIRA_LINK``
+        (skip unmapped relations: duplicates / supersedes / discovered_from);
+      - DEDUP against the issue's existing ``issuelinks`` by
+        ``(jira_link_type, target_key)`` so an already-present link emits
+        nothing (critical to avoid re-emitting a `set_relationship` every pass);
+      - emit ``{"action":"add","type":...,"to_key":...,"relation":...,
+        "link_uuid":...}``.
+
+    No REMOVE mutations are emitted (additive-only, mirroring the create-time
+    label behaviour). The applier (Cycle 3) consumes ``to_key`` as the link
+    target. The recorded ``relation`` is the rebar relation; ``swap_endpoints``
+    is handled by the applier when issuing the directional Jira call.
+    """
+    deps = ticket.get("deps") or []
+    if not deps:
+        return []
+    existing = _existing_jira_links(jira_fields)
+
+    mutations: list[dict[str, Any]] = []
+    emitted: set[tuple[str, str]] = set()
+    for dep in deps:
+        if not isinstance(dep, dict):
+            continue
+        relation = dep.get("relation")
+        mapped = _RELATION_TO_JIRA_LINK.get(relation)
+        if mapped is None:
+            continue  # no reliable Jira link type — skip (no-op)
+        jira_type, _swap = mapped
+        target_id = dep.get("target_id")
+        if not target_id:
+            continue
+        target_key = binding_store.get_jira_key(target_id)
+        if not target_key:
+            continue  # unbound target — skip, retry next pass
+        key = (jira_type, target_key)
+        if key in existing or key in emitted:
+            continue  # already present in Jira (either direction) or already queued
+        emitted.add(key)
+        mutations.append(
+            {
+                "action": "add",
+                "type": jira_type,
+                "to_key": target_key,
+                "relation": relation,
+                "link_uuid": dep.get("link_uuid"),
+            }
+        )
+    return mutations
+
+
 def _diff_status_annotation_labels(
     local_status: str,
     jira_labels: list[str],
@@ -1079,8 +1189,12 @@ def compute_outbound_mutations(
                 jira_labels=list(jira_fields.get("labels") or []),
             )
             label_mutations = label_mutations + annotation_mutations
+            # story 25ae Cycle 2: diff local deps -> Jira issuelinks (ADD-only,
+            # deduped against the snapshot's existing issuelinks so an
+            # already-present link emits nothing — no per-pass churn).
+            link_mutations = _diff_links(ticket, jira_fields, binding_store)
 
-            if changed or comment_mutations or label_mutations:
+            if changed or comment_mutations or label_mutations or link_mutations:
                 # Sync-hardening P5 / bug 57d1 diagnosis enabler: emit a
                 # one-line CHANGED-FIELD BREADCRUMB whenever a bound key gets
                 # an outbound UPDATE carrying field diffs. Logs the changed
@@ -1096,7 +1210,8 @@ def compute_outbound_mutations(
                     f"RECON: outbound_update key={jira_key} "
                     f"changed=[{','.join(sorted(changed))}] "
                     f"comments={len(comment_mutations)} "
-                    f"labels={len(label_mutations)}",
+                    f"labels={len(label_mutations)} "
+                    f"links={len(link_mutations)}",
                     file=sys.stderr,
                 )
                 mutations.append(
@@ -1107,7 +1222,7 @@ def compute_outbound_mutations(
                         fields=changed,
                         comments=comment_mutations,
                         labels=label_mutations,
-                        links=[],
+                        links=link_mutations,
                     )
                 )
 

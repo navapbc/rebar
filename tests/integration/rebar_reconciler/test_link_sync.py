@@ -107,13 +107,6 @@ def _make_ticket(
 # ===========================================================================
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Link sync is not wired into the outbound pipeline: OutboundMutation.links "
-    "is always [] and the local deps array is never diffed. TDD spec for story "
-    "25ae-92e6-2927-49b6; verified by 2b45-3c6f-0c13-442b. Remove this marker when "
-    "outbound link diffing lands.",
-)
 def test_outbound_emits_link_mutation_for_local_blocks_link(outbound):
     """DESIRED: a local ``blocks`` link must produce an outbound link op.
 
@@ -155,13 +148,6 @@ def test_outbound_emits_link_mutation_for_local_blocks_link(outbound):
 # ===========================================================================
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Link sync is not wired into the inbound pipeline: the fetcher does not "
-    "extract issuelinks and InboundMutation has no links field, so a Jira issuelink "
-    "is never reflected into rebar relations. TDD spec for story 25ae-92e6-2927-49b6; "
-    "verified by 2b45-3c6f-0c13-442b. Remove this marker when inbound link parsing lands.",
-)
 def test_inbound_reflects_jira_issuelink_into_rebar(inbound):
     """DESIRED: a Jira ``issuelinks`` entry must produce an inbound link change.
 
