@@ -93,7 +93,8 @@ def aggregate_findings(per_reviewer: Iterable) -> list[dict]:
                     "pd": (anchor[0], anchor[1]) if anchor else None,
                     "anchor": anchor[2] if anchor else None,
                     "txt": None if anchor else _text_key(finding),
-                    "items": [], "reviewers": set(),
+                    "items": [],
+                    "reviewers": set(),
                 }
                 clusters.append(cluster)
             cluster["items"].append(finding)
@@ -103,8 +104,9 @@ def aggregate_findings(per_reviewer: Iterable) -> list[dict]:
     merged: list[dict] = []
     for cluster in clusters:
         # Representative = highest severity, then longest detail (most specific).
-        rep = max(cluster["items"],
-                  key=lambda f: (_severity_rank(f), len(str(f.get("detail", "")))))
+        rep = max(
+            cluster["items"], key=lambda f: (_severity_rank(f), len(str(f.get("detail", ""))))
+        )
         out = dict(rep)
         seen, cits = set(), []
         for finding in cluster["items"]:

@@ -40,7 +40,10 @@ RUNNERS = ("langgraph", "deepagents", "langflow", "fake")
 # for diagnostics + clear errors; init_chat_model does the authoritative dispatch).
 _PROVIDER_PREFIXES = (
     ("claude", "anthropic"),
-    ("gpt-", "openai"), ("gpt4", "openai"), ("o1", "openai"), ("o3", "openai"),
+    ("gpt-", "openai"),
+    ("gpt4", "openai"),
+    ("o1", "openai"),
+    ("o3", "openai"),
     ("chatgpt", "openai"),
     ("gemini", "google_genai"),
 )
@@ -162,9 +165,7 @@ class LLMConfig:
                     mcp_servers = parsed
             except json.JSONDecodeError:
                 mcp_servers = {}
-        repo_path = os.environ.get("REBAR_LLM_REPO_PATH") or str(
-            _root_config.repo_root(repo_root)
-        )
+        repo_path = os.environ.get("REBAR_LLM_REPO_PATH") or str(_root_config.repo_root(repo_root))
         return cls(
             runner=runner,
             model=(os.environ.get("REBAR_LLM_MODEL") or DEFAULT_MODEL).strip(),

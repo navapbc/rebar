@@ -60,7 +60,8 @@ def test_live_review_ticket(rebar_repo: Path) -> None:
     from rebar.llm.config import LLMConfig
 
     epic = rebar.create_ticket(
-        "epic", "Add login",
+        "epic",
+        "Add login",
         description="Build login.\n\n## Acceptance Criteria\n- [ ] users can log in",
         repo_root=str(rebar_repo),
     )
@@ -86,7 +87,9 @@ def test_live_review_code(rebar_repo: Path) -> None:
     )
     cfg = LLMConfig(model=_MODEL, repo_path=str(rebar_repo), max_iterations=15)
     result = llm.review_code(
-        diff_text=diff, changed_files=["auth.py"], reviewers=["code-quality"],
+        diff_text=diff,
+        changed_files=["auth.py"],
+        reviewers=["code-quality"],
         config=cfg,
     )
     schemas.validator(schemas.REVIEW_RESULT).validate(result)

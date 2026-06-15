@@ -26,9 +26,7 @@ def _fetch_epics(epics: list[str] | None, repo_root) -> list[dict]:
 
     if epics:
         return [rebar.show_ticket(e, repo_root=repo_root) for e in epics]
-    return rebar.list_tickets(
-        ticket_type="epic", status="open,in_progress", repo_root=repo_root
-    )
+    return rebar.list_tickets(ticket_type="epic", status="open,in_progress", repo_root=repo_root)
 
 
 def _render_epic(t: dict) -> str:
@@ -40,7 +38,7 @@ def _render_epic(t: dict) -> str:
 
 def _chunks(seq: list, size: int) -> Iterator[list]:
     for i in range(0, len(seq), size):
-        yield seq[i:i + size]
+        yield seq[i : i + size]
 
 
 def scan_epics_for_spec(
@@ -84,15 +82,18 @@ def scan_epics_for_spec(
             "structured output."
         )
         req = RunRequest(
-            system_prompt=system_prompt, instructions=instructions, config=cfg,
+            system_prompt=system_prompt,
+            instructions=instructions,
+            config=cfg,
             reviewers=[reviewer_id],
             target={"kind": "spec_scan", "ticket_ids": [t.get("ticket_id") for t in batch]},
             langfuse_prompt=lf_prompt,
         )
         findings.extend(selected.run(req).get("findings", []))
 
-    findings.sort(key=lambda f: _SEVERITY_RANK.get(str(f.get("severity", "info")).lower(), 0),
-                  reverse=True)
+    findings.sort(
+        key=lambda f: _SEVERITY_RANK.get(str(f.get("severity", "info")).lower(), 0), reverse=True
+    )
     result = build_result(
         findings,
         runner=getattr(selected, "name", cfg.runner),
@@ -101,7 +102,7 @@ def scan_epics_for_spec(
         target={"kind": "spec_scan", "ticket_ids": epic_ids},
         reviewers=[reviewer_id],
         summary=f"scanned {len(tickets)} epic(s) in {batches} batch(es); "
-                f"{len(findings)} finding(s).",
+        f"{len(findings)} finding(s).",
     )
     resolve_citations(result, cfg.repo_path)
     return validate_result(result)

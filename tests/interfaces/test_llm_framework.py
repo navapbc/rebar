@@ -31,7 +31,8 @@ def test_import_rebar_llm_pulls_no_heavy_deps() -> None:
     )
     cp = subprocess.run(
         [sys.executable, "-c", code],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
         env={"PYTHONPATH": "src", "PATH": __import__("os").environ.get("PATH", "")},
     )
     assert cp.returncode == 0, cp.stderr
@@ -95,15 +96,19 @@ def test_resolve_citations_downgrades_unresolved(tmp_path: Path) -> None:
 
     (tmp_path / "real.py").write_text("a\nb\nc\n", encoding="utf-8")
     result = build_result(
-        [{
-            "severity": "high", "dimension": "d", "detail": "x",
-            "citations": [
-                {"kind": "file", "path": "real.py", "line_start": 1, "line_end": 2},
-                {"kind": "file", "path": "real.py", "line_start": 99},   # out of range
-                {"kind": "file", "path": "missing.py", "line_start": 1},  # no such file
-                "freeform",
-            ],
-        }],
+        [
+            {
+                "severity": "high",
+                "dimension": "d",
+                "detail": "x",
+                "citations": [
+                    {"kind": "file", "path": "real.py", "line_start": 1, "line_end": 2},
+                    {"kind": "file", "path": "real.py", "line_start": 99},  # out of range
+                    {"kind": "file", "path": "missing.py", "line_start": 1},  # no such file
+                    "freeform",
+                ],
+            }
+        ],
         runner="fake",
     )
     resolve_citations(result, str(tmp_path))
@@ -122,10 +127,17 @@ def test_resolve_citations_rejects_denied_state_paths(tmp_path: Path) -> None:
     (tmp_path / ".bridge_state").mkdir()
     (tmp_path / ".bridge_state" / "map.json").write_text("{}\n", encoding="utf-8")
     result = build_result(
-        [{"severity": "high", "dimension": "d", "detail": "x", "citations": [
-            {"kind": "file", "path": ".git/config", "line_start": 1},
-            {"kind": "file", "path": ".bridge_state/map.json", "line_start": 1},
-        ]}],
+        [
+            {
+                "severity": "high",
+                "dimension": "d",
+                "detail": "x",
+                "citations": [
+                    {"kind": "file", "path": ".git/config", "line_start": 1},
+                    {"kind": "file", "path": ".bridge_state/map.json", "line_start": 1},
+                ],
+            }
+        ],
         runner="fake",
     )
     resolve_citations(result, str(tmp_path))
@@ -140,8 +152,9 @@ def test_read_file_tool_caps_without_slurping(tmp_path: Path) -> None:
     from rebar.llm.runner import _READ_MAX_LINES, _filesystem_tools
 
     big = tmp_path / "big.txt"
-    big.write_text("".join(f"line {i}\n" for i in range(1, _READ_MAX_LINES + 501)),
-                   encoding="utf-8")
+    big.write_text(
+        "".join(f"line {i}\n" for i in range(1, _READ_MAX_LINES + 501)), encoding="utf-8"
+    )
     read_file = {t.name: t for t in _filesystem_tools(str(tmp_path))}["read_file"]
     out = read_file.invoke({"path": "big.txt"})
     assert "truncated" in out
@@ -157,8 +170,7 @@ def test_read_file_truncates_overlong_lines(tmp_path: Path) -> None:
     pytest.importorskip("langchain_core")
     from rebar.llm.runner import _READ_MAX_LINE_CHARS, _filesystem_tools
 
-    (tmp_path / "min.js").write_text("x" * (_READ_MAX_LINE_CHARS + 4000) + "\n",
-                                     encoding="utf-8")
+    (tmp_path / "min.js").write_text("x" * (_READ_MAX_LINE_CHARS + 4000) + "\n", encoding="utf-8")
     read_file = {t.name: t for t in _filesystem_tools(str(tmp_path))}["read_file"]
     out = read_file.invoke({"path": "min.js"})
     assert "chars truncated" in out
@@ -245,10 +257,15 @@ def test_pydantic_mirror_field_sets_match_schema() -> None:
 def test_normalize_clamps_soft_fields() -> None:
     from rebar.llm.findings import normalize_finding
 
-    f = normalize_finding({
-        "severity": "high", "dimension": "d", "detail": "x", "confidence": 2.5,
-        "citations": [{"kind": "file", "path": "a.py", "line_start": -3}],
-    })
+    f = normalize_finding(
+        {
+            "severity": "high",
+            "dimension": "d",
+            "detail": "x",
+            "confidence": 2.5,
+            "citations": [{"kind": "file", "path": "a.py", "line_start": -3}],
+        }
+    )
     assert f["confidence"] == 1.0  # clamped into [0,1]
     assert "line_start" not in f["citations"][0]  # negative line dropped
 
@@ -289,8 +306,14 @@ def test_build_model_wiring_is_provider_agnostic() -> None:
         return object()
 
     _build_model(
-        LLMConfig(model="gpt-4o", model_provider="openai", base_url="http://h/v1",
-                  api_key="k", max_tokens=123, timeout_s=7),
+        LLMConfig(
+            model="gpt-4o",
+            model_provider="openai",
+            base_url="http://h/v1",
+            api_key="k",
+            max_tokens=123,
+            timeout_s=7,
+        ),
         fake_init,
     )
     assert captured["model"] == "gpt-4o" and captured["provider"] == "openai"
@@ -407,18 +430,32 @@ def test_langflow_runner_end_to_end_mocked(monkeypatch: pytest.MonkeyPatch) -> N
     from rebar.llm.config import LLMConfig
     from rebar.llm.runner import LangflowRunner, RunRequest
 
-    findings_json = json.dumps({
-        "findings": [{"severity": "high", "dimension": "security", "detail": "x",
-                      "citations": [{"kind": "source", "description": "from the flow"}]}],
-        "summary": "one issue",
-    })
+    findings_json = json.dumps(
+        {
+            "findings": [
+                {
+                    "severity": "high",
+                    "dimension": "security",
+                    "detail": "x",
+                    "citations": [{"kind": "source", "description": "from the flow"}],
+                }
+            ],
+            "summary": "one issue",
+        }
+    )
     raw = {"outputs": [{"outputs": [{"results": {"message": {"text": findings_json}}}]}]}
     monkeypatch.setattr(runner_mod, "_langflow_post", lambda cfg, payload: raw)
 
-    cfg = LLMConfig(runner="langflow", langflow_url="http://lf", langflow_flow_id="f1",
-                    repo_path=".")
-    req = RunRequest(system_prompt="s", instructions="i", config=cfg,
-                     reviewers=["ticket-quality"], target={"kind": "ticket", "ticket_ids": ["T1"]})
+    cfg = LLMConfig(
+        runner="langflow", langflow_url="http://lf", langflow_flow_id="f1", repo_path="."
+    )
+    req = RunRequest(
+        system_prompt="s",
+        instructions="i",
+        config=cfg,
+        reviewers=["ticket-quality"],
+        target={"kind": "ticket", "ticket_ids": ["T1"]},
+    )
     result = LangflowRunner(cfg).run(req)
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
     assert result["runner"] == "langflow" and result["summary"] == "one issue"
@@ -455,15 +492,29 @@ def test_deepagents_runner_assembles(tmp_path: Path) -> None:
 def test_aggregate_findings_clusters_and_ranks() -> None:
     from rebar.llm.aggregate import aggregate_findings
 
-    r1 = {"reviewers": ["a"], "findings": [
-        {"severity": "high", "dimension": "security", "detail": "sql injection",
-         "citations": [{"kind": "file", "path": "db.py", "line_start": 10}]},
-        {"severity": "low", "dimension": "style", "detail": "naming"},
-    ]}
-    r2 = {"reviewers": ["b"], "findings": [
-        {"severity": "medium", "dimension": "security", "detail": "sqli risk",
-         "citations": [{"kind": "file", "path": "db.py", "line_start": 12}]},
-    ]}
+    r1 = {
+        "reviewers": ["a"],
+        "findings": [
+            {
+                "severity": "high",
+                "dimension": "security",
+                "detail": "sql injection",
+                "citations": [{"kind": "file", "path": "db.py", "line_start": 10}],
+            },
+            {"severity": "low", "dimension": "style", "detail": "naming"},
+        ],
+    }
+    r2 = {
+        "reviewers": ["b"],
+        "findings": [
+            {
+                "severity": "medium",
+                "dimension": "security",
+                "detail": "sqli risk",
+                "citations": [{"kind": "file", "path": "db.py", "line_start": 12}],
+            },
+        ],
+    }
     merged = aggregate_findings([r1, r2])
     assert len(merged) == 2  # the two db.py security findings cluster into one
     top = merged[0]
@@ -478,22 +529,43 @@ def test_aggregate_clusters_across_line_bucket_boundary() -> None:
     boundary (9 vs 11) must still cluster — proximity, not fixed bucketing."""
     from rebar.llm.aggregate import aggregate_findings
 
-    r1 = {"reviewers": ["a"], "findings": [
-        {"severity": "high", "dimension": "security", "detail": "bug",
-         "citations": [{"kind": "file", "path": "x.py", "line_start": 9}]},
-    ]}
-    r2 = {"reviewers": ["b"], "findings": [
-        {"severity": "high", "dimension": "security", "detail": "same bug",
-         "citations": [{"kind": "file", "path": "x.py", "line_start": 11}]},
-    ]}
+    r1 = {
+        "reviewers": ["a"],
+        "findings": [
+            {
+                "severity": "high",
+                "dimension": "security",
+                "detail": "bug",
+                "citations": [{"kind": "file", "path": "x.py", "line_start": 9}],
+            },
+        ],
+    }
+    r2 = {
+        "reviewers": ["b"],
+        "findings": [
+            {
+                "severity": "high",
+                "dimension": "security",
+                "detail": "same bug",
+                "citations": [{"kind": "file", "path": "x.py", "line_start": 11}],
+            },
+        ],
+    }
     merged = aggregate_findings([r1, r2])
     assert len(merged) == 1 and merged[0]["agreement"] == 2
     assert merged[0]["reviewers"] == ["a", "b"]
     # A far-away finding on the same file/dimension stays its own cluster.
-    r3 = {"reviewers": ["c"], "findings": [
-        {"severity": "high", "dimension": "security", "detail": "different",
-         "citations": [{"kind": "file", "path": "x.py", "line_start": 99}]},
-    ]}
+    r3 = {
+        "reviewers": ["c"],
+        "findings": [
+            {
+                "severity": "high",
+                "dimension": "security",
+                "detail": "different",
+                "citations": [{"kind": "file", "path": "x.py", "line_start": 99}],
+            },
+        ],
+    }
     assert len(aggregate_findings([r1, r2, r3])) == 2
 
 
@@ -504,10 +576,14 @@ def test_langflow_extract_prefers_output_over_echoed_input() -> None:
 
     raw = {
         "inputs": {"text": "ECHOED PROMPT"},  # outside outputs → must be ignored
-        "outputs": [{"outputs": [
-            {"results": {"text": "intermediate message"}},
-            {"results": {"message": {"text": "FINAL OUTPUT"}}},
-        ]}],
+        "outputs": [
+            {
+                "outputs": [
+                    {"results": {"text": "intermediate message"}},
+                    {"results": {"message": {"text": "FINAL OUTPUT"}}},
+                ]
+            }
+        ],
     }
     assert _langflow_extract_text(raw) == "FINAL OUTPUT"
 
@@ -542,13 +618,22 @@ def test_review_code_end_to_end(tmp_path: Path) -> None:
 
     diff = "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n+print('hi')\n"
     runner = llm.FakeRunner(
-        findings=[{"severity": "high", "dimension": "code-quality", "detail": "bug",
-                   "citations": [{"kind": "source", "description": "from the diff"}]}],
+        findings=[
+            {
+                "severity": "high",
+                "dimension": "code-quality",
+                "detail": "bug",
+                "citations": [{"kind": "source", "description": "from the diff"}],
+            }
+        ],
         summary="s",
     )
     result = llm.review_code(
-        diff_text=diff, changed_files=["x.py"], reviewers=["code-quality", "security"],
-        config=LLMConfig(repo_path=str(tmp_path)), runner=runner,
+        diff_text=diff,
+        changed_files=["x.py"],
+        reviewers=["code-quality", "security"],
+        config=LLMConfig(repo_path=str(tmp_path)),
+        runner=runner,
     )
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
     assert result["target"]["kind"] == "code" and result["target"]["files"] == ["x.py"]
@@ -564,8 +649,10 @@ def test_review_code_derives_changed_files_from_diff(tmp_path: Path) -> None:
 
     diff = "--- a/a.py\n+++ b/a.py\n@@\n+x\n--- a/b.py\n+++ b/b.py\n@@\n+y\n"
     result = llm.review_code(
-        diff_text=diff, reviewers=["code-quality"],
-        config=LLMConfig(repo_path=str(tmp_path)), runner=llm.FakeRunner(findings=[]),
+        diff_text=diff,
+        reviewers=["code-quality"],
+        config=LLMConfig(repo_path=str(tmp_path)),
+        runner=llm.FakeRunner(findings=[]),
     )
     assert set(result["target"]["files"]) == {"a.py", "b.py"}  # parsed from +++ lines
 
@@ -576,16 +663,28 @@ def test_scan_epics_for_spec_batches(rebar_repo: Path) -> None:
     from rebar.llm.config import LLMConfig
 
     for i in range(3):
-        rebar.create_ticket("epic", f"Epic {i}",
-                            description=f"Body {i}.\n\n## Acceptance Criteria\n- [ ] x",
-                            repo_root=str(rebar_repo))
+        rebar.create_ticket(
+            "epic",
+            f"Epic {i}",
+            description=f"Body {i}.\n\n## Acceptance Criteria\n- [ ] x",
+            repo_root=str(rebar_repo),
+        )
     runner = llm.FakeRunner(
-        findings=[{"severity": "high", "dimension": "spec-alignment", "detail": "gap",
-                   "citations": [{"kind": "source", "description": "epic"}]}],
+        findings=[
+            {
+                "severity": "high",
+                "dimension": "spec-alignment",
+                "detail": "gap",
+                "citations": [{"kind": "source", "description": "epic"}],
+            }
+        ],
     )
     result = llm.scan_epics_for_spec(
-        "The system must do X and Y.", batch_size=2,
-        config=LLMConfig(repo_path=str(rebar_repo)), runner=runner, repo_root=str(rebar_repo),
+        "The system must do X and Y.",
+        batch_size=2,
+        config=LLMConfig(repo_path=str(rebar_repo)),
+        runner=runner,
+        repo_root=str(rebar_repo),
     )
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
     assert result["target"]["kind"] == "spec_scan"
@@ -600,9 +699,11 @@ def _seed(repo: Path) -> str:
     r = str(repo)
     epic = rebar.create_ticket("epic", "Login epic", repo_root=r)
     rebar.create_ticket(
-        "task", "Add auth",
+        "task",
+        "Add auth",
         description="Body.\n\n## Acceptance Criteria\n- [ ] login works",
-        parent=epic, repo_root=r,
+        parent=epic,
+        repo_root=r,
     )
     return epic
 
@@ -613,11 +714,14 @@ def test_review_ticket_end_to_end(rebar_repo: Path) -> None:
     epic = _seed(rebar_repo)
     (rebar_repo / "app.py").write_text("import os\nKEY='x'\n", encoding="utf-8")
     runner = llm.FakeRunner(
-        findings=[{
-            "severity": "high", "dimension": "security",
-            "detail": "hardcoded secret",
-            "citations": [{"kind": "file", "path": "app.py", "line_start": 2, "line_end": 2}],
-        }],
+        findings=[
+            {
+                "severity": "high",
+                "dimension": "security",
+                "detail": "hardcoded secret",
+                "citations": [{"kind": "file", "path": "app.py", "line_start": 2, "line_end": 2}],
+            }
+        ],
         summary="one issue",
     )
     result = llm.review_ticket(epic, "ticket-quality", repo_root=str(rebar_repo), runner=runner)
@@ -644,8 +748,9 @@ def test_review_ticket_unknown_reviewer_is_llmerror(rebar_repo: Path) -> None:
 
     epic = _seed(rebar_repo)
     with pytest.raises(llm.LLMError):
-        llm.review_ticket(epic, "no-such-reviewer", repo_root=str(rebar_repo),
-                          runner=llm.FakeRunner())
+        llm.review_ticket(
+            epic, "no-such-reviewer", repo_root=str(rebar_repo), runner=llm.FakeRunner()
+        )
 
 
 # ── CLI surface ───────────────────────────────────────────────────────────────
@@ -659,8 +764,9 @@ def test_cli_review_check(capsys: pytest.CaptureFixture) -> None:
     assert "langchain" in data and "anthropic_api_key" in data
 
 
-def test_cli_review_with_fake_runner(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch,
-                                     capsys: pytest.CaptureFixture) -> None:
+def test_cli_review_with_fake_runner(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
     epic = _seed(rebar_repo)
     monkeypatch.setenv("REBAR_LLM_RUNNER", "fake")  # offline runner, valid empty review
     from rebar._cli import main
@@ -673,8 +779,9 @@ def test_cli_review_with_fake_runner(rebar_repo: Path, monkeypatch: pytest.Monke
     assert result["runner"] == "fake" and result["findings"] == []
 
 
-def test_cli_review_bad_reviewer_is_graceful(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch,
-                                             capsys: pytest.CaptureFixture) -> None:
+def test_cli_review_bad_reviewer_is_graceful(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
     epic = _seed(rebar_repo)
     monkeypatch.setenv("REBAR_LLM_RUNNER", "fake")
     from rebar._cli import main
@@ -685,8 +792,9 @@ def test_cli_review_bad_reviewer_is_graceful(rebar_repo: Path, monkeypatch: pyte
 
 
 # ── MCP surface ───────────────────────────────────────────────────────────────
-def test_mcp_review_tool_registered_and_gated(rebar_repo: Path,
-                                              monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mcp_review_tool_registered_and_gated(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     pytest.importorskip("mcp")
     import asyncio
 

@@ -35,8 +35,7 @@ def _format_ticket(t: dict) -> str:
     """Render one ticket dict (from rebar.show_ticket) as deterministic markdown."""
     lines = [
         f"### Ticket {t.get('ticket_id', '?')} — {t.get('title', '')}",
-        f"- type: {t.get('ticket_type')}  status: {t.get('status')}  "
-        f"priority: {t.get('priority')}",
+        f"- type: {t.get('ticket_type')}  status: {t.get('status')}  priority: {t.get('priority')}",
     ]
     if t.get("assignee"):
         lines.append(f"- assignee: {t['assignee']}")

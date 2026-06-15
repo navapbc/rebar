@@ -383,9 +383,7 @@ def build_server():
         return rebar.reconcile(parsed.value)
 
     @mcp.tool()
-    def review_ticket(
-        ticket_id: str, reviewer_id: str | None = None, graph: bool = False
-    ) -> dict:
+    def review_ticket(ticket_id: str, reviewer_id: str | None = None, graph: bool = False) -> dict:
         """Run an LLM review of a ticket (or its graph) -> a review_result dict
         {findings[], target, reviewers, runner, model, trace_id, summary}.
 

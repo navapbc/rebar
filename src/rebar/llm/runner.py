@@ -211,9 +211,7 @@ def _parse_findings_json(text: str) -> tuple[list, str | None]:
     try:
         obj = json.loads(t)
     except json.JSONDecodeError as exc:
-        raise StructuredOutputError(
-            f"Langflow output was not valid findings JSON: {exc}"
-        ) from exc
+        raise StructuredOutputError(f"Langflow output was not valid findings JSON: {exc}") from exc
     if isinstance(obj, list):
         return obj, None
     if isinstance(obj, dict):
@@ -281,7 +279,7 @@ class DeepAgentsRunner:
         # internal state — parity with the langgraph runner's _safe_path deny.
         permissions = [FilesystemPermission(operations=["write"], paths=["/**"], mode="deny")]
         deny_globs = [
-            f"/{d[len(root) + 1:].replace(os.sep, '/')}/**"
+            f"/{d[len(root) + 1 :].replace(os.sep, '/')}/**"
             for d in _denied_realpaths(root)
             if d.startswith(root + os.sep)
         ]
@@ -346,8 +344,9 @@ def _invoke(agent, cfg: LLMConfig, req: RunRequest) -> tuple[dict, str | None]:
     return outcome, trace_id
 
 
-def _finalize_review(outcome: dict, cfg: LLMConfig, req: RunRequest,
-                     runner_name: str, trace_id: str | None) -> dict:
+def _finalize_review(
+    outcome: dict, cfg: LLMConfig, req: RunRequest, runner_name: str, trace_id: str | None
+) -> dict:
     """Turn an agent outcome into a validated review_result. Shared by the
     langgraph + deepagents runners."""
     structured = outcome.get("structured_response")
@@ -462,24 +461,65 @@ def _safe_path(root: str, rel: str, denied: tuple[str, ...]) -> str:
 # or tree. read_file is windowed (page with line_start/line_end), long lines are
 # truncated, and discovery output is capped — the patterns SWE-agent/deepagents/
 # Claude Code converge on (windowing is a *correctness* lever, not just cost).
-_READ_MAX_LINES = 2000        # max lines returned by one read_file call
-_READ_MAX_LINE_CHARS = 2000   # per-line cap (minified/generated lines)
-_SCAN_MAX_FILES = 5000        # max files scanned by one search_files call
+_READ_MAX_LINES = 2000  # max lines returned by one read_file call
+_READ_MAX_LINE_CHARS = 2000  # per-line cap (minified/generated lines)
+_SCAN_MAX_FILES = 5000  # max files scanned by one search_files call
 _SEARCH_MAX_LINE_CHARS = 500  # per-matched-line cap
 
 # Vendored/generated dirs + binary/lock suffixes hidden from DISCOVERY
 # (list_directory/search_files) so the agent isn't drowned on large projects.
 # read_file is NOT filtered by these — an explicitly named file is always readable
 # (only the security deny-list blocks it).
-_NOISE_DIRS = frozenset({
-    "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache",
-    ".ruff_cache", ".tox", "dist", "build", ".next", "target", ".gradle",
-    ".idea", ".vscode", ".cache", "coverage", "htmlcov",
-})
+_NOISE_DIRS = frozenset(
+    {
+        "node_modules",
+        "__pycache__",
+        ".venv",
+        "venv",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        "dist",
+        "build",
+        ".next",
+        "target",
+        ".gradle",
+        ".idea",
+        ".vscode",
+        ".cache",
+        "coverage",
+        "htmlcov",
+    }
+)
 _NOISE_SUFFIXES = (
-    ".lock", ".min.js", ".min.css", ".map", ".pyc", ".pyo", ".so", ".o", ".a",
-    ".class", ".jar", ".bin", ".woff", ".woff2", ".ttf", ".eot", ".png", ".jpg",
-    ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip", ".gz", ".tar", ".whl",
+    ".lock",
+    ".min.js",
+    ".min.css",
+    ".map",
+    ".pyc",
+    ".pyo",
+    ".so",
+    ".o",
+    ".a",
+    ".class",
+    ".jar",
+    ".bin",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".ico",
+    ".pdf",
+    ".zip",
+    ".gz",
+    ".tar",
+    ".whl",
 )
 
 
@@ -490,9 +530,9 @@ def _git_tracked(root: str) -> set[str] | None:
     uses — without us reimplementing .gitignore parsing."""
     try:
         proc = subprocess.run(
-            ["git", "-C", root, "ls-files", "-z", "--cached", "--others",
-             "--exclude-standard"],
-            capture_output=True, timeout=15,
+            ["git", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            capture_output=True,
+            timeout=15,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -618,7 +658,8 @@ def _filesystem_tools(repo_path: str | None) -> list:
         scanned = 0
         for dirpath, dirnames, filenames in os.walk(base):
             dirnames[:] = [
-                d for d in dirnames
+                d
+                for d in dirnames
                 if not skip_dir(d)
                 and _within_root(os.path.realpath(os.path.join(dirpath, d)), root)
                 and not _is_denied(os.path.realpath(os.path.join(dirpath, d)), denied)

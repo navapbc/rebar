@@ -101,16 +101,20 @@ def _review(argv: list[str]) -> int:
     )
     parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")
     parser.add_argument(
-        "reviewer_id", nargs="?", default=None,
+        "reviewer_id",
+        nargs="?",
+        default=None,
         help="reviewer from the catalog (default: the catalog's default reviewer)",
     )
     parser.add_argument(
-        "--graph", action="store_true",
+        "--graph",
+        action="store_true",
         help="also review the ticket's descendants, as one unit",
     )
     parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
     parser.add_argument(
-        "--check", action="store_true",
+        "--check",
+        action="store_true",
         help="print backend/credential availability and exit",
     )
     args = parser.parse_args(argv)
@@ -151,8 +155,12 @@ def _review_code(argv: list[str]) -> int:
     parser.add_argument("--base", default="HEAD~1", help="base git ref (default HEAD~1)")
     parser.add_argument("--head", default="HEAD", help="head git ref (default HEAD)")
     parser.add_argument("--diff-file", help="review this unified-diff file instead of a git range")
-    parser.add_argument("--reviewer", action="append", dest="reviewers",
-                        help="reviewer id (repeatable; default: deterministic selection)")
+    parser.add_argument(
+        "--reviewer",
+        action="append",
+        dest="reviewers",
+        help="reviewer id (repeatable; default: deterministic selection)",
+    )
     parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
     args = parser.parse_args(argv)
 
@@ -167,8 +175,9 @@ def _review_code(argv: list[str]) -> int:
             sys.stderr.write(f"Error: cannot read --diff-file: {exc}\n")
             return 1
     try:
-        result = llm.review_code(base=args.base, head=args.head, diff_text=diff_text,
-                                 reviewers=args.reviewers)
+        result = llm.review_code(
+            base=args.base, head=args.head, diff_text=diff_text, reviewers=args.reviewers
+        )
     except llm.LLMError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
@@ -194,8 +203,12 @@ def _scan_spec(argv: list[str]) -> int:
     )
     parser.add_argument("--spec-file", required=True, help="path to the specification text")
     parser.add_argument("--batch-size", type=int, default=5, help="epics per batch (default 5)")
-    parser.add_argument("--epic", action="append", dest="epics",
-                        help="restrict to these epic ids (repeatable; default: all open epics)")
+    parser.add_argument(
+        "--epic",
+        action="append",
+        dest="epics",
+        help="restrict to these epic ids (repeatable; default: all open epics)",
+    )
     parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
     args = parser.parse_args(argv)
 

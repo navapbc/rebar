@@ -74,9 +74,7 @@ def get_reviewer(reviewer_id: str) -> Reviewer:
     try:
         return catalog[reviewer_id]
     except KeyError:
-        raise ReviewerError(
-            f"unknown reviewer '{reviewer_id}'; known: {sorted(catalog)}"
-        ) from None
+        raise ReviewerError(f"unknown reviewer '{reviewer_id}'; known: {sorted(catalog)}") from None
 
 
 def packaged_prompt_text(reviewer: Reviewer) -> str:
@@ -117,9 +115,7 @@ def _glob_match(path: str, pattern: str) -> bool:
 
     # `**/` should also match at the repo root, so try the pattern with the
     # leading `**/` stripped too.
-    return fnmatch(path, pattern) or (
-        pattern.startswith("**/") and fnmatch(path, pattern[3:])
-    )
+    return fnmatch(path, pattern) or (pattern.startswith("**/") and fnmatch(path, pattern[3:]))
 
 
 def select_reviewers(
@@ -133,8 +129,6 @@ def select_reviewers(
     cat = catalog if catalog is not None else load_catalog()
     selected: list[str] = []
     for rid, rv in cat.items():
-        if rv.default or any(
-            _glob_match(f, g) for g in rv.applies_to for f in changed_files
-        ):
+        if rv.default or any(_glob_match(f, g) for g in rv.applies_to for f in changed_files):
             selected.append(rid)
     return selected

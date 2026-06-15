@@ -44,8 +44,9 @@ def select_code_reviewers(changed_files: list[str]) -> list[str]:
 
 def _git(repo: str, args: list[str]) -> str:
     try:
-        proc = subprocess.run(["git", "-C", repo, *args], capture_output=True,
-                              text=True, timeout=30)
+        proc = subprocess.run(
+            ["git", "-C", repo, *args], capture_output=True, text=True, timeout=30
+        )
     except (OSError, subprocess.SubprocessError) as exc:
         raise LLMConfigError(f"git failed ({' '.join(args)}): {exc}") from exc
     if proc.returncode != 0:
@@ -86,11 +87,14 @@ def _orientation(changed_files: list[str]) -> str:
 
 
 def _compose_context(changed_files: list[str], diff_text: str) -> str:
-    diff = diff_text if len(diff_text) <= _DIFF_CHAR_CAP else (
-        diff_text[:_DIFF_CHAR_CAP] + "\n…(diff truncated; use your file tools for the rest)"
+    diff = (
+        diff_text
+        if len(diff_text) <= _DIFF_CHAR_CAP
+        else (diff_text[:_DIFF_CHAR_CAP] + "\n…(diff truncated; use your file tools for the rest)")
     )
     return (
-        f"## Changed files ({len(changed_files)})\n" + "\n".join(changed_files or ["(none)"])
+        f"## Changed files ({len(changed_files)})\n"
+        + "\n".join(changed_files or ["(none)"])
         + f"\n\n## Orientation\n{_orientation(changed_files)}"
         + f"\n\n## Diff\n```diff\n{diff}\n```"
     )
@@ -131,8 +135,11 @@ def review_code(
     results: list[dict] = []
     for rid in reviewer_ids:
         reviewer = prompts.get_reviewer(rid)
-        variables = {"ticket_id": "(code review)", "ticket_context": context,
-                     "repo_path": cfg.repo_path or ""}
+        variables = {
+            "ticket_id": "(code review)",
+            "ticket_context": context,
+            "repo_path": cfg.repo_path or "",
+        }
         system_prompt, lf_prompt = prompts.resolve_prompt(reviewer, variables, cfg.langfuse)
         instructions = (
             f"Review the code change above along the '{reviewer.dimension}' dimension. "
@@ -141,7 +148,9 @@ def review_code(
             "output and never invent locations. Return findings via the structured output."
         )
         req = RunRequest(
-            system_prompt=system_prompt, instructions=instructions, config=cfg,
+            system_prompt=system_prompt,
+            instructions=instructions,
+            config=cfg,
             reviewers=[rid],
             target={"kind": "code", "files": changed_files},
             langfuse_prompt=lf_prompt,
