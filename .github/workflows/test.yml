@@ -142,3 +142,53 @@ jobs:
         run: >-
           pytest -m integration -q -p no:cacheprovider
           --basetemp="${{ runner.temp }}/rebar-basetemp-int"
+
+  # External-integration tier (tests/external/): live, billable, real-mutation
+  # tests (live Jira via the `acli` SUBPROCESS, live LLM calls). This is the ONLY
+  # job that:
+  #   * sets REBAR_RUN_EXTERNAL=1 (the env opt-in that makes tests/external/ tests
+  #     non-inert — see tests/external/conftest.py), AND
+  #   * exposes Jira / LLM credentials.
+  # The default `test` job above sets NEITHER, so external tests are structurally
+  # unable to leak into it (bug 4a48-6dd5-aef3-4c8e).
+  #
+  # Fork guard: only run on the canonical repo (owner == actor), never on a PR
+  # from a fork, so secrets are never exposed to untrusted code. Manual dispatch
+  # only — keep live mutations off the every-push/every-PR path.
+  external:
+    name: external-integration (live Jira + LLM)
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository_owner == github.actor }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install rebar (editable) + test deps + agents extra
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev,agents]'
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+      - name: Run the external tier (live; opt-in + credential scoped)
+        # REBAR_RUN_EXTERNAL=1 lifts the default skip; each test still self-skips
+        # unless its own creds/extra are present. Attach real secrets below by
+        # wiring repository/organization secrets to these env keys, e.g.:
+        #   JIRA_URL: ${{ secrets.JIRA_URL }}
+        #   JIRA_USER: ${{ secrets.JIRA_USER }}
+        #   JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        #   ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        # (Until secrets are wired, the tests self-skip on absent creds — the job
+        # still validates that the tier is reachable only here.)
+        env:
+          REBAR_RUN_EXTERNAL: "1"
+          # JIRA_URL: ${{ secrets.JIRA_URL }}
+          # JIRA_USER: ${{ secrets.JIRA_USER }}
+          # JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: >-
+          pytest -m external -q -p no:cacheprovider
+          --basetemp="${{ runner.temp }}/rebar-basetemp-ext"

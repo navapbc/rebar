@@ -180,6 +180,12 @@ pytest_add_cli_args_test_selection = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# --strict-markers turns an unregistered @pytest.mark.X into a collection error
+# (every custom marker must be registered below or via pytest_configure);
+# --strict-config does the same for unknown ini keys. Together they keep marker
+# typos (e.g. a misspelled tier) from silently passing — part of the external-
+# test confinement (bug 4a48-6dd5-aef3-4c8e).
+addopts = "--strict-markers --strict-config"
 markers = [
     "unit: unit-tier tests (network-guarded)",
     "scripts: scripts-tier tests (engine scripts / reconciler)",

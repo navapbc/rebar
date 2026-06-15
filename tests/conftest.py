@@ -58,6 +58,47 @@ def pytest_configure(config: pytest.Config) -> None:
     )
 
 
+_EXTERNAL_DIR = _REPO_ROOT / "tests" / "external"
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Confine the ``external`` tier to tests/external/ (bug 4a48-6dd5-aef3-4c8e).
+
+    Two structural guarantees:
+
+    (a) Auto-apply the ``external`` marker to every collected item whose file
+        lives under tests/external/, so existing tests need no per-file edits and
+        the default selection ``-m "not integration and not external"`` reliably
+        excludes the whole tier by directory.
+
+    (b) Hard-FAIL collection if any item carries the ``external`` marker but is
+        NOT under tests/external/ — a live/billable test must never hide in
+        another tier. This is the one unambiguous confinement rule; it does not
+        require a tier marker on the many existing non-external tests.
+    """
+    misplaced: list[str] = []
+    for item in items:
+        try:
+            test_path = Path(item.fspath).resolve()
+        except Exception:
+            continue
+        under_external = test_path.is_relative_to(_EXTERNAL_DIR)
+        if under_external:
+            item.add_marker("external")
+        elif item.get_closest_marker("external") is not None:
+            misplaced.append(f"{item.nodeid} ({test_path})")
+
+    if misplaced:
+        listing = "\n  ".join(misplaced)
+        pytest.fail(
+            "External-test confinement violation: the following item(s) are "
+            "marked `external` but live OUTSIDE tests/external/. Live/billable "
+            "external tests must reside under tests/external/ so the env opt-in "
+            "and credential-scoped CI job confine them:\n  " + listing,
+            pytrace=False,
+        )
+
+
 # Directories whose tests are network-isolated by the socket guard.
 _NETWORK_GUARDED_TIERS = (
     _REPO_ROOT / "tests" / "unit",
