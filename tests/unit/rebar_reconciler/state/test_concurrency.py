@@ -138,7 +138,9 @@ def test_rebase_retry_ok_when_write_succeeds(concurrency, tmp_git_repo: Path) ->
 
 
 def test_rebase_retry_abort_due_to_error(concurrency, tmp_git_repo: Path) -> None:
-    """rebase_retry() returns Result(ok=False, event.kind='abort_due_to_error') when write_fn raises."""
+    """rebase_retry() returns Result(ok=False, event.kind='abort_due_to_error') when write_fn
+    raises.
+    """
 
     def write_fn():
         raise RuntimeError("simulated write failure")

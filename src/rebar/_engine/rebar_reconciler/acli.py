@@ -73,6 +73,32 @@ from rebar_reconciler.jira_fields import (
     _sanitize_summary,
 )
 
+# Re-export facade. These names are imported from sibling acli_* / jira_fields
+# modules solely so ``acli.<name>`` keeps resolving for callers and the
+# characterization suites; ``__all__`` records them as intentional re-exports.
+__all__ = [
+    "AcliMutationError",
+    "AssigneeNotFoundError",
+    "InvalidLabelError",
+    "RetryExhaustedError",
+    "_ASSIGNEE_NOT_FOUND_ERROR",
+    "_ASSIGNEE_PERMISSION_ERROR",
+    "_AUTH_FAILURE_CODE",
+    "_JIRA_LABEL_MAX_CHARS",
+    "_JIRA_SUMMARY_MAX_CHARS",
+    "_MAX_ATTEMPTS",
+    "_RETRYABLE_HTTP_CODES",
+    "_attach_parent_guarded",
+    "_call_with_backoff",
+    "_create_from_json_payload",
+    "_create_issue_from_json",
+    "_create_issue_no_json",
+    "_run_acli",
+    "_sanitize_comment",
+    "_sanitize_label",
+    "_verify_created_issue",
+]
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------

@@ -4,9 +4,12 @@ When a local ticket's bound jira_key vanishes from a fetcher pass, the probe
 fetches the issue directly via stdlib urllib (GET-only) and classifies the
 result into one of 4 branches:
 
-  1. PRESENT_RESOLVED    — issue still exists; status was changed to Resolved/Done/Cancelled (out of working set)
-  2. PRESENT_FILTERED    — issue still exists but no longer matches the JQL filter for other reasons
-  3. ARCHIVED_OR_MOVED   — 404/410/403 — the issue has been deleted, archived, or moved off the project
+  1. PRESENT_RESOLVED    — issue still exists; status was changed to
+                           Resolved/Done/Cancelled (out of working set)
+  2. PRESENT_FILTERED    — issue still exists but no longer matches the JQL filter
+                           for other reasons
+  3. ARCHIVED_OR_MOVED   — 404/410/403 — the issue has been deleted, archived, or
+                           moved off the project
   4. UNREACHABLE         — transient network / auth error; do not classify, leave for retry
 
 GET-only invariant: every Request uses get_method() == 'GET'. POST/PUT/DELETE

@@ -78,7 +78,8 @@ def check_orphaned_tasks(issues: list[dict]) -> list[Finding]:
             out.append(
                 Finding(
                     "major",
-                    f"{len(group)} orphaned tasks created around {hour_key} ({ids}{suffix}) — likely need an epic",
+                    f"{len(group)} orphaned tasks created around {hour_key} "
+                    f"({ids}{suffix}) — likely need an epic",
                 )
             )
 
@@ -122,7 +123,8 @@ def check_empty_epics(issues: list[dict]) -> list[Finding]:
                 out.append(
                     Finding(
                         "verbose",
-                        f"Epic with 0 children: {iid} - {title} (decompose into child tickets when ready)",
+                        f"Epic with 0 children: {iid} - {title} "
+                        f"(decompose into child tickets when ready)",
                     )
                 )
                 empty += 1
@@ -143,7 +145,8 @@ def check_ticket_count(issues: list[dict]) -> list[Finding]:
         out.append(
             Finding(
                 "major",
-                f"Total ticket count is {total} (≥600) — consider archiving closed tickets to keep the tracker manageable",
+                f"Total ticket count is {total} (≥600) — consider archiving "
+                f"closed tickets to keep the tracker manageable",
             )
         )
     elif total >= 300:
@@ -185,7 +188,8 @@ def check_child_parent_deps(issues: list[dict]) -> list[Finding]:
                     out.append(
                         Finding(
                             "critical",
-                            f"Child->parent dependency: {iid} depends on its parent {parent_id} - {title}",
+                            f"Child->parent dependency: {iid} depends on its "
+                            f"parent {parent_id} - {title}",
                         )
                     )
                     errors += 1
@@ -224,7 +228,9 @@ def check_cross_epic_child_deps(issues: list[dict]) -> list[Finding]:
                 out.append(
                     Finding(
                         "critical",
-                        f"Cross-epic child dependency: {iid} (child of {my_parent}) depends on {dep_id} (child of {dep_parent}). Use epic-level dependency instead - {title}",
+                        f"Cross-epic child dependency: {iid} (child of {my_parent}) "
+                        f"depends on {dep_id} (child of {dep_parent}). "
+                        f"Use epic-level dependency instead - {title}",
                     )
                 )
                 errors += 1
@@ -313,7 +319,8 @@ def check_interface_contracts(issues: list[dict], ticket_cmd: str) -> list[Findi
             out.append(
                 Finding(
                     "suggestion",
-                    f"Add notes with: {ticket_cmd} comment {iid} 'Interface in src/.../base.py. Key methods: ...'",
+                    f"Add notes with: {ticket_cmd} comment {iid} "
+                    f"'Interface in src/.../base.py. Key methods: ...'",
                 )
             )
     return out

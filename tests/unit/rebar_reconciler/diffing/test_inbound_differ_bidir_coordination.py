@@ -168,7 +168,9 @@ def test_inbound_add_suppressed_when_outbound_removes_same_label(
 def test_inbound_scalar_field_suppressed_when_outbound_updates_same_field(
     inbound_differ: ModuleType, outbound_differ: ModuleType
 ) -> None:
-    """Local just changed description; outbound emits update for it; inbound must NOT echo back the old value."""
+    """Local just changed description; outbound emits update for it; inbound must NOT echo back the
+    old value.
+    """
     jira_snapshot = {
         "PROJ-3": {
             "summary": "T",

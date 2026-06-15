@@ -34,17 +34,9 @@ import os
 import subprocess
 import sys
 import time
-from pathlib import Path
 from typing import Any
 
 from rebar._engine import engine_dir as _engine_dir
-
-# Engine scripts (e.g. ticket-sync.sh) live in the bundled engine dir, not next
-# to this module. This is the in-process read implementation (the engine's bash
-# wrapper reaches it via the ``ticket_reads`` compat shim), so ``rebar`` is always
-# importable here and the read packages import as real ``rebar.*`` subpackages.
-_SCRIPTS_DIR = _engine_dir()
-
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar.graph._graph import build_dep_graph
@@ -57,6 +49,11 @@ from rebar.reducer import (
 )
 from rebar.reducer._present import public_state
 from rebar.reducer.llm_format import to_llm
+
+# The bundled engine dir holds the read packages' supporting assets. This is the
+# in-process read implementation, so ``rebar`` is always importable here and the
+# read packages import as real ``rebar.*`` subpackages.
+_SCRIPTS_DIR = _engine_dir()
 
 
 # ───────────────────────────── tracker resolution ────────────────────────────
@@ -434,7 +431,8 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
     usage = (
         "Usage: ticket list [--output llm] [--include-archived] [--exclude-deleted] "
         "[--type=<type>] [--status=<status>] [--priority=<n>] [--parent=<id>] "
-        "[--has-tag=<tag>] [--without-tag=<tag>] [--min-children=<n>] [--unblocked|--blocked] [--with-children-count]"
+        "[--has-tag=<tag>] [--without-tag=<tag>] [--min-children=<n>] "
+        "[--unblocked|--blocked] [--with-children-count]"
     )
     try:
         fmt, rest = parse_output(argv, "reader")
@@ -506,7 +504,8 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
     if pri:
         if any(c not in "0123456789," for c in pri):
             print(
-                f"Error: --priority expects integer values 0-4 (comma-separated for OR), got '{pri}'",
+                f"Error: --priority expects integer values 0-4 "
+                f"(comma-separated for OR), got '{pri}'",
                 file=sys.stderr,
             )
             return 1

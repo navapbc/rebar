@@ -296,7 +296,8 @@ def test_inbound_create_adf_body_normalized(applier, mut_mod, fixture_repo):
     )
     stored_body = comment_events[0]["data"]["body"]
     assert isinstance(stored_body, str), (
-        f"COMMENT body must be a string (ADF normalized), got {type(stored_body)!r}: {stored_body!r}"
+        f"COMMENT body must be a string (ADF normalized), "
+        f"got {type(stored_body)!r}: {stored_body!r}"
     )
     assert "ADF paragraph text" in stored_body, (
         f"Normalized body must contain the ADF text; got {stored_body!r}"

@@ -151,7 +151,9 @@ def test_create_one_label_failure_does_not_abort_create(applier):
 
 
 def test_create_one_no_labels_or_comments_unchanged_behavior(applier):
-    """When mutation lacks labels/comments keys, behavior matches the existing identity-write contract."""
+    """When mutation lacks labels/comments keys, behavior matches the existing identity-write
+    contract.
+    """
     local_id = "tick-bare"
     client = _make_mock_client(create_return={"key": "DIG-555"})
     # Bare mutation — no labels/comments keys (covers the legacy mutation shape).

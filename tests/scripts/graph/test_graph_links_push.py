@@ -28,7 +28,8 @@ from _helpers import (
 def test_is_active_link_same_second_unlink_sorts_after_link(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """_is_active_link correctly handles LINK+UNLINK events that share the same Unix-second timestamp.
+    """_is_active_link correctly handles LINK+UNLINK events that share the same Unix-second
+    timestamp.
 
     When a LINK and its cancelling UNLINK share the same timestamp second but have
     different random UUIDs, a pure alphabetic filename sort can place the UNLINK before

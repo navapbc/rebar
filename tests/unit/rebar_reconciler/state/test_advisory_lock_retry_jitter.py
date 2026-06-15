@@ -151,7 +151,7 @@ def test_backoff_timing_increases_between_retries(lock_mod, conc_mod, monkeypatc
     # Base 200ms, ×2 per retry, capped at 5s, ±30% jitter.
     # Expected bases: 0.2, 0.4, 0.8, 1.6, 3.2 (none capped yet).
     expected_bases = [0.2, 0.4, 0.8, 1.6, 3.2]
-    for actual, base in zip(sleeps, expected_bases):
+    for actual, base in zip(sleeps, expected_bases, strict=True):
         lo = base * 0.7
         hi = base * 1.3
         # Cap of 5s applies as an upper ceiling regardless of jitter.

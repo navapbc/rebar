@@ -119,7 +119,7 @@ class TestBindingStoreCorrupt:
         bindings_path = bridge_dir / "bindings.json"
         conflict_content = (
             "<<<<<<< HEAD\n"
-            '{"version": 1, "bindings": {"local-1": {"jira_key": "DIG-1", "state": "confirmed"}}, "reverse": {"DIG-1": "local-1"}}\n'
+            '{"version": 1, "bindings": {"local-1": {"jira_key": "DIG-1", "state": "confirmed"}}, "reverse": {"DIG-1": "local-1"}}\n'  # noqa: E501 — exact conflict-marker JSON fixture
             "=======\n"
             '{"version": 1, "bindings": {}, "reverse": {}}\n'
             ">>>>>>> feature-branch\n"
@@ -156,7 +156,7 @@ class TestBindingStoreCorrupt:
 
         raised = False
         try:
-            store = BindingStore(tmp_path)
+            BindingStore(tmp_path)
             # If no exception, verify that it didn't silently return empty
             # (this branch should not be reachable after the fix)
             raised = False

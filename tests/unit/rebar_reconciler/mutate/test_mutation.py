@@ -12,6 +12,7 @@ These tests are RED: mutation.py does not yet exist.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import importlib.util
 import random
@@ -167,7 +168,7 @@ def test_mutation_is_frozen_hashable(mut: ModuleType) -> None:
     assert m in s
 
     # Frozen: attribute assignment must raise an error
-    with pytest.raises(Exception):  # dataclasses.FrozenInstanceError (subclass of AttributeError)
+    with pytest.raises(dataclasses.FrozenInstanceError):
         m.target = "modified"  # type: ignore[misc]
 
 

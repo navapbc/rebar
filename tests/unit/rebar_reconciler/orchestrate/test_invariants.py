@@ -158,7 +158,9 @@ def test_timeout_surfaces_warning_does_not_patch_bug(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """TimeoutExpired during ticket-create surfaces a WARN to stderr and leaves the alert orphan-without-bug (next pass will see dedup; operators are expected to act on the WARN)."""
+    """TimeoutExpired during ticket-create surfaces a WARN to stderr and leaves the alert
+    orphan-without-bug (next pass will see dedup; operators are expected to act on the WARN).
+    """
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
         with patch.object(
             invariants.subprocess,
@@ -186,7 +188,9 @@ def test_oserror_surfaces_warning_does_not_patch_bug(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """FileNotFoundError (e.g., ticket_cli not on PATH) is treated like a transient CLI failure: surface WARN, leave alert without bug-ticket linkage, do NOT crash the loop."""
+    """FileNotFoundError (e.g., ticket_cli not on PATH) is treated like a transient CLI failure:
+    surface WARN, leave alert without bug-ticket linkage, do NOT crash the loop.
+    """
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
         with patch.object(
             invariants.subprocess,
@@ -264,7 +268,9 @@ def test_programming_error_propagates(
 def test_non_list_local_ids_is_ignored(
     invariants: ModuleType, mock_alert_store: MagicMock, tmp_path: Path
 ) -> None:
-    """A snapshot entry whose local_ids is not a list (or a single-element list) does not trigger a violation."""
+    """A snapshot entry whose local_ids is not a list (or a single-element list) does not trigger a
+    violation.
+    """
     snap = {
         "DIG-A": {"local_ids": "single-string-not-a-list"},
         "DIG-B": {"local_ids": ["just-one"]},

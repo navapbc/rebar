@@ -12,11 +12,8 @@ Imports downward only (apply_base, batch_dispatch); never imports applier.
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import urllib.error
-from pathlib import Path
 from typing import Any
 
 from rebar_reconciler.apply_base import (
@@ -24,7 +21,7 @@ from rebar_reconciler.apply_base import (
     _direction_guard,
     _load_mutation_module,
 )
-from rebar_reconciler.batch_dispatch import JiraAPIError, _call_with_retry, delete_one
+from rebar_reconciler.batch_dispatch import JiraAPIError, _call_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -372,39 +369,3 @@ def _apply_outbound_conflict(mutation, *, client=None, repo_root=None) -> ApplyR
         "jira_key": mutation.target,
     }
     return ApplyResult(mutation.direction, mutation.action, {"follow_on": follow_on})
-
-
-# ---------------------------------------------------------------------------
-# Inbound leaf-body helpers (story bd19-d744-b8c7-4079)
-#
-# Inbound leaves write local ticket-tracker events directly because the local
-# CLI is the authoritative reader and we want deterministic file-shape control.
-# Event files follow the format documented at
-# docs/ticket-system-v3-architecture.md and mirrored
-# throughout the tracker dir as <ticket_id>/<ts>-<uuid>-<EVENT>.json.
-# ---------------------------------------------------------------------------
-
-# Jira→local translation + local-event-store IO live in inbound_translate.py.
-# Re-imported here so the inbound leaves (still resident on this facade) and
-# apply()'s suppression index resolve them as module globals.
-from rebar_reconciler.inbound_translate import (  # noqa: E402
-    _ADF_KEY_APPLIER,
-    _BRIDGE_INTERNAL_TAG_PREFIXES,
-    _JIRA_PRIORITY_MAP,
-    _JIRA_TYPE_MAP,
-    _LOCAL_STATUS_VALUES,
-    _REBAR_STATUS_LABEL_TO_LOCAL,
-    _TICKET_REDUCER_MODULE,
-    _VALID_PRIORITY_RANGE,
-    _AdfModule_Applier,
-    _event_meta,
-    _extract_name,
-    _jira_key_to_local_id,
-    _jira_status_to_local,
-    _load_adf_module,
-    _normalize_adf_body,
-    _read_latest_status,
-    _resolve_priority,
-    _resolve_tracker_dir,
-    _write_event_file,
-)

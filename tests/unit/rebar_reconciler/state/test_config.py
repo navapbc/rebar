@@ -136,7 +136,7 @@ def test_jira_to_local_status_round_trips_through_forward_map(
     (To Do/In Progress/Done are fixed points of forward∘reverse)."""
     fwd = config.local_to_jira_status
     rev = config.jira_to_local_status
-    for jira_status, local_status in rev.items():
+    for _jira_status, local_status in rev.items():
         assert local_status in fwd, (
             f"reverse-mapped local status {local_status!r} missing from "
             "local_to_jira_status — preflight would abort on it"

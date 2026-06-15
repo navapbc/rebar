@@ -79,8 +79,9 @@ with their authorization status for rebar-id label mutations:
                               FIELD via set_issue_property(), NOT the label.
 
 Only inbound_clean_label (delete), outbound_create (create), and
-inbound_create (create) may emit rebar-id label mutations. Any other leaf that emits such a mutation is a bug
-and should raise RebarIdLabelWriteError from _errors.py.
+inbound_create (create) may emit rebar-id label mutations. Any other leaf that
+emits such a mutation is a bug and should raise RebarIdLabelWriteError from
+_errors.py.
 
 conflict_resolver per-element provenance MUST skip rebar-id fields. The
 conflict_resolver must not write, modify, or emit rebar-id label mutations;
@@ -94,7 +95,10 @@ properties, not labels). It MUST NOT touch the label surface.
 _AUTHORIZED_REBAR_ID_LABEL_WRITERS: frozenset[str] = frozenset(
     {"inbound_clean_label", "outbound_create", "inbound_create"}
 )
-"""Leaf names authorized to emit rebar-id label mutations (see _AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC)."""
+"""Leaf names authorized to emit rebar-id label mutations.
+
+See _AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC for the full authorization contract.
+"""
 
 # Per-leaf authorized-action map: enforced by _audit_rebar_id_label_writes.
 # Each authorized leaf is permitted ONLY the action(s) listed here; any other

@@ -137,7 +137,8 @@ def push_tickets_branch(base_path: str) -> None:
             if merge2.returncode != 0:
                 _git(base_path, "merge", "--abort")
                 print(
-                    f"Warning: tickets branch merge failed after stash recovery (attempt {attempt})",
+                    f"Warning: tickets branch merge failed after stash recovery "
+                    f"(attempt {attempt})",
                     file=sys.stderr,
                 )
             continue

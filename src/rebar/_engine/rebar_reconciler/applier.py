@@ -15,19 +15,14 @@ a follow-up bug ticket before the next applier-touching change.
 
 from __future__ import annotations
 
-import contextlib
 import importlib.util
 import json
 import logging
 import os
 import sys
-import tempfile
 import time
 import urllib.error
-from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +248,80 @@ from rebar_reconciler.apply_planning import (  # noqa: E402
     _partition_by_mode_cap,
     _SuppressionIndex,
 )
+
+# Re-export facade. applier imports these names from its sibling leaf/IO modules
+# solely so ``applier.<name>`` and ``from rebar_reconciler.applier import <name>``
+# keep resolving for reconcile.py's getattr dispatch table and the test suite.
+# Listing them in ``__all__`` documents that public surface and marks the imports
+# as intentional re-exports.
+__all__ = [
+    "ApplyResult",
+    "DirectionMismatchError",
+    "EXIT_RESCHEDULE",
+    "JiraAPIError",
+    "RebarIdLabelWriteError",
+    "RescheduleError",
+    "RetryExhaustedError",
+    "StatusMappingError",
+    "UnknownActionError",
+    "_ADF_KEY_APPLIER",
+    "_AUTHORIZED_REBAR_ID_LABEL_ACTIONS",
+    "_AUTHORIZED_REBAR_ID_LABEL_WRITERS",
+    "_AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC",
+    "_AdfModule_Applier",
+    "_BRIDGE_INTERNAL_TAG_PREFIXES",
+    "_ErrorsModule",
+    "_JIRA_PRIORITY_MAP",
+    "_JIRA_TYPE_MAP",
+    "_LEAF_NAMES",
+    "_LEAVES",
+    "_LOCAL_STATUS_VALUES",
+    "_MUTATION_KEY",
+    "_MutationModule",
+    "_REBAR_STATUS_LABEL_TO_LOCAL",
+    "_TICKET_REDUCER_MODULE",
+    "_VALID_PRIORITY_RANGE",
+    "_apply_inbound_clean_label",
+    "_apply_inbound_conflict",
+    "_apply_inbound_create",
+    "_apply_inbound_delete",
+    "_apply_inbound_probe",
+    "_apply_inbound_repair_property",
+    "_apply_inbound_update",
+    "_apply_outbound_conflict",
+    "_apply_outbound_create",
+    "_apply_outbound_delete",
+    "_apply_outbound_probe",
+    "_apply_outbound_update",
+    "_build_leaves",
+    "_call_with_retry",
+    "_direction_guard",
+    "_errors_module",
+    "_event_meta",
+    "_extract_name",
+    "_get_rebar_id_guard_mode_from_config",
+    "_is_illegal_transition_400",
+    "_is_rebar_id_label_write_mutation",
+    "_jira_key_to_local_id",
+    "_jira_status_to_local",
+    "_load_adf_module",
+    "_load_errors_module",
+    "_load_manifest_renderer",
+    "_load_mapping",
+    "_load_mode_module",
+    "_mode_sort_key",
+    "_normalize_adf_body",
+    "_read_latest_status",
+    "_resolve_priority",
+    "_resolve_tracker_dir",
+    "_write_event_file",
+    "_write_mapping_atomic",
+    "_write_mapping_json_atomic",
+    "create_one",
+    "delete_one",
+    "inbound_repair_property",
+    "update_one",
+]
 
 
 def apply(

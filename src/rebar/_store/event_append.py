@@ -119,9 +119,9 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(_canonical_bytes(event))
-    except OSError:
+    except OSError as exc:
         _silent_unlink(staging)
-        raise StoreError("Error: failed to write staging temp file", 1)
+        raise StoreError("Error: failed to write staging temp file", 1) from exc
 
     _ensure_gc_auto_zero(tracker)
     commit_msg = f"ticket: {event_type} {ticket_id}"
@@ -130,8 +130,8 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
             _lock.check_no_rebase_in_progress(tracker)  # raises RebaseGuard (75)
             try:
                 os.replace(staging, final_path)  # atomic rename
-            except OSError:
-                raise StoreError("Error: atomic rename failed", 1)
+            except OSError as exc:
+                raise StoreError("Error: atomic rename failed", 1) from exc
             add = subprocess.run(
                 ["git", "-C", tracker, "add", relative_path],
                 capture_output=True,

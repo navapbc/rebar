@@ -1,4 +1,6 @@
-"""Test that defect #4 (NoneType.__dict__ from _try_load_step not registering in sys.modules) doesn't recur."""
+"""Test that defect #4 (NoneType.__dict__ from _try_load_step not registering in sys.modules)
+doesn't recur.
+"""
 
 import importlib.util
 import sys

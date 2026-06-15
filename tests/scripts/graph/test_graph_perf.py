@@ -281,7 +281,8 @@ def test_compute_dep_graph_children_use_preloaded_state(graph: ModuleType, tmp_p
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_hierarchy_enforcement_benchmark_1000_tickets(graph: ModuleType, tmp_path: Path) -> None:
-    """Hierarchy enforcement completes 10 cross-tier add_dependency calls under 5s on 1000-ticket hierarchy.
+    """Hierarchy enforcement completes 10 cross-tier add_dependency calls under 5s on 1000-ticket
+    hierarchy.
 
     Setup: 10 epics × 10 stories × 10 tasks = 1,000 tickets.
     Action: 10 add_dependency calls linking a task to a *different* epic (cross-tier),

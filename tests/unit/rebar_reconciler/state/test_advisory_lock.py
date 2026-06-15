@@ -2,16 +2,23 @@
 
 Tests cover the 7 acceptance criteria from task a2ba-0875-d23f-4696:
 
-  1. test_check_pass_lock_absent       — check_pass_lock returns False when no lock file on tickets branch
-  2. test_check_pass_lock_present      — check_pass_lock returns True when .reconciler-pass-lock present on tickets
-  3. test_missing_tickets_branch_fails_closed — check_pass_lock raises ReconcileLockError when tickets branch missing
-  4. test_acquire_release_uses_rebase_retry   — acquire/release roundtrip via _concurrency.rebase_retry
-  5. test_phase_gate_blocks_advancement — check_phase_gate blocks BOOTSTRAP_THROTTLE when gate file present,
+  1. test_check_pass_lock_absent       — check_pass_lock returns False when no lock file on tickets
+  branch
+  2. test_check_pass_lock_present      — check_pass_lock returns True when .reconciler-pass-lock
+  present on tickets
+  3. test_missing_tickets_branch_fails_closed — check_pass_lock raises ReconcileLockError when
+  tickets branch missing
+  4. test_acquire_release_uses_rebase_retry   — acquire/release roundtrip via
+  _concurrency.rebase_retry
+  5. test_phase_gate_blocks_advancement — check_phase_gate blocks BOOTSTRAP_THROTTLE when gate file
+  present,
                                           allows BOOTSTRAP_STRICT
 
 Plus two additional tests from AC amendment comments (G4 + G5):
-  6. test_git_show_unrecognised_stderr_fails_closed — unrecognised non-zero exit raises ReconcileLockError
-  7. test_release_pass_lock_ownership_check          — release with wrong pass_id leaves file, logs warning
+  6. test_git_show_unrecognised_stderr_fails_closed — unrecognised non-zero exit raises
+  ReconcileLockError
+  7. test_release_pass_lock_ownership_check          — release with wrong pass_id leaves file, logs
+  warning
 
 Module loading follows the importlib.util.spec_from_file_location convention
 established in conftest.py and test_concurrency.py.
@@ -305,7 +312,8 @@ def test_release_pass_lock_ownership_check(
 def test_acquire_pass_lock_when_tickets_checked_out_in_sibling_worktree(
     advisory_lock: ModuleType, tmp_git_repo_with_tickets: Path
 ) -> None:
-    """acquire_pass_lock succeeds even when tickets branch is already checked out in a sibling worktree.
+    """acquire_pass_lock succeeds even when tickets branch is already checked out in a sibling
+    worktree.
 
     Reproduces the bug where `git worktree add <dir> tickets` fails with exit 128
     ("fatal: 'tickets' is already used by worktree at ...") when a sibling worktree
@@ -362,7 +370,8 @@ def test_acquire_pass_lock_when_tickets_checked_out_in_sibling_worktree(
 def test_release_pass_lock_when_tickets_checked_out_in_sibling_worktree(
     advisory_lock: ModuleType, tmp_git_repo_with_tickets: Path
 ) -> None:
-    """release_pass_lock succeeds even when tickets branch is already checked out in a sibling worktree.
+    """release_pass_lock succeeds even when tickets branch is already checked out in a sibling
+    worktree.
 
     Mirrors test_acquire_pass_lock_when_tickets_checked_out_in_sibling_worktree but
     for the release path: the `git worktree add <dir> tickets` inside

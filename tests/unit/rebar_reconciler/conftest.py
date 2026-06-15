@@ -144,7 +144,8 @@ def paginating_acli_stub():
           "maxResults": effective_max,  # min(max_results, max_results_cap)
           "total": len(pages),
         }
-    Slicing follows real ACLI: start_at out-of-range returns empty issues list with total=len(pages).
+    Slicing follows real ACLI: start_at out-of-range returns empty issues list
+    with total=len(pages).
     """
 
     def _factory(pages, max_results_cap=100):

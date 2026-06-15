@@ -45,7 +45,7 @@ def applier():
 
 
 def test_update_one_strips_issuetype(applier):
-    """update_one must NOT pass issuetype to client.update_issue (ACLI rejects --issuetype on edit)."""
+    """update_one must NOT pass issuetype to client.update_issue (ACLI rejects it on edit)."""
     client = MagicMock()
     client.update_issue.return_value = None
     mutation = {

@@ -122,7 +122,7 @@ def test_reducer_assignee_defaults_to_none_when_absent(tmp_path: Path, reducer: 
 def test_reduce_ticket_trailing_slash_produces_correct_ticket_id(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """reduce_ticket() called with a trailing-slash path must set ticket_id to the directory name."""
+    """reduce_ticket() with a trailing-slash path sets ticket_id to the directory name."""
     ticket_dir = tmp_path / "tkt-slash"
     ticket_dir.mkdir()
 

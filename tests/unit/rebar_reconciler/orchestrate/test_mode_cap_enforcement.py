@@ -534,7 +534,7 @@ def test_manifest_renderer_handles_typed_and_legacy_dict_shapes(applier_mod, mut
 def test_mode_string_coercion(applier_mod, mode_mod, tmp_path):
     """Valid mode strings are coerced to Mode enum members (finding #1)."""
     mutations = []  # empty is fine — we're testing the validation path
-    result = applier_mod.apply(mutations, "test-coerce", repo_root=tmp_path, mode="dry-run")
+    applier_mod.apply(mutations, "test-coerce", repo_root=tmp_path, mode="dry-run")
     # DRY_RUN with 0 mutations produces a manifest (path may be None or file)
     # — the key assertion is that it didn't raise.
 

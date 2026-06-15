@@ -63,7 +63,7 @@ def test_preflight_accepts_dict_status_with_known_name(reconcile, monkeypatch):
 
 
 def test_preflight_does_not_crash_on_dict_status(reconcile, monkeypatch):
-    """Even when the .name isn't in mapping, the error should be StatusMappingError, not TypeError."""
+    """When the .name isn't in mapping, the error is StatusMappingError, not TypeError."""
     _patch_mapping(reconcile, monkeypatch, {"To Do": "To Do"})
     mutations = [
         {

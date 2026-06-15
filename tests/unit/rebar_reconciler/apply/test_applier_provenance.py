@@ -93,7 +93,9 @@ def _make_update_mutation(jira_key: str = "DIG-123", labels=None, watchers=None)
 
 
 def test_provenance_persisted_for_labels_field(applier, tmp_path):
-    """After apply() processes an update with 'labels', mapping.json contains field_provenance.labels."""
+    """After apply() processes an update with 'labels', mapping.json contains
+    field_provenance.labels.
+    """
     mutation = _make_update_mutation("DIG-123", labels=["bug", "backend"])
 
     fake_acli, _ = _make_mock_acli()

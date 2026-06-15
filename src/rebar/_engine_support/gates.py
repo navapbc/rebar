@@ -19,7 +19,7 @@ import re
 import sys
 
 from rebar._engine_support.output import OutputFormatError, parse_output
-from rebar._engine_support.reads import ReadError, deps_state, show_state, tracker_dir
+from rebar._engine_support.reads import ReadError, deps_state, show_state
 
 
 # ── shared text extraction ────────────────────────────────────────────────────
@@ -350,7 +350,8 @@ def quality_check_cli(argv: list[str], tracker: str) -> int:
                 sys.stdout.write(f"QUALITY: fail - {reason}\n")
             else:
                 sys.stdout.write(
-                    f"QUALITY: fail - description too sparse ({lc} lines); add detail before dispatch\n"
+                    f"QUALITY: fail - description too sparse ({lc} lines); "
+                    "add detail before dispatch\n"
                 )
         elif reason == "story - prose done-definitions":
             sys.stdout.write(

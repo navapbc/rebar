@@ -113,7 +113,8 @@ def process_status(state: dict, event: dict, data: dict, filepath: str) -> None:
         # winner has been recorded, so the incoming event wins unconditionally
         # (otherwise any non-empty incoming UUID > "" and the existing-empty
         # branch would always win, leaving state.status stuck at the loser's
-        # value — bug e60b-e698, test_reducer_applies_multiple_status_events_current_status_mismatch_resolves_fork).
+        # value — bug e60b-e698, regression test:
+        # test_reducer_applies_multiple_status_events_current_status_mismatch_resolves_fork).
         if not existing_uuid or incoming_uuid <= existing_uuid:
             # Incoming event wins.
             winner_uuid = incoming_uuid

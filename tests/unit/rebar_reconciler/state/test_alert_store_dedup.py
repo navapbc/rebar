@@ -142,7 +142,9 @@ def test_patch_bug_filed_updates_record(tmp_path):
 
 
 def test_patch_bug_filed_skips_non_dict_lines(tmp_path):
-    """A non-dict JSONL line (e.g. bare int) is preserved verbatim; the target record is still patched."""
+    """A non-dict JSONL line (e.g. bare int) is preserved verbatim; the target record is still
+    patched.
+    """
     store_dir = tmp_path / "bridge_state" / "bridge_alerts"
     store_dir.mkdir(parents=True)
     today_file = store_dir / "2099-01-01.jsonl"

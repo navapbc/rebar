@@ -179,7 +179,8 @@ def _make_inbound_update_mutation_with_rebar_id_label(mut_mod):
 
 
 def test_apply_raises_for_unauthorized_rebar_id_label_mutation(applier, mut_mod, errors_mod):
-    """BEHAVIORAL GREEN: apply() with inbound_update + rebar-id-* label mutation raises RebarIdLabelWriteError.
+    """BEHAVIORAL GREEN: apply() with inbound_update + rebar-id-* label mutation raises
+    RebarIdLabelWriteError.
 
     After wiring _audit_rebar_id_label_writes into apply(), this call must raise.
     (Before wiring: this test fails — that is the RED state.)

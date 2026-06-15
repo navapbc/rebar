@@ -156,6 +156,6 @@ def test_transition_unmapped_raises_with_available_set(acli):
 def test_transition_no_transitions_available_raises(acli):
     """Empty transitions list → cannot transition; raise."""
     client = _make_client_with_transitions(acli, [])
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError):
         client.transition_issue_by_name("DIG-500", "Done")
     client._direct_rest_post_raw.assert_not_called()

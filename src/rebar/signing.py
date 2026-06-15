@@ -288,7 +288,9 @@ def verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict:
         **base,
         "verified": False,
         "verdict": "mismatch",
-        "reason": "verified steps do NOT match the signature (manifest altered or signature invalid)",
+        "reason": (
+            "verified steps do NOT match the signature (manifest altered or signature invalid)"
+        ),
     }
 
 

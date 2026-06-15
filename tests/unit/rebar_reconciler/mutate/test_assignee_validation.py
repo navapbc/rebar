@@ -131,7 +131,7 @@ def test_update_issue_validates_assignee_before_acli_dispatch(acli):
     """When kwargs contains a real assignee, validate first; raise blocks ACLI dispatch."""
     client = _make_client(acli, [])  # No assignable users → validation fails
     with patch.object(acli, "update_issue") as mod_update:
-        with pytest.raises(Exception):
+        with pytest.raises(acli.AssigneeNotFoundError):
             client.update_issue("DIG-300", assignee="bogus@example.com")
         # ACLI module-level update_issue must NOT be called when validation fails.
         mod_update.assert_not_called()

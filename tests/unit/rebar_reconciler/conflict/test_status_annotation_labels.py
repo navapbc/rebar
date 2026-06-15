@@ -382,7 +382,7 @@ def test_inbound_dso_status_blocked_label_overrides_jira_status(
 def test_inbound_dso_status_blocked_label_sets_local_blocked_when_local_is_open(
     inbound_differ: ModuleType,
 ) -> None:
-    """(d) inbound rebar-status:blocked label → local status becomes 'blocked', not 'in_progress'."""
+    """(d) inbound rebar-status:blocked label → local status 'blocked', not 'in_progress'."""
     jira_snapshot = {
         "DIG-100": _make_jira_fields(
             status="In Progress",

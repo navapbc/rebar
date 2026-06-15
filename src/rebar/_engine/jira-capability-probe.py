@@ -20,12 +20,10 @@ Environment variables:
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import sys
 import time
 import uuid
-from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Load the acli transport from the in-package module (the engine dir is on

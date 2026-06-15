@@ -23,8 +23,8 @@ import rebar
 
 _AC = "\n## Acceptance Criteria\n- [ ] first criterion\n- [ ] second criterion\n"
 _FILLER = (
-    "This ticket describes a cohesive unit of work in enough detail for an agent to act on it without guessing. "
-    * 3
+    "This ticket describes a cohesive unit of work in enough detail for an "
+    "agent to act on it without guessing. " * 3
 )
 
 # Well-formed ticket per type: the per-type headings clarity rewards PLUS the

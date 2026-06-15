@@ -31,7 +31,9 @@ def mut():
 
 
 def test_emits_probe_for_absent_only(differ, mut):
-    """Differ emits exactly one (inbound, probe, DIG-100) mutation for absent partner; zero for present partner."""
+    """Differ emits exactly one (inbound, probe, DIG-100) mutation for absent partner; zero for
+    present partner.
+    """
     local_state = {
         "LOCAL-X": {"local_id": "id-X", "jira_key": "DIG-100"},  # partner DIG-100 absent
         "LOCAL-Y": {"local_id": "id-Y", "jira_key": "DIG-200"},  # partner DIG-200 present

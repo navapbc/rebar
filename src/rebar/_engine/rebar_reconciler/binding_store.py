@@ -102,9 +102,9 @@ class BindingStore:
                     f"and cannot be parsed — aborting reconcile pass to prevent "
                     f"duplicate Jira mutations. File: {self._path}. "  # tickets-boundary-ok
                     f"Original error: {exc}. "
-                    f"Recovery: resolve the merge conflict or restore the file "  # tickets-boundary-ok
+                    f"Recovery: resolve the merge conflict or restore the file "  # tickets-boundary-ok  # noqa: E501
                     f"from the tickets branch with: "
-                    f"git show tickets:.tickets-tracker/.bridge_state/bindings.json"  # tickets-boundary-ok
+                    f"git show tickets:.tickets-tracker/.bridge_state/bindings.json"  # tickets-boundary-ok  # noqa: E501
                 ) from exc
         return json.loads(json.dumps(_EMPTY_STORE))  # deep copy
 

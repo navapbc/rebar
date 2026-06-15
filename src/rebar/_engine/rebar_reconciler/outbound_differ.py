@@ -457,7 +457,6 @@ def _diff_fields(
     against ``jira_fields["parent"]["key"]``.  Unbound parents are omitted
     from the mapped dict and therefore never emitted as changes.
     """
-    import os
     import sys
 
     verbose = _rebar_env("RECONCILER_VERBOSE", "0") == "1"

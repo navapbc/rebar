@@ -263,7 +263,7 @@ def test_cache_invalidation_after_compaction_file_deletion(
     )
 
     status_paths = []
-    for i, (uuid_val, ts) in enumerate(
+    for _i, (uuid_val, ts) in enumerate(
         [
             ("11111111-1111-1111-1111-111111111111", 1742605300),
             ("22222222-2222-2222-2222-222222222222", 1742605400),

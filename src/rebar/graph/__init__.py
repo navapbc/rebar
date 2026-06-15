@@ -1,9 +1,8 @@
 """rebar.graph — dependency-graph build, cycle detection, hierarchy promotion,
 and link writes.
 
-Re-exports the flat public API (build/cycle/hierarchy/link helpers) that the
-engine's ``ticket-graph.py`` CLI wrapper used to expose, so the library, CLI, and
-tests share ONE surface (Tier E E7d — the wrapper is deleted). Submodules are
+Re-exports the flat public API (build/cycle/hierarchy/link helpers) so the
+library, CLI, and tests share ONE surface. Submodules are
 imported eagerly so ``rebar.graph._graph`` / ``._links`` / ``._cache`` resolve as
 attributes, and ``_reducer`` is the single loader instance ``_graph``/``_blockers``
 use (so a test patch on ``rebar.graph._reducer.reduce_all_tickets`` intercepts real
@@ -38,4 +37,11 @@ __all__ = [
     "_is_active_link",
     "_find_direct_blockers",
     "_compute_dep_graph",
+    # Submodules imported eagerly so ``rebar.graph._graph`` / ``._links`` / etc.
+    # resolve as attributes for callers and test patches.
+    "_blockers",
+    "_cache",
+    "_graph",
+    "_hierarchy",
+    "_links",
 ]

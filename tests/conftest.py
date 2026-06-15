@@ -159,7 +159,7 @@ def _no_repo_root_leaks() -> Iterator[None]:
 # exercise the same code (tests/unit/test_repo_isolation_guard.py).
 
 from _isolation import head as _repo_head  # noqa: E402
-from _isolation import porcelain as _repo_porcelain
+from _isolation import porcelain as _repo_porcelain  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

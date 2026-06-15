@@ -20,7 +20,6 @@ import sys
 import time
 import urllib.error
 from pathlib import Path
-from typing import Any
 
 from rebar_reconciler.pass_io import _write_mapping_atomic
 
