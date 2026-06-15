@@ -163,19 +163,19 @@ pytest_add_cli_args = ["-x", "-q", "-p", "no:randomly", "--basetemp=/tmp/rebar-p
 pytest_add_cli_args_test_selection = [
     # signing.py
     "tests/unit/test_signing.py",
-    "tests/interfaces/test_signature.py",
+    "tests/interfaces/lifecycle/test_signature.py",
     # reducer/_processors.py (the fast, rich reducer characterization suite)
     "tests/scripts/reducer/",
-    "tests/interfaces/test_reducer_single_source.py",
+    "tests/interfaces/store/test_reducer_single_source.py",
     # _engine_support/next_batch.py
-    "tests/interfaces/test_next_batch_compute.py",
-    "tests/interfaces/test_next_batch_behavior.py",
+    "tests/interfaces/queries/test_next_batch_compute.py",
+    "tests/interfaces/queries/test_next_batch_behavior.py",
     # _engine_support/validate.py
-    "tests/interfaces/test_validate_compute.py",
+    "tests/interfaces/queries/test_validate_compute.py",
     # _engine_support/gates.py
-    "tests/interfaces/test_gate_rubric_consistency.py",
-    "tests/interfaces/test_ws5d_quality_fileimpact.py",
-    "tests/interfaces/test_close_gate_story_epic.py",
+    "tests/interfaces/lifecycle/test_gate_rubric_consistency.py",
+    "tests/interfaces/queries/test_ws5d_quality_fileimpact.py",
+    "tests/interfaces/lifecycle/test_close_gate_story_epic.py",
 ]
 
 [tool.pytest.ini_options]

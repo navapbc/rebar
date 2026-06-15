@@ -44,7 +44,7 @@ coverage climbs; do not ratchet it above the measured number.
 Coverage is line-number-blind to whether each behavior is exercised through all
 three facades. This matrix pins the load-bearing behaviors and contracts against
 {CLI, library, MCP}; every cell names a test (or notes where one facade does not
-apply). The parity suite (`tests/interfaces/test_parity.py`) drives one behavior
+apply). The parity suite (`tests/interfaces/facades/test_parity.py`) drives one behavior
 through all three adapters at once.
 
 | Behavior / contract                  | CLI                                  | Library                              | MCP                                  |

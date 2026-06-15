@@ -4,7 +4,7 @@ rebar's exit codes are **load-bearing for agents**: the parallel-agent workflow
 keys off them (a claim that loses a race is exit 10, not a crash; a missing
 ticket is exit 1, not 0-with-empty). This document is the single source of truth
 for what each code means and which code each subcommand emits. It is pinned by
-`tests/interfaces/test_exit_codes.py`, which fails if the codes drift.
+`tests/interfaces/lifecycle/test_exit_codes.py`, which fails if the codes drift.
 
 This contract is **frozen** as of the 2026-06-09 breaking-change window. Changes
 to an emitted code are contract changes and must be called out in release notes.

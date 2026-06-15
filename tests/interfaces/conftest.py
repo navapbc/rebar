@@ -8,13 +8,25 @@ network) and uses a real temp git repo per test.
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 import rebar
+
+# Make this directory importable from subdirectory tests. pytest's prepend
+# import mode puts each test file's own dir on sys.path, but the seam
+# subdirectories under tests/interfaces/ do not contain ``adapters.py`` — it
+# lives here at the interfaces root. A parent-dir conftest is imported before
+# descending into subdirs, so this insertion runs before the subdir test
+# modules load, keeping ``from adapters import ...`` resolvable everywhere.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
 
 
 def _git(*args: str, cwd: Path) -> None:

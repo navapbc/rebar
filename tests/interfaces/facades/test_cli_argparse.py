@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 import pytest
+from _engine_path import repo_root
 
 import rebar
 from rebar._cli import (
@@ -28,7 +29,7 @@ from rebar._cli import (
     main,
 )
 
-_GOLDEN = Path(__file__).resolve().parents[1] / "golden" / "cli_help"
+_GOLDEN = repo_root() / "tests" / "golden" / "cli_help"
 
 # (golden-name, argv) for every captured invocation form except ``reconcile``
 # (passthrough to ``python -m rebar_reconciler`` — covered by the reconciler's own

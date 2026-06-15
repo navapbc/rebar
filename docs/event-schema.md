@@ -71,7 +71,7 @@ not the main replay) and the bridge-only `SYNC`. An event whose `event_type` is
   clone's data. (The same treatment `*-SYNC.json` and `*-PRECONDITIONS*.json`
   files already get.)
 
-Pinned by `tests/interfaces/test_event_schema_forward_compat.py`.
+Pinned by `tests/interfaces/contracts/test_event_schema_forward_compat.py`.
 
 ## Replay & fork determinism
 

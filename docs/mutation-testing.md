@@ -32,11 +32,11 @@ rather than the full ~5k-test run. The per-module mapping is:
 
 | Module | Selected tests |
 |--------|----------------|
-| `signing.py` | `tests/unit/test_signing.py`, `tests/interfaces/test_signature.py` |
-| `reducer/_processors.py` | `tests/scripts/reducer/`, `tests/interfaces/test_reducer_single_source.py` |
-| `next_batch.py` | `tests/interfaces/test_next_batch_compute.py`, `tests/interfaces/test_next_batch_behavior.py` |
-| `validate.py` | `tests/interfaces/test_validate_compute.py` |
-| `gates.py` | `tests/interfaces/test_gate_rubric_consistency.py`, `test_ws5d_quality_fileimpact.py`, `test_close_gate_story_epic.py` |
+| `signing.py` | `tests/unit/test_signing.py`, `tests/interfaces/lifecycle/test_signature.py` |
+| `reducer/_processors.py` | `tests/scripts/reducer/`, `tests/interfaces/store/test_reducer_single_source.py` |
+| `next_batch.py` | `tests/interfaces/queries/test_next_batch_compute.py`, `tests/interfaces/queries/test_next_batch_behavior.py` |
+| `validate.py` | `tests/interfaces/queries/test_validate_compute.py` |
+| `gates.py` | `tests/interfaces/lifecycle/test_gate_rubric_consistency.py`, `queries/test_ws5d_quality_fileimpact.py`, `lifecycle/test_close_gate_story_epic.py` |
 
 ## Invocation
 
@@ -116,7 +116,7 @@ assertions don't constrain it.
 
 The catalogue found by this pass, and the rewrite applied:
 
-- **`tests/interfaces/test_next_batch_compute.py::test_library_and_mcp_shape`** —
+- **`tests/interfaces/queries/test_next_batch_compute.py::test_library_and_mcp_shape`** —
   *assertion-light.* The only in-process driver of the next-batch `compute`
   asserted just `batch_size == 2` plus schema validity, leaving the field mapping,
   the output key set, the per-candidate values, and the skip-bucket classification
@@ -133,7 +133,7 @@ removal of the goldens.
 
 ## Tests added to kill high-value survivors
 
-- **`tests/interfaces/test_next_batch_behavior.py`** — drives `compute` /
+- **`tests/interfaces/queries/test_next_batch_behavior.py`** — drives `compute` /
   `to_json_dict` / `render_text` / `render_conflict_matrix` in-process against
   hand-built trackers and asserts observable output: the exact JSON key set and
   values, per-candidate field mapping, the blocked-story / in-progress /

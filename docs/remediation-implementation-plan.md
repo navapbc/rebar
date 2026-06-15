@@ -53,7 +53,7 @@ sketched at the end for sequencing only.*
    registration, and a golden.
 5. **Forward compatibility.** Anything an older clone could choke on goes through
    `reducer/_version.py` (`KNOWN_EVENT_TYPES`, `SCHEMA_VERSION`), pinned by
-   `tests/interfaces/test_event_schema_forward_compat.py`.
+   `tests/interfaces/contracts/test_event_schema_forward_compat.py`.
 
 ---
 

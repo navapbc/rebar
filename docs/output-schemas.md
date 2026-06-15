@@ -70,7 +70,7 @@ mirrors the process exit status (see [exit-codes.md](exit-codes.md)).
 The shared emitter is `ticket_output.error_envelope(...)` / the bash
 `_emit_error_envelope` helper (`ticket-output.sh`); every command's json-mode
 failure branch routes through it. Pinned by
-`tests/interfaces/test_error_envelope.py`.
+`tests/interfaces/contracts/test_error_envelope.py`.
 
 Not every non-zero exit is a "failure" in this sense: the per-ticket **gates**
 (`check-ac`/`quality-check`) use exit 1 as a *verdict*; **tolerant reads**
@@ -92,15 +92,15 @@ The MCP server's pydantic models (`src/rebar/mcp_server.py`, e.g. `TicketStateOu
 **mirror** these schemas to advertise an `outputSchema` to MCP clients; they are
 not a second source of truth. Tests pin both:
 
-- `tests/interfaces/test_schema_outputs.py` — drives every shape's REAL engine
+- `tests/interfaces/contracts/test_schema_outputs.py` — drives every shape's REAL engine
   output (library + CLI) and validates it against its schema.
-- `tests/interfaces/test_mcp_output_schema_coverage.py` — the **MCP coverage
+- `tests/interfaces/facades/test_mcp_output_schema_coverage.py` — the **MCP coverage
   guard**: the set of tools under test is sourced mechanically from
   `list_tools()`, every outputSchema-advertising tool is driven on a fixture store
   and its result validated against the canonical schema, and any advertiser
   without a canonical shape must be a documented exemption (so a new MCP tool
   cannot ship an unvalidated `outputSchema`).
-- `tests/interfaces/test_schema_coverage.py` — the **coverage guard**: every
+- `tests/interfaces/contracts/test_schema_coverage.py` — the **coverage guard**: every
   schema file is wired into `OUTPUT_SCHEMAS`, every registry entry resolves, and
   every command whose `--help` advertises `--output` is covered (so a new
   `--output` command without a schema fails CI).
