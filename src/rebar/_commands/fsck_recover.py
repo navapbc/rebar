@@ -86,7 +86,7 @@ def fsck_recover_cli(argv: list[str], *, repo_root=None) -> int:
             tracker_dir = argv[i + 1] if i + 1 < len(argv) else ""
             i += 2
         elif a.startswith("--tracker-dir="):
-            tracker_dir = a[len("--tracker-dir="):]
+            tracker_dir = a[len("--tracker-dir=") :]
             i += 1
         elif a == "--detect-only":
             detect_only = True
@@ -98,7 +98,7 @@ def fsck_recover_cli(argv: list[str], *, repo_root=None) -> int:
             continue_timeout = int(argv[i + 1]) if i + 1 < len(argv) else 30
             i += 2
         elif a.startswith("--timeout="):
-            continue_timeout = int(a[len("--timeout="):])
+            continue_timeout = int(a[len("--timeout=") :])
             i += 1
         elif a in ("--help", "-h"):
             sys.stdout.write(_USAGE)
@@ -125,9 +125,7 @@ def fsck_recover_cli(argv: list[str], *, repo_root=None) -> int:
 
     git_dir = _resolve_tracker_git_dir(tracker_dir)
     if not git_dir:
-        sys.stderr.write(
-            f"Error: could not resolve git directory for tracker '{tracker_dir}'\n"
-        )
+        sys.stderr.write(f"Error: could not resolve git directory for tracker '{tracker_dir}'\n")
         return 2
 
     rebase_kind = _detect_stale_rebase(git_dir)
@@ -166,7 +164,11 @@ def fsck_recover_cli(argv: list[str], *, repo_root=None) -> int:
             )
             try:
                 cp = _git(
-                    tracker_dir, "-c", "rebase.autostash=true", "rebase", "--continue",
+                    tracker_dir,
+                    "-c",
+                    "rebase.autostash=true",
+                    "rebase",
+                    "--continue",
                     timeout=continue_timeout,
                 )
                 continue_exit = cp.returncode
@@ -208,7 +210,7 @@ def fsck_recover_cli(argv: list[str], *, repo_root=None) -> int:
     dangling: list[str] = []
     for line in fsck_out.splitlines():
         if line.startswith("dangling commit "):
-            sha = line[len("dangling commit "):]
+            sha = line[len("dangling commit ") :]
             subject = _git(tracker_dir, "log", "-1", "--format=%s", sha).stdout.strip()
             if pat.search(subject):
                 dangling.append(sha)
@@ -233,8 +235,13 @@ def fsck_recover_cli(argv: list[str], *, repo_root=None) -> int:
     )
     for sha in sorted_shas:
         cp = _git(
-            tracker_dir, "cherry-pick", "--allow-empty", "--strategy=recursive",
-            "-X", "theirs", sha,
+            tracker_dir,
+            "cherry-pick",
+            "--allow-empty",
+            "--strategy=recursive",
+            "-X",
+            "theirs",
+            sha,
         )
         short = _git(tracker_dir, "rev-parse", "--short", sha).stdout.strip()
         if cp.returncode == 0:

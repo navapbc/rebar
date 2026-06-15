@@ -68,7 +68,9 @@ def test_transition_unstages_orphaned_event_on_commit_failure(
 
     # The orphaned STATUS event must be unstaged (index clean) AND off disk — else the
     # next write's commit would sweep in a transition the user never completed.
-    diff = subprocess.run(["git", "-C", tracker, "diff", "--cached", "--quiet"], capture_output=True)
+    diff = subprocess.run(
+        ["git", "-C", tracker, "diff", "--cached", "--quiet"], capture_output=True
+    )
     assert diff.returncode == 0, "orphaned event left STAGED in the index"
     assert not list((rebar_repo / ".tickets-tracker" / tid).glob("*-STATUS.json"))
 

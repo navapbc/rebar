@@ -6,7 +6,132 @@ opus-reviewed cluster decomposition + the live handoff state. End-state AC: **on
 three facades (lib/CLI/MCP); zero standalone shell tests; no embedded heredocs; no `_engine/*.sh`.**
 Tier E has NO kill-switch — it is a structural cutover; rollback is `git revert`.
 
-## STATUS (2026-06-13) — read this first
+## STATUS (2026-06-14, session 2) — read this FIRST
+
+**Done this session, committed to local `main` (NOT pushed — awaiting user direction):**
+
+| Cluster | Commit | What |
+|---|---|---|
+| E5 | `fd94e4b1` | `bridge-status` + `purge-bridge` in-process (`_engine_support/bridge.py`, `_commands/purge_bridge.py`); 10 byte-parity tests. |
+| E5b | `fb1b7fa7` | reconciler rewired off bare `event_append`/`ticket_reducer` → `rebar._store`/`rebar.reducer`; reconcile launch `python3`→`sys.executable`. **LIVE-DIG probe PASSED** (DIG-5764 create→validate-all-fields→inbound→delete, zero residue). Opus-reviewed APPROVE-WITH-NITS (fixes applied). |
+| E5c | `c7b36bd0` | deleted the bare `_engine/event_append.py` + its obsolete test. |
+| E6a | `b3cbfe6a` | rewired the rebar PACKAGE off the shims (`reducer/_processors.py`→`_engine_support.resolver`; interface/reconciler tests→`rebar.graph`/`rebar.reducer`). |
+| E6.5a (6/6) | `11c0784e`…`656958a1` | ALL in-process→engine subprocess deps severed: alias-compute, alias-resolve, link `--dry-run`, un-archive, bridge-fsck in-process; bridge-probe + reconcile launch via `sys.executable`. **`rebar._run` + `_cli._passthrough` are now DEAD** (every CLI subcommand runs in-process; dispatcher fully bypassed). Two live-DIG probes passed (DIG-5764 field round-trip; bridge-probe 6-step), zero residue. |
+| E8 batch 1 | `f7c6f5d8` | 4 GAP bash suites → in-process pytest (cache-gitignored, push-policy e2e, help-overview drift, fsck PUSH_PENDING); 11 tests green. |
+
+Full non-integration suite green at **1805 passed / 0 failed** (E6.5a milestone,
+clean — no false positive). NB: the `_no_repo_commits` guard trips if a `git commit`
+runs DURING a background full-suite run; do not commit while one is in flight.
+
+### RESUME HERE → E7e (sever reconciler/validate off the dispatcher), then delete the engine, then E9
+
+⚠ **NEW BLOCKER discovered (must fix BEFORE deleting the dispatcher):** the
+RECONCILER (which STAYS) and `validate` invoke the bash dispatcher as a subprocess:
+- `engine_env()` sets `REBAR_TICKET_CLI = dispatcher()`; the reconciler reads it in
+  `rebar_reconciler/{applier.py:406, invariants.py:26, reconcile.py:447}` and runs
+  `[cli_path, list/show/...]` to read local tickets + file-conflict bug tickets.
+- `_engine_support/validate.py:_default_ticket_cmd()` returns `engine_dir()/ticket`;
+  `run_checks(ticket_cmd=...)` → `check_interface_contracts` subprocesses it (used
+  even when `TICKET_CMD` is unset, i.e. production).
+Fix (E7e): give rebar an in-process CLI entry the reconciler can invoke as a single
+executable — add `src/rebar/__main__.py` (so `python -m rebar` runs `rebar._cli.main`)
+and repoint `REBAR_TICKET_CLI` + `_default_ticket_cmd` at the in-process CLI (e.g. the
+`rebar` console script via `shutil.which`, or `[sys.executable,"-m","rebar"]` — but the
+callers treat it as one path, so a `__main__.py` + console-script path is cleanest).
+Then RE-RUN a live reconciler dry-run (DIG) to confirm it still reads local tickets.
+
+**E7d test-side DONE** (committed): graph `rebar.graph/__init__` flat API + fixture
+off `ticket-graph.py` (`4b8a0f28`); the last 4 helper-coupled tests rewired to
+in-process `rebar.*` (`a02a27dd`). **NO surviving test references any engine helper.**
+Broad suite (interfaces+unit+scripts) 1662 passed.
+
+Original E7d resume (now gated on E7e first):
+
+**DONE since the milestone (committed to local main):** E8 batch 1 (`f7c6f5d8`) + batch 2
+(`f859a526`) — all GAP suites translated to in-process pytest. E7a (`5ce73a9d`) —
+rewired reducer/graph pytest tiers off the shims. E7c (`6cda0262`) — deleted the
+ENTIRE bash-dependent test side: 14 dispatcher parity tests, ALL `.sh` suites,
+`tests/lib/*.sh`, the `test_bash_suites.py` collector, `test_ticket_txn.py`,
+isolation-rules fixtures. **Zero `tests/**/*.sh`. Full suite 1667 passed / 0 failed
+(3 min).** E7d(partial) (`50210575`) — reducer `conftest` fixture → `rebar.reducer`.
+KEPT: `test_e3_txn_bytes.py` (pure in-process byte guard).
+
+**E7d remaining (the engine deletion) — these SURVIVING tests still touch the engine:**
+1. **graph tier** — `tests/scripts/graph/conftest.py`+`_helpers.py` `graph` fixture
+   spec-loads `ticket-graph.py` for its FLAT api (`build_dep_graph`,
+   `check_cycle_at_level`, …) which `rebar.graph/__init__` does NOT surface. Fix:
+   either expose that flat surface from `rebar.graph` (cleanest) or have the fixture
+   build it from the `rebar.graph._*` submodules. (reducer was a clean swap; graph
+   isn't.)
+2. **`tests/scripts/graph/test_graph_children_archive.py` + `test_graph_hierarchy_resolve.py`**
+   — subprocess `python3 ticket-graph.py {compute-archive-eligible,resolve-hierarchy-link}`
+   via `SCRIPT_PATH`; repoint to the in-process `rebar.graph._hierarchy` funcs or drop.
+3. **`tests/scripts/test_ticket_unblock.py`** — spec-loads + subprocesses
+   `ticket-unblock.py` (a SHIM → `rebar.graph._unblock`); repoint to `rebar.graph._unblock`.
+4. **`tests/scripts/bridge/test_bridge_alert_display.py`** — spec-loads
+   `ticket-reducer.py` + subprocesses; repoint to `rebar.reducer`.
+5. **`tests/unit/test_ticket_delete_unlink_scan.py`** — subprocesses
+   `ticket-delete-unlink-scan.py`; repoint to `rebar._commands.delete.scan_and_write_unlinks`.
+6. **`tests/scripts/reducer/test_ticket_alias_backfill.py`** — subprocesses
+   `ticket-alias-compute.py` + `ticket-alias-resolve.py`; repoint to
+   `rebar.reducer._alias.compute_alias` + `rebar._engine_support.resolver`.
+
+**Then the deletions + library surgery (one commit once 1-6 are green):**
+- DELETE `_engine/rebar`+`ticket` + all 36 `_engine/*.sh` + dispatcher-only `.py`
+  (`ticket-reducer.py`,`ticket-graph.py`,`ticket-reads.py`,`ticket-commands.py`,
+  `ticket-delete-unlink-scan.py`,`ticket-alias-compute.py`,`ticket-alias-resolve.py`,
+  `ticket-list-descendants.py`,`ticket-unblock.py`,`ticket-bridge-fsck.py`) + the 5
+  shims (`ticket_reducer/`,`ticket_graph/`,`ticket_reads.py`,`ticket_resolver.py`,
+  `ticket_output.py`) + `ticket_txn.py`.
+- KEEP `_engine/rebar_reconciler/`, `jira-capability-probe.py`, `resources/`.
+- `_engine.py`: delete `dispatcher()` + `run()`; **KEEP `engine_dir()`,`engine_env()`,
+  `wordlist_path()`** (reconciler + bridge-probe subprocess launches + `reducer._alias`
+  need them).
+- `__init__.py`: delete the dead `_run()` + the `run`/`dispatcher` import.
+- `_cli/__init__.py`: delete the dead `_passthrough()` + its `dispatcher`/`engine_env` import.
+- `tests/unit/test_engine_dir.py`: change `dispatcher().is_file()` → assert the engine
+  dir / wordlist / reconciler exist (KEEP the rest — engine_dir survives + the
+  no-top-level-names guard is now MORE important). `_engine_path.py` SURVIVES (locates
+  the still-present engine dir for the reconciler).
+- Verify full pytest green; opus-review the cutover.
+
+### (superseded) original E8→E7→E9 sketch
+
+**E8 batch 2 (translate the remaining GAP suites, additive, before E7):**
+- `test-ticket-list-has-tag.sh` — only the `detected_by:`∩bug-type rule if not already in `test_list_filters.py`.
+- `tests/test-reconciler-scratch-exclude.sh` — reconciler `--dry-run-enumerate` excludes `.scratch/` (launch `sys.executable -m rebar_reconciler` with `engine_env`; reconciler STAYS).
+- `test-format-ticket-id-symlink.sh` — resolve/format with a symlinked tracker.
+- `tests/test-ticket-init-idempotent.sh` — re-init idempotent `.git/info/exclude` upgrade (no dup lines).
+- `test-ticket-transition-open-children-perf.sh` — CORRECTNESS only, BOUNDED (~20-30 children), drop wall-clock asserts (flaky).
+- `tests/integration/ticket-id-collision/run.sh` — `@pytest.mark.integration`, BOUNDED (~500-1000 ids), id/alias uniqueness + deterministic replay.
+
+**E7 (ONE atomic commit — see the grounded plan below):** delete `_engine/rebar`+`ticket`+all 36 `.sh`+the dispatcher-only `.py` helpers (`ticket-reducer.py`/`ticket-graph.py`/`ticket-reads.py`/`ticket-commands.py`/`ticket-delete-unlink-scan.py`/`ticket-alias-*.py`/`ticket-list-descendants.py`/`ticket-unblock.py`)+the now-shim `ticket-bridge-fsck.py`+`ticket_txn.py`+the 5 compat shims; SAME commit delete ALL `tests/scripts/test-*.sh` + the few elsewhere + `tests/lib/*.sh` + `tests/scripts/test_bash_suites.py` collector + the 15 `test_eN_*.py` parity tests + `test_e3_txn_bytes.py` + machinery tests (`test_engine_dir.py`, `tests/_engine_path.py`, `test_ticket_txn.py`) + the conftest engine-`sys.path` inserts. KEEP: `_engine/rebar_reconciler/` + `jira-capability-probe.py` + `resources/ticket-wordlist.txt` (genuine tools the reconciler/probe/alias still use via `sys.executable`+engine_env). In `_engine.py`: `engine_dir`/`engine_env`/`wordlist_path` must SURVIVE (the reconciler + bridge-probe subprocess launches + `reducer._alias` need them); delete only `dispatcher()`/`run()`. Verify full pytest green (pytest-only, zero `tests/**/*.sh`). **opus-review the E7 cutover.**
+
+**E9:** docs (architecture offender table→empty; bash-migration §7 DONE; help golden now `_cli/_help`-anchored) + exhaustive dogfood + close `adult-oxide-slave` then `nervy-hold-dip`.
+
+⚠ A worker subagent crashed mid-draft on E8 batch 2 (socket error); redo batch 2 fresh.
+
+### CRITICAL — E6.5a prerequisites (grounded 2026-06-14; MORE than the original E6/E7 text)
+
+Before ANY engine deletion (E7), every in-process `rebar.*` path that still
+subprocesses the engine MUST be severed, or deleting the engine silently breaks
+production. Grounded list (grep of `src/rebar` excl. `_engine/`+reconciler):
+1. ✅ `composer._compute_alias` → `reducer._alias.compute_alias` (byte-parity verified).
+2. ⬜ `_engine_support/resolver.py` → still subprocesses `ticket-alias-resolve.py`; port the alias/jira_key scan in-process.
+3. ⬜ `composer.link_cli` `--dry-run` → subprocesses `ticket-link.sh --dry-run` (normal link is already in-process via `link_core`); port or drop the dry-run preview.
+4. ⬜ `transition._unarchive` (`archived→open`) → subprocesses `ticket-revert.sh`; port the REVERT-latest-ARCHIVED logic in-process (reuse `rebar._commands` revert core).
+5. ⬜ `rebar.bridge_fsck()` (+ MCP) → `_run(["bridge-fsck"])` → dispatcher → `ticket-bridge-fsck.py`; port to `rebar._engine_support.bridge_fsck`, add a `_cli` `bridge-fsck` arm.
+6. ⬜ `bridge-probe` (`_cli._passthrough`) → dispatcher → `jira-capability-probe.py`; port to `rebar._commands.bridge_probe`, add a `_cli` arm. **LIVE-DIG gate binds (now user-authorized).**
+   Plus: `validate._raw_tickets` subprocesses `$TICKET_CMD list` ONLY when `TICKET_CMD` is injected (a TEST seam; production is in-process `list_states`) — update those tests in E8. `reads.py`/`transition._short_head`/`_init.py` subprocess only `git` (benign, stays).
+
+### Then (opus-grounded ordering): E8 → E7 → E9
+- **E8 (before E7):** write the ~11 TRANSLATE pytest tests (in-process) for the confirmed coverage GAPs BEFORE deleting bash sources (fsck PUSH_PENDING; has-tag `detected_by`∩bug; reconciler `.scratch/` exclusion; init exclude idempotent upgrade; close O(open-children); id-collision opt-in; symlink-resolve; cache-gitignored; help-drift; push-policy residue) + 1 `sync`-invariant regression test. ~56 suites are DELETE-redundant (covered by `test_eN_*`/reducer/graph/interface tiers), ~17 DELETE-machinery.
+- **E7 (atomic, one commit):** delete `_engine/rebar`+`ticket`+all 36 `.sh`+dispatcher-only `.py` helpers+the 5 shims+`ticket_txn.py`; SAME commit delete all `.sh` suites + `tests/lib/*.sh` + the `test_bash_suites.py` collector + the 15 `test_eN_*.py` parity tests + machinery tests (`test_engine_dir.py`, `_engine_path.py`, `test_ticket_txn.py`) + the conftest engine-`sys.path` inserts + `engine_env`/`engine_dir`/`dispatcher`/`run` (keep/relocate `wordlist_path` for `_alias`).
+- **E9:** docs (architecture offender table→empty; bash-migration §7 DONE; help golden now `_cli/_help`-anchored) + exhaustive dogfood + close `adult-oxide-slave` then `nervy-hold-dip`.
+
+---
+
+## STATUS (2026-06-13) — prior session
 
 **Done, green, pushed to `origin/main` (HEAD `482bbed8`):**
 

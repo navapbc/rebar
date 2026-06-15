@@ -210,7 +210,7 @@ def test_discovery_rejects_symlink_escape(tmp_path: Path) -> None:
     assert "escape_dir" not in listing and "escape_file" not in listing
     found = tools["search_files"].invoke({"pattern": "TOPSECRET"})
     assert "normal.txt" in found and "secret.txt" not in found
-    with pytest.raises(Exception):  # explicit read of the escaping symlink is blocked
+    with pytest.raises(ValueError):  # explicit read of the escaping symlink is blocked
         tools["read_file"].invoke({"path": "escape_file"})
 
 
@@ -226,7 +226,7 @@ def test_pydantic_mirror_field_sets_match_schema() -> None:
     """Pin the Pydantic structured-output model to the JSON Schema $defs so the two
     can't drift (the schema is the source of truth)."""
     pytest.importorskip("pydantic")
-    model = findings_response_model = __import__(
+    model = __import__(
         "rebar.llm.findings", fromlist=["findings_response_model"]
     ).findings_response_model
     Review = model()
@@ -344,7 +344,11 @@ def test_runner_selection_and_stubs() -> None:
     from rebar.llm.config import LLMConfig
     from rebar.llm.errors import LLMConfigError
     from rebar.llm.runner import (
-        DeepAgentsRunner, FakeRunner, LangflowRunner, LangGraphRunner, RunRequest,
+        DeepAgentsRunner,
+        FakeRunner,
+        LangflowRunner,
+        LangGraphRunner,
+        RunRequest,
         get_runner,
     )
 
@@ -399,9 +403,9 @@ def test_langflow_runner_missing_config() -> None:
 def test_langflow_runner_end_to_end_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
     """LangflowRunner extracts the flow's findings JSON from a nested response and
     runs it through the shared normalize/validate/citation pipeline."""
+    from rebar.llm import runner as runner_mod
     from rebar.llm.config import LLMConfig
     from rebar.llm.runner import LangflowRunner, RunRequest
-    from rebar.llm import runner as runner_mod
 
     findings_json = json.dumps({
         "findings": [{"severity": "high", "dimension": "security", "detail": "x",
@@ -687,6 +691,7 @@ def test_mcp_review_tool_registered_and_gated(rebar_repo: Path,
     import asyncio
 
     from adapters import _unwrap  # tests/interfaces on sys.path
+
     from rebar.mcp_server import build_server
 
     srv = build_server()
@@ -707,5 +712,7 @@ def test_mcp_review_tool_registered_and_gated(rebar_repo: Path,
         "scan_spec": {"spec_text": "the spec"},
     }
     for name, args in gated_calls.items():
-        with pytest.raises(Exception):
+        # FastMCP wraps the tool's ValueError in a transport error whose exact type
+        # is version-dependent; we only need to assert the gated call errors.
+        with pytest.raises(Exception):  # noqa: B017
             _unwrap(asyncio.run(srv.call_tool(name, args)))

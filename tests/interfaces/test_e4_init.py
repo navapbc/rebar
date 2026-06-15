@@ -1,10 +1,10 @@
-"""Tier E E4: init + the auto-init consent gate — cross-surface validation.
+"""init + the auto-init consent gate — cross-surface validation.
 
-Validates the invariant the user requested: the ticket store is NEVER created
-without (a) an explicit ``rebar init`` / :func:`rebar.init_repo`, or (b) an
-interactive confirmation. Every path that *can* result in an init is checked:
-in-process CLI (TTY prompt + non-TTY error), the library, and init parity vs the
-dispatcher. (MCP exercises the library write path, which errors here too.)
+Validates the invariant: the ticket store is NEVER created without (a) an explicit
+``rebar init`` / :func:`rebar.init_repo`, or (b) an interactive confirmation. Every
+path that *can* result in an init is checked: in-process CLI (TTY prompt + non-TTY
+error), the library, and the symlink-vs-first-time-init distinction. (MCP exercises
+the library write path, which errors here too.)
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ import pytest
 import rebar
 from rebar._cli import _init as cli_init
 from rebar._cli import main
-from rebar._engine import dispatcher, engine_env
 
 
 @pytest.fixture
@@ -41,20 +40,20 @@ def _tracker(repo: Path) -> Path:
     return repo / ".tickets-tracker"
 
 
-# ── init parity (in-process vs dispatcher) ───────────────────────────────────
-def test_init_parity_fresh_and_idempotent(
-    fresh_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+# ── init: fresh + idempotent ─────────────────────────────────────────────────
+def test_init_fresh_and_idempotent(
+    fresh_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
     # in-process init (cwd = repo, like a user running `rebar init`)
     monkeypatch.chdir(fresh_repo)
     capsys.readouterr()
     code = main(["init"])
-    out, err = capsys.readouterr().out, capsys.readouterr().err  # noqa
     assert code == 0
     assert _tracker(fresh_repo).is_dir()
     branch = subprocess.run(
         ["git", "-C", str(_tracker(fresh_repo)), "rev-parse", "--abbrev-ref", "HEAD"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     assert branch == "tickets"
     # idempotent
@@ -63,21 +62,6 @@ def test_init_parity_fresh_and_idempotent(
     err2 = capsys.readouterr().err
     assert code2 == 0
     assert "already initialized" in err2
-
-    # bash parity on a separate fresh repo
-    other = tmp_path / "other"
-    other.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=other, check=True)
-    subprocess.run(["git", "config", "user.email", "t@e"], cwd=other, check=True)
-    subprocess.run(["git", "config", "user.name", "T"], cwd=other, check=True)
-    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "base"], cwd=other, check=True)
-    bcp = subprocess.run(
-        ["bash", str(dispatcher()), "init"],
-        env={**engine_env(str(other)), "_TICKET_TEST_NO_SYNC": "1"},
-        cwd=str(other), capture_output=True, text=True,
-    )
-    assert bcp.returncode == 0
-    assert bcp.stderr.strip() == "Ticket system initialized."
 
 
 # ── consent gate: in-process CLI ─────────────────────────────────────────────
@@ -114,9 +98,7 @@ def test_interactive_yes_initializes(
     assert _tracker(fresh_repo).is_dir()
 
 
-def test_interactive_no_aborts(
-    fresh_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
+def test_interactive_no_aborts(fresh_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     monkeypatch.setattr(cli_init, "_is_interactive", lambda: True)
     monkeypatch.setattr(builtins, "input", lambda: "n")
     capsys.readouterr()
@@ -158,9 +140,7 @@ def test_worktree_symlinks_silently_without_prompt(
 
     # Add a linked worktree (its .git is a file, not a directory).
     wt = tmp_path / "wt"
-    subprocess.run(
-        ["git", "-C", str(fresh_repo), "worktree", "add", "-q", str(wt)], check=True
-    )
+    subprocess.run(["git", "-C", str(fresh_repo), "worktree", "add", "-q", str(wt)], check=True)
     assert (wt / ".git").is_file()
 
     # Drive a read command from the worktree, NON-interactively, with the gate
@@ -184,9 +164,7 @@ def test_worktree_without_main_init_still_errors_noninteractive(
     """A worktree whose MAIN repo is NOT initialized has no store to link to, so
     there is nothing to symlink — the consent gate still fires (first-time init)."""
     wt = tmp_path / "wt"
-    subprocess.run(
-        ["git", "-C", str(fresh_repo), "worktree", "add", "-q", str(wt)], check=True
-    )
+    subprocess.run(["git", "-C", str(fresh_repo), "worktree", "add", "-q", str(wt)], check=True)
     monkeypatch.setattr(cli_init, "_is_interactive", lambda: False)
     monkeypatch.setenv("REBAR_ROOT", str(wt))
     monkeypatch.setenv("PROJECT_ROOT", str(wt))

@@ -22,9 +22,7 @@ from _events import _UUID, _UUID2, _UUID3, _write_event
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_compiles_single_create_event_to_state(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_compiles_single_create_event_to_state(tmp_path: Path, reducer: ModuleType) -> None:
     """Given one CREATE event JSON file, the reducer returns the expected dict."""
     ticket_dir = tmp_path / "tkt-001"
     ticket_dir.mkdir()
@@ -128,9 +126,7 @@ def test_reducer_orders_events_by_filename_not_insertion_order(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_skips_corrupt_json_with_warning(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_skips_corrupt_json_with_warning(tmp_path: Path, reducer: ModuleType) -> None:
     """Given one valid CREATE event and one malformed JSON file, the reducer
     must return valid state from the good event and must NOT raise an exception.
     It should log a warning (any mechanism is acceptable — the test only
@@ -161,9 +157,7 @@ def test_reducer_skips_corrupt_json_with_warning(
         warnings.simplefilter("always")
         state = reducer.reduce_ticket(ticket_dir)
 
-    assert state is not None, (
-        "reduce_ticket must return valid state when a corrupt file is present"
-    )
+    assert state is not None, "reduce_ticket must return valid state when a corrupt file is present"
     assert state["title"] == "Reducer is lenient"
     assert state["ticket_type"] == "bug"
 
@@ -197,14 +191,10 @@ def test_reducer_returns_none_for_ticket_with_no_create_event(
     try:
         state = reducer.reduce_ticket(ticket_dir)
         # If no exception, state must be None
-        assert state is None, (
-            "reduce_ticket must return None when no CREATE event is present"
-        )
+        assert state is None, "reduce_ticket must return None when no CREATE event is present"
     except Exception as exc:  # noqa: BLE001
         # TicketNotFoundError or similar is also acceptable
-        assert (
-            "TicketNotFound" in type(exc).__name__ or "NotFound" in type(exc).__name__
-        ), (
+        assert "TicketNotFound" in type(exc).__name__ or "NotFound" in type(exc).__name__, (
             f"Expected TicketNotFoundError or None return, got {type(exc).__name__}: {exc}"
         )
 
@@ -384,8 +374,7 @@ def test_reducer_fork_with_empty_existing_uuid_lets_incoming_win(
 
     assert state is not None, "reduce_ticket must return a dict on fork"
     assert state.get("status") == "closed", (
-        "Empty existing_uuid must let incoming win — got "
-        f"state['status']={state.get('status')!r}"
+        f"Empty existing_uuid must let incoming win — got state['status']={state.get('status')!r}"
     )
     # parent_status_uuid must advance to the winner's own UUID (not stay empty
     # and not become the parent pointer) so subsequent forks have a
@@ -441,16 +430,10 @@ def test_reducer_compiles_comment_event_to_comments_list(
     state = reducer.reduce_ticket(ticket_dir)
 
     assert state is not None
-    assert len(state["comments"]) == 1, (
-        "COMMENT event must append one entry to the comments list"
-    )
+    assert len(state["comments"]) == 1, "COMMENT event must append one entry to the comments list"
     comment = state["comments"][0]
-    assert comment["body"] == "first comment", (
-        "comment body must match the COMMENT event data.body"
-    )
-    assert comment["author"] == "Bob", (
-        "comment author must match the COMMENT event author"
-    )
+    assert comment["body"] == "first comment", "comment body must match the COMMENT event data.body"
+    assert comment["author"] == "Bob", "comment author must match the COMMENT event author"
     assert comment["timestamp"] == 1742605300, (
         "comment timestamp must match the COMMENT event timestamp"
     )
@@ -463,9 +446,7 @@ def test_reducer_compiles_comment_event_to_comments_list(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_accumulates_multiple_comments(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_accumulates_multiple_comments(tmp_path: Path, reducer: ModuleType) -> None:
     """Given CREATE + two COMMENT events, comments list must have 2 entries in order."""
     ticket_dir = tmp_path / "tkt-multicomment"
     ticket_dir.mkdir()
@@ -551,9 +532,7 @@ def test_reducer_returns_error_state_for_ticket_dir_with_zero_valid_events(
     assert state is not None, (
         "reduce_ticket must return a dict (not None) when only corrupt events exist"
     )
-    assert isinstance(state, dict), (
-        "reduce_ticket must return a dict for ghost ticket dir"
-    )
+    assert isinstance(state, dict), "reduce_ticket must return a dict for ghost ticket dir"
     assert state.get("status") == "error", (
         f"Ghost ticket dir must return status='error', got status={state.get('status')!r}"
     )
@@ -566,9 +545,7 @@ def test_reducer_returns_error_state_for_ticket_dir_with_zero_valid_events(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_flags_corrupt_create_as_fsck_needed(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_flags_corrupt_create_as_fsck_needed(tmp_path: Path, reducer: ModuleType) -> None:
     """A CREATE event missing required fields (ticket_type) must not silently corrupt state.
 
     The reducer must return a dict with status='fsck_needed' rather than None
@@ -706,9 +683,7 @@ def test_reducer_emits_warning_for_corrupt_event(
     reducer.reduce_ticket(ticket_dir)
 
     captured = capsys.readouterr()
-    assert "WARNING" in captured.err, (
-        f"Expected WARNING in stderr, got: {captured.err!r}"
-    )
+    assert "WARNING" in captured.err, f"Expected WARNING in stderr, got: {captured.err!r}"
     assert "corrupt" in captured.err.lower() or str(corrupt_file) in captured.err, (
         f"Expected corrupt file path or 'corrupt' in stderr warning, got: {captured.err!r}"
     )
@@ -716,9 +691,7 @@ def test_reducer_emits_warning_for_corrupt_event(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_skips_corrupt_event_in_snapshot_pass1(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_skips_corrupt_event_in_snapshot_pass1(tmp_path: Path, reducer: ModuleType) -> None:
     """Reducer handles corrupt events during SNAPSHOT pass 1 scan gracefully."""
     ticket_dir = tmp_path / "tkt-corrupt-snap"
     ticket_dir.mkdir()
@@ -768,9 +741,7 @@ def test_reducer_skips_corrupt_event_in_snapshot_pass1(
 
     state = reducer.reduce_ticket(ticket_dir)
 
-    assert state is not None, (
-        "reduce_ticket must return state with SNAPSHOT despite corrupt event"
-    )
+    assert state is not None, "reduce_ticket must return state with SNAPSHOT despite corrupt event"
     assert state["status"] == "in_progress", (
         f"Expected status from SNAPSHOT compiled_state, got {state['status']!r}"
     )
@@ -779,9 +750,7 @@ def test_reducer_skips_corrupt_event_in_snapshot_pass1(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_all_events_corrupt_returns_error_dict(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_all_events_corrupt_returns_error_dict(tmp_path: Path, reducer: ModuleType) -> None:
     """Dir with only corrupt JSON files returns error dict (ghost ticket prevention)."""
     ticket_dir = tmp_path / "tkt-all-corrupt"
     ticket_dir.mkdir()
@@ -792,9 +761,7 @@ def test_reducer_all_events_corrupt_returns_error_dict(
 
     state = reducer.reduce_ticket(ticket_dir)
 
-    assert state is not None, (
-        "reduce_ticket must return error dict for all-corrupt dir, not None"
-    )
+    assert state is not None, "reduce_ticket must return error dict for all-corrupt dir, not None"
     assert isinstance(state, dict), f"Expected dict, got {type(state)}"
     assert state.get("status") == "error", (
         f"Expected status='error' for all-corrupt dir, got {state.get('status')!r}"

@@ -99,9 +99,7 @@ def _non_internal_labels(value: Any) -> set[str]:
     if not isinstance(value, (list, tuple)):
         return set()
     return {
-        v
-        for v in value
-        if isinstance(v, str) and not v.startswith(_BRIDGE_INTERNAL_LABEL_PREFIXES)
+        v for v in value if isinstance(v, str) and not v.startswith(_BRIDGE_INTERNAL_LABEL_PREFIXES)
     }
 
 
@@ -259,9 +257,7 @@ def compute_mutations(
             if cand:
                 local_id_to_keys.setdefault(str(cand), []).append(local_key)
     # The set of local local_ids that have a collision (>1 owners).
-    duplicate_local_ids: set[str] = {
-        lid for lid, keys in local_id_to_keys.items() if len(keys) > 1
-    }
+    duplicate_local_ids: set[str] = {lid for lid, keys in local_id_to_keys.items() if len(keys) > 1}
     # The set of local local_ids that are present in local_state at all,
     # used to short-circuit dangling-jira-ref detection.
     local_rebar_ids: set[str] = set(local_id_to_keys.keys())
@@ -279,11 +275,7 @@ def compute_mutations(
 
         if in_local and not in_jira:
             local_fields = local_state[key] or {}
-            local_id_val = (
-                local_fields.get("local_id")
-                if isinstance(local_fields, dict)
-                else None
-            )
+            local_id_val = local_fields.get("local_id") if isinstance(local_fields, dict) else None
             local_id_str = str(local_id_val) if local_id_val else None
 
             # dd-5: duplicate local_id collision across local tickets —
@@ -334,9 +326,7 @@ def compute_mutations(
             if local_id_str and local_id_str in jira_state:
                 jira_sibling = jira_state.get(local_id_str) or {}
                 sibling_local_id = (
-                    jira_sibling.get("local_id")
-                    if isinstance(jira_sibling, dict)
-                    else None
+                    jira_sibling.get("local_id") if isinstance(jira_sibling, dict) else None
                 )
                 if not sibling_local_id:
                     _emit(
@@ -358,11 +348,7 @@ def compute_mutations(
                     )
                     continue
 
-            payload = {
-                f: v
-                for f, v in local_fields.items()
-                if f not in excluded
-            }
+            payload = {f: v for f, v in local_fields.items() if f not in excluded}
             if not payload:
                 # Only excluded fields → no useful create payload.
                 continue
@@ -385,11 +371,7 @@ def compute_mutations(
             )
         elif in_jira and not in_local:
             jira_fields = jira_state[key] or {}
-            jira_local_id = (
-                jira_fields.get("local_id")
-                if isinstance(jira_fields, dict)
-                else None
-            )
+            jira_local_id = jira_fields.get("local_id") if isinstance(jira_fields, dict) else None
             jira_local_id_str = str(jira_local_id) if jira_local_id else None
 
             # Bug 4354: when the snapshot lacks local_id (the fetcher
@@ -467,11 +449,7 @@ def compute_mutations(
                 )
                 continue
 
-            payload = {
-                f: v
-                for f, v in jira_fields.items()
-                if f not in excluded
-            }
+            payload = {f: v for f, v in jira_fields.items() if f not in excluded}
             # An inbound create with an empty payload is still meaningful
             # (it announces a new Jira-side issue) — keep the Mutation even
             # if every field is excluded, because the target itself is the
@@ -503,9 +481,9 @@ def compute_mutations(
                     continue
                 local_val = local_fields.get(field)
                 jira_val = jira_fields.get(field)
-                if field == "labels" and _non_internal_labels(
-                    local_val
-                ) == _non_internal_labels(jira_val):
+                if field == "labels" and _non_internal_labels(local_val) == _non_internal_labels(
+                    jira_val
+                ):
                     # Label drift confined to bridge-internal labels is our
                     # own write-back from the prior pass (rebar-id: identity,
                     # rebar-status: annotations) — not remote drift. Emitting

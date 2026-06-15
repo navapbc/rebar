@@ -29,18 +29,10 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
-)
-FETCHER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
-)
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
-ALERT_STORE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "alert_store.py"
-)
+RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
+FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+ALERT_STORE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "alert_store.py"
 
 # ---------------------------------------------------------------------------
 # Module loading
@@ -87,9 +79,7 @@ def _seed_namespace_stubs(request):
 
     See the comment above for cleanup-scope rationale.
     """
-    for _parent in (
-        "rebar_reconciler",
-    ):
+    for _parent in ("rebar_reconciler",):
         if _parent not in sys.modules:
             sys.modules[_parent] = _types.ModuleType(_parent)
 
@@ -265,9 +255,7 @@ def test_alert_emitted_through_stateless_path(
         return result
 
     # Load the differ module to patch compute_mutations.
-    differ_path = (
-        REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "differ.py"
-    )
+    differ_path = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "differ.py"
     differ_mod = _load_module("reconcile_differ_smoke", differ_path)
 
     # Pre-register modules so reconcile._load() reuses them.
@@ -335,10 +323,10 @@ def test_alert_emitted_through_stateless_path(
     # At least one record must reference local_id in its reason or key
     # — confirming it came from check_at_most_one_local_id.
     matching = [
-        r for r in all_records
+        r
+        for r in all_records
         if "local_id" in r.get("reason", "") or "at-most-one" in r.get("key", "")
     ]
     assert len(matching) >= 1, (
-        f"No alert record references local_id/at-most-one. "
-        f"Records found: {all_records}"
+        f"No alert record references local_id/at-most-one. Records found: {all_records}"
     )

@@ -7,9 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-INV_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "invariants.py"
-)
+INV_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "invariants.py"
 
 
 def _load_invariants():
@@ -117,9 +115,7 @@ def test_report_schema_drift_dedup_skips_second_call(inv, tmp_path):
         patch.object(inv, "_load_alert_store", return_value=mock_alert_store),
         patch.object(inv, "subprocess") as mock_subprocess,
     ):
-        inv.report_schema_drift(
-            "L-16", observed={}, expected={"invariants-cap-hit": True}
-        )
+        inv.report_schema_drift("L-16", observed={}, expected={"invariants-cap-hit": True})
 
     # When is_deduped returns True, subprocess.run must NOT be called —
     # no new ticket should be filed.
@@ -153,9 +149,7 @@ def test_report_schema_drift_appends_to_alert_store_on_first_call(inv, tmp_path)
         patch.object(inv, "_load_alert_store", return_value=mock_alert_store),
         patch.object(inv, "subprocess"),
     ):
-        inv.report_schema_drift(
-            "PROJ-42", observed={}, expected={"invariants-cap-hit": True}
-        )
+        inv.report_schema_drift("PROJ-42", observed={}, expected={"invariants-cap-hit": True})
 
     # alert_store.append must have been called to persist the dedup record.
     assert mock_alert_store.append.called, (
@@ -167,6 +161,5 @@ def test_report_schema_drift_appends_to_alert_store_on_first_call(inv, tmp_path)
     append_call = mock_alert_store.append.call_args
     record = append_call[0][0] if append_call[0] else append_call[1].get("record", {})
     assert record.get("key") == "bridge-alert:schema-drift:PROJ-42", (
-        f"appended record key={record.get('key')!r}, expected "
-        f"'bridge-alert:schema-drift:PROJ-42'"
+        f"appended record key={record.get('key')!r}, expected 'bridge-alert:schema-drift:PROJ-42'"
     )

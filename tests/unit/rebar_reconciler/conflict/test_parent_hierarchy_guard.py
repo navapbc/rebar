@@ -149,13 +149,9 @@ def test_non_epic_parent_suppressed_no_update_reemit(
         [parent, child], jira_snapshot=jira_snapshot, binding_store=store
     )
     parent_updates = [
-        m
-        for m in mutations
-        if m.local_id == "child-3" and "parent" in (m.fields or {})
+        m for m in mutations if m.local_id == "child-3" and "parent" in (m.fields or {})
     ]
-    assert not parent_updates, (
-        f"non-epic parent must not re-emit an update, got: {mutations}"
-    )
+    assert not parent_updates, f"non-epic parent must not re-emit an update, got: {mutations}"
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +174,11 @@ def test_applier_set_parent_400_continues_pass(
 
         def set_parent(self, key: str, parent: str | None) -> None:
             raise urllib.error.HTTPError(
-                url="x", code=400, msg="bad", hdrs=None, fp=BytesIO(b"")  # type: ignore[arg-type]
+                url="x",
+                code=400,
+                msg="bad",
+                hdrs=None,
+                fp=BytesIO(b""),  # type: ignore[arg-type]
             )
 
         def update_issue(self, key: str, **fields: Any) -> dict:

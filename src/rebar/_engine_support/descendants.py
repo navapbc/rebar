@@ -14,8 +14,8 @@ import json
 import sys
 from collections import deque
 
-from rebar.reducer import reduce_all_tickets
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar.reducer import reduce_all_tickets
 
 _TYPE_TO_BUCKET = {"epic": "epics", "story": "stories", "task": "tasks", "bug": "bugs"}
 
@@ -76,8 +76,7 @@ def list_descendants(root_id: str, tracker: str) -> dict:
 
 def list_descendants_cli(argv: list[str], tracker: str) -> int:
     if not argv:
-        # Preserve the engine script's exact usage string (parity).
-        sys.stderr.write("Usage: ticket-list-descendants.py <ticket_id>\n")
+        sys.stderr.write("Usage: rebar list-descendants <ticket_id>\n")
         return 1
     # Graceful: pass the raw input through when resolution misses (documented
     # empty-arrays contract).

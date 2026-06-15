@@ -122,9 +122,7 @@ def _check_mutation_failure(stdout: str, cmd: list[str]) -> None:
             if failure_messages
             else f"successCount=0 (totalCount={parsed.get('totalCount')!r})"
         )
-        raise AcliMutationError(
-            f"ACLI mutation reported FAILURE (exit=0) for {cmd!r}: {detail}"
-        )
+        raise AcliMutationError(f"ACLI mutation reported FAILURE (exit=0) for {cmd!r}: {detail}")
 
 
 def _call_with_backoff(
@@ -158,9 +156,7 @@ def _call_with_backoff(
             # Compute delay: exponential backoff capped at 60s, with jitter
             base_delay = min(2 ** (attempt + 1), 60)
             retry_after = (
-                exc.headers.get("Retry-After")
-                if exc.code == 429 and exc.headers
-                else None
+                exc.headers.get("Retry-After") if exc.code == 429 and exc.headers else None
             )
             if retry_after is not None:
                 try:
@@ -228,8 +224,7 @@ def _run_acli(
             # Fast-abort on deterministic assignee errors — retrying is pointless.
             # Callers print a contextual warning; no stderr print here to avoid duplication.
             if exc.stderr and (
-                _ASSIGNEE_PERMISSION_ERROR in exc.stderr
-                or _ASSIGNEE_NOT_FOUND_ERROR in exc.stderr
+                _ASSIGNEE_PERMISSION_ERROR in exc.stderr or _ASSIGNEE_NOT_FOUND_ERROR in exc.stderr
             ):
                 raise
             # If more retries remain, sleep with exponential backoff

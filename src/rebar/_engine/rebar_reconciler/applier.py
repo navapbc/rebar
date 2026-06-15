@@ -15,19 +15,14 @@ a follow-up bug ticket before the next applier-touching change.
 
 from __future__ import annotations
 
-import contextlib
 import importlib.util
 import json
 import logging
 import os
 import sys
-import tempfile
 import time
 import urllib.error
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +35,7 @@ def _rebar_env(name: str, default: str | None = None) -> str | None:
     shared shim would not resolve.
     """
     return os.environ.get(f"REBAR_{name}", default)
+
 
 # Typed-mutation dispatch layer.
 #
@@ -61,20 +57,32 @@ def _rebar_env(name: str, default: str | None = None) -> str | None:
 # ApplyResult/mutation/_errors loaders + _direction_guard). Re-exported so the
 # resident leaves, _apply_typed, and applier.<name> refs resolve.
 from rebar_reconciler.apply_base import (  # noqa: E402
+    _MUTATION_KEY,
     ApplyResult,
     DirectionMismatchError,
     RebarIdLabelWriteError,
     StatusMappingError,
     UnknownActionError,
-    _ErrorsModule,
-    _MUTATION_KEY,
-    _MutationModule,
     _direction_guard,
     _errors_module,
+    _ErrorsModule,
     _load_errors_module,
     _load_mutation_module,
+    _MutationModule,
 )
 
+# Inbound leaf appliers live in apply_inbound.py.
+# Re-exported so _build_leaves (resident) binds them.
+from rebar_reconciler.apply_inbound import (  # noqa: E402
+    _apply_inbound_clean_label,
+    _apply_inbound_conflict,
+    _apply_inbound_create,
+    _apply_inbound_delete,
+    _apply_inbound_probe,
+    _apply_inbound_repair_property,
+    _apply_inbound_update,
+    inbound_repair_property,
+)
 
 # Subject prefixes considered "benign" for HEAD-drift tolerance — i.e.,
 # external writers that don't conflict with in-flight outbound mutations.
@@ -101,22 +109,19 @@ from rebar_reconciler.apply_outbound import (  # noqa: E402
 # Re-imported so the resident inbound leaves resolve them as module globals.
 from rebar_reconciler.inbound_translate import (  # noqa: E402
     _ADF_KEY_APPLIER,
-    _AdfModule_Applier,
     _BRIDGE_INTERNAL_TAG_PREFIXES,
-    _EVENT_APPEND_MODULE,
     _JIRA_PRIORITY_MAP,
     _JIRA_TYPE_MAP,
     _LOCAL_STATUS_VALUES,
     _REBAR_STATUS_LABEL_TO_LOCAL,
     _TICKET_REDUCER_MODULE,
     _VALID_PRIORITY_RANGE,
+    _AdfModule_Applier,
     _event_meta,
     _extract_name,
     _jira_key_to_local_id,
     _jira_status_to_local,
     _load_adf_module,
-    _load_event_append,
-    _load_ticket_reducer,
     _normalize_adf_body,
     _read_latest_status,
     _resolve_priority,
@@ -125,21 +130,7 @@ from rebar_reconciler.inbound_translate import (  # noqa: E402
 )
 
 
-# Inbound leaf appliers live in apply_inbound.py.
-# Re-exported so _build_leaves (resident) binds them.
-from rebar_reconciler.apply_inbound import (  # noqa: E402
-    _apply_inbound_clean_label,
-    _apply_inbound_conflict,
-    _apply_inbound_create,
-    _apply_inbound_delete,
-    _apply_inbound_probe,
-    _apply_inbound_repair_property,
-    _apply_inbound_update,
-    inbound_repair_property,
-)
-def _file_conflict_bug_ticket(
-    cli_path: Path, title: str, description: str, parent_id: str
-) -> str:
+def _file_conflict_bug_ticket(cli_path: Path, title: str, description: str, parent_id: str) -> str:
     """Spawn the ticket CLI as a subprocess to file a bug ticket.
 
     Returns the canonical bug id on success, '' otherwise. Isolated as its
@@ -161,9 +152,7 @@ def _file_conflict_bug_ticket(
     if parent_id:
         cmd.extend(["--parent", parent_id])
     try:
-        res = subprocess.run(
-            cmd, capture_output=True, text=True, check=False, timeout=30
-        )
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
     except (OSError, subprocess.SubprocessError):
         return ""
     if res.returncode != 0:
@@ -174,31 +163,19 @@ def _file_conflict_bug_ticket(
 
 # The typed-dispatch routing table + dispatcher live in typed_dispatch.py.
 # Re-exported so apply() (resident) + test_leaves_registry_coverage resolve.
-from rebar_reconciler.typed_dispatch import (  # noqa: E402
-    _LEAF_NAMES,
-    _LEAVES,
-    _apply_typed,
-    _build_leaves,
+# Outbound batch dispatch + Jira-call retry live in batch_dispatch.py.
+# Re-exported so resident _apply_batch/apply()/outbound leaves and the
+# patch.object(applier, '_call_with_retry'/'JiraAPIError') tests resolve.
+from rebar_reconciler.batch_dispatch import (  # noqa: E402
+    JiraAPIError,
+    RetryExhaustedError,
+    _call_with_retry,
+    _is_illegal_transition_400,
+    _mutation_to_batch_dict,
+    create_one,
+    delete_one,
+    update_one,
 )
-
-
-# ---------------------------------------------------------------------------
-# rebar-id label write authorization contract
-# ---------------------------------------------------------------------------
-
-# rebar-id label-write authorization lives in rebar_id_audit.py.
-# Re-exported so _apply_typed/_apply_batch (resident) and test_errors.py's
-# getattr(applier, ...) reads resolve.
-from rebar_reconciler.rebar_id_audit import (  # noqa: E402
-    _AUTHORIZED_REBAR_ID_LABEL_ACTIONS,
-    _AUTHORIZED_REBAR_ID_LABEL_WRITERS,
-    _AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC,
-    _BatchAuditView,
-    _audit_rebar_id_label_writes,
-    _get_rebar_id_guard_mode_from_config,
-    _is_rebar_id_label_write_mutation,
-)
-
 
 # Pass-write persistence + the reschedule contract live in pass_io.py.
 # Re-exported so apply()/_apply_batch and __main__'s getattr(applier, ...) resolve.
@@ -214,19 +191,30 @@ from rebar_reconciler.pass_io import (  # noqa: E402
     _write_mapping_json_atomic,
     _write_pass_record,
 )
-# Outbound batch dispatch + Jira-call retry live in batch_dispatch.py.
-# Re-exported so resident _apply_batch/apply()/outbound leaves and the
-# patch.object(applier, '_call_with_retry'/'JiraAPIError') tests resolve.
-from rebar_reconciler.batch_dispatch import (  # noqa: E402
-    JiraAPIError,
-    RetryExhaustedError,
-    _call_with_retry,
-    _is_illegal_transition_400,
-    _mutation_to_batch_dict,
-    create_one,
-    delete_one,
-    update_one,
+
+# ---------------------------------------------------------------------------
+# rebar-id label write authorization contract
+# ---------------------------------------------------------------------------
+# rebar-id label-write authorization lives in rebar_id_audit.py.
+# Re-exported so _apply_typed/_apply_batch (resident) and test_errors.py's
+# getattr(applier, ...) reads resolve.
+from rebar_reconciler.rebar_id_audit import (  # noqa: E402
+    _AUTHORIZED_REBAR_ID_LABEL_ACTIONS,
+    _AUTHORIZED_REBAR_ID_LABEL_WRITERS,
+    _AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC,
+    _audit_rebar_id_label_writes,
+    _BatchAuditView,
+    _get_rebar_id_guard_mode_from_config,
+    _is_rebar_id_label_write_mutation,
 )
+from rebar_reconciler.typed_dispatch import (  # noqa: E402
+    _LEAF_NAMES,
+    _LEAVES,
+    _apply_typed,
+    _build_leaves,
+)
+
+
 def _load_acli():
     """Return the in-package acli transport module (rebar_reconciler.acli)."""
     from rebar_reconciler import acli
@@ -253,13 +241,87 @@ def _load_concurrency():
 # Pass-planning policy (mode caps, suppression, manifest) lives in apply_planning.py.
 # Re-exported so apply() (resident) calls them + the _mode_sort_key reads resolve.
 from rebar_reconciler.apply_planning import (  # noqa: E402
-    _SuppressionIndex,
     _emit_mode_manifest,
     _load_manifest_renderer,
     _load_mode_module,
     _mode_sort_key,
     _partition_by_mode_cap,
+    _SuppressionIndex,
 )
+
+# Re-export facade. applier imports these names from its sibling leaf/IO modules
+# solely so ``applier.<name>`` and ``from rebar_reconciler.applier import <name>``
+# keep resolving for reconcile.py's getattr dispatch table and the test suite.
+# Listing them in ``__all__`` documents that public surface and marks the imports
+# as intentional re-exports.
+__all__ = [
+    "ApplyResult",
+    "DirectionMismatchError",
+    "EXIT_RESCHEDULE",
+    "JiraAPIError",
+    "RebarIdLabelWriteError",
+    "RescheduleError",
+    "RetryExhaustedError",
+    "StatusMappingError",
+    "UnknownActionError",
+    "_ADF_KEY_APPLIER",
+    "_AUTHORIZED_REBAR_ID_LABEL_ACTIONS",
+    "_AUTHORIZED_REBAR_ID_LABEL_WRITERS",
+    "_AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC",
+    "_AdfModule_Applier",
+    "_BRIDGE_INTERNAL_TAG_PREFIXES",
+    "_ErrorsModule",
+    "_JIRA_PRIORITY_MAP",
+    "_JIRA_TYPE_MAP",
+    "_LEAF_NAMES",
+    "_LEAVES",
+    "_LOCAL_STATUS_VALUES",
+    "_MUTATION_KEY",
+    "_MutationModule",
+    "_REBAR_STATUS_LABEL_TO_LOCAL",
+    "_TICKET_REDUCER_MODULE",
+    "_VALID_PRIORITY_RANGE",
+    "_apply_inbound_clean_label",
+    "_apply_inbound_conflict",
+    "_apply_inbound_create",
+    "_apply_inbound_delete",
+    "_apply_inbound_probe",
+    "_apply_inbound_repair_property",
+    "_apply_inbound_update",
+    "_apply_outbound_conflict",
+    "_apply_outbound_create",
+    "_apply_outbound_delete",
+    "_apply_outbound_probe",
+    "_apply_outbound_update",
+    "_build_leaves",
+    "_call_with_retry",
+    "_direction_guard",
+    "_errors_module",
+    "_event_meta",
+    "_extract_name",
+    "_get_rebar_id_guard_mode_from_config",
+    "_is_illegal_transition_400",
+    "_is_rebar_id_label_write_mutation",
+    "_jira_key_to_local_id",
+    "_jira_status_to_local",
+    "_load_adf_module",
+    "_load_errors_module",
+    "_load_manifest_renderer",
+    "_load_mapping",
+    "_load_mode_module",
+    "_mode_sort_key",
+    "_normalize_adf_body",
+    "_read_latest_status",
+    "_resolve_priority",
+    "_resolve_tracker_dir",
+    "_write_event_file",
+    "_write_mapping_atomic",
+    "_write_mapping_json_atomic",
+    "create_one",
+    "delete_one",
+    "inbound_repair_property",
+    "update_one",
+]
 
 
 def apply(
@@ -290,14 +352,10 @@ def apply(
         )
 
     if pass_id is None:
-        raise TypeError(
-            "apply() legacy batch form requires pass_id as the second argument"
-        )
+        raise TypeError("apply() legacy batch form requires pass_id as the second argument")
 
     # Mode-cap enforcement (story 286b): coerce mode + partition into applied/deferred.
-    mode, mode_mod, mutations_input, deferred_for_manifest = _partition_by_mode_cap(
-        mode, mutations
-    )
+    mode, mode_mod, mutations_input, deferred_for_manifest = _partition_by_mode_cap(mode, mutations)
 
     # Direction-aware dispatch (defect #8): inbound typed Mutations route through
     # _apply_typed per-mutation; outbound/untyped go to the legacy _apply_batch.
@@ -306,11 +364,7 @@ def apply(
     def _looks_like_mutation(m) -> bool:
         if isinstance(m, mut_mod.Mutation):
             return True
-        return (
-            type(m).__name__ == "Mutation"
-            and hasattr(m, "direction")
-            and hasattr(m, "action")
-        )
+        return type(m).__name__ == "Mutation" and hasattr(m, "direction") and hasattr(m, "action")
 
     def _direction_of(m) -> str:
         d = getattr(m, "direction", None)
@@ -354,25 +408,13 @@ def apply(
             break
         if suppression.is_suppressed(getattr(mut, "target", "")):
             continue
-        result = _apply_typed(
-            mut, client=client, repo_root=repo_root, binding_store=binding_store
-        )
-        result_payload = (
-            getattr(result, "payload", None) if result is not None else None
-        )
-        follow_on = (
-            result_payload.get("follow_on")
-            if isinstance(result_payload, dict)
-            else None
-        )
+        result = _apply_typed(mut, client=client, repo_root=repo_root, binding_store=binding_store)
+        result_payload = getattr(result, "payload", None) if result is not None else None
+        follow_on = result_payload.get("follow_on") if isinstance(result_payload, dict) else None
         if isinstance(follow_on, dict) and follow_on.get("kind") == "suppress_pair":
-            suppression.record(
-                follow_on.get("local_id", ""), follow_on.get("jira_key", "")
-            )
+            suppression.record(follow_on.get("local_id", ""), follow_on.get("jira_key", ""))
         pending = (
-            result_payload.get("pending_bug_ticket")
-            if isinstance(result_payload, dict)
-            else None
+            result_payload.get("pending_bug_ticket") if isinstance(result_payload, dict) else None
         )
         if isinstance(pending, dict):
             pending_bug_tickets.append(pending)
@@ -386,8 +428,7 @@ def apply(
     # Outbound (or untyped dict): normalize typed Mutations to dicts so
     # _apply_batch can iterate, then route through the legacy batch path.
     outbound_list = [
-        _mutation_to_batch_dict(m) if _looks_like_mutation(m) else m
-        for m in outbound_or_untyped
+        _mutation_to_batch_dict(m) if _looks_like_mutation(m) else m for m in outbound_or_untyped
     ]
     if suppression.suppressed_pairs:
         outbound_list = [
@@ -405,10 +446,9 @@ def apply(
             )
     finally:
         if pending_bug_tickets and not is_dry_run:
-            cli_path = Path(
-                os.environ.get("REBAR_TICKET_CLI")
-                or (Path(__file__).resolve().parent.parent / "rebar")
-            )
+            from rebar._engine import in_process_cli
+
+            cli_path = Path(os.environ.get("REBAR_TICKET_CLI") or in_process_cli())
             for pending in pending_bug_tickets:
                 try:
                     _file_conflict_bug_ticket(
@@ -478,7 +518,11 @@ def _apply_batch(
                           file is written to disk; the next pass starts fresh.
     """
     if repo_root is None:
-        repo_root = Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])
+        repo_root = Path(
+            os.environ.get("REBAR_ROOT")
+            or os.environ.get("PROJECT_ROOT")
+            or Path(__file__).resolve().parents[4]
+        )
 
     acli = _load_acli()
     # Mirror fetcher.fetch_snapshot's pattern: AcliClient's real constructor
@@ -557,8 +601,7 @@ def _apply_batch(
                     head_pin = current_head
                 else:
                     raise HeadDriftError(
-                        f"drift: {head_pin[:8]}→{current_head[:8]} "
-                        f"subject={drift_subject!r}"
+                        f"drift: {head_pin[:8]}→{current_head[:8]} subject={drift_subject!r}"
                     )
 
             action = mutation.get("action", "")
@@ -570,9 +613,7 @@ def _apply_batch(
             # outbound_<action> leaf for guard-name purposes. Without this
             # call, _audit_rebar_id_label_writes was bypassed for every legacy
             # dict-shaped mutation — only _apply_typed enforced the contract.
-            _audit_rebar_id_label_writes(
-                f"outbound_{action}", [_BatchAuditView(mutation)]
-            )
+            _audit_rebar_id_label_writes(f"outbound_{action}", [_BatchAuditView(mutation)])
 
             if action == "create":
                 # Bug ea6d-e4b2-a316-45ec: collect any add_comment failures so a
@@ -591,10 +632,7 @@ def _apply_batch(
                     comment_errors=_comment_errors,
                 )
                 # Only count REST call on actual create (not dedup-skipped, not deferred)
-                if (
-                    result is not None
-                    and result.get("status") != "dedup-create-skipped"
-                ):
+                if result is not None and result.get("status") != "dedup-create-skipped":
                     rest_calls += 1
                 outcome["result"] = result
                 # Surface swallowed comment failures. NON-fatal — the issue create
@@ -618,9 +656,7 @@ def _apply_batch(
                 # rather than reporting a clean error=None.
                 _comment_errors: list[str] = []
                 try:
-                    result = update_one(
-                        mutation, client, comment_errors=_comment_errors
-                    )
+                    result = update_one(mutation, client, comment_errors=_comment_errors)
                 except urllib.error.HTTPError as exc:
                     # Bug tan-coin-atone (6614-43cd-3a48-4f63): an outbound
                     # update against a DELETED Jira issue (stale binding, 1e08
@@ -639,9 +675,7 @@ def _apply_batch(
                     # docs/designs/sync-hardening-proposal.md Item 4b.
                     if exc.code != 404:
                         raise
-                    _outcome_key = (
-                        mutation.get("key") or mutation.get("local_id") or "<unknown>"
-                    )
+                    _outcome_key = mutation.get("key") or mutation.get("local_id") or "<unknown>"
                     logger.warning(
                         "outbound update skipped: Jira issue %s gone (HTTP 404) "
                         "— stale binding (1e08); recording per-mutation failure "
@@ -666,9 +700,7 @@ def _apply_batch(
                             "kind": "outbound-update-assignee-unresolved",
                             "key": mutation.get("key"),
                             "local_id": mutation.get("local_id"),
-                            "assignee": (
-                                (mutation.get("fields") or {}).get("assignee")
-                            ),
+                            "assignee": ((mutation.get("fields") or {}).get("assignee")),
                             "pass_id": pass_id,
                             "timestamp_ns": time.time_ns(),
                             "reason": str(exc),
@@ -679,9 +711,7 @@ def _apply_batch(
                     outcome["error"] = f"assignee-unresolved: {exc!s}"
                     mutations_with_outcomes.append(outcome)
                     # Per-mutation RECON line matches the regular path.
-                    _outcome_key = (
-                        mutation.get("key") or mutation.get("local_id") or "<unknown>"
-                    )
+                    _outcome_key = mutation.get("key") or mutation.get("local_id") or "<unknown>"
                     print(  # noqa: T201
                         f"RECON: batch_outcome action={action} "
                         f"key={_outcome_key} "
@@ -720,13 +750,10 @@ def _apply_batch(
             # Targets the legacy batch path (the dominant outbound CREATE +
             # UPDATE channel today). Truncated to single-line; full
             # mutation lives in the manifest for forensic dives.
-            _outcome_key = (
-                mutation.get("key") or mutation.get("local_id") or "<unknown>"
-            )
+            _outcome_key = mutation.get("key") or mutation.get("local_id") or "<unknown>"
             _outcome_err = outcome.get("error")
             print(  # noqa: T201
-                f"RECON: batch_outcome action={action} key={_outcome_key} "
-                f"error={_outcome_err!r}",
+                f"RECON: batch_outcome action={action} key={_outcome_key} error={_outcome_err!r}",
                 file=sys.stderr,
             )
 

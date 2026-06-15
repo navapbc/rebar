@@ -123,8 +123,7 @@ def test_outbound_local_trailing_newlines_does_not_emit_diff(
     # Either no mutation, or a mutation with no description field.
     for m in result:
         assert "description" not in m.fields, (
-            f"outbound description phantom: local trailing whitespace "
-            f"triggered diff: {m.fields}"
+            f"outbound description phantom: local trailing whitespace triggered diff: {m.fields}"
         )
 
 
@@ -211,6 +210,5 @@ def test_inbound_jira_trailing_whitespace_difference_suppressed(
 
     for m in result:
         assert "description" not in m.fields, (
-            f"inbound description phantom: trailing whitespace diff "
-            f"triggered mutation: {m.fields}"
+            f"inbound description phantom: trailing whitespace diff triggered mutation: {m.fields}"
         )

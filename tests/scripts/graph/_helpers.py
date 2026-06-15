@@ -8,14 +8,12 @@ The `graph` fixture + autouse git-isolation fixture live in conftest.py.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 from types import ModuleType
 
 # graph/_helpers.py -> graph -> scripts -> tests -> <repo>
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SCRIPT_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "ticket-graph.py"
 
 _UUID_A = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
 _UUID_B = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"
@@ -24,11 +22,12 @@ _UUID_D = "dddddddd-dddd-4ddd-dddd-dddddddddddd"
 
 
 def _load_module() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("ticket_graph", SCRIPT_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
-    return module
+    """Return the canonical graph package (Tier E E7d: was the hyphenated
+    ticket-graph.py CLI wrapper, which only re-exported rebar.graph)."""
+    import rebar.graph
+
+    return rebar.graph
+
 
 def _write_ticket(
     tracker_dir: Path,
@@ -76,6 +75,7 @@ def _write_ticket(
 
     return ticket_dir
 
+
 def _write_blocks_link(
     tracker_dir: Path,
     blocker_id: str,
@@ -107,9 +107,8 @@ def _write_blocks_link(
     with open(blocker_dir / filename, "w") as f:
         json.dump(link_event, f)
 
-def _write_archive_event(
-    tracker_dir: Path, ticket_id: str, timestamp: int = 3000
-) -> None:
+
+def _write_archive_event(tracker_dir: Path, ticket_id: str, timestamp: int = 3000) -> None:
     """Write an ARCHIVED event to ticket_id's directory.
 
     This marks the ticket as archived in the event-sourced state.
@@ -127,6 +126,7 @@ def _write_archive_event(
     }
     with open(ticket_dir / f"{timestamp}-archive-{ticket_id}-ARCHIVED.json", "w") as f:
         json.dump(archive_event, f)
+
 
 def _make_ticket(tracker: Path, ticket_id: str, ticket_type: str = "task") -> Path:
     """Write a minimal ticket directory with a CREATE event. Returns the ticket dir."""
@@ -147,6 +147,7 @@ def _make_ticket(tracker: Path, ticket_id: str, ticket_type: str = "task") -> Pa
     with open(ticket_dir / f"1000-create-{ticket_id}-CREATE.json", "w") as f:
         json.dump(create_event, f)
     return ticket_dir
+
 
 def _write_link_event(
     source_id: str,
@@ -173,6 +174,7 @@ def _write_link_event(
     filename = f"{timestamp}-{link_uuid}-LINK.json"
     with open(source_dir / filename, "w") as f:
         json.dump(link_event, f)
+
 
 def _get_check_cycle_at_level():  # type: ignore[no-untyped-def]
     """Load check_cycle_at_level from ticket-graph module."""

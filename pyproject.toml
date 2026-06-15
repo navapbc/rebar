@@ -18,10 +18,10 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = []
 
-# The ticket engine (bash + the ticket_reducer / ticket_graph / rebar_reconciler
-# Python packages + rebar_reconciler/acli.py) is stdlib-only and ships as package
-# data under rebar/_engine/. System prerequisites (not pip deps): git, jq,
-# flock, python3, and `acli` (only for live Jira reconciliation).
+# The engine assets (the rebar_reconciler package + jira-capability-probe.py + the
+# alias wordlist) are stdlib-only and ship as package data under rebar/_engine/.
+# System prerequisites (not pip deps): git, and `acli` (only for live Jira
+# reconciliation).
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.2"]
@@ -66,9 +66,9 @@ rebar = "rebar.cli:main"
 rebar-mcp = "rebar.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
-# packages includes the whole src/rebar tree (the _engine dir with its bash
-# scripts, executables, wordlist, and native Python packages ships verbatim as
-# package data — hatchling includes all files under the package, not just .py).
+# packages includes the whole src/rebar tree (the _engine dir with the reconciler
+# package, the Jira probe, and the alias wordlist ships verbatim as package data —
+# hatchling includes all files under the package, not just .py).
 packages = ["src/rebar"]
 artifacts = [
     "src/rebar/_engine/**/*",
@@ -88,16 +88,15 @@ include = ["src/rebar", "tests", "README.md"]
 
 [tool.ruff]
 # Engine ships as package data but is normal Python; lint it too. The gating set
-# below is the subset the whole tree is CLEAN for — so `ruff check` passes and
-# prevents regressions. It starts from the flake8 "real-bug" smoke set (syntax
-# errors + undefined names — the class that catches NameError-on-error-path bugs
-# like a missing `import urllib` in an `except`) and adds the rule families that
-# were swept clean: redefinitions (F811), modernizations (UP), and the safe
-# bugbear/style checks (B009, B012, F541, E401). The remaining stylistic set
-# (unused imports F401, line length E501, import order I001, …) runs advisory in
-# CI to ratchet down over time without a destabilizing one-shot mass-fix; F401 in
-# the reconciler re-export facades is tracked as a dedicated bug (it needs
-# executable reconciler integration tests + `__all__` before it can be swept).
+# below is the full recommended set — E, F, W, I, UP, B — and the whole tree is
+# CLEAN for it, so `ruff check src tests` passes and prevents regressions across
+# every one of those families. Coverage spans pycodestyle errors + warnings (E/W,
+# including E501 line-length), Pyflakes (F — undefined names, unused imports,
+# redefinitions), import sorting (I), pyupgrade modernizations (UP), and the
+# flake8-bugbear checks (B — including B007/B017/B904/B905). Re-export facades
+# (e.g. reconciler `acli`/`applier`, `rebar.graph`) declare an `__all__` so their
+# intentional re-exports satisfy F401; a handful of unbreakable string/data
+# literals carry a targeted `# noqa: E501`.
 #
 # target-version is intentionally kept at the conservative py310 floor (not py311)
 # even though requires-python is >=3.11: it keeps the gating UP set from pushing
@@ -106,8 +105,13 @@ include = ["src/rebar", "tests", "README.md"]
 target-version = "py310"
 line-length = 100
 
+# Formatting: ruff's recommended defaults (Black-compatible — double quotes,
+# space indentation, magic trailing comma honored). `line-length` is inherited
+# from [tool.ruff] above. `ruff format --check src tests` gates in CI.
+[tool.ruff.format]
+
 [tool.ruff.lint]
-select = ["E9", "F63", "F7", "F82", "F811", "F541", "UP", "B009", "B012", "E401"]
+select = ["E", "F", "W", "I", "UP", "B"]
 
 [tool.mypy]
 # Scoped, opt-in type checking. The pure in-process library core

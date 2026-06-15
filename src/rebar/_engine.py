@@ -1,17 +1,21 @@
-"""Locate and invoke the bundled ticket engine.
+"""Locate the bundled engine assets and build subprocess environments for them.
 
-The engine (bash dispatcher + ``ticket-*.sh`` + the ``ticket_reducer`` /
-``ticket_graph`` / ``rebar_reconciler`` Python packages + ``rebar_reconciler/acli.py``)
-ships as package data under ``rebar/_engine/``. This module resolves that
-directory deterministically (editable or wheel install) and runs the dispatcher
-as a subprocess with an environment that pins repo-root and import paths.
+The ``rebar/_engine/`` package data holds the Python tooling the library launches
+as subprocesses — the ``rebar_reconciler`` package (Jira sync),
+``jira-capability-probe.py`` (the live preflight), and the alias ``resources/``
+wordlist. This module resolves that directory deterministically (editable or wheel
+install), exposes the in-process ``rebar`` CLI path (:func:`in_process_cli`) the
+reconciler and ``validate`` read tickets through, and builds the subprocess
+environment (:func:`engine_env`) that pins repo-root and import paths for those
+launches.
 """
 
 from __future__ import annotations
 
 import importlib.resources
 import os
-import subprocess
+import shutil
+import sys
 from functools import lru_cache
 from pathlib import Path
 
@@ -20,19 +24,21 @@ from pathlib import Path
 def engine_dir() -> Path:
     """Absolute path to the bundled ``_engine`` directory.
 
-    ``importlib.resources.files`` returns a real filesystem path for editable
-    and wheel installs (hatchling wheels install unzipped), which bash requires.
+    ``importlib.resources.files`` returns a real filesystem path for editable and
+    wheel installs (hatchling wheels install unzipped), which the subprocess
+    launches require.
 
-    rebar's engine is bash + python helpers exec'd as real files, so it MUST be
-    installed UNPACKED to a real on-disk directory — zipimport / zip-safe installs
-    are unsupported. We assert that here so a mispackaged install fails loudly at
-    the first engine call instead of with an opaque bash error.
+    The engine assets (the ``rebar_reconciler`` package + the Jira probe) are
+    exec'd as real files, so the directory MUST be installed UNPACKED to a real
+    on-disk path — zipimport / zip-safe installs are unsupported. We assert that
+    here so a mispackaged install fails loudly at the first engine call instead of
+    with an opaque import error.
     """
     path = Path(str(importlib.resources.files("rebar") / "_engine")).resolve()
     if not path.is_dir():
         raise RuntimeError(
             f"rebar engine directory is not a real on-disk directory: {path!s}. "
-            "The engine (bash dispatcher + ticket-*.sh + python helpers) must be "
+            "The engine assets (the rebar_reconciler package + Jira probe) must be "
             "installed UNPACKED to the filesystem; rebar does not support "
             "zipimport / zip-safe installs. Install from a wheel (hatchling builds "
             "unpacked) or as an editable install — not a zipapp/zip-imported package."
@@ -40,9 +46,25 @@ def engine_dir() -> Path:
     return path
 
 
-def dispatcher() -> Path:
-    """Path to the ``rebar`` bash dispatcher inside the engine."""
-    return engine_dir() / "rebar"
+def in_process_cli() -> str:
+    """Path to the in-process ``rebar`` CLI used as a single-executable ticket reader.
+
+    The reconciler (``rebar_reconciler/{applier,invariants,reconcile}.py``) and
+    ``validate`` invoke ``$REBAR_TICKET_CLI`` as one executable (``[cli, "list"]``)
+    to read local tickets: the ``rebar`` console script (``rebar.cli:main`` →
+    ``rebar._cli.main``), which runs fully in-process.
+
+    Because callers treat the value as a single token, this returns the console
+    script path rather than the multi-token ``python -m rebar`` (the package
+    ``__main__`` entry, which serves as the import-path-independent fallback).
+    Resolution prefers the console script next to the running interpreter (the
+    venv/pipx ``bin`` dir — hermetic, independent of ``PATH``), then falls back to
+    a ``PATH`` lookup. When neither is found we return the best-effort
+    interpreter-adjacent path; callers warn and degrade to an empty list.
+    """
+    bindir = Path(sys.executable).parent
+    found = shutil.which("rebar", path=str(bindir)) or shutil.which("rebar")
+    return found if found else str(bindir / "rebar")
 
 
 def wordlist_path() -> Path:
@@ -51,28 +73,29 @@ def wordlist_path() -> Path:
 
 
 def engine_env(repo_root: str | os.PathLike[str] | None = None) -> dict[str, str]:
-    """Environment for engine subprocesses (bash dispatcher + ``python3`` helpers).
+    """Environment for the engine subprocesses (reconciler + Jira probe).
 
     This is the ONLY place the engine dir is put on an import path — and it is
     scoped to subprocesses, never the in-process library path (the library imports
     ``rebar.reducer`` / ``rebar.graph`` / ``rebar._engine_support.*`` directly).
 
-    - Prepends the engine dir to ``PYTHONPATH`` so the engine's bare ``python3``
-      resolves the old top-level names (``ticket_reducer`` / ``ticket_graph`` /
-      ``ticket_reads`` …, now thin compat shims) and ``python -m rebar_reconciler``.
-      The shims self-bootstrap the ``rebar`` package onto ``sys.path`` from their
-      own location, so the subprocess does not need ``rebar`` pre-resolved.
-    - Pins ``REBAR_ROOT`` *and* ``PROJECT_ROOT`` (the bash write path reads
-      ``PROJECT_ROOT``; the reconciler reads ``REBAR_ROOT`` — they must agree).
+    - Prepends the engine dir to ``PYTHONPATH`` so the top-level
+      ``rebar_reconciler`` package resolves under ``python -m rebar_reconciler``
+      and the absolute-path ``jira-capability-probe.py`` launch (both import
+      ``rebar_reconciler.*``).
+    - Pins ``REBAR_ROOT`` *and* ``PROJECT_ROOT`` (kept in agreement for any
+      consumer that reads either one).
     - Pins ``TICKET_WORDLIST_PATH`` so alias generation never falls back to hex
       regardless of the engine dir's path shape.
+    - Defaults ``REBAR_TICKET_CLI`` to the in-process CLI (:func:`in_process_cli`)
+      so the reconciler/validate read local tickets through Python, not bash.
     """
     env = dict(os.environ)
     eng = str(engine_dir())
     existing = env.get("PYTHONPATH")
     env["PYTHONPATH"] = eng + (os.pathsep + existing if existing else "")
     env["TICKET_WORDLIST_PATH"] = str(wordlist_path())
-    env.setdefault("REBAR_TICKET_CLI", str(dispatcher()))
+    env.setdefault("REBAR_TICKET_CLI", in_process_cli())
 
     if repo_root is not None:
         root = str(Path(repo_root).resolve())
@@ -86,39 +109,3 @@ def engine_env(repo_root: str | os.PathLike[str] | None = None) -> dict[str, str
             env["REBAR_ROOT"] = root
             env["PROJECT_ROOT"] = root
     return env
-
-
-def run(
-    args,
-    *,
-    repo_root: str | os.PathLike[str] | None = None,
-    cwd: str | os.PathLike[str] | None = None,
-    input: str | None = None,
-    check: bool = True,
-    capture: bool = True,
-    env_extra: dict[str, str] | None = None,
-) -> subprocess.CompletedProcess:
-    """Invoke the ``rebar`` bash dispatcher as a subprocess.
-
-    When no explicit ``cwd`` is given, the dispatcher runs *inside* the repo
-    root (resolved from ``repo_root`` / REBAR_ROOT / PROJECT_ROOT) so that the
-    engine's cwd-relative git operations resolve the right repository even when
-    the library/CLI is invoked from an unrelated directory.
-    """
-    env = engine_env(repo_root)
-    if env_extra:
-        env.update(env_extra)
-    if cwd is None:
-        cwd = env.get("REBAR_ROOT") or env.get("PROJECT_ROOT")
-        if cwd and not os.path.isdir(cwd):
-            cwd = None
-    cmd = ["bash", str(dispatcher()), *(str(a) for a in args)]
-    return subprocess.run(
-        cmd,
-        cwd=str(cwd) if cwd is not None else None,
-        input=input,
-        env=env,
-        text=True,
-        capture_output=capture,
-        check=check,
-    )

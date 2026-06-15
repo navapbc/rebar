@@ -28,13 +28,17 @@ def _cli(*args: str, cwd: Path, **env: str) -> subprocess.CompletedProcess:
     e.update(env)
     return subprocess.run(
         [sys.executable, "-m", "rebar.cli", *args],
-        capture_output=True, text=True, cwd=str(cwd), env=e,
+        capture_output=True,
+        text=True,
+        cwd=str(cwd),
+        env=e,
     )
 
 
 def _seed(repo: Path) -> str:
     return rebar.create_ticket(
-        "task", "Sign me",
+        "task",
+        "Sign me",
         description="Body.\n\n## Acceptance Criteria\n- [ ] a",
         repo_root=str(repo),
     )
@@ -92,7 +96,7 @@ def _forge_signature_event(repo: Path, tid: str, new_manifest: list[str]) -> Non
     ev["uuid"] = str(_uuid.uuid4())
     ev["timestamp"] = int(ev["timestamp"]) + 1000
     ev["data"] = {**ev["data"], "manifest": new_manifest}
-    (tdir / f'{ev["timestamp"]}-{ev["uuid"]}-SIGNATURE.json').write_text(
+    (tdir / f"{ev['timestamp']}-{ev['uuid']}-SIGNATURE.json").write_text(
         json.dumps(ev, ensure_ascii=False)
     )
     for cache in glob.glob(str(tdir / ".cache.json")):
@@ -108,7 +112,9 @@ def test_tampered_manifest_is_rejected(rebar_repo: Path) -> None:
     assert out["verdict"] == "mismatch"
 
 
-def test_foreign_environment_key_cannot_certify(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_foreign_environment_key_cannot_certify(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     tid = _seed(rebar_repo)
     rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
     # A different environment (different signing key) must not be able to certify.
@@ -146,9 +152,15 @@ def test_sign_compact_sign_compact_latest_wins(rebar_repo: Path) -> None:
     # exercises the SNAPSHOT fold + post-snapshot replay for the signature field.
     tid = _seed(rebar_repo)
     rebar.sign_manifest(tid, ["v1: first"], repo_root=str(rebar_repo))
-    assert _cli("compact", tid, "--threshold=0", cwd=rebar_repo, TICKET_SYNC_CMD="true").returncode == 0
+    assert (
+        _cli("compact", tid, "--threshold=0", cwd=rebar_repo, TICKET_SYNC_CMD="true").returncode
+        == 0
+    )
     rebar.sign_manifest(tid, ["v2: second", "v2: more"], repo_root=str(rebar_repo))
-    assert _cli("compact", tid, "--threshold=0", cwd=rebar_repo, TICKET_SYNC_CMD="true").returncode == 0
+    assert (
+        _cli("compact", tid, "--threshold=0", cwd=rebar_repo, TICKET_SYNC_CMD="true").returncode
+        == 0
+    )
 
     out = rebar.verify_signature(tid, repo_root=str(rebar_repo))
     assert out["verdict"] == "certified"
@@ -169,12 +181,18 @@ def test_concurrent_signatures_converge_by_basename(rebar_repo: Path) -> None:
 
     def _write(uid: str, manifest: list[str]) -> None:
         ev = {
-            "timestamp": ts, "uuid": uid, "event_type": "SIGNATURE",
-            "env_id": "e", "author": "a",
+            "timestamp": ts,
+            "uuid": uid,
+            "event_type": "SIGNATURE",
+            "env_id": "e",
+            "author": "a",
             "data": {
-                "manifest": manifest, "algorithm": signing.ALGORITHM,
+                "manifest": manifest,
+                "algorithm": signing.ALGORITHM,
                 "signature": signing.compute_signature(tid, manifest, key),
-                "key_id": signing.key_fingerprint(key), "head_sha": "x", "signed_at": ts,
+                "key_id": signing.key_fingerprint(key),
+                "head_sha": "x",
+                "signed_at": ts,
             },
         }
         (tdir / f"{ts}-{uid}-SIGNATURE.json").write_text(json.dumps(ev))
@@ -198,7 +216,7 @@ def test_foreign_key_round_trip_via_file_swap(rebar_repo: Path) -> None:
     keyfile = rebar_repo / ".tickets-tracker" / ".signing-key"
     env_a = keyfile.read_text()
 
-    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))            # signed by A
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))  # signed by A
     assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "certified"
 
     # Become environment B (different key on disk).
@@ -212,7 +230,9 @@ def test_foreign_key_round_trip_via_file_swap(rebar_repo: Path) -> None:
     assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "foreign_key"
 
 
-def test_readonly_verify_does_not_mint_key(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_readonly_verify_does_not_mint_key(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # A verify on a key-less environment must not write a .signing-key (a read
     # tool persisting a secret a read-only deployment never asked for).
     tid = _seed(rebar_repo)
@@ -239,8 +259,11 @@ def test_verify_survives_non_dict_signature_state(rebar_repo: Path) -> None:
     uid = str(_uuid.uuid4())
     tdir = rebar_repo / ".tickets-tracker" / tid
     snap = {
-        "timestamp": ts, "uuid": uid, "event_type": "SNAPSHOT",
-        "env_id": "e", "author": "a",
+        "timestamp": ts,
+        "uuid": uid,
+        "event_type": "SNAPSHOT",
+        "env_id": "e",
+        "author": "a",
         "data": {"compiled_state": state, "source_event_uuids": []},
     }
     (tdir / f"{ts}-{uid}-SNAPSHOT.json").write_text(json.dumps(snap))
@@ -295,14 +318,20 @@ def _enable_gate(repo: Path) -> None:
 def _commit(repo: Path, msg: str = "c") -> None:
     """Give the code repo a resolvable HEAD (the fixture inits with an unborn
     HEAD; real repos have commits, and the gate's freshness binding requires one)."""
-    subprocess.run(["git", "commit", "--allow-empty", "-q", "-m", msg],
-                   cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-q", "-m", msg],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+    )
 
 
 def _story(repo: Path) -> str:
     tid = rebar.create_ticket(
-        "story", "Gate story",
-        description="B.\n\n## Acceptance Criteria\n- [ ] a", repo_root=str(repo),
+        "story",
+        "Gate story",
+        description="B.\n\n## Acceptance Criteria\n- [ ] a",
+        repo_root=str(repo),
     )
     rebar.transition(tid, "open", "in_progress", repo_root=str(repo))
     return tid
@@ -340,7 +369,9 @@ def test_close_gate_stale_head_blocks(rebar_repo: Path) -> None:
     assert "different commit" in ei.value.stderr
     # Re-signing at the new HEAD unblocks the close.
     rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
-    assert rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))["to"] == "closed"
+    assert (
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))["to"] == "closed"
+    )
 
 
 def test_close_gate_blocks_when_head_unresolvable(rebar_repo: Path) -> None:
@@ -349,7 +380,10 @@ def test_close_gate_blocks_when_head_unresolvable(rebar_repo: Path) -> None:
     # binding must NOT treat 'unknown' == 'unknown' as a match (that would silently
     # void the guard) — the close must be blocked even with a certified signature.
     from rebar import config, signing
-    assert signing.head_sha(config.repo_root(str(rebar_repo))) == "unknown", "fixture should have an unborn HEAD"
+
+    assert signing.head_sha(config.repo_root(str(rebar_repo))) == "unknown", (
+        "fixture should have an unborn HEAD"
+    )
     _enable_gate(rebar_repo)
     tid = _story(rebar_repo)
     rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
@@ -360,7 +394,9 @@ def test_close_gate_blocks_when_head_unresolvable(rebar_repo: Path) -> None:
     assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "in_progress"
 
 
-def test_close_gate_blocks_in_keyless_environment(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_close_gate_blocks_in_keyless_environment(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # Security regression: a key-less environment must NOT be able to certify (and
     # thus close), even with an existing signature — an empty key is forgeable.
     _commit(rebar_repo)
@@ -381,7 +417,9 @@ def test_close_gate_blocks_in_keyless_environment(rebar_repo: Path, monkeypatch:
 def test_close_gate_force_close_bypass(rebar_repo: Path) -> None:
     _enable_gate(rebar_repo)
     tid = _story(rebar_repo)
-    cp = _cli("transition", tid, "in_progress", "closed", "--force-close=verifier offline", cwd=rebar_repo)
+    cp = _cli(
+        "transition", tid, "in_progress", "closed", "--force-close=verifier offline", cwd=rebar_repo
+    )
     assert cp.returncode == 0, cp.stderr
     assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "closed"
 

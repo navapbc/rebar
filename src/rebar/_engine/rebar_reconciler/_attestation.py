@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -65,8 +64,6 @@ def build_acli_client_from_env() -> Any:
             f"missing JIRA_* environment variables: {', '.join(missing)} "
             "(required to construct AcliClient for bootstrap band execution)"
         )
-
-    import importlib.util  # local import — keeps top-level deps minimal
 
     from rebar_reconciler import acli as mod
 

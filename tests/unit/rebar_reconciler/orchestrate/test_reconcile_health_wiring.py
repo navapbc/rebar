@@ -21,9 +21,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
-)
+RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
 
 
 def _load_module(name: str, path: Path):
@@ -42,8 +40,7 @@ def reconcile_mod():
     sys.modules.pop("reconcile", None)
     if not RECONCILE_PATH.exists():
         pytest.fail(
-            f"reconcile.py not found at {RECONCILE_PATH} — "
-            "implement the module to make tests pass."
+            f"reconcile.py not found at {RECONCILE_PATH} — implement the module to make tests pass."
         )
     return _load_module("reconcile", RECONCILE_PATH)
 
@@ -53,7 +50,9 @@ def reconcile_mod():
 # ---------------------------------------------------------------------------
 
 
-def _make_stub_fetcher(tmp_path: Path, pass_id: str, snapshot: dict | None = None) -> types.ModuleType:
+def _make_stub_fetcher(
+    tmp_path: Path, pass_id: str, snapshot: dict | None = None
+) -> types.ModuleType:
     """Return a stub fetcher whose fetch_snapshot() writes a JSON file and returns its path."""
     import json
 
@@ -125,7 +124,12 @@ def test_health_record_pass_called_after_apply(tmp_path, reconcile_mod):
     try:
         result = reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
     finally:
-        for key in ("reconcile_fetcher", "reconcile_differ", "reconcile_applier", "reconcile_health"):
+        for key in (
+            "reconcile_fetcher",
+            "reconcile_differ",
+            "reconcile_applier",
+            "reconcile_health",
+        ):
             sys.modules.pop(key, None)
 
     stub_health.record_pass.assert_called_once()
@@ -138,8 +142,7 @@ def test_health_record_pass_called_after_apply(tmp_path, reconcile_mod):
     # Extract pass_id from args[0] or kwargs
     actual_pass_id = kwargs.get("pass_id", args[0] if args else None)
     assert actual_pass_id == pass_id, (
-        f"health.record_pass() must be called with pass_id={pass_id!r}, "
-        f"got {actual_pass_id!r}"
+        f"health.record_pass() must be called with pass_id={pass_id!r}, got {actual_pass_id!r}"
     )
 
     # Extract local_mutation_count
@@ -174,7 +177,12 @@ def test_health_record_pass_called_with_zero_mutations(tmp_path, reconcile_mod):
     try:
         reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
     finally:
-        for key in ("reconcile_fetcher", "reconcile_differ", "reconcile_applier", "reconcile_health"):
+        for key in (
+            "reconcile_fetcher",
+            "reconcile_differ",
+            "reconcile_applier",
+            "reconcile_health",
+        ):
             sys.modules.pop(key, None)
 
     stub_health.record_pass.assert_called_once()
@@ -216,10 +224,16 @@ def test_health_record_pass_still_fires_on_apply_failure(tmp_path, reconcile_mod
     try:
         # The original apply() error must propagate after health is recorded
         import pytest as _pytest
+
         with _pytest.raises(RuntimeError, match="boom"):
             reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
     finally:
-        for key in ("reconcile_fetcher", "reconcile_differ", "reconcile_applier", "reconcile_health"):
+        for key in (
+            "reconcile_fetcher",
+            "reconcile_differ",
+            "reconcile_applier",
+            "reconcile_health",
+        ):
             sys.modules.pop(key, None)
 
     # health.record_pass MUST have been called even though apply raised
@@ -238,8 +252,7 @@ def test_health_record_pass_still_fires_on_apply_failure(tmp_path, reconcile_mod
         f"degraded health record must include failure_kind; got {kwargs!r}"
     )
     assert kwargs.get("failure_kind") in ("apply_error", "reschedule"), (
-        f"failure_kind must be one of the documented values; got "
-        f"{kwargs.get('failure_kind')!r}"
+        f"failure_kind must be one of the documented values; got {kwargs.get('failure_kind')!r}"
     )
 
 
@@ -271,7 +284,12 @@ def test_health_per_type_counts_uses_count_open_by_type_result(tmp_path, reconci
     try:
         reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
     finally:
-        for key in ("reconcile_fetcher", "reconcile_differ", "reconcile_applier", "reconcile_health"):
+        for key in (
+            "reconcile_fetcher",
+            "reconcile_differ",
+            "reconcile_applier",
+            "reconcile_health",
+        ):
             sys.modules.pop(key, None)
 
     stub_health.count_open_by_type.assert_called_once()

@@ -27,26 +27,14 @@ the one-id-per-line list; for the report commands it is the human text report),
 ``json`` is the structured machine shape, and ``llm`` is the minified short-key
 NDJSON variant.
 
-Two ways to use it:
+Used in-process by the read/report entry points::
 
-  * In-process (Python entry points)::
-
-        from ticket_output import parse_output
-        fmt, rest = parse_output(argv, "reader")
-
-  * As a tiny CLI (the bash command scripts), which only need the *resolved,
-    validated* format token::
-
-        fmt=$(python3 ticket_output.py resolve report -- "$@") || exit 2
-
-    ``resolve`` prints the format on stdout (exit 0) or an ``Error: ...`` line
-    on stderr (exit 2 — the conventional argparse usage-error code).
+    from rebar._engine_support.output import parse_output
+    fmt, rest = parse_output(argv, "reader")
 """
 
 from __future__ import annotations
 
-import json
-import sys
 from collections.abc import Iterable
 
 __all__ = [
@@ -150,44 +138,3 @@ def error_envelope(error: str, input_str: str, message: str, exit_code=None) -> 
     if exit_code is not None and exit_code != "":
         env["exit_code"] = int(exit_code)
     return env
-
-
-def _main(argv: list[str]) -> int:
-    """CLI shim for bash callers.
-
-    Usage:
-      ``ticket_output.py resolve <profile> -- <args...>``  — resolve --output.
-      ``ticket_output.py emit-error <error> <input> <message> [exit_code]``
-          — print a schema-valid error_envelope JSON object on stdout (exit 0).
-            Bash error branches call this in --output json mode so the failure is
-            machine-readable; the human stderr prose is printed separately.
-    """
-    if argv and argv[0] == "emit-error":
-        rest = argv[1:]
-        if len(rest) < 3:
-            print(
-                "Usage: ticket_output.py emit-error <error> <input> <message> [exit_code]",
-                file=sys.stderr,
-            )
-            return 2
-        exit_code = rest[3] if len(rest) > 3 else None
-        print(json.dumps(error_envelope(rest[0], rest[1], rest[2], exit_code), ensure_ascii=False))
-        return 0
-    if len(argv) < 2 or argv[0] != "resolve":
-        print("Usage: ticket_output.py resolve <profile> -- <args...>", file=sys.stderr)
-        return 2
-    profile = argv[1]
-    rest = argv[2:]
-    if rest and rest[0] == "--":
-        rest = rest[1:]
-    try:
-        fmt, _ = parse_output(rest, profile)
-    except OutputFormatError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 2
-    print(fmt)
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(_main(sys.argv[1:]))

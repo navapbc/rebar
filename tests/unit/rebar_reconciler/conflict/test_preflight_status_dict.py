@@ -24,15 +24,11 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
-)
+RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
 
 
 def _load_reconcile():
-    spec = importlib.util.spec_from_file_location(
-        "reconcile_status_preflight_test", RECONCILE_PATH
-    )
+    spec = importlib.util.spec_from_file_location("reconcile_status_preflight_test", RECONCILE_PATH)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules["reconcile_status_preflight_test"] = mod
@@ -67,7 +63,7 @@ def test_preflight_accepts_dict_status_with_known_name(reconcile, monkeypatch):
 
 
 def test_preflight_does_not_crash_on_dict_status(reconcile, monkeypatch):
-    """Even when the .name isn't in mapping, the error should be StatusMappingError, not TypeError."""
+    """When the .name isn't in mapping, the error is StatusMappingError, not TypeError."""
     _patch_mapping(reconcile, monkeypatch, {"To Do": "To Do"})
     mutations = [
         {

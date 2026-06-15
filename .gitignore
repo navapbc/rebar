@@ -23,3 +23,6 @@ build/
 .coverage.*
 coverage.xml
 htmlcov/
+
+# Serena MCP (local code-navigation tooling; per-developer)
+.serena/

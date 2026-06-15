@@ -26,9 +26,7 @@ _LINK_UUID3 = "deadd00d-1234-5678-9abc-def012345678"
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_compiles_link_event_into_deps_list(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_compiles_link_event_into_deps_list(tmp_path: Path, reducer: ModuleType) -> None:
     """A single LINK event with relation=blocks and target_id=tkt-002 results in
     state['deps'] containing exactly one entry with those fields plus link_uuid."""
     ticket_dir = tmp_path / "tkt-link-single"
@@ -60,9 +58,7 @@ def test_reducer_compiles_link_event_into_deps_list(
     assert dep["target_id"] == "tkt-002", (
         f"Expected target_id='tkt-002', got {dep.get('target_id')!r}"
     )
-    assert dep["relation"] == "blocks", (
-        f"Expected relation='blocks', got {dep.get('relation')!r}"
-    )
+    assert dep["relation"] == "blocks", f"Expected relation='blocks', got {dep.get('relation')!r}"
     assert dep["link_uuid"] == _LINK_UUID, (
         f"Expected link_uuid={_LINK_UUID!r}, got {dep.get('link_uuid')!r}"
     )
@@ -108,9 +104,7 @@ def test_reducer_link_event_with_target_key_instead_of_target_id(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_compiles_multiple_link_events(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_compiles_multiple_link_events(tmp_path: Path, reducer: ModuleType) -> None:
     """Two LINK events produce two independent entries in state['deps']."""
     ticket_dir = tmp_path / "tkt-link-multi"
     ticket_dir.mkdir()
@@ -153,9 +147,7 @@ def test_reducer_compiles_multiple_link_events(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_unlink_event_removes_dep_entry(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_unlink_event_removes_dep_entry(tmp_path: Path, reducer: ModuleType) -> None:
     """A LINK event followed by an UNLINK event with matching link_uuid removes
     the dep entry — state['deps'] is empty after the UNLINK.
 
@@ -222,9 +214,7 @@ def test_reducer_unlink_event_removes_dep_entry(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_unlink_unknown_uuid_is_noop(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_unlink_unknown_uuid_is_noop(tmp_path: Path, reducer: ModuleType) -> None:
     """An UNLINK event referencing an unknown link_uuid does not crash and leaves
     state['deps'] unchanged."""
     ticket_dir = tmp_path / "tkt-unlink-noop"
@@ -264,9 +254,7 @@ def test_reducer_unlink_unknown_uuid_is_noop(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_link_events_survive_snapshot(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_link_events_survive_snapshot(tmp_path: Path, reducer: ModuleType) -> None:
     """A LINK event included in a SNAPSHOT's compiled_state.deps, plus one new LINK
     event after the snapshot, both appear in the final state['deps']."""
     ticket_dir = tmp_path / "tkt-link-snapshot"
@@ -342,9 +330,7 @@ def test_reducer_link_events_survive_snapshot(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_reducer_deps_in_snapshot_not_duplicated(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_reducer_deps_in_snapshot_not_duplicated(tmp_path: Path, reducer: ModuleType) -> None:
     """A LINK event listed in a SNAPSHOT's source_event_uuids is not double-counted;
     its dep entry comes only from the compiled_state, not re-applied from the raw event."""
     ticket_dir = tmp_path / "tkt-link-nodupe"
@@ -418,9 +404,7 @@ def test_reducer_deps_in_snapshot_not_duplicated(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_same_second_link_unlink_sort_order(
-    reducer: ModuleType, tmp_path: Path
-) -> None:
+def test_same_second_link_unlink_sort_order(reducer: ModuleType, tmp_path: Path) -> None:
     """When LINK and UNLINK share the same Unix-second timestamp, LINK must
     replay before UNLINK so the dep is correctly cancelled.
 

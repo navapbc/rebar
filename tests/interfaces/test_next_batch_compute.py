@@ -1,10 +1,7 @@
-"""next-batch characterization (Tier C, post-retirement) — docs/bash-migration.md §5.
+"""next-batch characterization — docs/bash-migration.md §5.
 
-Tier C was retired on 2026-06-12: the bash ``ticket-next-batch.sh`` and the
-``REBAR_COMPUTE`` switch are gone, so this file no longer dual-runs bash-vs-python.
-It is now the durable python characterization that outlived the second
-implementation (the a93885ed pattern): golden output for the conflict-aware
-selector, the determinism fix, error/exit contracts, and library/schema shape.
+The python characterization of the conflict-aware selector: golden output, the
+determinism fix, error/exit contracts, and the library/schema shape.
 """
 
 from __future__ import annotations
@@ -16,8 +13,11 @@ from pathlib import Path
 
 import pytest
 
-_PLUGIN_ROOT = Path(__file__).resolve().parents[2]
-_DISPATCHER = _PLUGIN_ROOT / "src" / "rebar" / "_engine" / "ticket"
+from rebar._engine import in_process_cli
+
+# Drive the in-process rebar CLI; the next-batch arm routes to the in-process
+# compute, so this characterizes the production output.
+_CLI = in_process_cli()
 
 
 # ───────────────────────────── fixtures ──────────────────────────────────────
@@ -39,24 +39,180 @@ def _write(base: Path, tid: str, idx: int, et: str, data: dict, ts: int) -> None
 def _three_tier(base: Path) -> None:
     """epic → story-1{task-1,task-2}, story-2(blocked by story-1){task-3}."""
     ts = 1700000000000000000
-    _write(base, "nb-epic", 1, "CREATE", {"ticket_id": "nb-epic", "title": "NB Epic", "ticket_type": "epic", "status": "open", "priority": 1, "parent_id": None}, ts)
-    _write(base, "nb-story-1", 1, "CREATE", {"ticket_id": "nb-story-1", "title": "NB Story One", "ticket_type": "story", "status": "open", "priority": 2, "parent_id": "nb-epic"}, ts + 1)
-    _write(base, "nb-task-1", 1, "CREATE", {"ticket_id": "nb-task-1", "title": "NB Task One", "ticket_type": "task", "status": "open", "priority": 2, "parent_id": "nb-story-1"}, ts + 2)
-    _write(base, "nb-task-2", 1, "CREATE", {"ticket_id": "nb-task-2", "title": "NB Task Two", "ticket_type": "task", "status": "open", "priority": 2, "parent_id": "nb-story-1"}, ts + 3)
-    _write(base, "nb-story-2", 1, "CREATE", {"ticket_id": "nb-story-2", "title": "NB Story Two", "ticket_type": "story", "status": "open", "priority": 3, "parent_id": "nb-epic"}, ts + 4)
-    _write(base, "nb-story-2", 2, "LINK", {"relation": "depends_on", "target_id": "nb-story-1"}, ts + 5)
-    _write(base, "nb-task-3", 1, "CREATE", {"ticket_id": "nb-task-3", "title": "NB Task Three", "ticket_type": "task", "status": "open", "priority": 3, "parent_id": "nb-story-2"}, ts + 6)
+    _write(
+        base,
+        "nb-epic",
+        1,
+        "CREATE",
+        {
+            "ticket_id": "nb-epic",
+            "title": "NB Epic",
+            "ticket_type": "epic",
+            "status": "open",
+            "priority": 1,
+            "parent_id": None,
+        },
+        ts,
+    )
+    _write(
+        base,
+        "nb-story-1",
+        1,
+        "CREATE",
+        {
+            "ticket_id": "nb-story-1",
+            "title": "NB Story One",
+            "ticket_type": "story",
+            "status": "open",
+            "priority": 2,
+            "parent_id": "nb-epic",
+        },
+        ts + 1,
+    )
+    _write(
+        base,
+        "nb-task-1",
+        1,
+        "CREATE",
+        {
+            "ticket_id": "nb-task-1",
+            "title": "NB Task One",
+            "ticket_type": "task",
+            "status": "open",
+            "priority": 2,
+            "parent_id": "nb-story-1",
+        },
+        ts + 2,
+    )
+    _write(
+        base,
+        "nb-task-2",
+        1,
+        "CREATE",
+        {
+            "ticket_id": "nb-task-2",
+            "title": "NB Task Two",
+            "ticket_type": "task",
+            "status": "open",
+            "priority": 2,
+            "parent_id": "nb-story-1",
+        },
+        ts + 3,
+    )
+    _write(
+        base,
+        "nb-story-2",
+        1,
+        "CREATE",
+        {
+            "ticket_id": "nb-story-2",
+            "title": "NB Story Two",
+            "ticket_type": "story",
+            "status": "open",
+            "priority": 3,
+            "parent_id": "nb-epic",
+        },
+        ts + 4,
+    )
+    _write(
+        base, "nb-story-2", 2, "LINK", {"relation": "depends_on", "target_id": "nb-story-1"}, ts + 5
+    )
+    _write(
+        base,
+        "nb-task-3",
+        1,
+        "CREATE",
+        {
+            "ticket_id": "nb-task-3",
+            "title": "NB Task Three",
+            "ticket_type": "task",
+            "status": "open",
+            "priority": 3,
+            "parent_id": "nb-story-2",
+        },
+        ts + 6,
+    )
 
 
 def _file_impact(base: Path) -> None:
     """Two tasks, identical recorded file_impact on ONE shared path."""
     ts = 1700002000000000000
-    _write(base, "fi-epic", 1, "CREATE", {"ticket_id": "fi-epic", "title": "FI Epic", "ticket_type": "epic", "status": "open", "priority": 1, "parent_id": None}, ts)
-    _write(base, "fi-story", 1, "CREATE", {"ticket_id": "fi-story", "title": "FI Story", "ticket_type": "story", "status": "open", "priority": 2, "parent_id": "fi-epic"}, ts + 1)
-    _write(base, "fi-a", 1, "CREATE", {"ticket_id": "fi-a", "title": "FI Task A", "ticket_type": "task", "status": "open", "priority": 2, "parent_id": "fi-story"}, ts + 2)
-    _write(base, "fi-a", 2, "FILE_IMPACT", {"file_impact": [{"path": "src/shared.py", "reason": "edit"}]}, ts + 3)
-    _write(base, "fi-b", 1, "CREATE", {"ticket_id": "fi-b", "title": "FI Task B", "ticket_type": "task", "status": "open", "priority": 2, "parent_id": "fi-story"}, ts + 4)
-    _write(base, "fi-b", 2, "FILE_IMPACT", {"file_impact": [{"path": "src/shared.py", "reason": "edit"}]}, ts + 5)
+    _write(
+        base,
+        "fi-epic",
+        1,
+        "CREATE",
+        {
+            "ticket_id": "fi-epic",
+            "title": "FI Epic",
+            "ticket_type": "epic",
+            "status": "open",
+            "priority": 1,
+            "parent_id": None,
+        },
+        ts,
+    )
+    _write(
+        base,
+        "fi-story",
+        1,
+        "CREATE",
+        {
+            "ticket_id": "fi-story",
+            "title": "FI Story",
+            "ticket_type": "story",
+            "status": "open",
+            "priority": 2,
+            "parent_id": "fi-epic",
+        },
+        ts + 1,
+    )
+    _write(
+        base,
+        "fi-a",
+        1,
+        "CREATE",
+        {
+            "ticket_id": "fi-a",
+            "title": "FI Task A",
+            "ticket_type": "task",
+            "status": "open",
+            "priority": 2,
+            "parent_id": "fi-story",
+        },
+        ts + 2,
+    )
+    _write(
+        base,
+        "fi-a",
+        2,
+        "FILE_IMPACT",
+        {"file_impact": [{"path": "src/shared.py", "reason": "edit"}]},
+        ts + 3,
+    )
+    _write(
+        base,
+        "fi-b",
+        1,
+        "CREATE",
+        {
+            "ticket_id": "fi-b",
+            "title": "FI Task B",
+            "ticket_type": "task",
+            "status": "open",
+            "priority": 2,
+            "parent_id": "fi-story",
+        },
+        ts + 4,
+    )
+    _write(
+        base,
+        "fi-b",
+        2,
+        "FILE_IMPACT",
+        {"file_impact": [{"path": "src/shared.py", "reason": "edit"}]},
+        ts + 5,
+    )
 
 
 def _multi_overlap(base: Path) -> None:
@@ -64,15 +220,76 @@ def _multi_overlap(base: Path) -> None:
     substring match → conflict set has 2 files (the determinism case)."""
     ts = 1700001000000000000
     sf = "src/rebar/_engine/sprint-next-batch.sh"
-    _write(base, "ov-epic", 1, "CREATE", {"ticket_id": "ov-epic", "title": "OV Epic", "ticket_type": "epic", "status": "open", "priority": 1, "parent_id": None}, ts)
-    _write(base, "ov-story", 1, "CREATE", {"ticket_id": "ov-story", "title": "OV Story", "ticket_type": "story", "status": "open", "priority": 2, "parent_id": "ov-epic"}, ts + 1)
-    _write(base, "ov-a", 1, "CREATE", {"ticket_id": "ov-a", "title": f"OV Task A - modifies {sf}", "ticket_type": "task", "status": "open", "priority": 2, "parent_id": "ov-story"}, ts + 2)
-    _write(base, "ov-b", 1, "CREATE", {"ticket_id": "ov-b", "title": f"OV Task B - modifies {sf}", "ticket_type": "task", "status": "open", "priority": 2, "parent_id": "ov-story"}, ts + 3)
+    _write(
+        base,
+        "ov-epic",
+        1,
+        "CREATE",
+        {
+            "ticket_id": "ov-epic",
+            "title": "OV Epic",
+            "ticket_type": "epic",
+            "status": "open",
+            "priority": 1,
+            "parent_id": None,
+        },
+        ts,
+    )
+    _write(
+        base,
+        "ov-story",
+        1,
+        "CREATE",
+        {
+            "ticket_id": "ov-story",
+            "title": "OV Story",
+            "ticket_type": "story",
+            "status": "open",
+            "priority": 2,
+            "parent_id": "ov-epic",
+        },
+        ts + 1,
+    )
+    _write(
+        base,
+        "ov-a",
+        1,
+        "CREATE",
+        {
+            "ticket_id": "ov-a",
+            "title": f"OV Task A - modifies {sf}",
+            "ticket_type": "task",
+            "status": "open",
+            "priority": 2,
+            "parent_id": "ov-story",
+        },
+        ts + 2,
+    )
+    _write(
+        base,
+        "ov-b",
+        1,
+        "CREATE",
+        {
+            "ticket_id": "ov-b",
+            "title": f"OV Task B - modifies {sf}",
+            "ticket_type": "task",
+            "status": "open",
+            "priority": 2,
+            "parent_id": "ov-story",
+        },
+        ts + 3,
+    )
 
 
 def _run(tracker: Path, *args: str) -> subprocess.CompletedProcess:
-    env = {**os.environ, "TICKETS_TRACKER_DIR": str(tracker), "REBAR_NO_SYNC": "1", "_TICKET_TEST_NO_SYNC": "1"}
-    return subprocess.run([str(_DISPATCHER), "next-batch", *args], env=env, capture_output=True, text=True)
+    env = {
+        **os.environ,
+        "TICKETS_TRACKER_DIR": str(tracker),
+        "REBAR_NO_SYNC": "1",
+        "_TICKET_TEST_NO_SYNC": "1",
+    }
+    return subprocess.run([_CLI, "next-batch", *args], env=env, capture_output=True, text=True)
 
 
 @pytest.fixture
@@ -102,7 +319,14 @@ def test_three_tier_text_golden(tracker: Path):
 def test_three_tier_json_shape(tracker: Path):
     _three_tier(tracker)
     d = json.loads(_run(tracker, "nb-epic", "--output", "json").stdout)
-    assert {"epic_id", "available_pool", "batch_size", "batch", "skipped_overlap", "skipped_blocked_story"} <= set(d)
+    assert {
+        "epic_id",
+        "available_pool",
+        "batch_size",
+        "batch",
+        "skipped_overlap",
+        "skipped_blocked_story",
+    } <= set(d)
     assert {e["id"] for e in d["batch"]} == {"nb-task-1", "nb-task-2"}
     # batch_item shape: no routing-field leak (the common.schema.json batch_item contract).
     allowed = {"id", "title", "priority", "type", "files", "files_likely_read"}

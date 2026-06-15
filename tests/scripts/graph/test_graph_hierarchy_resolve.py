@@ -7,13 +7,11 @@ conftest.py; event-writing helpers + the module loader in _helpers.py.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 from _helpers import (
-    SCRIPT_PATH,
     _write_ticket,
 )
 
@@ -24,9 +22,7 @@ from _helpers import (
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_resolve_hierarchy_link_same_parent_story_sc1(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_resolve_hierarchy_link_same_parent_story_sc1(graph: ModuleType, tmp_path: Path) -> None:
     """SC1: Two tasks sharing the same parent story → original IDs unchanged.
 
     Setup:
@@ -90,9 +86,7 @@ def test_resolve_hierarchy_link_cross_story_same_epic_sc3(
     _write_ticket(tracker_dir, "task-a1", parent_id="story-a", ticket_type="task")
     _write_ticket(tracker_dir, "task-b1", parent_id="story-b", ticket_type="task")
 
-    result = graph.resolve_hierarchy_link(
-        "task-a1", "task-b1", str(tracker_dir), "blocks"
-    )
+    result = graph.resolve_hierarchy_link("task-a1", "task-b1", str(tracker_dir), "blocks")
 
     assert result["resolved_source"] == "task-a1", (
         f"SC3: expected resolved_source='task-a1', got {result['resolved_source']!r}"
@@ -110,9 +104,7 @@ def test_resolve_hierarchy_link_cross_story_same_epic_sc3(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_resolve_hierarchy_link_cross_epic_sc5(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_resolve_hierarchy_link_cross_epic_sc5(graph: ModuleType, tmp_path: Path) -> None:
     """SC5 (new type-tier semantics): cross-epic SAME-tier task pair → NOT promoted.
 
     Both endpoints are tasks (tier 0). Even across separate epics, a same-tier
@@ -139,9 +131,7 @@ def test_resolve_hierarchy_link_cross_epic_sc5(
     _write_ticket(tracker_dir, "task-a1", parent_id="story-a", ticket_type="task")
     _write_ticket(tracker_dir, "task-b1", parent_id="story-b", ticket_type="task")
 
-    result = graph.resolve_hierarchy_link(
-        "task-a1", "task-b1", str(tracker_dir), "depends_on"
-    )
+    result = graph.resolve_hierarchy_link("task-a1", "task-b1", str(tracker_dir), "depends_on")
 
     assert result["resolved_source"] == "task-a1", (
         f"SC5: expected resolved_source='task-a1', got {result['resolved_source']!r}"
@@ -159,9 +149,7 @@ def test_resolve_hierarchy_link_cross_epic_sc5(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_resolve_hierarchy_link_orphan_ticket_sc10(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_resolve_hierarchy_link_orphan_ticket_sc10(graph: ModuleType, tmp_path: Path) -> None:
     """SC10: Tickets with no parent_id → original IDs unchanged.
 
     Setup:
@@ -195,9 +183,7 @@ def test_resolve_hierarchy_link_orphan_ticket_sc10(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_resolve_hierarchy_link_unreadable_ticket_sc11(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_resolve_hierarchy_link_unreadable_ticket_sc11(graph: ModuleType, tmp_path: Path) -> None:
     """SC11: If ticket state cannot be reduced → AttributeError or returns error dict.
 
     Setup:
@@ -212,9 +198,7 @@ def test_resolve_hierarchy_link_unreadable_ticket_sc11(
     _write_ticket(tracker_dir, "ticket-ok", ticket_type="task")
     # missing-ticket directory is intentionally absent
 
-    result = graph.resolve_hierarchy_link(
-        "ticket-ok", "missing-ticket", str(tracker_dir)
-    )
+    result = graph.resolve_hierarchy_link("ticket-ok", "missing-ticket", str(tracker_dir))
 
     assert "error" in result, (
         f"SC11: expected result to contain 'error' key for missing ticket, got {result!r}"
@@ -242,13 +226,9 @@ def test_resolve_hierarchy_link_is_redundant_direct_parent(
     tracker_dir.mkdir()
 
     _write_ticket(tracker_dir, "story-parent", ticket_type="story")
-    _write_ticket(
-        tracker_dir, "task-child", parent_id="story-parent", ticket_type="task"
-    )
+    _write_ticket(tracker_dir, "task-child", parent_id="story-parent", ticket_type="task")
 
-    result = graph.resolve_hierarchy_link(
-        "story-parent", "task-child", str(tracker_dir)
-    )
+    result = graph.resolve_hierarchy_link("story-parent", "task-child", str(tracker_dir))
 
     assert result["is_redundant"] is True, (
         f"is_redundant=True expected when source is direct parent of target, got {result!r}"
@@ -257,68 +237,7 @@ def test_resolve_hierarchy_link_is_redundant_direct_parent(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_resolve_hierarchy_link_cli_outputs_json(
-    graph: ModuleType, tmp_path: Path
-) -> None:
-    """CLI subcommand resolve-hierarchy-link outputs valid JSON.
-
-    Setup:
-        - orphan-x: task (no parent)
-        - orphan-y: task (no parent)
-
-    Verify: python3 ticket-graph.py resolve-hierarchy-link orphan-x orphan-y
-            --tickets-dir=... outputs JSON with required keys.
-    """
-    import subprocess
-
-    tracker_dir = tmp_path / "tracker"
-    tracker_dir.mkdir()
-
-    _write_ticket(tracker_dir, "orphan-x", ticket_type="task")
-    _write_ticket(tracker_dir, "orphan-y", ticket_type="task")
-
-    result = subprocess.run(
-        [
-            "python3",
-            str(SCRIPT_PATH),
-            "resolve-hierarchy-link",
-            "orphan-x",
-            "orphan-y",
-            f"--tickets-dir={tracker_dir}",
-        ],
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 0, (
-        f"CLI returned non-zero exit code {result.returncode}. "
-        f"stdout={result.stdout!r} stderr={result.stderr!r}"
-    )
-    try:
-        output = json.loads(result.stdout)
-    except json.JSONDecodeError as e:
-        pytest.fail(f"CLI output is not valid JSON: {e!r}. stdout={result.stdout!r}")
-
-    required_keys = {
-        "resolved_source",
-        "resolved_target",
-        "was_redirected",
-        "is_redundant",
-    }
-    missing = required_keys - set(output.keys())
-    assert not missing, f"CLI output missing keys {missing}. Got: {output!r}"
-
-
-# ---------------------------------------------------------------------------
-# Type-tier comparability for BLOCKING deps only (new semantics)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-@pytest.mark.scripts
-@pytest.mark.parametrize(
-    "relation", ["relates_to", "duplicates", "supersedes", "discovered_from"]
-)
+@pytest.mark.parametrize("relation", ["relates_to", "duplicates", "supersedes", "discovered_from"])
 def test_resolve_hierarchy_link_non_blocking_never_promoted(
     graph: ModuleType, tmp_path: Path, relation: str
 ) -> None:
@@ -335,9 +254,7 @@ def test_resolve_hierarchy_link_non_blocking_never_promoted(
     _write_ticket(tracker_dir, "task-leaf", parent_id="story-mid", ticket_type="task")
     _write_ticket(tracker_dir, "epic-other", ticket_type="epic")
 
-    result = graph.resolve_hierarchy_link(
-        "task-leaf", "epic-other", str(tracker_dir), relation
-    )
+    result = graph.resolve_hierarchy_link("task-leaf", "epic-other", str(tracker_dir), relation)
 
     assert result["resolved_source"] == "task-leaf", result
     assert result["resolved_target"] == "epic-other", result
@@ -368,17 +285,13 @@ def test_resolve_hierarchy_link_task_to_epic_promotes_to_epic(
     _write_ticket(tracker_dir, "epic-other", ticket_type="epic")
 
     # source is the lower-tier endpoint
-    result = graph.resolve_hierarchy_link(
-        "task-leaf", "epic-other", str(tracker_dir), relation
-    )
+    result = graph.resolve_hierarchy_link("task-leaf", "epic-other", str(tracker_dir), relation)
     assert result["resolved_source"] == "epic-root", result
     assert result["resolved_target"] == "epic-other", result
     assert result["was_redirected"] is True, result
 
     # symmetric: lower-tier endpoint as TARGET is promoted too
-    result_rev = graph.resolve_hierarchy_link(
-        "epic-other", "task-leaf", str(tracker_dir), relation
-    )
+    result_rev = graph.resolve_hierarchy_link("epic-other", "task-leaf", str(tracker_dir), relation)
     assert result_rev["resolved_source"] == "epic-other", result_rev
     assert result_rev["resolved_target"] == "epic-root", result_rev
     assert result_rev["was_redirected"] is True, result_rev
@@ -402,9 +315,7 @@ def test_resolve_hierarchy_link_task_to_story_promotes_to_story(
     _write_ticket(tracker_dir, "task-leaf", parent_id="story-mid", ticket_type="task")
     _write_ticket(tracker_dir, "story-other", parent_id="epic-root", ticket_type="story")
 
-    result = graph.resolve_hierarchy_link(
-        "task-leaf", "story-other", str(tracker_dir), "blocks"
-    )
+    result = graph.resolve_hierarchy_link("task-leaf", "story-other", str(tracker_dir), "blocks")
     assert result["resolved_source"] == "story-mid", result
     assert result["resolved_target"] == "story-other", result
     assert result["was_redirected"] is True, result
@@ -412,9 +323,7 @@ def test_resolve_hierarchy_link_task_to_story_promotes_to_story(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-@pytest.mark.parametrize(
-    "type_a,type_b", [("task", "task"), ("task", "bug"), ("bug", "bug")]
-)
+@pytest.mark.parametrize("type_a,type_b", [("task", "task"), ("task", "bug"), ("bug", "bug")])
 def test_resolve_hierarchy_link_same_tier_siblings_cousins_not_promoted(
     graph: ModuleType, tmp_path: Path, type_a: str, type_b: str
 ) -> None:
@@ -434,9 +343,7 @@ def test_resolve_hierarchy_link_same_tier_siblings_cousins_not_promoted(
     _write_ticket(tracker_dir, "leaf-a", parent_id="story-a", ticket_type=type_a)
     _write_ticket(tracker_dir, "leaf-b", parent_id="story-b", ticket_type=type_b)
 
-    result = graph.resolve_hierarchy_link(
-        "leaf-a", "leaf-b", str(tracker_dir), "depends_on"
-    )
+    result = graph.resolve_hierarchy_link("leaf-a", "leaf-b", str(tracker_dir), "depends_on")
     assert result["resolved_source"] == "leaf-a", result
     assert result["resolved_target"] == "leaf-b", result
     assert result["was_redirected"] is False, (
@@ -465,9 +372,7 @@ def test_resolve_hierarchy_link_fallback_no_comparable_ancestor(
     # Orphan task ↔ epic: no ancestor at all → resolves to itself, not redirected.
     _write_ticket(tracker_dir, "orphan-task", ticket_type="task")
     _write_ticket(tracker_dir, "the-epic", ticket_type="epic")
-    res_orphan = graph.resolve_hierarchy_link(
-        "orphan-task", "the-epic", str(tracker_dir), "blocks"
-    )
+    res_orphan = graph.resolve_hierarchy_link("orphan-task", "the-epic", str(tracker_dir), "blocks")
     assert res_orphan["resolved_source"] == "orphan-task", res_orphan
     assert res_orphan["resolved_target"] == "the-epic", res_orphan
     assert res_orphan["was_redirected"] is False, res_orphan

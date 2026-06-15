@@ -19,9 +19,7 @@ _ENGINE = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine"
 
 def _load(modname: str, filename: str):
     key = f"rebar_reconciler.{modname}"
-    spec = importlib.util.spec_from_file_location(
-        key, _ENGINE / "rebar_reconciler" / filename
-    )
+    spec = importlib.util.spec_from_file_location(key, _ENGINE / "rebar_reconciler" / filename)
     mod = importlib.util.module_from_spec(spec)
     # Register BEFORE exec so @dataclass resolution works on Python 3.14
     # (dataclasses looks up cls.__module__ in sys.modules during class body exec).
@@ -30,10 +28,13 @@ def _load(modname: str, filename: str):
     return mod
 
 
-@pytest.mark.parametrize("modname,filename", [
-    ("applier", "applier.py"),
-    ("outbound_differ", "outbound_differ.py"),
-])
+@pytest.mark.parametrize(
+    "modname,filename",
+    [
+        ("applier", "applier.py"),
+        ("outbound_differ", "outbound_differ.py"),
+    ],
+)
 def test_rebar_env_reads_rebar_only(modname, filename, monkeypatch):
     mod = _load(modname, filename)
     monkeypatch.delenv("REBAR_WS1ALIAS", raising=False)

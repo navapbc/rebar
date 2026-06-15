@@ -17,17 +17,12 @@ _HERE = str(Path(__file__).resolve().parent)
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from _helpers import REPO_ROOT, SCRIPT_PATH, _load_module  # noqa: E402
+from _helpers import REPO_ROOT, _load_module  # noqa: E402
 
 
 @pytest.fixture(scope="module")
 def graph() -> ModuleType:
     """Return the ticket-graph module, failing all tests if absent (RED)."""
-    if not SCRIPT_PATH.exists():
-        pytest.fail(
-            f"ticket-graph.py not found at {SCRIPT_PATH} — "
-            "this is expected RED state; implement the script to make tests pass."
-        )
     return _load_module()
 
 

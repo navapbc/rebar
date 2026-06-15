@@ -102,9 +102,9 @@ class BindingStore:
                     f"and cannot be parsed — aborting reconcile pass to prevent "
                     f"duplicate Jira mutations. File: {self._path}. "  # tickets-boundary-ok
                     f"Original error: {exc}. "
-                    f"Recovery: resolve the merge conflict or restore the file "  # tickets-boundary-ok
+                    f"Recovery: resolve the merge conflict or restore the file "  # tickets-boundary-ok  # noqa: E501
                     f"from the tickets branch with: "
-                    f"git show tickets:.tickets-tracker/.bridge_state/bindings.json"  # tickets-boundary-ok
+                    f"git show tickets:.tickets-tracker/.bridge_state/bindings.json"  # tickets-boundary-ok  # noqa: E501
                 ) from exc
         return json.loads(json.dumps(_EMPTY_STORE))  # deep copy
 
@@ -161,9 +161,7 @@ class BindingStore:
         )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(
-                    {"version": 1, "retired": entries}, f, indent=2, sort_keys=True
-                )
+                json.dump({"version": 1, "retired": entries}, f, indent=2, sort_keys=True)
                 f.write("\n")
             os.replace(tmp, str(self._retired_path))
         except BaseException:
@@ -184,9 +182,7 @@ class BindingStore:
             import importlib.util as _ilu
 
             alert_path = Path(__file__).parent / "alert_store.py"
-            spec = _ilu.spec_from_file_location(
-                "rebar_reconciler.alert_store", alert_path
-            )
+            spec = _ilu.spec_from_file_location("rebar_reconciler.alert_store", alert_path)
             if spec is None or spec.loader is None:
                 return
             alert_mod = _ilu.module_from_spec(spec)
@@ -241,16 +237,12 @@ class BindingStore:
 
     def pending_bindings(self) -> list[str]:
         return [
-            lid
-            for lid, entry in self._data["bindings"].items()
-            if entry.get("state") == "pending"
+            lid for lid, entry in self._data["bindings"].items() if entry.get("state") == "pending"
         ]
 
     def confirmed_count(self) -> int:
         return sum(
-            1
-            for entry in self._data["bindings"].values()
-            if entry.get("state") == "confirmed"
+            1 for entry in self._data["bindings"].values() if entry.get("state") == "confirmed"
         )
 
     # -- mutations ---------------------------------------------------------

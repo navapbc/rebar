@@ -9,10 +9,10 @@ This module is inert on its own; callers are wired by subsequent tasks.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from collections.abc import Callable
 
 
 @dataclass
@@ -111,9 +111,7 @@ def rebase_retry(
         head_after = snapshot_head(repo_root)
         if head_after != head_before:
             # Drift detected — concurrent writer; loop to retry this attempt.
-            last_drift_message = (
-                f"HEAD changed {head_before[:8]}->{head_after[:8]}"
-            )
+            last_drift_message = f"HEAD changed {head_before[:8]}->{head_after[:8]}"
             continue
         return Result(ok=True, value=value)
 

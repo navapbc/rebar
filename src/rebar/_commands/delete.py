@@ -1,6 +1,5 @@
-"""In-process ``delete`` (Tier E E3).
+"""In-process ``delete``.
 
-Ports the bash ``ticket_delete`` (ticket-lib-api.sh) + ``ticket-delete-unlink-scan.py``.
 ``delete`` is a destructive soft-delete: it requires ``--user-approved``, refuses
 when the ticket has non-deleted children, then writes — in ONE atomic commit — an
 UNLINK event for every net-active LINK referencing the ticket, a STATUS(deleted)
@@ -9,10 +8,9 @@ event, an ARCHIVED event, and a ``.tombstone.json`` marker; afterwards it drops 
 ``newly_unblocked``. Idempotent: a re-invocation on an already-tombstoned ticket
 just commits any straggler UNLINKs and exits 0 silently.
 
-Event bytes keep ``json.dump(ensure_ascii=False)`` (unsorted) for parity. Reuses
+Event bytes use ``json.dump(ensure_ascii=False)`` (unsorted). Reuses
 ``rebar.reducer`` (reduce_all_tickets / compute_alias / write_marker),
-``rebar.graph._unblock`` and the resolver. Byte-parity pinned by
-``tests/interfaces/test_e3_delete.py``.
+``rebar.graph._unblock`` and the resolver.
 """
 
 from __future__ import annotations
@@ -27,7 +25,8 @@ import uuid
 from pathlib import Path
 
 from rebar import config
-from rebar._engine_support.output import error_envelope, parse_output, OutputFormatError
+from rebar._commands import scratch
+from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar.graph._unblock import batch_close_operations
 from rebar.reducer import reduce_all_tickets
@@ -68,9 +67,17 @@ def _has_any_link_refs(tracker_path: Path, deleted_id: str) -> bool:
     pattern = "|".join(re.escape(t) for t in search_terms)
     try:
         result = subprocess.run(
-            ["grep", "-rlE", pattern, str(tracker_path),
-             "--include=*-LINK.json", "--include=*-SNAPSHOT.json"],
-            capture_output=True, text=True, check=False,
+            [
+                "grep",
+                "-rlE",
+                pattern,
+                str(tracker_path),
+                "--include=*-LINK.json",
+                "--include=*-SNAPSHOT.json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return True
@@ -83,7 +90,9 @@ def _has_any_link_refs(tracker_path: Path, deleted_id: str) -> bool:
     return False
 
 
-def _write_unlink(source_dir: Path, target_id: str, link_uuid: str, env_id: str, author: str) -> str | None:
+def _write_unlink(
+    source_dir: Path, target_id: str, link_uuid: str, env_id: str, author: str
+) -> str | None:
     if not source_dir.is_dir():
         return None
     ts = time.time_ns()
@@ -174,8 +183,14 @@ def _children(tracker: str, parent_id: str) -> list[str]:
 def _write_event(ticket_dir: str, event_type: str, env_id: str, author: str, data: dict) -> str:
     ts = time.time_ns()
     ev = str(uuid.uuid4())
-    event = {"timestamp": ts, "uuid": ev, "event_type": event_type,
-             "env_id": env_id, "author": author, "data": data}
+    event = {
+        "timestamp": ts,
+        "uuid": ev,
+        "event_type": event_type,
+        "env_id": env_id,
+        "author": author,
+        "data": data,
+    }
     path = os.path.join(ticket_dir, f"{ts}-{ev}-{event_type}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(event, f, ensure_ascii=False)
@@ -184,7 +199,7 @@ def _write_event(ticket_dir: str, event_type: str, env_id: str, author: str, dat
 
 def _rel(tracker: str, path: str) -> str:
     prefix = tracker.rstrip("/") + "/"
-    return path[len(prefix):] if path.startswith(prefix) else path
+    return path[len(prefix) :] if path.startswith(prefix) else path
 
 
 def delete_cli(argv: list[str], *, repo_root=None) -> int:
@@ -222,7 +237,9 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
     if ticket_id is None:
         if fmt == "json":
             sys.stdout.write(
-                json.dumps(error_envelope("ticket_not_found", raw_id, f"Ticket '{raw_id}' not found", 1))
+                json.dumps(
+                    error_envelope("ticket_not_found", raw_id, f"Ticket '{raw_id}' not found", 1)
+                )
                 + "\n"
             )
         sys.stderr.write(f"Error: ticket '{raw_id}' not found\n")
@@ -236,18 +253,15 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
         if children:
             sys.stderr.write(
                 f"Cannot delete ticket '{ticket_id}': has non-deleted children: "
-                + " ".join(children) + "\n"
+                + " ".join(children)
+                + "\n"
             )
             return 1
 
     from rebar._commands import _seam
     from rebar._commands._seam import CommandError
 
-    try:
-        with open(os.path.join(tracker, ".env-id"), encoding="utf-8") as f:
-            env_id = f.read().strip()
-    except OSError:
-        env_id = "unknown"
+    env_id = _seam.env_id(Path(tracker))
     author = _seam.author("Unknown")
 
     # The atomic write+commit aborts loudly on any git failure (a failed commit must
@@ -265,8 +279,14 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
             staged = [_rel(tracker, p) for p in unlink_paths if p]
             if staged:
                 _git(tracker, "add", *staged)
-                _git(tracker, "commit", "-q", "--no-verify", "-m",
-                     f"ticket: UNLINK cleanup for already-deleted {ticket_id}")
+                _git(
+                    tracker,
+                    "commit",
+                    "-q",
+                    "--no-verify",
+                    "-m",
+                    f"ticket: UNLINK cleanup for already-deleted {ticket_id}",
+                )
             return 0
 
         status_path = _write_event(ticket_dir, "STATUS", env_id, author, {"status": "deleted"})
@@ -286,8 +306,9 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
         # store is left exactly as before — no half-deleted, wedged-on-rerun state.
         rels = [_rel(tracker, p) for p in written]
         if rels:
-            subprocess.run(["git", "-C", tracker, "reset", "-q", "--", *rels],
-                           capture_output=True, text=True)
+            subprocess.run(
+                ["git", "-C", tracker, "reset", "-q", "--", *rels], capture_output=True, text=True
+            )
         for p in written:
             try:
                 os.remove(p)
@@ -301,28 +322,17 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
     except Exception:
         pass
 
-    _scratch_cleanup(tracker, ticket_id)
+    scratch.cleanup_for_ticket(os.path.dirname(tracker), ticket_id)
 
     batch = batch_close_operations(ticket_ids=[ticket_id], tracker_dir=tracker)
     unblocked = batch["newly_unblocked"]
 
     if fmt == "json":
         sys.stdout.write(
-            json.dumps({"ticket_id": ticket_id, "deleted": True, "newly_unblocked": unblocked}) + "\n"
+            json.dumps({"ticket_id": ticket_id, "deleted": True, "newly_unblocked": unblocked})
+            + "\n"
         )
     else:
         sys.stdout.write(f"Deleted ticket '{ticket_id}'\n")
         sys.stdout.write(f"UNBLOCKED: {','.join(unblocked) if unblocked else 'none'}\n")
     return 0
-
-
-def _scratch_cleanup(tracker: str, ticket_id: str) -> None:
-    import shutil
-
-    base = os.environ.get("SCRATCH_BASE_DIR") or os.path.join(
-        os.path.dirname(tracker), ".rebar", "scratch"
-    )
-    try:
-        shutil.rmtree(os.path.join(base, ticket_id), ignore_errors=True)
-    except OSError:
-        pass

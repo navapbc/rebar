@@ -53,7 +53,7 @@ ID_D = "dddd-dddd-dddd-dddd"
 def inbound():
     """Import find_inbound_relationships, failing (RED) until it exists."""
     try:
-        from ticket_reducer import find_inbound_relationships  # noqa: WPS433
+        from rebar.reducer import find_inbound_relationships  # noqa: WPS433
     except ImportError as exc:  # pragma: no cover - RED guard
         pytest.fail(
             "ticket_reducer.find_inbound_relationships not importable — "
@@ -122,9 +122,7 @@ def _write_link(
         json.dump(link_event, f)
 
 
-def _write_comment(
-    tracker_dir: Path, ticket_id: str, body: str, timestamp: int = 1700
-) -> None:
+def _write_comment(tracker_dir: Path, ticket_id: str, body: str, timestamp: int = 1700) -> None:
     ticket_dir = tracker_dir / ticket_id
     ticket_dir.mkdir(parents=True, exist_ok=True)
     comment_event = {

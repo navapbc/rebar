@@ -123,9 +123,9 @@ def test_inbound_remove_suppressed_when_outbound_adds_same_label(
     # Inbound must not emit a REMOVE for 'ob-added'.
     for m in result:
         for lm in m.labels:
-            assert not (
-                lm.get("action") == "remove" and lm.get("label") == "ob-added"
-            ), f"Inbound emitted contradictory REMOVE ob-added: {m}"
+            assert not (lm.get("action") == "remove" and lm.get("label") == "ob-added"), (
+                f"Inbound emitted contradictory REMOVE ob-added: {m}"
+            )
     # One label REMOVE was suppressed.
     assert suppressed == 1
 
@@ -168,7 +168,9 @@ def test_inbound_add_suppressed_when_outbound_removes_same_label(
 def test_inbound_scalar_field_suppressed_when_outbound_updates_same_field(
     inbound_differ: ModuleType, outbound_differ: ModuleType
 ) -> None:
-    """Local just changed description; outbound emits update for it; inbound must NOT echo back the old value."""
+    """Local just changed description; outbound emits update for it; inbound must NOT echo back the
+    old value.
+    """
     jira_snapshot = {
         "PROJ-3": {
             "summary": "T",
@@ -451,9 +453,9 @@ def test_combined_field_and_label_suppression_same_jira_key(
             f"Inbound emitted contradictory description update: {m}"
         )
         for lm in m.labels:
-            assert not (
-                lm.get("action") == "remove" and lm.get("label") == "ob-added"
-            ), f"Inbound emitted contradictory REMOVE ob-added: {m}"
+            assert not (lm.get("action") == "remove" and lm.get("label") == "ob-added"), (
+                f"Inbound emitted contradictory REMOVE ob-added: {m}"
+            )
             assert not (lm.get("action") == "add" and lm.get("label") == "ib-add"), (
                 f"Inbound emitted contradictory ADD ib-add: {m}"
             )

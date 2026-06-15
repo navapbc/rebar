@@ -16,7 +16,7 @@ import json
 import sys
 from pathlib import Path
 
-from rebar._commands._seam import append_event, CommandError, tracker_dir
+from rebar._commands._seam import CommandError, append_event, tracker_dir
 from rebar._engine_support.resolver import resolve_ticket_id
 
 _USAGE = (
@@ -58,7 +58,10 @@ def _get_link_info(ticket_dir: Path, target_id: str) -> tuple[str, str]:
         uuid = ev.get("uuid", "")
         if ev_type == "LINK":
             if uuid:
-                active[uuid] = (data.get("target_id", data.get("target", "")), data.get("relation", ""))
+                active[uuid] = (
+                    data.get("target_id", data.get("target", "")),
+                    data.get("relation", ""),
+                )
         else:
             link_uuid = data.get("link_uuid", "")
             if link_uuid:

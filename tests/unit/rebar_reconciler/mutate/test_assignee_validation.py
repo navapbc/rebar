@@ -37,9 +37,7 @@ if "rebar_reconciler.adf" not in sys.modules:
 # (bug 6afc-20ee-84e5-4dd5). Bootstrap it explicitly alongside adf.
 _CL_PATH = SCRIPTS_DIR / "rebar_reconciler" / "comment_limits.py"
 if "rebar_reconciler.comment_limits" not in sys.modules:
-    _cl_spec = importlib.util.spec_from_file_location(
-        "rebar_reconciler.comment_limits", _CL_PATH
-    )
+    _cl_spec = importlib.util.spec_from_file_location("rebar_reconciler.comment_limits", _CL_PATH)
     _cl_mod = importlib.util.module_from_spec(_cl_spec)
     sys.modules["rebar_reconciler.comment_limits"] = _cl_mod
     _cl_spec.loader.exec_module(_cl_mod)
@@ -133,7 +131,7 @@ def test_update_issue_validates_assignee_before_acli_dispatch(acli):
     """When kwargs contains a real assignee, validate first; raise blocks ACLI dispatch."""
     client = _make_client(acli, [])  # No assignable users → validation fails
     with patch.object(acli, "update_issue") as mod_update:
-        with pytest.raises(Exception):
+        with pytest.raises(acli.AssigneeNotFoundError):
             client.update_issue("DIG-300", assignee="bogus@example.com")
         # ACLI module-level update_issue must NOT be called when validation fails.
         mod_update.assert_not_called()

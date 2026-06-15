@@ -193,9 +193,7 @@ class TestReconcileOnceFiltered:
             / "rebar_reconciler"
             / "mutation.py"
         )
-        real_mut_spec = importlib.util.spec_from_file_location(
-            "reconcile_mutation", real_mut_path
-        )
+        real_mut_spec = importlib.util.spec_from_file_location("reconcile_mutation", real_mut_path)
         real_mut = importlib.util.module_from_spec(real_mut_spec)
         real_mut_spec.loader.exec_module(real_mut)
 
@@ -342,9 +340,7 @@ class TestReconcileOnceFiltered:
             # Verify both expected mutations made it through, identified by
             # which provenance field caused the match.
             targets = {m.target for m in applier._applied}
-            assert targets == {"DIG-100", "some-unrelated-key"}, (
-                f"unexpected targets: {targets}"
-            )
+            assert targets == {"DIG-100", "some-unrelated-key"}, f"unexpected targets: {targets}"
         finally:
             for name, orig in originals.items():
                 if orig is None:
@@ -414,7 +410,5 @@ class TestFilterLocalIdsArgParsing:
 
     def test_parse_none_produces_none(self):
         raw = None
-        result = (
-            None if raw is None else {s.strip() for s in raw.split(",") if s.strip()}
-        )
+        result = None if raw is None else {s.strip() for s in raw.split(",") if s.strip()}
         assert result is None

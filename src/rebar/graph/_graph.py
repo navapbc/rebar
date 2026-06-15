@@ -6,7 +6,6 @@ import os
 from typing import Any
 
 from . import _loader as _loader_module
-
 from ._blockers import _find_direct_blockers
 from ._cache import (
     _compute_cache_key,
@@ -47,9 +46,7 @@ def build_dep_graph(
         if cached_graphs is not None and ticket_id in cached_graphs:
             return cached_graphs[ticket_id]
 
-    result = _compute_dep_graph(
-        ticket_id, tracker_dir, exclude_archived=exclude_archived
-    )
+    result = _compute_dep_graph(ticket_id, tracker_dir, exclude_archived=exclude_archived)
 
     if cache_key and exclude_archived:
         cached_graphs = _read_graph_cache(tracker_dir, cache_key) or {}
@@ -63,9 +60,7 @@ def _compute_dep_graph(
     ticket_id: str, tracker_dir: str, exclude_archived: bool = True
 ) -> dict[str, Any]:
     """Compute (without cache) the dependency graph for ticket_id."""
-    all_states_list = _loader_module.reducer.reduce_all_tickets(
-        tracker_dir, exclude_archived=False
-    )
+    all_states_list = _loader_module.reducer.reduce_all_tickets(tracker_dir, exclude_archived=False)
     ticket_states: dict[str, Any] = {}
     for t in all_states_list:
         tid = t.get("ticket_id", "")
@@ -165,10 +160,7 @@ def _get_all_blocked_by(ticket_id: str, tracker_dir: str) -> set[str]:
             if e_state is None or not isinstance(e_state, dict):
                 continue
             for dep in e_state.get("deps", []):
-                if (
-                    dep.get("relation") == "depends_on"
-                    and dep.get("target_id") == current
-                ):
+                if dep.get("relation") == "depends_on" and dep.get("target_id") == current:
                     blocked.add(entry)
                     if entry not in visited:
                         queue.append(entry)
@@ -214,9 +206,7 @@ def check_would_create_cycle(
         return source_id in blocked_by_target
 
 
-def check_cycle_at_level(
-    source_id: str, target_id: str, level: str, tracker_dir: str
-) -> bool:
+def check_cycle_at_level(source_id: str, target_id: str, level: str, tracker_dir: str) -> bool:
     """Return True if adding source_id→target_id would create a cycle at the given level.
 
     A self-loop (source_id == target_id) always returns True.

@@ -25,9 +25,7 @@ from types import ModuleType
 from unittest.mock import MagicMock
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
-)
+RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
 
 _RECONCILE_COLLAB_KEYS = (
     "reconcile_fetcher",
@@ -99,9 +97,7 @@ def _make_stub_invariants(
     """Return (stub_module, drift_spy) where drift_spy records report_schema_drift calls."""
     stub = types.ModuleType("reconcile_invariants")
     stub.check_at_most_one_local_id = MagicMock(return_value=[])
-    stub.check_dual_identity_complete = MagicMock(
-        return_value=(quarantine or set(), seeds or [])
-    )
+    stub.check_dual_identity_complete = MagicMock(return_value=(quarantine or set(), seeds or []))
     drift_spy = MagicMock(return_value=None)
     stub.report_schema_drift = drift_spy
     return stub, drift_spy
@@ -159,9 +155,7 @@ def test_invariant_phase_passes_quarantine_set_to_differ(tmp_path):
 
     assert differ_spy.call_count == 1
     kwargs = differ_spy.call_args.kwargs
-    assert "quarantine_set" in kwargs, (
-        "compute_mutations must be called with quarantine_set kwarg"
-    )
+    assert "quarantine_set" in kwargs, "compute_mutations must be called with quarantine_set kwarg"
     assert kwargs["quarantine_set"] == quarantine
 
 
@@ -204,9 +198,7 @@ def test_invariant_phase_passes_seed_mutations_to_differ(tmp_path):
 
     assert differ_spy.call_count == 1
     kwargs = differ_spy.call_args.kwargs
-    assert "seed_mutations" in kwargs, (
-        "compute_mutations must be called with seed_mutations kwarg"
-    )
+    assert "seed_mutations" in kwargs, "compute_mutations must be called with seed_mutations kwarg"
     assert kwargs["seed_mutations"] == seeds
 
 

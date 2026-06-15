@@ -81,9 +81,7 @@ def test_cache_hit_returns_cached_state(tmp_path: Path, reducer: ModuleType) -> 
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_cache_miss_on_directory_listing_change(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_cache_miss_on_directory_listing_change(tmp_path: Path, reducer: ModuleType) -> None:
     """Adding an event file between calls must invalidate the cache.
 
     Without the fix: without caching, the test structure is valid but the cache-miss
@@ -150,9 +148,7 @@ def test_cache_miss_on_directory_listing_change(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_cache_invalidated_on_file_deletion(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_cache_invalidated_on_file_deletion(tmp_path: Path, reducer: ModuleType) -> None:
     """Deleting an event file between calls must invalidate the cache.
 
     Without the fix: without caching, the second call already sees 0 comments because
@@ -231,9 +227,7 @@ def test_cache_invalidated_on_file_deletion(
     )
 
     # Cache file must be updated after recompute (mtime must change)
-    assert cache_file.exists(), (
-        ".cache.json must still exist after recompute following deletion"
-    )
+    assert cache_file.exists(), ".cache.json must still exist after recompute following deletion"
     mtime_after_recompute = cache_file.stat().st_mtime
     assert mtime_after_recompute != mtime_after_warm, (
         ".cache.json must be updated (mtime changed) after cache-miss recompute "
@@ -253,9 +247,7 @@ def test_cache_invalidated_on_file_deletion(
     os.environ.get("CI") == "true",
     reason="Wall-clock benchmark skipped on CI runners (use @pytest.mark.benchmark exclusion)",
 )
-def test_warm_cache_200_tickets_under_500ms(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_warm_cache_200_tickets_under_500ms(tmp_path: Path, reducer: ModuleType) -> None:
     """200 warm-cache reduce_ticket() calls must complete in under 500ms.
 
     Setup: create 200 ticket directories each with a CREATE event, warm the
@@ -356,9 +348,7 @@ def test_warm_cache_1000_tickets_under_2s(tmp_path: Path, reducer: ModuleType) -
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_cache_miss_on_same_filename_content_change(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_cache_miss_on_same_filename_content_change(tmp_path: Path, reducer: ModuleType) -> None:
     """Overwriting an event file with different content (same filename) must invalidate cache.
 
     This test guards against the filename-only hash bug: if the cache hash
@@ -397,9 +387,7 @@ def test_cache_miss_on_same_filename_content_change(
     # First call — warm cache
     state1 = reducer.reduce_ticket(ticket_dir)
     assert state1 is not None
-    assert state1["title"] == "Original title", (
-        "Setup: first call must return the original title"
-    )
+    assert state1["title"] == "Original title", "Setup: first call must return the original title"
 
     # Overwrite same file with updated title (same filename, different content and size)
     updated_payload = {
@@ -428,9 +416,7 @@ def test_cache_miss_on_same_filename_content_change(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_cache_miss_on_same_size_inplace_rewrite(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_cache_miss_on_same_size_inplace_rewrite(tmp_path: Path, reducer: ModuleType) -> None:
     """A same-byte-length in-place rewrite of an event file must invalidate cache.
 
     Regression guard for bug 1d76-b6d1: the dir-hash keyed on filename+size only

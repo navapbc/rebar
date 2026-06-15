@@ -122,7 +122,9 @@ def _glob_match(path: str, pattern: str) -> bool:
     )
 
 
-def select_reviewers(changed_files: list[str], *, catalog: dict[str, Reviewer] | None = None) -> list[str]:
+def select_reviewers(
+    changed_files: list[str], *, catalog: dict[str, Reviewer] | None = None
+) -> list[str]:
     """Deterministic reviewer selection for a change (the rule layer used by the
     future code-review op). Returns the union of every ``default`` reviewer and
     every reviewer whose ``applies_to`` globs match a changed file, in catalog

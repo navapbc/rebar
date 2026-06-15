@@ -181,9 +181,7 @@ def _emit_mode_manifest(
         return ("RETURN", None)
 
     if mode == mode_mod.Mode.BOOTSTRAP_THROTTLE:
-        rendered = renderer_mod.render_throttle(
-            applied_for_manifest, deferred_for_manifest
-        )
+        rendered = renderer_mod.render_throttle(applied_for_manifest, deferred_for_manifest)
     else:
         # DRY_RUN and BOOTSTRAP_STRICT share the same renderer.
         rendered = renderer_mod.render_dry_run_or_strict(
@@ -227,7 +225,11 @@ def _emit_mode_manifest(
     # the manifest_path is valid; overwrite with the asymmetric shape.
     if manifest_path is None:
         if repo_root is None:
-            repo_root_resolved = Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])
+            repo_root_resolved = Path(
+                os.environ.get("REBAR_ROOT")
+                or os.environ.get("PROJECT_ROOT")
+                or Path(__file__).resolve().parents[4]
+            )
         else:
             repo_root_resolved = repo_root
         snapshots_dir = repo_root_resolved / "bridge_state" / "snapshots"

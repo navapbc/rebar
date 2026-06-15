@@ -80,9 +80,8 @@ def test_sibling_gates_missing_ticket_structured(rebar_repo: Path) -> None:
 def test_link_docstring_lists_all_relations() -> None:
     """rebar.link's docstring must document all six canonical relations
     (sourced from the engine's CANONICAL_RELATIONS — single source of truth)."""
-    from ticket_graph._links import CANONICAL_RELATIONS
-
     import rebar  # noqa: F401
+    from rebar.graph._links import CANONICAL_RELATIONS
 
     doc = rebar.link.__doc__ or ""
     for rel in CANONICAL_RELATIONS:

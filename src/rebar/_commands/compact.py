@@ -1,16 +1,14 @@
-"""In-process ``compact`` / ``compact-all`` (Tier E E3).
+"""In-process ``compact`` / ``compact-all``.
 
-Ports ``ticket-compact.sh`` (+ the ``ticket_compact`` lib-api id resolver) and
-``ticket-compact-all.sh``. compaction squashes a ticket's event log into ONE
-SNAPSHOT event under the unified write lock: re-list events inside the lock,
-partition out forward-compat unknown-type events (never absorbed/deleted),
-re-check the threshold, reduce the current state, write the SNAPSHOT, delete the
-originals, invalidate the reducer cache, and ``git add -A`` + commit atomically.
+Compaction squashes a ticket's event log into ONE SNAPSHOT event under the unified
+write lock: re-list events inside the lock, partition out forward-compat
+unknown-type events (never absorbed/deleted), re-check the threshold, reduce the
+current state, write the SNAPSHOT, delete the originals, invalidate the reducer
+cache, and ``git add -A`` + commit atomically.
 
-Reuses ``rebar._store.lock`` (the fcntl+mkdir dual-leg lock — stiff-mop-lane),
-``rebar.reducer.reduce_ticket`` (in-process, no subprocess), and
-``event_append.event_filename``. SNAPSHOT bytes keep ``json.dump(ensure_ascii=False)``
-(unsorted) for parity. Byte-parity pinned by ``tests/interfaces/test_e3_compact.py``.
+Reuses ``rebar._store.lock`` (the fcntl+mkdir dual-leg lock),
+``rebar.reducer.reduce_ticket`` (in-process), and ``event_append.event_filename``.
+SNAPSHOT bytes use ``json.dump(ensure_ascii=False)`` (unsorted).
 """
 
 from __future__ import annotations
@@ -21,13 +19,13 @@ import subprocess
 import sys
 import time
 import uuid
+from pathlib import Path
 
 from rebar import config
+from rebar._commands import _seam
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._store import event_append, lock
 from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
-
-_DEFAULT_ENV_ID = "00000000-0000-4000-8000-000000000000"
 
 
 def _usage() -> int:
@@ -56,8 +54,7 @@ def _sync_before_compact() -> int:
     if cp.returncode != 0:
         err = (cp.stderr or "").strip()
         sys.stderr.write(
-            f"Error: ticket sync failed (exit {cp.returncode})"
-            f"{': ' + err if err else ''}\n"
+            f"Error: ticket sync failed (exit {cp.returncode}){': ' + err if err else ''}\n"
         )
         return cp.returncode
     return 0
@@ -109,9 +106,7 @@ def _compact_locked(
             return 1
         status = compiled_state.get("status", "")
         if status in ("error", "fsck_needed"):
-            sys.stderr.write(
-                f"Error: ticket {ticket_id} has status '{status}' — cannot compact\n"
-            )
+            sys.stderr.write(f"Error: ticket {ticket_id} has status '{status}' — cannot compact\n")
             return 1
 
         source_uuids = []
@@ -122,11 +117,7 @@ def _compact_locked(
             except (json.JSONDecodeError, OSError):
                 source_uuids.append(os.path.basename(fp))
 
-        try:
-            with open(os.path.join(tracker, ".env-id"), encoding="utf-8") as f:
-                env_id = f.read().strip()
-        except OSError:
-            env_id = _DEFAULT_ENV_ID
+        env_id = _seam.env_id(Path(tracker))
         author = _git_author()
 
         snapshot_uuid = str(uuid.uuid4())
@@ -205,7 +196,7 @@ def compact_cli(argv: list[str], *, repo_root=None) -> int:
     no_commit = False
     for a in argv[1:]:
         if a.startswith("--threshold="):
-            threshold = int(a[len("--threshold="):])
+            threshold = int(a[len("--threshold=") :])
         elif a == "--skip-sync":
             skip_sync = True
         elif a == "--no-commit":
@@ -216,7 +207,10 @@ def compact_cli(argv: list[str], *, repo_root=None) -> int:
 
     if not (
         os.path.isdir(tracker)
-        and (os.path.isfile(os.path.join(tracker, ".git")) or os.path.isdir(os.path.join(tracker, ".git")))
+        and (
+            os.path.isfile(os.path.join(tracker, ".git"))
+            or os.path.isdir(os.path.join(tracker, ".git"))
+        )
     ):
         sys.stderr.write("Error: ticket system not initialized. Run 'ticket init' first.\n")
         return 1
@@ -230,8 +224,7 @@ def compact_cli(argv: list[str], *, repo_root=None) -> int:
         if rc != 0:
             return rc
         if any(
-            f.endswith("-SNAPSHOT.json") and not f.startswith(".")
-            for f in os.listdir(ticket_dir)
+            f.endswith("-SNAPSHOT.json") and not f.startswith(".") for f in os.listdir(ticket_dir)
         ):
             sys.stdout.write(f"skipping compaction for {ticket_id} — remote SNAPSHOT exists\n")
             return 0
@@ -281,7 +274,7 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
         if a == "--dry-run":
             dry_run = True
         elif a.startswith("--limit="):
-            limit = int(a[len("--limit="):])
+            limit = int(a[len("--limit=") :])
         elif a == "--no-commit":
             no_commit = True
         elif a in ("--help", "-h"):
@@ -348,7 +341,11 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
             sys.stdout.write("No staged changes (SNAPSHOTs may already have been committed).\n")
         else:
             _git(
-                tracker, "commit", "-q", "--no-verify", "-m",
+                tracker,
+                "commit",
+                "-q",
+                "--no-verify",
+                "-m",
                 f"chore: backfill SNAPSHOT files for {compacted} tickets (ticket-compact-all)",
             )
             sys.stdout.write("Committed.\n")

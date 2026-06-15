@@ -137,9 +137,7 @@ def _compute_backoff_seconds(retry_index: int) -> float:
         _BACKOFF_BASE_SECONDS * (_BACKOFF_FACTOR**retry_index),
         _BACKOFF_CAP_SECONDS,
     )
-    jitter = random.uniform(
-        1.0 - _BACKOFF_JITTER_FRACTION, 1.0 + _BACKOFF_JITTER_FRACTION
-    )
+    jitter = random.uniform(1.0 - _BACKOFF_JITTER_FRACTION, 1.0 + _BACKOFF_JITTER_FRACTION)
     return base * jitter
 
 
@@ -319,9 +317,7 @@ def release_pass_lock(pass_id: str, repo_root: Path) -> None:
         return
 
     def _delete():
-        _delete_file_from_tickets_branch(
-            repo_root, _LOCK_FILE, f"release lock pass_id={pass_id}"
-        )
+        _delete_file_from_tickets_branch(repo_root, _LOCK_FILE, f"release lock pass_id={pass_id}")
 
     result = _rebase_retry(repo_root, _delete)
     if not result.ok:
@@ -433,9 +429,7 @@ def _cas_backoff_seconds(retry_index: int) -> float:
         _CAS_BACKOFF_BASE_SECONDS * (_BACKOFF_FACTOR**retry_index),
         _CAS_BACKOFF_CAP_SECONDS,
     )
-    jitter = random.uniform(
-        1.0 - _CAS_BACKOFF_JITTER_FRACTION, 1.0 + _CAS_BACKOFF_JITTER_FRACTION
-    )
+    jitter = random.uniform(1.0 - _CAS_BACKOFF_JITTER_FRACTION, 1.0 + _CAS_BACKOFF_JITTER_FRACTION)
     return base * jitter
 
 
@@ -554,13 +548,12 @@ def _write_file_to_tickets_branch(
                 check=False,
             )
             import shutil as _shutil_preflight
+
             _shutil_preflight.rmtree(worktree_dir, ignore_errors=True)
         try:
             # --detach avoids "fatal: 'tickets' is already used by worktree at ..."
             # when a sibling worktree (e.g. .tickets-tracker) has tickets checked out.
-            _git_run(
-                repo_root, ["worktree", "add", "--detach", str(worktree_dir), "tickets"]
-            )
+            _git_run(repo_root, ["worktree", "add", "--detach", str(worktree_dir), "tickets"])
             file_path = worktree_dir / filename
             file_path.write_text(contents)
             _git_run_in(worktree_dir, ["add", filename])
@@ -593,9 +586,7 @@ def _write_file_to_tickets_branch(
                 )
         finally:
             try:
-                _git_run(
-                    repo_root, ["worktree", "remove", "--force", str(worktree_dir)]
-                )
+                _git_run(repo_root, ["worktree", "remove", "--force", str(worktree_dir)])
             except subprocess.CalledProcessError:
                 # Best-effort cleanup: if the worktree remove fails (e.g. already
                 # gone), ignore it — rmtree below will still clean up the temp dir.
@@ -605,9 +596,7 @@ def _write_file_to_tickets_branch(
     _cas_advance_with_retry(repo_root, _mutate_and_advance)
 
 
-def _delete_file_from_tickets_branch(
-    repo_root: Path, filename: str, commit_message: str
-) -> None:
+def _delete_file_from_tickets_branch(repo_root: Path, filename: str, commit_message: str) -> None:
     """Delete *filename* from the tickets orphan branch.
 
     Uses a temporary git worktree so the main branch pointer is unchanged.
@@ -664,13 +653,12 @@ def _delete_file_from_tickets_branch(
                 check=False,
             )
             import shutil as _shutil_preflight
+
             _shutil_preflight.rmtree(worktree_dir, ignore_errors=True)
         try:
             # --detach avoids "fatal: 'tickets' is already used by worktree at ..."
             # when a sibling worktree (e.g. .tickets-tracker) has tickets checked out.
-            _git_run(
-                repo_root, ["worktree", "add", "--detach", str(worktree_dir), "tickets"]
-            )
+            _git_run(repo_root, ["worktree", "add", "--detach", str(worktree_dir), "tickets"])
             file_path = worktree_dir / filename
             if file_path.exists():
                 _git_run_in(worktree_dir, ["rm", "-f", filename])
@@ -694,9 +682,7 @@ def _delete_file_from_tickets_branch(
                 )
         finally:
             try:
-                _git_run(
-                    repo_root, ["worktree", "remove", "--force", str(worktree_dir)]
-                )
+                _git_run(repo_root, ["worktree", "remove", "--force", str(worktree_dir)])
             except subprocess.CalledProcessError:
                 # Best-effort cleanup: if the worktree remove fails (e.g. already
                 # gone), ignore it — rmtree below will still clean up the temp dir.

@@ -139,8 +139,7 @@ def load(name: str) -> dict[str, Any]:
 def names() -> list[str]:
     """Every schema name shipped in this package (sans the ``.schema.json``)."""
     return sorted(
-        p.name[: -len(".schema.json")]
-        for p in Path(str(files(__package__))).glob("*.schema.json")
+        p.name[: -len(".schema.json")] for p in Path(str(files(__package__))).glob("*.schema.json")
     )
 
 

@@ -23,6 +23,8 @@ stdlib-only; running needs the ``nava-rebar[agents]`` extra + ``ANTHROPIC_API_KE
 
 from __future__ import annotations
 
+from rebar.llm.aggregate import aggregate_findings
+from rebar.llm.code_review import review_code, select_code_reviewers
 from rebar.llm.config import (
     LLMConfig,
     agents_extra_installed,
@@ -34,19 +36,17 @@ from rebar.llm.errors import (
     LLMRunnerError,
     StructuredOutputError,
 )
-from rebar.llm.aggregate import aggregate_findings
-from rebar.llm.code_review import review_code, select_code_reviewers
 from rebar.llm.findings import build_result, normalize_finding, validate_result
 from rebar.llm.operations import review_ticket, select_reviewers
 from rebar.llm.prompts import Reviewer, get_reviewer, load_catalog
-from rebar.llm.spec_scan import scan_epics_for_spec
 from rebar.llm.runner import (
     DeepAgentsRunner,
     FakeRunner,
-    RunRequest,
     Runner,
+    RunRequest,
     get_runner,
 )
+from rebar.llm.spec_scan import scan_epics_for_spec
 
 __all__ = [
     # operations

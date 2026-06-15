@@ -31,9 +31,7 @@ from unittest.mock import patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-FETCHER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
-)
+FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
 
 
 def _load_fetcher():
@@ -68,12 +66,8 @@ class _JqlRoutedClient:
         self._page_size = page_size
         self.calls: list[dict] = []
 
-    def search_issues(
-        self, jql: str, start_at: int = 0, max_results: int = 50
-    ) -> list[dict]:
-        self.calls.append(
-            {"jql": jql, "start_at": start_at, "max_results": max_results}
-        )
+    def search_issues(self, jql: str, start_at: int = 0, max_results: int = 50) -> list[dict]:
+        self.calls.append({"jql": jql, "start_at": start_at, "max_results": max_results})
         size = self._sizes.get(jql, 0)
         if start_at >= size:
             return []
@@ -98,9 +92,7 @@ def test_both_split_jqls_issued_in_order_active_then_done(tmp_path, fetcher):
             fetcher.JQL_DONE_RECENT: 80,
         }
     )
-    with patch.object(
-        fetcher, "_load_acli", return_value=_make_acli_module_returning(client)
-    ):
+    with patch.object(fetcher, "_load_acli", return_value=_make_acli_module_returning(client)):
         fetcher.fetch_snapshot("split-order-test", repo_root=tmp_path)
 
     # First call must use the active JQL; later calls switch to Done-recent.
@@ -108,19 +100,14 @@ def test_both_split_jqls_issued_in_order_active_then_done(tmp_path, fetcher):
         f"Expected first call to use active JQL; got {client.calls[0]['jql']!r}"
     )
     seen_jqls_in_order = [c["jql"] for c in client.calls]
-    active_indices = [
-        i for i, j in enumerate(seen_jqls_in_order) if j == fetcher.JQL_ACTIVE
-    ]
-    done_indices = [
-        i for i, j in enumerate(seen_jqls_in_order) if j == fetcher.JQL_DONE_RECENT
-    ]
+    active_indices = [i for i, j in enumerate(seen_jqls_in_order) if j == fetcher.JQL_ACTIVE]
+    done_indices = [i for i, j in enumerate(seen_jqls_in_order) if j == fetcher.JQL_DONE_RECENT]
     # Both queries reached — guard before calling max/min on indices.
     # (Without these guards the assertion below would crash with ValueError
     # instead of a diagnostic assertion failure if a regression caused Q1
     # to raise before Q2 began.)
     assert active_indices, (
-        f"Active JQL never reached search_issues. JQL sequence: "
-        f"{seen_jqls_in_order!r}"
+        f"Active JQL never reached search_issues. JQL sequence: {seen_jqls_in_order!r}"
     )
     assert done_indices, (
         f"Done-recent JQL never reached search_issues — Q1 likely raised "
@@ -145,9 +132,7 @@ def test_done_query_capped_at_done_recent_cap(tmp_path, fetcher):
             fetcher.JQL_DONE_RECENT: cap + 100,  # 100 more than the cap
         }
     )
-    with patch.object(
-        fetcher, "_load_acli", return_value=_make_acli_module_returning(client)
-    ):
+    with patch.object(fetcher, "_load_acli", return_value=_make_acli_module_returning(client)):
         out_path = fetcher.fetch_snapshot("done-cap-test", repo_root=tmp_path)
 
     # Count Done issues consumed = sum of max_results actually returned for Done JQL.
@@ -178,9 +163,7 @@ def test_active_query_uncapped_consumes_everything_under_ceiling(tmp_path, fetch
             fetcher.JQL_DONE_RECENT: 0,
         }
     )
-    with patch.object(
-        fetcher, "_load_acli", return_value=_make_acli_module_returning(client)
-    ):
+    with patch.object(fetcher, "_load_acli", return_value=_make_acli_module_returning(client)):
         out_path = fetcher.fetch_snapshot("active-uncapped-test", repo_root=tmp_path)
 
     import json as _json
@@ -188,8 +171,7 @@ def test_active_query_uncapped_consumes_everything_under_ceiling(tmp_path, fetch
     snapshot = _json.loads(out_path.read_text())
     active_in_snapshot = [k for k in snapshot if k.startswith("DIG-ACT-")]
     assert len(active_in_snapshot) == 1100, (
-        f"Active query should consume all 1100 stub issues; "
-        f"snapshot has {len(active_in_snapshot)}"
+        f"Active query should consume all 1100 stub issues; snapshot has {len(active_in_snapshot)}"
     )
 
 

@@ -106,9 +106,7 @@ def test_ticket_type_mismatch_does_not_emit_inbound_mutation(
         local_tickets_by_id=local_tickets,
     )
 
-    assert result == [], (
-        f"inbound differ leaked ticket_type mutation: {result}"
-    )
+    assert result == [], f"inbound differ leaked ticket_type mutation: {result}"
     assert suppressed == 0
 
 
@@ -208,9 +206,7 @@ def test_outbound_excludes_issuetype_from_update_mutations(
     # issuetype in the fields. Both are acceptable; what's NOT
     # acceptable is an issuetype emission.
     for m in result:
-        assert "issuetype" not in m.fields, (
-            f"outbound update leaked issuetype: {m.fields}"
-        )
+        assert "issuetype" not in m.fields, f"outbound update leaked issuetype: {m.fields}"
 
 
 def test_outbound_create_still_includes_issuetype(

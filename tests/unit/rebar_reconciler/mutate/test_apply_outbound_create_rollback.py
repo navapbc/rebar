@@ -20,12 +20,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
-MUTATION_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
 
 
 def _load_module(name: str, path: Path):
@@ -51,7 +47,9 @@ def mutation_mod(applier):
     return applier._load_mutation_module()
 
 
-def _make_outbound_create_mutation(mutation_mod, *, target: str = "LOCAL-A", key_hint: str = "PROJ-1"):
+def _make_outbound_create_mutation(
+    mutation_mod, *, target: str = "LOCAL-A", key_hint: str = "PROJ-1"
+):
     return mutation_mod.Mutation(
         direction=mutation_mod.MutationDirection.outbound,
         action=mutation_mod.MutationAction.create,
@@ -69,6 +67,7 @@ def test_rollback_invokes_delete_via_call_with_retry(applier, mutation_mod):
     mutation = _make_outbound_create_mutation(mutation_mod)
 
     from rebar_reconciler import apply_outbound  # point-of-use: leaf calls retry here
+
     real_call_with_retry = apply_outbound._call_with_retry
     captured: list[tuple] = []
 

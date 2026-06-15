@@ -24,9 +24,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_applier():
@@ -44,8 +42,7 @@ def applier():
     """Load the applier module, failing all tests if absent."""
     if not APPLIER_PATH.exists():
         pytest.fail(
-            f"applier.py not found at {APPLIER_PATH} — "
-            "implement the module to make tests pass."
+            f"applier.py not found at {APPLIER_PATH} — implement the module to make tests pass."
         )
     return _load_applier()
 
@@ -117,8 +114,10 @@ def test_drift_mid_pass_raises_head_drift_error(tmp_path, applier):
         {"action": "update", "key": "DSO-11", "fields": {"summary": "second"}},
     ]
 
-    with patch.object(applier, "_load_acli", return_value=mock_acli_mod), \
-         patch.object(applier, "_load_concurrency", return_value=mock_concurrency):
+    with (
+        patch.object(applier, "_load_acli", return_value=mock_acli_mod),
+        patch.object(applier, "_load_concurrency", return_value=mock_concurrency),
+    ):
         with pytest.raises(applier.HeadDriftError):
             applier.apply(mutations, "pass-drift-01", repo_root=tmp_path)
 
@@ -138,8 +137,10 @@ def test_drift_mid_pass_no_jira_call_after_drift(tmp_path, applier):
         {"action": "update", "key": "DSO-11", "fields": {"summary": "second"}},
     ]
 
-    with patch.object(applier, "_load_acli", return_value=mock_acli_mod), \
-         patch.object(applier, "_load_concurrency", return_value=mock_concurrency):
+    with (
+        patch.object(applier, "_load_acli", return_value=mock_acli_mod),
+        patch.object(applier, "_load_concurrency", return_value=mock_concurrency),
+    ):
         with pytest.raises(applier.HeadDriftError):
             applier.apply(mutations, "pass-drift-02", repo_root=tmp_path)
 
@@ -182,8 +183,10 @@ def test_empty_mutations_no_head_check(tmp_path, applier):
     mock_concurrency.snapshot_head = _fake_snapshot_head  # type: ignore[attr-defined]
     mock_concurrency.rebase_retry = _fake_rebase_retry  # type: ignore[attr-defined]
 
-    with patch.object(applier, "_load_acli", return_value=mock_acli_mod), \
-         patch.object(applier, "_load_concurrency", return_value=mock_concurrency):
+    with (
+        patch.object(applier, "_load_acli", return_value=mock_acli_mod),
+        patch.object(applier, "_load_concurrency", return_value=mock_concurrency),
+    ):
         manifest_path = applier.apply([], "pass-empty-01", repo_root=tmp_path)
 
     assert direct_snapshot_calls == [], (
@@ -208,8 +211,10 @@ def test_stable_head_all_mutations_dispatched(tmp_path, applier):
         {"action": "delete", "key": "DSO-22"},
     ]
 
-    with patch.object(applier, "_load_acli", return_value=mock_acli_mod), \
-         patch.object(applier, "_load_concurrency", return_value=mock_concurrency):
+    with (
+        patch.object(applier, "_load_acli", return_value=mock_acli_mod),
+        patch.object(applier, "_load_concurrency", return_value=mock_concurrency),
+    ):
         manifest_path = applier.apply(mutations, "pass-stable-01", repo_root=tmp_path)
 
     # All three mutations should have been dispatched

@@ -53,9 +53,7 @@ class StubBindingStore:
 
 
 def _make_jira_snapshot_with_comments(jira_key: str, comment_bodies: list[str]) -> dict:
-    jira_comments = [
-        {"id": str(100 + i), "body": body} for i, body in enumerate(comment_bodies)
-    ]
+    jira_comments = [{"id": str(100 + i), "body": body} for i, body in enumerate(comment_bodies)]
     return {
         jira_key: {
             "summary": "Some issue",
@@ -132,9 +130,7 @@ def test_human_comment_still_emitted_alongside_excluded_marker(
     comment_mutations = [m for m in result if m.comments]
     assert len(comment_mutations) == 1
     emitted = comment_mutations[0].comments
-    assert len(emitted) == 1, (
-        f"Exactly one (human) comment should be emitted; got {emitted}"
-    )
+    assert len(emitted) == 1, f"Exactly one (human) comment should be emitted; got {emitted}"
     assert human_body in emitted[0]["body"]
     assert "BRIDGE_CANARY_ALERT" not in emitted[0]["body"]
 
@@ -149,8 +145,8 @@ def test_bridge_canary_alert_comments_not_emitted(
     (20+ observed on DIG-5383). Two such comments with DIFFERENT timestamps must
     BOTH be excluded from outbound sync — proving the re-emitter is killed."""
     jira_key = "DIG-5383"
-    c1 = "BRIDGE_CANARY_ALERT: Still stale as of 2026-06-04T20:42:59Z: Last successful run was 3h ago."
-    c2 = "BRIDGE_CANARY_ALERT: Still stale as of 2026-06-04T23:29:33Z: Last successful run was 6h ago."
+    c1 = "BRIDGE_CANARY_ALERT: Still stale as of 2026-06-04T20:42:59Z: Last successful run was 3h ago."  # noqa: E501 — exact canary fixture string
+    c2 = "BRIDGE_CANARY_ALERT: Still stale as of 2026-06-04T23:29:33Z: Last successful run was 6h ago."  # noqa: E501 — exact canary fixture string
     ticket = _make_ticket_with_comments("local-canary", [c1, c2])
     store = StubBindingStore({"local-canary": jira_key})
     snapshot = _make_jira_snapshot_with_comments(jira_key, [])
@@ -178,7 +174,7 @@ def test_legacy_unmarked_canary_comment_not_emitted(
     prefix, or it keeps re-emitting (DIG-5383 observed still re-emitting after
     the marker-only fix landed)."""
     jira_key = "DIG-5383"
-    legacy = "Still stale as of 2026-06-04T23:29:33Z: Last successful run was 6h 12m ago (threshold: 2h). Run: https://example/actions/runs/1"
+    legacy = "Still stale as of 2026-06-04T23:29:33Z: Last successful run was 6h 12m ago (threshold: 2h). Run: https://example/actions/runs/1"  # noqa: E501 — exact legacy-canary fixture (embedded URL)
     ticket = _make_ticket_with_comments("local-legacy-canary", [legacy])
     store = StubBindingStore({"local-legacy-canary": jira_key})
     snapshot = _make_jira_snapshot_with_comments(jira_key, [])

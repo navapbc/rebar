@@ -29,12 +29,8 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
-CONCURRENCY_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_concurrency.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+CONCURRENCY_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_concurrency.py"
 
 
 def _load_applier():
@@ -61,8 +57,7 @@ def applier():
     """Load the applier module, failing all tests if absent."""
     if not APPLIER_PATH.exists():
         pytest.fail(
-            f"applier.py not found at {APPLIER_PATH} — "
-            "implement the module to make tests pass."
+            f"applier.py not found at {APPLIER_PATH} — implement the module to make tests pass."
         )
     return _load_applier()
 
@@ -137,8 +132,10 @@ def test_apply_raises_reschedule_error_on_exhaustion(tmp_path, applier, concurre
     mock_acli_mod, _ = _make_mock_acli_module()
     fake_concurrency = _make_exhaustion_concurrency(concurrency)
 
-    with patch.object(applier, "_load_acli", return_value=mock_acli_mod), \
-         patch.object(applier, "_load_concurrency", return_value=fake_concurrency):
+    with (
+        patch.object(applier, "_load_acli", return_value=mock_acli_mod),
+        patch.object(applier, "_load_concurrency", return_value=fake_concurrency),
+    ):
         with pytest.raises(applier.RescheduleError) as exc_info:
             applier.apply([], pass_id, repo_root=tmp_path)
 
@@ -151,9 +148,7 @@ def test_apply_raises_reschedule_error_on_exhaustion(tmp_path, applier, concurre
     )
 
 
-def test_apply_emits_health_event_to_stderr_on_exhaustion(
-    tmp_path, applier, concurrency, capsys
-):
+def test_apply_emits_health_event_to_stderr_on_exhaustion(tmp_path, applier, concurrency, capsys):
     """apply() emits a JSON health event to stderr before raising RescheduleError.
 
     The event must include: kind='reject_and_reschedule', attempt_count, last_error.
@@ -162,8 +157,10 @@ def test_apply_emits_health_event_to_stderr_on_exhaustion(
     mock_acli_mod, _ = _make_mock_acli_module()
     fake_concurrency = _make_exhaustion_concurrency(concurrency)
 
-    with patch.object(applier, "_load_acli", return_value=mock_acli_mod), \
-         patch.object(applier, "_load_concurrency", return_value=fake_concurrency):
+    with (
+        patch.object(applier, "_load_acli", return_value=mock_acli_mod),
+        patch.object(applier, "_load_concurrency", return_value=fake_concurrency),
+    ):
         with pytest.raises(applier.RescheduleError):
             applier.apply([], pass_id, repo_root=tmp_path)
 
@@ -193,15 +190,18 @@ def test_no_retry_counter_file_written_after_exhaustion(tmp_path, applier, concu
     mock_acli_mod, _ = _make_mock_acli_module()
     fake_concurrency = _make_exhaustion_concurrency(concurrency)
 
-    with patch.object(applier, "_load_acli", return_value=mock_acli_mod), \
-         patch.object(applier, "_load_concurrency", return_value=fake_concurrency):
+    with (
+        patch.object(applier, "_load_acli", return_value=mock_acli_mod),
+        patch.object(applier, "_load_concurrency", return_value=fake_concurrency),
+    ):
         with pytest.raises(applier.RescheduleError):
             applier.apply([], pass_id, repo_root=tmp_path)
 
     # Collect all files written under tmp_path
     all_files = list(tmp_path.rglob("*"))
     counter_files = [
-        f for f in all_files
+        f
+        for f in all_files
         if f.is_file() and "retry" in f.name.lower() and "counter" in f.name.lower()
     ]
     assert counter_files == [], (
@@ -210,10 +210,10 @@ def test_no_retry_counter_file_written_after_exhaustion(tmp_path, applier, concu
 
     # Also assert no file with 'retry_count' or similar suffix anywhere
     retry_state_files = [
-        f for f in all_files
-        if f.is_file() and any(
-            tok in f.name.lower() for tok in ("retry_count", "retry-count", "attempt_count")
-        )
+        f
+        for f in all_files
+        if f.is_file()
+        and any(tok in f.name.lower() for tok in ("retry_count", "retry-count", "attempt_count"))
     ]
     assert retry_state_files == [], (
         f"No retry-state file should persist across passes, found: {retry_state_files}"
@@ -237,22 +237,25 @@ def test_pass_n_plus_1_succeeds_with_no_residual_state(tmp_path, applier, concur
 
     # ---- Pass N: exhaustion scenario ----
     fake_exhaustion = _make_exhaustion_concurrency(concurrency)
-    with patch.object(applier, "_load_acli", return_value=mock_acli_mod), \
-         patch.object(applier, "_load_concurrency", return_value=fake_exhaustion):
+    with (
+        patch.object(applier, "_load_acli", return_value=mock_acli_mod),
+        patch.object(applier, "_load_concurrency", return_value=fake_exhaustion),
+    ):
         with pytest.raises(applier.RescheduleError):
             applier.apply([], pass_n_id, repo_root=tmp_path)
 
     # The manifest for pass N should have been written (idempotency guarantee)
     manifest_n = tmp_path / "bridge_state" / "snapshots" / f"{pass_n_id}.manifest.json"
     assert manifest_n.exists(), (
-        f"Pass N manifest must be on disk after exhaustion (idempotency), "
-        f"path: {manifest_n}"
+        f"Pass N manifest must be on disk after exhaustion (idempotency), path: {manifest_n}"
     )
 
     # ---- Pass N+1: success scenario (contention removed) ----
     fake_success = _make_success_concurrency(concurrency)
-    with patch.object(applier, "_load_acli", return_value=mock_acli_mod), \
-         patch.object(applier, "_load_concurrency", return_value=fake_success):
+    with (
+        patch.object(applier, "_load_acli", return_value=mock_acli_mod),
+        patch.object(applier, "_load_concurrency", return_value=fake_success),
+    ):
         result_path = applier.apply([], pass_n1_id, repo_root=tmp_path)
 
     manifest_n1 = tmp_path / "bridge_state" / "snapshots" / f"{pass_n1_id}.manifest.json"

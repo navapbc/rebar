@@ -78,8 +78,14 @@ def _do_reconverge(tracker: str) -> None:
         return
 
     # Diverged → merge-as-union. Conflict → abort, keep local, hint fsck.
-    merge = _git(tracker, "merge", "origin/tickets", "--no-edit",
-                 "-m", "Merge origin/tickets (auto-reconcile during sync)")
+    merge = _git(
+        tracker,
+        "merge",
+        "origin/tickets",
+        "--no-edit",
+        "-m",
+        "Merge origin/tickets (auto-reconcile during sync)",
+    )
     if merge.returncode != 0:
         _git(tracker, "merge", "--abort")
         print(

@@ -18,9 +18,7 @@ from unittest.mock import MagicMock
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 MUTATION_PATH = APPLIER_PATH.parent / "mutation.py"
 
 
@@ -79,9 +77,7 @@ def fixture_repo(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _make_mutation(
-    mut_mod, *, direction, action, target, payload=None, provenance=None
-):
+def _make_mutation(mut_mod, *, direction, action, target, payload=None, provenance=None):
     return mut_mod.Mutation(
         direction=direction,
         action=action,
@@ -203,18 +199,14 @@ def test_inbound_update_writes_edit_event(applier, mut_mod, fixture_repo):
 
     tracker = fixture_repo / ".tickets-tracker"
     edits = [
-        json.loads(p.read_text())
-        for p in _event_files(tracker, "jira-dig-123")
-        if "EDIT" in p.name
+        json.loads(p.read_text()) for p in _event_files(tracker, "jira-dig-123") if "EDIT" in p.name
     ]
     assert edits, "expected at least one EDIT event"
     assert edits[-1]["data"]["fields"]["title"] == "Y"
     assert result.payload["local_id"] == "jira-dig-123"
 
 
-def test_inbound_update_status_event_uses_previous_status_not_new(
-    applier, mut_mod, fixture_repo
-):
+def test_inbound_update_status_event_uses_previous_status_not_new(applier, mut_mod, fixture_repo):
     """STATUS event's current_status must be the PREVIOUS state, not the new
     one (PR #375 review thread 3306949587). The reducer compares
     data['current_status'] against state['status'] to detect forks — setting
@@ -311,9 +303,7 @@ def test_inbound_delete_branches(applier, mut_mod, fixture_repo, outcome):
         assert any("COMMENT" in p.name for p in events)
 
 
-def test_inbound_delete_redirect_raises_when_destination_exists(
-    applier, mut_mod, fixture_repo
-):
+def test_inbound_delete_redirect_raises_when_destination_exists(applier, mut_mod, fixture_repo):
     """Redirect branch must NOT silently skip the rename when both src and
     dst already exist on disk (PR #375 review thread 3307104042). Silent
     skip leaves both directories present — an inconsistent state that
@@ -374,9 +364,7 @@ def test_inbound_repair_property_invokes_client(applier, mut_mod):
 # ---------------------------------------------------------------------------
 
 
-def test_inbound_conflict_emits_suppress_pair(
-    applier, mut_mod, fixture_repo, monkeypatch
-):
+def test_inbound_conflict_emits_suppress_pair(applier, mut_mod, fixture_repo, monkeypatch):
     # Make the bug-file subprocess a no-op so the test does not depend on the
     # ticket CLI being available inside the fixture tree.
     called = {}
@@ -443,16 +431,12 @@ def test_apply_honours_suppress_pair_drops_subsequent_inbound(
         payload={"fields": {"summary": "STOMP-2"}},
     )
 
-    applier.apply(
-        [conflict, update_1, update_2], pass_id="test-pass", repo_root=fixture_repo
-    )
+    applier.apply([conflict, update_1, update_2], pass_id="test-pass", repo_root=fixture_repo)
 
     # The two STOMP updates should NOT have produced EDIT events.
     tracker = fixture_repo / ".tickets-tracker"
     edits = [
-        json.loads(p.read_text())
-        for p in _event_files(tracker, "jira-dig-7")
-        if "EDIT" in p.name
+        json.loads(p.read_text()) for p in _event_files(tracker, "jira-dig-7") if "EDIT" in p.name
     ]
     titles = [e["data"]["fields"].get("title", "") for e in edits]
     assert "STOMP-1" not in titles
@@ -503,9 +487,7 @@ def test_apply_honours_suppress_pair_drops_subsequent_inbound_via_computed_form(
 
     tracker = fixture_repo / ".tickets-tracker"
     edits = [
-        json.loads(p.read_text())
-        for p in _event_files(tracker, "jira-dig-7")
-        if "EDIT" in p.name
+        json.loads(p.read_text()) for p in _event_files(tracker, "jira-dig-7") if "EDIT" in p.name
     ]
     titles = [e["data"]["fields"].get("title", "") for e in edits]
     assert "SHOULD-BE-DROPPED" not in titles
@@ -657,9 +639,7 @@ def test_inbound_update_accepts_flat_payload(applier, mut_mod, fixture_repo):
     applier._apply_typed(update_mut, repo_root=fixture_repo)
     tracker = fixture_repo / ".tickets-tracker"
     edits = [
-        json.loads(p.read_text())
-        for p in _event_files(tracker, "jira-dig-502")
-        if "EDIT" in p.name
+        json.loads(p.read_text()) for p in _event_files(tracker, "jira-dig-502") if "EDIT" in p.name
     ]
     assert edits
     assert edits[-1]["data"]["fields"]["title"] == "Updated flat"
@@ -723,9 +703,7 @@ def test_inbound_update_extracts_nested_jira_objects(applier, mut_mod, fixture_r
     applier._apply_typed(update_mut, repo_root=fixture_repo)
     tracker = fixture_repo / ".tickets-tracker"
     edits = [
-        json.loads(p.read_text())
-        for p in _event_files(tracker, "jira-dig-601")
-        if "EDIT" in p.name
+        json.loads(p.read_text()) for p in _event_files(tracker, "jira-dig-601") if "EDIT" in p.name
     ]
     assert edits
     fields = edits[-1]["data"]["fields"]
@@ -759,9 +737,7 @@ def test_inbound_create_writes_back_jira_dedup_markers(applier, mut_mod, fixture
     local_id = "jira-dig-700"
     assert result.payload["local_id"] == local_id
     client.add_label.assert_called_once_with("DIG-700", f"rebar-id:{local_id}")
-    client.set_entity_property.assert_called_once_with(
-        "DIG-700", "local_id", local_id
-    )
+    client.set_entity_property.assert_called_once_with("DIG-700", "local_id", local_id)
 
 
 @pytest.mark.parametrize(
@@ -769,8 +745,8 @@ def test_inbound_create_writes_back_jira_dedup_markers(applier, mut_mod, fixture
     [
         (0, 0),
         (4, 4),
-        (99, 2),    # out-of-range clamps to default
-        (-1, 2),    # negative clamps to default
+        (99, 2),  # out-of-range clamps to default
+        (-1, 2),  # negative clamps to default
     ],
 )
 def test_inbound_create_clamps_out_of_range_integer_priority(
@@ -826,9 +802,7 @@ def test_inbound_create_no_writeback_without_client(applier, mut_mod, fixture_re
 
 def _read_status_events(tracker_dir: Path, local_id: str) -> list[dict]:
     return [
-        json.loads(p.read_text())
-        for p in _event_files(tracker_dir, local_id)
-        if "STATUS" in p.name
+        json.loads(p.read_text()) for p in _event_files(tracker_dir, local_id) if "STATUS" in p.name
     ]
 
 
@@ -896,8 +870,7 @@ def test_inbound_create_rebar_status_label_overrides_workflow_status(
     assert [e["data"]["status"] for e in events] == ["blocked"]
     create_ev = _read_create(tracker, "jira-dig-911")
     assert create_ev["data"]["tags"] == ["team-x", "imported:reconciler-bootstrap"], (
-        "bridge-internal labels (rebar-id:*, rebar-status:*) must not leak "
-        "into local tags"
+        "bridge-internal labels (rebar-id:*, rebar-status:*) must not leak into local tags"
     )
 
 
@@ -959,9 +932,7 @@ def test_inbound_create_binds_at_creation(applier, mut_mod, fixture_repo):
         target="DIG-913",
         payload={"fields": {"summary": "bind me", "issuetype": "Task"}},
     )
-    result = applier._apply_typed(
-        mutation, repo_root=fixture_repo, binding_store=store
-    )
+    result = applier._apply_typed(mutation, repo_root=fixture_repo, binding_store=store)
     assert result.payload["local_id"] == "jira-dig-913"
     assert store.confirmed == {"jira-dig-913": "DIG-913"}
 
@@ -984,9 +955,7 @@ def test_inbound_create_tolerates_store_without_bind_confirm(
         target="DIG-914",
         payload={"fields": {"summary": "legacy store", "issuetype": "Task"}},
     )
-    result = applier._apply_typed(
-        mutation, repo_root=fixture_repo, binding_store=_LegacyStore()
-    )
+    result = applier._apply_typed(mutation, repo_root=fixture_repo, binding_store=_LegacyStore())
     assert result.payload["local_id"] == "jira-dig-914"
     assert (fixture_repo / ".tickets-tracker" / "jira-dig-914").exists()
     assert "lacks bind_confirm" in capsys.readouterr().err

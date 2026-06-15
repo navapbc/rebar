@@ -25,15 +25,11 @@ from unittest.mock import MagicMock
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_applier():
-    spec = importlib.util.spec_from_file_location(
-        "applier_update_one_filter", APPLIER_PATH
-    )
+    spec = importlib.util.spec_from_file_location("applier_update_one_filter", APPLIER_PATH)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules["applier_update_one_filter"] = mod
@@ -49,7 +45,7 @@ def applier():
 
 
 def test_update_one_strips_issuetype(applier):
-    """update_one must NOT pass issuetype to client.update_issue (ACLI rejects --issuetype on edit)."""
+    """update_one must NOT pass issuetype to client.update_issue (ACLI rejects it on edit)."""
     client = MagicMock()
     client.update_issue.return_value = None
     mutation = {
@@ -88,7 +84,9 @@ def test_update_one_keeps_allowlisted_fields(applier):
     applier.update_one(mutation, client)
     _, kwargs = client.update_issue.call_args
     for f in ("summary", "description", "priority", "assignee"):
-        assert f in kwargs, f"allowlisted field {f} must reach client.update_issue; kwargs={kwargs!r}"
+        assert f in kwargs, (
+            f"allowlisted field {f} must reach client.update_issue; kwargs={kwargs!r}"
+        )
 
 
 def test_update_one_forwards_status_to_client(applier):
@@ -110,8 +108,7 @@ def test_update_one_forwards_status_to_client(applier):
     applier.update_one(mutation, client)
     _, kwargs = client.update_issue.call_args
     assert kwargs.get("status") == "Blocked", (
-        f"status must reach client.update_issue (no BY_DESIGN drop); "
-        f"got kwargs={kwargs!r}"
+        f"status must reach client.update_issue (no BY_DESIGN drop); got kwargs={kwargs!r}"
     )
 
 

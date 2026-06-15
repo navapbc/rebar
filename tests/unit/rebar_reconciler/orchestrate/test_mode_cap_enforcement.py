@@ -142,9 +142,7 @@ def test_bootstrap_strict_caps_at_10(tmp_path, applier_mod, mode_mod, mutation_m
     # in the cap window first (bug d5a2-3fc8). The natural tuple sort
     # would put 'inbound' before 'outbound' and break that contract.
     deferred_dicts = payload["deferred"]
-    deferred_sort_keys = [
-        applier_mod._mode_sort_key(d) for d in deferred_dicts
-    ]
+    deferred_sort_keys = [applier_mod._mode_sort_key(d) for d in deferred_dicts]
     assert deferred_sort_keys == sorted(deferred_sort_keys), (
         "deferred list must be ordered by applier._mode_sort_key"
     )
@@ -188,9 +186,7 @@ def test_live_uncapped(tmp_path, applier_mod, mode_mod, mutation_mod):
 
     with (
         patch.object(applier_mod, "_apply_typed") as typed_spy,
-        patch.object(
-            applier_mod, "_apply_batch", return_value=fake_batch_manifest
-        ) as batch_spy,
+        patch.object(applier_mod, "_apply_batch", return_value=fake_batch_manifest) as batch_spy,
     ):
         manifest_path = applier_mod.apply(
             muts, pass_id="t-live", repo_root=tmp_path, mode=mode_mod.Mode.LIVE
@@ -213,12 +209,8 @@ def test_target_mode_threaded_to_applier(tmp_path, applier_mod, mode_mod, mutati
     Sentinel test: dispatch a known Mode through the call chain and assert it
     reaches applier.apply unchanged (kwarg name preserved end-to-end).
     """
-    reconcile_mod = _load(
-        "rebar_reconciler.reconcile_under_test", "reconcile.py"
-    )
-    main_mod = _load(
-        "rebar_reconciler.main_under_test", "__main__.py"
-    )
+    reconcile_mod = _load("rebar_reconciler.reconcile_under_test", "reconcile.py")
+    main_mod = _load("rebar_reconciler.main_under_test", "__main__.py")
 
     sentinel = mode_mod.Mode.BOOTSTRAP_STRICT
     captured: dict = {}
@@ -265,9 +257,7 @@ def test_target_mode_threaded_to_applier(tmp_path, applier_mod, mode_mod, mutati
     )
 
 
-def test_asymmetric_manifest_dry_run_shape(
-    tmp_path, applier_mod, mode_mod, mutation_mod
-):
+def test_asymmetric_manifest_dry_run_shape(tmp_path, applier_mod, mode_mod, mutation_mod):
     """DRY_RUN manifest must contain outbound.totals + inbound[] array."""
     muts = _make_mutations(20, mutation_mod)
     manifest_path = applier_mod.apply(
@@ -283,9 +273,7 @@ def test_asymmetric_manifest_dry_run_shape(
         assert "key" in entry and "action" in entry and "fields" in entry
 
 
-def test_asymmetric_manifest_throttle_shape(
-    tmp_path, applier_mod, mode_mod, mutation_mod
-):
+def test_asymmetric_manifest_throttle_shape(tmp_path, applier_mod, mode_mod, mutation_mod):
     """BOOTSTRAP_THROTTLE manifest: both totals + spot_check sample."""
     muts = _make_mutations(200, mutation_mod)
     snapshots_dir = tmp_path / "bridge_state" / "snapshots"
@@ -309,9 +297,7 @@ def test_asymmetric_manifest_throttle_shape(
     assert isinstance(payload["spot_check"], list)
 
 
-def test_asymmetric_manifest_live_writes_no_file(
-    tmp_path, applier_mod, mode_mod, mutation_mod
-):
+def test_asymmetric_manifest_live_writes_no_file(tmp_path, applier_mod, mode_mod, mutation_mod):
     """LIVE mode must NOT write any manifest file."""
     muts = _make_mutations(10, mutation_mod)
     snapshots_dir = tmp_path / "bridge_state" / "snapshots"
@@ -340,9 +326,7 @@ def test_phase_gate_still_blocks(tmp_path):
     phase-gate path that ``__main__.main`` reads BEFORE invoking run_pass —
     the new ``target_mode`` plumbing must not have weakened it.
     """
-    advisory = _load(
-        "rebar_reconciler._advisory_lock", "_advisory_lock.py"
-    )
+    advisory = _load("rebar_reconciler._advisory_lock", "_advisory_lock.py")
     mode_mod = _load("rebar_reconciler.mode", "mode.py")
 
     # Pin the gate at dry-run.
@@ -439,6 +423,7 @@ def test_reconcile_once_legacy_caller_omits_mode_kwarg(
     # (e.g. binding_store=), so the literal-string assertion is too brittle.
     # Use a regex that allows trailing kwargs but explicitly rejects mode=.
     import re as _re
+
     legacy_match = _re.search(
         r"applier\.apply\(\s*mutations,\s*pass_id,\s*repo_root\b[^)]*\)",
         reconcile_src,
@@ -471,9 +456,7 @@ def test_reconcile_once_legacy_caller_omits_mode_kwarg(
     )
 
 
-def test_manifest_renderer_handles_typed_and_legacy_dict_shapes(
-    applier_mod, mutation_mod
-):
+def test_manifest_renderer_handles_typed_and_legacy_dict_shapes(applier_mod, mutation_mod):
     """Finding #3 (3307050264): renderer must handle both Mutation dataclass
     instances AND legacy dict-shaped batch mutations.
 
@@ -551,9 +534,7 @@ def test_manifest_renderer_handles_typed_and_legacy_dict_shapes(
 def test_mode_string_coercion(applier_mod, mode_mod, tmp_path):
     """Valid mode strings are coerced to Mode enum members (finding #1)."""
     mutations = []  # empty is fine — we're testing the validation path
-    result = applier_mod.apply(
-        mutations, "test-coerce", repo_root=tmp_path, mode="dry-run"
-    )
+    applier_mod.apply(mutations, "test-coerce", repo_root=tmp_path, mode="dry-run")
     # DRY_RUN with 0 mutations produces a manifest (path may be None or file)
     # — the key assertion is that it didn't raise.
 

@@ -31,9 +31,7 @@ from unittest.mock import patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-FETCHER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
-)
+FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
 
 # Two JQL strings emitted by fetch_snapshot under the split-JQL contract
 # (bug f6cc-b174-9e9a-435c): one for the active working set, one for
@@ -73,12 +71,8 @@ def fetcher():
 #     no-op (pool size 500 < cap).
 # Source-literal ``range(1, 1501)`` is kept as a greppable AC token.
 
-_ACTIVE_POOL = [
-    {"key": f"DIG-{i}", "fields": {"summary": f"issue {i}"}} for i in range(1, 1001)
-]
-_DONE_POOL = [
-    {"key": f"DIG-{i}", "fields": {"summary": f"issue {i}"}} for i in range(1001, 1501)
-]
+_ACTIVE_POOL = [{"key": f"DIG-{i}", "fields": {"summary": f"issue {i}"}} for i in range(1, 1001)]
+_DONE_POOL = [{"key": f"DIG-{i}", "fields": {"summary": f"issue {i}"}} for i in range(1001, 1501)]
 assert len(_ACTIVE_POOL) == 1000
 assert len(_DONE_POOL) == 500
 # Greppable AC token retained: range(1, 1501) describes the COMBINED pool
@@ -101,12 +95,8 @@ class _PaginatingClient:
             return _DONE_POOL
         return _ACTIVE_POOL
 
-    def search_issues(
-        self, jql: str, start_at: int = 0, max_results: int = 50
-    ) -> list[dict]:
-        self.calls.append(
-            {"jql": jql, "start_at": start_at, "max_results": max_results}
-        )
+    def search_issues(self, jql: str, start_at: int = 0, max_results: int = 50) -> list[dict]:
+        self.calls.append({"jql": jql, "start_at": start_at, "max_results": max_results})
         pool = self._pool_for(jql)
         end = min(start_at + max_results, len(pool))
         return pool[start_at:end]
@@ -165,9 +155,7 @@ def test_fetcher_calls_acli_with_split_jqls_verbatim(tmp_path, fetcher):
         )
 
 
-def test_fetcher_paginates_through_1500_issues_in_100_step_increments(
-    tmp_path, fetcher
-):
+def test_fetcher_paginates_through_1500_issues_in_100_step_increments(tmp_path, fetcher):
     """Pagination loop must request at least 10 pages with start_at 0..900 in 100-step increments.
 
     Working set size: 1500 (see ``range(1, 1501)`` fixture builder above).
@@ -193,15 +181,12 @@ def test_fetcher_paginates_through_1500_issues_in_100_step_increments(
     # 100-step increments are used.
     expected_prefix = list(range(0, 1000, 100))
     assert start_ats[:10] == expected_prefix, (
-        f"Expected first 10 start_at values to be {expected_prefix!r}; "
-        f"got {start_ats[:10]!r}"
+        f"Expected first 10 start_at values to be {expected_prefix!r}; got {start_ats[:10]!r}"
     )
 
     # Each call uses max_results=100 (the 100-step increment).
     for call in client.calls[:10]:
-        assert call["max_results"] == 100, (
-            f"Expected max_results=100; got {call['max_results']!r}"
-        )
+        assert call["max_results"] == 100, f"Expected max_results=100; got {call['max_results']!r}"
 
     # Every captured call carries one of the two verbatim split JQLs.
     for call in client.calls:

@@ -29,9 +29,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-INVARIANTS_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "invariants.py"
-)
+INVARIANTS_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "invariants.py"
 
 
 def _load_invariants() -> ModuleType:
@@ -71,9 +69,7 @@ def _make_alert_store_mock(deduped_keys: set[str] | None = None):
     return mock_store
 
 
-def _make_subprocess_result(
-    returncode: int = 0, stdout: str = "abcd-1234-5678-90ef"
-):
+def _make_subprocess_result(returncode: int = 0, stdout: str = "abcd-1234-5678-90ef"):
     """Build a mock subprocess.CompletedProcess result for ticket-create.sh.
 
     The default stdout uses a canonical 16-hex dso ticket ID
@@ -134,9 +130,7 @@ def test_b_single_violation(tmp_path, invariants):
     # the regex \b[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}\b and
     # returns "" on a miss — at which point production rolls the alert back
     # and the assertions on append/run/patch_bug_filed below all fail.
-    mock_proc_result = _make_subprocess_result(
-        returncode=0, stdout="abcd-1234-5678-90ef"
-    )
+    mock_proc_result = _make_subprocess_result(returncode=0, stdout="abcd-1234-5678-90ef")
 
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
         with patch("invariants.subprocess.run", return_value=mock_proc_result) as mock_run:
@@ -234,15 +228,12 @@ def test_c_legacy_dedup_key_still_recognized(tmp_path, invariants):
 def test_d_cap_at_5(tmp_path, invariants):
     """With 7 violations and cap=5, exactly 5 are processed and 2 are skipped."""
     snapshot = {
-        f"PROJ-{100 + i * 100}": {"local_ids": [f"local-a{i}", f"local-b{i}"]}
-        for i in range(7)
+        f"PROJ-{100 + i * 100}": {"local_ids": [f"local-a{i}", f"local-b{i}"]} for i in range(7)
     }
 
     mock_store = _make_alert_store_mock(deduped_keys=set())
     # Canonical 16-hex format required (see _make_subprocess_result docstring).
-    mock_proc_result = _make_subprocess_result(
-        returncode=0, stdout="cafe-babe-dead-beef"
-    )
+    mock_proc_result = _make_subprocess_result(returncode=0, stdout="cafe-babe-dead-beef")
 
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
         with patch("invariants.subprocess.run", return_value=mock_proc_result) as mock_run:
@@ -267,9 +258,7 @@ def test_d_cap_at_5(tmp_path, invariants):
 # Paths for reconcile.py integration tests
 # ---------------------------------------------------------------------------
 
-RECONCILE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
-)
+RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
 
 
 _RECONCILE_COLLAB_KEYS = (
@@ -396,8 +385,7 @@ def test_reconcile_once_invokes_invariant_after_fetch(tmp_path):
 
     # check_at_most_one_local_id must have been called exactly once
     assert invariants_mock.call_count == 1, (
-        f"Expected check_at_most_one_local_id to be called once, "
-        f"got {invariants_mock.call_count}"
+        f"Expected check_at_most_one_local_id to be called once, got {invariants_mock.call_count}"
     )
 
     # The first positional argument must be the post-fetch snapshot dict
@@ -496,8 +484,7 @@ def test_end_to_end_second_write_produces_one_alert_one_bug(tmp_path):
 
     # Pass 2 must have produced exactly one ticket-cli call
     assert calls_after_pass2 == 1, (
-        f"Pass 2 (violation) should produce exactly 1 ticket-cli call, "
-        f"got {calls_after_pass2}"
+        f"Pass 2 (violation) should produce exactly 1 ticket-cli call, got {calls_after_pass2}"
     )
 
     # Exactly one at-most-one invariant BRIDGE_ALERT entry must exist.
@@ -519,8 +506,7 @@ def test_end_to_end_second_write_produces_one_alert_one_bug(tmp_path):
                     pass  # malformed alert line — skip
 
     invariant_alerts = [
-        r for r in all_alert_lines
-        if r.get("jira_key") or "at-most-one" in r.get("key", "")
+        r for r in all_alert_lines if r.get("jira_key") or "at-most-one" in r.get("key", "")
     ]
     assert len(invariant_alerts) == 1, (
         f"Expected exactly 1 at-most-one invariant BRIDGE_ALERT entry, "

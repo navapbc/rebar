@@ -1,4 +1,7 @@
-"""Test that defect #4 (NoneType.__dict__ from _try_load_step not registering in sys.modules) doesn't recur."""
+"""Test that defect #4 (NoneType.__dict__ from _try_load_step not registering in sys.modules)
+doesn't recur.
+"""
+
 import importlib.util
 import sys
 from pathlib import Path
@@ -20,9 +23,7 @@ def test_try_load_step_registers_module_in_sys_modules():
     returned None, causing dataclasses._is_type to crash.
     """
     # Load __main__ fresh
-    spec = importlib.util.spec_from_file_location(
-        "_try_load_step_test_main", MAIN_PATH
-    )
+    spec = importlib.util.spec_from_file_location("_try_load_step_test_main", MAIN_PATH)
     main_mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(main_mod)
 
@@ -31,9 +32,7 @@ def test_try_load_step_registers_module_in_sys_modules():
     try:
         applier = main_mod._try_load_step("applier")
         # Module must be loaded successfully
-        assert applier is not None, (
-            "_try_load_step('applier') must return the loaded module"
-        )
+        assert applier is not None, "_try_load_step('applier') must return the loaded module"
         # Module must be registered in sys.modules under its dotted name
         assert "rebar_reconciler.applier" in sys.modules, (
             "_try_load_step must register module under 'rebar_reconciler.applier' "

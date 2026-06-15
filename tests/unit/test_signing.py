@@ -115,7 +115,16 @@ def test_verify_unsigned() -> None:
 def test_every_verdict_has_uniform_shape() -> None:
     # A consumer must be able to read manifest/step_count regardless of verdict
     # (no KeyError on the unsigned path — there is no outputSchema to enforce it).
-    keys = {"verified", "verdict", "reason", "manifest", "step_count", "key_id", "signed_at", "head_sha"}
+    keys = {
+        "verified",
+        "verdict",
+        "reason",
+        "manifest",
+        "step_count",
+        "key_id",
+        "signed_at",
+        "head_sha",
+    }
     certified = signing.verify_record(_record("t", ["a"], KEY), "t", KEY)
     unsigned = signing.verify_record(None, "t", KEY)
     foreign = signing.verify_record(_record("t", ["a"], OTHER), "t", KEY)
@@ -253,7 +262,11 @@ def test_verify_record_non_dict_never_raises(bad) -> None:
 
 
 def test_verify_record_non_list_manifest_reports_zero_steps() -> None:
-    rec = {"manifest": {"not": "a list"}, "signature": "deadbeef", "key_id": signing.key_fingerprint(KEY)}
+    rec = {
+        "manifest": {"not": "a list"},
+        "signature": "deadbeef",
+        "key_id": signing.key_fingerprint(KEY),
+    }
     out = signing.verify_record(rec, "t", KEY)
     assert out["verified"] is False and out["verdict"] == "mismatch"
     assert out["step_count"] == 0  # honest count, not len(dict)
@@ -304,8 +317,12 @@ def test_process_signature_coerces_non_list_manifest() -> None:
     from rebar.reducer._state import make_initial_state
 
     s = make_initial_state()
-    ev = {"uuid": "u", "timestamp": 1, "author": "a",
-          "data": {"manifest": {"not": "a list"}, "signature": "x", "key_id": "k"}}
+    ev = {
+        "uuid": "u",
+        "timestamp": 1,
+        "author": "a",
+        "data": {"manifest": {"not": "a list"}, "signature": "x", "key_id": "k"},
+    }
     process_signature(s, ev, ev["data"])
     assert s["signature"]["manifest"] == []
 
@@ -315,8 +332,18 @@ def test_process_signature_is_last_writer_wins() -> None:
     from rebar.reducer._processors import process_signature
     from rebar.reducer._state import make_initial_state
 
-    ev_a = {"uuid": "aaaa", "timestamp": 1, "author": "x", "data": {"manifest": ["A"], "signature": "sa", "key_id": "k"}}
-    ev_b = {"uuid": "bbbb", "timestamp": 2, "author": "x", "data": {"manifest": ["B"], "signature": "sb", "key_id": "k"}}
+    ev_a = {
+        "uuid": "aaaa",
+        "timestamp": 1,
+        "author": "x",
+        "data": {"manifest": ["A"], "signature": "sa", "key_id": "k"},
+    }
+    ev_b = {
+        "uuid": "bbbb",
+        "timestamp": 2,
+        "author": "x",
+        "data": {"manifest": ["B"], "signature": "sb", "key_id": "k"},
+    }
 
     # Whichever is applied LAST wins — the reducer fixes a deterministic apply
     # order (basename sort) so the on-disk replay is convergent (see the interface

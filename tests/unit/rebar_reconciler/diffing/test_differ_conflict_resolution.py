@@ -22,20 +22,11 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "differ.py"
-)
+DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "differ.py"
 CONFLICT_RESOLVER_PATH = (
-    REPO_ROOT
-    / "src"
-    / "rebar"
-    / "_engine"
-    / "rebar_reconciler"
-    / "conflict_resolver.py"
+    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "conflict_resolver.py"
 )
-MUTATION_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
-)
+MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -258,15 +249,13 @@ def test_duplicate_local_id_emits_conflict_per_collision(
         and m.direction == mutation_mod.MutationDirection.inbound
     )
     assert collision_targets == ["LOCAL-X", "LOCAL-Y"], (
-        f"expected duplicate-id conflicts for LOCAL-X and LOCAL-Y; "
-        f"got {collision_targets}"
+        f"expected duplicate-id conflicts for LOCAL-X and LOCAL-Y; got {collision_targets}"
     )
     # LOCAL-Z must not appear as a conflict.
     z_conflicts = [
         m
         for m in result
-        if m.target == "LOCAL-Z"
-        and m.action == mutation_mod.MutationAction.conflict
+        if m.target == "LOCAL-Z" and m.action == mutation_mod.MutationAction.conflict
     ]
     assert z_conflicts == [], (
         f"LOCAL-Z (unique id) must not be flagged as conflict; got {z_conflicts}"

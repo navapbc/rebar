@@ -1,9 +1,11 @@
-"""Unit tests for ticket-delete-unlink-scan.py standalone helper.
+"""Unit tests for the delete-time UNLINK scan.
 
-RED marker — test_unlink_scan_inbound_link_writes_unlink_file
-Must FAIL before ticket-delete-unlink-scan.py is created (0071-a28d, 3932-5199).
+Tier E E7d: the bash-era ``ticket-delete-unlink-scan.py`` standalone helper was
+a thin CLI wrapper over the in-process logic, which now lives in
+``rebar._commands.delete.scan_and_write_unlinks``. These tests call that function
+directly instead of subprocessing the (deleted) helper.
 
-Verifies that the extracted helper:
+Verifies that the scan:
   (a) writes UNLINK events for inbound LINKs pointing at the deleted ticket
   (b) writes UNLINK events for outbound LINKs from the deleted ticket
   (c) does NOT write duplicate UNLINKs when a LINK is already cancelled
@@ -12,17 +14,13 @@ Verifies that the extracted helper:
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 import time
 import uuid
 from pathlib import Path
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPTS_DIR = _REPO_ROOT / "src" / "rebar" / "_engine"
-_HELPER_PATH = _SCRIPTS_DIR / "ticket-delete-unlink-scan.py"
+from rebar._commands.delete import scan_and_write_unlinks
 
 _ENV_ID = "eeee-0000-4000-8000-000000000001"
 _AUTHOR = "test-user"
@@ -59,14 +57,14 @@ def _make_ticket(tracker: Path, ticket_id: str) -> Path:
 
 
 def _run_helper(tracker: Path, deleted_id: str) -> tuple[int, list[str]]:
-    """Run ticket-delete-unlink-scan.py and return (exit_code, list_of_written_paths)."""
-    result = subprocess.run(
-        [sys.executable, str(_HELPER_PATH), str(tracker), deleted_id, _ENV_ID, _AUTHOR],
-        capture_output=True,
-        text=True,
-    )
-    paths = [p.strip() for p in result.stdout.splitlines() if p.strip()]
-    return result.returncode, paths
+    """Run the in-process UNLINK scan and return (exit_code, list_of_written_paths).
+
+    The deleted ticket-delete-unlink-scan.py CLI printed one written path per line
+    on stdout and exited 0 on success; scan_and_write_unlinks returns that same
+    list of paths directly, so we map a successful return to rc=0.
+    """
+    paths = scan_and_write_unlinks(str(tracker), deleted_id, _ENV_ID, _AUTHOR)
+    return 0, [p for p in paths if p]
 
 
 @pytest.mark.unit
@@ -101,9 +99,7 @@ def test_unlink_scan_inbound_link_writes_unlink_file(tmp_path: Path) -> None:
     rc, written_paths = _run_helper(tracker, deleted_id)
 
     assert rc == 0, f"Helper exited {rc}"
-    assert len(written_paths) >= 1, (
-        f"Expected at least 1 UNLINK path printed; got {written_paths}"
-    )
+    assert len(written_paths) >= 1, f"Expected at least 1 UNLINK path printed; got {written_paths}"
     unlink_files = list(ticket_a.glob("*-UNLINK.json"))
     assert len(unlink_files) >= 1, (
         f"Expected UNLINK file in ticket_a dir; found: {list(ticket_a.iterdir())}"
@@ -140,9 +136,7 @@ def test_unlink_scan_outbound_link_writes_unlink_file(tmp_path: Path) -> None:
     rc, written_paths = _run_helper(tracker, deleted_id)
 
     assert rc == 0, f"Helper exited {rc}"
-    assert len(written_paths) >= 1, (
-        f"Expected at least 1 UNLINK path printed; got {written_paths}"
-    )
+    assert len(written_paths) >= 1, f"Expected at least 1 UNLINK path printed; got {written_paths}"
     unlink_files = list(deleted_ticket.glob("*-UNLINK.json"))
     assert len(unlink_files) >= 1, (
         f"Expected UNLINK file in deleted_ticket dir; found: {list(deleted_ticket.iterdir())}"
@@ -194,9 +188,7 @@ def test_unlink_scan_already_cancelled_link_is_skipped(tmp_path: Path) -> None:
     rc, written_paths = _run_helper(tracker, deleted_id)
 
     assert rc == 0, f"Helper exited {rc}"
-    new_unlinks = [
-        p for p in written_paths if Path(p).name != f"{ts2}-{unlink_uuid}-UNLINK.json"
-    ]
+    new_unlinks = [p for p in written_paths if Path(p).name != f"{ts2}-{unlink_uuid}-UNLINK.json"]
     assert len(new_unlinks) == 0, (
         f"Expected no new UNLINK files for already-cancelled link; got {new_unlinks}"
     )

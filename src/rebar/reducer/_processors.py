@@ -113,7 +113,8 @@ def process_status(state: dict, event: dict, data: dict, filepath: str) -> None:
         # winner has been recorded, so the incoming event wins unconditionally
         # (otherwise any non-empty incoming UUID > "" and the existing-empty
         # branch would always win, leaving state.status stuck at the loser's
-        # value — bug e60b-e698, test_reducer_applies_multiple_status_events_current_status_mismatch_resolves_fork).
+        # value — bug e60b-e698, regression test:
+        # test_reducer_applies_multiple_status_events_current_status_mismatch_resolves_fork).
         if not existing_uuid or incoming_uuid <= existing_uuid:
             # Incoming event wins.
             winner_uuid = incoming_uuid
@@ -172,9 +173,7 @@ def process_comment(state: dict, event: dict, data: dict) -> None:
     state["comments"].append(_entry)
 
 
-def process_link(
-    state: dict, event: dict, data: dict, tracker_dir: str | None = None
-) -> None:
+def process_link(state: dict, event: dict, data: dict, tracker_dir: str | None = None) -> None:
     """Apply a LINK event: append a dep entry to state.deps.
 
     When tracker_dir is provided, attempt to resolve an alias-form or short-hex
@@ -186,7 +185,8 @@ def process_link(
     resolved_target = raw_target
     if tracker_dir and raw_target:
         try:
-            from ticket_resolver import resolve_ticket_id  # local import avoids circular dep
+            # local import avoids a module-load circular dep with the resolver
+            from rebar._engine_support.resolver import resolve_ticket_id
 
             canonical = resolve_ticket_id(raw_target, tracker_dir)
             if canonical:
@@ -205,9 +205,7 @@ def process_link(
 def process_unlink(state: dict, data: dict) -> None:
     """Apply an UNLINK event: remove the dep entry matching link_uuid (noop if unknown)."""
     link_uuid_to_remove = data.get("link_uuid")
-    state["deps"] = [
-        d for d in state["deps"] if d.get("link_uuid") != link_uuid_to_remove
-    ]
+    state["deps"] = [d for d in state["deps"] if d.get("link_uuid") != link_uuid_to_remove]
 
 
 def process_bridge_alert(state: dict, event: dict, data: dict, event_uuid: str) -> None:
@@ -385,9 +383,7 @@ def scan_for_latest_snapshot(
             continue
         if event.get("event_type") == "SNAPSHOT":
             latest_snapshot_idx = idx
-            snapshot_source_uuids = set(
-                event.get("data", {}).get("source_event_uuids", [])
-            )
+            snapshot_source_uuids = set(event.get("data", {}).get("source_event_uuids", []))
 
     return latest_snapshot_idx, snapshot_source_uuids
 

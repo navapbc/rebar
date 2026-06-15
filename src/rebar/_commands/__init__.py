@@ -13,10 +13,11 @@ exits 1 under either implementation.
 from __future__ import annotations
 
 import sys
-from typing import NamedTuple
 from collections.abc import Callable
+from typing import NamedTuple
 
-from rebar._commands import composer, leaf, unlink as _unlink
+from rebar._commands import composer, leaf
+from rebar._commands import unlink as _unlink
 from rebar._commands._seam import CommandError
 
 
@@ -85,9 +86,7 @@ def main(argv: list[str]) -> int:
     if entry is None:
         print(f"Error: unknown leaf-write command '{command}'", file=sys.stderr)
         return 1
-    if len(args) < entry.min_args or (
-        entry.max_args is not None and len(args) > entry.max_args
-    ):
+    if len(args) < entry.min_args or (entry.max_args is not None and len(args) > entry.max_args):
         print(entry.usage, file=sys.stderr)
         return 1
     try:

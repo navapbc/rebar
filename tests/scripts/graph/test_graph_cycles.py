@@ -28,9 +28,7 @@ from _helpers import (
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_graph_cycle_detection_rejects_direct_cycle(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_graph_cycle_detection_rejects_direct_cycle(graph: ModuleType, tmp_path: Path) -> None:
     """add_dependency raises CyclicDependencyError for a direct cycle A→B, B→A.
 
     Setup: ticket-a blocks ticket-b already exists.
@@ -49,9 +47,7 @@ def test_graph_cycle_detection_rejects_direct_cycle(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_graph_cycle_detection_rejects_transitive_cycle(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_graph_cycle_detection_rejects_transitive_cycle(graph: ModuleType, tmp_path: Path) -> None:
     """add_dependency raises CyclicDependencyError for a transitive cycle A→B→C→A.
 
     Setup: ticket-a blocks ticket-b, ticket-b blocks ticket-c.
@@ -94,9 +90,7 @@ def test_graph_cycle_detection_allows_dag(graph: ModuleType, tmp_path: Path) -> 
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_graph_visited_set_prevents_infinite_loop(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_graph_visited_set_prevents_infinite_loop(graph: ModuleType, tmp_path: Path) -> None:
     """Diamond graph (A→B, A→C, B→D, C→D) traverses without infinite recursion.
 
     Setup:
@@ -131,9 +125,7 @@ def test_graph_visited_set_prevents_infinite_loop(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_add_dependency_raises_on_cycle_at_level(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_add_dependency_raises_on_cycle_at_level(graph: ModuleType, tmp_path: Path) -> None:
     """add_dependency must raise CyclicDependencyError when a level-scoped cycle would be created.
 
     Setup:
@@ -161,9 +153,7 @@ def test_add_dependency_raises_on_cycle_at_level(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_add_dependency_raises_on_self_loop_at_level(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_add_dependency_raises_on_self_loop_at_level(graph: ModuleType, tmp_path: Path) -> None:
     """add_dependency must raise CyclicDependencyError for a self-referential dependency.
 
     Setup:
@@ -204,9 +194,7 @@ def test_add_dependency_skips_cycle_check_when_no_type(
 
     # Empty level string → fail-open: returns False without BFS
     result = check_cycle_at_level("task-a", "task-b", "", str(tracker_dir))
-    assert result is False, (
-        "check_cycle_at_level must return False for empty level (fail-open)"
-    )
+    assert result is False, "check_cycle_at_level must return False for empty level (fail-open)"
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +276,7 @@ def test_cycle_detection_ignores_suggestions_dir(tmp_path: Path) -> None:
     if _scripts_dir not in sys.path:
         sys.path.insert(0, _scripts_dir)
 
-    from ticket_graph._graph import _get_all_blocked_by
+    from rebar.graph._graph import _get_all_blocked_by
 
     tracker_dir = tmp_path / ".tickets-tracker"
     tracker_dir.mkdir()
@@ -309,8 +297,7 @@ def test_cycle_detection_ignores_suggestions_dir(tmp_path: Path) -> None:
         "observation": "test suggestion",
     }
     suggestion_file = (
-        suggestions_dir
-        / "1778262194332-b25af26e-4e7d6a27-ad27-4d6a-8184-5f894b522b0e.json"
+        suggestions_dir / "1778262194332-b25af26e-4e7d6a27-ad27-4d6a-8184-5f894b522b0e.json"
     )
     suggestion_file.write_text(json.dumps(suggestion_payload))
 

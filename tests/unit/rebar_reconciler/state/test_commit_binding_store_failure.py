@@ -99,11 +99,12 @@ def test_commit_failure_returns_false_and_logs_error(
         return result
 
     with patch("subprocess.run", side_effect=_failing_run):
-        result = reconcile_mod._commit_binding_store_snapshot(stub_bs, tmp_path, "test-pass-fail-001")
+        result = reconcile_mod._commit_binding_store_snapshot(
+            stub_bs, tmp_path, "test-pass-fail-001"
+        )
 
     assert result is False, (
-        "_commit_binding_store_snapshot must return False when git commit fails, "
-        f"got {result!r}"
+        f"_commit_binding_store_snapshot must return False when git commit fails, got {result!r}"
     )
 
     captured = capsys.readouterr()
@@ -162,8 +163,7 @@ def test_commit_failure_appends_alert(
     # Check that an alert was written to bridge_alerts
     alerts_dir = tmp_path / "bridge_state" / "bridge_alerts"
     assert alerts_dir.is_dir(), (
-        "bridge_alerts directory must be created when an alert is appended. "
-        f"Expected: {alerts_dir}"
+        f"bridge_alerts directory must be created when an alert is appended. Expected: {alerts_dir}"
     )
     jsonl_files = list(alerts_dir.glob("*.jsonl"))
     assert jsonl_files, "At least one JSONL alert file must exist after a commit failure."
@@ -187,10 +187,9 @@ def test_commit_failure_appends_alert(
     assert alert.get("severity") == "error", (
         f"Alert severity must be 'error', got {alert.get('severity')!r}"
     )
-    assert "clobber" in alert.get("reason", "").lower() or "risk" in alert.get("reason", "").lower(), (
-        "Alert reason must mention the clobber risk. "
-        f"Got: {alert.get('reason')!r}"
-    )
+    assert (
+        "clobber" in alert.get("reason", "").lower() or "risk" in alert.get("reason", "").lower()
+    ), f"Alert reason must mention the clobber risk. Got: {alert.get('reason')!r}"
 
 
 def test_commit_success_returns_true_no_alert(
@@ -244,8 +243,7 @@ def test_commit_success_returns_true_no_alert(
                     pass
         binding_alerts = [r for r in all_records if "binding-commit-failure" in r.get("key", "")]
         assert not binding_alerts, (
-            "No binding-commit-failure alert should be filed on success. "
-            f"Got: {binding_alerts}"
+            f"No binding-commit-failure alert should be filed on success. Got: {binding_alerts}"
         )
 
 
@@ -300,7 +298,9 @@ def test_commit_failure_dedup_suppresses_second_alert(
                     all_records.append(json.loads(line))
                 except json.JSONDecodeError:
                     pass
-        matching = [r for r in all_records if "binding-commit-failure:dedup-pass-001" in r.get("key", "")]
+        matching = [
+            r for r in all_records if "binding-commit-failure:dedup-pass-001" in r.get("key", "")
+        ]
         assert len(matching) == 1, (
             f"Dedup gate must suppress the second alert. Expected 1, got {len(matching)}. "
             f"Records: {matching}"

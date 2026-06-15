@@ -20,7 +20,6 @@ import sys
 import time
 import urllib.error
 from pathlib import Path
-from typing import Any
 
 from rebar_reconciler.pass_io import _write_mapping_atomic
 
@@ -137,7 +136,11 @@ def create_one(
 
         # Persist local_id -> jira_key in mapping.json atomically
         if repo_root is None:
-            repo_root = Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])
+            repo_root = Path(
+                os.environ.get("REBAR_ROOT")
+                or os.environ.get("PROJECT_ROOT")
+                or Path(__file__).resolve().parents[4]
+            )
         mapping_path = repo_root / "bridge_state" / "mapping.json"
         _write_mapping_atomic(mapping_path, local_id, hit_key)
 
@@ -188,9 +191,7 @@ def create_one(
             # branch (delete_issue + BRIDGE_ALERT) even though the underlying
             # condition would have cleared on retry.
             _call_with_retry(client.add_label, jira_key, f"rebar-id:{local_id}")
-            _call_with_retry(
-                client.set_entity_property, jira_key, "local_id", local_id
-            )
+            _call_with_retry(client.set_entity_property, jira_key, "local_id", local_id)
             if binding_store is not None and local_id:
                 binding_store.bind_confirm(local_id, jira_key)
         except Exception as write_err:
@@ -201,12 +202,17 @@ def create_one(
             # Emit BRIDGE_ALERT for identity-write rollback so the event is
             # surfaced in the tickets-tracker for observability.  # tickets-boundary-ok
             try:
-                import uuid as _uuid
-                import time as _time
                 import json as _json
+                import time as _time
+                import uuid as _uuid
 
                 _alert_root = (
-                    repo_root or Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])
+                    repo_root
+                    or Path(
+                        os.environ.get("REBAR_ROOT")
+                        or os.environ.get("PROJECT_ROOT")
+                        or Path(__file__).resolve().parents[4]
+                    )
                 ) / ".tickets-tracker"
                 # F7: defensive guard — if local_id is falsy the alert directory
                 # would resolve to .tickets-tracker root and pollute it. Prefer
@@ -308,9 +314,7 @@ def _is_illegal_transition_400(exc: Exception) -> bool:
     return "illegal" in msg or "transition" in msg
 
 
-def update_one(
-    mutation: dict, client, comment_errors: list[str] | None = None
-) -> dict | None:
+def update_one(mutation: dict, client, comment_errors: list[str] | None = None) -> dict | None:
     """Update an existing Jira issue from the mutation's key and fields.
 
     Bug 6afc-20ee-84e5-4dd5: comment sub-mutations (the ``comments`` payload)

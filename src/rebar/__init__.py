@@ -1,13 +1,13 @@
 """rebar — event-sourced ticket system with a Jira reconciler.
 
-Three interfaces over one engine:
+Three interfaces over one implementation:
   * CLI:     the ``rebar`` console script (rebar.cli)
-  * Library: this package (write-path subprocess wrappers + native reads)
+  * Library: this package — in-process reads and writes over the git-backed store
   * MCP:     the ``rebar-mcp`` console script (rebar.mcp_server)
 
-The write path wraps the bundled bash dispatcher; reads return parsed JSON.
-The stdlib-only native read API (ticket_reducer / ticket_graph) is re-exported
-for callers that want in-process bulk reads without subprocess overhead.
+Ticket reads and writes run in-process against the event-sourced store (the Jira
+reconciler runs as a subprocess). The reducer and graph APIs (``rebar.reducer`` /
+``rebar.graph``) are re-exported for callers that want in-process bulk reads.
 """
 
 from __future__ import annotations
@@ -15,10 +15,11 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import subprocess
+import sys
 from typing import Any
 
 from rebar import config
-from rebar._engine import dispatcher, engine_dir, engine_env, run
+from rebar._engine import engine_dir, engine_env
 
 try:
     # Single source of truth: derive the version from the installed package
@@ -45,36 +46,6 @@ class ConcurrencyError(RebarError):
 
     Raised by :func:`transition` when the engine reports exit code 10.
     """
-
-
-# ── Internals ────────────────────────────────────────────────────────────────
-def _run(args, *, repo_root=None, check=True, input=None, env_extra=None):
-    return run(
-        args,
-        repo_root=repo_root,
-        input=input,
-        check=False,
-        capture=True,
-        env_extra=env_extra,
-    )
-
-
-def _ok(cp: subprocess.CompletedProcess, *, what: str) -> str:
-    if cp.returncode != 0:
-        raise RebarError(
-            f"rebar {what} failed (exit {cp.returncode}): {cp.stderr.strip()}",
-            returncode=cp.returncode,
-            stderr=cp.stderr,
-        )
-    return cp.stdout
-
-
-def _json(cp: subprocess.CompletedProcess, *, what: str) -> Any:
-    out = _ok(cp, what=what)
-    try:
-        return json.loads(out)
-    except json.JSONDecodeError as exc:
-        raise RebarError(f"rebar {what}: could not parse JSON output: {exc}") from exc
 
 
 # ── Initialization ───────────────────────────────────────────────────────────
@@ -117,22 +88,27 @@ def create_ticket(
 
     try:
         res = composer.create_core(
-            ticket_type, title, parent=parent, priority=priority, assignee=assignee,
-            description=description, tags=tags, repo_root=repo_root,
+            ticket_type,
+            title,
+            parent=parent,
+            priority=priority,
+            assignee=assignee,
+            description=description,
+            tags=tags,
+            repo_root=repo_root,
         )
     except CommandError as exc:
         raise RebarError(
             f"rebar create failed (exit {exc.returncode}): {exc.message}",
-            returncode=exc.returncode, stderr=exc.message,
+            returncode=exc.returncode,
+            stderr=exc.message,
         ) from None
     if not return_alias:
         return res["id"]
     return {"id": res["id"], "alias": res["alias"] or ""}
 
 
-def transition(
-    ticket_id: str, current_status: str, target_status: str, *, repo_root=None
-) -> dict:
+def transition(ticket_id: str, current_status: str, target_status: str, *, repo_root=None) -> dict:
     """Transition a ticket's status with optimistic concurrency.
 
     Raises :class:`ConcurrencyError` if the ticket's actual status no longer
@@ -161,8 +137,7 @@ def transition(
         )
     except ConcurrencyMismatch as exc:
         raise ConcurrencyError(
-            f"transition rejected: {ticket_id} is no longer '{current_status}'. "
-            f"{exc.message}",
+            f"transition rejected: {ticket_id} is no longer '{current_status}'. {exc.message}",
             returncode=10,
             stderr=exc.message,
         ) from None
@@ -206,9 +181,7 @@ def claim(ticket_id: str, *, assignee=None, repo_root=None) -> dict:
             stderr=f"Error: ticket '{ticket_id}' not found\n",
         )
     try:
-        return _transition.claim_compute(
-            resolved, assignee=assignee or "", repo_root=repo_root
-        )
+        return _transition.claim_compute(resolved, assignee=assignee or "", repo_root=repo_root)
     except ConcurrencyMismatch as exc:
         raise ConcurrencyError(
             f"claim rejected: {ticket_id} is not open (already claimed). {exc.message}",
@@ -235,6 +208,7 @@ def reopen(ticket_id: str, *, repo_root=None) -> dict:
 # non-raising _run and report a `passed` boolean rather than raising.
 def _json_or(out: str, default):
     import json as _json
+
     try:
         return _json.loads(out)
     except Exception:
@@ -319,10 +293,13 @@ def get_file_impact(ticket_id: str, *, repo_root=None) -> list:
 def set_file_impact(ticket_id: str, impact, *, repo_root=None) -> None:
     """Record file impact (list of {path, reason} dicts, or a JSON string)."""
     import json as _json
+
     payload = impact if isinstance(impact, str) else _json.dumps(impact)
     from rebar._commands import leaf
 
-    _python_leaf(leaf.set_file_impact, ticket_id, payload, repo_root=repo_root, what="set-file-impact")
+    _python_leaf(
+        leaf.set_file_impact, ticket_id, payload, repo_root=repo_root, what="set-file-impact"
+    )
 
 
 def get_verify_commands(ticket_id: str, *, repo_root=None) -> list:
@@ -348,10 +325,17 @@ def set_verify_commands(ticket_id: str, commands, *, repo_root=None) -> None:
     """Record DD-level verify commands (list of {dd_id, dd_text, command} dicts,
     or a JSON string)."""
     import json as _json
+
     payload = commands if isinstance(commands, str) else _json.dumps(commands)
     from rebar._commands import leaf
 
-    _python_leaf(leaf.set_verify_commands, ticket_id, payload, repo_root=repo_root, what="set-verify-commands")
+    _python_leaf(
+        leaf.set_verify_commands,
+        ticket_id,
+        payload,
+        repo_root=repo_root,
+        what="set-verify-commands",
+    )
 
 
 def _python_leaf(fn, *args, repo_root, what: str) -> None:
@@ -503,6 +487,7 @@ def verify_signature(ticket_id: str, *, repo_root=None) -> dict:
 def show_ticket(ticket_id: str, *, repo_root=None) -> dict:
     """Compiled ticket state as a dict (alias/short-id aware)."""
     from rebar import _reads
+
     return _reads.show_ticket(ticket_id, repo_root=repo_root)
 
 
@@ -532,6 +517,7 @@ def list_tickets(
     so the default shape matches show/search — the single-reducer invariant).
     """
     from rebar import _reads
+
     return _reads.list_tickets(
         status=status,
         ticket_type=ticket_type,
@@ -551,12 +537,14 @@ def list_tickets(
 def deps(ticket_id: str, *, repo_root=None) -> dict:
     """Dependency graph for a ticket (JSON)."""
     from rebar import _reads
+
     return _reads.deps(ticket_id, repo_root=repo_root)
 
 
 def ready(*, repo_root=None) -> Any:
     """Tickets ready to work (all blockers closed)."""
     from rebar import _reads
+
     return _reads.ready(repo_root=repo_root)
 
 
@@ -585,6 +573,7 @@ def search(
     :func:`list_tickets`). Query terms are whitespace-split and matched
     case-insensitively (AND)."""
     from rebar import _reads
+
     return _reads.search(
         query,
         status=status,
@@ -661,7 +650,9 @@ def summary(*ticket_ids: str, repo_root=None) -> list:
     return [gates.summary_compute(tid, tracker) for tid in ticket_ids]
 
 
-def list_epics(*, include_blocked: bool = False, has_tag=None, min_children=None, repo_root=None) -> dict:
+def list_epics(
+    *, include_blocked: bool = False, has_tag=None, min_children=None, repo_root=None
+) -> dict:
     """DEPRECATED — thin wrapper over the generic ``list``. Returns
     ``{p0_bugs, epics}`` (both ``ticket_state`` arrays) by making exactly TWO
     generic calls: one for epics, one for P0 bugs. Blocking-awareness is now the
@@ -696,9 +687,18 @@ def list_epics(*, include_blocked: bool = False, has_tag=None, min_children=None
 
 def bridge_fsck(*, repo_root=None) -> dict:
     """Bridge-mapping audit as structured JSON: {orphaned, duplicates, stale}.
-    A nonzero exit (anomalies present) is NORMAL, not an error."""
-    cp = _run(["bridge-fsck", "--output", "json"], repo_root=repo_root)
-    return _json_or(cp.stdout, {"orphaned": [], "duplicates": [], "stale": []})
+    A nonzero exit (anomalies present) is NORMAL, not an error.
+
+    In-process (Tier E E6.5a): runs the audit via ``rebar._engine_support.
+    bridge_fsck.audit_bridge_mappings`` instead of subprocessing the dispatcher.
+    """
+    from pathlib import Path
+
+    from rebar._engine_support.bridge_fsck import audit_bridge_mappings
+
+    tracker = config.tracker_dir(repo_root)
+    findings = audit_bridge_mappings(Path(tracker))
+    return {k: findings.get(k, []) for k in ("orphaned", "duplicates", "stale")}
 
 
 # ── Reconciler (Jira sync) ────────────────────────────────────────────────────
@@ -711,13 +711,20 @@ def reconcile(mode: str = "dry-run", *, repo_root=None) -> dict:
     and ``dry-run`` are non-mutating.
     """
     root = str(config.repo_root(repo_root))
+    # Launch under THIS interpreter (sys.executable), not a bare ``python3``: Tier E
+    # E5b rewired the reconciler onto in-package ``rebar.*`` imports, so it must run
+    # on the rebar-capable interpreter. engine_env still puts the engine dir on
+    # PYTHONPATH so the top-level ``rebar_reconciler`` package resolves.
     cmd = [
-        "python3", "-m", "rebar_reconciler",
-        "--mode", mode, "--repo-root", root,
+        sys.executable,
+        "-m",
+        "rebar_reconciler",
+        "--mode",
+        mode,
+        "--repo-root",
+        root,
     ]
-    cp = subprocess.run(
-        cmd, env=engine_env(root), text=True, capture_output=True, check=False
-    )
+    cp = subprocess.run(cmd, env=engine_env(root), text=True, capture_output=True, check=False)
     if cp.returncode not in (0, 75):  # 75 == EXIT_RESCHEDULE
         raise RebarError(
             f"reconcile ({mode}) failed (exit {cp.returncode}): {cp.stderr.strip()}",
@@ -753,7 +760,6 @@ from rebar._native import (  # noqa: E402
 __all__ = [
     "__version__",
     "engine_dir",
-    "dispatcher",
     "config",
     # exceptions
     "RebarError",

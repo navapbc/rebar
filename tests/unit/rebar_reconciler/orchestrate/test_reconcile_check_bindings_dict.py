@@ -120,9 +120,14 @@ def test_reconcile_check_uses_binding_store_module_when_available(tmp_path, monk
         def reconcile_check(local_tickets, jira_snapshot, binding_store):
             captured["binding_store_class"] = type(binding_store).__name__
             return {
-                "total_bindings": 1, "checked": 0, "in_sync": 0,
-                "discrepancies": [], "orphaned_bindings": [],
-                "orphaned_jira": [], "unbound_local": 0, "unbound_jira": 0,
+                "total_bindings": 1,
+                "checked": 0,
+                "in_sync": 0,
+                "discrepancies": [],
+                "orphaned_bindings": [],
+                "orphaned_jira": [],
+                "unbound_local": 0,
+                "unbound_jira": 0,
             }
 
         @staticmethod

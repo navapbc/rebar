@@ -32,7 +32,9 @@ pytest.importorskip("referencing")
 def _cli(*args: str, cwd: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "rebar.cli", *args],
-        capture_output=True, text=True, cwd=cwd,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
     )
 
 
@@ -64,12 +66,16 @@ def _seed(repo: Path) -> dict:
     r = str(repo)
     epic = rebar.create_ticket("epic", "Epic", repo_root=r)
     task = rebar.create_ticket(
-        "task", "Task",
+        "task",
+        "Task",
         description="Body\n\n## Acceptance Criteria\n- [ ] a",
-        parent=epic, repo_root=r,
+        parent=epic,
+        repo_root=r,
     )
     rebar.set_file_impact(task, [{"path": "a.py", "reason": "r"}], repo_root=r)
-    rebar.set_verify_commands(task, [{"dd_id": "D1", "dd_text": "t", "command": "echo"}], repo_root=r)
+    rebar.set_verify_commands(
+        task, [{"dd_id": "D1", "dd_text": "t", "command": "echo"}], repo_root=r
+    )
     return {"epic": epic, "task": task, "repo": r}
 
 
@@ -176,9 +182,7 @@ def test_lifecycle_results_via_library(rebar_repo: Path) -> None:
     created = rebar.create_ticket("task", "Lib lifecycle", return_alias=True, repo_root=r)
     schemas.validator(schemas.CREATE_RESULT).validate(created)
     tid = created["id"]
-    schemas.validator(schemas.CLAIM_RESULT).validate(
-        rebar.claim(tid, assignee="bob", repo_root=r)
-    )
+    schemas.validator(schemas.CLAIM_RESULT).validate(rebar.claim(tid, assignee="bob", repo_root=r))
     schemas.validator(schemas.TRANSITION_RESULT).validate(
         rebar.transition(tid, "in_progress", "closed", repo_root=r)
     )
@@ -189,8 +193,10 @@ def test_lifecycle_results_via_library(rebar_repo: Path) -> None:
 def test_gate_results(rebar_repo: Path) -> None:
     r = str(rebar_repo)
     tid = rebar.create_ticket(
-        "task", "Gate probe",
-        description="Body line.\n\n## Acceptance Criteria\n- [ ] a\n- [ ] b", repo_root=r,
+        "task",
+        "Gate probe",
+        description="Body line.\n\n## Acceptance Criteria\n- [ ] a\n- [ ] b",
+        repo_root=r,
     )
     v = schemas.validator(schemas.GATE_RESULT)
     # CLI --output json
@@ -255,9 +261,18 @@ def test_mcp_read_tools_advertise_output_schema(rebar_repo: Path) -> None:
     from rebar.mcp_server import build_server
 
     typed_read_tools = {
-        "show_ticket", "list_tickets", "search", "ticket_deps", "ready_tickets",
-        "next_batch", "clarity_check", "validate", "get_file_impact",
-        "get_verify_commands", "check_ac", "quality_check",
+        "show_ticket",
+        "list_tickets",
+        "search",
+        "ticket_deps",
+        "ready_tickets",
+        "next_batch",
+        "clarity_check",
+        "validate",
+        "get_file_impact",
+        "get_verify_commands",
+        "check_ac",
+        "quality_check",
     }
     tools = {t.name: t for t in asyncio.run(build_server().list_tools())}
     for name in typed_read_tools:

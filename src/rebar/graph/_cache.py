@@ -65,9 +65,7 @@ def _read_graph_cache(tracker_dir: str, cache_key: str) -> dict[str, Any] | None
     return None
 
 
-def _write_graph_cache(
-    tracker_dir: str, cache_key: str, graphs: dict[str, Any]
-) -> None:
+def _write_graph_cache(tracker_dir: str, cache_key: str, graphs: dict[str, Any]) -> None:
     """Atomically write the graph cache."""
     cache_path = os.path.join(tracker_dir, _GRAPH_CACHE_FILE)
     cache_tmp = cache_path + ".tmp"

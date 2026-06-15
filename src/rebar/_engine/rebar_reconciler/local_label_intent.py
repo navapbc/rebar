@@ -108,9 +108,7 @@ def compute_label_intent_set(ticket_id: str, tracker_dir: Path) -> set[str]:
     return ever_seen
 
 
-def compute_label_intent_map(
-    bound_local_ids: list[str], tracker_dir: Path
-) -> dict[str, set[str]]:
+def compute_label_intent_map(bound_local_ids: list[str], tracker_dir: Path) -> dict[str, set[str]]:
     """Bulk helper: compute the intent set for every bound ticket.
 
     Called once per reconcile pass by ``reconcile.py`` before invoking
@@ -120,6 +118,5 @@ def compute_label_intent_map(
     safety property at the map level).
     """
     return {
-        local_id: compute_label_intent_set(local_id, tracker_dir)
-        for local_id in bound_local_ids
+        local_id: compute_label_intent_set(local_id, tracker_dir) for local_id in bound_local_ids
     }

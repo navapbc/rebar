@@ -24,15 +24,13 @@ _SCRIPTS_DIR_FI = str(REPO_ROOT / "src" / "rebar" / "_engine")
 if _SCRIPTS_DIR_FI not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR_FI)
 
-from ticket_reducer._state import make_error_dict as _make_error_dict  # noqa: E402
-from ticket_reducer._state import make_initial_state as _make_initial_state  # noqa: E402
+from rebar.reducer._state import make_error_dict as _make_error_dict  # noqa: E402
+from rebar.reducer._state import make_initial_state as _make_initial_state  # noqa: E402
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_file_impact_event_compiles_to_state(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_file_impact_event_compiles_to_state(tmp_path: Path, reducer: ModuleType) -> None:
     """Given a CREATE + FILE_IMPACT event, state['file_impact'] equals the list.
 
     Without the fix: _processors.py has no process_file_impact() handler, so the
@@ -61,12 +59,9 @@ def test_file_impact_event_compiles_to_state(
     state = reducer.reduce_ticket(ticket_dir)
 
     assert state is not None, "reduce_ticket must return state for CREATE + FILE_IMPACT"
-    assert "file_impact" in state, (
-        "state must contain 'file_impact' key after FILE_IMPACT event"
-    )
+    assert "file_impact" in state, "state must contain 'file_impact' key after FILE_IMPACT event"
     assert state["file_impact"] == [{"path": "src/foo.py", "reason": "modified"}], (
-        f"state['file_impact'] must equal the list from the event; "
-        f"got {state.get('file_impact')!r}"
+        f"state['file_impact'] must equal the list from the event; got {state.get('file_impact')!r}"
     )
 
 
@@ -109,16 +104,13 @@ def test_file_impact_latest_wins_semantics(tmp_path: Path, reducer: ModuleType) 
     assert state is not None, "reduce_ticket must return state"
     assert "file_impact" in state, "state must contain 'file_impact' key"
     assert state["file_impact"] == [{"path": "new.py", "reason": "new"}], (
-        f"Latest FILE_IMPACT event must win (last-write-wins); "
-        f"got {state.get('file_impact')!r}"
+        f"Latest FILE_IMPACT event must win (last-write-wins); got {state.get('file_impact')!r}"
     )
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_file_impact_missing_key_returns_empty_list(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_file_impact_missing_key_returns_empty_list(tmp_path: Path, reducer: ModuleType) -> None:
     """Given FILE_IMPACT event with no file_impact key, state['file_impact'] == [].
 
     Without the fix: FILE_IMPACT events not yet processed; state key is absent.
@@ -147,16 +139,13 @@ def test_file_impact_missing_key_returns_empty_list(
     assert state is not None, "reduce_ticket must return state"
     assert "file_impact" in state, "state must contain 'file_impact' key"
     assert state["file_impact"] == [], (
-        f"Missing file_impact key in event data must yield []; "
-        f"got {state.get('file_impact')!r}"
+        f"Missing file_impact key in event data must yield []; got {state.get('file_impact')!r}"
     )
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_file_impact_null_value_returns_empty_list(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_file_impact_null_value_returns_empty_list(tmp_path: Path, reducer: ModuleType) -> None:
     """Given FILE_IMPACT event with file_impact: null, state['file_impact'] == [].
 
     Without the fix: FILE_IMPACT events not yet processed; state key is absent.
@@ -185,8 +174,7 @@ def test_file_impact_null_value_returns_empty_list(
     assert state is not None, "reduce_ticket must return state"
     assert "file_impact" in state, "state must contain 'file_impact' key"
     assert state["file_impact"] == [], (
-        f"Null file_impact value in event data must yield []; "
-        f"got {state.get('file_impact')!r}"
+        f"Null file_impact value in event data must yield []; got {state.get('file_impact')!r}"
     )
 
 

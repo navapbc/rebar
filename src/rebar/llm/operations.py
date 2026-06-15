@@ -18,7 +18,7 @@ from rebar.llm import prompts
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMError
 from rebar.llm.prompts import select_reviewers  # re-export (rules layer)
-from rebar.llm.runner import RunRequest, Runner, get_runner
+from rebar.llm.runner import Runner, RunRequest, get_runner
 
 __all__ = ["review_ticket", "select_reviewers"]
 

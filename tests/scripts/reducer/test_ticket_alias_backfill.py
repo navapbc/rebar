@@ -1,28 +1,33 @@
 """Tests for ticket_reducer._alias.compute_alias and the read-time backfill
 applied by ticket_reducer._processors.process_create.
 
+Tier E E7d: the bash-era helpers ``ticket-alias-compute.py`` (alias computation)
+and ``ticket-alias-resolve.py`` (alias/jira_key resolution) were thin CLI wrappers
+over the in-process logic — ``rebar.reducer._alias.compute_alias`` and
+``rebar._engine_support.resolver.resolve_ticket_id`` respectively. These tests
+exercise that in-process logic directly instead of subprocessing the (deleted)
+helpers.
+
 Behaviours under test:
   - compute_alias returns adj-noun-noun for full 16-hex IDs
   - compute_alias returns adj-noun (2 words) for legacy 8-hex IDs
-  - compute_alias returns the same value as the shipped ticket-alias-compute.py
-    shell helper (cross-implementation parity)
   - process_create populates state['alias'] from data.alias when present
   - process_create backfills state['alias'] from ticket_id when data.alias missing
+  - resolve_ticket_id resolves by stored/backfilled alias and jira_key, skips
+    dotfile dirs and malformed CREATE events, and fails loud (returns None +
+    stderr diagnostic) on an unreadable tracker directory
 """
 
 import json
-import subprocess
-import sys
 import time
 import uuid
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-SCRIPTS = REPO_ROOT / "src" / "rebar" / "_engine"
-sys.path.insert(0, str(SCRIPTS))
+from rebar._engine_support.resolver import _scan_alias_jira, resolve_ticket_id
+from rebar.reducer import reduce_ticket
+from rebar.reducer._alias import compute_alias
 
-from ticket_reducer import reduce_ticket  # noqa: E402
-from ticket_reducer._alias import compute_alias  # noqa: E402
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_compute_alias_full_id_three_words():
@@ -44,22 +49,12 @@ def test_compute_alias_too_short_returns_none():
     assert compute_alias("") is None
 
 
-def test_compute_alias_matches_shell_helper():
-    """Module fallback must match the existing shell-side computation byte-for-byte
-    so backfilled aliases for legacy tickets are the same as if they had been
-    written at create time."""
-    shell = SCRIPTS / "ticket-alias-compute.py"
-    wordlist = REPO_ROOT / "src" / "rebar" / "_engine" / "resources" / "ticket-wordlist.txt"
-    assert shell.exists()
-    assert wordlist.exists()
-    for tid in ("0193-d61d-abcd-1234", "ffff-0000-1111-2222"):
-        out = subprocess.run(
-            [sys.executable, str(shell), tid, str(wordlist)],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert out.stdout.strip() == compute_alias(tid)
+# NOTE (Tier E E7d): the former test_compute_alias_matches_shell_helper asserted
+# byte-parity between compute_alias and the deleted ticket-alias-compute.py CLI.
+# That helper was a thin re-export of compute_alias, so the parity check is now an
+# identity (compute_alias == compute_alias) with no remaining in-process meaning;
+# it has been dropped. compute_alias is exercised directly by the tests above and
+# by the resolver backfill tests below.
 
 
 def _plant_ticket(root: Path, ticket_id: str, alias_in_data: str | None) -> Path:
@@ -111,27 +106,24 @@ def test_process_create_backfills_when_alias_missing(tmp_path):
     assert state["alias"] is not None
 
 
-# ── Edge-case coverage for ticket-alias-resolve.py (Finding 4) ────────────────
-
-RESOLVER_SCRIPT = SCRIPTS / "ticket-alias-resolve.py"
-
-
-def _run_resolver(target: str, tracker: str | Path) -> tuple[int, str, str]:
-    """Invoke ticket-alias-resolve.py and return (rc, stdout, stderr)."""
-    proc = subprocess.run(
-        [sys.executable, str(RESOLVER_SCRIPT), target, str(tracker)],
-        capture_output=True,
-        text=True,
-    )
-    return proc.returncode, proc.stdout, proc.stderr
+# ── Edge-case coverage for resolve_ticket_id alias/jira_key resolution ────────
+#
+# Tier E E7d: ticket-alias-resolve.py was a thin CLI over
+# rebar._engine_support.resolver. The CLI printed "alias\t<id>" / "jira\t<id>" on
+# a match and exited non-zero on a hard tracker-listing failure. In-process,
+# resolve_ticket_id returns the resolved ticket-dir name (or None on no-match /
+# hard failure) and prints diagnostics to stderr; _scan_alias_jira exposes the
+# jira-vs-alias bucketing the CLI's output prefix encoded. We assert on those
+# return values + captured stderr (via capsys) instead of subprocess streams.
 
 
-def test_resolver_missing_tracker_dir_fails_loud(tmp_path):
-    """Non-existent tracker directory must exit non-zero with a useful stderr —
-    silent emptiness is indistinguishable from 'no matches found'."""
-    rc, _, err = _run_resolver("anything", tmp_path / "does-not-exist")
-    assert rc != 0
-    assert "cannot list" in err
+def test_resolver_missing_tracker_dir_fails_loud(tmp_path, capsys):
+    """Non-existent tracker directory must fail loud — return None AND emit a
+    stderr diagnostic, since silent emptiness is indistinguishable from
+    'no matches found'."""
+    result = resolve_ticket_id("anything", str(tmp_path / "does-not-exist"))
+    assert result is None
+    assert "cannot list" in capsys.readouterr().err
 
 
 def test_resolver_malformed_create_json_is_skipped(tmp_path):
@@ -144,9 +136,7 @@ def test_resolver_malformed_create_json_is_skipped(tmp_path):
     bad.mkdir()
     ts = time.time_ns()
     (bad / f"{ts}-junk-CREATE.json").write_text("{ not valid json")
-    rc, out, _ = _run_resolver("good-stored-alias", tmp_path)
-    assert rc == 0
-    assert out.strip() == f"alias\t{good.name}"
+    assert resolve_ticket_id("good-stored-alias", str(tmp_path)) == good.name
 
 
 def test_resolver_dotfile_dirs_ignored(tmp_path):
@@ -156,9 +146,7 @@ def test_resolver_dotfile_dirs_ignored(tmp_path):
     (tmp_path / ".graph-cache" / "fake-CREATE.json").write_text(
         json.dumps({"data": {"alias": "should-not-match"}})
     )
-    rc, out, _ = _run_resolver("should-not-match", tmp_path)
-    assert rc == 0
-    assert out.strip() == ""
+    assert resolve_ticket_id("should-not-match", str(tmp_path)) is None
 
 
 def test_resolver_backfilled_alias_matches_legacy_ticket(tmp_path):
@@ -166,15 +154,15 @@ def test_resolver_backfilled_alias_matches_legacy_ticket(tmp_path):
     fallback — this is the whole point of the backfill."""
     td = _plant_ticket(tmp_path, "0193-d61d-abcd-1234", alias_in_data=None)
     expected = compute_alias("0193-d61d-abcd-1234")
-    rc, out, _ = _run_resolver(expected, tmp_path)
-    assert rc == 0
-    assert out.strip() == f"alias\t{td.name}"
+    assert resolve_ticket_id(expected, str(tmp_path)) == td.name
 
 
 def test_resolver_jira_key_takes_precedence_over_alias_collision(tmp_path):
     """If a single ticket's CREATE event has both a matching jira_key and a
     matching alias for the same input string (pathological), jira wins —
-    matches the resolver's documented precedence order."""
+    matches the resolver's documented precedence order. _scan_alias_jira returns
+    (jira_matches, alias_matches); the colliding input must land in jira_matches
+    (the bucket the CLI's "jira\\t" prefix encoded), not alias_matches."""
     td = tmp_path / "abcd-efab-1234-5678"
     td.mkdir()
     ts = time.time_ns()
@@ -185,51 +173,33 @@ def test_resolver_jira_key_takes_precedence_over_alias_collision(tmp_path):
             }
         )
     )
-    rc, out, _ = _run_resolver("COLLIDE-99", tmp_path)
-    assert rc == 0
-    assert out.strip() == f"jira\t{td.name}"
+    jira_matches, alias_matches = _scan_alias_jira("COLLIDE-99", str(tmp_path))
+    assert jira_matches == [td.name]
+    assert alias_matches == []
+    # And the public resolver still returns the ticket (jira precedence).
+    assert resolve_ticket_id("COLLIDE-99", str(tmp_path)) == td.name
 
 
-def test_resolver_nonzero_exit_propagates_to_resolve_ticket_id(tmp_path):
-    """Cycle-3 review defense: when the resolver subprocess exits non-zero
-    (e.g. tracker dir unreadable), resolve_ticket_id must surface the failure
-    rather than report 'no matches' — silent zero-match looks identical to
-    'ticket not found' and hides operational problems."""
-    import os
+def test_resolver_nonzero_exit_propagates_to_resolve_ticket_id(tmp_path, capsys):
+    """When the tracker dir is unreadable, resolve_ticket_id must surface the
+    failure (return None AND emit a stderr diagnostic) rather than report a
+    silent zero-match — a silent zero-match looks identical to 'ticket not found'
+    and hides operational problems.
 
-    # Fake repo with a tickets-tracker that is a FILE not a dir → resolver
-    # raises OSError on listdir → exits 1. resolve_ticket_id should print
-    # an error to stderr and return non-zero.
-    repo = tmp_path / "fake-repo"
-    repo.mkdir()
-    bad_tracker = repo / ".tickets-tracker"
+    The former bash-CLI variant of this test (sourcing ticket-lib.sh and shelling
+    out to the alias resolver) checked the same intent across the deleted
+    subprocess boundary; in-process the diagnostic is _scan_alias_jira's
+    "cannot list" stderr line, surfaced by resolve_ticket_id."""
+    # A tracker path that is a FILE not a dir → os.listdir raises OSError →
+    # _scan_alias_jira prints "cannot list ..." and returns None → resolve
+    # returns None.
+    bad_tracker = tmp_path / ".tickets-tracker"
     bad_tracker.write_text("not a directory")
 
-    ticket_lib = REPO_ROOT / "src" / "rebar" / "_engine" / "ticket-lib.sh"
-    cmd = (
-        f"source {ticket_lib} && "
-        f"TICKETS_TRACKER_DIR={bad_tracker} resolve_ticket_id some-alias"
-    )
-    proc = subprocess.run(
-        ["bash", "-c", cmd],
-        capture_output=True,
-        text=True,
-        cwd=str(repo),
-        env={**os.environ, "TICKETS_TRACKER_DIR": str(bad_tracker)},
-    )
-    assert proc.returncode != 0, "expected non-zero exit on resolver failure"
-    # Tightened (cycle-4 review F5): require an explicit diagnostic — silent
-    # failure is the exact bug we are guarding against, so a missing stderr
-    # message must fail the test, not pass on the absence of a success line.
-    assert "alias resolver exited" in proc.stderr or "cannot list" in proc.stderr, (
-        f"expected explicit resolver diagnostic in stderr; got "
-        f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    )
-    # And the success-line must NOT appear (otherwise the failure was masked
-    # as 'not found'):
-    assert "ticket 'some-alias' not found" not in proc.stdout, (
-        "resolver failure should not be reported as 'ticket not found'"
-    )
+    result = resolve_ticket_id("some-alias", str(bad_tracker))
+    err = capsys.readouterr().err
+    assert result is None, "resolver failure must not resolve to a ticket"
+    assert "cannot list" in err, f"expected explicit resolver diagnostic in stderr; got {err!r}"
 
 
 def test_load_warns_once_when_wordlist_missing(tmp_path, capsys, monkeypatch):
@@ -237,7 +207,7 @@ def test_load_warns_once_when_wordlist_missing(tmp_path, capsys, monkeypatch):
     diagnostic — silent fallback to the 8-hex alias hides a real
     misconfiguration. The warning must appear exactly once per process even
     across many _load() calls (cache + warned-flag both prevent re-emission)."""
-    from ticket_reducer import _alias as alias_mod
+    from rebar.reducer import _alias as alias_mod
 
     # Reset the module-level cache + warned flag so this test starts clean
     monkeypatch.setattr(alias_mod, "_WORDS_CACHE", None)
@@ -323,10 +293,9 @@ def test_resolver_snapshot_only_ticket_matches_stored_alias(tmp_path):
     _plant_snapshot_ticket(tmp_path, ticket_id, stored_alias=stored)
 
     # Positive: resolver must find the ticket when given the stored alias.
-    rc, out, err = _run_resolver(stored, tmp_path)
-    assert rc == 0, f"expected exit 0, got {rc}; stderr={err!r}"
-    assert out.strip() == f"alias\t{ticket_id}", (
-        f"expected 'alias\\t{ticket_id}' in stdout; got {out.strip()!r}\n"
+    result = resolve_ticket_id(stored, str(tmp_path))
+    assert result == ticket_id, (
+        f"expected resolve to {ticket_id!r}; got {result!r}\n"
         f"(Bug 9894: resolver probably fell back to compute_alias={computed!r} "
         f"instead of reading compiled_state.alias={stored!r} from the SNAPSHOT)"
     )
@@ -358,11 +327,10 @@ def test_resolver_snapshot_only_ticket_does_not_match_computed_alias(tmp_path):
     _plant_snapshot_ticket(tmp_path, ticket_id, stored_alias=stored)
 
     # Negative: querying by the computed alias must NOT match (stored wins).
-    rc, out, err = _run_resolver(computed, tmp_path)
-    assert rc == 0, f"expected exit 0, got {rc}; stderr={err!r}"
-    assert out.strip() == "", (
-        f"expected empty stdout when querying by compute_alias={computed!r}; "
-        f"got {out.strip()!r}\n"
+    result = resolve_ticket_id(computed, str(tmp_path))
+    assert result is None, (
+        f"expected no match when querying by compute_alias={computed!r}; "
+        f"got {result!r}\n"
         f"(Bug 9894: if a match appears here, the resolver incorrectly used "
         f"compute_alias instead of the SNAPSHOT compiled_state.alias={stored!r})"
     )

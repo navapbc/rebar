@@ -112,9 +112,9 @@ def mock_jira_verify() -> Iterator[MagicMock]:
     verify-after-create REST path resolves without a real socket. Tests using
     this fixture exercise the create payload/argv, not the verify response.
     """
-    body = json.dumps(
-        {"key": "TEST-1", "summary": "Test", "status": {"name": "To Do"}}
-    ).encode("utf-8")
+    body = json.dumps({"key": "TEST-1", "summary": "Test", "status": {"name": "To Do"}}).encode(
+        "utf-8"
+    )
     resp = MagicMock()
     resp.read.return_value = body
     resp.__enter__ = lambda s: s

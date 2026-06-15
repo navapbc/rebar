@@ -1,4 +1,4 @@
-"""In-process ``init`` — bootstrap the event-sourced ticket store (Tier E E4).
+"""In-process ``init`` — bootstrap the event-sourced ticket store.
 
 Port of ticket-init.sh. Creates (or mounts) the orphan ``tickets`` branch as a
 linked worktree at ``.tickets-tracker/``, commits ``.gitignore`` +
@@ -90,7 +90,8 @@ def _resolve_repo_root(repo_root) -> str | None:
         return os.path.realpath(env)
     cp = subprocess.run(
         ["git", "-C", ".", "rev-parse", "--show-toplevel"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
         env={**os.environ, "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1"},
     )
     return cp.stdout.strip() if cp.returncode == 0 and cp.stdout.strip() else None
@@ -199,7 +200,7 @@ def _resolve_git_dir(repo: str) -> str:
     if os.path.isfile(git_path):
         with open(git_path, encoding="utf-8") as f:
             line = f.read().strip()
-        return line[len("gitdir: "):] if line.startswith("gitdir: ") else ""
+        return line[len("gitdir: ") :] if line.startswith("gitdir: ") else ""
     return git_path
 
 
@@ -208,10 +209,14 @@ def _init_lock_dir(repo: str) -> str:
     if os.path.isfile(base):
         with open(base, encoding="utf-8") as f:
             line = f.read().strip()
-        gd = line[len("gitdir: "):] if line.startswith("gitdir: ") else base
-        common = _git(gd if os.path.isdir(gd) else repo, "rev-parse", "--git-common-dir").stdout.strip()
+        gd = line[len("gitdir: ") :] if line.startswith("gitdir: ") else base
+        common = _git(
+            gd if os.path.isdir(gd) else repo, "rev-parse", "--git-common-dir"
+        ).stdout.strip()
         if common:
-            base = os.path.realpath(os.path.join(gd, common)) if not os.path.isabs(common) else common
+            base = (
+                os.path.realpath(os.path.join(gd, common)) if not os.path.isabs(common) else common
+            )
     return os.path.join(base, "ticket-init.lock")
 
 
@@ -257,8 +262,15 @@ def _mount_or_create_branch(repo: str, tracker: str) -> int:
     _ensure_branch_user_config(repo, tracker)
     _git(tracker, "config", "commit.gpgsign", "false")
     _git(tracker, "config", "tag.gpgsign", "false")
-    _git(tracker, "commit", "--allow-empty", "-q", "--no-verify", "-m",
-         "chore: initialize ticket tracker")
+    _git(
+        tracker,
+        "commit",
+        "--allow-empty",
+        "-q",
+        "--no-verify",
+        "-m",
+        "chore: initialize ticket tracker",
+    )
     return 0
 
 
@@ -275,8 +287,14 @@ def _commit_gitignore(tracker: str) -> None:
         with open(os.path.join(tracker, ".gitignore"), "w", encoding="utf-8") as f:
             f.write(_GITIGNORE)
         _git(tracker, "add", ".gitignore")
-        _git(tracker, "commit", "-q", "--no-verify", "-m",
-             "chore: add .gitignore for env-id, state-cache, scratch, and reducer cache")
+        _git(
+            tracker,
+            "commit",
+            "-q",
+            "--no-verify",
+            "-m",
+            "chore: add .gitignore for env-id, state-cache, scratch, and reducer cache",
+        )
 
 
 def _exclude_scratch_in_tracker(tracker: str) -> None:
@@ -285,7 +303,7 @@ def _exclude_scratch_in_tracker(tracker: str) -> None:
     if os.path.isfile(git_file):
         with open(git_file, encoding="utf-8") as f:
             line = f.read().strip()
-        gd = line[len("gitdir: "):] if line.startswith("gitdir: ") else ""
+        gd = line[len("gitdir: ") :] if line.startswith("gitdir: ") else ""
         if gd and not os.path.isabs(gd):
             gd = os.path.join(tracker, gd)
         git_dir = gd
@@ -299,8 +317,14 @@ def _commit_precommit(tracker: str) -> None:
         with open(os.path.join(tracker, ".pre-commit-config.yaml"), "w", encoding="utf-8") as f:
             f.write(_PRECOMMIT)
         _git(tracker, "add", ".pre-commit-config.yaml")
-        _git(tracker, "commit", "-q", "--no-verify", "-m",
-             "chore: add no-op .pre-commit-config.yaml (bug 27d8-b230)")
+        _git(
+            tracker,
+            "commit",
+            "-q",
+            "--no-verify",
+            "-m",
+            "chore: add no-op .pre-commit-config.yaml (bug 27d8-b230)",
+        )
 
 
 def _gen_local_files(tracker: str) -> None:
@@ -329,7 +353,7 @@ def _main_worktree_tracker(repo: str) -> str | None:
     wl = _git(repo, "worktree", "list", "--porcelain").stdout
     for line in wl.splitlines():
         if line.startswith("worktree "):
-            return os.path.join(line[len("worktree "):], ".tickets-tracker")
+            return os.path.join(line[len("worktree ") :], ".tickets-tracker")
     return None
 
 

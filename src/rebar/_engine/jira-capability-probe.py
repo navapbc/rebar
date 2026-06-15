@@ -20,18 +20,15 @@ Environment variables:
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import sys
 import time
 import uuid
-from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Load the acli transport from the in-package module (the engine dir is on
 # PYTHONPATH via engine_env() for every reconciler subprocess).
 # ---------------------------------------------------------------------------
-
 from rebar_reconciler import acli as _acli_mod
 
 AcliClient = _acli_mod.AcliClient
@@ -93,9 +90,7 @@ def main() -> None:
         )
         issue_key = result.get("key") or result.get("id")
         if not issue_key:
-            print(
-                f"PROBE_FAIL step=STEP_CREATE reason=no_key_in_response detail={result!r}"
-            )
+            print(f"PROBE_FAIL step=STEP_CREATE reason=no_key_in_response detail={result!r}")
             sys.exit(1)
         print("PROBE_PASS step=STEP_CREATE")
 
@@ -144,10 +139,7 @@ def main() -> None:
         try:
             read_value = client.get_issue_property(issue_key, "local_id")
         except KeyError as exc:
-            print(
-                f"PROBE_FAIL step=STEP_PROPERTY_READ "
-                f"reason=malformed_response detail={exc}"
-            )
+            print(f"PROBE_FAIL step=STEP_PROPERTY_READ reason=malformed_response detail={exc}")
             failed = True
         else:
             if read_value != probe_uuid:

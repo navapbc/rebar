@@ -1,5 +1,11 @@
 # Bash→Python strangler-fig migration plan
 
+> **STATUS: COMPLETE.** All tiers (A–E) are done — the bash engine is deleted and
+> rebar is one Python implementation behind three facades (CLI / library / MCP)
+> with zero bash dependency. This document is retained as the historical record of
+> how the migration was executed; for the current architecture see
+> [architecture.md](architecture.md).
+
 Story: `adult-oxide-slave` (8784-c2d7-c395-4478) · parent epic `nervy-hold-dip`
 (Audit 2026-06-09) · source analysis: Rec 1 + Rec 9 of the 2026-06-09
 architecture review (risks R3/R4/R5/R8/R9).
@@ -365,25 +371,28 @@ Cross-clone / cross-machine (environments):
 default flipped, concurrency suites green in CI continuously, before the
 switch (and the bash core, ~2,000 LOC) is deleted.
 
-## 7. Tier E — delete the dispatcher
+## 7. Tier E — delete the dispatcher ✅ DONE
 
-After D's switch is gone: `cli.py` becomes a real argparse CLI over the
-same `rebar._commands` functions the library exports (three thin facades,
-one implementation). Help/usage text is byte-pinned by goldens *before*
-the cutover. Retired here, each with a test asserting it's gone:
+`cli.py` is a thin facade over `rebar._cli` — a real argparse CLI over the same
+`rebar._commands` functions the library exports (three facades, one
+implementation). Help / usage / error output is byte-pinned by goldens anchored in
+`rebar._cli/_help`. Deleted in the cutover:
 
-- The bash dispatcher (`_engine/rebar`, ~580 LOC) and `engine_env()`'s
-  subprocess `PYTHONPATH` machinery.
-- The compat shims (`ticket_reducer/`, `ticket_graph/`, `ticket_reads.py`,
-  `ticket_resolver.py`, `ticket_output.py`) — no heredocs remain to import
-  the old names (architecture.md § engine import boundary already marks
-  these as dying with this story).
-- The **unpacked-disk constraint** (`engine_dir()` zipimport assertion),
-  the **jq prerequisite**, and the **flock(1)/mkdir discovery** machinery.
-- `tests/lib/suite-engine.sh` + `assert.sh` once the last bash suite is
-  translated (Rec 9 end state: zero standalone shell test harness).
+- The bash dispatcher (`_engine/rebar` + the `ticket` alias) and the dispatcher
+  arm of `engine_env()` (the `REBAR_TICKET_CLI` default now points at the
+  in-process CLI; `engine_env()`'s `PYTHONPATH` survives, scoped to the reconciler
+  + Jira-probe subprocess launches).
+- All `_engine/*.sh`, the `ticket-*.py` helpers, the compat shims
+  (`ticket_reducer/`, `ticket_graph/`, `ticket_reads.py`, `ticket_resolver.py`,
+  `ticket_output.py`), and the relocated write core (`ticket_txn.py` →
+  `rebar._commands.txn`).
+- The **jq prerequisite** and the **flock(1)/mkdir discovery** machinery. The
+  unpacked-disk constraint (`engine_dir()` zipimport assertion) is **kept** — the
+  reconciler + probe still exec as real files.
+- The standalone shell test harness (`tests/lib/suite-engine.sh` + `assert.sh` +
+  the collector); the suites are translated to in-process pytest.
 
-End state (the story's AC): one implementation + three facades; zero
+End state reached (the story's AC): one implementation + three facades; zero
 standalone shell tests; no embedded heredocs; no `_engine/*.sh`.
 
 ## 8. Sequencing, tickets, and rollback

@@ -19,9 +19,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-SL_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "sync_logger.py"
-)
+SL_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "sync_logger.py"
 
 
 def _load_module(name: str, path: Path) -> ModuleType:

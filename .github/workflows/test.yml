@@ -6,10 +6,12 @@ name: test
 #
 # Coverage: the Python tiers (unit / scripts / interface) AND every standalone
 # bash suite under tests/scripts/test-*.sh, which the test_bash_suites.py collector
-# runs under pytest. The integration tier (live Jira / network) and the external
-# tier (live LLM providers — tests/external/) are excluded from the default run via
-# `-m "not integration and not external"`; the external tier runs separately with
-# credentials via the external-integration workflow.
+# runs under pytest, plus the integration tier (concurrency + reconciler —
+# network-guarded / mocked, so CI-safe) as a separate step. Live Jira validation is
+# done via manual probes (bridge-probe, reconcile dry-run), not pytest. The external
+# tier (live LLM providers — tests/external/) is excluded from the default run via
+# `-m "not integration and not external"` and runs separately with credentials via
+# the external-integration workflow.
 
 on:
   push:
@@ -44,6 +46,10 @@ jobs:
       # only inside an `except` clause).
       - name: ruff — real-bug rules (gating)
         run: ruff check src tests
+
+      # GATING: formatting consistency (ruff format, recommended defaults).
+      - name: ruff format — check (gating)
+        run: ruff format --check src tests
 
       # ADVISORY: the broader stylistic set (unused imports, etc.). Reported into
       # the job summary as a ratchet view; the step always SUCCEEDS (green) so the
@@ -88,18 +94,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # The bash suites shell out to jq (ticket_show's reducer path). Ensure it is
-      # present on both runners (platform-compat lessons live in
-      # test-ticket-platform-compat.sh).
-      - name: Ensure jq is installed
-        shell: bash
-        run: |
-          if ! command -v jq >/dev/null 2>&1; then
-            if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get update && sudo apt-get install -y jq; fi
-            if [ "$RUNNER_OS" = "macOS" ]; then brew install jq; fi
-          fi
-          jq --version
-
       - name: Install rebar (editable) + test deps
         run: |
           python -m pip install --upgrade pip
@@ -120,22 +114,30 @@ jobs:
         shell: bash
         run: |
           echo "Files over the 800-LOC soft cap (policy: docs/architecture.md):"
-          over=$(find src/rebar -name '*.py' -o -name '*.sh' | grep -v __pycache__ \
+          over=$(find src/rebar -name '*.py' | grep -v __pycache__ \
             | xargs wc -l 2>/dev/null \
             | awk '$2 != "total" && $1 > 800 { printf "  %5d  %s\n", $1, $2 }' | sort -rn)
           if [ -n "$over" ]; then echo "$over"; else echo "  (none — all units within the soft cap)"; fi
 
-      - name: Run the full suite (Python tiers + bash collector; excludes live-Jira + external)
+      - name: Run the default suite (Python tiers + bash collector; excludes integration + external)
         # Pin --basetemp under the runner temp (not /tmp): on long (10-16 min) runs
         # the macOS tmp-cleaner reaps pytest's default /tmp/pytest-of-* basetemp
         # mid-run, producing a spurious FileNotFoundError cascade. -p no:cacheprovider
         # keeps a stale cache from leaking across runs.
         #
-        # Coverage is reported (term-missing) but NOT gated: the bash suites run
-        # rebar as a subprocess so they don't count toward in-process coverage, and
-        # a hard floor would be misleading until that's reconciled. The number is
-        # surfaced for visibility / ratcheting, not as a pass/fail.
+        # Coverage is reported (term-missing) but NOT gated: several tests run rebar
+        # as a subprocess so they don't count toward in-process coverage, and a hard
+        # floor would be misleading until that's reconciled. The number is surfaced
+        # for visibility / ratcheting, not as a pass/fail.
         run: >-
           pytest -m "not integration and not external" -q -p no:cacheprovider
           --basetemp="${{ runner.temp }}/rebar-basetemp"
           --cov=rebar --cov-report=term-missing:skip-covered
+
+      - name: Run the integration tier (concurrency + reconciler; network-guarded)
+        # These need no live services (mocked acli / local git), so they run in CI
+        # for cross-process concurrency + reconciler coverage. Live-Jira validation
+        # stays a manual probe (bridge-probe / reconcile dry-run).
+        run: >-
+          pytest -m integration -q -p no:cacheprovider
+          --basetemp="${{ runner.temp }}/rebar-basetemp-int"

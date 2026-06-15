@@ -14,14 +14,12 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import uuid as _uuid
 
-from rebar import _engine
 from rebar._commands._seam import (
-    append_event,
     CommandError,
+    append_event,
     require_id,
     require_not_ghost,
     tracker_dir,
@@ -46,23 +44,18 @@ def _new_ticket_id() -> str:
 
 
 def _compute_alias(ticket_id: str) -> str:
-    """Human alias via the shared ticket-alias-compute.py (same script bash calls).
+    """Human alias via the in-process reducer (``rebar.reducer._alias``).
 
-    Honors TICKET_WORDLIST_PATH (engine_env sets it), else the bundled wordlist.
-    Emits the same ``WARN: ...hex fallback...`` line bash does when the wordlist is
-    missing. Returns the alias (or the hex fallback the script prints).
+    Tier E E6.5a: replaced the ``ticket-alias-compute.py`` subprocess with the
+    canonical in-process helper — byte-identical adj-noun-noun derivation, the same
+    8-hex fallback when the wordlist is unavailable (it self-resolves the bundled
+    wordlist and honours ``TICKET_WORDLIST_PATH``), and its own one-shot WARN. The
+    ``or`` guards the ``None`` a malformed (<8-hex) id would return; native ids are
+    always 16-hex so this is belt-and-suspenders.
     """
-    script = _engine.engine_dir() / "ticket-alias-compute.py"
-    wordlist = os.environ.get("TICKET_WORDLIST_PATH") or str(_engine.wordlist_path())
-    proc = subprocess.run(
-        [sys.executable, str(script), ticket_id, wordlist],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if "FALLBACK" in proc.stderr:
-        print("WARN: ticket-wordlist.txt not found — using hex fallback alias", file=sys.stderr)
-    return proc.stdout.strip()
+    from rebar.reducer._alias import compute_alias
+
+    return compute_alias(ticket_id) or ticket_id.replace("-", "")[:8]
 
 
 def create_core(
@@ -118,9 +111,7 @@ def create_core(
             p.name.endswith(("-CREATE.json", "-SNAPSHOT.json")) and not p.name.startswith(".")
             for p in pdir.iterdir()
         ):
-            raise CommandError(
-                f"Error: parent ticket '{resolved}' has no CREATE or SNAPSHOT event"
-            )
+            raise CommandError(f"Error: parent ticket '{resolved}' has no CREATE or SNAPSHOT event")
         if (reduce_ticket(str(pdir)) or {}).get("status") == "closed":
             raise CommandError(
                 f"Error: cannot create child of closed ticket '{resolved}'. "
@@ -179,37 +170,58 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
     while i < n:
         a = args[i]
         if a in ("--parent",) and i + 1 < n:
-            parent = args[i + 1]; i += 2
+            parent = args[i + 1]
+            i += 2
         elif a.startswith("--parent="):
-            parent = a[len("--parent="):]; i += 1
+            parent = a[len("--parent=") :]
+            i += 1
         elif a in ("--priority", "-p") and i + 1 < n:
-            priority = args[i + 1]; i += 2
+            priority = args[i + 1]
+            i += 2
         elif a.startswith("--priority="):
-            priority = a[len("--priority="):]; i += 1
+            priority = a[len("--priority=") :]
+            i += 1
         elif a in ("--assignee",) and i + 1 < n:
-            assignee = args[i + 1]; i += 2
+            assignee = args[i + 1]
+            i += 2
         elif a.startswith("--assignee="):
-            assignee = a[len("--assignee="):]; i += 1
+            assignee = a[len("--assignee=") :]
+            i += 1
         elif a in ("--description", "-d") and i + 1 < n:
-            description = args[i + 1]; i += 2
+            description = args[i + 1]
+            i += 2
         elif a.startswith("--description="):
-            description = a[len("--description="):]; i += 1
+            description = a[len("--description=") :]
+            i += 1
         elif a in ("--tags",) and i + 1 < n:
-            tags = f"{tags},{args[i + 1]}" if tags else args[i + 1]; i += 2
+            tags = f"{tags},{args[i + 1]}" if tags else args[i + 1]
+            i += 2
         elif a.startswith("--tags="):
-            v = a[len("--tags="):]
-            tags = f"{tags},{v}" if tags else v; i += 1
+            v = a[len("--tags=") :]
+            tags = f"{tags},{v}" if tags else v
+            i += 1
         else:
-            parent = a; i += 1  # bare positional → parent (backward-compatible)
+            parent = a
+            i += 1  # bare positional → parent (backward-compatible)
 
     try:
         res = create_core(
-            ticket_type, title, parent=parent, priority=priority, assignee=assignee,
-            description=description, tags=tags, repo_root=repo_root,
+            ticket_type,
+            title,
+            parent=parent,
+            priority=priority,
+            assignee=assignee,
+            description=description,
+            tags=tags,
+            repo_root=repo_root,
         )
     except CommandError as exc:
         if fmt == "json" and exc.error_code:
-            print(json.dumps(error_envelope(exc.error_code, exc.input_str, exc.message, exc.returncode)))
+            print(
+                json.dumps(
+                    error_envelope(exc.error_code, exc.input_str, exc.message, exc.returncode)
+                )
+            )
         print(exc.message, file=sys.stderr)
         return exc.returncode
 
@@ -246,9 +258,7 @@ def edit_core(ticket_id: str, fields: dict, *, repo_root=None) -> None:
     tracker = tracker_dir(repo_root)
     for name in fields:
         if name not in _EDIT_FIELDS:
-            raise CommandError(
-                f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}"
-            )
+            raise CommandError(f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}")
     if not fields:
         raise CommandError("Error: at least one --field=value pair is required")
     if not (tracker / ".env-id").is_file():
@@ -345,14 +355,20 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
         if arg.startswith("--") and "=" in arg:
             name, val = arg[2:].split("=", 1)
             if name not in _EDIT_FIELDS:
-                print(f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}", file=sys.stderr)
+                print(
+                    f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}",
+                    file=sys.stderr,
+                )
                 return 1
             fields[name] = val
             i += 1
         elif arg.startswith("--"):
             name = arg[2:]
             if name not in _EDIT_FIELDS:
-                print(f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}", file=sys.stderr)
+                print(
+                    f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}",
+                    file=sys.stderr,
+                )
                 return 1
             if i + 1 >= n:
                 print(f"Error: --{name} requires a value", file=sys.stderr)
@@ -370,7 +386,9 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
     return 0
 
 
-def link_core(src_raw: str, tgt_raw: str, relation: str, *, repo_root=None, quiet: bool = False) -> None:
+def link_core(
+    src_raw: str, tgt_raw: str, relation: str, *, repo_root=None, quiet: bool = False
+) -> None:
     """Resolve endpoints and add a LINK via the shared graph (mirrors ticket_link's
     non-dry-run path → ticket-graph.py --link → add_dependency).
 
@@ -403,6 +421,42 @@ def link_core(src_raw: str, tgt_raw: str, relation: str, *, repo_root=None, quie
         raise CommandError(f"Error: {exc}") from None
 
 
+def _link_dry_run(src_raw: str, tgt_raw: str, relation: str, *, repo_root=None) -> int:
+    """In-process ``link --dry-run`` preview (Tier E E6.5a — replaces the
+    ticket-link.sh subprocess). Resolves endpoints, asks the shared hierarchy
+    resolver what WOULD happen, and prints the byte-identical ``[DRY RUN]`` line
+    without writing any event. Missing tickets error like the bash _check_ticket_
+    exists; a resolver failure falls back to the plain "Would create" preview."""
+    from rebar.graph._hierarchy import resolve_hierarchy_link
+
+    tracker = str(tracker_dir(repo_root))
+    src_id = resolve_ticket_id(src_raw, tracker)
+    if src_id is None:
+        print(f"Error: ticket '{src_raw}' does not exist", file=sys.stderr)
+        return 1
+    tgt_id = resolve_ticket_id(tgt_raw, tracker)
+    if tgt_id is None:
+        print(f"Error: ticket '{tgt_raw}' does not exist", file=sys.stderr)
+        return 1
+    try:
+        res = resolve_hierarchy_link(src_id, tgt_id, tracker, relation)
+    except Exception:  # noqa: BLE001 — resolver unavailable → plain preview (bash parity)
+        print(f"[DRY RUN] Would create: {src_id} {relation} {tgt_id} (no event written)")
+        return 0
+    if res.get("is_redundant"):
+        print(
+            f"[DRY RUN] Would reject: {src_id} {relation} {tgt_id} — "
+            "redundant link (direct child) (no event written)"
+        )
+    elif res.get("was_redirected"):
+        rs = res.get("resolved_source", src_id)
+        rt = res.get("resolved_target", tgt_id)
+        print(f"[DRY RUN] Would promote: {rs} {relation} {rt} (no event written)")
+    else:
+        print(f"[DRY RUN] Would create: {src_id} {relation} {tgt_id} (no event written)")
+    return 0
+
+
 def link_cli(argv: list[str], *, repo_root=None) -> int:
     """Dispatcher Python route for ``link``: parse --dry-run, resolve, delegate."""
     dry_run = "--dry-run" in argv
@@ -413,17 +467,7 @@ def link_cli(argv: list[str], *, repo_root=None) -> int:
     src_raw, tgt_raw, relation = rest[0], rest[1], rest[2]
 
     if dry_run:
-        # --dry-run preview is owned by ticket-link.sh (retired with the bash core).
-        tracker = tracker_dir(repo_root)
-        src_id = resolve_ticket_id(src_raw, str(tracker)) or src_raw
-        tgt_id = resolve_ticket_id(tgt_raw, str(tracker)) or tgt_raw
-        proc = subprocess.run(
-            ["bash", str(_engine.engine_dir() / "ticket-link.sh"), "link",
-             src_id, tgt_id, relation, "--dry-run"],
-            env=_engine.engine_env(repo_root),
-            check=False,
-        )
-        return proc.returncode
+        return _link_dry_run(src_raw, tgt_raw, relation, repo_root=repo_root)
 
     try:
         link_core(src_raw, tgt_raw, relation, repo_root=repo_root)
@@ -503,7 +547,7 @@ def revert_cli(argv: list[str], *, repo_root=None) -> int:
     reason = ""
     for arg in argv[2:]:
         if arg.startswith("--reason="):
-            reason = arg[len("--reason="):]
+            reason = arg[len("--reason=") :]
         else:
             print(f"Error: unknown argument '{arg}'", file=sys.stderr)
             print(_REVERT_USAGE, file=sys.stderr)

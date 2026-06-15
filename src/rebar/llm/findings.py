@@ -158,7 +158,8 @@ def resolve_citations(result: dict, repo_path: str | None) -> dict:
             if not path:
                 continue
             abs_path = os.path.realpath(os.path.join(root, path))
-            if not (abs_path == root or abs_path.startswith(root + os.sep)) or not os.path.isfile(abs_path):
+            within = abs_path == root or abs_path.startswith(root + os.sep)
+            if not within or not os.path.isfile(abs_path):
                 _downgrade(cit, f"unresolved file citation: {path}")
                 continue
             if is_denied(abs_path, denied):
@@ -207,16 +208,24 @@ def findings_response_model():
         line_start: int | None = Field(default=None, description="1-based start line (kind=file).")
         line_end: int | None = Field(default=None, description="1-based end line (kind=file).")
         url: str | None = Field(default=None, description="URL evidence (kind=url).")
-        description: str | None = Field(default=None, description="Freeform source/evidence (kind=source).")
+        description: str | None = Field(
+            default=None, description="Freeform source/evidence (kind=source)."
+        )
 
     class Finding(BaseModel):
         severity: str = Field(description="One of: critical | high | medium | low | info.")
-        dimension: str = Field(description="Category/dimension, e.g. 'security', 'acceptance-criteria'.")
+        dimension: str = Field(
+            description="Category/dimension, e.g. 'security', 'acceptance-criteria'."
+        )
         detail: str = Field(description="Human-readable description of the finding.")
         title: str | None = Field(default=None, description="Optional short headline.")
-        citations: list[Citation] = Field(default_factory=list, description="Evidence: file+line / url / freeform.")
+        citations: list[Citation] = Field(
+            default_factory=list, description="Evidence: file+line / url / freeform."
+        )
         confidence: float | None = Field(default=None, description="Optional confidence 0..1.")
-        reviewer_id: str | None = Field(default=None, description="Reviewer that produced this finding.")
+        reviewer_id: str | None = Field(
+            default=None, description="Reviewer that produced this finding."
+        )
 
     class ReviewFindings(BaseModel):
         """Structured output of an LLM review: the findings and an optional summary."""

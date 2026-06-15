@@ -6,11 +6,12 @@ Faithful in-process port of ``validate-issues.sh``: normalize every ticket from
 finding stream, and render text / ``--terse`` / ``--output json`` exactly as bash
 did — including the ANSI colors and the score-encoded exit (``exit == 5 - score``).
 
-Data source mirrors bash precisely: bash reads via ``$TICKET_CMD list`` (default
-the dispatcher itself); so when ``TICKET_CMD`` is set in the environment (test
-injection) we subprocess it, and otherwise we read in-process via
-``list_states`` — the Tier C win, byte-equivalent because the dispatcher's ``list``
-arm is itself ``list_states``.
+Data source: when ``TICKET_CMD`` is set in the environment (test injection) we
+subprocess ``$TICKET_CMD list``, and otherwise we read in-process via
+``list_states`` — the Tier C win, byte-equivalent because the CLI's ``list`` arm
+is itself ``list_states``. The default ticket command (used only for the
+interface-contract *suggestion* text, never subprocessed in production) is the
+in-process ``rebar`` CLI (:func:`rebar._engine.in_process_cli`).
 
 Output contract (docs/bash-migration.md §1.4): ``--output json`` is pinned by JSON
 **schema + semantic** equality (jq vs ``json.dumps`` whitespace differs and is not
@@ -50,9 +51,9 @@ _ALWAYS_SHOWN = {"critical", "major", "minor", "warning"}
 
 
 def _default_ticket_cmd() -> str:
-    from rebar._engine import engine_dir
+    from rebar._engine import in_process_cli
 
-    return str(engine_dir() / "ticket")
+    return in_process_cli()
 
 
 # ───────────────────────────── data + normalization ──────────────────────────
@@ -131,17 +132,20 @@ def signature_findings(tracker: str) -> list:
             continue
         verdict = signing.verify_record(record, name, key).get("verdict")
         if verdict == "mismatch":
-            out.append(Finding(
-                "major",
-                f"[SIGNATURE] {name}: signature does not match its verified-steps "
-                f"manifest (tampered or invalid)",
-            ))
+            out.append(
+                Finding(
+                    "major",
+                    f"[SIGNATURE] {name}: signature does not match its verified-steps "
+                    f"manifest (tampered or invalid)",
+                )
+            )
         elif verdict == "foreign_key":
-            out.append(Finding(
-                "minor",
-                f"[SIGNATURE] {name}: signed by a different environment "
-                f"(cannot certify here)",
-            ))
+            out.append(
+                Finding(
+                    "minor",
+                    f"[SIGNATURE] {name}: signed by a different environment (cannot certify here)",
+                )
+            )
     return out
 
 
@@ -283,9 +287,17 @@ def _emit_findings(findings: list[_checks.Finding], *, verbose: bool) -> None:
 
 
 def _emit_summary(score: int, buckets: dict[str, list[str]], *, terse: bool) -> None:
-    c, ma, mi, w = (len(buckets["critical"]), len(buckets["major"]), len(buckets["minor"]), len(buckets["warning"]))
+    c, ma, mi, w = (
+        len(buckets["critical"]),
+        len(buckets["major"]),
+        len(buckets["minor"]),
+        len(buckets["warning"]),
+    )
     if terse and score == 5:
-        print(f"Issues health: {score}/5 ({c} critical, {ma} major, {mi} minor, {w} warnings)", file=sys.stderr)
+        print(
+            f"Issues health: {score}/5 ({c} critical, {ma} major, {mi} minor, {w} warnings)",
+            file=sys.stderr,
+        )
         return
     print("", file=sys.stderr)
     print(f"{_BLUE}=== Summary ==={_NC}", file=sys.stderr)
@@ -326,7 +338,9 @@ def validate_state(tracker: str, *, quick: bool = False) -> dict[str, Any]:
     """In-process validate for the library/MCP: returns the JSON report dict
     ({score, critical_issues, major_issues, minor_issues, warnings, suggestions})."""
     issues = normalize_issues(_raw_tickets(tracker))
-    findings = run_checks(issues, quick=quick, ticket_cmd=os.environ.get("TICKET_CMD") or _default_ticket_cmd())
+    findings = run_checks(
+        issues, quick=quick, ticket_cmd=os.environ.get("TICKET_CMD") or _default_ticket_cmd()
+    )
     findings += signature_findings(tracker)
     buckets = _bucket(findings)
     return to_json_dict(calculate_score(buckets), buckets)

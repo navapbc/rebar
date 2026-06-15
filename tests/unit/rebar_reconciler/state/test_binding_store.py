@@ -40,6 +40,7 @@ load_binding_store = _mod.load_binding_store
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def store(tmp_path: Path) -> BindingStore:
     """Fresh BindingStore backed by a temporary directory."""
@@ -67,9 +68,7 @@ class TestBindingLifecycle:
 
 
 class TestQueries:
-    def test_get_jira_key_returns_none_for_unbound(
-        self, store: BindingStore
-    ) -> None:
+    def test_get_jira_key_returns_none_for_unbound(self, store: BindingStore) -> None:
         assert store.get_jira_key("nonexistent") is None
 
     def test_reverse_lookup(self, store: BindingStore) -> None:
@@ -77,9 +76,7 @@ class TestQueries:
         store.bind_confirm("local-1", "DIG-99")
         assert store.get_local_id("DIG-99") == "local-1"
 
-    def test_reverse_lookup_returns_none_for_unknown_key(
-        self, store: BindingStore
-    ) -> None:
+    def test_reverse_lookup_returns_none_for_unknown_key(self, store: BindingStore) -> None:
         assert store.get_local_id("DIG-0") is None
 
     def test_pending_bindings_listed(self, store: BindingStore) -> None:
@@ -148,9 +145,7 @@ class TestPersistence:
 
 
 class TestRecovery:
-    def test_recover_pending_found_in_jira(
-        self, store: BindingStore
-    ) -> None:
+    def test_recover_pending_found_in_jira(self, store: BindingStore) -> None:
         """Recovery with a mock that returns a hit for any query (legacy behavior).
 
         Updated to accept colon-form as the primary search label — the
@@ -173,9 +168,7 @@ class TestRecovery:
             f"Primary search must use colon form; got: {first_call_arg!r}"
         )
 
-    def test_recover_pending_not_found_in_jira(
-        self, store: BindingStore
-    ) -> None:
+    def test_recover_pending_not_found_in_jira(self, store: BindingStore) -> None:
         store.bind_pending("orphan-1")
 
         client = MagicMock()
@@ -186,9 +179,7 @@ class TestRecovery:
         assert count == 1
         assert not store.is_bound("orphan-1")
 
-    def test_recover_with_no_pending_is_noop(
-        self, store: BindingStore
-    ) -> None:
+    def test_recover_with_no_pending_is_noop(self, store: BindingStore) -> None:
         client = MagicMock()
         assert store.recover_pending_bindings(client) == 0
         client.search_issues.assert_not_called()
@@ -197,9 +188,7 @@ class TestRecovery:
     # NEW tests — bug 8a1f-fd52-a416-4776 regression tests
     # ------------------------------------------------------------------
 
-    def test_recover_colon_form_primary_hit(
-        self, store: BindingStore
-    ) -> None:
+    def test_recover_colon_form_primary_hit(self, store: BindingStore) -> None:
         """Client returns a result ONLY for colon-form JQL — binding confirmed.
 
         This is the RED test: before the fix, the code searches hyphen-form
@@ -228,9 +217,7 @@ class TestRecovery:
             "Entry must no longer be pending after colon-form recovery"
         )
 
-    def test_recover_hyphen_form_legacy_fallback(
-        self, store: BindingStore
-    ) -> None:
+    def test_recover_hyphen_form_legacy_fallback(self, store: BindingStore) -> None:
         """Client returns a result ONLY for hyphen-form JQL — legacy fallback.
 
         Old issues written before the colon→hyphen migration may carry a
@@ -256,9 +243,7 @@ class TestRecovery:
         )
         assert not store.is_pending("xyz-0001")
 
-    def test_recover_colon_form_wins_when_both_present(
-        self, store: BindingStore
-    ) -> None:
+    def test_recover_colon_form_wins_when_both_present(self, store: BindingStore) -> None:
         """When both colon-form and hyphen-form would match, colon-form is used.
 
         The colon search must be attempted first; because it returns a hit,
@@ -281,9 +266,7 @@ class TestRecovery:
 
 
 class TestLoadBindingStore:
-    def test_load_binding_store_creates_instance(
-        self, tmp_path: Path
-    ) -> None:
+    def test_load_binding_store_creates_instance(self, tmp_path: Path) -> None:
         tracker = tmp_path / ".tickets-tracker"
         tracker.mkdir()
         repo_root = tmp_path

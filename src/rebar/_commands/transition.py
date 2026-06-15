@@ -1,34 +1,26 @@
-"""In-process ``transition`` / ``reopen`` / ``claim`` wrappers (Tier E E3).
+"""In-process ``transition`` / ``reopen`` / ``claim`` wrappers.
 
-Ports the bash ``ticket-transition.sh`` / ``ticket-claim.sh`` wrappers (+ the
-``ticket_transition`` lib-api id-resolution layer) over the relocated locked cores
-in :mod:`rebar._commands.txn` (``transition_core`` / ``claim_core``). The wrappers
-own everything around the locked write: ``--output`` parsing, the 2-arg
-current-status autodetect, the ``archived → open`` un-archive seam, status
-validation, the idempotent no-op, the ghost / init checks, the open-children close
-guard, ``newly_unblocked`` detection (via
+These wrappers drive the locked write cores in :mod:`rebar._commands.txn`
+(``transition_core`` / ``claim_core``) and own everything around the locked write:
+``--output`` parsing, the 2-arg current-status autodetect, the ``archived → open``
+un-archive seam, status validation, the idempotent no-op, the ghost / init checks,
+the open-children close guard, ``newly_unblocked`` detection (via
 :func:`rebar.graph._unblock.batch_close_operations`), the force-close audit
 comment, compact-on-close, per-ticket scratch cleanup, the
 ``{ticket_id,from,to,newly_unblocked}`` json / ``UNBLOCKED:`` text output, and
-claim's ``_emit_error_envelope`` (ticket_not_found / concurrency_conflict /
-claim_failed) + ``CLAIMED:`` output.
-
-Byte-parity with the dispatcher is pinned by ``tests/interfaces/test_e3_transition.py``
-and ``test_e3_claim.py``. No bash is deleted here (the ``.sh`` suites still drive
-the dispatcher); compact-on-close still subprocesses ``ticket-compact.sh`` until
-compact is ported, then rewires.
+claim's error-envelope (ticket_not_found / concurrency_conflict / claim_failed) +
+``CLAIMED:`` output.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 
 from rebar import config
-from rebar._commands import txn
+from rebar._commands import scratch, txn
 from rebar._commands._seam import CommandError
 from rebar._commands.txn import ConcurrencyMismatch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
@@ -88,7 +80,7 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str, str]:
     while i < len(args):
         a = args[i]
         if a.startswith("--reason="):
-            reason = a[len("--reason="):]
+            reason = a[len("--reason=") :]
             i += 1
         elif a == "--reason":
             if i + 1 >= len(args):
@@ -99,7 +91,7 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str, str]:
             force = True
             i += 1
         elif a.startswith("--verdict-hash="):
-            verdict_hash = a[len("--verdict-hash="):]
+            verdict_hash = a[len("--verdict-hash=") :]
             i += 1
         elif a == "--verdict-hash":
             if i + 1 >= len(args):
@@ -107,7 +99,7 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str, str]:
             verdict_hash = args[i + 1]
             i += 2
         elif a.startswith("--force-close="):
-            force_close = a[len("--force-close="):]
+            force_close = a[len("--force-close=") :]
             i += 1
         elif a == "--force-close":
             if i + 1 >= len(args):
@@ -131,26 +123,15 @@ def _validate_status(label: str, value: str) -> None:
             returncode=1,
         )
     raise CommandError(
-        f"Error: invalid {label} '{value}'. Must be one of: open, in_progress, "
-        "closed, blocked",
+        f"Error: invalid {label} '{value}'. Must be one of: open, in_progress, closed, blocked",
         returncode=1,
     )
 
 
-def _scratch_cleanup(repo_root: str, ticket_id: str) -> None:
-    """Best-effort per-ticket scratch dir removal (silenced, like the bash
-    ``_scratch_cleanup_for_ticket`` call on close)."""
-    base = os.environ.get("SCRATCH_BASE_DIR") or os.path.join(repo_root, ".rebar", "scratch")
-    try:
-        shutil.rmtree(os.path.join(base, ticket_id), ignore_errors=True)
-    except OSError:
-        pass
-
-
 def _compact_on_close(repo_root: str, ticket_id: str) -> None:
     """Compact-on-close: squash the event log into a SNAPSHOT (non-blocking, output
-    silenced). In-process via rebar._commands.compact (Tier E E3 rewired this off
-    the ticket-compact.sh subprocess); --threshold=0 --skip-sync, commit kept."""
+    silenced). In-process via rebar._commands.compact; --threshold=0 --skip-sync,
+    commit kept."""
     import contextlib
     import io
 
@@ -158,9 +139,7 @@ def _compact_on_close(repo_root: str, ticket_id: str) -> None:
 
     try:
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            _compact.compact_cli(
-                [ticket_id, "--threshold=0", "--skip-sync"], repo_root=repo_root
-            )
+            _compact.compact_cli([ticket_id, "--threshold=0", "--skip-sync"], repo_root=repo_root)
     except Exception:
         pass
 
@@ -230,9 +209,7 @@ def transition_compute(
                 sys.stderr.write(
                     f"Warning: closing ticket '{ticket_id}' with {count} unresolved "
                     "(non-closed) child ticket(s) (--force).\n"
-                    "The following children are not yet closed:\n"
-                    + "\n".join(open_children)
-                    + "\n"
+                    "The following children are not yet closed:\n" + "\n".join(open_children) + "\n"
                 )
             else:
                 raise CommandError(
@@ -277,7 +254,7 @@ def transition_compute(
 
     if target_status == "closed":
         _compact_on_close(repo_root_str, ticket_id)
-        _scratch_cleanup(repo_root_str, ticket_id)
+        scratch.cleanup_for_ticket(repo_root_str, ticket_id)
 
     return {
         "ticket_id": ticket_id,
@@ -292,7 +269,9 @@ def _short_head(tracker: str) -> str:
     try:
         return subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         ).stdout.strip()
     except Exception:
         return ""
@@ -300,9 +279,10 @@ def _short_head(tracker: str) -> str:
 
 def _unarchive(ticket_id: str, target_status: str, tracker: str, repo_root_str: str) -> int:
     """The ``archived → open`` un-archive seam: REVERT the latest live ARCHIVED
-    event. Subprocesses ticket-revert.sh exactly as the bash ``exec`` did (its
-    stdout/stderr/exit become this command's); ``--output`` and the UNBLOCKED block
-    are skipped on this path."""
+    event IN-PROCESS via :func:`rebar._commands.composer.revert_core` (Tier E
+    E6.5a — replacing the ticket-revert.sh subprocess). Same REVERT event +
+    ``.archived`` marker clear + ``Reverted event …`` confirmation the bash
+    ``exec`` produced; ``--output`` and the UNBLOCKED block are skipped here."""
     if target_status != "open":
         sys.stderr.write(
             "Error: from 'archived' the only valid transition is to 'open' "
@@ -313,18 +293,21 @@ def _unarchive(ticket_id: str, target_status: str, tracker: str, repo_root_str: 
     if not archived_uuid:
         sys.stderr.write("Error: no live ARCHIVED event (status may be stale)\n")
         return 1
-    from rebar._engine import dispatcher, engine_env
+    from rebar._commands._seam import CommandError
+    from rebar._commands.composer import revert_core
 
-    script = os.path.join(os.path.dirname(str(dispatcher())), "ticket-revert.sh")
-    env = engine_env(repo_root_str)
-    env["TICKETS_TRACKER_DIR"] = tracker
-    return subprocess.call(
-        [
-            "bash", script, ticket_id, archived_uuid,
-            "--reason=un-archive via transition archived open",
-        ],
-        env=env,
-    )
+    try:
+        resolved = revert_core(
+            ticket_id,
+            archived_uuid,
+            "un-archive via transition archived open",
+            repo_root=repo_root_str,
+        )
+    except CommandError as exc:
+        sys.stderr.write(exc.message + "\n")
+        return exc.returncode
+    sys.stdout.write(f"Reverted event '{archived_uuid}' on ticket '{resolved}'\n")
+    return 0
 
 
 def _latest_live_archived_uuid(ticket_dir: str) -> str:
@@ -460,7 +443,7 @@ def _parse_assignee(args: list[str]) -> str:
     while i < len(args):
         a = args[i]
         if a.startswith("--assignee="):
-            assignee = a[len("--assignee="):]
+            assignee = a[len("--assignee=") :]
             i += 1
         elif a == "--assignee":
             if i + 1 >= len(args):
@@ -565,7 +548,9 @@ def claim_cli(argv: list[str], *, repo_root=None) -> int:
 
     if fmt == "json":
         sys.stdout.write(
-            json.dumps({"ticket_id": ticket_id, "status": "in_progress", "assignee": assignee or None})
+            json.dumps(
+                {"ticket_id": ticket_id, "status": "in_progress", "assignee": assignee or None}
+            )
             + "\n"
         )
     else:

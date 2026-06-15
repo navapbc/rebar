@@ -28,20 +28,11 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = (
-    REPO_ROOT
-    / "src"
-    / "rebar"
-    / "_engine"
-    / "rebar_reconciler"
-    / "outbound_differ.py"
-)
+DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
 
 
 def _load_differ():
-    spec = importlib.util.spec_from_file_location(
-        "outbound_differ_comments_test", DIFFER_PATH
-    )
+    spec = importlib.util.spec_from_file_location("outbound_differ_comments_test", DIFFER_PATH)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules["outbound_differ_comments_test"] = mod
@@ -60,9 +51,7 @@ def _adf_paragraph(text: str) -> dict:
     return {
         "type": "doc",
         "version": 1,
-        "content": [
-            {"type": "paragraph", "content": [{"type": "text", "text": text}]}
-        ],
+        "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}],
     }
 
 
@@ -73,9 +62,7 @@ def _jira_snapshot_with_comments(jira_key: str, comment_bodies_or_dicts) -> dict
     key is "comment", not "comments". Updated from the old incorrect shape to
     match the fix for bug 4572.
     """
-    jira_comments = [
-        (c if isinstance(c, dict) else {"body": c}) for c in comment_bodies_or_dicts
-    ]
+    jira_comments = [(c if isinstance(c, dict) else {"body": c}) for c in comment_bodies_or_dicts]
     return {
         jira_key: {
             "comment": {"comments": jira_comments, "total": len(jira_comments)},
@@ -103,8 +90,7 @@ def test_diff_comments_dedup_matches_adf_to_plain(differ):
     )
     out = differ._diff_comments(ticket, "DIG-1", jira_snapshot)
     assert out == [], (
-        f"local body matches Jira ADF body after adf_to_text — no diff expected; "
-        f"got: {out!r}"
+        f"local body matches Jira ADF body after adf_to_text — no diff expected; got: {out!r}"
     )
 
 

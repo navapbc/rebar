@@ -7,14 +7,12 @@ conftest.py; event-writing helpers + the module loader in _helpers.py.
 
 from __future__ import annotations
 
-import json
 import tempfile
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 from _helpers import (
-    SCRIPT_PATH,
     _write_archive_event,
     _write_blocks_link,
     _write_link_event,
@@ -57,9 +55,7 @@ def test_build_dep_graph_includes_children(graph: ModuleType, tmp_path: Path) ->
     )
 
 
-def test_build_dep_graph_children_empty_when_no_children(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_build_dep_graph_children_empty_when_no_children(graph: ModuleType, tmp_path: Path) -> None:
     """build_dep_graph must return an empty 'children' list when no tickets
     have parent_id matching the queried ticket."""
     tracker_dir = tmp_path / "tracker"
@@ -71,9 +67,7 @@ def test_build_dep_graph_children_empty_when_no_children(
     result = graph.build_dep_graph("lonely-ticket", str(tracker_dir))
 
     assert "children" in result, "build_dep_graph result missing 'children' field"
-    assert result["children"] == [], (
-        f"Expected empty children, got {result['children']}"
-    )
+    assert result["children"] == [], f"Expected empty children, got {result['children']}"
 
 
 @pytest.mark.unit
@@ -116,8 +110,7 @@ def test_compute_archive_eligible_regression(graph: ModuleType, tmp_path: Path) 
         )
 
         assert "ticket-already-archived" not in eligible, (
-            f"ticket-already-archived is already archived, must not be re-eligible; "
-            f"got {eligible}"
+            f"ticket-already-archived is already archived, must not be re-eligible; got {eligible}"
         )
 
         assert "ticket-open" not in eligible, (
@@ -131,9 +124,7 @@ def test_compute_archive_eligible_regression(graph: ModuleType, tmp_path: Path) 
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_transitive_traversal_includes_archived_midchain(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_transitive_traversal_includes_archived_midchain(graph: ModuleType, tmp_path: Path) -> None:
     """Transitive blocker traversal must NOT skip archived tickets mid-chain — regression guard.
 
     GREEN: This test passes today and must continue passing after archived exclusion
@@ -204,13 +195,9 @@ def test_check_would_create_cycle_no_false_positive_for_transitive_depends_on(
     _write_ticket(tracker_dir, "ticket-c", status="open")
 
     # ticket-a depends_on ticket-c: LINK in ticket-a's dir
-    _write_link_event(
-        "ticket-a", "ticket-c", "depends_on", str(tracker_dir), timestamp=1500
-    )
+    _write_link_event("ticket-a", "ticket-c", "depends_on", str(tracker_dir), timestamp=1500)
     # ticket-c depends_on ticket-b: LINK in ticket-c's dir
-    _write_link_event(
-        "ticket-c", "ticket-b", "depends_on", str(tracker_dir), timestamp=1501
-    )
+    _write_link_event("ticket-c", "ticket-b", "depends_on", str(tracker_dir), timestamp=1501)
 
     # Redundant transitive edge: A→B is already implied by A→C→B, but is NOT a cycle.
     would_cycle = graph.check_would_create_cycle(
@@ -251,18 +238,12 @@ def test_add_dependency_allows_redundant_transitive_depends_on(
     _write_ticket(tracker_dir, "ticket-b", status="open")
     _write_ticket(tracker_dir, "ticket-c", status="open")
 
-    _write_link_event(
-        "ticket-a", "ticket-c", "depends_on", str(tracker_dir), timestamp=1500
-    )
-    _write_link_event(
-        "ticket-c", "ticket-b", "depends_on", str(tracker_dir), timestamp=1501
-    )
+    _write_link_event("ticket-a", "ticket-c", "depends_on", str(tracker_dir), timestamp=1500)
+    _write_link_event("ticket-c", "ticket-b", "depends_on", str(tracker_dir), timestamp=1501)
 
     # Must not raise CyclicDependencyError — redundant transitive edge is allowed
     try:
-        graph.add_dependency(
-            "ticket-a", "ticket-b", str(tracker_dir), relation="depends_on"
-        )
+        graph.add_dependency("ticket-a", "ticket-b", str(tracker_dir), relation="depends_on")
     except graph.CyclicDependencyError as exc:
         pytest.fail(
             f"add_dependency raised CyclicDependencyError for a redundant transitive "
@@ -280,9 +261,7 @@ def test_add_dependency_allows_redundant_transitive_depends_on(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_build_dep_graph_excludes_archived_children(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_build_dep_graph_excludes_archived_children(graph: ModuleType, tmp_path: Path) -> None:
     """build_dep_graph must exclude archived tickets from the children list by default.
 
     Setup:
@@ -303,12 +282,8 @@ def test_build_dep_graph_excludes_archived_children(
 
     try:
         _write_ticket(tracker_dir, "epic-001", ticket_type="epic")
-        _write_ticket(
-            tracker_dir, "story-active", parent_id="epic-001", ticket_type="story"
-        )
-        _write_ticket(
-            tracker_dir, "story-archived", parent_id="epic-001", ticket_type="story"
-        )
+        _write_ticket(tracker_dir, "story-active", parent_id="epic-001", ticket_type="story")
+        _write_ticket(tracker_dir, "story-archived", parent_id="epic-001", ticket_type="story")
         _write_archive_event(tracker_dir, "story-archived")
 
         result = graph.build_dep_graph("epic-001", str(tracker_dir))
@@ -330,9 +305,7 @@ def test_build_dep_graph_excludes_archived_children(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_build_dep_graph_excludes_archived_blockers(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_build_dep_graph_excludes_archived_blockers(graph: ModuleType, tmp_path: Path) -> None:
     """build_dep_graph must exclude archived tickets from the blockers list by default.
 
     Setup:
@@ -354,12 +327,8 @@ def test_build_dep_graph_excludes_archived_blockers(
         _write_ticket(tracker_dir, "ticket-active-blocker", status="open")
         _write_ticket(tracker_dir, "ticket-archived-blocker", status="open")
         _write_ticket(tracker_dir, "ticket-target", status="open")
-        _write_blocks_link(
-            tracker_dir, "ticket-active-blocker", "ticket-target", timestamp=1500
-        )
-        _write_blocks_link(
-            tracker_dir, "ticket-archived-blocker", "ticket-target", timestamp=1501
-        )
+        _write_blocks_link(tracker_dir, "ticket-active-blocker", "ticket-target", timestamp=1500)
+        _write_blocks_link(tracker_dir, "ticket-archived-blocker", "ticket-target", timestamp=1501)
         _write_archive_event(tracker_dir, "ticket-archived-blocker")
 
         result = graph.build_dep_graph("ticket-target", str(tracker_dir))
@@ -372,155 +341,6 @@ def test_build_dep_graph_excludes_archived_blockers(
             f"ticket-archived-blocker (archived) should NOT be in blockers by default; "
             f"got {result['blockers']}. "
             "Archived tickets must be excluded from blockers by default."
-        )
-    finally:
-        import shutil
-
-        shutil.rmtree(str(tracker_dir.parent), ignore_errors=True)
-
-
-@pytest.mark.unit
-@pytest.mark.scripts
-def test_deps_cli_include_archived(tmp_path: Path) -> None:
-    """ticket-graph.py CLI with --include-archived returns full graph including archived.
-
-    Setup:
-        - ticket-parent: epic
-        - ticket-child-active: story, parent_id=ticket-parent (not archived)
-        - ticket-child-archived: story, parent_id=ticket-parent, ARCHIVED
-
-    Without --include-archived: children = [ticket-child-active] (archived excluded by default)
-    With --include-archived: children = [ticket-child-active, ticket-child-archived]
-
-    This test is RED — default archived exclusion is not yet implemented, so the
-    without-flag case incorrectly includes the archived child.
-    """
-    import subprocess
-
-    tracker_dir = Path(tempfile.mkdtemp()) / "tracker"
-    tracker_dir.mkdir(parents=True)
-
-    try:
-        _write_ticket(tracker_dir, "ticket-parent", ticket_type="epic")
-        _write_ticket(
-            tracker_dir,
-            "ticket-child-active",
-            parent_id="ticket-parent",
-            ticket_type="story",
-        )
-        _write_ticket(
-            tracker_dir,
-            "ticket-child-archived",
-            parent_id="ticket-parent",
-            ticket_type="story",
-        )
-        _write_archive_event(tracker_dir, "ticket-child-archived")
-
-        # First: verify default behavior excludes archived (RED — not yet implemented)
-        result_default = subprocess.run(
-            [
-                "python3",
-                str(SCRIPT_PATH),
-                "ticket-parent",
-                f"--tickets-dir={tracker_dir}",
-            ],
-            capture_output=True,
-            text=True,
-        )
-
-        assert result_default.returncode == 0, (
-            f"CLI (no flag) exited with {result_default.returncode}; "
-            f"stderr={result_default.stderr!r}"
-        )
-        output_default = json.loads(result_default.stdout)
-        children_default = output_default.get("children", [])
-        assert "ticket-child-archived" not in children_default, (
-            f"Without --include-archived, archived child must be excluded by default; "
-            f"children={children_default}. "
-            "Default archived exclusion is not yet implemented."
-        )
-
-        # Second: verify --include-archived includes the archived child
-        result_with_flag = subprocess.run(
-            [
-                "python3",
-                str(SCRIPT_PATH),
-                "ticket-parent",
-                f"--tickets-dir={tracker_dir}",
-                "--include-archived",
-            ],
-            capture_output=True,
-            text=True,
-        )
-
-        assert result_with_flag.returncode == 0, (
-            f"CLI (--include-archived) exited with {result_with_flag.returncode}; "
-            f"stderr={result_with_flag.stderr!r}. "
-            "--include-archived flag must be recognized and return exit 0."
-        )
-
-        output_with_flag = json.loads(result_with_flag.stdout)
-        children_with_flag = output_with_flag.get("children", [])
-        assert "ticket-child-archived" in children_with_flag, (
-            f"With --include-archived, archived child must appear in result; "
-            f"children={children_with_flag}. "
-            "--include-archived flag is not yet implemented."
-        )
-        assert "ticket-child-active" in children_with_flag, (
-            f"With --include-archived, active child must still appear; "
-            f"children={children_with_flag}"
-        )
-    finally:
-        import shutil
-
-        shutil.rmtree(str(tracker_dir.parent), ignore_errors=True)
-
-
-@pytest.mark.unit
-@pytest.mark.scripts
-def test_deps_archived_direct_target_error(tmp_path: Path) -> None:
-    """CLI: querying deps for an archived ticket directly exits 1 with a helpful message.
-
-    When a user runs `ticket-graph.py <archived-ticket-id> --tickets-dir=...`,
-    the ticket exists on disk but is archived. The CLI must:
-      - Exit with code 1
-      - Print a message to stderr suggesting --include-archived
-
-    This guards against silently returning an empty/stale graph for an archived ticket
-    when the user likely needs to use --include-archived.
-
-    This test is RED — the archived-ticket-direct-query guard is not yet implemented.
-    """
-    import subprocess
-
-    tracker_dir = Path(tempfile.mkdtemp()) / "tracker"
-    tracker_dir.mkdir(parents=True)
-
-    try:
-        # Create an archived ticket
-        _write_ticket(tracker_dir, "ticket-archived", status="closed")
-        _write_archive_event(tracker_dir, "ticket-archived")
-
-        result = subprocess.run(
-            [
-                "python3",
-                str(SCRIPT_PATH),
-                "ticket-archived",
-                f"--tickets-dir={tracker_dir}",
-            ],
-            capture_output=True,
-            text=True,
-        )
-
-        assert result.returncode == 1, (
-            f"CLI must exit 1 when querying an archived ticket directly; "
-            f"got returncode={result.returncode}. "
-            "The archived-ticket guard is not yet implemented."
-        )
-        assert "--include-archived" in result.stderr, (
-            f"CLI stderr must suggest --include-archived when querying archived ticket; "
-            f"got stderr={result.stderr!r}. "
-            "The error message must guide users to the correct flag."
         )
     finally:
         import shutil

@@ -161,12 +161,10 @@ def test_list_exclude_deleted_parity(rebar_repo: Path, exclude_deleted: bool) ->
     assert cli_ids == expected
 
     lib_ids = {
-        t["ticket_id"]
-        for t in lib.list(include_archived=True, exclude_deleted=exclude_deleted)
+        t["ticket_id"] for t in lib.list(include_archived=True, exclude_deleted=exclude_deleted)
     }
     mcp_ids = {
-        t["ticket_id"]
-        for t in mcp.list(include_archived=True, exclude_deleted=exclude_deleted)
+        t["ticket_id"] for t in mcp.list(include_archived=True, exclude_deleted=exclude_deleted)
     }
     assert lib_ids == cli_ids
     assert mcp_ids == cli_ids

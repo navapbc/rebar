@@ -31,9 +31,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_applier():
@@ -162,14 +160,11 @@ def test_edit_fields_use_local_keyed_shape_from_differ(tmp_path, applier):
     events = _read_events(tracker_dir / local_uuid)
     edit = next(e for e in events if e.get("event_type") == "EDIT")
     fields = edit["data"]["fields"]
-    assert fields.get("title") == "X", (
-        f"Expected title='X' in EDIT data.fields, got {fields}"
-    )
+    assert fields.get("title") == "X", f"Expected title='X' in EDIT data.fields, got {fields}"
     assert fields.get("description") == "Y"
     assert fields.get("priority") == 1
     assert fields.get("ticket_type") == "story", (
-        f"Expected ticket_type='story' (differ-emitted local key) to be "
-        f"forwarded, got {fields}"
+        f"Expected ticket_type='story' (differ-emitted local key) to be forwarded, got {fields}"
     )
 
 
@@ -312,12 +307,9 @@ def test_inbound_label_add_writes_edit_with_new_tag(tmp_path, applier):
     assert tags_written is not None, (
         f"No EDIT event carried fields.tags; EDIT events: {edit_events}"
     )
-    assert "new-tag" in tags_written, (
-        f"Expected 'new-tag' in EDIT.fields.tags, got {tags_written}"
-    )
+    assert "new-tag" in tags_written, f"Expected 'new-tag' in EDIT.fields.tags, got {tags_written}"
     assert "existing-tag" in tags_written, (
-        f"Expected pre-existing 'existing-tag' preserved in EDIT.fields.tags, "
-        f"got {tags_written}"
+        f"Expected pre-existing 'existing-tag' preserved in EDIT.fields.tags, got {tags_written}"
     )
 
 
@@ -363,9 +355,7 @@ def test_inbound_label_remove_writes_edit_without_removed_tag(tmp_path, applier)
     )
 
 
-def test_inbound_label_add_does_not_wipe_tags_when_reducer_fails(
-    tmp_path, applier, monkeypatch
-):
+def test_inbound_label_add_does_not_wipe_tags_when_reducer_fails(tmp_path, applier, monkeypatch):
     """Bug bc8f-775e-9a34-44d1: when the reducer raises (or returns None) the
     labels-apply block previously fell back to an empty current_tags list and
     wrote an EDIT whose fields.tags contained ONLY the newly-added label —
@@ -383,7 +373,11 @@ def test_inbound_label_add_does_not_wipe_tags_when_reducer_fails(
     # Simulate the failure mode observed in the live probe: the reducer
     # raises mid-apply (e.g., transient I/O error, malformed event during
     # concurrent write). Patch the reducer module's reduce_ticket to raise.
-    reducer_mod = applier._load_ticket_reducer()
+    # The lazy reducer loader now lives in inbound_translate (its owner) and
+    # returns rebar.reducer; patch reduce_ticket there (Tier E E5b).
+    from rebar_reconciler import inbound_translate
+
+    reducer_mod = inbound_translate._load_ticket_reducer()
     monkeypatch.setattr(
         reducer_mod,
         "reduce_ticket",
@@ -416,9 +410,7 @@ def test_inbound_label_add_does_not_wipe_tags_when_reducer_fails(
             )
 
 
-def test_inbound_label_add_does_not_wipe_tags_when_ticket_dir_missing(
-    tmp_path, applier
-):
+def test_inbound_label_add_does_not_wipe_tags_when_ticket_dir_missing(tmp_path, applier):
     """Companion to bc8f RED test: when the ticket dir doesn't exist yet
     (e.g., race with concurrent CREATE), reduce_ticket returns None and the
     pre-fix code wrote an EDIT containing ONLY the new label. The fix must
@@ -449,9 +441,9 @@ def test_inbound_label_add_does_not_wipe_tags_when_ticket_dir_missing(
     if ticket_dir.exists():
         events = _read_events(ticket_dir)
         tag_edits = [
-            e for e in events
-            if e.get("event_type") == "EDIT"
-            and "tags" in e.get("data", {}).get("fields", {})
+            e
+            for e in events
+            if e.get("event_type") == "EDIT" and "tags" in e.get("data", {}).get("fields", {})
         ]
         assert not tag_edits, (
             f"Expected NO tags-EDIT when ticket dir is unseeded (reducer "
@@ -486,9 +478,7 @@ def test_inbound_label_noop_when_labels_empty(tmp_path, applier):
     # was written (the labels list is empty).
     for e in edit_events:
         f = e.get("data", {}).get("fields", {})
-        assert "tags" not in f, (
-            f"Unexpected tags-EDIT event written for empty labels list: {e}"
-        )
+        assert "tags" not in f, f"Unexpected tags-EDIT event written for empty labels list: {e}"
 
 
 def test_status_already_local_not_double_mapped(tmp_path, applier):

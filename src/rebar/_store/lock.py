@@ -29,8 +29,8 @@ import errno
 import fcntl
 import os
 import time
-from contextlib import contextmanager
 from collections.abc import Iterator
+from contextlib import contextmanager
 
 WRITE_LOCK_NAME = ".ticket-write.lock"
 MKDIR_LOCK_NAME = ".ticket-write.lock.d"
@@ -89,7 +89,7 @@ def _gitdir(tracker: str) -> str | None:
                 line = f.read().strip()
         except OSError:
             return None
-        gd = line[len("gitdir:"):].strip() if line.startswith("gitdir:") else ""
+        gd = line[len("gitdir:") :].strip() if line.startswith("gitdir:") else ""
         if gd and not os.path.isabs(gd):
             gd = os.path.join(tracker, gd)
         return gd or None

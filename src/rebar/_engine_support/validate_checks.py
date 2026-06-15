@@ -75,7 +75,13 @@ def check_orphaned_tasks(issues: list[dict]) -> list[Finding]:
         if len(group) >= 3:
             ids = ", ".join(o.get("id", "?").split("-")[-1] for o in group[:5])
             suffix = f" + {len(group) - 5} more" if len(group) > 5 else ""
-            out.append(Finding("major", f"{len(group)} orphaned tasks created around {hour_key} ({ids}{suffix}) — likely need an epic"))
+            out.append(
+                Finding(
+                    "major",
+                    f"{len(group)} orphaned tasks created around {hour_key} "
+                    f"({ids}{suffix}) — likely need an epic",
+                )
+            )
 
     if not orphans:
         out.append(Finding("verbose", "No orphaned tasks found — all open tasks belong to an epic"))
@@ -88,7 +94,10 @@ def check_empty_epics(issues: list[dict]) -> list[Finding]:
     out: list[Finding] = [Finding("verbose", "Checking for epics with 0 children...")]
     epic_ids = set()
     for issue in issues:
-        if issue.get("type", issue.get("issue_type", "task")) == "epic" and issue.get("status", "open") != "closed":
+        if (
+            issue.get("type", issue.get("issue_type", "task")) == "epic"
+            and issue.get("status", "open") != "closed"
+        ):
             iid = issue.get("id", "")
             if iid:
                 epic_ids.add(iid)
@@ -104,16 +113,27 @@ def check_empty_epics(issues: list[dict]) -> list[Finding]:
                     epics_with_children.add(dep_id)
     empty = 0
     for issue in issues:
-        if issue.get("type", issue.get("issue_type", "task")) == "epic" and issue.get("status", "open") != "closed":
+        if (
+            issue.get("type", issue.get("issue_type", "task")) == "epic"
+            and issue.get("status", "open") != "closed"
+        ):
             iid = issue.get("id", "")
             title = issue.get("title", issue.get("name", "?"))
             if iid and iid not in epics_with_children:
-                out.append(Finding("verbose", f"Epic with 0 children: {iid} - {title} (decompose into child tickets when ready)"))
+                out.append(
+                    Finding(
+                        "verbose",
+                        f"Epic with 0 children: {iid} - {title} "
+                        f"(decompose into child tickets when ready)",
+                    )
+                )
                 empty += 1
     if empty == 0:
         out.append(Finding("verbose", "All open epics have children"))
     else:
-        out.append(Finding("verbose", f"{empty} epic(s) with 0 children (normal for backlog items)"))
+        out.append(
+            Finding("verbose", f"{empty} epic(s) with 0 children (normal for backlog items)")
+        )
     return out
 
 
@@ -122,9 +142,20 @@ def check_ticket_count(issues: list[dict]) -> list[Finding]:
     out: list[Finding] = [Finding("verbose", "Checking total ticket count...")]
     total = len(issues)
     if total >= 600:
-        out.append(Finding("major", f"Total ticket count is {total} (≥600) — consider archiving closed tickets to keep the tracker manageable"))
+        out.append(
+            Finding(
+                "major",
+                f"Total ticket count is {total} (≥600) — consider archiving "
+                f"closed tickets to keep the tracker manageable",
+            )
+        )
     elif total >= 300:
-        out.append(Finding("warning", f"Total ticket count is {total} (≥300) — consider archiving older closed tickets"))
+        out.append(
+            Finding(
+                "warning",
+                f"Total ticket count is {total} (≥300) — consider archiving older closed tickets",
+            )
+        )
     else:
         out.append(Finding("verbose", f"Total ticket count: {total} (within healthy range)"))
     return out
@@ -154,7 +185,13 @@ def check_child_parent_deps(issues: list[dict]) -> list[Finding]:
                 dep_id = dep.get("depends_on_id", dep.get("id", ""))
                 if dep_type != "parent-child" and dep_id == parent_id:
                     title = issue.get("title", issue.get("name", "unknown"))
-                    out.append(Finding("critical", f"Child->parent dependency: {iid} depends on its parent {parent_id} - {title}"))
+                    out.append(
+                        Finding(
+                            "critical",
+                            f"Child->parent dependency: {iid} depends on its "
+                            f"parent {parent_id} - {title}",
+                        )
+                    )
                     errors += 1
     if errors == 0:
         out.append(Finding("verbose", "No child->parent dependency violations found"))
@@ -188,7 +225,14 @@ def check_cross_epic_child_deps(issues: list[dict]) -> list[Finding]:
             dep_parent = parent_map.get(dep_id)
             if dep_parent and dep_parent != my_parent:
                 title = issue.get("title", issue.get("name", "unknown"))
-                out.append(Finding("critical", f"Cross-epic child dependency: {iid} (child of {my_parent}) depends on {dep_id} (child of {dep_parent}). Use epic-level dependency instead - {title}"))
+                out.append(
+                    Finding(
+                        "critical",
+                        f"Cross-epic child dependency: {iid} (child of {my_parent}) "
+                        f"depends on {dep_id} (child of {dep_parent}). "
+                        f"Use epic-level dependency instead - {title}",
+                    )
+                )
                 errors += 1
     if errors == 0:
         out.append(Finding("verbose", "No cross-epic child dependency violations found"))
@@ -249,7 +293,9 @@ def _is_interface_contract_title(title: str) -> bool:
 def check_interface_contracts(issues: list[dict], ticket_cmd: str) -> list[Finding]:
     """Interface/contract tickets lacking a file path or method reference → WARNING
     + a SUGGESTION (the suggestion embeds ``ticket_cmd`` exactly like bash)."""
-    out: list[Finding] = [Finding("verbose", "Checking interface contract tasks for documentation...")]
+    out: list[Finding] = [
+        Finding("verbose", "Checking interface contract tasks for documentation...")
+    ]
     for issue in issues:
         if issue.get("status", "open") == "closed":
             continue
@@ -260,17 +306,31 @@ def check_interface_contracts(issues: list[dict], ticket_cmd: str) -> list[Findi
         desc = issue.get("description", issue.get("body", "") or "")
         notes = issue.get("notes", "") or ""
         combined = desc + notes
-        has_file_path = bool(re.search(r"src/|\.py|\.sh|\.md|docs/contracts|skills/|file path", combined, re.IGNORECASE))
+        has_file_path = bool(
+            re.search(
+                r"src/|\.py|\.sh|\.md|docs/contracts|skills/|file path", combined, re.IGNORECASE
+            )
+        )
         has_methods = bool(re.search(r"method|function|@abstractmethod", combined, re.IGNORECASE))
         if not has_file_path and not has_methods:
-            out.append(Finding("warning", f"Interface task may need documentation: {iid} - {title}"))
-            out.append(Finding("suggestion", f"Add notes with: {ticket_cmd} comment {iid} 'Interface in src/.../base.py. Key methods: ...'"))
+            out.append(
+                Finding("warning", f"Interface task may need documentation: {iid} - {title}")
+            )
+            out.append(
+                Finding(
+                    "suggestion",
+                    f"Add notes with: {ticket_cmd} comment {iid} "
+                    f"'Interface in src/.../base.py. Key methods: ...'",
+                )
+            )
     return out
 
 
 def check_in_progress_without_notes(issues: list[dict]) -> list[Finding]:
     """in_progress tickets with no progress notes → WARNING each."""
-    out: list[Finding] = [Finding("verbose", "Checking for in-progress tasks without progress notes...")]
+    out: list[Finding] = [
+        Finding("verbose", "Checking for in-progress tasks without progress notes...")
+    ]
     for issue in issues:
         if issue.get("status", "open") != "in_progress":
             continue

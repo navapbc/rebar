@@ -112,7 +112,7 @@ def test_graph_cache_key_invalidated_on_same_size_rewrite(tmp_path: Path) -> Non
     stale graph through deps/ready/next-batch.
     """
 
-    from ticket_graph._cache import _compute_cache_key
+    from rebar.graph._cache import _compute_cache_key
 
     tracker = tmp_path / "tracker"
     (tracker / "0000-aaaa-bbbb-cccc").mkdir(parents=True)
@@ -180,9 +180,7 @@ def test_build_dep_graph_single_batch_scan(graph: ModuleType, tmp_path: Path) ->
         call_count.append(1)
         return real_reduce_all(*args, **kwargs)
 
-    with patch.object(
-        graph._reducer, "reduce_all_tickets", side_effect=counting_reduce_all
-    ):
+    with patch.object(graph._reducer, "reduce_all_tickets", side_effect=counting_reduce_all):
         graph.build_dep_graph("ticket-e", str(tracker_dir))
 
     assert len(call_count) == 1, (
@@ -196,9 +194,7 @@ def test_build_dep_graph_single_batch_scan(graph: ModuleType, tmp_path: Path) ->
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_find_direct_blockers_no_per_ticket_scan(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_find_direct_blockers_no_per_ticket_scan(graph: ModuleType, tmp_path: Path) -> None:
     """_find_direct_blockers must not call _reduce_ticket directly — use pre-loaded state.
 
     Setup:
@@ -240,9 +236,7 @@ def test_find_direct_blockers_no_per_ticket_scan(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_compute_dep_graph_children_use_preloaded_state(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_compute_dep_graph_children_use_preloaded_state(graph: ModuleType, tmp_path: Path) -> None:
     """_compute_dep_graph must not call _reduce_ticket for children discovery.
 
     Setup:
@@ -286,10 +280,9 @@ def test_compute_dep_graph_children_use_preloaded_state(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_hierarchy_enforcement_benchmark_1000_tickets(
-    graph: ModuleType, tmp_path: Path
-) -> None:
-    """Hierarchy enforcement completes 10 cross-tier add_dependency calls under 5s on 1000-ticket hierarchy.
+def test_hierarchy_enforcement_benchmark_1000_tickets(graph: ModuleType, tmp_path: Path) -> None:
+    """Hierarchy enforcement completes 10 cross-tier add_dependency calls under 5s on 1000-ticket
+    hierarchy.
 
     Setup: 10 epics × 10 stories × 10 tasks = 1,000 tickets.
     Action: 10 add_dependency calls linking a task to a *different* epic (cross-tier),
@@ -331,9 +324,7 @@ def test_hierarchy_enforcement_benchmark_1000_tickets(
     elapsed = time.monotonic() - start
 
     # Performance assertion
-    assert elapsed < 5.0, (
-        f"9 cross-tier add_dependency calls took {elapsed:.2f}s (limit: 5.0s)"
-    )
+    assert elapsed < 5.0, f"9 cross-tier add_dependency calls took {elapsed:.2f}s (limit: 5.0s)"
 
     # Correctness: verify at least one epic-level dep was actually written
     # (task-01-00-00 promoted to epic-01, depends_on epic-00).

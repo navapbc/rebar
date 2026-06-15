@@ -12,12 +12,12 @@ from pathlib import Path
 
 import pytest
 
-# Ensure src/rebar/_engine/ is on sys.path so that `from ticket_reducer...` resolves.
+# Ensure src/rebar/_engine/ is on sys.path so that `from rebar.reducer...` resolves.
 _SCRIPTS_DIR = str(Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine")
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
-from ticket_reducer.llm_format import shorten_comment, shorten_dep, to_llm  # noqa: E402
+from rebar.reducer.llm_format import shorten_comment, shorten_dep, to_llm  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Fixture shim — provides a 'mod' namespace with the three public functions
@@ -208,9 +208,7 @@ class TestShortenDep:
         assert mod.shorten_dep(42) == 42
 
     def test_unknown_dep_keys_passed_through(self, mod):
-        result = mod.shorten_dep(
-            {"target_id": "t-2", "relation": "blocks", "meta": "info"}
-        )
+        result = mod.shorten_dep({"target_id": "t-2", "relation": "blocks", "meta": "info"})
         assert result.get("meta") == "info"
 
 
@@ -222,11 +220,7 @@ class TestShortenDep:
 class TestToLlmSubkeyShortening:
     def test_comments_subkeys_shortened(self, mod):
         result = mod.to_llm(
-            {
-                "comments": [
-                    {"body": "lgtm", "author": "alice", "timestamp": "2026-01-01"}
-                ]
-            }
+            {"comments": [{"body": "lgtm", "author": "alice", "timestamp": "2026-01-01"}]}
         )
         cm = result["cm"]
         assert len(cm) == 1

@@ -8,6 +8,11 @@ import os
 from ._loader import reduce_ticket
 from ._relations import _BLOCKING_RELATIONS  # re-exported for _blockers
 
+# ``_BLOCKING_RELATIONS`` is imported here solely so ``_blockers`` can resolve it
+# via ``from ._status import _BLOCKING_RELATIONS``; list it in ``__all__`` to mark
+# that intentional re-export alongside this module's own status helper.
+__all__ = ["_get_ticket_status", "_BLOCKING_RELATIONS"]
+
 
 # The reviewer noted the function "may not exist" — it does exist and is the authoritative
 # status resolver for graph operations.

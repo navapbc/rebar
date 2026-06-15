@@ -91,15 +91,11 @@ def prepare_event_files(
         all_files = os.listdir(ticket_dir)
     except OSError:
         all_files = []
-    event_filenames = sorted(
-        f for f in all_files if f.endswith(".json") and f != ".cache.json"
-    )
+    event_filenames = sorted(f for f in all_files if f.endswith(".json") and f != ".cache.json")
     dir_hash = compute_dir_hash(ticket_dir, event_filenames)
 
     cached = read_cache(cache_path, dir_hash)
 
-    event_files = sorted(
-        glob.glob(os.path.join(ticket_dir, "*.json")), key=event_sort_key
-    )
+    event_files = sorted(glob.glob(os.path.join(ticket_dir, "*.json")), key=event_sort_key)
 
     return cache_path, dir_hash, event_files, cached

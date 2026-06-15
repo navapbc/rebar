@@ -21,9 +21,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_applier():
@@ -40,8 +38,7 @@ def applier():
     """Load the applier module, failing all tests if absent."""
     if not APPLIER_PATH.exists():
         pytest.fail(
-            f"applier.py not found at {APPLIER_PATH} — "
-            "implement the module to make tests pass."
+            f"applier.py not found at {APPLIER_PATH} — implement the module to make tests pass."
         )
     return _load_applier()
 
@@ -140,8 +137,7 @@ def test_add_label_includes_rebar_id_label_after_create(applier, tmp_path):
     label_calls = client.add_label_calls
     labels_written = [label for (_key, label) in label_calls]
     assert expected_label in labels_written, (
-        f"Expected label {expected_label!r} in add_label calls, "
-        f"got labels: {labels_written}"
+        f"Expected label {expected_label!r} in add_label calls, got labels: {labels_written}"
     )
 
 
@@ -162,10 +158,7 @@ def test_readback_both_assertions_together(applier, tmp_path):
 
     # Assert 2: rebar-id label present in add_label calls for the correct key
     expected_label = f"rebar-id:{local_id}"
-    label_calls_for_key = [
-        label for (key, label) in client.add_label_calls if key == issue_key
-    ]
+    label_calls_for_key = [label for (key, label) in client.add_label_calls if key == issue_key]
     assert expected_label in label_calls_for_key, (
-        f"Expected label {expected_label!r} among labels for {issue_key!r}: "
-        f"{label_calls_for_key}"
+        f"Expected label {expected_label!r} among labels for {issue_key!r}: {label_calls_for_key}"
     )

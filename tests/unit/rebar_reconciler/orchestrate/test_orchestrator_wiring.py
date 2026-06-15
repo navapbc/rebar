@@ -171,9 +171,7 @@ def _stub_modules(
     }
 
 
-def _patch_and_run(
-    reconcile_mod, stubs, repo_root, pass_id="test-pass", target_mode=None
-):
+def _patch_and_run(reconcile_mod, stubs, repo_root, pass_id="test-pass", target_mode=None):
     """Patch reconcile_mod._load to return stubs, then call reconcile_once."""
     original_load = reconcile_mod._load
 
@@ -226,11 +224,9 @@ class TestOutboundCreate:
             comments=[],
             labels=[{"action": "add", "label": "team-a"}],
         )
-        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = [
-            om
-        ]
+        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = [om]
 
-        result = _patch_and_run(reconcile_mod, stubs, repo_root)
+        _patch_and_run(reconcile_mod, stubs, repo_root)
 
         # The applier.apply should have been called with mutations that include
         # the outbound create
@@ -272,11 +268,9 @@ class TestOutboundUpdate:
             comments=[],
             labels=[],
         )
-        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = [
-            om
-        ]
+        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = [om]
 
-        result = _patch_and_run(reconcile_mod, stubs, repo_root)
+        _patch_and_run(reconcile_mod, stubs, repo_root)
 
         apply_call = stubs["reconcile_applier"].apply
         mutations_passed = apply_call.call_args[0][0]
@@ -322,7 +316,7 @@ class TestInboundUpdate:
             0,
         )
 
-        result = _patch_and_run(reconcile_mod, stubs, repo_root)
+        _patch_and_run(reconcile_mod, stubs, repo_root)
 
         apply_call = stubs["reconcile_applier"].apply
         mutations_passed = apply_call.call_args[0][0]
@@ -417,9 +411,7 @@ class TestCapCombined:
             comments=[],
             labels=[],
         )
-        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = [
-            om
-        ]
+        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = [om]
 
         result = _patch_and_run(reconcile_mod, stubs, repo_root)
 
@@ -443,7 +435,7 @@ class TestSyncLogger:
         repo_root = _setup_repo_root(tmp_path)
         stubs = _stub_modules(repo_root, jira_snapshot={})
 
-        result = _patch_and_run(reconcile_mod, stubs, repo_root, pass_id="p1")
+        _patch_and_run(reconcile_mod, stubs, repo_root, pass_id="p1")
 
         sync_logger = stubs["_sync_logger"]
         # Check that log was called with sync_pass_start and sync_pass_end
@@ -466,7 +458,7 @@ class TestBindingStoreSaved:
         repo_root = _setup_repo_root(tmp_path)
         stubs = _stub_modules(repo_root, jira_snapshot={})
 
-        result = _patch_and_run(reconcile_mod, stubs, repo_root)
+        _patch_and_run(reconcile_mod, stubs, repo_root)
 
         binding_store = stubs["_binding_store"]
         assert binding_store.save.called

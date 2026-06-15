@@ -19,7 +19,7 @@ import re
 import sys
 
 from rebar._engine_support.output import OutputFormatError, parse_output
-from rebar._engine_support.reads import ReadError, deps_state, show_state, tracker_dir
+from rebar._engine_support.reads import ReadError, deps_state, show_state
 
 
 # ── shared text extraction ────────────────────────────────────────────────────
@@ -350,14 +350,21 @@ def quality_check_cli(argv: list[str], tracker: str) -> int:
                 sys.stdout.write(f"QUALITY: fail - {reason}\n")
             else:
                 sys.stdout.write(
-                    f"QUALITY: fail - description too sparse ({lc} lines); add detail before dispatch\n"
+                    f"QUALITY: fail - description too sparse ({lc} lines); "
+                    "add detail before dispatch\n"
                 )
         elif reason == "story - prose done-definitions":
-            sys.stdout.write(f"QUALITY: pass (story - prose done-definitions) ({lc} lines, {kc} criteria)\n")
+            sys.stdout.write(
+                f"QUALITY: pass (story - prose done-definitions) ({lc} lines, {kc} criteria)\n"
+            )
         elif reason == "legacy - no AC/file impact":
-            sys.stdout.write(f"QUALITY: pass (legacy - no AC/file impact) ({lc} lines, {kc} criteria)\n")
+            sys.stdout.write(
+                f"QUALITY: pass (legacy - no AC/file impact) ({lc} lines, {kc} criteria)\n"
+            )
         elif ac >= 1:
-            sys.stdout.write(f"QUALITY: pass ({lc} lines, {kc} criteria, {ac} AC items, {fi} file impact)\n")
+            sys.stdout.write(
+                f"QUALITY: pass ({lc} lines, {kc} criteria, {ac} AC items, {fi} file impact)\n"
+            )
         else:
             sys.stdout.write(f"QUALITY: pass ({lc} lines, {kc} criteria, {fi} file impact)\n")
     if warn:
@@ -370,7 +377,12 @@ def summary_compute(ticket_id: str, tracker: str) -> dict:
     try:
         state = show_state(ticket_id, tracker)
     except ReadError:
-        return {"ticket_id": ticket_id, "status": "unknown", "title": None, "blocking_summary": None}
+        return {
+            "ticket_id": ticket_id,
+            "status": "unknown",
+            "title": None,
+            "blocking_summary": None,
+        }
     title = state.get("title") or "untitled"
     status = state.get("status") or "unknown"
     blockers, ready = [], True

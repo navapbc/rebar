@@ -1,24 +1,16 @@
-"""The rebar argparse CLI (Tier E).
+"""The rebar argparse CLI — the ``rebar`` entrypoint.
 
-A real in-process Python CLI replacing the bash dispatcher (``_engine/rebar``).
-During E0 this module is built and tested but NOT yet the entrypoint —
-``rebar.cli:main`` keeps delegating to the bash dispatcher until the E1 cutover —
-so the surface can be proven byte-identical first.
-
-Structure mirrors the dispatcher exactly:
+An in-process Python CLI. Its structure:
 
 * ``argparse`` owns top-level tokenization (subcommand + REMAINDER); per-command
-  flag parsing stays in each command's existing implementation, so argument-error
-  byte-parity is preserved (those messages come from the unchanged impls).
-* Help / overview / unknown-subcommand output is byte-identical to the dispatcher
-  via the pinned package-data strings in :mod:`rebar._cli._help`.
-* Category-A commands (reads + leaf writes) dispatch **in-process** to
+  flag parsing stays in each command's own implementation, so argument-error
+  messages come from the unchanged impls.
+* Help / overview / unknown-subcommand output comes from the pinned package-data
+  strings in :mod:`rebar._cli._help`.
+* Read and leaf-write commands dispatch **in-process** to
   ``rebar._engine_support.reads.main`` / ``rebar._commands.main`` with the
-  dispatcher's per-command auto-init policy (:mod:`rebar._cli._init`).
-* Category-B commands (not yet ported) **transitionally subprocess** the bash
-  dispatcher exactly as today; they migrate in-process in E2-E5.
-* ``reconcile`` routes to ``python -m rebar_reconciler`` (the dispatcher has no
-  reconcile arm), preserving ``cli.py``'s behavior.
+  per-command auto-init policy (:mod:`rebar._cli._init`).
+* ``reconcile`` routes to ``python -m rebar_reconciler``.
 """
 
 from __future__ import annotations
@@ -53,6 +45,9 @@ _SIGNING = frozenset({"sign", "verify-signature"})
 _LIFECYCLE = frozenset({"transition", "reopen", "claim"})
 # Compaction arms (E3): full auto-init before the in-process SNAPSHOT write.
 _COMPACT = frozenset({"compact", "compact-all"})
+# Bridge arms (E5): full auto-init UNLESS TICKETS_TRACKER_DIR is injected (test
+# tracker), matching the dispatcher's `bridge-status`/`purge-bridge` arms.
+_BRIDGE = frozenset({"bridge-status", "bridge-fsck", "purge-bridge"})
 # Leaf-write arms: full auto-init + reconverge before the in-process write.
 _WRITES_FULL = frozenset(
     {
@@ -82,9 +77,11 @@ def _reconcile(argv: list[str]) -> int:
         args += ["--repo-root", root]
     if not any(a == "--mode" or a.startswith("--mode=") for a in args):
         args += ["--mode", "dry-run"]
-    return subprocess.call(
-        ["python3", "-m", "rebar_reconciler", *args], env=engine_env(root)
-    )
+    # Launch under THIS interpreter (sys.executable), not a bare ``python3``: the
+    # reconciler imports ``rebar.*`` in-package (Tier E E5b), so it needs the
+    # rebar-capable interpreter; engine_env keeps the engine dir on PYTHONPATH so
+    # the top-level ``rebar_reconciler`` package still resolves.
+    return subprocess.call([sys.executable, "-m", "rebar_reconciler", *args], env=engine_env(root))
 
 
 def _review(argv: list[str]) -> int:
@@ -259,25 +256,20 @@ def _render_review_text(result: dict) -> None:
                 sys.stdout.write(f"    - {c.get('description', '')}\n")
 
 
-def _passthrough(sub: str, rest: list[str]) -> int:
-    """Transitionally run a not-yet-ported command via the bash dispatcher.
+def _bridge_probe(argv: list[str]) -> int:
+    """``rebar bridge-probe`` → live Jira capability preflight.
 
-    The dispatcher would silently auto-init, so we run the in-process consent gate
-    FIRST (Tier E E4): on an uninitialized repo this prompts (TTY) or errors
-    (non-interactive) before any bash runs, closing the last silent-init path. Once
-    the tracker exists the dispatcher's own ``_ensure_initialized`` is a no-op.
-    Output streams inherit (no capture) so the user sees output directly.
+    Launches the genuine python probe (``jira-capability-probe.py``) under
+    ``sys.executable`` with ``engine_env`` (so the engine's
+    ``rebar_reconciler.acli`` transport resolves) — replacing the bash-dispatcher
+    passthrough (Tier E E6.5a). Talks only to Jira (creates + deletes a throwaway
+    issue); needs no local tracker, so NO auto-init (matches the dispatcher arm).
+    Output streams inherit so the operator sees the PROBE_PASS/FAIL lines directly.
     """
-    ensure_initialized(init_only=False)
-    from rebar._engine import dispatcher, engine_env
+    from rebar._engine import engine_dir, engine_env
 
-    env = engine_env()
-    cwd = env.get("REBAR_ROOT") or env.get("PROJECT_ROOT")
-    if not (cwd and os.path.isdir(cwd)):
-        cwd = None
-    return subprocess.call(
-        ["bash", str(dispatcher()), sub, *rest], env=env, cwd=cwd
-    )
+    script = str(engine_dir() / "jira-capability-probe.py")
+    return subprocess.call([sys.executable, script, *argv], env=engine_env())
 
 
 def _emit_subcommand_help(sub: str) -> int:
@@ -337,6 +329,24 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         from rebar._commands import delete as _delete
 
         return _delete.delete_cli(rest)
+    if sub in _BRIDGE:
+        # The dispatcher auto-inits only when no test tracker is injected.
+        if not os.environ.get("TICKETS_TRACKER_DIR"):
+            ensure_initialized(init_only=False)
+        from rebar import config
+
+        tracker = str(config.tracker_dir())
+        if sub == "bridge-status":
+            from rebar._engine_support import bridge
+
+            return bridge.bridge_status_cli(rest, tracker)
+        if sub == "bridge-fsck":
+            from rebar._engine_support import bridge_fsck
+
+            return bridge_fsck.main(rest)
+        from rebar._commands import purge_bridge
+
+        return purge_bridge.purge_bridge_cli(rest)
     if sub == "fsck":
         ensure_initialized(init_only=False)
         from rebar._commands import fsck as _fsck
@@ -396,7 +406,13 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         if sub == "sign":
             return signing.sign_cli(rest)
         return signing.verify_signature_cli(rest)
-    return _passthrough(sub, rest)
+    if sub == "bridge-probe":
+        return _bridge_probe(rest)
+    # Every known subcommand is routed in-process above, and main() rejects
+    # unknown subcommands before reaching _dispatch. Arriving here means a
+    # subcommand was added to the known set without an in-process arm — a wiring
+    # bug, surfaced loudly rather than silently mis-dispatched.
+    raise RuntimeError(f"rebar: subcommand {sub!r} is known but has no in-process handler")
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -30,15 +30,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-MAIN_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "__main__.py"
-)
+MAIN_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "__main__.py"
 
 
 def _load_main_module():
-    spec = importlib.util.spec_from_file_location(
-        "rebar_reconciler_main_truthful", MAIN_PATH
-    )
+    spec = importlib.util.spec_from_file_location("rebar_reconciler_main_truthful", MAIN_PATH)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules["rebar_reconciler_main_truthful"] = mod
@@ -61,13 +57,15 @@ def _make_stub_reconcile(return_value):
 
 def test_run_pass_prints_applied_count_when_writes_succeed(main_mod, tmp_path, capsys):
     """When 3 of 10 mutations land in Jira, the OK line must report applied=3."""
-    stub = _make_stub_reconcile({
-        "pass_id": "p-001",
-        "mutation_count": 10,
-        "mutations_applied": 3,
-        "mutation_failures": 7,
-        "manifest_path": str(tmp_path / "manifest.json"),
-    })
+    stub = _make_stub_reconcile(
+        {
+            "pass_id": "p-001",
+            "mutation_count": 10,
+            "mutations_applied": 3,
+            "mutation_failures": 7,
+            "manifest_path": str(tmp_path / "manifest.json"),
+        }
+    )
     with patch.object(main_mod, "_try_load_step", return_value=stub):
         rc = main_mod.run_pass(repo_root=tmp_path)
     out = capsys.readouterr().out
@@ -80,22 +78,22 @@ def test_run_pass_prints_applied_count_when_writes_succeed(main_mod, tmp_path, c
     )
 
 
-def test_run_pass_does_not_say_converged_when_applied_nonzero(
-    main_mod, tmp_path, capsys
-):
+def test_run_pass_does_not_say_converged_when_applied_nonzero(main_mod, tmp_path, capsys):
     """'converged' verb must be reserved for applied=0 confirmation passes.
 
     The historical lying message was 'OK: steady-state pass converged — N
     mutations' where N was the computed count. After the fix, 'converged'
     must NOT appear on the line when mutations_applied > 0.
     """
-    stub = _make_stub_reconcile({
-        "pass_id": "p-002",
-        "mutation_count": 10,
-        "mutations_applied": 10,
-        "mutation_failures": 0,
-        "manifest_path": str(tmp_path / "manifest.json"),
-    })
+    stub = _make_stub_reconcile(
+        {
+            "pass_id": "p-002",
+            "mutation_count": 10,
+            "mutations_applied": 10,
+            "mutation_failures": 0,
+            "manifest_path": str(tmp_path / "manifest.json"),
+        }
+    )
     with patch.object(main_mod, "_try_load_step", return_value=stub):
         main_mod.run_pass(repo_root=tmp_path)
     out = capsys.readouterr().out
@@ -107,13 +105,15 @@ def test_run_pass_does_not_say_converged_when_applied_nonzero(
 
 def test_run_pass_says_converged_only_when_applied_zero(main_mod, tmp_path, capsys):
     """When applied=0, the converged verb is permitted (genuine no-op pass)."""
-    stub = _make_stub_reconcile({
-        "pass_id": "p-003",
-        "mutation_count": 0,
-        "mutations_applied": 0,
-        "mutation_failures": 0,
-        "manifest_path": str(tmp_path / "manifest.json"),
-    })
+    stub = _make_stub_reconcile(
+        {
+            "pass_id": "p-003",
+            "mutation_count": 0,
+            "mutations_applied": 0,
+            "mutation_failures": 0,
+            "manifest_path": str(tmp_path / "manifest.json"),
+        }
+    )
     with patch.object(main_mod, "_try_load_step", return_value=stub):
         main_mod.run_pass(repo_root=tmp_path)
     out = capsys.readouterr().out

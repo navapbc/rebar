@@ -6,14 +6,17 @@ appliers (``apply_inbound``): map Jira issuetype/priority/status to their local
 forms, normalize ADF bodies, and append local ticket events. No Jira writes
 happen here — this is the parse/serialize layer beneath the inbound appliers.
 
-The lazy module loaders (``_load_event_append``/``_load_ticket_reducer``/
-``_load_adf_module``) preserve the engine's by-path loading so a bare engine
-``python3`` resolves the siblings without extra PYTHONPATH help.
+Event writes and reducer reads now go through the in-package store primitives
+(``rebar._store`` / ``rebar.reducer``) directly — Tier E E5b dropped the bare
+``event_append`` / ``ticket_reducer`` compat shims and their ``sys.path`` dances.
+The remaining lazy loader (``_load_adf_module``) preserves the engine's by-path
+loading for the sibling ``adf`` module.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 from pathlib import Path
@@ -124,9 +127,7 @@ def _jira_status_to_local(jira_status: str) -> str:
     try:
         # Late-load config without polluting module namespace.
         config_path = Path(__file__).parent / "config.py"
-        spec = importlib.util.spec_from_file_location(
-            "rebar_reconciler_config", config_path
-        )
+        spec = importlib.util.spec_from_file_location("rebar_reconciler_config", config_path)
         if spec is None or spec.loader is None:
             return "open"
         cfg_mod = importlib.util.module_from_spec(spec)
@@ -156,7 +157,11 @@ def _resolve_tracker_dir(repo_root: Path | None) -> Path:
     if override:
         return Path(override)
     if repo_root is None:
-        repo_root = Path(os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])
+        repo_root = Path(
+            os.environ.get("REBAR_ROOT")
+            or os.environ.get("PROJECT_ROOT")
+            or Path(__file__).resolve().parents[4]
+        )
     return Path(repo_root) / ".tickets-tracker"  # tickets-boundary-ok
 
 
@@ -191,44 +196,49 @@ def _read_latest_status(tracker_dir: Path, ticket_id: str) -> str:
     return status
 
 
-_EVENT_APPEND_MODULE = None
-
-
-def _load_event_append():
-    """Lazy-load the shared event-append module (engine sibling, stdlib-only)."""
-    global _EVENT_APPEND_MODULE
-    if _EVENT_APPEND_MODULE is not None:
-        return _EVENT_APPEND_MODULE
-    scripts_dir = Path(__file__).resolve().parent.parent  # <engine>/
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
-    import event_append as _ea  # noqa: PLC0415 — lazy import by design
-
-    _EVENT_APPEND_MODULE = _ea
-    return _ea
-
-
 def _write_event_file(
     tracker_dir: Path, ticket_id: str, event_type: str, data: dict[str, Any]
 ) -> Path:
-    """Write a single ticket event JSON file via the shared event-append module.
+    """Write a single ticket event JSON file under the unified write lock.
 
-    Acquires the ``.ticket-write.lock`` flock (I5) so the reconciler's event-file
-    write is serialized against a concurrent local agent (the gap fixed by ticket
-    pokey-matte-flute), and uses the shared I2 filename contract. Returns the path.
+    Acquires the canonical ``.ticket-write.lock`` (I5) via
+    :func:`rebar._store.lock.write_lock` — both the ``fcntl`` and ``mkdir`` legs,
+    so the reconciler mutually excludes local leaf-writes on every platform (the
+    pokey-matte-flute / stiff-mop-lane fixes) — then atomically writes ONE event
+    file under the shared I2 filename contract (temp file + ``os.replace``).
+
+    Tier E E5b: this replaced the bare ``_engine/event_append`` import (resolved by
+    a ``sys.path`` dance) with the in-package store primitives. The on-disk event
+    bytes are UNCHANGED — ``json.dumps(event, ensure_ascii=False)`` with the
+    historical insertion key order — so the committed store is byte-identical to
+    the pre-rewire reconciler. Returns the path.
     """
+    from rebar._store import event_append as _store_event_append
+    from rebar._store import lock as _store_lock
+
     ts, uuid_str, env_id, author = _event_meta()
-    ea = _load_event_append()
-    with ea.write_lock(tracker_dir):
-        return ea.append_event(
-            tracker_dir / ticket_id,
-            event_type,
-            data,
-            timestamp=ts,
-            uuid_str=uuid_str,
-            env_id=env_id,
-            author=author,
-        )
+    ticket_dir = tracker_dir / ticket_id
+    ticket_dir.mkdir(parents=True, exist_ok=True)
+    event = {
+        "timestamp": ts,
+        "uuid": uuid_str,
+        "event_type": event_type,
+        "env_id": env_id,
+        "author": author,
+        "data": data,
+    }
+    final = ticket_dir / _store_event_append.event_filename(ts, uuid_str, event_type)
+    tmp = ticket_dir / f".tmp-{uuid_str}-{event_type}"
+    # attempts=1 preserves the bare module's historical single-shot acquire. The
+    # bare ``event_append.write_lock`` re-raised a lock timeout as the builtin
+    # ``TimeoutError``; preserve that contract here so callers see the same type.
+    try:
+        with _store_lock.write_lock(str(tracker_dir), attempts=1, dual_window=True):
+            tmp.write_text(json.dumps(event, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, final)
+    except _store_lock.LockTimeout as exc:
+        raise TimeoutError(str(exc)) from None
+    return final
 
 
 def _extract_name(val, default=""):
@@ -270,22 +280,20 @@ _TICKET_REDUCER_MODULE = None
 
 
 def _load_ticket_reducer():
-    """Lazy-load the ticket_reducer subpackage from ../../ (scripts dir).
+    """Lazy-load the canonical reducer (``rebar.reducer``).
 
-    Used by ``_apply_inbound_update`` to read the current tag list before
-    applying an inbound label diff (bug 57b0). Loaded lazily so test
-    contexts that never hit the labels branch are not forced to import
-    the reducer package.
+    Used to read the current local state (status / tags) before composing an
+    inbound event. Loaded lazily so test contexts that never hit those branches
+    are not forced to import the reducer package.
+
+    Tier E E5b: replaced the bare ``ticket_reducer`` compat shim (resolved by a
+    ``sys.path`` dance to the engine dir) with the in-package ``rebar.reducer`` —
+    the shim was already a thin re-export of it, so ``reduce_ticket`` is identical.
     """
     global _TICKET_REDUCER_MODULE
     if _TICKET_REDUCER_MODULE is not None:
         return _TICKET_REDUCER_MODULE
-    # This file lives at <plugin_scripts_dir>/rebar_reconciler/inbound_translate.py;
-    # walk two parents up to reach the scripts dir containing ticket_reducer/.
-    scripts_dir = Path(__file__).resolve().parent.parent
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
-    import ticket_reducer as _tr  # noqa: PLC0415 — lazy import by design
+    import rebar.reducer as _tr  # noqa: PLC0415 — lazy import by design
 
     _TICKET_REDUCER_MODULE = _tr
     return _tr

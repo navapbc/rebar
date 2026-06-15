@@ -5,6 +5,7 @@ concern (via REBAR_RECONCILER_STATUS_GATING + local_to_jira_status). This
 test catches dynamic references (getattr, importlib, dict lookups) that
 would couple the differ to status mapping at runtime.
 """
+
 import ast
 from pathlib import Path
 
@@ -25,7 +26,7 @@ def test_differ_ast_does_not_reference_local_to_jira_status():
         if isinstance(node, ast.Attribute) and node.attr == FORBIDDEN_NAME:
             hits.append(("Attribute", node.lineno))
         if isinstance(node, ast.ImportFrom):
-            for alias in (node.names or []):
+            for alias in node.names or []:
                 if alias.name == FORBIDDEN_NAME:
                     hits.append(("ImportFrom", node.lineno))
     assert not hits, f"differ.py references {FORBIDDEN_NAME!r} at: {hits}"

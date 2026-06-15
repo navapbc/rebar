@@ -1,4 +1,5 @@
 """RED tests for differ ProvenanceLedger echo suppression."""
+
 import importlib.util
 import sys
 from pathlib import Path
@@ -42,7 +43,7 @@ def test_echo_suppressed_for_identical_elements(differ, ledger_mod):
 
 
 def test_zero_mutations_on_second_pass(differ, ledger_mod):
-    """Two-pass simulation: pass 1 emits mutations + records them; pass 2 on same state emits zero."""
+    """Two-pass run: pass 1 emits mutations + records them; pass 2 on the same state emits zero."""
     ledger = ledger_mod.ProvenanceLedger()
     local_state = {"LOCAL-1": {"local_id": "id-1", "summary": "x"}}
     jira_state = {}

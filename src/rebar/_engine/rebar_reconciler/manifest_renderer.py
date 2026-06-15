@@ -29,8 +29,8 @@ Contract: ``docs/contracts/asymmetric-manifest.md``.
 from __future__ import annotations
 
 import hashlib
-from typing import Any
 from collections.abc import Iterable
+from typing import Any
 
 
 def _direction_of(m: Any) -> str:

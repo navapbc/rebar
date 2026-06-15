@@ -8,6 +8,7 @@ For each (direction, action) pair registered in applier._LEAVES, this test:
 The production _direction_guard is wired identically on all 12 leaves; this
 test is structural coverage to satisfy the per-leaf DD requirement from 2f51.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -74,9 +75,7 @@ def test_every_leaf_raises_direction_mismatch_when_direction_flipped(applier):
     # Cross-check: every registered leaf must also be in _VALID_COMBINATIONS.
     valid = mut_mod._VALID_COMBINATIONS
     registry_outside_valid = [
-        f"({d.value},{a.value})"
-        for (d, a) in applier._LEAVES.keys()
-        if (d, a) not in valid
+        f"({d.value},{a.value})" for (d, a) in applier._LEAVES.keys() if (d, a) not in valid
     ]
     assert not registry_outside_valid, (
         "applier._LEAVES contains entries not in mutation._VALID_COMBINATIONS: "
@@ -120,8 +119,7 @@ def test_every_leaf_raises_direction_mismatch_when_direction_flipped(applier):
         try:
             leaf(mutation, client=client)
             failures.append(
-                f"({direction.value},{action.value}): "
-                f"leaf did NOT raise DirectionMismatchError"
+                f"({direction.value},{action.value}): leaf did NOT raise DirectionMismatchError"
             )
         except errs.DirectionMismatchError:
             pass  # expected

@@ -26,9 +26,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-HEALTH_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "health.py"
-)
+HEALTH_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "health.py"
 
 
 def _load_health() -> ModuleType:
@@ -76,9 +74,7 @@ def test_record_pass_schema_version(health: ModuleType, tmp_path: Path) -> None:
         local_mutation_count=0,
         repo_root=tmp_path,
     )
-    data = json.loads(
-        (tmp_path / "bridge_state" / "health" / f"{pass_id}.json").read_text()
-    )
+    data = json.loads((tmp_path / "bridge_state" / "health" / f"{pass_id}.json").read_text())
     assert data["schema_version"] == 1
 
 
@@ -98,9 +94,7 @@ def test_record_pass_fields(health: ModuleType, tmp_path: Path) -> None:
         local_mutation_count=local_mutation_count,
         repo_root=tmp_path,
     )
-    data = json.loads(
-        (tmp_path / "bridge_state" / "health" / f"{pass_id}.json").read_text()
-    )
+    data = json.loads((tmp_path / "bridge_state" / "health" / f"{pass_id}.json").read_text())
 
     assert data["pass_id"] == pass_id
     assert data["pre_pass_fsck_total"] == pre_fsck
@@ -110,9 +104,7 @@ def test_record_pass_fields(health: ModuleType, tmp_path: Path) -> None:
     assert "timestamp_ns" in data
 
 
-def test_record_pass_timestamp_ns_positive(
-    health: ModuleType, tmp_path: Path
-) -> None:
+def test_record_pass_timestamp_ns_positive(health: ModuleType, tmp_path: Path) -> None:
     """timestamp_ns is a positive integer."""
     pass_id = "test-pass-ts"
     health.record_pass(
@@ -123,17 +115,13 @@ def test_record_pass_timestamp_ns_positive(
         local_mutation_count=0,
         repo_root=tmp_path,
     )
-    data = json.loads(
-        (tmp_path / "bridge_state" / "health" / f"{pass_id}.json").read_text()
-    )
+    data = json.loads((tmp_path / "bridge_state" / "health" / f"{pass_id}.json").read_text())
     ts = data["timestamp_ns"]
     assert isinstance(ts, int), f"timestamp_ns should be int, got {type(ts)}"
     assert ts > 0, f"timestamp_ns should be positive, got {ts}"
 
 
-def test_capture_baseline_is_callable(
-    health: ModuleType, tmp_path: Path
-) -> None:
+def test_capture_baseline_is_callable(health: ModuleType, tmp_path: Path) -> None:
     """capture_baseline() is implemented and returns a Path (task 15b8 stub removed)."""
     result = health.capture_baseline(pass_id="test-baseline", repo_root=tmp_path)
     assert isinstance(result, Path)
@@ -202,9 +190,7 @@ def test_count_open_by_type_defaults_open_when_only_create(
     assert result == {"story": 1}
 
 
-def test_count_open_by_type_skips_non_dict_events(
-    health: ModuleType, tmp_path: Path
-) -> None:
+def test_count_open_by_type_skips_non_dict_events(health: ModuleType, tmp_path: Path) -> None:
     """Non-dict JSON payloads in event files do not crash the walker."""
     import json as _json
     import time
@@ -235,9 +221,7 @@ def test_count_open_by_type_skips_non_dict_events(
 # ---------------------------------------------------------------------------
 
 
-def test_count_open_by_type_alphabetical_filename_order(
-    health: ModuleType, tmp_path: Path
-) -> None:
+def test_count_open_by_type_alphabetical_filename_order(health: ModuleType, tmp_path: Path) -> None:
     """When filenames sort alphabetically (CREATE before STATUS by name),
     count_open_by_type still applies the latest STATUS correctly."""
     import json as _json
@@ -260,9 +244,7 @@ def test_count_open_by_type_alphabetical_filename_order(
     assert result == {}
 
 
-def test_count_open_by_type_multiple_status_latest_wins(
-    health: ModuleType, tmp_path: Path
-) -> None:
+def test_count_open_by_type_multiple_status_latest_wins(health: ModuleType, tmp_path: Path) -> None:
     """With timestamp-prefixed filenames, sorted order equals chronological
     order, so the latest STATUS event (numerically-largest timestamp) wins."""
     import json as _json
@@ -291,9 +273,7 @@ def test_count_open_by_type_multiple_status_latest_wins(
     assert result == {"task": 1}
 
 
-def test_capture_baseline_alphabetical_filename_order(
-    health: ModuleType, tmp_path: Path
-) -> None:
+def test_capture_baseline_alphabetical_filename_order(health: ModuleType, tmp_path: Path) -> None:
     """capture_baseline uses has_create + default-open semantics, so a ticket
     whose CREATE filename sorts before its STATUS=closed filename is correctly
     counted as closed (not open)."""
@@ -312,18 +292,14 @@ def test_capture_baseline_alphabetical_filename_order(
         _json.dumps({"event_type": "STATUS", "data": {"status": "closed"}})
     )
 
-    out_path = health.capture_baseline(
-        pass_id="alpha-pass", repo_root=tmp_path
-    )
+    out_path = health.capture_baseline(pass_id="alpha-pass", repo_root=tmp_path)
     import json as _json2
 
     data = _json2.loads(out_path.read_text())
     assert data["pre_pass_fsck_total"] == 0
 
 
-def test_capture_baseline_create_only_counts_open(
-    health: ModuleType, tmp_path: Path
-) -> None:
+def test_capture_baseline_create_only_counts_open(health: ModuleType, tmp_path: Path) -> None:
     """capture_baseline counts a ticket with only a CREATE event as open
     (matches the canonical reducer initial state)."""
     import json as _json
@@ -336,9 +312,7 @@ def test_capture_baseline_create_only_counts_open(
         _json.dumps({"event_type": "CREATE", "data": {"ticket_type": "bug"}})
     )
 
-    out_path = health.capture_baseline(
-        pass_id="create-only-pass", repo_root=tmp_path
-    )
+    out_path = health.capture_baseline(pass_id="create-only-pass", repo_root=tmp_path)
     import json as _json2
 
     data = _json2.loads(out_path.read_text())

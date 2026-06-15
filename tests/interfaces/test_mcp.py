@@ -28,14 +28,24 @@ def test_readonly_hides_write_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     # Reads remain; writes are gone.
     assert "show_ticket" in names and "list_tickets" in names
     for write_tool in (
-        "create_ticket", "transition_ticket", "tag_ticket", "archive_ticket",
-        "claim_ticket", "reopen_ticket", "set_file_impact", "set_verify_commands",
+        "create_ticket",
+        "transition_ticket",
+        "tag_ticket",
+        "archive_ticket",
+        "claim_ticket",
+        "reopen_ticket",
+        "set_file_impact",
+        "set_verify_commands",
     ):
         assert write_tool not in names, write_tool
     # WS5d: quality-gate + file-impact READ tools stay exposed in readonly mode.
     for read_tool in (
-        "clarity_check", "check_ac", "quality_check", "validate",
-        "get_file_impact", "get_verify_commands",
+        "clarity_check",
+        "check_ac",
+        "quality_check",
+        "validate",
+        "get_file_impact",
+        "get_verify_commands",
     ):
         assert read_tool in names, read_tool
 
@@ -44,17 +54,30 @@ def test_write_tools_present_by_default(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.delenv("REBAR_MCP_READONLY", raising=False)
     names = _tool_names(build_server())
     assert {
-        "create_ticket", "transition_ticket", "claim_ticket", "reopen_ticket",
-        "set_file_impact", "set_verify_commands",
+        "create_ticket",
+        "transition_ticket",
+        "claim_ticket",
+        "reopen_ticket",
+        "set_file_impact",
+        "set_verify_commands",
     } <= names
 
 
 @pytest.mark.parametrize(
     "val,expect_readonly",
     [
-        ("1", True), ("true", True), ("TRUE", True), ("True", True),
-        ("yes", True), ("YES", True), ("Yes", True), (" true ", True),
-        ("", False), ("0", False), ("no", False), ("false", False),
+        ("1", True),
+        ("true", True),
+        ("TRUE", True),
+        ("True", True),
+        ("yes", True),
+        ("YES", True),
+        ("Yes", True),
+        (" true ", True),
+        ("", False),
+        ("0", False),
+        ("no", False),
+        ("false", False),
     ],
 )
 def test_readonly_truthy_parse_is_case_insensitive(
@@ -112,8 +135,9 @@ def test_reconcile_cap0_modes_allowed_in_both_gates(
     must not refuse them. (They may legitimately fail for lack of Jira creds; we
     only assert they are NOT refused by the gate.)"""
     for readonly in ("", "1"):
-        monkeypatch.setenv("REBAR_MCP_READONLY", readonly) if readonly else \
-            monkeypatch.delenv("REBAR_MCP_READONLY", raising=False)
+        monkeypatch.setenv("REBAR_MCP_READONLY", readonly) if readonly else monkeypatch.delenv(
+            "REBAR_MCP_READONLY", raising=False
+        )
         monkeypatch.delenv("REBAR_MCP_ALLOW_RECONCILE_LIVE", raising=False)
         srv = build_server()
         try:
@@ -225,9 +249,7 @@ def test_reconcile_bogus_mode_clean_error(
 
 
 # ── fsck recover-gate (BUG f6f6) ────────────────────────────────────────────────
-def test_fsck_recover_blocked_under_readonly(
-    monkeypatch: pytest.MonkeyPatch, rebar_repo
-) -> None:
+def test_fsck_recover_blocked_under_readonly(monkeypatch: pytest.MonkeyPatch, rebar_repo) -> None:
     """fsck(recover=True) is a write op and must be refused under readonly."""
     monkeypatch.setenv("REBAR_MCP_READONLY", "1")
     srv = build_server()
@@ -237,22 +259,19 @@ def test_fsck_recover_blocked_under_readonly(
     assert "read-only" in msg and "recover" in msg
 
 
-def test_fsck_recover_allowed_when_writable(
-    monkeypatch: pytest.MonkeyPatch, rebar_repo
-) -> None:
+def test_fsck_recover_allowed_when_writable(monkeypatch: pytest.MonkeyPatch, rebar_repo) -> None:
     """Non-readonly server still runs the recovery path."""
     monkeypatch.delenv("REBAR_MCP_READONLY", raising=False)
     srv = build_server()
     asyncio.run(srv.call_tool("fsck", {"recover": True}))  # no raise
 
 
-def test_plain_fsck_available_in_both_modes(
-    monkeypatch: pytest.MonkeyPatch, rebar_repo
-) -> None:
+def test_plain_fsck_available_in_both_modes(monkeypatch: pytest.MonkeyPatch, rebar_repo) -> None:
     """Plain fsck() (no recovery) works readonly and writable alike."""
     for readonly in ("1", ""):
-        monkeypatch.setenv("REBAR_MCP_READONLY", readonly) if readonly else \
-            monkeypatch.delenv("REBAR_MCP_READONLY", raising=False)
+        monkeypatch.setenv("REBAR_MCP_READONLY", readonly) if readonly else monkeypatch.delenv(
+            "REBAR_MCP_READONLY", raising=False
+        )
         srv = build_server()
         asyncio.run(srv.call_tool("fsck", {}))  # no raise
 
@@ -265,9 +284,7 @@ def _make_stale_index_lock(repo):
 
     tracker = Path(repo) / ".tickets-tracker"
     gd = tracker / ".git"
-    gitdir = (
-        Path(gd.read_text().split("gitdir:", 1)[1].strip()) if gd.is_file() else gd
-    )
+    gitdir = Path(gd.read_text().split("gitdir:", 1)[1].strip()) if gd.is_file() else gd
     lock = gitdir / "index.lock"
     lock.write_text("")
     old = time.time() - 600
@@ -289,9 +306,7 @@ def test_plain_fsck_does_not_remove_lock_under_readonly(
     assert "not removed (read-only)" in str(res)
 
 
-def test_plain_fsck_removes_lock_when_writable(
-    monkeypatch: pytest.MonkeyPatch, rebar_repo
-) -> None:
+def test_plain_fsck_removes_lock_when_writable(monkeypatch: pytest.MonkeyPatch, rebar_repo) -> None:
     """Control: a writable server still cleans the stale lock."""
     lock = _make_stale_index_lock(rebar_repo)
     monkeypatch.delenv("REBAR_MCP_READONLY", raising=False)
@@ -316,13 +331,12 @@ def test_clarity_check_missing_ticket_mcp_clean(
 def test_mcp_link_docstring_lists_all_relations(rebar_repo) -> None:
     """The MCP link_tickets docstring must mention all six canonical relations
     (sourced from the engine's CANONICAL_RELATIONS — single source of truth)."""
-    from ticket_graph._links import CANONICAL_RELATIONS
-
-    import rebar  # noqa: F401  (puts engine on sys.path)
+    import rebar  # noqa: F401
+    from rebar.graph._links import CANONICAL_RELATIONS
 
     srv = build_server()
     tools = {t.name: t for t in asyncio.run(srv.list_tools())}
-    doc = (tools["link_tickets"].description or "")
+    doc = tools["link_tickets"].description or ""
     for rel in CANONICAL_RELATIONS:
         assert rel in doc, f"MCP link doc missing relation {rel!r}"
 

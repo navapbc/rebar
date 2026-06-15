@@ -117,12 +117,8 @@ def test_enriched_snapshot_skips_get_comments(outbound_differ: ModuleType) -> No
     assert client.get_comments_calls == [], (
         "enriched snapshot must NOT trigger a per-ticket get_comments call"
     )
-    comment_muts = [
-        c for m in mutations for c in m.comments if c.get("action") == "add"
-    ]
-    assert comment_muts == [], (
-        f"comment already mirrored — expected no add, got: {comment_muts}"
-    )
+    comment_muts = [c for m in mutations for c in m.comments if c.get("action") == "add"]
+    assert comment_muts == [], f"comment already mirrored — expected no add, got: {comment_muts}"
 
 
 # ---------------------------------------------------------------------------
@@ -157,9 +153,7 @@ def test_unenriched_snapshot_falls_back_to_get_comments(
     assert client.get_comments_calls == ["DIG-2"], (
         "an unenriched entry must fall back to client.get_comments"
     )
-    comment_muts = [
-        c for m in mutations for c in m.comments if c.get("action") == "add"
-    ]
+    comment_muts = [c for m in mutations for c in m.comments if c.get("action") == "add"]
     assert len(comment_muts) == 1, (
         f"local comment not on Jira → one add expected, got: {comment_muts}"
     )
@@ -212,9 +206,9 @@ def test_fetcher_enriches_comment_field(tmp_path: Path) -> None:
     output_path = fetcher_mod.fetch_snapshot("test-pass", repo_root=tmp_path)
 
     snapshot = json.loads(output_path.read_text())
-    assert snapshot["DIG-90"].get("comment") == {
-        "comments": [{"body": "enriched comment"}]
-    }, f"comment field not enriched: {snapshot['DIG-90']}"
+    assert snapshot["DIG-90"].get("comment") == {"comments": [{"body": "enriched comment"}]}, (
+        f"comment field not enriched: {snapshot['DIG-90']}"
+    )
 
 
 @pytest.mark.unit

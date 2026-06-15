@@ -13,7 +13,7 @@ from collections.abc import Iterator
 from rebar.llm import prompts
 from rebar.llm.config import LLMConfig
 from rebar.llm.findings import build_result, resolve_citations, validate_result
-from rebar.llm.runner import RunRequest, Runner, get_runner
+from rebar.llm.runner import Runner, RunRequest, get_runner
 
 __all__ = ["scan_epics_for_spec"]
 

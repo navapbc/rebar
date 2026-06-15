@@ -22,7 +22,7 @@ from rebar.llm.aggregate import aggregate_findings
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMConfigError
 from rebar.llm.findings import build_result, resolve_citations, validate_result
-from rebar.llm.runner import RunRequest, Runner, get_runner
+from rebar.llm.runner import Runner, RunRequest, get_runner
 
 __all__ = ["review_code", "select_code_reviewers"]
 

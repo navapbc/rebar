@@ -52,9 +52,7 @@ if "rebar_reconciler.adf" not in sys.modules:
     _adf_spec.loader.exec_module(_adf_mod)  # type: ignore[union-attr]
 _CL_PATH = SCRIPTS_DIR / "rebar_reconciler" / "comment_limits.py"
 if "rebar_reconciler.comment_limits" not in sys.modules:
-    _cl_spec = importlib.util.spec_from_file_location(
-        "rebar_reconciler.comment_limits", _CL_PATH
-    )
+    _cl_spec = importlib.util.spec_from_file_location("rebar_reconciler.comment_limits", _CL_PATH)
     _cl_mod = importlib.util.module_from_spec(_cl_spec)
     sys.modules["rebar_reconciler.comment_limits"] = _cl_mod
     _cl_spec.loader.exec_module(_cl_mod)  # type: ignore[union-attr]
@@ -97,9 +95,7 @@ def _make_fake_acli(acli_mod: ModuleType, client: MagicMock) -> MagicMock:
 
 
 def _read_manifest_outcomes(repo_root: Path, pass_id: str) -> list[dict]:
-    manifest_path = (
-        repo_root / "bridge_state" / "snapshots" / f"{pass_id}.manifest.json"
-    )
+    manifest_path = repo_root / "bridge_state" / "snapshots" / f"{pass_id}.manifest.json"
     if not manifest_path.is_file():
         return []
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -142,9 +138,7 @@ def test_create_add_comment_failure_surfaces_in_outcome(
     assert fake_client.add_comment.called, "add_comment must have been attempted"
 
     outcomes = _read_manifest_outcomes(tmp_path, pass_id)
-    target_outcomes = [
-        o for o in outcomes if o.get("local_id") == "create-comment-fail-id"
-    ]
+    target_outcomes = [o for o in outcomes if o.get("local_id") == "create-comment-fail-id"]
     assert target_outcomes, f"expected an outcome for the create; got {outcomes}"
     outcome = target_outcomes[0]
 

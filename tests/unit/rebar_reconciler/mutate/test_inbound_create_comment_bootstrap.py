@@ -22,9 +22,7 @@ from unittest.mock import MagicMock
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 MUTATION_PATH = APPLIER_PATH.parent / "mutation.py"
 INBOUND_DIFFER_PATH = APPLIER_PATH.parent / "inbound_differ.py"
 
@@ -103,9 +101,7 @@ def _adf_comment(cid: str, text: str) -> dict:
         "body": {
             "type": "doc",
             "version": 1,
-            "content": [
-                {"type": "paragraph", "content": [{"type": "text", "text": text}]}
-            ],
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}],
         },
     }
 
@@ -219,8 +215,7 @@ def test_inbound_create_next_pass_no_double_import(applier, mut_mod, inbound_dif
 
     mutations = inbound_differ._diff_comments_inbound(jira_fields, local_ticket)
     assert mutations == [], (
-        f"Next-pass diff must emit 0 mutations (dedup by jira_comment_id); "
-        f"got {mutations!r}"
+        f"Next-pass diff must emit 0 mutations (dedup by jira_comment_id); got {mutations!r}"
     )
 
 
@@ -245,7 +240,9 @@ def test_inbound_create_get_comments_failure_degrades(applier, mut_mod, fixture_
     # Must not raise
     result = applier._apply_typed(mutation, client=client, repo_root=fixture_repo)
     local_id = "jira-dig-902"
-    assert result.payload["local_id"] == local_id, "create must succeed despite get_comments failure"
+    assert result.payload["local_id"] == local_id, (
+        "create must succeed despite get_comments failure"
+    )
 
     tracker = fixture_repo / ".tickets-tracker"
     # CREATE event must exist
@@ -259,15 +256,13 @@ def test_inbound_create_get_comments_failure_degrades(applier, mut_mod, fixture_
     # 0 COMMENT events
     comment_events = _read_events_of_type(tracker, local_id, "COMMENT")
     assert comment_events == [], (
-        f"No COMMENT events must be written when get_comments fails; "
-        f"got {comment_events!r}"
+        f"No COMMENT events must be written when get_comments fails; got {comment_events!r}"
     )
 
     # Warning must appear on stderr
     captured = capsys.readouterr()
     assert "WARNING" in captured.err or "warning" in captured.err.lower(), (
-        f"A warning must be logged to stderr on get_comments failure; "
-        f"stderr was: {captured.err!r}"
+        f"A warning must be logged to stderr on get_comments failure; stderr was: {captured.err!r}"
     )
 
 
@@ -301,7 +296,8 @@ def test_inbound_create_adf_body_normalized(applier, mut_mod, fixture_repo):
     )
     stored_body = comment_events[0]["data"]["body"]
     assert isinstance(stored_body, str), (
-        f"COMMENT body must be a string (ADF normalized), got {type(stored_body)!r}: {stored_body!r}"
+        f"COMMENT body must be a string (ADF normalized), "
+        f"got {type(stored_body)!r}: {stored_body!r}"
     )
     assert "ADF paragraph text" in stored_body, (
         f"Normalized body must contain the ADF text; got {stored_body!r}"

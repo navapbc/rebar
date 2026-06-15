@@ -22,9 +22,21 @@ import urllib.request
 from typing import Any
 
 from rebar_reconciler import acli_cli_ops, acli_subprocess
+
+# Module-level ACLI issue ops live in acli_cli_ops; the AcliClient methods
+# delegate to them via ``acli_cli_ops.<name>``. Only the private helpers below
+# are pulled in by name for internal use.
+from rebar_reconciler.acli_cli_ops import (
+    _attach_parent_guarded,
+    _create_from_json_payload,
+    _create_issue_from_json,
+    _create_issue_no_json,
+    _extract_parent_key,
+    _parse_acli_comments,
+    _verify_created_issue,
+)
 from rebar_reconciler.acli_graph import AcliGraphMixin
 from rebar_reconciler.acli_rest import AcliRestMixin
-from rebar_reconciler.adf import text_to_adf as _text_to_adf  # canonical location
 
 # Subprocess transport floor (process exec + retry + typed mutation errors) lives
 # in acli_subprocess; re-exported here so acli.<name> keeps resolving. The seam
@@ -45,37 +57,47 @@ from rebar_reconciler.acli_subprocess import (
     _check_mutation_failure,
     _run_acli,
 )
-
-# Module-level ACLI issue ops live in acli_cli_ops; the AcliClient methods
-# delegate to them. Re-exported so acli.<name> keeps resolving for callers.
-from rebar_reconciler.acli_cli_ops import (
-    _attach_parent_guarded,
-    _create_from_json_payload,
-    _create_issue_from_json,
-    _create_issue_no_json,
-    _extract_parent_key,
-    _parse_acli_comments,
-    _verify_created_issue,
-    add_comment,
-    create_issue,
-    get_comments,
-    get_issue,
-    update_priority,
-)
+from rebar_reconciler.adf import text_to_adf as _text_to_adf  # canonical location
 
 # Field sanitization + local↔Jira value maps live in jira_fields; re-exported
 # here so ``acli.<name>`` keeps resolving for callers and the characterization
 # suites (point-of-use read access).
 from rebar_reconciler.jira_fields import (
-    InvalidLabelError,
     _JIRA_LABEL_MAX_CHARS,
     _JIRA_SUMMARY_MAX_CHARS,
     _LOCAL_PRIORITY_TO_JIRA,
     _LOCAL_STATUS_TO_JIRA,
+    InvalidLabelError,
     _sanitize_comment,
     _sanitize_label,
     _sanitize_summary,
 )
+
+# Re-export facade. These names are imported from sibling acli_* / jira_fields
+# modules solely so ``acli.<name>`` keeps resolving for callers and the
+# characterization suites; ``__all__`` records them as intentional re-exports.
+__all__ = [
+    "AcliMutationError",
+    "AssigneeNotFoundError",
+    "InvalidLabelError",
+    "RetryExhaustedError",
+    "_ASSIGNEE_NOT_FOUND_ERROR",
+    "_ASSIGNEE_PERMISSION_ERROR",
+    "_AUTH_FAILURE_CODE",
+    "_JIRA_LABEL_MAX_CHARS",
+    "_JIRA_SUMMARY_MAX_CHARS",
+    "_MAX_ATTEMPTS",
+    "_RETRYABLE_HTTP_CODES",
+    "_attach_parent_guarded",
+    "_call_with_backoff",
+    "_create_from_json_payload",
+    "_create_issue_from_json",
+    "_create_issue_no_json",
+    "_run_acli",
+    "_sanitize_comment",
+    "_sanitize_label",
+    "_verify_created_issue",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +107,6 @@ logger = logging.getLogger(__name__)
 
 
 # _text_to_adf is imported from rebar_reconciler.adf (canonical location)
-
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +204,6 @@ def update_issue(
 
     result = acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd)
     return json.loads(result.stdout)
-
 
 
 # ---------------------------------------------------------------------------
@@ -327,7 +347,6 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         """Add a comment to a Jira issue via ACLI."""
         return acli_cli_ops.add_comment(jira_key, body, acli_cmd=self._acli_cmd)
 
-
     def search_issues(
         self,
         jql: str,
@@ -411,28 +430,13 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         )
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
-                self._myself_cache: dict[str, Any] = json.loads(
-                    resp.read().decode("utf-8")
-                )
+                self._myself_cache: dict[str, Any] = json.loads(resp.read().decode("utf-8"))
         except (urllib.error.URLError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             logging.warning("get_myself: failed to fetch /rest/api/2/myself: %s", exc)
             # missing keys gracefully (defaulting to UTC), and caching prevents a
             # second network failure on the same run from the verify+fetch double-call.
             self._myself_cache = {}
         return self._myself_cache
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     def transition_issue_by_name(self, jira_key: str, target_status: str) -> None:
         """Transition a Jira issue to *target_status* via REST.
@@ -459,13 +463,9 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         by project+issuetype produces incorrect hits for an issue mid-
         workflow.
         """
-        transitions_resp = self._direct_rest_get(
-            f"/rest/api/3/issue/{jira_key}/transitions"
-        )
+        transitions_resp = self._direct_rest_get(f"/rest/api/3/issue/{jira_key}/transitions")
         transitions = (
-            transitions_resp.get("transitions", [])
-            if isinstance(transitions_resp, dict)
-            else []
+            transitions_resp.get("transitions", []) if isinstance(transitions_resp, dict) else []
         )
         target_lower = target_status.strip().lower()
         match_id = None
@@ -515,9 +515,7 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         ``ValueError`` when neither scope arg is supplied.
         """
         if not (issue_key or project_key):
-            raise ValueError(
-                "validate_assignee_exists: issue_key or project_key required"
-            )
+            raise ValueError("validate_assignee_exists: issue_key or project_key required")
         query_part = f"query={urllib.parse.quote(assignee)}"
         scope_part = (
             f"issueKey={urllib.parse.quote(issue_key)}"
@@ -527,9 +525,7 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         path = f"/rest/api/3/user/assignable/search?{query_part}&{scope_part}"
         users = self._direct_rest_get(path)
         if not isinstance(users, list) or not users:
-            scope_label = (
-                f"issue={issue_key!r}" if issue_key else f"project={project_key!r}"
-            )
+            scope_label = f"issue={issue_key!r}" if issue_key else f"project={project_key!r}"
             raise AssigneeNotFoundError(
                 f"validate_assignee_exists: no assignable user matches "
                 f"{assignee!r} for {scope_label}"
@@ -612,16 +608,6 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
             body = {"fields": {"parent": None}}
         self._direct_rest_put_raw(f"/rest/api/3/issue/{jira_key}", body)
 
-
-
-
-
-
-
-
-
-
-
     def delete_issue(
         self,
         jira_key: str,
@@ -674,4 +660,3 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
                 raise PermissionError(msg) from exc
             raise
         return {"status": "deleted", "key": jira_key}
-

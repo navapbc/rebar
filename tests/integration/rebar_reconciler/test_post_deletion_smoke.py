@@ -4,6 +4,7 @@ Verifies that with the legacy bridge modules removed (task 6cbb) and the
 bridge-cutover one-shots removed (WS4), applier._LEAVES still loads and every
 leaf is invocable without ModuleNotFoundError.
 """
+
 import importlib.util
 import sys
 from pathlib import Path
@@ -65,4 +66,6 @@ def test_all_leaves_invocable_without_import_error(applier):
             # import-level regressions. Stubs may legitimately raise on
             # missing payload fields, etc.
             pass
-    assert leaves_count >= 6, f"_LEAVES has only {leaves_count} entries — expected at least 6 valid pairs"
+    assert leaves_count >= 6, (
+        f"_LEAVES has only {leaves_count} entries — expected at least 6 valid pairs"
+    )

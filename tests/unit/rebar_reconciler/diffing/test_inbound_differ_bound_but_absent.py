@@ -116,9 +116,7 @@ class StubBindingStore:
 
 
 def _http_error(code: int) -> urllib.error.HTTPError:
-    return urllib.error.HTTPError(
-        url="http://x/issue/X", code=code, msg="err", hdrs=None, fp=None
-    )
+    return urllib.error.HTTPError(url="http://x/issue/X", code=code, msg="err", hdrs=None, fp=None)
 
 
 def _ticket(tid: str, **over) -> dict:
@@ -138,9 +136,7 @@ def _ticket(tid: str, **over) -> dict:
     return base
 
 
-def _run_pass(
-    od, ib, *, local_tickets, snapshot, store, client, pass_id, local_label_intent=None
-):
+def _run_pass(od, ib, *, local_tickets, snapshot, store, client, pass_id, local_label_intent=None):
     """Drive one bidirectional pass the way reconcile.py threads the two
     differs, sharing the outbound bounded-GET results into the inbound snapshot.
 
@@ -298,8 +294,7 @@ def test_bidir_no_oscillation_outbound_field_suppressed_inbound(od, ib):
     )
     # Outbound pushes the local title (it is the source of truth).
     assert any(
-        m.action == "update" and m.fields.get("summary") == "Local NEW title"
-        for m in outbound
+        m.action == "update" and m.fields.get("summary") == "Local NEW title" for m in outbound
     )
     # Inbound must NOT mirror the stale Jira title back (suppression holds).
     for m in inbound:
@@ -354,9 +349,7 @@ def test_inbound_respects_outbound_get_budget(od, ib, monkeypatch):
     K = 2
     bindings = {f"loc-{i}": f"DIG-{i}" for i in range(N)}
     store = StubBindingStore(bindings)
-    tickets = [
-        _ticket(f"loc-{i}", title="Old", description="Same") for i in range(N)
-    ]
+    tickets = [_ticket(f"loc-{i}", title="Old", description="Same") for i in range(N)]
     client = MagicMock()
     client.get_issue_by_rest.return_value = {
         "fields": {
@@ -449,9 +442,7 @@ def test_absent_alive_fields_param_is_optional(od):
     ticket = _ticket("loc-1", title="NEW")
     store = StubBindingStore({"loc-1": jira_key})
     client = MagicMock()
-    client.get_issue_by_rest.return_value = {
-        "fields": {"summary": "OLD", "labels": []}
-    }
+    client.get_issue_by_rest.return_value = {"fields": {"summary": "OLD", "labels": []}}
     result = od.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},

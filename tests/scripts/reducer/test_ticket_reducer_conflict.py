@@ -15,7 +15,6 @@ Test: python3 -m pytest tests/scripts/test_ticket_reducer_conflict.py -q
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 from types import ModuleType
@@ -23,30 +22,16 @@ from types import ModuleType
 import pytest
 
 # ---------------------------------------------------------------------------
-# Module loading — filename has hyphens so we use importlib
+# Reducer under test — ``rebar.reducer``.
 # ---------------------------------------------------------------------------
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-SCRIPT_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "ticket-reducer.py"
-
-
-def _load_module() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("ticket_reducer", SCRIPT_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
-    return module
 
 
 @pytest.fixture(scope="module")
 def reducer() -> ModuleType:
-    """Return the ticket-reducer module, failing all tests if absent (RED)."""
-    if not SCRIPT_PATH.exists():
-        pytest.fail(
-            f"ticket-reducer.py not found at {SCRIPT_PATH} — "
-            "this is expected RED state; implement the script to make tests pass."
-        )
-    return _load_module()
+    """Return the in-process ``rebar.reducer`` module (reduce_ticket et al.)."""
+    import rebar.reducer as reducer_mod
+
+    return reducer_mod
 
 
 def _write_event(
@@ -90,9 +75,7 @@ _STATUS_UUID = "33333333-3333-4333-8333-333333333333"
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_duplicate_uuid_comment_applies_once(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_duplicate_uuid_comment_applies_once(tmp_path: Path, reducer: ModuleType) -> None:
     """A COMMENT event copied to a second filename (same uuid) appears ONCE.
 
     RED before the dedup fix: filename-order replay double-applies the second
@@ -140,9 +123,7 @@ def test_duplicate_uuid_comment_applies_once(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_duplicate_uuid_status_does_not_self_fork(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_duplicate_uuid_status_does_not_self_fork(tmp_path: Path, reducer: ModuleType) -> None:
     """A STATUS event duplicated under a second filename resolves to one status.
 
     Re-applying the same STATUS uuid must not be treated as two distinct envs /
@@ -177,8 +158,7 @@ def test_duplicate_uuid_status_does_not_self_fork(
 
     assert state is not None
     assert state["status"] == "closed", (
-        f"Duplicate STATUS uuid must resolve to a single transition; "
-        f"got {state['status']}"
+        f"Duplicate STATUS uuid must resolve to a single transition; got {state['status']}"
     )
 
 
@@ -189,9 +169,7 @@ def test_duplicate_uuid_status_does_not_self_fork(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_distinct_uuid_events_unchanged(
-    tmp_path: Path, reducer: ModuleType
-) -> None:
+def test_distinct_uuid_events_unchanged(tmp_path: Path, reducer: ModuleType) -> None:
     """Three distinct COMMENT uuids all apply — dedup must not over-collapse."""
     ticket_dir = tmp_path / "tkt-distinct"
     ticket_dir.mkdir()
@@ -304,6 +282,5 @@ def test_snapshot_plus_post_snapshot_duplicate_applies_once(
     assert state is not None
     bodies = [c["body"] for c in state["comments"]]
     assert bodies == ["pre-snapshot comment", "post-snapshot comment"], (
-        f"Snapshot + duplicated post-snapshot comment must apply once each; "
-        f"got {bodies}"
+        f"Snapshot + duplicated post-snapshot comment must apply once each; got {bodies}"
     )

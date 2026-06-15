@@ -84,9 +84,7 @@ def _parent_status_uuid(ticket_dir_path: str) -> str | None:
 def _git(tracker_dir: str, *args: str) -> None:
     """Run a git command in the tracker, raising :class:`CommandError` (exit 2) on
     failure with the exact bash stderr prefix."""
-    cp = subprocess.run(
-        ["git", "-C", tracker_dir, *args], capture_output=True, text=True
-    )
+    cp = subprocess.run(["git", "-C", tracker_dir, *args], capture_output=True, text=True)
     if cp.returncode != 0:
         raise CommandError(f"Error: git operation failed: {cp.stderr}", returncode=2)
 
@@ -103,7 +101,8 @@ def _unstage(tracker_dir: str, *abs_paths: str | None) -> None:
     try:
         subprocess.run(
             ["git", "-C", tracker_dir, "reset", "-q", "--", *rels],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
     except OSError:
         pass
@@ -158,14 +157,11 @@ def transition_core(
         if target_status == "closed" and ticket_type == "bug":
             if not close_reason:
                 raise CommandError(
-                    'Error: closing a bug ticket requires --reason with prefix '
+                    "Error: closing a bug ticket requires --reason with prefix "
                     '"Fixed:" or "Escalated to user:"',
                     returncode=1,
                 )
-            if not (
-                close_reason.startswith("Fixed")
-                or close_reason.lower().startswith("escalat")
-            ):
+            if not (close_reason.startswith("Fixed") or close_reason.lower().startswith("escalat")):
                 raise CommandError(
                     'Error: --reason must start with "Fixed:" or "Escalated to user:"',
                     returncode=1,
@@ -246,9 +242,7 @@ def _signature_gate(
         or os.environ.get("PROJECT_ROOT")
         or tracker_dir.rsplit("/", 1)[0]
     )
-    config_path = os.environ.get("REBAR_CONFIG") or os.path.join(
-        cfg_root, ".rebar", "config.conf"
-    )
+    config_path = os.environ.get("REBAR_CONFIG") or os.path.join(cfg_root, ".rebar", "config.conf")
     # Fail-CLOSED on read error: a *present* gate config we cannot read/parse must
     # never silently disable the verification gate — require a signature (block) and
     # surface the error. An absent config is the intended opt-out (gate stays off).
@@ -296,16 +290,17 @@ def _signature_gate(
         print(f"  Reason: {force_close_reason}", file=sys.stderr)
         return
 
-    from rebar import config as _config, signing as _signing
+    from rebar import config as _config
+    from rebar import signing as _signing
 
     key = _signing.signing_key(tracker_dir, create_if_missing=False)
     result = _signing.verify_record(state.get("signature"), ticket_id, key)
     if not result["verified"]:
         raise CommandError(
-            f'Error: closing a {ticket_type} requires a certified signature '
-            f'(verdict: {result["verdict"]}).\n'
+            f"Error: closing a {ticket_type} requires a certified signature "
+            f"(verdict: {result['verdict']}).\n"
             "  Recovery: sign a manifest of verified steps, then close:\n"
-            f"    rebar sign {ticket_id} '[\"step one: PASS\", \"step two: PASS\"]'\n"
+            f'    rebar sign {ticket_id} \'["step one: PASS", "step two: PASS"]\'\n'
             f"    rebar transition {ticket_id} closed\n"
             '  Override: use --force-close="<reason>" to bypass (requires user approval).',
             returncode=1,

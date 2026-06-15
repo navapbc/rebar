@@ -28,12 +28,8 @@ from unittest.mock import patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-FETCHER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
-)
-ERRORS_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_errors.py"
-)
+FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
+ERRORS_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_errors.py"
 
 # Best-effort import of SilentTruncationError. If not yet defined, fall back to
 # a local placeholder so test collection still succeeds in the RED state.
@@ -186,8 +182,6 @@ def test_fetch_1150_issues_under_ceiling_succeeds_below_ceiling(fetcher, tmp_pat
 
     with patch.object(fetcher, "_load_acli", _fake_load_acli):
         # Should NOT raise — 1150 is under_ceiling.
-        out_path = fetcher.fetch_snapshot(
-            pass_id="under-ceiling-1150", repo_root=tmp_path
-        )
+        out_path = fetcher.fetch_snapshot(pass_id="under-ceiling-1150", repo_root=tmp_path)
 
     assert out_path.exists(), "snapshot file should be written below_ceiling"

@@ -34,17 +34,13 @@ import os
 import subprocess
 import sys
 import time
-from pathlib import Path
 from typing import Any
 
 from rebar._engine import engine_dir as _engine_dir
-
-# Engine scripts (e.g. ticket-sync.sh) live in the bundled engine dir, not next
-# to this module. This is the in-process read implementation (the engine's bash
-# wrapper reaches it via the ``ticket_reads`` compat shim), so ``rebar`` is always
-# importable here and the read packages import as real ``rebar.*`` subpackages.
-_SCRIPTS_DIR = _engine_dir()
-
+from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
+from rebar._engine_support.resolver import resolve_ticket_id
+from rebar.graph._graph import build_dep_graph
+from rebar.graph._ready import find_ready_tickets
 from rebar.reducer import (
     apply_ticket_filters,
     reduce_all_tickets,
@@ -53,10 +49,11 @@ from rebar.reducer import (
 )
 from rebar.reducer._present import public_state
 from rebar.reducer.llm_format import to_llm
-from rebar.graph._graph import build_dep_graph
-from rebar.graph._ready import find_ready_tickets
-from rebar._engine_support.resolver import resolve_ticket_id
-from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
+
+# The bundled engine dir holds the read packages' supporting assets. This is the
+# in-process read implementation, so ``rebar`` is always importable here and the
+# read packages import as real ``rebar.*`` subpackages.
+_SCRIPTS_DIR = _engine_dir()
 
 
 # ───────────────────────────── tracker resolution ────────────────────────────
@@ -351,18 +348,14 @@ def search_state(
     states = reduce_all_tickets(
         tracker, exclude_archived=not include_archived, exclude_deleted=True
     )
-    results = search_states(
-        states, query, status=status, ticket_type=ticket_type, has_tag=has_tag
-    )
+    results = search_states(states, query, status=status, ticket_type=ticket_type, has_tag=has_tag)
     return [public_state(t) for t in results]
 
 
 # ───────────────────────────── CLI command handlers ──────────────────────────
 def _bridge_alert_warning(states: list[dict]) -> str | None:
     alerted = sum(
-        1
-        for t in states
-        if any(not a.get("resolved", False) for a in t.get("bridge_alerts", []))
+        1 for t in states if any(not a.get("resolved", False) for a in t.get("bridge_alerts", []))
     )
     if alerted > 0:
         return (
@@ -407,9 +400,7 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
             # line (preserving the historical contract callers depend on).
             print(
                 json.dumps(
-                    error_envelope(
-                        "ticket_not_found", raw_id, f"Ticket '{raw_id}' not found", 1
-                    ),
+                    error_envelope("ticket_not_found", raw_id, f"Ticket '{raw_id}' not found", 1),
                     ensure_ascii=False,
                 )
                 if "not found" in exc.message
@@ -440,7 +431,8 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
     usage = (
         "Usage: ticket list [--output llm] [--include-archived] [--exclude-deleted] "
         "[--type=<type>] [--status=<status>] [--priority=<n>] [--parent=<id>] "
-        "[--has-tag=<tag>] [--without-tag=<tag>] [--min-children=<n>] [--unblocked|--blocked] [--with-children-count]"
+        "[--has-tag=<tag>] [--without-tag=<tag>] [--min-children=<n>] "
+        "[--unblocked|--blocked] [--with-children-count]"
     )
     try:
         fmt, rest = parse_output(argv, "reader")
@@ -466,19 +458,19 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         elif arg == "--exclude-deleted":
             opts["exclude_deleted"] = True
         elif arg.startswith("--type="):
-            opts["ticket_type"] = arg[len("--type="):]
+            opts["ticket_type"] = arg[len("--type=") :]
         elif arg.startswith("--status="):
-            opts["status"] = arg[len("--status="):]
+            opts["status"] = arg[len("--status=") :]
         elif arg.startswith("--parent="):
-            opts["parent"] = arg[len("--parent="):]
+            opts["parent"] = arg[len("--parent=") :]
         elif arg.startswith("--has-tag="):
-            opts["has_tag"] = arg[len("--has-tag="):]
+            opts["has_tag"] = arg[len("--has-tag=") :]
         elif arg.startswith("--priority="):
-            opts["priority"] = arg[len("--priority="):]
+            opts["priority"] = arg[len("--priority=") :]
         elif arg.startswith("--without-tag="):
-            opts["without_tag"] = arg[len("--without-tag="):]
+            opts["without_tag"] = arg[len("--without-tag=") :]
         elif arg.startswith("--min-children="):
-            raw = arg[len("--min-children="):]
+            raw = arg[len("--min-children=") :]
             if not raw.isdigit():
                 print(
                     f"Error: --min-children expects a non-negative integer, got '{raw}'",
@@ -512,7 +504,8 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
     if pri:
         if any(c not in "0123456789," for c in pri):
             print(
-                f"Error: --priority expects integer values 0-4 (comma-separated for OR), got '{pri}'",
+                f"Error: --priority expects integer values 0-4 "
+                f"(comma-separated for OR), got '{pri}'",
                 file=sys.stderr,
             )
             return 1
@@ -581,7 +574,7 @@ def _cmd_ready(argv: list[str], tracker: str) -> int:
             i += 2
             continue
         if arg.startswith("--epic="):
-            epic = arg[len("--epic="):]
+            epic = arg[len("--epic=") :]
             i += 1
             continue
         if arg.startswith("-"):
@@ -614,11 +607,11 @@ def _cmd_search(argv: list[str], tracker: str) -> int:
     include_archived = False
     for arg in argv:
         if arg.startswith("--status="):
-            status = arg[len("--status="):]
+            status = arg[len("--status=") :]
         elif arg.startswith("--type="):
-            ticket_type = arg[len("--type="):]
+            ticket_type = arg[len("--type=") :]
         elif arg.startswith("--has-tag="):
-            has_tag = arg[len("--has-tag="):]
+            has_tag = arg[len("--has-tag=") :]
         elif arg == "--include-archived":
             include_archived = True
         elif arg.startswith("-"):
@@ -675,9 +668,9 @@ def _cmd_list_epics(argv: list[str], tracker: str) -> int:
         if arg == "--all":
             include_blocked = True
         elif arg.startswith("--has-tag="):
-            has_tag = arg[len("--has-tag="):]
+            has_tag = arg[len("--has-tag=") :]
         elif arg.startswith("--min-children="):
-            raw = arg[len("--min-children="):]
+            raw = arg[len("--min-children=") :]
             if not raw.isdigit():
                 print(
                     f"Error: --min-children expects a non-negative integer, got '{raw}'",
@@ -757,7 +750,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
         print(
-            "Usage: ticket-reads.py <show|list|deps|ready|search> [args...]",
+            "Usage: rebar <show|list|deps|ready|search> [args...]",
             file=sys.stderr,
         )
         return 1

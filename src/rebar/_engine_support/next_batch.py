@@ -22,10 +22,10 @@ import os
 import sys
 from typing import Any
 
-from rebar.reducer import reduce_all_tickets, reduce_ticket
+from rebar._engine_support.next_batch_files import PathConfig, extract_files
 from rebar._engine_support.output import error_envelope
 from rebar._engine_support.resolver import resolve_ticket_id
-from rebar._engine_support.next_batch_files import PathConfig, extract_files
+from rebar.reducer import reduce_all_tickets, reduce_ticket
 
 _CLOSED_STATUSES = {"closed", "done", "completed", "deleted"}
 # Files that are shared-by-design and support concurrent additive edits.
@@ -128,9 +128,7 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
             if child not in descendants:
                 descendants.add(child)
                 queue.append(child)
-    parent_ids_with_children = {
-        pid for pid in parent_map if pid in descendants and parent_map[pid]
-    }
+    parent_ids_with_children = {pid for pid in parent_map if pid in descendants and parent_map[pid]}
 
     # Open/in_progress tickets via the shared list path (== ``rebar list``).
     from rebar._engine_support import reads as _reads
@@ -168,8 +166,7 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
             d
             for d in (t.get("deps") or [])
             if d.get("relation") == "depends_on"
-            and ticket_status_map.get(d.get("target_id", ""), "closed")
-            not in _CLOSED_STATUSES
+            and ticket_status_map.get(d.get("target_id", ""), "closed") not in _CLOSED_STATUSES
         ]
         if open_depends_on:
             continue
@@ -218,8 +215,7 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
             continue
         if any(
             d.get("relation") == "depends_on"
-            and ticket_status_map.get(d.get("target_id", ""), "closed")
-            not in _CLOSED_STATUSES
+            and ticket_status_map.get(d.get("target_id", ""), "closed") not in _CLOSED_STATUSES
             for d in (t.get("deps") or [])
         ):
             _blocked_ids.add(tid)
@@ -373,21 +369,23 @@ def render_text(r: NextBatchResult) -> str:
     ]
     for c in r.batch:
         lines.append(f"TASK: {c.id}\tP{c.priority}\t{c.itype}\t{c.title}")
-    for tid, title, cf, ct in r.skipped_overlap:
+    for tid, _title, cf, ct in r.skipped_overlap:
         lines.append(f"SKIPPED_OVERLAP: {tid}\tdeferred (overlaps with {ct} on {cf})")
-    for tid, title, sid in r.skipped_blocked_story:
+    for tid, _title, sid in r.skipped_blocked_story:
         lines.append(f"SKIPPED_BLOCKED_STORY: {tid}\tdeferred (parent story {sid} is blocked)")
-    for tid, title, sid in r.skipped_design_awaiting:
+    for tid, _title, sid in r.skipped_design_awaiting:
         lines.append(
-            f"SKIPPED_DESIGN_AWAITING: {tid}\tdeferred (parent story {sid} awaiting designer import)"
+            f"SKIPPED_DESIGN_AWAITING: {tid}\tdeferred "
+            f"(parent story {sid} awaiting designer import)"
         )
-    for tid, title, sid in r.skipped_manual_awaiting:
+    for tid, _title, sid in r.skipped_manual_awaiting:
         lines.append(
-            f"SKIPPED_MANUAL_AWAITING: {tid}\tdeferred (parent story {sid} awaiting manual user step)"
+            f"SKIPPED_MANUAL_AWAITING: {tid}\tdeferred "
+            f"(parent story {sid} awaiting manual user step)"
         )
-    for tid, title in r.skipped_in_progress:
+    for tid, _title in r.skipped_in_progress:
         lines.append(f"SKIPPED_IN_PROGRESS: {tid}\talready in_progress")
-    for tid, title in r.skipped_needs_planning:
+    for tid, _title in r.skipped_needs_planning:
         lines.append(
             f"SKIPPED_NEEDS_PLANNING: {tid}\tneeds implementation planning (story has 0 children)"
         )
@@ -490,7 +488,7 @@ def run(argv: list[str], tracker: str) -> int:
 
     for arg in rest:
         if arg.startswith("--limit="):
-            val = arg[len("--limit="):]
+            val = arg[len("--limit=") :]
             if val == "unlimited":
                 limit = 0
             elif not val.isdigit():

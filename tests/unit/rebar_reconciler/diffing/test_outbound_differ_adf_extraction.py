@@ -23,20 +23,11 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = (
-    REPO_ROOT
-    / "src"
-    / "rebar"
-    / "_engine"
-    / "rebar_reconciler"
-    / "outbound_differ.py"
-)
+DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
 
 
 def _load_differ():
-    spec = importlib.util.spec_from_file_location(
-        "outbound_differ_adf_test", DIFFER_PATH
-    )
+    spec = importlib.util.spec_from_file_location("outbound_differ_adf_test", DIFFER_PATH)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules["outbound_differ_adf_test"] = mod
@@ -56,9 +47,7 @@ def _adf_doc(*lines: str) -> dict:
     paragraphs = []
     for line in lines:
         if line:
-            paragraphs.append(
-                {"type": "paragraph", "content": [{"type": "text", "text": line}]}
-            )
+            paragraphs.append({"type": "paragraph", "content": [{"type": "text", "text": line}]})
         else:
             paragraphs.append({"type": "paragraph", "content": []})
     return {"type": "doc", "version": 1, "content": paragraphs}
@@ -79,9 +68,7 @@ def test_extract_jira_field_decodes_multi_paragraph_adf_description(differ):
     got = differ._extract_jira_field(jira_fields, "description")
     # text_to_adf splits on \n; adf_to_text adds \n per paragraph then rstrip.
     # "First\n\nSecond" → 3 paragraphs (First, empty, Second) → "First\n\nSecond"
-    assert got == "First\n\nSecond", (
-        f"multi-paragraph ADF must round-trip cleanly; got {got!r}"
-    )
+    assert got == "First\n\nSecond", f"multi-paragraph ADF must round-trip cleanly; got {got!r}"
 
 
 def test_diff_fields_does_not_flag_description_when_matches_jira_adf(differ):

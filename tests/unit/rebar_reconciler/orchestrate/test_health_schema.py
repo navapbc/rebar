@@ -18,9 +18,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-HEALTH_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "health.py"
-)
+HEALTH_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "health.py"
 
 
 def _load_health() -> ModuleType:
@@ -76,9 +74,7 @@ def _call_record_pass(health: ModuleType, tmp_path: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def test_schema_version_is_int_and_equals_1(
-    health: ModuleType, tmp_path: Path
-) -> None:
+def test_schema_version_is_int_and_equals_1(health: ModuleType, tmp_path: Path) -> None:
     """schema_version is an int equal to 1."""
     data = _call_record_pass(health, tmp_path)
     assert isinstance(data["schema_version"], int), (
@@ -90,15 +86,11 @@ def test_schema_version_is_int_and_equals_1(
 def test_pass_id_is_str_and_matches(health: ModuleType, tmp_path: Path) -> None:
     """pass_id is a str equal to the value passed in."""
     data = _call_record_pass(health, tmp_path)
-    assert isinstance(data["pass_id"], str), (
-        f"pass_id should be str, got {type(data['pass_id'])}"
-    )
+    assert isinstance(data["pass_id"], str), f"pass_id should be str, got {type(data['pass_id'])}"
     assert data["pass_id"] == _PASS_ID
 
 
-def test_pre_pass_fsck_total_is_int_and_matches(
-    health: ModuleType, tmp_path: Path
-) -> None:
+def test_pre_pass_fsck_total_is_int_and_matches(health: ModuleType, tmp_path: Path) -> None:
     """pre_pass_fsck_total is an int equal to pre_fsck argument."""
     data = _call_record_pass(health, tmp_path)
     assert isinstance(data["pre_pass_fsck_total"], int), (
@@ -107,9 +99,7 @@ def test_pre_pass_fsck_total_is_int_and_matches(
     assert data["pre_pass_fsck_total"] == _PRE_FSCK
 
 
-def test_post_pass_fsck_total_is_int_and_matches(
-    health: ModuleType, tmp_path: Path
-) -> None:
+def test_post_pass_fsck_total_is_int_and_matches(health: ModuleType, tmp_path: Path) -> None:
     """post_pass_fsck_total is an int equal to post_fsck argument."""
     data = _call_record_pass(health, tmp_path)
     assert isinstance(data["post_pass_fsck_total"], int), (
@@ -124,9 +114,7 @@ def test_per_type_open_counts_is_dict_with_all_four_keys(
     """per_type_open_counts is a dict containing all four required type keys."""
     data = _call_record_pass(health, tmp_path)
     counts = data["per_type_open_counts"]
-    assert isinstance(counts, dict), (
-        f"per_type_open_counts should be dict, got {type(counts)}"
-    )
+    assert isinstance(counts, dict), f"per_type_open_counts should be dict, got {type(counts)}"
     for key in ("epic", "story", "task", "bug"):
         assert key in counts, f"per_type_open_counts missing key '{key}'"
     assert counts == _PER_TYPE_COUNTS

@@ -135,6 +135,23 @@ bash→Python strangler-fig migration over carving it into more bash. The curren
 over-cap offenders and their planned remedies are tabulated in
 `docs/architecture.md` (a warn-only CI report flags new ones).
 
+## Navigating the codebase (when editing rebar itself)
+
+This checkout has the **Serena** MCP server configured (LSP-backed, Pyright over
+`src/rebar`) for *semantic* code navigation. **Prefer its symbol tools over
+`grep`** when finding or following references — `find_symbol`,
+`find_referencing_symbols`, `get_symbols_overview`, and symbol-precise edits
+(`replace_symbol_body`, `insert_after_symbol`). It resolves "who calls / imports
+this?" reliably (definitions + references, not text matches), which is exactly
+what cross-cutting refactors (e.g. the bash→Python migration's importer sweeps)
+need. Serena's tools load at **session start**; if they're absent, the server is
+registered in local MCP config — verify with `claude mcp get serena` (re-add with
+`claude mcp add serena -- uvx --from git+https://github.com/oraios/serena serena
+start-mcp-server --context ide-assistant --project "$(git rev-parse --show-toplevel)"`).
+Its per-developer cache/config lives in the git-ignored `.serena/`. `grep`/the
+search tools remain the fallback when Serena is unavailable or for non-symbol
+(text/comment/string) searches.
+
 ## Linking (relations + hierarchy promotion)
 
 - `link <id1> <id2> <relation>` **requires** a relation. The six relations:

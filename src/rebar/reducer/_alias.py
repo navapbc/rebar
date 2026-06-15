@@ -25,9 +25,7 @@ def _wordlist_path() -> str:
     # subprocesses get TICKET_WORDLIST_PATH from engine_env() and never reach
     # this fallback; it serves the in-process library path.)
     here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.normpath(
-        os.path.join(here, "..", "_engine", "resources", "ticket-wordlist.txt")
-    )
+    return os.path.normpath(os.path.join(here, "..", "_engine", "resources", "ticket-wordlist.txt"))
 
 
 def _load() -> tuple[list[str], list[str]]:

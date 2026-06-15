@@ -30,12 +30,8 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "differ.py"
-)
-MUTATION_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
-)
+DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "differ.py"
+MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -159,9 +155,7 @@ def test_quarantine_set_suppresses_all_mutations_for_key(
     assert "LOCAL-B" in result_targets
 
 
-def test_seed_mutations_prepended_to_result(
-    differ: ModuleType, mutation_mod: ModuleType
-) -> None:
+def test_seed_mutations_prepended_to_result(differ: ModuleType, mutation_mod: ModuleType) -> None:
     """Seed mutations are prepended to the result and not mutated.
 
     The invariant checker (story 7a75,

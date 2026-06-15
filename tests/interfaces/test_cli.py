@@ -24,7 +24,10 @@ def _cli(
 ) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "rebar.cli", *args],
-        capture_output=True, text=True, cwd=cwd, env=env,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        env=env,
     )
 
 
@@ -180,6 +183,7 @@ def test_validate_is_repo_wide_no_ticket_id(rebar_repo: Path) -> None:
     cp = _cli("validate", "--output", "json", cwd=str(rebar_repo))
     assert "unknown option" not in (cp.stdout + cp.stderr).lower()
     import json
+
     report = json.loads(cp.stdout)
     assert "score" in report
 
@@ -187,6 +191,5 @@ def test_validate_is_repo_wide_no_ticket_id(rebar_repo: Path) -> None:
     r = rebar.validate(repo_root=str(rebar_repo))
     assert isinstance(r, dict)
     assert "score" in r
-    for key in ("critical_issues", "major_issues", "minor_issues",
-                "warnings", "suggestions"):
+    for key in ("critical_issues", "major_issues", "minor_issues", "warnings", "suggestions"):
         assert key in r

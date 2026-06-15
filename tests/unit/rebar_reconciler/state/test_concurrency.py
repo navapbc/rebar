@@ -28,9 +28,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-MODULE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_concurrency.py"
-)
+MODULE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_concurrency.py"
 
 
 def _load_module() -> ModuleType:
@@ -55,8 +53,7 @@ def concurrency() -> ModuleType:
     """Return the _concurrency module; fail all tests if absent."""
     if not MODULE_PATH.exists():
         pytest.fail(
-            f"_concurrency.py not found at {MODULE_PATH} — "
-            "implement the module to make tests pass."
+            f"_concurrency.py not found at {MODULE_PATH} — implement the module to make tests pass."
         )
     return _load_module()
 
@@ -141,7 +138,9 @@ def test_rebase_retry_ok_when_write_succeeds(concurrency, tmp_git_repo: Path) ->
 
 
 def test_rebase_retry_abort_due_to_error(concurrency, tmp_git_repo: Path) -> None:
-    """rebase_retry() returns Result(ok=False, event.kind='abort_due_to_error') when write_fn raises."""
+    """rebase_retry() returns Result(ok=False, event.kind='abort_due_to_error') when write_fn
+    raises.
+    """
 
     def write_fn():
         raise RuntimeError("simulated write failure")
@@ -165,8 +164,7 @@ def test_rebase_retry_reject_and_reschedule_when_all_attempts_drift(
     """
     # snapshot_head is called twice per attempt: once before, once after.
     # Returning a different SHA each call guarantees drift on every attempt.
-    sha_seq = iter(["aaaa" * 10, "bbbb" * 10, "cccc" * 10,
-                    "dddd" * 10, "eeee" * 10, "ffff" * 10])
+    sha_seq = iter(["aaaa" * 10, "bbbb" * 10, "cccc" * 10, "dddd" * 10, "eeee" * 10, "ffff" * 10])
 
     def fake_snapshot_head(repo_root):  # noqa: ARG001
         return next(sha_seq)
@@ -187,9 +185,7 @@ def test_rebase_retry_reject_and_reschedule_when_all_attempts_drift(
     assert result.event.attempt == 3
 
 
-def test_rebase_retry_retries_on_drift_then_succeeds(
-    concurrency, tmp_git_repo: Path
-) -> None:
+def test_rebase_retry_retries_on_drift_then_succeeds(concurrency, tmp_git_repo: Path) -> None:
     """Regression for F1: rebase_retry must retry on drift.
 
     With max_attempts=3, 2 forced drifts followed by 1 stable HEAD must result
@@ -200,9 +196,7 @@ def test_rebase_retry_retries_on_drift_then_succeeds(
     #   attempt 1: before="aaaa", after="bbbb"  → drift, retry
     #   attempt 2: before="cccc", after="dddd"  → drift, retry
     #   attempt 3: before="eeee", after="eeee"  → stable, success
-    sha_seq = iter(
-        ["a" * 40, "b" * 40, "c" * 40, "d" * 40, "e" * 40, "e" * 40]
-    )
+    sha_seq = iter(["a" * 40, "b" * 40, "c" * 40, "d" * 40, "e" * 40, "e" * 40])
 
     write_call_count = {"n": 0}
 
@@ -220,13 +214,10 @@ def test_rebase_retry_retries_on_drift_then_succeeds(
     finally:
         concurrency.snapshot_head = original_snapshot_head
 
-    assert result.ok is True, (
-        f"Expected ok=True after retry-then-success; got event={result.event}"
-    )
+    assert result.ok is True, f"Expected ok=True after retry-then-success; got event={result.event}"
     assert result.value == "write_3"
     assert write_call_count["n"] == 3, (
-        f"write_fn must be invoked once per attempt (3 total); "
-        f"got {write_call_count['n']}"
+        f"write_fn must be invoked once per attempt (3 total); got {write_call_count['n']}"
     )
 
 

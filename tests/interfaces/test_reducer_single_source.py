@@ -27,7 +27,9 @@ INTERNAL_KEYS = {"parent_status_uuid", "last_status_env_id"}
 def _cli(*args: str, cwd: str | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "rebar.cli", *args],
-        capture_output=True, text=True, cwd=cwd,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
     )
 
 
@@ -37,16 +39,16 @@ def _rich_ticket(repo: Path) -> str:
     r = str(repo)
     epic = rebar.create_ticket("epic", "Epic", repo_root=r)
     tid = rebar.create_ticket("task", "Rich ticket", repo_root=r)
-    rebar.claim(tid, assignee="me", repo_root=r)            # STATUS
-    rebar.edit_ticket(tid, priority=1, repo_root=r)          # EDIT
-    rebar.comment(tid, "a comment", repo_root=r)             # COMMENT
-    rebar.link(tid, epic, "relates_to", repo_root=r)         # LINK (no promotion)
-    rebar.tag(tid, "alpha", repo_root=r)                     # EDIT (tags)
+    rebar.claim(tid, assignee="me", repo_root=r)  # STATUS
+    rebar.edit_ticket(tid, priority=1, repo_root=r)  # EDIT
+    rebar.comment(tid, "a comment", repo_root=r)  # COMMENT
+    rebar.link(tid, epic, "relates_to", repo_root=r)  # LINK (no promotion)
+    rebar.tag(tid, "alpha", repo_root=r)  # EDIT (tags)
     rebar.set_file_impact(tid, [{"path": "a.py", "reason": "r"}], repo_root=r)  # FILE_IMPACT
     rebar.set_verify_commands(
         tid, [{"dd_id": "D1", "dd_text": "t", "command": "echo"}], repo_root=r
-    )                                                        # VERIFY_COMMANDS
-    rebar.compact(tid, repo_root=r)                          # SNAPSHOT
+    )  # VERIFY_COMMANDS
+    rebar.compact(tid, repo_root=r)  # SNAPSHOT
     return tid
 
 
@@ -73,9 +75,7 @@ def test_show_list_search_share_one_shape(rebar_repo: Path) -> None:
     assert not (INTERNAL_KEYS & set(show))
 
     # verify_commands flows everywhere and survived compaction (SNAPSHOT).
-    assert show["verify_commands"] == [
-        {"dd_id": "D1", "dd_text": "t", "command": "echo"}
-    ]
+    assert show["verify_commands"] == [{"dd_id": "D1", "dd_text": "t", "command": "echo"}]
     # Sanity: the rich event history is reflected.
     assert show["status"] == "in_progress"
     assert show["priority"] == 1
@@ -99,8 +99,7 @@ def test_native_reduce_matches_interface_modulo_internal_keys(rebar_repo: Path) 
     stripped = {k: v for k, v in native.items() if k not in INTERNAL_KEYS}
     if isinstance(stripped.get("preconditions_summary"), dict):
         stripped["preconditions_summary"] = {
-            k: v for k, v in stripped["preconditions_summary"].items()
-            if k != "source_count"
+            k: v for k, v in stripped["preconditions_summary"].items() if k != "source_count"
         }
     assert stripped == show
 
@@ -113,7 +112,9 @@ def test_llm_parity_show_vs_list(rebar_repo: Path) -> None:
 
     show_llm = json.loads(_cli("show", "--output", "llm", tid, cwd=r).stdout)
     list_lines = [
-        json.loads(ln) for ln in _cli("list", "--output", "llm", cwd=r).stdout.splitlines() if ln.strip()
+        json.loads(ln)
+        for ln in _cli("list", "--output", "llm", cwd=r).stdout.splitlines()
+        if ln.strip()
     ]
     list_llm = next(t for t in list_lines if t.get("id") == tid)
 

@@ -1,4 +1,5 @@
 """RED tests for inbound_probe (story 60c3)."""
+
 import importlib.util
 import sys
 from pathlib import Path
@@ -28,7 +29,9 @@ def test_classifies_present_resolved(probe_mod):
 
 
 def test_classifies_present_filtered(probe_mod):
-    r = probe_mod.classify_probe_response("PROJ-2", 200, {"fields": {"status": {"name": "In Progress"}}})
+    r = probe_mod.classify_probe_response(
+        "PROJ-2", 200, {"fields": {"status": {"name": "In Progress"}}}
+    )
     assert r.branch == probe_mod.ProbeBranch.PRESENT_FILTERED
 
 

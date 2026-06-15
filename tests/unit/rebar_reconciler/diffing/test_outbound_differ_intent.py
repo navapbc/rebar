@@ -102,12 +102,7 @@ def test_a06c_jira_only_label_not_in_intent_suppresses_remove(
     # The diff would normally produce an "update" with REMOVE ib-added.
     # With intent gating it produces no mutation (or an update with no
     # label-remove for ib-added).
-    label_removes = [
-        lb["label"]
-        for m in result
-        for lb in m.labels
-        if lb.get("action") == "remove"
-    ]
+    label_removes = [lb["label"] for m in result for lb in m.labels if lb.get("action") == "remove"]
     assert "ib-added" not in label_removes
 
 
@@ -134,12 +129,7 @@ def test_legitimate_removal_in_intent_emits_remove(
         local_label_intent=intent_map,
     )
 
-    label_removes = [
-        lb["label"]
-        for m in result
-        for lb in m.labels
-        if lb.get("action") == "remove"
-    ]
+    label_removes = [lb["label"] for m in result for lb in m.labels if lb.get("action") == "remove"]
     assert "to-remove" in label_removes
 
 
@@ -163,12 +153,7 @@ def test_intent_none_preserves_legacy_behavior(
         # local_label_intent omitted (legacy callers)
     )
 
-    label_removes = [
-        lb["label"]
-        for m in result
-        for lb in m.labels
-        if lb.get("action") == "remove"
-    ]
+    label_removes = [lb["label"] for m in result for lb in m.labels if lb.get("action") == "remove"]
     assert "jira-only" in label_removes
 
 
@@ -193,12 +178,7 @@ def test_missing_ticket_in_intent_map_skips_removes(
         local_label_intent=intent_map,
     )
 
-    label_removes = [
-        lb["label"]
-        for m in result
-        for lb in m.labels
-        if lb.get("action") == "remove"
-    ]
+    label_removes = [lb["label"] for m in result for lb in m.labels if lb.get("action") == "remove"]
     assert label_removes == []
 
 
@@ -218,12 +198,7 @@ def test_user_added_label_in_intent_emits_add(
         local_label_intent=intent_map,
     )
 
-    label_adds = [
-        lb["label"]
-        for m in result
-        for lb in m.labels
-        if lb.get("action") == "add"
-    ]
+    label_adds = [lb["label"] for m in result for lb in m.labels if lb.get("action") == "add"]
     assert "local-only" in label_adds
 
 
@@ -254,10 +229,5 @@ def test_inbound_applied_label_not_in_intent_suppresses_add(
         local_label_intent=intent_map,
     )
 
-    label_adds = [
-        lb["label"]
-        for m in result
-        for lb in m.labels
-        if lb.get("action") == "add"
-    ]
+    label_adds = [lb["label"] for m in result for lb in m.labels if lb.get("action") == "add"]
     assert "ib-added" not in label_adds

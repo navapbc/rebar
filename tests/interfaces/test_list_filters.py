@@ -30,7 +30,10 @@ def _env(repo: Path) -> dict:
 def _cli_list(repo: Path, *args: str):
     cp = subprocess.run(
         [sys.executable, "-m", "rebar.cli", "list", *args],
-        cwd=str(repo), capture_output=True, text=True, env=_env(repo),
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        env=_env(repo),
     )
     return cp
 
@@ -66,13 +69,16 @@ def scenario(rebar_repo: Path) -> dict:
     s["cA"] = rebar.create_ticket("task", "child-cA", parent=s["E1"], repo_root=r)  # open
     s["cB"] = rebar.create_ticket("task", "child-cB", parent=s["E1"], repo_root=r)
     rebar.claim(s["cB"], assignee="x", repo_root=r)
-    rebar.transition(s["cB"], "in_progress", "closed", repo_root=r)                 # closed
+    rebar.transition(s["cB"], "in_progress", "closed", repo_root=r)  # closed
     s["cC"] = rebar.create_ticket("task", "child-cC", parent=s["E1"], repo_root=r)
-    rebar.claim(s["cC"], assignee="x", repo_root=r)                                 # in_progress
+    rebar.claim(s["cC"], assignee="x", repo_root=r)  # in_progress
     s["cD"] = rebar.create_ticket("task", "child-cD", parent=s["E1"], repo_root=r)
     subprocess.run(  # delete cD → must not count toward E1
         [sys.executable, "-m", "rebar.cli", "delete", s["cD"], "--user-approved"],
-        cwd=r, capture_output=True, text=True, env=_env(rebar_repo),
+        cwd=r,
+        capture_output=True,
+        text=True,
+        env=_env(rebar_repo),
     )
     s["E2"] = rebar.create_ticket("epic", "epic-E2", repo_root=r)
     s["e2c"] = rebar.create_ticket("task", "child-e2c", parent=s["E2"], repo_root=r)
@@ -100,17 +106,22 @@ def test_children_count_present_when_opted_in(scenario):
 
 def test_children_count_values(scenario):
     r = str(scenario["repo"])
-    counts = {t["ticket_id"]: t["children_count"]
-              for t in rebar.list_tickets(with_children_count=True, repo_root=r)}
-    assert counts[scenario["E1"]] == 3       # cA, cB(closed), cC(in_progress); cD deleted excluded
+    counts = {
+        t["ticket_id"]: t["children_count"]
+        for t in rebar.list_tickets(with_children_count=True, repo_root=r)
+    }
+    assert counts[scenario["E1"]] == 3  # cA, cB(closed), cC(in_progress); cD deleted excluded
     assert counts[scenario["E2"]] == 1
     assert counts[scenario["E3"]] == 0
-    assert counts[scenario["cA"]] == 0       # leaf
+    assert counts[scenario["cA"]] == 0  # leaf
 
 
 def test_children_count_excludes_deleted_child(scenario):
-    e1 = next(t for t in rebar.list_tickets(with_children_count=True, repo_root=str(scenario["repo"]))
-              if t["ticket_id"] == scenario["E1"])
+    e1 = next(
+        t
+        for t in rebar.list_tickets(with_children_count=True, repo_root=str(scenario["repo"]))
+        if t["ticket_id"] == scenario["E1"]
+    )
     assert e1["children_count"] == 3, "deleted child cD must not be counted"
 
 
@@ -123,10 +134,13 @@ def test_cli_with_children_count_flag(scenario):
 
 
 # ── --min-children ───────────────────────────────────────────────────────────
-@pytest.mark.parametrize("n,present,absent", [
-    (3, ["E1"], ["E2", "E3"]),
-    (1, ["E1", "E2"], ["E3"]),
-])
+@pytest.mark.parametrize(
+    "n,present,absent",
+    [
+        (3, ["E1"], ["E2", "E3"]),
+        (1, ["E1", "E2"], ["E3"]),
+    ],
+)
 def test_min_children_boundary(scenario, n, present, absent):
     r = str(scenario["repo"])
     ids = _ids(rebar.list_tickets(ticket_type="epic", min_children=n, repo_root=r))
@@ -138,8 +152,9 @@ def test_min_children_boundary(scenario, n, present, absent):
 
 def test_min_children_zero_is_noop(scenario):
     r = str(scenario["repo"])
-    assert _ids(rebar.list_tickets(min_children=0, repo_root=r)) == \
-        _ids(rebar.list_tickets(repo_root=r))
+    assert _ids(rebar.list_tickets(min_children=0, repo_root=r)) == _ids(
+        rebar.list_tickets(repo_root=r)
+    )
 
 
 def test_min_children_above_max_is_empty(scenario):
@@ -156,19 +171,21 @@ def test_min_children_rejects_non_integer(scenario):
 def test_blocked_includes_only_active_with_open_blocker(scenario):
     r = str(scenario["repo"])
     blocked = _ids(rebar.list_tickets(ticket_type="task", blocking_state="blocked", repo_root=r))
-    assert scenario["BLKD"] in blocked          # blocked by open BLK
-    assert scenario["BLK"] not in blocked        # no blockers
-    assert scenario["UNB"] not in blocked        # no blockers
-    assert scenario["cB"] not in blocked         # closed → not active
+    assert scenario["BLKD"] in blocked  # blocked by open BLK
+    assert scenario["BLK"] not in blocked  # no blockers
+    assert scenario["UNB"] not in blocked  # no blockers
+    assert scenario["cB"] not in blocked  # closed → not active
 
 
 def test_unblocked_excludes_blocked(scenario):
     r = str(scenario["repo"])
-    unblocked = _ids(rebar.list_tickets(ticket_type="task", blocking_state="unblocked", repo_root=r))
+    unblocked = _ids(
+        rebar.list_tickets(ticket_type="task", blocking_state="unblocked", repo_root=r)
+    )
     assert scenario["BLKD"] not in unblocked
     assert scenario["BLK"] in unblocked
     assert scenario["UNB"] in unblocked
-    assert scenario["cC"] in unblocked           # in_progress, no blockers
+    assert scenario["cC"] in unblocked  # in_progress, no blockers
 
 
 def test_blocking_state_transitions_on_blocker_close(scenario):
@@ -177,7 +194,9 @@ def test_blocking_state_transitions_on_blocker_close(scenario):
     rebar.claim(scenario["BLK"], assignee="x", repo_root=r)
     rebar.transition(scenario["BLK"], "in_progress", "closed", repo_root=r)
     blocked = _ids(rebar.list_tickets(ticket_type="task", blocking_state="blocked", repo_root=r))
-    unblocked = _ids(rebar.list_tickets(ticket_type="task", blocking_state="unblocked", repo_root=r))
+    unblocked = _ids(
+        rebar.list_tickets(ticket_type="task", blocking_state="unblocked", repo_root=r)
+    )
     assert scenario["BLKD"] not in blocked
     assert scenario["BLKD"] in unblocked
 

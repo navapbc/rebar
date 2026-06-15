@@ -32,8 +32,14 @@ def tracker(tmp_path: Path) -> str:
 
 
 def _event(**over):
-    e = {"timestamp": 1700000000000000000, "uuid": "u-1", "event_type": "COMMENT",
-         "env_id": "e", "author": "a", "data": {"body": "x"}}
+    e = {
+        "timestamp": 1700000000000000000,
+        "uuid": "u-1",
+        "event_type": "COMMENT",
+        "env_id": "e",
+        "author": "a",
+        "data": {"body": "x"},
+    }
     e.update(over)
     return e
 
@@ -42,13 +48,16 @@ def _event(**over):
 def test_committed_bytes_are_canonical(tracker: str):
     ev = _event(data={"body": "héllo", "z": 1, "a": [3, 2, 1]})
     event_append.stage_and_commit(tracker, "tk", dict(ev))
-    path = os.path.join(tracker, "tk", event_append.event_filename(ev["timestamp"], ev["uuid"], "COMMENT"))
+    path = os.path.join(
+        tracker, "tk", event_append.event_filename(ev["timestamp"], ev["uuid"], "COMMENT")
+    )
     raw = Path(path).read_bytes()
     assert raw == json.dumps(ev, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
     assert not raw.endswith(b"\n")
     # And a commit landed with the canonical message.
-    msg = subprocess.run(["git", "-C", tracker, "log", "-1", "--format=%s"],
-                         capture_output=True, text=True).stdout.strip()
+    msg = subprocess.run(
+        ["git", "-C", tracker, "log", "-1", "--format=%s"], capture_output=True, text=True
+    ).stdout.strip()
     assert msg == "ticket: COMMENT tk"
 
 
@@ -99,11 +108,18 @@ def test_dual_lock_mutual_exclusion_same_process(tracker: str):
 
 
 # ── push policy parsing ───────────────────────────────────────────────────────
-@pytest.mark.parametrize("val,expect", [
-    ("off", "off"), ("OFF", "off"), (" Off ", "off"),
-    ("async", "async"), ("ASYNC", "async"),
-    ("always", "always"), ("", "always"),  # unset handled separately
-])
+@pytest.mark.parametrize(
+    "val,expect",
+    [
+        ("off", "off"),
+        ("OFF", "off"),
+        (" Off ", "off"),
+        ("async", "async"),
+        ("ASYNC", "async"),
+        ("always", "always"),
+        ("", "always"),  # unset handled separately
+    ],
+)
 def test_push_mode_parsing(monkeypatch, val, expect):
     monkeypatch.setenv("REBAR_PUSH", val)
     assert push._push_mode() == (expect if val.strip() else "always")

@@ -172,11 +172,7 @@ class TestAllDirectionActionPairsCovered:
         D = mutation_mod.MutationDirection
         A = mutation_mod.MutationAction
 
-        cartesian = {
-            (str(d.value), str(a.value))
-            for d in D
-            for a in A
-        }
+        cartesian = {(str(d.value), str(a.value)) for d in D for a in A}
 
         invalid_strs: set[tuple[str, str]] = {
             (str(d), str(a)) for d, a in reconcile_mod.INVALID_PAIRS
@@ -204,15 +200,10 @@ class TestAllDirectionActionPairsCovered:
         missing = cartesian - covered
 
         assert not dispatch_errors, (
-            f"_dispatch_mutation raised NotImplementedError for valid pairs: "
-            f"{dispatch_errors}"
+            f"_dispatch_mutation raised NotImplementedError for valid pairs: {dispatch_errors}"
         )
-        assert missing == set(), (
-            f"Pairs not covered by dispatch table or INVALID_PAIRS: {missing}"
-        )
-        assert covered == cartesian, (
-            f"covered ({len(covered)}) != cartesian ({len(cartesian)})"
-        )
+        assert missing == set(), f"Pairs not covered by dispatch table or INVALID_PAIRS: {missing}"
+        assert covered == cartesian, f"covered ({len(covered)}) != cartesian ({len(cartesian)})"
 
 
 class TestEachLeafRoutesToDistinctApplier:

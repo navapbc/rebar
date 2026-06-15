@@ -21,9 +21,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-)
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
 
 def _load_applier():
@@ -40,8 +38,7 @@ def applier():
     """Load the applier module, failing all tests if absent."""
     if not APPLIER_PATH.exists():
         pytest.fail(
-            f"applier.py not found at {APPLIER_PATH} — "
-            "implement the module to make tests pass."
+            f"applier.py not found at {APPLIER_PATH} — implement the module to make tests pass."
         )
     return _load_applier()
 
@@ -71,9 +68,7 @@ def test_retry_exhausted_on_timeout(applier):
 def test_success_on_second_attempt(applier):
     """_call_with_retry succeeds on 2nd attempt when first raises a transient 503."""
     JiraAPIError = applier.JiraAPIError
-    fn = MagicMock(
-        side_effect=[JiraAPIError("service unavailable", 503), {"key": "PROJ-1"}]
-    )
+    fn = MagicMock(side_effect=[JiraAPIError("service unavailable", 503), {"key": "PROJ-1"}])
 
     with patch("time.sleep") as mock_sleep:
         result = applier._call_with_retry(fn, max_retries=3)

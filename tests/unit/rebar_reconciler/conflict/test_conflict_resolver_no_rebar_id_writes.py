@@ -290,7 +290,10 @@ def test_no_rebar_id_label_writes_per_draft9_case(
     outbound_create jurisdiction.
     """
     mutations = differ.compute_mutations(local_state, jira_state)
-    _assert_no_rebar_id_label_writes(mutations, case_id=request.node.callid if hasattr(request.node, "callid") else request.node.name)
+    _assert_no_rebar_id_label_writes(
+        mutations,
+        case_id=request.node.callid if hasattr(request.node, "callid") else request.node.name,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -324,9 +327,8 @@ def applier_mod():
     # applier imports _errors via relative dotted lookup; seed the canonical
     # package path so RebarIdLabelWriteError resolves at raise-time.
     import types as _types
-    for _parent in (
-        "rebar_reconciler",
-    ):
+
+    for _parent in ("rebar_reconciler",):
         if _parent not in sys.modules:
             sys.modules[_parent] = _types.ModuleType(_parent)
     errors_path = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_errors.py"
@@ -381,9 +383,7 @@ def test_applier_guard_blocks_resolver_rebar_id_label_writes(
     # 2. Build a label-target Mutation carrying the offending rebar-id label.
     #    The applier's _is_rebar_id_label_write_mutation matches mutations where
     #    target == 'label' AND payload (string) starts with 'rebar-id-'.
-    offending_label = next(
-        lbl for lbl in resolved if str(lbl).startswith("rebar-id-")
-    )
+    offending_label = next(lbl for lbl in resolved if str(lbl).startswith("rebar-id-"))
     mut = mutation_mod.Mutation(
         direction=mutation_mod.MutationDirection.outbound,
         action=mutation_mod.MutationAction.update,
@@ -400,6 +400,7 @@ def test_applier_guard_blocks_resolver_rebar_id_label_writes(
 
     # Ensure guard mode is 'raise' regardless of environment.
     import os as _os
+
     prev = _os.environ.get("REBAR_ID_GUARD_MODE")
     _os.environ["REBAR_ID_GUARD_MODE"] = "raise"
     try:

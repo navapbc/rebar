@@ -24,7 +24,6 @@ import json
 import os
 import sys
 
-from rebar.reducer import reduce_ticket
 from rebar._engine_support.output import (
     OutputFormatError,
     error_envelope,
@@ -32,6 +31,7 @@ from rebar._engine_support.output import (
 )
 from rebar._engine_support.reads import ReadError, show_state
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar.reducer import reduce_ticket
 
 
 # ── library-facing pure helpers ───────────────────────────────────────────────
