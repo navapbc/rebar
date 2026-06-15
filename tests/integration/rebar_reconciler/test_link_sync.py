@@ -10,18 +10,22 @@ link sync into the differs.
 Loaded via ``spec_from_file_location`` per the reconciler test-tree convention
 (mirrors test_reconcile_roundtrip.py).
 
-Empirical context captured while authoring (verify, don't trust):
+Empirical context (current state — link sync IS implemented; story 25ae):
 
 * Local ticket dicts (from ``rebar list`` JSON) carry links under the ``deps``
   key, shaped as ``[{"target_id", "relation", "link_uuid"}, ...]`` where
   ``relation`` ∈ {blocks, depends_on, relates_to, duplicates, supersedes,
-  discovered_from}. So the local side DOES carry link data into the differ.
-* ``outbound_differ.OutboundMutation`` has a ``links: list`` field, but it is
-  hardcoded ``[]`` in BOTH the create and update branches of
-  ``compute_outbound_mutations`` — there is no ``_diff_links`` helper and
-  ``deps`` is never read. (Documented as a finding, asserted against below.)
-* ``inbound_differ.InboundMutation`` has NO ``links`` field at all, and
-  ``_diff_jira_vs_local`` never inspects an ``issuelinks`` array.
+  discovered_from}. The local side carries link data into the differ.
+* ``outbound_differ.OutboundMutation`` has a ``links: list`` field that is now
+  POPULATED by ``_diff_links`` in the update branch of
+  ``compute_outbound_mutations``: it reads ``deps``, maps each relation to a
+  Jira link type via ``_RELATION_TO_JIRA_LINK``, and dedups against the issue's
+  existing ``issuelinks`` (ADD-only; create-branch links are resolved after all
+  creates). The applier dispatches each add via ``client.set_relationship`` and
+  (bug d843) does a live pre-create ``get_issue_links`` existence check.
+* ``inbound_differ.InboundMutation`` now HAS a ``links`` field, populated by
+  ``_diff_links_inbound``, which reverse-maps an issue's ``issuelinks`` array
+  back to rebar relations (ADD-only, deduped against existing local deps).
 """
 
 from __future__ import annotations
@@ -136,8 +140,10 @@ def test_outbound_emits_link_mutation_for_local_blocks_link(outbound):
         f"{[(m.local_id, m.action, dict(fields=m.fields, links=m.links)) for m in muts]}. "
         f"Aggregated links across all mutations: {all_links}"
     )
-    # The link op should reference B's bound Jira key.
-    targets = {lk.get("to_key") or lk.get("target") or lk.get("to") for lk in a_mut.links}
+    # The link op references B's bound Jira key under the settled ``to_key`` key
+    # (the apply contract is fixed — _diff_links emits ``to_key`` and the applier
+    # consumes ``to_key``; the prior to_key/target/to triple-fallback is gone).
+    targets = {lk.get("to_key") for lk in a_mut.links}
     assert "DIG-200" in targets, (
         f"outbound link mutation does not target B's Jira key DIG-200: {a_mut.links}"
     )

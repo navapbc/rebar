@@ -53,14 +53,28 @@ def _make_outbound_update_mutation_with_payload(applier_mod, payload, target="DI
     )
 
 
-def _client():
+def _client(existing_links=None):
+    """Mock client. ``existing_links`` seeds the live pre-create probe
+    (client.get_issue_links) with REST-nested issuelink entries (default: none).
+    """
     return SimpleNamespace(
         update_issue=MagicMock(return_value=None),
         add_label=MagicMock(),
         remove_label=MagicMock(),
         add_comment=MagicMock(),
         set_relationship=MagicMock(return_value=None),
+        get_issue_links=MagicMock(return_value=list(existing_links or [])),
     )
+
+
+def _issuelink(type_name, *, inward=None, outward=None):
+    """Build a REST-nested issuelink entry (as get_issue_links returns)."""
+    entry: dict = {"type": {"name": type_name}}
+    if inward is not None:
+        entry["inwardIssue"] = {"key": inward}
+    if outward is not None:
+        entry["outwardIssue"] = {"key": outward}
+    return entry
 
 
 def test_link_add_dispatched_via_set_relationship(applier):
@@ -91,8 +105,130 @@ def test_link_add_dispatched_via_set_relationship(applier):
         f"set_relationship not called for the link add. Calls: {set_rel_calls}"
     )
     assert result.payload["links_applied"] == 1
+    # Created EXACTLY once — the links_applied counter alone cannot distinguish
+    # one set_relationship call from two (bug d843 C2: a duplicate-on-retry would
+    # still increment links_applied once per real success but would double the
+    # server effect). The pre-create probe found no existing link, so the add
+    # proceeds exactly once.
+    assert client.set_relationship.call_count == 1
     # Link-only update: no scalar/label/comment side-effects.
     assert client.update_issue.call_count == 0
+
+
+def test_link_skipped_when_already_present_live(applier):
+    """bug d843 C2: the pre-create get_issue_links probe finds the (Blocks, DIG-2)
+    link already on the issue → set_relationship is NOT called (skip the add)."""
+    client = _client(existing_links=[_issuelink("Blocks", outward="DIG-2")])
+    mutation = _make_outbound_update_mutation_with_payload(
+        applier,
+        {
+            "changed_fields": {},
+            "labels": [],
+            "comments": [],
+            "links": [{"action": "add", "type": "Blocks", "to_key": "DIG-2"}],
+        },
+    )
+
+    result = applier._apply_outbound_update(mutation, client=client)
+
+    # Probed once, created zero times — the live re-check skipped the duplicate.
+    assert client.get_issue_links.call_count == 1
+    assert client.set_relationship.call_count == 0
+    assert result.payload["links_applied"] == 0
+
+
+def test_link_skipped_when_present_in_inward_direction(applier):
+    """The live match is direction-agnostic (mirrors _existing_jira_links): a
+    Blocks link where DIG-2 is the INWARD side still counts as present → skip."""
+    client = _client(existing_links=[_issuelink("Blocks", inward="DIG-2")])
+    mutation = _make_outbound_update_mutation_with_payload(
+        applier,
+        {
+            "changed_fields": {},
+            "labels": [],
+            "comments": [],
+            "links": [{"action": "add", "type": "Blocks", "to_key": "DIG-2"}],
+        },
+    )
+
+    result = applier._apply_outbound_update(mutation, client=client)
+
+    assert client.set_relationship.call_count == 0
+    assert result.payload["links_applied"] == 0
+
+
+def test_link_no_duplicate_on_retry_after_partial_success(applier):
+    """bug d843 C2: the retry-after-partial-success scenario. A prior pass's
+    set_relationship committed server-side (so the link is present on the live
+    probe) but the response timed out; this pass re-attempts the same add. The
+    live pre-create check sees the link and skips → no duplicate create. With
+    Pass-1's write-not-retried-on-timeout, the at-most-once property holds.
+    """
+    # The link the previous (timed-out-but-committed) pass created.
+    client = _client(existing_links=[_issuelink("Blocks", outward="DIG-2")])
+    mutation = _make_outbound_update_mutation_with_payload(
+        applier,
+        {
+            "changed_fields": {},
+            "labels": [],
+            "comments": [],
+            "links": [{"action": "add", "type": "Blocks", "to_key": "DIG-2"}],
+        },
+    )
+
+    result = applier._apply_outbound_update(mutation, client=client)
+
+    assert client.set_relationship.call_count == 0, (
+        "duplicate link created on retry — pre-create check failed to dedup"
+    )
+    assert result.payload["links_applied"] == 0
+
+
+def test_link_probe_failure_falls_back_to_add(applier, caplog):
+    """The get_issue_links probe is best-effort: on probe error we log and fall
+    back to attempting the add (snapshot-only dedup), never block the link."""
+    client = _client()
+    client.get_issue_links = MagicMock(side_effect=RuntimeError("probe boom"))
+    mutation = _make_outbound_update_mutation_with_payload(
+        applier,
+        {
+            "changed_fields": {},
+            "labels": [],
+            "comments": [],
+            "links": [{"action": "add", "type": "Blocks", "to_key": "DIG-2"}],
+        },
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = applier._apply_outbound_update(mutation, client=client)
+
+    assert client.set_relationship.call_count == 1
+    assert result.payload["links_applied"] == 1
+    assert any("get_issue_links probe failed" in r.message for r in caplog.records)
+
+
+def test_link_probe_called_once_for_multiple_adds(applier):
+    """The probe is cached for the whole link loop — one get_issue_links call,
+    not one per entry (multiple adds → still a single probe)."""
+    client = _client()
+    mutation = _make_outbound_update_mutation_with_payload(
+        applier,
+        {
+            "changed_fields": {},
+            "labels": [],
+            "comments": [],
+            "links": [
+                {"action": "add", "type": "Blocks", "to_key": "DIG-2"},
+                {"action": "add", "type": "Relates", "to_key": "DIG-3"},
+            ],
+        },
+    )
+
+    result = applier._apply_outbound_update(mutation, client=client)
+
+    assert client.get_issue_links.call_count == 1
+    assert client.set_relationship.call_count == 2
+    assert result.payload["links_applied"] == 2
 
 
 def test_link_only_update_is_not_a_noop(applier, caplog):

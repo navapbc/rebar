@@ -415,3 +415,61 @@ def test_outbound_comment_not_reimported_inbound(adf, outbound, inbound):
     assert [c for m in out2 for c in m.comments] == [], (
         "outbound re-emitted the comment that is already mirrored on Jira"
     )
+
+
+# ===========================================================================
+# 6. link round-trip (rebar dep -> Jira issuelink -> NOT re-emitted either way)
+# ===========================================================================
+
+
+def test_link_relationship_survives_roundtrip_without_reemit(adf, outbound, inbound):
+    """A local 'blocks' dep pushed as a Jira Blocks issuelink must reach a fixed
+    point: once the link rides on the Jira snapshot, NEITHER the outbound differ
+    re-emits a `set_relationship` (no per-pass churn) NOR the inbound differ
+    re-imports the dep (no echo). This is the link analogue of cases 3/5 — the
+    historical link layer (story 25ae) had NO round-trip convergence coverage,
+    only one-directional unit tests.
+    """
+    bind = StubBindingStore({"loc-7": "DIG-7", "loc-8": "DIG-8"})
+    blocker = _make_ticket("loc-7", status="open")
+    blocker["deps"] = [{"target_id": "loc-8", "relation": "blocks", "link_uuid": "u-7"}]
+    blocked = _make_ticket("loc-8", status="open")
+
+    # Outbound: no issuelinks on the Jira side yet → emit the link ADD.
+    pre_blocker = _outbound_jira_shape(blocker, adf=adf, outbound=outbound, jira_status="To Do")
+    pre_blocked = _outbound_jira_shape(blocked, adf=adf, outbound=outbound, jira_status="To Do")
+    out_muts = outbound.compute_outbound_mutations(
+        [blocker, blocked], {"DIG-7": pre_blocker, "DIG-8": pre_blocked}, bind
+    )
+    blocker_om = next(m for m in out_muts if m.local_id == "loc-7")
+    assert any(
+        lm["action"] == "add" and lm["type"] == "Blocks" and lm["to_key"] == "DIG-8"
+        for lm in blocker_om.links
+    ), f"outbound did not emit the Blocks link to DIG-8: {blocker_om.links}"
+
+    # Apply the link to the Jira snapshot (what the next fetch returns). The
+    # applier issues set_relationship(--out DIG-7 --in DIG-8, Blocks), so from
+    # DIG-7's perspective DIG-8 is on the INWARD side ("DIG-7 blocks DIG-8" —
+    # X blocks Y, the outward/blocker side is DIG-7). Inbound reverse-maps an
+    # inwardIssue Blocks back to the 'blocks' relation (matching the local dep).
+    post_blocker = dict(pre_blocker)
+    post_blocker["issuelinks"] = [{"type": {"name": "Blocks"}, "inwardIssue": {"key": "DIG-8"}}]
+
+    # Outbound is now stable: the link is already present → no re-ADD (no churn).
+    out2 = outbound.compute_outbound_mutations(
+        [blocker, blocked], {"DIG-7": post_blocker, "DIG-8": pre_blocked}, bind
+    )
+    out2_links = [lm for m in out2 for lm in m.links]
+    assert out2_links == [], (
+        f"link re-emitted outbound after the round-trip (per-pass churn): {out2_links}"
+    )
+
+    # Inbound: the Jira Blocks link resolves back to the local dep already on
+    # loc-7, so NO inbound link mutation is emitted (no echo).
+    inbound_muts, _ = inbound.compute_inbound_mutations(
+        {"DIG-7": post_blocker}, bind, {"loc-7": blocker}
+    )
+    inbound_links = [lm for m in inbound_muts for lm in m.links]
+    assert inbound_links == [], (
+        f"the link was re-imported inbound after the outbound add (loop): {inbound_links}"
+    )

@@ -34,6 +34,29 @@ _BENIGN_DRIFT_PREFIXES: tuple[str, ...] = (
 )
 
 
+def _index_existing_links(issuelinks) -> set[tuple[str, str]]:
+    """Index a ``get_issue_links`` result as a ``{(type_name, other_key)}`` set.
+
+    Mirrors the differ's ``outbound_differ._existing_jira_links``: an entry's
+    ``type.name`` plus the OTHER issue's key on EITHER side (``inwardIssue`` or
+    ``outwardIssue``) is recorded, so the membership test is direction-agnostic —
+    a ``Blocks`` link to B is "present" whether B is the inward or outward side.
+    """
+    existing: set[tuple[str, str]] = set()
+    for link in issuelinks or []:
+        if not isinstance(link, dict):
+            continue
+        link_type = link.get("type") or {}
+        type_name = link_type.get("name") if isinstance(link_type, dict) else None
+        if not type_name:
+            continue
+        for side_key in ("inwardIssue", "outwardIssue"):
+            side = link.get(side_key)
+            if isinstance(side, dict) and side.get("key"):
+                existing.add((type_name, side.get("key")))
+    return existing
+
+
 def _drift_is_benign(subject: str) -> bool:
     """Return True if a commit subject indicates a benign external writer.
 
@@ -275,22 +298,46 @@ def _apply_outbound_update(mutation, *, client=None, repo_root=None) -> ApplyRes
                 )
 
     # Dispatch link mutations: add a Jira issue link per entry (Cycle 3).
-    # Mirrors the label/comment dispatch pattern. The outbound differ already
-    # dedups against existing Jira links, so we add without re-querying.
-    # ADD-only — removes are out of scope for this cycle.
+    # Mirrors the label/comment dispatch pattern. The outbound differ dedups
+    # against the (possibly stale) snapshot; the LIVE pre-create check below is
+    # the convergent defense. ADD-only — removes are out of scope for this cycle.
     #
-    # Residual duplicate risk: Jira's POST issueLink is non-idempotent (no
+    # Write-safety (bug d843): Jira's POST issueLink is non-idempotent (no
     # idempotency key, no server-side dedup). The differ dedups against the
     # snapshot, but that snapshot is stale across a retry window — if a
     # set_relationship POST commits server-side and then the response
-    # times out / 5xxs, _call_with_retry re-POSTs and Jira stores a duplicate
-    # link. The narrow fix is a pre-create get_issue_links existence check here;
-    # it is deferred to the timeout/retry overhaul in bug d843 (which also bounds
-    # the subprocess call that creates the retry window in the first place).
+    # times out / 5xxs and is re-issued, Jira stores a duplicate link. To close
+    # this residual window we do a LIVE re-check here: probe the issue's current
+    # links ONCE (cached for the whole loop — one call, not per-entry) via
+    # client.get_issue_links and SKIP any add whose (link_type, to_key) already
+    # exists in EITHER direction (same direction-agnostic match the differ's
+    # _existing_jira_links uses). This closes the CROSS-PASS / cross-agent
+    # staleness window (a link created since the snapshot was fetched), and —
+    # with Pass-1's write-not-retried-on-timeout — the timeout-then-retry window.
+    # It does NOT close the intra-call window: _run_acli still retries a write on
+    # a non-timeout CalledProcessError (_MAX_ATTEMPTS), so a write that commits
+    # server-side but returns a non-zero exit can still be re-issued before
+    # control returns here — a narrow, pre-existing residual (Jira links are not
+    # made idempotent). The probe is best-effort: a get_issue_links failure is
+    # non-fatal — we log and fall back to attempting the add (snapshot-only dedup).
     links = payload.get("links") or []
     links_applied: int = 0
     link_errors: list[str] = []
     if isinstance(links, list):
+        existing_links: set[tuple[str, str]] | None = None
+        # Only probe once, and only when there is at least one add to apply.
+        if any(isinstance(e, dict) and e.get("action") == "add" for e in links):
+            try:
+                existing_links = _index_existing_links(client.get_issue_links(mutation.target))
+            except Exception as exc:  # noqa: BLE001
+                # Non-fatal probe failure: fall back to attempting the add(s).
+                existing_links = None
+                logger.warning(
+                    "_apply_outbound_update: get_issue_links probe failed for %s "
+                    "(falling back to snapshot-only dedup): %r",
+                    mutation.target,
+                    exc,
+                )
         for entry in links:
             if not isinstance(entry, dict):
                 continue
@@ -299,6 +346,10 @@ def _apply_outbound_update(mutation, *, client=None, repo_root=None) -> ApplyRes
             link_type = entry.get("type")
             to_key = entry.get("to_key")
             if not link_type or not to_key:
+                continue
+            if existing_links is not None and (link_type, to_key) in existing_links:
+                # Live re-check: this link already exists on the issue (either
+                # direction). Skip the add to avoid a duplicate-on-retry.
                 continue
             try:
                 _call_with_retry(client.set_relationship, mutation.target, to_key, link_type)

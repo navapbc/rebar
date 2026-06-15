@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import subprocess
 import sys
 from pathlib import Path
 
@@ -159,3 +160,79 @@ def test_inbound_link_malformed_entries_skipped(applier, tmp_path, monkeypatch):
 
     assert calls == []
     assert result.payload["links_applied"] == 0
+
+
+# ---------------------------------------------------------------------------
+# bug d843 I1: real-store integration — _apply_inbound_update drives the REAL
+# rebar.link against an initialized store and the link is OBSERVABLE via the
+# public read (rebar.deps), not merely that rebar.link was called.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def real_store(tmp_path, monkeypatch):
+    """An initialized rebar store with two tickets; returns (repo, a_id, b_id)."""
+    import rebar
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@e"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "base"], cwd=repo, check=True)
+    monkeypatch.setenv("_TICKET_TEST_NO_SYNC", "1")
+    rebar.init_repo(repo_root=str(repo))
+    a_id = rebar.create_ticket("task", "Blocker A", repo_root=str(repo))
+    b_id = rebar.create_ticket("task", "Blocked B", repo_root=str(repo))
+    return repo, a_id, b_id
+
+
+def test_inbound_link_real_store_is_observable_via_deps(applier, real_store):
+    """I1: _apply_inbound_update with a links payload calls the REAL rebar.link
+    (NOT mocked), and the created link is observable through the public
+    rebar.deps read — proving an end-to-end write, not just arg pass-through."""
+    import rebar
+
+    repo, a_id, b_id = real_store
+
+    mutation = _make_inbound_update_mutation(
+        applier,
+        {
+            "local_id": a_id,
+            "links": [{"action": "add", "target_id": b_id, "relation": "blocks"}],
+        },
+        target=a_id,
+    )
+
+    result = applier._apply_inbound_update(mutation, repo_root=str(repo))
+
+    assert result.payload["links_applied"] == 1
+    # OBSERVABLE: the link is durably in the store, visible via the public read.
+    deps = rebar.deps(a_id, repo_root=str(repo))["deps"]
+    assert any(d["target_id"] == b_id and d["relation"] == "blocks" for d in deps), (
+        f"link not observable via rebar.deps after inbound apply: {deps}"
+    )
+
+
+def test_inbound_link_real_store_invalid_relation_rejected(applier, real_store):
+    """I1: a bogus relation is rejected by rebar.link — non-fatal (no crash),
+    links_applied == 0, and NO link is written to the store."""
+    import rebar
+
+    repo, a_id, b_id = real_store
+
+    mutation = _make_inbound_update_mutation(
+        applier,
+        {
+            "local_id": a_id,
+            "links": [{"action": "add", "target_id": b_id, "relation": "not_a_relation"}],
+        },
+        target=a_id,
+    )
+
+    # Does not raise — the rebar.link failure is swallowed and surfaced as a count.
+    result = applier._apply_inbound_update(mutation, repo_root=str(repo))
+
+    assert result.payload["links_applied"] == 0
+    deps = rebar.deps(a_id, repo_root=str(repo))["deps"]
+    assert deps == [], f"a rejected-relation link must not be written: {deps}"
