@@ -197,18 +197,21 @@ MCP: the `review_ticket` tool is exposed but **disabled unless
 `REBAR_MCP_ALLOW_LLM=1`** (it has cost/network side-effects). It returns a plain
 dict (the `review_result` shape) and advertises no `outputSchema` by design.
 
-## Live validation
+## External-integration suite (live validation)
 
-The live agent path makes real, billable model calls, so its tests are marked
-`integration` and excluded from the default CI run. Two ways to run them:
+Tests that hit third-party services live in **`tests/external/`** and are marked
+**`external`**. They make real, billable calls, so they are excluded from the
+default run (`-m "not integration and not external"`). The live `rebar.llm`
+validation (ticket b2e5) is the suite's first member; future external tests
+(Langflow, Langfuse, …) go here too. Two ways to run them:
 
 - **CI (recommended):** add an `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`)
-  repository secret and dispatch the **`llm-live-validation`** workflow from the
-  Actions tab (`.github/workflows/llm-live.yml`). It installs `.[dev]`, runs the
-  integration tests, and **fails** if no key secret is set. Add `LANGFUSE_*`
-  secrets to also exercise tracing.
-- **Locally:** `ANTHROPIC_API_KEY=… pytest -m integration tests/interfaces/test_llm_live.py`
-  (needs the `agents` extra). The tests skip when no key/extra is present.
+  repository secret and dispatch the **`external-integration`** workflow from the
+  Actions tab (`.github/workflows/external-integration.yml`). It installs `.[dev]`,
+  runs `pytest -m external tests/external`, and **fails** if no key secret is set.
+  Add `LANGFUSE_*` secrets to also exercise tracing.
+- **Locally:** `ANTHROPIC_API_KEY=… pytest -m external tests/external` (needs the
+  `agents` extra). The tests skip when no key/extra is present.
 
 ## Adding an operation or reviewer
 

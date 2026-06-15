@@ -132,6 +132,7 @@ markers = [
     "unit: unit-tier tests (network-guarded)",
     "scripts: scripts-tier tests (engine scripts / reconciler)",
     "integration: integration-tier tests (may require live services)",
+    "external: external-integration tests that hit third-party services (live LLM providers, etc.); excluded from the default run; run via the external-integration workflow with credentials",
     "interface: interface-parity tests (library / CLI / MCP over one store)",
     "allow_network: opt out of the network guard for a test",
     "benchmark: performance benchmark (informational; not a pass/fail gate)",

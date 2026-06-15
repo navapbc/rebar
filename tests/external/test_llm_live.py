@@ -1,9 +1,11 @@
 """Live-runtime validation of the langgraph runner (ticket b2e5).
 
-These exercise the REAL agent path end-to-end — a live, billable model call — so
-they are marked ``integration`` (excluded from the default CI run, which uses
-``-m "not integration"``) and skip unless both an API key and the ``agents`` extra
-are present. They validate the runtime behaviors that can't be checked offline:
+The seed of rebar's **external-integration suite** (``tests/external/``): tests
+that hit third-party services. These exercise the REAL agent path end-to-end — a
+live, billable model call — so they are marked ``external`` (excluded from the
+default CI run, which uses ``-m "not integration and not external"``) and skip
+unless both an API key and the ``agents`` extra are present. They validate the
+runtime behaviors that can't be checked offline:
 
   * the model call succeeds (in particular, no `temperature` is sent to
     claude-opus-4.x, which would 400),
@@ -13,7 +15,7 @@ are present. They validate the runtime behaviors that can't be checked offline:
 
 Run locally with credentials::
 
-    ANTHROPIC_API_KEY=… pytest tests/interfaces/test_llm_live.py -m integration
+    ANTHROPIC_API_KEY=… pytest -m external tests/external
 
 Langfuse trace delivery and MCP-server session lifecycle need their own live
 services (LANGFUSE_* / REBAR_LLM_MCP_SERVERS) and are validated by configuring
@@ -30,7 +32,7 @@ import pytest
 import rebar
 from rebar import schemas
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.external
 
 
 def _live_model() -> str | None:

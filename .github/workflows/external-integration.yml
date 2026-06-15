@@ -1,10 +1,12 @@
-name: llm-live-validation
+name: external-integration
 
-# Manually-triggered live validation of the rebar.llm runner (ticket b2e5). This
-# makes REAL, billable model calls, so it is deliberately NOT part of the automatic
-# `test` workflow (which excludes `-m integration`). Trigger it from the Actions
-# tab. It requires the `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`) repository secret;
-# set `LANGFUSE_*` secrets too to also exercise the tracing path.
+# Manually-triggered EXTERNAL-integration suite (tests/external/): tests that hit
+# third-party services — currently the live rebar.llm runner validation (ticket
+# b2e5). These make REAL, billable calls, so they are deliberately NOT part of the
+# automatic `test` workflow (which excludes `-m "not integration and not external"`).
+# Trigger from the Actions tab. Requires the `ANTHROPIC_API_KEY` (or
+# `OPENAI_API_KEY`) repository secret; set `LANGFUSE_*` secrets to also exercise
+# the tracing path.
 
 on:
   workflow_dispatch: {}
@@ -13,8 +15,8 @@ permissions:
   contents: read
 
 jobs:
-  live:
-    name: llm live integration
+  external:
+    name: external integration (live services)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -22,15 +24,15 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Fail loudly if no key is configured — otherwise the integration tests would
-      # simply skip and the job would go green without validating anything.
+      # Fail loudly if no key is configured — otherwise the LLM tests would simply
+      # skip and the job would go green without validating anything.
       - name: Require an LLM API key secret
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENAI_API_KEY" ]; then
-            echo "::error::Set the ANTHROPIC_API_KEY (or OPENAI_API_KEY) repository secret to run live validation."
+            echo "::error::Set the ANTHROPIC_API_KEY (or OPENAI_API_KEY) repository secret to run the external suite."
             exit 1
           fi
 
@@ -50,7 +52,7 @@ jobs:
           git config --global user.name "rebar CI"
           git config --global init.defaultBranch main
 
-      - name: Run live LLM validation (integration tier)
+      - name: Run the external-integration suite
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -61,5 +63,5 @@ jobs:
           LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
         # -p no:cacheprovider + a runner-temp basetemp mirror the main workflow.
         run: >-
-          pytest -m integration tests/interfaces/test_llm_live.py -q
+          pytest -m external tests/external -q
           -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"

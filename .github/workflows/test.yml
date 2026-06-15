@@ -6,8 +6,10 @@ name: test
 #
 # Coverage: the Python tiers (unit / scripts / interface) AND every standalone
 # bash suite under tests/scripts/test-*.sh, which the test_bash_suites.py collector
-# runs under pytest. The integration tier (live Jira / network) is excluded from
-# the default run via `-m "not integration"`; run it separately with credentials.
+# runs under pytest. The integration tier (live Jira / network) and the external
+# tier (live LLM providers — tests/external/) are excluded from the default run via
+# `-m "not integration and not external"`; the external tier runs separately with
+# credentials via the external-integration workflow.
 
 on:
   push:
@@ -123,7 +125,7 @@ jobs:
             | awk '$2 != "total" && $1 > 800 { printf "  %5d  %s\n", $1, $2 }' | sort -rn)
           if [ -n "$over" ]; then echo "$over"; else echo "  (none — all units within the soft cap)"; fi
 
-      - name: Run the full suite (Python tiers + bash collector; excludes live-Jira)
+      - name: Run the full suite (Python tiers + bash collector; excludes live-Jira + external)
         # Pin --basetemp under the runner temp (not /tmp): on long (10-16 min) runs
         # the macOS tmp-cleaner reaps pytest's default /tmp/pytest-of-* basetemp
         # mid-run, producing a spurious FileNotFoundError cascade. -p no:cacheprovider
@@ -134,6 +136,6 @@ jobs:
         # a hard floor would be misleading until that's reconciled. The number is
         # surfaced for visibility / ratcheting, not as a pass/fail.
         run: >-
-          pytest -m "not integration" -q -p no:cacheprovider
+          pytest -m "not integration and not external" -q -p no:cacheprovider
           --basetemp="${{ runner.temp }}/rebar-basetemp"
           --cov=rebar --cov-report=term-missing:skip-covered
