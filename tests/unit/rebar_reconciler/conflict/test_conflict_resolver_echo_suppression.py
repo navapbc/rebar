@@ -36,10 +36,12 @@ def test_echo_suppressed_for_identical_elements(differ, ledger_mod):
     ledger.record("PROJ-1", "jira", {"summary": "echoed"})
     local_state = {"LOCAL-1": {"local_id": "id-1", "jira_key": "PROJ-1", "summary": "echoed"}}
     jira_state = {"PROJ-1": {"local_id": "id-1", "summary": "echoed"}}
-    differ.compute_mutations(local_state, jira_state, ledger=ledger)
-    # Implementation-defined: echo suppression should drop or pre-filter via ledger
-    # Test asserts that at least the echo path was checked — ledger has the entry
-    assert ledger.is_echo("PROJ-1", {"summary": "echoed"})
+    mutations = differ.compute_mutations(local_state, jira_state, ledger=ledger)
+    # Behavioral: the seeded echo must be SUPPRESSED — i.e. absent from the actual
+    # compute_mutations OUTPUT (not merely present in the ledger we populated).
+    assert "PROJ-1" not in [m.target for m in mutations], (
+        f"echo for PROJ-1 was not suppressed; compute_mutations emitted it: {mutations}"
+    )
 
 
 def test_zero_mutations_on_second_pass(differ, ledger_mod):
@@ -54,11 +56,8 @@ def test_zero_mutations_on_second_pass(differ, ledger_mod):
         ledger.record(m.target, "local" if "outbound" in m.direction.value else "jira", m.payload)
     # Pass 2 — same state; ledger now has the recorded values
     pass2 = differ.compute_mutations(local_state, jira_state, ledger=ledger)
-    # Pass 2 should emit zero mutations of the same target+payload as pass 1
-    pass1_targets = {(m.target, m.action.value) for m in pass1}
-    pass2_targets = {(m.target, m.action.value) for m in pass2}
-    # At minimum, the same (target, action) pair should not re-emit identically
-    redundant = pass2_targets & pass1_targets
-    assert not redundant or len(pass2) < len(pass1), (
-        f"pass 2 redundantly emitted: pass1={pass1}, pass2={pass2}"
-    )
+    # Non-vacuity: pass 1 must have emitted something, else the test proves nothing.
+    assert pass1, "pass 1 emitted no mutations — the second-pass assertion would be vacuous"
+    # Behavioral: with pass 1 recorded in the ledger, pass 2 emits ZERO (the docstring's
+    # promise) — not merely "fewer". Asserts the actual output, not set arithmetic.
+    assert pass2 == [], f"pass 2 must emit ZERO after pass 1 was recorded, got: {pass2}"

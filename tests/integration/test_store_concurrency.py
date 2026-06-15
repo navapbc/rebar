@@ -28,12 +28,50 @@ _REBAR = shutil.which("rebar")
 pytestmark = pytest.mark.integration
 
 
-def _has_store_build() -> bool:
+def _clean_env(**extra: str) -> dict:
+    """A subprocess env with ALL ambient ``REBAR_*`` scrubbed.
+
+    These tests drive the CLI through git-backed stores in ``tmp_path``; an
+    inherited ``REBAR_ROOT``/``REBAR_WRITE_CORE``/``REBAR_PUSH``/… from the caller's
+    shell would silently steer the writers at a different store or lock mode and
+    make the storm assertions meaningless. We start from a REBAR-free environment
+    and add back only the knobs each test sets explicitly (plus REBAR_NO_SYNC)."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("REBAR_")}
+    env["REBAR_NO_SYNC"] = "1"
+    env.update(extra)
+    return env
+
+
+def _store_build_reason() -> str | None:
+    """Return None if the on-PATH ``rebar`` is a build with ``rebar._store`` wired,
+    else a human reason string. Unlike a bare ``--help`` exit check, this actually
+    drives a store write (``rebar init`` in a throwaway git repo) so a stale
+    published install (CLI present but missing the ``rebar._store`` write core) is
+    DETECTED — turning what was a false-green silent skip into a visible xfail."""
     if not _REBAR:
-        return False
-    # The on-PATH rebar must be the build that has rebar._store wired.
-    probe = subprocess.run([_REBAR, "--help"], capture_output=True, text=True, env={**os.environ})
-    return probe.returncode == 0
+        return "no on-PATH rebar"
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td) / "probe"
+        repo.mkdir()
+        if subprocess.run(["git", "init", "-q"], cwd=repo).returncode != 0:
+            return "git init failed in probe"
+        subprocess.run(
+            ["git", "commit", "-q", "--allow-empty", "-m", "init"], cwd=repo, capture_output=True
+        )
+        res = subprocess.run(
+            [_REBAR, "init"], cwd=repo, env=_clean_env(), capture_output=True, text=True
+        )
+        if res.returncode != 0:
+            return f"on-PATH rebar lacks a working store core: {res.stderr.strip()[:120]}"
+        # The store worktree must materialise — proves rebar._store actually ran.
+        if not (repo / ".tickets-tracker").exists():
+            return "rebar init did not materialise the store worktree"
+    return None
+
+
+_STORE_BUILD_REASON = _store_build_reason()
 
 
 @pytest.fixture
@@ -42,17 +80,15 @@ def clone(tmp_path: Path):
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "init"], cwd=repo, check=True)
-    env = {**os.environ, "REBAR_NO_SYNC": "1"}
-    subprocess.run([_REBAR, "init"], cwd=repo, env=env, capture_output=True, check=True)
+    subprocess.run([_REBAR, "init"], cwd=repo, env=_clean_env(), capture_output=True, check=True)
     return repo
 
 
 def _create(repo: Path, ttype: str, title: str, env_extra: dict) -> str:
-    env = {**os.environ, "REBAR_NO_SYNC": "1", **env_extra}
     out = subprocess.run(
         [_REBAR, "create", ttype, title],
         cwd=repo,
-        env=env,
+        env=_clean_env(**env_extra),
         capture_output=True,
         text=True,
         check=True,
@@ -71,9 +107,12 @@ def _count_events(repo: Path, ticket_id: str, suffix: str) -> int:
     )
 
 
-@pytest.mark.skipif(
-    not _has_store_build(),
-    reason="on-PATH rebar lacks rebar._store (run pipx install --editable .)",
+@pytest.mark.xfail(
+    _STORE_BUILD_REASON is not None,
+    reason=f"on-PATH rebar lacks a working store core ({_STORE_BUILD_REASON}); "
+    "run pipx install --editable .",
+    raises=Exception,
+    strict=False,
 )
 def test_concurrent_writer_storm_no_loss(clone: Path):
     """N concurrent comments on one ticket land with ZERO loss and a clean fsck —
@@ -85,11 +124,10 @@ def test_concurrent_writer_storm_no_loss(clone: Path):
     n = 16
 
     def writer(i: int):
-        env = {**os.environ, "REBAR_NO_SYNC": "1"}
         return subprocess.run(
             [_REBAR, "comment", tid, f"note-{i}"],
             cwd=clone,
-            env=env,
+            env=_clean_env(),
             capture_output=True,
             text=True,
         )
@@ -106,14 +144,19 @@ def test_concurrent_writer_storm_no_loss(clone: Path):
     fsck = subprocess.run(
         [_REBAR, "fsck", "--output", "json"],
         cwd=clone,
-        env={**os.environ, "REBAR_NO_SYNC": "1"},
+        env=_clean_env(),
         capture_output=True,
         text=True,
     )
     assert json.loads(fsck.stdout).get("issue_count") == 0
 
 
-@pytest.mark.skipif(not _has_store_build(), reason="on-PATH rebar lacks rebar._store")
+@pytest.mark.xfail(
+    _STORE_BUILD_REASON is not None,
+    reason=f"on-PATH rebar lacks a working store core ({_STORE_BUILD_REASON})",
+    raises=Exception,
+    strict=False,
+)
 def test_claim_storm_one_winner(clone: Path):
     """A concurrent claim storm on one open ticket (python core) yields exactly ONE
     winner and (N-1) exit-10 losers — optimistic concurrency under the unified lock."""
@@ -124,7 +167,7 @@ def test_claim_storm_one_winner(clone: Path):
         return subprocess.run(
             [_REBAR, "claim", tid, "--assignee", f"agent-{i}"],
             cwd=clone,
-            env={**os.environ, "REBAR_NO_SYNC": "1", "REBAR_WRITE_CORE": "python"},
+            env=_clean_env(REBAR_WRITE_CORE="python"),
             capture_output=True,
             text=True,
         )

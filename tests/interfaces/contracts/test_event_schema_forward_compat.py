@@ -126,6 +126,27 @@ def test_unknown_event_file_survives_compaction(rebar_repo: Path) -> None:
         "would be destroyed by an older clone's compaction"
     )
 
+    # Existence alone is not enough: the PAYLOAD must be preserved byte-equivalently.
+    # A regression that truncated/rewrote the file while keeping the path would pass
+    # an exists()-only check — so re-read and assert the future fields survived.
+    import json as _json
+
+    future_event = _json.loads(future_path.read_text(encoding="utf-8"))
+    assert future_event["event_type"] == FUTURE_TYPE
+    assert future_event["uuid"] == FUTURE_UUID
+    assert future_event["data"]["some_future_field"] == "value", (
+        "compaction rewrote the unknown event's payload"
+    )
+
+    # And the SNAPSHOT must NOT have absorbed the unknown event's uuid into its
+    # provenance — an older clone compacting must not claim to subsume a newer
+    # clone's event (which would let a later compaction delete it as 'covered').
+    snap = _json.loads(snaps[0].read_text(encoding="utf-8"))
+    absorbed = snap.get("data", {}).get("source_event_uuids", [])
+    assert FUTURE_UUID not in absorbed, (
+        f"compaction snapshot absorbed the unknown event {FUTURE_UUID}: {absorbed}"
+    )
+
     # And replay still succeeds after compaction.
     state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
     assert state["status"] == "open"

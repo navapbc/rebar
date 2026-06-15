@@ -71,13 +71,22 @@ def _tracker(repo: Path) -> Path:
 
 
 def _expire_sync_marker(tracker: Path) -> None:
-    """Delete the once-a-minute sync marker so the next read actually syncs."""
+    """Delete the once-a-minute sync marker so the next read actually syncs.
+
+    The production throttle marker (``rebar._engine_support.reads.ensure_fresh``)
+    is ``/tmp/.ticket-sync-<md5(realpath(tracker))[:12]>`` -- its name is uniquely
+    derived from THIS tracker's realpath, which lives under the test's ``tmp_path``,
+    so it is already namespaced per-test/per-worker and cannot perturb a sibling
+    test or xdist worker. We delete ONLY that tracker-specific marker. We do NOT
+    touch any fixed/global ``/tmp`` path (e.g. a non-namespaced
+    ``/tmp/.ticket-sync-fallback``): no production code reads such a path, and
+    deleting a global path would race other tests/workers (SDET I6).
+    """
     h = hashlib.md5(str(tracker).encode()).hexdigest()[:12]
-    for cand in (f"/tmp/.ticket-sync-{h}", "/tmp/.ticket-sync-fallback"):
-        try:
-            os.unlink(cand)
-        except FileNotFoundError:
-            pass
+    try:
+        os.unlink(f"/tmp/.ticket-sync-{h}")
+    except FileNotFoundError:
+        pass
 
 
 def _remote_remove(tracker: Path) -> None:
@@ -97,6 +106,38 @@ def _event_files(tracker: Path) -> set[str]:
         for line in out.splitlines()
         if line.endswith(".json") and "-" in line.split("/")[-1]
     }
+
+
+def _status_events_for(tracker: Path, ticket_id: str) -> list[dict[str, str]]:
+    """Return the STATUS events committed for *ticket_id*, each as
+    ``{"uuid", "status", "current_status", "filename"}``.
+
+    Event files are committed at ``<ticket_id>/<ts>-<uuid>-STATUS.json``; the
+    canonical bytes carry the event's own ``uuid`` and ``data.status`` /
+    ``data.current_status``. ``filename`` is the basename (``<ts>-<uuid>-STATUS``)
+    -- the reducer (``rebar.reducer._api.reduce_ticket``) replays events in
+    lexicographic filename order, so the basename is the authoritative replay-order
+    key. Reads from git so it sees the merged union, not the working tree.
+    """
+    listing = _git("ls-tree", "-r", "--name-only", "tickets", cwd=tracker).stdout
+    out: list[dict[str, str]] = []
+    for path in listing.splitlines():
+        if not path.endswith("-STATUS.json"):
+            continue
+        if path.split("/")[0] != ticket_id:
+            continue
+        blob = _git("show", f"tickets:{path}", cwd=tracker).stdout
+        ev = json.loads(blob)
+        data = ev.get("data", {})
+        out.append(
+            {
+                "uuid": ev.get("uuid", ""),
+                "status": data.get("status", ""),
+                "current_status": data.get("current_status", ""),
+                "filename": path.split("/")[-1],
+            }
+        )
+    return out
 
 
 def _list_status(repo: Path) -> dict[str, str]:
@@ -194,8 +235,17 @@ def test_two_clone_union_deterministic_replay_and_fork_tiebreak(two_clones):
         f"event sets diverged:\n  only in A: {sorted(events_a - events_b)}\n"
         f"  only in B: {sorted(events_b - events_a)}"
     )
-    # The disjoint creates must both be present.
-    assert any(f.endswith("-CREATE.json") for f in events_a)
+    # The disjoint creates must BOTH survive the union -- not merely "some CREATE
+    # file is present". A union that dropped exactly one side's CREATE would still
+    # satisfy any(...), so assert each ticket's own CREATE event file is present.
+    # CREATE events are committed under a per-ticket-id directory; read that dir
+    # set from git rather than guessing the (UUID-embedding) filename shape.
+    listing = _git("ls-tree", "-r", "--name-only", "tickets", cwd=tracker_a).stdout
+    create_dirs = {
+        line.split("/")[0] for line in listing.splitlines() if line.endswith("-CREATE.json")
+    }
+    assert ta in create_dirs, f"ta CREATE event lost in union (have {sorted(create_dirs)})"
+    assert tb in create_dirs, f"tb CREATE event lost in union (have {sorted(create_dirs)})"
     assert all(t in _list_status(repo_a) for t in (seed, ta, tb))
     assert all(t in _list_status(repo_b) for t in (seed, ta, tb))
 
@@ -204,7 +254,50 @@ def test_two_clone_union_deterministic_replay_and_fork_tiebreak(two_clones):
     status_a = _list_status(repo_a)
     status_b = _list_status(repo_b)
     assert status_a == status_b, f"non-deterministic replay: A={status_a} B={status_b}"
-    assert status_a[seed] in ("in_progress", "blocked"), status_a[seed]
+
+    # -- Fork tie-break: assert the SPECIFIC winner, not mere set-membership --
+    # Two concurrent STATUS events on the seed both forked from current_status
+    # == "open" (A->in_progress, B->blocked). The OLD assertion only checked
+    # ``status_a[seed] in ("in_progress","blocked")`` -- it could not tell WHICH
+    # event won, so any resolution rule (UUID, wall-clock, insertion order) passed.
+    #
+    # We pin the SPECIFIC winner by replaying the fork the *same way the reducer
+    # does*: ``rebar.reducer._api.reduce_ticket`` applies a ticket's events in
+    # lexicographic **filename** order (``<ts>-<uuid>-STATUS.json``), and for this
+    # concurrent-transition shape (both siblings carry an empty
+    # ``parent_status_uuid`` -- the seed had no prior STATUS) the
+    # ``process_status`` fork branch lets the LATER-applied (last-in-filename-order)
+    # event win. So the expected winner is the forked STATUS event whose committed
+    # filename sorts LAST. Asserting that exact target status makes the test FAIL
+    # if the resolution rule is changed (e.g. to first-writer-wins, or to a
+    # different ordering key) -- which is the regression this test must guard.
+    #
+    # NOTE (discovered defect, filed as a discovered_from ticket): the reducer
+    # docstring advertises a "deterministic-by-UUID" tie-break, but for two
+    # empty-parent concurrent siblings the implemented resolution is actually
+    # last-in-replay-order (timestamp/insertion), NOT by event UUID. Both clones
+    # still CONVERGE (they replay the identical union in identical filename order),
+    # so cross-clone determinism (asserted above via status_a == status_b) holds;
+    # but the *winner-selection* rule is insertion-order, not UUID. This test pins
+    # the winner the reducer actually produces and documents the divergence rather
+    # than asserting a UUID rule the code does not implement.
+    seed_status_events = _status_events_for(tracker_a, seed)
+    forked = [e for e in seed_status_events if e["current_status"] == "open"]
+    assert len(forked) == 2, (
+        f"expected exactly 2 concurrent STATUS events forking from open, got {forked}"
+    )
+    assert {e["status"] for e in forked} == {"in_progress", "blocked"}, forked
+    # Reducer replays in lexicographic filename order; the last-applied empty-parent
+    # sibling wins -> its target status is the seed's final status.
+    winner = max(forked, key=lambda e: e["filename"])
+    expected_status = winner["status"]
+    assert status_a[seed] == expected_status, (
+        f"fork tie-break did not select the last-in-replay-order winner: expected "
+        f"{expected_status!r} (winner file={winner['filename']}), got {status_a[seed]!r}; "
+        f"events={forked}"
+    )
+    # Both clones must agree on that SAME specific winner (skew-independent union).
+    assert status_b[seed] == expected_status
 
 
 def test_failed_push_never_drops_local_commit(two_clones):

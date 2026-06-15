@@ -29,12 +29,17 @@ def test_library_comment_python_path(rebar_repo: Path, monkeypatch: pytest.Monke
     assert "a python-path note" in bodies
 
 
-def test_library_comment_parity_bash_vs_python(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
-    """Same comment via bash and python paths → both land, identical body."""
+def test_library_comment_repeated_same_body_both_land(rebar_repo: Path):
+    """Two comments with an identical body both land as DISTINCT events (comments
+    are append-only, not deduped) on the sole python leaf-write path.
+
+    (This test historically toggled ``REBAR_LEAF_WRITES`` between ``bash`` and
+    ``python`` to compare two implementations. Tier B retired the bash leaf bodies
+    on 2026-06-11 and that env var is no longer read by any runtime code, so a
+    ``bash`` setting was a silent no-op — the comparison was vacuous. It now
+    asserts the real, current invariant: repeated identical comments accumulate.)"""
     tid = _new_ticket(rebar_repo)
-    monkeypatch.setenv("REBAR_LEAF_WRITES", "bash")
     rebar.comment(tid, "shared note", repo_root=str(rebar_repo))
-    monkeypatch.setenv("REBAR_LEAF_WRITES", "python")
     rebar.comment(tid, "shared note", repo_root=str(rebar_repo))
     state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
     bodies = [c["body"] for c in state["comments"]]

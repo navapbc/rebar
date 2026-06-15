@@ -15,14 +15,57 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from dataclasses import dataclass
 from typing import Any
+
+# The one shared structured-rejection code. A state-dependent write
+# (transition/claim/reopen) that fails optimistic concurrency surfaces this
+# identity across ALL three interfaces: the engine's exit code 10, which the
+# library raises as ``rebar.ConcurrencyError`` and which the CLI returns as
+# ``returncode == 10``. Any other failure (e.g. not-found, exit 1) is NOT this
+# code, so parity tests can distinguish a concurrency rejection from any other
+# error rather than collapsing every failure to a bare ``False``.
+CONCURRENCY_CODE = 10
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """A structured result for a state-dependent write across interfaces.
+
+    ``ok`` is True on success. On failure, ``code`` is the engine exit code that
+    every interface agrees on (``CONCURRENCY_CODE`` for an optimistic-concurrency
+    rejection, some other non-zero value otherwise) and ``error_type`` is the
+    library exception class name (``"ConcurrencyError"`` for the shared identity)
+    so a test can assert the rejection REASON, not just its presence.
+
+    The object is truthy iff ``ok`` so existing ``assert adapter.transition(...)``
+    truth checks keep working, while ``.is_concurrency`` exposes the shared code.
+    """
+
+    ok: bool
+    code: int | None = None
+    error_type: str | None = None
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+    @property
+    def is_concurrency(self) -> bool:
+        """True iff this is the ONE shared concurrency-rejection identity."""
+        return (not self.ok) and self.code == CONCURRENCY_CODE
+
+
+# Sentinels for the two states most parity tests assert on.
+OK = Outcome(ok=True)
 
 
 class Adapter:
     """Common interface protocol. Methods return normalized Python values.
 
-    transition() returns True on success, False on a rejected/failed transition
-    (so parity tests assert error-presence + store-invariance uniformly).
+    transition()/claim() return a structured :class:`Outcome` (truthy on success,
+    falsy on rejection) carrying the shared rejection identity, so parity tests
+    can assert both error-presence + store-invariance AND the rejection REASON
+    (concurrency vs. anything else) uniformly across the three interfaces.
     """
 
     name: str
@@ -30,8 +73,8 @@ class Adapter:
     def create(self, ticket_type: str, title: str, **kw: Any) -> str: ...
     def show(self, tid: str) -> dict: ...
     def list(self, **filters: Any) -> list[dict]: ...
-    def transition(self, tid: str, current: str, target: str) -> bool: ...
-    def claim(self, tid: str, assignee: str | None = None) -> bool: ...
+    def transition(self, tid: str, current: str, target: str) -> Outcome: ...
+    def claim(self, tid: str, assignee: str | None = None) -> Outcome: ...
     def comment(self, tid: str, body: str) -> None: ...
     def tag(self, tid: str, tag: str) -> None: ...
     def link(self, a: str, b: str, relation: str) -> None: ...
@@ -59,19 +102,31 @@ class LibraryAdapter(Adapter):
     def list(self, **filters: Any) -> list[dict]:
         return self._r.list_tickets(**filters)
 
-    def transition(self, tid: str, current: str, target: str) -> bool:
+    def transition(self, tid: str, current: str, target: str) -> Outcome:
         try:
             self._r.transition(tid, current, target)
-            return True
-        except self._r.RebarError:
-            return False
+            return OK
+        except self._r.RebarError as exc:
+            return self._reject(exc)
 
-    def claim(self, tid: str, assignee: str | None = None) -> bool:
+    def claim(self, tid: str, assignee: str | None = None) -> Outcome:
         try:
             self._r.claim(tid, assignee=assignee)
-            return True
-        except self._r.RebarError:
-            return False
+            return OK
+        except self._r.RebarError as exc:
+            return self._reject(exc)
+
+    def _reject(self, exc: Exception) -> Outcome:
+        """Map a library RebarError to the shared structured Outcome.
+
+        The exception's ``returncode`` (10 for ConcurrencyError) IS the shared
+        engine code; its class name is the typed identity.
+        """
+        return Outcome(
+            ok=False,
+            code=getattr(exc, "returncode", None),
+            error_type=type(exc).__name__,
+        )
 
     def comment(self, tid: str, body: str) -> None:
         self._r.comment(tid, body)
@@ -151,14 +206,27 @@ class CliAdapter(Adapter):
                 args.append(f"{flag}={val}")
         return self._ok_json(*args)
 
-    def transition(self, tid: str, current: str, target: str) -> bool:
-        return self._run("transition", tid, current, target).returncode == 0
+    def transition(self, tid: str, current: str, target: str) -> Outcome:
+        return self._outcome(self._run("transition", tid, current, target))
 
-    def claim(self, tid: str, assignee: str | None = None) -> bool:
+    def claim(self, tid: str, assignee: str | None = None) -> Outcome:
         args = ["claim", tid]
         if assignee:
             args.append(f"--assignee={assignee}")
-        return self._run(*args).returncode == 0
+        return self._outcome(self._run(*args))
+
+    @staticmethod
+    def _outcome(cp: subprocess.CompletedProcess) -> Outcome:
+        """Map a CLI exit code to the shared structured Outcome.
+
+        exit 0 is success; otherwise the exit code IS the shared engine code
+        (10 == concurrency). We synthesize the typed ``ConcurrencyError`` name
+        for code 10 so the CLI carries the SAME identity the library raises.
+        """
+        if cp.returncode == 0:
+            return OK
+        error_type = "ConcurrencyError" if cp.returncode == CONCURRENCY_CODE else "RebarError"
+        return Outcome(ok=False, code=cp.returncode, error_type=error_type)
 
     def comment(self, tid: str, body: str) -> None:
         assert self._run("comment", tid, body).returncode == 0
@@ -244,7 +312,7 @@ class McpAdapter(Adapter):
     def list(self, **filters: Any) -> list[dict]:
         return self._call("list_tickets", **filters)
 
-    def transition(self, tid: str, current: str, target: str) -> bool:
+    def transition(self, tid: str, current: str, target: str) -> Outcome:
         try:
             self._call(
                 "transition_ticket",
@@ -252,16 +320,33 @@ class McpAdapter(Adapter):
                 current_status=current,
                 target_status=target,
             )
-            return True
-        except Exception:
-            return False
+            return OK
+        except Exception as exc:
+            return self._reject(exc)
 
-    def claim(self, tid: str, assignee: str | None = None) -> bool:
+    def claim(self, tid: str, assignee: str | None = None) -> Outcome:
         try:
             self._call("claim_ticket", ticket_id=tid, assignee=assignee)
-            return True
-        except Exception:
-            return False
+            return OK
+        except Exception as exc:
+            return self._reject(exc)
+
+    @staticmethod
+    def _reject(exc: Exception) -> Outcome:
+        """Map a FastMCP ToolError to the shared structured Outcome.
+
+        FastMCP wraps the tool's exception in a ToolError but chains the original
+        via ``__cause__`` — and rebar's write tools call the library directly, so
+        that cause is the very same ``ConcurrencyError`` (returncode 10) the
+        library raises. We read the typed identity off the cause, NOT off the
+        wrapper's prose message, giving MCP the ONE shared structured identity.
+        """
+        cause = exc.__cause__ or exc
+        return Outcome(
+            ok=False,
+            code=getattr(cause, "returncode", None),
+            error_type=type(cause).__name__,
+        )
 
     def comment(self, tid: str, body: str) -> None:
         self._call("comment_ticket", ticket_id=tid, body=body)

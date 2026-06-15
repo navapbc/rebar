@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from adapters import CliAdapter, LibraryAdapter, McpAdapter
+from adapters import CONCURRENCY_CODE, CliAdapter, LibraryAdapter, McpAdapter
 
 
 @pytest.fixture(params=["library", "cli", "mcp"])
@@ -53,16 +53,22 @@ def test_list_and_filter_parity(adapter) -> None:
 
 def test_transition_happy_parity(adapter) -> None:
     tid = adapter.create("task", "To progress")
-    assert adapter.transition(tid, "open", "in_progress") is True
+    assert adapter.transition(tid, "open", "in_progress").ok is True
     assert adapter.show(tid)["status"] == "in_progress"
 
 
 def test_transition_stale_rejected_parity(adapter) -> None:
-    """A valid-but-stale current_status is rejected and the store is unchanged
-    (engine exit-10 contract surfaced uniformly across interfaces)."""
+    """A valid-but-stale current_status is rejected with the ONE shared
+    concurrency identity (exit-10 / ConcurrencyError) and the store is unchanged,
+    surfaced uniformly across interfaces. Asserting ``is_concurrency`` (not just
+    falsiness) makes this fail if an interface rejects for the WRONG reason."""
     tid = adapter.create("task", "Stale guard")
     # Ticket is 'open'; claim a valid-but-wrong current status.
-    assert adapter.transition(tid, "in_progress", "closed") is False
+    outcome = adapter.transition(tid, "in_progress", "closed")
+    assert outcome.ok is False
+    assert outcome.is_concurrency, f"{adapter.name}: rejected for {outcome!r}, not concurrency"
+    assert outcome.code == CONCURRENCY_CODE
+    assert outcome.error_type == "ConcurrencyError"
     assert adapter.show(tid)["status"] == "open"
 
 
@@ -70,19 +76,26 @@ def test_claim_happy_parity(adapter) -> None:
     """claim moves an open ticket to in_progress and sets the assignee, identically
     across library/CLI/MCP."""
     tid = adapter.create("task", "Claimable")
-    assert adapter.claim(tid, assignee="alice") is True
+    assert adapter.claim(tid, assignee="alice").ok is True
     state = adapter.show(tid)
     assert state["status"] == "in_progress"
     assert state.get("assignee") == "alice"
 
 
 def test_claim_not_open_rejected_parity(adapter) -> None:
-    """Claiming a non-open ticket is rejected (exit-10 / ConcurrencyError / MCP
-    tool error) and the store is unchanged — surfaced uniformly across interfaces."""
+    """Claiming a non-open ticket is rejected with the ONE shared concurrency
+    identity (exit-10 / ConcurrencyError / MCP tool error whose cause is
+    ConcurrencyError) and the store is unchanged — surfaced uniformly across
+    interfaces. The ``is_concurrency`` assertion fails if an interface rejects
+    for the wrong reason (e.g. not-found)."""
     tid = adapter.create("task", "Already claimed")
-    assert adapter.claim(tid, assignee="alice") is True
+    assert adapter.claim(tid, assignee="alice").ok is True
     # Second claim must be rejected; assignee must remain the first winner's.
-    assert adapter.claim(tid, assignee="bob") is False
+    outcome = adapter.claim(tid, assignee="bob")
+    assert outcome.ok is False
+    assert outcome.is_concurrency, f"{adapter.name}: rejected for {outcome!r}, not concurrency"
+    assert outcome.code == CONCURRENCY_CODE
+    assert outcome.error_type == "ConcurrencyError"
     state = adapter.show(tid)
     assert state["status"] == "in_progress"
     assert state.get("assignee") == "alice"
@@ -192,6 +205,6 @@ def test_write_one_read_all(rebar_repo: Path) -> None:
         assert t["status"] == "open", reader.name
 
     # Mutate through MCP; library + CLI must see it.
-    assert mcp.transition(tid, "open", "in_progress") is True
+    assert mcp.transition(tid, "open", "in_progress").ok is True
     assert lib.show(tid)["status"] == "in_progress"
     assert cli.show(tid)["status"] == "in_progress"

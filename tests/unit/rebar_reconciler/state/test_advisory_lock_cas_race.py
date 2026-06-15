@@ -11,15 +11,15 @@ advance the ref with a single-shot compare-and-swap::
 When a *concurrent* tickets-branch writer (ticket-CLI event commit, per-pass
 bindings commit, agent comment) advances the ref between the ``old_sha`` read
 and the CAS, ``git update-ref`` exits 128 (old-sha mismatch). Previously this
-raised ``CalledProcessError`` → ``rebase_retry`` returned ``abort_due_to_error``
-→ ``acquire_pass_lock``'s outer loop (which only retries
+raised ``CalledProcessError`` -> ``rebase_retry`` returned ``abort_due_to_error``
+-> ``acquire_pass_lock``'s outer loop (which only retries
 ``reject_and_reschedule``) broke immediately and raised ``ReconcileLockError``,
 silently aborting the reconcile pass.
 
-The fix wraps the read-tip → build-commit → CAS sequence in a bounded retry
+The fix wraps the read-tip -> build-commit -> CAS sequence in a bounded retry
 loop: on an exit-128 CAS mismatch it re-reads the tip and rebuilds on the new
 tip. A *legitimate* lock-held condition is a higher-level concern (the lock file
-is present) and is unaffected — these tests assert the CAS-race path retries and
+is present) and is unaffected -- these tests assert the CAS-race path retries and
 succeeds, while a non-CAS git failure still fails fast.
 
 Module loading follows the importlib.util.spec_from_file_location convention.
@@ -136,10 +136,14 @@ def _advance_tickets_ref(repo: Path) -> None:
         shutil.rmtree(parent, ignore_errors=True)
 
 
-def _patch_update_ref_to_race(lock_mod, repo: Path, fail_times: int):
+def _patch_update_ref_to_race(monkeypatch, lock_mod, repo: Path, fail_times: int):
     """Patch lock_mod._git_run so the FIRST *fail_times* update-ref CAS calls
-    are preceded by a real concurrent ref advance — causing the CAS old-sha to
-    be stale and exit 128 — then subsequent calls proceed normally.
+    are preceded by a real concurrent ref advance -- causing the CAS old-sha to
+    be stale and exit 128 -- then subsequent calls proceed normally.
+
+    Uses ``monkeypatch.setattr`` so the original ``_git_run`` is auto-restored at
+    test teardown -- correctness no longer depends on the fresh-module-load-per-test
+    convention (SDET I7).
 
     Returns a dict capturing {"update_ref_calls": int}.
     """
@@ -155,12 +159,12 @@ def _patch_update_ref_to_race(lock_mod, repo: Path, fail_times: int):
                 _advance_tickets_ref(Path(repo_root))
         return original_git_run(repo_root, args)
 
-    lock_mod._git_run = patched_git_run
+    monkeypatch.setattr(lock_mod, "_git_run", patched_git_run)
     return state
 
 
 def test_acquire_pass_lock_retries_on_cas_race(
-    lock_mod: ModuleType, tmp_git_repo_with_tickets: Path
+    lock_mod: ModuleType, tmp_git_repo_with_tickets: Path, monkeypatch
 ) -> None:
     """acquire_pass_lock survives a concurrent tickets-ref advance during CAS.
 
@@ -172,12 +176,8 @@ def test_acquire_pass_lock_retries_on_cas_race(
     repo = tmp_git_repo_with_tickets
     pass_id = f"cas-race-{time.time_ns()}"
 
-    state = _patch_update_ref_to_race(lock_mod, repo, fail_times=2)
-    try:
-        lock_mod.acquire_pass_lock(pass_id, repo)
-    finally:
-        # restore handled by fresh module load per test
-        pass
+    state = _patch_update_ref_to_race(monkeypatch, lock_mod, repo, fail_times=2)
+    lock_mod.acquire_pass_lock(pass_id, repo)
 
     assert lock_mod.check_pass_lock(repo) is True, (
         "After a CAS race retry, the lock file must be present on the tickets branch"
@@ -194,7 +194,7 @@ def test_acquire_pass_lock_retries_on_cas_race(
 
 
 def test_release_pass_lock_retries_on_cas_race(
-    lock_mod: ModuleType, tmp_git_repo_with_tickets: Path
+    lock_mod: ModuleType, tmp_git_repo_with_tickets: Path, monkeypatch
 ) -> None:
     """release_pass_lock survives a concurrent tickets-ref advance during CAS.
 
@@ -208,7 +208,7 @@ def test_release_pass_lock_retries_on_cas_race(
     lock_mod.acquire_pass_lock(pass_id, repo)
     assert lock_mod.check_pass_lock(repo) is True
 
-    state = _patch_update_ref_to_race(lock_mod, repo, fail_times=2)
+    state = _patch_update_ref_to_race(monkeypatch, lock_mod, repo, fail_times=2)
     lock_mod.release_pass_lock(pass_id, repo)
 
     assert lock_mod.check_pass_lock(repo) is False, (
@@ -219,26 +219,26 @@ def test_release_pass_lock_retries_on_cas_race(
 
 
 def test_cas_retry_bounded_then_fails(
-    lock_mod: ModuleType, tmp_git_repo_with_tickets: Path
+    lock_mod: ModuleType, tmp_git_repo_with_tickets: Path, monkeypatch
 ) -> None:
     """Unbounded CAS contention eventually surfaces as a ReconcileLockError.
 
     If every CAS attempt races (a pathological case), acquire_pass_lock must
-    NOT loop forever — it must exhaust its bounded budget and raise. This keeps
+    NOT loop forever -- it must exhaust its bounded budget and raise. This keeps
     the lock-held / genuine-failure path honest (no retry-forever).
     """
     repo = tmp_git_repo_with_tickets
     pass_id = f"cas-race-forever-{time.time_ns()}"
 
     # Race on EVERY update-ref CAS (large fail_times).
-    _patch_update_ref_to_race(lock_mod, repo, fail_times=10_000)
+    _patch_update_ref_to_race(monkeypatch, lock_mod, repo, fail_times=10_000)
 
     with pytest.raises(lock_mod.ReconcileLockError):
         lock_mod.acquire_pass_lock(pass_id, repo)
 
 
 def test_non_cas_git_failure_still_fails_fast(
-    lock_mod: ModuleType, tmp_git_repo_with_tickets: Path
+    lock_mod: ModuleType, tmp_git_repo_with_tickets: Path, monkeypatch
 ) -> None:
     """A non-CAS git failure (e.g. worktree add error) must NOT be CAS-retried.
 
@@ -260,7 +260,7 @@ def test_non_cas_git_failure_still_fails_fast(
             )
         return original_git_run(repo_root, args)
 
-    lock_mod._git_run = patched_git_run
+    monkeypatch.setattr(lock_mod, "_git_run", patched_git_run)
 
     with pytest.raises(lock_mod.ReconcileLockError):
         lock_mod.acquire_pass_lock(pass_id, repo)

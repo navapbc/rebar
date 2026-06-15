@@ -353,52 +353,88 @@ def test_mcp_module_docstring_describes_inprocess_reads() -> None:
 
 # ── optimistic-concurrency error IDENTITY over MCP (parity with CLI exit-10 and
 #    rebar.ConcurrencyError) ──────────────────────────────────────────────────
-# The MCP parity adapter collapses every exception to ``return False``, so the
-# parity "rejected" tests prove a rejection happened but NOT that MCP surfaces a
-# concurrency-SPECIFIC error. These call the server directly and assert the raised
-# tool error's message identifies the concurrency condition.
-def _concurrency_err_text(srv, tool: str, args: dict) -> str:
+# A state-dependent write that fails optimistic concurrency must surface the ONE
+# shared structured identity across all three interfaces: the engine's exit code
+# 10, raised by the library as ``rebar.ConcurrencyError``. FastMCP wraps the
+# tool's exception in a ToolError but chains the original via ``__cause__`` — and
+# the write tools call the library directly, so that cause IS a ConcurrencyError
+# (returncode 10). These tests assert on that TYPED, chained identity (class +
+# code), not on the wrapper's prose message, and verify it is DISTINCT from a
+# non-concurrency failure (e.g. not-found → returncode 1) so a wrong-reason
+# rejection fails the test.
+CONCURRENCY_CODE = 10
+
+
+def _concurrency_cause(srv, tool: str, args: dict) -> BaseException:
+    """Run an MCP tool expected to reject, returning the chained root cause.
+
+    Asserts the ToolError chains a ``rebar.ConcurrencyError`` carrying the shared
+    engine exit code (10) — the structured identity, independent of wording."""
     with pytest.raises(Exception) as exc:  # FastMCP raises mcp ...ToolError
         asyncio.run(srv.call_tool(tool, args))
-    return str(exc.value).lower()
+    cause = exc.value.__cause__ or exc.value
+    assert isinstance(cause, rebar.ConcurrencyError), (
+        f"expected ConcurrencyError cause, got {type(cause).__name__}: {cause!r}"
+    )
+    assert getattr(cause, "returncode", None) == CONCURRENCY_CODE
+    return cause
 
 
 def test_transition_stale_current_mcp_concurrency_error(rebar_repo) -> None:
-    """transition_ticket with a STALE expected current_status surfaces a
-    concurrency-identifying tool error over MCP (the ticket is unchanged)."""
+    """transition_ticket with a STALE expected current_status surfaces the shared
+    ConcurrencyError identity (returncode 10) over MCP (the ticket is unchanged)."""
     srv = build_server()
     tid = rebar.create_ticket("task", "Stale guard", repo_root=str(rebar_repo))
     # Ticket is open; declare a valid-but-wrong current → optimistic mismatch.
-    msg = _concurrency_err_text(
+    _concurrency_cause(
         srv,
         "transition_ticket",
         {"ticket_id": tid, "current_status": "in_progress", "target_status": "closed"},
     )
-    assert "transition rejected" in msg and "no longer" in msg
     assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "open"
 
 
 def test_claim_already_claimed_mcp_concurrency_error(rebar_repo) -> None:
-    """claim_ticket on an already-claimed ticket surfaces a concurrency-identifying
-    tool error over MCP; the original assignee is preserved."""
+    """claim_ticket on an already-claimed ticket surfaces the shared
+    ConcurrencyError identity (returncode 10) over MCP; assignee is preserved."""
     srv = build_server()
     tid = rebar.create_ticket("task", "Already claimed", repo_root=str(rebar_repo))
     rebar.claim(tid, assignee="alice", repo_root=str(rebar_repo))
-    msg = _concurrency_err_text(srv, "claim_ticket", {"ticket_id": tid, "assignee": "bob"})
-    assert "claim rejected" in msg and "already claimed" in msg
+    _concurrency_cause(srv, "claim_ticket", {"ticket_id": tid, "assignee": "bob"})
     state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
     assert state["status"] == "in_progress" and state.get("assignee") == "alice"
 
 
 def test_reopen_non_closed_mcp_concurrency_error(rebar_repo) -> None:
-    """reopen_ticket on a NON-closed ticket surfaces a concurrency-identifying tool
-    error over MCP (parity with CLI exit-10 and library ConcurrencyError)."""
+    """reopen_ticket on a NON-closed ticket surfaces the shared ConcurrencyError
+    identity (returncode 10) over MCP (parity with CLI exit-10 and library)."""
     srv = build_server()
     tid = rebar.create_ticket("task", "Reopen guard", repo_root=str(rebar_repo))
     # Ticket is open, not closed → reopen (closed→open) is a state mismatch.
-    msg = _concurrency_err_text(srv, "reopen_ticket", {"ticket_id": tid})
-    assert "rejected" in msg and "no longer" in msg
+    _concurrency_cause(srv, "reopen_ticket", {"ticket_id": tid})
     assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "open"
+
+
+def test_mcp_rejection_identity_distinguishes_not_found(rebar_repo) -> None:
+    """A NON-concurrency failure (not-found) must NOT carry the shared concurrency
+    identity — proving the typed identity discriminates the rejection REASON, not
+    just rejection presence. The chained cause is a plain RebarError (exit 1),
+    never a ConcurrencyError (exit 10)."""
+    srv = build_server()
+    with pytest.raises(Exception) as exc:
+        asyncio.run(
+            srv.call_tool(
+                "transition_ticket",
+                {
+                    "ticket_id": "ffff-ffff-ffff-ffff",
+                    "current_status": "open",
+                    "target_status": "in_progress",
+                },
+            )
+        )
+    cause = exc.value.__cause__ or exc.value
+    assert not isinstance(cause, rebar.ConcurrencyError)
+    assert getattr(cause, "returncode", None) != CONCURRENCY_CODE
 
 
 def test_absent_mcp_extra_raises_systemexit(monkeypatch: pytest.MonkeyPatch) -> None:
