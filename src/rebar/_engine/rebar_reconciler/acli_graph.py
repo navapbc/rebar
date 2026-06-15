@@ -21,6 +21,37 @@ from typing import Any
 
 from rebar_reconciler.jira_fields import _sanitize_label
 
+# ---------------------------------------------------------------------------
+# Relation <-> Jira link-type mapping (story 25ae-92e6-2927-49b6, Cycle 1)
+# ---------------------------------------------------------------------------
+#
+# Shared by BOTH differs (outbound_differ / inbound_differ import from here) so
+# the relation<->link-type vocabulary lives in exactly one place — mirrors the
+# ``_LOCAL_TO_JIRA_*`` constant pattern in outbound_differ.py.
+#
+# Each entry maps a rebar relation to a tuple ``(jira_link_type, swap_endpoints)``
+# where ``swap_endpoints`` records that the rebar direction (A relation B) maps
+# to the Jira link with the endpoints reversed (B link A). For ``depends_on``,
+# "A depends_on B" is equivalent to the Jira "B blocks A".
+#
+# Relations with no reliable Jira link type (``duplicates`` / ``supersedes`` /
+# ``discovered_from``) are intentionally ABSENT: callers SKIP them (no-op, log a
+# single line), never fail on them.
+_RELATION_TO_JIRA_LINK: dict[str, tuple[str, bool]] = {
+    "blocks": ("Blocks", False),
+    "depends_on": ("Blocks", True),  # A depends_on B == B blocks A
+    "relates_to": ("Relates", False),
+}
+
+# Reverse map: Jira link-type name -> rebar relation. Only the canonical
+# (non-swapped) entries are reversed here; the inbound differ uses link
+# directionality (outwardIssue vs inwardIssue) plus this map to recover the
+# rebar relation. ``Blocks`` reverses to ``blocks`` (the outward direction).
+_JIRA_LINK_TO_RELATION: dict[str, str] = {
+    "Blocks": "blocks",
+    "Relates": "relates_to",
+}
+
 
 class AcliGraphMixin:
     """Labels, links, parent/comment maps, and field-edit ops for AcliClient."""
@@ -422,6 +453,11 @@ class AcliGraphMixin:
 
         Raises subprocess.CalledProcessError on ACLI failure.
         """
+        # Story 25ae: the installed ACLI rejects an unconditional ``--json`` on
+        # ``link create`` ("unknown flag"). Run WITHOUT ``--json``; only retry
+        # with it for forward-version tolerance (older builds that DO accept it
+        # behave identically either way — we never read the structured output
+        # here, the return is synthesized).
         cmd = [
             "jira",
             "workitem",
@@ -433,38 +469,27 @@ class AcliGraphMixin:
             to_key,
             "--type",
             link_type,
-            # Bug 44de: --json enables structured-failure detection.
-            "--json",
         ]
         self._run(cmd)  # raises on failure — no silent swallowing
         return {"status": "created", "from": from_key, "to": to_key}
 
     def get_issue_links(self, jira_key: str) -> list[dict[str, Any]]:
-        """Get existing issue links for a Jira issue.
+        """Get existing issue links for a Jira issue, in REST-nested shape:
+        ``[{"id", "type": {"name", "inward", "outward"},
+            "inwardIssue": {"key", ...}|absent, "outwardIssue": {"key", ...}|absent}]``.
 
-        Returns a list of link dicts matching the Jira REST API format:
-        ``[{"type": {"name": ...}, "inwardIssue": {...}|None, "outwardIssue": {...}|None}]``
+        Reads via the REST API rather than the ACLI ``link list`` command: the
+        latter does not report the linked issue key (it returns
+        ``outwardIssueKey: null``), so it cannot identify what a link points to.
+        ``GET /rest/api/3/issue/{key}?fields=issuelinks`` returns the canonical
+        shape with the linked-issue keys the differs and callers need.
 
-        Used by the LINK handler for pre-create deduplication.
-        Raises subprocess.CalledProcessError on ACLI failure.
+        Raises on REST failure (via ``_direct_rest_get``).
         """
-        cmd = [
-            "jira",
-            "workitem",
-            "link",
-            "list",
-            "--key",
-            jira_key,
-            "--json",
-        ]
-        result = self._run(cmd)
-        parsed = json.loads(result.stdout or "[]")
-        if isinstance(parsed, list):
-            return parsed
-        # Some ACLI versions wrap results in a dict with an "issuelinks" key
-        if isinstance(parsed, dict):
-            return parsed.get("issuelinks", [])
-        return []
+        data = self._direct_rest_get(f"/rest/api/3/issue/{jira_key}?fields=issuelinks")
+        fields = data.get("fields") if isinstance(data, dict) else None
+        links = fields.get("issuelinks") if isinstance(fields, dict) else None
+        return links if isinstance(links, list) else []
 
     def delete_issue_link(self, link_id: str) -> dict[str, Any]:
         """Delete a Jira issue link by its ID via ACLI.
@@ -481,8 +506,9 @@ class AcliGraphMixin:
             "delete",
             "--id",
             link_id,
-            # Bug 44de: --json enables structured-failure detection.
-            "--json",
+            # Story 25ae: the installed ACLI rejects ``--json`` on link delete
+            # ("unknown flag"); ``_run`` raises on a nonzero exit, so the
+            # synthesized return below stands in for structured-failure detection.
         ]
         self._run(cmd)
         return {"status": "deleted", "link_id": link_id}

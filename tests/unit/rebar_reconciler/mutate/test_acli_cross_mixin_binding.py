@@ -96,12 +96,27 @@ def test_set_relationship_dispatches_to_run(client: Any) -> None:
     assert "DIG-1" in captured[0] and "DIG-2" in captured[0]
 
 
-def test_get_issue_links_dispatches_to_run(client: Any) -> None:
-    links = [{"type": {"name": "Blocks"}, "outwardIssue": {"key": "DIG-2"}}]
-    captured = _stub_run(client, json.dumps(links))
+def test_get_issue_links_reads_issuelinks_via_rest(client: Any) -> None:
+    # get_issue_links reads via the REST API (not the ACLI ``link list`` command,
+    # which omits the linked-issue key) and returns fields.issuelinks verbatim
+    # in the REST-nested shape.
+    links = [{"id": "1", "type": {"name": "Blocks"}, "outwardIssue": {"key": "DIG-2"}}]
+    captured: dict[str, str] = {}
+
+    def fake_rest_get(path: str) -> dict:
+        captured["path"] = path
+        return {"fields": {"issuelinks": links}}
+
+    client._direct_rest_get = fake_rest_get
     out = client.get_issue_links("DIG-1")
     assert out == links
-    assert captured[0][:4] == ["jira", "workitem", "link", "list"]
+    assert "/rest/api/3/issue/DIG-1" in captured["path"]
+    assert "issuelinks" in captured["path"]
+
+
+def test_get_issue_links_empty_when_no_issuelinks_field(client: Any) -> None:
+    client._direct_rest_get = lambda path: {"fields": {}}
+    assert client.get_issue_links("DIG-1") == []
 
 
 def test_delete_issue_link_dispatches_to_run(client: Any) -> None:
