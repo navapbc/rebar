@@ -41,3 +41,15 @@ def test_transition_wrong_current_library_raises_concurrency_error(rebar_repo: P
     with pytest.raises(rebar.ConcurrencyError):
         rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
     assert _status(tid, rebar_repo) == "open"  # unchanged
+
+
+def test_reopen_non_closed_library_raises_concurrency_error(rebar_repo: Path) -> None:
+    """``rebar.reopen`` is optimistic-concurrency: it expects a CLOSED ticket, so
+    reopening a non-closed (open) one raises ConcurrencyError — the library mirror
+    of the CLI exit-10 reopen path — and the ticket stays open."""
+    tid = rebar.create_ticket("task", "T", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "open"
+
+    with pytest.raises(rebar.ConcurrencyError):
+        rebar.reopen(tid, repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "open"  # unchanged

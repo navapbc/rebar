@@ -130,6 +130,15 @@ follow_imports = "silent"
 source = ["rebar"]
 branch = true
 
+[tool.coverage.report]
+# Documented floor, set well BELOW the measured in-process total (61% on
+# 2026-06-14 — see docs/coverage.md). Many tests drive rebar as a subprocess,
+# so in-process coverage understates real exercise; the floor is intentionally
+# conservative so it documents a minimum without gating routine work. CI runs
+# the same `-m "not integration and not external"` selection that produced 61%,
+# so this floor does not break the existing (report-only) coverage step.
+fail_under = 50
+
 # ── Mutation testing (mutmut 3.x) ─────────────────────────────────────────────
 # Scope is deliberately bounded to the highest-value behavioral cores (see
 # docs/mutation-testing.md). mutmut walks every .py under `source_paths`, so

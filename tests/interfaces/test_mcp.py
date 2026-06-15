@@ -15,6 +15,7 @@ pytest.importorskip("mcp")
 
 import asyncio
 
+import rebar
 from rebar.mcp_server import build_server
 
 
@@ -348,6 +349,56 @@ def test_mcp_module_docstring_describes_inprocess_reads() -> None:
     doc = (m.__doc__ or "").lower()
     assert "in-process" in doc
     assert "subprocess wrapper" not in doc
+
+
+# ── optimistic-concurrency error IDENTITY over MCP (parity with CLI exit-10 and
+#    rebar.ConcurrencyError) ──────────────────────────────────────────────────
+# The MCP parity adapter collapses every exception to ``return False``, so the
+# parity "rejected" tests prove a rejection happened but NOT that MCP surfaces a
+# concurrency-SPECIFIC error. These call the server directly and assert the raised
+# tool error's message identifies the concurrency condition.
+def _concurrency_err_text(srv, tool: str, args: dict) -> str:
+    with pytest.raises(Exception) as exc:  # FastMCP raises mcp ...ToolError
+        asyncio.run(srv.call_tool(tool, args))
+    return str(exc.value).lower()
+
+
+def test_transition_stale_current_mcp_concurrency_error(rebar_repo) -> None:
+    """transition_ticket with a STALE expected current_status surfaces a
+    concurrency-identifying tool error over MCP (the ticket is unchanged)."""
+    srv = build_server()
+    tid = rebar.create_ticket("task", "Stale guard", repo_root=str(rebar_repo))
+    # Ticket is open; declare a valid-but-wrong current → optimistic mismatch.
+    msg = _concurrency_err_text(
+        srv,
+        "transition_ticket",
+        {"ticket_id": tid, "current_status": "in_progress", "target_status": "closed"},
+    )
+    assert "transition rejected" in msg and "no longer" in msg
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "open"
+
+
+def test_claim_already_claimed_mcp_concurrency_error(rebar_repo) -> None:
+    """claim_ticket on an already-claimed ticket surfaces a concurrency-identifying
+    tool error over MCP; the original assignee is preserved."""
+    srv = build_server()
+    tid = rebar.create_ticket("task", "Already claimed", repo_root=str(rebar_repo))
+    rebar.claim(tid, assignee="alice", repo_root=str(rebar_repo))
+    msg = _concurrency_err_text(srv, "claim_ticket", {"ticket_id": tid, "assignee": "bob"})
+    assert "claim rejected" in msg and "already claimed" in msg
+    state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
+    assert state["status"] == "in_progress" and state.get("assignee") == "alice"
+
+
+def test_reopen_non_closed_mcp_concurrency_error(rebar_repo) -> None:
+    """reopen_ticket on a NON-closed ticket surfaces a concurrency-identifying tool
+    error over MCP (parity with CLI exit-10 and library ConcurrencyError)."""
+    srv = build_server()
+    tid = rebar.create_ticket("task", "Reopen guard", repo_root=str(rebar_repo))
+    # Ticket is open, not closed → reopen (closed→open) is a state mismatch.
+    msg = _concurrency_err_text(srv, "reopen_ticket", {"ticket_id": tid})
+    assert "rejected" in msg and "no longer" in msg
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "open"
 
 
 def test_absent_mcp_extra_raises_systemexit(monkeypatch: pytest.MonkeyPatch) -> None:

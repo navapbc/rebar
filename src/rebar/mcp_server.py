@@ -135,6 +135,29 @@ try:
         duplicates: list = []
         stale: list = []
 
+    class SignResultOut(_Out):
+        # Mirrors src/rebar/schemas/sign_result.schema.json.
+        ticket_id: str
+        manifest: list[str] = []
+        algorithm: str
+        signature: str
+        key_id: str
+        head_sha: str
+        signed_at: int
+
+    class VerifySignatureResultOut(_Out):
+        # Mirrors src/rebar/schemas/verify_signature_result.schema.json.
+        ticket_id: str
+        manifest: list[str] = []
+        step_count: int
+        algorithm: str | None = None
+        key_id: str | None = None
+        signed_at: int | None = None
+        head_sha: str | None = None
+        verified: bool
+        verdict: str
+        reason: str
+
     # NOTE: transition/reopen return {ticket_id, from, to, newly_unblocked}; the
     # `from` key is a Python reserved word, so those tools return a plain dict
     # (FastMCP serializes it correctly) rather than a typed model. They therefore
@@ -147,6 +170,7 @@ except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     NextBatchOut = FileImpactItemOut = VerifyCommandItemOut = None  # type: ignore[assignment,misc]
     CreateResultOut = ClaimResultOut = GateResultOut = None  # type: ignore[assignment,misc]
     ListEpicsOut = BridgeFsckOut = None  # type: ignore[assignment,misc]
+    SignResultOut = VerifySignatureResultOut = None  # type: ignore[assignment,misc]
 
 
 def _env_truthy(name: str) -> bool:
@@ -347,14 +371,14 @@ def build_server():
         return BridgeFsckOut.model_validate(rebar.bridge_fsck())
 
     @mcp.tool()
-    def verify_signature(ticket_id: str) -> dict:
+    def verify_signature(ticket_id: str) -> VerifySignatureResultOut:
         """Certify a ticket's verified-steps manifest against its signature.
 
         Recomputes the HMAC with THIS environment's signing key and returns
         {ticket_id, verified, verdict, reason, manifest, ...}. verdict is
         'certified' (steps match), 'mismatch' (altered/invalid), 'foreign_key'
         (signed by a different environment), or 'unsigned'. Read-only."""
-        return rebar.verify_signature(ticket_id)
+        return VerifySignatureResultOut.model_validate(rebar.verify_signature(ticket_id))
 
     @mcp.tool()
     def reconcile(mode: str = "dry-run") -> dict:
@@ -573,7 +597,7 @@ def build_server():
             return "ok"
 
         @mcp.tool()
-        def sign_manifest(ticket_id: str, manifest: list[str]) -> dict:
+        def sign_manifest(ticket_id: str, manifest: list[str]) -> SignResultOut:
             """Sign a manifest of verified steps with the environment signing key.
 
             Computes an HMAC-SHA256 over the steps with this environment's key
@@ -581,7 +605,7 @@ def build_server():
             SIGNATURE event. Returns {ticket_id, manifest, algorithm, signature,
             key_id, head_sha, signed_at}. Use verify_signature to certify it
             later — only this environment (holding the key) can certify."""
-            return rebar.sign_manifest(ticket_id, manifest)
+            return SignResultOut.model_validate(rebar.sign_manifest(ticket_id, manifest))
 
     return mcp
 

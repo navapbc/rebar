@@ -58,6 +58,8 @@ CANONICAL: dict[str, str] = {
     "summary": schemas.SUMMARY,
     "list_epics": schemas.LIST_EPICS,
     "bridge_fsck": schemas.BRIDGE_FSCK,
+    "sign_manifest": schemas.SIGN_RESULT,
+    "verify_signature": schemas.VERIFY_SIGNATURE_RESULT,
 }
 
 # Advertisers with no canonical structured shape — they return a generic
@@ -123,6 +125,61 @@ def test_every_advertiser_is_classified() -> None:
     assert not stale, f"classified tools no longer advertise an outputSchema: {sorted(stale)}"
 
 
+def test_no_schema_advertisers_are_exhaustively_classified() -> None:
+    """Every MCP tool returning STRUCTURED data is in EXACTLY ONE classification
+    set — closing the gap where a structured-dict tool that advertised no
+    outputSchema (sign_manifest/verify_signature) sat in none of the three sets
+    and so escaped every other guard.
+
+    A tool is "structured" if it advertises an outputSchema (a dict/model return)
+    OR is recorded in NO_SCHEMA_EXEMPT (a structured dict deliberately advertising
+    none). The only tools legitimately outside all three sets are the generic
+    string-ack writers, which surface as ``-> str`` advertisers and are caught
+    here as CANONICAL/EXEMPT_GENERIC members. This guard asserts the partition is
+    total and disjoint, so an unclassified structured tool can never recur.
+    """
+    sets = {
+        "CANONICAL": set(CANONICAL),
+        "EXEMPT_GENERIC": set(EXEMPT_GENERIC),
+        "NO_SCHEMA_EXEMPT": set(NO_SCHEMA_EXEMPT),
+    }
+    # Disjointness: no tool may be classified in two sets at once.
+    names = list(sets)
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            overlap = sets[names[i]] & sets[names[j]]
+            assert not overlap, f"{names[i]} and {names[j]} both classify: {sorted(overlap)}"
+
+    classified = set().union(*sets.values())
+
+    # TOTAL partition: EVERY tool sourced mechanically from list_tools() is
+    # classified. This is the load-bearing assertion — a brand-new tool (a typed
+    # advertiser, or a plain-dict/string-ack writer with no outputSchema) that the
+    # author forgets to classify lands outside all three sets and trips here. That
+    # is exactly the class of gap (an untyped structured tool in no set) this guard
+    # exists to make impossible.
+    all_tools = set(_tools())
+    assert all_tools <= classified, (
+        f"MCP tools in no classification set (add each to CANONICAL, EXEMPT_GENERIC, "
+        f"or NO_SCHEMA_EXEMPT): {sorted(all_tools - classified)}"
+    )
+
+    # Every advertiser must be classified (CANONICAL or EXEMPT_GENERIC).
+    advertised = _advertisers()
+    assert advertised <= classified, (
+        f"advertised MCP tools not in any classification set: {sorted(advertised - classified)}"
+    )
+
+    # And every structured tool that advertises NO schema must be in
+    # NO_SCHEMA_EXEMPT — the exact class of gap this test exists to catch.
+    structured_no_schema = set(NO_SCHEMA_EXEMPT) - advertised
+    unclassified = structured_no_schema - classified
+    assert not unclassified, (
+        f"structured-dict MCP tools advertise no outputSchema and are in no "
+        f"classification set: {sorted(unclassified)}"
+    )
+
+
 def test_no_schema_exempt_set_is_accurate() -> None:
     # The reverse gap: tools we deliberately leave without an outputSchema must
     # genuinely lack one (so this exemption list cannot rot).
@@ -174,6 +231,8 @@ def _call_args(name: str, s: dict) -> dict:
         "summary": {"ticket_ids": [s["task"]]},
         "list_epics": {},
         "bridge_fsck": {},
+        "sign_manifest": {"ticket_id": s["task"], "manifest": ["step one", "step two"]},
+        "verify_signature": {"ticket_id": s["task"]},
     }[name]
 
 

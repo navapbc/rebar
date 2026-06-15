@@ -125,10 +125,11 @@ jobs:
         # mid-run, producing a spurious FileNotFoundError cascade. -p no:cacheprovider
         # keeps a stale cache from leaking across runs.
         #
-        # Coverage is reported (term-missing) but NOT gated: several tests run rebar
-        # as a subprocess so they don't count toward in-process coverage, and a hard
-        # floor would be misleading until that's reconciled. The number is surfaced
-        # for visibility / ratcheting, not as a pass/fail.
+        # Coverage is reported (term-missing) and carries a conservative floor
+        # (fail_under in [tool.coverage.report], pyproject.toml): the floor sits well
+        # below the measured in-process total because several tests run rebar as a
+        # subprocess and so don't count toward in-process coverage. It guards against
+        # a large regression without pinning the exact number; see docs/coverage.md.
         run: >-
           pytest -m "not integration and not external" -q -p no:cacheprovider
           --basetemp="${{ runner.temp }}/rebar-basetemp"

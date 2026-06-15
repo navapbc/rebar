@@ -107,11 +107,18 @@ def test_tag_and_comment_parity(adapter) -> None:
 
 
 def test_deps_parity(adapter) -> None:
+    """A `blocks` link must appear in the blocked ticket's dep graph identically
+    across library/CLI/MCP: its blocker is listed and it is not ready to work.
+    (Two parentless tasks at the same level → no hierarchy promotion, so the link
+    lands directly on `b`.)"""
     a = adapter.create("task", "Blocker")
     b = adapter.create("task", "Blocked")
     adapter.link(a, b, "blocks")
     graph = adapter.deps(b)
     assert isinstance(graph, dict)
+    assert graph["ticket_id"] == b
+    assert a in graph["blockers"], f"{adapter.name}: blocker {a} missing from {graph['blockers']}"
+    assert graph["ready_to_work"] is False, f"{adapter.name}: blocked ticket reported ready"
 
 
 def _cli_list_ids(*flags: str) -> set[str]:
