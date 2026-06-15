@@ -71,7 +71,10 @@ def acli_capture(
     """
     captured_cmds: list[list[str]] = []
 
-    def fake_run_acli(cmd: list[str], *, acli_cmd: list[str] | None = None) -> Any:
+    def fake_run_acli(
+        cmd: list[str], *, acli_cmd: list[str] | None = None, retry_on_timeout: bool = False
+    ) -> Any:
+        # retry_on_timeout: bug-d843 read/write flag now passed by callers.
         captured_cmds.append(cmd)
         result = MagicMock()
         # get_issue uses "search --jql" (not "view"), which returns a list

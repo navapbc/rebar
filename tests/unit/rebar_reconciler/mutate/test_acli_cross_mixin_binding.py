@@ -78,7 +78,8 @@ def client(acli_mod: ModuleType) -> Any:
 def _stub_run(client: Any, stdout: str) -> list[list[str]]:
     captured: list[list[str]] = []
 
-    def fake_run(cmd: list[str]) -> Any:
+    def fake_run(cmd: list[str], **kwargs: Any) -> Any:
+        # **kwargs tolerates the bug-d843 retry_on_timeout flag callers now pass.
         captured.append(cmd)
         result = MagicMock()
         result.stdout = stdout

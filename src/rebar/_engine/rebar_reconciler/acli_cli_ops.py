@@ -451,7 +451,7 @@ def get_issue(
         "key,summary,description,status,priority,issuetype,assignee,labels",
         "--json",
     ]
-    result = acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd)
+    result = acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd, retry_on_timeout=True)  # READ
     parsed = json.loads(result.stdout)
     issues = parsed if isinstance(parsed, list) else parsed.get("issues", [])
     if not issues:
@@ -521,5 +521,5 @@ def get_comments(
         jira_key,
         "--json",
     ]
-    result = acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd)
+    result = acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd, retry_on_timeout=True)  # READ
     return _parse_acli_comments(json.loads(result.stdout))

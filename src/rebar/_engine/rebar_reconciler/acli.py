@@ -50,6 +50,7 @@ from rebar_reconciler.acli_subprocess import (
     _MAX_ATTEMPTS,
     _RETRYABLE_HTTP_CODES,
     AcliMutationError,
+    AcliTimeoutError,
     AssigneeNotFoundError,
     RetryExhaustedError,
     _build_env,
@@ -78,18 +79,22 @@ from rebar_reconciler.jira_fields import (
 # characterization suites; ``__all__`` records them as intentional re-exports.
 __all__ = [
     "AcliMutationError",
+    "AcliTimeoutError",
     "AssigneeNotFoundError",
     "InvalidLabelError",
     "RetryExhaustedError",
     "_ASSIGNEE_NOT_FOUND_ERROR",
     "_ASSIGNEE_PERMISSION_ERROR",
     "_AUTH_FAILURE_CODE",
+    "_DEFAULT_ACLI_CMD",
     "_JIRA_LABEL_MAX_CHARS",
     "_JIRA_SUMMARY_MAX_CHARS",
     "_MAX_ATTEMPTS",
     "_RETRYABLE_HTTP_CODES",
     "_attach_parent_guarded",
+    "_build_env",
     "_call_with_backoff",
+    "_check_mutation_failure",
     "_create_from_json_payload",
     "_create_issue_from_json",
     "_create_issue_no_json",
@@ -202,7 +207,7 @@ def update_issue(
         else:
             cmd.extend([f"--{field}", str(value)])
 
-    result = acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd)
+    result = acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd, retry_on_timeout=False)  # WRITE
     return json.loads(result.stdout)
 
 
@@ -239,15 +244,27 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         self.jira_project = jira_project
         self._acli_cmd = acli_cmd
 
-    def _run(self, cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    def _run(
+        self,
+        cmd: list[str],
+        *,
+        retry_on_timeout: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
         """Run an ACLI command.
 
         ACLI Go reads auth from its config file (set by ``acli auth login``).
         Credentials stored on self are available for callers that need them
         (e.g., direct REST calls), but are not injected into the subprocess
         environment — ACLI does not read env vars for auth.
+
+        ``retry_on_timeout`` (bug d843) forwards to ``_run_acli``: READS pass
+        ``True`` (idempotent, safe to retry on timeout); WRITES leave the
+        ``False`` default so a timed-out, possibly-committed mutation is never
+        blind-retried against non-idempotent Jira.
         """
-        return acli_subprocess._run_acli(cmd, acli_cmd=self._acli_cmd)
+        return acli_subprocess._run_acli(
+            cmd, acli_cmd=self._acli_cmd, retry_on_timeout=retry_on_timeout
+        )
 
     # --- Outbound API methods (local → Jira) ---
 
@@ -384,7 +401,7 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
                 "--paginate",
                 "--json",
             ]
-            result = self._run(cmd)
+            result = self._run(cmd, retry_on_timeout=True)  # READ — idempotent
             parsed = json.loads(result.stdout)
             if isinstance(parsed, list):
                 all_issues = parsed
@@ -587,7 +604,7 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
             jira_key,
             "--json",
         ]
-        result = self._run(cmd)
+        result = self._run(cmd, retry_on_timeout=True)  # READ — idempotent
         return _parse_acli_comments(json.loads(result.stdout))
 
     def set_parent(self, jira_key: str, parent_key: str | None) -> None:
@@ -624,12 +641,11 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
             PermissionError: When ACLI exits with a 403 permission error.
             subprocess.CalledProcessError: On other ACLI failures (single attempt — no retry).
         """
-        base = self._acli_cmd if self._acli_cmd is not None else _DEFAULT_ACLI_CMD
         # `--yes` skips ACLI's interactive confirmation prompt. Without it,
         # `acli jira workitem delete` waits on stdin for confirmation and
         # exits non-zero in non-TTY contexts (bug 3256-f960-4ae6-4943
         # surfaced by the live cfd6 capability probe run).
-        full_cmd = base + [
+        cmd = [
             "jira",
             "workitem",
             "delete",
@@ -641,15 +657,12 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
             "--json",
         ]
         try:
-            completed = subprocess.run(
-                full_cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-                env=_build_env(),
-            )
-            # Bug 44de: delete bypasses _run_acli, so call the check here too.
-            _check_mutation_failure(completed.stdout, full_cmd)
+            # Bug d843: route the delete through the _run_acli chokepoint so it
+            # inherits the timeout/process-group reaping (and errors='replace').
+            # WRITE — retry_on_timeout=False (delete is non-idempotent on a
+            # timeout; callers below treat 404 as idempotent success).
+            # _run_acli already runs _check_mutation_failure on the completed run.
+            acli_subprocess._run_acli(cmd, acli_cmd=self._acli_cmd, retry_on_timeout=False)
         except subprocess.CalledProcessError as exc:
             err_text = (exc.stderr or "") + (exc.stdout or "")
             if "404" in err_text or "not found" in err_text.lower():

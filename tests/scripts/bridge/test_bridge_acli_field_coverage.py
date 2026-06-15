@@ -576,14 +576,18 @@ class TestAcliContractRegression:
     def test_delete_issue_uses_key_and_yes_flags(self, acli_mod: Any, acli_capture: Any) -> None:
         """DELETE MUST use --key and --yes (skip interactive confirmation).
 
-        delete_issue calls subprocess.run directly (not via _run_acli), so we
-        patch subprocess.run and inspect the captured cmd argv.
+        Bug d843: delete_issue now routes through the ``_run_acli`` chokepoint
+        (so it inherits the timeout/process-group reaping), so we patch
+        ``_run_acli`` and inspect the captured cmd argv (sans the acli_cmd
+        prefix, which _run_acli prepends internally).
         """
         from unittest.mock import MagicMock
 
         captured: list[list[str]] = []
 
-        def fake_run(cmd: list[str], **kw: Any) -> Any:
+        def fake_run_acli(
+            cmd: list[str], *, acli_cmd: list[str] | None = None, retry_on_timeout: bool = False
+        ) -> Any:
             captured.append(cmd)
             result = MagicMock()
             result.returncode = 0
@@ -592,12 +596,12 @@ class TestAcliContractRegression:
             return result
 
         client, _, _ = acli_capture
-        with patch.object(acli_mod.subprocess, "run", side_effect=fake_run):
+        with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
             client.delete_issue("DIG-3802")
 
         assert captured, "delete_issue must issue at least one subprocess call"
         cmd = captured[0]
-        # acli_cmd prefix may be ["echo"] (test fixture) — strip it before assertion
+        # _run_acli receives the argv WITHOUT the acli_cmd prefix.
         try:
             idx = cmd.index("jira")
         except ValueError:

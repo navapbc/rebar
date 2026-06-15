@@ -74,7 +74,7 @@ class AcliGraphMixin:
             "list",
             "--json",
         ]
-        result = self._run(cmd)
+        result = self._run(cmd, retry_on_timeout=True)  # READ — idempotent
         parsed = json.loads(result.stdout or "[]")
         if isinstance(parsed, list):
             return parsed

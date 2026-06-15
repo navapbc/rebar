@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import random
+import signal
 import subprocess
 import sys
 import time
@@ -28,6 +29,38 @@ logger = logging.getLogger(__name__)
 _DEFAULT_ACLI_CMD: list[str] = ["acli"]
 _MAX_ATTEMPTS: int = 3  # initial + 2 retries
 _AUTH_FAILURE_CODE: int = 401
+
+# --- Subprocess timeout / process-group reaping (bug d843) -----------------
+# A hung ``acli`` child (interactive prompt, stuck socket, JVM/network-helper
+# grandchild holding the capture pipe) must never freeze a reconcile pass.
+# ``subprocess.run(timeout=)`` only reaps the DIRECT child — a grandchild on
+# the pipe defeats it (CPython bpo-30154). So we Popen(start_new_session=True),
+# communicate(timeout=), and on TimeoutExpired reap the whole process GROUP
+# (SIGTERM -> grace -> SIGKILL), bounding the post-kill drain so a D-state
+# child can't block forever. Worst-case per call = call_timeout + GRACE + DRAIN.
+_DEFAULT_ACLI_TIMEOUT: int = 120  # seconds; acli does OAuth + network
+_ACLI_GRACE_SECONDS: int = 3  # SIGTERM grace before SIGKILL (JVM flush headroom)
+_ACLI_DRAIN_SECONDS: int = 2  # bounded post-SIGKILL reap/drain (D-state safe)
+
+
+def _acli_call_timeout() -> int:
+    """Per-call subprocess timeout (seconds) from ``REBAR_ACLI_TIMEOUT``.
+
+    Defaults to :data:`_DEFAULT_ACLI_TIMEOUT` (120s). A missing, unparseable, or
+    non-positive value falls back to the default rather than failing the call —
+    a zero/negative timeout would make ``communicate(timeout=0)`` time out every
+    call instantly.
+    """
+    raw = os.environ.get("REBAR_ACLI_TIMEOUT")
+    if raw is None:
+        return _DEFAULT_ACLI_TIMEOUT
+    try:
+        value = int(raw)
+    except (ValueError, TypeError):
+        return _DEFAULT_ACLI_TIMEOUT
+    return value if value > 0 else _DEFAULT_ACLI_TIMEOUT
+
+
 _ASSIGNEE_PERMISSION_ERROR: str = "cannot be assigned"
 _ASSIGNEE_NOT_FOUND_ERROR: str = (
     "User not found for email:"  # prefix match — email value varies per call
@@ -49,6 +82,38 @@ class AssigneeNotFoundError(ValueError):
 
 class RetryExhaustedError(RuntimeError):
     """All retry attempts exhausted after transient HTTP/network errors."""
+
+
+class AcliTimeoutError(Exception):
+    """An ACLI subprocess exceeded its wall-clock budget and was reaped (bug d843).
+
+    Terminal: raised when ``_run_acli`` times out and either the call is a
+    non-retryable WRITE or the read retries are exhausted. The child (and its
+    whole process group) has already been SIGTERM/SIGKILL-reaped.
+
+    Deliberately **NOT** a subclass of the builtin :class:`TimeoutError`
+    (validation spike E4): ``apply_outbound._call_with_retry`` catches
+    ``TimeoutError`` and would otherwise blindly re-retry a timed-out write,
+    re-introducing the duplicate-write bug Jira's non-idempotent create/link
+    makes dangerous.
+
+    Carries the command and any partial stdout/stderr captured from the
+    original :class:`subprocess.TimeoutExpired` for diagnostics.
+    """
+
+    def __init__(
+        self,
+        cmd: list[str],
+        timeout: float,
+        *,
+        partial_stdout: str | None = None,
+        partial_stderr: str | None = None,
+    ) -> None:
+        self.cmd = cmd
+        self.timeout = timeout
+        self.partial_stdout = partial_stdout
+        self.partial_stderr = partial_stderr
+        super().__init__(f"ACLI command timed out after {timeout}s: {cmd!r}")
 
 
 class AcliMutationError(RuntimeError):
@@ -182,55 +247,186 @@ def _call_with_backoff(
     ) from last_error
 
 
+def _decode_partial(data: Any) -> str | None:
+    """Decode partial stdout/stderr from a TimeoutExpired for diagnostics.
+
+    CPython leaves ``TimeoutExpired.stdout``/``.stderr`` as the UNDECODED bytes
+    read before the timeout even in text mode. Decode with ``errors='replace'``
+    so a truncated multibyte lead (spike E3) never raises here.
+    """
+    if data is None:
+        return None
+    if isinstance(data, str):
+        return data
+    if isinstance(data, (bytes, bytearray)):
+        return bytes(data).decode("utf-8", errors="replace")
+    return None
+
+
+def _reap_process_group(p: subprocess.Popen[str]) -> None:
+    """Terminate and reap a timed-out child and its whole process group (bug d843).
+
+    On POSIX the child was started with ``start_new_session=True`` so it leads
+    its own group; we ``killpg`` the group (SIGTERM, grace, then SIGKILL) to
+    catch pipe-holding grandchildren that a direct ``p.kill()`` would orphan
+    (validation spikes E1/E2). All ``getpgid``/``killpg`` calls are guarded
+    against the ESRCH/EPERM race (spike E5: an already-exited group raises
+    ``ProcessLookupError``). The post-kill drain is itself bounded so a D-state
+    (unkillable) child can't block forever — a survivor is logged as a leaked
+    PID, never asserted.
+
+    On non-POSIX (no ``killpg``) fall back to ``p.kill()`` + bounded wait.
+    """
+    if os.name != "posix":
+        try:
+            p.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            p.wait(timeout=_ACLI_GRACE_SECONDS + _ACLI_DRAIN_SECONDS)
+        except subprocess.TimeoutExpired:
+            logger.warning("acli child PID %s did not exit after kill (leaked)", p.pid)
+        return
+
+    try:
+        pgid = os.getpgid(p.pid)
+    except (ProcessLookupError, PermissionError):
+        # Child already gone (ESRCH) or we can't see it — best-effort reap and return.
+        try:
+            p.wait(timeout=_ACLI_DRAIN_SECONDS)
+        except subprocess.TimeoutExpired:
+            pass
+        return
+
+    # SIGTERM the group, then give it a grace window to flush + exit cleanly.
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        p.communicate(timeout=_ACLI_GRACE_SECONDS)
+        return  # exited on SIGTERM within the grace window — drained.
+    except subprocess.TimeoutExpired:
+        pass
+
+    # Grace expired — SIGKILL the group, then bound the final reap/drain so a
+    # D-state child cannot hang us indefinitely.
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        p.communicate(timeout=_ACLI_DRAIN_SECONDS)
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            "acli process group %s survived SIGKILL after %ss drain (leaked PID %s)",
+            pgid,
+            _ACLI_DRAIN_SECONDS,
+            p.pid,
+        )
+
+
 def _run_acli(
     cmd: list[str],
     *,
     acli_cmd: list[str] | None = None,
+    retry_on_timeout: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    """Run an ACLI command with retry and exponential backoff.
+    """Run an ACLI command with retry, exponential backoff, and a bounded timeout.
 
     Retries up to 2 times (3 total attempts) on CalledProcessError,
     with backoff delays of 2s and 4s. Auth failures (exit code 401)
     and deterministic assignee errors ("cannot be assigned" or "User not
     found for email:") abort immediately without retrying.
 
-    Raises CalledProcessError if all attempts are exhausted.
+    Each invocation is bounded by ``REBAR_ACLI_TIMEOUT`` (default 120s) and run
+    in its own process session, so a hung ``acli`` child (or a pipe-holding
+    grandchild) is reaped rather than freezing the pass (bug d843). On timeout:
+
+    - ``retry_on_timeout=True`` (READS only — they are idempotent) retries the
+      timed-out call within the existing attempt loop with backoff.
+    - ``retry_on_timeout=False`` (the default; WRITES) raises
+      :class:`AcliTimeoutError` immediately — a timed-out Jira write is
+      ambiguous (may have committed server-side) and Jira create/link is
+      non-idempotent, so a blind retry would duplicate. The terminal error is
+      deliberately not a builtin ``TimeoutError`` so the outer
+      ``_call_with_retry`` won't re-retry it.
+
+    Raises:
+        CalledProcessError: if all CalledProcessError attempts are exhausted.
+        AcliTimeoutError: on a non-retryable (write) timeout, or read timeout
+            with all attempts exhausted. Terminal — raised BEFORE
+            ``_check_mutation_failure`` so a killed child never fabricates a
+            success.
     """
     base = acli_cmd if acli_cmd is not None else _DEFAULT_ACLI_CMD
     full_cmd = base + cmd
     env = _build_env()
+    call_timeout = _acli_call_timeout()
 
     last_error: subprocess.CalledProcessError | None = None
     for attempt in range(_MAX_ATTEMPTS):
+        # --- Spawn in its own session so killpg can reap the whole group. -----
+        popen_kwargs: dict[str, Any] = dict(
+            stdin=subprocess.DEVNULL,  # any unexpected acli prompt fails fast
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            errors="replace",  # spike E3: SIGKILL mid-multibyte must not crash the reap
+            env=env,
+        )
+        if os.name == "posix":
+            popen_kwargs["start_new_session"] = True  # POSIX-only (killpg needs it)
+        p = subprocess.Popen(full_cmd, **popen_kwargs)
         try:
-            result = subprocess.run(
+            out, err = p.communicate(timeout=call_timeout)
+        except subprocess.TimeoutExpired as exc:
+            # M3: partial output comes from the ORIGINAL exception — the
+            # post-kill communicate() calls return ('', ''). Even in text mode,
+            # TimeoutExpired.stdout/.stderr carry the UNDECODED bytes read so
+            # far (CPython never decodes the partial), so decode them ourselves
+            # with errors='replace' (spike E3: a truncated multibyte lead must
+            # not crash this diagnostic path).
+            partial_out = _decode_partial(exc.stdout)
+            partial_err = _decode_partial(exc.stderr)
+            _reap_process_group(p)
+            if retry_on_timeout and attempt < _MAX_ATTEMPTS - 1:
+                time.sleep(2 ** (attempt + 1))  # 2s, 4s — retry within the loop
+                continue
+            # Terminal: raised BEFORE _check_mutation_failure (never fabricate a
+            # success on a killed child).
+            raise AcliTimeoutError(
                 full_cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-                env=env,
-            )
-            # Bug 44de: ACLI exits 0 even when a mutation fails. Inspect the
-            # structured --json output and raise AcliMutationError if the
-            # response indicates FAILURE. Read-only and create-issue shapes
-            # short-circuit harmlessly inside the helper.
-            _check_mutation_failure(result.stdout, full_cmd)
-            return result
-        except subprocess.CalledProcessError as exc:
+                call_timeout,
+                partial_stdout=partial_out,
+                partial_stderr=partial_err,
+            ) from exc
+
+        result = subprocess.CompletedProcess(full_cmd, p.returncode, out, err)
+        if p.returncode != 0:
+            # Preserve the previous check=True semantics.
+            exc = subprocess.CalledProcessError(p.returncode, full_cmd, out, err)
             last_error = exc
             # Fast-abort on auth failure
             if exc.returncode == _AUTH_FAILURE_CODE:
-                raise
+                raise exc
             # Fast-abort on deterministic assignee errors — retrying is pointless.
             # Callers print a contextual warning; no stderr print here to avoid duplication.
             if exc.stderr and (
                 _ASSIGNEE_PERMISSION_ERROR in exc.stderr or _ASSIGNEE_NOT_FOUND_ERROR in exc.stderr
             ):
-                raise
+                raise exc
             # If more retries remain, sleep with exponential backoff
             if attempt < _MAX_ATTEMPTS - 1:
-                delay = 2 ** (attempt + 1)  # 2s, 4s
-                time.sleep(delay)
+                time.sleep(2 ** (attempt + 1))  # 2s, 4s
+            continue
+
+        # Bug 44de: ACLI exits 0 even when a mutation fails. Inspect the
+        # structured --json output and raise AcliMutationError if the response
+        # indicates FAILURE. Only reached on a real, completed run — never on a
+        # killed child. Read-only and create-issue shapes short-circuit harmlessly.
+        _check_mutation_failure(result.stdout, full_cmd)
+        return result
 
     # All attempts exhausted — include stderr in the error message for debugging
     assert last_error is not None
