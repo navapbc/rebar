@@ -118,8 +118,14 @@ model mirrors it (pinned by a test). Correctness guarantees:
   repo; a missing file or out-of-range line is downgraded to a freeform `source`
   note. File tools print `<lineno>: <content>` so the model cites accurately.
 - **Read-only, sandboxed.** The agent's file tools are read-only and confined to
-  the repo, with `.git` / `.tickets-tracker` / `.bridge_state` denied. No
-  write/edit/bash tools in a *review* op.
+  the repo, with `.git` / `.tickets-tracker` / `.bridge_state` denied (by realpath,
+  so symlinks can't escape the root). No write/edit/bash tools in a *review* op.
+  **Deployment caveat:** the deny-list covers internal state, *not* secrets. An
+  explicitly named in-repo file is readable even if `.gitignore`'d — discovery
+  hides `.gitignore`'d paths, but `read_file` will still return a named `.env` /
+  `*.pem` / credentials file (and could quote it in a citation). Run reviews
+  against repos that don't contain live secrets, or scrub them first; don't point
+  the agent at a working tree holding production credentials.
 - **Built for large files/projects** (the patterns SWE-agent / deepagents / Claude
   Code converge on, where windowing is a *correctness* lever, not just cost):
   `read_file` is **windowed** — it returns a capped number of lines and tells the

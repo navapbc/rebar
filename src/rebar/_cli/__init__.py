@@ -236,6 +236,10 @@ def _render_review_text(result: dict) -> None:
         sys.stdout.write(f"\n{result['summary']}\n")
     for f in findings:
         sys.stdout.write(f"\n[{f.get('severity', '?').upper()}] ({f.get('dimension')}) ")
+        # Surface multi-reviewer consensus that aggregation computed (agreement>1).
+        if f.get("agreement", 1) > 1:
+            who = ", ".join(f.get("reviewers", [])) or "?"
+            sys.stdout.write(f"[agreement {f['agreement']}: {who}] ")
         if f.get("title"):
             sys.stdout.write(f"{f['title']}\n")
         else:

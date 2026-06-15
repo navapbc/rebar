@@ -163,31 +163,39 @@ def _langflow_extract_text(raw: dict) -> str:
                 return inner
     except (KeyError, IndexError, TypeError):
         pass
-    found = _deep_find_text(raw)
-    if found:
-        return found
+    # Fallback: search only the `outputs` subtree (never the top-level inputs/
+    # session echo) and prefer the LAST message-like string — the flow's final
+    # output component, not an echoed input or intermediate message earlier in the
+    # tree, which a first-match walk would wrongly grab.
+    subtree = raw.get("outputs", raw) if isinstance(raw, dict) else raw
+    texts = _deep_find_texts(subtree)
+    if texts:
+        return texts[-1]
     raise StructuredOutputError("could not extract a message from the Langflow response")
 
 
-def _deep_find_text(obj, _depth: int = 0) -> str | None:
-    """Recursively find the first non-empty string under a 'text'/'message' key."""
+def _deep_find_texts(obj, _depth: int = 0) -> list[str]:
+    """Every non-empty string under a 'text'/'message' key, in depth-first order."""
+    out: list[str] = []
     if _depth > 8:
-        return None
+        return out
     if isinstance(obj, dict):
         for key in ("text", "message"):
             val = obj.get(key)
             if isinstance(val, str) and val.strip():
-                return val
+                out.append(val)
         for val in obj.values():
-            found = _deep_find_text(val, _depth + 1)
-            if found:
-                return found
+            out.extend(_deep_find_texts(val, _depth + 1))
     elif isinstance(obj, list):
         for item in obj:
-            found = _deep_find_text(item, _depth + 1)
-            if found:
-                return found
-    return None
+            out.extend(_deep_find_texts(item, _depth + 1))
+    return out
+
+
+def _deep_find_text(obj) -> str | None:
+    """First non-empty 'text'/'message' string (kept for callers/tests)."""
+    texts = _deep_find_texts(obj)
+    return texts[0] if texts else None
 
 
 def _parse_findings_json(text: str) -> tuple[list, str | None]:
@@ -250,10 +258,11 @@ class DeepAgentsRunner:
     this runner is the seam for future deepagents-based task types. It uses
     deepagents' native filesystem over a repo-rooted ``FilesystemBackend``, made
     **read-only** via a write-denying ``FilesystemPermission`` (confined to the
-    repo root). NOTE: our state-dir deny-list (`.git`/`.tickets-tracker`/
-    `.bridge_state`) is enforced on the citation OUTPUT (resolve_citations) rather
-    than on reads here; use the default langgraph runner for read-side deny-listing.
-    Output is still constrained to our findings schema, so it returns a review_result."""
+    repo root), plus **read-deny** rules over our state-dir deny-list
+    (`.git`/`.tickets-tracker`/`.bridge_state`, incl. the TICKETS_TRACKER_DIR
+    override) so internal state can't be read here either — same guarantee the
+    default langgraph runner enforces. Output is still constrained to our findings
+    schema, so it returns a review_result."""
 
     name = "deepagents"
 
@@ -265,14 +274,27 @@ class DeepAgentsRunner:
         _, ToolStrategy, init_chat_model = _import_langgraph()
         create_deep_agent, FilesystemBackend, FilesystemPermission = _import_deepagents()
         model = _build_model(cfg, init_chat_model)
-        backend = FilesystemBackend(root_dir=cfg.repo_path or ".", virtual_mode=True)
-        read_only = [FilesystemPermission(operations=["write"], paths=["/**"], mode="deny")]
+        root = os.path.realpath(cfg.repo_path or ".")
+        backend = FilesystemBackend(root_dir=root, virtual_mode=True)
+        # Read-only overall, plus read-deny over the state-dir deny-list (as
+        # backend-root-relative globs) so deepagents' own ls/read/grep can't reach
+        # internal state — parity with the langgraph runner's _safe_path deny.
+        permissions = [FilesystemPermission(operations=["write"], paths=["/**"], mode="deny")]
+        deny_globs = [
+            f"/{d[len(root) + 1:].replace(os.sep, '/')}/**"
+            for d in _denied_realpaths(root)
+            if d.startswith(root + os.sep)
+        ]
+        if deny_globs:
+            permissions.append(
+                FilesystemPermission(operations=["read"], paths=deny_globs, mode="deny")
+            )
         agent = create_deep_agent(
             model=model,
             tools=_mcp_tools(cfg.mcp_servers),  # deepagents supplies its own ls/read/grep/glob
             system_prompt=req.system_prompt,
             backend=backend,
-            permissions=read_only,
+            permissions=permissions,
             response_format=ToolStrategy(_findings.findings_response_model(), handle_errors=True),
         )
         outcome, trace_id = _invoke(agent, cfg, req)
@@ -296,6 +318,8 @@ def get_runner(config: LLMConfig, *, override: Runner | None = None) -> Runner:
 def _invoke(agent, cfg: LLMConfig, req: RunRequest) -> tuple[dict, str | None]:
     """Invoke a compiled agent under the (optional) Langfuse trace, returning
     ``(outcome, trace_id)``. Shared by the langgraph + deepagents runners."""
+    # LangGraph counts super-steps (~2 per tool-call cycle: model node + tool node),
+    # so this is roughly half the tool calls the agent can make before it trips.
     invoke_cfg: dict = {"recursion_limit": cfg.max_iterations}
     with _trace(cfg) as (trace_id, callbacks):
         if callbacks:
@@ -304,10 +328,21 @@ def _invoke(agent, cfg: LLMConfig, req: RunRequest) -> tuple[dict, str | None]:
             # Best-effort prompt→trace linkage (see note: create_agent builds
             # messages internally, so this run-level metadata may not register).
             invoke_cfg["metadata"] = {"langfuse_prompt": req.langfuse_prompt}
-        outcome = agent.invoke(
-            {"messages": [{"role": "user", "content": req.instructions}]},
-            config=invoke_cfg,
-        )
+        try:
+            outcome = agent.invoke(
+                {"messages": [{"role": "user", "content": req.instructions}]},
+                config=invoke_cfg,
+            )
+        except Exception as exc:
+            # Surface the opaque GraphRecursionError as a clean, actionable runner
+            # error (matched by name to avoid importing langgraph.errors).
+            if type(exc).__name__ == "GraphRecursionError":
+                raise LLMRunnerError(
+                    f"agent exceeded its step budget (recursion_limit="
+                    f"{cfg.max_iterations}; ~2 steps per tool call). Raise "
+                    "REBAR_LLM_MAX_ITERS or narrow the task."
+                ) from exc
+            raise
     return outcome, trace_id
 
 

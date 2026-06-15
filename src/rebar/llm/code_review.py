@@ -57,10 +57,21 @@ def _git(repo: str, args: list[str]) -> str:
 
 
 def _changed_from_diff(diff_text: str) -> list[str]:
-    files = []
+    """Changed paths from a unified diff. Parse ``diff --git a/… b/…`` headers (the
+    new path) so deletions (``+++ /dev/null``) and renames are covered too — not just
+    ``+++ b/`` lines — and fall back to ``+++ b/`` for non-git diffs. /dev/null is
+    skipped; order-preserving + de-duplicated."""
+    files: list[str] = []
+    seen: set[str] = set()
     for line in diff_text.splitlines():
-        if line.startswith("+++ b/"):
-            files.append(line[6:].strip())
+        path = None
+        if line.startswith("diff --git ") and " b/" in line:
+            path = line.split(" b/", 1)[1].strip()
+        elif line.startswith("+++ b/"):
+            path = line[6:].strip()
+        if path and path != "/dev/null" and path not in seen:
+            seen.add(path)
+            files.append(path)
     return files
 
 

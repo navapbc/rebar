@@ -7,16 +7,17 @@ imported lazily by the runner only when an operation actually runs.
 
 Environment variables (all optional; sensible defaults):
 
-  REBAR_LLM_RUNNER        in-process backend: ``langgraph`` (default) | ``langflow``
+  REBAR_LLM_RUNNER        backend: ``langgraph`` (default) | ``langflow`` |
+                          ``deepagents`` | ``fake`` (offline/tests)
   REBAR_LLM_MODEL         model id (default ``claude-opus-4-8``)
   REBAR_LLM_MAX_TOKENS    per-response token ceiling (default 8000)
-  REBAR_LLM_MAX_ITERS     agent-loop recursion/iteration cap (default 25)
+  REBAR_LLM_MAX_ITERS     LangGraph recursion limit (super-steps; ~2 per tool call; default 25)
   REBAR_LLM_TIMEOUT       per-operation wall-clock seconds (default 600)
   REBAR_LLM_REPO_PATH     repo root the agent's read-only file tools see (default: repo root)
   REBAR_LLM_MCP_SERVERS   JSON object of MCP servers (langchain-mcp-adapters shape)
   ANTHROPIC_API_KEY       model credentials (required to actually run langgraph)
   LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST   tracing + prompts (optional)
-  LANGFLOW_URL / LANGFLOW_API_KEY   Langflow deployment (only for the langflow runner)
+  LANGFLOW_URL / LANGFLOW_FLOW_ID / LANGFLOW_API_KEY   Langflow deployment (langflow runner)
 """
 
 from __future__ import annotations

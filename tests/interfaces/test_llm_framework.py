@@ -469,6 +469,61 @@ def test_aggregate_findings_clusters_and_ranks() -> None:
     assert merged[1]["dimension"] == "style"  # ranked below (lower severity/agreement)
 
 
+def test_aggregate_clusters_across_line_bucket_boundary() -> None:
+    """Two reviewers citing the same region at lines straddling a 10-line bucket
+    boundary (9 vs 11) must still cluster — proximity, not fixed bucketing."""
+    from rebar.llm.aggregate import aggregate_findings
+
+    r1 = {"reviewers": ["a"], "findings": [
+        {"severity": "high", "dimension": "security", "detail": "bug",
+         "citations": [{"kind": "file", "path": "x.py", "line_start": 9}]},
+    ]}
+    r2 = {"reviewers": ["b"], "findings": [
+        {"severity": "high", "dimension": "security", "detail": "same bug",
+         "citations": [{"kind": "file", "path": "x.py", "line_start": 11}]},
+    ]}
+    merged = aggregate_findings([r1, r2])
+    assert len(merged) == 1 and merged[0]["agreement"] == 2
+    assert merged[0]["reviewers"] == ["a", "b"]
+    # A far-away finding on the same file/dimension stays its own cluster.
+    r3 = {"reviewers": ["c"], "findings": [
+        {"severity": "high", "dimension": "security", "detail": "different",
+         "citations": [{"kind": "file", "path": "x.py", "line_start": 99}]},
+    ]}
+    assert len(aggregate_findings([r1, r2, r3])) == 2
+
+
+def test_langflow_extract_prefers_output_over_echoed_input() -> None:
+    """The fallback extractor must search only the `outputs` subtree and return the
+    LAST message — never an echoed input or an intermediate message."""
+    from rebar.llm.runner import _langflow_extract_text
+
+    raw = {
+        "inputs": {"text": "ECHOED PROMPT"},  # outside outputs → must be ignored
+        "outputs": [{"outputs": [
+            {"results": {"text": "intermediate message"}},
+            {"results": {"message": {"text": "FINAL OUTPUT"}}},
+        ]}],
+    }
+    assert _langflow_extract_text(raw) == "FINAL OUTPUT"
+
+
+def test_changed_from_diff_covers_deletes_and_renames() -> None:
+    from rebar.llm.code_review import _changed_from_diff
+
+    diff = (
+        "diff --git a/auth.py b/auth.py\n"
+        "deleted file mode 100644\n--- a/auth.py\n+++ /dev/null\n"
+        "diff --git a/old.py b/new.py\n"
+        "similarity index 90%\nrename from old.py\nrename to new.py\n"
+        "diff --git a/normal.py b/normal.py\n"
+        "--- a/normal.py\n+++ b/normal.py\n@@ -1 +1 @@\n-x\n+y\n"
+    )
+    files = _changed_from_diff(diff)
+    assert files == ["auth.py", "new.py", "normal.py"]  # delete + rename + edit, deduped
+    assert "/dev/null" not in files
+
+
 def test_select_code_reviewers_rules() -> None:
     from rebar.llm.code_review import select_code_reviewers
 
@@ -636,12 +691,21 @@ def test_mcp_review_tool_registered_and_gated(rebar_repo: Path,
 
     srv = build_server()
     tools = {t.name: t for t in asyncio.run(srv.list_tools())}
-    assert "review_ticket" in tools
-    # plain-dict return → no advertised outputSchema (NO_SCHEMA_EXEMPT contract)
-    assert not tools["review_ticket"].outputSchema
+    # All three LLM tools are registered, plain-dict return → no advertised
+    # outputSchema (NO_SCHEMA_EXEMPT contract).
+    for name in ("review_ticket", "review_code", "scan_spec"):
+        assert name in tools, name
+        assert not tools[name].outputSchema, name
 
     epic = _seed(rebar_repo)
-    # Disabled by default (no REBAR_MCP_ALLOW_LLM) → tool error.
+    # All three are disabled by default (no REBAR_MCP_ALLOW_LLM) → tool error, so a
+    # default MCP client can never trigger a billable LLM call.
     monkeypatch.delenv("REBAR_MCP_ALLOW_LLM", raising=False)
-    with pytest.raises(Exception):
-        _unwrap(asyncio.run(srv.call_tool("review_ticket", {"ticket_id": epic})))
+    gated_calls = {
+        "review_ticket": {"ticket_id": epic},
+        "review_code": {},
+        "scan_spec": {"spec_text": "the spec"},
+    }
+    for name, args in gated_calls.items():
+        with pytest.raises(Exception):
+            _unwrap(asyncio.run(srv.call_tool(name, args)))
