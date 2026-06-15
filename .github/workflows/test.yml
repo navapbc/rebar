@@ -4,10 +4,14 @@ name: test
 # "the suite catches it", so this is the gate that makes that automatic (ticket
 # coily-conch-tag / Rec 3 of the 2026-06-09 architecture review).
 #
-# Coverage: the Python tiers (unit / scripts / interface) plus the integration
-# tier (concurrency + reconciler — network-guarded / mocked, so CI-safe). Live
-# Jira validation is done via manual probes (bridge-probe, reconcile dry-run),
-# not pytest.
+# Coverage: the Python tiers (unit / scripts / interface) AND every standalone
+# bash suite under tests/scripts/test-*.sh, which the test_bash_suites.py collector
+# runs under pytest, plus the integration tier (concurrency + reconciler —
+# network-guarded / mocked, so CI-safe) as a separate step. Live Jira validation is
+# done via manual probes (bridge-probe, reconcile dry-run), not pytest. The external
+# tier (live LLM providers — tests/external/) is excluded from the default run via
+# `-m "not integration and not external"` and runs separately with credentials via
+# the external-integration workflow.
 
 on:
   push:
@@ -115,18 +119,18 @@ jobs:
             | awk '$2 != "total" && $1 > 800 { printf "  %5d  %s\n", $1, $2 }' | sort -rn)
           if [ -n "$over" ]; then echo "$over"; else echo "  (none — all units within the soft cap)"; fi
 
-      - name: Run the Python tiers (unit / scripts / interface; excludes integration)
-        # Pin --basetemp under the runner temp (not /tmp): on long runs the macOS
-        # tmp-cleaner reaps pytest's default /tmp/pytest-of-* basetemp mid-run,
-        # producing a spurious FileNotFoundError cascade. -p no:cacheprovider keeps
-        # a stale cache from leaking across runs.
+      - name: Run the default suite (Python tiers + bash collector; excludes integration + external)
+        # Pin --basetemp under the runner temp (not /tmp): on long (10-16 min) runs
+        # the macOS tmp-cleaner reaps pytest's default /tmp/pytest-of-* basetemp
+        # mid-run, producing a spurious FileNotFoundError cascade. -p no:cacheprovider
+        # keeps a stale cache from leaking across runs.
         #
         # Coverage is reported (term-missing) but NOT gated: several tests run rebar
         # as a subprocess so they don't count toward in-process coverage, and a hard
         # floor would be misleading until that's reconciled. The number is surfaced
         # for visibility / ratcheting, not as a pass/fail.
         run: >-
-          pytest -m "not integration" -q -p no:cacheprovider
+          pytest -m "not integration and not external" -q -p no:cacheprovider
           --basetemp="${{ runner.temp }}/rebar-basetemp"
           --cov=rebar --cov-report=term-missing:skip-covered
 

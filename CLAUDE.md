@@ -77,6 +77,14 @@ additionally requires `REBAR_MCP_ALLOW_RECONCILE_LIVE=1`. Both env gates accept
 any case-insensitive truthy value (`1`/`true`/`yes`, whitespace tolerated);
 anything else (including unset) is off.
 
+**LLM agent operations (optional, gated):** `review_ticket(ticket_id, reviewer_id,
+graph)` runs a tool-using LLM agent that reviews a ticket (or its graph) and
+returns a `review_result` (`{findings[], …}`). It is **disabled unless
+`REBAR_MCP_ALLOW_LLM=1`** (it makes a live, billable LLM call) and needs the
+`nava-rebar[agents]` extra + `ANTHROPIC_API_KEY`. This is part of the optional
+`rebar.llm` framework (CLI: `rebar review`; library: `rebar.llm.review_ticket`) —
+see [docs/llm-framework.md](docs/llm-framework.md).
+
 ## Quality gates
 
 The **per-ticket** gates each take a ticket id and self-check a single ticket
@@ -184,4 +192,7 @@ rebar.claim(tid["id"], assignee="me")                            # raises Concur
 hits = rebar.search("login")                                     # replay-derived list
 rebar.link(child, parent, "discovered_from")
 rebar.transition(tid["id"], "in_progress", "closed")
+
+import rebar.llm                                                  # optional [agents] extra
+review = rebar.llm.review_ticket(tid["id"], "ticket-quality")    # -> review_result {findings[], …}
 ```

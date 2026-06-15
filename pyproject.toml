@@ -25,6 +25,27 @@ dependencies = []
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.2"]
+# LLM agent-operations framework (rebar.llm). OPTIONAL — never required by core
+# rebar (the engine stays stdlib-only, `dependencies = []`). The default in-process
+# runner is the LangChain/LangGraph stack — the one agent runtime native to BOTH
+# Langflow and Langfuse — but everything here is imported lazily, so `import rebar`
+# and even `import rebar.llm` stay dependency-free; only *running* an operation
+# needs this extra. langchain/langgraph are pinned to the v1 line (the
+# `langchain.agents.create_agent` API); langfuse forces pydantic v2. The Langflow
+# runner needs no dependency (a stubbed REST seam); custom read-only filesystem
+# tools avoid langchain-community.
+agents = [
+    "langchain>=1,<2",
+    "langgraph>=1,<2",
+    "langchain-anthropic>=0.3",  # Claude (default provider)
+    "langchain-openai>=0.2",     # ChatGPT / OpenAI-compatible local servers
+    "langchain-mcp-adapters>=0.3",
+    "langfuse>=3",
+    "pydantic>=2",
+    "deepagents>=0.6",  # opt-in harness runner (planning/subagents); not the review default
+]
+# Additional model providers are opt-in (keep the default extra lean):
+#   pip install langchain-google-genai   # Gemini
 dev = [
     "pytest>=8",
     "mcp>=1.2",
@@ -33,6 +54,11 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.10",
     "pytest-cov>=5",
+    # Pull the full agents stack so the rebar.llm validation tests (provider
+    # construction for Claude + ChatGPT, MCP/Langfuse paths) RUN in CI rather than
+    # skipping. Self-referential extra — kept here, not in core, so `pip install
+    # nava-rebar` stays dependency-free.
+    "nava-rebar[agents]",
 ]
 
 [project.scripts]
@@ -110,6 +136,7 @@ markers = [
     "unit: unit-tier tests (network-guarded)",
     "scripts: scripts-tier tests (engine scripts / reconciler)",
     "integration: integration-tier tests (may require live services)",
+    "external: external-integration tests that hit third-party services (live LLM providers, etc.); excluded from the default run; run via the external-integration workflow with credentials",
     "interface: interface-parity tests (library / CLI / MCP over one store)",
     "allow_network: opt out of the network guard for a test",
     "benchmark: performance benchmark (informational; not a pass/fail gate)",

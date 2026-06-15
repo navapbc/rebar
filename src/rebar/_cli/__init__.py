@@ -84,6 +84,191 @@ def _reconcile(argv: list[str]) -> int:
     return subprocess.call([sys.executable, "-m", "rebar_reconciler", *args], env=engine_env(root))
 
 
+def _review(argv: list[str]) -> int:
+    """``rebar review`` → rebar.llm.review_ticket (native; not a dispatcher arm).
+
+    Like ``reconcile``, this is intercepted in main() before the bash-golden help
+    system, so it owns its own ``--help``. JSON output conforms to the
+    ``review_result`` schema (OUTPUT_SCHEMAS['review'])."""
+    import argparse
+    import json as _json
+
+    parser = argparse.ArgumentParser(
+        prog="rebar review",
+        description="Run an LLM review of a ticket (or its ticket-graph) and emit "
+        "structured findings. Needs the 'agents' extra + a model API key (provider "
+        "per REBAR_LLM_MODEL); see `rebar review --check`.",
+    )
+    parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")
+    parser.add_argument(
+        "reviewer_id",
+        nargs="?",
+        default=None,
+        help="reviewer from the catalog (default: the catalog's default reviewer)",
+    )
+    parser.add_argument(
+        "--graph",
+        action="store_true",
+        help="also review the ticket's descendants, as one unit",
+    )
+    parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="print backend/credential availability and exit",
+    )
+    args = parser.parse_args(argv)
+
+    from rebar import llm
+
+    if args.check:
+        sys.stdout.write(_json.dumps(llm.available_backends(), indent=2) + "\n")
+        return 0
+    if not args.ticket_id:
+        parser.error("ticket_id is required")
+    ensure_initialized(init_only=True)
+    try:
+        result = llm.review_ticket(args.ticket_id, args.reviewer_id, graph=args.graph)
+    except llm.LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    if args.output == "json":
+        sys.stdout.write(_json.dumps(result) + "\n")
+    else:
+        _render_review_text(result)
+    return 0
+
+
+def _review_code(argv: list[str]) -> int:
+    """``rebar review-code`` → rebar.llm.review_code (native, like reconcile/review).
+
+    Reviews a git range (``--base``/``--head``) or a ``--diff-file`` with one or
+    more reviewers; JSON output conforms to the ``review_result`` schema."""
+    import argparse
+    import json as _json
+
+    parser = argparse.ArgumentParser(
+        prog="rebar review-code",
+        description="Run an LLM code review of a change (git range or diff file) and "
+        "emit aggregated structured findings. Needs the 'agents' extra + an API key.",
+    )
+    parser.add_argument("--base", default="HEAD~1", help="base git ref (default HEAD~1)")
+    parser.add_argument("--head", default="HEAD", help="head git ref (default HEAD)")
+    parser.add_argument("--diff-file", help="review this unified-diff file instead of a git range")
+    parser.add_argument(
+        "--reviewer",
+        action="append",
+        dest="reviewers",
+        help="reviewer id (repeatable; default: deterministic selection)",
+    )
+    parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
+    args = parser.parse_args(argv)
+
+    from rebar import llm
+
+    diff_text = None
+    if args.diff_file:
+        try:
+            with open(args.diff_file, encoding="utf-8", errors="replace") as fh:
+                diff_text = fh.read()
+        except OSError as exc:
+            sys.stderr.write(f"Error: cannot read --diff-file: {exc}\n")
+            return 1
+    try:
+        result = llm.review_code(
+            base=args.base, head=args.head, diff_text=diff_text, reviewers=args.reviewers
+        )
+    except llm.LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    if args.output == "json":
+        sys.stdout.write(_json.dumps(result) + "\n")
+    else:
+        _render_review_text(result)
+    return 0
+
+
+def _scan_spec(argv: list[str]) -> int:
+    """``rebar scan-spec`` → rebar.llm.scan_epics_for_spec (native op).
+
+    Scans open epics against a spec for gaps/conflicts/overlaps; JSON output
+    conforms to the ``review_result`` schema."""
+    import argparse
+    import json as _json
+
+    parser = argparse.ArgumentParser(
+        prog="rebar scan-spec",
+        description="Batch-scan open epics against a specification and emit "
+        "structured findings (gaps/conflicts/overlaps). Needs the 'agents' extra.",
+    )
+    parser.add_argument("--spec-file", required=True, help="path to the specification text")
+    parser.add_argument("--batch-size", type=int, default=5, help="epics per batch (default 5)")
+    parser.add_argument(
+        "--epic",
+        action="append",
+        dest="epics",
+        help="restrict to these epic ids (repeatable; default: all open epics)",
+    )
+    parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
+    args = parser.parse_args(argv)
+
+    try:
+        with open(args.spec_file, encoding="utf-8", errors="replace") as fh:
+            spec_text = fh.read()
+    except OSError as exc:
+        sys.stderr.write(f"Error: cannot read --spec-file: {exc}\n")
+        return 1
+    ensure_initialized(init_only=True)  # reads epics from the store
+    from rebar import llm
+
+    try:
+        result = llm.scan_epics_for_spec(spec_text, epics=args.epics, batch_size=args.batch_size)
+    except llm.LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    if args.output == "json":
+        sys.stdout.write(_json.dumps(result) + "\n")
+    else:
+        _render_review_text(result)
+    return 0
+
+
+def _render_review_text(result: dict) -> None:
+    """Human-readable rendering of a review_result."""
+    findings = result.get("findings", [])
+    target = result.get("target", {})
+    ids = ", ".join(target.get("ticket_ids", [])) or "?"
+    sys.stdout.write(
+        f"Review of {ids} ({result.get('runner')}/{result.get('model') or 'n/a'}) — "
+        f"{len(findings)} finding(s)\n"
+    )
+    if result.get("summary"):
+        sys.stdout.write(f"\n{result['summary']}\n")
+    for f in findings:
+        sys.stdout.write(f"\n[{f.get('severity', '?').upper()}] ({f.get('dimension')}) ")
+        # Surface multi-reviewer consensus that aggregation computed (agreement>1).
+        if f.get("agreement", 1) > 1:
+            who = ", ".join(f.get("reviewers", [])) or "?"
+            sys.stdout.write(f"[agreement {f['agreement']}: {who}] ")
+        if f.get("title"):
+            sys.stdout.write(f"{f['title']}\n")
+        else:
+            sys.stdout.write("\n")
+        sys.stdout.write(f"  {f.get('detail', '')}\n")
+        for c in f.get("citations", []):
+            if c.get("kind") == "file":
+                loc = c.get("path", "")
+                if c.get("line_start"):
+                    loc += f":{c['line_start']}"
+                    if c.get("line_end") and c["line_end"] != c["line_start"]:
+                        loc += f"-{c['line_end']}"
+                sys.stdout.write(f"    @ {loc}\n")
+            elif c.get("kind") == "url":
+                sys.stdout.write(f"    @ {c.get('url', '')}\n")
+            else:
+                sys.stdout.write(f"    - {c.get('description', '')}\n")
+
+
 def _bridge_probe(argv: list[str]) -> int:
     """``rebar bridge-probe`` → live Jira capability preflight.
 
@@ -255,6 +440,18 @@ def main(argv: list[str] | None = None) -> int:
     # reconcile intercept (the dispatcher has no reconcile arm).
     if argv and argv[0] == "reconcile":
         return _reconcile(argv[1:])
+
+    # review intercept (native rebar.llm op; not a dispatcher arm, like reconcile).
+    if argv and argv[0] == "review":
+        return _review(argv[1:])
+
+    # review-code intercept (native rebar.llm code-review op).
+    if argv and argv[0] == "review-code":
+        return _review_code(argv[1:])
+
+    # scan-spec intercept (native rebar.llm batch spec-scan op).
+    if argv and argv[0] == "scan-spec":
+        return _scan_spec(argv[1:])
 
     # No subcommand: overview to stdout, exit 1 (the dispatcher's _usage).
     if not argv:

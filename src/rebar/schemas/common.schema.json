@@ -96,6 +96,40 @@
         "message": { "type": "string" },
         "exit_code": { "type": "integer", "description": "Optional: the process exit code that accompanied this failure (see docs/exit-codes.md). Present on emitted failure envelopes; omitted by legacy read-not-found callers." }
       }
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "high", "medium", "low", "info"],
+      "description": "Finding severity, highest→lowest. 'info' is a non-actionable observation."
+    },
+    "citation": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Evidence backing a finding (rebar.llm). The `kind` discriminator selects the shape: a repo file location (path [, line_start, line_end]); a URL; or a freeform source/evidence description. `kind` is required so consumers can branch; the other fields are populated per kind.",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["file", "url", "source"] },
+        "path": { "type": "string", "description": "Repo-relative file path (kind=file)." },
+        "line_start": { "type": "integer", "minimum": 0, "description": "1-based start line (kind=file); 0/omitted means whole file." },
+        "line_end": { "type": "integer", "minimum": 0, "description": "1-based end line (kind=file); 0/omitted means whole file (i.e. through the end)." },
+        "url": { "type": "string", "description": "URL evidence (kind=url)." },
+        "description": { "type": "string", "description": "Freeform source/evidence description (kind=source), or extra context for any kind." }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "One reviewer finding — the universal output element of every LLM review operation (rebar.llm).",
+      "required": ["severity", "dimension", "detail"],
+      "properties": {
+        "severity": { "$ref": "common.schema.json#/$defs/severity" },
+        "dimension": { "type": "string", "description": "Category/dimension the finding belongs to (e.g. 'security', 'acceptance-criteria', 'test-coverage'). Reviewer-defined." },
+        "detail": { "type": "string", "description": "Human-readable description of the finding." },
+        "title": { "type": "string", "description": "Optional short headline." },
+        "citations": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/citation" } },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1, "description": "Optional reviewer confidence (0..1)." },
+        "reviewer_id": { "type": "string", "description": "Id of the reviewer prompt that produced this finding." }
+      }
     }
   }
 }

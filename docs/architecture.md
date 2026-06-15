@@ -63,6 +63,17 @@ over one git-backed store.
     (`python -m rebar_reconciler`); the one component with a grandfathered
     cross-client advisory lock (`.reconciler-pass-lock`, single-writer-by-design).
 
+- **LLM agent operations** (`rebar.llm`, code at `src/rebar/llm/`) — an OPTIONAL
+  framework for tool-using LLM agents that emit structured findings, exposed over
+  library/CLI (`rebar review`)/MCP (`review_ticket`). The engine core stays
+  stdlib-only; everything here is behind the `nava-rebar[agents]` extra and
+  lazy-imported. A pluggable `Runner` (default in-process LangChain/LangGraph for
+  review; an opt-in deepagents harness for future task types; a Langflow REST stub;
+  a `FakeRunner` for tests) runs the agent with read-only repo file tools + MCP
+  tools; output is constrained to the `review_result` JSON Schema.
+  Langfuse provides tracing + the reviewer-prompt library. See
+  [llm-framework.md](llm-framework.md).
+
 ### Python package layout & the engine import boundary
 
 The library, CLI, MCP server, and all command/read/write logic are the `rebar`

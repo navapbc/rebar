@@ -117,7 +117,16 @@ the MCP server via Homebrew users, install the `[mcp]` extra with pipx/uvx below
 pipx install nava-rebar              # isolated CLI on PATH: rebar
 pip  install nava-rebar              # library: import rebar
 pip  install 'nava-rebar[mcp]'       # + MCP server: rebar-mcp
+pip  install 'nava-rebar[agents]'    # + LLM agent operations: `rebar review` (rebar.llm)
 ```
+
+The `[agents]` extra adds the optional **LLM agent-operations framework**
+(`rebar.llm`) — tool-using agents that review tickets/code and emit structured
+findings, over library / CLI (`rebar review`) / MCP. It is multi-provider
+(**Claude** and **ChatGPT** out of the box, plus Gemini and OpenAI-compatible local
+servers like LMStudio/Ollama via `REBAR_LLM_MODEL`/`REBAR_LLM_MODEL_PROVIDER`/
+`REBAR_LLM_BASE_URL`) and is never required by core rebar (the engine stays
+stdlib-only); see [docs/llm-framework.md](docs/llm-framework.md).
 
 ### MCP server — from the MCP Registry
 

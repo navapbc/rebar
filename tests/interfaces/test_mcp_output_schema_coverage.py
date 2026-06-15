@@ -84,6 +84,17 @@ NO_SCHEMA_EXEMPT: dict[str, str] = {
     "model). CLI/library JSON pinned to transition_result.",
     "reopen_ticket": "same {…, from, …} shape as transition; reserved word.",
     "reconcile": "no canonical schema for the reconcile plan/result shape.",
+    "review_ticket": "rebar.llm review op: makes a live LLM call, so it returns a "
+    "plain dict (review_result shape) and advertises NO outputSchema "
+    "by design — it must NOT be auto-driven on the fixture store in "
+    "CI. The CLI/library --output json path IS pinned to "
+    "review_result via OUTPUT_SCHEMAS['review'].",
+    "review_code": "rebar.llm code-review op: live LLM call(s) over a git range, "
+    "returns an aggregated review_result as a plain dict (no "
+    "outputSchema) — same exemption rationale as review_ticket.",
+    "scan_spec": "rebar.llm batch spec-scan op: live LLM call(s) over the store's "
+    "epics, returns a review_result as a plain dict (no outputSchema) "
+    "— same exemption rationale as review_ticket.",
 }
 
 

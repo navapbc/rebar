@@ -1,0 +1,67 @@
+name: external-integration
+
+# Manually-triggered EXTERNAL-integration suite (tests/external/): tests that hit
+# third-party services — currently the live rebar.llm runner validation (ticket
+# b2e5). These make REAL, billable calls, so they are deliberately NOT part of the
+# automatic `test` workflow (which excludes `-m "not integration and not external"`).
+# Trigger from the Actions tab. Requires the `ANTHROPIC_API_KEY` (or
+# `OPENAI_API_KEY`) repository secret; set `LANGFUSE_*` secrets to also exercise
+# the tracing path.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  external:
+    name: external integration (live services)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # Fail loudly if no key is configured — otherwise the LLM tests would simply
+      # skip and the job would go green without validating anything.
+      - name: Require an LLM API key secret
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENAI_API_KEY" ]; then
+            echo "::error::Set the ANTHROPIC_API_KEY (or OPENAI_API_KEY) repository secret to run the external suite."
+            exit 1
+          fi
+
+      # The rebar_repo fixture initializes a git-backed store via the bash engine,
+      # which shells out to jq + git (mirrors the main test workflow).
+      - name: Ensure jq is installed
+        run: sudo apt-get update && sudo apt-get install -y jq && jq --version
+
+      - name: Install rebar + the full agents stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+
+      - name: Run the external-integration suite
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Optional: present only if configured as secrets — exercises the Langfuse
+          # tracing path (otherwise it stays a no-op).
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
+        # -p no:cacheprovider + a runner-temp basetemp mirror the main workflow.
+        run: >-
+          pytest -m external tests/external -q
+          -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"

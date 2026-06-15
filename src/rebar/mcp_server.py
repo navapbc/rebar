@@ -382,6 +382,66 @@ def build_server():
                 )
         return rebar.reconcile(parsed.value)
 
+    @mcp.tool()
+    def review_ticket(ticket_id: str, reviewer_id: str | None = None, graph: bool = False) -> dict:
+        """Run an LLM review of a ticket (or its graph) -> a review_result dict
+        {findings[], target, reviewers, runner, model, trace_id, summary}.
+
+        DISABLED unless REBAR_MCP_ALLOW_LLM=1: this makes a live, billable LLM call
+        and reaches the network + filesystem (it is not a plain store read). It
+        needs the 'agents' extra + a model API key (provider per REBAR_LLM_MODEL,
+        e.g. ANTHROPIC_API_KEY or OPENAI_API_KEY). Returns a plain dict and
+        advertises NO outputSchema by design — the result is model-produced, so it
+        is a documented NO_SCHEMA_EXEMPT and is not auto-driven in CI."""
+        if not _env_truthy("REBAR_MCP_ALLOW_LLM"):
+            raise ValueError(
+                "review_ticket is disabled: it makes a live, billable LLM call. "
+                "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
+            )
+        import rebar.llm
+
+        return rebar.llm.review_ticket(ticket_id, reviewer_id, graph=graph)
+
+    @mcp.tool()
+    def review_code(
+        base: str = "HEAD~1",
+        head: str = "HEAD",
+        reviewers: list[str] | None = None,
+    ) -> dict:
+        """Run a multi-reviewer LLM code review of a git range (base..head) ->
+        an aggregated review_result dict (findings carry agreement + reviewers).
+
+        DISABLED unless REBAR_MCP_ALLOW_LLM=1 (live, billable LLM call(s); reaches
+        network + filesystem + git). Needs the 'agents' extra + an API key. Returns
+        a plain dict and advertises NO outputSchema by design (documented
+        NO_SCHEMA_EXEMPT) — its CLI/library --output json is pinned to
+        review_result."""
+        if not _env_truthy("REBAR_MCP_ALLOW_LLM"):
+            raise ValueError(
+                "review_code is disabled: it makes live, billable LLM call(s). "
+                "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
+            )
+        import rebar.llm
+
+        return rebar.llm.review_code(base=base, head=head, reviewers=reviewers)
+
+    @mcp.tool()
+    def scan_spec(spec_text: str, batch_size: int = 5) -> dict:
+        """Batch-scan the store's open epics against a specification -> a
+        review_result dict (gaps/conflicts/overlaps), epics evaluated in batches.
+
+        DISABLED unless REBAR_MCP_ALLOW_LLM=1 (live, billable LLM call(s)). Needs
+        the 'agents' extra + an API key. Returns a plain dict and advertises NO
+        outputSchema by design (documented NO_SCHEMA_EXEMPT)."""
+        if not _env_truthy("REBAR_MCP_ALLOW_LLM"):
+            raise ValueError(
+                "scan_spec is disabled: it makes live, billable LLM call(s). "
+                "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
+            )
+        import rebar.llm
+
+        return rebar.llm.scan_epics_for_spec(spec_text, batch_size=batch_size)
+
     # ── Write tools (gated by REBAR_MCP_READONLY) ──────────────────────────────
     if not _readonly():
 
