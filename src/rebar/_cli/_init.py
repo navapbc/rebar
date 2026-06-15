@@ -1,24 +1,18 @@
-"""Auto-init + freshness middleware for the argparse CLI.
+"""Auto-init + freshness middleware for the in-process CLI.
 
-This is the in-process port of the bash dispatcher's ``_ensure_initialized``
-(``_engine/rebar`` lines ~167-235). The dispatcher ran it before every command
-arm; the argparse CLI runs it for the in-process (category-A) arms with the same
-per-command policy:
+The CLI runs this before each in-process command arm, with a per-command policy:
 
 * ``init_only=True`` (read arms: show/list/deps/ready/search/next-batch/list-epics)
   — auto-init only; the read path owns its own throttled reconverge
   (``rebar._engine_support.reads.ensure_fresh``), so the middleware must NOT
   reconverge too (that would double-sync).
 * ``init_only=False`` (write/lifecycle arms) — auto-init **and** the same
-  marker-throttled, fetch-free reconverge the bash write path did. We reuse
+  marker-throttled, fetch-free reconverge the write path needs. It reuses
   ``reads.ensure_fresh`` for the reconverge so there is ONE sync implementation
   and ONE ``/tmp/.ticket-sync-<md5>`` throttle marker shared with the read path.
 
-Category-B arms still subprocess the bash dispatcher (which runs its own
-``_ensure_initialized``), so the middleware is intentionally NOT applied to them.
-
 When ``TICKETS_TRACKER_DIR`` is injected (tests / embedding) the caller owns the
-tracker — the middleware returns immediately, exactly as the dispatcher did.
+tracker — the middleware returns immediately.
 """
 
 from __future__ import annotations
@@ -69,10 +63,42 @@ def _is_interactive() -> bool:
         return False
 
 
-def _confirm_and_init(repo_root: str) -> None:
-    """Auto-init gate (Tier E E4): the ticket store is NEVER created without consent.
+def _create_tracker(repo_root: str) -> None:
+    """Materialize the missing tracker, distinguishing the two init concepts.
 
-    Interactive (TTY): prompt ``[Y/n]`` (default Yes); a No aborts. Non-interactive
+    The store at ``repo_root`` does not exist yet, but "make it exist" means one of
+    two very different things, and only one of them changes the underlying repo:
+
+    * **Symlink to an existing store** — when the host repo is a linked git
+      worktree whose MAIN repo is already initialized, ``init_core`` just creates a
+      ``.tickets-tracker`` symlink to the main repo's store. That adds a local link
+      to an *existing* system and leaves the underlying repo's state untouched, so
+      we create it AUTOMATICALLY — no prompt, even non-interactively.
+    * **First-time init** — when there is no store to link to, materializing one
+      mutates the host repo (orphan ``tickets`` branch + linked worktree +
+      ``.git/info/exclude`` edits). That requires consent (see
+      :func:`_confirm_and_init`).
+    """
+    from rebar._commands import init as _init_cmd
+
+    if _init_cmd.pending_init_is_symlink(repo_root):
+        if _init_cmd.init_core(repo_root, silent=False) != 0:
+            sys.stderr.write(
+                "Error: could not link this worktree to the main repo's ticket store. "
+                "Run 'rebar init' manually.\n"
+            )
+            raise SystemExit(1)
+        return
+    _confirm_and_init(repo_root)
+
+
+def _confirm_and_init(repo_root: str) -> None:
+    """First-time-init consent gate: a NEW ticket store is never
+    created without consent.
+
+    Reached only when there is no existing store to symlink to (see
+    :func:`_create_tracker`), so creating one mutates the host repo. Interactive
+    (TTY): prompt ``[Y/n]`` (default Yes); a No aborts. Non-interactive
     (CI/pipe/library/MCP-shaped): error — no silent creation. The explicit
     ``rebar init`` / :func:`rebar.init_repo` paths bypass this gate entirely. init
     runs in-process via :func:`rebar._commands.init.init_core`.
@@ -114,9 +140,11 @@ def _confirm_and_init(repo_root: str) -> None:
 def ensure_initialized(*, init_only: bool) -> None:
     """Auto-init + freshness gate for in-process CLI arms.
 
-    Unlike the legacy dispatcher (which silently auto-initialized), this NEVER
-    creates the store without an interactive confirmation (TTY) — non-interactive
+    This never creates a NEW store without an interactive confirmation (TTY) — non-interactive
     callers must run ``rebar init`` / :func:`rebar.init_repo` explicitly first.
+    Creating a worktree's symlink to an ALREADY-initialized store is the one
+    exception: it doesn't change the underlying repo, so it happens automatically
+    (see :func:`_create_tracker`).
     """
     # Explicit tracker injected → the caller manages init/freshness (do not
     # auto-init the cwd repo's tracker). Matches the dispatcher's first guard.
@@ -131,7 +159,7 @@ def ensure_initialized(*, init_only: bool) -> None:
     from rebar import config
 
     if not config.tracker_dir(repo_root).is_dir():
-        _confirm_and_init(repo_root)
+        _create_tracker(repo_root)
 
     if init_only:
         return
