@@ -251,6 +251,40 @@ def test_fsck_and_bridge_fsck_shapes(rebar_repo: Path) -> None:
     schemas.validator(schemas.BRIDGE_FSCK).validate(rebar.bridge_fsck(repo_root=r))
 
 
+# ── signing result shapes (sign / verify-signature) ───────────────────────────
+def test_sign_and_verify_signature_shapes(rebar_repo: Path) -> None:
+    r = str(rebar_repo)
+    signed = rebar.create_ticket("task", "To sign", repo_root=r)
+    unsigned = rebar.create_ticket("task", "Unsigned", repo_root=r)
+
+    # sign --output json -> the persisted SIGNATURE record + ticket_id
+    sign_out = _cli_json("sign", signed, '["ran tests", "lint clean"]', "--output", "json", cwd=r)
+    schemas.validator(schemas.SIGN_RESULT).validate(sign_out)
+    assert sign_out["manifest"] == ["ran tests", "lint clean"]
+
+    v = schemas.validator(schemas.VERIFY_SIGNATURE_RESULT)
+    # a freshly-signed ticket verifies as `certified`
+    certified = _cli_json("verify-signature", signed, "--output", "json", cwd=r)
+    v.validate(certified)
+    assert certified["verdict"] == "certified" and certified["verified"] is True
+    # an unsigned ticket verifies as `unsigned` (null base fields)
+    none = _cli_json("verify-signature", unsigned, "--output", "json", cwd=r)
+    v.validate(none)
+    assert none["verdict"] == "unsigned" and none["verified"] is False
+
+    # library parity (sign_manifest / verify_signature)
+    schemas.validator(schemas.SIGN_RESULT).validate(
+        rebar.sign_manifest(unsigned, ["lib step"], repo_root=r)
+    )
+    v.validate(rebar.verify_signature(signed, repo_root=r))
+
+
+def test_verify_signature_not_found_envelope(rebar_repo: Path) -> None:
+    # The unresolved-ticket path emits an error_envelope, not the verdict shape.
+    cp = _cli("verify-signature", "no-such-ticket-xyz", "--output", "json", cwd=str(rebar_repo))
+    schemas.validator(schemas.ERROR_ENVELOPE).validate(json.loads(cp.stdout))
+
+
 # ── MCP typed returns advertise an outputSchema ───────────────────────────────
 def test_mcp_read_tools_advertise_output_schema(rebar_repo: Path) -> None:
     """Every typed read tool advertises an MCP outputSchema (so agents get a

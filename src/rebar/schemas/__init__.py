@@ -59,6 +59,8 @@ __all__ = [
     "LIST_EPICS",
     "FSCK",
     "REVIEW_RESULT",
+    "SIGN_RESULT",
+    "VERIFY_SIGNATURE_RESULT",
     "COMMON",
 ]
 
@@ -88,6 +90,10 @@ FSCK = "fsck"
 # exempt (live LLM call → plain dict, no outputSchema); the CLI/library JSON path
 # is pinned to this schema via the "review" key below.
 REVIEW_RESULT = "review_result"
+# signing.py — the persisted SIGNATURE record (`rebar sign`) and the uniform
+# verify verdict (`rebar verify-signature`), both over `--output json`.
+SIGN_RESULT = "sign_result"
+VERIFY_SIGNATURE_RESULT = "verify_signature_result"
 
 # The authoritative map of every structured (--output json / always-JSON) output
 # to its schema. Keyed by command, or <command>.<interface> when an interface's
@@ -123,6 +129,9 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "list_epics": LIST_EPICS,
     "fsck": FSCK,
     "review": REVIEW_RESULT,
+    "sign": SIGN_RESULT,
+    "verify_signature": VERIFY_SIGNATURE_RESULT,
+    "verify_signature.not_found": ERROR_ENVELOPE,
 }
 
 

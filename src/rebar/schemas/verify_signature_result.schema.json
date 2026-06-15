@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/verify_signature_result.schema.json",
+  "title": "VerifySignatureResult",
+  "description": "Result of `rebar verify-signature <ticket_id> --output json` (and the library verify_signature() / MCP verify_signature): a uniform verdict record. Every verdict carries the same base keys (manifest, step_count, algorithm, key_id, signed_at, head_sha) so consumers read them regardless of outcome; verdict is one of unsigned | foreign_key | certified | mismatch and verified is true iff certified. algorithm/key_id/signed_at/head_sha are null on an unsigned ticket. The not-found path emits an error_envelope instead (covered by ERROR_ENVELOPE).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["manifest", "step_count", "algorithm", "key_id", "signed_at", "head_sha", "verified", "verdict", "reason", "ticket_id"],
+  "properties": {
+    "manifest": { "type": "array", "items": { "type": "string" } },
+    "step_count": { "type": "integer" },
+    "algorithm": { "type": ["string", "null"] },
+    "key_id": { "type": ["string", "null"] },
+    "signed_at": { "type": ["integer", "null"] },
+    "head_sha": { "type": ["string", "null"] },
+    "verified": { "type": "boolean" },
+    "verdict": { "type": "string", "enum": ["unsigned", "foreign_key", "certified", "mismatch"] },
+    "reason": { "type": "string" },
+    "ticket_id": { "type": "string" }
+  }
+}

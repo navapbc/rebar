@@ -45,19 +45,12 @@ def _help_arms() -> dict[str, str]:
     return {sub: (_help.subcommand_help(sub) or "") for sub in _help.known_subcommands()}
 
 
-# Commands that advertise --output json but do not yet have a registered output
-# schema. Tracked as a known gap in ticket roam-crone-disco (the signing commands
-# from PR #4 emit --output json but were never schema-wired); remove entries here
-# as that ticket lands schemas for them.
-_OUTPUT_SCHEMA_GAPS = frozenset({"sign", "verify-signature"})
-
-
 def test_commands_advertising_output_have_a_schema() -> None:
     arms = _help_arms()
     assert arms, "could not parse any subcommand help arms (parser drift?)"
     missing = []
     for cmd, help_text in arms.items():
-        if "--output" not in help_text or cmd in _OUTPUT_SCHEMA_GAPS:
+        if "--output" not in help_text:
             continue
         key = cmd.replace("-", "_")  # CLI uses hyphens; registry keys use underscores
         if key not in schemas.OUTPUT_SCHEMAS:

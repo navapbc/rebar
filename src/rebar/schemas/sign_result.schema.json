@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/sign_result.schema.json",
+  "title": "SignResult",
+  "description": "Result of `rebar sign <ticket_id> <manifest_json> --output json` (and the library sign_manifest() / MCP sign_manifest): the persisted SIGNATURE record plus the resolved ticket_id. manifest is the array of verified-step strings; signature is the HMAC-SHA256 hex; key_id is the environment key fingerprint; head_sha is audit metadata; signed_at is a ns-epoch integer. A validation/resolve failure emits no JSON (stderr + nonzero exit).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["manifest", "algorithm", "signature", "key_id", "head_sha", "signed_at", "ticket_id"],
+  "properties": {
+    "manifest": { "type": "array", "items": { "type": "string" } },
+    "algorithm": { "type": "string" },
+    "signature": { "type": "string" },
+    "key_id": { "type": "string" },
+    "head_sha": { "type": "string" },
+    "signed_at": { "type": "integer" },
+    "ticket_id": { "type": "string" }
+  }
+}
