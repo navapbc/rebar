@@ -111,7 +111,7 @@
         "kind": { "type": "string", "enum": ["file", "url", "source"] },
         "path": { "type": "string", "description": "Repo-relative file path (kind=file)." },
         "line_start": { "type": "integer", "minimum": 0, "description": "1-based start line (kind=file); 0/omitted means whole file." },
-        "line_end": { "type": "integer", "minimum": 0, "description": "1-based end line (kind=file)." },
+        "line_end": { "type": "integer", "minimum": 0, "description": "1-based end line (kind=file); 0/omitted means whole file (i.e. through the end)." },
         "url": { "type": "string", "description": "URL evidence (kind=url)." },
         "description": { "type": "string", "description": "Freeform source/evidence description (kind=source), or extra context for any kind." }
       }

@@ -167,14 +167,20 @@ def resolve_citations(result: dict, repo_path: str | None) -> dict:
             # Test `is not None` (not truthiness): the schema treats line_start=0 /
             # omitted as "whole file", which must not be conflated with absent.
             start, end = cit.get("line_start"), cit.get("line_end")
-            if start is not None or end is not None:
+            needed = max(start or 0, end or 0)
+            if needed > 0:
+                # Stop as soon as the cited line is reached — no full-file scan for
+                # citations near the top of a large file.
+                count = 0
                 try:
                     with open(abs_path, encoding="utf-8", errors="replace") as fh:
-                        n = sum(1 for _ in fh)
+                        for count, _ in enumerate(fh, 1):
+                            if count >= needed:
+                                break
                 except OSError:
                     continue
-                if (start is not None and start > n) or (end is not None and end > n):
-                    note = f"{path} (cited lines {start}-{end} exceed file length {n})"
+                if count < needed:  # file ended before the cited line → out of range
+                    note = f"{path} (cited lines {start}-{end} exceed file length {count})"
                     _downgrade(cit, note)
     return result
 

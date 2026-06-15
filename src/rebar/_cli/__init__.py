@@ -99,8 +99,8 @@ def _review(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="rebar review",
         description="Run an LLM review of a ticket (or its ticket-graph) and emit "
-        "structured findings. Needs the 'agents' extra + ANTHROPIC_API_KEY; see "
-        "`rebar review --check`.",
+        "structured findings. Needs the 'agents' extra + a model API key (provider "
+        "per REBAR_LLM_MODEL); see `rebar review --check`.",
     )
     parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")
     parser.add_argument(

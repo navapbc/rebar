@@ -388,7 +388,8 @@ def build_server():
 
         DISABLED unless REBAR_MCP_ALLOW_LLM=1: this makes a live, billable LLM call
         and reaches the network + filesystem (it is not a plain store read). It
-        needs the 'agents' extra + ANTHROPIC_API_KEY. Returns a plain dict and
+        needs the 'agents' extra + a model API key (provider per REBAR_LLM_MODEL,
+        e.g. ANTHROPIC_API_KEY or OPENAI_API_KEY). Returns a plain dict and
         advertises NO outputSchema by design — the result is model-produced, so it
         is a documented NO_SCHEMA_EXEMPT and is not auto-driven in CI."""
         if not _env_truthy("REBAR_MCP_ALLOW_LLM"):

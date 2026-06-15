@@ -189,6 +189,31 @@ def test_discovery_hides_noise_and_gitignored(rebar_repo: Path) -> None:
     assert "TOKEN=abc" in tools["read_file"].invoke({"path": "secret.txt"})
 
 
+def test_discovery_rejects_symlink_escape(tmp_path: Path) -> None:
+    """list_directory/search_files must not surface symlinks pointing outside the
+    repo root (PR #6 review) — read_file already blocks them via _safe_path."""
+    pytest.importorskip("langchain_core")
+    from rebar.llm.runner import _filesystem_tools
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("TOPSECRET\n", encoding="utf-8")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "normal.txt").write_text("TOPSECRET marker\n", encoding="utf-8")
+    (repo / "escape_dir").symlink_to(outside, target_is_directory=True)
+    (repo / "escape_file").symlink_to(outside / "secret.txt")
+
+    tools = {t.name: t for t in _filesystem_tools(str(repo))}
+    listing = tools["list_directory"].invoke({"path": "."})
+    assert "normal.txt" in listing
+    assert "escape_dir" not in listing and "escape_file" not in listing
+    found = tools["search_files"].invoke({"pattern": "TOPSECRET"})
+    assert "normal.txt" in found and "secret.txt" not in found
+    with pytest.raises(Exception):  # explicit read of the escaping symlink is blocked
+        tools["read_file"].invoke({"path": "escape_file"})
+
+
 def test_validate_rejects_bad_result() -> None:
     pytest.importorskip("jsonschema")
     from rebar.llm.findings import FindingsError, validate_result

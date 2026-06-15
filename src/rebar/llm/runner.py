@@ -483,6 +483,13 @@ def _discovery_filter(root: str):
     return skip_dir, skip_file
 
 
+def _within_root(abs_path: str, root: str) -> bool:
+    """True if a realpath stays inside the repo root — used by the discovery tools
+    to reject symlinks pointing outside the root (read_file blocks these too, via
+    _safe_path)."""
+    return abs_path == root or abs_path.startswith(root + os.sep)
+
+
 def _filesystem_tools(repo_path: str | None) -> list:
     """Read-only, sandboxed file tools rooted at ``repo_path``. Output is
     line-numbered (``<lineno>: <content>``) so the agent can cite ``path:line``
@@ -548,8 +555,8 @@ def _filesystem_tools(repo_path: str | None) -> list:
         for name in sorted(os.listdir(target)):
             full = os.path.join(target, name)
             rp = os.path.realpath(full)
-            if _is_denied(rp, denied):
-                continue
+            if _is_denied(rp, denied) or not _within_root(rp, root):
+                continue  # denied state path, or a symlink pointing outside the repo
             is_dir = os.path.isdir(full)
             if (is_dir and skip_dir(name)) or (not is_dir and skip_file(rp, name)):
                 hidden += 1
@@ -578,12 +585,14 @@ def _filesystem_tools(repo_path: str | None) -> list:
             dirnames[:] = [
                 d for d in dirnames
                 if not skip_dir(d)
+                and _within_root(os.path.realpath(os.path.join(dirpath, d)), root)
                 and not _is_denied(os.path.realpath(os.path.join(dirpath, d)), denied)
             ]
             for fn in sorted(filenames):
                 full = os.path.join(dirpath, fn)
                 rp = os.path.realpath(full)
-                if _is_denied(rp, denied) or skip_file(rp, fn):
+                # Skip denied state paths, symlinks pointing outside the repo, and noise.
+                if _is_denied(rp, denied) or not _within_root(rp, root) or skip_file(rp, fn):
                     continue
                 if scanned >= _SCAN_MAX_FILES:
                     return "\n".join(hits) + (
