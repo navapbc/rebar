@@ -274,14 +274,59 @@ def _apply_outbound_update(mutation, *, client=None, repo_root=None) -> ApplyRes
                     exc,
                 )
 
+    # Dispatch link mutations: add a Jira issue link per entry (Cycle 3).
+    # Mirrors the label/comment dispatch pattern. The outbound differ already
+    # dedups against existing Jira links, so we add without re-querying.
+    # ADD-only — removes are out of scope for this cycle.
+    #
+    # Residual duplicate risk: Jira's POST issueLink is non-idempotent (no
+    # idempotency key, no server-side dedup). The differ dedups against the
+    # snapshot, but that snapshot is stale across a retry window — if a
+    # set_relationship POST commits server-side and then the response
+    # times out / 5xxs, _call_with_retry re-POSTs and Jira stores a duplicate
+    # link. The narrow fix is a pre-create get_issue_links existence check here;
+    # it is deferred to the timeout/retry overhaul in bug d843 (which also bounds
+    # the subprocess call that creates the retry window in the first place).
+    links = payload.get("links") or []
+    links_applied: int = 0
+    link_errors: list[str] = []
+    if isinstance(links, list):
+        for entry in links:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("action") != "add":
+                continue
+            link_type = entry.get("type")
+            to_key = entry.get("to_key")
+            if not link_type or not to_key:
+                continue
+            try:
+                _call_with_retry(client.set_relationship, mutation.target, to_key, link_type)
+                links_applied += 1
+            except Exception as exc:  # noqa: BLE001
+                link_errors.append(f"set_relationship failed ({to_key}/{link_type}): {exc!s}")
+                logger.warning(
+                    "_apply_outbound_update: set_relationship failed for %s -> %s (%s): %r",
+                    mutation.target,
+                    to_key,
+                    link_type,
+                    exc,
+                )
+
     # Loud skip guard: warn when the effective work set is entirely empty so
     # callers can distinguish a genuine no-op (no diff) from a misconfigured
     # mutation that carried only non-allowlisted fields.
     # parent_key is counted as work even when popped from allowed (ticket 8b25).
-    if not allowed and not labels_applied and not comments_applied and parent_key is None:
+    if (
+        not allowed
+        and not labels_applied
+        and not comments_applied
+        and not links_applied
+        and parent_key is None
+    ):
         logger.warning(
             "_apply_outbound_update: no-op for %s — changed_fields %r "
-            "produced zero allowlisted fields and no labels/comments; "
+            "produced zero allowlisted fields and no labels/comments/links; "
             "verify mutation payload is not empty or mis-keyed",
             mutation.target,
             list(changed_fields.keys()) if changed_fields else [],
@@ -291,9 +336,12 @@ def _apply_outbound_update(mutation, *, client=None, repo_root=None) -> ApplyRes
         "fields_pushed": sorted(allowed.keys()),
         "labels_applied": labels_applied,
         "comments_applied": comments_applied,
+        "links_applied": links_applied,
     }
     if comment_errors:
         result_payload["comment_errors"] = comment_errors
+    if link_errors:
+        result_payload["link_errors"] = link_errors
     if parent_key is not None:
         result_payload["parent_set"] = parent_key
 

@@ -974,6 +974,10 @@ def reconcile_once(
                     "changed_fields": om.fields,
                     "comments": om.comments,
                     "labels": om.labels,
+                    # Cycle 3: link adds ride the existing update payload
+                    # (no new MutationAction) — _apply_outbound_update reads
+                    # payload["links"] and calls client.set_relationship.
+                    "links": getattr(om, "links", []),
                 },
                 provenance={
                     "source": "outbound_differ",
@@ -1071,6 +1075,9 @@ def reconcile_once(
                 # compat with InboundMutation variants (legacy test stubs)
                 # that lack the field.
                 "comments": getattr(im, "comments", []),
+                # Cycle 3: inbound link adds — _apply_inbound_update writes
+                # each into rebar via the rebar.link library facade.
+                "links": getattr(im, "links", []),
             },
             provenance={
                 "source": "inbound_differ",

@@ -13,6 +13,7 @@ imports applier.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -39,6 +40,8 @@ from rebar_reconciler.inbound_translate import (
     _write_event_file,
 )
 from rebar_reconciler.pass_io import _write_mapping_atomic
+
+logger = logging.getLogger(__name__)
 
 
 def _rebar_env(name: str, default: str | None = None) -> str | None:
@@ -451,10 +454,42 @@ def _apply_inbound_update(mutation, *, client=None, repo_root=None) -> ApplyResu
             path = _write_event_file(tracker_dir, local_id, "COMMENT", event_data)
             written.append(str(path))
 
+    # Cycle 3: inbound links — write each Jira-sourced relation into rebar via
+    # the rebar.link library facade. rebar.link owns relation validation,
+    # hierarchy promotion, cycle/redundant-link guards, and the LINK event
+    # write — so we do NOT hand-write LINK events here. The redundant-link
+    # guard inside add_dependency makes re-apply idempotent. Failures are
+    # non-fatal and logged.
+    inbound_links = payload.get("links") or []
+    links_applied: int = 0
+    if isinstance(inbound_links, list):
+        import rebar
+
+        for entry in inbound_links:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("action") != "add":
+                continue
+            target_local_id = entry.get("target_id")
+            relation = entry.get("relation")
+            if not target_local_id or not relation:
+                continue
+            try:
+                rebar.link(local_id, target_local_id, relation, repo_root=repo_root)
+                links_applied += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "_apply_inbound_update: rebar.link failed for %s -> %s (%s): %r",
+                    local_id,
+                    target_local_id,
+                    relation,
+                    exc,
+                )
+
     return ApplyResult(
         mutation.direction,
         mutation.action,
-        {"local_id": local_id, "events": written},
+        {"local_id": local_id, "events": written, "links_applied": links_applied},
     )
 
 
