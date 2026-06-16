@@ -332,15 +332,19 @@ def _read_legacy_conf(path: Path) -> dict:
     return out
 
 
-def _pyproject_has_rebar(path: Path) -> bool:
+def _pyproject_rebar_state(path: Path) -> str:
+    """Whether a ``pyproject.toml`` carries a ``[tool.rebar]`` table:
+    ``"has"`` / ``"absent"`` / ``"unreadable"`` (won't parse). An unreadable
+    pyproject is reported as such — NOT silently skipped — so a present-but-
+    unparseable gate config can fail CLOSED rather than leaking the security gate."""
     import tomllib
 
     try:
         with open(path, "rb") as f:
             data = tomllib.load(f)
     except (OSError, tomllib.TOMLDecodeError):
-        return False
-    return isinstance(data.get("tool", {}).get("rebar"), dict)
+        return "unreadable"
+    return "has" if isinstance(data.get("tool", {}).get("rebar"), dict) else "absent"
 
 
 def _discover_project_config(root: str | os.PathLike[str] | None = None) -> tuple[Path, str] | None:
@@ -362,7 +366,13 @@ def _discover_project_config(root: str | os.PathLike[str] | None = None) -> tupl
         if rt.is_file():
             return (rt, "toml")
         pp = cur / "pyproject.toml"
-        if pp.is_file() and _pyproject_has_rebar(pp):
+        # A pyproject with [tool.rebar] is the config; an UNREADABLE pyproject is
+        # also selected (so _read_toml_table raises ConfigError -> the verify gate
+        # fails CLOSED) — never silently skip a present-but-unparseable gate config.
+        # (rebar.toml above takes precedence, so this only bites when it's the
+        # would-be-chosen config.) An "absent" (parses, no [tool.rebar]) pyproject
+        # is skipped, and the walk continues.
+        if pp.is_file() and _pyproject_rebar_state(pp) in ("has", "unreadable"):
             return (pp, "pyproject")
         if (cur / ".git").exists() or cur.parent == cur:
             break  # repo boundary / filesystem root

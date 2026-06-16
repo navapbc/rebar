@@ -63,24 +63,16 @@ def _short_prefix(ticket_id: str, tracker: str) -> str:
 
 
 def _display_mode(repo_root: str | None) -> str:
-    """Resolve ``ticket.display_mode`` from config (dispatcher precedence), default ``auto``."""
-    cf = os.environ.get("WORKFLOW_CONFIG_FILE")
-    if not cf:
-        rebar_config = os.environ.get("REBAR_CONFIG")
-        if rebar_config and os.path.isfile(rebar_config):
-            cf = rebar_config
-        elif repo_root and os.path.isfile(os.path.join(repo_root, ".rebar", "config.conf")):
-            cf = os.path.join(repo_root, ".rebar", "config.conf")
-        else:
-            cf = os.path.join(repo_root or "", ".rebar.conf")
+    """Resolve ``ticket.display_mode`` through the unified typed config (all layers),
+    default ``auto``. Display is non-critical, so an unreadable config degrades to
+    ``auto`` rather than failing. (The legacy WORKFLOW_CONFIG_FILE pointer is gone —
+    config discovery is now $REBAR_CONFIG / rebar.toml / pyproject / legacy conf.)"""
+    from rebar.config import ConfigError, load_config
+
     try:
-        with open(cf, encoding="utf-8") as fh:
-            for line in fh:
-                if line.startswith("ticket.display_mode="):
-                    return line.split("=", 1)[1].strip() or "auto"
-    except OSError:
-        pass
-    return "auto"
+        return load_config(repo_root).ticket.display_mode
+    except ConfigError:
+        return "auto"
 
 
 # ── CLI arms (byte-parity with the dispatcher) ────────────────────────────────

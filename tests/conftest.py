@@ -181,6 +181,19 @@ def _no_repo_root_leaks() -> Iterator[None]:
             )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_user_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Portability/isolation: config is now resolved on the read path via
+    ``rebar.config.load_config``, which reads a user-level config
+    (``$XDG_CONFIG_HOME/rebar/config.toml``). Point XDG at an empty per-test dir so
+    no test ever reads the developer's real ``~/.config/rebar/config.toml`` (host
+    leakage would make results machine-dependent), and drop any ambient
+    ``REBAR_CONFIG`` pointer. Tests that need a user config set ``XDG_CONFIG_HOME``
+    themselves; this only removes host leakage."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
+    monkeypatch.delenv("REBAR_CONFIG", raising=False)
+
+
 # ── Repo-isolation guard (no test may commit to / mutate this checkout) ───────
 #
 # Tests operate on disposable trackers under tmp_path, never the rebar checkout.

@@ -236,38 +236,28 @@ def _signature_gate(
     ticket is not certified; a force-close reason bypasses with a stderr warning
     (the wrapper writes the audit comment). Replaces the legacy verdict-hash gate;
     ``--verdict-hash`` is deprecated and ignored."""
-    require_sig = False
     cfg_root = (
         os.environ.get("REBAR_ROOT")
         or os.environ.get("PROJECT_ROOT")
         or tracker_dir.rsplit("/", 1)[0]
     )
-    config_path = os.environ.get("REBAR_CONFIG") or os.path.join(cfg_root, ".rebar", "config.conf")
-    # Fail-CLOSED on read error: a *present* gate config we cannot read/parse must
-    # never silently disable the verification gate — require a signature (block) and
-    # surface the error. An absent config is the intended opt-out (gate stays off).
-    if os.path.isfile(config_path):
-        try:
-            with open(config_path, encoding="utf-8") as cf:
-                for line in cf:
-                    s = line.strip()
-                    # New name + legacy alias (back-compat for existing configs).
-                    if s.startswith("verify.require_signature_for_close=") or s.startswith(
-                        "verify.require_verdict_for_close="
-                    ):
-                        val = s.split("=", 1)[1].strip().lower()
-                        if val in ("true", "1", "yes"):
-                            require_sig = True
-        except (OSError, UnicodeDecodeError) as cfg_exc:
-            import sys
+    # Resolve the verify gate through the unified typed config (all layers + the
+    # legacy require_verdict_for_close alias). Fail-CLOSED: a present-but-unreadable
+    # config must never silently disable the gate — require a signature. An absent
+    # config returns the default (gate off), the intended opt-out.
+    from rebar.config import ConfigError, load_config
 
-            print(
-                f"Warning: could not read verify config {config_path} "
-                f"({cfg_exc}); requiring a signature to close {ticket_type} "
-                f"{ticket_id} (fail-closed).",
-                file=sys.stderr,
-            )
-            require_sig = True
+    try:
+        require_sig = load_config(cfg_root).verify.require_signature_for_close
+    except ConfigError as cfg_exc:
+        import sys
+
+        print(
+            f"Warning: could not read rebar config ({cfg_exc}); requiring a "
+            f"signature to close {ticket_type} {ticket_id} (fail-closed).",
+            file=sys.stderr,
+        )
+        require_sig = True
 
     if not require_sig:
         return

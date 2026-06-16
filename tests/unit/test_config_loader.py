@@ -226,3 +226,22 @@ def test_rebar_config_env_beats_in_tree_rebar_toml(
     other.write_text("[compact]\nthreshold = 7\n", encoding="utf-8")
     monkeypatch.setenv("REBAR_CONFIG", str(other))
     assert cfg.load_config(root=p).compact.threshold == 7  # explicit $REBAR_CONFIG wins over walk
+
+
+def test_malformed_pyproject_fails_closed(tmp_path: Path) -> None:
+    """A present-but-unparseable pyproject (the would-be config, no rebar.toml) must
+    raise ConfigError — NOT be silently skipped — so the security gate fails closed."""
+    p = _proj(tmp_path)
+    (p / "pyproject.toml").write_text("[tool.rebar] this is broken === [[\n", encoding="utf-8")
+    with pytest.raises(cfg.ConfigError):
+        cfg.load_config(root=p)
+
+
+def test_absent_pyproject_does_not_preempt_legacy_conf(tmp_path: Path) -> None:
+    """A parseable pyproject WITHOUT [tool.rebar] is skipped (not selected), so the
+    legacy .rebar/config.conf is still found and applied."""
+    p = _proj(tmp_path)
+    (p / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+    (p / ".rebar").mkdir()
+    (p / ".rebar" / "config.conf").write_text("compact.threshold=5\n", encoding="utf-8")
+    assert cfg.load_config(root=p).compact.threshold == 5

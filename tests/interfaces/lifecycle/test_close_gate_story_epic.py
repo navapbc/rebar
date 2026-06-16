@@ -109,6 +109,54 @@ def test_gate_stale_head_is_rejected(rebar_repo: Path, ttype: str) -> None:
     )
 
 
+# ── unified-config routing (fe78): the gate now resolves through load_config, so
+# it can be enabled from ANY layer (rebar.toml / env / …), and a present-but-
+# unreadable config still FAILS CLOSED. ──────────────────────────────────────────
+def test_gate_on_via_rebar_toml(rebar_repo: Path) -> None:
+    _commit(rebar_repo)
+    (rebar_repo / "rebar.toml").write_text("[verify]\nrequire_signature_for_close = true\n")
+    tid = _make(rebar_repo, "story")
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert "certified signature" in ei.value.stderr
+    assert _status(tid, rebar_repo) == "in_progress"
+
+
+def test_gate_on_via_env_var(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _commit(rebar_repo)
+    monkeypatch.setenv("REBAR_VERIFY_REQUIRE_SIGNATURE_FOR_CLOSE", "true")
+    tid = _make(rebar_repo, "story")
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert "certified signature" in ei.value.stderr
+    assert _status(tid, rebar_repo) == "in_progress"
+
+
+def test_gate_fails_closed_on_unreadable_config(rebar_repo: Path) -> None:
+    """A present-but-unreadable config must NOT silently disable the gate — closing
+    still requires a signature (the load-time ConfigError fails closed)."""
+    _commit(rebar_repo)
+    (rebar_repo / "rebar.toml").write_text("this is = = not valid toml [[[\n")
+    tid = _make(rebar_repo, "story")
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert "certified signature" in ei.value.stderr
+    assert _status(tid, rebar_repo) == "in_progress"
+
+
+def test_gate_fails_closed_on_malformed_pyproject(rebar_repo: Path) -> None:
+    """Security regression guard: a malformed pyproject that would carry the gate
+    config (no rebar.toml present, so pyproject is the would-be config) must FAIL
+    CLOSED — not be silently skipped during discovery."""
+    _commit(rebar_repo)
+    (rebar_repo / "pyproject.toml").write_text("[tool.rebar.verify] broken === [[\n")
+    tid = _make(rebar_repo, "story")
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert "certified signature" in ei.value.stderr
+    assert _status(tid, rebar_repo) == "in_progress"
+
+
 @pytest.mark.parametrize("ttype", _TYPES)
 def test_gate_force_close_bypasses_with_warning_and_audit_comment(
     rebar_repo: Path, ttype: str, capsys: pytest.CaptureFixture[str]
