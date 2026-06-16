@@ -543,6 +543,34 @@ def test_mcp_tools_downed_server_is_loud_not_silent(monkeypatch: pytest.MonkeyPa
     assert "zero tools" in str(exc2.value)
 
 
+def test_mcp_tools_loads_from_real_stdio_server(tmp_path: Path) -> None:
+    """End-to-end (ticket 9bd5): _mcp_tools spawns a REAL stdio MCP server and loads
+    its tools — the positive path complementing the downed-server negative path.
+    A second call spawns a fresh session (stateless re-spawn) and still loads."""
+    pytest.importorskip("langchain_mcp_adapters")
+    pytest.importorskip("mcp")
+    import sys
+
+    from rebar.llm.runner import _mcp_tools
+
+    server = tmp_path / "mini_mcp_server.py"
+    server.write_text(
+        "from mcp.server.fastmcp import FastMCP\n"
+        "mcp = FastMCP('probe')\n"
+        "@mcp.tool()\n"
+        "def echo(text: str) -> str:\n"
+        "    '''Echo the input back.'''\n"
+        "    return text\n"
+        "if __name__ == '__main__':\n"
+        "    mcp.run()\n",
+        encoding="utf-8",
+    )
+    servers = {"probe": {"command": sys.executable, "args": [str(server)], "transport": "stdio"}}
+    assert "echo" in {t.name for t in _mcp_tools(servers)}
+    # Stateless re-spawn: an independent second call spawns a fresh session.
+    assert "echo" in {t.name for t in _mcp_tools(servers)}
+
+
 def test_langflow_parse_helpers() -> None:
     from rebar.llm.runner import _deep_find_text, _langflow_extract_text, _parse_findings_json
 
