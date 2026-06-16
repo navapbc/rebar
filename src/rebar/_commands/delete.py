@@ -157,8 +157,14 @@ def _git(tracker: str, *args: str):
 
 
 def _children(tracker: str, parent_id: str) -> list[str]:
-    """Non-deleted children via CREATE parent_id (sorted; matches the bash guard —
-    CREATE-based, not effective-parent)."""
+    """Non-deleted children via the EFFECTIVE current parent_id (full event history,
+    not just the CREATE event), so a child REPARENTED onto ``parent_id`` via
+    ``edit --parent`` is still caught — otherwise a soft delete would orphan it.
+    Mirrors the transition open-children guard fix (535bee1), which closed the same
+    CREATE-only blind spot. Tombstoned/archived children are already-deleted /
+    excluded and don't block (unchanged)."""
+    from rebar.reducer import reduce_ticket
+
     children: list[str] = []
     for entry in sorted(Path(tracker).iterdir()):
         if not entry.is_dir():
@@ -168,15 +174,13 @@ def _children(tracker: str, parent_id: str) -> list[str]:
             continue
         if (entry / ".tombstone.json").is_file() or (entry / ".archived").is_file():
             continue
-        for ef in sorted(entry.glob("*-CREATE.json")):
-            try:
-                with open(ef, encoding="utf-8") as fh:
-                    ev = json.load(fh)
-            except (OSError, json.JSONDecodeError):
-                continue
-            if ev.get("data", {}).get("parent_id") == parent_id:
+        try:
+            state = reduce_ticket(str(entry))
+        except Exception:
+            continue  # unreadable/corrupt ticket — fsck's job, don't block delete here
+        if state and state.get("status") not in ("error", "fsck_needed"):
+            if state.get("parent_id") == parent_id:
                 children.append(tid)
-                break
     return children
 
 
