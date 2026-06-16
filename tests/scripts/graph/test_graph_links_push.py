@@ -156,7 +156,7 @@ def test_write_link_event_retries_on_non_fast_forward(
 
     with (
         patch("subprocess.run", side_effect=side_effects) as mock_run,
-        patch.dict("os.environ", {"_TICKET_TEST_NO_SYNC": ""}, clear=False),
+        patch.dict("os.environ", {"REBAR_SYNC_PUSH": "always"}, clear=False),
     ):
         _real_write_link_event("tkt-src3", "tkt-tgt3", "depends_on", str(tracker_dir))
 
@@ -205,7 +205,7 @@ def test_write_link_event_push_gives_up_on_merge_conflict(
 
     with (
         patch("subprocess.run", side_effect=side_effects),
-        patch.dict("os.environ", {"_TICKET_TEST_NO_SYNC": ""}, clear=False),
+        patch.dict("os.environ", {"REBAR_SYNC_PUSH": "always"}, clear=False),
     ):
         # Must not raise — best-effort means failure is silently swallowed
         _real_write_link_event("tkt-src4", "tkt-tgt4", "depends_on", str(tracker_dir))

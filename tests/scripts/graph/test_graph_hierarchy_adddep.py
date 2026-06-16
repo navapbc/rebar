@@ -411,7 +411,8 @@ def test_add_dependency_accepts_all_canonical_relations(
         )
 
         # Should NOT raise ValueError for canonical relations
-        monkeypatch.setenv("_TICKET_TEST_NO_SYNC", "1")
+        monkeypatch.setenv("REBAR_SYNC_PULL", "off")
+        monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
         try:
             graph.add_dependency("src", "tgt", str(subdir), relation)
         except graph.CyclicDependencyError:

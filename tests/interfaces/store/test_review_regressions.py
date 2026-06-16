@@ -91,7 +91,8 @@ def test_consent_gate_no_reprompt_when_root_differs_from_toplevel(
     monkeypatch.setenv("REBAR_ROOT", str(sub))
     monkeypatch.delenv("PROJECT_ROOT", raising=False)
     monkeypatch.delenv("TICKETS_TRACKER_DIR", raising=False)
-    monkeypatch.setenv("_TICKET_TEST_NO_SYNC", "1")
+    monkeypatch.setenv("REBAR_SYNC_PULL", "off")
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
 
     from rebar._cli import _init as cli_init
 

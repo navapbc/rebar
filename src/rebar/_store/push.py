@@ -1,7 +1,8 @@
 """Best-effort push of the tickets branch (Tier D, ``REBAR_WRITE_CORE``).
 
-Faithful port of ``_push_tickets_branch`` (ticket-lib.sh). Honours ``REBAR_PUSH``
-(``always`` | ``async`` | ``off``, default ``always``; case/space-insensitive),
+Faithful port of ``_push_tickets_branch`` (ticket-lib.sh). Honours the ``sync.push``
+policy (``always`` | ``async`` | ``off``, default ``always``; env ``REBAR_SYNC_PUSH``,
+deprecated alias ``REBAR_PUSH``, or a config file — resolved via the typed config),
 pushes ``HEAD:tickets`` (the detached-HEAD commit, bug 27d8-b230), retries ≤3, and
 reconciles a non-fast-forward by **merging** ``origin/tickets`` (never rebasing —
 merge is atomic, no rebase-merge state to strand picks; 637b Fix 3), including the
@@ -24,10 +25,20 @@ _DIRTY_WD = re.compile(
 _MAX_RETRIES = 3
 
 
-def _push_mode() -> str:
-    # bash ${REBAR_PUSH:-always}: unset OR empty → "always" (the `:-` form), then
-    # lowercase + strip whitespace.
-    return "".join((os.environ.get("REBAR_PUSH") or "always").lower().split())
+def _push_mode(root: str | None = None) -> str:
+    """The outbound push policy (``always`` | ``async`` | ``off``), resolved through
+    the typed config (``sync.push``; env ``REBAR_SYNC_PUSH``, deprecated alias
+    ``REBAR_PUSH``, or a config file). ``root`` is passed explicitly (the repo dir
+    holding the tracker) so resolution is pure stat-based discovery — it never shells
+    out to ``git`` for root detection, which would conflict with callers that mock
+    subprocess. Best-effort: a malformed config falls back to the ``always`` default —
+    a bad config must never break (or silently disable) the auto-push."""
+    from rebar.config import ConfigError, load_config
+
+    try:
+        return load_config(root=root).sync.push
+    except ConfigError:
+        return "always"
 
 
 # Bound git calls (notably the network `push`) so a stuck remote can't hang the
@@ -55,18 +66,18 @@ def _git(base: str, *args: str, env: dict | None = None) -> subprocess.Completed
 
 
 def push_tickets_branch(base_path: str) -> None:
-    """Push ``HEAD:tickets`` to origin per the REBAR_PUSH policy (best-effort)."""
-    mode = _push_mode()
+    """Push ``HEAD:tickets`` to origin per the ``sync.push`` policy (best-effort)."""
+    mode = _push_mode(os.path.dirname(base_path))  # base_path is .../.tickets-tracker
     if mode == "off":
         return
     if mode == "async":
-        # Detach a synchronous push (REBAR_PUSH=always) that survives parent exit.
+        # Detach a synchronous push (REBAR_SYNC_PUSH=always) that survives parent exit.
         # The dispatcher launches the CLI as a bare `python3` whose `rebar`
         # importability comes from a parent sys.path bootstrap the child does NOT
         # inherit — so put the rebar `src` dir on the child's PYTHONPATH and have the
         # -c stub re-insert it (parents[2] of this file == .../src).
         src = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        child_env = {**os.environ, "REBAR_PUSH": "always"}
+        child_env = {**os.environ, "REBAR_SYNC_PUSH": "always"}
         child_env["PYTHONPATH"] = src + (
             os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else ""
         )

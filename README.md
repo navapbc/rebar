@@ -307,8 +307,9 @@ MCP — the primary agent surface — with the *stalest* reads; that divergence 
 gone.)
 
 **Opt out** for a pure-local replay (offline work, tight loops, or right after a
-write that already synced): set `REBAR_NO_SYNC=1` (honored everywhere) or pass
-`--no-sync` to any read subcommand (e.g. `rebar list --no-sync`). Only the network
+write that already synced): set `REBAR_SYNC_PULL=off` (honored everywhere;
+deprecated alias `REBAR_NO_SYNC=1`) or pass `--no-pull` to any read subcommand
+(e.g. `rebar list --no-pull`; deprecated alias `--no-sync`). Only the network
 fetch/merge is skipped; the local reduce/cache path is unchanged. See
 [`docs/concurrency.md`](docs/concurrency.md#read-freshness-policy-uniform-across-cli-library-and-mcp).
 

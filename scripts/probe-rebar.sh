@@ -85,8 +85,9 @@ else
     TRACKER="$REBAR_ROOT/.tickets-tracker"
     _PRE_IDS=""
 fi
-# Skip the network sync in isolated/probe runs (no remote).
-export _TICKET_TEST_NO_SYNC=1
+# Skip the network sync (both directions) in isolated/probe runs (no remote).
+export REBAR_SYNC_PULL=off
+export REBAR_SYNC_PUSH=off
 
 # Track ids we create so we can clean them up precisely.
 _CREATED=()

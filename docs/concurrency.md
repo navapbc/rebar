@@ -211,11 +211,13 @@ agent surface) the *stalest* interface. Collapsing the dual read path
 freshness into the native read path so all three interfaces agree.
 
 **Opt out** of the fetch when you want a pure-local replay (offline, hot loops,
-or when a write already synced): set the environment variable `REBAR_NO_SYNC=1`
-(honored by all interfaces) or pass the `--no-sync` flag to any read subcommand
-(`rebar list --no-sync`). The reducer's local `.cache.json` (I3/I3a) is still used;
-only the network fetch/merge is skipped. (The test harnesses' `_TICKET_TEST_NO_SYNC=1`
-remains honored as well, for temp repos with no remote.)
+or when a write already synced): set `REBAR_SYNC_PULL=off` (the `sync.pull` policy,
+honored by all interfaces; deprecated alias `REBAR_NO_SYNC=1`) or pass the
+`--no-pull` flag to any read subcommand (`rebar list --no-pull`; deprecated alias
+`--no-sync`). The reducer's local `.cache.json` (I3/I3a) is still used; only the
+network fetch/merge is skipped. (Temp repos with no remote set `REBAR_SYNC_PULL=off`
+together with `REBAR_SYNC_PUSH=off` to skip both directions; the former private
+`_TICKET_TEST_NO_SYNC` flag was removed in favor of these.)
 
 ---
 

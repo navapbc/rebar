@@ -172,12 +172,20 @@ def _write_link_event(
         return
 
     # Best-effort push — mirrors bash _push_tickets_branch behavior.
-    # Skipped in test environments (_TICKET_TEST_NO_SYNC=1) and when no remote exists.
+    # Skipped when the push policy is off (sync.push=off / REBAR_SYNC_PUSH=off, used by
+    # test repos with no remote) and when no remote exists.
     # per direction). Each call pushes independently. Double best-effort pushes are harmless:
     # the second push is a no-op if no new commits exist between the two calls, and both are
     # non-fatal. This matches how bash write_commit_event works (one push per commit).
-    if os.environ.get("_TICKET_TEST_NO_SYNC", "") == "1":
-        return
+    try:
+        from rebar.config import ConfigError, load_config
+
+        # Explicit root (parent of the tracker dir) → pure stat-based discovery, no
+        # git subprocess for root detection (callers here mock subprocess.run).
+        if load_config(root=os.path.dirname(tracker_dir)).sync.push == "off":
+            return
+    except ConfigError:
+        pass  # best-effort: a bad config must not break the link-event push
     _remote_check = _sp.run(
         ["git", "-C", tracker_dir, "remote"],
         capture_output=True,

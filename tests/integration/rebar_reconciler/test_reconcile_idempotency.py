@@ -188,8 +188,8 @@ def git_repo(tmp_path, monkeypatch):
     monkeypatch.delenv("PROJECT_ROOT", raising=False)
     monkeypatch.delenv("REBAR_ENV_ID", raising=False)
     monkeypatch.delenv("REBAR_AUTHOR", raising=False)
-    monkeypatch.setenv("REBAR_NO_SYNC", "1")
-    monkeypatch.setenv("_TICKET_TEST_NO_SYNC", "1")
+    monkeypatch.setenv("REBAR_SYNC_PULL", "off")
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
     # Reconciler reads local tickets via the in-process rebar CLI.
     from rebar._engine import in_process_cli
 

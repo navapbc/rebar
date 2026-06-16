@@ -427,7 +427,7 @@ def _read_local_tickets(repo_root: Path, *, no_sync: bool = False) -> list[dict]
     If the CLI is unavailable (unit tests, minimal environments), return an
     empty list with a warning on stderr.
 
-    ``no_sync=True`` sets REBAR_NO_SYNC for the subprocess so the read does not
+    ``no_sync=True`` sets REBAR_SYNC_PULL=off for the subprocess so the read does not
     trigger the tickets-branch fetch/reconverge (a git working-tree mutation).
     Cap-0 reconcile passes (dry-run/reconcile-check) pass this so a no-write
     pass stays literally no-write on the local git tree (review M3).
@@ -444,7 +444,7 @@ def _read_local_tickets(repo_root: Path, *, no_sync: bool = False) -> list[dict]
             file=sys.stderr,
         )
         return []
-    _env = dict(_os.environ, REBAR_NO_SYNC="1") if no_sync else None
+    _env = dict(_os.environ, REBAR_SYNC_PULL="off") if no_sync else None
     try:
         result = _sp.run(
             [str(cli), "list"],

@@ -462,15 +462,41 @@ def user_config_path() -> Path:
     return Path(base) / "rebar" / "config.toml"
 
 
+# Deprecated env vars that map to a canonical config key during the rename window
+# (EV-1). The OLD name still works — read only when the canonical
+# ``REBAR_<SECTION>_<KEY>`` is unset (canonical always wins) — with a deprecation
+# warning. ``REBAR_NO_SYNC`` is a NEGATIVE boolean flipped to the positive
+# ``sync.pull`` (truthy → "off"/disabled; unset-or-"0" → "on"/enabled).
+_LEGACY_ENV_ALIASES: dict[str, tuple[str, str, str]] = {
+    # legacy name      -> (section, key, canonical name)
+    "REBAR_PUSH": ("sync", "push", "REBAR_SYNC_PUSH"),
+    "REBAR_NO_SYNC": ("sync", "pull", "REBAR_SYNC_PULL"),
+}
+
+
+def _map_legacy_env(legacy: str, value: str) -> str:
+    """Map a legacy env value to its canonical config value (the only non-identity
+    case is the ``REBAR_NO_SYNC`` negative→positive boolean flip)."""
+    if legacy == "REBAR_NO_SYNC":
+        return "off" if (value and value != "0") else "on"
+    return value
+
+
 def env_overrides() -> dict:
     """Sparse mapping of ``REBAR_<SECTION>_<KEY>`` env overrides (raw strings;
-    coerce_sparse types them). Only the known config keys are read."""
+    coerce_sparse types them). Only the known config keys are read. Deprecated
+    legacy env vars (:data:`_LEGACY_ENV_ALIASES`) are honored when their canonical
+    counterpart is unset, with a deprecation warning."""
     out: dict[str, dict] = {}
     for sect, keys in _SECTIONS.items():
         for key in keys:
             name = f"REBAR_{sect.upper()}_{key.upper()}"
             if name in os.environ:
                 out.setdefault(sect, {})[key] = os.environ[name]
+    for legacy, (sect, key, canonical) in _LEGACY_ENV_ALIASES.items():
+        if legacy in os.environ and key not in out.get(sect, {}):
+            logger.warning("rebar config: env %s is deprecated; use %s", legacy, canonical)
+            out.setdefault(sect, {})[key] = _map_legacy_env(legacy, os.environ[legacy])
     return out
 
 
@@ -534,6 +560,8 @@ def _env_signature() -> tuple:
             "REBAR_ROOT",
             "PROJECT_ROOT",
             "REBAR_CONFIG_UNKNOWN_KEYS",  # strict/warn policy affects whether load raises
+            "REBAR_PUSH",  # deprecated alias -> sync.push (EV-1)
+            "REBAR_NO_SYNC",  # deprecated alias -> sync.pull (EV-1)
         )
     ]
     for sect, keys in _SECTIONS.items():

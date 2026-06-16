@@ -32,7 +32,8 @@ def fresh_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("REBAR_ROOT", str(repo))
     monkeypatch.setenv("PROJECT_ROOT", str(repo))
     monkeypatch.delenv("TICKETS_TRACKER_DIR", raising=False)
-    monkeypatch.setenv("_TICKET_TEST_NO_SYNC", "1")
+    monkeypatch.setenv("REBAR_SYNC_PULL", "off")
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
     return repo
 
 

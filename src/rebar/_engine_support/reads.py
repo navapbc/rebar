@@ -23,7 +23,8 @@ best-effort, throttled (<=1/min) ``git fetch origin tickets`` + reconverge via
 the shared ``ticket-sync.sh`` ``_reconverge_tickets`` (the SAME mechanism and the
 SAME ``/tmp/.ticket-sync-<md5>`` throttle marker the dispatcher's
 ``_ensure_initialized`` used) so all three interfaces share one contract. Opt out
-with the ``REBAR_NO_SYNC=1`` env var or the ``--no-sync`` CLI flag.
+with ``REBAR_SYNC_PULL=off`` (deprecated alias ``REBAR_NO_SYNC=1``) or the
+``--no-pull`` CLI flag (deprecated alias ``--no-sync``).
 """
 
 from __future__ import annotations
@@ -112,16 +113,19 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
 
 
 # ───────────────────────────── freshness policy ──────────────────────────────
-def _sync_disabled() -> bool:
-    val = os.environ.get("REBAR_NO_SYNC", "")
-    if val and val != "0":
-        return True
-    # The test harnesses set _TICKET_TEST_NO_SYNC=1 for temp repos with no remote
-    # (the dispatcher's _ensure_initialized honored the same flag); preserve it so
-    # moving freshness into the native path does not start wasting I/O in tests.
-    if os.environ.get("_TICKET_TEST_NO_SYNC", "") == "1":
-        return True
-    return False
+def _sync_disabled(root: str | None = None) -> bool:
+    """Whether inbound freshness (fetch/reconverge) is turned off — the ``sync.pull``
+    policy resolved via the typed config (env ``REBAR_SYNC_PULL=off``, deprecated
+    alias ``REBAR_NO_SYNC``, or a config file). ``root`` (the repo dir holding the
+    tracker) is passed explicitly so resolution is pure stat-based discovery — no
+    ``git`` subprocess for root detection. Best-effort: a malformed config leaves
+    sync enabled (every fetch failure is swallowed downstream anyway)."""
+    from rebar.config import ConfigError, load_config
+
+    try:
+        return load_config(root=root).sync.pull == "off"
+    except ConfigError:
+        return False
 
 
 def ensure_fresh(tracker: str, *, no_sync: bool = False) -> None:
@@ -135,7 +139,7 @@ def ensure_fresh(tracker: str, *, no_sync: bool = False) -> None:
     there is ONE sync implementation, not a reinvented one. Every failure path is
     swallowed: a read must never fail because a fetch could not run.
     """
-    if no_sync or _sync_disabled():
+    if no_sync or _sync_disabled(os.path.dirname(os.path.realpath(tracker))):
         return
     try:
         tracker_abs = os.path.realpath(tracker)
@@ -759,13 +763,13 @@ def main(argv: list[str] | None = None) -> int:
     if handler is None:
         print(f"Error: unknown read subcommand '{sub}'", file=sys.stderr)
         return 1
-    # Freshness: strip --no-sync (an opt-out alongside REBAR_NO_SYNC) before the
-    # subcommand parses its own flags, so all read arms share one policy.
-    no_sync = "--no-sync" in rest
-    rest = [a for a in rest if a != "--no-sync"]
+    # Freshness: strip --no-pull (canonical; --no-sync kept as a deprecated alias)
+    # before the subcommand parses its own flags, so all read arms share one policy.
+    no_pull = "--no-pull" in rest or "--no-sync" in rest
+    rest = [a for a in rest if a not in ("--no-pull", "--no-sync")]
     tracker = tracker_dir()
     if sub not in _NO_PREFETCH:
-        ensure_fresh(tracker, no_sync=no_sync)
+        ensure_fresh(tracker, no_sync=no_pull)
     return handler(rest, tracker)
 
 

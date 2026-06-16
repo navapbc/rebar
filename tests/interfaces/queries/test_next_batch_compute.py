@@ -302,8 +302,8 @@ def _run(tracker: Path, *args: str) -> subprocess.CompletedProcess:
     env = {
         **os.environ,
         "TICKETS_TRACKER_DIR": str(tracker),
-        "REBAR_NO_SYNC": "1",
-        "_TICKET_TEST_NO_SYNC": "1",
+        "REBAR_SYNC_PULL": "off",
+        "REBAR_SYNC_PUSH": "off",
     }
     return subprocess.run([_CLI, "next-batch", *args], env=env, capture_output=True, text=True)
 
