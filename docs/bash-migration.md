@@ -198,8 +198,8 @@ release of flipped defaults; each retired suite translated to pytest.
 
 > **Status: DONE — Tier C retired (2026-06-12).** All three compute commands are
 > Python: `list-epics` retired via deprecation (worm-burr-fly); `next-batch`
-> (sure-beech-taunt) is `rebar._engine_support.next_batch` (selection/render/CLI) +
-> `next_batch_files` (the text→file-path heuristic, split on its own seam);
+> (sure-beech-taunt) is `rebar._engine_support.next_batch` (selection/render/CLI;
+> conflicts key off each ticket's declared `file_impact` — no text inference);
 > `validate` (gawk-grove-site) is `rebar._engine_support.validate` (normalize →
 > score → render → CLI) + `validate_checks` (the nine checks, each returning an
 > ordered `Finding` stream so the severity buckets reproduce byte-for-byte). All

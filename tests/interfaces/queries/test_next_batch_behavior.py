@@ -210,6 +210,40 @@ def test_design_awaiting_parent_defers_children(tracker: Path) -> None:
     )
 
 
+def test_manual_awaiting_parent_defers_children(tracker: Path) -> None:
+    """A task whose parent story is tagged ``manual:awaiting_user`` is deferred into
+    skipped_manual_awaiting — UNCONDITIONALLY (no longer gated behind a config flag,
+    which was removed). Mirrors the design-awaiting deferral."""
+    ts = 1700000000000000000
+    _create(tracker, "e", "epic", None, priority=1, ts=ts)
+    _write(
+        tracker,
+        "s",
+        1,
+        "CREATE",
+        {
+            "ticket_id": "s",
+            "title": "Awaiting Story",
+            "ticket_type": "story",
+            "status": "open",
+            "priority": 2,
+            "parent_id": "e",
+            "tags": ["manual:awaiting_user"],
+        },
+        ts + 1,
+    )
+    _create(tracker, "t", "task", "s", priority=2, ts=ts + 2)
+
+    r = nb.compute(str(tracker), "e")
+    assert r.batch == []
+    assert r.skipped_manual_awaiting == [("t", "Title t", "s")]
+    d = nb.to_json_dict(r)
+    assert d["skipped_manual_awaiting"] == [{"id": "t", "title": "Title t", "blocked_story": "s"}]
+    assert "SKIPPED_MANUAL_AWAITING: t\tdeferred (parent story s awaiting manual user step)" in (
+        nb.render_text(r)
+    )
+
+
 def test_childless_story_needs_planning(tracker: Path) -> None:
     """A story with no children is reported as needing planning, never batched."""
     ts = 1700000000000000000

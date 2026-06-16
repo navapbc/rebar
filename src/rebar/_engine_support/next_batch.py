@@ -10,9 +10,10 @@ read plumbing (:func:`rebar._engine_support.reads.list_states`). Output (text an
 ``--output json``) and the stderr conflict matrix are byte-identical to the bash
 implementation so the dual-run parity gate passes (docs/bash-migration.md §5).
 
-The ``analyze-file-impact`` hook is unwired in rebar (``ANALYZE_IMPACT=""``), so
-the bash always falls back to ``extract_files()`` output with an empty
-``files_likely_read`` — that fallback is the only path reproduced here.
+Conflict-aware batching keys SOLELY off each ticket's explicitly-declared
+``file_impact`` (recorded via ``set_file_impact``); declaring accurate impact is
+the ticket author's responsibility. There is no fuzzy text inference of file
+paths — a path causes a batching conflict only if a ticket declares it.
 """
 
 from __future__ import annotations
@@ -22,7 +23,6 @@ import os
 import sys
 from typing import Any
 
-from rebar._engine_support.next_batch_files import PathConfig, extract_files
 from rebar._engine_support.output import error_envelope
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar.reducer import reduce_all_tickets, reduce_ticket
@@ -39,24 +39,21 @@ _MANUAL_AWAITING_USER_TAG = "manual:awaiting_user"
 class _Candidate:
     __slots__ = ("id", "title", "priority", "itype", "status", "files", "files_read")
 
-    def __init__(self, raw: dict, cfg: PathConfig, body: str) -> None:
+    def __init__(self, raw: dict) -> None:
         self.id = raw.get("id", "")
         self.title = raw.get("title", "untitled")
         self.priority = raw.get("priority", 4)
         self.itype = raw.get("issue_type", "task")
         self.status = raw.get("status", "open").lower()
-        text = (raw.get("description") or "") + " " + (raw.get("notes") or "") + " " + body
-        seed_files = extract_files(text, cfg)
-        # ANALYZE_IMPACT is unwired in rebar → always the extract_files fallback.
-        self.files = seed_files
-        self.files_read: set[str] = set()
-        declared = {
+        # Batching conflicts key SOLELY off the ticket's declared file_impact —
+        # no fuzzy inference from description/comment text. An author who wants two
+        # tickets serialized declares the shared path via set_file_impact.
+        self.files = {
             e["path"]
             for e in (raw.get("file_impact") or [])
             if isinstance(e, dict) and e.get("path")
         }
-        if declared:
-            self.files = set(self.files) | declared
+        self.files_read: set[str] = set()
 
 
 class EpicNotFound(Exception):
@@ -90,8 +87,6 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
     """Compute the next batch under ``epic_id``. ``limit`` of 0 means unlimited.
 
     Raises :class:`EpicNotFound` when the epic cannot be resolved."""
-    cfg = PathConfig()
-
     # Resolve the canonical epic id + title (bash: ``rebar show <epic>``).
     resolved = resolve_ticket_id(epic_id, tracker)
     if resolved is None:
@@ -250,27 +245,13 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
         if design_awaiting_parent:
             skipped_design_awaiting.append((tid, title, design_awaiting_parent))
             continue
-        if cfg.planning_flag_enabled:
-            manual_awaiting_parent = is_parent_story_awaiting(tid, _MANUAL_AWAITING_USER_TAG)
-            if manual_awaiting_parent:
-                skipped_manual_awaiting.append((tid, title, manual_awaiting_parent))
-                continue
+        manual_awaiting_parent = is_parent_story_awaiting(tid, _MANUAL_AWAITING_USER_TAG)
+        if manual_awaiting_parent:
+            skipped_manual_awaiting.append((tid, title, manual_awaiting_parent))
+            continue
         candidates_raw.append(raw)
 
-    def _body(tid: str) -> str:
-        s = state_by_id.get(tid)
-        if not s:
-            return ""
-        parts = []
-        if s.get("title"):
-            parts.append(s["title"])
-        for comment in s.get("comments") or []:
-            b = comment.get("body", "")
-            if b:
-                parts.append(b)
-        return "\n".join(parts)
-
-    candidates = [_Candidate(raw, cfg, _body(raw.get("id", ""))) for raw in candidates_raw]
+    candidates = [_Candidate(raw) for raw in candidates_raw]
     # Sort by priority (0=critical), then id for stable tie-breaking.
     candidates.sort(key=lambda c: (c.priority, c.id))
 

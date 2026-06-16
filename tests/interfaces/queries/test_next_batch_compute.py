@@ -216,10 +216,10 @@ def _file_impact(base: Path) -> None:
 
 
 def _multi_overlap(base: Path) -> None:
-    """Two tasks sharing a path that ALSO triggers the extensionless 'rebar'
-    substring match → conflict set has 2 files (the determinism case)."""
+    """Two tasks declaring the SAME two file_impact paths → the conflict set has 2
+    shared files; the reported conflict_file must be the lexicographically smallest
+    ('aaa/shared.py'), byte-stable across runs (the determinism case)."""
     ts = 1700001000000000000
-    sf = "src/rebar/_engine/sprint-next-batch.sh"
     _write(
         base,
         "ov-epic",
@@ -257,7 +257,7 @@ def _multi_overlap(base: Path) -> None:
         "CREATE",
         {
             "ticket_id": "ov-a",
-            "title": f"OV Task A - modifies {sf}",
+            "title": "OV Task A",
             "ticket_type": "task",
             "status": "open",
             "priority": 2,
@@ -267,18 +267,34 @@ def _multi_overlap(base: Path) -> None:
     )
     _write(
         base,
+        "ov-a",
+        2,
+        "FILE_IMPACT",
+        {"file_impact": [{"path": "aaa/shared.py", "reason": "e"}, {"path": "zzz/shared.py", "reason": "e"}]},
+        ts + 3,
+    )
+    _write(
+        base,
         "ov-b",
         1,
         "CREATE",
         {
             "ticket_id": "ov-b",
-            "title": f"OV Task B - modifies {sf}",
+            "title": "OV Task B",
             "ticket_type": "task",
             "status": "open",
             "priority": 2,
             "parent_id": "ov-story",
         },
-        ts + 3,
+        ts + 4,
+    )
+    _write(
+        base,
+        "ov-b",
+        2,
+        "FILE_IMPACT",
+        {"file_impact": [{"path": "aaa/shared.py", "reason": "e"}, {"path": "zzz/shared.py", "reason": "e"}]},
+        ts + 5,
     )
 
 
@@ -350,7 +366,7 @@ def test_multi_overlap_is_deterministic(tracker: Path):
     outs = {_run(tracker, "ov-epic").stdout for _ in range(6)}
     assert len(outs) == 1, f"non-deterministic: {outs}"
     out = outs.pop()
-    assert "SKIPPED_OVERLAP: ov-b\tdeferred (overlaps with ov-a on rebar)" in out
+    assert "SKIPPED_OVERLAP: ov-b\tdeferred (overlaps with ov-a on aaa/shared.py)" in out
     assert "TASK: ov-a" in out and "TASK: ov-b" not in out
 
 
