@@ -1,0 +1,110 @@
+"""Typed core Config (rebar.config.Config) — parse/validate/defaults/aliases and
+loud unknown-key handling (config-refinement task 252e). The TOML loader,
+discovery, and CLI/env/file layering are separate tasks; here we test the schema
++ from_mapping in isolation against a nested mapping (the TOML [tool.rebar] shape).
+"""
+
+from __future__ import annotations
+
+import logging
+
+import pytest
+
+from rebar.config import Config, ConfigError
+
+pytestmark = pytest.mark.unit
+
+
+def test_defaults_when_empty() -> None:
+    c = Config.from_mapping(None)
+    assert c.verify.require_signature_for_close is False
+    assert c.ticket.display_mode == "auto"
+    assert c.compact.threshold == 10
+    assert c.sync.push == "always" and c.sync.pull == "on"
+    assert c.mcp.readonly is False and c.mcp.allow_llm is False and c.mcp.allow_jira_sync is False
+    assert c.reconciler.lock_max_retries == 5 and c.reconciler.deletion_probe_limit == 20
+    assert c.reconciler.id_guard_bypass_unsafe is False
+    assert c.jira.url == "" and c.scratch.base_dir == ""
+
+
+def test_parses_known_keys_typed() -> None:
+    c = Config.from_mapping(
+        {
+            "verify": {"require_signature_for_close": True},
+            "compact": {"threshold": 25},
+            "sync": {"push": "async", "pull": "off"},
+            "mcp": {"allow_jira_sync": True},
+            "reconciler": {"lock_max_retries": 9, "id_guard_bypass_unsafe": True},
+            "jira": {"url": "https://x.atlassian.net", "project": "DSO"},
+            "scratch": {"base_dir": "/tmp/s"},
+        }
+    )
+    assert c.verify.require_signature_for_close is True
+    assert c.compact.threshold == 25
+    assert c.sync.push == "async" and c.sync.pull == "off"
+    assert c.mcp.allow_jira_sync is True
+    assert c.reconciler.lock_max_retries == 9 and c.reconciler.id_guard_bypass_unsafe is True
+    assert c.jira.url == "https://x.atlassian.net" and c.jira.project == "DSO"
+    assert c.scratch.base_dir == "/tmp/s"
+
+
+def test_string_coercion_from_env_or_flat_file() -> None:
+    # Values arriving as strings (env / legacy flat file) coerce to the typed shape.
+    c = Config.from_mapping(
+        {
+            "verify": {"require_signature_for_close": "yes"},
+            "compact": {"threshold": "30"},
+            "sync": {"push": "OFF"},  # case-insensitive choice
+            "mcp": {"readonly": "1"},
+        }
+    )
+    assert c.verify.require_signature_for_close is True
+    assert c.compact.threshold == 30
+    assert c.sync.push == "off"
+    assert c.mcp.readonly is True
+
+
+@pytest.mark.parametrize(
+    "raw, msg",
+    [
+        ({"sync": {"push": "sometimes"}}, "sync.push"),
+        ({"sync": {"pull": "maybe"}}, "sync.pull"),
+        ({"verify": {"require_signature_for_close": "kinda"}}, "boolean"),
+        ({"compact": {"threshold": "lots"}}, "integer"),
+        ({"compact": {"threshold": 0}}, ">= 1"),  # below minimum
+        ({"compact": {"threshold": True}}, "boolean"),  # bool rejected as int
+        ({"jira": {"url": {"nested": 1}}}, "string"),
+        ({"verify": "notatable"}, "table/section"),
+    ],
+)
+def test_invalid_values_fail_closed(raw: dict, msg: str) -> None:
+    with pytest.raises(ConfigError) as exc:
+        Config.from_mapping(raw)
+    assert msg in str(exc.value)
+
+
+def test_unknown_key_and_section_warn_not_drop(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING, logger="rebar.config"):
+        c = Config.from_mapping(
+            {"verify": {"require_signature_for_close": True, "tpyo": 1}, "bogus_section": {"x": 1}},
+            source="rebar.toml",
+        )
+    # The valid key still parses; the unknown key/section are warned, NOT silently dropped.
+    assert c.verify.require_signature_for_close is True
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "verify.tpyo" in text and "rebar.toml" in text
+    assert "[bogus_section]" in text
+
+
+def test_legacy_verify_alias_with_deprecation_warning(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING, logger="rebar.config"):
+        c = Config.from_mapping({"verify": {"require_verdict_for_close": True}})
+    assert c.verify.require_signature_for_close is True
+    assert any("require_verdict_for_close" in r.getMessage() for r in caplog.records)
+
+
+def test_new_key_wins_over_legacy_alias() -> None:
+    c = Config.from_mapping(
+        {"verify": {"require_verdict_for_close": False, "require_signature_for_close": True}}
+    )
+    assert c.verify.require_signature_for_close is True
