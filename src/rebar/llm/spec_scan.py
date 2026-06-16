@@ -62,6 +62,11 @@ def scan_epics_for_spec(
     tickets = _fetch_epics(epics, repo_root)
     reviewer = prompts.get_reviewer(reviewer_id)
     selected = get_runner(cfg, override=runner)
+    # Probe runner readiness up front (import-only, no model call) so a missing
+    # ``agents`` extra (or a misconfigured runner) degrades cleanly even when there
+    # are zero epics to scan — otherwise the batch loop below never runs and an
+    # unusable runner would masquerade as an empty-but-successful result.
+    selected.preflight()
 
     epic_ids = [t.get("ticket_id") for t in tickets]
     findings: list[dict] = []

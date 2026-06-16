@@ -131,6 +131,11 @@ def review_code(
     reviewer_ids = reviewers or select_code_reviewers(changed_files)
     context = _compose_context(changed_files, diff_text)
     selected = get_runner(cfg, override=runner)
+    # Probe runner readiness up front (import-only, no model call) so a missing
+    # ``agents`` extra degrades cleanly even if reviewer selection is empty (a
+    # degenerate catalog) — otherwise the loop below never runs and an unusable
+    # runner would masquerade as an empty-but-successful result. (Matches spec_scan.)
+    selected.preflight()
 
     results: list[dict] = []
     for rid in reviewer_ids:

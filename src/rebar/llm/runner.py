@@ -47,6 +47,14 @@ class Runner(Protocol):
         """Execute the request and return a validated ``review_result`` dict."""
         ...
 
+    def preflight(self) -> None:
+        """Cheap, offline readiness check: raise ``LLMConfigError`` if this runner
+        cannot run (e.g. the ``agents`` extra is absent or it is misconfigured),
+        WITHOUT making a model/network call. Lets callers surface a clean
+        degradation even on a no-op workload (e.g. a spec-scan with zero epics),
+        so optionality failures never hide behind an empty batch loop."""
+        ...
+
 
 # ── Fake runner (offline / tests) ─────────────────────────────────────────────
 class FakeRunner:
@@ -60,6 +68,9 @@ class FakeRunner:
     def __init__(self, findings: list[dict] | None = None, summary: str | None = None):
         self._findings = findings or []
         self._summary = summary
+
+    def preflight(self) -> None:
+        """Always ready — no extra, no network."""
 
     def run(self, req: RunRequest) -> dict:
         result = _findings.build_result(
@@ -95,13 +106,17 @@ class LangflowRunner:
     def __init__(self, config: LLMConfig):
         self._config = config
 
-    def run(self, req: RunRequest) -> dict:
+    def preflight(self) -> None:
         cfg = self._config
         if not cfg.langflow_url or not cfg.langflow_flow_id:
             raise LLMConfigError(
                 "the langflow runner needs LANGFLOW_URL and LANGFLOW_FLOW_ID set "
                 "(+ optional LANGFLOW_API_KEY). See docs/llm-framework.md."
             )
+
+    def run(self, req: RunRequest) -> dict:
+        cfg = self._config
+        self.preflight()
         payload = {
             "input_value": f"{req.system_prompt}\n\n{req.instructions}",
             "input_type": "chat",
@@ -226,6 +241,10 @@ class LangGraphRunner:
     def __init__(self, config: LLMConfig):
         self._config = config
 
+    def preflight(self) -> None:
+        """Fail fast if the ``agents`` extra is absent (import-only, no call)."""
+        _import_langgraph()
+
     def run(self, req: RunRequest) -> dict:
         cfg = self._config
         create_agent, ToolStrategy, init_chat_model = _import_langgraph()
@@ -266,6 +285,11 @@ class DeepAgentsRunner:
 
     def __init__(self, config: LLMConfig):
         self._config = config
+
+    def preflight(self) -> None:
+        """Fail fast if the langgraph base or deepagents harness is absent."""
+        _import_langgraph()
+        _import_deepagents()
 
     def run(self, req: RunRequest) -> dict:
         cfg = self._config

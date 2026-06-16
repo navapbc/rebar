@@ -9,6 +9,34 @@ It is **optional**: the rebar engine stays stdlib-only (`dependencies = []`), an
 nothing here is imported until you actually run an operation. `import rebar` and
 even `import rebar.llm` pull no heavy dependency.
 
+### Optionality is a hard, validated contract
+
+Optionality holds across **every interface × every operation**, and when the
+`agents` extra is absent each surface **degrades cleanly** — never an
+`ImportError` traceback, never a silent success:
+
+- **Library** — each operation (`review_ticket`, `review_code`,
+  `scan_epics_for_spec`) raises a typed `LLMError` (the `LLMConfigError` subclass)
+  whose message points at the extra.
+- **CLI** — `rebar review` / `review-code` / `scan-spec` print `Error: …` and exit
+  non-zero (`rebar review --check` is an import-free preflight that reports
+  availability and always exits 0).
+- **MCP** — `review_ticket` / `review_code` / `scan_spec` are **gated off** unless
+  `REBAR_MCP_ALLOW_LLM=1`; even when the gate is opened with the extra absent they
+  surface the typed error as a tool error, so a default client can never trigger a
+  billable call.
+
+Every runner exposes a cheap, offline `preflight()` (import-only, no model/network
+call) that the operations invoke **before** their batch loop. This is what makes a
+zero-work workload (e.g. a spec-scan over a store with no epics, or a code review
+that selects no reviewers) still fail loudly on a missing extra instead of
+returning an empty-but-successful result.
+
+The whole matrix is locked down by `tests/interfaces/store/test_llm_optionality.py`
+(import-cleanliness per interface + degradation per interface×operation + an
+exhaustiveness guard that discovers operations from the public surface), all
+runnable offline.
+
 ## Why this shape (the research-grounded decision)
 
 The design was chosen after a research spike + two independent Opus design reviews
