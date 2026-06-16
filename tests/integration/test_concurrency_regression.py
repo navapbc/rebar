@@ -261,39 +261,27 @@ def test_two_clone_union_deterministic_replay_and_fork_tiebreak(two_clones):
     # ``status_a[seed] in ("in_progress","blocked")`` -- it could not tell WHICH
     # event won, so any resolution rule (UUID, wall-clock, insertion order) passed.
     #
-    # We pin the SPECIFIC winner by replaying the fork the *same way the reducer
-    # does*: ``rebar.reducer._api.reduce_ticket`` applies a ticket's events in
-    # lexicographic **filename** order (``<ts>-<uuid>-STATUS.json``), and for this
-    # concurrent-transition shape (both siblings carry an empty
-    # ``parent_status_uuid`` -- the seed had no prior STATUS) the
-    # ``process_status`` fork branch lets the LATER-applied (last-in-filename-order)
-    # event win. So the expected winner is the forked STATUS event whose committed
-    # filename sorts LAST. Asserting that exact target status makes the test FAIL
-    # if the resolution rule is changed (e.g. to first-writer-wins, or to a
-    # different ordering key) -- which is the regression this test must guard.
-    #
-    # NOTE (discovered defect, filed as a discovered_from ticket): the reducer
-    # docstring advertises a "deterministic-by-UUID" tie-break, but for two
-    # empty-parent concurrent siblings the implemented resolution is actually
-    # last-in-replay-order (timestamp/insertion), NOT by event UUID. Both clones
-    # still CONVERGE (they replay the identical union in identical filename order),
-    # so cross-clone determinism (asserted above via status_a == status_b) holds;
-    # but the *winner-selection* rule is insertion-order, not UUID. This test pins
-    # the winner the reducer actually produces and documents the divergence rather
-    # than asserting a UUID rule the code does not implement.
+    # The reducer (``process_status``) resolves the fork by LEXICAL EVENT UUID:
+    # the lexically-LOWER of the two siblings' own UUIDs wins, deterministically
+    # and INDEPENDENT of replay/insertion order (bug 8874 fixed: the non-fork
+    # branch now advances ``parent_status_uuid`` to the event's own UUID, so a
+    # sibling forks against the prior sibling's identity rather than an empty
+    # parent pointer that would let the later-replayed event win by insertion
+    # order). So the expected winner is the forked STATUS event with the smallest
+    # UUID; asserting that exact target status makes the test FAIL if the rule
+    # regresses to insertion-order / a different key.
     seed_status_events = _status_events_for(tracker_a, seed)
     forked = [e for e in seed_status_events if e["current_status"] == "open"]
     assert len(forked) == 2, (
         f"expected exactly 2 concurrent STATUS events forking from open, got {forked}"
     )
     assert {e["status"] for e in forked} == {"in_progress", "blocked"}, forked
-    # Reducer replays in lexicographic filename order; the last-applied empty-parent
-    # sibling wins -> its target status is the seed's final status.
-    winner = max(forked, key=lambda e: e["filename"])
+    # Lexically-lower event UUID wins (process_status tie-break) — replay-order-independent.
+    winner = min(forked, key=lambda e: e["uuid"])
     expected_status = winner["status"]
     assert status_a[seed] == expected_status, (
-        f"fork tie-break did not select the last-in-replay-order winner: expected "
-        f"{expected_status!r} (winner file={winner['filename']}), got {status_a[seed]!r}; "
+        f"fork tie-break did not select the lower-UUID winner: expected "
+        f"{expected_status!r} (winner uuid={winner['uuid']}), got {status_a[seed]!r}; "
         f"events={forked}"
     )
     # Both clones must agree on that SAME specific winner (skew-independent union).
