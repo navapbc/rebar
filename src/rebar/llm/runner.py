@@ -449,7 +449,14 @@ def _build_model(cfg: LLMConfig, init_chat_model):
 def _mcp_tools(servers: dict) -> list:
     """Load MCP tools (langchain-mcp-adapters). get_tools() is async; run it on a
     private loop in a worker thread so this works even when the caller is already
-    inside a running event loop (asyncio.run() would raise there)."""
+    inside a running event loop (asyncio.run() would raise there).
+
+    A fresh ``MultiServerMCPClient`` is created per call — MCP sessions are
+    stateless and re-spawned each review, so a stale session can't leak across
+    runs. A configured server that fails to start/connect (a *downed* server), or
+    that connects but advertises zero tools, must surface a CLEAR LLMRunnerError —
+    NEVER be silently swallowed into a tool-less run (which would degrade the
+    review with no signal that the operator's MCP tools went missing)."""
     if not servers:
         return []
     import asyncio
@@ -459,15 +466,30 @@ def _mcp_tools(servers: dict) -> list:
     async def _load():
         return await MultiServerMCPClient(servers).get_tools()
 
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(_load())  # no loop running — the common (sync) case
-    # A loop is already running in this thread: run our own loop in a worker.
-    import concurrent.futures
+    def _run():
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(_load())  # no loop running — the common (sync) case
+        # A loop is already running in this thread: run our own loop in a worker.
+        import concurrent.futures
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, _load()).result()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, _load()).result()
+
+    try:
+        tools = _run()
+    except Exception as exc:
+        raise LLMRunnerError(
+            f"MCP server(s) {sorted(servers)} failed to load tools: {exc}. "
+            "Check REBAR_LLM_MCP_SERVERS and that each server is reachable."
+        ) from exc
+    if not tools:
+        raise LLMRunnerError(
+            f"MCP server(s) {sorted(servers)} connected but advertised zero tools — "
+            "refusing to run tool-less silently. Check the server configuration."
+        )
+    return tools
 
 
 def _safe_path(root: str, rel: str, denied: tuple[str, ...]) -> str:

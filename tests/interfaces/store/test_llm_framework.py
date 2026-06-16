@@ -509,6 +509,40 @@ def test_trace_yields_once_and_propagates_when_body_raises(
     assert flushed == [True]
 
 
+def test_mcp_tools_downed_server_is_loud_not_silent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A configured MCP server that fails to load, or connects but advertises zero
+    tools, must raise a clean LLMRunnerError — NEVER silently degrade to a tool-less
+    run (ticket 9bd5: 'a downed MCP server does NOT silently yield zero tools').
+    A fresh client per call also gives the stateless re-spawn the ticket asks for."""
+    pytest.importorskip("langchain_mcp_adapters")
+    from rebar.llm.errors import LLMRunnerError
+    from rebar.llm.runner import _mcp_tools
+
+    # No servers configured -> empty list, no error (the default/lazy case).
+    assert _mcp_tools({}) == []
+
+    # A configured-but-DOWN server (missing stdio binary) -> clean, actionable error.
+    down = {"x": {"command": "no-such-mcp-binary-zzz", "args": [], "transport": "stdio"}}
+    with pytest.raises(LLMRunnerError) as exc:
+        _mcp_tools(down)
+    assert "x" in str(exc.value) and "REBAR_LLM_MCP_SERVERS" in str(exc.value)
+
+    # A server that connects but advertises ZERO tools -> also loud, not silent.
+    import langchain_mcp_adapters.client as lmc
+
+    class _EmptyClient:
+        def __init__(self, servers: dict) -> None:
+            pass
+
+        async def get_tools(self) -> list:
+            return []
+
+    monkeypatch.setattr(lmc, "MultiServerMCPClient", _EmptyClient)
+    with pytest.raises(LLMRunnerError) as exc2:
+        _mcp_tools({"y": {"url": "http://127.0.0.1:1/mcp", "transport": "streamable_http"}})
+    assert "zero tools" in str(exc2.value)
+
+
 def test_langflow_parse_helpers() -> None:
     from rebar.llm.runner import _deep_find_text, _langflow_extract_text, _parse_findings_json
 
