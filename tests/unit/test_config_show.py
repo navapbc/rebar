@@ -166,6 +166,19 @@ def test_config_cli_json_output(tmp_path: Path, capsys: pytest.CaptureFixture) -
     assert payload["user_config"]["exists"] is False
 
 
+def test_config_cli_reports_config_error_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A strict-mode unknown key surfaces as a clean stderr message + exit 1, not a
+    traceback."""
+    monkeypatch.setenv("REBAR_CONFIG_UNKNOWN_KEYS", "error")
+    p = _proj(tmp_path)
+    (p / "rebar.toml").write_text("[sync]\npush = 'off'\nbogus = 1\n", encoding="utf-8")
+    rc = show_config.config_cli(["--root", str(p)])
+    err = capsys.readouterr().err
+    assert rc == 1 and "sync.bogus" in err
+
+
 def test_config_cli_json_identical_across_clones(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:

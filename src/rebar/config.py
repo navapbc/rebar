@@ -122,7 +122,19 @@ def _as_choice(v: Any, key: str, choices: set[str]) -> str:
     return s
 
 
-def _warn_unknown(section: str, leftover: dict, source: str) -> None:
+def _warn_unknown(section: str, leftover: dict, source: str, *, strict: bool = False) -> None:
+    """Handle keys left over after coercion (unknown to the schema). During the
+    deprecation window (``strict=False``, the default) WARN and ignore them — a typo
+    guard that never breaks a working install. Past the cutover (``strict=True``, via
+    ``REBAR_CONFIG_UNKNOWN_KEYS=error``) raise so the unknown key is a hard error."""
+    if not leftover:
+        return
+    if strict:
+        keys = ", ".join(f"{section}.{k}" for k in leftover)
+        raise ConfigError(
+            f"rebar config{_src(source)}: unknown key(s) {keys} "
+            "(REBAR_CONFIG_UNKNOWN_KEYS=error — remove them or fix the typo)"
+        )
     for k in leftover:
         logger.warning(
             "rebar config%s: unknown key '%s.%s' ignored (typo? see docs/config.md)",
@@ -195,12 +207,13 @@ class Config:
     scratch: ScratchConfig = field(default_factory=ScratchConfig)
 
     @classmethod
-    def from_mapping(cls, raw: dict | None, *, source: str = "") -> Config:
+    def from_mapping(cls, raw: dict | None, *, source: str = "", strict: bool = False) -> Config:
         """Build a Config from a nested mapping (TOML ``[tool.rebar]`` shape): coerce
         + validate present values, apply defaults for the rest, honor legacy
-        aliases, and WARN (never silently drop) on unknown sections/keys. Raises
+        aliases, and WARN (never silently drop) on unknown sections/keys — or, with
+        ``strict=True``, hard-error on them (the post-deprecation cutover). Raises
         :class:`ConfigError` on an invalid value (fail-closed at load)."""
-        sparse = coerce_sparse(raw, source=source)
+        sparse = coerce_sparse(raw, source=source, strict=strict)
         return cls(**{sect: _SECTION_CLASSES[sect](**vals) for sect, vals in sparse.items()})
 
 
@@ -250,17 +263,24 @@ _ALIASES: dict[str, dict[str, str]] = {
 }
 
 
-def coerce_sparse(raw: dict | None, *, source: str = "") -> dict:
+def coerce_sparse(raw: dict | None, *, source: str = "", strict: bool = False) -> dict:
     """Coerce+validate a nested mapping into a SPARSE nested dict of ONLY the keys
     actually present (NO defaults applied) — the per-layer building block for
-    precedence merging. Warns on unknown sections/keys; resolves legacy aliases;
-    raises :class:`ConfigError` on an invalid value. Defaults are applied ONCE, at
-    the end, by :meth:`Config.from_mapping` — so a lower-priority layer's default
-    can never override a higher layer's explicit value."""
+    precedence merging. Resolves legacy aliases (the legacy key is accepted, with a
+    deprecation warning, regardless of ``strict``); raises :class:`ConfigError` on an
+    invalid value. Unknown sections/keys WARN by default and, with ``strict=True``,
+    hard-error (the deprecation cutover). Defaults are applied ONCE, at the end, by
+    :meth:`Config.from_mapping` — so a lower-priority layer's default can never
+    override a higher layer's explicit value."""
     raw = dict(raw or {})
     out: dict[str, dict] = {}
     for sect, val in raw.items():
         if sect not in _SECTIONS:
+            if strict:
+                raise ConfigError(
+                    f"rebar config{_src(source)}: unknown section [{sect}] "
+                    "(REBAR_CONFIG_UNKNOWN_KEYS=error)"
+                )
             logger.warning("rebar config%s: unknown section [%s] ignored", _src(source), sect)
             continue
         if not isinstance(val, dict):
@@ -280,7 +300,7 @@ def coerce_sparse(raw: dict | None, *, source: str = "") -> dict:
         for key, coercer in _SECTIONS[sect].items():
             if key in d:
                 coerced[key] = coercer(d.pop(key), f"{sect}.{key}")
-        _warn_unknown(sect, d, source)
+        _warn_unknown(sect, d, source, strict=strict)
         if coerced:
             out[sect] = coerced
     return out
@@ -459,8 +479,20 @@ def env_overrides() -> dict:
 LAYER_ORDER: tuple[str, ...] = ("default", "user", "project", "env", "cli")
 
 
+def _strict_unknown_keys() -> bool:
+    """Unknown-key policy for the legacy-config deprecation window. Default: WARN and
+    ignore (``REBAR_CONFIG_UNKNOWN_KEYS`` unset / ``warn``) — a working install never
+    breaks on an unknown/typo'd key during the window. Set
+    ``REBAR_CONFIG_UNKNOWN_KEYS=error`` to hard-fail (the post-deprecation cutover, or
+    an early opt-in to strict config). Any other value falls back to the safe WARN."""
+    return os.environ.get("REBAR_CONFIG_UNKNOWN_KEYS", "").strip().lower() == "error"
+
+
 def _ordered_layers(
-    root: str | os.PathLike[str] | None = None, *, cli_overrides: dict | None = None
+    root: str | os.PathLike[str] | None = None,
+    *,
+    cli_overrides: dict | None = None,
+    strict: bool = False,
 ) -> tuple[list[tuple[str, dict]], tuple[Path, str] | None]:
     """Assemble the precedence layers, **lowest first**: user config < project
     config < ``REBAR_<KEY>`` env < CLI overrides. Each is a ``(label, sparse)``
@@ -471,7 +503,9 @@ def _ordered_layers(
     layers: list[tuple[str, dict]] = []
     up = user_config_path()
     if up.is_file():
-        layers.append(("user", coerce_sparse(_read_toml_table(up, pyproject=False), source=str(up))))
+        layers.append(
+            ("user", coerce_sparse(_read_toml_table(up, pyproject=False), source=str(up), strict=strict))
+        )
     proj = _discover_project_config(root)
     if proj is not None:
         path, kind = proj
@@ -480,10 +514,10 @@ def _ordered_layers(
             if kind == "legacy"
             else _read_toml_table(path, pyproject=(kind == "pyproject"))
         )
-        layers.append(("project", coerce_sparse(raw, source=str(path))))
-    layers.append(("env", coerce_sparse(env_overrides(), source="env")))
+        layers.append(("project", coerce_sparse(raw, source=str(path), strict=strict)))
+    layers.append(("env", coerce_sparse(env_overrides(), source="env", strict=strict)))
     if cli_overrides:
-        layers.append(("cli", coerce_sparse(cli_overrides, source="cli")))
+        layers.append(("cli", coerce_sparse(cli_overrides, source="cli", strict=strict)))
     return layers, proj
 
 
@@ -494,7 +528,13 @@ def _env_signature() -> tuple:
     cache key's env component, so an env change misses the cache."""
     sig = [
         (name, os.environ.get(name))
-        for name in ("REBAR_CONFIG", "XDG_CONFIG_HOME", "REBAR_ROOT", "PROJECT_ROOT")
+        for name in (
+            "REBAR_CONFIG",
+            "XDG_CONFIG_HOME",
+            "REBAR_ROOT",
+            "PROJECT_ROOT",
+            "REBAR_CONFIG_UNKNOWN_KEYS",  # strict/warn policy affects whether load raises
+        )
     ]
     for sect, keys in _SECTIONS.items():
         for key in keys:
@@ -528,7 +568,7 @@ def _resolve(
 ) -> tuple[Config, tuple]:
     """Resolve the Config AND the validation token (stat-tokens of the files that
     actually fed the result), so a warm cache hit can detect an edit without a walk."""
-    layers, proj = _ordered_layers(root, cli_overrides=cli_overrides)
+    layers, proj = _ordered_layers(root, cli_overrides=cli_overrides, strict=_strict_unknown_keys())
     cfg = Config.from_mapping(merge_sparse(*(sparse for _, sparse in layers)))
     read_paths: list[Path] = []
     up = user_config_path()
@@ -582,7 +622,9 @@ def resolve_with_sources(
     (the precedence-transparency command). Resolution reuses the exact same layers
     as :func:`load_config`, so the reported provenance can never disagree with the
     value that load actually produced."""
-    layers, project = _ordered_layers(root, cli_overrides=cli_overrides)
+    layers, project = _ordered_layers(
+        root, cli_overrides=cli_overrides, strict=_strict_unknown_keys()
+    )
     config = Config.from_mapping(merge_sparse(*(sparse for _, sparse in layers)))
     sources: dict[str, dict[str, str]] = {}
     for sect, keys in _SECTIONS.items():

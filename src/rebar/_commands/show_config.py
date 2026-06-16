@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import sys
 from typing import Any
 
 from rebar import config as _config
@@ -97,7 +98,13 @@ def config_cli(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
-    payload = _resolved(args.root)
+    try:
+        payload = _resolved(args.root)
+    except _config.ConfigError as exc:
+        # A malformed config or a strict-mode unknown key (REBAR_CONFIG_UNKNOWN_KEYS
+        # =error) is a user-facing condition — report it cleanly, not as a traceback.
+        sys.stderr.write(f"rebar config: {exc}\n")
+        return 1
     if args.output == "json":
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
