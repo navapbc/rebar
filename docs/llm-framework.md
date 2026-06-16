@@ -235,17 +235,50 @@ dict (the `review_result` shape) and advertises no `outputSchema` by design.
 
 Tests that hit third-party services live in **`tests/external/`** and are marked
 **`external`**. They make real, billable calls, so they are excluded from the
-default run (`-m "not integration and not external"`). The live `rebar.llm`
-validation (ticket b2e5) is the suite's first member; future external tests
-(Langflow, Langfuse, …) go here too. Two ways to run them:
+default run (`-m "not integration and not external"`) **and** are inert unless
+`REBAR_RUN_EXTERNAL=1` is also set (a second guard against accidental billable
+calls — both the env opt-in and credentials are required). The live `rebar.llm`
+runner validation (b2e5) and the Langfuse trace round-trip (9bd5) are the current
+members. Two ways to run them:
 
 - **CI (recommended):** add an `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`)
   repository secret and dispatch the **`external-integration`** workflow from the
-  Actions tab (`.github/workflows/external-integration.yml`). It installs `.[dev]`,
-  runs `pytest -m external tests/external`, and **fails** if no key secret is set.
-  Add `LANGFUSE_*` secrets to also exercise tracing.
-- **Locally:** `ANTHROPIC_API_KEY=… pytest -m external tests/external` (needs the
-  `agents` extra). The tests skip when no key/extra is present.
+  Actions tab (`.github/workflows/external-integration.yml`). It has two jobs:
+  `external` (the live model tests) and `langfuse-trace`. Both **fail** if no key
+  secret is set.
+- **Locally:** `REBAR_RUN_EXTERNAL=1 ANTHROPIC_API_KEY=… pytest -m external tests/external`
+  (needs the `agents` extra). Tests skip when a key/extra is absent.
+
+### Self-hosting Langfuse for the trace round-trip
+
+The `langfuse-trace` job validates that a review run emits a trace **fetchable
+back through the Langfuse API** — so it needs a live Langfuse. Per
+[research grounded in Langfuse's own SDK CI](https://github.com/langfuse/langfuse-python/blob/main/.github/workflows/ci.yml),
+we run an **ephemeral self-hosted stack**, not a persistent server:
+
+- **`docker-compose.langfuse.yml`** — the v3 stack (web + worker + Postgres +
+  ClickHouse + Redis + MinIO) pinned to a server version, with **headless
+  initialization** baking in a deterministic org/project/user and the keys
+  `pk-lf-1234567890` / `sk-lf-1234567890`. So no UI step and **no Langfuse secret**
+  is needed in CI — only the model key is a real secret.
+- **CI** brings the stack up, waits for `/api/public/health` **and** an
+  `auth_check()` (the server reports healthy before headless-init + ClickHouse/MinIO
+  migrations finish — budget ~2-3 min), runs `tests/external/test_llm_trace.py`,
+  then tears it down. The test polls `GET /api/public/traces/{id}` with a read-retry
+  loop because ingestion is async (a trace is queryable a few seconds *after*
+  `flush()`).
+- **Locally**, the same stack:
+  ```bash
+  docker compose -f docker-compose.langfuse.yml up -d            # ~2-3 min to Ready
+  export LANGFUSE_HOST=http://localhost:3000
+  export LANGFUSE_PUBLIC_KEY=pk-lf-1234567890
+  export LANGFUSE_SECRET_KEY=sk-lf-1234567890
+  REBAR_RUN_EXTERNAL=1 ANTHROPIC_API_KEY=… pytest -m external tests/external/test_llm_trace.py
+  docker compose -f docker-compose.langfuse.yml down -v          # tear down + wipe
+  ```
+  The UI is at `http://localhost:3000` (login `rebar-ci@rebar.local` /
+  `rebar-ci-password`). The init keys are **non-secret throwaways for a local
+  instance** — never reuse them or expose the instance to a network.
 
 ## Adding an operation or reviewer
 

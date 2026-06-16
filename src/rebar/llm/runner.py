@@ -757,16 +757,33 @@ def _trace(cfg: LLMConfig):
         return
     try:
         try:
-            with client.start_as_current_span(name="rebar.review") as span:
-                yield (getattr(span, "trace_id", None), [handler])
+            with _langfuse_root_span(client) as span:
+                # Prefer the span's own id; fall back to the client's current-trace
+                # lookup. Either is the OTEL 32-hex trace id that the public
+                # /api/public/traces/{id} endpoint keys on (no transformation).
+                trace_id = getattr(span, "trace_id", None)
+                if not trace_id and hasattr(client, "get_current_trace_id"):
+                    trace_id = client.get_current_trace_id()
+                yield (trace_id, [handler])
         except Exception:
             # Span API drift across SDK versions shouldn't fail the review — still trace.
             yield (None, [handler])
     finally:
-        # The v3 SDK buffers spans on a background thread; a short-lived process
-        # (CLI run) can exit before they flush, silently losing the trace. Flush
-        # before returning. Best-effort — never fail the review on a tracing hiccup.
+        # The SDK buffers spans on a background thread; a short-lived process (CLI
+        # run) can exit before they flush, silently losing the trace. Flush before
+        # returning. Best-effort — never fail the review on a tracing hiccup.
         try:
             client.flush()
         except Exception:
             pass
+
+
+def _langfuse_root_span(client):
+    """Open the ``rebar.review`` root span, compatibly across Langfuse SDK majors.
+
+    v4 renamed ``start_as_current_span(name=…)`` to
+    ``start_as_current_observation(name=…, as_type="span")``; v3 used the former.
+    Returns the context manager (yields a span object carrying ``trace_id``)."""
+    if hasattr(client, "start_as_current_observation"):
+        return client.start_as_current_observation(name="rebar.review", as_type="span")
+    return client.start_as_current_span(name="rebar.review")

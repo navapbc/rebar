@@ -1,12 +1,18 @@
 name: external-integration
 
 # Manually-triggered EXTERNAL-integration suite (tests/external/): tests that hit
-# third-party services — currently the live rebar.llm runner validation (ticket
-# b2e5). These make REAL, billable calls, so they are deliberately NOT part of the
-# automatic `test` workflow (which excludes `-m "not integration and not external"`).
-# Trigger from the Actions tab. Requires the `ANTHROPIC_API_KEY` (or
-# `OPENAI_API_KEY`) repository secret; set `LANGFUSE_*` secrets to also exercise
-# the tracing path.
+# third-party services and make REAL, billable LLM calls, so they are deliberately
+# NOT part of the automatic `test` workflow. Trigger from the Actions tab.
+#
+# Two jobs:
+#   * external        — the live rebar.llm runner validation (model only).
+#   * langfuse-trace  — stands up an EPHEMERAL self-hosted Langfuse stack
+#                       (docker-compose.langfuse.yml, headless-init) and asserts a
+#                       review run emits a trace fetchable via the Langfuse API.
+#
+# Both require the `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`) repository secret.
+# langfuse-trace needs NO Langfuse secret — the stack is ephemeral with
+# deterministic headless-init keys baked into the compose file.
 
 on:
   workflow_dispatch: {}
@@ -56,12 +62,95 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          # Optional: present only if configured as secrets — exercises the Langfuse
-          # tracing path (otherwise it stays a no-op).
-          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
-          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
-          LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
+          # The external tier is inert unless this opt-in is set (a safety guard
+          # against accidental billable calls); the job above already required a key.
+          REBAR_RUN_EXTERNAL: "1"
         # -p no:cacheprovider + a runner-temp basetemp mirror the main workflow.
+        # The Langfuse trace test skips here (no LANGFUSE_HOST) — see langfuse-trace.
         run: >-
           pytest -m external tests/external -q
           -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
+
+  langfuse-trace:
+    name: langfuse tracing round-trip (ephemeral self-hosted)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Require an LLM API key secret
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENAI_API_KEY" ]; then
+            echo "::error::Set the ANTHROPIC_API_KEY (or OPENAI_API_KEY) repository secret to run the tracing round-trip."
+            exit 1
+          fi
+
+      - name: Ensure jq is installed
+        run: sudo apt-get update && sudo apt-get install -y jq && jq --version
+
+      - name: Install rebar + the full agents stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+
+      # The deterministic headless-init keys live in docker-compose.langfuse.yml.
+      - name: Bring up the ephemeral Langfuse stack
+        run: docker compose -f docker-compose.langfuse.yml up -d
+
+      - name: Wait for Langfuse to be ready
+        run: |
+          # 1) HTTP liveness — the web container answers /api/public/health.
+          ok=
+          for i in $(seq 1 60); do
+            if curl -fsS --head http://localhost:3000/api/public/health >/dev/null 2>&1; then
+              echo "health OK after ${i} tries"; ok=1; break
+            fi
+            sleep 5
+          done
+          [ -n "$ok" ] || { echo "::error::Langfuse web never became healthy"; docker compose -f docker-compose.langfuse.yml logs --tail=80 langfuse-web; exit 1; }
+          # 2) Auth/readiness — the server reports healthy BEFORE headless-init +
+          #    ClickHouse/MinIO migrations finish, so confirm the project resolves.
+          for i in $(seq 1 24); do
+            if LANGFUSE_HOST=http://localhost:3000 \
+               LANGFUSE_PUBLIC_KEY=pk-lf-1234567890 \
+               LANGFUSE_SECRET_KEY=sk-lf-1234567890 \
+               python -c "from langfuse import get_client; assert get_client().auth_check()" 2>/dev/null; then
+              echo "langfuse auth OK after ${i} tries"; exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Langfuse project did not initialize in time"
+          docker compose -f docker-compose.langfuse.yml logs --tail=80
+          exit 1
+
+      - name: Run the Langfuse trace round-trip test
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Point rebar at the ephemeral stack with its baked-in headless-init keys.
+          LANGFUSE_HOST: http://localhost:3000
+          LANGFUSE_PUBLIC_KEY: pk-lf-1234567890
+          LANGFUSE_SECRET_KEY: sk-lf-1234567890
+          REBAR_RUN_EXTERNAL: "1"
+        run: >-
+          pytest -m external tests/external/test_llm_trace.py -q
+          -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
+
+      - name: Langfuse logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.langfuse.yml logs --tail=120
+
+      - name: Tear down the Langfuse stack
+        if: always()
+        run: docker compose -f docker-compose.langfuse.yml down -v
