@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
@@ -755,27 +755,38 @@ def _trace(cfg: LLMConfig):
     except Exception:
         yield (None, [])
         return
-    try:
+    # Open the rebar.review root span via an ExitStack so it closes correctly
+    # whether the body returns OR raises — and CRUCIALLY so this generator yields
+    # exactly ONCE. (A naive ``with span: yield`` wrapped in ``try/except: yield``
+    # double-yields when the body raises — contextmanager throws the exception
+    # back in at the yield, the except catches it and yields again, and
+    # @contextmanager dies with "generator didn't stop after throw()", masking the
+    # real error. Opening the span outside the yield's try avoids that entirely.)
+    trace_id = None
+    with ExitStack() as stack:
         try:
-            with _langfuse_root_span(client) as span:
-                # Prefer the span's own id; fall back to the client's current-trace
-                # lookup. Either is the OTEL 32-hex trace id that the public
-                # /api/public/traces/{id} endpoint keys on (no transformation).
-                trace_id = getattr(span, "trace_id", None)
-                if not trace_id and hasattr(client, "get_current_trace_id"):
-                    trace_id = client.get_current_trace_id()
-                yield (trace_id, [handler])
+            span = stack.enter_context(_langfuse_root_span(client))
+            # Prefer the span's own id; fall back to the client's current-trace
+            # lookup. Either is the OTEL 32-hex trace id that the public
+            # /api/public/traces/{id} endpoint keys on (no transformation). A
+            # span-API failure must not lose tracing — the handler still traces.
+            trace_id = getattr(span, "trace_id", None)
+            if not trace_id and hasattr(client, "get_current_trace_id"):
+                trace_id = client.get_current_trace_id()
         except Exception:
-            # Span API drift across SDK versions shouldn't fail the review — still trace.
-            yield (None, [handler])
-    finally:
-        # The SDK buffers spans on a background thread; a short-lived process (CLI
-        # run) can exit before they flush, silently losing the trace. Flush before
-        # returning. Best-effort — never fail the review on a tracing hiccup.
+            trace_id = None
         try:
-            client.flush()
-        except Exception:
-            pass
+            yield (trace_id, [handler])
+        finally:
+            # The SDK buffers spans on a background thread; a short-lived process
+            # (CLI run) can exit before they flush, silently losing the trace.
+            # Flush before returning. Best-effort — never fail the review on a
+            # tracing hiccup. (The span itself is closed by the ExitStack, which
+            # records any in-flight exception on it.)
+            try:
+                client.flush()
+            except Exception:
+                pass
 
 
 def _langfuse_root_span(client):

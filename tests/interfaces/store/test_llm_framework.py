@@ -448,6 +448,67 @@ def test_runner_selection_and_stubs() -> None:
             DeepAgentsRunner(LLMConfig(repo_path=".")).run(req)
 
 
+def test_trace_yields_once_and_propagates_when_body_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: ``_trace`` must yield EXACTLY once even when the wrapped body
+    raises. A naive ``with span: yield`` wrapped in ``try/except: yield`` double-
+    yields on a thrown-in exception, so @contextmanager dies with 'generator
+    didn't stop after throw()' and MASKS the real error. The body's exception must
+    propagate unchanged, the span must close, and flush() must still run."""
+    pytest.importorskip("langfuse")
+    import langfuse
+    import langfuse.langchain as lflc
+
+    from rebar.llm.config import LangfuseConfig, LLMConfig
+    from rebar.llm.runner import _trace
+
+    flushed: list = []
+    exited: list = []
+
+    class _FakeSpan:
+        trace_id = "abc123def"
+
+    class _FakeSpanCM:
+        def __enter__(self):
+            return _FakeSpan()
+
+        def __exit__(self, *exc):
+            exited.append(exc[0])
+            return False  # do NOT suppress
+
+    class _FakeClient:
+        def start_as_current_observation(self, **kw):
+            return _FakeSpanCM()
+
+        def get_current_trace_id(self):
+            return "abc123def"
+
+        def flush(self):
+            flushed.append(True)
+
+    monkeypatch.setattr(langfuse, "get_client", lambda: _FakeClient())
+    monkeypatch.setattr(lflc, "CallbackHandler", lambda: object())
+
+    cfg = LLMConfig(langfuse=LangfuseConfig(public_key="pk", secret_key="sk"))
+    assert cfg.langfuse.enabled
+
+    boom = RuntimeError("body failed")
+    with pytest.raises(RuntimeError) as exc:
+        with _trace(cfg) as (trace_id, callbacks):
+            assert trace_id == "abc123def" and callbacks  # span id + handler wired
+            raise boom
+    assert exc.value is boom  # the REAL error, not a masked contextlib RuntimeError
+    assert flushed == [True]  # flushed despite the raise
+    assert exited and exited[0] is RuntimeError  # span closed, told about the exc
+
+    # And the happy path still yields the trace id and flushes.
+    flushed.clear()
+    with _trace(cfg) as (trace_id, callbacks):
+        assert trace_id == "abc123def"
+    assert flushed == [True]
+
+
 def test_langflow_parse_helpers() -> None:
     from rebar.llm.runner import _deep_find_text, _langflow_extract_text, _parse_findings_json
 

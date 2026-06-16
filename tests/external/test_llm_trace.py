@@ -85,6 +85,10 @@ def test_live_review_emits_fetchable_langfuse_trace(rebar_repo: Path) -> None:
         description="Build login.\n\n## Acceptance Criteria\n- [ ] users can log in",
         repo_root=str(rebar_repo),
     )
+    # Seed a concrete file with an obvious issue so the agent CONVERGES quickly
+    # (finds it, reports, stops) instead of exploring an empty repo until it trips
+    # the recursion limit — mirrors test_llm_live.test_live_review_ticket.
+    (rebar_repo / "app.py").write_text("API_KEY = 'hardcoded-secret'\n", encoding="utf-8")
 
     # from_env() picks up the LANGFUSE_* creds so tracing is enabled for this run.
     cfg = LLMConfig.from_env(repo_root=str(rebar_repo))
