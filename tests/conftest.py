@@ -194,6 +194,18 @@ def _isolate_user_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.delenv("REBAR_CONFIG", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _reset_config_cache() -> None:
+    """``load_config`` memoizes resolution per process (perf: it is on the command
+    hot path). Tests reconfigure env/files freely between cases, so clear the caches
+    around each test — no resolved Config or parsed-TOML entry leaks across tests."""
+    from rebar import config as _cfg
+
+    _cfg.reset_config_cache()
+    yield
+    _cfg.reset_config_cache()
+
+
 # ── Repo-isolation guard (no test may commit to / mutate this checkout) ───────
 #
 # Tests operate on disposable trackers under tmp_path, never the rebar checkout.

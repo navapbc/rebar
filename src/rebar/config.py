@@ -297,16 +297,67 @@ def merge_sparse(*layers: dict | None) -> dict:
 
 
 # ── config-file discovery + layered load ──────────────────────────────────────
-def _read_toml_table(path: Path, *, pyproject: bool) -> dict:
-    """Read a TOML config: the ``[tool.rebar]`` table for a pyproject.toml, else the
-    whole top-level table (standalone rebar.toml / user config.toml)."""
+#
+# Config resolution is on the COMMAND HOT PATH (every CLI invocation + many library
+# reads resolve config; the verify gate and ticket.display_mode go through
+# load_config). Two caches keep it cheap and bounded WITHOUT risking staleness:
+#
+#  * _TOML_CACHE memoizes a parsed TOML file by (path, mtime_ns, size) — so the
+#    upward discovery walk and the final read never parse the same pyproject twice
+#    (the walk's [tool.rebar]-presence probe and the subsequent table read share one
+#    parse), and a repeated load reuses the parse. mtime+size in the key means an
+#    edited file misses the cache, so a stale parse can never be served.
+#  * _RESULT_CACHE memoizes a whole resolved Config by (root, cwd-when-root-implicit,
+#    env-signature, cli-signature) so repeated resolutions in one process skip the
+#    discovery walk + merge. Each entry also stores stat-tokens of the files that
+#    were actually read; a warm hit re-stats ONLY those known paths (cheap; not a
+#    walk, not a re-parse) and re-resolves if any changed or vanished. So even in a
+#    long-running host (the MCP server) an EDITED config file is picked up — the
+#    fail-closed verify gate cannot be pinned to a stale value by an in-process edit.
+#    Errors are NEVER cached (the gate re-evaluates fail-closed). The one thing a
+#    warm hit does NOT detect is a brand-NEW higher-priority config file appearing
+#    where none was discovered (that needs a fresh walk) — call reset_config_cache()
+#    to force one; this matches the "discovered once per process" contract.
+_TOML_CACHE: dict[tuple[str, int, int], dict] = {}
+# value: (config, validation) where validation is a tuple of file stat-tokens.
+_RESULT_CACHE: dict[tuple, tuple[Config, tuple]] = {}
+
+
+def reset_config_cache() -> None:
+    """Clear the config resolution caches (parsed-TOML + resolved-Config). For one-
+    shot CLI processes this is never needed; tests call it between cases, and a
+    long-running host may call it to force a re-read after editing config files."""
+    _TOML_CACHE.clear()
+    _RESULT_CACHE.clear()
+
+
+def _parse_toml(path: Path) -> dict:
+    """Parse a whole TOML file, memoized by (path, mtime, size). Raises
+    :class:`ConfigError` if the file cannot be read or parsed — the single place
+    parse errors turn into the fail-closed signal."""
     import tomllib
 
+    try:
+        st = path.stat()
+    except OSError as exc:
+        raise ConfigError(f"could not read config {path}: {exc}") from None
+    cache_key = (str(path), st.st_mtime_ns, st.st_size)
+    hit = _TOML_CACHE.get(cache_key)
+    if hit is not None:
+        return hit
     try:
         with open(path, "rb") as f:
             data = tomllib.load(f)
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise ConfigError(f"could not read config {path}: {exc}") from None
+    _TOML_CACHE[cache_key] = data
+    return data
+
+
+def _read_toml_table(path: Path, *, pyproject: bool) -> dict:
+    """Read a TOML config: the ``[tool.rebar]`` table for a pyproject.toml, else the
+    whole top-level table (standalone rebar.toml / user config.toml)."""
+    data = _parse_toml(path)
     table = data.get("tool", {}).get("rebar", {}) if pyproject else data
     return table if isinstance(table, dict) else {}
 
@@ -336,13 +387,14 @@ def _pyproject_rebar_state(path: Path) -> str:
     """Whether a ``pyproject.toml`` carries a ``[tool.rebar]`` table:
     ``"has"`` / ``"absent"`` / ``"unreadable"`` (won't parse). An unreadable
     pyproject is reported as such — NOT silently skipped — so a present-but-
-    unparseable gate config can fail CLOSED rather than leaking the security gate."""
-    import tomllib
+    unparseable gate config can fail CLOSED rather than leaking the security gate.
 
+    Parses via the shared mtime-keyed cache, so when a ``[tool.rebar]`` pyproject is
+    selected the subsequent :func:`_read_toml_table` reuses this parse rather than
+    re-reading the file (no double-parse on the hot path)."""
     try:
-        with open(path, "rb") as f:
-            data = tomllib.load(f)
-    except (OSError, tomllib.TOMLDecodeError):
+        data = _parse_toml(path)
+    except ConfigError:
         return "unreadable"
     return "has" if isinstance(data.get("tool", {}).get("rebar"), dict) else "absent"
 
@@ -435,6 +487,58 @@ def _ordered_layers(
     return layers, proj
 
 
+def _env_signature() -> tuple:
+    """The config-relevant environment, as a hashable snapshot: the discovery/
+    location pointers plus every ``REBAR_<SECTION>_<KEY>`` override. Two processes
+    with the same snapshot (and same files) resolve identically — and it is the
+    cache key's env component, so an env change misses the cache."""
+    sig = [
+        (name, os.environ.get(name))
+        for name in ("REBAR_CONFIG", "XDG_CONFIG_HOME", "REBAR_ROOT", "PROJECT_ROOT")
+    ]
+    for sect, keys in _SECTIONS.items():
+        for key in keys:
+            n = f"REBAR_{sect.upper()}_{key.upper()}"
+            sig.append((n, os.environ.get(n)))
+    return tuple(sig)
+
+
+def _cli_signature(cli_overrides: dict | None) -> tuple | None:
+    """A hashable snapshot of CLI overrides (sorted nested items) for the cache key."""
+    if not cli_overrides:
+        return None
+    return tuple(
+        (sect, tuple(sorted(vals.items())))
+        for sect, vals in sorted(cli_overrides.items())
+    )
+
+
+def _file_token(path: Path) -> tuple[str, int | None, int | None]:
+    """A cheap (path, mtime_ns, size) freshness token; ``(path, None, None)`` if the
+    file is missing — so a deleted/created config flips the token and misses cache."""
+    try:
+        st = path.stat()
+        return (str(path), st.st_mtime_ns, st.st_size)
+    except OSError:
+        return (str(path), None, None)
+
+
+def _resolve(
+    root: str | os.PathLike[str] | None, cli_overrides: dict | None
+) -> tuple[Config, tuple]:
+    """Resolve the Config AND the validation token (stat-tokens of the files that
+    actually fed the result), so a warm cache hit can detect an edit without a walk."""
+    layers, proj = _ordered_layers(root, cli_overrides=cli_overrides)
+    cfg = Config.from_mapping(merge_sparse(*(sparse for _, sparse in layers)))
+    read_paths: list[Path] = []
+    up = user_config_path()
+    if up.is_file():
+        read_paths.append(up)
+    if proj is not None:
+        read_paths.append(proj[0])
+    return cfg, tuple(_file_token(p) for p in read_paths)
+
+
 def load_config(
     root: str | os.PathLike[str] | None = None, *, cli_overrides: dict | None = None
 ) -> Config:
@@ -443,9 +547,27 @@ def load_config(
 
     Each layer is coerced sparse, merged by precedence, then defaults applied ONCE
     — so a lower layer's default can never override a higher layer's explicit
-    value, and the result is portable (no machine-specific state leaks in)."""
-    layers, _ = _ordered_layers(root, cli_overrides=cli_overrides)
-    return Config.from_mapping(merge_sparse(*(sparse for _, sparse in layers)))
+    value, and the result is portable (no machine-specific state leaks in).
+
+    Memoized per process (see the cache notes above): repeated resolutions on the
+    command hot path skip the discovery walk + parse, but a warm hit re-stats the
+    files it read and re-resolves if any changed (so an in-process config edit — incl.
+    the verify gate — is honored). A :class:`ConfigError` is propagated and NOT cached
+    (the gate re-evaluates fail-closed every call). See :func:`reset_config_cache`."""
+    key = (
+        str(root) if root is not None else None,
+        os.getcwd() if root is None else None,  # cwd resolves the root when implicit
+        _env_signature(),
+        _cli_signature(cli_overrides),
+    )
+    entry = _RESULT_CACHE.get(key)
+    if entry is not None:
+        cfg, validation = entry
+        if all(_file_token(Path(tok[0])) == tok for tok in validation):
+            return cfg  # every file it read is unchanged → cache is fresh
+    cfg, validation = _resolve(root, cli_overrides)
+    _RESULT_CACHE[key] = (cfg, validation)
+    return cfg
 
 
 def resolve_with_sources(
