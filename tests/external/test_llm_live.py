@@ -85,7 +85,12 @@ def test_live_review_code(rebar_repo: Path) -> None:
         "--- a/auth.py\n+++ b/auth.py\n@@ -0,0 +1,3 @@\n"
         "+def check(token):\n+    return True  # TODO: actually verify\n"
     )
-    cfg = LLMConfig(model=_MODEL, repo_path=str(rebar_repo), max_iterations=15)
+    # Write the reviewed file to disk so the agent's file tools can read it (a real
+    # code review reviews files that exist) and converge within the default budget.
+    (rebar_repo / "auth.py").write_text(
+        "def check(token):\n    return True  # TODO: actually verify\n", encoding="utf-8"
+    )
+    cfg = LLMConfig(model=_MODEL, repo_path=str(rebar_repo))  # default max_iterations
     result = llm.review_code(
         diff_text=diff,
         changed_files=["auth.py"],
@@ -95,3 +100,28 @@ def test_live_review_code(rebar_repo: Path) -> None:
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
     assert result["model"] == _MODEL
     assert isinstance(result["findings"], list)
+
+
+@_skip
+def test_live_scan_spec(rebar_repo: Path) -> None:
+    """The third operation, validated live: a batch spec-scan over a real epic
+    must reach the runner, populate structured output, and validate — exercising
+    the up-front preflight + batch loop on the real model path."""
+    import rebar.llm as llm
+    from rebar.llm.config import LLMConfig
+
+    rebar.create_ticket(
+        "epic",
+        "Authentication",
+        description="Login + sessions.\n\n## Acceptance Criteria\n- [ ] users can log in",
+        repo_root=str(rebar_repo),
+    )
+    cfg = LLMConfig(model=_MODEL, repo_path=str(rebar_repo))
+    result = llm.scan_epics_for_spec(
+        "The product must support multi-factor authentication and password reset.",
+        repo_root=str(rebar_repo),
+        config=cfg,
+    )
+    schemas.validator(schemas.REVIEW_RESULT).validate(result)
+    assert result["model"] == _MODEL
+    assert isinstance(result["findings"], list)  # structured_response populated

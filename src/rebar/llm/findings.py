@@ -60,7 +60,10 @@ def _coerce_citation(raw: Any) -> dict:
                 c.pop(line_key, None)
             else:
                 c[line_key] = value
-    return c
+    # Strip null-valued keys: a model that emits `"path": null` / `"url": null` on
+    # a `source` citation would otherwise fail the schema (those fields are typed
+    # `string`). None means absent.
+    return {k: v for k, v in c.items() if v is not None}
 
 
 def normalize_finding(raw: dict, *, reviewer_id: str | None = None) -> dict:
@@ -88,7 +91,10 @@ def normalize_finding(raw: dict, *, reviewer_id: str | None = None) -> dict:
             f.pop("confidence", None)
     if reviewer_id and not f.get("reviewer_id"):
         f["reviewer_id"] = reviewer_id
-    return f
+    # Drop keys the model left explicitly null: optional schema fields (title,
+    # reviewer_id, …) are typed `string`, so a None value fails validation —
+    # `None` means "absent", so strip it rather than sink the whole review.
+    return {k: v for k, v in f.items() if v is not None}
 
 
 def build_result(

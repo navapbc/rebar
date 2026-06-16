@@ -609,29 +609,38 @@ def _filesystem_tools(repo_path: str | None) -> list:
         line_end<=0 means to the end) rather than guessing — when output is
         truncated the result tells you the next line_start. Overlong lines are
         clipped. Prefer reading the specific region you need."""
-        target = _safe_path(root, path, denied)
+        try:
+            target = _safe_path(root, path, denied)
+        except ValueError as exc:
+            return f"Error: {exc}"  # denied/escaping path — refused, agent recovers
         lo = max(1, line_start)
         hard_hi = lo + _READ_MAX_LINES - 1  # read at most _READ_MAX_LINES lines
         requested_end = line_end if line_end > 0 else None
         out: list[str] = []
         hit_cap = False
         # Stream the file; never read more than the returned window into memory,
-        # so the cap holds even on a huge file (a narrow range stays cheap).
-        with open(target, encoding="utf-8", errors="replace") as fh:
-            for i, line in enumerate(fh, 1):
-                if i < lo:
-                    continue
-                if i > hard_hi:
-                    hit_cap = True  # more lines exist beyond the cap window
-                    break
-                if requested_end is not None and i > requested_end:
-                    break
-                text = line.rstrip("\n")
-                if len(text) > _READ_MAX_LINE_CHARS:
-                    text = text[:_READ_MAX_LINE_CHARS] + (
-                        f" …(+{len(text) - _READ_MAX_LINE_CHARS} chars truncated)"
-                    )
-                out.append(f"{i}: {text}")
+        # so the cap holds even on a huge file (a narrow range stays cheap). A
+        # missing/unreadable path (e.g. a file in the diff but not on disk, or a
+        # directory) returns a recoverable message so the agent adapts — never an
+        # uncaught OSError that aborts the whole run.
+        try:
+            with open(target, encoding="utf-8", errors="replace") as fh:
+                for i, line in enumerate(fh, 1):
+                    if i < lo:
+                        continue
+                    if i > hard_hi:
+                        hit_cap = True  # more lines exist beyond the cap window
+                        break
+                    if requested_end is not None and i > requested_end:
+                        break
+                    text = line.rstrip("\n")
+                    if len(text) > _READ_MAX_LINE_CHARS:
+                        text = text[:_READ_MAX_LINE_CHARS] + (
+                            f" …(+{len(text) - _READ_MAX_LINE_CHARS} chars truncated)"
+                        )
+                    out.append(f"{i}: {text}")
+        except OSError as exc:
+            return f"Error: cannot read '{path}': {exc.strerror or exc}"
         if not out:
             return "(no lines in range; file may be empty or shorter than line_start)"
         body = "\n".join(out)
@@ -648,10 +657,17 @@ def _filesystem_tools(repo_path: str | None) -> list:
         """List entries of a repo directory (directories end with '/'). Vendored/
         generated and git-ignored entries are hidden to cut noise; you can still
         read_file any specific path that isn't shown."""
-        target = _safe_path(root, path, denied)
+        try:
+            target = _safe_path(root, path, denied)
+        except ValueError as exc:
+            return f"Error: {exc}"  # denied/escaping path — refused, agent recovers
         entries: list[str] = []
         hidden = 0
-        for name in sorted(os.listdir(target)):
+        try:
+            names = sorted(os.listdir(target))
+        except OSError as exc:
+            return f"Error: cannot list '{path}': {exc.strerror or exc}"
+        for name in names:
             full = os.path.join(target, name)
             rp = os.path.realpath(full)
             if _is_denied(rp, denied) or not _within_root(rp, root):
@@ -673,7 +689,10 @@ def _filesystem_tools(repo_path: str | None) -> list:
         are skipped. If you hit the cap, narrow the pattern or `path`."""
         import re
 
-        base = _safe_path(root, path, denied)
+        try:
+            base = _safe_path(root, path, denied)
+        except ValueError as exc:
+            return f"Error: {exc}"  # denied/escaping path — refused, agent recovers
         try:
             rx = re.compile(pattern)
         except re.error as exc:

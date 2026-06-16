@@ -91,6 +91,29 @@ def test_normalize_coerces_shape() -> None:
     assert f["citations"] == []
 
 
+def test_normalize_strips_model_emitted_nulls() -> None:
+    """A real model may emit explicit nulls on optional string fields (title) or
+    citation fields (path/url on a source citation) — those are typed `string` in
+    the schema, so a None would fail validation. They must be stripped (None ==
+    absent) so one sloppy field can't sink an otherwise-valid review. Regression
+    for a live-run FindingsError ('None is not of type string')."""
+    from rebar.llm.findings import build_result, normalize_finding, validate_result
+
+    f = normalize_finding(
+        {
+            "severity": "high",
+            "dimension": "security",
+            "detail": "hardcoded secret",
+            "title": None,  # model emitted an explicit null
+            "citations": [{"kind": "source", "description": "evidence", "path": None, "url": None}],
+        }
+    )
+    assert "title" not in f
+    assert "path" not in f["citations"][0] and "url" not in f["citations"][0]
+    # End-to-end: the assembled review_result now validates cleanly.
+    validate_result(build_result([f], runner="fake"))
+
+
 def test_resolve_citations_downgrades_unresolved(tmp_path: Path) -> None:
     from rebar.llm.findings import build_result, resolve_citations
 
@@ -177,6 +200,25 @@ def test_read_file_truncates_overlong_lines(tmp_path: Path) -> None:
     assert len(out) < _READ_MAX_LINE_CHARS + 500  # the 4000-char tail was clipped
 
 
+def test_read_tools_return_recoverable_error_for_missing_path(tmp_path: Path) -> None:
+    """A missing/unreadable path (e.g. a file named in a diff but not on disk, or a
+    directory) must return a recoverable message — NOT raise an uncaught OSError
+    that aborts the agent run. Regression for a live-run FileNotFoundError in
+    review_code. (A denied/escaping path is a separate hard ValueError block.)"""
+    pytest.importorskip("langchain_core")
+    from rebar.llm.runner import _filesystem_tools
+
+    tools = {t.name: t for t in _filesystem_tools(str(tmp_path))}
+    out = tools["read_file"].invoke({"path": "does-not-exist.py"})
+    assert out.startswith("Error: cannot read 'does-not-exist.py'")
+    # read_file on a directory is also recoverable, not a crash.
+    (tmp_path / "subdir").mkdir()
+    assert tools["read_file"].invoke({"path": "subdir"}).startswith("Error: cannot read")
+    # list_directory on a missing path is recoverable too.
+    miss = tools["list_directory"].invoke({"path": "no-such-dir"})
+    assert miss.startswith("Error: cannot list 'no-such-dir'")
+
+
 def test_discovery_hides_noise_and_gitignored(rebar_repo: Path) -> None:
     """list_directory/search_files hide vendored/generated + .gitignore'd files, but
     read_file can still access an explicitly named one (large-project handling)."""
@@ -222,8 +264,15 @@ def test_discovery_rejects_symlink_escape(tmp_path: Path) -> None:
     assert "escape_dir" not in listing and "escape_file" not in listing
     found = tools["search_files"].invoke({"pattern": "TOPSECRET"})
     assert "normal.txt" in found and "secret.txt" not in found
-    with pytest.raises(ValueError):  # explicit read of the escaping symlink is blocked
-        tools["read_file"].invoke({"path": "escape_file"})
+    # An explicit read of an escaping symlink is BLOCKED, but as a recoverable
+    # refusal message — not an uncaught ValueError that would abort the agent run.
+    # (The secret content must never appear in the returned string.)
+    refusal = tools["read_file"].invoke({"path": "escape_file"})
+    assert refusal.startswith("Error:") and "escape" in refusal
+    assert "TOPSECRET" not in refusal
+    # Same hard block, same recoverable shape, for an absolute path the model may
+    # pass (e.g. list_directory("/")) — regression for a live-run abort.
+    assert tools["list_directory"].invoke({"path": "/"}).startswith("Error:")
 
 
 def test_validate_rejects_bad_result() -> None:
