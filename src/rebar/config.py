@@ -10,7 +10,6 @@ import logging
 import os
 import subprocess
 from dataclasses import dataclass, field
-from dataclasses import fields as _dc_fields
 from pathlib import Path
 from typing import Any
 
@@ -197,114 +196,225 @@ class Config:
 
     @classmethod
     def from_mapping(cls, raw: dict | None, *, source: str = "") -> Config:
-        """Parse a nested mapping (TOML ``[tool.rebar]`` shape) into a Config.
+        """Build a Config from a nested mapping (TOML ``[tool.rebar]`` shape): coerce
+        + validate present values, apply defaults for the rest, honor legacy
+        aliases, and WARN (never silently drop) on unknown sections/keys. Raises
+        :class:`ConfigError` on an invalid value (fail-closed at load)."""
+        sparse = coerce_sparse(raw, source=source)
+        return cls(**{sect: _SECTION_CLASSES[sect](**vals) for sect, vals in sparse.items()})
 
-        Coerces/validates each value, applies defaults for anything absent, honors
-        legacy aliases, and WARNS (does not drop silently) on unknown sections/keys.
-        Raises :class:`ConfigError` on an invalid value (fail-closed at load)."""
-        raw = dict(raw or {})
-        known = {f.name for f in _dc_fields(cls)}
-        for sect in list(raw):
-            if not isinstance(raw[sect], dict):
-                raise ConfigError(f"[{sect}]: expected a table/section, got {type(raw[sect]).__name__}")
-            if sect not in known:
-                logger.warning("rebar config%s: unknown section [%s] ignored", _src(source), sect)
-        return cls(
-            verify=_parse_verify(raw.get("verify"), source),
-            ticket=_parse_ticket(raw.get("ticket"), source),
-            compact=_parse_compact(raw.get("compact"), source),
-            sync=_parse_sync(raw.get("sync"), source),
-            mcp=_parse_mcp(raw.get("mcp"), source),
-            reconciler=_parse_reconciler(raw.get("reconciler"), source),
-            jira=_parse_jira(raw.get("jira"), source),
-            scratch=_parse_scratch(raw.get("scratch"), source),
+
+# ── schema: the single source of coercion truth (sparse parse + defaults) ─────
+_SECTION_CLASSES: dict[str, type] = {
+    "verify": VerifyConfig,
+    "ticket": TicketConfig,
+    "compact": CompactConfig,
+    "sync": SyncConfig,
+    "mcp": McpConfig,
+    "reconciler": ReconcilerConfig,
+    "jira": JiraConfig,
+    "scratch": ScratchConfig,
+}
+
+# section -> {key -> coercer(value, dotted_key) -> coerced value (raises ConfigError)}
+_SECTIONS: dict[str, dict] = {
+    "verify": {"require_signature_for_close": lambda v, k: _as_bool(v, k)},
+    "ticket": {"display_mode": lambda v, k: (_as_str(v, k) or "auto")},
+    "compact": {"threshold": lambda v, k: _as_int(v, k, minimum=1)},
+    "sync": {
+        "push": lambda v, k: _as_choice(v, k, {"always", "async", "off"}),
+        "pull": lambda v, k: _as_choice(v, k, {"on", "off"}),
+    },
+    "mcp": {
+        "readonly": lambda v, k: _as_bool(v, k),
+        "allow_llm": lambda v, k: _as_bool(v, k),
+        "allow_jira_sync": lambda v, k: _as_bool(v, k),
+    },
+    "reconciler": {
+        "jira_cli_timeout": lambda v, k: _as_int(v, k, minimum=0),
+        "lock_max_retries": lambda v, k: _as_int(v, k, minimum=0),
+        "deletion_probe_limit": lambda v, k: _as_int(v, k, minimum=1),
+        "id_guard_bypass_unsafe": lambda v, k: _as_bool(v, k),
+    },
+    "jira": {
+        "url": lambda v, k: _as_str(v, k),
+        "user": lambda v, k: _as_str(v, k),
+        "project": lambda v, k: _as_str(v, k),
+    },
+    "scratch": {"base_dir": lambda v, k: _as_str(v, k)},
+}
+
+# section -> {deprecated_key -> canonical_key}
+_ALIASES: dict[str, dict[str, str]] = {
+    "verify": {"require_verdict_for_close": "require_signature_for_close"},
+}
+
+
+def coerce_sparse(raw: dict | None, *, source: str = "") -> dict:
+    """Coerce+validate a nested mapping into a SPARSE nested dict of ONLY the keys
+    actually present (NO defaults applied) — the per-layer building block for
+    precedence merging. Warns on unknown sections/keys; resolves legacy aliases;
+    raises :class:`ConfigError` on an invalid value. Defaults are applied ONCE, at
+    the end, by :meth:`Config.from_mapping` — so a lower-priority layer's default
+    can never override a higher layer's explicit value."""
+    raw = dict(raw or {})
+    out: dict[str, dict] = {}
+    for sect, val in raw.items():
+        if sect not in _SECTIONS:
+            logger.warning("rebar config%s: unknown section [%s] ignored", _src(source), sect)
+            continue
+        if not isinstance(val, dict):
+            raise ConfigError(f"[{sect}]: expected a table/section, got {type(val).__name__}")
+        d = dict(val)
+        for old, new in _ALIASES.get(sect, {}).items():
+            if old in d:
+                if new not in d:
+                    logger.warning(
+                        "rebar config%s: '%s.%s' is deprecated; use '%s.%s'",
+                        _src(source), sect, old, sect, new,
+                    )
+                    d[new] = d.pop(old)
+                else:
+                    d.pop(old)  # canonical key wins
+        coerced: dict = {}
+        for key, coercer in _SECTIONS[sect].items():
+            if key in d:
+                coerced[key] = coercer(d.pop(key), f"{sect}.{key}")
+        _warn_unknown(sect, d, source)
+        if coerced:
+            out[sect] = coerced
+    return out
+
+
+def merge_sparse(*layers: dict | None) -> dict:
+    """Deep-merge sparse config layers in precedence order — LATER layers win,
+    per key. Each layer is a sparse nested dict from :func:`coerce_sparse`."""
+    out: dict[str, dict] = {}
+    for layer in layers:
+        for sect, vals in (layer or {}).items():
+            out.setdefault(sect, {}).update(vals)
+    return out
+
+
+# ── config-file discovery + layered load ──────────────────────────────────────
+def _read_toml_table(path: Path, *, pyproject: bool) -> dict:
+    """Read a TOML config: the ``[tool.rebar]`` table for a pyproject.toml, else the
+    whole top-level table (standalone rebar.toml / user config.toml)."""
+    import tomllib
+
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise ConfigError(f"could not read config {path}: {exc}") from None
+    table = data.get("tool", {}).get("rebar", {}) if pyproject else data
+    return table if isinstance(table, dict) else {}
+
+
+def _read_legacy_conf(path: Path) -> dict:
+    """Read the legacy flat ``.rebar/config.conf`` (dotted ``section.key=value``)
+    into a nested sparse mapping (values stay strings; coerce_sparse types them)."""
+    out: dict[str, dict] = {}
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ConfigError(f"could not read config {path}: {exc}") from None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        k = k.strip()
+        v = v.strip().strip('"').strip("'")
+        if "." in k:
+            sect, key = k.split(".", 1)
+            out.setdefault(sect, {})[key] = v
+    return out
+
+
+def _pyproject_has_rebar(path: Path) -> bool:
+    import tomllib
+
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    return isinstance(data.get("tool", {}).get("rebar"), dict)
+
+
+def _discover_project_config(root: str | os.PathLike[str] | None = None) -> tuple[Path, str] | None:
+    """Find the project config: ``$REBAR_CONFIG`` (explicit) first; else walk UP
+    from the repo root for the nearest ``rebar.toml`` or a ``pyproject.toml`` with a
+    ``[tool.rebar]`` table (stopping at ``.git`` / filesystem root); else the legacy
+    ``.rebar/config.conf`` / ``.rebar.conf``. Returns ``(path, kind)`` or ``None``
+    where kind ∈ {toml, pyproject, legacy}."""
+    env = os.environ.get("REBAR_CONFIG")
+    if env and Path(env).is_file():
+        p = Path(env)
+        if p.name == "pyproject.toml":
+            return (p, "pyproject")
+        return (p, "toml" if p.suffix == ".toml" else "legacy")
+    base = repo_root(root)
+    cur = base
+    while True:
+        rt = cur / "rebar.toml"
+        if rt.is_file():
+            return (rt, "toml")
+        pp = cur / "pyproject.toml"
+        if pp.is_file() and _pyproject_has_rebar(pp):
+            return (pp, "pyproject")
+        if (cur / ".git").exists() or cur.parent == cur:
+            break  # repo boundary / filesystem root
+        cur = cur.parent
+    for cand in (base / ".rebar" / "config.conf", base / ".rebar.conf"):
+        if cand.is_file():
+            return (cand, "legacy")
+    return None
+
+
+def user_config_path() -> Path:
+    """User-level config path (hand-rolled XDG; no platformdirs):
+    ``$XDG_CONFIG_HOME/rebar/config.toml``, default ``~/.config/rebar/config.toml``."""
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return Path(base) / "rebar" / "config.toml"
+
+
+def env_overrides() -> dict:
+    """Sparse mapping of ``REBAR_<SECTION>_<KEY>`` env overrides (raw strings;
+    coerce_sparse types them). Only the known config keys are read."""
+    out: dict[str, dict] = {}
+    for sect, keys in _SECTIONS.items():
+        for key in keys:
+            name = f"REBAR_{sect.upper()}_{key.upper()}"
+            if name in os.environ:
+                out.setdefault(sect, {})[key] = os.environ[name]
+    return out
+
+
+def load_config(
+    root: str | os.PathLike[str] | None = None, *, cli_overrides: dict | None = None
+) -> Config:
+    """Resolve the typed Config by layering, **highest precedence last**:
+    defaults < user config < project config < ``REBAR_<KEY>`` env < CLI overrides.
+
+    Each layer is coerced sparse, merged by precedence, then defaults applied ONCE
+    — so a lower layer's default can never override a higher layer's explicit
+    value, and the result is portable (no machine-specific state leaks in)."""
+    layers: list[dict] = []
+    up = user_config_path()
+    if up.is_file():
+        layers.append(coerce_sparse(_read_toml_table(up, pyproject=False), source=str(up)))
+    proj = _discover_project_config(root)
+    if proj is not None:
+        path, kind = proj
+        raw = (
+            _read_legacy_conf(path)
+            if kind == "legacy"
+            else _read_toml_table(path, pyproject=(kind == "pyproject"))
         )
-
-
-def _parse_verify(d: dict | None, source: str) -> VerifyConfig:
-    d = dict(d or {})
-    # Legacy alias: verify.require_verdict_for_close -> require_signature_for_close.
-    if "require_verdict_for_close" in d and "require_signature_for_close" not in d:
-        logger.warning(
-            "rebar config%s: 'verify.require_verdict_for_close' is deprecated; "
-            "use 'verify.require_signature_for_close'",
-            _src(source),
-        )
-        d["require_signature_for_close"] = d.pop("require_verdict_for_close")
-    d.pop("require_verdict_for_close", None)
-    out = VerifyConfig(
-        require_signature_for_close=_as_bool(
-            d.pop("require_signature_for_close", False), "verify.require_signature_for_close"
-        )
-    )
-    _warn_unknown("verify", d, source)
-    return out
-
-
-def _parse_ticket(d: dict | None, source: str) -> TicketConfig:
-    d = dict(d or {})
-    out = TicketConfig(display_mode=_as_str(d.pop("display_mode", "auto"), "ticket.display_mode") or "auto")
-    _warn_unknown("ticket", d, source)
-    return out
-
-
-def _parse_compact(d: dict | None, source: str) -> CompactConfig:
-    d = dict(d or {})
-    out = CompactConfig(threshold=_as_int(d.pop("threshold", 10), "compact.threshold", minimum=1))
-    _warn_unknown("compact", d, source)
-    return out
-
-
-def _parse_sync(d: dict | None, source: str) -> SyncConfig:
-    d = dict(d or {})
-    out = SyncConfig(
-        push=_as_choice(d.pop("push", "always"), "sync.push", {"always", "async", "off"}),
-        pull=_as_choice(d.pop("pull", "on"), "sync.pull", {"on", "off"}),
-    )
-    _warn_unknown("sync", d, source)
-    return out
-
-
-def _parse_mcp(d: dict | None, source: str) -> McpConfig:
-    d = dict(d or {})
-    out = McpConfig(
-        readonly=_as_bool(d.pop("readonly", False), "mcp.readonly"),
-        allow_llm=_as_bool(d.pop("allow_llm", False), "mcp.allow_llm"),
-        allow_jira_sync=_as_bool(d.pop("allow_jira_sync", False), "mcp.allow_jira_sync"),
-    )
-    _warn_unknown("mcp", d, source)
-    return out
-
-
-def _parse_reconciler(d: dict | None, source: str) -> ReconcilerConfig:
-    d = dict(d or {})
-    out = ReconcilerConfig(
-        jira_cli_timeout=_as_int(d.pop("jira_cli_timeout", 0), "reconciler.jira_cli_timeout", minimum=0),
-        lock_max_retries=_as_int(d.pop("lock_max_retries", 5), "reconciler.lock_max_retries", minimum=0),
-        deletion_probe_limit=_as_int(
-            d.pop("deletion_probe_limit", 20), "reconciler.deletion_probe_limit", minimum=1
-        ),
-        id_guard_bypass_unsafe=_as_bool(
-            d.pop("id_guard_bypass_unsafe", False), "reconciler.id_guard_bypass_unsafe"
-        ),
-    )
-    _warn_unknown("reconciler", d, source)
-    return out
-
-
-def _parse_jira(d: dict | None, source: str) -> JiraConfig:
-    d = dict(d or {})
-    out = JiraConfig(
-        url=_as_str(d.pop("url", ""), "jira.url"),
-        user=_as_str(d.pop("user", ""), "jira.user"),
-        project=_as_str(d.pop("project", ""), "jira.project"),
-    )
-    _warn_unknown("jira", d, source)
-    return out
-
-
-def _parse_scratch(d: dict | None, source: str) -> ScratchConfig:
-    d = dict(d or {})
-    out = ScratchConfig(base_dir=_as_str(d.pop("base_dir", ""), "scratch.base_dir"))
-    _warn_unknown("scratch", d, source)
-    return out
+        layers.append(coerce_sparse(raw, source=str(path)))
+    layers.append(coerce_sparse(env_overrides(), source="env"))
+    if cli_overrides:
+        layers.append(coerce_sparse(cli_overrides, source="cli"))
+    return Config.from_mapping(merge_sparse(*layers))
