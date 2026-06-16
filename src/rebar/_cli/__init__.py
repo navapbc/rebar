@@ -453,6 +453,13 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] == "scan-spec":
         return _scan_spec(argv[1:])
 
+    # config intercept (native config-transparency read; owns its own --help, like
+    # reconcile/review). No store init: it reads working-tree config files only.
+    if argv and argv[0] == "config":
+        from rebar._commands import show_config
+
+        return show_config.config_cli(argv[1:])
+
     # No subcommand: overview to stdout, exit 1 (the dispatcher's _usage).
     if not argv:
         sys.stdout.write(_help.overview())

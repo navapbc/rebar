@@ -402,6 +402,39 @@ def env_overrides() -> dict:
     return out
 
 
+# The precedence layers, lowest to highest. ``defaults`` is not a layer — it is
+# applied once by Config.from_mapping after the sparse layers merge.
+LAYER_ORDER: tuple[str, ...] = ("default", "user", "project", "env", "cli")
+
+
+def _ordered_layers(
+    root: str | os.PathLike[str] | None = None, *, cli_overrides: dict | None = None
+) -> tuple[list[tuple[str, dict]], tuple[Path, str] | None]:
+    """Assemble the precedence layers, **lowest first**: user config < project
+    config < ``REBAR_<KEY>`` env < CLI overrides. Each is a ``(label, sparse)``
+    pair (``label`` ∈ :data:`LAYER_ORDER`); a layer absent on this machine is
+    simply omitted. Also returns the discovered project config ``(path, kind)`` (or
+    ``None``) for transparency reporting. Shared by :func:`load_config` and
+    :func:`resolve_with_sources` so resolution and provenance never diverge."""
+    layers: list[tuple[str, dict]] = []
+    up = user_config_path()
+    if up.is_file():
+        layers.append(("user", coerce_sparse(_read_toml_table(up, pyproject=False), source=str(up))))
+    proj = _discover_project_config(root)
+    if proj is not None:
+        path, kind = proj
+        raw = (
+            _read_legacy_conf(path)
+            if kind == "legacy"
+            else _read_toml_table(path, pyproject=(kind == "pyproject"))
+        )
+        layers.append(("project", coerce_sparse(raw, source=str(path))))
+    layers.append(("env", coerce_sparse(env_overrides(), source="env")))
+    if cli_overrides:
+        layers.append(("cli", coerce_sparse(cli_overrides, source="cli")))
+    return layers, proj
+
+
 def load_config(
     root: str | os.PathLike[str] | None = None, *, cli_overrides: dict | None = None
 ) -> Config:
@@ -411,20 +444,31 @@ def load_config(
     Each layer is coerced sparse, merged by precedence, then defaults applied ONCE
     — so a lower layer's default can never override a higher layer's explicit
     value, and the result is portable (no machine-specific state leaks in)."""
-    layers: list[dict] = []
-    up = user_config_path()
-    if up.is_file():
-        layers.append(coerce_sparse(_read_toml_table(up, pyproject=False), source=str(up)))
-    proj = _discover_project_config(root)
-    if proj is not None:
-        path, kind = proj
-        raw = (
-            _read_legacy_conf(path)
-            if kind == "legacy"
-            else _read_toml_table(path, pyproject=(kind == "pyproject"))
-        )
-        layers.append(coerce_sparse(raw, source=str(path)))
-    layers.append(coerce_sparse(env_overrides(), source="env"))
-    if cli_overrides:
-        layers.append(coerce_sparse(cli_overrides, source="cli"))
-    return Config.from_mapping(merge_sparse(*layers))
+    layers, _ = _ordered_layers(root, cli_overrides=cli_overrides)
+    return Config.from_mapping(merge_sparse(*(sparse for _, sparse in layers)))
+
+
+def resolve_with_sources(
+    root: str | os.PathLike[str] | None = None, *, cli_overrides: dict | None = None
+) -> tuple[Config, dict[str, dict[str, str]], tuple[Path, str] | None]:
+    """Resolve the typed Config **and** record where each key's value came from.
+
+    Returns ``(config, sources, project)`` where ``sources[section][key]`` is the
+    winning layer label (``"default"`` when no layer set it, else ``"user"`` /
+    ``"project"`` / ``"env"`` / ``"cli"``) and ``project`` is the discovered project
+    config ``(path, kind)`` or ``None``. This is the data behind ``rebar config``
+    (the precedence-transparency command). Resolution reuses the exact same layers
+    as :func:`load_config`, so the reported provenance can never disagree with the
+    value that load actually produced."""
+    layers, project = _ordered_layers(root, cli_overrides=cli_overrides)
+    config = Config.from_mapping(merge_sparse(*(sparse for _, sparse in layers)))
+    sources: dict[str, dict[str, str]] = {}
+    for sect, keys in _SECTIONS.items():
+        sources[sect] = {}
+        for key in keys:
+            label = "default"
+            for layer_label, sparse in layers:  # lowest→highest: last match wins
+                if key in sparse.get(sect, {}):
+                    label = layer_label
+            sources[sect][key] = label
+    return config, sources, project
