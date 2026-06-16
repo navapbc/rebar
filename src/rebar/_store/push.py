@@ -30,8 +30,28 @@ def _push_mode() -> str:
     return "".join((os.environ.get("REBAR_PUSH") or "always").lower().split())
 
 
+# Bound git calls (notably the network `push`) so a stuck remote can't hang the
+# caller. Push is best-effort (a failure never fails the write), so a timeout
+# surfaces as a failed CompletedProcess, never a hang.
+_GIT_TIMEOUT = 30
+
+
 def _git(base: str, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", base, *args], capture_output=True, text=True, env=env)
+    try:
+        return subprocess.run(
+            ["git", "-C", base, *args],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=_GIT_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            ["git", "-C", base, *args],
+            124,
+            "",
+            f"git timed out after {_GIT_TIMEOUT}s",
+        )
 
 
 def push_tickets_branch(base_path: str) -> None:

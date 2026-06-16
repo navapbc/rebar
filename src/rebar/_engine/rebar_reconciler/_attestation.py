@@ -108,6 +108,9 @@ def verify_attested_commit(sha: str, allowlist: list[str]) -> bool:
             ["git", "verify-commit", sha],
             capture_output=True,
             check=False,
+            # Bound the GPG verify: it can hang on a gpg-agent / keyserver lookup.
+            # TimeoutExpired is caught below and treated as a verification failure.
+            timeout=15,
         )
         if result.returncode != 0:
             return False
@@ -120,6 +123,7 @@ def verify_attested_commit(sha: str, allowlist: list[str]) -> bool:
             capture_output=True,
             text=True,
             check=False,
+            timeout=10,
         )
         if email_result.returncode != 0:
             return False

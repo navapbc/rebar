@@ -23,10 +23,27 @@ import sys
 from rebar._store import lock as _lock
 
 _SYNC_LOCK_TIMEOUT = 15  # bash TICKET_SYNC_LOCK_TIMEOUT default
+# Bound git calls (notably the network `fetch`) so a stuck remote can't hang a
+# sync indefinitely. These calls are best-effort already (`_ok` returns False on
+# failure), so a timeout surfaces as a failed CompletedProcess, never a hang.
+_GIT_TIMEOUT = 30
 
 
 def _git(tracker: str, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", tracker, *args], capture_output=True, text=True)
+    try:
+        return subprocess.run(
+            ["git", "-C", tracker, *args],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            ["git", "-C", tracker, *args],
+            124,
+            "",
+            f"git timed out after {_GIT_TIMEOUT}s",
+        )
 
 
 def _ok(tracker: str, *args: str) -> bool:

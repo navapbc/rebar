@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from rebar._store import event_append, lock, push
+from rebar._store import event_append, lock, push, sync
 
 
 @pytest.fixture
@@ -134,3 +134,23 @@ def test_push_off_is_noop(tracker: str, monkeypatch):
 def test_push_no_remote_is_noop(tracker: str, monkeypatch):
     monkeypatch.setenv("REBAR_PUSH", "always")
     push.push_tickets_branch(tracker)  # no remote → silent best-effort return
+
+
+@pytest.mark.parametrize("mod,args", [(push, ("/repo", "push")), (sync, ("/repo", "fetch"))])
+def test_network_git_is_bounded_and_timeout_is_best_effort(monkeypatch, mod, args):
+    """A hung network git (fetch/push) must surface as a FAILED CompletedProcess,
+    never hang (bug c16f). The wrapper must pass a bounded timeout to subprocess.run
+    and convert a TimeoutExpired into a non-zero return — so the best-effort callers
+    (`_ok` -> False / push best-effort) degrade rather than block."""
+    seen: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["timeout"] = kwargs.get("timeout")
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout") or 0)
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    cp = mod._git(*args)
+    assert cp.returncode != 0, "a git timeout must surface as a failed CompletedProcess"
+    assert isinstance(seen["timeout"], (int, float)) and seen["timeout"] > 0, (
+        "the git wrapper must pass a bounded timeout to subprocess.run"
+    )
