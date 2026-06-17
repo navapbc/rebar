@@ -268,6 +268,14 @@ def transition_compute(
         _compact_on_close(repo_root_str, ticket_id)
         scratch.cleanup_for_ticket(repo_root_str, ticket_id)
 
+    # The STATUS (and compact-on-close SNAPSHOT) commits are now in the local
+    # tickets branch but unpushed — txn.transition_core commits inline and does not
+    # go through write_and_push. Trigger the same best-effort push so a trailing
+    # transition (the last write of a session) isn't stranded (bug prone-octet-cheek).
+    from rebar._store import push
+
+    push.push_after_commit(tracker)
+
     return {
         "ticket_id": ticket_id,
         "from": current_status,
@@ -492,6 +500,11 @@ def claim_compute(ticket_id: str, *, assignee: str = "", repo_root=None) -> dict
     env_id = _seam.env_id(config.tracker_dir(repo_root))
     author = _seam.author("Unknown")
     txn.claim_core(tracker, ticket_id, env_id=env_id, author=author, assignee=assignee)
+    # claim_core commits inline (not via write_and_push); push best-effort so a
+    # claim that isn't followed by an append_event write still reaches origin.
+    from rebar._store import push
+
+    push.push_after_commit(tracker)
     return {"ticket_id": ticket_id, "status": "in_progress", "assignee": assignee or None}
 
 

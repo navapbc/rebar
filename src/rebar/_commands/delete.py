@@ -293,6 +293,9 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
                     "-m",
                     f"ticket: UNLINK cleanup for already-deleted {ticket_id}",
                 )
+                from rebar._store import push
+
+                push.push_after_commit(tracker)
             return 0
 
         status_path = _write_event(ticket_dir, "STATUS", env_id, author, {"status": "deleted"})
@@ -341,4 +344,12 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
     else:
         sys.stdout.write(f"Deleted ticket '{ticket_id}'\n")
         sys.stdout.write(f"UNBLOCKED: {','.join(unblocked) if unblocked else 'none'}\n")
+
+    # The DELETE (STATUS(deleted)+ARCHIVED, plus any UNLINK cascade) committed
+    # inline; delete holds no write lock, so push best-effort here (bug
+    # prone-octet-cheek) so a delete that isn't followed by an append_event write
+    # still reaches origin.
+    from rebar._store import push
+
+    push.push_after_commit(tracker)
     return 0

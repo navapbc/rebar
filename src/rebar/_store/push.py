@@ -182,3 +182,24 @@ def push_tickets_branch(base_path: str) -> None:
         )
 
     print(f"Warning: tickets branch push failed after {_MAX_RETRIES} retries", file=sys.stderr)
+
+
+def push_after_commit(tracker: str | os.PathLike) -> None:
+    """Best-effort auto-push for the inline-commit write paths.
+
+    ``transition`` / ``reopen`` / ``claim`` (txn.py), ``compact`` (compact.py), and
+    ``delete`` (delete.py) do their own locked rename+commit rather than going
+    through :func:`rebar._store.event_append.write_and_push`, so they must trigger
+    the same best-effort push the ``append_event`` family gets — otherwise a
+    trailing status/compact/delete (the LAST write of a session) strands its commit
+    as ``PUSH_PENDING`` (bug ``prone-octet-cheek``). Resolves the canonical tracker
+    and pushes ``HEAD:tickets`` per the ``sync.push`` policy; never raises
+    (``push_tickets_branch`` is itself best-effort). Call AFTER the locked commit
+    has released the store lock — the push runs its own fetch/merge and must not
+    nest inside the write lock."""
+    try:
+        from rebar._store import lock as _lock
+
+        push_tickets_branch(_lock.canonical_tracker(str(tracker)))
+    except Exception:
+        pass

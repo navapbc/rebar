@@ -234,7 +234,16 @@ def compact_cli(argv: list[str], *, repo_root=None) -> int:
         sys.stdout.write(f"below threshold ({preflock} <= {threshold}) — skipping compaction\n")
         return 0
 
-    return _compact_locked(tracker, ticket_id, ticket_dir, threshold, no_commit)
+    rc = _compact_locked(tracker, ticket_id, ticket_dir, threshold, no_commit)
+    # A successful compaction commits a SNAPSHOT inline (not via write_and_push), so
+    # push it best-effort — unless --no-commit (nothing committed) or --skip-sync
+    # (the caller owns sync: compact-on-close passes it and the transition pushes;
+    # compact-all batches one commit + push itself). Bug prone-octet-cheek.
+    if rc == 0 and not no_commit and not skip_sync:
+        from rebar._store import push
+
+        push.push_after_commit(tracker)
+    return rc
 
 
 # ── compact-all ──────────────────────────────────────────────────────────────
@@ -347,5 +356,10 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
                 f"chore: backfill SNAPSHOT files for {compacted} tickets (ticket-compact-all)",
             )
             sys.stdout.write("Committed.\n")
+            # One best-effort push for the whole batch (per-ticket calls used
+            # --skip-sync to defer it here) — bug prone-octet-cheek.
+            from rebar._store import push
+
+            push.push_after_commit(tracker)
 
     return 2 if error_ids else 0
