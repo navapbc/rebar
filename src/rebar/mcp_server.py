@@ -542,6 +542,25 @@ def build_server():
             return "ok"
 
         @mcp.tool()
+        def log_session(
+            entry: str,
+            summary: str | None = None,
+            relates_to: str | None = None,
+            discovered_from: str | None = None,
+        ) -> CreateResultOut:
+            """Append a verbose entry to the current session_log, creating one on
+            first use (write-gated: refused under REBAR_MCP_READONLY=1). Returns the
+            log's {id, alias}; optional relates_to / discovered_from link it to the
+            work it documents."""
+            res = rebar.append_session_log(
+                entry,
+                summary=summary,
+                relates_to=relates_to,
+                discovered_from=discovered_from,
+            )
+            return CreateResultOut.model_validate({"id": res["id"], "alias": res.get("alias")})
+
+        @mcp.tool()
         def edit_ticket(
             ticket_id: str,
             title: str | None = None,

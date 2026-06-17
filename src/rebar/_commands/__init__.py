@@ -17,6 +17,7 @@ from collections.abc import Callable
 from typing import NamedTuple
 
 from rebar._commands import composer, leaf
+from rebar._commands import session_log as _session_log
 from rebar._commands import unlink as _unlink
 from rebar._commands._seam import CommandError
 
@@ -56,6 +57,7 @@ _ARGV_REGISTRY: dict[str, Callable[[list[str]], int]] = {
     "link": composer.link_cli,
     "unlink": _unlink.unlink_cli,
     "revert": composer.revert_cli,
+    "session-log": _session_log.session_log_cli,
 }
 
 

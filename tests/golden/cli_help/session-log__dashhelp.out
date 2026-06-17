@@ -1,0 +1,1 @@
+Usage: rebar session-log <append "<entry>" | start> [--summary=<text>] [--relates-to=<id>] [--discovered-from=<id>]   (capture helper: append to the current session_log, creating one on first use; start rotates to a fresh log)

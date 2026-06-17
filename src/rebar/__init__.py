@@ -363,6 +363,51 @@ def comment(ticket_id: str, body: str, *, repo_root=None) -> None:
     _python_leaf(leaf.comment, ticket_id, body, repo_root=repo_root, what="comment")
 
 
+def append_session_log(
+    entry: str, *, summary=None, relates_to=None, discovered_from=None, repo_root=None
+) -> dict:
+    """Append ``entry`` to the current session_log, creating one on first use.
+
+    A convenience over ``create`` + ``comment``: the first call creates a
+    ``session_log`` (titled ``summary`` or a default) and records it as the
+    current log via a local pointer; subsequent calls append to that same log.
+    Optional ``relates_to`` / ``discovered_from`` link the log to the work it
+    documents (blocking links remain refused). Returns
+    ``{"id", "alias", "created"}``."""
+    from rebar._commands import session_log
+    from rebar._commands._seam import CommandError
+
+    try:
+        return session_log.append(
+            entry,
+            summary=summary,
+            relates_to=relates_to,
+            discovered_from=discovered_from,
+            repo_root=repo_root,
+        )
+    except CommandError as exc:
+        raise RebarError(exc.message, returncode=exc.returncode, stderr=exc.message) from None
+
+
+def start_session_log(
+    *, summary=None, relates_to=None, discovered_from=None, repo_root=None
+) -> dict:
+    """Explicitly create a NEW session_log and make it the current one (rotating
+    away from any prior log). Returns ``{"id", "alias"}``."""
+    from rebar._commands import session_log
+    from rebar._commands._seam import CommandError
+
+    try:
+        return session_log.start(
+            summary=summary,
+            relates_to=relates_to,
+            discovered_from=discovered_from,
+            repo_root=repo_root,
+        )
+    except CommandError as exc:
+        raise RebarError(exc.message, returncode=exc.returncode, stderr=exc.message) from None
+
+
 def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> None:
     """Edit ticket fields: title, priority, assignee, ticket_type, description, tags."""
     normalized = {}
@@ -774,6 +819,8 @@ __all__ = [
     "claim",
     "reopen",
     "comment",
+    "append_session_log",
+    "start_session_log",
     "edit_ticket",
     "link",
     "unlink",

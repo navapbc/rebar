@@ -11,6 +11,7 @@ Subcommands:
   claim       Atomically claim an open ticket (-> in_progress + assignee; exit 10 if taken)
   reopen      Reopen a closed ticket (closed -> open; exit 10 if not currently closed)
   comment     Add a comment to a ticket
+  session-log Capture helper: append "<entry>" to the current session_log (start rotates to a fresh log)
   link        Link two tickets (relation REQUIRED: blocks|depends_on|relates_to|duplicates|supersedes|discovered_from)
   unlink      Remove ONE link between an ordered <source> <target> pair (no relation arg; most-recent first)
   deps        Show dependency graph for a ticket (<ticket_id>)

@@ -62,6 +62,7 @@ _WRITES_FULL = frozenset(
         "archive",
         "set-file-impact",
         "set-verify-commands",
+        "session-log",
     }
 )
 

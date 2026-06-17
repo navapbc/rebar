@@ -8,6 +8,7 @@ dist/
 .ruff_cache/
 .tickets-tracker/
 bridge_state/
+.rebar/
 .claude/
 session-logs/
 CLAUDE.local.md
