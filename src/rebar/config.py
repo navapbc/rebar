@@ -489,8 +489,16 @@ def _discover_project_config(root: str | os.PathLike[str] | None = None) -> tupl
 
 def user_config_path() -> Path:
     """User-level config path (hand-rolled XDG; no platformdirs):
-    ``$XDG_CONFIG_HOME/rebar/config.toml``, default ``~/.config/rebar/config.toml``."""
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    ``$XDG_CONFIG_HOME/rebar/config.toml``, default ``~/.config/rebar/config.toml``.
+
+    ``~/.config`` is used on ALL platforms (incl. macOS — we deliberately do not use
+    ``~/Library/Application Support``, matching ruff/black/mypy's predictable dev-tool
+    convention). Per the XDG spec a non-absolute ``XDG_CONFIG_HOME`` is ignored (it
+    would otherwise resolve relative to cwd — non-portable), falling back to the
+    default."""
+    base = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    if not base or not os.path.isabs(base):
+        base = os.path.join(os.path.expanduser("~"), ".config")
     return Path(base) / "rebar" / "config.toml"
 
 

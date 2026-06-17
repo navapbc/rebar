@@ -7,6 +7,7 @@ COMBINATIONS of config parameters and LOCATIONS, plus precedence + portability
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,29 @@ def _proj(tmp: Path) -> Path:
     p.mkdir()
     (p / ".git").mkdir()  # repo boundary marker
     return p
+
+
+# ── user config path: XDG (OSS-validation hardening) ──────────────────────────
+def test_user_config_path_absolute_xdg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    assert cfg.user_config_path() == tmp_path / "xdg" / "rebar" / "config.toml"
+
+
+def test_user_config_path_default_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    expected = Path(os.path.expanduser("~")) / ".config" / "rebar" / "config.toml"
+    assert cfg.user_config_path() == expected
+
+
+@pytest.mark.parametrize("bad", ["relative/dir", "  ", ""])
+def test_user_config_path_ignores_non_absolute_xdg(
+    monkeypatch: pytest.MonkeyPatch, bad: str
+) -> None:
+    """Per the XDG spec a non-absolute (or empty/blank) XDG_CONFIG_HOME is ignored —
+    it must NOT resolve relative to cwd (portability), falling back to ~/.config."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", bad)
+    expected = Path(os.path.expanduser("~")) / ".config" / "rebar" / "config.toml"
+    assert cfg.user_config_path() == expected
 
 
 # ── repo-root override: REBAR_ROOT only (EV-2a; PROJECT_ROOT removed) ─────────
