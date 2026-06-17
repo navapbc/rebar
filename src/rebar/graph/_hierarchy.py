@@ -225,7 +225,7 @@ def compute_archive_eligible(tracker_dir: str) -> list[str]:
     via depends_on or blocks edges (traversed bidirectionally), and is not
     already archived.
     """
-    all_tickets = reduce_all_tickets(tracker_dir, exclude_archived=False)
+    all_tickets = reduce_all_tickets(tracker_dir, exclude_archived=False, exclude_session_logs=True)
 
     ticket_map: dict[str, dict[str, Any]] = {}
     for t in all_tickets:

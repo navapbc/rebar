@@ -60,7 +60,9 @@ def _compute_dep_graph(
     ticket_id: str, tracker_dir: str, exclude_archived: bool = True
 ) -> dict[str, Any]:
     """Compute (without cache) the dependency graph for ticket_id."""
-    all_states_list = _loader_module.reducer.reduce_all_tickets(tracker_dir, exclude_archived=False)
+    all_states_list = _loader_module.reducer.reduce_all_tickets(
+        tracker_dir, exclude_archived=False, exclude_session_logs=True
+    )
     ticket_states: dict[str, Any] = {}
     for t in all_states_list:
         tid = t.get("ticket_id", "")
@@ -69,6 +71,16 @@ def _compute_dep_graph(
 
     deps: list[dict[str, Any]] = []
     state = ticket_states.get(ticket_id)
+    if state is None:
+        # The queried ticket is absent from the (session-log-excluded) node set when
+        # it is itself a session_log. Logs are excluded as *graph nodes* of other
+        # tickets, but `deps <session_log>` must still surface the log's own
+        # non-blocking links (relates_to / discovered_from) — reduce it singly.
+        ticket_dir = os.path.join(tracker_dir, ticket_id)
+        if os.path.isdir(ticket_dir):
+            single = reduce_ticket(ticket_dir)
+            if single is not None and isinstance(single, dict):
+                state = single
     if state is not None and isinstance(state, dict):
         deps = list(state.get("deps", []))
 

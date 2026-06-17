@@ -54,7 +54,9 @@ def find_ready_tickets(
     if not tracker_path.is_dir():
         return []
 
-    all_states_list = reduce_all_tickets(str(tracker_dir))
+    # session_log tickets never participate in the dependency graph — exclude them
+    # so ready-computation timings are unaffected by verbose log bodies.
+    all_states_list = reduce_all_tickets(str(tracker_dir), exclude_session_logs=True)
 
     # Build a lookup dict, skipping error states.
     ticket_states: dict[str, dict] = {}

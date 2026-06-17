@@ -180,6 +180,7 @@ def reduce_all_tickets(
     tracker_dir: str | os.PathLike[str],
     exclude_archived: bool = False,
     exclude_deleted: bool = False,
+    exclude_session_logs: bool = False,
 ) -> list[dict]:
     """Batch-reduce all tickets in tracker_dir.
 
@@ -194,6 +195,12 @@ def reduce_all_tickets(
             must still surface deleted tickets for tombstone inspection. Uses
             the reduced ``status`` field (the authoritative net-deleted signal),
             not an event re-scan; error dicts (no ``status``) are kept intact.
+        exclude_session_logs: When True, drop ``session_log`` tickets. Default on
+            for the dependency-graph / store-health hot paths (``ready``,
+            ``next_batch``, ``deps``, ``validate``) so verbose log bodies never tax
+            those compiles; keeps logs out of default ``list``. ``search`` and
+            single-ticket ``show`` deliberately do NOT set this (logs stay
+            discoverable). Error dicts (no ``ticket_type``) are kept intact.
     """
     tracker_path = os.path.normpath(str(tracker_dir))
     results: list[dict] = []
@@ -229,5 +236,10 @@ def reduce_all_tickets(
         # Use the reduced status field as the authoritative net-deleted signal.
         # Error dicts have no "status" key and are preserved intact.
         results = [r for r in results if r.get("status") != "deleted"]
+
+    if exclude_session_logs:
+        # Keep verbose log bodies out of the graph/health hot paths. Error dicts
+        # (no "ticket_type") are preserved intact.
+        results = [r for r in results if r.get("ticket_type") != "session_log"]
 
     return results

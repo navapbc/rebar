@@ -102,7 +102,9 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
 
     # Full reduced set (every status, incl. archived/deleted dirs) for the BFS
     # parent map and ticket-body/parent/tag lookups — bash scans all dirs.
-    full_states = reduce_all_tickets(tracker, exclude_archived=False, exclude_deleted=False)
+    full_states = reduce_all_tickets(
+        tracker, exclude_archived=False, exclude_deleted=False, exclude_session_logs=True
+    )
     state_by_id: dict[str, dict] = {}
     parent_map: dict[str, list[str]] = {}
     for s in full_states:

@@ -282,8 +282,15 @@ def list_states(
     parent_filter = parent
     if parent_filter:
         parent_filter = resolve_ticket_id(parent_filter, tracker) or parent_filter
+    # session_log tickets are hidden from default `list` (they are searchable via
+    # `search`/`show` only) — surface them ONLY when the type filter explicitly
+    # selects them (`list --type=session_log`). `validate` reaches list_states with
+    # no type filter, so it inherits the exclusion (logs are never health-flagged).
     results = reduce_all_tickets(
-        tracker, exclude_archived=not include_archived, exclude_deleted=exclude_deleted
+        tracker,
+        exclude_archived=not include_archived,
+        exclude_deleted=exclude_deleted,
+        exclude_session_logs=(ticket_type != "session_log"),
     )
     # children_count: direct non-deleted children per ticket, counted over the
     # reduced set BEFORE the narrowing filters (a closed child still counts).

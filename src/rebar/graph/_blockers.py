@@ -30,7 +30,9 @@ def _find_direct_blockers(
             When None, loads all ticket states via reduce_all_tickets.
     """
     if ticket_states is None:
-        all_states = _loader_module.reducer.reduce_all_tickets(tracker_dir, exclude_archived=False)
+        all_states = _loader_module.reducer.reduce_all_tickets(
+            tracker_dir, exclude_archived=False, exclude_session_logs=True
+        )
         ticket_states = {}
         for t in all_states:
             tid = t.get("ticket_id", "")

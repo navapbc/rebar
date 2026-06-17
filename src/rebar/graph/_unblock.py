@@ -137,7 +137,11 @@ def batch_close_operations(
     if not tracker_path.is_dir():
         return {"open_children": [], "newly_unblocked": []}
 
-    all_states = reduce_all_tickets(tracker_dir, exclude_archived=exclude_archived)
+    # Exclude session_logs: they never block/unblock anything, and a lifecycle-exempt
+    # session_log child must never count as an "open child" that blocks a parent close.
+    all_states = reduce_all_tickets(
+        tracker_dir, exclude_archived=exclude_archived, exclude_session_logs=True
+    )
 
     ts: dict[str, dict] = {}
     for state in all_states:
