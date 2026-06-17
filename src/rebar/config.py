@@ -298,6 +298,13 @@ _ALIASES: dict[str, dict[str, str]] = {
     "verify": {"require_verdict_for_close": "require_signature_for_close"},
 }
 
+# Config sections owned by an OPTIONAL layer rather than the stdlib core typed
+# Config — currently ``llm`` (the ``nava-rebar[agents]`` extra; resolved by
+# ``rebar.llm.LLMConfig.from_env`` so the stdlib core never imports the agents
+# stack). They are RECOGNISED by the core parser — neither warned as unknown nor
+# coerced into :class:`Config` — and read raw via :func:`read_reserved_section`.
+_RESERVED_SECTIONS: frozenset[str] = frozenset({"llm"})
+
 
 def coerce_sparse(raw: dict | None, *, source: str = "", strict: bool = False) -> dict:
     """Coerce+validate a nested mapping into a SPARSE nested dict of ONLY the keys
@@ -311,6 +318,8 @@ def coerce_sparse(raw: dict | None, *, source: str = "", strict: bool = False) -
     raw = dict(raw or {})
     out: dict[str, dict] = {}
     for sect, val in raw.items():
+        if sect in _RESERVED_SECTIONS:
+            continue  # owned by an optional layer (e.g. llm → rebar.llm); not a core key
         if sect not in _SECTIONS:
             if strict:
                 raise ConfigError(
@@ -820,6 +829,45 @@ def read_config_file(path: str | os.PathLike[str]) -> Config:
     else:
         raw = _read_legacy_conf(p)
     return Config.from_mapping(raw, source=str(p), strict=_strict_unknown_keys())
+
+
+def read_reserved_section(name: str, root: str | os.PathLike[str] | None = None) -> dict:
+    """Return the merged RAW sub-table for a :data:`_RESERVED_SECTIONS` section — one
+    owned by an optional layer (e.g. ``llm`` → ``rebar.llm``), assembled from the SAME
+    user-then-project file discovery as :func:`load_config` (project overrides user,
+    per key) but WITHOUT core coercion: the owning layer applies its own typing and its
+    own env/CLI overlay (see :func:`cli_overrides_for`). Values are raw TOML/conf types.
+
+    Raises :class:`ConfigError` if a discovered config file is unreadable/malformed —
+    the caller decides whether to fail or degrade (the agents layer degrades to
+    env-only so a broken core config never breaks an LLM operation)."""
+    merged: dict = {}
+    up = user_config_path()
+    if up.is_file():
+        sub = _read_toml_table(up, pyproject=False).get(name)
+        if isinstance(sub, dict):
+            merged.update(sub)
+    proj = _discover_project_config(root)
+    if proj is not None:
+        path, kind = proj
+        table = (
+            _read_legacy_conf(path)
+            if kind == "legacy"
+            else _read_toml_table(path, pyproject=(kind == "pyproject"))
+        )
+        sub = table.get(name)
+        if isinstance(sub, dict):
+            merged.update(sub)
+    return merged
+
+
+def cli_overrides_for(name: str) -> dict:
+    """The process-wide ``rebar -c`` overrides for a single section (``{key: value}``,
+    raw strings), or ``{}`` when none. Lets a reserved-section owner (e.g. ``rebar.llm``)
+    honor ``rebar -c llm.KEY=VALUE`` as its highest-precedence layer without the key
+    being part of the core typed Config."""
+    sub = (_CLI_OVERRIDES or {}).get(name)
+    return dict(sub) if isinstance(sub, dict) else {}
 
 
 def resolve_with_sources(

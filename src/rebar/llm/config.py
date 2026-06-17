@@ -120,6 +120,66 @@ def _env_int_aliased(name: str, legacy: str, default: int) -> int:
     return _env_int(name, default)
 
 
+# ── [tool.rebar.llm] config-file layer (0ac6 slice 4) ─────────────────────────
+#
+# llm.* is resolved HERE (not the stdlib-core typed Config) so importing rebar.llm
+# never pulls the agents stack into core. The non-secret, non-runtime, non-derived
+# knobs are settable in a ``[tool.rebar.llm]`` table (pyproject / rebar.toml [llm] /
+# legacy .rebar/config.conf llm.* / XDG user config), read via the core loader's
+# discovery so file LOCATIONS + precedence match the rest of rebar. Resolution per
+# key: ``rebar -c llm.KEY=VALUE`` (CLI) > ``REBAR_LLM_<KEY>`` env > config file >
+# default. Secrets (REBAR_LLM_API_KEY / ANTHROPIC/OPENAI keys / LANGFUSE_* /
+# LANGFLOW_API_KEY), the runtime-only REBAR_LLM_REPO_PATH, and the DERIVED runner
+# stay env-only and are NOT config-file keys.
+
+
+def _read_llm_file_table(repo_root=None) -> dict:
+    """The merged ``[tool.rebar.llm]`` table (user < project), or ``{}``. A malformed
+    core config degrades to env-only — a broken pyproject must never break an LLM op."""
+    try:
+        return _root_config.read_reserved_section("llm", repo_root)
+    except _root_config.ConfigError:
+        return {}
+
+
+def _llm_str(table: dict, cli: dict, env_name: str, file_key: str, default):
+    """Resolve a string setting: CLI > env > file > default (blank → fall through)."""
+    if file_key in cli and str(cli[file_key]).strip():
+        return str(cli[file_key]).strip()
+    raw = os.environ.get(env_name)
+    if raw is not None and raw.strip():
+        return raw.strip()
+    fv = table.get(file_key)
+    if fv is not None and str(fv).strip():
+        return str(fv).strip()
+    return default
+
+
+def _llm_int(table: dict, cli: dict, env_name: str, file_key: str, default: int, *, legacy=None):
+    """Resolve an int setting: CLI > env (canonical, then deprecated ``legacy``) > file
+    > default. An unparseable higher layer falls through to the next."""
+    candidates: list = []
+    if file_key in cli:
+        candidates.append(cli[file_key])
+    env_raw = os.environ.get(env_name)
+    if (env_raw is None or not env_raw.strip()) and legacy and os.environ.get(legacy, "").strip():
+        import logging
+
+        logging.getLogger("rebar.llm.config").warning("%s is deprecated; use %s", legacy, env_name)
+        env_raw = os.environ.get(legacy)
+    if env_raw is not None and env_raw.strip():
+        candidates.append(env_raw)
+    fv = table.get(file_key)
+    if fv is not None and not isinstance(fv, bool):
+        candidates.append(fv)
+    for c in candidates:
+        try:
+            return int(str(c).strip())
+        except (TypeError, ValueError):
+            continue
+    return default
+
+
 @dataclass
 class LangfuseConfig:
     """Langfuse credentials/host, plus whether tracing+prompts are *enabled*.
@@ -179,8 +239,14 @@ class LLMConfig:
             runner = "langflow"
         else:
             runner = "langgraph"
-        mcp_raw = os.environ.get("REBAR_LLM_MCP_SERVERS")
+        # Config-file layer for the non-secret knobs ([tool.rebar.llm]); env (and
+        # `rebar -c llm.*`) override it. Secrets/runtime/derived values stay env-only.
+        table = _read_llm_file_table(repo_root)
+        cli = _root_config.cli_overrides_for("llm")
+
+        # mcp_servers: env JSON > rebar -c llm.mcp_servers=<json> > file table/JSON.
         mcp_servers: dict = {}
+        mcp_raw = cli.get("mcp_servers") or os.environ.get("REBAR_LLM_MCP_SERVERS")
         if mcp_raw:
             try:
                 parsed = json.loads(mcp_raw)
@@ -188,16 +254,30 @@ class LLMConfig:
                     mcp_servers = parsed
             except json.JSONDecodeError:
                 mcp_servers = {}
+        else:
+            file_mcp = table.get("mcp_servers")
+            if isinstance(file_mcp, dict):
+                mcp_servers = file_mcp
+            elif isinstance(file_mcp, str):
+                try:
+                    parsed = json.loads(file_mcp)
+                    if isinstance(parsed, dict):
+                        mcp_servers = parsed
+                except json.JSONDecodeError:
+                    mcp_servers = {}
+        # repo_path is a RUNTIME-only override (env only) — not a [tool.rebar.llm] key.
         repo_path = os.environ.get("REBAR_LLM_REPO_PATH") or str(_root_config.repo_root(repo_root))
         return cls(
             runner=runner,
-            model=(os.environ.get("REBAR_LLM_MODEL") or DEFAULT_MODEL).strip(),
-            model_provider=(os.environ.get("REBAR_LLM_MODEL_PROVIDER") or "").strip() or None,
-            base_url=os.environ.get("REBAR_LLM_BASE_URL") or None,
+            model=_llm_str(table, cli, "REBAR_LLM_MODEL", "model", DEFAULT_MODEL),
+            model_provider=_llm_str(table, cli, "REBAR_LLM_MODEL_PROVIDER", "model_provider", None),
+            base_url=_llm_str(table, cli, "REBAR_LLM_BASE_URL", "base_url", None),
             api_key=os.environ.get("REBAR_LLM_API_KEY") or None,
-            max_tokens=_env_int("REBAR_LLM_MAX_TOKENS", 8000),
-            max_iterations=_env_int_aliased("REBAR_LLM_MAX_STEPS", "REBAR_LLM_MAX_ITERS", 25),
-            timeout_s=_env_int("REBAR_LLM_TIMEOUT", 600),
+            max_tokens=_llm_int(table, cli, "REBAR_LLM_MAX_TOKENS", "max_tokens", 8000),
+            max_iterations=_llm_int(
+                table, cli, "REBAR_LLM_MAX_STEPS", "max_steps", 25, legacy="REBAR_LLM_MAX_ITERS"
+            ),
+            timeout_s=_llm_int(table, cli, "REBAR_LLM_TIMEOUT", "timeout", 600),
             repo_path=repo_path,
             mcp_servers=mcp_servers,
             langfuse=LangfuseConfig.from_env(),
