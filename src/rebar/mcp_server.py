@@ -6,7 +6,7 @@ Reads (``show``/``list``) run in-process via rebar._reads (no subprocess);
 
 Safety:
   * ``reconcile`` defaults to ``dry-run``; ``live`` additionally requires
-    REBAR_MCP_ALLOW_RECONCILE_LIVE=1.
+    REBAR_MCP_ALLOW_JIRA_SYNC=1 (deprecated alias: REBAR_MCP_ALLOW_RECONCILE_LIVE).
   * Write tools (create/transition/edit/link/unlink/tag/untag/archive/comment)
     are gated by REBAR_MCP_READONLY: set it to 1 to expose a read-only server.
 
@@ -177,15 +177,25 @@ def _env_truthy(name: str) -> bool:
     """Case-insensitive truthy parse for a boolean env gate.
 
     Accepts 1 / true / yes (any case, surrounding whitespace tolerated). Used by
-    BOTH REBAR_MCP_READONLY and REBAR_MCP_ALLOW_RECONCILE_LIVE so a common
-    spelling like ``TRUE`` can never silently fail open on the readonly gate
-    (bug ship-mogul-glob).
+    REBAR_MCP_READONLY so a common spelling like ``TRUE`` can never silently fail
+    open on the readonly gate (bug ship-mogul-glob).
     """
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
 
 
 def _readonly() -> bool:
     return _env_truthy("REBAR_MCP_READONLY")
+
+
+def _allow_jira_sync() -> bool:
+    """Whether live/applying Jira-sync (mutating reconcile) is enabled — the typed
+    config ``mcp.allow_jira_sync`` (env REBAR_MCP_ALLOW_JIRA_SYNC, deprecated alias
+    REBAR_MCP_ALLOW_RECONCILE_LIVE, or a config file). Fail-SAFE: a malformed config
+    (or an unparseable boolean) resolves the gate CLOSED (off), never fails open."""
+    try:
+        return rebar.config.load_config().mcp.allow_jira_sync
+    except rebar.config.ConfigError:
+        return False
 
 
 def _dump(item):
@@ -385,8 +395,9 @@ def build_server():
         """Run the Jira reconciler. Defaults to a non-mutating dry-run.
 
         The Jira-mutating modes (bootstrap-strict, bootstrap-throttle, live) each
-        require REBAR_MCP_ALLOW_RECONCILE_LIVE=1 and are blocked under
-        REBAR_MCP_READONLY. reconcile-check / dry-run are non-mutating.
+        require REBAR_MCP_ALLOW_JIRA_SYNC=1 (deprecated alias
+        REBAR_MCP_ALLOW_RECONCILE_LIVE) and are blocked under REBAR_MCP_READONLY.
+        reconcile-check / dry-run are non-mutating.
         """
         # MODE_CAPS / Mode are imported once at module load (see top of file).
         # Unknown mode -> ValueError -> clean tool error.
@@ -399,10 +410,10 @@ def build_server():
                     f"{parsed.value} reconcile is disabled: this server is "
                     "read-only (REBAR_MCP_READONLY)"
                 )
-            if not _env_truthy("REBAR_MCP_ALLOW_RECONCILE_LIVE"):
+            if not _allow_jira_sync():
                 raise ValueError(
                     f"{parsed.value} reconcile is disabled (mutating mode); "
-                    "set REBAR_MCP_ALLOW_RECONCILE_LIVE=1 to enable"
+                    "set REBAR_MCP_ALLOW_JIRA_SYNC=1 to enable"
                 )
         return rebar.reconcile(parsed.value)
 

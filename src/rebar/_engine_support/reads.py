@@ -217,9 +217,17 @@ def show_state(ticket_id: str, tracker: str, *, include_scratch: bool = False) -
 
 
 def _load_scratch(ticket_id: str, tracker: str) -> dict:
-    scratch_base = os.environ.get("SCRATCH_BASE_DIR", "").strip()
+    repo_root = os.path.dirname(os.path.abspath(tracker))
+    # scratch.base_dir via the typed config (env REBAR_SCRATCH_BASE_DIR, deprecated
+    # alias SCRATCH_BASE_DIR, or a config file). Explicit root → pure stat discovery
+    # (no git subprocess); a malformed config falls back to the default (display path).
+    from rebar.config import ConfigError, load_config
+
+    try:
+        scratch_base = load_config(root=repo_root).scratch.base_dir.strip()
+    except ConfigError:
+        scratch_base = ""
     if not scratch_base:
-        repo_root = os.path.dirname(os.path.abspath(tracker))
         scratch_base = os.path.join(repo_root, ".rebar", "scratch")
     scratch_dir = os.path.join(scratch_base, ticket_id)
     data: dict[str, Any] = {}

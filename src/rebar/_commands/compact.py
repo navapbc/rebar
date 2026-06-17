@@ -31,7 +31,7 @@ from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
 def _usage() -> int:
     sys.stderr.write(
         "Usage: ticket-compact.sh <ticket_id> [--threshold=N]\n"
-        "  Default threshold: COMPACT_THRESHOLD env var or 10\n"
+        "  Default threshold: REBAR_COMPACT_THRESHOLD env / compact.threshold config or 10\n"
     )
     return 1
 
@@ -182,7 +182,10 @@ def compact_cli(argv: list[str], *, repo_root=None) -> int:
         sys.stderr.write(f"Error: ticket '{raw}' not found\n")
         return 1
 
-    threshold = int(os.environ.get("COMPACT_THRESHOLD", "10"))
+    # Default threshold from the typed config (compact.threshold; env
+    # REBAR_COMPACT_THRESHOLD, deprecated alias COMPACT_THRESHOLD, or a config file).
+    # A --threshold= flag below still overrides.
+    threshold = config.load_config(repo_root).compact.threshold
     skip_sync = False
     no_commit = False
     for a in argv[1:]:

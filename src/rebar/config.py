@@ -463,14 +463,17 @@ def user_config_path() -> Path:
 
 
 # Deprecated env vars that map to a canonical config key during the rename window
-# (EV-1). The OLD name still works — read only when the canonical
+# (EV-1/EV-3). The OLD name still works — read only when the canonical
 # ``REBAR_<SECTION>_<KEY>`` is unset (canonical always wins) — with a deprecation
 # warning. ``REBAR_NO_SYNC`` is a NEGATIVE boolean flipped to the positive
 # ``sync.pull`` (truthy → "off"/disabled; unset-or-"0" → "on"/enabled).
 _LEGACY_ENV_ALIASES: dict[str, tuple[str, str, str]] = {
-    # legacy name      -> (section, key, canonical name)
+    # legacy name                      -> (section, key, canonical name)
     "REBAR_PUSH": ("sync", "push", "REBAR_SYNC_PUSH"),
     "REBAR_NO_SYNC": ("sync", "pull", "REBAR_SYNC_PULL"),
+    "COMPACT_THRESHOLD": ("compact", "threshold", "REBAR_COMPACT_THRESHOLD"),
+    "SCRATCH_BASE_DIR": ("scratch", "base_dir", "REBAR_SCRATCH_BASE_DIR"),
+    "REBAR_MCP_ALLOW_RECONCILE_LIVE": ("mcp", "allow_jira_sync", "REBAR_MCP_ALLOW_JIRA_SYNC"),
 }
 
 
@@ -561,6 +564,9 @@ def _env_signature() -> tuple:
             "REBAR_CONFIG_UNKNOWN_KEYS",  # strict/warn policy affects whether load raises
             "REBAR_PUSH",  # deprecated alias -> sync.push (EV-1)
             "REBAR_NO_SYNC",  # deprecated alias -> sync.pull (EV-1)
+            "COMPACT_THRESHOLD",  # deprecated alias -> compact.threshold (EV-3a)
+            "SCRATCH_BASE_DIR",  # deprecated alias -> scratch.base_dir (EV-3a)
+            "REBAR_MCP_ALLOW_RECONCILE_LIVE",  # deprecated alias -> mcp.allow_jira_sync (EV-3a)
         )
     ]
     for sect, keys in _SECTIONS.items():

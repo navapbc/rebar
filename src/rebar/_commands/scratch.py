@@ -1,7 +1,8 @@
 """In-process ``scratch`` set/get/clear.
 
 Scratch is a filesystem-only per-ticket key/value store under
-``<repo>/.rebar/scratch/`` (``SCRATCH_BASE_DIR`` overrides) — NO ticket store, NO
+``<repo>/.rebar/scratch/`` (``scratch.base_dir`` / ``REBAR_SCRATCH_BASE_DIR``
+overrides) — NO ticket store, NO
 write lock, NO auto-init. Values are wrapped ``{"ts":<iso8601>,"value":<str>}`` and
 written atomically (same-dir tmp + fsync + rename). All structured output is JSON on
 stdout (default ``json.dumps`` separators, except the compact ``unknown_verb``
@@ -28,9 +29,14 @@ _CONTROL_RE = re.compile(r"[\x00-\x1f]")
 
 
 def base_dir(repo_root=None) -> str:
-    """The scratch base directory: ``$SCRATCH_BASE_DIR`` if set, else
-    ``<repo_root or config.repo_root()>/.rebar/scratch``."""
-    base = os.environ.get("SCRATCH_BASE_DIR")
+    """The scratch base directory: ``scratch.base_dir`` (env REBAR_SCRATCH_BASE_DIR,
+    deprecated alias SCRATCH_BASE_DIR, or a config file) if set, else
+    ``<repo_root or config.repo_root()>/.rebar/scratch``. Scratch is best-effort
+    infra, so a malformed config falls back to the default rather than erroring."""
+    try:
+        base = config.load_config(repo_root).scratch.base_dir
+    except config.ConfigError:
+        base = ""
     if base:
         return base
     root = repo_root if repo_root is not None else str(config.repo_root())
