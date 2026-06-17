@@ -585,10 +585,7 @@ def reconcile_once(
         where N is the number of mutations dispatched in this pass.
     """
     if repo_root is None:
-        repo_root = Path(
-            os.environ.get("REBAR_ROOT")
-            or Path(__file__).resolve().parents[4]
-        )
+        repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
 
     fetcher = _load("reconcile_fetcher", "fetcher.py")
     differ = _load("reconcile_differ", "differ.py")

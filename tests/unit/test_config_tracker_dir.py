@@ -60,12 +60,16 @@ def test_tracker_dir_uses_legacy_alias(tmp_path: Path, monkeypatch: pytest.Monke
     assert cfg.tracker_dir() == Path(str(tmp_path / "old"))
 
 
-def test_tracker_dir_default_when_no_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tracker_dir_default_when_no_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
     assert cfg.tracker_dir() == tmp_path.resolve() / ".tickets-tracker"
 
 
-def test_reads_tracker_dir_honors_canonical(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reads_tracker_dir_honors_canonical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from rebar._engine_support import reads
 
     monkeypatch.setenv("REBAR_TRACKER_DIR", str(tmp_path / "rt"))

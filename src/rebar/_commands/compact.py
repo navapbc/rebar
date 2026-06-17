@@ -184,8 +184,13 @@ def compact_cli(argv: list[str], *, repo_root=None) -> int:
 
     # Default threshold from the typed config (compact.threshold; env
     # REBAR_COMPACT_THRESHOLD, deprecated alias COMPACT_THRESHOLD, or a config file).
-    # A --threshold= flag below still overrides.
-    threshold = config.load_config(repo_root).compact.threshold
+    # A --threshold= flag below still overrides. A malformed config is reported as a
+    # clean error (exit 1), not an uncaught traceback.
+    try:
+        threshold = config.load_config(repo_root).compact.threshold
+    except config.ConfigError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
     skip_sync = False
     no_commit = False
     for a in argv[1:]:

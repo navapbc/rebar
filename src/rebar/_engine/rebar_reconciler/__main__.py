@@ -189,10 +189,7 @@ def run_pass(
     generated and a sub-second race could record mismatched pass_ids.
     """
     if repo_root is None:
-        repo_root = Path(
-            os.environ.get("REBAR_ROOT")
-            or Path(__file__).resolve().parents[4]
-        )
+        repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
 
     reconcile = _try_load_step("reconcile")
     if reconcile is None:
@@ -322,10 +319,7 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = (
         Path(args.repo_root)
         if args.repo_root
-        else Path(
-            os.environ.get("REBAR_ROOT")
-            or Path(__file__).resolve().parents[4]
-        )
+        else Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
     )
 
     # --dry-run-enumerate: list enumerable ticket directories and exit.
@@ -335,10 +329,7 @@ def main(argv: list[str] | None = None) -> int:
         resolved_root = (
             repo_root
             if repo_root is not None
-            else Path(
-                os.environ.get("REBAR_ROOT")
-                or Path(__file__).resolve().parents[4]
-            )
+            else Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
         )
         tickets_dir = resolved_root / ".tickets-tracker"
         if not tickets_dir.is_dir():

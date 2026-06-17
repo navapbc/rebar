@@ -51,8 +51,7 @@ def record_pass(
     """
     if repo_root is None:
         repo_root = Path(
-            os.environ.get("REBAR_ROOT")
-            or Path(__file__).resolve().parents[4]
+            os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4]
         )  # four levels up from rebar_reconciler/
     health_dir = repo_root / _STATE_SUBDIR / _HEALTH_SUBDIR
     health_dir.mkdir(parents=True, exist_ok=True)
@@ -99,8 +98,7 @@ def count_open_by_type(repo_root: Path | None = None) -> dict:
     """
     if repo_root is None:
         repo_root = Path(
-            os.environ.get("REBAR_ROOT")
-            or Path(__file__).resolve().parents[4]
+            os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4]
         )  # repo root from rebar_reconciler/
 
     tickets_dir = (
@@ -173,8 +171,7 @@ def capture_baseline(pass_id: str, repo_root: Path | None = None) -> Path:
     """
     if repo_root is None:
         repo_root = Path(
-            os.environ.get("REBAR_ROOT")
-            or Path(__file__).resolve().parents[4]
+            os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4]
         )  # repo root from rebar_reconciler/
 
     # Count total open tickets across all types as the baseline fsck total.

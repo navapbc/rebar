@@ -119,7 +119,9 @@ def test_sources_match_load_config(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     """The resolved Config from resolve_with_sources must equal load_config's — the
     provenance view can never disagree with the live load."""
     p = _proj(tmp_path)
-    (p / "rebar.toml").write_text("[sync]\npush = 'async'\n[compact]\nthreshold = 9\n", encoding="utf-8")
+    (p / "rebar.toml").write_text(
+        "[sync]\npush = 'async'\n[compact]\nthreshold = 9\n", encoding="utf-8"
+    )
     monkeypatch.setenv("REBAR_SYNC_PULL", "off")
     cfgobj, _, _ = cfg.resolve_with_sources(root=p)
     assert cfgobj == cfg.load_config(root=p)

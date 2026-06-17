@@ -88,8 +88,7 @@ def _apply_inbound_create(
         if bound_local_id:
             if repo_root is None:
                 repo_root = Path(
-                    os.environ.get("REBAR_ROOT")
-                    or Path(__file__).resolve().parents[4]
+                    os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4]
                 )
             mapping_path = repo_root / "bridge_state" / "mapping.json"
             _write_mapping_atomic(mapping_path, bound_local_id, jira_key)

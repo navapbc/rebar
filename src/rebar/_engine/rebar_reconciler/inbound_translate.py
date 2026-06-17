@@ -160,10 +160,7 @@ def _resolve_tracker_dir(repo_root: Path | None) -> Path:
     if override:
         return Path(override)
     if repo_root is None:
-        repo_root = Path(
-            os.environ.get("REBAR_ROOT")
-            or Path(__file__).resolve().parents[4]
-        )
+        repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
     return Path(repo_root) / ".tickets-tracker"  # tickets-boundary-ok
 
 

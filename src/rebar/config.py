@@ -259,7 +259,7 @@ _SECTION_CLASSES: dict[str, type] = {
 # section -> {key -> coercer(value, dotted_key) -> coerced value (raises ConfigError)}
 _SECTIONS: dict[str, dict] = {
     "verify": {"require_signature_for_close": lambda v, k: _as_bool(v, k)},
-    "ticket": {"display_mode": lambda v, k: (_as_str(v, k) or "auto")},
+    "ticket": {"display_mode": lambda v, k: _as_str(v, k) or "auto"},
     "compact": {"threshold": lambda v, k: _as_int(v, k, minimum=1)},
     "sync": {
         "push": lambda v, k: _as_choice(v, k, {"always", "async", "off"}),
@@ -318,7 +318,11 @@ def coerce_sparse(raw: dict | None, *, source: str = "", strict: bool = False) -
                 if new not in d:
                     logger.warning(
                         "rebar config%s: '%s.%s' is deprecated; use '%s.%s'",
-                        _src(source), sect, old, sect, new,
+                        _src(source),
+                        sect,
+                        old,
+                        sect,
+                        new,
                     )
                     d[new] = d.pop(old)
                 else:
@@ -561,7 +565,10 @@ def _ordered_layers(
     up = user_config_path()
     if up.is_file():
         layers.append(
-            ("user", coerce_sparse(_read_toml_table(up, pyproject=False), source=str(up), strict=strict))
+            (
+                "user",
+                coerce_sparse(_read_toml_table(up, pyproject=False), source=str(up), strict=strict),
+            )
         )
     proj = _discover_project_config(root)
     if proj is not None:
@@ -609,8 +616,7 @@ def _cli_signature(cli_overrides: dict | None) -> tuple | None:
     if not cli_overrides:
         return None
     return tuple(
-        (sect, tuple(sorted(vals.items())))
-        for sect, vals in sorted(cli_overrides.items())
+        (sect, tuple(sorted(vals.items()))) for sect, vals in sorted(cli_overrides.items())
     )
 
 

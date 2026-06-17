@@ -322,9 +322,7 @@ def validate_state(tracker: str, *, quick: bool = False) -> dict[str, Any]:
     """In-process validate for the library/MCP: returns the JSON report dict
     ({score, critical_issues, major_issues, minor_issues, warnings, suggestions})."""
     issues = normalize_issues(_raw_tickets(tracker))
-    findings = run_checks(
-        issues, quick=quick, ticket_cmd=_default_ticket_cmd()
-    )
+    findings = run_checks(issues, quick=quick, ticket_cmd=_default_ticket_cmd())
     findings += signature_findings(tracker)
     buckets = _bucket(findings)
     return to_json_dict(calculate_score(buckets), buckets)

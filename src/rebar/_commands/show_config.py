@@ -60,12 +60,10 @@ def _render_text(payload: dict[str, Any]) -> str:
     lines: list[str] = []
     lines.append("# rebar resolved configuration")
     lines.append(
-        "# project config: "
-        + (f"{proj['path']} ({proj['kind']})" if proj else "(none found)")
+        "# project config: " + (f"{proj['path']} ({proj['kind']})" if proj else "(none found)")
     )
     lines.append(
-        "# user config:    "
-        + (user["path"] if user["exists"] else f"{user['path']} (none)")
+        "# user config:    " + (user["path"] if user["exists"] else f"{user['path']} (none)")
     )
     lines.append("# precedence:     " + " < ".join(payload["precedence"]))
     lines.append("")

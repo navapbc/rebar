@@ -97,7 +97,9 @@ def test_canonical_wins_over_legacy_in_same_layer(tmp_path: Path) -> None:
     assert cfg.load_config(root=p).verify.require_signature_for_close is False
 
 
-def test_legacy_alias_cross_layer_precedence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_legacy_alias_cross_layer_precedence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The 252e review property: a LEGACY key in a lower layer and the CANONICAL key
     in a higher layer must compare by their shared canonical name — the higher layer
     wins, because aliases resolve per-layer (to canonical) BEFORE the merge."""
@@ -136,7 +138,9 @@ def test_unknown_key_errors_under_strict_cutover(
         cfg.load_config(root=p)
 
 
-def test_unknown_section_errors_under_strict(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unknown_section_errors_under_strict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("REBAR_CONFIG_UNKNOWN_KEYS", "error")
     p = _proj(tmp_path)
     (p / "rebar.toml").write_text("[nonsense]\nx = 1\n", encoding="utf-8")

@@ -16,7 +16,6 @@ The ``mcp`` dependency is an optional extra and is imported lazily.
 from __future__ import annotations
 
 import importlib.util
-import os
 
 import rebar
 
@@ -173,29 +172,32 @@ except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     SignResultOut = VerifySignatureResultOut = None  # type: ignore[assignment,misc]
 
 
-def _env_truthy(name: str) -> bool:
-    """Case-insensitive truthy parse for a boolean env gate.
-
-    Accepts 1 / true / yes (any case, surrounding whitespace tolerated). Used by
-    REBAR_MCP_READONLY so a common spelling like ``TRUE`` can never silently fail
-    open on the readonly gate (bug ship-mogul-glob).
-    """
-    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
+def _mcp_gate(attr: str, *, fail: bool) -> bool:
+    """Resolve a typed ``mcp.<attr>`` boolean gate through the single-source config
+    (env ``REBAR_MCP_<ATTR>`` wins over a ``[tool.rebar.mcp]`` config file; the
+    ``_as_bool`` coercion accepts 1/true/yes/on, any case, whitespace-tolerant). On a
+    MALFORMED config it returns ``fail`` — the SAFE direction for that gate, so the
+    value reported by ``rebar config`` is exactly what's enforced here."""
+    try:
+        return getattr(rebar.config.load_config().mcp, attr)
+    except rebar.config.ConfigError:
+        return fail
 
 
 def _readonly() -> bool:
-    return _env_truthy("REBAR_MCP_READONLY")
+    # Fail-CLOSED (read-only) on a malformed config — consistent with the verify
+    # gate; a broken config hides the write tools rather than exposing them.
+    return _mcp_gate("readonly", fail=True)
+
+
+def _allow_llm() -> bool:
+    # Fail-SAFE off — a malformed config never enables billable LLM calls.
+    return _mcp_gate("allow_llm", fail=False)
 
 
 def _allow_jira_sync() -> bool:
-    """Whether live/applying Jira-sync (mutating reconcile) is enabled — the typed
-    config ``mcp.allow_jira_sync`` (env REBAR_MCP_ALLOW_JIRA_SYNC, deprecated alias
-    REBAR_MCP_ALLOW_RECONCILE_LIVE, or a config file). Fail-SAFE: a malformed config
-    (or an unparseable boolean) resolves the gate CLOSED (off), never fails open."""
-    try:
-        return rebar.config.load_config().mcp.allow_jira_sync
-    except rebar.config.ConfigError:
-        return False
+    # Fail-SAFE off — a malformed config never enables live/applying Jira writes.
+    return _mcp_gate("allow_jira_sync", fail=False)
 
 
 def _dump(item):
@@ -428,7 +430,7 @@ def build_server():
         e.g. ANTHROPIC_API_KEY or OPENAI_API_KEY). Returns a plain dict and
         advertises NO outputSchema by design — the result is model-produced, so it
         is a documented NO_SCHEMA_EXEMPT and is not auto-driven in CI."""
-        if not _env_truthy("REBAR_MCP_ALLOW_LLM"):
+        if not _allow_llm():
             raise ValueError(
                 "review_ticket is disabled: it makes a live, billable LLM call. "
                 "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
@@ -451,7 +453,7 @@ def build_server():
         a plain dict and advertises NO outputSchema by design (documented
         NO_SCHEMA_EXEMPT) — its CLI/library --output json is pinned to
         review_result."""
-        if not _env_truthy("REBAR_MCP_ALLOW_LLM"):
+        if not _allow_llm():
             raise ValueError(
                 "review_code is disabled: it makes live, billable LLM call(s). "
                 "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
@@ -468,7 +470,7 @@ def build_server():
         DISABLED unless REBAR_MCP_ALLOW_LLM=1 (live, billable LLM call(s)). Needs
         the 'agents' extra + an API key. Returns a plain dict and advertises NO
         outputSchema by design (documented NO_SCHEMA_EXEMPT)."""
-        if not _env_truthy("REBAR_MCP_ALLOW_LLM"):
+        if not _allow_llm():
             raise ValueError(
                 "scan_spec is disabled: it makes live, billable LLM call(s). "
                 "Set REBAR_MCP_ALLOW_LLM=1 to enable it."

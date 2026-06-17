@@ -518,10 +518,7 @@ def _apply_batch(
                           file is written to disk; the next pass starts fresh.
     """
     if repo_root is None:
-        repo_root = Path(
-            os.environ.get("REBAR_ROOT")
-            or Path(__file__).resolve().parents[4]
-        )
+        repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
 
     acli = _load_acli()
     # Mirror fetcher.fetch_snapshot's pattern: AcliClient's real constructor

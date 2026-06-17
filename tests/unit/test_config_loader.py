@@ -59,7 +59,9 @@ def test_defaults_when_no_config(tmp_path: Path) -> None:
 
 def test_project_rebar_toml(tmp_path: Path) -> None:
     p = _proj(tmp_path)
-    (p / "rebar.toml").write_text("[sync]\npush = 'async'\n[compact]\nthreshold = 25\n", encoding="utf-8")
+    (p / "rebar.toml").write_text(
+        "[sync]\npush = 'async'\n[compact]\nthreshold = 25\n", encoding="utf-8"
+    )
     c = cfg.load_config(root=p)
     assert c.sync.push == "async" and c.compact.threshold == 25
 
@@ -83,7 +85,9 @@ def test_legacy_config_conf_backcompat(tmp_path: Path) -> None:
     assert c.verify.require_signature_for_close is True and c.sync.pull == "off"
 
 
-def test_rebar_config_env_points_at_explicit_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rebar_config_env_points_at_explicit_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     elsewhere = tmp_path / "elsewhere.toml"
     elsewhere.write_text("[ticket]\ndisplay_mode = 'plain'\n", encoding="utf-8")
     monkeypatch.setenv("REBAR_CONFIG", str(elsewhere))
@@ -213,11 +217,15 @@ def test_invalid_value_in_file_fails_closed(tmp_path: Path) -> None:
 
 
 # ── additional matrix coverage (combinations flagged in review) ───────────────
-def test_rebar_config_env_points_at_pyproject(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rebar_config_env_points_at_pyproject(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     pp = tmp_path / "pyproject.toml"
     pp.write_text("[project]\nname='x'\n[tool.rebar.sync]\npush = 'off'\n", encoding="utf-8")
     monkeypatch.setenv("REBAR_CONFIG", str(pp))
-    assert cfg.load_config(root=_proj(tmp_path)).sync.push == "off"  # pyproject-kind via $REBAR_CONFIG
+    assert (
+        cfg.load_config(root=_proj(tmp_path)).sync.push == "off"
+    )  # pyproject-kind via $REBAR_CONFIG
 
 
 def test_env_beats_legacy_conf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

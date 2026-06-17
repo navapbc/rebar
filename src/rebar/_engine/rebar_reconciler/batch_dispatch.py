@@ -136,10 +136,7 @@ def create_one(
 
         # Persist local_id -> jira_key in mapping.json atomically
         if repo_root is None:
-            repo_root = Path(
-                os.environ.get("REBAR_ROOT")
-                or Path(__file__).resolve().parents[4]
-            )
+            repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
         mapping_path = repo_root / "bridge_state" / "mapping.json"
         _write_mapping_atomic(mapping_path, local_id, hit_key)
 
@@ -207,10 +204,7 @@ def create_one(
 
                 _alert_root = (
                     repo_root
-                    or Path(
-                        os.environ.get("REBAR_ROOT")
-                        or Path(__file__).resolve().parents[4]
-                    )
+                    or Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
                 ) / ".tickets-tracker"
                 # F7: defensive guard — if local_id is falsy the alert directory
                 # would resolve to .tickets-tracker root and pollute it. Prefer

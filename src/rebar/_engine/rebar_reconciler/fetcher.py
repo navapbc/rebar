@@ -253,10 +253,7 @@ def _build_snapshot(
         Any exception raised by ``AcliClient.search_issues()`` propagates out.
     """
     if repo_root is None:
-        repo_root = Path(
-            os.environ.get("REBAR_ROOT")
-            or Path(__file__).resolve().parents[4]
-        )
+        repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
 
     acli_mod = _load_acli()
     client = acli_mod.AcliClient(
@@ -417,10 +414,7 @@ def fetch_snapshot(
     depend on it.
     """
     if repo_root is None:
-        repo_root = Path(
-            os.environ.get("REBAR_ROOT")
-            or Path(__file__).resolve().parents[4]
-        )
+        repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
 
     snapshot = _build_snapshot(pass_id, repo_root)
 

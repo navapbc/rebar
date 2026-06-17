@@ -270,7 +270,12 @@ def _multi_overlap(base: Path) -> None:
         "ov-a",
         2,
         "FILE_IMPACT",
-        {"file_impact": [{"path": "aaa/shared.py", "reason": "e"}, {"path": "zzz/shared.py", "reason": "e"}]},
+        {
+            "file_impact": [
+                {"path": "aaa/shared.py", "reason": "e"},
+                {"path": "zzz/shared.py", "reason": "e"},
+            ]
+        },
         ts + 3,
     )
     _write(
@@ -293,7 +298,12 @@ def _multi_overlap(base: Path) -> None:
         "ov-b",
         2,
         "FILE_IMPACT",
-        {"file_impact": [{"path": "aaa/shared.py", "reason": "e"}, {"path": "zzz/shared.py", "reason": "e"}]},
+        {
+            "file_impact": [
+                {"path": "aaa/shared.py", "reason": "e"},
+                {"path": "zzz/shared.py", "reason": "e"},
+            ]
+        },
         ts + 5,
     )
 

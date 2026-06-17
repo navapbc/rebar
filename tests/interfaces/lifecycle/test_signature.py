@@ -153,13 +153,11 @@ def test_sign_compact_sign_compact_latest_wins(rebar_repo: Path) -> None:
     tid = _seed(rebar_repo)
     rebar.sign_manifest(tid, ["v1: first"], repo_root=str(rebar_repo))
     assert (
-        _cli("compact", tid, "--threshold=0", cwd=rebar_repo, REBAR_SYNC_PULL="off").returncode
-        == 0
+        _cli("compact", tid, "--threshold=0", cwd=rebar_repo, REBAR_SYNC_PULL="off").returncode == 0
     )
     rebar.sign_manifest(tid, ["v2: second", "v2: more"], repo_root=str(rebar_repo))
     assert (
-        _cli("compact", tid, "--threshold=0", cwd=rebar_repo, REBAR_SYNC_PULL="off").returncode
-        == 0
+        _cli("compact", tid, "--threshold=0", cwd=rebar_repo, REBAR_SYNC_PULL="off").returncode == 0
     )
 
     out = rebar.verify_signature(tid, repo_root=str(rebar_repo))

@@ -20,8 +20,12 @@ pytestmark = pytest.mark.unit
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
-        "REBAR_CONFIG", "XDG_CONFIG_HOME", "REBAR_SYNC_PUSH", "REBAR_SYNC_PULL",
-        "REBAR_PUSH", "REBAR_NO_SYNC",
+        "REBAR_CONFIG",
+        "XDG_CONFIG_HOME",
+        "REBAR_SYNC_PUSH",
+        "REBAR_SYNC_PULL",
+        "REBAR_PUSH",
+        "REBAR_NO_SYNC",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -47,8 +51,9 @@ def test_legacy_rebar_push_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     with caplog.at_level(logging.WARNING, logger="rebar.config"):
         c = cfg.load_config(root=_proj(tmp_path))
     assert c.sync.push == "off"
-    assert any("REBAR_PUSH" in r.getMessage() and "deprecated" in r.getMessage()
-               for r in caplog.records)
+    assert any(
+        "REBAR_PUSH" in r.getMessage() and "deprecated" in r.getMessage() for r in caplog.records
+    )
 
 
 def test_canonical_push_beats_legacy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -69,7 +74,9 @@ def test_legacy_no_sync_flip(
     assert cfg.load_config(root=_proj(tmp_path)).sync.pull == expected_pull
 
 
-def test_canonical_pull_beats_legacy_no_sync(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_canonical_pull_beats_legacy_no_sync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("REBAR_SYNC_PULL", "on")
     monkeypatch.setenv("REBAR_NO_SYNC", "1")  # legacy ignored when canonical set
     assert cfg.load_config(root=_proj(tmp_path)).sync.pull == "on"

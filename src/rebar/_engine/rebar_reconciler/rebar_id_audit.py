@@ -142,10 +142,7 @@ def _get_rebar_id_guard_mode_from_config() -> str | None:
             config_path = Path(_root) / ".rebar" / "config.conf"
         else:
             config_path = (
-                Path(
-                    os.environ.get("REBAR_ROOT")
-                    or Path(__file__).resolve().parents[4]
-                )
+                Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
                 / ".rebar"
                 / "config.conf"
             )

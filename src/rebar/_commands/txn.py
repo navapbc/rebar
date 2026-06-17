@@ -236,10 +236,7 @@ def _signature_gate(
     ticket is not certified; a force-close reason bypasses with a stderr warning
     (the wrapper writes the audit comment). Replaces the legacy verdict-hash gate;
     ``--verdict-hash`` is deprecated and ignored."""
-    cfg_root = (
-        os.environ.get("REBAR_ROOT")
-        or tracker_dir.rsplit("/", 1)[0]
-    )
+    cfg_root = os.environ.get("REBAR_ROOT") or tracker_dir.rsplit("/", 1)[0]
     # Resolve the verify gate through the unified typed config (all layers + the
     # legacy require_verdict_for_close alias). Fail-CLOSED: a present-but-unreadable
     # config must never silently disable the gate — require a signature. An absent

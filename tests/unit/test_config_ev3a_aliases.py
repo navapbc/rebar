@@ -21,10 +21,16 @@ pytestmark = pytest.mark.unit
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
-        "REBAR_CONFIG", "XDG_CONFIG_HOME",
-        "REBAR_COMPACT_THRESHOLD", "COMPACT_THRESHOLD",
-        "REBAR_SCRATCH_BASE_DIR", "SCRATCH_BASE_DIR",
-        "REBAR_MCP_ALLOW_JIRA_SYNC", "REBAR_MCP_ALLOW_RECONCILE_LIVE",
+        "REBAR_CONFIG",
+        "XDG_CONFIG_HOME",
+        "REBAR_COMPACT_THRESHOLD",
+        "COMPACT_THRESHOLD",
+        "REBAR_SCRATCH_BASE_DIR",
+        "SCRATCH_BASE_DIR",
+        "REBAR_MCP_ALLOW_JIRA_SYNC",
+        "REBAR_MCP_ALLOW_RECONCILE_LIVE",
+        "REBAR_MCP_READONLY",
+        "REBAR_MCP_ALLOW_LLM",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -42,13 +48,17 @@ def test_compact_canonical_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert cfg.load_config(root=_proj(tmp_path)).compact.threshold == 42
 
 
-def test_compact_legacy_alias_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog) -> None:
+def test_compact_legacy_alias_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
     monkeypatch.setenv("COMPACT_THRESHOLD", "7")
     with caplog.at_level(logging.WARNING, logger="rebar.config"):
         c = cfg.load_config(root=_proj(tmp_path))
     assert c.compact.threshold == 7
-    assert any("COMPACT_THRESHOLD" in r.getMessage() and "deprecated" in r.getMessage()
-               for r in caplog.records)
+    assert any(
+        "COMPACT_THRESHOLD" in r.getMessage() and "deprecated" in r.getMessage()
+        for r in caplog.records
+    )
 
 
 def test_compact_canonical_beats_legacy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -116,3 +126,58 @@ def test_mcp_allow_jira_sync_failsafe_on_garbage(
     monkeypatch.setenv("REBAR_MCP_ALLOW_JIRA_SYNC", "maybe")  # invalid bool -> ConfigError
     cfg.reset_config_cache()
     assert mcp_server._allow_jira_sync() is False  # fail-safe off
+
+
+# ── mcp.readonly / mcp.allow_llm gates: reported == enforced (review fix) ──────
+def _proj_git(tmp: Path) -> Path:
+    p = tmp / "proj"
+    p.mkdir(parents=True)
+    (p / ".git").mkdir()
+    return p
+
+
+def test_mcp_readonly_honors_config_file_and_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The readonly gate now reads the typed config, so a [tool.rebar.mcp] config
+    file is honored (was previously env-only while `rebar config` reported it) — and
+    env still wins."""
+    from rebar import mcp_server
+
+    p = _proj_git(tmp_path)
+    monkeypatch.chdir(p)
+    assert mcp_server._readonly() is False  # default
+    (p / "rebar.toml").write_text("[mcp]\nreadonly = true\n", encoding="utf-8")
+    cfg.reset_config_cache()
+    assert mcp_server._readonly() is True  # config-file honored
+    monkeypatch.setenv("REBAR_MCP_READONLY", "0")  # env overrides the file
+    cfg.reset_config_cache()
+    assert mcp_server._readonly() is False
+
+
+def test_mcp_readonly_fails_closed_on_malformed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A malformed config locks the server READ-ONLY (fail-closed, like the verify
+    gate) — never exposes write tools on a broken config."""
+    from rebar import mcp_server
+
+    p = _proj_git(tmp_path)
+    monkeypatch.chdir(p)
+    (p / "pyproject.toml").write_text("[tool.rebar] broken === [[\n", encoding="utf-8")
+    cfg.reset_config_cache()
+    assert mcp_server._readonly() is True  # fail-CLOSED
+
+
+def test_mcp_allow_llm_gate_and_failsafe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from rebar import mcp_server
+
+    p = _proj_git(tmp_path)
+    monkeypatch.chdir(p)
+    assert mcp_server._allow_llm() is False  # default off
+    (p / "rebar.toml").write_text("[mcp]\nallow_llm = true\n", encoding="utf-8")
+    cfg.reset_config_cache()
+    assert mcp_server._allow_llm() is True  # config-file honored
+    monkeypatch.setenv("REBAR_MCP_ALLOW_LLM", "garbage")  # invalid -> ConfigError
+    cfg.reset_config_cache()
+    assert mcp_server._allow_llm() is False  # fail-safe off (never enable on bad config)
