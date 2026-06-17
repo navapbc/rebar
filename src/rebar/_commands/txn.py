@@ -15,12 +15,12 @@ append-only event file(s), and ``git add``+``commit`` — releasing the lock onl
 after the commit. Do NOT split the commit out: it would reopen a lost-update
 window (REMEDIATION_PROPOSAL §0 I4/I5, docs/concurrency.md).
 
-**Byte-parity contract.** Event files are written with
-``json.dump(event, ensure_ascii=False)`` (default separators, UNSORTED keys) —
-byte-identical to the former ``ticket_txn.py`` heredoc. This deliberately does NOT
-use ``rebar._store.event_append.stage_and_commit``/``write_and_push`` (which sort
-keys and re-acquire the lock per event); canonicalising these bytes is epic P1.0's
-scope, not E5c's. Only ``event_filename`` is shared.
+**Byte-parity contract.** Event files are serialised through the single canonical
+helper ``rebar._store.canonical.canonical_str`` (sorted keys, compact separators,
+``ensure_ascii=False``) — byte-identical to every other live writer (epic P1.0).
+This still does NOT use ``rebar._store.event_append.stage_and_commit``/
+``write_and_push`` (which re-acquire the lock per event); it shares only the
+serializer and ``event_filename``, keeping the inline rename+commit window here.
 
 Failure signalling: these cores **raise** rather than ``sys.exit``. exit-10
 optimistic-concurrency mismatch → :class:`ConcurrencyMismatch`; everything else →
@@ -39,6 +39,7 @@ import uuid
 
 from rebar._commands._seam import CommandError
 from rebar._store import event_append, lock
+from rebar._store.canonical import canonical_str
 from rebar.reducer import reduce_ticket
 
 
@@ -204,7 +205,7 @@ def transition_core(
 
         temp_path = os.path.join(tracker_dir, f".tmp-transition-{event_uuid}")
         with open(temp_path, "w", encoding="utf-8") as f:
-            json.dump(event, f, ensure_ascii=False)
+            f.write(canonical_str(event))
 
         final_filename = event_append.event_filename(timestamp, event_uuid, "STATUS")
         final_path = os.path.join(ticket_dir_path, final_filename)
@@ -379,7 +380,7 @@ def claim_core(
         status_filename = event_append.event_filename(ts1, uuid1, "STATUS")
         status_tmp = os.path.join(tracker_dir, f".tmp-claim-{uuid1}")
         with open(status_tmp, "w", encoding="utf-8") as f:
-            json.dump(status_event, f, ensure_ascii=False)
+            f.write(canonical_str(status_event))
         status_path = os.path.join(ticket_dir_path, status_filename)
         os.rename(status_tmp, status_path)
         rel_paths.append(f"{ticket_id}/{status_filename}")
@@ -400,7 +401,7 @@ def claim_core(
             edit_filename = event_append.event_filename(ts2, uuid2, "EDIT")
             edit_tmp = os.path.join(tracker_dir, f".tmp-claim-{uuid2}")
             with open(edit_tmp, "w", encoding="utf-8") as f:
-                json.dump(edit_event, f, ensure_ascii=False)
+                f.write(canonical_str(edit_event))
             edit_path = os.path.join(ticket_dir_path, edit_filename)
             os.rename(edit_tmp, edit_path)
             rel_paths.append(f"{ticket_id}/{edit_filename}")

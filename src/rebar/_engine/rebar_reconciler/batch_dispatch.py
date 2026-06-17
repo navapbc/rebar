@@ -198,9 +198,10 @@ def create_one(
             # Emit BRIDGE_ALERT for identity-write rollback so the event is
             # surfaced in the tickets-tracker for observability.  # tickets-boundary-ok
             try:
-                import json as _json
                 import time as _time
                 import uuid as _uuid
+
+                from rebar._store.canonical import canonical_str
 
                 _alert_root = (
                     repo_root
@@ -216,21 +217,18 @@ def create_one(
                 _ts = _time.time_ns()
                 _alert_uuid = str(_uuid.uuid4())
                 _alert_path = _ticket_dir / f"{_ts}-{_alert_uuid}-BRIDGE_ALERT.json"
-                _alert_path.write_text(
-                    _json.dumps(
-                        {
-                            "event_type": "BRIDGE_ALERT",
-                            "timestamp": _ts,
-                            "uuid": _alert_uuid,
-                            "ticket_id": local_id,
-                            "jira_key": jira_key,
-                            "data": {
-                                "reason": "identity-write failed after create; Jira issue deleted",
-                                "tag": "create-identity-write-failed",
-                            },
-                        }
-                    )
-                )
+                _alert_event = {
+                    "event_type": "BRIDGE_ALERT",
+                    "timestamp": _ts,
+                    "uuid": _alert_uuid,
+                    "ticket_id": local_id,
+                    "jira_key": jira_key,
+                    "data": {
+                        "reason": "identity-write failed after create; Jira issue deleted",
+                        "tag": "create-identity-write-failed",
+                    },
+                }
+                _alert_path.write_text(canonical_str(_alert_event))
             except Exception:
                 pass  # alert write failure must not mask original error
             raise write_err

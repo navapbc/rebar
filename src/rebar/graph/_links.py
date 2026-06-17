@@ -8,6 +8,8 @@ import os
 import sys
 import uuid
 
+from rebar._store.canonical import canonical_str
+
 from ._graph import check_cycle_at_level, check_would_create_cycle
 from ._hierarchy import resolve_hierarchy_link
 from ._loader import reduce_ticket
@@ -135,7 +137,7 @@ def _write_link_event(
     filename = f"{timestamp}-{link_uuid}-LINK.json"
     event_path = os.path.join(source_dir, filename)
     with open(event_path, "w", encoding="utf-8") as f:
-        json.dump(link_event, f, ensure_ascii=False)
+        f.write(canonical_str(link_event))
 
     _rel_path = os.path.relpath(event_path, tracker_dir)
     _commit_msg = f"ticket: link {source_id} {relation} {target_id}"

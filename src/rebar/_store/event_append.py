@@ -8,10 +8,12 @@ bytes, stages it same-filesystem, and under the unified write lock does the atom
 rename + ``git add`` + ``git commit``. ``write_and_push`` additionally runs the
 best-effort push.
 
-**Byte parity (the contract).** The committed bytes are
-``json.dumps(event, ensure_ascii=False, separators=(',', ':'), sort_keys=True)`` with
-NO trailing newline — byte-identical to the bash path's ``jq -S -c '.'`` (pinned by
-``tests/scripts/test-ticket-write-commit-event.sh``). This committer serialises the
+**Byte parity (the contract).** The committed bytes come from the single canonical
+serializer :func:`rebar._store.canonical.canonical_bytes`
+(``json.dumps(event, ensure_ascii=False, separators=(',', ':'), sort_keys=True)`` with
+NO trailing newline), shared by every live event writer and pinned Python↔Python by
+``tests/interfaces/store/test_canonical_event_bytes.py`` (and the byte contract +
+structural guard in ``tests/unit/test_canonical.py``). This committer serialises the
 *given* dict; it never re-derives author/env_id/uuid/timestamp (those are the seam's).
 
 Exit-code parity (surfaced as ``StoreError.returncode`` → the seam's ``CommandError``):
@@ -22,13 +24,13 @@ Exit-code parity (surfaced as ``StoreError.returncode`` → the seam's ``Command
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import tempfile
 from typing import Any
 
 from rebar._store import lock as _lock
+from rebar._store.canonical import canonical_bytes  # the single canonical serializer
 from rebar._store.lock import LockTimeout, RebaseGuard  # re-export for callers
 
 # I2 event-type enum (matches write_commit_event's `case` allow-list).
@@ -62,14 +64,6 @@ class StoreError(Exception):
 def event_filename(timestamp: int, uuid_str: str, event_type: str) -> str:
     """The I2 filename: ``{timestamp}-{uuid}-{TYPE}.json``."""
     return f"{timestamp}-{uuid_str}-{event_type}.json"
-
-
-def _canonical_bytes(event: dict[str, Any]) -> bytes:
-    """The committed bytes (== ``jq -S -c '.'``): sorted keys, compact separators,
-    ``ensure_ascii=False``, no trailing newline."""
-    return json.dumps(event, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode(
-        "utf-8"
-    )
 
 
 def _ensure_gc_auto_zero(tracker: str) -> None:
@@ -117,7 +111,7 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
     fd, staging = tempfile.mkstemp(prefix=".tmp-event-", dir=tracker)
     try:
         with os.fdopen(fd, "wb") as fh:
-            fh.write(_canonical_bytes(event))
+            fh.write(canonical_bytes(event))
     except OSError as exc:
         _silent_unlink(staging)
         raise StoreError("Error: failed to write staging temp file", 1) from exc

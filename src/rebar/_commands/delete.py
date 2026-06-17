@@ -8,7 +8,8 @@ event, an ARCHIVED event, and a ``.tombstone.json`` marker; afterwards it drops 
 ``newly_unblocked``. Idempotent: a re-invocation on an already-tombstoned ticket
 just commits any straggler UNLINKs and exits 0 silently.
 
-Event bytes use ``json.dump(ensure_ascii=False)`` (unsorted). Reuses
+Event bytes go through the single canonical serializer
+``rebar._store.canonical.canonical_str`` (sorted keys, P1.0). Reuses
 ``rebar.reducer`` (reduce_all_tickets / compute_alias / write_marker),
 ``rebar.graph._unblock`` and the resolver.
 """
@@ -28,6 +29,7 @@ from rebar import config
 from rebar._commands import scratch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._store.canonical import canonical_str
 from rebar.graph._unblock import batch_close_operations
 from rebar.reducer import reduce_all_tickets
 from rebar.reducer._alias import compute_alias
@@ -106,7 +108,7 @@ def _write_unlink(
         "data": {"link_uuid": link_uuid, "target_id": target_id},
     }
     dest = source_dir / f"{ts}-{ev_uuid}-UNLINK.json"
-    dest.write_text(json.dumps(event, ensure_ascii=False), encoding="utf-8")
+    dest.write_text(canonical_str(event), encoding="utf-8")
     return str(dest)
 
 
@@ -197,7 +199,7 @@ def _write_event(ticket_dir: str, event_type: str, env_id: str, author: str, dat
     }
     path = os.path.join(ticket_dir, f"{ts}-{ev}-{event_type}.json")
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(event, f, ensure_ascii=False)
+        f.write(canonical_str(event))
     return path
 
 

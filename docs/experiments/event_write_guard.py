@@ -17,7 +17,10 @@ Exit 1 if any non-allowlisted raw event serializer is found.
 """
 import ast, os, re, sys
 
-PY_ALLOW = {"_store/event_append.py"}            # the canonical helper itself
+# The live guard now ships as tests/unit/test_canonical.py::test_no_raw_event_serializers_in_src
+# (P1.0). This file is the validated EXP-R9 origin. The canonical serializer moved
+# to _store/canonical.py (event_append.py now imports it).
+PY_ALLOW = {"_store/canonical.py"}               # the canonical helper itself
 SH_ALLOW_SUBSTR = ("ticket-create.sh", "ticket-edit.sh", "ticket-migrate")  # dead/one-shot
 SH_EVENT = re.compile(r"""['"]event_type['"]""")
 SH_DUMP = re.compile(r"json\.dumps?\s*\(")

@@ -16,7 +16,6 @@ loading for the sibling ``adf`` module.
 from __future__ import annotations
 
 import importlib.util
-import json
 import os
 import sys
 from pathlib import Path
@@ -208,12 +207,14 @@ def _write_event_file(
 
     Tier E E5b: this replaced the bare ``_engine/event_append`` import (resolved by
     a ``sys.path`` dance) with the in-package store primitives. The on-disk event
-    bytes are UNCHANGED — ``json.dumps(event, ensure_ascii=False)`` with the
-    historical insertion key order — so the committed store is byte-identical to
-    the pre-rewire reconciler. Returns the path.
+    bytes go through the single canonical serializer
+    ``rebar._store.canonical.canonical_str`` (sorted keys, P1.0) — byte-identical to
+    every other live writer; re-serialisation is replay-safe (the reducer reads
+    parsed keys, not bytes). Returns the path.
     """
     from rebar._store import event_append as _store_event_append
     from rebar._store import lock as _store_lock
+    from rebar._store.canonical import canonical_str
 
     ts, uuid_str, env_id, author = _event_meta()
     ticket_dir = tracker_dir / ticket_id
@@ -233,7 +234,7 @@ def _write_event_file(
     # ``TimeoutError``; preserve that contract here so callers see the same type.
     try:
         with _store_lock.write_lock(str(tracker_dir), attempts=1, dual_window=True):
-            tmp.write_text(json.dumps(event, ensure_ascii=False), encoding="utf-8")
+            tmp.write_text(canonical_str(event), encoding="utf-8")
             os.replace(tmp, final)
     except _store_lock.LockTimeout as exc:
         raise TimeoutError(str(exc)) from None

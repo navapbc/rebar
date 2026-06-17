@@ -8,7 +8,8 @@ cache, and ``git add -A`` + commit atomically.
 
 Reuses ``rebar._store.lock`` (the fcntl+mkdir dual-leg lock),
 ``rebar.reducer.reduce_ticket`` (in-process), and ``event_append.event_filename``.
-SNAPSHOT bytes use ``json.dump(ensure_ascii=False)`` (unsorted).
+SNAPSHOT bytes go through the single canonical serializer
+``rebar._store.canonical.canonical_str`` (sorted keys, P1.0).
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from rebar import config
 from rebar._commands import _seam
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._store import event_append, lock
+from rebar._store.canonical import canonical_str
 from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
 
 
@@ -130,7 +132,7 @@ def _compact_locked(
         )
         staging = final_path + ".tmp"
         with open(staging, "w", encoding="utf-8") as f:
-            json.dump(snapshot_event, f, ensure_ascii=False)
+            f.write(canonical_str(snapshot_event))
         os.rename(staging, final_path)
 
         for fp in event_files:
