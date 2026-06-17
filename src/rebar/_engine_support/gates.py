@@ -133,31 +133,19 @@ def _clarity_score(description: str, ticket_type: str) -> int:
     return score
 
 
-def _read_config_key(path: str, key: str) -> str | None:
-    try:
-        with open(path, encoding="utf-8") as fh:
-            hits = [ln for ln in fh if ln.startswith(f"{key}=")]
-    except OSError:
-        return None
-    if not hits:
-        return None
-    return re.sub(r"\s", "", hits[-1].split("=", 1)[1])
-
-
 def _clarity_threshold(repo_root: str | None, config_file: str | None) -> int:
-    threshold = 5
-    if config_file:
-        override = _read_config_key(config_file, "ticket_clarity.threshold")
-    else:
-        conf = None
-        if repo_root and os.path.isfile(os.path.join(repo_root, ".rebar", "config.conf")):
-            conf = os.path.join(repo_root, ".rebar", "config.conf")
-        elif repo_root and os.path.isfile(os.path.join(repo_root, ".rebar.conf")):
-            conf = os.path.join(repo_root, ".rebar.conf")
-        override = _read_config_key(conf, "ticket_clarity.threshold") if conf else None
-    if override and re.fullmatch(r"[0-9]+", override):
-        threshold = int(override)
-    return max(threshold, 1)
+    """Clarity-check pass threshold, resolved through the typed config
+    (``ticket_clarity.threshold``: ``[tool.rebar.ticket_clarity]`` / ``rebar.toml`` /
+    legacy ``.rebar/config.conf`` + env ``REBAR_TICKET_CLARITY_THRESHOLD``, default 5).
+    An explicit ``config_file`` reads that one file; otherwise the layered loader runs.
+    A malformed config falls back to the default — clarity is a non-critical gate."""
+    from rebar.config import ConfigError, load_config, read_config_file
+
+    try:
+        cfg = read_config_file(config_file) if config_file else load_config(root=repo_root)
+        return cfg.ticket_clarity.threshold
+    except ConfigError:
+        return 5
 
 
 def clarity_check_compute(ticket_type: str, description: str, threshold: int) -> tuple[dict, int]:

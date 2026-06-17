@@ -182,6 +182,12 @@ class TicketConfig:
 
 
 @dataclass
+class TicketClarityConfig:
+    threshold: int = 5  # clarity-check pass threshold (section name matches the
+    # legacy flat key `ticket_clarity.threshold`, so it reads with no alias)
+
+
+@dataclass
 class CompactConfig:
     threshold: int = 10
 
@@ -226,6 +232,7 @@ class Config:
 
     verify: VerifyConfig = field(default_factory=VerifyConfig)
     ticket: TicketConfig = field(default_factory=TicketConfig)
+    ticket_clarity: TicketClarityConfig = field(default_factory=TicketClarityConfig)
     compact: CompactConfig = field(default_factory=CompactConfig)
     sync: SyncConfig = field(default_factory=SyncConfig)
     mcp: McpConfig = field(default_factory=McpConfig)
@@ -248,6 +255,7 @@ class Config:
 _SECTION_CLASSES: dict[str, type] = {
     "verify": VerifyConfig,
     "ticket": TicketConfig,
+    "ticket_clarity": TicketClarityConfig,
     "compact": CompactConfig,
     "sync": SyncConfig,
     "mcp": McpConfig,
@@ -260,6 +268,7 @@ _SECTION_CLASSES: dict[str, type] = {
 _SECTIONS: dict[str, dict] = {
     "verify": {"require_signature_for_close": lambda v, k: _as_bool(v, k)},
     "ticket": {"display_mode": lambda v, k: _as_str(v, k) or "auto"},
+    "ticket_clarity": {"threshold": lambda v, k: _as_int(v, k, minimum=1)},
     "compact": {"threshold": lambda v, k: _as_int(v, k, minimum=1)},
     "sync": {
         "push": lambda v, k: _as_choice(v, k, {"always", "async", "off"}),
@@ -726,6 +735,22 @@ def load_config(
     cfg, validation = _resolve(root, effective_cli)
     _RESULT_CACHE[key] = (cfg, validation)
     return cfg
+
+
+def read_config_file(path: str | os.PathLike[str]) -> Config:
+    """Resolve a typed Config from a SINGLE explicit config file — no discovery, env,
+    or user-layer merging. For callers that point at a specific file (e.g.
+    ``clarity-check --config-file``); honors the same pyproject/TOML/legacy formats and
+    coercion as the layered loader. Raises :class:`ConfigError` on an unreadable/
+    invalid file (fail-closed)."""
+    p = Path(path)
+    if p.name == "pyproject.toml":
+        raw = _read_toml_table(p, pyproject=True)
+    elif p.suffix == ".toml":
+        raw = _read_toml_table(p, pyproject=False)
+    else:
+        raw = _read_legacy_conf(p)
+    return Config.from_mapping(raw, source=str(p), strict=_strict_unknown_keys())
 
 
 def resolve_with_sources(

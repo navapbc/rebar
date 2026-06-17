@@ -90,8 +90,9 @@ by `rebar -c SECTION.KEY=VALUE`. Each is consumed by routing through `load_confi
 verify.require_signature_for_close = false   # alias: verify.require_verdict_for_close
 
 # tickets / display / maintenance
-ticket.display_mode  = "auto"
-compact.threshold    = 10     # env REBAR_COMPACT_THRESHOLD (alias: COMPACT_THRESHOLD)
+ticket.display_mode      = "auto"
+ticket_clarity.threshold = 5      # clarity-check pass threshold (env REBAR_TICKET_CLARITY_THRESHOLD)
+compact.threshold        = 10     # env REBAR_COMPACT_THRESHOLD (alias: COMPACT_THRESHOLD)
 
 # sync (git-backed store)
 sync.push = "always"   # always | async | off   (env REBAR_SYNC_PUSH; alias REBAR_PUSH)
@@ -163,10 +164,10 @@ own SDKs and keep their standard names.)
 
 The legacy flat `.rebar/config.conf` keeps being read **identically for ≥1
 release**; legacy key names are aliased (e.g. `verify.require_verdict_for_close`).
-One key is still read **only** from the legacy flat file (not yet a typed/TOML key,
-so it does not appear in `rebar config`): `ticket_clarity.threshold` — the
-clarity-check pass threshold (default 5). Promoting it to the typed Config is tracked
-by `0ac6`.
+`ticket_clarity.threshold` (clarity-check pass threshold, default 5) is a typed key —
+settable in `[tool.rebar.ticket_clarity]`/`rebar.toml`, via `REBAR_TICKET_CLARITY_THRESHOLD`,
+or the legacy flat `ticket_clarity.threshold` (the section name matches, so it reads
+with no alias); it appears in `rebar config`.
 Unknown keys **warn** (not fail) during the deprecation window and hard-error under
 `REBAR_CONFIG_UNKNOWN_KEYS=error`. Renamed env vars keep their old names as
 deprecated aliases (with a warning): `REBAR_PUSH`→`REBAR_SYNC_PUSH`,
