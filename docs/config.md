@@ -19,6 +19,9 @@
    containing `[tool.rebar]`, stopping at `.git`/filesystem root). If no project
    config is found, fall back to a **user-level** config at
    `$XDG_CONFIG_HOME/rebar/config.toml` (default `~/.config/rebar/config.toml`).
+   `~/.config` is used on **all** platforms incl. macOS — deliberately *not*
+   `~/Library/Application Support` (the predictable dev-tool convention, matching
+   ruff/black/mypy). Per the XDG spec a non-absolute `XDG_CONFIG_HOME` is ignored.
 3. **Precedence (highest → lowest):**
    **CLI flag > `REBAR_<KEY>` env var > project config > user config > built-in
    defaults.** Documented and enforced by a single resolver.
@@ -31,9 +34,11 @@
    `REBAR_<KEY>` env override). *Secrets* live **only** in the environment / a
    gitignored `.env`, never the committed config.
 6. **Loud, not silent.** Unknown keys **warn** (typo guard) — the bespoke parser
-   dropped them silently. The **verify gate stays fail-closed**: a present-but-
-   unreadable `verify.*` config requires a signature to close; an absent config
-   leaves the gate off.
+   dropped them silently — and flip to a hard error under
+   `REBAR_CONFIG_UNKNOWN_KEYS=error` (the post-deprecation cutover). An invalid
+   *value* always raises `ConfigError` at load (fail-fast). The **verify gate stays
+   fail-closed**: a present-but-unreadable `verify.*` config requires a signature to
+   close; an absent config leaves the gate off.
 
 ## Hard constraints (rebar-specific; deviations from the broader survey)
 
@@ -72,7 +77,12 @@ non-dotted key) is a clean error, not a traceback.
 config explicitly (matches `RUFF_CONFIG` / `PIP_CONFIG_FILE` / `UV_CONFIG_FILE`).
 Env var naming: a dotted config key `x.y_z` is overridden by `REBAR_X_Y_Z`.
 
-## Config-key inventory (settings → config file)
+## Config-key inventory
+
+### Config-file keys (fully wired: `[tool.rebar]`/`rebar.toml` → typed Config → consumer)
+
+These are settable in the config file, overridden by `REBAR_<SECTION>_<KEY>` env, then
+by `rebar -c SECTION.KEY=VALUE`. Each is consumed by routing through `load_config`.
 
 ```toml
 [tool.rebar]
@@ -81,39 +91,53 @@ verify.require_signature_for_close = false   # alias: verify.require_verdict_for
 
 # tickets / display / maintenance
 ticket.display_mode  = "auto"
-compact.threshold    = 10
+compact.threshold    = 10     # env REBAR_COMPACT_THRESHOLD (alias: COMPACT_THRESHOLD)
 
 # sync (git-backed store)
-sync.push = "always"   # always | async | off
-sync.pull = "on"       # on | off
+sync.push = "always"   # always | async | off   (env REBAR_SYNC_PUSH; alias REBAR_PUSH)
+sync.pull = "on"       # on | off               (env REBAR_SYNC_PULL; alias REBAR_NO_SYNC)
 
 # MCP server gates
 mcp.readonly         = false
 mcp.allow_llm        = false
-mcp.allow_jira_sync  = false   # was: allow live (applying) Jira writes
-
-# LLM framework (optional [agents] extra)
-llm.model         = "claude-opus-4-8"
-llm.model_provider = ""         # inferred from model when empty
-llm.base_url      = ""          # OpenAI-compatible endpoint
-llm.max_tokens    = 8000
-llm.max_steps     = 25          # max agent loop steps (~2 per tool call); raise if "exceeded step budget"
-llm.timeout       = 600         # wall-clock seconds
-llm.mcp_servers   = {}          # TOML table (retires the JSON-in-env footgun)
-
-# Jira reconciler
-jira.url     = ""
-jira.user    = ""
-jira.project = ""
-
-# reconciler tunables (advanced — sensible defaults, rarely needed)
-reconciler.jira_cli_timeout       = 0     # acli (Atlassian CLI) call timeout
-reconciler.lock_max_retries       = 5     # advisory-lock acquisition retries
-reconciler.deletion_probe_limit   = 20    # GET probes to confirm a Jira issue is really deleted
-reconciler.id_guard_bypass_unsafe = false # TEMPORARY bypass of the rebar-id write guard — do NOT leave on
+mcp.allow_jira_sync  = false   # live (applying) Jira writes (alias env REBAR_MCP_ALLOW_RECONCILE_LIVE)
 
 # scratch space
-scratch.base_dir = ""   # default <repo>/.rebar/scratch
+scratch.base_dir = ""   # default <repo>/.rebar/scratch (env REBAR_SCRATCH_BASE_DIR; alias SCRATCH_BASE_DIR)
+```
+
+### Advanced tunables — currently ENV-configured (config-file routing: ticket `0ac6`)
+
+`reconciler.*` and `jira.*` exist in the typed Config schema (so `rebar config` reports
+them) but their consumers — the Jira reconciler — read the env vars below directly; a
+`[tool.rebar.reconciler]`/`[tool.rebar.jira]` *file* value is parsed but **not yet
+consumed**. `llm.*` is not a core Config section at all (it lives in the optional
+`rebar.llm` layer so the stdlib core never imports the agents extra) and is resolved
+env-only by `LLMConfig.from_env`. Wiring all three to the config file is tracked by
+`0ac6`; today, configure them via the environment:
+
+```
+# reconciler (advanced; sensible defaults, rarely needed) — env names, deprecated aliases in ()
+REBAR_JIRA_CLI_TIMEOUT              # acli (Atlassian CLI) call timeout   (REBAR_ACLI_TIMEOUT)
+REBAR_RECONCILER_LOCK_MAX_RETRIES  # advisory-lock retries               (REBAR_RECONCILER_LOCK_RETRY_BUDGET)
+REBAR_RECONCILER_DELETION_PROBE_LIMIT  # GETs to confirm a deletion      (RECONCILER_ABSENT_GET_BUDGET)
+REBAR_UNSAFE_ID_GUARD_BYPASS=true  # TEMPORARY bypass of the rebar-id write guard — do NOT leave on
+                                   # (deprecated: REBAR_ID_GUARD_MODE=warn; raise->false, warn->true)
+
+# Jira reconciler (Atlassian-standard names; secret JIRA_API_TOKEN below)
+JIRA_URL  /  JIRA_USER  /  JIRA_PROJECT
+
+# LLM framework (optional [agents] extra; runner DERIVED, not configured)
+REBAR_LLM_MODEL            # default claude-opus-4-8
+REBAR_LLM_MODEL_PROVIDER   # inferred from model when empty
+REBAR_LLM_BASE_URL         # OpenAI-compatible endpoint
+REBAR_LLM_MAX_TOKENS       # default 8000
+REBAR_LLM_MAX_STEPS        # max agent loop steps (~2 per tool call), default 25  (REBAR_LLM_MAX_ITERS)
+REBAR_LLM_TIMEOUT          # wall-clock seconds, default 600
+REBAR_LLM_MCP_SERVERS      # JSON object of MCP servers
+REBAR_LLM_REPO_PATH        # repo the review agent's read-only file tools see (default: repo root)
+REBAR_LLM_EXPERIMENTAL_HARNESS=deepagents  # opt into the experimental harness; else langflow (if
+                           # LANGFLOW_URL+LANGFLOW_FLOW_ID set) else langgraph; `fake` is library-arg-only
 ```
 
 ### Secrets — environment / `.env` only (never the config file)
@@ -139,10 +163,25 @@ own SDKs and keep their standard names.)
 
 The legacy flat `.rebar/config.conf` keeps being read **identically for ≥1
 release**; legacy key names are aliased (e.g. `verify.require_verdict_for_close`).
-Unknown keys **warn** (not fail) during the deprecation window; hard-error only
-after. Renamed env vars (`REBAR_PUSH`→`REBAR_SYNC_PUSH`, `TICKETS_TRACKER_DIR`→
-`REBAR_TRACKER_DIR`, …) keep their old names as deprecated aliases — see the
-env-var standardization story `60ce`.
+One key is still read **only** from the legacy flat file (not yet a typed/TOML key,
+so it does not appear in `rebar config`): `ticket_clarity.threshold` — the
+clarity-check pass threshold (default 5). Promoting it to the typed Config is tracked
+by `0ac6`.
+Unknown keys **warn** (not fail) during the deprecation window and hard-error under
+`REBAR_CONFIG_UNKNOWN_KEYS=error`. Renamed env vars keep their old names as
+deprecated aliases (with a warning): `REBAR_PUSH`→`REBAR_SYNC_PUSH`,
+`REBAR_NO_SYNC`→`REBAR_SYNC_PULL` (negative→positive flip), `COMPACT_THRESHOLD`→
+`REBAR_COMPACT_THRESHOLD`, `SCRATCH_BASE_DIR`→`REBAR_SCRATCH_BASE_DIR`,
+`REBAR_MCP_ALLOW_RECONCILE_LIVE`→`REBAR_MCP_ALLOW_JIRA_SYNC`, `TICKETS_TRACKER_DIR`→
+`REBAR_TRACKER_DIR`, `REBAR_ACLI_TIMEOUT`→`REBAR_JIRA_CLI_TIMEOUT`,
+`REBAR_RECONCILER_LOCK_RETRY_BUDGET`→`REBAR_RECONCILER_LOCK_MAX_RETRIES`,
+`RECONCILER_ABSENT_GET_BUDGET`→`REBAR_RECONCILER_DELETION_PROBE_LIMIT`,
+`REBAR_LLM_MAX_ITERS`→`REBAR_LLM_MAX_STEPS`, `REBAR_ID_GUARD_MODE`→
+`REBAR_UNSAFE_ID_GUARD_BYPASS` (raise→false/warn→true). Removed (no alias):
+`PROJECT_ROOT` (use `REBAR_ROOT`), `REBAR_LLM_RUNNER` (runner is derived), and the
+dead `TICKET_CMD`/`REBAR_TICKET_CLI`/`TICKET_WORDLIST_PATH`/`TICKET_SYNC_CMD`/
+`_REBAR_GC_AUTO_ZERO`/`REBAR_FSCK_NO_MUTATE` internals. See the env-var
+standardization story `60ce`.
 
 ## Transparency
 

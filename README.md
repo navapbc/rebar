@@ -149,7 +149,8 @@ name; or register it directly in your client config (zero pre-install via
 
 (Already pip/pipx-installed `nava-rebar[mcp]`? Use `"command": "rebar-mcp"`
 instead.) Server flags: `REBAR_MCP_READONLY=1` exposes only read tools;
-`reconcile` is dry-run unless `REBAR_MCP_ALLOW_RECONCILE_LIVE=1`. Both flags
+`reconcile` is dry-run unless `REBAR_MCP_ALLOW_JIRA_SYNC=1` (deprecated alias
+`REBAR_MCP_ALLOW_RECONCILE_LIVE`). Both flags
 accept any case-insensitive truthy value — `1`, `true`, or `yes` (surrounding
 whitespace tolerated); anything else (incl. unset) is off.
 
@@ -344,7 +345,8 @@ rebar-mcp          # stdio transport
 ```
 
 Exposes ticket operations as MCP tools. `reconcile` defaults to `dry-run`
-(`live` requires `REBAR_MCP_ALLOW_RECONCILE_LIVE=1`). Set `REBAR_MCP_READONLY=1`
+(`live` requires `REBAR_MCP_ALLOW_JIRA_SYNC=1`, deprecated alias
+`REBAR_MCP_ALLOW_RECONCILE_LIVE`). Set `REBAR_MCP_READONLY=1`
 to expose only the read tools (no write/mutation tools). To register it in an MCP
 client (registry name `io.github.navapbc/rebar`, or a direct `uvx` config), see
 [Install → MCP server](#mcp-server--from-the-mcp-registry) above.
@@ -362,18 +364,29 @@ Apache-2.0 — see [`LICENSE`](LICENSE).
 
 ## Configuration
 
-Optional `.rebar/config.conf` (or `.rebar.conf`) at the repo root, flat
-`key=value`:
+rebar reads **TOML** config from `[tool.rebar]` in `pyproject.toml` or a standalone
+`rebar.toml` (nearest up-tree, stopping at `.git`), falling back to a user config at
+`~/.config/rebar/config.toml` (honoring `$XDG_CONFIG_HOME`). Precedence, highest
+first: **`rebar -c SECTION.KEY=VALUE` / CLI flag > `REBAR_<SECTION>_<KEY>` env >
+project config > user config > built-in default.** `rebar config` prints the resolved
+values and which layer each came from.
 
-```ini
-ticket.display_mode=auto                # auto | canonical | alias | short
-ticket_clarity.threshold=70
-verify.require_signature_for_close=true # opt-in (default: false) — gate story/epic
-                                        # close on a certified signature at the
-                                        # current HEAD (`rebar sign`). The legacy
-                                        # name verify.require_verdict_for_close is
-                                        # still honored as an alias.
+```toml
+[tool.rebar]
+verify.require_signature_for_close = true  # gate story/epic close on a certified
+                                           # signature at HEAD (rebar sign); default
+                                           # false. Alias: verify.require_verdict_for_close
+ticket.display_mode = "auto"               # auto | canonical | alias | short
+compact.threshold   = 10
+sync.push = "always"                       # always | async | off
+sync.pull = "on"                           # on | off
+mcp.readonly = false
+scratch.base_dir = ""                      # default <repo>/.rebar/scratch
 ```
+
+The full key set, the `REBAR_<KEY>` env names, and deprecation aliases are in
+[`docs/config.md`](docs/config.md). The legacy flat `.rebar/config.conf`
+(`key=value`) is still read during a deprecation window for back-compat.
 
 When the close gate is enabled, closing a story/epic requires a **certified
 signature made at the current HEAD** — sign a manifest of verified steps
@@ -382,9 +395,9 @@ moved, or bypass with `--force-close=<reason>`. This replaces the older
 `--verdict-hash`/`compute-verdict-hash.sh` gate, which is now deprecated.
 
 rebar keeps its writable state under `.rebar/` at the repo root. The `scratch`
-store defaults to `REPO_ROOT/.rebar/scratch/` (override with the
-`SCRATCH_BASE_DIR` environment variable), and one-shot migration stamps are
-written under `.rebar/` as well.
+store defaults to `<repo>/.rebar/scratch/` (override with `scratch.base_dir` /
+`REBAR_SCRATCH_BASE_DIR`; the unprefixed `SCRATCH_BASE_DIR` is a deprecated alias),
+and one-shot migration stamps are written under `.rebar/` as well.
 
 ## Tests
 

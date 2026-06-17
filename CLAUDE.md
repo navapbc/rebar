@@ -73,7 +73,8 @@ shape) drawn from the canonical JSON Schemas — see
 `verify_signature` certifies it).
 
 There is no `init` over MCP (operator bootstrap only). `reconcile` `live` mode
-additionally requires `REBAR_MCP_ALLOW_RECONCILE_LIVE=1`. Both env gates accept
+additionally requires `REBAR_MCP_ALLOW_JIRA_SYNC=1` (deprecated alias
+`REBAR_MCP_ALLOW_RECONCILE_LIVE`). Both env gates accept
 any case-insensitive truthy value (`1`/`true`/`yes`, whitespace tolerated);
 anything else (including unset) is off.
 
@@ -178,7 +179,8 @@ event to the `tickets` branch **and** auto-pushes to `origin/tickets` when an
 propagates to the shared remote immediately. Push is best-effort: no remote means
 no push, and a push failure never fails the write (the commit stays local and
 diverged). `fsck` reports `PUSH_PENDING` when the local branch is ahead of origin.
-The **`REBAR_PUSH`** env var tunes this (default `always`): `async` pushes in the
+The **`REBAR_SYNC_PUSH`** env var tunes this (default `always`; deprecated alias
+`REBAR_PUSH`): `async` pushes in the
 background so per-write network latency doesn't serialize a batch claim, and `off`
 keeps commits local — both still surface `PUSH_PENDING` via `fsck` (see
 `docs/concurrency.md`).
