@@ -16,8 +16,9 @@ selector. The legacy `--json` and `--format=*` flags were removed (pre-1.0).
 | `llm`  | token-minified short-key NDJSON (`show`/`list`/`ready` only)              |
 
 Accepted spellings: `-o json`, `--output json`, `--output=json`. Per-command the
-allowed set differs (a *profile*): `show`/`list`/`search` default to `json` and
-add `llm`; `ready` is `text`(ids)/`llm`/`json`; everything else is `text`/`json`.
+allowed set differs (a *profile*): `show`/`list`/`search`/`session-logs` default
+to `json` and add `llm`; `ready` is `text`(ids)/`llm`/`json`; everything else is
+`text`/`json`.
 
 All of this lives in **one** place — `src/rebar/_engine/ticket_output.py`
 (`parse_output(argv, profile)`); the bash commands shell into it, so the parsing,
@@ -25,15 +26,16 @@ validation, and error text are never duplicated between bash and Python.
 
 ## Per-command output contract
 
-Always-JSON reads (no flag needed): `show`, `list`, `search`, `deps`,
-`list-descendants`, `get-file-impact`, `get-verify-commands`, `clarity-check`.
+Always-JSON reads (no flag needed): `show`, `list`, `search`, `session-logs`,
+`deps`, `list-descendants`, `get-file-impact`, `get-verify-commands`,
+`clarity-check`.
 
 Structured via `--output json`:
 
 | command(s)                       | schema                    |
 |----------------------------------|---------------------------|
-| `show` / `list` / `search` / `ready` | `ticket_state`        |
-| `show`/`list`/`ready` `--output llm` | `ticket_state_llm`    |
+| `show` / `list` / `search` / `ready` / `session-logs` | `ticket_state` |
+| `show`/`list`/`ready`/`session-logs` `--output llm` | `ticket_state_llm` |
 | `deps`                           | `deps_graph`              |
 | `next-batch`                     | `next_batch`              |
 | `list-descendants`               | `list_descendants`        |

@@ -55,9 +55,16 @@ over one git-backed store.
     reconciler-inbound writer all acquire the same `rebar._store.lock`.
   - **Reducer** (`rebar.reducer`, code at `src/rebar/reducer/`) — pure
     deterministic replay of the event log into compiled state; local rebuildable
-    `.cache.json` per ticket.
+    `.cache.json` per ticket. `reduce_all_tickets()` is the single batch-compile
+    that backs `search`/`list`/`ready`/`next_batch`/`deps`/`validate`; its
+    `exclude_session_logs` flag is the **compile-exclusion seam** — the
+    graph/health hot paths and default `list` set it so verbose `session_log`
+    bodies never tax those compiles, while `search` and single-ticket `show`
+    leave it off so logs stay discoverable (see CLAUDE.md "Session logs").
   - **Graph** (`rebar.graph`, code at `src/rebar/graph/`) — relations + cycle
-    detection.
+    detection. Excludes `session_log` tickets from the dependency graph (they
+    carry non-blocking links only and never block/unblock work); `deps` on a
+    `session_log` itself still resolves its own links.
   - **Reconciler** (`rebar_reconciler/`, shipped as `_engine/` package data) —
     level-triggered, bidirectional Jira sync, launched as a subprocess
     (`python -m rebar_reconciler`); the one component with a grandfathered

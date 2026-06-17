@@ -52,7 +52,8 @@ resolves the STATUS fork deterministically by UUID, so every clone agrees.
 ## MCP tool set
 
 **Reads (always available):** `show_ticket`, `list_tickets`, `search`,
-`ticket_deps`, `ready_tickets`, `next_batch`, `clarity_check`, `check_ac`,
+`recent_session_logs`, `ticket_deps`, `ready_tickets`, `next_batch`,
+`clarity_check`, `check_ac`,
 `quality_check`, `validate`, `get_file_impact`, `get_verify_commands`,
 `verify_signature`, `fsck`, `summary`, `bridge_fsck`, `reconcile` (dry-run by
 default). The
@@ -69,6 +70,8 @@ shape) drawn from the canonical JSON Schemas — see
 `transition_ticket`, `claim_ticket`, `reopen_ticket`, `comment_ticket`,
 `edit_ticket`, `link_tickets`, `unlink_tickets`, `tag_ticket`, `untag_ticket`,
 `archive_ticket`, `compact_ticket`, `set_file_impact`, `set_verify_commands`,
+`log_session` (capture helper — appends a verbose entry to the current
+`session_log`, creating one on first use),
 `sign_manifest` (HMAC-signs a manifest of verified steps with the environment key;
 `verify_signature` certifies it).
 
@@ -77,6 +80,43 @@ additionally requires `REBAR_MCP_ALLOW_JIRA_SYNC=1` (deprecated alias
 `REBAR_MCP_ALLOW_RECONCILE_LIVE`). Both env gates accept
 any case-insensitive truthy value (`1`/`true`/`yes`, whitespace tolerated);
 anything else (including unset) is off.
+
+## Session logs (`session_log` ticket type)
+
+`session_log` is a first-class ticket type for **verbose, durable, agent-facing
+logs** stored in the rebar store and surfaced later by keyword. It is
+deliberately kept out of the dependency-graph / store-health hot paths so its
+large bodies never tax the operations that run constantly during the
+parallel-agent workflow. Its behavior differs from work tickets:
+
+- **Gate- and lifecycle-exempt.** `clarity_check` / `check_ac` / `quality_check`
+  treat it as exempt (always pass), and `validate` never flags it
+  (orphan/empty/etc.). It **cannot** be `claim`ed or `transition`ed; `show`,
+  `comment`, and `edit` work normally.
+- **Visibility — searchable, hidden from `list`.** Included in keyword `search`
+  and in single-ticket `show`, and listed by `recent_session_logs` /
+  `list_tickets(ticket_type="session_log")`, but **excluded** from default
+  `list` and from `ready` / `next_batch` / `deps` / `validate` (the graph/health
+  compiles), so log size/count never affects those.
+- **Non-blocking links only.** `relates_to` / `discovered_from` are allowed (so a
+  log can reference the work it documents); `blocks` / `depends_on` are refused on
+  either endpoint, and logs never enter the dependency graph.
+- **Never synced to Jira.** `reconcile` excludes `session_log` (it is in the
+  reconciler's `EXCLUDED_SYNC_TYPES` and absent from the local→Jira type map), and
+  it never appears in `bridge_fsck`.
+- **Title convention (guidance, NOT enforced).** Titles should carry a short
+  summary of the work (not merely a date/time/session id); nothing validates this.
+
+**Capture helper.** Rather than hand-assembling `create` + `comment`, use the
+helper: library `rebar.append_session_log(entry, *, summary=…, relates_to=…,
+discovered_from=…)`, CLI `rebar session-log append "<entry>"` (and
+`rebar session-log start --summary=…` to rotate to a fresh log), or the
+write-gated MCP `log_session(entry)`. The first call creates one `session_log`
+(titled by `summary`) and records it as the current log via a **local,
+git-ignored** pointer (`.rebar/current_session_log`); subsequent calls append to
+that same log. Retrieve recent logs with `rebar.recent_session_logs(limit=5)` /
+`rebar session-logs [--limit=<n>]` / the MCP `recent_session_logs` tool (newest
+first, default 5).
 
 **LLM agent operations (optional, gated):** `review_ticket(ticket_id, reviewer_id,
 graph)` runs a tool-using LLM agent that reviews a ticket (or its graph) and
@@ -116,10 +156,12 @@ headings below are what `clarity_check` additionally rewards:
 | `story`     | `## Acceptance Criteria`  | `## Why`, `## What`, `## Scope`                   |
 | `bug`       | `## Acceptance Criteria`  | `## Reproduction Steps`, Expected vs Actual       |
 | `epic`      | `## Acceptance Criteria`  | `## Success Criteria`, `## Context`               |
+| `session_log` | *(none — gate-exempt)*  | n/a (always passes the gates; see Session logs)   |
 
-Plus, for all types: a description ≥ ~200 chars and at least one bullet/checklist
-line. A ticket missing the `## Acceptance Criteria` checklist fails both gates
-regardless of how rich the rest of the description is.
+Plus, for all types **except `session_log`**: a description ≥ ~200 chars and at
+least one bullet/checklist line. A ticket missing the `## Acceptance Criteria`
+checklist fails both gates regardless of how rich the rest of the description is.
+(`session_log` is exempt from all of this — see the Session logs section above.)
 
 Record `set_file_impact` (the `{path,reason}` array that `next_batch` uses to
 avoid scheduling file-conflicting tickets together) and `set_verify_commands`
