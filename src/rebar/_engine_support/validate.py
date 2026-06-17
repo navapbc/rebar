@@ -6,12 +6,11 @@ Faithful in-process port of ``validate-issues.sh``: normalize every ticket from
 finding stream, and render text / ``--terse`` / ``--output json`` exactly as bash
 did — including the ANSI colors and the score-encoded exit (``exit == 5 - score``).
 
-Data source: when ``TICKET_CMD`` is set in the environment (test injection) we
-subprocess ``$TICKET_CMD list``, and otherwise we read in-process via
-``list_states`` — the Tier C win, byte-equivalent because the CLI's ``list`` arm
-is itself ``list_states``. The default ticket command (used only for the
-interface-contract *suggestion* text, never subprocessed in production) is the
-in-process ``rebar`` CLI (:func:`rebar._engine.in_process_cli`).
+Data source: tickets are read in-process via ``list_states`` (the Tier C win,
+byte-equivalent because the CLI's ``list`` arm is itself ``list_states``). The
+ticket-command string (used only for the interface-contract *suggestion* text,
+never subprocessed) is the in-process ``rebar`` CLI
+(:func:`rebar._engine.in_process_cli`).
 
 Output contract (docs/bash-migration.md §1.4): ``--output json`` is pinned by JSON
 **schema + semantic** equality (jq vs ``json.dumps`` whitespace differs and is not
@@ -23,7 +22,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 from typing import Any
 
@@ -58,27 +56,13 @@ def _default_ticket_cmd() -> str:
 
 # ───────────────────────────── data + normalization ──────────────────────────
 def _raw_tickets(tracker: str) -> list[dict]:
-    """Raw ticket list: subprocess ``$TICKET_CMD list`` when injected (tests), else
-    in-process ``list_states`` (production). Both feed the same normalization."""
-    ticket_cmd = os.environ.get("TICKET_CMD")
-    if ticket_cmd:
-        try:
-            cp = subprocess.run([ticket_cmd, "list"], capture_output=True, text=True)
-        except OSError:
-            return []
-        if cp.returncode != 0:
-            return []
-        raw = (cp.stdout or "").strip() or "[]"
-        try:
-            data = json.loads(raw)
-        except (json.JSONDecodeError, ValueError):
-            return []
-        return data if isinstance(data, list) else []
+    """Raw ticket list, read in-process via ``list_states`` (the production path).
+
+    Applies the uniform read-freshness policy here — the bash validate arm omitted
+    init but got freshness transitively via its nested ``ticket list``; we mirror
+    that without a subprocess."""
     from rebar._engine_support import reads
 
-    # In-process (production) path: apply the uniform read-freshness policy here —
-    # the bash validate arm omits init but gets freshness transitively via its
-    # nested `ticket list`; we mirror that without a subprocess.
     reads.ensure_fresh(tracker)
     return reads.list_states(tracker)
 
@@ -207,7 +191,7 @@ def normalize_issues(tickets: list[dict]) -> list[dict]:
 # re-emits per call (its cache lives in a pipe-subshell and never persists). The
 # port fetches once, so to keep verbose byte-parity we splice this line in after
 # each check's opening "Checking..." verbose finding.
-_FETCHING = _checks.Finding("verbose", "Fetching issues JSON (shared cache) via TICKET_CMD list...")
+_FETCHING = _checks.Finding("verbose", "Reading local tickets (in-process)...")
 
 
 def _with_fetch(findings: list[_checks.Finding]) -> list[_checks.Finding]:
@@ -339,7 +323,7 @@ def validate_state(tracker: str, *, quick: bool = False) -> dict[str, Any]:
     ({score, critical_issues, major_issues, minor_issues, warnings, suggestions})."""
     issues = normalize_issues(_raw_tickets(tracker))
     findings = run_checks(
-        issues, quick=quick, ticket_cmd=os.environ.get("TICKET_CMD") or _default_ticket_cmd()
+        issues, quick=quick, ticket_cmd=_default_ticket_cmd()
     )
     findings += signature_findings(tracker)
     buckets = _bucket(findings)
@@ -393,7 +377,7 @@ def run(argv: list[str], tracker: str) -> int:
             print(f"{_YELLOW}(quick mode — run --full for complete check){_NC}", file=sys.stderr)
         print("", file=sys.stderr)
 
-    ticket_cmd = os.environ.get("TICKET_CMD") or _default_ticket_cmd()
+    ticket_cmd = _default_ticket_cmd()
     issues = normalize_issues(_raw_tickets(tracker))
     findings = run_checks(issues, quick=quick, ticket_cmd=ticket_cmd)
     findings += signature_findings(tracker)

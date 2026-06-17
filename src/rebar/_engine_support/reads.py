@@ -740,9 +740,9 @@ _COMMANDS = {
     "validate": _cmd_validate,
 }
 
-# Subcommands that own their freshness policy (so main does not pre-fetch). The
-# bash validate arm deliberately omits init for test isolation under a mocked
-# TICKET_CMD; the port mirrors that and fetches only on its in-process branch.
+# Subcommands that own their freshness policy (so main does not pre-fetch).
+# ``validate`` reads tickets in-process (``validate._raw_tickets`` → ``list_states``)
+# and applies freshness there itself.
 _NO_PREFETCH = {"validate"}
 
 

@@ -1,44 +1,35 @@
 """validate characterization — docs/bash-migration.md §5.
 
 The python characterization of ``validate``: the score→exit tiers, the JSON
-report shape, the human text/terse goldens, and the library/schema — driven
-through the CLI with the same ``TICKET_CMD`` injection seam ``validate`` honors.
+report shape, the human text/terse goldens, and the library/schema.
+
+Driven IN-PROCESS by injecting the raw ticket list (``validate._raw_tickets``) and
+calling ``validate.run`` directly. EV-2b removed the ``TICKET_CMD`` subprocess
+injection seam; the synthetic-graph fixtures are kept (they exercise the health
+checks' scoring of arbitrary graphs — including the child→parent-dep critical,
+which a real-store materialization could NOT reproduce because the write API's
+hierarchy promotion neutralizes exactly that pathology).
 """
 
 from __future__ import annotations
 
-import json
-import os
-import stat
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from rebar._engine import in_process_cli
-
-# Drive the in-process rebar CLI; the validate arm honors the TICKET_CMD
-# injection seam, so this characterizes the production output.
-_CLI = in_process_cli()
+from rebar._engine_support import validate as _validate
 
 
-def _mock_ticket_cmd(tmp_path: Path, tickets: list[dict]) -> str:
-    (tmp_path / "tickets.json").write_text(json.dumps(tickets))
-    script = tmp_path / "ticket"
-    script.write_text(
-        "#!/usr/bin/env bash\n"
-        'case "${1:-}" in\n'
-        f"  list) cat {tmp_path / 'tickets.json'} ;;\n"
-        "  *) exit 0 ;;\n"
-        "esac\n"
-    )
-    script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-    return str(script)
-
-
-def _run(ticket_cmd: str, *args: str) -> subprocess.CompletedProcess:
-    env = {**os.environ, "TICKET_CMD": ticket_cmd, "REBAR_NO_SYNC": "1"}
-    return subprocess.run([_CLI, "validate", *args], env=env, capture_output=True, text=True)
+def _run(capsys, monkeypatch, tmp_path: Path, tickets: list[dict], *args: str):
+    """Inject ``tickets`` as the raw ticket list and run validate in-process.
+    Returns (returncode, stdout, stderr). The tracker is an empty tmp dir —
+    signature_findings no-ops without a signing key, so only the injected graph
+    drives the score."""
+    monkeypatch.setattr(_validate, "_raw_tickets", lambda tracker: list(tickets))
+    capsys.readouterr()  # clear
+    rc = _validate.run(list(args), str(tmp_path))
+    cap = capsys.readouterr()
+    return rc, cap.out, cap.err
 
 
 def _ticket(tid, status, ttype, parent=None, title=None, desc="yes", notes="", deps=None):
@@ -91,14 +82,15 @@ _ORPHAN_PLUS_CRIT = [
         ("four_crit", _FOUR_CRIT, 1),
     ],
 )
-def test_score_tier_and_exit(tmp_path: Path, name, tickets, expect_score):
+def test_score_tier_and_exit(capsys, monkeypatch, tmp_path: Path, name, tickets, expect_score):
     """exit == 5 - score (the docs/exit-codes.md contract), and the JSON report
     carries the matching score + the canonical key set."""
-    cmd = _mock_ticket_cmd(tmp_path, tickets)
-    r = _run(cmd, "--output", "json")
-    d = json.loads(r.stdout)
+    import json
+
+    rc, out, _ = _run(capsys, monkeypatch, tmp_path, tickets, "--output", "json")
+    d = json.loads(out)
     assert d["score"] == expect_score
-    assert r.returncode == 5 - expect_score
+    assert rc == 5 - expect_score
     assert set(d) == {
         "score",
         "critical_issues",
@@ -109,36 +101,35 @@ def test_score_tier_and_exit(tmp_path: Path, name, tickets, expect_score):
     }
 
 
-def test_critical_message_golden(tmp_path: Path):
-    cmd = _mock_ticket_cmd(tmp_path, _ONE_CRIT)
-    d = json.loads(_run(cmd, "--output", "json").stdout)
+def test_critical_message_golden(capsys, monkeypatch, tmp_path: Path):
+    import json
+
+    _, out, _ = _run(capsys, monkeypatch, tmp_path, _ONE_CRIT, "--output", "json")
+    d = json.loads(out)
     assert d["critical_issues"] == [
         "Child->parent dependency: cc depends on its parent ce - Ticket cc"
     ]
 
 
 # ───────────────────────────── human output goldens ──────────────────────────
-def test_healthy_terse_is_single_line(tmp_path: Path):
-    cmd = _mock_ticket_cmd(tmp_path, _HEALTHY)
-    r = _run(cmd, "--terse")
-    assert r.returncode == 0
-    assert r.stdout == ""  # text/terse go to stderr; stdout is empty
-    assert r.stderr == "Issues health: 5/5 (0 critical, 0 major, 0 minor, 0 warnings)\n"
+def test_healthy_terse_is_single_line(capsys, monkeypatch, tmp_path: Path):
+    rc, out, err = _run(capsys, monkeypatch, tmp_path, _HEALTHY, "--terse")
+    assert rc == 0
+    assert out == ""  # text/terse go to stderr; stdout is empty
+    assert err == "Issues health: 5/5 (0 critical, 0 major, 0 minor, 0 warnings)\n"
 
 
-def test_text_findings_colored_on_stderr(tmp_path: Path):
-    cmd = _mock_ticket_cmd(tmp_path, _ONE_CRIT)
-    r = _run(cmd)
+def test_text_findings_colored_on_stderr(capsys, monkeypatch, tmp_path: Path):
+    _, out, err = _run(capsys, monkeypatch, tmp_path, _ONE_CRIT)
     # The CRITICAL finding prints in red to stderr; stdout stays empty in text mode.
-    assert r.stdout == ""
-    assert "\033[0;31m[CRITICAL]\033[0m Child->parent dependency: cc" in r.stderr
-    assert "Health Score: \033[1;33m3/5\033[0m - Fair (needs attention)" in r.stderr
+    assert out == ""
+    assert "\033[0;31m[CRITICAL]\033[0m Child->parent dependency: cc" in err
+    assert "Health Score: \033[1;33m3/5\033[0m - Fair (needs attention)" in err
 
 
-def test_usage_errors(tmp_path: Path):
-    cmd = _mock_ticket_cmd(tmp_path, _HEALTHY)
-    assert _run(cmd, "--bogus").returncode == 1  # unknown option → exit 1
-    assert _run(cmd, "--help").returncode == 0
+def test_usage_errors(capsys, monkeypatch, tmp_path: Path):
+    assert _run(capsys, monkeypatch, tmp_path, _HEALTHY, "--bogus")[0] == 1  # unknown → 1
+    assert _run(capsys, monkeypatch, tmp_path, _HEALTHY, "--help")[0] == 0
 
 
 # ───────────────────────────── library / MCP ─────────────────────────────────
@@ -146,8 +137,7 @@ def test_library_and_mcp_shape(monkeypatch):
     import rebar
     from rebar.mcp_server import ValidateReportOut
 
-    monkeypatch.setenv("REBAR_NO_SYNC", "1")
-    monkeypatch.delenv("TICKET_CMD", raising=False)
+    monkeypatch.setenv("REBAR_SYNC_PULL", "off")
     d = rebar.validate()  # real store, in-process
     assert set(d) == {
         "score",
