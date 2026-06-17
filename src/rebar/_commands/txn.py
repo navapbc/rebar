@@ -137,6 +137,16 @@ def transition_core(
                 returncode=1,
             )
 
+        # session_log tickets are lifecycle-exempt: they have no workflow status
+        # to advance. Refuse transition authoritatively (before the concurrency
+        # check) so the message is clear regardless of the supplied current_status.
+        if state.get("ticket_type", "") == "session_log":
+            raise CommandError(
+                "Error: session_log tickets are lifecycle-exempt and cannot be "
+                "transitioned (they are not claimed, transitioned, or closed)",
+                returncode=1,
+            )
+
         actual_status = state.get("status", "")
         if actual_status != current_status:
             if actual_status == "archived":
@@ -330,6 +340,13 @@ def claim_core(
         if state is None:
             raise CommandError(
                 "Error: reducer returned no state (ticket may be corrupt or missing events)",
+                returncode=1,
+            )
+        # session_log tickets are lifecycle-exempt: they cannot be claimed (no
+        # status to advance, and they never participate in the work workflow).
+        if state.get("ticket_type", "") == "session_log":
+            raise CommandError(
+                "Error: session_log tickets are lifecycle-exempt and cannot be claimed",
                 returncode=1,
             )
         actual_status = state.get("status", "")

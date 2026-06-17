@@ -63,6 +63,8 @@ def check_ac_compute(ticket_id: str, tracker: str) -> tuple[dict, int]:
         state = show_state(ticket_id, tracker)
     except ReadError:
         return {"verdict": "fail", "criteria_count": 0, "reason": f"could not load {ticket_id}"}, 1
+    if state.get("ticket_type") == "session_log":
+        return {"verdict": "pass", "criteria_count": 0, "reason": "session_log is gate-exempt"}, 0
     n = _count_ac_reset(_ticket_text(state))
     if n >= 1:
         return {"verdict": "pass", "criteria_count": n, "reason": f"{n} criteria lines"}, 0
@@ -149,6 +151,10 @@ def _clarity_threshold(repo_root: str | None, config_file: str | None) -> int:
 
 
 def clarity_check_compute(ticket_type: str, description: str, threshold: int) -> tuple[dict, int]:
+    if ticket_type == "session_log":
+        # session_log tickets carry verbose free-form logs, not dispatchable work,
+        # so the clarity heuristic does not apply — they are gate-exempt (pass).
+        return {"score": 0, "verdict": "pass", "threshold": threshold}, 0
     score = _clarity_score(description, ticket_type)
     ac_count = _count_ac_reset(description)
     if score >= threshold and ac_count >= 1:
@@ -269,6 +275,19 @@ def quality_check_compute(ticket_id: str, tracker: str) -> tuple[dict, int, str 
                 "reason": f"could not load issue {ticket_id}",
             },
             1,
+            None,
+        )
+    if state.get("ticket_type") == "session_log":
+        return (
+            {
+                "verdict": "pass",
+                "line_count": 0,
+                "keyword_count": 0,
+                "ac_items": 0,
+                "file_impact": 0,
+                "reason": "session_log is gate-exempt",
+            },
+            0,
             None,
         )
     ticket_type = state.get("ticket_type") or "task"

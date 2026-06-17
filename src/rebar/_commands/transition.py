@@ -172,6 +172,18 @@ def transition_compute(
     _validate_status("target_status", target_status)
 
     if current_status == target_status:
+        # Same-status no-op short-circuits BEFORE the authoritative guard in
+        # txn.transition_core, so refuse a session_log here too — it is
+        # lifecycle-exempt and must never report a (no-op) transition success.
+        from rebar.reducer import reduce_ticket
+
+        _state = reduce_ticket(os.path.join(tracker, ticket_id))
+        if _state is not None and _state.get("ticket_type") == "session_log":
+            raise CommandError(
+                "Error: session_log tickets are lifecycle-exempt and cannot be "
+                "transitioned (they are not claimed, transitioned, or closed)",
+                returncode=1,
+            )
         return {
             "ticket_id": ticket_id,
             "from": current_status,

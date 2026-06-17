@@ -27,12 +27,12 @@ from rebar._commands._seam import (
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
 
-_TYPES = ("bug", "epic", "story", "task")
+_TYPES = ("bug", "epic", "story", "task", "session_log")
 
 _USAGE = (
     "Usage: ticket create <ticket_type> <title> [--parent <id>] [--priority <n>] "
     "[--assignee <name>] [--description <text>] [--tags <tag1,tag2>]\n"
-    "  ticket_type: bug | epic | story | task\n"
+    "  ticket_type: bug | epic | story | task | session_log\n"
     "  --priority, -p: 0-4 (0=critical, 4=backlog; default: 2)"
 )
 
@@ -83,7 +83,8 @@ def create_core(
 
     if ticket_type not in _TYPES:
         raise CommandError(
-            f"Error: invalid ticket type '{ticket_type}'. Must be one of: bug, epic, story, task",
+            f"Error: invalid ticket type '{ticket_type}'. "
+            "Must be one of: bug, epic, story, task, session_log",
             error_code="invalid_ticket_type",
             input_str=ticket_type,
         )
@@ -290,7 +291,8 @@ def edit_core(ticket_id: str, fields: dict, *, repo_root=None) -> None:
         elif key == "ticket_type":
             if value not in _TYPES:
                 raise CommandError(
-                    f"Error: invalid ticket type '{value}'. Must be one of: bug, epic, story, task"
+                    f"Error: invalid ticket type '{value}'. "
+                    "Must be one of: bug, epic, story, task, session_log"
                 )
             out["ticket_type"] = value
         elif key == "parent":
