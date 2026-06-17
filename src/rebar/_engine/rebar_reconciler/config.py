@@ -4,6 +4,14 @@ from __future__ import annotations
 
 EXCLUDED_FIELDS: tuple[str, ...] = ("local_id", "rebar-id")
 
+# Local ticket types that are NEVER synced to Jira. session_log tickets are
+# verbose, local, agent-facing artifacts with no place in a Jira project, so
+# compute_outbound_mutations skips them entirely (alongside the excluded-status
+# check). These types are also deliberately ABSENT from outbound_differ's
+# _LOCAL_TO_JIRA_TYPE map so any leak past this filter surfaces rather than
+# silently syncing.
+EXCLUDED_SYNC_TYPES: frozenset[str] = frozenset({"session_log"})
+
 # Status mapping: local-side status name -> Jira-side status name.
 # Used by outbound_update v1's status-routing path (gated behind
 # REBAR_RECONCILER_STATUS_GATING) and by the preflight status-mapping scan

@@ -167,6 +167,34 @@ _AdfModule = None
 _COMMENT_LIMITS_KEY = "rebar_reconciler.comment_limits"
 _CommentLimitsModule = None
 
+_CONFIG_KEY = "rebar_reconciler.config"
+_ConfigModule = None
+
+
+def _load_config():
+    """Lazy-load the sibling config module (same pattern as _load_comment_limits).
+
+    Loaded by file path (not ``from . import``) because the differ may be
+    imported via ``importlib.util.spec_from_file_location`` in tests, which does
+    not establish package context. Provides ``EXCLUDED_SYNC_TYPES`` (the local
+    ticket types — e.g. ``session_log`` — that are never synced to Jira).
+    """
+    global _ConfigModule
+    if _ConfigModule is not None:
+        return _ConfigModule
+    if _CONFIG_KEY in sys.modules:
+        _ConfigModule = sys.modules[_CONFIG_KEY]
+        return _ConfigModule
+    cfg_path = Path(__file__).parent / "config.py"
+    spec = importlib.util.spec_from_file_location(_CONFIG_KEY, cfg_path)
+    if spec is None or spec.loader is None:
+        raise FileNotFoundError(f"config.py not found at {cfg_path}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[_CONFIG_KEY] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    _ConfigModule = mod
+    return mod
+
 
 def _load_comment_limits():
     """Lazy-load the sibling comment_limits module (same pattern as _load_adf).
@@ -1029,6 +1057,12 @@ def compute_outbound_mutations(
     if excluded_statuses is None:
         excluded_statuses = {"archived", "deleted"}
 
+    # Local ticket types that never sync to Jira (e.g. session_log) — verbose,
+    # local, agent-facing artifacts with no Jira counterpart. Skipped in both the
+    # absent-GET pre-selection and the main mutation loop, alongside the
+    # excluded-status check.
+    excluded_sync_types: frozenset[str] = _load_config().EXCLUDED_SYNC_TYPES
+
     mutations: list[OutboundMutation] = []
 
     # Bug 1e08 — rotation pre-selection for bound-but-absent direct GETs.
@@ -1054,6 +1088,8 @@ def compute_outbound_mutations(
     for _t in local_tickets if client is not None else ():
         if _t.get("status", "") in excluded_statuses:
             continue
+        if _t.get("ticket_type", "") in excluded_sync_types:
+            continue
         _lid = _t.get("ticket_id")
         if not _lid:
             continue
@@ -1078,6 +1114,8 @@ def compute_outbound_mutations(
     for ticket in local_tickets:
         status = ticket.get("status", "")
         if status in excluded_statuses:
+            continue
+        if ticket.get("ticket_type", "") in excluded_sync_types:
             continue
 
         local_id = ticket["ticket_id"]
