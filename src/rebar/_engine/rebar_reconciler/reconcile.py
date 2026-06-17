@@ -423,9 +423,8 @@ def _read_local_tickets(repo_root: Path, *, no_sync: bool = False) -> list[dict]
     """Read local tickets from the ticket CLI, falling back to empty list.
 
     In production the ticket CLI is the ``rebar`` dispatcher (``rebar list``),
-    resolved from REBAR_TICKET_CLI or the engine dir alongside this package.
-    If the CLI is unavailable (unit tests, minimal environments), return an
-    empty list with a warning on stderr.
+    self-resolved via :func:`in_process_cli`. If the CLI is unavailable (unit
+    tests, minimal environments), return an empty list with a warning on stderr.
 
     ``no_sync=True`` sets REBAR_SYNC_PULL=off for the subprocess so the read does not
     trigger the tickets-branch fetch/reconverge (a git working-tree mutation).
@@ -437,7 +436,7 @@ def _read_local_tickets(repo_root: Path, *, no_sync: bool = False) -> list[dict]
 
     from rebar._engine import in_process_cli
 
-    cli = Path(_os.environ.get("REBAR_TICKET_CLI") or in_process_cli())
+    cli = Path(in_process_cli())
     if not cli.exists():
         print(  # noqa: T201
             "reconcile: ticket CLI not found — local_tickets=[]",

@@ -22,10 +22,7 @@ def _default_repo_root() -> Path:
 
 
 def _default_ticket_cli() -> str:
-    """Path to the in-process rebar CLI (the ticket reader); env override wins."""
-    cli = os.environ.get("REBAR_TICKET_CLI")
-    if cli:
-        return cli
+    """Path to the in-process rebar CLI (the ticket reader), self-resolved."""
     from rebar._engine import in_process_cli
 
     return in_process_cli()

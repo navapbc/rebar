@@ -4,7 +4,7 @@ Ports ticket-fsck.sh. Runs five checks over the tracker:
   1. JSON validity of event files
   2. CREATE event presence (via the reducer)
   3. Stale ``.git/index.lock`` cleanup (>5min; the ONLY mutation, suppressed by
-     ``REBAR_FSCK_NO_MUTATE=1`` for read-only surfaces)
+     the ``no_mutate=True`` argument for read-only surfaces)
   4. SNAPSHOT ``source_event_uuids`` consistency (4a still-on-disk, 4b orphans)
   4.5 Push-pending notice (local ahead of origin/tickets; informational)
 
@@ -242,7 +242,7 @@ def _transform_json(text: str) -> str:
     return json.dumps({"issues": issues, "fixed": fixed, "issue_count": len(issues)})
 
 
-def fsck_cli(argv: list[str], *, repo_root=None) -> int:
+def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int:
     try:
         fmt, _rest = parse_output(argv, "report")
     except OutputFormatError as exc:
@@ -260,7 +260,10 @@ def fsck_cli(argv: list[str], *, repo_root=None) -> int:
         )
         return 1
 
-    no_mutate = os.environ.get("REBAR_FSCK_NO_MUTATE") == "1"
+    # ``no_mutate`` is passed by the caller (the library's read-only fsck surface),
+    # not read from the environment: read paths (list/show via rebar.fsck(report_only=
+    # True)) pass no_mutate=True so they never delete the stale lock; the CLI `fsck`
+    # always mutates (default False).
     lines, issue_count = _scan(tracker, no_mutate)
     summary = (
         "fsck complete: no issues found"

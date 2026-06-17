@@ -73,10 +73,9 @@ def _canonical_bytes(event: dict[str, Any]) -> bytes:
 
 
 def _ensure_gc_auto_zero(tracker: str) -> None:
-    """``gc.auto=0`` in the tickets worktree (skip if ``_REBAR_GC_AUTO_ZERO=1`` or
-    already 0), matching _flock_stage_commit's pre-lock guard."""
-    if os.environ.get("_REBAR_GC_AUTO_ZERO") == "1":
-        return
+    """``gc.auto=0`` in the tickets worktree (skip if already 0), matching
+    _flock_stage_commit's pre-lock guard. The value-check below already avoids the
+    redundant ``git config`` write when it is set, so no separate skip flag."""
     cur = subprocess.run(
         ["git", "-C", tracker, "config", "--get", "gc.auto"],
         capture_output=True,

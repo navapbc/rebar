@@ -40,24 +40,15 @@ def _git(tracker: str, *args: str):
     return subprocess.run(["git", "-C", tracker, *args], capture_output=True, text=True)
 
 
-def _sync_before_compact() -> int:
-    """Run the sync-before-compact precondition (``ticket sync`` by default;
-    ``TICKET_SYNC_CMD`` overrides). Exit 127 (subcommand absent) → warn + skip;
-    other non-zero → error + propagate; 0 → continue. Matches ticket-compact.sh."""
-    cmd = os.environ.get("TICKET_SYNC_CMD", "ticket sync")
-    cp = subprocess.run(cmd, shell=True, stderr=subprocess.PIPE, text=True)
-    if cp.returncode == 127:
-        sys.stderr.write(
-            "warning: sync unavailable (sync subcommand absent) — skipping sync before compact\n"
-        )
-        return 0
-    if cp.returncode != 0:
-        err = (cp.stderr or "").strip()
-        sys.stderr.write(
-            f"Error: ticket sync failed (exit {cp.returncode}){': ' + err if err else ''}\n"
-        )
-        return cp.returncode
-    return 0
+def _sync_before_compact(tracker: str) -> None:
+    """Pull the latest tickets before compacting (best-effort, in-process) so a
+    remote SNAPSHOT written by another agent is visible and local compaction can
+    defer to it. Honors the ``sync.pull`` policy and is fully best-effort (every
+    fetch failure is swallowed). Replaces the former dead ``ticket sync`` shell-out
+    (no such subcommand existed; ``shell=True`` injection smell)."""
+    from rebar._engine_support import reads
+
+    reads.ensure_fresh(tracker)
 
 
 def _compact_locked(
@@ -220,9 +211,7 @@ def compact_cli(argv: list[str], *, repo_root=None) -> int:
         return 1
 
     if not skip_sync:
-        rc = _sync_before_compact()
-        if rc != 0:
-            return rc
+        _sync_before_compact(tracker)
         if any(
             f.endswith("-SNAPSHOT.json") and not f.startswith(".") for f in os.listdir(ticket_dir)
         ):

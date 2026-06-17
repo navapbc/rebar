@@ -614,23 +614,14 @@ def fsck(*, recover: bool = False, report_only: bool = False, repo_root=None) ->
     # preserving the prior _ok(_run(...)) contract.
     import contextlib
     import io
-    import os as _os
 
     from rebar._commands import fsck as _fsck_mod
 
+    # Read-only surfaces (report_only, e.g. list/show) pass no_mutate=True directly,
+    # so the scan never deletes the stale .git/index.lock — no os.environ round-trip.
     out, err = io.StringIO(), io.StringIO()
-    _prev = _os.environ.get("REBAR_FSCK_NO_MUTATE")
-    if report_only:
-        _os.environ["REBAR_FSCK_NO_MUTATE"] = "1"
-    try:
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            rc = _fsck_mod.fsck_cli([], repo_root=repo_root)
-    finally:
-        if report_only:
-            if _prev is None:
-                _os.environ.pop("REBAR_FSCK_NO_MUTATE", None)
-            else:
-                _os.environ["REBAR_FSCK_NO_MUTATE"] = _prev
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = _fsck_mod.fsck_cli([], repo_root=repo_root, no_mutate=report_only)
     if rc != 0:
         raise RebarError(
             f"rebar fsck failed (exit {rc}): {(err.getvalue() or out.getvalue()).strip()}",

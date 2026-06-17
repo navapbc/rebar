@@ -50,9 +50,9 @@ def in_process_cli() -> str:
     """Path to the in-process ``rebar`` CLI used as a single-executable ticket reader.
 
     The reconciler (``rebar_reconciler/{applier,invariants,reconcile}.py``) and
-    ``validate`` invoke ``$REBAR_TICKET_CLI`` as one executable (``[cli, "list"]``)
-    to read local tickets: the ``rebar`` console script (``rebar.cli:main`` →
-    ``rebar._cli.main``), which runs fully in-process.
+    ``validate`` invoke this CLI as one executable (``[cli, "list"]``) to read local
+    tickets: the ``rebar`` console script (``rebar.cli:main`` → ``rebar._cli.main``),
+    which runs fully in-process. They call this resolver directly (no env handoff).
 
     Because callers treat the value as a single token, this returns the console
     script path rather than the multi-token ``python -m rebar`` (the package
@@ -85,17 +85,16 @@ def engine_env(repo_root: str | os.PathLike[str] | None = None) -> dict[str, str
       ``rebar_reconciler.*``).
     - Pins ``REBAR_ROOT`` *and* ``PROJECT_ROOT`` (kept in agreement for any
       consumer that reads either one).
-    - Pins ``TICKET_WORDLIST_PATH`` so alias generation never falls back to hex
-      regardless of the engine dir's path shape.
-    - Defaults ``REBAR_TICKET_CLI`` to the in-process CLI (:func:`in_process_cli`)
-      so the reconciler/validate read local tickets through Python, not bash.
+
+    The wordlist path and the ticket-reader CLI are NOT pinned: subprocesses
+    self-resolve them (``reducer._alias`` resolves the bundled wordlist directly;
+    the reconciler/validate readers call :func:`in_process_cli`), so there is no
+    env handoff to keep in sync.
     """
     env = dict(os.environ)
     eng = str(engine_dir())
     existing = env.get("PYTHONPATH")
     env["PYTHONPATH"] = eng + (os.pathsep + existing if existing else "")
-    env["TICKET_WORDLIST_PATH"] = str(wordlist_path())
-    env.setdefault("REBAR_TICKET_CLI", in_process_cli())
 
     if repo_root is not None:
         root = str(Path(repo_root).resolve())

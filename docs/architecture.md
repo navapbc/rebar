@@ -94,9 +94,9 @@ top-level name on `sys.path`**:
   the engine dir goes on an import path (`PYTHONPATH`), scoped to the subprocess
   launches `python -m rebar_reconciler` and `jira-capability-probe.py`, so the
   top-level `rebar_reconciler` package resolves there. It also pins `REBAR_ROOT`/
-  `PROJECT_ROOT`, the alias wordlist path, and `REBAR_TICKET_CLI` — the in-process
-  `rebar` CLI the reconciler and `validate` read tickets through
-  (`rebar._engine.in_process_cli`).
+  `PROJECT_ROOT`. The alias wordlist and the in-process ticket-reader CLI are NOT
+  pinned — subprocesses self-resolve them (`rebar.reducer._alias` resolves the
+  bundled wordlist; the reconciler and `validate` call `rebar._engine.in_process_cli`).
 
 The **reconciler** (`rebar_reconciler/`) stays in the engine dir: the library only
 ever reaches it as a subprocess (`python -m rebar_reconciler`) or by loading a

@@ -49,7 +49,7 @@ def _compute_alias(ticket_id: str) -> str:
     Tier E E6.5a: replaced the ``ticket-alias-compute.py`` subprocess with the
     canonical in-process helper — byte-identical adj-noun-noun derivation, the same
     8-hex fallback when the wordlist is unavailable (it self-resolves the bundled
-    wordlist and honours ``TICKET_WORDLIST_PATH``), and its own one-shot WARN. The
+    wordlist), and its own one-shot WARN. The
     ``or`` guards the ``None`` a malformed (<8-hex) id would return; native ids are
     always 16-hex so this is belt-and-suspenders.
     """

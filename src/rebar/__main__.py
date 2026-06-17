@@ -6,9 +6,9 @@ interpreter-relative invocation that does not depend on the console script being
 on ``PATH``, which is useful when ``rebar`` is imported but not installed with its
 entry points (e.g. a raw ``PYTHONPATH`` checkout).
 
-The reconciler and ``validate`` read tickets through ``$REBAR_TICKET_CLI`` as a
-single executable token, so they target the console script rather than this
-``python -m rebar`` form (see :func:`rebar._engine.in_process_cli`); this module
+The reconciler and ``validate`` read tickets through the in-process CLI as a
+single executable token (self-resolved via :func:`rebar._engine.in_process_cli`),
+so they target the console script rather than this ``python -m rebar`` form; this module
 is the import-path-independent fallback and a documented manual entry.
 """
 

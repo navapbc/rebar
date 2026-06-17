@@ -16,14 +16,12 @@ _WARNED_MISSING: bool = False
 
 
 def _wordlist_path() -> str:
-    """Resolve the bundled wordlist path. Honours TICKET_WORDLIST_PATH override."""
-    env = os.environ.get("TICKET_WORDLIST_PATH")
-    if env:
-        return env
-    # This module lives at <rebar>/reducer/_alias.py; the bundled wordlist ships
-    # with the engine at <rebar>/_engine/resources/ticket-wordlist.txt. (Engine
-    # subprocesses get TICKET_WORDLIST_PATH from engine_env() and never reach
-    # this fallback; it serves the in-process library path.)
+    """Resolve the bundled wordlist path (self-resolved; not a user knob).
+
+    This module lives at ``<rebar>/reducer/_alias.py``; the bundled wordlist ships
+    with the engine at ``<rebar>/_engine/resources/ticket-wordlist.txt``. The
+    in-process library and engine subprocesses resolve to this same path (engine
+    subprocesses no longer receive a TICKET_WORDLIST_PATH handoff)."""
     here = os.path.dirname(os.path.abspath(__file__))
     return os.path.normpath(os.path.join(here, "..", "_engine", "resources", "ticket-wordlist.txt"))
 
@@ -59,8 +57,8 @@ def _load() -> tuple[list[str], list[str]]:
         if not _WARNED_MISSING:
             print(
                 f"WARN: ticket-wordlist.txt unavailable at {path!r} ({exc}); "
-                "falling back to 8-hex aliases. Set TICKET_WORDLIST_PATH to "
-                "override.",
+                "falling back to 8-hex aliases (check the install ships the "
+                "bundled engine resources).",
                 file=sys.stderr,
             )
             _WARNED_MISSING = True

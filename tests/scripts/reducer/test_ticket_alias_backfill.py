@@ -212,7 +212,11 @@ def test_load_warns_once_when_wordlist_missing(tmp_path, capsys, monkeypatch):
     # Reset the module-level cache + warned flag so this test starts clean
     monkeypatch.setattr(alias_mod, "_WORDS_CACHE", None)
     monkeypatch.setattr(alias_mod, "_WARNED_MISSING", False)
-    monkeypatch.setenv("TICKET_WORDLIST_PATH", str(tmp_path / "does-not-exist.txt"))
+    # Force the missing-wordlist fallback by pointing the (self-resolving) path
+    # helper at a nonexistent file — TICKET_WORDLIST_PATH is no longer a knob.
+    monkeypatch.setattr(
+        alias_mod, "_wordlist_path", lambda: str(tmp_path / "does-not-exist.txt")
+    )
 
     alias_mod._load()
     alias_mod._load()

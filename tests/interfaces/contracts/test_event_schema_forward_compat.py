@@ -112,9 +112,9 @@ def test_unknown_event_file_survives_compaction(rebar_repo: Path) -> None:
     future_path = _write_future_event(rebar_repo, tid)
     assert future_path.exists()
 
-    # Force compaction (threshold 0 => compact whatever is present). TICKET_SYNC_CMD
-    # is neutralized so the no-origin fixture doesn't attempt a remote sync.
-    cp = _cli("compact", tid, "--threshold=0", cwd=str(rebar_repo), TICKET_SYNC_CMD="true")
+    # Force compaction (threshold 0 => compact whatever is present). REBAR_SYNC_PULL
+    # =off so the no-origin fixture doesn't attempt the in-process pull before compact.
+    cp = _cli("compact", tid, "--threshold=0", cwd=str(rebar_repo), REBAR_SYNC_PULL="off")
     assert cp.returncode == 0, f"compact failed: {cp.stderr}"
 
     # A SNAPSHOT must have been written ...
