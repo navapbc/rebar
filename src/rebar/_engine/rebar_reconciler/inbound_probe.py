@@ -19,7 +19,6 @@ would be a contract violation.
 from __future__ import annotations
 
 import json
-import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -61,10 +60,13 @@ def _make_request(jira_url: str, issue_key: str, user: str, token: str) -> urlli
 
 
 def _resolve_env() -> tuple[str, str, str]:
+    # url/user resolve through the typed config (JIRA_URL/JIRA_USER env override the
+    # [tool.rebar.jira] file); the secret token is env-only. All three stay required.
+    from rebar_reconciler import acli_subprocess
+
+    settings = acli_subprocess.resolve_jira_settings()
+    jira_url, user, token = settings.url, settings.user, settings.api_token
     missing = []
-    jira_url = os.environ.get("JIRA_URL")
-    user = os.environ.get("JIRA_USER")
-    token = os.environ.get("JIRA_API_TOKEN")
     if not jira_url:
         missing.append("JIRA_URL")
     if not user:
@@ -72,7 +74,7 @@ def _resolve_env() -> tuple[str, str, str]:
     if not token:
         missing.append("JIRA_API_TOKEN")
     if missing:
-        raise ProbeConfigError(f"inbound_probe: missing required env var(s): {', '.join(missing)}")
+        raise ProbeConfigError(f"inbound_probe: missing required Jira config: {', '.join(missing)}")
     return jira_url, user, token
 
 

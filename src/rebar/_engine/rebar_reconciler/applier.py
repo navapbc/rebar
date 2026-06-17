@@ -385,18 +385,19 @@ def apply(
 
     # Create an AcliClient for inbound leaves that write back to Jira.
     if client is None and inbound_typed:
+        from rebar_reconciler import acli_subprocess
+
         acli_mod = _load_acli()
-        client = acli_mod.AcliClient(
-            jira_url=os.environ.get("JIRA_URL", ""),
-            user=os.environ.get("JIRA_USER", ""),
-            api_token=os.environ.get("JIRA_API_TOKEN", ""),
-        )
+        # Resolve via the stable acli_subprocess floor (acli_mod may be a test fake
+        # that only provides AcliClient).
+        _s = acli_subprocess.resolve_jira_settings()
+        client = acli_mod.AcliClient(jira_url=_s.url, user=_s.user, api_token=_s.api_token)
         logger.info(
             "inbound dispatch: created AcliClient for %d inbound mutations "
             "(JIRA_URL=%s, JIRA_USER=%s)",
             len(inbound_typed),
-            os.environ.get("JIRA_URL", "<unset>"),
-            os.environ.get("JIRA_USER", "<unset>"),
+            _s.url or "<unset>",
+            _s.user or "<unset>",
         )
 
     # Deferred bug-filing directives from inbound conflict leaves, processed
@@ -520,19 +521,24 @@ def _apply_batch(
     if repo_root is None:
         repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
 
+    from rebar_reconciler import acli_subprocess
+
     acli = _load_acli()
     # Mirror fetcher.fetch_snapshot's pattern: AcliClient's real constructor
     # requires (jira_url, user, api_token) — the no-arg form raises TypeError
-    # on every real invocation. Read credentials from the standard
-    # JIRA_URL / JIRA_USER / JIRA_API_TOKEN environment variables, defaulting
-    # to "" so test/CI shims that monkey-patch _load_acli still work.
-    # jira_project defaults to "DIG" (matching _attestation.py) because an empty
-    # projectKey is rejected by ACLI on every CREATE — bug 4fa9-0846-519e-4c30.
+    # on every real invocation. url/user/project resolve through the typed config
+    # (JIRA_URL/JIRA_USER/JIRA_PROJECT env override the [tool.rebar.jira] file),
+    # defaulting to "" so test/CI shims that monkey-patch _load_acli still work; the
+    # secret api_token is env-only. The resolver is read from the stable
+    # acli_subprocess floor (acli may be a test fake). jira_project defaults to "DIG"
+    # (matching _attestation.py) because an empty projectKey is rejected by ACLI on
+    # every CREATE — bug 4fa9-0846-519e-4c30.
+    _s = acli_subprocess.resolve_jira_settings(project_default="DIG")
     client = acli.AcliClient(
-        jira_url=os.environ.get("JIRA_URL", ""),
-        user=os.environ.get("JIRA_USER", ""),
-        api_token=os.environ.get("JIRA_API_TOKEN", ""),
-        jira_project=os.environ.get("JIRA_PROJECT", "DIG"),
+        jira_url=_s.url,
+        user=_s.user,
+        api_token=_s.api_token,
+        jira_project=_s.project,
     )
 
     rest_calls: int = 0

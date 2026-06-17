@@ -255,12 +255,13 @@ def _build_snapshot(
     if repo_root is None:
         repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
 
+    from rebar_reconciler import acli_subprocess
+
     acli_mod = _load_acli()
-    client = acli_mod.AcliClient(
-        jira_url=os.environ.get("JIRA_URL", ""),
-        user=os.environ.get("JIRA_USER", ""),
-        api_token=os.environ.get("JIRA_API_TOKEN", ""),
-    )
+    # Resolve settings via the stable acli_subprocess floor (NOT acli_mod, which
+    # tests swap with a fake AcliClient-only module that lacks the resolver).
+    _s = acli_subprocess.resolve_jira_settings()
+    client = acli_mod.AcliClient(jira_url=_s.url, user=_s.user, api_token=_s.api_token)
 
     # Lazy load to avoid a circular at module-load time (alert_store is leaf).
     alert_store = _load_alert_store()
@@ -315,9 +316,11 @@ def _build_snapshot(
 
     _fetcher_log = _log_mod.getLogger(__name__)
     try:
-        # Derive the project key from the first snapshot key (e.g. "DIG-123" → "DIG").
-        # Fall back to the JIRA_PROJECT env var when the snapshot is empty.
-        project_key = os.environ.get("JIRA_PROJECT", "")
+        # Project key: the configured jira.project (config file, overridden by the
+        # JIRA_PROJECT env), else derived from the first snapshot key ("DIG-123" → "DIG").
+        from rebar_reconciler import acli_subprocess
+
+        project_key = acli_subprocess.resolve_jira_settings().project
         if not project_key and snapshot:
             first_key = next(iter(snapshot))
             project_key = first_key.rsplit("-", 1)[0] if "-" in first_key else ""

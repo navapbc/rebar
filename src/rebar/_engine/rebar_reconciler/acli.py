@@ -13,7 +13,6 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import os
 import subprocess
 import sys
 import urllib.error
@@ -57,6 +56,7 @@ from rebar_reconciler.acli_subprocess import (
     _call_with_backoff,
     _check_mutation_failure,
     _run_acli,
+    resolve_jira_settings,
 )
 from rebar_reconciler.adf import text_to_adf as _text_to_adf  # canonical location
 
@@ -145,11 +145,8 @@ def transition_issue(
     is no longer used.
     """
     resolved = _LOCAL_STATUS_TO_JIRA.get(status, status.replace("_", " ").title())
-    client = AcliClient(
-        jira_url=os.environ.get("JIRA_URL", ""),
-        user=os.environ.get("JIRA_USER", ""),
-        api_token=os.environ.get("JIRA_API_TOKEN", ""),
-    )
+    _s = resolve_jira_settings()
+    client = AcliClient(jira_url=_s.url, user=_s.user, api_token=_s.api_token)
     client.transition_issue_by_name(jira_key, resolved)
     return {"key": jira_key, "status": resolved}
 

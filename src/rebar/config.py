@@ -585,6 +585,11 @@ def user_config_path() -> Path:
 _CANONICAL_ENV_NAMES: dict[tuple[str, str], str] = {
     ("reconciler", "jira_cli_timeout"): "REBAR_JIRA_CLI_TIMEOUT",
     ("reconciler", "id_guard_bypass_unsafe"): "REBAR_UNSAFE_ID_GUARD_BYPASS",
+    # jira.* keep the Atlassian-standard unprefixed env names (the secret
+    # JIRA_API_TOKEN stays env-only and is NOT a config key).
+    ("jira", "url"): "JIRA_URL",
+    ("jira", "user"): "JIRA_USER",
+    ("jira", "project"): "JIRA_PROJECT",
 }
 
 

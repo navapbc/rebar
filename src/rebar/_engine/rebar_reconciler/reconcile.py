@@ -903,11 +903,13 @@ def reconcile_once(
     # The in-package acli transport module (rebar_reconciler.acli), shared via
     # the canonical package key so it is not double-loaded.
     from rebar_reconciler import acli as acli_mod_for_comments
+    from rebar_reconciler import acli_subprocess
 
+    # Resolve via the stable acli_subprocess floor (acli_mod_for_comments may be a
+    # test fake that only provides AcliClient).
+    _s = acli_subprocess.resolve_jira_settings()
     outbound_diff_client = acli_mod_for_comments.AcliClient(
-        jira_url=os.environ.get("JIRA_URL", ""),
-        user=os.environ.get("JIRA_USER", ""),
-        api_token=os.environ.get("JIRA_API_TOKEN", ""),
+        jira_url=_s.url, user=_s.user, api_token=_s.api_token
     )
 
     # Bug 0702-3b6d-c1db-4ed3 (inbound counterpart to 1e08): collect the

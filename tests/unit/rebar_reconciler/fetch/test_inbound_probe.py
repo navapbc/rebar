@@ -55,5 +55,7 @@ def test_request_is_get_only(probe_mod):
 def test_missing_env_raises_probe_config_error(probe_mod, monkeypatch):
     for var in ("JIRA_URL", "JIRA_USER", "JIRA_API_TOKEN"):
         monkeypatch.delenv(var, raising=False)
-    with pytest.raises(probe_mod.ProbeConfigError, match="inbound_probe: missing required env var"):
+    with pytest.raises(
+        probe_mod.ProbeConfigError, match="inbound_probe: missing required Jira config"
+    ):
         probe_mod._resolve_env()

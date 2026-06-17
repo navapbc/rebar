@@ -19,12 +19,18 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture(autouse=True)
 def _clean_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Strip ambient config so each test sees only what it sets up."""
+    """Strip ambient config so each test sees only what it sets up. Clears the
+    CANONICAL env name for every key (which for jira.*/some reconciler.* keys is an
+    ergonomic name like JIRA_URL, not the auto-derived REBAR_<SECTION>_<KEY>) plus
+    every deprecated alias — otherwise an exported JIRA_URL etc. leaks into the
+    'sources' provenance."""
     monkeypatch.delenv("REBAR_CONFIG", raising=False)
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     for sect, keys in cfg._SECTIONS.items():
         for key in keys:
-            monkeypatch.delenv(f"REBAR_{sect.upper()}_{key.upper()}", raising=False)
+            monkeypatch.delenv(cfg._canonical_env_name(sect, key), raising=False)
+    for legacy in cfg._LEGACY_ENV_ALIASES:
+        monkeypatch.delenv(legacy, raising=False)
 
 
 def _proj(tmp: Path) -> Path:

@@ -400,10 +400,11 @@ def update_priority(
     Probe-validated: returns 204 on success.
     """
     # This function needs credentials. When called from the module-level
-    # update_issue (which has no client instance), we read from env vars.
-    jira_url = os.environ.get("JIRA_URL", "")
-    user = os.environ.get("JIRA_USER", "")
-    api_token = os.environ.get("JIRA_API_TOKEN", "")
+    # update_issue (which has no client instance), we resolve url/user through the
+    # typed config (JIRA_URL/JIRA_USER env override the [tool.rebar.jira] file) and
+    # the secret api_token from the environment only.
+    _s = acli_subprocess.resolve_jira_settings()
+    jira_url, user, api_token = _s.url, _s.user, _s.api_token
     if not all([jira_url, user, api_token]):
         logger.warning(
             "Cannot update priority on %s via REST (missing JIRA_URL/JIRA_USER/"

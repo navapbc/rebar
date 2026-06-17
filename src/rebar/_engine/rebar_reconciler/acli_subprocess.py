@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 import urllib.error
-from typing import Any
+from typing import Any, NamedTuple
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,45 @@ def _acli_call_timeout() -> int:
     except ConfigError:
         return _DEFAULT_ACLI_TIMEOUT
     return value if value > 0 else _DEFAULT_ACLI_TIMEOUT
+
+
+class JiraSettings(NamedTuple):
+    """Resolved Jira connection settings: the non-secret ``url``/``user``/``project``
+    (from the typed Config) plus the secret ``api_token`` (env-only)."""
+
+    url: str
+    user: str
+    project: str
+    api_token: str
+
+
+def resolve_jira_settings(*, project_default: str = "") -> JiraSettings:
+    """Resolve the Jira connection settings through the single config entry point.
+
+    ``url`` / ``user`` / ``project`` come from ``load_config().jira.*`` so a
+    ``[tool.rebar.jira]`` / ``rebar.toml`` / legacy ``.rebar/config.conf`` value is
+    actually consumed, with the Atlassian-standard env vars ``JIRA_URL`` /
+    ``JIRA_USER`` / ``JIRA_PROJECT`` overriding the file (they are the canonical env
+    layer). The SECRET ``JIRA_API_TOKEN`` is read from the environment ONLY — it is
+    never a config-file key. ``project_default`` substitutes for an empty project
+    (e.g. ``"DIG"``, which ACLI requires on CREATE — bug 4fa9). A malformed config
+    degrades to the prior env-only behavior rather than breaking a reconcile pass.
+    """
+    from rebar.config import ConfigError, load_config
+
+    try:
+        jira = load_config().jira
+        url, user, project = jira.url, jira.user, jira.project
+    except ConfigError:
+        url = os.environ.get("JIRA_URL", "")
+        user = os.environ.get("JIRA_USER", "")
+        project = os.environ.get("JIRA_PROJECT", "")
+    return JiraSettings(
+        url=url,
+        user=user,
+        project=project or project_default,
+        api_token=os.environ.get("JIRA_API_TOKEN", ""),
+    )
 
 
 _ASSIGNEE_PERMISSION_ERROR: str = "cannot be assigned"

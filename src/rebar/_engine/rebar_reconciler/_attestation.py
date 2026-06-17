@@ -9,7 +9,6 @@ on-disk manifest contents.
 from __future__ import annotations
 
 import hashlib
-import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -57,21 +56,35 @@ def build_acli_client_from_env() -> Any:
     Raises:
         RuntimeError: If any required JIRA_* env var is missing or empty.
     """
-    required = ("JIRA_URL", "JIRA_USER", "JIRA_API_TOKEN")
-    missing = [name for name in required if not os.environ.get(name)]
+    from rebar_reconciler import acli as mod
+    from rebar_reconciler import acli_subprocess
+
+    # url/user/project resolve through the typed config (JIRA_URL/JIRA_USER/
+    # JIRA_PROJECT env override the [tool.rebar.jira] file) via the stable
+    # acli_subprocess floor; the secret api_token is env-only. All three connection
+    # essentials are still REQUIRED (env or config).
+    settings = acli_subprocess.resolve_jira_settings(project_default="DIG")
+    missing = [
+        name
+        for name, value in (
+            ("JIRA_URL", settings.url),
+            ("JIRA_USER", settings.user),
+            ("JIRA_API_TOKEN", settings.api_token),
+        )
+        if not value
+    ]
     if missing:
         raise RuntimeError(
-            f"missing JIRA_* environment variables: {', '.join(missing)} "
+            f"missing JIRA_* configuration: {', '.join(missing)} "
+            "(set via env or [tool.rebar.jira]; JIRA_API_TOKEN is env-only) "
             "(required to construct AcliClient for bootstrap band execution)"
         )
 
-    from rebar_reconciler import acli as mod
-
     return mod.AcliClient(
-        jira_url=os.environ["JIRA_URL"],
-        user=os.environ["JIRA_USER"],
-        api_token=os.environ["JIRA_API_TOKEN"],
-        jira_project=os.environ.get("JIRA_PROJECT", "DIG"),
+        jira_url=settings.url,
+        user=settings.user,
+        api_token=settings.api_token,
+        jira_project=settings.project,
     )
 
 
