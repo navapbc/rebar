@@ -263,50 +263,41 @@ def test_warn_mode_logs_and_does_not_raise(applier, errors_mod, caplog):
         "default_raise_when_both_unset",
     ],
 )
-def test_guard_mode_precedence(applier, errors_mod, env_val, config_val, expected_raises):
-    """env var REBAR_ID_GUARD_MODE takes precedence over .rebar/config.conf key."""
+def test_guard_mode_precedence(
+    applier, errors_mod, env_val, config_val, expected_raises, tmp_path, monkeypatch
+):
+    """env var REBAR_ID_GUARD_MODE takes precedence over the legacy .rebar/config.conf
+    key — exercised through the real typed-config layer (0ac6 slice 2: the guard now
+    resolves via rebar.config.load_config, so both the deprecated env alias and the
+    legacy flat config key flow through the single config entry point with env > file
+    precedence and the warn->bypass / raise->guard value-flip preserved)."""
+    import rebar.config as _cfg
+
     assert hasattr(applier, "_audit_rebar_id_label_writes"), (
         "_audit_rebar_id_label_writes not found in applier"
     )
     mut = _MockLabelMutation(payload="rebar-id-prec-test", action="create")
 
-    # Save and restore REBAR_ID_GUARD_MODE cleanly
-    original_env = os.environ.pop("REBAR_ID_GUARD_MODE", None)
-    try:
-        if env_val is not None:
-            os.environ["REBAR_ID_GUARD_MODE"] = env_val
-        # else: env var remains absent
+    # config layer: the legacy flat .rebar/config.conf key under a tmp project root.
+    monkeypatch.delenv("REBAR_UNSAFE_ID_GUARD_BYPASS", raising=False)
+    monkeypatch.delenv("REBAR_ID_GUARD_MODE", raising=False)
+    if config_val is not None:
+        (tmp_path / ".rebar").mkdir()
+        (tmp_path / ".rebar" / "config.conf").write_text(
+            f"rebar_id_guard_mode={config_val}\n", encoding="utf-8"
+        )
+    monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
+    # env layer (deprecated alias): REBAR_ID_GUARD_MODE, when set, must beat the file.
+    if env_val is not None:
+        monkeypatch.setenv("REBAR_ID_GUARD_MODE", env_val)
+    _cfg.reset_config_cache()
 
-        # Patch the internal config-reader at its point of use. The guard now
-        # lives in rebar_id_audit and calls its own _get_rebar_id_guard_mode_from_config,
-        # so patch it there (not on the applier facade re-export).
-        from rebar_reconciler import rebar_id_audit as _audit_mod
-
-        _config_patcher = None
-        if hasattr(_audit_mod, "_get_rebar_id_guard_mode_from_config"):
-            _config_patcher = patch.object(
-                _audit_mod,
-                "_get_rebar_id_guard_mode_from_config",
-                return_value=config_val,
-            )
-            _config_patcher.start()
-
-        try:
-            # Use applier.RebarIdLabelWriteError to avoid importlib module-identity mismatch.
-            if expected_raises:
-                with pytest.raises(applier.RebarIdLabelWriteError):
-                    applier._audit_rebar_id_label_writes("inbound_update", [mut])
-            else:
-                applier._audit_rebar_id_label_writes("inbound_update", [mut])
-        finally:
-            if _config_patcher is not None:
-                _config_patcher.stop()
-    finally:
-        # Restore original env state
-        if original_env is not None:
-            os.environ["REBAR_ID_GUARD_MODE"] = original_env
-        else:
-            os.environ.pop("REBAR_ID_GUARD_MODE", None)
+    # Use applier.RebarIdLabelWriteError to avoid importlib module-identity mismatch.
+    if expected_raises:
+        with pytest.raises(applier.RebarIdLabelWriteError):
+            applier._audit_rebar_id_label_writes("inbound_update", [mut])
+    else:
+        applier._audit_rebar_id_label_writes("inbound_update", [mut])
 
 
 # ---------------------------------------------------------------------------

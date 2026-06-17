@@ -44,25 +44,21 @@ _ACLI_DRAIN_SECONDS: int = 2  # bounded post-SIGKILL reap/drain (D-state safe)
 
 
 def _acli_call_timeout() -> int:
-    """Per-call subprocess timeout (seconds) from ``REBAR_JIRA_CLI_TIMEOUT``
-    (deprecated alias ``REBAR_ACLI_TIMEOUT``).
+    """Per-call subprocess timeout (seconds), resolved through the typed config:
+    the config-file key ``[tool.rebar.reconciler].jira_cli_timeout``, overridden by
+    env ``REBAR_JIRA_CLI_TIMEOUT`` (deprecated alias ``REBAR_ACLI_TIMEOUT``), then by
+    ``rebar -c reconciler.jira_cli_timeout=…``.
 
-    Defaults to :data:`_DEFAULT_ACLI_TIMEOUT` (120s). A missing, unparseable, or
-    non-positive value falls back to the default rather than failing the call —
-    a zero/negative timeout would make ``communicate(timeout=0)`` time out every
-    call instantly.
+    Defaults to :data:`_DEFAULT_ACLI_TIMEOUT` (120s). The typed default (0 = unset)
+    and any non-positive or unreadable value fall back to the default rather than
+    failing the call — a zero/negative timeout would make ``communicate(timeout=0)``
+    time out every call instantly.
     """
-    raw = os.environ.get("REBAR_JIRA_CLI_TIMEOUT")
-    if raw is None:
-        legacy = os.environ.get("REBAR_ACLI_TIMEOUT")
-        if legacy is not None:
-            logger.warning("REBAR_ACLI_TIMEOUT is deprecated; use REBAR_JIRA_CLI_TIMEOUT")
-            raw = legacy
-    if raw is None:
-        return _DEFAULT_ACLI_TIMEOUT
+    from rebar.config import ConfigError, load_config
+
     try:
-        value = int(raw)
-    except (ValueError, TypeError):
+        value = load_config().reconciler.jira_cli_timeout
+    except ConfigError:
         return _DEFAULT_ACLI_TIMEOUT
     return value if value > 0 else _DEFAULT_ACLI_TIMEOUT
 

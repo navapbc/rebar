@@ -1037,18 +1037,17 @@ def compute_outbound_mutations(
     # Select the K least-recently-GET'd (sorted by last_get_pass ascending; the
     # "" never-GET'd sentinel sorts first), bounding servicing of every absent
     # key to <= ceil(N/K) passes (anti-starvation, I3/I4).
-    # Canonical REBAR_RECONCILER_DELETION_PROBE_LIMIT; deprecated alias
-    # RECONCILER_ABSENT_GET_BUDGET (the "absent get budget" = GET probes to confirm a
-    # Jira issue is really deleted) honored with a warning during the rename window.
-    _probe_env = "REBAR_RECONCILER_DELETION_PROBE_LIMIT"
-    if _probe_env not in os.environ and "RECONCILER_ABSENT_GET_BUDGET" in os.environ:
-        import logging as _logging
+    # Deletion-probe budget (GET probes to confirm a Jira issue is really deleted),
+    # resolved through the typed config: [tool.rebar.reconciler].deletion_probe_limit
+    # (default 20), overridden by env REBAR_RECONCILER_DELETION_PROBE_LIMIT (deprecated
+    # alias RECONCILER_ABSENT_GET_BUDGET), then `rebar -c reconciler.deletion_probe_limit=…`.
+    # An unreadable config falls back to the default rather than failing the pass.
+    from rebar.config import ConfigError, load_config
 
-        _logging.getLogger(__name__).warning(
-            "RECONCILER_ABSENT_GET_BUDGET is deprecated; use REBAR_RECONCILER_DELETION_PROBE_LIMIT"
-        )
-        _probe_env = "RECONCILER_ABSENT_GET_BUDGET"
-    _budget = _env_int(_probe_env, _DEFAULT_ABSENT_GET_BUDGET, minimum=1)
+    try:
+        _budget = load_config().reconciler.deletion_probe_limit
+    except ConfigError:
+        _budget = _DEFAULT_ABSENT_GET_BUDGET
     _absent_candidates: list[str] = []
     _seen_absent: set[str] = set()
     # Without a client we cannot direct-GET, so there is nothing to select.

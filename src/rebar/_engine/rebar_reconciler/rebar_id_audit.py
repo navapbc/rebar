@@ -165,32 +165,29 @@ def _get_rebar_id_guard_mode_from_config() -> str | None:
 
 
 def _resolve_id_guard_bypass() -> bool:
-    """Whether the rebar-id label-write guard is BYPASSED (the UNSAFE direction).
+    """Whether the rebar-id label-write guard is BYPASSED (the UNSAFE direction),
+    resolved through the typed config (``rebar.config.load_config`` — the single
+    config entry point).
 
-    Default ``False`` — guard active, fail-CLOSED (a violation raises). Canonical:
-    ``REBAR_UNSAFE_ID_GUARD_BYPASS`` (boolean true/false). The old ``REBAR_ID_GUARD_MODE``
-    env and the legacy ``.rebar/config.conf`` key ``rebar_id_guard_mode`` are honored
-    during the rename window (value map: ``warn`` -> bypass/True, ``raise`` -> False)
-    with a deprecation warning. Precedence: canonical env > deprecated env > config.
+    Default ``False`` — guard active, fail-CLOSED (a violation raises). The value is
+    ``[tool.rebar.reconciler].id_guard_bypass_unsafe``, overridden by env
+    ``REBAR_UNSAFE_ID_GUARD_BYPASS`` (boolean true/false), then ``rebar -c``. The old
+    ``REBAR_ID_GUARD_MODE`` env and the legacy ``.rebar/config.conf`` key
+    ``rebar_id_guard_mode`` remain honored during the rename window as deprecated
+    aliases inside the config layer (value-flip preserved: ``warn`` → bypass/True,
+    ``raise``/other → False), with env > config precedence (env layer beats the
+    config-file layer). An unreadable/invalid config FAILS CLOSED (guard active).
 
     This is a TEMPORARY bypass of the identity primitive binding local tickets to Jira
     issues — leaving it on risks duplicate/orphaned issues, hence the loud per-violation
     warning at the call site and the ``UNSAFE`` name.
     """
-    canon = os.environ.get("REBAR_UNSAFE_ID_GUARD_BYPASS")
-    if canon is not None:
-        return canon.strip().lower() in ("1", "true", "yes", "on")
-    legacy_env = _rebar_env("ID_GUARD_MODE")
-    if legacy_env is not None:
-        logger.warning(
-            "REBAR_ID_GUARD_MODE is deprecated; use REBAR_UNSAFE_ID_GUARD_BYPASS "
-            "(true/false; old warn->true, raise->false)"
-        )
-        return legacy_env.strip().lower() == "warn"
-    cfg_mode = _get_rebar_id_guard_mode_from_config()
-    if cfg_mode is not None:
-        return cfg_mode.strip().lower() == "warn"
-    return False
+    from rebar.config import ConfigError, load_config
+
+    try:
+        return load_config().reconciler.id_guard_bypass_unsafe
+    except ConfigError:
+        return False  # fail-CLOSED: an unreadable config keeps the guard active
 
 
 def _is_rebar_id_label_write_mutation(mutation) -> bool:

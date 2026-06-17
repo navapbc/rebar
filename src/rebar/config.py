@@ -461,10 +461,31 @@ def _read_toml_table(path: Path, *, pyproject: bool) -> dict:
     return table if isinstance(table, dict) else {}
 
 
+# Legacy FLAT (non-dotted) ``.rebar/config.conf`` keys mapped to a typed section.key
+# for back-compat. Values are transformed by :func:`_map_legacy_flat_conf`. The only
+# entry is the id-guard mode, whose flat key predates the typed reconciler section.
+_LEGACY_FLAT_CONF_KEYS: dict[str, tuple[str, str]] = {
+    "rebar_id_guard_mode": ("reconciler", "id_guard_bypass_unsafe"),
+}
+
+
+def _map_legacy_flat_conf(key: str, value: str) -> str:
+    """Map a legacy flat-conf value to its typed config value. The only case is
+    ``rebar_id_guard_mode`` (the id-guard value-flip: ``warn`` → bypass/"true",
+    ``raise``/other → "false")."""
+    if key == "rebar_id_guard_mode":
+        return "true" if value.strip().lower() == "warn" else "false"
+    return value
+
+
 def _read_legacy_conf(path: Path) -> dict:
     """Read the legacy flat ``.rebar/config.conf`` (dotted ``section.key=value``)
-    into a nested sparse mapping (values stay strings; coerce_sparse types them)."""
+    into a nested sparse mapping (values stay strings; coerce_sparse types them).
+    A handful of legacy NON-dotted keys (:data:`_LEGACY_FLAT_CONF_KEYS`, e.g.
+    ``rebar_id_guard_mode``) are mapped to their typed section.key for back-compat,
+    with the canonical dotted key winning if both appear in the file."""
     out: dict[str, dict] = {}
+    flat_legacy: dict[tuple[str, str], str] = {}
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -479,6 +500,12 @@ def _read_legacy_conf(path: Path) -> dict:
         if "." in k:
             sect, key = k.split(".", 1)
             out.setdefault(sect, {})[key] = v
+        elif k in _LEGACY_FLAT_CONF_KEYS:
+            flat_legacy[_LEGACY_FLAT_CONF_KEYS[k]] = _map_legacy_flat_conf(k, v)
+    # Apply legacy flat keys only where the canonical dotted key was not set
+    # (canonical wins); the legacy flat name stays honored during the back-compat window.
+    for (sect, key), val in flat_legacy.items():
+        out.setdefault(sect, {}).setdefault(key, val)
     return out
 
 
@@ -549,11 +576,31 @@ def user_config_path() -> Path:
     return Path(base) / "rebar" / "config.toml"
 
 
+# Per-key CANONICAL env-var name, where the ergonomic/established name does NOT
+# match the auto-derived ``REBAR_<SECTION>_<KEY>``. These are the NON-deprecated,
+# no-warning overrides of the config-file key (the env layer). Keys absent here use
+# the auto-derived name. This resolves the reconciler/jira "nice env name vs nested
+# section key" mismatch (e.g. reconciler.jira_cli_timeout ← REBAR_JIRA_CLI_TIMEOUT,
+# not REBAR_RECONCILER_JIRA_CLI_TIMEOUT) WITHOUT renaming the established env vars.
+_CANONICAL_ENV_NAMES: dict[tuple[str, str], str] = {
+    ("reconciler", "jira_cli_timeout"): "REBAR_JIRA_CLI_TIMEOUT",
+    ("reconciler", "id_guard_bypass_unsafe"): "REBAR_UNSAFE_ID_GUARD_BYPASS",
+}
+
+
+def _canonical_env_name(sect: str, key: str) -> str:
+    """The canonical ``REBAR_<KEY>`` env override for a config key — the per-key
+    override in :data:`_CANONICAL_ENV_NAMES` when present, else the auto-derived
+    ``REBAR_<SECTION>_<KEY>``."""
+    return _CANONICAL_ENV_NAMES.get((sect, key), f"REBAR_{sect.upper()}_{key.upper()}")
+
+
 # Deprecated env vars that map to a canonical config key during the rename window
-# (EV-1/EV-3). The OLD name still works — read only when the canonical
-# ``REBAR_<SECTION>_<KEY>`` is unset (canonical always wins) — with a deprecation
-# warning. ``REBAR_NO_SYNC`` is a NEGATIVE boolean flipped to the positive
-# ``sync.pull`` (truthy → "off"/disabled; unset-or-"0" → "on"/enabled).
+# (EV-1/EV-3/EV-3c). The OLD name still works — read only when the canonical
+# counterpart is unset (canonical always wins) — with a deprecation warning.
+# ``REBAR_NO_SYNC`` is a NEGATIVE boolean flipped to the positive ``sync.pull``
+# (truthy → "off"/disabled; unset-or-"0" → "on"/enabled); ``REBAR_ID_GUARD_MODE``
+# is similarly value-mapped (warn → bypass/"true", raise/other → "false").
 _LEGACY_ENV_ALIASES: dict[str, tuple[str, str, str]] = {
     # legacy name                      -> (section, key, canonical name)
     "REBAR_PUSH": ("sync", "push", "REBAR_SYNC_PUSH"),
@@ -561,14 +608,30 @@ _LEGACY_ENV_ALIASES: dict[str, tuple[str, str, str]] = {
     "COMPACT_THRESHOLD": ("compact", "threshold", "REBAR_COMPACT_THRESHOLD"),
     "SCRATCH_BASE_DIR": ("scratch", "base_dir", "REBAR_SCRATCH_BASE_DIR"),
     "REBAR_MCP_ALLOW_RECONCILE_LIVE": ("mcp", "allow_jira_sync", "REBAR_MCP_ALLOW_JIRA_SYNC"),
+    # reconciler.* (EV-3c renames) — canonical names are the ergonomic ones above.
+    "REBAR_ACLI_TIMEOUT": ("reconciler", "jira_cli_timeout", "REBAR_JIRA_CLI_TIMEOUT"),
+    "REBAR_RECONCILER_LOCK_RETRY_BUDGET": (
+        "reconciler",
+        "lock_max_retries",
+        "REBAR_RECONCILER_LOCK_MAX_RETRIES",
+    ),
+    "RECONCILER_ABSENT_GET_BUDGET": (
+        "reconciler",
+        "deletion_probe_limit",
+        "REBAR_RECONCILER_DELETION_PROBE_LIMIT",
+    ),
+    "REBAR_ID_GUARD_MODE": ("reconciler", "id_guard_bypass_unsafe", "REBAR_UNSAFE_ID_GUARD_BYPASS"),
 }
 
 
 def _map_legacy_env(legacy: str, value: str) -> str:
-    """Map a legacy env value to its canonical config value (the only non-identity
-    case is the ``REBAR_NO_SYNC`` negative→positive boolean flip)."""
+    """Map a legacy env value to its canonical config value. Non-identity cases:
+    ``REBAR_NO_SYNC`` (negative→positive boolean flip) and ``REBAR_ID_GUARD_MODE``
+    (the id-guard value-flip: ``warn`` → bypass/"true", ``raise``/other → "false")."""
     if legacy == "REBAR_NO_SYNC":
         return "off" if (value and value != "0") else "on"
+    if legacy == "REBAR_ID_GUARD_MODE":
+        return "true" if value.strip().lower() == "warn" else "false"
     return value
 
 
@@ -580,7 +643,7 @@ def env_overrides() -> dict:
     out: dict[str, dict] = {}
     for sect, keys in _SECTIONS.items():
         for key in keys:
-            name = f"REBAR_{sect.upper()}_{key.upper()}"
+            name = _canonical_env_name(sect, key)
             if name in os.environ:
                 out.setdefault(sect, {})[key] = os.environ[name]
     for legacy, (sect, key, canonical) in _LEGACY_ENV_ALIASES.items():
@@ -652,17 +715,18 @@ def _env_signature() -> tuple:
             "XDG_CONFIG_HOME",
             "REBAR_ROOT",
             "REBAR_CONFIG_UNKNOWN_KEYS",  # strict/warn policy affects whether load raises
-            "REBAR_PUSH",  # deprecated alias -> sync.push (EV-1)
-            "REBAR_NO_SYNC",  # deprecated alias -> sync.pull (EV-1)
-            "COMPACT_THRESHOLD",  # deprecated alias -> compact.threshold (EV-3a)
-            "SCRATCH_BASE_DIR",  # deprecated alias -> scratch.base_dir (EV-3a)
-            "REBAR_MCP_ALLOW_RECONCILE_LIVE",  # deprecated alias -> mcp.allow_jira_sync (EV-3a)
         )
     ]
+    # Canonical env overrides (per-key nice names where they differ from the
+    # auto-derived REBAR_<SECTION>_<KEY>).
     for sect, keys in _SECTIONS.items():
         for key in keys:
-            n = f"REBAR_{sect.upper()}_{key.upper()}"
+            n = _canonical_env_name(sect, key)
             sig.append((n, os.environ.get(n)))
+    # Every deprecated alias (EV-1/EV-3/EV-3c) — a change to any flips the resolved
+    # config, so each must miss the cache.
+    for legacy in _LEGACY_ENV_ALIASES:
+        sig.append((legacy, os.environ.get(legacy)))
     return tuple(sig)
 
 

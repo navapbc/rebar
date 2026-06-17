@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import importlib.util
 import logging
-import os
 import random
 import subprocess
 import sys
@@ -72,8 +71,9 @@ _GATE_FILE = ".reconciler-phase-gate"
 # envelope tight while unblocking dev probes.
 # ---------------------------------------------------------------------------
 
-_LOCK_MAX_RETRIES_ENV = "REBAR_RECONCILER_LOCK_MAX_RETRIES"  # canonical
-_LOCK_RETRY_BUDGET_ENV = "REBAR_RECONCILER_LOCK_RETRY_BUDGET"  # deprecated alias
+# The env names (canonical REBAR_RECONCILER_LOCK_MAX_RETRIES, deprecated alias
+# REBAR_RECONCILER_LOCK_RETRY_BUDGET) are now owned by the typed config layer
+# (rebar.config); _resolve_retry_budget reads the resolved value via load_config.
 _LOCK_RETRY_BUDGET_DEFAULT = 5
 _BACKOFF_BASE_SECONDS = 0.2  # 200ms
 _BACKOFF_FACTOR = 2.0
@@ -104,31 +104,20 @@ _CAS_BACKOFF_JITTER_FRACTION = 0.3  # ±30%
 
 
 def _resolve_retry_budget() -> int:
-    """Return the outer retry budget (>=1) from env var or default.
+    """Return the outer retry budget (>=1), resolved through the typed config.
 
-    Reads ``REBAR_RECONCILER_LOCK_MAX_RETRIES`` (canonical), falling back to the
-    deprecated ``REBAR_RECONCILER_LOCK_RETRY_BUDGET`` with a deprecation warning
-    (EV-3c rename; the prior WS1 aliasing read the same name twice — a no-op).
+    Reads ``[tool.rebar.reconciler].lock_max_retries`` (default 5), overridden by env
+    ``REBAR_RECONCILER_LOCK_MAX_RETRIES`` (deprecated alias
+    ``REBAR_RECONCILER_LOCK_RETRY_BUDGET``), then by
+    ``rebar -c reconciler.lock_max_retries=…``. 0 disables the outer retry
+    (equivalent to a single attempt, today's behaviour); an unreadable/invalid config
+    falls back to the default rather than failing the pass.
     """
-    raw = os.environ.get(_LOCK_MAX_RETRIES_ENV)
-    if raw is None:
-        legacy = os.environ.get(_LOCK_RETRY_BUDGET_ENV)
-        if legacy is not None:
-            logger.warning(
-                "%s is deprecated; use %s", _LOCK_RETRY_BUDGET_ENV, _LOCK_MAX_RETRIES_ENV
-            )
-            raw = legacy
-    if raw is None or raw == "":
-        return _LOCK_RETRY_BUDGET_DEFAULT
+    from rebar.config import ConfigError, load_config
+
     try:
-        value = int(raw)
-    except ValueError:
-        logger.warning(
-            "%s=%r is not an integer; falling back to default %d",
-            _LOCK_MAX_RETRIES_ENV,
-            raw,
-            _LOCK_RETRY_BUDGET_DEFAULT,
-        )
+        value = load_config().reconciler.lock_max_retries
+    except ConfigError:
         return _LOCK_RETRY_BUDGET_DEFAULT
     # Treat 0 as "disable outer retry" — equivalent to 1 attempt (today's behaviour).
     return max(1, value)
