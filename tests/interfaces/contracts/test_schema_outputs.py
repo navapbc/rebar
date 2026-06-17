@@ -298,6 +298,7 @@ def test_mcp_read_tools_advertise_output_schema(rebar_repo: Path) -> None:
         "show_ticket",
         "list_tickets",
         "search",
+        "recent_session_logs",
         "ticket_deps",
         "ready_tickets",
         "next_batch",

@@ -584,6 +584,18 @@ def search(
     )
 
 
+def recent_session_logs(*, limit: int = 5, repo_root=None) -> list:
+    """The ``limit`` newest ``session_log`` tickets, newest first (by created_at).
+
+    session_log tickets are hidden from :func:`list_tickets`; this is the
+    type-specific read that surfaces them (same element shape as
+    :func:`list_tickets`). ``limit`` defaults to 5; a non-positive ``limit``
+    returns an empty list."""
+    from rebar import _reads
+
+    return _reads.recent_session_logs(limit=limit, repo_root=repo_root)
+
+
 def fsck(*, recover: bool = False, report_only: bool = False, repo_root=None) -> str:
     """Run store integrity checks. ``recover=True`` runs the destructive recovery
     path. ``report_only=True`` suppresses fsck's only mutation — removing a stale
@@ -792,6 +804,7 @@ __all__ = [
     "ready",
     "next_batch",
     "search",
+    "recent_session_logs",
     # reconciler
     "reconcile",
     # native re-exports

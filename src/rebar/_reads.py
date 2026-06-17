@@ -141,3 +141,10 @@ def search(
         has_tag=has_tag,
         include_archived=include_archived,
     )
+
+
+def recent_session_logs(*, limit: int = 5, repo_root=None) -> list[dict]:
+    """The ``limit`` newest ``session_log`` tickets, newest first (by created_at)."""
+    tracker = _tracker(repo_root)
+    _fresh(tracker)
+    return ticket_reads.recent_session_logs_state(tracker, limit=limit)

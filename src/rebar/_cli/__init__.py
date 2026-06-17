@@ -25,7 +25,7 @@ from rebar._cli._init import ensure_initialized
 
 # Read arms that auto-init only; the read path owns its own throttled reconverge.
 _READS_INIT_ONLY = frozenset(
-    {"show", "list", "list-epics", "next-batch", "deps", "ready", "search"}
+    {"show", "list", "list-epics", "next-batch", "deps", "ready", "search", "session-logs"}
 )
 # Read-compute arm the dispatcher ran with NO _ensure_initialized (self-manages).
 _READS_NO_INIT = frozenset({"validate"})

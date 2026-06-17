@@ -1,0 +1,1 @@
+Usage: rebar session-logs [--output json|llm] [--limit=<n>] [--no-sync]   (lists the newest session_log tickets, newest first; default limit 5)

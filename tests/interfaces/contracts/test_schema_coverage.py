@@ -93,6 +93,7 @@ CLI_OUTPUT_DRIVERS: dict[str, object] = {
     "show": lambda s: ["show", s["task"]],
     "list": lambda s: ["list"],
     "ready": lambda s: ["ready"],
+    "session-logs": lambda s: ["session-logs"],
     "next-batch": lambda s: ["next-batch", s["epic"], "--limit=0"],
     "summary": lambda s: ["summary", s["task"]],
     "check-ac": lambda s: ["check-ac", s["task"]],

@@ -33,6 +33,7 @@ Subcommands:
   next-batch    Select next parallel agent batch for an epic [--output json]
   ready         List tickets ready to work (all blockers closed)
   search        Full-text search over titles/descriptions/comments/tags (JSON)
+  session-logs  List the newest session_log tickets, newest first [--limit=<n>]
   archive       Archive an open ticket (excludes from default list; idempotent)
   set-file-impact  Record file impact for a ticket (JSON array of {path,reason} objects)
   get-file-impact  Get the current file impact array for a ticket (JSON)

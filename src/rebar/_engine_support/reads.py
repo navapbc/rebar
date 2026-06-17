@@ -370,6 +370,19 @@ def search_state(
     return [public_state(t) for t in results]
 
 
+def recent_session_logs_state(tracker: str, *, limit: int = 5) -> list[dict]:
+    """The ``limit`` newest ``session_log`` tickets, ordered by ``created_at``
+    (ns) descending. session_logs are hidden from default ``list`` but are the
+    sole subject here, so this is the one read that includes them by type — the
+    counterpart to ``search``/``show``. Archived/deleted logs are excluded; a
+    ``limit`` <= 0 returns an empty list."""
+    states = reduce_all_tickets(tracker, exclude_archived=True, exclude_deleted=True)
+    logs = [t for t in states if t.get("ticket_type") == "session_log"]
+    # created_at is the CREATE-event timestamp (ns); missing/None sorts oldest.
+    logs.sort(key=lambda t: t.get("created_at") or 0, reverse=True)
+    return [public_state(t) for t in logs[: max(0, limit)]]
+
+
 # ───────────────────────────── CLI command handlers ──────────────────────────
 def _bridge_alert_warning(states: list[dict]) -> str | None:
     alerted = sum(
@@ -548,6 +561,45 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         warning = _bridge_alert_warning(results)
         if warning:
             print(warning, file=sys.stderr)
+    return 0
+
+
+def _cmd_session_logs(argv: list[str], tracker: str) -> int:
+    usage = "Usage: ticket session-logs [--output json|llm] [--limit=<n>]"
+    try:
+        fmt, rest = parse_output(argv, "reader")
+    except OutputFormatError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+    limit = 5
+    for arg in rest:
+        if arg.startswith("--limit="):
+            raw = arg[len("--limit=") :]
+            if not raw.isdigit() or int(raw) <= 0:
+                print(
+                    f"Error: --limit expects a positive integer, got '{raw}'",
+                    file=sys.stderr,
+                )
+                return 2
+            limit = int(raw)
+        elif arg in ("--help", "-h"):
+            print(usage, file=sys.stderr)
+            return 0
+        else:
+            print(f"Error: unknown option '{arg}'", file=sys.stderr)
+            print(usage, file=sys.stderr)
+            return 2
+
+    if not os.path.isdir(tracker):
+        print("Error: ticket system not initialized. Run 'ticket init' first.", file=sys.stderr)
+        return 1
+
+    results = recent_session_logs_state(tracker, limit=limit)
+    if fmt == "llm":
+        for t in results:
+            print(json.dumps(to_llm(t), ensure_ascii=False, separators=(",", ":")))
+    else:
+        print(json.dumps(results, ensure_ascii=False))
     return 0
 
 
@@ -756,6 +808,7 @@ _COMMANDS = {
     "list-epics": _cmd_list_epics,
     "next-batch": _cmd_next_batch,
     "validate": _cmd_validate,
+    "session-logs": _cmd_session_logs,
 }
 
 # Subcommands that own their freshness policy (so main does not pre-fetch).

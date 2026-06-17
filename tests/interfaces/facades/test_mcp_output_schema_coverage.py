@@ -45,6 +45,7 @@ CANONICAL: dict[str, str] = {
     "list_tickets": schemas.TICKET_STATE,
     "search": schemas.TICKET_STATE,
     "ready_tickets": schemas.TICKET_STATE,
+    "recent_session_logs": schemas.TICKET_STATE,
     "ticket_deps": schemas.DEPS_GRAPH,
     "next_batch": schemas.NEXT_BATCH,
     "clarity_check": schemas.CLARITY_RESULT,
@@ -209,7 +210,10 @@ def _seed(repo: Path) -> dict:
     )
     # A spare open ticket to exercise claim_ticket without disturbing `task`.
     claimable = rebar.create_ticket("task", "Claimable", repo_root=r)
-    return {"epic": epic, "task": task, "claimable": claimable, "repo": r}
+    # A session_log so recent_session_logs returns a non-empty list to shape-check
+    # (hidden from list/search/ready, so it does not disturb the other tools).
+    log = rebar.create_ticket("session_log", "Session log", description="verbose", repo_root=r)
+    return {"epic": epic, "task": task, "claimable": claimable, "log": log, "repo": r}
 
 
 def _call_args(name: str, s: dict) -> dict:
@@ -218,6 +222,7 @@ def _call_args(name: str, s: dict) -> dict:
         "list_tickets": {},
         "search": {"query": "Task"},
         "ready_tickets": {},
+        "recent_session_logs": {},
         "ticket_deps": {"ticket_id": s["task"]},
         "next_batch": {"epic_id": s["epic"]},
         "clarity_check": {"ticket_id": s["task"]},

@@ -303,6 +303,13 @@ def build_server():
         ]
 
     @mcp.tool()
+    def recent_session_logs(limit: int = 5) -> list[TicketStateOut]:
+        """The newest session_log tickets, newest first (by created_at; default
+        limit 5). session_logs are hidden from list_tickets; this is the
+        type-specific read that surfaces them."""
+        return [TicketStateOut.model_validate(t) for t in rebar.recent_session_logs(limit=limit)]
+
+    @mcp.tool()
     def fsck(recover: bool = False) -> str:
         """Check ticket-store integrity (JSON validity, CREATE presence, lock
         cleanup). Set recover=True to run the recovery path."""
