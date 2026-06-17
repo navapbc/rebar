@@ -1,1 +1,0 @@
-{"author":"Claude","data":{"file_impact":[{"path":"src/rebar/_engine/rebar_reconciler/config.py","reason":"EXCLUDED_SYNC_TYPES"},{"path":"src/rebar/_engine/rebar_reconciler/outbound_differ.py","reason":"outbound type filter"}]},"env_id":"8260ef0c-64d3-4df2-95f7-c14158313384","event_type":"FILE_IMPACT","timestamp":1781642707308087456,"uuid":"31130575-ee82-469d-be1e-c5c0f381e12d"}
