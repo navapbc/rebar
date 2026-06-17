@@ -399,7 +399,11 @@ def test_build_model_constructs_claude_and_chatgpt() -> None:
 def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     from rebar.llm.config import LLMConfig
 
-    monkeypatch.setenv("REBAR_LLM_RUNNER", "fake")
+    # REBAR_LLM_RUNNER is removed (EV-4); the runner is DERIVED — default langgraph.
+    monkeypatch.delenv("REBAR_LLM_EXPERIMENTAL_HARNESS", raising=False)
+    monkeypatch.delenv("LANGFLOW_URL", raising=False)
+    monkeypatch.delenv("LANGFLOW_FLOW_ID", raising=False)
+    monkeypatch.setenv("REBAR_LLM_RUNNER", "fake")  # IGNORED — no longer a knob
     monkeypatch.setenv("REBAR_LLM_MODEL", "gpt-4o")
     monkeypatch.setenv("REBAR_LLM_MODEL_PROVIDER", "openai")
     monkeypatch.setenv("REBAR_LLM_BASE_URL", "http://localhost:1234/v1")
@@ -407,9 +411,29 @@ def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk")
     cfg = LLMConfig.from_env(repo_root=".")
-    assert cfg.runner == "fake" and cfg.model == "gpt-4o" and cfg.max_iterations == 7
+    assert cfg.runner == "langgraph"  # derived; REBAR_LLM_RUNNER=fake ignored
+    assert cfg.model == "gpt-4o" and cfg.max_iterations == 7
     assert cfg.model_provider == "openai" and cfg.base_url == "http://localhost:1234/v1"
     assert cfg.langfuse.enabled is True
+
+
+def test_runner_derivation_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """EV-4: the runner is derived — deepagents only via the experimental opt-in,
+    langflow iff a Langflow deployment is configured, else langgraph. The old
+    REBAR_LLM_RUNNER knob is ignored."""
+    from rebar.llm.config import LLMConfig
+
+    for v in ("REBAR_LLM_EXPERIMENTAL_HARNESS", "LANGFLOW_URL", "LANGFLOW_FLOW_ID"):
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setenv("REBAR_LLM_RUNNER", "deepagents")  # ignored
+    assert LLMConfig.from_env(repo_root=".").runner == "langgraph"  # default
+
+    monkeypatch.setenv("LANGFLOW_URL", "http://lf")
+    monkeypatch.setenv("LANGFLOW_FLOW_ID", "f1")
+    assert LLMConfig.from_env(repo_root=".").runner == "langflow"  # auto when configured
+
+    monkeypatch.setenv("REBAR_LLM_EXPERIMENTAL_HARNESS", "deepagents")
+    assert LLMConfig.from_env(repo_root=".").runner == "deepagents"  # explicit opt-in wins
 
 
 def test_runner_selection_and_stubs() -> None:
@@ -432,6 +456,10 @@ def test_runner_selection_and_stubs() -> None:
     assert isinstance(get_runner(LLMConfig()), LangGraphRunner)
     fake = FakeRunner(findings=[{"severity": "low", "dimension": "d", "detail": "x"}])
     assert isinstance(get_runner(LLMConfig(runner="langgraph"), override=fake), FakeRunner)
+    # An unknown (typo'd) library runner value fails loudly, not silently default.
+
+    with pytest.raises(LLMConfigError, match="unknown runner"):
+        get_runner(LLMConfig(runner="bogus"))
 
     req = RunRequest(system_prompt="s", instructions="i", config=LLMConfig(repo_path="."))
     # LangGraph runner without the 'agents' extra (langchain) gives a clear install
@@ -940,7 +968,12 @@ def test_cli_review_with_fake_runner(
     rebar_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     epic = _seed(rebar_repo)
-    monkeypatch.setenv("REBAR_LLM_RUNNER", "fake")  # offline runner, valid empty review
+    # fake is off the public env surface (EV-4); inject it via the library seam the
+    # CLI review path uses (operations.get_runner) — the only offline injection point.
+    from rebar.llm import operations
+    from rebar.llm.runner import FakeRunner
+
+    monkeypatch.setattr(operations, "get_runner", lambda cfg, override=None: FakeRunner())
     from rebar._cli import main
 
     rc = main(["review", epic, "--output", "json"])
@@ -955,7 +988,10 @@ def test_cli_review_bad_reviewer_is_graceful(
     rebar_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     epic = _seed(rebar_repo)
-    monkeypatch.setenv("REBAR_LLM_RUNNER", "fake")
+    from rebar.llm import operations
+    from rebar.llm.runner import FakeRunner
+
+    monkeypatch.setattr(operations, "get_runner", lambda cfg, override=None: FakeRunner())
     from rebar._cli import main
 
     rc = main(["review", epic, "no-such-reviewer"])

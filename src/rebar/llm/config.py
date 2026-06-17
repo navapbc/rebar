@@ -7,8 +7,10 @@ imported lazily by the runner only when an operation actually runs.
 
 Environment variables (all optional; sensible defaults):
 
-  REBAR_LLM_RUNNER        backend: ``langgraph`` (default) | ``langflow`` |
-                          ``deepagents`` | ``fake`` (offline/tests)
+  REBAR_LLM_EXPERIMENTAL_HARNESS  set to ``deepagents`` to opt into the experimental
+                          deepagents harness. Otherwise the runner is DERIVED: langflow
+                          iff LANGFLOW_URL+LANGFLOW_FLOW_ID are set, else in-process
+                          langgraph (the default). ``fake`` is test-only (library arg).
   REBAR_LLM_MODEL         model id (default ``claude-opus-4-8``)
   REBAR_LLM_MAX_TOKENS    per-response token ceiling (default 8000)
   REBAR_LLM_MAX_STEPS     Max agent loop steps before abort (~2 per tool call; default
@@ -166,8 +168,16 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls, *, repo_root=None) -> LLMConfig:
-        runner = (os.environ.get("REBAR_LLM_RUNNER") or "langgraph").strip().lower()
-        if runner not in RUNNERS:
+        # The runner is DERIVED, not a public env knob (EV-4): the experimental
+        # deepagents harness is an explicit opt-in; otherwise langflow is used iff a
+        # Langflow deployment is fully configured, else the in-process langgraph
+        # default. The ``fake`` runner is test-only — reachable via the library
+        # ``runner=``/``override=`` arg, never from the environment.
+        if os.environ.get("REBAR_LLM_EXPERIMENTAL_HARNESS", "").strip().lower() == "deepagents":
+            runner = "deepagents"
+        elif os.environ.get("LANGFLOW_URL") and os.environ.get("LANGFLOW_FLOW_ID"):
+            runner = "langflow"
+        else:
             runner = "langgraph"
         mcp_raw = os.environ.get("REBAR_LLM_MCP_SERVERS")
         mcp_servers: dict = {}

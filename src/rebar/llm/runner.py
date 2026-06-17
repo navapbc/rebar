@@ -270,7 +270,7 @@ class DeepAgentsRunner:
     """Run the operation on LangChain's deepagents harness (planning, subagents,
     large-result eviction) instead of our bare create_agent loop.
 
-    OPT-IN (``REBAR_LLM_RUNNER=deepagents``): the review default stays the
+    OPT-IN (``REBAR_LLM_EXPERIMENTAL_HARNESS=deepagents``): the review default stays the
     ``langgraph`` runner with our own read-only, citation-disciplined file tools —
     this runner is the seam for future deepagents-based task types. It uses
     deepagents' native filesystem over a repo-rooted ``FilesystemBackend``, made
@@ -334,7 +334,14 @@ def get_runner(config: LLMConfig, *, override: Runner | None = None) -> Runner:
         return LangflowRunner(config)
     if config.runner == "deepagents":
         return DeepAgentsRunner(config)
-    return LangGraphRunner(config)
+    if config.runner == "langgraph":
+        return LangGraphRunner(config)
+    # from_env only ever derives a valid runner; a bad value can only come from an
+    # explicit library LLMConfig(runner=...). Fail loudly rather than silently
+    # running the default, naming the valid set (RUNNERS).
+    from rebar.llm.config import RUNNERS
+
+    raise LLMConfigError(f"unknown runner {config.runner!r}; valid runners: {RUNNERS}")
 
 
 def _invoke(agent, cfg: LLMConfig, req: RunRequest) -> tuple[dict, str | None]:
