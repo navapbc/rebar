@@ -44,14 +44,20 @@ _ACLI_DRAIN_SECONDS: int = 2  # bounded post-SIGKILL reap/drain (D-state safe)
 
 
 def _acli_call_timeout() -> int:
-    """Per-call subprocess timeout (seconds) from ``REBAR_ACLI_TIMEOUT``.
+    """Per-call subprocess timeout (seconds) from ``REBAR_JIRA_CLI_TIMEOUT``
+    (deprecated alias ``REBAR_ACLI_TIMEOUT``).
 
     Defaults to :data:`_DEFAULT_ACLI_TIMEOUT` (120s). A missing, unparseable, or
     non-positive value falls back to the default rather than failing the call —
     a zero/negative timeout would make ``communicate(timeout=0)`` time out every
     call instantly.
     """
-    raw = os.environ.get("REBAR_ACLI_TIMEOUT")
+    raw = os.environ.get("REBAR_JIRA_CLI_TIMEOUT")
+    if raw is None:
+        legacy = os.environ.get("REBAR_ACLI_TIMEOUT")
+        if legacy is not None:
+            logger.warning("REBAR_ACLI_TIMEOUT is deprecated; use REBAR_JIRA_CLI_TIMEOUT")
+            raw = legacy
     if raw is None:
         return _DEFAULT_ACLI_TIMEOUT
     try:
@@ -339,7 +345,8 @@ def _run_acli(
     and deterministic assignee errors ("cannot be assigned" or "User not
     found for email:") abort immediately without retrying.
 
-    Each invocation is bounded by ``REBAR_ACLI_TIMEOUT`` (default 120s) and run
+    Each invocation is bounded by ``REBAR_JIRA_CLI_TIMEOUT`` (deprecated alias
+    ``REBAR_ACLI_TIMEOUT``; default 120s) and run
     in its own process session, so a hung ``acli`` child (or a pipe-holding
     grandchild) is reaped rather than freezing the pass (bug d843). On timeout:
 

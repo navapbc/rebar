@@ -1037,7 +1037,18 @@ def compute_outbound_mutations(
     # Select the K least-recently-GET'd (sorted by last_get_pass ascending; the
     # "" never-GET'd sentinel sorts first), bounding servicing of every absent
     # key to <= ceil(N/K) passes (anti-starvation, I3/I4).
-    _budget = _env_int("RECONCILER_ABSENT_GET_BUDGET", _DEFAULT_ABSENT_GET_BUDGET, minimum=1)
+    # Canonical REBAR_RECONCILER_DELETION_PROBE_LIMIT; deprecated alias
+    # RECONCILER_ABSENT_GET_BUDGET (the "absent get budget" = GET probes to confirm a
+    # Jira issue is really deleted) honored with a warning during the rename window.
+    _probe_env = "REBAR_RECONCILER_DELETION_PROBE_LIMIT"
+    if _probe_env not in os.environ and "RECONCILER_ABSENT_GET_BUDGET" in os.environ:
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning(
+            "RECONCILER_ABSENT_GET_BUDGET is deprecated; use REBAR_RECONCILER_DELETION_PROBE_LIMIT"
+        )
+        _probe_env = "RECONCILER_ABSENT_GET_BUDGET"
+    _budget = _env_int(_probe_env, _DEFAULT_ABSENT_GET_BUDGET, minimum=1)
     _absent_candidates: list[str] = []
     _seen_absent: set[str] = set()
     # Without a client we cannot direct-GET, so there is nothing to select.

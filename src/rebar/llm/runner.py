@@ -362,7 +362,7 @@ def _invoke(agent, cfg: LLMConfig, req: RunRequest) -> tuple[dict, str | None]:
                 raise LLMRunnerError(
                     f"agent exceeded its step budget (recursion_limit="
                     f"{cfg.max_iterations}; ~2 steps per tool call). Raise "
-                    "REBAR_LLM_MAX_ITERS or narrow the task."
+                    "REBAR_LLM_MAX_STEPS or narrow the task."
                 ) from exc
             raise
     return outcome, trace_id

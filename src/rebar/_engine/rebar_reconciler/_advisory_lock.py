@@ -72,7 +72,8 @@ _GATE_FILE = ".reconciler-phase-gate"
 # envelope tight while unblocking dev probes.
 # ---------------------------------------------------------------------------
 
-_LOCK_RETRY_BUDGET_ENV = "REBAR_RECONCILER_LOCK_RETRY_BUDGET"
+_LOCK_MAX_RETRIES_ENV = "REBAR_RECONCILER_LOCK_MAX_RETRIES"  # canonical
+_LOCK_RETRY_BUDGET_ENV = "REBAR_RECONCILER_LOCK_RETRY_BUDGET"  # deprecated alias
 _LOCK_RETRY_BUDGET_DEFAULT = 5
 _BACKOFF_BASE_SECONDS = 0.2  # 200ms
 _BACKOFF_FACTOR = 2.0
@@ -105,12 +106,18 @@ _CAS_BACKOFF_JITTER_FRACTION = 0.3  # ±30%
 def _resolve_retry_budget() -> int:
     """Return the outer retry budget (>=1) from env var or default.
 
-    Reads ``REBAR_RECONCILER_LOCK_RETRY_BUDGET`` preferred, falling back to the
-    deprecated ``REBAR_RECONCILER_LOCK_RETRY_BUDGET`` (WS1 env aliasing).
+    Reads ``REBAR_RECONCILER_LOCK_MAX_RETRIES`` (canonical), falling back to the
+    deprecated ``REBAR_RECONCILER_LOCK_RETRY_BUDGET`` with a deprecation warning
+    (EV-3c rename; the prior WS1 aliasing read the same name twice — a no-op).
     """
-    raw = os.environ.get("REBAR_RECONCILER_LOCK_RETRY_BUDGET")
+    raw = os.environ.get(_LOCK_MAX_RETRIES_ENV)
     if raw is None:
-        raw = os.environ.get(_LOCK_RETRY_BUDGET_ENV)
+        legacy = os.environ.get(_LOCK_RETRY_BUDGET_ENV)
+        if legacy is not None:
+            logger.warning(
+                "%s is deprecated; use %s", _LOCK_RETRY_BUDGET_ENV, _LOCK_MAX_RETRIES_ENV
+            )
+            raw = legacy
     if raw is None or raw == "":
         return _LOCK_RETRY_BUDGET_DEFAULT
     try:
@@ -118,7 +125,7 @@ def _resolve_retry_budget() -> int:
     except ValueError:
         logger.warning(
             "%s=%r is not an integer; falling back to default %d",
-            _LOCK_RETRY_BUDGET_ENV,
+            _LOCK_MAX_RETRIES_ENV,
             raw,
             _LOCK_RETRY_BUDGET_DEFAULT,
         )

@@ -118,8 +118,9 @@ _AUTHORIZED_REBAR_ID_LABEL_ACTIONS: dict[str, frozenset[str]] = {
 # list (or before dispatching the typed-mutation leaf) to ensure no unauthorized
 # leaf emits a rebar-id-* label mutation.
 #
-# Guard mode is controlled by REBAR_ID_GUARD_MODE (env) or rebar_id_guard_mode
-# (.rebar/config.conf key). Precedence: env > config > default ('raise').
+# The guard is BYPASSED only when REBAR_UNSAFE_ID_GUARD_BYPASS is truthy (deprecated
+# aliases: REBAR_ID_GUARD_MODE=warn env / rebar_id_guard_mode=warn config). Default:
+# guard active, fail-closed. See _resolve_id_guard_bypass; precedence env > config.
 # ---------------------------------------------------------------------------
 
 
@@ -130,7 +131,7 @@ def _get_rebar_id_guard_mode_from_config() -> str | None:
     is absent or the file cannot be read.
 
     Resolution order for the guard mode (env wins):
-      1. os.environ['REBAR_ID_GUARD_MODE']  — checked in _audit_rebar_id_label_writes
+      1. os.environ['REBAR_ID_GUARD_MODE'] (deprecated alias of REBAR_UNSAFE_ID_GUARD_BYPASS)
       2. This function (.rebar/config.conf fallback)
       3. Default: 'raise'
     """
@@ -161,6 +162,35 @@ def _get_rebar_id_guard_mode_from_config() -> str | None:
         # propagate so they surface during test runs.
         return None
     return None
+
+
+def _resolve_id_guard_bypass() -> bool:
+    """Whether the rebar-id label-write guard is BYPASSED (the UNSAFE direction).
+
+    Default ``False`` — guard active, fail-CLOSED (a violation raises). Canonical:
+    ``REBAR_UNSAFE_ID_GUARD_BYPASS`` (boolean true/false). The old ``REBAR_ID_GUARD_MODE``
+    env and the legacy ``.rebar/config.conf`` key ``rebar_id_guard_mode`` are honored
+    during the rename window (value map: ``warn`` -> bypass/True, ``raise`` -> False)
+    with a deprecation warning. Precedence: canonical env > deprecated env > config.
+
+    This is a TEMPORARY bypass of the identity primitive binding local tickets to Jira
+    issues — leaving it on risks duplicate/orphaned issues, hence the loud per-violation
+    warning at the call site and the ``UNSAFE`` name.
+    """
+    canon = os.environ.get("REBAR_UNSAFE_ID_GUARD_BYPASS")
+    if canon is not None:
+        return canon.strip().lower() in ("1", "true", "yes", "on")
+    legacy_env = _rebar_env("ID_GUARD_MODE")
+    if legacy_env is not None:
+        logger.warning(
+            "REBAR_ID_GUARD_MODE is deprecated; use REBAR_UNSAFE_ID_GUARD_BYPASS "
+            "(true/false; old warn->true, raise->false)"
+        )
+        return legacy_env.strip().lower() == "warn"
+    cfg_mode = _get_rebar_id_guard_mode_from_config()
+    if cfg_mode is not None:
+        return cfg_mode.strip().lower() == "warn"
+    return False
 
 
 def _is_rebar_id_label_write_mutation(mutation) -> bool:
@@ -207,12 +237,12 @@ def _audit_rebar_id_label_writes(leaf_name: str, mutations: list) -> None:
         contract is per-action; defeating it would leave a security gap by
         allowing an authorized leaf to perform any action.
 
-    Guard mode (REBAR_ID_GUARD_MODE env var, .rebar/config.conf key rebar_id_guard_mode,
-    default 'raise'):
-      - 'raise': RebarIdLabelWriteError raised on violation (default, production-safe).
-      - 'warn': WARNING logged with tag REBAR_ID_GUARD; no exception raised (staged rollout).
+    Guard bypass (REBAR_UNSAFE_ID_GUARD_BYPASS=true; deprecated aliases
+    REBAR_ID_GUARD_MODE=warn env / rebar_id_guard_mode=warn config), default OFF:
+      - bypass OFF (default): RebarIdLabelWriteError raised on violation (fail-closed).
+      - bypass ON: a LOUD WARNING is logged on every violation; no exception (staged rollout).
 
-    Precedence: env var > .rebar/config.conf key > default 'raise'.
+    See :func:`_resolve_id_guard_bypass` for precedence (env > config).
     """
     is_authorized_leaf = leaf_name in _AUTHORIZED_REBAR_ID_LABEL_WRITERS
     allowed_actions = _AUTHORIZED_REBAR_ID_LABEL_ACTIONS.get(leaf_name, frozenset())
@@ -242,20 +272,16 @@ def _audit_rebar_id_label_writes(leaf_name: str, mutations: list) -> None:
     if offending is None:
         return
 
-    # Determine guard mode: env > config > default 'raise'
-    guard_mode = _rebar_env("ID_GUARD_MODE")
-    if guard_mode is None:
-        guard_mode = _get_rebar_id_guard_mode_from_config()
-    if guard_mode is None:
-        guard_mode = "raise"
-
     msg = (
         f"REBAR_ID_GUARD: unauthorized rebar-id label write from leaf '{leaf_name}' "
         f"(action={offending_action!r}); offending payload: {offending_payload!r}"
     )
 
-    if guard_mode == "warn":
-        logger.warning(msg)
+    # Default: guard active → raise (fail-closed). When the UNSAFE bypass is engaged
+    # (REBAR_UNSAFE_ID_GUARD_BYPASS), log+allow — with a LOUD warning every time, since
+    # bypassing the identity guard risks duplicate/orphaned Jira issues.
+    if _resolve_id_guard_bypass():
+        logger.warning("[UNSAFE BYPASS ENGAGED] %s", msg)
         return
 
     errs = _load_errors_module()

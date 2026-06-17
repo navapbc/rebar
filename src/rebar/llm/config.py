@@ -11,7 +11,8 @@ Environment variables (all optional; sensible defaults):
                           ``deepagents`` | ``fake`` (offline/tests)
   REBAR_LLM_MODEL         model id (default ``claude-opus-4-8``)
   REBAR_LLM_MAX_TOKENS    per-response token ceiling (default 8000)
-  REBAR_LLM_MAX_ITERS     LangGraph recursion limit (super-steps; ~2 per tool call; default 25)
+  REBAR_LLM_MAX_STEPS     Max agent loop steps before abort (~2 per tool call; default
+                          25 ~= 12 tool calls). Deprecated alias: REBAR_LLM_MAX_ITERS.
   REBAR_LLM_TIMEOUT       per-operation wall-clock seconds (default 600)
   REBAR_LLM_REPO_PATH     repo root the agent's read-only file tools see (default: repo root)
   REBAR_LLM_MCP_SERVERS   JSON object of MCP servers (langchain-mcp-adapters shape)
@@ -106,6 +107,17 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_int_aliased(name: str, legacy: str, default: int) -> int:
+    """:func:`_env_int` for ``name``, honoring a deprecated ``legacy`` env var (with
+    a one-time-ish warning) when the canonical name is unset."""
+    if name not in os.environ and legacy in os.environ:
+        import logging
+
+        logging.getLogger("rebar.llm.config").warning("%s is deprecated; use %s", legacy, name)
+        name = legacy
+    return _env_int(name, default)
+
+
 @dataclass
 class LangfuseConfig:
     """Langfuse credentials/host, plus whether tracing+prompts are *enabled*.
@@ -174,7 +186,7 @@ class LLMConfig:
             base_url=os.environ.get("REBAR_LLM_BASE_URL") or None,
             api_key=os.environ.get("REBAR_LLM_API_KEY") or None,
             max_tokens=_env_int("REBAR_LLM_MAX_TOKENS", 8000),
-            max_iterations=_env_int("REBAR_LLM_MAX_ITERS", 25),
+            max_iterations=_env_int_aliased("REBAR_LLM_MAX_STEPS", "REBAR_LLM_MAX_ITERS", 25),
             timeout_s=_env_int("REBAR_LLM_TIMEOUT", 600),
             repo_path=repo_path,
             mcp_servers=mcp_servers,
