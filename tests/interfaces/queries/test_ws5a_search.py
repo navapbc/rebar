@@ -27,7 +27,6 @@ def _env(repo: Path) -> dict:
 
     e = dict(os.environ)
     e["REBAR_ROOT"] = str(repo)
-    e["PROJECT_ROOT"] = str(repo)
     return e
 
 

@@ -33,6 +33,24 @@ def _proj(tmp: Path) -> Path:
     return p
 
 
+# ── repo-root override: REBAR_ROOT only (EV-2a; PROJECT_ROOT removed) ─────────
+def test_repo_root_honors_rebar_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PROJECT_ROOT", raising=False)
+    monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
+    assert cfg.repo_root() == tmp_path.resolve()
+
+
+def test_repo_root_ignores_project_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """PROJECT_ROOT was hard-removed (EV-2a): set ONLY PROJECT_ROOT and it must NOT
+    be honored — repo_root falls through to the git toplevel / cwd instead."""
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    monkeypatch.delenv("REBAR_ROOT", raising=False)
+    monkeypatch.setenv("PROJECT_ROOT", str(other))
+    monkeypatch.chdir(tmp_path)
+    assert cfg.repo_root() != other.resolve()  # PROJECT_ROOT ignored
+
+
 # ── locations ────────────────────────────────────────────────────────────────
 def test_defaults_when_no_config(tmp_path: Path) -> None:
     c = cfg.load_config(root=_proj(tmp_path))

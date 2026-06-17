@@ -209,8 +209,8 @@ Help is only recognized as the first argument after the subcommand, so a
 `--help`/`-h`/`help` that appears inside a free-text parameter (title, comment
 body, search query, …) is treated as literal text, not a help request.
 
-Repo root is resolved from `REBAR_ROOT` (or `PROJECT_ROOT`), falling back to the
-git toplevel of the working directory.
+Repo root is resolved from `REBAR_ROOT`, falling back to the git toplevel of the
+working directory.
 
 **Structured output.** Every data-returning command emits machine-readable JSON
 via the canonical `--output json` flag (short `-o json`; `--output llm` gives a

@@ -135,7 +135,7 @@ def _get_rebar_id_guard_mode_from_config() -> str | None:
       3. Default: 'raise'
     """
     try:
-        _root = os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT")
+        _root = os.environ.get("REBAR_ROOT")
         if os.environ.get("REBAR_CONFIG"):
             config_path = Path(os.environ["REBAR_CONFIG"])
         elif _root:
@@ -144,7 +144,6 @@ def _get_rebar_id_guard_mode_from_config() -> str | None:
             config_path = (
                 Path(
                     os.environ.get("REBAR_ROOT")
-                    or os.environ.get("PROJECT_ROOT")
                     or Path(__file__).resolve().parents[4]
                 )
                 / ".rebar"

@@ -44,7 +44,7 @@ _CLI = _engine.in_process_cli()
 def _engine_run(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
     """Run a rebar subcommand against *repo* via the in-process CLI.
 
-    ``engine_env`` pins REBAR_ROOT/PROJECT_ROOT so the command's cwd-relative git
+    ``engine_env`` pins REBAR_ROOT so the command's cwd-relative git
     operations resolve the right repository. This drives the Python
     write/sync/lock path under real cross-process concurrency — the contract this
     harness characterizes."""

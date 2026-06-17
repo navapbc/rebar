@@ -238,7 +238,6 @@ def _signature_gate(
     ``--verdict-hash`` is deprecated and ignored."""
     cfg_root = (
         os.environ.get("REBAR_ROOT")
-        or os.environ.get("PROJECT_ROOT")
         or tracker_dir.rsplit("/", 1)[0]
     )
     # Resolve the verify gate through the unified typed config (all layers + the

@@ -61,7 +61,7 @@ _SCRIPTS_DIR = _engine_dir()
 def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
     """Resolve the tracker dir: TICKETS_TRACKER_DIR, else <repo_root>/.tickets-tracker.
 
-    repo_root precedence: explicit arg > PROJECT_ROOT > REBAR_ROOT > git toplevel
+    repo_root precedence: explicit arg > REBAR_ROOT > git toplevel
     of cwd. Mirrors the shims' resolution so the CLI/library agree.
     """
     env_dir = os.environ.get("TICKETS_TRACKER_DIR")
@@ -69,11 +69,7 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
         # Explicit tracker dir — read it directly, no git precondition (test
         # fixtures and tooling point this at a hand-built tracker on purpose).
         return env_dir
-    root = (
-        str(repo_root)
-        if repo_root is not None
-        else (os.environ.get("PROJECT_ROOT") or os.environ.get("REBAR_ROOT"))
-    )
+    root = str(repo_root) if repo_root is not None else os.environ.get("REBAR_ROOT")
     if not root:
         try:
             root = (
@@ -90,7 +86,7 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
             )
             sys.exit(1)
     else:
-        # A repo-root was supplied (arg / PROJECT_ROOT / REBAR_ROOT). The rebar
+        # A repo-root was supplied (arg / REBAR_ROOT). The rebar
         # store is git-backed, so require root to be a git work tree — matching
         # the pre-collapse bash read path, which errored ("not inside a git
         # repository") on an uninitialized dir. This is the precondition

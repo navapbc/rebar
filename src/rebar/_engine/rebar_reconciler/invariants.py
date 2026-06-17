@@ -12,12 +12,12 @@ _CAP_PER_PASS = 5
 
 
 def _default_repo_root() -> Path:
-    """Repo root: REBAR_ROOT/PROJECT_ROOT env if set, else the engine's parent.
+    """Repo root: REBAR_ROOT env if set, else the engine's parent.
 
     (Depth-math fallback only applies when no env is set; the rebar library/CLI
     always export REBAR_ROOT, and the reconciler threads --repo-root.)
     """
-    root = os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT")
+    root = os.environ.get("REBAR_ROOT")
     return Path(root) if root else Path(__file__).resolve().parents[4]
 
 

@@ -71,7 +71,7 @@ _CLEAN_DIRS=()
 if [ "${PROBE_LIVE:-}" = "1" ]; then
     MODE="LIVE (real project store)"
     # Snapshot the existing ticket dir set so we only remove what we create.
-    _root="${REBAR_ROOT:-${PROJECT_ROOT:-$(git -C "$_repo_root" rev-parse --show-toplevel)}}"
+    _root="${REBAR_ROOT:-$(git -C "$_repo_root" rev-parse --show-toplevel)}"
     export REBAR_ROOT="$_root"
     TRACKER="$REBAR_ROOT/.tickets-tracker"
     _PRE_IDS="$(ls -1 "$TRACKER" 2>/dev/null | grep -E '^[0-9a-f]{4}-' | sort || true)"

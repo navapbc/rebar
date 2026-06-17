@@ -33,7 +33,6 @@ def pre_upgrade_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     info.mkdir(parents=True, exist_ok=True)
     (info / "exclude").write_text(".tickets-tracker\n.env\n")  # legacy: no .scratch
     monkeypatch.setenv("REBAR_ROOT", str(repo))
-    monkeypatch.setenv("PROJECT_ROOT", str(repo))
     yield repo
 
 

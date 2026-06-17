@@ -89,7 +89,6 @@ def _apply_inbound_create(
             if repo_root is None:
                 repo_root = Path(
                     os.environ.get("REBAR_ROOT")
-                    or os.environ.get("PROJECT_ROOT")
                     or Path(__file__).resolve().parents[4]
                 )
             mapping_path = repo_root / "bridge_state" / "mapping.json"

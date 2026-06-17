@@ -459,7 +459,7 @@ def test_main_without_repo_root_passes_resolved_repo_root(main_mod, monkeypatch)
     """The Path passed to check_pass_lock when --repo-root is omitted must contain
     the rebar_reconciler package, confirming it resolves to the actual project root.
 
-    The conftest sandbox sets REBAR_ROOT for isolation; clear it (and PROJECT_ROOT)
+    The conftest sandbox sets REBAR_ROOT for isolation; clear it
     here so the genuine depth-fallback runs. reconcile_once is mocked, so nothing
     is written to the resolved root.
 
@@ -468,7 +468,6 @@ def test_main_without_repo_root_passes_resolved_repo_root(main_mod, monkeypatch)
     src/rebar/_engine/rebar_reconciler/__main__.py.
     """
     monkeypatch.delenv("REBAR_ROOT", raising=False)
-    monkeypatch.delenv("PROJECT_ROOT", raising=False)
     check_pass_lock_mock = MagicMock(return_value=False)
 
     with (

@@ -83,8 +83,7 @@ def engine_env(repo_root: str | os.PathLike[str] | None = None) -> dict[str, str
       ``rebar_reconciler`` package resolves under ``python -m rebar_reconciler``
       and the absolute-path ``jira-capability-probe.py`` launch (both import
       ``rebar_reconciler.*``).
-    - Pins ``REBAR_ROOT`` *and* ``PROJECT_ROOT`` (kept in agreement for any
-      consumer that reads either one).
+    - Pins ``REBAR_ROOT`` (the single repo-root override) when a repo_root is given.
 
     The wordlist path and the ticket-reader CLI are NOT pinned: subprocesses
     self-resolve them (``reducer._alias`` resolves the bundled wordlist directly;
@@ -97,14 +96,7 @@ def engine_env(repo_root: str | os.PathLike[str] | None = None) -> dict[str, str
     env["PYTHONPATH"] = eng + (os.pathsep + existing if existing else "")
 
     if repo_root is not None:
-        root = str(Path(repo_root).resolve())
-        env["REBAR_ROOT"] = root
-        env["PROJECT_ROOT"] = root
-    else:
-        # If a caller (or parent env) set one of the two, mirror it to the other
-        # so the write path and reconciler never disagree on repo-root.
-        root = env.get("REBAR_ROOT") or env.get("PROJECT_ROOT")
-        if root:
-            env["REBAR_ROOT"] = root
-            env["PROJECT_ROOT"] = root
+        env["REBAR_ROOT"] = str(Path(repo_root).resolve())
+    # else: an inherited REBAR_ROOT (from os.environ) already carries through —
+    # there is no second var to mirror it to.
     return env

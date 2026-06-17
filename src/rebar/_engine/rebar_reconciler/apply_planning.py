@@ -227,7 +227,6 @@ def _emit_mode_manifest(
         if repo_root is None:
             repo_root_resolved = Path(
                 os.environ.get("REBAR_ROOT")
-                or os.environ.get("PROJECT_ROOT")
                 or Path(__file__).resolve().parents[4]
             )
         else:

@@ -93,8 +93,8 @@ top-level name on `sys.path`**:
 - **Subprocess (the reconciler + Jira probe).** `engine_env()` is the ONE place
   the engine dir goes on an import path (`PYTHONPATH`), scoped to the subprocess
   launches `python -m rebar_reconciler` and `jira-capability-probe.py`, so the
-  top-level `rebar_reconciler` package resolves there. It also pins `REBAR_ROOT`/
-  `PROJECT_ROOT`. The alias wordlist and the in-process ticket-reader CLI are NOT
+  top-level `rebar_reconciler` package resolves there. It also pins `REBAR_ROOT`
+  (the single repo-root override). The alias wordlist and the in-process ticket-reader CLI are NOT
   pinned — subprocesses self-resolve them (`rebar.reducer._alias` resolves the
   bundled wordlist; the reconciler and `validate` call `rebar._engine.in_process_cli`).
 

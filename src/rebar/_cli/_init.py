@@ -37,13 +37,13 @@ def _git_toplevel() -> str | None:
 
 
 def _resolve_repo_root() -> str:
-    """Repo root with the dispatcher's precedence: PROJECT_ROOT, REBAR_ROOT, git.
+    """Repo root with the dispatcher's precedence: REBAR_ROOT, git.
 
     Exits 1 with the dispatcher's exact message when none resolves.
     """
-    # Same precedence as config.repo_root (REBAR_ROOT > PROJECT_ROOT > git) so the
+    # Same precedence as config.repo_root (REBAR_ROOT > git) so the
     # gate inspects the SAME repo the commands operate on and init writes to.
-    root = os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT")
+    root = os.environ.get("REBAR_ROOT")
     if not root:
         root = _git_toplevel()
     if not root:
@@ -154,7 +154,7 @@ def ensure_initialized(*, init_only: bool) -> None:
     repo_root = _resolve_repo_root()
     # Check existence at the SAME location init writes / commands read
     # (config.tracker_dir), not a hard-coded repo_root/.tickets-tracker — otherwise a
-    # REBAR_ROOT/PROJECT_ROOT that differs from the git toplevel would re-prompt
+    # REBAR_ROOT that differs from the git toplevel would re-prompt
     # forever (the check never sees the tracker init actually created).
     from rebar import config
 

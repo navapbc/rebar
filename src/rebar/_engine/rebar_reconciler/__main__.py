@@ -191,7 +191,6 @@ def run_pass(
     if repo_root is None:
         repo_root = Path(
             os.environ.get("REBAR_ROOT")
-            or os.environ.get("PROJECT_ROOT")
             or Path(__file__).resolve().parents[4]
         )
 
@@ -325,7 +324,6 @@ def main(argv: list[str] | None = None) -> int:
         if args.repo_root
         else Path(
             os.environ.get("REBAR_ROOT")
-            or os.environ.get("PROJECT_ROOT")
             or Path(__file__).resolve().parents[4]
         )
     )
@@ -339,7 +337,6 @@ def main(argv: list[str] | None = None) -> int:
             if repo_root is not None
             else Path(
                 os.environ.get("REBAR_ROOT")
-                or os.environ.get("PROJECT_ROOT")
                 or Path(__file__).resolve().parents[4]
             )
         )

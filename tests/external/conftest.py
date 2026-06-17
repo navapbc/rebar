@@ -54,6 +54,5 @@ def rebar_repo(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
     _git("config", "user.email", "test@example.com", cwd=repo)
     _git("config", "user.name", "Test", cwd=repo)
     monkeypatch.setenv("REBAR_ROOT", str(repo))
-    monkeypatch.setenv("PROJECT_ROOT", str(repo))
     rebar.init_repo(repo_root=str(repo))
     yield repo

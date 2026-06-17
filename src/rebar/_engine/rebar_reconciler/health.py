@@ -52,7 +52,6 @@ def record_pass(
     if repo_root is None:
         repo_root = Path(
             os.environ.get("REBAR_ROOT")
-            or os.environ.get("PROJECT_ROOT")
             or Path(__file__).resolve().parents[4]
         )  # four levels up from rebar_reconciler/
     health_dir = repo_root / _STATE_SUBDIR / _HEALTH_SUBDIR
@@ -101,7 +100,6 @@ def count_open_by_type(repo_root: Path | None = None) -> dict:
     if repo_root is None:
         repo_root = Path(
             os.environ.get("REBAR_ROOT")
-            or os.environ.get("PROJECT_ROOT")
             or Path(__file__).resolve().parents[4]
         )  # repo root from rebar_reconciler/
 
@@ -176,7 +174,6 @@ def capture_baseline(pass_id: str, repo_root: Path | None = None) -> Path:
     if repo_root is None:
         repo_root = Path(
             os.environ.get("REBAR_ROOT")
-            or os.environ.get("PROJECT_ROOT")
             or Path(__file__).resolve().parents[4]
         )  # repo root from rebar_reconciler/
 

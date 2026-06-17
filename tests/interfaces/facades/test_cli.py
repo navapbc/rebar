@@ -150,7 +150,6 @@ def test_reconcile_intercepted_dry_run_default(
     fully offline. The live-Jira behaviour is covered by the opt-in integration
     test below, so this routing check never touches the network."""
     offline_acli_env["REBAR_ROOT"] = str(rebar_repo)
-    offline_acli_env["PROJECT_ROOT"] = str(rebar_repo)
     cp = _cli("reconcile", cwd=str(rebar_repo), env=offline_acli_env)
     assert "unknown subcommand 'reconcile'" not in (cp.stdout + cp.stderr).lower()
 

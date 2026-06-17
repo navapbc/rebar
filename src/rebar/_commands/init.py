@@ -9,8 +9,8 @@ returns 0. A 30s mkdir lock (``.git/ticket-init.lock``) serializes concurrent
 inits.
 
 init resolves the repo from the git toplevel of ``repo_root`` (or cwd) — it
-deliberately ignores PROJECT_ROOT/REBAR_ROOT (it must initialize the target repo,
-not a shim's project root), matching the bash script's ``unset PROJECT_ROOT``.
+deliberately ignores an inherited repo-root override (it must initialize the
+target repo, not a shim's project root), matching the bash script's repo-root unset.
 
 Byte-parity pinned by ``tests/interfaces/test_e4_init.py``.
 """
@@ -80,12 +80,12 @@ def _emit(msg: str, silent: bool) -> None:
 
 def _resolve_repo_root(repo_root) -> str | None:
     """Resolve the repo to initialize, matching ``config.repo_root`` precedence
-    (explicit > REBAR_ROOT > PROJECT_ROOT > git toplevel of cwd) so init writes the
+    (explicit > REBAR_ROOT > git toplevel of cwd) so init writes the
     tracker exactly where every command (config.tracker_dir) and the auto-init gate
     look for it. Returns None only when no root resolves (→ "not a git repo")."""
     if repo_root:
         return os.path.realpath(str(repo_root))
-    env = os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT")
+    env = os.environ.get("REBAR_ROOT")
     if env:
         return os.path.realpath(env)
     cp = subprocess.run(

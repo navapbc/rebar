@@ -19,11 +19,11 @@ logger = logging.getLogger("rebar.config")
 def repo_root(explicit: str | os.PathLike[str] | None = None) -> Path:
     """Resolve the repository root.
 
-    Order: explicit arg > REBAR_ROOT > PROJECT_ROOT > git toplevel of cwd.
+    Order: explicit arg > REBAR_ROOT > git toplevel of cwd.
     """
     if explicit is not None:
         return Path(explicit).resolve()
-    env = os.environ.get("REBAR_ROOT") or os.environ.get("PROJECT_ROOT")
+    env = os.environ.get("REBAR_ROOT")
     if env:
         return Path(env).resolve()
     try:
@@ -558,7 +558,6 @@ def _env_signature() -> tuple:
             "REBAR_CONFIG",
             "XDG_CONFIG_HOME",
             "REBAR_ROOT",
-            "PROJECT_ROOT",
             "REBAR_CONFIG_UNKNOWN_KEYS",  # strict/warn policy affects whether load raises
             "REBAR_PUSH",  # deprecated alias -> sync.push (EV-1)
             "REBAR_NO_SYNC",  # deprecated alias -> sync.pull (EV-1)

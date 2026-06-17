@@ -140,7 +140,6 @@ def test_implicit_root_keys_on_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     """With root=None the repo root comes from cwd; two repos with different config
     must not bleed across a chdir (cwd is part of the cache key)."""
     monkeypatch.delenv("REBAR_ROOT", raising=False)
-    monkeypatch.delenv("PROJECT_ROOT", raising=False)
     for name in ("A", "B"):
         r = tmp_path / name
         r.mkdir()

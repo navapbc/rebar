@@ -49,7 +49,6 @@ def repo_with_origin(
     _git("config", "user.name", "t", cwd=repo)
     _git("remote", "add", "origin", str(origin), cwd=repo)
     monkeypatch.setenv("REBAR_ROOT", str(repo))
-    monkeypatch.setenv("PROJECT_ROOT", str(repo))
     rebar.init_repo(repo_root=str(repo))
     yield repo, origin
 

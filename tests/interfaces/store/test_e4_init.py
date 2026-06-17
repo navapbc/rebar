@@ -30,7 +30,6 @@ def fresh_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     subprocess.run(["git", "config", "user.name", "T"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "base"], cwd=repo, check=True)
     monkeypatch.setenv("REBAR_ROOT", str(repo))
-    monkeypatch.setenv("PROJECT_ROOT", str(repo))
     monkeypatch.delenv("TICKETS_TRACKER_DIR", raising=False)
     monkeypatch.setenv("REBAR_SYNC_PULL", "off")
     monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
@@ -149,7 +148,6 @@ def test_worktree_symlinks_silently_without_prompt(
     # symlink to the main repo's store — so it must auto-create, not prompt/error.
     monkeypatch.setattr(cli_init, "_is_interactive", lambda: False)
     monkeypatch.setenv("REBAR_ROOT", str(wt))
-    monkeypatch.setenv("PROJECT_ROOT", str(wt))
     monkeypatch.chdir(wt)
     capsys.readouterr()
     code = main(["list"])
@@ -168,7 +166,6 @@ def test_worktree_without_main_init_still_errors_noninteractive(
     subprocess.run(["git", "-C", str(fresh_repo), "worktree", "add", "-q", str(wt)], check=True)
     monkeypatch.setattr(cli_init, "_is_interactive", lambda: False)
     monkeypatch.setenv("REBAR_ROOT", str(wt))
-    monkeypatch.setenv("PROJECT_ROOT", str(wt))
     monkeypatch.chdir(wt)
     capsys.readouterr()
     with pytest.raises(SystemExit) as exc:
