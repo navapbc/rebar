@@ -288,6 +288,83 @@ def test_two_clone_union_deterministic_replay_and_fork_tiebreak(two_clones):
     assert status_b[seed] == expected_status
 
 
+# ─────────────────── HLC skewed-clock convergence (P2.1) ─────────────────────
+# Two 19-digit physical-clock injections (REBAR_HLC_NOW): A runs FAST (a clock far
+# in the future), B runs SLOW. The scenario proves the Hybrid Logical Clock makes
+# causally-later edits win regardless of wall-clock skew — the gap raw time_ns()
+# left open (last-wall-clock-writer silently clobbers).
+_FAST_NOW = 5_000_000_000_000_000_000  # ~year 2128, 19 digits
+_SLOW_NOW = 1_000_000_000_000_000_000  # ~year 2001, 19 digits
+
+
+def _engine_run_at(repo: Path, *args: str, now: int, check: bool = True):
+    """`_engine_run` with the physical HLC clock pinned to *now* (REBAR_HLC_NOW)."""
+    env = _engine.engine_env(repo_root=str(repo))
+    env["REBAR_HLC_NOW"] = str(now)
+    return subprocess.run(
+        [_CLI, *args], cwd=str(repo), env=env, text=True, capture_output=True, check=check
+    )
+
+
+def _show_title(repo: Path, tid: str) -> str:
+    out = _engine_run(repo, "show", tid).stdout
+    return json.loads(out).get("title", "")
+
+
+def _edit_prefix_for_title(tracker: Path, ticket_id: str, title: str) -> int:
+    """The integer filename-prefix of the EDIT event that set ``title`` (from the
+    merged union on the tickets branch)."""
+    listing = _git("ls-tree", "-r", "--name-only", "tickets", cwd=tracker).stdout
+    for path in listing.splitlines():
+        if not path.endswith("-EDIT.json") or path.split("/")[0] != ticket_id:
+            continue
+        ev = json.loads(_git("show", f"tickets:{path}", cwd=tracker).stdout)
+        if ev.get("data", {}).get("fields", {}).get("title") == title:
+            return int(path.split("/")[-1].split("-")[0])
+    raise AssertionError(f"no EDIT event setting title={title!r} for {ticket_id}")
+
+
+def test_hlc_skewed_clock_edit_causality_convergence(two_clones):
+    """B's edit, made AFTER observing A's edit but on a far-SLOWER wall clock, must
+    still win on both clones — because next_tick witnesses A's event prefix and
+    ticks strictly above it. Under raw time_ns() B's small timestamp would lose
+    (the clobber); the HLC flips it to the causally-correct winner."""
+    remote, repo_a, repo_b, seed = two_clones
+    tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
+
+    # A (fast clock) edits the shared title, and its write auto-pushes to origin.
+    _engine_run_at(repo_a, "edit", seed, "--title=from-A", now=_FAST_NOW)
+
+    # B syncs so it OBSERVES A's edit before writing (the causal dependency).
+    _expire_sync_marker(tracker_b)
+    _engine_run(repo_b, "list")
+    assert _show_title(repo_b, seed) == "from-A", "B did not observe A's edit before writing"
+
+    # B (slow clock) now edits the SAME field. Its next_tick witnesses A's event
+    # prefix (~_FAST_NOW) and ticks above it despite B's slow physical clock.
+    _engine_run_at(repo_b, "edit", seed, "--title=from-B", now=_SLOW_NOW)
+
+    # A converges via read-side sync.
+    _expire_sync_marker(tracker_a)
+    _engine_run(repo_a, "list")
+    _expire_sync_marker(tracker_a)
+    _engine_run(repo_a, "list")
+
+    # Convergence: both clones agree, and on the causally-LATER value (from-B),
+    # not the one with the larger wall clock (from-A).
+    assert _show_title(repo_a, seed) == "from-B", "A did not converge to the causal winner"
+    assert _show_title(repo_b, seed) == "from-B", "B did not hold the causal winner"
+
+    # The HLC witness is what made it so: B's edit prefix strictly exceeds A's,
+    # even though B's physical clock (_SLOW_NOW) is far below A's (_FAST_NOW).
+    prefix_a = _edit_prefix_for_title(tracker_a, seed, "from-A")
+    prefix_b = _edit_prefix_for_title(tracker_a, seed, "from-B")
+    assert prefix_b > prefix_a, (
+        f"causal edit did not tick above the witnessed prefix: from-B={prefix_b} "
+        f"!> from-A={prefix_a} (slow wall clock {_SLOW_NOW} would have lost without HLC)"
+    )
+
+
 def test_failed_push_never_drops_local_commit(two_clones):
     """A push to an unreachable remote must not discard the local-only commit,
     and a subsequent sync must still preserve it (WS3 no-data-loss)."""

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import time
 import uuid as _uuid
 from pathlib import Path
 
@@ -148,10 +147,11 @@ def append_event(
     guard). (Tier D retired the bash seam; ``rebar._store`` is the sole write core.)
     """
     from rebar._store import event_append as _store_append
+    from rebar._store import hlc
     from rebar._store.event_append import StoreError
     from rebar._store.lock import LockTimeout, RebaseGuard
 
-    timestamp, uuid_str = time.time_ns(), str(_uuid.uuid4())
+    timestamp, uuid_str = hlc.next_tick(str(tracker), ticket_id), str(_uuid.uuid4())
     event = {
         "timestamp": timestamp,
         "uuid": uuid_str,

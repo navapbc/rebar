@@ -18,14 +18,13 @@ import json
 import os
 import subprocess
 import sys
-import time
 import uuid
 from pathlib import Path
 
 from rebar import config
 from rebar._commands import _seam
 from rebar._engine_support.resolver import resolve_ticket_id
-from rebar._store import event_append, lock
+from rebar._store import event_append, hlc, lock
 from rebar._store.canonical import canonical_str
 from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
 
@@ -114,7 +113,7 @@ def _compact_locked(
         author = _git_author()
 
         snapshot_uuid = str(uuid.uuid4())
-        snapshot_ts = time.time_ns()
+        snapshot_ts = hlc.next_tick(tracker, ticket_id)
         snapshot_event = {
             "event_type": "SNAPSHOT",
             "timestamp": snapshot_ts,

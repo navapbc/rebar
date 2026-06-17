@@ -17,8 +17,16 @@ except the local, rebuildable `.cache.json` (gitignored — see docs/concurrency
 ${timestamp_ns}-${uuid}-${TYPE}.json
 ```
 
-- `${timestamp_ns}` — high-resolution (`time.time_ns()`) clock prefix; determines
-  replay order (lexical == chronological for equal-width ns integers).
+- `${timestamp_ns}` — a single-integer **Hybrid Logical Clock** prefix (P2.1,
+  `rebar._store.hlc.next_tick`): `max(per-clone cache, the target ticket's
+  witnessed max-prefix, time_ns()) + 1`. It tracks wall-clock ns but never ties or
+  inverts for causally-related events from one actor (the `+1` floor), so replay
+  order is **skew-immune and causal**, not merely best-effort wall-clock. It stays
+  a 19-digit integer (until ~year 2286), and ordering compares prefixes **as
+  integers** (`reducer/_sort.prefix_ts`) so legacy ns names and HLC names form one
+  global order regardless of width. Staged behind `REBAR_HLC` (default-on;
+  `REBAR_HLC=0` reverts to raw `time.time_ns()`). The clock is >2^53, so jq must
+  never read or compute on it (P1.0 keeps jq out of the event path).
 - `${uuid}` — a fresh UUID4 per event; makes every filename globally unique, so
   two clients writing concurrently never collide and git merges the two files as
   a union (`ticket-lib.sh:85`, `ticket_txn.py`).
@@ -52,10 +60,12 @@ Replay dispatch: `ticket_reducer/_processors.py` (`process_*`).
 The event log is the **wire format between clones running different rebar
 versions** — they share one `origin/tickets` and merge each other's event files
 as a union. The format carries an explicit version constant:
-`ticket_reducer/_version.py: SCHEMA_VERSION` (currently `1`). Bump it when the
-wire format changes in a way other clones must be aware of. There is **no**
-VERSION event and no version negotiation — cross-version safety is handled by a
-single rule:
+`reducer/_version.py: SCHEMA_VERSION` (currently `2`). Bump it when the
+wire format changes in a way other clones must be aware of. (v2 = P2.1: the
+filename prefix became a single-integer HLC value; same width and encoding, so
+older clones still string-compare correctly — the change is semantic ordering, not
+a body change.) There is **no** VERSION event and no version negotiation —
+cross-version safety is handled by a single rule:
 
 **Unknown event types are preserved-and-ignored.** `KNOWN_EVENT_TYPES`
 (`_version.py`) is the canonical set of types the reducer's replay dispatch
@@ -75,14 +85,20 @@ Pinned by `tests/interfaces/contracts/test_event_schema_forward_compat.py`.
 
 ## Replay & fork determinism
 
-- Events replay in `${timestamp_ns}` filename order; the reducer is pure
+- Events replay in `${timestamp_ns}` filename order, compared **as integers**
+  (`reducer/_sort.event_sort_key` → `prefix_ts`); the reducer is pure
   (deterministic given the file set).
+- **HLC causal order (P2.1).** Because the prefix is a Hybrid Logical Clock
+  (above), COMMENT/EDIT ordering by prefix is now **causal and skew-immune**: a
+  clone that observed another clone's event before writing witnesses its prefix
+  and ticks strictly after it, so concurrent same-field edits converge to the same
+  value on every clone (no last-wall-clock-writer clobber). This generalizes I8
+  beyond STATUS forks.
 - **STATUS forks** (two STATUS events sharing a `parent_status_uuid` — e.g. two
   clients transitioning the same ticket concurrently) are resolved **skew-
   independently by the lexically-lower event UUID** (`_processors.py` `process_status`),
-  so every clone converges to the same winner regardless of clock skew or replay
-  order (invariant I8). Other event kinds (COMMENT/EDIT) are best-effort by
-  timestamp.
+  kept as defense-in-depth for exact-equal prefixes, so every clone converges to
+  the same winner regardless of clock skew or replay order (invariant I8).
 
 ## Compaction (I9)
 

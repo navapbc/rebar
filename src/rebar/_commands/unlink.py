@@ -18,6 +18,7 @@ from pathlib import Path
 
 from rebar._commands._seam import CommandError, append_event, tracker_dir
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar.reducer._sort import prefix_ts as _prefix_ts
 
 _USAGE = (
     "Usage: ticket link <source_id> <target_id> <relation>   (relation REQUIRED)\n"
@@ -44,7 +45,7 @@ def _get_link_info(ticket_dir: Path, target_id: str) -> tuple[str, str]:
         return "", ""
     events = [("LINK", f) for f in sorted(ticket_dir.glob("*-LINK.json"))]
     events += [("UNLINK", f) for f in sorted(ticket_dir.glob("*-UNLINK.json"))]
-    events.sort(key=lambda x: (x[1].name.split("-")[0], _EVENT_ORDER.get(x[0], 99), x[1].name))
+    events.sort(key=lambda x: (_prefix_ts(x[1].name), _EVENT_ORDER.get(x[0], 99), x[1].name))
 
     active: dict[str, tuple[str, str]] = {}
     cancelled: set[str] = set()

@@ -22,7 +22,13 @@ processor dispatch and the compaction preserve-filter both key off it.
 from __future__ import annotations
 
 # Bump when the event wire format changes in a way other clones must be aware of.
-SCHEMA_VERSION = 1
+# v2 (P2.1): the ``${timestamp}`` filename-prefix is now a single-integer Hybrid
+# Logical Clock value (``max(cache, witnessed max-prefix, time_ns()) + 1``) rather
+# than a raw ``time.time_ns()``. Same width (19 digits until ~2286) and same
+# single-integer encoding, so older clones still string-compare correctly; the only
+# *semantic* change is skew-immune causal ordering. No event-body change, so the
+# unknown-type forward-compat machinery is not engaged.
+SCHEMA_VERSION = 2
 
 # Every event_type the reducer's processor dispatch (_processors.replay) applies.
 # Anything outside this set is forward-compat payload: preserved-and-ignored.

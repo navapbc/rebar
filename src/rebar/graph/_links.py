@@ -9,6 +9,7 @@ import sys
 import uuid
 
 from rebar._store.canonical import canonical_str
+from rebar.reducer._sort import prefix_ts as _prefix_ts
 
 from ._graph import check_cycle_at_level, check_would_create_cycle
 from ._hierarchy import resolve_hierarchy_link
@@ -45,7 +46,7 @@ def _is_active_link(source_id: str, target_id: str, relation: str, tracker_dir: 
     all_events = sorted(
         link_files + unlink_files,
         key=lambda x: (
-            os.path.basename(x[1]).split("-")[0],
+            _prefix_ts(x[1]),
             _event_order.get(x[0], 99),
             os.path.basename(x[1]),
         ),
@@ -113,14 +114,15 @@ def _write_link_event(
     """Write a single LINK event to source_id's directory (no cycle check, no idempotency)."""
     import fcntl as _fcntl
     import subprocess as _sp
-    import time
+
+    from rebar._store import hlc
 
     source_dir = os.path.join(tracker_dir, source_id)
     if not os.path.isdir(source_dir):
         os.makedirs(source_dir, exist_ok=True)
 
     link_uuid = str(uuid.uuid4())
-    timestamp = time.time_ns()
+    timestamp = hlc.next_tick(tracker_dir, source_id)
 
     link_event = {
         "event_type": "LINK",

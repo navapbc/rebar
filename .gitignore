@@ -31,3 +31,7 @@ htmlcov/
 mutants/
 .mutmut-cache
 html/
+
+# Hybrid Logical Clock per-clone cache (P2.1) — disposable, rebuilt from the log
+.rebar/hlc.state
+.rebar/hlc.lock

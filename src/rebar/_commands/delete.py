@@ -21,7 +21,6 @@ import os
 import re
 import subprocess
 import sys
-import time
 import uuid
 from pathlib import Path
 
@@ -29,6 +28,7 @@ from rebar import config
 from rebar._commands import scratch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._store import hlc
 from rebar._store.canonical import canonical_str
 from rebar.graph._unblock import batch_close_operations
 from rebar.reducer import reduce_all_tickets
@@ -97,7 +97,7 @@ def _write_unlink(
 ) -> str | None:
     if not source_dir.is_dir():
         return None
-    ts = time.time_ns()
+    ts = hlc.next_tick(source_dir.parent, source_dir.name)
     ev_uuid = str(uuid.uuid4())
     event = {
         "event_type": "UNLINK",
@@ -187,7 +187,7 @@ def _children(tracker: str, parent_id: str) -> list[str]:
 
 
 def _write_event(ticket_dir: str, event_type: str, env_id: str, author: str, data: dict) -> str:
-    ts = time.time_ns()
+    ts = hlc.next_tick(os.path.dirname(ticket_dir), os.path.basename(ticket_dir))
     ev = str(uuid.uuid4())
     event = {
         "timestamp": ts,

@@ -34,13 +34,13 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import time
 import uuid
 
 from rebar._commands._seam import CommandError
-from rebar._store import event_append, lock
+from rebar._store import event_append, hlc, lock
 from rebar._store.canonical import canonical_str
 from rebar.reducer import reduce_ticket
+from rebar.reducer._sort import prefix_ts as _prefix_ts
 
 
 class ConcurrencyMismatch(CommandError):
@@ -68,9 +68,12 @@ def _parent_status_uuid(ticket_dir_path: str) -> str | None:
     chronological)."""
     try:
         status_files = sorted(
-            f
-            for f in os.listdir(ticket_dir_path)
-            if f.endswith("-STATUS.json") and not f.startswith(".")
+            (
+                f
+                for f in os.listdir(ticket_dir_path)
+                if f.endswith("-STATUS.json") and not f.startswith(".")
+            ),
+            key=lambda f: (_prefix_ts(f), f),
         )
         if status_files:
             most_recent = os.path.join(ticket_dir_path, status_files[-1])
@@ -187,7 +190,7 @@ def transition_core(
         ticket_dir_path = os.path.join(tracker_dir, ticket_id)
         parent_status_uuid = _parent_status_uuid(ticket_dir_path)
 
-        timestamp = time.time_ns()
+        timestamp = hlc.next_tick(tracker_dir, ticket_id)
         event_uuid = str(uuid.uuid4())
         event = {
             "timestamp": timestamp,
@@ -362,7 +365,7 @@ def claim_core(
         rel_paths = []
 
         # STATUS(open -> in_progress).
-        ts1 = time.time_ns()
+        ts1 = hlc.next_tick(tracker_dir, ticket_id)
         uuid1 = str(uuid.uuid4())
         status_event = {
             "timestamp": ts1,
@@ -385,10 +388,10 @@ def claim_core(
         os.rename(status_tmp, status_path)
         rel_paths.append(f"{ticket_id}/{status_filename}")
 
-        # EDIT(assignee) — only when supplied. ts2 sampled AFTER ts1 so STATUS sorts
-        # before EDIT in replay (cosmetic: disjoint fields).
+        # EDIT(assignee) — only when supplied. ts2 ticked AFTER ts1 so STATUS sorts
+        # before EDIT in replay (the HLC +1 floor makes ts2 > ts1 strictly).
         if assignee:
-            ts2 = time.time_ns()
+            ts2 = hlc.next_tick(tracker_dir, ticket_id)
             uuid2 = str(uuid.uuid4())
             edit_event = {
                 "timestamp": ts2,

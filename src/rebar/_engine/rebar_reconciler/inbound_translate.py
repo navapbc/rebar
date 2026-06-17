@@ -213,10 +213,12 @@ def _write_event_file(
     parsed keys, not bytes). Returns the path.
     """
     from rebar._store import event_append as _store_event_append
+    from rebar._store import hlc as _hlc
     from rebar._store import lock as _store_lock
     from rebar._store.canonical import canonical_str
 
-    ts, uuid_str, env_id, author = _event_meta()
+    _, uuid_str, env_id, author = _event_meta()
+    ts = _hlc.next_tick(str(tracker_dir), ticket_id)
     ticket_dir = tracker_dir / ticket_id
     ticket_dir.mkdir(parents=True, exist_ok=True)
     event = {
