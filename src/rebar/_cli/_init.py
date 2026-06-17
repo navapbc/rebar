@@ -11,7 +11,8 @@ The CLI runs this before each in-process command arm, with a per-command policy:
   ``reads.ensure_fresh`` for the reconverge so there is ONE sync implementation
   and ONE ``/tmp/.ticket-sync-<md5>`` throttle marker shared with the read path.
 
-When ``TICKETS_TRACKER_DIR`` is injected (tests / embedding) the caller owns the
+When the tracker override is injected (``REBAR_TRACKER_DIR``, deprecated alias
+``TICKETS_TRACKER_DIR``; tests / embedding) the caller owns the
 tracker — the middleware returns immediately.
 """
 
@@ -148,7 +149,9 @@ def ensure_initialized(*, init_only: bool) -> None:
     """
     # Explicit tracker injected → the caller manages init/freshness (do not
     # auto-init the cwd repo's tracker). Matches the dispatcher's first guard.
-    if os.environ.get("TICKETS_TRACKER_DIR"):
+    from rebar import config
+
+    if config.tracker_dir_override():
         return
 
     repo_root = _resolve_repo_root()

@@ -48,7 +48,7 @@ class CommandError(Exception):
 
 
 def tracker_dir(repo_root=None) -> Path:
-    """Resolve the tracker dir (honors TICKETS_TRACKER_DIR, then repo-root)."""
+    """Resolve the tracker dir (honors REBAR_TRACKER_DIR (deprecated alias TICKETS_TRACKER_DIR), then repo-root)."""
     return config.tracker_dir(repo_root)
 
 

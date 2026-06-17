@@ -59,12 +59,15 @@ _SCRIPTS_DIR = _engine_dir()
 
 # ───────────────────────────── tracker resolution ────────────────────────────
 def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
-    """Resolve the tracker dir: TICKETS_TRACKER_DIR, else <repo_root>/.tickets-tracker.
+    """Resolve the tracker dir: the explicit override (REBAR_TRACKER_DIR, deprecated
+    alias TICKETS_TRACKER_DIR), else <repo_root>/.tickets-tracker.
 
     repo_root precedence: explicit arg > REBAR_ROOT > git toplevel
     of cwd. Mirrors the shims' resolution so the CLI/library agree.
     """
-    env_dir = os.environ.get("TICKETS_TRACKER_DIR")
+    from rebar.config import tracker_dir_override
+
+    env_dir = tracker_dir_override()
     if env_dir:
         # Explicit tracker dir — read it directly, no git precondition (test
         # fixtures and tooling point this at a hand-built tracker on purpose).

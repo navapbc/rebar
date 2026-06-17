@@ -89,6 +89,7 @@ def test_consent_gate_no_reprompt_when_root_differs_from_toplevel(
     # REBAR_ROOT points at a SUBDIR (≠ git toplevel). Pre-fix: the gate checked
     # sub/.tickets-tracker while init wrote toplevel/.tickets-tracker → re-prompt loop.
     monkeypatch.setenv("REBAR_ROOT", str(sub))
+    monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
     monkeypatch.delenv("TICKETS_TRACKER_DIR", raising=False)
     monkeypatch.setenv("REBAR_SYNC_PULL", "off")
     monkeypatch.setenv("REBAR_SYNC_PUSH", "off")

@@ -29,7 +29,7 @@ from rebar._engine_support import reads as ticket_reads
 
 
 def _tracker(repo_root: str | os.PathLike[str] | None) -> str:
-    """Tracker dir, honoring TICKETS_TRACKER_DIR then repo-root (matches the
+    """Tracker dir, honoring REBAR_TRACKER_DIR (deprecated alias TICKETS_TRACKER_DIR) then repo-root (matches the
     shared resolver's repo_root-based contract)."""
     return str(config.tracker_dir(repo_root))
 

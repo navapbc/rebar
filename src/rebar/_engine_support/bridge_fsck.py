@@ -444,8 +444,8 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help=(
             "Path to the .tickets-tracker directory. "
-            "Defaults to TICKETS_TRACKER_DIR env var or "
-            "<repo-root>/.tickets-tracker."
+            "Defaults to REBAR_TRACKER_DIR env var (deprecated alias "
+            "TICKETS_TRACKER_DIR) or <repo-root>/.tickets-tracker."
         ),
     )
     parser.add_argument(
@@ -459,11 +459,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(raw)
 
-    # Resolve tracker path: explicit arg > env var > repo root default
+    # Resolve tracker path: explicit arg > env override > repo root default
+    from rebar.config import tracker_dir_override
+
+    _override = tracker_dir_override()
     if args.tickets_tracker:
         tracker_path = Path(args.tickets_tracker)
-    elif "TICKETS_TRACKER_DIR" in os.environ:
-        tracker_path = Path(os.environ["TICKETS_TRACKER_DIR"])
+    elif _override:
+        tracker_path = Path(_override)
     else:
         # Fall back to repo root detection
         try:

@@ -152,8 +152,11 @@ def _event_meta() -> tuple[int, str, str, str]:
 
 
 def _resolve_tracker_dir(repo_root: Path | None) -> Path:
-    """Resolve the .tickets-tracker directory. Honours TICKETS_TRACKER_DIR env."""
-    override = os.environ.get("TICKETS_TRACKER_DIR")
+    """Resolve the .tickets-tracker directory. Honours the REBAR_TRACKER_DIR override
+    (deprecated alias TICKETS_TRACKER_DIR)."""
+    from rebar.config import tracker_dir_override
+
+    override = tracker_dir_override()
     if override:
         return Path(override)
     if repo_root is None:

@@ -52,9 +52,36 @@ def config_file(root: str | os.PathLike[str] | None = None) -> Path | None:
     return None
 
 
+# Warn-once registry for deprecated standalone env vars (those resolved outside the
+# load_config cache, e.g. the tracker-dir override, which is read on a hot path).
+_WARNED_LEGACY_ENV: set[str] = set()
+
+
+def _warn_once_legacy_env(legacy: str, canonical: str) -> None:
+    if legacy not in _WARNED_LEGACY_ENV:
+        _WARNED_LEGACY_ENV.add(legacy)
+        logger.warning("rebar config: env %s is deprecated; use %s", legacy, canonical)
+
+
+def tracker_dir_override() -> str | None:
+    """The explicit ticket-store location override, or ``None`` when unset:
+    ``REBAR_TRACKER_DIR`` (canonical) or the deprecated ``TICKETS_TRACKER_DIR``
+    (honored during the rename window with a one-time deprecation warning). The
+    decoupled/relocated store is a supported feature (EV-3b)."""
+    val = os.environ.get("REBAR_TRACKER_DIR")
+    if val:
+        return val
+    legacy = os.environ.get("TICKETS_TRACKER_DIR")
+    if legacy:
+        _warn_once_legacy_env("TICKETS_TRACKER_DIR", "REBAR_TRACKER_DIR")
+        return legacy
+    return None
+
+
 def tracker_dir(root: str | os.PathLike[str] | None = None) -> Path:
-    """Path to the ticket event store (.tickets-tracker), honoring the env override."""
-    env = os.environ.get("TICKETS_TRACKER_DIR")
+    """Path to the ticket event store (.tickets-tracker), honoring the env override
+    (``REBAR_TRACKER_DIR``, deprecated alias ``TICKETS_TRACKER_DIR``)."""
+    env = tracker_dir_override()
     if env:
         return Path(env)
     return repo_root(root) / ".tickets-tracker"
@@ -349,6 +376,7 @@ def reset_config_cache() -> None:
     long-running host may call it to force a re-read after editing config files."""
     _TOML_CACHE.clear()
     _RESULT_CACHE.clear()
+    _WARNED_LEGACY_ENV.clear()
 
 
 def _parse_toml(path: Path) -> dict:

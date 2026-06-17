@@ -3,7 +3,7 @@
 In-process port of tests/scripts/test-format-ticket-id-symlink.sh (bug
 3203-236a-09bc-44f4: the bash fallback used ``find`` without ``-L``, silently
 returning zero results when ``.tickets-tracker`` is reached via a symlink — common
-in worktree sessions where ``TICKETS_TRACKER_DIR`` points at a symlink). The
+in worktree sessions where ``REBAR_TRACKER_DIR`` points at a symlink). The
 in-process resolver walks with ``os.listdir``/``os.path.isdir`` (which follow
 symlinks), so both ``short`` and ``auto`` must return a valid short form.
 """
@@ -26,11 +26,11 @@ def _format(argv: list[str], capsys: pytest.CaptureFixture[str]) -> tuple[str, i
 
 @pytest.fixture
 def symlinked_tracker(rebar_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
-    """A symlink pointing at the repo's real tracker; sets TICKETS_TRACKER_DIR to it."""
+    """A symlink pointing at the repo's real tracker; sets REBAR_TRACKER_DIR to it."""
     link = tmp_path / "tracker-link"
     link.symlink_to(rebar_repo / ".tickets-tracker")
     assert link.is_symlink() and link.is_dir()
-    monkeypatch.setenv("TICKETS_TRACKER_DIR", str(link))
+    monkeypatch.setenv("REBAR_TRACKER_DIR", str(link))
     return str(link)
 
 

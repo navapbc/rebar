@@ -276,7 +276,7 @@ class DeepAgentsRunner:
     deepagents' native filesystem over a repo-rooted ``FilesystemBackend``, made
     **read-only** via a write-denying ``FilesystemPermission`` (confined to the
     repo root), plus **read-deny** rules over our state-dir deny-list
-    (`.git`/`.tickets-tracker`/`.bridge_state`, incl. the TICKETS_TRACKER_DIR
+    (`.git`/`.tickets-tracker`/`.bridge_state`, incl. the REBAR_TRACKER_DIR/TICKETS_TRACKER_DIR
     override) so internal state can't be read here either — same guarantee the
     default langgraph runner enforces. Output is still constrained to our findings
     schema, so it returns a review_result."""

@@ -59,6 +59,7 @@ def inbound_differ():
 @pytest.fixture
 def fixture_repo(tmp_path, monkeypatch):
     """Isolated tracker directory for each test."""
+    monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
     monkeypatch.delenv("TICKETS_TRACKER_DIR", raising=False)
     monkeypatch.delenv("REBAR_ENV_ID", raising=False)
     monkeypatch.delenv("REBAR_AUTHOR", raising=False)

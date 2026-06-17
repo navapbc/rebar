@@ -109,9 +109,9 @@ def fsck_recover_cli(argv: list[str], *, repo_root=None) -> int:
             return 2
 
     if not tracker_dir:
-        # Default: config-resolved tracker (TICKETS_TRACKER_DIR > repo_root >
+        # Default: config-resolved tracker (REBAR_TRACKER_DIR/TICKETS_TRACKER_DIR > repo_root >
         # REBAR_ROOT > git toplevel) so the library's repo_root and the
-        # dispatcher's TICKETS_TRACKER_DIR translation both work. In production
+        # dispatcher's tracker-dir override translation both work. In production
         # (cwd=repo, no env override) this equals the bash git-toplevel resolution.
         from rebar import config
 

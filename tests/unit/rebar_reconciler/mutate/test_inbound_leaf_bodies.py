@@ -68,6 +68,7 @@ def fixture_repo(tmp_path, monkeypatch):
     locally but the event-file ``env_id``/``author`` diverge between local
     and CI runs (PR #375 review thread 3307104056).
     """
+    monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
     monkeypatch.delenv("TICKETS_TRACKER_DIR", raising=False)
     monkeypatch.delenv("REBAR_ENV_ID", raising=False)
     monkeypatch.delenv("REBAR_AUTHOR", raising=False)

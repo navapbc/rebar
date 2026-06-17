@@ -46,7 +46,7 @@ REPO_ROOT = Path(
     subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
 )
 # Drive the in-process rebar CLI; the bridge-status arm is fully in-process, and
-# with TICKETS_TRACKER_DIR injected the auto-init consent gate is bypassed
+# with REBAR_TRACKER_DIR injected the auto-init consent gate is bypassed
 # (ensure_initialized returns early).
 _CLI = in_process_cli()
 
@@ -65,12 +65,12 @@ def _run_bridge_status(
 ) -> subprocess.CompletedProcess:
     """Invoke 'rebar bridge-status' with the given tracker dir and optional args.
 
-    Passes TICKETS_TRACKER_DIR so the command reads from tmp_path rather than the
+    Passes REBAR_TRACKER_DIR so the command reads from tmp_path rather than the
     real repository's .tickets-tracker directory (and bypasses the auto-init gate).
     """
     env = {
         **os.environ,
-        "TICKETS_TRACKER_DIR": str(tracker_dir),
+        "REBAR_TRACKER_DIR": str(tracker_dir),
     }
     if env_override:
         env.update(env_override)

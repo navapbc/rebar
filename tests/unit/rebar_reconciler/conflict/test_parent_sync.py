@@ -451,16 +451,16 @@ class TestApplierInboundCreateParent:
             provenance={},
         )
 
-        # We use TICKETS_TRACKER_DIR env var to isolate the tracker dir
-        env_backup = os.environ.get("TICKETS_TRACKER_DIR")
+        # We use REBAR_TRACKER_DIR env var to isolate the tracker dir
+        env_backup = os.environ.get("REBAR_TRACKER_DIR")
         try:
-            os.environ["TICKETS_TRACKER_DIR"] = str(tracker_dir)
+            os.environ["REBAR_TRACKER_DIR"] = str(tracker_dir)
             applier.apply(mut, client=None, repo_root=tmp_path)
         finally:
             if env_backup is None:
-                os.environ.pop("TICKETS_TRACKER_DIR", None)
+                os.environ.pop("REBAR_TRACKER_DIR", None)
             else:
-                os.environ["TICKETS_TRACKER_DIR"] = env_backup
+                os.environ["REBAR_TRACKER_DIR"] = env_backup
 
         import json
 
@@ -542,15 +542,15 @@ class TestApplierInboundUpdateParent:
             provenance={},
         )
 
-        env_backup = os.environ.get("TICKETS_TRACKER_DIR")
+        env_backup = os.environ.get("REBAR_TRACKER_DIR")
         try:
-            os.environ["TICKETS_TRACKER_DIR"] = str(tracker_dir)
+            os.environ["REBAR_TRACKER_DIR"] = str(tracker_dir)
             applier.apply(mut, client=None, repo_root=tmp_path)
         finally:
             if env_backup is None:
-                os.environ.pop("TICKETS_TRACKER_DIR", None)
+                os.environ.pop("REBAR_TRACKER_DIR", None)
             else:
-                os.environ["TICKETS_TRACKER_DIR"] = env_backup
+                os.environ["REBAR_TRACKER_DIR"] = env_backup
 
         # Check that an EDIT event was written with parent_id in fields
         edit_events = list(ticket_dir.glob("*-EDIT.json"))

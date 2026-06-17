@@ -184,6 +184,7 @@ def git_repo(tmp_path, monkeypatch):
     tracker.mkdir()
     (tracker / ".env-id").write_text("integration-env-id", encoding="utf-8")
 
+    monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
     monkeypatch.delenv("TICKETS_TRACKER_DIR", raising=False)
     monkeypatch.delenv("REBAR_ENV_ID", raising=False)
     monkeypatch.delenv("REBAR_AUTHOR", raising=False)

@@ -301,7 +301,7 @@ def _multi_overlap(base: Path) -> None:
 def _run(tracker: Path, *args: str) -> subprocess.CompletedProcess:
     env = {
         **os.environ,
-        "TICKETS_TRACKER_DIR": str(tracker),
+        "REBAR_TRACKER_DIR": str(tracker),
         "REBAR_SYNC_PULL": "off",
         "REBAR_SYNC_PUSH": "off",
     }
@@ -396,7 +396,7 @@ def test_library_and_mcp_shape(tracker: Path, monkeypatch):
     from rebar.mcp_server import NextBatchOut
 
     _three_tier(tracker)
-    monkeypatch.setenv("TICKETS_TRACKER_DIR", str(tracker))
+    monkeypatch.setenv("REBAR_TRACKER_DIR", str(tracker))
     monkeypatch.setenv("REBAR_NO_SYNC", "1")
     d = rebar.next_batch("nb-epic")
     # Observable result (not just the size): the resolved epic, the selected

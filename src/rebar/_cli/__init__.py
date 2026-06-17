@@ -45,7 +45,7 @@ _SIGNING = frozenset({"sign", "verify-signature"})
 _LIFECYCLE = frozenset({"transition", "reopen", "claim"})
 # Compaction arms (E3): full auto-init before the in-process SNAPSHOT write.
 _COMPACT = frozenset({"compact", "compact-all"})
-# Bridge arms (E5): full auto-init UNLESS TICKETS_TRACKER_DIR is injected (test
+# Bridge arms (E5): full auto-init UNLESS a tracker override is injected (test
 # tracker), matching the dispatcher's `bridge-status`/`purge-bridge` arms.
 _BRIDGE = frozenset({"bridge-status", "bridge-fsck", "purge-bridge"})
 # Leaf-write arms: full auto-init + reconverge before the in-process write.
@@ -343,11 +343,11 @@ def _dispatch(sub: str, rest: list[str]) -> int:
 
         return _delete.delete_cli(rest)
     if sub in _BRIDGE:
-        # The dispatcher auto-inits only when no test tracker is injected.
-        if not os.environ.get("TICKETS_TRACKER_DIR"):
-            ensure_initialized(init_only=False)
         from rebar import config
 
+        # The dispatcher auto-inits only when no test tracker is injected.
+        if not config.tracker_dir_override():
+            ensure_initialized(init_only=False)
         tracker = str(config.tracker_dir())
         if sub == "bridge-status":
             from rebar._engine_support import bridge
@@ -366,9 +366,12 @@ def _dispatch(sub: str, rest: list[str]) -> int:
 
         return _fsck.fsck_cli(rest)
     if sub == "fsck-recover":
-        # The recover path resolves its own tracker (honors TICKETS_TRACKER_DIR /
-        # --tracker-dir); the dispatcher only auto-inits when no tracker is injected.
-        if not os.environ.get("TICKETS_TRACKER_DIR"):
+        # The recover path resolves its own tracker (honors REBAR_TRACKER_DIR /
+        # TICKETS_TRACKER_DIR / --tracker-dir); the dispatcher only auto-inits when
+        # no tracker is injected.
+        from rebar import config
+
+        if not config.tracker_dir_override():
             ensure_initialized(init_only=False)
         from rebar._commands import fsck_recover as _fsck_recover
 

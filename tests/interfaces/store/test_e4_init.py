@@ -30,6 +30,7 @@ def fresh_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     subprocess.run(["git", "config", "user.name", "T"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "base"], cwd=repo, check=True)
     monkeypatch.setenv("REBAR_ROOT", str(repo))
+    monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
     monkeypatch.delenv("TICKETS_TRACKER_DIR", raising=False)
     monkeypatch.setenv("REBAR_SYNC_PULL", "off")
     monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
