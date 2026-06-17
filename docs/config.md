@@ -55,11 +55,18 @@ For any key, the first layer that provides a value wins:
 
 ```
 1. explicit CLI flag                 (e.g. --no-pull, --output)
+   + `rebar -c SECTION.KEY=VALUE …`  (git -c style, repeatable, before the subcommand)
 2. REBAR_<KEY> environment variable  (dots → underscores, uppercased)
 3. project config  (rebar.toml | [tool.rebar] in pyproject.toml, nearest up-tree)
 4. user config     ($XDG_CONFIG_HOME/rebar/config.toml | ~/.config/rebar/config.toml)
 5. built-in default
 ```
+
+The generic `rebar -c SECTION.KEY=VALUE <subcommand>` override populates the
+highest-precedence **`cli`** layer for the whole invocation (every consumer — the
+verify gate, push/pull policy, display mode, …). `rebar config -c sync.push=off`
+shows the resolved value tagged `[cli]`. A malformed `-c` pair (missing `=` or a
+non-dotted key) is a clean error, not a traceback.
 
 `$REBAR_CONFIG` (a file path) short-circuits discovery and names the project
 config explicitly (matches `RUFF_CONFIG` / `PIP_CONFIG_FILE` / `UV_CONFIG_FILE`).

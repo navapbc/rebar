@@ -373,14 +373,52 @@ _TOML_CACHE: dict[tuple[str, int, int], dict] = {}
 # value: (config, validation) where validation is a tuple of file stat-tokens.
 _RESULT_CACHE: dict[tuple, tuple[Config, tuple]] = {}
 
+# Process-wide CLI overrides (the highest-precedence ``cli`` layer). Set once by the
+# ``rebar`` CLI from ``-c section.key=value`` flags (git -c style); None for the
+# library/MCP unless a caller passes ``cli_overrides=`` explicitly. load_config /
+# resolve_with_sources fall back to this when no explicit ``cli_overrides`` arg is
+# given, so the documented CLI-wins precedence holds across every config consumer
+# without threading the overrides through every call site.
+_CLI_OVERRIDES: dict | None = None
+
+
+def set_cli_overrides(overrides: dict | None) -> None:
+    """Install the process-wide ``cli`` override layer (or clear it with ``None``).
+    Invalidates the resolved-Config cache so the next resolve reflects the change."""
+    global _CLI_OVERRIDES
+    _CLI_OVERRIDES = overrides
+    _RESULT_CACHE.clear()
+
+
+def parse_cli_overrides(pairs: list[str]) -> dict:
+    """Parse ``section.key=value`` strings (the ``rebar -c`` flag) into a nested
+    sparse mapping. Raises :class:`ConfigError` on a malformed pair (missing ``=``
+    or a non-dotted key) so a typo'd override fails loudly rather than being dropped."""
+    out: dict[str, dict] = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise ConfigError(f"--config override {pair!r}: expected SECTION.KEY=VALUE")
+        dotted, _, value = pair.partition("=")
+        dotted = dotted.strip()
+        if "." not in dotted:
+            raise ConfigError(
+                f"--config override {pair!r}: key must be dotted SECTION.KEY (got {dotted!r})"
+            )
+        sect, key = dotted.split(".", 1)
+        out.setdefault(sect.strip(), {})[key.strip()] = value
+    return out
+
 
 def reset_config_cache() -> None:
-    """Clear the config resolution caches (parsed-TOML + resolved-Config). For one-
-    shot CLI processes this is never needed; tests call it between cases, and a
-    long-running host may call it to force a re-read after editing config files."""
+    """Clear the config resolution caches (parsed-TOML + resolved-Config) and the
+    process-wide CLI overrides. For one-shot CLI processes this is never needed;
+    tests call it between cases, and a long-running host may call it to force a
+    re-read after editing config files."""
+    global _CLI_OVERRIDES
     _TOML_CACHE.clear()
     _RESULT_CACHE.clear()
     _WARNED_LEGACY_ENV.clear()
+    _CLI_OVERRIDES = None
 
 
 def _parse_toml(path: Path) -> dict:
@@ -668,19 +706,24 @@ def load_config(
     command hot path skip the discovery walk + parse, but a warm hit re-stats the
     files it read and re-resolves if any changed (so an in-process config edit — incl.
     the verify gate — is honored). A :class:`ConfigError` is propagated and NOT cached
-    (the gate re-evaluates fail-closed every call). See :func:`reset_config_cache`."""
+    (the gate re-evaluates fail-closed every call). See :func:`reset_config_cache`.
+
+    ``cli_overrides`` defaults to the process-wide :data:`_CLI_OVERRIDES` (set by the
+    ``rebar -c`` flag); pass an explicit dict to override it, or an explicit ``{}`` to
+    deliberately opt OUT of the process global (no ``cli`` layer for this call)."""
+    effective_cli = cli_overrides if cli_overrides is not None else _CLI_OVERRIDES
     key = (
         str(root) if root is not None else None,
         os.getcwd() if root is None else None,  # cwd resolves the root when implicit
         _env_signature(),
-        _cli_signature(cli_overrides),
+        _cli_signature(effective_cli),
     )
     entry = _RESULT_CACHE.get(key)
     if entry is not None:
         cfg, validation = entry
         if all(_file_token(Path(tok[0])) == tok for tok in validation):
             return cfg  # every file it read is unchanged → cache is fresh
-    cfg, validation = _resolve(root, cli_overrides)
+    cfg, validation = _resolve(root, effective_cli)
     _RESULT_CACHE[key] = (cfg, validation)
     return cfg
 
@@ -697,8 +740,9 @@ def resolve_with_sources(
     (the precedence-transparency command). Resolution reuses the exact same layers
     as :func:`load_config`, so the reported provenance can never disagree with the
     value that load actually produced."""
+    effective_cli = cli_overrides if cli_overrides is not None else _CLI_OVERRIDES
     layers, project = _ordered_layers(
-        root, cli_overrides=cli_overrides, strict=_strict_unknown_keys()
+        root, cli_overrides=effective_cli, strict=_strict_unknown_keys()
     )
     config = Config.from_mapping(merge_sparse(*(sparse for _, sparse in layers)))
     sources: dict[str, dict[str, str]] = {}

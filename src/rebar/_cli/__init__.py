@@ -440,6 +440,29 @@ def main(argv: list[str] | None = None) -> int:
     """
     argv = list(sys.argv[1:] if argv is None else argv)
 
+    # Global config overrides (git -c style): `rebar -c section.key=value [...] <cmd>`,
+    # repeatable, BEFORE the subcommand. They install the highest-precedence `cli`
+    # layer (CLI > env > project > user > defaults) for every config consumer this
+    # invocation — the verify gate, push/pull policy, display mode, etc.
+    _overrides: list[str] = []
+    while argv and (argv[0] in ("-c", "--config") or argv[0].startswith("--config=")):
+        tok = argv.pop(0)
+        if tok.startswith("--config="):
+            _overrides.append(tok[len("--config=") :])
+        elif argv:
+            _overrides.append(argv.pop(0))
+        else:
+            sys.stderr.write(f"Error: {tok} requires a SECTION.KEY=VALUE argument\n")
+            return 1
+    if _overrides:
+        from rebar import config as _config
+
+        try:
+            _config.set_cli_overrides(_config.parse_cli_overrides(_overrides))
+        except _config.ConfigError as exc:
+            sys.stderr.write(f"Error: {exc}\n")
+            return 1
+
     # reconcile intercept (the dispatcher has no reconcile arm).
     if argv and argv[0] == "reconcile":
         return _reconcile(argv[1:])
