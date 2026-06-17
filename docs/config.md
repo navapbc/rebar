@@ -107,39 +107,60 @@ mcp.allow_jira_sync  = false   # live (applying) Jira writes (alias env REBAR_MC
 scratch.base_dir = ""   # default <repo>/.rebar/scratch (env REBAR_SCRATCH_BASE_DIR; alias SCRATCH_BASE_DIR)
 ```
 
-### Advanced tunables — currently ENV-configured (config-file routing: ticket `0ac6`)
+### Reconciler + Jira tunables — config-file wired (consumed via `load_config`)
 
-`reconciler.*` and `jira.*` exist in the typed Config schema (so `rebar config` reports
-them) but their consumers — the Jira reconciler — read the env vars below directly; a
-`[tool.rebar.reconciler]`/`[tool.rebar.jira]` *file* value is parsed but **not yet
-consumed**. `llm.*` is not a core Config section at all (it lives in the optional
-`rebar.llm` layer so the stdlib core never imports the agents extra) and is resolved
-env-only by `LLMConfig.from_env`. Wiring all three to the config file is tracked by
-`0ac6`; today, configure them via the environment:
+`reconciler.*` and `jira.*` are settable in `[tool.rebar.reconciler]` /
+`[tool.rebar.jira]` (or `rebar.toml` `[reconciler]`/`[jira]`, or the legacy
+`.rebar/config.conf`), reported by `rebar config`, and **consumed** by the Jira
+reconciler — the file value is overridden by the env var, then by
+`rebar -c SECTION.KEY=VALUE`. Their env overrides keep the ERGONOMIC / Atlassian-
+standard names, which deliberately differ from the auto-derived
+`REBAR_<SECTION>_<KEY>` (a per-key canonical-env-name map in `config.py`):
 
+```toml
+[tool.rebar.reconciler]   # advanced; sensible defaults, rarely needed
+jira_cli_timeout       = 0     # acli call timeout (s); 0 ⇒ the 120s default. env REBAR_JIRA_CLI_TIMEOUT (alias REBAR_ACLI_TIMEOUT)
+lock_max_retries       = 5     # advisory-lock outer retries.    env REBAR_RECONCILER_LOCK_MAX_RETRIES (alias REBAR_RECONCILER_LOCK_RETRY_BUDGET)
+deletion_probe_limit   = 20    # GET probes to confirm a deletion. env REBAR_RECONCILER_DELETION_PROBE_LIMIT (alias RECONCILER_ABSENT_GET_BUDGET)
+id_guard_bypass_unsafe = false # TEMPORARY bypass of the rebar-id write guard — do NOT leave on; fail-CLOSED.
+                               # env REBAR_UNSAFE_ID_GUARD_BYPASS; deprecated REBAR_ID_GUARD_MODE env + legacy flat
+                               # `rebar_id_guard_mode` key (value-flip: warn→true/bypass, raise→false/guard)
+
+[tool.rebar.jira]   # Atlassian-standard, UNPREFIXED env names
+url     = ""   # env JIRA_URL
+user    = ""   # env JIRA_USER
+project = ""   # env JIRA_PROJECT  (the reconciler substitutes "DIG" when empty on CREATE)
 ```
-# reconciler (advanced; sensible defaults, rarely needed) — env names, deprecated aliases in ()
-REBAR_JIRA_CLI_TIMEOUT              # acli (Atlassian CLI) call timeout   (REBAR_ACLI_TIMEOUT)
-REBAR_RECONCILER_LOCK_MAX_RETRIES  # advisory-lock retries               (REBAR_RECONCILER_LOCK_RETRY_BUDGET)
-REBAR_RECONCILER_DELETION_PROBE_LIMIT  # GETs to confirm a deletion      (RECONCILER_ABSENT_GET_BUDGET)
-REBAR_UNSAFE_ID_GUARD_BYPASS=true  # TEMPORARY bypass of the rebar-id write guard — do NOT leave on
-                                   # (deprecated: REBAR_ID_GUARD_MODE=warn; raise->false, warn->true)
 
-# Jira reconciler (Atlassian-standard names; secret JIRA_API_TOKEN below)
-JIRA_URL  /  JIRA_USER  /  JIRA_PROJECT
+The SECRET `JIRA_API_TOKEN` stays env-only — never a config key (see Secrets).
 
-# LLM framework (optional [agents] extra; runner DERIVED, not configured)
-REBAR_LLM_MODEL            # default claude-opus-4-8
-REBAR_LLM_MODEL_PROVIDER   # inferred from model when empty
-REBAR_LLM_BASE_URL         # OpenAI-compatible endpoint
-REBAR_LLM_MAX_TOKENS       # default 8000
-REBAR_LLM_MAX_STEPS        # max agent loop steps (~2 per tool call), default 25  (REBAR_LLM_MAX_ITERS)
-REBAR_LLM_TIMEOUT          # wall-clock seconds, default 600
-REBAR_LLM_MCP_SERVERS      # JSON object of MCP servers
-REBAR_LLM_REPO_PATH        # repo the review agent's read-only file tools see (default: repo root)
-REBAR_LLM_EXPERIMENTAL_HARNESS=deepagents  # opt into the experimental harness; else langflow (if
-                           # LANGFLOW_URL+LANGFLOW_FLOW_ID set) else langgraph; `fake` is library-arg-only
+### LLM framework (`llm.*`) — optional `[agents]` extra, `[tool.rebar.llm]`
+
+`llm.*` is resolved by the optional `rebar.llm` layer (`LLMConfig.from_env`), NOT
+the stdlib-core typed Config — so importing `rebar.llm` never pulls the agents
+stack into core, and `llm.*` is **not** reported by `rebar config`. It is a
+*reserved* section: the core loader recognises `[tool.rebar.llm]` and never warns
+on it (nor rejects it under `REBAR_CONFIG_UNKNOWN_KEYS=error`), but does not parse
+it into `Config`. The non-secret knobs are settable in the file and resolved
+`rebar -c llm.KEY=VALUE` > `REBAR_LLM_<KEY>` env > config file > default:
+
+```toml
+[tool.rebar.llm]
+model          = "claude-opus-4-8"   # env REBAR_LLM_MODEL
+model_provider = ""                  # env REBAR_LLM_MODEL_PROVIDER (inferred from the model name when empty)
+base_url       = ""                  # env REBAR_LLM_BASE_URL (OpenAI-compatible endpoint)
+max_tokens     = 8000                # env REBAR_LLM_MAX_TOKENS
+max_steps      = 25                  # env REBAR_LLM_MAX_STEPS (alias REBAR_LLM_MAX_ITERS); ~2 steps per tool call
+timeout        = 600                 # env REBAR_LLM_TIMEOUT (wall-clock s)
+mcp_servers    = {}                  # env REBAR_LLM_MCP_SERVERS (JSON); a TOML inline table in-file
 ```
+
+Env-only (NOT `[tool.rebar.llm]` keys): the secret `REBAR_LLM_API_KEY`; the
+runtime-only `REBAR_LLM_REPO_PATH` (which repo the review agent's read-only file
+tools see — an invocation-specific override, default the repo root); and the
+DERIVED runner — `REBAR_LLM_EXPERIMENTAL_HARNESS=deepagents` opts into the
+experimental harness, else `langflow` when `LANGFLOW_URL`+`LANGFLOW_FLOW_ID` are
+set, else in-process `langgraph` (`fake` is a library-arg-only test seam).
 
 ### Secrets — environment / `.env` only (never the config file)
 
