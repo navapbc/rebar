@@ -495,25 +495,54 @@ def _scan_secret_literals(doc: dict[str, Any]) -> list[LintFinding]:
 # ── The one-pass collector ────────────────────────────────────────────────────
 
 
+# Variables the agent runner always supplies to a prompt (RunnerAgentStep); a
+# step needn't declare these in `with`.
+_ENGINE_PROVIDED_VARS = frozenset({"ticket_id", "ticket_context", "repo_path"})
+
+
 def lint_prompt_refs(doc: dict[str, Any], *, repo_root=None) -> list[LintFinding]:
-    """Validate every agent step's ``prompt:`` ref resolves to a real prompt (WS-F2):
-    a catalog reviewer or a ``.rebar/prompts/<id>.md`` file. Imports the (stdlib-only)
-    prompt registry lazily so the core linter stays free of that coupling."""
-    from rebar.llm.prompts import prompt_ref_exists
+    """Validate every agent step's ``prompt:`` ref (WS-F2): it must resolve to a real
+    prompt (a catalog reviewer or a ``.rebar/prompts/<id>.md`` file), AND the step's
+    inputs must satisfy the prompt's declared required-variable schema. Imports the
+    (stdlib-only) prompt registry lazily so the core linter stays uncoupled."""
+    from rebar.llm.prompts import get_reviewer, load_catalog, prompt_input_schema, prompt_ref_exists
 
     findings: list[LintFinding] = []
+    catalog = load_catalog()
     for step in doc.get("steps", []):
         if not isinstance(step, dict) or step_kind(step) != "agent":
             continue
         prompt_id = step.get("prompt")
-        if isinstance(prompt_id, str) and not prompt_ref_exists(prompt_id, repo_root=repo_root):
+        if not isinstance(prompt_id, str):
+            continue
+        loc = f"steps[{step.get('id', '?')}].prompt"
+        if not prompt_ref_exists(prompt_id, repo_root=repo_root):
             findings.append(
                 LintFinding(
-                    f"steps[{step.get('id', '?')}].prompt",
+                    loc,
                     f"prompt {prompt_id!r} does not resolve to a known reviewer or a "
                     f".rebar/prompts/{prompt_id}.md file",
                 )
             )
+            continue
+        # Schema satisfaction: the prompt's required vars must be engine-provided or
+        # supplied via the step's `with`. (Checked for catalog reviewers, whose schema
+        # we can resolve; user-file prompts are existence-checked above.)
+        if prompt_id in catalog:
+            try:
+                schema = prompt_input_schema(get_reviewer(prompt_id), repo_root=repo_root)
+            except Exception:  # a malformed prompt is the prompt's own lint, not this
+                continue
+            available = _ENGINE_PROVIDED_VARS | set((step.get("with") or {}).keys())
+            missing = sorted(set(schema.get("required", [])) - available)
+            if missing:
+                findings.append(
+                    LintFinding(
+                        loc,
+                        f"prompt {prompt_id!r} requires input(s) {missing} that the step "
+                        f"neither supplies via `with` nor receives from the engine",
+                    )
+                )
     return findings
 
 

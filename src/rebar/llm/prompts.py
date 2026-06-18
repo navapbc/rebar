@@ -110,20 +110,145 @@ def _render_strict(template: str, variables: dict) -> str:
     return _VAR.sub(lambda m: str(variables[m.group(1)]), template)
 
 
-def canonical_prompt_text(reviewer: Reviewer, *, repo_root=None) -> str:
-    """The GIT-CANONICAL prompt text for a reviewer (WS-F1).
+# ── front-matter + variant overlays (WS-F2) ──────────────────────────────────
 
-    A user override at ``<repo>/.rebar/prompts/<id>.md`` wins (local, git-tracked in
-    the user's repo); otherwise the packaged ``reviewers/*.md`` (committed in this
-    repo) is canonical. Langfuse is NEVER consulted here."""
+_FRONT_MATTER = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
+# Overlay sentinel: a variant body may include its base/parent here. Chosen as an
+# HTML comment so it never collides with {{var}} rendering.
+_BASE_MARKER = "<!--base-->"
+
+
+def parse_front_matter(text: str) -> tuple[dict, str]:
+    """Split an optional YAML front-matter block off a prompt file → ``(meta, body)``.
+
+    A prompt may begin with ``---\\n<yaml>\\n---\\n``; declared keys are
+    ``variables`` (the vars the template uses), ``required`` (subset that MUST be
+    supplied), and ``variant_of`` (a parent prompt id for overlay chaining). No
+    front-matter → ``({}, text)`` (so existing front-matter-less prompts are
+    unchanged)."""
+    m = _FRONT_MATTER.match(text)
+    if not m:
+        return {}, text
+    import yaml
+
+    try:
+        meta = yaml.safe_load(m.group(1)) or {}
+    except yaml.YAMLError as exc:
+        raise PromptError(f"invalid prompt front-matter: {exc}") from None
+    if not isinstance(meta, dict):
+        raise PromptError("prompt front-matter must be a mapping")
+    return meta, text[m.end() :]
+
+
+def _prompt_file(reviewer: Reviewer, repo_root, variant: str | None):
+    """The file for a reviewer's base or ``<id>.<variant>`` prompt — a user
+    ``.rebar/prompts/`` override wins over the packaged ``reviewers/`` copy."""
+    suffix = f".{variant}" if variant else ""
     if repo_root:
-        override = Path(repo_root) / ".rebar" / "prompts" / f"{reviewer.id}.md"
+        user = Path(repo_root) / ".rebar" / "prompts" / f"{reviewer.id}{suffix}.md"
         try:
-            if override.is_file():
-                return override.read_text(encoding="utf-8")
+            if user.is_file():
+                return user.read_text(encoding="utf-8")
         except OSError:
             pass
-    return packaged_prompt_text(reviewer)
+    if reviewer.fallback_file:
+        stem = (
+            reviewer.fallback_file[:-3]
+            if reviewer.fallback_file.endswith(".md")
+            else (reviewer.fallback_file)
+        )
+        pkg = _catalog_dir().joinpath(f"{stem}{suffix}.md")
+        try:
+            return pkg.read_text(encoding="utf-8")
+        except (OSError, FileNotFoundError):
+            pass
+    return None
+
+
+def load_prompt(
+    reviewer: Reviewer, *, repo_root=None, variant: str | None = None, _seen: set | None = None
+) -> tuple[str, dict]:
+    """Resolve a reviewer's prompt to ``(body, meta)`` — front-matter stripped and
+    variant overlay applied (WS-F2).
+
+    A variant (``<id>.<variant>.md``) overlays a base: its front-matter ``variant_of``
+    names the parent (default: the base), and its body may include the parent via the
+    ``<!--base-->`` marker (no marker → it is a full override). The ``variant_of``
+    chain is cycle-guarded."""
+    _seen = _seen if _seen is not None else set()
+    key = variant or "<base>"
+    if key in _seen:
+        raise PromptError(f"prompt variant cycle detected at {key!r} for {reviewer.id!r}")
+    _seen.add(key)
+
+    raw = _prompt_file(reviewer, repo_root, variant)
+    if raw is None:
+        if variant:
+            raise PromptError(f"unknown prompt variant {variant!r} for reviewer {reviewer.id!r}")
+        raw = ""  # a reviewer with no fallback_file resolves to empty (legacy behavior)
+    meta, body = parse_front_matter(raw)
+
+    if variant:
+        parent = meta.get("variant_of")  # None → overlay onto the base
+        parent_body, parent_meta = load_prompt(
+            reviewer, repo_root=repo_root, variant=parent, _seen=_seen
+        )
+        if _BASE_MARKER in body:
+            body = body.replace(_BASE_MARKER, parent_body)
+        merged = {**parent_meta, **meta}
+        merged.pop("variant_of", None)
+        return body, merged
+    return body, meta
+
+
+def canonical_prompt_text(reviewer: Reviewer, *, repo_root=None, variant: str | None = None) -> str:
+    """The GIT-CANONICAL prompt text for a reviewer (WS-F1/F2): the committed prompt
+    file's body (front-matter stripped, variant overlay applied). A user
+    ``.rebar/prompts/<id>.md`` override wins over the packaged ``reviewers/*.md``;
+    Langfuse is NEVER consulted."""
+    return load_prompt(reviewer, repo_root=repo_root, variant=variant)[0]
+
+
+def prompt_input_schema(reviewer: Reviewer, *, repo_root=None, variant: str | None = None) -> dict:
+    """A JSON Schema for a prompt's declared input variables (WS-F2).
+
+    Properties = the declared ``variables`` (string-typed); ``required`` = the
+    declared required subset (or ALL declared variables when ``required`` is
+    unspecified). Falls back to the template's actually-used ``{{vars}}`` when no
+    front-matter declares them. ``additionalProperties`` is allowed (the engine
+    supplies extra context like ``repo_path``)."""
+    body, meta = load_prompt(reviewer, repo_root=repo_root, variant=variant)
+    declared = list(meta.get("variables") or sorted(template_variables(body)))
+    required = list(meta.get("required", declared))
+    return {
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {v: {"type": "string"} for v in declared},
+        "required": [r for r in required if r in declared],
+    }
+
+
+def check_prompt_parity(
+    reviewer: Reviewer, *, repo_root=None, variant: str | None = None
+) -> list[str]:
+    """Parity gate (WS-F2): diff a prompt's DECLARED front-matter ``variables`` vs the
+    vars its template actually uses. A used-but-undeclared var is an error; a
+    declared-but-unused var is an error. No declared front-matter → no findings (the
+    template's used vars are self-declaring; the universe gate covers those)."""
+    body, meta = load_prompt(reviewer, repo_root=repo_root, variant=variant)
+    if "variables" not in meta:
+        return []
+    declared = set(meta.get("variables") or [])
+    used = template_variables(body)
+    errors: list[str] = []
+    for v in sorted(used - declared):
+        errors.append(f"variable {{{{{v}}}}} used in template but not declared in front-matter")
+    for v in sorted(declared - used):
+        errors.append(f"variable {v!r} declared in front-matter but unused in template")
+    bad_required = set(meta.get("required") or []) - declared
+    for v in sorted(bad_required):
+        errors.append(f"required variable {v!r} is not in declared variables")
+    return errors
 
 
 def prompt_ref_exists(prompt_id: str, *, repo_root=None) -> bool:
@@ -147,27 +272,39 @@ def prompt_content_hash(text: str) -> str:
 
 
 def resolve_prompt(
-    reviewer: Reviewer, variables: dict, langfuse_cfg=None, *, repo_root=None
+    reviewer: Reviewer,
+    variables: dict,
+    langfuse_cfg=None,
+    *,
+    repo_root=None,
+    variant: str | None = None,
 ) -> tuple[str, dict]:
-    """Resolve a reviewer's system prompt → ``(compiled_text, prompt_meta)`` (WS-F1).
+    """Resolve a reviewer's system prompt → ``(compiled_text, prompt_meta)`` (WS-F1/F2).
 
-    GIT-CANONICAL: the text is the committed prompt file (a user
-    ``.rebar/prompts/<id>.md`` override, else the packaged ``*.md``); **Langfuse is
-    never consulted for the text** (read-replica only). Rendering is strict. The
-    returned ``prompt_meta`` carries the content hash + provenance and is threaded
+    GIT-CANONICAL: the text is the committed prompt file's body (a user
+    ``.rebar/prompts/<id>.md`` override, else the packaged ``*.md``), with front-matter
+    stripped and any ``variant`` overlay applied; **Langfuse is never consulted for
+    the text** (read-replica only). Front-matter-declared ``required`` variables must
+    be supplied (else PromptError), and rendering is strict on used vars. The returned
+    ``prompt_meta`` carries the content hash + provenance + variant and is threaded
     into the trace (via RunRequest.langfuse_prompt), so the exact prompt bytes that
     ran are recorded and any divergence from a Langfuse copy is visible.
 
     ``langfuse_cfg`` is accepted for call-site compatibility but no longer drives a
     text fetch."""
-    text = canonical_prompt_text(reviewer, repo_root=repo_root)
-    compiled = _render_strict(text, variables)
-    meta = {
+    body, meta = load_prompt(reviewer, repo_root=repo_root, variant=variant)
+    missing_required = sorted(set(meta.get("required") or []) - set(variables))
+    if missing_required:
+        raise PromptError(
+            f"prompt {reviewer.id!r} requires variable(s) {missing_required} that were not supplied"
+        )
+    compiled = _render_strict(body, variables)
+    return compiled, {
         "prompt_id": reviewer.id,
-        "content_sha256": prompt_content_hash(text),
+        "content_sha256": prompt_content_hash(body),
         "source": "git",
+        "variant": variant,
     }
-    return compiled, meta
 
 
 def _glob_match(path: str, pattern: str) -> bool:
