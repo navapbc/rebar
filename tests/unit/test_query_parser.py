@@ -46,6 +46,14 @@ def test_negation_on_predicate_and_text() -> None:
     assert ("login", True) in terms
 
 
+def test_bare_negation_token_is_a_noop() -> None:
+    # A lone ``not:`` / ``-`` has no body — it must drop out, NOT become an
+    # empty substring term (which matches everything and would empty a negated
+    # result set).
+    assert parse_query("not:") == ([], [])
+    assert parse_query("keeper not:") == ([], [("keeper", False)])
+
+
 def test_unknown_field_degrades_to_substring() -> None:
     # Unknown field:value must NOT raise and must NOT become a predicate.
     preds, terms = parse_query("foo:bar")

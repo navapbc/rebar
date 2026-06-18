@@ -81,6 +81,38 @@ def test_compacted_then_untouched_reports_compacted_at(rebar_repo: Path) -> None
     assert rebar.show_ticket(tid)["updated_at"] == compacted_at
 
 
+def test_stale_pre_p1_1_cache_is_invalidated(rebar_repo: Path) -> None:
+    # A .cache.json written before updated_at existed (an OLDER reducer-cache
+    # version) must be invalidated by the version bump, not served verbatim —
+    # otherwise every untouched ticket would report updated_at=None post-upgrade.
+    import os
+
+    from rebar.reducer import _cache
+    from rebar.reducer._api import reduce_ticket
+    from rebar.reducer._cache import compute_dir_hash, write_cache
+
+    tid = rebar.create_ticket("task", "cache check")
+    tdir = str(rebar_repo / ".tickets-tracker" / tid)
+    events = sorted(f for f in os.listdir(tdir) if f.endswith(".json") and not f.startswith("."))
+
+    # Forge a cache as the PREVIOUS version (2) would have: a reduced state with
+    # NO updated_at, keyed by the dir-hash that version 2 produced.
+    old_version = 2
+    saved = _cache._REDUCER_CACHE_VERSION
+    try:
+        _cache._REDUCER_CACHE_VERSION = old_version
+        old_hash = compute_dir_hash(tdir, events)
+        stale_state = {k: v for k, v in reduce_ticket(tdir).items() if k != "updated_at"}
+    finally:
+        _cache._REDUCER_CACHE_VERSION = saved
+    write_cache(str(Path(tdir) / ".cache.json"), old_hash, stale_state, tdir)
+
+    # Under the current version the old hash no longer matches → cache miss →
+    # updated_at re-derived rather than served as None.
+    st = reduce_ticket(tdir)
+    assert st.get("updated_at") is not None
+
+
 def test_updated_at_survives_post_snapshot_event(rebar_repo: Path) -> None:
     tid = rebar.create_ticket("task", "compact then touch")
     rebar.comment(tid, "c1")

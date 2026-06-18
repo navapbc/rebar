@@ -127,6 +127,58 @@ def test_plain_search_backcompat_unchanged(rebar_repo: Path) -> None:
     assert set(_ids(rebar.search("ZEPHYR"))) == {a, b}  # case-insensitive
 
 
+def test_sort_by_updated_orders_by_derived_timestamp(rebar_repo: Path) -> None:
+    # The one sort dimension that depends on derived state. Touch the tickets in
+    # a known order so updated_at strictly increases, then assert -updated puts
+    # the most-recently-touched first. (Also guards against the cache serving a
+    # stale updated_at=None.)
+    a = rebar.create_ticket("task", "touch alpha")
+    b = rebar.create_ticket("task", "touch beta")
+    c = rebar.create_ticket("task", "touch gamma")
+    rebar.comment(c, "touch c first")
+    rebar.comment(b, "touch b second")
+    rebar.comment(a, "touch a last")  # a is now the most recently updated
+
+    assert _ids(rebar.search("touch", sort="-updated")) == [a, b, c]
+    assert _ids(rebar.search("touch", sort="updated")) == [c, b, a]
+
+
+def test_list_sort(rebar_repo: Path) -> None:
+    p0 = rebar.create_ticket("task", "list p0", priority=0)
+    p3 = rebar.create_ticket("task", "list p3", priority=3)
+    ids = [t["ticket_id"] for t in rebar.list_tickets(sort="priority")]
+    # p0 precedes p3 in ascending priority order.
+    assert ids.index(p0) < ids.index(p3)
+
+
+def test_ready_sort(rebar_repo: Path) -> None:
+    p0 = rebar.create_ticket("task", "ready p0", priority=0)
+    p4 = rebar.create_ticket("task", "ready p4", priority=4)
+    ids = [t["ticket_id"] for t in rebar.ready(sort="-priority")]
+    assert ids.index(p4) < ids.index(p0)  # descending → p4 first
+
+
+def test_priority_range_predicate_e2e(rebar_repo: Path) -> None:
+    p0 = rebar.create_ticket("bug", "range p0", priority=0)
+    p2 = rebar.create_ticket("bug", "range p2", priority=2)
+    p4 = rebar.create_ticket("bug", "range p4", priority=4)
+    hits = set(_ids(rebar.search("range priority:1..3")))
+    assert hits == {p2}
+    assert p0 not in hits and p4 not in hits
+    # Open-ended: *..2 keeps 0 and 2, drops 4.
+    assert set(_ids(rebar.search("range priority:*..2"))) == {p0, p2}
+
+
+def test_parent_alias_resolution_e2e(rebar_repo: Path) -> None:
+    epic = rebar.create_ticket("epic", "parent epic", return_alias=True)
+    child = rebar.create_ticket("task", "child of epic", parent=epic["id"])
+    rebar.create_ticket("task", "unrelated child")
+    # parent: accepts the human alias and resolves it to the canonical id.
+    assert set(_ids(rebar.search("child parent:" + epic["alias"]))) == {child}
+    # ...and the canonical id works too.
+    assert set(_ids(rebar.search("child parent:" + epic["id"]))) == {child}
+
+
 def test_invalid_sort_key_is_usage_error(rebar_repo: Path) -> None:
     cp = subprocess.run(
         [sys.executable, "-m", "rebar.cli", "search", "x", "--sort=bogus"],

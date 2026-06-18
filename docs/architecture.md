@@ -168,8 +168,9 @@ report runs in CI (`.github/workflows/test.yml`) so new offenders surface in PRs
 | `rebar_reconciler/reconcile.py` | ~1305 | split orchestration vs pass-driver seams |
 | `rebar_reconciler/outbound_differ.py` | ~1114 | split per-field differ seams |
 | `__init__.py` | ~830 | library facade just over the cap — split the read vs write API if it grows |
+| `_engine_support/reads.py` | ~930 | just over the cap (P1.1 `--sort`); split the CLI `_cmd_*` arms from the `*_state` facades along the existing seam if it grows |
 
-Files in the 500–800 band (`_engine_support/reads.py`, `_commands/transition.py`,
+Files in the 500–800 band (`_commands/transition.py`,
 `_commands/composer.py`, `_engine_support/next_batch.py`, `mcp_server.py`, and
 several `rebar_reconciler/` modules — `apply_inbound.py`, `applier.py`,
 `_advisory_lock.py`, `acli.py`, `inbound_differ.py`, `differ.py`,

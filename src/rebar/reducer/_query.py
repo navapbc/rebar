@@ -65,6 +65,11 @@ def parse_query(query: str) -> tuple[list[tuple], list[tuple]]:
             negate, tok = True, tok[4:]
         elif tok.startswith("-") and len(tok) > 1:
             negate, tok = True, tok[1:]
+        if not tok:
+            # A bare ``not:`` / ``-`` with no body is a no-op, not an empty term
+            # (an empty substring matches everything, which would silently empty
+            # a negated result set).
+            continue
 
         field, sep, raw = tok.partition(":")
         if sep and raw != "" and field.lower() in KNOWN_FIELDS:

@@ -15,7 +15,8 @@ import sys
 # the dir hash invalidates all caches on a bump. BUMP THIS whenever a processor's
 # projection changes.
 #   v2: process_revert now un-archives on REVERT-of-ARCHIVED (bug vocal-jig-apron)
-_REDUCER_CACHE_VERSION = 2
+#   v3: replay now projects a derived `updated_at` (P1.1); pre-v3 caches lack it
+_REDUCER_CACHE_VERSION = 3
 
 
 def read_cache(cache_path: str, dir_hash: str) -> dict | None:
