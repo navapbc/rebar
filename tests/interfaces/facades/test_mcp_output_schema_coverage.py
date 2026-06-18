@@ -79,6 +79,8 @@ EXEMPT_GENERIC: dict[str, str] = {
     "set_verify_commands": "string ack; no canonical shape",
     "fsck": "MCP fsck returns a human summary string; the canonical `fsck` schema "
     "describes the CLI/library `--output json` shape, not the MCP string",
+    "render_workflow": "workflow engine (WS-I): returns a Mermaid flowchart as a "
+    "string (a read-only render); no canonical structured shape.",
 }
 
 # Tools that HAVE a canonical schema but advertise NO outputSchema by design.

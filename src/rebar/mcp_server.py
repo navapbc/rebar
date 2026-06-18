@@ -461,6 +461,16 @@ def build_server():
         return rebar.get_workflow_result(run_id, ticket_id)
 
     @mcp.tool()
+    def render_workflow(workflow: str) -> str:
+        """Render a workflow (a .rebar/workflows/<name> name or a file path) to a
+        read-only Mermaid flowchart (TEXT; the host renders it to SVG, never
+        committed). Large graphs degrade to a text outline. Read tool, always
+        available."""
+        from rebar.llm.workflow import render
+
+        return render.render_workflow(workflow)
+
+    @mcp.tool()
     def review_ticket(ticket_id: str, reviewer_id: str | None = None, graph: bool = False) -> dict:
         """Run an LLM review of a ticket (or its graph) -> a review_result dict
         {findings[], target, reviewers, runner, model, trace_id, summary}.

@@ -294,6 +294,9 @@ def _workflow(argv: list[str]) -> int:
     )
     p_run.add_argument("--output", "-o", choices=["text", "json"], default="text")
 
+    p_show = subparsers.add_parser("show", help="render a workflow as a Mermaid graph")
+    p_show.add_argument("file", help="a workflow file path or a .rebar/workflows/<name> name")
+
     for sub in ("status", "result"):
         p = subparsers.add_parser(sub, help=f"read a run's {sub} via replay")
         p.add_argument("run_id", help="the run id returned by `workflow run`")
@@ -309,10 +312,24 @@ def _workflow(argv: list[str]) -> int:
         return _workflow_validate(args)
     if args.cmd == "run":
         return _workflow_run(args)
+    if args.cmd == "show":
+        return _workflow_show(args)
     if args.cmd in ("status", "result"):
         return _workflow_read(args)
     parser.print_help()
     return 1
+
+
+def _workflow_show(args) -> int:
+    from rebar.llm import errors as _werr
+    from rebar.llm.workflow import render
+
+    try:
+        sys.stdout.write(render.render_workflow(args.file))
+    except _werr.WorkflowError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    return 0
 
 
 def _workflow_run(args) -> int:
