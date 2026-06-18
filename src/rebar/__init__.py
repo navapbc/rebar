@@ -547,6 +547,44 @@ def show_ticket(ticket_id: str, *, repo_root=None) -> dict:
     return _reads.show_ticket(ticket_id, repo_root=repo_root)
 
 
+def export_tickets(
+    *,
+    out=None,
+    status: str | None = None,
+    ticket_type: str | None = None,
+    parent: str | None = None,
+    strip_external: bool = False,
+    include_session_logs: bool = False,
+    exclude_archived: bool = False,
+    include_deleted: bool = False,
+    repo_root=None,
+) -> dict:
+    """Export the store as NDJSON (one full ticket per line) to ``out``.
+
+    ``out`` is a writable text file object, a path (str/os.PathLike), or None for a
+    metadata-only run (no write). A lossy interop projection — reporting/data-mining
+    and clean rebar→rebar migration — NOT a backup. Streams via ``reduce_ticket``
+    (bounded memory). ``strip_external`` removes all external-tracker linkage
+    (provider-neutral). Scope defaults: all work types/statuses incl. closed;
+    session_log excluded; archived included (marked); deleted excluded. Returns run
+    metadata ``{exported, schema_version, source_env, exported_at}``. See
+    :mod:`rebar._io.export_ndjson`.
+    """
+    from rebar._io import export_ndjson
+
+    return export_ndjson.export_tickets(
+        out=out,
+        status=status,
+        ticket_type=ticket_type,
+        parent=parent,
+        strip_external=strip_external,
+        include_session_logs=include_session_logs,
+        exclude_archived=exclude_archived,
+        include_deleted=include_deleted,
+        repo_root=repo_root,
+    )
+
+
 def list_tickets(
     *,
     status: str | None = None,
@@ -871,6 +909,7 @@ __all__ = [
     "verify_signature",
     # read path
     "show_ticket",
+    "export_tickets",
     "list_tickets",
     "deps",
     "ready",

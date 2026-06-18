@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/export.schema.json",
+  "title": "ExportLine",
+  "description": "One NDJSON line emitted by `rebar export` (and rebar.export_tickets): a full compiled ticket object (the TicketState shape) plus a `schema_version` discriminator for the export-line format. NDJSON serves reporting (row-oriented, stream-parseable) and migration (each line re-imports as a full ticket) from one artifact. With `--strip-external`, external-tracker linkage (bridge_alerts, per-comment jira_comment_id, provider keys) is absent. Imported tickets additionally carry provenance (source_id/source_created_at/source_author/source_env). Unknown properties are allowed so the projection can evolve without breaking consumers.",
+  "allOf": [{ "$ref": "ticket_state.schema.json" }],
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "ticket_id", "ticket_type", "title", "status"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Export-line format version (independent of the event-log SCHEMA_VERSION). Bump when the per-line shape changes in a way importers must be aware of."
+    }
+  }
+}

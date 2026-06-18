@@ -61,6 +61,7 @@ __all__ = [
     "REVIEW_RESULT",
     "SIGN_RESULT",
     "VERIFY_SIGNATURE_RESULT",
+    "EXPORT",
     "COMMON",
 ]
 
@@ -94,6 +95,10 @@ REVIEW_RESULT = "review_result"
 # verify verdict (`rebar verify-signature`), both over `--output json`.
 SIGN_RESULT = "sign_result"
 VERIFY_SIGNATURE_RESULT = "verify_signature_result"
+# _io/export_ndjson — the per-line shape of `rebar export` NDJSON output. Not in
+# OUTPUT_SCHEMAS (export emits NDJSON, not the standard --output json envelope);
+# documented + validated directly via schemas.validator(schemas.EXPORT).
+EXPORT = "export"
 
 # The authoritative map of every structured (--output json / always-JSON) output
 # to its schema. Keyed by command, or <command>.<interface> when an interface's
@@ -134,6 +139,10 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "sign": SIGN_RESULT,
     "verify_signature": VERIFY_SIGNATURE_RESULT,
     "verify_signature.not_found": ERROR_ENVELOPE,
+    # `export` emits NDJSON (one EXPORT line per ticket), not the canonical
+    # --output json envelope, so it is not driven by the --output coverage guard;
+    # registered here so the every-schema-file-is-wired guard sees it.
+    "export": EXPORT,
 }
 
 

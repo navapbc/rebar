@@ -41,6 +41,7 @@ def _routable_subcommands() -> frozenset[str]:
         | _cli._COMPACT
         | _cli._BRIDGE
         | _cli._WRITES_FULL
+        | _cli._IO
     )
     # Arms ``_dispatch`` routes by explicit ``if sub == …`` rather than a frozenset.
     individual = frozenset({"init", "scratch", "delete", "fsck", "fsck-recover", "bridge-probe"})
