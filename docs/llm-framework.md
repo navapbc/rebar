@@ -374,14 +374,23 @@ children's own gates already did). The **close gate** runs the verifier with `gr
 exactly this reason (the standalone `rebar verify-completion <id> --graph` still inlines the
 subtree for a human review).
 
-> **Model + budget tuning (important).** Completion verification wants a *decisive* model, not
-> a maximally-thorough one. The framework default (opus) over-explores — it rabbit-holes
-> confirming code is "wired" and trips the step budget even on a 2-criterion ticket — so the op
-> **defaults the verifier to `claude-sonnet-4-6`** (matching the DSO completion-verifier; it
-> converges in seconds where opus loops past hundreds of steps). An operator who explicitly sets
-> `REBAR_LLM_MODEL` to a non-default still wins. The op also raises the agent step budget to a
-> floor (an explicit higher `REBAR_LLM_MAX_STEPS` still wins). A very large epic verified with
-> `graph=True` may still need the budget raised or a `--force-close`. The untrusted ticket/file content is delimited and
+> **Why the verifier uses natural termination, not forced structured output (root cause).** A
+> tool-using agent bound with LangChain `ToolStrategy` (forced `tool_choice`) **does not
+> terminate naturally** — it keeps calling exploration tools instead of concluding, so on a
+> code-heavy ticket it over-explores for hundreds of steps and trips the budget. Verified by
+> A/B on the same model/prompt/ticket: **>250 tool calls (timeout) with ToolStrategy vs ~17 and a
+> clean verdict without it** (a Claude-Code sonnet subagent on the same task: ~12). So the
+> verifier sets `RunRequest.output_strategy="extract"`: it runs the agent with **no forced
+> response_format** (it reasons, stops, and concludes in text), then does a **tool-less**
+> structured-output call to extract the verdict from that conclusion. This is the proven fix and
+> the field consensus (forcing the loop is the documented anti-pattern; LangGraph: a high
+> `recursion_limit` means "you're paying for a loop, fix the loop").
+>
+> The verifier also **defaults to `claude-sonnet-4-6`** — a *decisive* model, not a
+> maximally-thorough one: larger/reasoning models *over-explore more* on bounded agentic tasks
+> (the documented "overthinking" effect), so escalating to a bigger model is the **wrong** lever
+> here. An explicit non-default `REBAR_LLM_MODEL` still wins. (`review`/`code`/`scan` keep the
+> `ToolStrategy` default; migrating the framework default is a tracked follow-up.) The untrusted ticket/file content is delimited and
 the prompt carries an instruction-hierarchy clause (prompt-injection mitigation, OWASP LLM01).
 
 **The close gate** (`verify.require_completion_verification_for_close`, default off; **on for

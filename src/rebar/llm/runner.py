@@ -48,6 +48,16 @@ class RunRequest:
     # rebar ``show_ticket`` for the completion verifier). DEFAULTED None so existing
     # review callers are unchanged. Appended with a name-collision guard (see _merge_tools).
     extra_tools: list | None = None
+    # How structured output is obtained from a tool-using agent:
+    #   "tool"    — bind ToolStrategy (forced tool_choice) so the agent emits the structured
+    #               result in-loop. DEFAULT (unchanged for review/code/scan).
+    #   "extract" — run the agent with NO forced response_format so it terminates NATURALLY
+    #               (reasons, stops calling tools, concludes in text), THEN do a tool-less
+    #               structured-output call to extract the result from that conclusion. This
+    #               avoids ToolStrategy's forced-tool-choice non-termination (which makes a
+    #               tool-using agent over-explore for hundreds of steps instead of concluding —
+    #               proven by A/B: 17 tool calls vs >250 on the same task/model/prompt).
+    output_strategy: str = "tool"
 
 
 @runtime_checkable
@@ -131,19 +141,26 @@ class LangGraphRunner:
         tools = _merge_tools(
             _filesystem_tools(cfg.repo_path) + _mcp_tools(cfg.mcp_servers), req.extra_tools
         )
+        model_cls = contracts.response_model_for(req.output_schema)
         # The structured-output contract is selected PER OPERATION by req.output_schema
-        # (default: the findings model) — the pluggable-contract seam — instead of being
-        # hardcoded, so each op/workflow step declares its own output shape.
-        # ToolStrategy (not ProviderStrategy) is deliberate: it is provider-PORTABLE
-        # (works across Anthropic/OpenAI/Gemini), with in-loop self-correction
-        # (handle_errors). A missing structured_response is handled below.
+        # (default: the findings model) — the pluggable-contract seam.
+        if req.output_strategy == "extract":
+            # NATURAL termination: NO forced response_format, so the tool-using agent reasons,
+            # STOPS, and concludes in text instead of looping (ToolStrategy's forced tool_choice
+            # prevents termination → over-exploration). Then a tool-LESS structured-output call
+            # extracts the result from that conclusion.
+            agent = create_agent(model, tools, system_prompt=req.system_prompt)
+            outcome, trace_id = _invoke(agent, cfg, req)
+            structured = _extract_structured(model, model_cls, _findings._final_text(outcome))
+            outcome = {**outcome, "structured_response": structured}
+            return _finalize_review(outcome, cfg, req, self.name, trace_id)
+        # "tool" (default): bind ToolStrategy. Provider-PORTABLE, with in-loop self-correction
+        # (handle_errors). A missing structured_response is handled below. (review/code/scan)
         agent = create_agent(
             model,
             tools,
             system_prompt=req.system_prompt,
-            response_format=ToolStrategy(
-                contracts.response_model_for(req.output_schema), handle_errors=True
-            ),
+            response_format=ToolStrategy(model_cls, handle_errors=True),
         )
         outcome, trace_id = _invoke_structured(agent, cfg, req)
         return _finalize_review(outcome, cfg, req, self.name, trace_id)
@@ -287,6 +304,31 @@ def _invoke_structured(agent, cfg: LLMConfig, req: RunRequest) -> tuple[dict, st
     repaired = replace(req, instructions=req.instructions + _REPAIR_NUDGE)
     outcome2, trace_id2 = _invoke(agent, cfg, repaired)
     return outcome2, (trace_id2 or trace_id)
+
+
+def _extract_structured(model, model_cls, conclusion: str):
+    """Tool-LESS structured-output extraction (the ``output_strategy="extract"`` second step):
+    turn the agent's free-text conclusion into the structured result via
+    ``model.with_structured_output``. NO tools are bound here, so this single call returns
+    immediately — no exploration loop. Returns ``None`` for an empty conclusion (so
+    ``finalize_outcome`` raises the usual ``StructuredOutputError`` rather than inventing a
+    verdict)."""
+    if not conclusion.strip():
+        return None
+    return model.with_structured_output(model_cls).invoke(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Extract the completion-verification result into the structured schema using "
+                    "ONLY the conclusion below. Do not add new judgments or re-verify anything; "
+                    "faithfully transcribe the verdict, the per-criterion failures, and their "
+                    "evidence/citations as already stated."
+                ),
+            },
+            {"role": "user", "content": conclusion},
+        ]
+    )
 
 
 def _finalize_review(
