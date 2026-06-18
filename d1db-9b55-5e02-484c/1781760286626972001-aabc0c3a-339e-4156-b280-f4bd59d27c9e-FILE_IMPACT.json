@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/llm/workflow/migrate.py","reason":"schema_version up-conversion shim"},{"path":"src/rebar/schemas/workflow.schema.json","reason":"per-version pinned schema"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781760286626972001,"uuid":"aabc0c3a-339e-4156-b280-f4bd59d27c9e"}
