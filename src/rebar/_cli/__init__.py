@@ -558,6 +558,7 @@ def _workflow_new(args) -> int:
 def _workflow_validate(args) -> int:
     import json as _json
 
+    from rebar import config
     from rebar.llm.workflow import lint as _lint
 
     try:
@@ -567,7 +568,19 @@ def _workflow_validate(args) -> int:
         sys.stderr.write(f"Error: cannot read {args.file}: {exc}\n")
         return 1
 
-    findings = _lint.lint_workflow(text, source=args.file, expressions=not args.no_expressions)
+    # check_prompts (WS-F2): validate agent `prompt:` refs resolve to a reviewer or
+    # a .rebar/prompts/<id>.md file (repo-scoped).
+    try:
+        repo_root = str(config.repo_root())
+    except Exception:  # not in a repo — skip the repo-scoped prompt-file lookup
+        repo_root = None
+    findings = _lint.lint_workflow(
+        text,
+        source=args.file,
+        expressions=not args.no_expressions,
+        check_prompts=True,
+        repo_root=repo_root,
+    )
     valid = _lint.lint_passes(findings)
 
     if args.output == "json":

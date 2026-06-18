@@ -495,15 +495,44 @@ def _scan_secret_literals(doc: dict[str, Any]) -> list[LintFinding]:
 # ── The one-pass collector ────────────────────────────────────────────────────
 
 
+def lint_prompt_refs(doc: dict[str, Any], *, repo_root=None) -> list[LintFinding]:
+    """Validate every agent step's ``prompt:`` ref resolves to a real prompt (WS-F2):
+    a catalog reviewer or a ``.rebar/prompts/<id>.md`` file. Imports the (stdlib-only)
+    prompt registry lazily so the core linter stays free of that coupling."""
+    from rebar.llm.prompts import prompt_ref_exists
+
+    findings: list[LintFinding] = []
+    for step in doc.get("steps", []):
+        if not isinstance(step, dict) or step_kind(step) != "agent":
+            continue
+        prompt_id = step.get("prompt")
+        if isinstance(prompt_id, str) and not prompt_ref_exists(prompt_id, repo_root=repo_root):
+            findings.append(
+                LintFinding(
+                    f"steps[{step.get('id', '?')}].prompt",
+                    f"prompt {prompt_id!r} does not resolve to a known reviewer or a "
+                    f".rebar/prompts/{prompt_id}.md file",
+                )
+            )
+    return findings
+
+
 def lint_workflow(
-    text: str, *, source: str = "<workflow>", expressions: bool = True
+    text: str,
+    *,
+    source: str = "<workflow>",
+    expressions: bool = True,
+    check_prompts: bool = False,
+    repo_root=None,
 ) -> list[LintFinding]:
     """Parse, migrate, schema-validate, semantically lint, and secret-scan ``text``,
     returning EVERY finding in one pass (empty == clean). This is the function
     ``rebar workflow validate`` / ``--dry-run`` build on.
 
-    A hard parse/upgrade failure short-circuits (you cannot lint what will not
-    load) and is returned as a single error finding.
+    ``check_prompts`` additionally validates agent ``prompt:`` refs (WS-F2) against
+    the reviewer catalog + ``.rebar/prompts/`` — opt-in so the broad callers (which
+    don't know about prompts) are unaffected. A hard parse/upgrade failure
+    short-circuits (you cannot lint what will not load) and is one error finding.
     """
     try:
         doc = parse_workflow(text, source=source)
@@ -524,6 +553,8 @@ def lint_workflow(
     findings.extend(lint_document(doc, source=source, expressions=expressions))
     findings.extend(_scan_secret_literals(doc))
     findings.extend(secret_scan(text, source=source))
+    if check_prompts:
+        findings.extend(lint_prompt_refs(doc, repo_root=repo_root))
     return findings
 
 

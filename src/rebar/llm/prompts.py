@@ -126,6 +126,20 @@ def canonical_prompt_text(reviewer: Reviewer, *, repo_root=None) -> str:
     return packaged_prompt_text(reviewer)
 
 
+def prompt_ref_exists(prompt_id: str, *, repo_root=None) -> bool:
+    """True if a workflow ``prompt:`` ref resolves to a real prompt (WS-F2): a known
+    catalog reviewer, or a user ``.rebar/prompts/<id>.md`` file. Stdlib-only."""
+    if prompt_id in load_catalog():
+        return True
+    if repo_root:
+        f = Path(repo_root) / ".rebar" / "prompts" / f"{prompt_id}.md"
+        try:
+            return f.is_file()
+        except OSError:
+            return False
+    return False
+
+
 def prompt_content_hash(text: str) -> str:
     """sha256 of the canonical prompt text — the identity embedded in traces so a
     divergence between what ran and any Langfuse/registry copy is detectable."""

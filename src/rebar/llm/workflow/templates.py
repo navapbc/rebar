@@ -41,7 +41,7 @@ steps:
       ticket_id: ${{ inputs.ticket_id }}
 
   - id: review
-    prompt: code_quality
+    prompt: code-quality
     needs: [fetch]
     with:
       context: ${{ steps.fetch.outputs.context }}
