@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/_commands/init.py","reason":"ensure tickets-branch .gitattributes idempotently"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781813060879841001,"uuid":"5ec4d666-a4cd-4c90-8312-bf81f2e44403"}
