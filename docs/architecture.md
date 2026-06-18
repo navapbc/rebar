@@ -72,9 +72,9 @@ over one git-backed store.
 
 - **LLM agent operations** (`rebar.llm`, code at `src/rebar/llm/`) — an OPTIONAL
   framework for tool-using LLM agents that emit structured findings, exposed over
-  library/CLI (`rebar review`)/MCP (`review_ticket`). The engine core stays
-  stdlib-only; everything here is behind the `nava-rebar[agents]` extra and
-  lazy-imported. A pluggable `Runner` (default in-process LangChain/LangGraph for
+  library/CLI (`rebar review`)/MCP (`review_ticket`). The engine core needs NO LLM
+  dependency (its only runtime dep is `pyyaml`, the workflow DSL loader); everything
+  here is behind the `nava-rebar[agents]` extra and lazy-imported. A pluggable `Runner` (default in-process LangChain/LangGraph for
   review; an opt-in deepagents harness for future task types;
   a `FakeRunner` for tests) runs the agent with read-only repo file tools + MCP
   tools; output is constrained to the `review_result` JSON Schema.

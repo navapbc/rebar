@@ -5,9 +5,12 @@ findings**, exposed — like the rest of rebar — over a Python library, the CL
 MCP. It ships one reference operation (`review_ticket`) and the seams to add more
 (code review, spec-vs-epic scans, …) reliably.
 
-It is **optional**: the rebar engine stays stdlib-only (`dependencies = []`), and
-nothing here is imported until you actually run an operation. `import rebar` and
-even `import rebar.llm` pull no heavy dependency.
+It is **optional**: rebar's core runtime is tiny — its only dependency is `pyyaml`
+(the workflow DSL loader) — and **none of the LLM stack is imported until you
+actually run an operation**. `import rebar` and even `import rebar.llm` pull no
+heavy dependency; the LLM features live entirely behind the `nava-rebar[agents]`
+extra, and CI enforces that the core never grows it (see "Optionality is a hard,
+validated contract" below).
 
 ### Optionality is a hard, validated contract
 

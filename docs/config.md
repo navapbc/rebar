@@ -42,9 +42,12 @@
 
 ## Hard constraints (rebar-specific; deviations from the broader survey)
 
-- **Core is stdlib-only** (`pyproject.toml` `dependencies = []`). So **no
-  `pydantic-settings`** (use a stdlib `dataclass` + hand-rolled validation) and
-  **no `platformdirs`** (resolve XDG by hand via `$XDG_CONFIG_HOME` / `~/.config`).
+- **Core stays minimal** — the ONLY runtime dependency is `pyyaml`, the workflow
+  DSL loader (`pyproject.toml` `dependencies = ["pyyaml>=6"]`); the engine core and
+  reconciler are otherwise stdlib-only, and all LLM/MCP/eval/tracing functionality
+  is behind optional extras. So for *config* specifically: **no `pydantic-settings`**
+  (use a stdlib `dataclass` + hand-rolled validation) and **no `platformdirs`**
+  (resolve XDG by hand via `$XDG_CONFIG_HOME` / `~/.config`).
 - **`tomllib` needs no fallback.** The runtime floor is already
   `requires-python = ">=3.11"`, so `tomllib` is in the stdlib. (The ruff
   `target-version = "py310"` is a *lint* target only — unrelated to runtime.)
