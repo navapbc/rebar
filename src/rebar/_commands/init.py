@@ -2,7 +2,8 @@
 
 Port of ticket-init.sh. Creates (or mounts) the orphan ``tickets`` branch as a
 linked worktree at ``.tickets-tracker/``, commits ``.gitignore`` +
-``.pre-commit-config.yaml`` on it, generates ``.env-id`` + ``.signing-key``,
+``.pre-commit-config.yaml`` + ``.gitattributes`` (``merge=ours`` for the per-pass
+mutable root files) on it, generates ``.env-id`` + ``.signing-key``,
 normalizes gc config (``--unset gc.auto`` + ``gc.autoDetach=true`` — rebar trusts
 stock ``git gc`` now that recovery is non-destructive, see ``_migrate_gc_config``),
 and excludes the tracker from the host repo. Idempotent: re-running on an
@@ -32,6 +33,16 @@ _GITIGNORE = """.env-id
 .scratch/
 .cache.json
 */.cache.json
+"""
+
+_GITATTRIBUTES = """# Shared mutable root files are per-pass derived CACHES the reconciler rebuilds,
+# not ticket events (uuid-named ticket dirs never collide, so they never need a
+# merge policy). On a union reconverge (sync.py) keep OUR copy and let the next
+# reconciler pass rebuild the loser. merge=union is WRONG here — it line-unions
+# JSON into invalid JSON. The 'ours' driver is defined in git config by init
+# (merge.ours.driver=true); without it these patterns are silently ignored.
+.bridge_state/* merge=ours
+.reconciler-* merge=ours
 """
 
 _PRECOMMIT = """# No-op pre-commit config for the tickets orphan branch.
@@ -168,6 +179,8 @@ def init_core(repo_root=None, *, silent: bool = False) -> int:
                     _git(tracker, "merge", "--abort")
             _ensure_env_id(tracker)
             _migrate_gc_config(tracker)
+            _ensure_merge_ours_driver(tracker)
+            _commit_gitattributes(tracker)  # migrate trackers predating WU-3
             _emit("Ticket system already initialized.", silent)
             return 0
 
@@ -198,8 +211,10 @@ def init_core(repo_root=None, *, silent: bool = False) -> int:
         _commit_gitignore(tracker)
         _exclude_scratch_in_tracker(tracker)
         _commit_precommit(tracker)
+        _commit_gitattributes(tracker)
         _gen_local_files(tracker)
         _migrate_gc_config(tracker)
+        _ensure_merge_ours_driver(tracker)
         _emit("Ticket system initialized.", silent)
         return 0
     finally:
@@ -330,6 +345,33 @@ def _exclude_scratch_in_tracker(tracker: str) -> None:
     if not git_dir:
         return
     _exclude(git_dir, ".scratch/")
+
+
+def _ensure_merge_ours_driver(tracker: str) -> None:
+    """Define the ``ours`` merge driver the ``.gitattributes`` references (epic 97e7
+    / WU-3). ``true`` always exits 0, leaving OUR version of a conflicted path in
+    place. Without this, ``merge=ours`` in ``.gitattributes`` is silently ignored
+    and the shared mutable root files conflict on a union reconverge. Local config
+    (per clone; shared by symlinked worktrees via the common git dir); idempotent."""
+    _git(tracker, "config", "merge.ours.driver", "true")
+
+
+def _commit_gitattributes(tracker: str) -> None:
+    """Commit the tickets-branch ``.gitattributes`` (create-if-absent, idempotent),
+    so a union merge keeps OUR copy of the per-pass mutable root files instead of
+    wedging. Pairs with :func:`_ensure_merge_ours_driver` (the driver it names)."""
+    if _git(tracker, "show", "tickets:.gitattributes").returncode != 0:
+        with open(os.path.join(tracker, ".gitattributes"), "w", encoding="utf-8") as f:
+            f.write(_GITATTRIBUTES)
+        _git(tracker, "add", ".gitattributes")
+        _git(
+            tracker,
+            "commit",
+            "-q",
+            "--no-verify",
+            "-m",
+            "chore: add .gitattributes merge=ours for shared mutable root files (epic 97e7)",
+        )
 
 
 def _commit_precommit(tracker: str) -> None:
