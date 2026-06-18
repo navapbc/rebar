@@ -547,6 +547,48 @@ def show_ticket(ticket_id: str, *, repo_root=None) -> dict:
     return _reads.show_ticket(ticket_id, repo_root=repo_root)
 
 
+# ── Workflow engine (epic a88f) — sync library entrypoints (WS-C4) ────────────
+def run_workflow(
+    source,
+    inputs: dict | None = None,
+    *,
+    ticket_id: str | None = None,
+    run_id: str | None = None,
+    dry_run: bool = False,
+    repo_root=None,
+    secrets: dict | None = None,
+) -> dict:
+    """Run a workflow (a ``.rebar/workflows/<name>.yaml`` path/name or a dict) and
+    return its result. Synchronous; persists run-state to ``ticket_id`` when given.
+    ``dry_run=True`` executes agent steps with the offline FakeRunner (no tokens).
+    See :mod:`rebar.llm.workflow.runs`."""
+    from rebar.llm.workflow import runs
+
+    return runs.run(
+        source,
+        inputs,
+        ticket_id=ticket_id,
+        run_id=run_id,
+        dry_run=dry_run,
+        repo_root=repo_root,
+        secrets=secrets,
+    )
+
+
+def get_workflow_status(run_id: str, ticket_id: str | None = None, *, repo_root=None) -> dict:
+    """A workflow run's current status, read via replay (no execution)."""
+    from rebar.llm.workflow import runs
+
+    return runs.status(run_id, ticket_id, repo_root=repo_root)
+
+
+def get_workflow_result(run_id: str, ticket_id: str | None = None, *, repo_root=None) -> dict:
+    """A workflow run's outputs (the terminal step's output is the result)."""
+    from rebar.llm.workflow import runs
+
+    return runs.result(run_id, ticket_id, repo_root=repo_root)
+
+
 def export_tickets(
     *,
     out=None,

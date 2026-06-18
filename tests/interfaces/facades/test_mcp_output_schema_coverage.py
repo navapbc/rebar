@@ -99,6 +99,14 @@ NO_SCHEMA_EXEMPT: dict[str, str] = {
     "scan_spec": "rebar.llm batch spec-scan op: live LLM call(s) over the store's "
     "epics, returns a review_result as a plain dict (no outputSchema) "
     "— same exemption rationale as review_ticket.",
+    "run_workflow": "workflow engine (WS-C4): async — returns {run_id, ticket_id, "
+    "status:'running'} immediately and runs in the background; a plain dict, no "
+    "outputSchema. WS-ffc4 adds the typed model + committed schema.",
+    "get_workflow_status": "workflow engine (WS-C4): run status via replay, a plain "
+    "dict for now; the typed outputSchema + committed workflow_run schema is WS-ffc4 "
+    "(it moves to CANONICAL there).",
+    "get_workflow_result": "workflow engine (WS-C4): run outputs via replay, a plain "
+    "dict for now; the typed outputSchema + committed schema is WS-ffc4.",
 }
 
 

@@ -238,19 +238,18 @@ def _scan_spec(argv: list[str]) -> int:
 
 
 def _workflow(argv: list[str]) -> int:
-    """``rebar workflow <new|validate>`` → the workflow DSL toolchain (WS-B4).
+    """``rebar workflow <new|validate|run|status|result>`` → the workflow toolchain.
 
     A native ``rebar.llm.workflow`` op intercepted in main() (like review/reconcile),
-    so it owns its own ``--help``. ``new`` scaffolds a valid skeleton; ``validate``
-    runs the full one-pass linter (schema + reference integrity + expression
-    allow-list + secret scan). Lean-runtime only — no LLM dependency. The ``show``
-    (render, WS-I) and ``run`` (execute, WS-C) arms are added by their stories.
+    so it owns its own ``--help``. ``new`` scaffolds; ``validate`` lints; ``run``
+    executes (sync; ``--dry-run`` = offline FakeRunner, no tokens); ``status``/
+    ``result`` read a run's state via replay. The ``show`` (render) arm is WS-I.
     """
     import argparse
 
     parser = argparse.ArgumentParser(
         prog="rebar workflow",
-        description="Author and validate git-native workflows (.rebar/workflows/*.yaml).",
+        description="Author, validate, and run git-native workflows (.rebar/workflows/*.yaml).",
     )
     subparsers = parser.add_subparsers(dest="cmd")
 
@@ -268,7 +267,7 @@ def _workflow(argv: list[str]) -> int:
     p_val.add_argument(
         "--dry-run",
         action="store_true",
-        help="validate without spending tokens (no LLM calls)",
+        help="static validation without tokens (use `run --dry-run` to execute)",
     )
     p_val.add_argument(
         "--no-expressions",
@@ -277,13 +276,110 @@ def _workflow(argv: list[str]) -> int:
     )
     p_val.add_argument("--output", "-o", choices=["text", "json"], default="text")
 
+    p_run = subparsers.add_parser("run", help="execute a workflow (sync)")
+    p_run.add_argument("file", help="a workflow file path or a .rebar/workflows/<name> name")
+    p_run.add_argument(
+        "--input",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="a workflow input (repeatable)",
+    )
+    p_run.add_argument("--ticket", help="persist run-state to this ticket (durable + resumable)")
+    p_run.add_argument("--run-id", help="reuse a run id (idempotent resume)")
+    p_run.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="execute agent steps with the offline FakeRunner (no tokens)",
+    )
+    p_run.add_argument("--output", "-o", choices=["text", "json"], default="text")
+
+    for sub in ("status", "result"):
+        p = subparsers.add_parser(sub, help=f"read a run's {sub} via replay")
+        p.add_argument("run_id", help="the run id returned by `workflow run`")
+        p.add_argument(
+            "--ticket", help="the run's target ticket (else resolved from the run index)"
+        )
+        p.add_argument("--output", "-o", choices=["text", "json"], default="text")
+
     args = parser.parse_args(argv)
     if args.cmd == "new":
         return _workflow_new(args)
     if args.cmd == "validate":
         return _workflow_validate(args)
+    if args.cmd == "run":
+        return _workflow_run(args)
+    if args.cmd in ("status", "result"):
+        return _workflow_read(args)
     parser.print_help()
     return 1
+
+
+def _workflow_run(args) -> int:
+    import json as _json
+
+    import rebar
+    from rebar.llm import errors as _werr
+
+    inputs: dict[str, str] = {}
+    for item in args.input:
+        if "=" not in item:
+            sys.stderr.write(f"Error: --input must be KEY=VALUE, got {item!r}\n")
+            return 1
+        key, _, val = item.partition("=")
+        inputs[key] = val
+
+    if args.ticket:
+        ensure_initialized(init_only=False)  # run-state events are writes
+    try:
+        res = rebar.run_workflow(
+            args.file,
+            inputs,
+            ticket_id=args.ticket,
+            run_id=args.run_id,
+            dry_run=args.dry_run,
+        )
+    except _werr.WorkflowError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+
+    if args.output == "json":
+        sys.stdout.write(_json.dumps(res) + "\n")
+    else:
+        sys.stdout.write(f"run_id: {res['run_id']}\n")
+        sys.stdout.write(f"status: {res['status']}\n")
+        if res.get("error"):
+            sys.stdout.write(f"error: {res['error']}\n")
+        for sid, st in res.get("steps", {}).items():
+            sys.stdout.write(f"  - {sid}: {st}\n")
+    return 0 if res["status"] == "succeeded" else 1
+
+
+def _workflow_read(args) -> int:
+    import json as _json
+
+    import rebar
+    from rebar.llm import errors as _werr
+
+    if args.ticket:
+        ensure_initialized(init_only=True)
+    fn = rebar.get_workflow_status if args.cmd == "status" else rebar.get_workflow_result
+    try:
+        res = fn(args.run_id, args.ticket)
+    except _werr.WorkflowError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    if args.output == "json":
+        sys.stdout.write(_json.dumps(res) + "\n")
+    else:
+        sys.stdout.write(f"run_id: {res['run_id']}  ({res.get('status')})\n")
+        if args.cmd == "status":
+            for sid, st in res.get("steps", {}).items():
+                sys.stdout.write(f"  - {sid}: {st}\n")
+        else:
+            sys.stdout.write(f"terminal_step: {res.get('terminal_step')}\n")
+            sys.stdout.write(f"terminal_output: {_json.dumps(res.get('terminal_output'))}\n")
+    return 0
 
 
 def _workflow_new(args) -> int:

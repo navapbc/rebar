@@ -440,6 +440,27 @@ def build_server():
         return rebar.reconcile(parsed.value)
 
     @mcp.tool()
+    def get_workflow_status(run_id: str, ticket_id: str | None = None) -> dict:
+        """Read a workflow run's current status via replay (no execution) -> a dict
+        {run_id, ticket_id, workflow_name, status, terminal_step, error, steps}.
+
+        Read tool, always available. ``ticket_id`` is resolved from the local run
+        index when omitted. Returns a plain dict and advertises NO outputSchema for
+        now — the typed outputSchema + committed workflow_run schema is WS-ffc4
+        (documented NO_SCHEMA_EXEMPT until then)."""
+        return rebar.get_workflow_status(run_id, ticket_id)
+
+    @mcp.tool()
+    def get_workflow_result(run_id: str, ticket_id: str | None = None) -> dict:
+        """Read a workflow run's outputs via replay -> a dict {run_id, status,
+        terminal_step, terminal_output, outputs, error}. The terminal step's output
+        is the run result.
+
+        Read tool, always available. Returns a plain dict and advertises NO
+        outputSchema for now (typed schema is WS-ffc4; documented NO_SCHEMA_EXEMPT)."""
+        return rebar.get_workflow_result(run_id, ticket_id)
+
+    @mcp.tool()
     def review_ticket(ticket_id: str, reviewer_id: str | None = None, graph: bool = False) -> dict:
         """Run an LLM review of a ticket (or its graph) -> a review_result dict
         {findings[], target, reviewers, runner, model, trace_id, summary}.
@@ -658,6 +679,46 @@ def build_server():
             key_id, head_sha, signed_at}. Use verify_signature to certify it
             later — only this environment (holding the key) can certify."""
             return SignResultOut.model_validate(rebar.sign_manifest(ticket_id, manifest))
+
+        @mcp.tool()
+        async def run_workflow(
+            workflow: str,
+            ticket_id: str,
+            inputs: dict | None = None,
+            dry_run: bool = False,
+        ) -> dict:
+            """Start a workflow run; returns {run_id, ticket_id, status:'running'}
+            IMMEDIATELY (async — the run executes in the background so it survives
+            client timeouts). Poll get_workflow_status / get_workflow_result to read
+            its outcome. Run-state persists durably to ``ticket_id``'s event log
+            (resumable on crash). ``workflow`` is a .rebar/workflows/<name> name or a
+            file path; ``dry_run`` executes agent steps with the offline FakeRunner
+            (no tokens). Write tool (gated by REBAR_MCP_READONLY)."""
+            import threading
+
+            from rebar.llm.workflow import executor as _wf_exec
+            from rebar.llm.workflow import runs as _wf_runs
+
+            run_id = _wf_exec.new_run_id()
+            # Record the index BEFORE returning so an immediate status poll resolves.
+            _wf_runs.record_run_location(run_id, ticket_id, None)
+
+            def _bg() -> None:
+                # Best-effort: any failure is reflected in the persisted run-state
+                # (a failed step record); never propagated to the immediate return.
+                try:
+                    _wf_runs.run(
+                        workflow,
+                        inputs or {},
+                        ticket_id=ticket_id,
+                        run_id=run_id,
+                        dry_run=dry_run,
+                    )
+                except Exception:
+                    pass
+
+            threading.Thread(target=_bg, daemon=True).start()
+            return {"run_id": run_id, "ticket_id": ticket_id, "status": "running"}
 
     return mcp
 
