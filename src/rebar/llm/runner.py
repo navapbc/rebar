@@ -36,6 +36,14 @@ class RunRequest:
     reviewers: list[str] = field(default_factory=list)
     target: dict = field(default_factory=dict)
     langfuse_prompt: object | None = None
+    # Generalized output contract (WS-D1) — DEFAULTED so existing review callers are
+    # unchanged. ``mode``: how to finalize the agent's outcome —
+    # ``findings`` (the review_result pipeline, default) | ``structured`` (return the
+    # agent's structured payload, validated against ``output_schema``) | ``text``
+    # (return the final message text). ``output_schema``: a packaged JSON Schema name
+    # constraining/validating ``structured`` output.
+    output_schema: str | None = None
+    mode: str = "findings"
 
 
 @runtime_checkable
@@ -72,7 +80,7 @@ class FakeRunner:
         """Always ready — no extra, no network."""
 
     def run(self, req: RunRequest) -> dict:
-        result = _findings.build_result(
+        return _findings.finalize_findings(
             self._findings,
             runner=self.name,
             model=None,
@@ -81,9 +89,8 @@ class FakeRunner:
             reviewers=req.reviewers,
             summary=self._summary,
             reviewer_id=req.reviewers[0] if len(req.reviewers) == 1 else None,
+            repo_path=req.config.repo_path,
         )
-        _findings.resolve_citations(result, req.config.repo_path)
-        return _findings.validate_result(result)
 
 
 # ── Langflow runner (hosted-deployment backend over REST) ─────────────────────
@@ -124,7 +131,7 @@ class LangflowRunner:
         raw = _langflow_post(cfg, payload)
         text = _langflow_extract_text(raw)
         findings, summary = _parse_findings_json(text)
-        result = _findings.build_result(
+        return _findings.finalize_findings(
             findings,
             runner=self.name,
             model=cfg.model,
@@ -133,9 +140,8 @@ class LangflowRunner:
             reviewers=req.reviewers,
             summary=summary,
             reviewer_id=req.reviewers[0] if len(req.reviewers) == 1 else None,
+            repo_path=cfg.repo_path,
         )
-        _findings.resolve_citations(result, cfg.repo_path)
-        return _findings.validate_result(result)
 
 
 def _langflow_post(cfg: LLMConfig, payload: dict) -> dict:
@@ -377,30 +383,23 @@ def _invoke(agent, cfg: LLMConfig, req: RunRequest) -> tuple[dict, str | None]:
 def _finalize_review(
     outcome: dict, cfg: LLMConfig, req: RunRequest, runner_name: str, trace_id: str | None
 ) -> dict:
-    """Turn an agent outcome into a validated review_result. Shared by the
-    langgraph + deepagents runners."""
-    structured = outcome.get("structured_response")
-    if structured is None:
-        # A plain-text turn yields no structured payload. An empty review is
-        # indistinguishable from a clean one, so fail loudly rather than silently
-        # returning zero findings.
-        raise StructuredOutputError(
-            "the agent returned no structured findings (no structured_response). "
-            "Treating this as a failed review rather than a clean one."
-        )
-    data = structured.model_dump() if hasattr(structured, "model_dump") else dict(structured)
-    result = _findings.build_result(
-        data.get("findings", []),
+    """Finalize an agent outcome via the generalized strategy (WS-D1).
+
+    Dispatches on ``req.mode`` (default ``findings`` → the review_result pipeline,
+    so the review ops are unchanged); ``structured``/``text`` serve agentic workflow
+    steps. Shared by the langgraph + deepagents runners."""
+    return _findings.finalize_outcome(
+        outcome,
+        mode=req.mode,
+        output_schema=req.output_schema,
         runner=runner_name,
         model=cfg.model,
         trace_id=trace_id,
         target=req.target,
         reviewers=req.reviewers,
-        summary=data.get("summary"),
+        repo_path=cfg.repo_path,
         reviewer_id=req.reviewers[0] if len(req.reviewers) == 1 else None,
     )
-    _findings.resolve_citations(result, cfg.repo_path)
-    return _findings.validate_result(result)
 
 
 # ── lazy imports + helpers ────────────────────────────────────────────────────

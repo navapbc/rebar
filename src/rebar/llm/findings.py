@@ -201,6 +201,130 @@ def _downgrade(cit: dict, note: str) -> None:
         cit.pop(k, None)
 
 
+# ── Finalization strategy (WS-D1) ─────────────────────────────────────────────
+# ONE place that turns a runner's raw output into a final dict, so FakeRunner,
+# LangflowRunner, and the agent runners stop duplicating build→resolve→validate.
+
+
+def finalize_findings(
+    findings: list[dict],
+    *,
+    runner: str,
+    model: str | None = None,
+    trace_id: str | None = None,
+    target: dict | None = None,
+    reviewers: list[str] | None = None,
+    summary: str | None = None,
+    reviewer_id: str | None = None,
+    repo_path: str | None = None,
+) -> dict:
+    """The single review_result finalization strategy: build → resolve citations →
+    validate. Every runner's findings path funnels through here (so the three
+    formerly-duplicated call sites are now one)."""
+    result = build_result(
+        findings,
+        runner=runner,
+        model=model,
+        trace_id=trace_id,
+        target=target,
+        reviewers=reviewers,
+        summary=summary,
+        reviewer_id=reviewer_id,
+    )
+    resolve_citations(result, repo_path)
+    return validate_result(result)
+
+
+def _final_text(outcome: dict) -> str:
+    """The agent's last non-empty message text (for ``mode='text'``)."""
+    for msg in reversed(outcome.get("messages") or []):
+        content = getattr(msg, "content", None)
+        if content:
+            return content if isinstance(content, str) else str(content)
+    return ""
+
+
+def _validate_structured(data: dict, output_schema: str | None) -> dict:
+    """Best-effort validate a structured payload against a named JSON Schema.
+
+    No-ops when ``output_schema`` is unset, the schema isn't a packaged rebar
+    schema, or jsonschema isn't installed — mirroring ``validate_result``'s graceful
+    degradation. Raises :class:`FindingsError` on a real validation failure."""
+    if not output_schema:
+        return data
+    try:
+        validator = schemas.validator(output_schema)
+    except Exception:  # unknown schema name or jsonschema absent — skip
+        return data
+    import jsonschema
+
+    try:
+        validator.validate(data)
+    except jsonschema.ValidationError as exc:
+        raise FindingsError(
+            f"agent output failed schema {output_schema!r}: {exc.message}"
+        ) from None
+    return data
+
+
+def finalize_outcome(
+    outcome: dict,
+    *,
+    mode: str = "findings",
+    output_schema: str | None = None,
+    runner: str,
+    model: str | None = None,
+    trace_id: str | None = None,
+    target: dict | None = None,
+    reviewers: list[str] | None = None,
+    repo_path: str | None = None,
+    reviewer_id: str | None = None,
+) -> dict:
+    """Finalize an agent outcome per ``mode`` — the generalized strategy (WS-D1).
+
+    * ``findings`` (default) — the review_result pipeline (unchanged for the review
+      ops). Requires a ``structured_response``; a missing one is a hard
+      :class:`StructuredOutputError` (an empty review must never read as a clean one).
+    * ``structured`` — return the agent's structured payload, validated against
+      ``output_schema`` when given.
+    * ``text`` — return ``{text, runner, model, trace_id}`` from the final message.
+    """
+    if mode == "text":
+        return {
+            "text": _final_text(outcome),
+            "runner": runner,
+            "model": model,
+            "trace_id": trace_id,
+        }
+
+    structured = outcome.get("structured_response")
+    if structured is None:
+        from rebar.llm.errors import StructuredOutputError
+
+        raise StructuredOutputError(
+            "the agent returned no structured output (no structured_response). "
+            "Treating this as a failed run rather than a clean one."
+        )
+    data = structured.model_dump() if hasattr(structured, "model_dump") else dict(structured)
+
+    if mode == "structured":
+        payload = _validate_structured(data, output_schema)
+        return {**payload, "runner": runner, "model": model, "trace_id": trace_id}
+
+    # mode == "findings"
+    return finalize_findings(
+        data.get("findings", []),
+        runner=runner,
+        model=model,
+        trace_id=trace_id,
+        target=target,
+        reviewers=reviewers,
+        summary=data.get("summary"),
+        reviewer_id=reviewer_id,
+        repo_path=repo_path,
+    )
+
+
 def findings_response_model():
     """Build (lazily) the Pydantic model the LangGraph runner binds as its
     structured-output contract. Mirrors ``common.schema.json#/$defs/finding``;
