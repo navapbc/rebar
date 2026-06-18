@@ -589,6 +589,36 @@ def get_workflow_result(run_id: str, ticket_id: str | None = None, *, repo_root=
     return runs.result(run_id, ticket_id, repo_root=repo_root)
 
 
+def attach_commits(ticket_id: str, commits, *, repo_root=None) -> dict:
+    """Attach commit SHAs to a ticket as a durable, union-merged ``commits`` list
+    (epic a88f / WS-H). ``commits`` is a list of SHA strings or {sha, message?,
+    author?, …} records. Convergent (union by sha) and NOT synced to Jira. Returns
+    ``{ticket_id, attached}``."""
+    from rebar._commands import _seam
+    from rebar._commands._seam import CommandError
+
+    tracker = _seam.tracker_dir(repo_root)
+    tid = _seam.require_id(ticket_id, tracker)
+    _seam.require_not_ghost(tid, tracker)
+    records = []
+    for c in commits:
+        if isinstance(c, str) and c:
+            records.append({"sha": c})
+        elif isinstance(c, dict) and c.get("sha"):
+            records.append(c)
+        else:
+            raise RebarError(f"invalid commit entry {c!r}: need a sha string or {{sha, …}} dict")
+    try:
+        _seam.append_event(tid, "COMMITS", {"commits": records}, tracker, repo_root=repo_root)
+    except CommandError as exc:
+        raise RebarError(
+            f"rebar attach-commits failed (exit {exc.returncode}): {exc.message}",
+            returncode=exc.returncode,
+            stderr=exc.message,
+        ) from None
+    return {"ticket_id": tid, "attached": len(records)}
+
+
 def export_tickets(
     *,
     out=None,

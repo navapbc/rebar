@@ -412,6 +412,38 @@ def process_workflow_step(state: dict, event: dict, data: dict) -> None:
     run_steps[step_id] = dict(data)
 
 
+def process_commits(state: dict, event: dict, data: dict) -> None:
+    """Apply a COMMITS event: union commit records into ``state.commits`` (WS-H).
+
+    The code-review example workflow needs commit SHAs attached to a ticket as
+    input. Each event carries ``data.commits`` — a list of SHAs (strings) or commit
+    records ({sha, message?, author?, …}); they are UNIONED into the ticket's
+    ``commits`` list, deduplicated by ``sha`` (first occurrence in replay order
+    wins). Union-add is order-insensitive for the SET, and replay order is the
+    deterministic HLC+UUID filename order, so every clone converges to the same
+    list. Lazy/additive (``setdefault``-free guard) so a ticket with no commits
+    keeps its exact prior shape; restored verbatim by SNAPSHOT, so it survives
+    compaction. Never surfaced to Jira (the outbound differ is field-driven and
+    does not read ``commits``)."""
+    incoming = data.get("commits")
+    if not isinstance(incoming, list) or not incoming:
+        return
+    existing = state.get("commits") or []
+    seen = {c.get("sha") for c in existing if isinstance(c, dict) and c.get("sha")}
+    merged = list(existing)
+    for item in incoming:
+        record = {"sha": item} if isinstance(item, str) else item
+        if not isinstance(record, dict):
+            continue
+        sha = record.get("sha")
+        if not sha or sha in seen:
+            continue
+        seen.add(sha)
+        merged.append(record)
+    if merged:
+        state["commits"] = merged
+
+
 def process_archived(state: dict) -> None:
     """Apply an ARCHIVED event: mark ticket archived and reflect in status field.
 
@@ -549,6 +581,8 @@ def replay_events(
             process_workflow_run(state, event, data)
         elif event_type == "WORKFLOW_STEP":
             process_workflow_step(state, event, data)
+        elif event_type == "COMMITS":
+            process_commits(state, event, data)
         elif event_type == "ARCHIVED":
             process_archived(state)
         elif event_type == "SNAPSHOT":

@@ -54,5 +54,9 @@ KNOWN_EVENT_TYPES = frozenset(
         # (their effect is preserved in compiled_state, restored by process_snapshot).
         "WORKFLOW_RUN",
         "WORKFLOW_STEP",
+        # Commits-on-ticket (epic a88f / WS-H): commit SHAs attached to a ticket as
+        # a durable, union-merged list. NOT a Jira-synced field (the outbound differ
+        # is field-driven and never reads it).
+        "COMMITS",
     }
 )
