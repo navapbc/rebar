@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/_cli/__init__.py","reason":"rebar workflow new/validate/dry-run"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781760287918424001,"uuid":"1dc2ffb1-73f7-488d-960f-21648367f825"}
