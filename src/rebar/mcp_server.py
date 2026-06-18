@@ -157,6 +157,15 @@ try:
         verdict: str
         reason: str
 
+    class WorkflowRunOut(_Out):
+        # Mirrors src/rebar/schemas/workflow_run.schema.json — one permissive model
+        # for both get_workflow_status and get_workflow_result (extra=allow covers
+        # the fields each adds: steps vs outputs/terminal_output).
+        run_id: str
+        status: str
+        ticket_id: str | None = None
+        workflow_name: str | None = None
+
     # NOTE: transition/reopen return {ticket_id, from, to, newly_unblocked}; the
     # `from` key is a Python reserved word, so those tools return a plain dict
     # (FastMCP serializes it correctly) rather than a typed model. They therefore
@@ -170,6 +179,7 @@ except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     CreateResultOut = ClaimResultOut = GateResultOut = None  # type: ignore[assignment,misc]
     ListEpicsOut = BridgeFsckOut = None  # type: ignore[assignment,misc]
     SignResultOut = VerifySignatureResultOut = None  # type: ignore[assignment,misc]
+    WorkflowRunOut = None  # type: ignore[assignment,misc]
 
 
 def _mcp_gate(attr: str, *, fail: bool) -> bool:
@@ -198,6 +208,30 @@ def _allow_llm() -> bool:
 def _allow_jira_sync() -> bool:
     # Fail-SAFE off — a malformed config never enables live/applying Jira writes.
     return _mcp_gate("allow_jira_sync", fail=False)
+
+
+# Keep MCP workflow status/result payloads under the client's ~25K-token budget
+# (WS-ffc4). ~90 KB ≈ 25K tokens; over it, elide the bulky step outputs (which an
+# agent can re-read via the library/CLI) while preserving the schema-valid shape.
+_WORKFLOW_TOKEN_BUDGET_BYTES = 90_000
+
+
+def _cap_workflow_payload(payload: dict) -> dict:
+    import json
+
+    if len(json.dumps(payload, default=str)) <= _WORKFLOW_TOKEN_BUDGET_BYTES:
+        return payload
+    note = (
+        "[truncated to stay under the MCP token budget — read the full result via "
+        "rebar.get_workflow_result / `rebar workflow result`]"
+    )
+    capped = dict(payload)
+    capped["truncated"] = True
+    if capped.get("terminal_output"):
+        capped["terminal_output"] = {"_truncated": note}
+    if isinstance(capped.get("outputs"), dict):
+        capped["outputs"] = {sid: {"_truncated": note} for sid in capped["outputs"]}
+    return capped
 
 
 def _dump(item):
@@ -440,25 +474,28 @@ def build_server():
         return rebar.reconcile(parsed.value)
 
     @mcp.tool()
-    def get_workflow_status(run_id: str, ticket_id: str | None = None) -> dict:
-        """Read a workflow run's current status via replay (no execution) -> a dict
+    def get_workflow_status(run_id: str, ticket_id: str | None = None) -> WorkflowRunOut:
+        """Read a workflow run's current status via replay (no execution) ->
         {run_id, ticket_id, workflow_name, status, terminal_step, error, steps}.
 
-        Read tool, always available. ``ticket_id`` is resolved from the local run
-        index when omitted. Returns a plain dict and advertises NO outputSchema for
-        now — the typed outputSchema + committed workflow_run schema is WS-ffc4
-        (documented NO_SCHEMA_EXEMPT until then)."""
-        return rebar.get_workflow_status(run_id, ticket_id)
+        Typed read tool (mirrors src/rebar/schemas/workflow_run.schema.json), always
+        available. ``ticket_id`` is resolved from the local run index when omitted."""
+        return WorkflowRunOut.model_validate(
+            _cap_workflow_payload(rebar.get_workflow_status(run_id, ticket_id))
+        )
 
     @mcp.tool()
-    def get_workflow_result(run_id: str, ticket_id: str | None = None) -> dict:
-        """Read a workflow run's outputs via replay -> a dict {run_id, status,
+    def get_workflow_result(run_id: str, ticket_id: str | None = None) -> WorkflowRunOut:
+        """Read a workflow run's outputs via replay -> {run_id, status,
         terminal_step, terminal_output, outputs, error}. The terminal step's output
         is the run result.
 
-        Read tool, always available. Returns a plain dict and advertises NO
-        outputSchema for now (typed schema is WS-ffc4; documented NO_SCHEMA_EXEMPT)."""
-        return rebar.get_workflow_result(run_id, ticket_id)
+        Typed read tool (workflow_run schema), always available. Bulky outputs are
+        elided to stay under the MCP token budget (``truncated: true``); read the
+        full result via the library/CLI."""
+        return WorkflowRunOut.model_validate(
+            _cap_workflow_payload(rebar.get_workflow_result(run_id, ticket_id))
+        )
 
     @mcp.tool()
     def render_workflow(workflow: str) -> str:

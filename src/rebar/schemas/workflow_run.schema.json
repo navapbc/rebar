@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/workflow_run.schema.json",
+  "title": "WorkflowRun",
+  "description": "The shape returned by the workflow status/result read tools (get_workflow_status / get_workflow_result) and the CLI `rebar workflow status/result`. One permissive schema covers both: `status` carries the per-step status map; `result` carries the terminal-step output + every step's outputs. `additionalProperties:true` so the evolving run record never breaks the contract; only run_id and status are required.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["run_id", "status"],
+  "properties": {
+    "run_id": { "type": "string" },
+    "ticket_id": { "type": ["string", "null"] },
+    "workflow_name": { "type": ["string", "null"] },
+    "status": {
+      "type": "string",
+      "description": "running | succeeded | failed (a per-step status uses the same vocabulary plus pending/skipped)."
+    },
+    "terminal_step": { "type": ["string", "null"] },
+    "terminal_output": {
+      "description": "The terminal step's output map (the run result); present in the result read.",
+      "type": ["object", "null"]
+    },
+    "error": { "type": ["string", "null"] },
+    "steps": {
+      "type": "object",
+      "description": "Present in the status read: step_id -> status string.",
+      "additionalProperties": { "type": "string" }
+    },
+    "outputs": {
+      "type": "object",
+      "description": "Present in the result read: step_id -> that step's output map.",
+      "additionalProperties": { "type": "object" }
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "True when large outputs were elided to keep the payload under the MCP token budget; read the full result via the library."
+    }
+  }
+}

@@ -62,6 +62,8 @@ CANONICAL: dict[str, str] = {
     "bridge_fsck": schemas.BRIDGE_FSCK,
     "sign_manifest": schemas.SIGN_RESULT,
     "verify_signature": schemas.VERIFY_SIGNATURE_RESULT,
+    "get_workflow_status": schemas.WORKFLOW_RUN,
+    "get_workflow_result": schemas.WORKFLOW_RUN,
 }
 
 # Advertisers with no canonical structured shape — they return a generic
@@ -102,13 +104,9 @@ NO_SCHEMA_EXEMPT: dict[str, str] = {
     "epics, returns a review_result as a plain dict (no outputSchema) "
     "— same exemption rationale as review_ticket.",
     "run_workflow": "workflow engine (WS-C4): async — returns {run_id, ticket_id, "
-    "status:'running'} immediately and runs in the background; a plain dict, no "
-    "outputSchema. WS-ffc4 adds the typed model + committed schema.",
-    "get_workflow_status": "workflow engine (WS-C4): run status via replay, a plain "
-    "dict for now; the typed outputSchema + committed workflow_run schema is WS-ffc4 "
-    "(it moves to CANONICAL there).",
-    "get_workflow_result": "workflow engine (WS-C4): run outputs via replay, a plain "
-    "dict for now; the typed outputSchema + committed schema is WS-ffc4.",
+    "status:'running'} immediately and runs in the background; a plain dict (no "
+    "outputSchema) because it is a fire-and-forget START ack, not the run result "
+    "(the typed surface is get_workflow_status/result, validated below).",
 }
 
 
@@ -224,7 +222,26 @@ def _seed(repo: Path) -> dict:
     # A session_log so recent_session_logs returns a non-empty list to shape-check
     # (hidden from list/search/ready, so it does not disturb the other tools).
     log = rebar.create_ticket("session_log", "Session log", description="verbose", repo_root=r)
-    return {"epic": epic, "task": task, "claimable": claimable, "log": log, "repo": r}
+    # A persisted workflow run so get_workflow_status/result have something to read
+    # (dry_run = offline FakeRunner, no tokens). Single agent step -> terminal.
+    run = rebar.run_workflow(
+        {
+            "schema_version": "1",
+            "name": "guard_demo",
+            "steps": [{"id": "review", "prompt": "code_quality", "mode": "findings"}],
+        },
+        ticket_id=task,
+        dry_run=True,
+        repo_root=r,
+    )
+    return {
+        "epic": epic,
+        "task": task,
+        "claimable": claimable,
+        "log": log,
+        "repo": r,
+        "run_id": run["run_id"],
+    }
 
 
 def _call_args(name: str, s: dict) -> dict:
@@ -250,6 +267,8 @@ def _call_args(name: str, s: dict) -> dict:
         "bridge_fsck": {},
         "sign_manifest": {"ticket_id": s["task"], "manifest": ["step one", "step two"]},
         "verify_signature": {"ticket_id": s["task"]},
+        "get_workflow_status": {"run_id": s["run_id"], "ticket_id": s["task"]},
+        "get_workflow_result": {"run_id": s["run_id"], "ticket_id": s["task"]},
     }[name]
 
 

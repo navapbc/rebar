@@ -64,6 +64,7 @@ __all__ = [
     "EXPORT",
     "COMMON",
     "WORKFLOW_V1",
+    "WORKFLOW_RUN",
     "INPUT_SCHEMAS",
 ]
 
@@ -101,6 +102,9 @@ VERIFY_SIGNATURE_RESULT = "verify_signature_result"
 # OUTPUT_SCHEMAS (export emits NDJSON, not the standard --output json envelope);
 # documented + validated directly via schemas.validator(schemas.EXPORT).
 EXPORT = "export"
+# rebar.llm.workflow — the run status/result read-tool output (WS-ffc4): a typed
+# read surface for get_workflow_status / get_workflow_result.
+WORKFLOW_RUN = "workflow_run"
 # rebar.llm.workflow — the version-pinned, IMMUTABLE workflow DSL schema (the
 # `.rebar/workflows/<name>.yaml` document format). These are INPUT/validation
 # schemas, not command outputs: a workflow file is validated against them via
@@ -154,6 +158,11 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "sign": SIGN_RESULT,
     "verify_signature": VERIFY_SIGNATURE_RESULT,
     "verify_signature.not_found": ERROR_ENVELOPE,
+    # Workflow run status/result read tools (WS-ffc4) — both share the permissive
+    # workflow_run shape. Keyed by MCP tool name; the MCP coverage guard drives
+    # them on a seeded run and validates the real output against this schema.
+    "get_workflow_status": WORKFLOW_RUN,
+    "get_workflow_result": WORKFLOW_RUN,
     # `export` emits NDJSON (one EXPORT line per ticket), not the canonical
     # --output json envelope, so it is not driven by the --output coverage guard;
     # registered here so the every-schema-file-is-wired guard sees it.
