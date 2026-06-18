@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/llm/workflow/lint.py","reason":"reference-integrity + expression + secret linter"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781760284944100001,"uuid":"5eb9cd1e-31e6-4a45-bd89-8bc9680111fd"}
