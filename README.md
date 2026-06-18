@@ -87,12 +87,32 @@ On top of that foundation, rebar adds what parallel agent work actually needs:
   BusyBox's is ignored in favor of the fallback.)
 - `acli` (Atlassian CLI) — only for **live** Jira reconciliation.
 
-**Python extras (pip):** the base install gives the `rebar` CLI + `import rebar`
-library; `[mcp]` adds the `rebar-mcp` server (pulls `mcp>=1.2`); `[dev]` adds the
-test/dev deps (`pytest`, `mcp`, `jsonschema`) and is **required to run the full
-test suite** — the interface-parity tests import the MCP server, so they error
-(not skip) if the `mcp` extra is absent. See [Install](#install) and
-[Tests](#tests).
+**Python dependencies — runtime (prod) vs. rebar development.** rebar keeps a
+deliberately tiny footprint; the distinction is between *running* rebar (and its
+optional capabilities) and *developing rebar itself*:
+
+- **Runtime — base.** `pip install nava-rebar` gives the `rebar` CLI + `import
+  rebar` library + the **lean workflow engine** (author/validate/render/run
+  *scripted* workflows). Its ONLY runtime dependency is **`pyyaml`** (the workflow
+  DSL loader, epic a88f) — the engine core and reconciler are otherwise
+  stdlib-only.
+- **Runtime — optional capability extras** (install only what you use; each is
+  lazy-imported, so the base stays light and CI enforces that):
+  - **`[mcp]`** — the `rebar-mcp` server (`mcp>=1.2`).
+  - **`[agents]`** — the LLM agent-operations framework + **agentic workflow
+    steps** (`rebar review`, the `code_review` workflow): langchain/langgraph (the
+    langgraph stack is exact-pinned) + a model-provider SDK.
+  - **`[eval]`** — prompt evaluation (`rebar prompt eval`): Inspect AI. An
+    authoring/CI capability, not needed to serve.
+  - **`[tracing]`** — the OTLP trace sink (write-only; OpenTelemetry is never read
+    back into a rebar decision).
+- **Development (working ON rebar).** `pip install -e '.[dev]'` adds the
+  test/lint/type tooling (`pytest`, `ruff`, `mypy`, `jsonschema`, `hatchling`) and
+  self-references `[agents]` so the validation tests **run** rather than skip. It
+  is **required to run the full test suite** (the interface-parity tests import the
+  MCP server, so they error — not skip — without `mcp`).
+
+See [Install](#install) and [Tests](#tests).
 
 ## Install
 
@@ -113,12 +133,20 @@ the MCP server via Homebrew users, install the `[mcp]` extra with pipx/uvx below
 
 ### PyPI — pipx / pip
 
+**Runtime (prod) — install what you'll run:**
+
 ```bash
-pipx install nava-rebar              # isolated CLI on PATH: rebar
-pip  install nava-rebar              # library: import rebar
+pipx install nava-rebar              # isolated CLI on PATH: rebar (+ lean workflow engine)
+pip  install nava-rebar              # library: import rebar  (only runtime dep: pyyaml)
 pip  install 'nava-rebar[mcp]'       # + MCP server: rebar-mcp
-pip  install 'nava-rebar[agents]'    # + LLM agent operations: `rebar review` (rebar.llm)
+pip  install 'nava-rebar[agents]'    # + LLM agent ops + agentic workflow steps (rebar.llm)
+pip  install 'nava-rebar[eval]'      # + prompt evaluation: `rebar prompt eval` (Inspect AI)
+pip  install 'nava-rebar[tracing]'   # + OTLP trace sink (write-only)
+pip  install 'nava-rebar[agents,eval,tracing]'   # the union, if you want it all
 ```
+
+The base install runs **scripted** workflows (`rebar workflow new/validate/show/run`)
+with no extra; **agentic** workflow steps and `rebar review` need `[agents]`.
 
 The `[agents]` extra adds the optional **LLM agent-operations framework**
 (`rebar.llm`) — tool-using agents that review tickets/code and emit structured
@@ -158,9 +186,11 @@ whitespace tolerated); anything else (incl. unset) is off.
 
 ```bash
 git clone https://github.com/navapbc/rebar && cd rebar
-pip install .              # library + CLI
+pip install .              # library + CLI (runtime; pyyaml only)
 pip install '.[mcp]'      # + MCP server (FastMCP)
-pip install -e '.[dev]'   # editable + test deps (pytest, mcp)
+# Developing rebar itself — the full dev environment (test/lint/type tooling +
+# the agents stack so the LLM validation tests RUN, not skip):
+pip install -e '.[dev]'
 ```
 
 > **Packaging note — why rebar installs *unpacked* to disk.** rebar's engine is a
