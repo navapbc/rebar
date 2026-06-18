@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/llm/prompts.py","reason":"invert resolve_prompt to git-canonical"},{"path":"src/rebar/llm/reviewers/","reason":"prompt-file canonicalization"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781760315436150001,"uuid":"53a76236-887a-4795-ad99-2e118db9d67a"}
