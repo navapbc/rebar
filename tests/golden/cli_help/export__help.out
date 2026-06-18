@@ -1,0 +1,21 @@
+Usage: rebar export [-o FILE] [--status=<s>] [--type=<t>] [--parent=<id>] [--strip-external|--no-jira] [--include-session-logs] [--exclude-archived] [--include-deleted]
+
+Export the ticket store as NDJSON — one full ticket object per line — to stdout
+(default) or a file. A lossy interop projection for reporting/data-mining
+(DuckDB/jq/pandas/BigQuery) and clean rebar->rebar migration; NOT a backup (use
+`git bundle create tickets.bundle tickets` for a lossless, full-history backup).
+Each line carries `schema_version`; run metadata (counts, source_env) goes to
+stderr so every stdout line is a clean ticket object.
+
+  -o, --out=FILE          Write NDJSON to FILE (default: stdout)
+  --status=<s>            Only tickets with status in <s> (comma-separated for OR)
+  --type=<t>              Only tickets of type <t> (comma-separated for OR)
+  --parent=<id>           Only direct children of <id>
+  --strip-external        Strip ALL external-tracker linkage (provider-neutral:
+  --no-jira               jira_comment_id, bridge_alerts, any provider id). Alias.
+  --include-session-logs  Include session_log tickets (excluded by default)
+  --exclude-archived      Exclude archived tickets (included+marked by default)
+  --include-deleted       Include deleted tickets (excluded by default)
+
+Scope defaults: all work types and statuses (incl. closed); session_log excluded;
+archived included (carrying `archived: true`); deleted excluded.

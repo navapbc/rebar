@@ -49,3 +49,5 @@ Subcommands:
   revert        Revert a ticket to a prior event UUID (<ticket_id> <target_uuid> [--reason=<text>])
   resolve       Resolve an id/alias/prefix to a canonical ticket id
   format        Render a ticket for display (<ticket_id> [mode])
+  export        Export the store as NDJSON (one ticket per line) [-o FILE] [--strip-external]
+  import        Import tickets from export NDJSON (clean rebar->rebar migration) [FILE] [--dry-run]

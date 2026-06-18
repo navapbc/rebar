@@ -1,0 +1,17 @@
+Usage: rebar import [FILE] [--dry-run]
+
+Import tickets from rebar export NDJSON (a FILE, or stdin if omitted) into this
+repo, composing ordinary events through the normal locked write path. A provenance
+import for clean rebar->rebar migration: every ticket gets a FRESH local id and
+fresh timestamps, with the source identity preserved as source_id / source_author /
+source_created_at / source_env. Two passes reproduce parents, links, tags,
+comments, file-impact, verify-commands, and non-open statuses (in_progress /
+closed). A dangling parent or link target (a source id not in the import set) is
+skipped with a warning, never a hard failure.
+
+  FILE         NDJSON file to import (default: read stdin)
+  --dry-run    Report how many tickets would be created; write nothing
+
+Note: this importer always creates (re-running duplicates). Idempotent skip-by-
+source_id and deferred-push performance are added in a follow-up. Run summary
+(counts, warnings) is printed to stderr.

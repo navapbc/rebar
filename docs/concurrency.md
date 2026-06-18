@@ -145,6 +145,12 @@ CLI / library / MCP honour it uniformly; case/space-insensitive; default
 
 Pinned by `tests/scripts/test-rebar-push-policy.sh`.
 
+`rebar import` uses `off` internally for its whole run and pushes once at the end,
+so a bulk import pays one round-trip rather than one per event; it still does one
+commit + one lock cycle per event (no batch primitive yet). See
+[import-export.md](import-export.md) for the accepted large-import limitation and
+the pre-compact guidance.
+
 ### Inbound — background sync (periodic, on reads/commands)
 `_reconverge_tickets` (`ticket-sync.sh`) runs at most once per minute per clone.
 It runs **under the write lock** (`.ticket-write.lock`) so it cannot race a
