@@ -237,6 +237,141 @@ def _scan_spec(argv: list[str]) -> int:
     return 0
 
 
+def _workflow(argv: list[str]) -> int:
+    """``rebar workflow <new|validate>`` → the workflow DSL toolchain (WS-B4).
+
+    A native ``rebar.llm.workflow`` op intercepted in main() (like review/reconcile),
+    so it owns its own ``--help``. ``new`` scaffolds a valid skeleton; ``validate``
+    runs the full one-pass linter (schema + reference integrity + expression
+    allow-list + secret scan). Lean-runtime only — no LLM dependency. The ``show``
+    (render, WS-I) and ``run`` (execute, WS-C) arms are added by their stories.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="rebar workflow",
+        description="Author and validate git-native workflows (.rebar/workflows/*.yaml).",
+    )
+    subparsers = parser.add_subparsers(dest="cmd")
+
+    p_new = subparsers.add_parser("new", help="scaffold a new valid skeleton workflow")
+    p_new.add_argument("name", help="workflow id (lowercase; the file stem)")
+    p_new.add_argument(
+        "--output-file",
+        "-o",
+        help="write here ('-' for stdout); default .rebar/workflows/<name>.yaml",
+    )
+    p_new.add_argument("--force", action="store_true", help="overwrite an existing file")
+
+    p_val = subparsers.add_parser("validate", help="validate/lint a workflow file")
+    p_val.add_argument("file", help="path to a .rebar/workflows/<name>.yaml file")
+    p_val.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="validate without spending tokens (no LLM calls)",
+    )
+    p_val.add_argument(
+        "--no-expressions",
+        action="store_true",
+        help="treat any ${{ }} expression as an error (expressions=off kill-switch)",
+    )
+    p_val.add_argument("--output", "-o", choices=["text", "json"], default="text")
+
+    args = parser.parse_args(argv)
+    if args.cmd == "new":
+        return _workflow_new(args)
+    if args.cmd == "validate":
+        return _workflow_validate(args)
+    parser.print_help()
+    return 1
+
+
+def _workflow_new(args) -> int:
+    from rebar import config
+    from rebar.llm import errors as _werr
+    from rebar.llm.workflow import lint as _lint
+    from rebar.llm.workflow import templates as _templates
+
+    try:
+        content = _templates.scaffold(args.name)
+    except _werr.WorkflowError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+
+    # Self-check: the scaffold we hand out must itself be lint-clean.
+    findings = _lint.lint_workflow(content, source=args.name)
+    if not _lint.lint_passes(findings):  # pragma: no cover - guards a broken template
+        sys.stderr.write("Error: internal scaffold is invalid:\n")
+        for f in findings:
+            sys.stderr.write(f"  {f}\n")
+        return 1
+
+    if args.output_file == "-":
+        sys.stdout.write(content)
+        return 0
+
+    if args.output_file:
+        dest = os.path.abspath(args.output_file)
+    else:
+        dest = os.path.join(str(config.repo_root()), ".rebar", "workflows", f"{args.name}.yaml")
+
+    if os.path.exists(dest) and not args.force:
+        sys.stderr.write(f"Error: {dest} already exists (use --force to overwrite)\n")
+        return 1
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    with open(dest, "w", encoding="utf-8") as fh:
+        fh.write(content)
+    sys.stdout.write(f"Created {dest}\n")
+    return 0
+
+
+def _workflow_validate(args) -> int:
+    import json as _json
+
+    from rebar.llm.workflow import lint as _lint
+
+    try:
+        with open(args.file, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError as exc:
+        sys.stderr.write(f"Error: cannot read {args.file}: {exc}\n")
+        return 1
+
+    findings = _lint.lint_workflow(text, source=args.file, expressions=not args.no_expressions)
+    valid = _lint.lint_passes(findings)
+
+    if args.output == "json":
+        sys.stdout.write(
+            _json.dumps(
+                {
+                    "source": args.file,
+                    "valid": valid,
+                    "dry_run": bool(args.dry_run),
+                    "findings": [
+                        {"location": f.location, "message": f.message, "severity": f.severity}
+                        for f in findings
+                    ],
+                }
+            )
+            + "\n"
+        )
+        return 0 if valid else 1
+
+    if args.dry_run:
+        # The executor lands in WS-C; until then a dry run is the full static pass.
+        # No LLM is ever called here, so "no tokens spent" holds by construction.
+        sys.stdout.write(f"Dry run of {args.file} (static validation — no LLM calls):\n")
+    if not findings:
+        sys.stdout.write(f"OK: {args.file} is valid.\n")
+        return 0
+    for f in findings:
+        sys.stdout.write(f"{f}\n")
+    errs = sum(1 for f in findings if f.severity == "error")
+    warns = len(findings) - errs
+    sys.stdout.write(f"\n{errs} error(s), {warns} warning(s).\n")
+    return 0 if valid else 1
+
+
 def _render_review_text(result: dict) -> None:
     """Human-readable rendering of a review_result."""
     findings = result.get("findings", [])
@@ -490,6 +625,10 @@ def main(argv: list[str] | None = None) -> int:
     # scan-spec intercept (native rebar.llm batch spec-scan op).
     if argv and argv[0] == "scan-spec":
         return _scan_spec(argv[1:])
+
+    # workflow intercept (native rebar.llm.workflow DSL toolchain; owns its --help).
+    if argv and argv[0] == "workflow":
+        return _workflow(argv[1:])
 
     # config intercept (native config-transparency read; owns its own --help, like
     # reconcile/review). No store init: it reads working-tree config files only.

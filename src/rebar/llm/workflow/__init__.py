@@ -50,6 +50,7 @@ from .schema import (
     step_kind,
     validate_document,
 )
+from .templates import SCAFFOLD_V1, scaffold
 
 __all__ = [
     "WorkflowError",
@@ -75,4 +76,6 @@ __all__ = [
     "lint_document",
     "lint_passes",
     "secret_scan",
+    "scaffold",
+    "SCAFFOLD_V1",
 ]
