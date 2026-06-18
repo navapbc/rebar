@@ -57,3 +57,22 @@ def test_cap_truncates_oversized_payloads() -> None:
     import json
 
     assert len(json.dumps(capped)) < 90_000
+
+
+def test_truncated_payload_still_validates_against_schema() -> None:
+    import pytest
+
+    pytest.importorskip("jsonschema")
+    from rebar import schemas
+    from rebar.mcp_server import _cap_workflow_payload
+
+    # An oversized STATUS-shaped payload (bulk in `steps`) must be capped AND remain
+    # schema-valid.
+    big_steps = {f"s{i}": "running" for i in range(20000)}
+    payload = {"run_id": "r", "status": "running", "ticket_id": "t", "steps": big_steps}
+    capped = _cap_workflow_payload(payload)
+    import json
+
+    assert len(json.dumps(capped)) < 90_000
+    assert capped["truncated"] is True
+    schemas.validator(schemas.WORKFLOW_RUN).validate(capped)

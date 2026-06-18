@@ -40,3 +40,12 @@ def test_setup_no_subcommand_prints_help(capsys) -> None:
     rc = main(["llm"])
     assert rc == 1
     assert "setup" in capsys.readouterr().out
+
+
+def test_setup_configures_otlp_endpoint(capsys) -> None:
+    rc = main(["llm", "setup", "--otlp-endpoint", "http://collector:4317", "--output", "json"])
+    assert rc == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["otlp_endpoint"] == "http://collector:4317"
+    assert "[tool.rebar.llm.tracing]" in report["recommended_config"]
+    assert "http://collector:4317" in report["recommended_config"]

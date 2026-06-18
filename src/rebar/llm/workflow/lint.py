@@ -229,6 +229,33 @@ def _check_step(
     findings: list[LintFinding],
 ) -> None:
     base = f"steps[{step_id}]"
+    kind = step_kind(step)
+
+    # 0a. Explicit `type` discriminator must agree with the uses/prompt shape, or
+    # the executor's step_kind (which honors an explicit `type`) would dispatch the
+    # wrong way.
+    declared_type = step.get("type")
+    if declared_type == "scripted" and "prompt" in step:
+        findings.append(
+            LintFinding(f"{base}.type", "`type: scripted` but the step has `prompt:` (agent shape)")
+        )
+    elif declared_type == "agent" and "uses" in step:
+        findings.append(
+            LintFinding(f"{base}.type", "`type: agent` but the step has `uses:` (scripted shape)")
+        )
+
+    # 0b. Agent-only fields on a scripted step are silently ignored at run time —
+    # flag them rather than let the author believe they take effect.
+    if kind == "scripted":
+        for agent_field in ("output_schema", "mode", "model"):
+            if agent_field in step:
+                findings.append(
+                    LintFinding(
+                        f"{base}.{agent_field}",
+                        f"`{agent_field}` only applies to an agent step (`prompt:`); "
+                        f"it is ignored on a scripted (`uses:`) step",
+                    )
+                )
 
     # 1. Injection guard: no raw expressions in identifier/body fields.
     for field in _LITERAL_ONLY_FIELDS:
@@ -434,6 +461,12 @@ def _scan_secret_literals(doc: dict[str, Any]) -> list[LintFinding]:
             if isinstance(value, dict):
                 for k, v in value.items():
                     keypath = f"{path}.{k}"
+                    # The risk this catches is a LITERAL secret committed to git. Any
+                    # ${{ }} / ${env:} value means the secret is NOT literal (it's
+                    # indirected — secrets.*, env, an input, or an upstream output),
+                    # so it is suppressed; only a bare literal in a credential-named
+                    # field is flagged. (Reference integrity separately validates the
+                    # expression itself.)
                     if (
                         isinstance(k, str)
                         and _SECRET_KEY_RE.search(k)

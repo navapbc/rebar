@@ -37,6 +37,25 @@ The whole matrix is locked down by `tests/interfaces/store/test_llm_optionality.
 exhaustiveness guard that discovers operations from the public surface), all
 runnable offline.
 
+### Extras taxonomy (epic a88f / WS-J)
+
+The optional surface is three extras, each lazy-imported behind
+`rebar._optional.guard_import(..., extra=…)` (which raises a clear error naming the
+exact `pip install nava-rebar[<extra>]`), and CI-enforced lean by
+`.github/workflows/optionality.yml` (an AST import-linter + a clean-core-wheel job
+that asserts the heavy stack is *not* importable + per-extra and union jobs):
+
+- **`[agents]`** — the LLM agent runtime (langchain/langgraph + a provider SDK):
+  agent workflow steps, `review_*`, the workflow agent runner.
+- **`[eval]`** — prompt evaluation (Inspect AI + promptfoo interop).
+- **`[tracing]`** — the OTLP trace sink. **Write-only by rule:** OpenTelemetry is a
+  *sink*, never read back into a rebar decision (the oracle-discipline rule). The
+  `rebar llm setup` wizard configures its endpoint (`--otlp-endpoint` /
+  `$OTEL_EXPORTER_OTLP_ENDPOINT`).
+
+Only `pyyaml` is a hard runtime dependency (the workflow DSL loader); everything
+else is one of these extras. A scripted-only workflow runs with no extra at all.
+
 ## Why this shape (the research-grounded decision)
 
 The design was chosen after a research spike + two independent Opus design reviews

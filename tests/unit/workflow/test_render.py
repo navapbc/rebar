@@ -66,3 +66,42 @@ def test_init_directive_pins_limits() -> None:
 
 def test_render_workflow_by_dict() -> None:
     assert "flowchart TD" in render.render_workflow(WF)
+
+
+def test_cli_workflow_show(tmp_path, capsys) -> None:
+    from rebar._cli import main
+
+    f = tmp_path / "wf.yaml"
+    f.write_text(
+        'schema_version: "1"\nname: showdemo\nsteps:\n'
+        "  - id: a\n    uses: u\n  - id: b\n    uses: u\n    needs: [a]\n"
+    )
+    rc = main(["workflow", "show", str(f)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "flowchart TD" in out and "a --> b" in out
+
+
+def test_cli_workflow_show_missing_file(capsys) -> None:
+    from rebar._cli import main
+
+    rc = main(["workflow", "show", "/no/such/wf.yaml"])
+    assert rc == 1
+    assert "Error" in capsys.readouterr().err
+
+
+def test_mcp_render_workflow_tool(tmp_path) -> None:
+    import asyncio
+
+    import pytest
+
+    pytest.importorskip("mcp")
+    from rebar.mcp_server import build_server
+
+    f = tmp_path / "wf.yaml"
+    f.write_text('schema_version: "1"\nname: m\nsteps:\n  - id: a\n    uses: u\n')
+    srv = build_server()
+    res = asyncio.run(srv.call_tool("render_workflow", {"workflow": str(f)}))
+    # _unwrap-free: the tool returns a string; FastMCP wraps it — just check content.
+    text = str(res)
+    assert "flowchart TD" in text

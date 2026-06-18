@@ -73,14 +73,24 @@ def new_run_id() -> str:
 
 
 def _capture_nondeterminism() -> dict[str, Any]:
-    """Snapshot the wall clock + a fresh uuid ONCE for a step (WS-C3).
+    """Snapshot the non-deterministic inputs a step may use — the wall clock, a
+    fresh uuid, and a random seed — ONCE per step EXECUTION (WS-C3).
 
-    Persisted in the WORKFLOW_STEP record so a later status/result read sees the
-    same values the step ran with, and so a side-effecting step has a stable
-    clock/uuid to pair with its (run_id, step_id) idempotency token rather than
-    reading the live clock on each retry.
+    Persisted in that execution's WORKFLOW_STEP record, so a later status/result
+    read replays the exact values the step ran with, and a step that needs a
+    clock/uuid/seed reads them from ``ctx.captured`` instead of a live source.
+    Note the scope: the capture is per execution, not immortal — a step that
+    crashed BEFORE its marker committed legitimately re-executes (forward-only
+    recovery) and captures afresh; effectively-once then rests on the effect being
+    idempotent over (run_id, step_id), which is the step's contract, not the
+    clock's. (Live external reads a step performs are the step's own concern; the
+    seed/clock/uuid are the engine-provided non-determinism.)
     """
-    return {"now_ns": time.time_ns(), "uuid": _uuid.uuid4().hex}
+    return {
+        "now_ns": time.time_ns(),
+        "uuid": _uuid.uuid4().hex,
+        "seed": _uuid.uuid4().int & 0xFFFFFFFF,
+    }
 
 
 # ── Step interfaces (the WS-E / WS-D seams) ──────────────────────────────────
@@ -103,10 +113,11 @@ class StepContext:
     workflow: Mapping[str, Any]
     target_ticket: str | None = None
     repo_root: str | None = None
-    # Non-determinism captured ONCE for this step (now_ns + a fresh step uuid),
-    # persisted in the WORKFLOW_STEP record so a status/result read reflects what
-    # actually happened (WS-C3). A side-effecting step uses (run_id, step_id) as its
-    # downstream idempotency token; ``captured`` gives it a stable clock/uuid.
+    # Non-determinism captured ONCE for this step execution (now_ns + a fresh uuid
+    # + a random seed), persisted in the WORKFLOW_STEP record so a status/result
+    # read replays what actually happened (WS-C3). A side-effecting step uses
+    # (run_id, step_id) as its downstream idempotency token; ``captured`` gives it a
+    # clock/uuid/seed to read instead of a live source.
     captured: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -456,6 +467,21 @@ def run_workflow(
             result = StepResult(outputs=prior.get("outputs", {}), status="succeeded")
             state = state.with_step(step_id, result)
             continue
+
+        # Best-effort progress (WS-C4): record a 'running' marker BEFORE the effect
+        # so a get_workflow_status poll sees which step is in-flight. This is NOT a
+        # done-marker (completed_step only skips status=='succeeded'), so it never
+        # triggers an idempotent skip and is overwritten by the final marker below.
+        rec.step_recorded(
+            {
+                "run_id": run_id,
+                "step_id": step_id,
+                "kind": kind,
+                "status": "running",
+                "outputs": {},
+                "error": None,
+            }
+        )
 
         # Capture non-determinism ONCE, before the effect, so the same clock/uuid
         # is handed to the step and persisted in its marker (WS-C3).

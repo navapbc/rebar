@@ -120,3 +120,28 @@ def test_commits_not_a_jira_synced_field() -> None:
     assert '"commits"' not in src and "'commits'" not in src, (
         "commits leaked into the outbound differ — it must not be a Jira-synced field"
     )
+
+
+def test_dedup_converges_under_reorder(rebar_repo: Path) -> None:
+    # The SAME sha arriving in two events, written out of filename order, converges
+    # to a single entry deterministically (union-add dedup by sha, replay order).
+    tid = rebar.create_ticket("task", "T", repo_root=str(rebar_repo))
+    env_id = (_tracker(rebar_repo) / ".env-id").read_text().strip()
+    base = 1_781_000_000_000_000_000
+
+    def write(ts, uid, shas):
+        ev = {
+            "timestamp": ts,
+            "uuid": uid,
+            "event_type": "COMMITS",
+            "env_id": env_id,
+            "author": "t",
+            "data": {"commits": shas},
+        }
+        (_tracker(rebar_repo) / tid / f"{ts}-{uid}-COMMITS.json").write_text(json.dumps(ev))
+
+    write(base + 9, "ffffffff-0000-4000-8000-000000000002", ["dup", "later"])
+    write(base + 1, "ffffffff-0000-4000-8000-000000000001", ["dup", "early"])
+    state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
+    shas = [c["sha"] for c in state["commits"]]
+    assert shas == ["dup", "early", "later"]  # first-occurrence-in-replay-order, deduped

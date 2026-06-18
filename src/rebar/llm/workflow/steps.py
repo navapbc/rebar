@@ -136,17 +136,16 @@ def gate(ctx: StepContext) -> dict[str, Any]:
 
     Inputs: ``findings`` (list of {severity, …}) and ``policy`` (a name in
     GATE_POLICIES; default ``default``). Deterministic, pure Python."""
-    findings = ctx.inputs.get("findings") or []
-    if not isinstance(findings, list):
-        findings = []
+    raw = ctx.inputs.get("findings") or []
+    if not isinstance(raw, list):
+        raw = []
+    # Count only well-formed findings; garbage entries neither fail-on-severity nor
+    # inflate the max_findings count (so the verdict reason stays meaningful).
+    findings = [f for f in raw if isinstance(f, dict)]
     policy_name = ctx.inputs.get("policy") or "default"
     policy = GATE_POLICIES.get(policy_name, GATE_POLICIES["default"])
 
-    failing = [
-        f
-        for f in findings
-        if isinstance(f, dict) and f.get("severity") in policy["fail_on_severity"]
-    ]
+    failing = [f for f in findings if f.get("severity") in policy["fail_on_severity"]]
     over_count = policy["max_findings"] is not None and len(findings) > policy["max_findings"]
     verdict = "fail" if (failing or over_count) else "pass"
     return {
@@ -164,11 +163,12 @@ def gate(ctx: StepContext) -> dict[str, Any]:
 
 @register_step("comment_verdict")
 def comment_verdict(ctx: StepContext) -> StepResult:
-    """Post a verdict/summary comment to the ticket — idempotent.
+    """Post a verdict/summary comment to the ticket — idempotent within a run.
 
     Embeds a ``[rebar-run <run_id>/<step_id>]`` marker and skips if a comment with
-    that marker already exists, so a crash-and-resume (effect-applied-but-unmarked)
-    never double-comments."""
+    that marker already exists, so a crash-and-resume of the SAME run
+    (effect-applied-but-marker-unwritten) never double-comments. A deliberately NEW
+    run (fresh run_id) is a new verdict and posts a new comment by design."""
     import rebar
 
     tid = _ticket_id(ctx)

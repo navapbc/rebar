@@ -29,9 +29,12 @@ def test_capture_persisted_in_step_record() -> None:
     doc = {"schema_version": "1", "name": "t", "steps": [{"id": "a", "uses": "e"}]}
     rec = ex.MemoryRecorder()
     ex.run_workflow(doc, run_id="R", scripted_registry={"e": lambda c: {}}, recorder=rec)
-    step = next(s for s in rec.steps if s["step_id"] == "a")
+    # A step emits a 'running' progress marker then the final marker; the capture
+    # lives on the completed (succeeded) record.
+    step = next(s for s in rec.steps if s["step_id"] == "a" and s["status"] == "succeeded")
     assert isinstance(step["captured"]["now_ns"], int)
     assert len(step["captured"]["uuid"]) == 32
+    assert isinstance(step["captured"]["seed"], int)
 
 
 def test_step_sees_captured_values() -> None:

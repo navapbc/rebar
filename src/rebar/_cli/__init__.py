@@ -351,6 +351,12 @@ def _llm(argv: list[str]) -> int:
     p_setup.add_argument(
         "--write", metavar="FILE", help="write the recommended [tool.rebar.llm] block to FILE"
     )
+    p_setup.add_argument(
+        "--otlp-endpoint",
+        metavar="URL",
+        help="configure the [tracing] OTLP sink endpoint (write-only — OTel is never "
+        "read back into a rebar decision); defaults to $OTEL_EXPORTER_OTLP_ENDPOINT",
+    )
     p_setup.add_argument("--output", "-o", choices=["text", "json"], default="text")
 
     args = parser.parse_args(argv)
@@ -387,12 +393,21 @@ def _llm_setup(args) -> int:
     except Exception as exc:  # noqa: BLE001 - report any failure as a clean message
         dry_ok, dry_err = False, str(exc)
 
+    # Optionally configure the OTLP tracing sink (write-only): an explicit
+    # --otlp-endpoint, else the standard OTEL env var if set.
+    otlp = args.otlp_endpoint or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
     snippet = f'[tool.rebar.llm]\nmodel = "{_cfg.DEFAULT_MODEL}"\n'
+    if otlp:
+        snippet += (
+            "\n# Write-only OTLP trace sink (OTel is never read back into a rebar "
+            f'decision).\n[tool.rebar.llm.tracing]\notlp_endpoint = "{otlp}"\n'
+        )
     report = {
         "extras": extras,
         "anthropic_api_key": backends["anthropic_api_key"],
         "openai_api_key": backends["openai_api_key"],
         "tracing_configured": backends.get("langfuse_configured", False),
+        "otlp_endpoint": otlp,
         "dry_run_ok": dry_ok,
         "dry_run_error": dry_err,
         "recommended_config": snippet,
@@ -413,6 +428,8 @@ def _llm_setup(args) -> int:
         sys.stdout.write(
             f"  FakeRunner dry-run: {'OK' if dry_ok else 'FAILED: ' + (dry_err or '')}\n"
         )
+        otlp_line = otlp or "not configured (--otlp-endpoint URL or $OTEL_EXPORTER_OTLP_ENDPOINT)"
+        sys.stdout.write(f"  OTLP tracing sink: {otlp_line}\n")
         if not extras["agents"]:
             sys.stdout.write(
                 "  → for real agent steps install:  pip install 'nava-rebar[agents]'\n"

@@ -340,3 +340,53 @@ def test_lean_core_degrades_when_jsonschema_absent(monkeypatch) -> None:
     assert L.lint_passes(findings), _msgs(findings)
     # The skip note is present but only as a warning.
     assert any(f.severity == "warning" and "jsonschema" in f.message.lower() for f in findings)
+
+
+def test_type_disagreement_with_shape_is_flagged() -> None:
+    wf = """\
+schema_version: "1"
+name: x
+steps:
+  - id: a
+    type: scripted
+    prompt: code_quality
+"""
+    findings = L.lint_workflow(wf)
+    assert any("type: scripted" in f.message and "prompt" in f.message for f in findings), _msgs(
+        findings
+    )
+
+
+def test_agent_only_field_on_scripted_step_is_flagged() -> None:
+    wf = """\
+schema_version: "1"
+name: x
+steps:
+  - id: a
+    uses: u
+    output_schema: review_result
+    mode: findings
+"""
+    findings = L.lint_workflow(wf)
+    msgs = _msgs(findings)
+    assert any("output_schema" in f.message and "ignored" in f.message for f in findings), msgs
+    assert any("mode" in f.message and "ignored" in f.message for f in findings), msgs
+
+
+def test_secret_indirection_via_any_expression_is_clean() -> None:
+    # The literal-secret check fires only on a bare literal; ANY ${{ }} indirection
+    # (inputs/secrets/steps/env) means the secret isn't in the file.
+    pytest.importorskip("jsonschema")
+    wf = """\
+schema_version: "1"
+name: x
+inputs:
+  pw: {type: string}
+steps:
+  - id: a
+    uses: u
+    with:
+      password: ${{ inputs.pw }}
+"""
+    findings = L.lint_workflow(wf)
+    assert not any("credential" in f.message for f in findings), _msgs(findings)

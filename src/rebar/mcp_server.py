@@ -216,10 +216,20 @@ def _allow_jira_sync() -> bool:
 _WORKFLOW_TOKEN_BUDGET_BYTES = 90_000
 
 
-def _cap_workflow_payload(payload: dict) -> dict:
+def _payload_bytes(payload: dict) -> int:
     import json
 
-    if len(json.dumps(payload, default=str)) <= _WORKFLOW_TOKEN_BUDGET_BYTES:
+    return len(json.dumps(payload, default=str))
+
+
+def _cap_workflow_payload(payload: dict) -> dict:
+    """Bound a status/result payload under the ~25K-token MCP budget (WS-ffc4).
+
+    Truncates the bulky carriers in escalating order until the WHOLE payload fits —
+    bulk can live in `outputs`/`terminal_output` (result read) OR `steps` (status
+    read) OR `error`/elsewhere — so the budget is airtight regardless of shape. The
+    full result stays available via the library/CLI."""
+    if _payload_bytes(payload) <= _WORKFLOW_TOKEN_BUDGET_BYTES:
         return payload
     note = (
         "[truncated to stay under the MCP token budget — read the full result via "
@@ -227,10 +237,26 @@ def _cap_workflow_payload(payload: dict) -> dict:
     )
     capped = dict(payload)
     capped["truncated"] = True
+    # 1) elide the result carriers.
     if capped.get("terminal_output"):
         capped["terminal_output"] = {"_truncated": note}
     if isinstance(capped.get("outputs"), dict):
         capped["outputs"] = {sid: {"_truncated": note} for sid in capped["outputs"]}
+    # 2) still over? collapse the per-step status map to a count (status read).
+    if _payload_bytes(capped) > _WORKFLOW_TOKEN_BUDGET_BYTES and isinstance(
+        capped.get("steps"), dict
+    ):
+        capped["steps"] = {"_truncated": f"{len(capped['steps'])} steps; {note}"}
+    # 3) last resort: a minimal envelope that is guaranteed to fit + schema-valid.
+    if _payload_bytes(capped) > _WORKFLOW_TOKEN_BUDGET_BYTES:
+        capped = {
+            "run_id": str(payload.get("run_id", "")),
+            "status": str(payload.get("status", "")),
+            "ticket_id": payload.get("ticket_id"),
+            "workflow_name": payload.get("workflow_name"),
+            "truncated": True,
+            "error": note,
+        }
     return capped
 
 
@@ -756,8 +782,11 @@ def build_server():
             )
 
             def _bg() -> None:
-                # Best-effort: any failure is reflected in the persisted run-state
-                # (a failed step record); never propagated to the immediate return.
+                # Step failures already persist a failed step record via the executor.
+                # A failure BEFORE the executor loop (workflow-not-found, validation
+                # error) would otherwise leave the run stuck at 'running' forever, so
+                # flip the run record to 'failed' here — a poller then settles instead
+                # of spinning to its timeout.
                 try:
                     _wf_runs.run(
                         workflow,
@@ -766,8 +795,13 @@ def build_server():
                         run_id=run_id,
                         dry_run=dry_run,
                     )
-                except Exception:
-                    pass
+                except Exception as exc:  # noqa: BLE001 - reflected in run-state, not raised
+                    try:
+                        _wf_exec.TicketEventRecorder(ticket_id).run_finished(
+                            {"run_id": run_id, "status": "failed", "error": str(exc)}
+                        )
+                    except Exception:
+                        pass
 
             threading.Thread(target=_bg, daemon=True).start()
             return {"run_id": run_id, "ticket_id": ticket_id, "status": "running"}

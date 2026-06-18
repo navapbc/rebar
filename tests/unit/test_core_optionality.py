@@ -67,12 +67,15 @@ def _module_scope_imports(tree: ast.Module):
         for node in body:
             if isinstance(node, ast.Import | ast.ImportFrom):
                 yield node
-            elif isinstance(node, ast.If | ast.Try | ast.With):
+            elif isinstance(node, ast.If | ast.Try | ast.With | ast.For | ast.While):
                 yield from walk(node.body)
                 yield from walk(getattr(node, "orelse", []))
                 yield from walk(getattr(node, "finalbody", []))
                 for h in getattr(node, "handlers", []):
                     yield from walk(h.body)
+            elif isinstance(node, ast.Match):
+                for case in node.cases:
+                    yield from walk(case.body)
 
     yield from walk(tree.body)
 

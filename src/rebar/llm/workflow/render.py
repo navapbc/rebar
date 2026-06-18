@@ -54,9 +54,14 @@ def _label(step: dict[str, Any]) -> str:
     else:
         detail = f"scripted: {step.get('uses', '?')}"
     sid = step.get("id", "?")
-    # Quote the label; escape any embedded quote so Mermaid stays well-formed.
-    text = f"{sid}\\n({detail})".replace('"', "'")
-    return text
+    # Quote the label; neutralize characters that trip stricter Mermaid renderers /
+    # securityLevel settings: double-quotes, backticks, and angle brackets. (Step
+    # ids/refs are already constrained by the schema, so this only ever bites an
+    # unusual prompt id.)
+    raw = f"{sid}\\n({detail})"
+    for bad, repl in (('"', "'"), ("`", "'"), ("<", "("), (">", ")")):
+        raw = raw.replace(bad, repl)
+    return raw
 
 
 def to_mermaid(doc: dict[str, Any]) -> str:

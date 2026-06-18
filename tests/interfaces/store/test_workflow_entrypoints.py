@@ -128,10 +128,14 @@ def test_mcp_run_workflow_is_async_and_pollable(rebar_repo: Path) -> None:
     assert started["status"] == "running"
     rid = started["run_id"]
 
-    # Poll get_workflow_status until the background run settles.
+    # Poll get_workflow_status until the background run settles. Pass ticket_id (the
+    # run's durable home) so the poll doesn't depend on the process-global run-index
+    # — run_id-only lookup is covered by test_library_run_status_result.
     final = None
     for _ in range(50):
-        st = _unwrap(asyncio.run(srv.call_tool("get_workflow_status", {"run_id": rid})))
+        st = _unwrap(
+            asyncio.run(srv.call_tool("get_workflow_status", {"run_id": rid, "ticket_id": tid}))
+        )
         if st.get("status") in ("succeeded", "failed"):
             final = st
             break
@@ -139,5 +143,7 @@ def test_mcp_run_workflow_is_async_and_pollable(rebar_repo: Path) -> None:
     assert final is not None, "background run never settled"
     assert final["status"] == "succeeded"
 
-    rr = _unwrap(asyncio.run(srv.call_tool("get_workflow_result", {"run_id": rid})))
+    rr = _unwrap(
+        asyncio.run(srv.call_tool("get_workflow_result", {"run_id": rid, "ticket_id": tid}))
+    )
     assert rr["terminal_step"] == "review"

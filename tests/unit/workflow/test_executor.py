@@ -178,3 +178,15 @@ def test_register_step_decorator() -> None:
         assert res.outputs["a"]["ok"] is True
     finally:
         ex.STEP_REGISTRY.pop("registered_demo", None)
+
+
+def test_progress_running_marker_emitted() -> None:
+    # Best-effort progress (WS-C4): each executed step emits a 'running' marker
+    # before its final marker, so a status poll can see in-flight progress.
+    doc = _wf([{"id": "a", "uses": "echo", "with": {"value": "v"}}])
+    rec = ex.MemoryRecorder()
+    ex.run_workflow(doc, run_id="r", scripted_registry={"echo": _echo}, recorder=rec)
+    a_records = [s for s in rec.steps if s["step_id"] == "a"]
+    statuses = [s["status"] for s in a_records]
+    assert "running" in statuses  # progress marker
+    assert statuses[-1] == "succeeded"  # final marker last
