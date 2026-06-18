@@ -44,6 +44,10 @@ class RunRequest:
     # constraining/validating ``structured`` output.
     output_schema: str | None = None
     mode: str = "findings"
+    # Per-operation extra tools appended to the agent's tool list (e.g. a read-only
+    # rebar ``show_ticket`` for the completion verifier). DEFAULTED None so existing
+    # review callers are unchanged. Appended with a name-collision guard (see _merge_tools).
+    extra_tools: list | None = None
 
 
 @runtime_checkable
@@ -105,20 +109,27 @@ class LangGraphRunner:
         _import_langgraph()
 
     def run(self, req: RunRequest) -> dict:
+        from rebar.llm import contracts  # lazy: keeps `import rebar.llm.runner` import-clean
+
         cfg = self._config
         create_agent, ToolStrategy, init_chat_model = _import_langgraph()
         model = _build_model(cfg, init_chat_model)
-        tools = _filesystem_tools(cfg.repo_path) + _mcp_tools(cfg.mcp_servers)
+        tools = _merge_tools(
+            _filesystem_tools(cfg.repo_path) + _mcp_tools(cfg.mcp_servers), req.extra_tools
+        )
+        # The structured-output contract is selected PER OPERATION by req.output_schema
+        # (default: the findings model) — the pluggable-contract seam — instead of being
+        # hardcoded, so each op/workflow step declares its own output shape.
         # ToolStrategy (not ProviderStrategy) is deliberate: it is provider-PORTABLE
         # (works across Anthropic/OpenAI/Gemini), with in-loop self-correction
-        # (handle_errors). NOTE: ToolStrategy forces tool_choice, which Anthropic
-        # rejects when *extended thinking* is enabled (HTTP 400) — so do NOT enable
-        # thinking on the model here. A missing structured_response is handled below.
+        # (handle_errors). A missing structured_response is handled below.
         agent = create_agent(
             model,
             tools,
             system_prompt=req.system_prompt,
-            response_format=ToolStrategy(_findings.findings_response_model(), handle_errors=True),
+            response_format=ToolStrategy(
+                contracts.response_model_for(req.output_schema), handle_errors=True
+            ),
         )
         outcome, trace_id = _invoke_structured(agent, cfg, req)
         return _finalize_review(outcome, cfg, req, self.name, trace_id)
@@ -151,6 +162,8 @@ class DeepAgentsRunner:
         _import_deepagents()
 
     def run(self, req: RunRequest) -> dict:
+        from rebar.llm import contracts  # lazy: keeps `import rebar.llm.runner` import-clean
+
         cfg = self._config
         _, ToolStrategy, init_chat_model = _import_langgraph()
         create_deep_agent, FilesystemBackend, FilesystemPermission = _import_deepagents()
@@ -171,12 +184,15 @@ class DeepAgentsRunner:
                 FilesystemPermission(operations=["read"], paths=deny_globs, mode="deny")
             )
         agent = create_deep_agent(
+            # deepagents supplies its own ls/read/grep/glob; append any per-op extra_tools.
             model=model,
-            tools=_mcp_tools(cfg.mcp_servers),  # deepagents supplies its own ls/read/grep/glob
+            tools=_merge_tools(_mcp_tools(cfg.mcp_servers), req.extra_tools),
             system_prompt=req.system_prompt,
             backend=backend,
             permissions=permissions,
-            response_format=ToolStrategy(_findings.findings_response_model(), handle_errors=True),
+            response_format=ToolStrategy(
+                contracts.response_model_for(req.output_schema), handle_errors=True
+            ),
         )
         outcome, trace_id = _invoke_structured(agent, cfg, req)
         return _finalize_review(outcome, cfg, req, self.name, trace_id)
@@ -374,6 +390,26 @@ def _mcp_tools(servers: dict) -> list:
             "refusing to run tool-less silently. Check the server configuration."
         )
     return tools
+
+
+def _merge_tools(base: list, extra: list | None) -> list:
+    """Append per-operation ``extra`` tools to ``base``, refusing a NAME collision.
+
+    LangChain binds tools by ``.name``; a silently-shadowed tool is a footgun — if a
+    configured MCP server exposes the same name as an op's extra tool (e.g. ``show_ticket``),
+    that must be a clear error, not a silent shadow. ``extra`` empty/None → ``base`` unchanged."""
+    if not extra:
+        return base
+    names = {getattr(t, "name", None) for t in base}
+    for t in extra:
+        name = getattr(t, "name", None)
+        if name in names:
+            raise LLMRunnerError(
+                f"tool name collision: '{name}' is provided by both the base toolset "
+                "(filesystem/MCP) and an operation's extra tools — rename or remove one."
+            )
+        names.add(name)
+    return [*base, *extra]
 
 
 def _readonly_gate() -> bool:

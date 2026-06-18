@@ -244,12 +244,14 @@ def _final_text(outcome: dict) -> str:
     return ""
 
 
-def _validate_structured(data: dict, output_schema: str | None) -> dict:
+def validate_structured(data: dict, output_schema: str | None) -> dict:
     """Best-effort validate a structured payload against a named JSON Schema.
 
-    No-ops when ``output_schema`` is unset, the schema isn't a packaged rebar
-    schema, or jsonschema isn't installed — mirroring ``validate_result``'s graceful
-    degradation. Raises :class:`FindingsError` on a real validation failure."""
+    Public (used by the verify-completion op for its final re-validation, and by
+    ``finalize_outcome``). No-ops when ``output_schema`` is unset, the schema isn't a
+    packaged rebar schema, or jsonschema isn't installed — mirroring
+    ``validate_result``'s graceful degradation. Raises :class:`FindingsError` on a
+    real validation failure."""
     if not output_schema:
         return data
     try:
@@ -305,10 +307,19 @@ def finalize_outcome(
             "the agent returned no structured output (no structured_response). "
             "Treating this as a failed run rather than a clean one."
         )
-    data = structured.model_dump() if hasattr(structured, "model_dump") else dict(structured)
+    # exclude_none: a Pydantic optional left unset dumps as explicit ``null``, which a
+    # shape-only schema (fields typed ``string``) rejects in `validate_structured` BEFORE
+    # the op can normalize — and `ToolStrategy` is free-generation + code-validation, so
+    # optional-None leakage is real (BI-1). Harmless for the findings path (normalize_finding
+    # strips nulls anyway); also hardens existing mode="structured" workflow steps.
+    data = (
+        structured.model_dump(exclude_none=True)
+        if hasattr(structured, "model_dump")
+        else {k: v for k, v in dict(structured).items() if v is not None}
+    )
 
     if mode == "structured":
-        payload = _validate_structured(data, output_schema)
+        payload = validate_structured(data, output_schema)
         return {**payload, "runner": runner, "model": model, "trace_id": trace_id}
 
     # mode == "findings"
@@ -325,11 +336,11 @@ def finalize_outcome(
     )
 
 
-def findings_response_model():
-    """Build (lazily) the Pydantic model the LangGraph runner binds as its
-    structured-output contract. Mirrors ``common.schema.json#/$defs/finding``;
-    pinned against the JSON Schema by a test so the two never drift. Requires
-    pydantic (the ``agents`` extra) — imported here, not at module top."""
+def citation_model():
+    """Lazily build the ``Citation`` structured-output model, mirroring
+    ``common.schema.json#/$defs/citation``. Factored out (not nested) so OTHER output
+    contracts (e.g. ``completion_verdict``) reuse the SAME citation shape — one source
+    of truth, no drift. pydantic imported here, never at module top."""
     from pydantic import BaseModel, Field
 
     class Citation(BaseModel):
@@ -341,6 +352,18 @@ def findings_response_model():
         description: str | None = Field(
             default=None, description="Freeform source/evidence (kind=source)."
         )
+
+    return Citation
+
+
+def finding_model():
+    """Lazily build the ``Finding`` structured-output model, mirroring
+    ``common.schema.json#/$defs/finding`` (with ``citations: list[Citation]``). The
+    schema-pin test reaches ``Citation`` through ``Finding.model_fields['citations']``,
+    so keep that annotation typed."""
+    from pydantic import BaseModel, Field
+
+    Citation = citation_model()
 
     class Finding(BaseModel):
         severity: str = Field(description="One of: critical | high | medium | low | info.")
@@ -356,6 +379,18 @@ def findings_response_model():
         reviewer_id: str | None = Field(
             default=None, description="Reviewer that produced this finding."
         )
+
+    return Finding
+
+
+def findings_response_model():
+    """Build (lazily) the Pydantic model the LangGraph runner binds as its
+    structured-output contract. Mirrors ``common.schema.json#/$defs/finding``;
+    pinned against the JSON Schema by a test so the two never drift. Requires
+    pydantic (the ``agents`` extra) — imported here, not at module top."""
+    from pydantic import BaseModel, Field
+
+    Finding = finding_model()
 
     class ReviewFindings(BaseModel):
         """Structured output of an LLM review: the findings and an optional summary."""

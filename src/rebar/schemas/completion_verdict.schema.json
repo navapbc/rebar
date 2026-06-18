@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/completion_verdict.schema.json",
+  "title": "CompletionVerdict",
+  "description": "Output of the rebar.llm completion-verification operation (`rebar verify-completion <id>`): a PASS/FAIL verdict that a ticket's completion criteria (acceptance/success/close/completion criteria, definitions of done; for bugs, resolution) are demonstrably met by the implementation. SHAPE-ONLY: the FAIL⇔findings invariant and verdict normalization are enforced by the operation's `_reconcile` (code), not the schema, because the runner validates this schema BEFORE the operation can repair a sloppy model turn. `verdict` is `string` (not a strict enum) so the operation can normalize casing. Each FAIL finding reuses the canonical `finding` shape with an added `criterion` (the specific requirement that failed). The MCP `verify_completion` tool returns this shape as a plain dict but advertises no outputSchema (live LLM call — a documented NO_SCHEMA_EXEMPT).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["verdict", "findings"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "description": "PASS or FAIL (normalized by the operation; not a strict enum so model casing can be repaired)."
+    },
+    "findings": {
+      "type": "array",
+      "description": "One finding per FAILING criterion (empty on PASS). Reuses the canonical `finding` shape; the failing requirement rides on `finding.criterion` (an additional property).",
+      "items": { "$ref": "common.schema.json#/$defs/finding" }
+    },
+    "summary": {
+      "type": "string",
+      "description": "Optional verifier summary; carries the no-explicit-criteria PASS rationale when applicable."
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "What was verified.",
+      "properties": {
+        "kind": { "type": "string", "description": "e.g. 'ticket'." },
+        "ticket_ids": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "reviewers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Reviewer prompt ids that ran (['completion-verifier'])."
+    },
+    "runner": { "type": "string", "description": "Execution backend: 'langgraph', 'deepagents', 'fake', …" },
+    "model": { "type": ["string", "null"], "description": "Model id used (null for non-LLM/fake runners)." },
+    "trace_id": { "type": ["string", "null"], "description": "Langfuse trace id when tracing is enabled; null otherwise." }
+  }
+}

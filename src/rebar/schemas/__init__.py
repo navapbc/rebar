@@ -59,6 +59,7 @@ __all__ = [
     "LIST_EPICS",
     "FSCK",
     "REVIEW_RESULT",
+    "COMPLETION_VERDICT",
     "SIGN_RESULT",
     "VERIFY_SIGNATURE_RESULT",
     "EXPORT",
@@ -94,6 +95,10 @@ FSCK = "fsck"
 # exempt (live LLM call → plain dict, no outputSchema); the CLI/library JSON path
 # is pinned to this schema via the "review" key below.
 REVIEW_RESULT = "review_result"
+# rebar.llm — output of the completion-verification op (`rebar verify-completion`).
+# Like review_result, the MCP tool is exempt (live LLM call → plain dict, no
+# outputSchema); the CLI/library JSON path is pinned via the "verify_completion" key.
+COMPLETION_VERDICT = "completion_verdict"
 # signing.py — the persisted SIGNATURE record (`rebar sign`) and the uniform
 # verify verdict (`rebar verify-signature`), both over `--output json`.
 SIGN_RESULT = "sign_result"
@@ -155,6 +160,10 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "list_epics": LIST_EPICS,
     "fsck": FSCK,
     "review": REVIEW_RESULT,
+    # completion-verification op: like `review`, no CLI help arm (so the --output
+    # coverage guard never drives it live) and the MCP tool is NO_SCHEMA_EXEMPT;
+    # registered here so the every-schema-file-is-wired guard sees completion_verdict.
+    "verify_completion": COMPLETION_VERDICT,
     "sign": SIGN_RESULT,
     "verify_signature": VERIFY_SIGNATURE_RESULT,
     "verify_signature.not_found": ERROR_ENVELOPE,
