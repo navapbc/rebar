@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"file_impact":[{"path":"tests/interfaces/contracts/","reason":"characterization tests (lib/CLI)"},{"path":"tests/interfaces/facades/","reason":"characterization tests (MCP)"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781760325447121001,"uuid":"38c53505-63ef-4f77-a836-191d23cce838"}
