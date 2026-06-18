@@ -72,6 +72,7 @@ def list_tickets(
     min_children: int | None = None,
     blocking_state: str = "",
     with_children_count: bool = False,
+    sort: str | None = None,
     repo_root=None,
 ) -> list[dict]:
     tracker = _tracker(repo_root)
@@ -89,6 +90,7 @@ def list_tickets(
         min_children=min_children,
         blocking_state=blocking_state,
         with_children_count=with_children_count,
+        sort=sort or "",
     )
 
 
@@ -102,11 +104,11 @@ def deps(ticket_id: str, *, repo_root=None) -> dict:
         raise _rebar_error(f"rebar deps failed (exit 1): {exc.message}") from None
 
 
-def ready(*, repo_root=None) -> Any:
+def ready(*, sort: str | None = None, repo_root=None) -> Any:
     """Tickets ready to work (no epic filter from the library entrypoint)."""
     tracker = _tracker(repo_root)
     _fresh(tracker)
-    return ticket_reads.ready_states(tracker)
+    return ticket_reads.ready_states(tracker, sort=sort or "")
 
 
 def next_batch(epic_id: str, *, repo_root=None, limit: int = 0) -> dict:
@@ -129,6 +131,7 @@ def search(
     ticket_type: str | None = None,
     has_tag: str | None = None,
     include_archived: bool = False,
+    sort: str | None = None,
     repo_root=None,
 ) -> list:
     tracker = _tracker(repo_root)
@@ -140,6 +143,7 @@ def search(
         ticket_type=ticket_type,
         has_tag=has_tag,
         include_archived=include_archived,
+        sort=sort or "",
     )
 
 

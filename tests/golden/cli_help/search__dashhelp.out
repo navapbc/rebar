@@ -1,1 +1,10 @@
-Usage: rebar search <query> [--status=<s>] [--type=<t>] [--has-tag=<tag>] [--include-archived] [--no-sync]
+Usage: rebar search <query> [--status=<s>] [--type=<t>] [--has-tag=<tag>] [--include-archived] [--sort=<key>] [--no-sync]
+  <query>            AND of whitespace-separated, case-insensitive substring terms over
+                     titles/descriptions/comments/tags. Also accepts field predicates:
+                     status: type: priority: assignee: tag: parent: (exact; comma = OR
+                     within a field). priority: takes <, <=, >, >= and n..m ranges.
+                     Prefix a term with - (or not:) to negate; an unknown field: is a
+                     literal substring. The flags below AND-narrow on top of the query.
+  --sort=<key>       Order by priority|created|updated|id|status ('-' prefix = descending;
+                     unset values sort last). Default keeps store order.
+  --no-sync          Skip the best-effort fetch/reconverge (also: REBAR_NO_SYNC=1)

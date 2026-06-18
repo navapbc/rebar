@@ -1,1 +1,2 @@
-Usage: rebar ready [--output text|llm|json] [--epic=<id>] [--no-sync]   (lists tickets whose blockers are all closed)
+Usage: rebar ready [--output text|llm|json] [--epic=<id>] [--sort=<key>] [--no-sync]   (lists tickets whose blockers are all closed)
+  --sort=<key>       Order by priority|created|updated|id|status ('-' prefix = descending; unset values sort last)

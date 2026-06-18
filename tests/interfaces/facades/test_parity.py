@@ -110,6 +110,24 @@ def test_search_parity(adapter) -> None:
     assert ids == {hit}
 
 
+def test_search_field_predicate_parity(adapter) -> None:
+    """A structured field predicate (P1.1) resolves identically across the three
+    interfaces — the predicate lives in the query string, so it is one behavior."""
+    p0 = adapter.create("bug", "predicate widget", priority=0)
+    adapter.create("bug", "predicate widget two", priority=3)
+    results = adapter.search("widget priority:<2 type:bug")
+    assert {t["ticket_id"] for t in results} == {p0}
+
+
+def test_search_sort_parity(adapter) -> None:
+    """`--sort` / `sort=` orders results identically across library/CLI/MCP."""
+    p0 = adapter.create("task", "ordered alpha", priority=0)
+    p2 = adapter.create("task", "ordered beta", priority=2)
+    p4 = adapter.create("task", "ordered gamma", priority=4)
+    ids = [t["ticket_id"] for t in adapter.search("ordered", sort="-priority")]
+    assert ids == [p4, p2, p0]
+
+
 def test_tag_and_comment_parity(adapter) -> None:
     tid = adapter.create("task", "Tag me")
     adapter.tag(tid, "area:api")

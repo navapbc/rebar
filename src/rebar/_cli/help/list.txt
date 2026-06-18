@@ -1,4 +1,4 @@
-Usage: rebar list [--status=<s>] [--type=<t>] [--priority=<n>] [--parent=<id>] [--has-tag=<tag>] [--without-tag=<tag>] [--include-archived] [--exclude-deleted] [--no-sync] [--output llm]
+Usage: rebar list [--status=<s>] [--type=<t>] [--priority=<n>] [--parent=<id>] [--has-tag=<tag>] [--without-tag=<tag>] [--sort=<key>] [--include-archived] [--exclude-deleted] [--no-sync] [--output llm]
   --type=<type>      Filter by ticket type (bug, epic, story, task)
   --status=<status>  Filter by status (comma-separated for OR)
   --priority=<n>     Filter by priority 0-4 (comma-separated for OR; exact match; unset priority not matched)
@@ -6,4 +6,6 @@ Usage: rebar list [--status=<s>] [--type=<t>] [--priority=<n>] [--parent=<id>] [
   --has-tag=<tag>    Filter to tickets having <tag> (comma-separated for OR);
                      tags matching ^detected_by: auto-intersect with --type=bug
   --without-tag=<tag>  Exclude tickets having ANY of <tag> (comma-separated)
+  --sort=<key>       Order by priority|created|updated|id|status ('-' prefix = descending;
+                     unset values sort last). Default keeps store order.
   --no-sync          Skip the best-effort fetch/reconverge (also: REBAR_NO_SYNC=1)

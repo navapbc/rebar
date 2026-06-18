@@ -549,6 +549,7 @@ def list_tickets(
     min_children: int | None = None,
     blocking_state: str = "",
     with_children_count: bool = False,
+    sort: str | None = None,
     repo_root=None,
 ) -> list[dict]:
     """List tickets as a list of dicts, with optional filters.
@@ -560,6 +561,8 @@ def list_tickets(
     with ≥ N direct children and ``blocking_state`` ("unblocked"/"blocked") filters
     by readiness. ``with_children_count`` adds a ``children_count`` field (opt-in,
     so the default shape matches show/search — the single-reducer invariant).
+    ``sort`` orders the result by ``priority|created|updated|id|status`` (prefix
+    ``-`` for descending; unset values sort last); the default keeps store order.
     """
     from rebar import _reads
 
@@ -575,6 +578,7 @@ def list_tickets(
         min_children=min_children,
         blocking_state=blocking_state,
         with_children_count=with_children_count,
+        sort=sort,
         repo_root=repo_root,
     )
 
@@ -586,11 +590,14 @@ def deps(ticket_id: str, *, repo_root=None) -> dict:
     return _reads.deps(ticket_id, repo_root=repo_root)
 
 
-def ready(*, repo_root=None) -> Any:
-    """Tickets ready to work (all blockers closed)."""
+def ready(*, sort: str | None = None, repo_root=None) -> Any:
+    """Tickets ready to work (all blockers closed).
+
+    ``sort`` orders by ``priority|created|updated|id|status`` (``-`` prefix =
+    descending; unset values last); the default keeps ready-order."""
     from rebar import _reads
 
-    return _reads.ready(repo_root=repo_root)
+    return _reads.ready(sort=sort, repo_root=repo_root)
 
 
 def next_batch(epic_id: str, *, repo_root=None) -> dict:
@@ -610,13 +617,19 @@ def search(
     ticket_type: str | None = None,
     has_tag: str | None = None,
     include_archived: bool = False,
+    sort: str | None = None,
     repo_root=None,
 ) -> list:
     """Full-text search over titles/descriptions/comments/tags (replay-derived).
 
     Returns a JSON list of matching ticket states (same element shape as
-    :func:`list_tickets`). Query terms are whitespace-split and matched
-    case-insensitively (AND)."""
+    :func:`list_tickets`). Plain whitespace-split terms match case-insensitively
+    (AND). The query also accepts field predicates — ``status:``/``type:``/
+    ``priority:``/``assignee:``/``tag:``/``parent:`` (comma = OR within a field,
+    ``priority`` accepts ``<``/``<=``/``>``/``>=`` and ``n..m`` ranges), with
+    ``-``/``not:`` negation; an unknown ``field:`` degrades to a literal
+    substring. ``sort`` orders results by ``priority|created|updated|id|status``
+    (``-`` prefix = descending; unset values last)."""
     from rebar import _reads
 
     return _reads.search(
@@ -625,6 +638,7 @@ def search(
         ticket_type=ticket_type,
         has_tag=has_tag,
         include_archived=include_archived,
+        sort=sort,
         repo_root=repo_root,
     )
 

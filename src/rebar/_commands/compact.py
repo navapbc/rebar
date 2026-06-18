@@ -96,6 +96,12 @@ def _compact_locked(
                 f"Error: reducer failed for ticket {ticket_id} (corrupt or ghost ticket)\n"
             )
             return 1
+        # ``updated_at`` is a derived presentation field (P1.1), re-computed on
+        # every replay. It must NOT enter the SNAPSHOT's compiled_state, or it
+        # would (a) ride into event-log bytes and (b) be restored stale by
+        # process_snapshot. Copy-and-drop it so the cache object is untouched and
+        # the SNAPSHOT bytes stay byte-identical to pre-P1.1.
+        compiled_state = {k: v for k, v in compiled_state.items() if k != "updated_at"}
         status = compiled_state.get("status", "")
         if status in ("error", "fsck_needed"):
             sys.stderr.write(f"Error: ticket {ticket_id} has status '{status}' — cannot compact\n")

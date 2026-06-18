@@ -57,6 +57,44 @@ from rebar.reducer.llm_format import to_llm
 _SCRIPTS_DIR = _engine_dir()
 
 
+# ───────────────────────────── result sorting (P1.1) ─────────────────────────
+# Caller-facing sort key -> reduced/public-state field. Default (no --sort) keeps
+# the historical reduce_all_tickets order (ticket-id directory order) byte-for-byte.
+_SORT_FIELD = {
+    "priority": "priority",
+    "created": "created_at",
+    "updated": "updated_at",
+    "id": "ticket_id",
+    "status": "status",
+}
+
+
+def sort_key_valid(sort: str) -> bool:
+    """True if ``sort`` is empty (no-op) or a known key, optionally ``-``-prefixed."""
+    return not sort or sort.lstrip("-") in _SORT_FIELD
+
+
+def sort_states(states: list[dict], sort: str) -> list[dict]:
+    """Return ``states`` ordered by ``sort`` (``key`` asc, ``-key`` desc).
+
+    Unset values always sort LAST in both directions (a ``(is_none, value)``
+    discipline implemented by partitioning, NOT ``key or 0`` — which would sort
+    an unset priority as 0 and raise on mixed None/int). Ties break by
+    ``ticket_id`` ascending regardless of direction (stable two-stage sort).
+    An empty/unknown ``sort`` returns the input list unchanged (default order)."""
+    if not sort or sort.lstrip("-") not in _SORT_FIELD:
+        return states
+    desc = sort.startswith("-")
+    field = _SORT_FIELD[sort.lstrip("-")]
+    present = [t for t in states if t.get(field) is not None]
+    missing = [t for t in states if t.get(field) is None]
+    # Stable: ticket_id-ascending first pass is preserved within equal primary keys.
+    present.sort(key=lambda t: t.get("ticket_id") or "")
+    present.sort(key=lambda t: t.get(field), reverse=desc)
+    missing.sort(key=lambda t: t.get("ticket_id") or "")
+    return present + missing
+
+
 # ───────────────────────────── tracker resolution ────────────────────────────
 def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
     """Resolve the tracker dir: the explicit override (REBAR_TRACKER_DIR, deprecated
@@ -267,6 +305,7 @@ def list_states(
     min_children: int | None = None,
     blocking_state: str = "",
     with_children_count: bool = False,
+    sort: str = "",
 ) -> list[dict]:
     """List ticket states. Two universal cross-ticket filters reuse the same
     reducer/graph the bespoke ``list-epics`` used: ``min_children`` (keep tickets
@@ -328,7 +367,7 @@ def list_states(
         if with_children_count:
             ps["children_count"] = cc
         out.append(ps)
-    return out
+    return sort_states(out, sort)
 
 
 def deps_state(ticket_id: str, tracker: str, *, include_archived: bool = False) -> dict:
@@ -348,10 +387,11 @@ def deps_state(ticket_id: str, tracker: str, *, include_archived: bool = False) 
     return build_dep_graph(resolved, tracker, exclude_archived=not include_archived)
 
 
-def ready_states(tracker: str, *, epic: str | None = None) -> list[dict]:
+def ready_states(tracker: str, *, epic: str | None = None, sort: str = "") -> list[dict]:
     if epic:
         epic = resolve_ticket_id(epic, tracker) or epic
-    return [public_state(s) for s in find_ready_tickets(tracker, epic_filter=epic)]
+    states = [public_state(s) for s in find_ready_tickets(tracker, epic_filter=epic)]
+    return sort_states(states, sort)
 
 
 def search_state(
@@ -362,12 +402,20 @@ def search_state(
     ticket_type: str | None = None,
     has_tag: str | None = None,
     include_archived: bool = False,
+    sort: str = "",
 ) -> list[dict]:
     states = reduce_all_tickets(
         tracker, exclude_archived=not include_archived, exclude_deleted=True
     )
-    results = search_states(states, query, status=status, ticket_type=ticket_type, has_tag=has_tag)
-    return [public_state(t) for t in results]
+    results = search_states(
+        states,
+        query,
+        status=status,
+        ticket_type=ticket_type,
+        has_tag=has_tag,
+        parent_resolver=lambda v: resolve_ticket_id(v, tracker) or v,
+    )
+    return sort_states([public_state(t) for t in results], sort)
 
 
 def recent_session_logs_state(tracker: str, *, limit: int = 5) -> list[dict]:
@@ -463,7 +511,8 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         "Usage: ticket list [--output llm] [--include-archived] [--exclude-deleted] "
         "[--type=<type>] [--status=<status>] [--priority=<n>] [--parent=<id>] "
         "[--has-tag=<tag>] [--without-tag=<tag>] [--min-children=<n>] "
-        "[--unblocked|--blocked] [--with-children-count]"
+        "[--unblocked|--blocked] [--with-children-count] "
+        "[--sort=<priority|created|updated|id|status>] (prefix '-' for descending)"
     )
     try:
         fmt, rest = parse_output(argv, "reader")
@@ -482,10 +531,13 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         "min_children": None,
         "blocking_state": "",
         "with_children_count": False,
+        "sort": "",
     }
     for arg in rest:
         if arg == "--include-archived":
             opts["include_archived"] = True
+        elif arg.startswith("--sort="):
+            opts["sort"] = arg[len("--sort=") :]
         elif arg == "--exclude-deleted":
             opts["exclude_deleted"] = True
         elif arg.startswith("--type="):
@@ -523,12 +575,20 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
             print(
                 "Valid filters: --type --status --priority --parent --has-tag "
                 "--without-tag --min-children --unblocked --blocked --with-children-count "
-                "--include-archived --exclude-deleted --output llm",
+                "--sort --include-archived --exclude-deleted --output llm",
                 file=sys.stderr,
             )
             # Unrecognized option is a usage error (2), not a runtime error (1) —
             # matching deps/ready/search (the canonical contract in exit-codes.md).
             return 2
+
+    if not sort_key_valid(opts["sort"]):
+        print(
+            f"Error: --sort expects one of priority|created|updated|id|status "
+            f"(optionally '-'-prefixed for descending), got '{opts['sort']}'",
+            file=sys.stderr,
+        )
+        return 2
 
     # --priority: integers 0-4 (comma-separated for OR).
     pri = opts["priority"]
@@ -636,6 +696,7 @@ def _cmd_ready(argv: list[str], tracker: str) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
     epic = None
+    sort = ""
     i = 0
     while i < len(rest):
         arg = rest[i]
@@ -647,17 +708,29 @@ def _cmd_ready(argv: list[str], tracker: str) -> int:
             epic = arg[len("--epic=") :]
             i += 1
             continue
+        if arg.startswith("--sort="):
+            sort = arg[len("--sort=") :]
+            i += 1
+            continue
         if arg.startswith("-"):
             # Reject unknown options, including the removed legacy `--json`
             # (use `--output json`). Mirrors the old ready arm's exit 2.
             print(f"Error: unknown option '{arg}'", file=sys.stderr)
             print(
-                "Usage: ticket ready [--output json|llm] [--epic <id>]",
+                "Usage: ticket ready [--output json|llm] [--epic <id>] "
+                "[--sort=<priority|created|updated|id|status>]",
                 file=sys.stderr,
             )
             return 2
         i += 1
-    states = ready_states(tracker, epic=epic)
+    if not sort_key_valid(sort):
+        print(
+            f"Error: --sort expects one of priority|created|updated|id|status "
+            f"(optionally '-'-prefixed for descending), got '{sort}'",
+            file=sys.stderr,
+        )
+        return 2
+    states = ready_states(tracker, epic=epic, sort=sort)
     if fmt == "json":
         print(json.dumps(states, ensure_ascii=False))
     elif fmt == "llm":
@@ -675,6 +748,7 @@ def _cmd_search(argv: list[str], tracker: str) -> int:
     query = None
     status = ticket_type = has_tag = None
     include_archived = False
+    sort = ""
     for arg in argv:
         if arg.startswith("--status="):
             status = arg[len("--status=") :]
@@ -682,6 +756,8 @@ def _cmd_search(argv: list[str], tracker: str) -> int:
             ticket_type = arg[len("--type=") :]
         elif arg.startswith("--has-tag="):
             has_tag = arg[len("--has-tag=") :]
+        elif arg.startswith("--sort="):
+            sort = arg[len("--sort=") :]
         elif arg == "--include-archived":
             include_archived = True
         elif arg.startswith("-"):
@@ -691,7 +767,8 @@ def _cmd_search(argv: list[str], tracker: str) -> int:
             print(f"Error: unknown option '{arg}'", file=sys.stderr)
             print(
                 "Usage: ticket search <query> [--status=S] [--type=T] "
-                "[--has-tag=TAG] [--include-archived]",
+                "[--has-tag=TAG] [--include-archived] "
+                "[--sort=<priority|created|updated|id|status>]",
                 file=sys.stderr,
             )
             return 2
@@ -699,7 +776,15 @@ def _cmd_search(argv: list[str], tracker: str) -> int:
             query = arg
     if query is None:
         print(
-            "Usage: ticket search <query> [--status=S] [--type=T] [--has-tag=TAG]",
+            "Usage: ticket search <query> [--status=S] [--type=T] [--has-tag=TAG] "
+            "[--sort=<priority|created|updated|id|status>]",
+            file=sys.stderr,
+        )
+        return 2
+    if not sort_key_valid(sort):
+        print(
+            f"Error: --sort expects one of priority|created|updated|id|status "
+            f"(optionally '-'-prefixed for descending), got '{sort}'",
             file=sys.stderr,
         )
         return 2
@@ -710,6 +795,7 @@ def _cmd_search(argv: list[str], tracker: str) -> int:
         ticket_type=ticket_type,
         has_tag=has_tag,
         include_archived=include_archived,
+        sort=sort,
     )
     print(json.dumps(results, ensure_ascii=False))
     return 0

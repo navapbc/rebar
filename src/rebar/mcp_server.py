@@ -239,6 +239,7 @@ def build_server():
         min_children: int | None = None,
         blocking_state: str = "",
         with_children_count: bool = False,
+        sort: str | None = None,
     ) -> list[TicketStateOut]:
         """List tickets as a JSON array, with optional filters.
 
@@ -264,6 +265,7 @@ def build_server():
                 min_children=min_children,
                 blocking_state=blocking_state,
                 with_children_count=with_children_count,
+                sort=sort,
             )
         ]
 
@@ -273,9 +275,11 @@ def build_server():
         return DepsGraphOut.model_validate(rebar.deps(ticket_id))
 
     @mcp.tool()
-    def ready_tickets() -> list[TicketStateOut]:
-        """List tickets ready to work (all blockers closed)."""
-        return [TicketStateOut.model_validate(t) for t in rebar.ready()]
+    def ready_tickets(sort: str | None = None) -> list[TicketStateOut]:
+        """List tickets ready to work (all blockers closed). ``sort`` orders by
+        ``priority|created|updated|id|status`` (prefix ``-`` for descending;
+        unset values sort last)."""
+        return [TicketStateOut.model_validate(t) for t in rebar.ready(sort=sort)]
 
     @mcp.tool()
     def next_batch(epic_id: str) -> NextBatchOut:
@@ -289,8 +293,16 @@ def build_server():
         ticket_type: str | None = None,
         has_tag: str | None = None,
         include_archived: bool = False,
+        sort: str | None = None,
     ) -> list[TicketStateOut]:
-        """Full-text search over titles/descriptions/comments/tags (replay-derived)."""
+        """Full-text search over titles/descriptions/comments/tags (replay-derived).
+
+        ``query`` accepts field predicates — ``status:``/``type:``/``priority:``/
+        ``assignee:``/``tag:``/``parent:`` (comma = OR within a field; ``priority``
+        accepts ``<``/``<=``/``>``/``>=`` and ``n..m`` ranges) and ``-``/``not:``
+        negation; an unknown ``field:`` degrades to a literal substring. ``sort``
+        orders by ``priority|created|updated|id|status`` (``-`` prefix = descending;
+        unset values last)."""
         return [
             TicketStateOut.model_validate(t)
             for t in rebar.search(
@@ -299,6 +311,7 @@ def build_server():
                 ticket_type=ticket_type,
                 has_tag=has_tag,
                 include_archived=include_archived,
+                sort=sort,
             )
         ]
 

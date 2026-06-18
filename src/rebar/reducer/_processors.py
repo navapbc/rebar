@@ -416,6 +416,13 @@ def replay_events(
     start_idx = latest_snapshot_idx if latest_snapshot_idx is not None else 0
     valid_event_count = 0
     seen_uuids: set[str] = set()
+    # Running max of event timestamps over the events that actually shape state
+    # (post-snapshot/applied events + the SNAPSHOT's own compacted_at). Surfaced
+    # as the derived ``updated_at`` (P1.1). Pre-snapshot events are skipped here
+    # but their effect is folded into the SNAPSHOT's compacted_at, so the max
+    # stays correct across compaction. Kept off the event log: compact.py strips
+    # ``updated_at`` before serializing compiled_state (byte-parity guard).
+    max_ts: int | None = None
 
     for idx, filepath in enumerate(event_files):
         try:
@@ -446,6 +453,14 @@ def replay_events(
 
         event_type = event.get("event_type", "")
         data = event.get("data", {})
+
+        # Fold this applied event into the updated_at running max. A SNAPSHOT
+        # re-seeds from its compacted_at (replay discards the pre-snapshot events
+        # it summarizes), so a freshly-compacted, untouched ticket reports
+        # updated_at == compacted_at.
+        ev_ts = data.get("compacted_at") if event_type == "SNAPSHOT" else event.get("timestamp")
+        if ev_ts is not None and (max_ts is None or ev_ts > max_ts):
+            max_ts = ev_ts
 
         if event_type == "CREATE":
             result = process_create(state, event, data, ticket_id, cache_path, dir_hash)
@@ -482,4 +497,7 @@ def replay_events(
             # file so an older clone's compaction doesn't destroy a newer clone's data.
             pass
 
+    # Derived presentation field (not an event-log field). None when no applied
+    # event carried a timestamp; the None-last sort key handles that.
+    state["updated_at"] = max_ts
     return valid_event_count, None
