@@ -16,7 +16,19 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-dependencies = []
+# Core stays deliberately tiny. The ONLY runtime dependency is a YAML loader for
+# the workflow DSL (epic a88f): loading + running a `.rebar/workflows/*.yaml`
+# workflow is a LEAN-RUNTIME capability — it must work without the heavy
+# `[agents]`/`[eval]`/`[tracing]` extras — so its parser cannot itself be optional.
+# This is consistent with the optionality CI (the import-linter ban-list targets
+# only the heavy ML/telemetry stack: anthropic/inspect_ai/langchain*/langgraph*/
+# opentelemetry*; pyyaml is intentionally permitted in core). PyYAML's SafeLoader
+# is hardened toward YAML 1.2 Core by rebar.llm.workflow.schema (anchors/merge
+# keys rejected, 1.1 yes/no/on/off bools dropped). Everything else — the engine
+# core and the reconciler — remains stdlib-only.
+dependencies = [
+    "pyyaml>=6",
+]
 
 # The engine assets (the rebar_reconciler package + jira-capability-probe.py + the
 # alias wordlist) are stdlib-only and ship as package data under rebar/_engine/.

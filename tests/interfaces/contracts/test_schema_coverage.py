@@ -36,8 +36,12 @@ from rebar import schemas
 
 def test_every_schema_file_is_wired() -> None:
     wired = set(schemas.OUTPUT_SCHEMAS.values())
+    # COMMON holds shared $defs; INPUT_SCHEMAS validate input documents (the
+    # workflow DSL files) rather than advertise a command's output, so neither is
+    # wired into OUTPUT_SCHEMAS by design.
+    exempt = {schemas.COMMON} | set(schemas.INPUT_SCHEMAS)
     for name in schemas.names():
-        if name == schemas.COMMON:
+        if name in exempt:
             continue
         assert name in wired, (
             f"schema {name!r} exists on disk but is not referenced by "

@@ -63,6 +63,8 @@ __all__ = [
     "VERIFY_SIGNATURE_RESULT",
     "EXPORT",
     "COMMON",
+    "WORKFLOW_V1",
+    "INPUT_SCHEMAS",
 ]
 
 COMMON = "common"
@@ -99,6 +101,19 @@ VERIFY_SIGNATURE_RESULT = "verify_signature_result"
 # OUTPUT_SCHEMAS (export emits NDJSON, not the standard --output json envelope);
 # documented + validated directly via schemas.validator(schemas.EXPORT).
 EXPORT = "export"
+# rebar.llm.workflow — the version-pinned, IMMUTABLE workflow DSL schema (the
+# `.rebar/workflows/<name>.yaml` document format). These are INPUT/validation
+# schemas, not command outputs: a workflow file is validated against them via
+# schemas.validator(name), and they are NOT wired into OUTPUT_SCHEMAS. Each DSL
+# version is its own frozen file at a stable $id (workflow.v1, workflow.v2, …).
+WORKFLOW_V1 = "workflow.v1"
+
+# Schemas authored to validate INPUT documents rather than advertise a command's
+# JSON output. Like COMMON, they are loaded by their consumers (the workflow
+# parser/linter) and intentionally absent from OUTPUT_SCHEMAS; the coverage-guard
+# test exempts this set so an authored-but-unwired check still catches a forgotten
+# OUTPUT schema while permitting these.
+INPUT_SCHEMAS: frozenset[str] = frozenset({WORKFLOW_V1})
 
 # The authoritative map of every structured (--output json / always-JSON) output
 # to its schema. Keyed by command, or <command>.<interface> when an interface's

@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/workflow.v1.schema.json",
+  "title": "WorkflowV1",
+  "description": "The rebar workflow DSL, schema_version \"1\". A coordinate-free, GitHub-Actions-style `steps:` document, git-tracked under .rebar/workflows/<name>.yaml and edited by agents+humans with clean diffs. This schema is IMMUTABLE and version-pinned at a stable $id (WS-B3): once shipped it is never edited in place; a new DSL version ships as workflow.v2.schema.json with a read-time vN->v(N+1) up-conversion shim. `additionalProperties:false` everywhere so an unknown key is a located error rather than a silent no-op (the Argo lesson). Steps are EITHER scripted (`uses:` a registry step) OR agentic (`prompt:` an .rebar/prompts/<id>.md) — never both (oneOf). Reference integrity, the expression allow-list, and the secret scan are enforced by the linter (rebar.llm.workflow.lint), not by this structural schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "name", "steps"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1",
+      "description": "DSL version, typed as a STRING (never a YAML float). For this schema it is exactly \"1\"; a value the running rebar does not recognize is a hard upgrade-rebar error (WS-B3)."
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Stable human workflow id (lowercase, no spaces); the file stem under .rebar/workflows/."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "model": {
+      "type": "string",
+      "description": "Workflow-level default model for agent steps, e.g. `anthropic:claude-opus-4-8`. Per-step `model` overrides this (precedence step > workflow > config > env > default)."
+    },
+    "inputs": {
+      "type": "object",
+      "description": "Declared workflow inputs, referenced as `${{ inputs.<name> }}`.",
+      "additionalProperties": { "$ref": "#/$defs/input_decl" }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The ordered step list. Execution order is the topological order of `needs` edges (graphlib.static_order), NOT array position; array order is for human readability only.",
+      "items": { "$ref": "#/$defs/step" }
+    }
+  },
+  "$defs": {
+    "input_decl": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["string", "integer", "number", "boolean"],
+          "default": "string"
+        },
+        "required": { "type": "boolean", "default": false },
+        "description": { "type": "string" },
+        "default": {}
+      }
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-zA-Z_][a-zA-Z0-9_-]*$",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "description": "A single workflow step. Exactly one of `uses` (scripted) or `prompt` (agentic) is required (oneOf). Agent-only fields (output_schema, mode, model) on a scripted step, or a scripted-only shape on an agent step, are flagged by the linter.",
+      "properties": {
+        "id": {
+          "allOf": [{ "$ref": "#/$defs/identifier" }],
+          "description": "Stable, unique step id; the anchor for `${{ steps.<id>.outputs.* }}` references."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["scripted", "agent"],
+          "description": "Optional explicit discriminator; if present it must agree with uses/prompt (linter-checked). Normally inferred."
+        },
+        "uses": {
+          "allOf": [{ "$ref": "#/$defs/identifier" }],
+          "description": "Scripted step: the registry name of a deterministic built-in (rebar.llm.workflow.steps)."
+        },
+        "prompt": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_./-]+$",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Agentic step: the prompt id resolving to .rebar/prompts/<id>.md (git-canonical; WS-F)."
+        },
+        "needs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" },
+          "description": "Upstream step ids this step depends on; defines the execution DAG."
+        },
+        "with": {
+          "type": "object",
+          "description": "Inputs to the step: a map of name -> literal or `${{ ... }}` expression (allow-listed; the linter forbids raw ${{}} leaking into prompt/command bodies).",
+          "additionalProperties": true
+        },
+        "output_schema": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_.-]+$",
+          "description": "Agent step: the JSON Schema name constraining the step's structured output (default review_result)."
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["findings", "structured", "text"],
+          "description": "Agent step output-finalization strategy (WS-D1). `findings` = review_result pipeline; `structured` = validate against output_schema; `text` = raw text."
+        },
+        "model": {
+          "type": "string",
+          "description": "Agent step: per-step model override, e.g. `anthropic:claude-opus-4-8` or `openai:gpt-4o` (highest precedence)."
+        },
+        "if": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "Optional guard expression from the closed allow-list (linter-enforced); the step runs only when it evaluates truthy."
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["uses"],
+          "not": { "required": ["prompt"] }
+        },
+        {
+          "required": ["prompt"],
+          "not": { "required": ["uses"] }
+        }
+      ]
+    }
+  }
+}

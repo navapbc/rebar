@@ -1,0 +1,61 @@
+"""The rebar workflow engine: git-native, agent-editable workflows that mix
+deterministic (scripted) and agentic (LLM) steps.
+
+This package is the lean-runtime half of the engine (epic a88f). Loading,
+validating, linting, migrating, and executing a workflow are pure-Python + a YAML
+safe-loader — no heavy LLM dependency. Only *agentic* steps (and evals/tracing)
+pull the optional ``nava-rebar[agents]`` / ``[eval]`` / ``[tracing]`` extras, and
+they are imported lazily at the step boundary, never here.
+
+Sub-modules:
+  * ``schema``   — the versioned DSL: a YAML 1.2-Core-flavored safe parser, the
+    immutable version-pinned JSON Schema, structural validation, deterministic
+    serialization.
+  * ``lint``     — reference-integrity + expression allow-list + secret scan
+    (WS-B2).
+  * ``migrate``  — read-time vN->v(N+1) up-conversion shim (WS-B3).
+
+Errors live in ``rebar.llm.errors`` (the shared vocabulary): ``WorkflowError`` and
+its subclasses.
+"""
+
+from __future__ import annotations
+
+from rebar.llm.errors import (
+    WorkflowError,
+    WorkflowParseError,
+    WorkflowValidationError,
+    WorkflowVersionError,
+)
+
+from .schema import (
+    CURRENT_SCHEMA_VERSION,
+    MAX_WORKFLOW_BYTES,
+    SUPPORTED_SCHEMA_VERSIONS,
+    canonical_json,
+    content_hash,
+    dump_workflow,
+    load_workflow,
+    parse_workflow,
+    schema_name_for_version,
+    step_kind,
+    validate_document,
+)
+
+__all__ = [
+    "WorkflowError",
+    "WorkflowParseError",
+    "WorkflowValidationError",
+    "WorkflowVersionError",
+    "CURRENT_SCHEMA_VERSION",
+    "SUPPORTED_SCHEMA_VERSIONS",
+    "MAX_WORKFLOW_BYTES",
+    "parse_workflow",
+    "load_workflow",
+    "validate_document",
+    "schema_name_for_version",
+    "step_kind",
+    "canonical_json",
+    "content_hash",
+    "dump_workflow",
+]
