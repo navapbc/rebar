@@ -12,9 +12,10 @@ small **local, git-ignored** index under ``.rebar/workflow_runs/<run_id>`` maps 
 run_id back to its ticket — mirroring the ``.rebar/current_session_log`` pointer —
 so ``status``/``result`` can be looked up by run_id alone.
 
-Agent steps need the WS-D runner; until that lands, non-dry runs use a pending
-runner that fails agent steps with a clear message, while scripted-only workflows
-run for real. ``dry_run=True`` uses the offline FakeAgentRunner (no tokens).
+Agent steps run through :class:`RunnerAgentStep`, which bridges an executor agent
+step to the rebar.llm review Runner stack (WS-K2): a real (config-selected) runner
+for a live run, an injected runner for the parallel-diff/tests, and the offline
+FakeAgentRunner for ``dry_run=True`` (no tokens). Scripted steps always run for real.
 """
 
 from __future__ import annotations
@@ -80,21 +81,75 @@ def load_workflow_doc(source: str | Path | dict, repo_root: str | None = None) -
     return migrate_to_current(doc, source=str(source))
 
 
-class _PendingAgentRunner(_ex.AgentStepRunner):
-    """Stand-in until WS-D wires the real LangGraph-backed agent runner: fails an
-    agent step with an actionable message instead of silently faking it."""
+class RunnerAgentStep(_ex.AgentStepRunner):
+    """Bridge an executor AGENT step to the rebar.llm review Runner stack (WS-K2).
+
+    A workflow agent step runs a real (or injected) tool-using agent and returns its
+    finalized result as the step's outputs. The step's ``prompt:`` is a reviewer id
+    (resolved via the prompt library → system prompt); ``model:`` follows the WS-D3
+    precedence (step > workflow > config > env > default); ``mode``/``output_schema``
+    flow into the RunRequest (the WS-D1 generalized contract). An injected ``runner``
+    (e.g. FakeRunner) is the offline/parallel-diff seam; otherwise the config-selected
+    runner is used (langgraph; a missing extra/key fails cleanly via get_runner)."""
+
+    def __init__(self, *, runner=None, repo_root: str | None = None) -> None:
+        self._runner = runner
+        self._repo_root = repo_root
 
     def run(self, ctx: _ex.StepContext) -> _ex.StepResult:
-        raise WorkflowError(
-            f"agent step {ctx.step_id!r} needs the WS-D agent runner (not yet wired); "
-            f"run with dry_run/--dry-run to execute agent steps with the offline FakeRunner"
+        from dataclasses import replace as _replace
+
+        from rebar.llm import prompts
+        from rebar.llm.config import LLMConfig, resolve_model
+        from rebar.llm.runner import RunRequest, get_runner
+
+        cfg = LLMConfig.from_env(repo_root=self._repo_root)
+        cfg = _replace(
+            cfg,
+            model=resolve_model(
+                cfg, step=ctx.step.get("model"), workflow=ctx.workflow.get("model")
+            ),
         )
+        prompt_id = ctx.step.get("prompt") or ""
+        reviewer = prompts.get_reviewer(prompt_id)
+        ticket_id = str(ctx.inputs.get("ticket_id") or ctx.target_ticket or "")
+        variables = {
+            "ticket_id": ticket_id,
+            "ticket_context": str(
+                ctx.inputs.get("context") or ctx.inputs.get("ticket_context") or ""
+            ),
+            "repo_path": cfg.repo_path or "",
+        }
+        system_prompt, langfuse_prompt = prompts.resolve_prompt(reviewer, variables, cfg.langfuse)
+        instructions = str(
+            ctx.inputs.get("instructions")
+            or f"Review along the '{reviewer.dimension}' dimension using the read-only "
+            "repository tools; ground every finding in tool output."
+        )
+        req = RunRequest(
+            system_prompt=system_prompt,
+            instructions=instructions,
+            config=cfg,
+            reviewers=[prompt_id],
+            target={"kind": "workflow_step", "ticket_ids": [ticket_id] if ticket_id else []},
+            langfuse_prompt=langfuse_prompt,
+            mode=ctx.step.get("mode", "findings"),
+            output_schema=ctx.step.get("output_schema"),
+        )
+        return _ex.StepResult(outputs=get_runner(cfg, override=self._runner).run(req))
 
 
-def _agent_runner(dry_run: bool) -> _ex.AgentStepRunner:
-    # WS-D will replace this factory with the real runner selection (provider/model
-    # precedence). Until then: offline fake for dry runs, a clear failure otherwise.
-    return _ex.FakeAgentRunner() if dry_run else _PendingAgentRunner()
+def _agent_runner(
+    dry_run: bool, *, repo_root: str | None = None, review_runner=None
+) -> _ex.AgentStepRunner:
+    """Select the agent-step runner: an injected review runner (parallel-diff /
+    tests), the offline FakeAgentRunner for ``dry_run``, else the real
+    RunnerAgentStep bridge (config-selected review runner)."""
+    if review_runner is not None:
+        return RunnerAgentStep(runner=review_runner, repo_root=repo_root)
+    if dry_run:
+        return _ex.FakeAgentRunner()
+    return RunnerAgentStep(repo_root=repo_root)
 
 
 def run(
@@ -106,14 +161,15 @@ def run(
     dry_run: bool = False,
     repo_root: str | None = None,
     secrets: dict[str, str] | None = None,
+    review_runner=None,
 ) -> dict[str, Any]:
     """Execute a workflow and return its result as a dict (WS-C4 sync entrypoint).
 
     Persists run-state to ``ticket_id`` (durable; resumable) when given, and records
     the run_id→ticket index so status/result resolve by run_id. Sweeps orphaned
     snapshots first (WS-C3 backstop). Synchronous — the MCP layer wraps this for its
-    async, return-run_id-immediately contract.
-    """
+    async, return-run_id-immediately contract. ``review_runner`` injects a specific
+    rebar.llm Runner into agent steps (the offline/parallel-diff seam)."""
     doc = load_workflow_doc(source, repo_root)
     run_id = run_id or _ex.new_run_id()
     _ex.sweep_orphan_snapshots(repo_root)
@@ -125,7 +181,7 @@ def run(
         run_id=run_id,
         target_ticket=ticket_id,
         repo_root=repo_root,
-        agent_runner=_agent_runner(dry_run),
+        agent_runner=_agent_runner(dry_run, repo_root=repo_root, review_runner=review_runner),
         secrets=secrets,
     )
     return _result_dict(res, ticket_id, dry_run)
