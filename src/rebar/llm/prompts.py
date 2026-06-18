@@ -5,20 +5,24 @@ Two concerns are kept deliberately separate (the converging OSS pattern):
   * **Reviewer identity + selection rules** (id, dimension, file-glob ``applies_to``,
     whether it's a default) live in a versioned, testable local catalog
     (``reviewers/catalog.json``) — so selection is code-reviewed and offline-testable.
-  * **Prompt text** is fetched from **Langfuse prompt management** by id
-    (``get_prompt(name, label="production", fallback=…)``) — hot-editable without a
-    deploy — with a packaged ``*.md`` fallback so the framework still runs offline /
-    when Langfuse is unconfigured.
+  * **Prompt text is GIT-CANONICAL** (epic a88f / WS-F1): the committed prompt file
+    is the single source of truth — a packaged ``reviewers/*.md`` (or a user override
+    at ``.rebar/prompts/<id>.md``). **Langfuse is NEVER consulted for prompt text**
+    (read-replica only); the resolved text's content hash (sha256) is returned so it
+    can be embedded in traces and any divergence from a Langfuse copy is detectable.
+    Rendering is **strict** — an unsupplied ``{{var}}`` raises, never a silent empty.
 
-Stdlib-only; Langfuse is imported lazily and only when configured.
+Stdlib-only.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
 from importlib.resources import files
+from pathlib import Path
 
 from rebar.llm.errors import LLMConfigError
 
@@ -29,6 +33,11 @@ class ReviewerError(LLMConfigError):
     """Raised when a reviewer id is not in the catalog. Subclasses ``LLMConfigError``
     (hence ``LLMError``) so a bad reviewer id surfaces as a clean error across all
     three interfaces rather than an uncaught ``KeyError`` traceback."""
+
+
+class PromptError(LLMConfigError):
+    """A prompt could not be resolved/rendered: strict-undefined variable, a missing
+    canonical file, or a declared/used variable parity mismatch (WS-F)."""
 
 
 @dataclass
@@ -84,30 +93,67 @@ def packaged_prompt_text(reviewer: Reviewer) -> str:
     return _catalog_dir().joinpath(reviewer.fallback_file).read_text(encoding="utf-8")
 
 
-def _render(template: str, variables: dict) -> str:
-    """Render Langfuse-style ``{{var}}`` placeholders from ``variables``."""
-    return _VAR.sub(lambda m: str(variables.get(m.group(1), "")), template)
+def template_variables(template: str) -> set[str]:
+    """The set of ``{{var}}`` names a template references (for parity checks)."""
+    return {m.group(1) for m in _VAR.finditer(template)}
 
 
-def resolve_prompt(reviewer: Reviewer, variables: dict, langfuse_cfg) -> tuple[str, object | None]:
-    """Resolve a reviewer's system prompt → ``(compiled_text, langfuse_prompt_obj)``.
+def _render_strict(template: str, variables: dict) -> str:
+    """Render ``{{var}}`` placeholders, STRICTLY (WS-F): every referenced variable
+    must be supplied — an unsupplied one raises :class:`PromptError` rather than
+    silently rendering empty (which would ship a malformed prompt)."""
+    missing = sorted(template_variables(template) - set(variables))
+    if missing:
+        raise PromptError(
+            f"prompt references undefined variable(s) {missing}; supplied: {sorted(variables)}"
+        )
+    return _VAR.sub(lambda m: str(variables[m.group(1)]), template)
 
-    Prefers Langfuse prompt management when configured+installed (so the prompt is
-    versioned/observable and the returned object can link prompt→trace); otherwise
-    renders the packaged fallback. Never raises on a Langfuse outage — falls back."""
-    fallback = packaged_prompt_text(reviewer)
-    if langfuse_cfg is not None and getattr(langfuse_cfg, "enabled", False):
+
+def canonical_prompt_text(reviewer: Reviewer, *, repo_root=None) -> str:
+    """The GIT-CANONICAL prompt text for a reviewer (WS-F1).
+
+    A user override at ``<repo>/.rebar/prompts/<id>.md`` wins (local, git-tracked in
+    the user's repo); otherwise the packaged ``reviewers/*.md`` (committed in this
+    repo) is canonical. Langfuse is NEVER consulted here."""
+    if repo_root:
+        override = Path(repo_root) / ".rebar" / "prompts" / f"{reviewer.id}.md"
         try:
-            from langfuse import get_client
+            if override.is_file():
+                return override.read_text(encoding="utf-8")
+        except OSError:
+            pass
+    return packaged_prompt_text(reviewer)
 
-            client = get_client()
-            prompt = client.get_prompt(
-                reviewer.prompt_name, label="production", fallback=fallback or None
-            )
-            return prompt.compile(**variables), prompt
-        except Exception:
-            pass  # network/SDK/config issue — fall through to the packaged prompt
-    return _render(fallback, variables), None
+
+def prompt_content_hash(text: str) -> str:
+    """sha256 of the canonical prompt text — the identity embedded in traces so a
+    divergence between what ran and any Langfuse/registry copy is detectable."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def resolve_prompt(
+    reviewer: Reviewer, variables: dict, langfuse_cfg=None, *, repo_root=None
+) -> tuple[str, dict]:
+    """Resolve a reviewer's system prompt → ``(compiled_text, prompt_meta)`` (WS-F1).
+
+    GIT-CANONICAL: the text is the committed prompt file (a user
+    ``.rebar/prompts/<id>.md`` override, else the packaged ``*.md``); **Langfuse is
+    never consulted for the text** (read-replica only). Rendering is strict. The
+    returned ``prompt_meta`` carries the content hash + provenance and is threaded
+    into the trace (via RunRequest.langfuse_prompt), so the exact prompt bytes that
+    ran are recorded and any divergence from a Langfuse copy is visible.
+
+    ``langfuse_cfg`` is accepted for call-site compatibility but no longer drives a
+    text fetch."""
+    text = canonical_prompt_text(reviewer, repo_root=repo_root)
+    compiled = _render_strict(text, variables)
+    meta = {
+        "prompt_id": reviewer.id,
+        "content_sha256": prompt_content_hash(text),
+        "source": "git",
+    }
+    return compiled, meta
 
 
 def _glob_match(path: str, pattern: str) -> bool:

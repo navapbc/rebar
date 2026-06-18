@@ -48,11 +48,15 @@ def test_catalog_and_fallback_prompt_render() -> None:
     assert "ticket-quality" in catalog
     assert catalog["ticket-quality"].default is True
     rv = llm.get_reviewer("ticket-quality")
-    text, obj = prompts.resolve_prompt(
+    text, meta = prompts.resolve_prompt(
         rv, {"ticket_id": "T1", "ticket_context": "CTX", "repo_path": "/x"}, None
     )
     assert "T1" in text and "CTX" in text
-    assert obj is None  # no Langfuse → packaged fallback, no prompt object
+    # WS-F1: git-canonical — meta carries the content hash + provenance (no Langfuse
+    # object; Langfuse is never consulted for the text).
+    assert meta["source"] == "git"
+    assert len(meta["content_sha256"]) == 64
+    assert meta["prompt_id"] == "ticket-quality"
 
 
 def test_unknown_reviewer_raises() -> None:
