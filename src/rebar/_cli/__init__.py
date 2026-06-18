@@ -332,6 +332,106 @@ def _workflow_show(args) -> int:
     return 0
 
 
+def _llm(argv: list[str]) -> int:
+    """``rebar llm setup`` → the LLM-framework onboarding wizard (WS-J2).
+
+    Native intercept (owns its own --help). Detects installed extras + API keys,
+    validates the engine with an offline FakeRunner dry-run (no tokens), and prints
+    the recommended ``[tool.rebar.llm]`` config (optionally written to a file)."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="rebar llm",
+        description="Configure and check the rebar LLM framework.",
+    )
+    subparsers = parser.add_subparsers(dest="cmd")
+    p_setup = subparsers.add_parser(
+        "setup", help="detect extras/keys, validate with a FakeRunner, print config"
+    )
+    p_setup.add_argument(
+        "--write", metavar="FILE", help="write the recommended [tool.rebar.llm] block to FILE"
+    )
+    p_setup.add_argument("--output", "-o", choices=["text", "json"], default="text")
+
+    args = parser.parse_args(argv)
+    if args.cmd == "setup":
+        return _llm_setup(args)
+    parser.print_help()
+    return 1
+
+
+def _llm_setup(args) -> int:
+    import json as _json
+
+    import rebar
+    from rebar import _optional
+    from rebar.llm import config as _cfg
+
+    backends = _cfg.available_backends()
+    extras = {e: _optional.extra_installed(e) for e in ("agents", "eval", "tracing")}
+
+    # Validate the configuration with an offline FakeRunner dry-run (no tokens):
+    # if a trivial agent workflow runs, the engine + config are wired correctly.
+    dry_ok, dry_err = True, None
+    try:
+        res = rebar.run_workflow(
+            {
+                "schema_version": "1",
+                "name": "setup_check",
+                "steps": [{"id": "check", "prompt": "code_quality", "mode": "text"}],
+            },
+            dry_run=True,
+        )
+        dry_ok = res["status"] == "succeeded"
+        dry_err = res.get("error")
+    except Exception as exc:  # noqa: BLE001 - report any failure as a clean message
+        dry_ok, dry_err = False, str(exc)
+
+    snippet = f'[tool.rebar.llm]\nmodel = "{_cfg.DEFAULT_MODEL}"\n'
+    report = {
+        "extras": extras,
+        "anthropic_api_key": backends["anthropic_api_key"],
+        "openai_api_key": backends["openai_api_key"],
+        "tracing_configured": backends.get("langfuse_configured", False),
+        "dry_run_ok": dry_ok,
+        "dry_run_error": dry_err,
+        "recommended_config": snippet,
+    }
+
+    if args.output == "json":
+        sys.stdout.write(_json.dumps(report) + "\n")
+    else:
+        sys.stdout.write("rebar LLM setup\n")
+        sys.stdout.write(
+            f"  extras:   agents={extras['agents']}  eval={extras['eval']}  "
+            f"tracing={extras['tracing']}\n"
+        )
+        sys.stdout.write(
+            f"  API keys: anthropic={backends['anthropic_api_key']}  "
+            f"openai={backends['openai_api_key']}\n"
+        )
+        sys.stdout.write(
+            f"  FakeRunner dry-run: {'OK' if dry_ok else 'FAILED: ' + (dry_err or '')}\n"
+        )
+        if not extras["agents"]:
+            sys.stdout.write(
+                "  → for real agent steps install:  pip install 'nava-rebar[agents]'\n"
+            )
+        if not (backends["anthropic_api_key"] or backends["openai_api_key"]):
+            sys.stdout.write("  → set a provider API key (e.g. ANTHROPIC_API_KEY)\n")
+        sys.stdout.write(f"\nRecommended config:\n\n{snippet}\n")
+
+    if args.write:
+        try:
+            with open(args.write, "w", encoding="utf-8") as fh:
+                fh.write(snippet)
+            sys.stdout.write(f"Wrote {args.write}\n")
+        except OSError as exc:
+            sys.stderr.write(f"Error: cannot write {args.write}: {exc}\n")
+            return 1
+    return 0 if dry_ok else 1
+
+
 def _workflow_run(args) -> int:
     import json as _json
 
@@ -742,6 +842,10 @@ def main(argv: list[str] | None = None) -> int:
     # workflow intercept (native rebar.llm.workflow DSL toolchain; owns its --help).
     if argv and argv[0] == "workflow":
         return _workflow(argv[1:])
+
+    # llm intercept (the LLM-framework setup wizard; owns its --help).
+    if argv and argv[0] == "llm":
+        return _llm(argv[1:])
 
     # config intercept (native config-transparency read; owns its own --help, like
     # reconcile/review). No store init: it reads working-tree config files only.
