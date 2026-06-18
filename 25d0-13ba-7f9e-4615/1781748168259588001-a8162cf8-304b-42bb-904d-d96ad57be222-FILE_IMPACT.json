@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/_io/import_ndjson.py","reason":"idempotency + deferred push"},{"path":"docs/architecture.md","reason":"large-import limitation docs"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781748168259588001,"uuid":"a8162cf8-304b-42bb-904d-d96ad57be222"}
