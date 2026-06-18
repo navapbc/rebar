@@ -2,11 +2,13 @@
 
 Port of ticket-init.sh. Creates (or mounts) the orphan ``tickets`` branch as a
 linked worktree at ``.tickets-tracker/``, commits ``.gitignore`` +
-``.pre-commit-config.yaml`` on it, generates ``.env-id`` + ``.signing-key``, sets
-``gc.auto=0``, and excludes the tracker from the host repo. Idempotent: re-running
-on an initialized repo recovers any stale rebase/merge on the tickets branch and
-returns 0. A 30s mkdir lock (``.git/ticket-init.lock``) serializes concurrent
-inits.
+``.pre-commit-config.yaml`` on it, generates ``.env-id`` + ``.signing-key``,
+normalizes gc config (``--unset gc.auto`` + ``gc.autoDetach=true`` — rebar trusts
+stock ``git gc`` now that recovery is non-destructive, see ``_migrate_gc_config``),
+and excludes the tracker from the host repo. Idempotent: re-running on an
+initialized repo recovers any stale rebase/merge on the tickets branch, re-applies
+the gc-config migration, and returns 0. A 30s mkdir lock
+(``.git/ticket-init.lock``) serializes concurrent inits.
 
 init resolves the repo from the git toplevel of ``repo_root`` (or cwd) — it
 deliberately ignores an inherited repo-root override (it must initialize the
@@ -52,6 +54,23 @@ def _git_ok(cwd: str, *args: str) -> bool:
 
 def _realpath(p: str) -> str:
     return os.path.realpath(p)
+
+
+def _migrate_gc_config(tracker: str) -> None:
+    """Trust stock ``git gc`` on the tickets worktree (epic 97e7 / P1.4).
+
+    rebar no longer forces ``gc.auto=0``: union recovery (sync.py) keeps every
+    ticket commit ref-reachable, so stock background gc is safe by construction and
+    only ever collects truly unreachable objects. Two idempotent steps, run at init
+    and on every re-init so existing trackers self-heal:
+
+    - ``--unset gc.auto`` sheds the stale ``gc.auto=0`` an older rebar wrote (no-op
+      / exit 5 when absent — harmless, we ignore the return code).
+    - ``gc.autoDetach=true`` ensures a triggered background gc forks and never
+      serializes a foreground ticket write.
+    """
+    _git(tracker, "config", "--unset", "gc.auto")
+    _git(tracker, "config", "gc.autoDetach", "true")
 
 
 def _ensure_env_id(tracker: str) -> None:
@@ -148,6 +167,7 @@ def init_core(repo_root=None, *, silent: bool = False) -> int:
                     _emit("WARNING: Aborting stale merge on tickets branch", silent)
                     _git(tracker, "merge", "--abort")
             _ensure_env_id(tracker)
+            _migrate_gc_config(tracker)
             _emit("Ticket system already initialized.", silent)
             return 0
 
@@ -179,7 +199,7 @@ def init_core(repo_root=None, *, silent: bool = False) -> int:
         _exclude_scratch_in_tracker(tracker)
         _commit_precommit(tracker)
         _gen_local_files(tracker)
-        _git(tracker, "config", "gc.auto", "0")
+        _migrate_gc_config(tracker)
         _emit("Ticket system initialized.", silent)
         return 0
     finally:

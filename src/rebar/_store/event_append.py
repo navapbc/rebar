@@ -71,19 +71,6 @@ def event_filename(timestamp: int, uuid_str: str, event_type: str) -> str:
     return f"{timestamp}-{uuid_str}-{event_type}.json"
 
 
-def _ensure_gc_auto_zero(tracker: str) -> None:
-    """``gc.auto=0`` in the tickets worktree (skip if already 0), matching
-    _flock_stage_commit's pre-lock guard. The value-check below already avoids the
-    redundant ``git config`` write when it is set, so no separate skip flag."""
-    cur = subprocess.run(
-        ["git", "-C", tracker, "config", "--get", "gc.auto"],
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    if cur != "0":
-        subprocess.run(["git", "-C", tracker, "config", "gc.auto", "0"], check=False)
-
-
 def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str, Any]) -> int:
     """Validate, canonical-stage, lock, atomic-rename, ``git add``+``commit``.
 
@@ -121,7 +108,6 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
         _silent_unlink(staging)
         raise StoreError("Error: failed to write staging temp file", 1) from exc
 
-    _ensure_gc_auto_zero(tracker)
     commit_msg = f"ticket: {event_type} {ticket_id}"
     try:
         with _lock.write_lock(tracker, dual_window=True):

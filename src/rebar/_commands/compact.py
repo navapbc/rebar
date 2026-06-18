@@ -58,7 +58,6 @@ def _compact_locked(
     """The locked compaction critical section. Returns 0 on success (prints
     EVENT_COUNT + the compacted line), 0 on below-threshold-inside-lock (prints the
     skip line), 1 on lock timeout / reducer / state / git failure."""
-    _git(tracker, "config", "gc.auto", "0")
     try:
         handle = lock.acquire(tracker, timeout=30, attempts=2, dual_window=True)
     except lock.LockTimeout as exc:

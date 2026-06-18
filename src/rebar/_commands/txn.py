@@ -214,7 +214,6 @@ def transition_core(
         final_path = os.path.join(ticket_dir_path, final_filename)
         os.rename(temp_path, final_path)
 
-        _git(tracker_dir, "config", "gc.auto", "0")
         _git(tracker_dir, "add", f"{ticket_id}/{final_filename}")
         _git(tracker_dir, "commit", "-q", "--no-verify", "-m", f"ticket: STATUS {ticket_id}")
     except CommandError:
@@ -409,8 +408,7 @@ def claim_core(
             os.rename(edit_tmp, edit_path)
             rel_paths.append(f"{ticket_id}/{edit_filename}")
 
-        # gc.auto=0, then stage BOTH events and commit ONCE (atomic).
-        _git(tracker_dir, "config", "gc.auto", "0")
+        # Stage BOTH events and commit ONCE (atomic).
         _git(tracker_dir, "add", *rel_paths)
         _git(tracker_dir, "commit", "-q", "--no-verify", "-m", f"ticket: CLAIM {ticket_id}")
     except CommandError:
