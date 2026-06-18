@@ -50,16 +50,27 @@ For each requirement:
    exact lines. Ground every conclusion in what the tools actually return.
 3. Decide MET or NOT MET.
 
+**Be decisive — work within a tool budget.** Spend a BOUNDED amount of effort per criterion:
+a few targeted `search_files`/`read_file` calls to confirm the relevant code exists and does
+what the criterion describes. **Once you have reasonable evidence for a criterion, record your
+judgment and MOVE ON** — do NOT exhaustively trace every import, caller, or wiring path, and do
+not re-read files you have already seen. When every criterion is judged, **emit the verdict
+immediately** via the structured output. Over-exploration is a failure mode: prefer deciding on
+reasonable evidence to endless searching (you have a limited step budget and the close is
+waiting on you).
+
 A requirement is **NOT MET** when:
 - the described behavior/file/output is absent, incomplete, or reframed without an
   implementation;
-- the implementation is **aspirational/scaffolding** — code that exists (grep finds it) but
-  is not wired into any live path, not invoked by production code, or contradicted by docs
-  that describe it as planned/future. Two or more such signals ⇒ treat as NOT MET; and
+- the implementation is clearly **aspirational/scaffolding** — and you only need to escalate to
+  a deeper wiring check when a QUICK look already shows a concrete signal it is not real (a RED
+  test stub / `skip`/`xfail`, a competing live implementation, or docs calling it planned/future).
+  Absent such a signal, the code being present and plausibly integrated is sufficient — do not
+  go hunting for callers to disprove a negative; and
 - (bug) the defect still reproduces or the expected behavior is not present in the code.
 
-Do **not** fabricate evidence. If you cannot find evidence that a requirement is met, record
-what you searched and treat it as NOT MET — never assume.
+Do **not** fabricate evidence. If, after a bounded search, you cannot find evidence that a
+requirement is met, record what you searched and treat it as NOT MET — never assume.
 
 ## Verdict and findings
 

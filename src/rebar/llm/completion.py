@@ -24,13 +24,20 @@ from __future__ import annotations
 from dataclasses import replace
 
 from rebar.llm import findings, operations, prompts
-from rebar.llm.config import LLMConfig
+from rebar.llm.config import DEFAULT_MODEL, LLMConfig
 from rebar.llm.runner import Runner, RunRequest, get_runner
 
 __all__ = ["verify_completion"]
 
 _REVIEWER_ID = "completion-verifier"
 _OUTPUT_SCHEMA = "completion_verdict"
+# Bounded completion verification wants a DECISIVE model, not a maximally-thorough one: the
+# framework default (opus) over-explores — it rabbit-holes on confirming code is "wired",
+# blowing the step budget even on a 2-criterion ticket (it tripped recursion_limit=300 / 385s
+# in testing) — whereas sonnet converges in ~12s. So default the verifier to sonnet (matching
+# the DSO completion-verifier's `model: sonnet`). An operator who EXPLICITLY sets
+# REBAR_LLM_MODEL to a non-default still wins (below).
+_VERIFIER_DEFAULT_MODEL = "claude-sonnet-4-6"
 # Completion verification is inherently more tool-heavy than a single-dimension review: it
 # must check potentially many criteria, each against several files. The framework review
 # default (REBAR_LLM_MAX_STEPS=25 ≈ 12 tool calls) is far too low and trips the recursion cap
@@ -109,6 +116,12 @@ def verify_completion(
     import rebar
 
     cfg = config or LLMConfig.from_env(repo_root=repo_root)
+    # Default to a decisive verifier model unless the operator EXPLICITLY chose a non-default
+    # one (cfg.model == DEFAULT_MODEL means REBAR_LLM_MODEL/[tool.rebar.llm].model was unset or
+    # left at the framework default → use the verifier default; any other value is an explicit
+    # choice and wins). Mirrors the step-floor pattern below.
+    if cfg.model == DEFAULT_MODEL:
+        cfg = replace(cfg, model=_VERIFIER_DEFAULT_MODEL)
     # Raise the agent step budget to a verification-appropriate floor (an explicit higher
     # REBAR_LLM_MAX_STEPS still wins) so a multi-criteria verification doesn't trip the
     # recursion cap mid-run.
@@ -143,9 +156,11 @@ def verify_completion(
         "- read_file(path, line_start, line_end): read exact lines; PAGE large files\n"
         "- show_ticket(ticket_id): read this ticket or any related/child ticket (JSON)\n\n"
         "Ground EVERY finding in what the tools actually return — cite real `path:line` from "
-        "read_file output and never invent paths, line numbers, or file contents. Emit one "
+        "read_file output and never invent paths, line numbers, or file contents. Be DECISIVE: "
+        "spend a few targeted searches/reads per criterion, then judge it and move on (don't "
+        "exhaustively trace wiring or re-read files) — you have a limited step budget. Emit one "
         "finding per FAILING requirement only, then report the verdict (PASS/FAIL) and findings "
-        "via the structured output."
+        "via the structured output as soon as every criterion is judged."
     )
 
     runner_sel = get_runner(cfg, override=runner)

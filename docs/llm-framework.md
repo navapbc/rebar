@@ -360,9 +360,16 @@ tools + a read-only rebar `show_ticket` tool (passed via `RunRequest.extra_tools
 failing `criterion`, an explanation, and a source-code citation. The agent emits the verdict;
 the op then deterministically normalizes it and enforces FAIL⇔findings (`_reconcile`) and
 resolves citations. Findings are **failures-only** (a completion check, not a code review);
-a ticket with no explicit criteria PASSes with a note. Because verification is far more
-tool-heavy than a single review, the op raises the agent step budget to a floor (an explicit
-higher `REBAR_LLM_MAX_STEPS` still wins). The untrusted ticket/file content is delimited and
+a ticket with no explicit criteria PASSes with a note.
+
+> **Model + budget tuning (important).** Completion verification wants a *decisive* model, not
+> a maximally-thorough one. The framework default (opus) over-explores — it rabbit-holes
+> confirming code is "wired" and trips the step budget even on a 2-criterion ticket — so the op
+> **defaults the verifier to `claude-sonnet-4-6`** (matching the DSO completion-verifier; it
+> converges in seconds where opus loops past hundreds of steps). An operator who explicitly sets
+> `REBAR_LLM_MODEL` to a non-default still wins. The op also raises the agent step budget to a
+> floor (an explicit higher `REBAR_LLM_MAX_STEPS` still wins). A very large epic verified with
+> `graph=True` may still need the budget raised or a `--force-close`. The untrusted ticket/file content is delimited and
 the prompt carries an instruction-hierarchy clause (prompt-injection mitigation, OWASP LLM01).
 
 **The close gate** (`verify.require_completion_verification_for_close`, default off; **on for
