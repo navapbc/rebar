@@ -117,3 +117,78 @@ def test_required_var_enforced_at_resolve(tmp_path: Path) -> None:
 def test_undeclared_prompt_has_no_parity_findings() -> None:
     # The packaged reviewers have no front-matter → parity gate is a no-op for them.
     assert prompts.check_prompt_parity(_rv()) == []
+
+
+# ── prior-art hardening (epic a88f follow-up, ticket crude-hook-stomp) ─────────
+
+
+def test_front_matter_survives_crlf_and_bom() -> None:
+    # A Windows checkout / core.autocrlf must not defeat the \n-anchored fence.
+    meta, body = prompts.parse_front_matter(
+        "﻿---\r\nvariables: [x]\r\nrequired: [x]\r\n---\r\nBODY {{x}}\r\n"
+    )
+    assert meta == {"variables": ["x"], "required": ["x"]}
+    assert "\r" not in body and body.startswith("BODY {{x}}")
+
+
+def test_declared_optional_var_defaults_to_empty(monkeypatch) -> None:
+    # A declared-but-not-required var that IS used must default to empty when
+    # omitted (matching prompt_input_schema marking it optional) — not raise.
+    rv = prompts.Reviewer(id="demo", dimension="d", fallback_file="demo.md")
+    monkeypatch.setattr(
+        prompts,
+        "_prompt_file",
+        lambda reviewer, repo_root, variant: (
+            "---\nvariables: [a, b]\nrequired: [a]\n---\nHELLO {{a}} {{b}}"
+            if variant is None
+            else None
+        ),
+    )
+    compiled, _ = prompts.resolve_prompt(rv, {"a": "X"})  # b omitted
+    assert compiled == "HELLO X "
+    # required var still enforced
+    with pytest.raises(PromptError):
+        prompts.resolve_prompt(rv, {})
+
+    # …and the schema agrees: a required, b optional.
+    schema = prompts.prompt_input_schema(rv)
+    assert schema["required"] == ["a"]
+    assert set(schema["properties"]) == {"a", "b"}
+
+
+def test_variant_overlay_unions_base_declarations(monkeypatch) -> None:
+    # A variant that splices the base (<!--base-->) must NOT drop the base's
+    # declared/required vars via a shallow overlay.
+    rv = prompts.Reviewer(id="demo", dimension="d", fallback_file="demo.md")
+
+    def fake(reviewer, repo_root, variant):
+        if variant is None:
+            return (
+                "---\nvariables: [ticket, diff]\nrequired: [ticket]\n---\n"
+                "BASE {{ticket}} {{diff}}"
+            )
+        if variant == "friendly":
+            return "---\nvariables: [tone]\n---\nTONE {{tone}}\n<!--base-->"
+        return None
+
+    monkeypatch.setattr(prompts, "_prompt_file", fake)
+    body, meta = prompts.load_prompt(rv, variant="friendly")
+    assert set(meta["variables"]) == {"ticket", "diff", "tone"}
+    assert meta["required"] == ["ticket"]  # base requirement preserved
+    assert "BASE" in body and "TONE" in body
+    assert prompts.check_prompt_parity(rv, variant="friendly") == []
+
+
+def test_full_override_variant_keeps_only_its_own_vars(monkeypatch) -> None:
+    rv = prompts.Reviewer(id="demo", dimension="d", fallback_file="demo.md")
+
+    def fake(reviewer, repo_root, variant):
+        if variant is None:
+            return "---\nvariables: [ticket, diff]\n---\nBASE {{ticket}} {{diff}}"
+        if variant == "full":
+            return "---\nvariables: [tone]\n---\nFULL {{tone}}"  # no <!--base-->
+        return None
+
+    monkeypatch.setattr(prompts, "_prompt_file", fake)
+    _, meta = prompts.load_prompt(rv, variant="full")
+    assert meta["variables"] == ["tone"]

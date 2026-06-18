@@ -192,3 +192,79 @@ def test_cli_prompt_eval_unknown(capsys) -> None:
     rc = main(["prompt", "eval", "no-such-prompt-xyz"])
     assert rc == 1
     assert "no eval spec" in capsys.readouterr().err
+
+
+# ── prior-art hardening (epic a88f follow-up, ticket crude-hook-stomp) ─────────
+
+
+def test_junit_wrapped_in_testsuites_root() -> None:
+    # promptfoo / most JUnit ingesters expect a <testsuites> root, not a bare
+    # <testsuite>.
+    xml = ev.to_junit("code-quality", [{"name": "c", "passed": False, "message": "x"}])
+    assert "<testsuites " in xml
+    assert "<testsuite " in xml  # the suite is nested inside the root
+    assert xml.index("<testsuites") < xml.index("<testsuite ")
+
+
+def test_junit_quoteattr_and_failure_body() -> None:
+    # A name/message containing a quote must not break the XML, and the failure
+    # message is repeated in the element body (not only the attribute).
+    xml = ev.to_junit("n", [{"name": 'a"b', "passed": False, "message": 'why"q', "scorer": "s"}])
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(xml)  # parses iff the quote is properly escaped
+    assert root.tag == "testsuites"
+    failure = root.find(".//failure")
+    assert failure is not None and failure.text == 'why"q'
+
+
+def test_grader_snapshot_must_match_model_id() -> None:
+    drifted = {
+        "type": "llm-judge",
+        "name": "j",
+        "gates": False,
+        "threshold": 0.7,
+        "grader": {"model": "openai:gpt-4o", "temperature": 0, "seed": 1, "snapshot": "2099-01-01"},
+    }
+    errs = ev.validate_scorer(drifted, generator_model="anthropic:claude-opus-4-8")
+    assert any("snapshot" in e and "not present in the pinned model id" in e for e in errs), errs
+
+
+def test_grader_snapshot_embedded_in_model_passes() -> None:
+    ok = {
+        "type": "llm-judge",
+        "name": "j",
+        "gates": False,
+        "threshold": 0.7,
+        "grader": {
+            "model": "openai:gpt-4o-2024-08-06",
+            "temperature": 0,
+            "seed": 1,
+            "snapshot": "2024-08-06",
+        },
+    }
+    errs = ev.validate_scorer(ok, generator_model="anthropic:claude-opus-4-8")
+    assert not any("snapshot" in e for e in errs), errs
+
+
+def test_gate_k_greater_than_epochs_is_unsatisfiable() -> None:
+    spec = {
+        "prompt": "p",
+        "epochs": 3,
+        "gate": "at_least(5)",
+        "coverage_threshold": 0.8,
+        "scorers": [{"type": "deterministic", "name": "d"}],
+    }
+    errs = ev.validate_eval_spec(spec)
+    assert any("unsatisfiable" in e for e in errs), errs
+
+
+def test_run_eval_not_wired_raises_notimplemented_when_extra_present() -> None:
+    # When the eval extra IS installed, the missing live harness is NOT a config
+    # error — it must surface as NotImplementedError, not EvalError.
+    import importlib.util
+
+    if importlib.util.find_spec("inspect_ai") is None:
+        pytest.skip("inspect_ai not installed — the EvalError guard path is exercised instead")
+    with pytest.raises(NotImplementedError):
+        ev.run_eval("code-quality")

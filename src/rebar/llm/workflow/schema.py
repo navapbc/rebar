@@ -97,6 +97,11 @@ def _build_loader():
             return super().compose_node(parent, index)
 
         def construct_mapping(self, node, deep=False):  # type: ignore[override]
+            # YAML 1.2 Core errors on duplicate mapping keys; PyYAML's SafeLoader
+            # silently keeps the last. A duplicate `uses:`/`if:` silently shadowing
+            # an earlier one is a real footgun (both Argo and GHA reject it), so we
+            # detect dups before construction and reject.
+            seen: set[Any] = set()
             for key_node, _ in node.value:
                 if key_node.tag == "tag:yaml.org,2002:merge":
                     raise WorkflowParseError(
@@ -104,6 +109,18 @@ def _build_loader():
                         line=_mark_line(key_node.start_mark),
                         column=_mark_col(key_node.start_mark),
                     )
+                try:
+                    key = self.construct_object(key_node, deep=True)
+                except Exception:  # pragma: no cover - unusual/non-constructible key
+                    continue
+                if isinstance(key, (str, int, float, bool)) or key is None:
+                    if key in seen:
+                        raise WorkflowParseError(
+                            f"duplicate key {key!r} in mapping",
+                            line=_mark_line(key_node.start_mark),
+                            column=_mark_col(key_node.start_mark),
+                        )
+                    seen.add(key)
             return super().construct_mapping(node, deep=deep)
 
     # YAML 1.2 Core normalization: give the subclass its own resolver table (so we

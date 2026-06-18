@@ -41,10 +41,30 @@ from rebar.llm.errors import WorkflowError
 # Total extracted-bytes ceiling — a snapshot is a source tree, not a data lake;
 # this bounds a pathological/hostile archive.
 DEFAULT_MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024  # 512 MiB
+# Member-count ceiling — bounds a tar of millions of tiny entries (inode exhaustion
+# / extraction-time blowup) that the byte cap alone would not catch.
+DEFAULT_MAX_SNAPSHOT_FILES = 200_000
 
 
 class SnapshotError(WorkflowError):
     """Building a git-ref snapshot failed (bad ref, git error, oversize, unsafe tar)."""
+
+
+def _require_safe_extraction() -> None:
+    """Refuse to extract unless the hardened stdlib tar filter is available.
+
+    ``tarfile.data_filter`` (and the ``extractall(filter=…)`` keyword) were added
+    in CPython 3.12 and backported to 3.11.4 — but ``requires-python`` is ``>=3.11``,
+    so a 3.11.0–3.11.3 interpreter would otherwise fall through to an UNFILTERED
+    ``extractall`` (CVE-2007-4559 path traversal). Fail closed with a clear message
+    instead of extracting a git archive unsafely.
+    """
+    if not hasattr(tarfile, "data_filter"):  # pragma: no cover - depends on runtime
+        raise SnapshotError(
+            "this Python lacks tarfile.data_filter (the hardened tar-extraction "
+            "filter added in 3.11.4 / 3.12); refusing to extract a snapshot "
+            "unsafely — upgrade to Python >= 3.11.4"
+        )
 
 
 def _snapshot_root(repo_root: str | None) -> Path:
@@ -73,14 +93,19 @@ def resolve_sha(ref: str, repo_root: str | None = None) -> str:
     return sha
 
 
-def _hardened_filter(max_bytes: int):
+def _hardened_filter(max_bytes: int, max_files: int = DEFAULT_MAX_SNAPSHOT_FILES):
     """A tarfile extraction filter: the stdlib ``data`` filter (rejects absolute
-    paths, ``..`` escapes, and escaping links) plus a cumulative size guard."""
-    seen = {"total": 0}
+    paths, ``..`` escapes, and escaping links) plus cumulative size + count guards."""
+    seen = {"total": 0, "count": 0}
 
     def _filter(member: tarfile.TarInfo, dest_path: str) -> tarfile.TarInfo | None:
         # data_filter raises on absolute paths / .. traversal / unsafe links.
         member = tarfile.data_filter(member, dest_path)
+        seen["count"] += 1
+        if seen["count"] > max_files:
+            raise SnapshotError(
+                f"snapshot exceeds the {max_files}-file cap; refusing to continue"
+            )
         seen["total"] += max(0, member.size)
         if seen["total"] > max_bytes:
             raise SnapshotError(
@@ -150,6 +175,7 @@ def snapshot_at_ref(
     if dest.is_dir():
         return dest  # cache hit (immutable by SHA)
 
+    _require_safe_extraction()
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix=f".tmp-snap-{sha[:8]}-", dir=str(dest.parent)))
     proc = None
@@ -178,8 +204,21 @@ def snapshot_at_ref(
             raise
         return dest
     except BaseException:
-        if proc is not None and proc.poll() is None:
-            proc.kill()
+        # Reap the child rather than leaving a zombie / leaking its pipe FDs: kill
+        # if still running, then always wait() and close the stdio pipes.
+        if proc is not None:
+            if proc.poll() is None:
+                proc.kill()
+            try:
+                proc.wait(timeout=10)
+            except Exception:
+                pass
+            for stream in (proc.stdout, proc.stderr):
+                try:
+                    if stream is not None:
+                        stream.close()
+                except Exception:
+                    pass
         if tmp.exists():
             _rmtree_writable(tmp)
         raise

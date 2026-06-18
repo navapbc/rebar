@@ -125,7 +125,16 @@ def parse_front_matter(text: str) -> tuple[dict, str]:
     ``variables`` (the vars the template uses), ``required`` (subset that MUST be
     supplied), and ``variant_of`` (a parent prompt id for overlay chaining). No
     front-matter → ``({}, text)`` (so existing front-matter-less prompts are
-    unchanged)."""
+    unchanged).
+
+    Line endings are normalized first: a leading UTF-8 BOM is stripped and
+    CRLF/CR are folded to LF, so a Windows checkout (or ``core.autocrlf``) cannot
+    defeat the ``\\n``-anchored front-matter fence — and the resolved body (hence
+    its content hash) is line-ending-independent."""
+    if text.startswith("\ufeff"):
+        text = text[1:]
+    if "\r" in text:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
     m = _FRONT_MATTER.match(text)
     if not m:
         return {}, text
@@ -193,10 +202,24 @@ def load_prompt(
         parent_body, parent_meta = load_prompt(
             reviewer, repo_root=repo_root, variant=parent, _seen=_seen
         )
-        if _BASE_MARKER in body:
+        includes_base = _BASE_MARKER in body
+        if includes_base:
             body = body.replace(_BASE_MARKER, parent_body)
         merged = {**parent_meta, **meta}
         merged.pop("variant_of", None)
+        # When the overlay splices the base body in, the spliced result uses BOTH
+        # the base's and the variant's variables — so UNION their declared
+        # `variables`/`required` rather than letting the shallow overlay drop the
+        # base's (which would break parity + strict rendering of base vars). A
+        # full override (no <!--base-->) keeps only the variant's own declarations.
+        if includes_base:
+            for k in ("variables", "required"):
+                union: list = []
+                for v in [*(parent_meta.get(k) or []), *(meta.get(k) or [])]:
+                    if v not in union:
+                        union.append(v)
+                if union:
+                    merged[k] = union
         return body, merged
     return body, meta
 
@@ -293,12 +316,34 @@ def resolve_prompt(
     ``langfuse_cfg`` is accepted for call-site compatibility but no longer drives a
     text fetch."""
     body, meta = load_prompt(reviewer, repo_root=repo_root, variant=variant)
-    missing_required = sorted(set(meta.get("required") or []) - set(variables))
-    if missing_required:
-        raise PromptError(
-            f"prompt {reviewer.id!r} requires variable(s) {missing_required} that were not supplied"
-        )
-    compiled = _render_strict(body, variables)
+    # Mirror prompt_input_schema's required/optional contract exactly: when
+    # front-matter declares `variables`, an absent `required` key means ALL
+    # declared vars are required, and any declared-but-not-required var is OPTIONAL
+    # — it defaults to empty when omitted instead of failing strict rendering (a
+    # declared-optional var must not be de-facto required). Undeclared used vars
+    # still raise. No front-matter → the legacy strict path (every used var
+    # required) is preserved for the review prompts.
+    render_vars = dict(variables)
+    if "variables" in meta:
+        declared = list(meta.get("variables") or [])
+        required = list(meta.get("required", declared))
+        missing_required = sorted(set(required) & set(declared) - set(variables))
+        if missing_required:
+            raise PromptError(
+                f"prompt {reviewer.id!r} requires variable(s) {missing_required} "
+                "that were not supplied"
+            )
+        for v in declared:
+            if v not in required:
+                render_vars.setdefault(v, "")
+    else:
+        missing_required = sorted(set(meta.get("required") or []) - set(variables))
+        if missing_required:
+            raise PromptError(
+                f"prompt {reviewer.id!r} requires variable(s) {missing_required} "
+                "that were not supplied"
+            )
+    compiled = _render_strict(body, render_vars)
     return compiled, {
         "prompt_id": reviewer.id,
         "content_sha256": prompt_content_hash(body),

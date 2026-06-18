@@ -36,7 +36,6 @@ from __future__ import annotations
 import graphlib
 import os
 import re
-import shutil
 import time
 import uuid as _uuid
 from collections.abc import Callable, Mapping
@@ -385,6 +384,13 @@ def _guard_passes(step: Mapping[str, Any], state: RunState, secrets: Mapping[str
     guard = step.get("if")
     if not guard:
         return True
+    # A bare `if:` value with no `${{ … }}` is NOT an expression — under naive
+    # substitution it resolves to the literal string and is silently truthy
+    # (the GHA `if: steps.a.outputs.ok` footgun). The linter rejects this so a
+    # well-formed workflow never reaches here with one; if internals are driven
+    # directly past the lint, fail closed (skip) rather than always-run.
+    if isinstance(guard, str) and "${{" not in guard:
+        return False
     try:
         val = resolve_value(guard, state, secrets)
     except ExpressionError:
@@ -596,6 +602,11 @@ def sweep_orphan_snapshots(
     skipped, not raised — the sweep must never break a run. Idempotent and safe to
     call at the start of every run.
     """
+    # Published snapshot trees are chmod'd read-only, so a plain rmtree can fail to
+    # remove them (and ignore_errors would silently leak the cache). Restore write
+    # bits first, via the same helper snapshot extraction uses to tear down temps.
+    from .snapshot import _rmtree_writable
+
     root = snapshot_root(repo_root)
     if not root.is_dir():
         return []
@@ -606,7 +617,7 @@ def sweep_orphan_snapshots(
             if entry.stat().st_mtime >= cutoff:
                 continue
             if entry.is_dir():
-                shutil.rmtree(entry, ignore_errors=True)
+                _rmtree_writable(entry)
             else:
                 entry.unlink()
             removed.append(str(entry))

@@ -32,6 +32,7 @@ import re
 from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape as _xml_escape
+from xml.sax.saxutils import quoteattr as _xml_attr
 
 from rebar.llm.errors import LLMError
 
@@ -137,8 +138,19 @@ def validate_scorer(scorer: dict, *, generator_model: str | None = None) -> list
             errs.append(f"grader for {name!r} must pin temperature: 0 (determinism)")
         if not isinstance(grader.get("seed"), int):
             errs.append(f"grader for {name!r} must pin an integer `seed`")
-        if not grader.get("snapshot"):
+        snapshot = grader.get("snapshot")
+        if not snapshot:
             errs.append(f"grader for {name!r} must pin a dated model `snapshot`")
+        elif grader.get("model") and str(snapshot) not in str(grader.get("model")):
+            # The snapshot must be the SAME version the pinned model id resolves to
+            # — a `snapshot` that isn't embedded in the `model` id (e.g. a bare
+            # `gpt-4o` paired with `snapshot: 2099-01-01`) lets the two drift, which
+            # defeats the point of pinning a dated, reproducible grader.
+            errs.append(
+                f"grader for {name!r} snapshot {snapshot!r} is not present in the "
+                f"pinned model id {grader.get('model')!r} — pin a dated model "
+                "(e.g. gpt-4o-2024-08-06) whose id contains the snapshot"
+            )
         gf, genf = _family(grader.get("model")), _family(generator_model)
         if gf and genf and gf == genf:
             errs.append(
@@ -189,7 +201,13 @@ def validate_eval_spec(spec: dict) -> list[str]:
     if not isinstance(epochs, int) or epochs < 1:
         errs.append("`epochs` must be an explicit integer >= 1")
     try:
-        parse_gate(spec.get("gate", ""))
+        k = parse_gate(spec.get("gate", ""))
+        # An at_least(k) gate with k > epochs can never pass — catch the
+        # unsatisfiable threshold at validation time, not after a full run.
+        if isinstance(epochs, int) and epochs >= 1 and k > epochs:
+            errs.append(
+                f"gate at_least({k}) is unsatisfiable: k must be <= epochs ({epochs})"
+            )
     except EvalError as exc:
         errs.append(str(exc))
     cov = spec.get("coverage_threshold")
@@ -270,21 +288,31 @@ def to_junit(eval_name: str, cases: list[dict]) -> str:
 
     Each case is ``{name, passed, message?, scorer?}``; a failed gating case becomes
     a ``<failure>``. CI consumes this (and promptfoo's exit-code-100 contract) to
-    gate the build."""
+    gate the build. The suite is wrapped in a root ``<testsuites>`` (promptfoo and
+    most JUnit ingesters expect that root, not a bare ``<testsuite>``); attributes
+    are emitted via ``quoteattr`` so a name/message containing a quote can't break
+    the XML, and the failure message is repeated in the element body (some parsers
+    read the body, not the attribute)."""
     failures = sum(1 for c in cases if not c.get("passed"))
+    suite_attrs = (
+        f"name={_xml_attr(eval_name)} tests=\"{len(cases)}\" "
+        f'failures="{failures}" errors="0"'
+    )
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        f'<testsuite name="{_xml_escape(eval_name)}" tests="{len(cases)}" failures="{failures}">',
+        f"<testsuites {suite_attrs}>",
+        f"  <testsuite {suite_attrs}>",
     ]
     for c in cases:
-        cname = _xml_escape(str(c.get("name", "case")))
-        classname = _xml_escape(str(c.get("scorer", "eval")))
-        lines.append(f'  <testcase name="{cname}" classname="{classname}">')
+        cname = _xml_attr(str(c.get("name", "case")))
+        classname = _xml_attr(str(c.get("scorer", "eval")))
+        lines.append(f"    <testcase name={cname} classname={classname}>")
         if not c.get("passed"):
-            msg = _xml_escape(str(c.get("message", "scorer failed")))
-            lines.append(f'    <failure message="{msg}"></failure>')
-        lines.append("  </testcase>")
-    lines.append("</testsuite>")
+            msg = str(c.get("message", "scorer failed"))
+            lines.append(f"      <failure message={_xml_attr(msg)}>{_xml_escape(msg)}</failure>")
+        lines.append("    </testcase>")
+    lines.append("  </testsuite>")
+    lines.append("</testsuites>")
     return "\n".join(lines) + "\n"
 
 
@@ -297,8 +325,15 @@ def run_eval(prompt_id: str, *, repo_root=None, dirty: bool = True) -> dict[str,
     Loads + validates the git-tracked spec, then evaluates the prompt — reading the
     DIRTY working-tree prompt text (so you iterate before committing). Returns a
     result dict ``{prompt, epochs, gate, passed, coverage, scores[], junit}``.
-    Raises a clear error if ``inspect_ai`` is not installed (it is the ``eval``
-    extra), keeping the lean core free of it."""
+
+    Two distinct failure modes, deliberately different exception types:
+      * ``EvalError`` — the spec is invalid, or the ``eval`` extra (``inspect_ai``)
+        is not installed. Both are user-actionable config errors.
+      * ``NotImplementedError`` — the extra IS present but the concrete live-model
+        Inspect harness is not wired into this build. This is NOT a config error,
+        so it must not masquerade as one; the offline-testable discipline
+        (validate_eval_spec/at_least_passes/coverage/cohens_kappa/to_junit) is what
+        gates locally, and the live run is exercised by the eval CI."""
     from rebar._optional import OptionalDependencyError, guard_import
 
     spec = load_eval_spec(prompt_id, repo_root=repo_root)
@@ -311,8 +346,9 @@ def run_eval(prompt_id: str, *, repo_root=None, dirty: bool = True) -> dict[str,
     # is assembled here from `spec`; kept thin so the disciplined pieces above
     # (grader checks, at_least(k), coverage, kappa) are what the tests pin. The live
     # model run is exercised by the external/eval CI with credentials, not offline.
-    raise EvalError(
-        "run_eval requires a live model + the eval CI harness; the offline-testable "
-        "discipline (validate_eval_spec/validate_scorer/at_least_passes/coverage/"
-        "cohens_kappa/to_junit) is what gates locally. Run it via the eval workflow."
+    raise NotImplementedError(
+        "run_eval's live-model Inspect harness is not wired into this build; the "
+        "offline-testable discipline (validate_eval_spec/validate_scorer/"
+        "at_least_passes/coverage/cohens_kappa/to_junit) gates locally. Run the "
+        "full evaluation via the eval CI workflow (needs credentials)."
     )

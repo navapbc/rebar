@@ -302,7 +302,30 @@ def _check_step(
 
     guard = step.get("if")
     if isinstance(guard, str):
-        check_string(guard, f"{base}.if")
+        # A bare `if:` with no `${{ … }}` resolves to its literal string and is
+        # silently truthy (the GHA `if: steps.a.outputs.ok` footgun) — require an
+        # explicit expression so the guard's semantics are unambiguous.
+        if "${{" not in guard:
+            findings.append(
+                LintFinding(
+                    f"{base}.if",
+                    "`if:` must be a `${{ … }}` expression — a bare value is "
+                    "treated as a literal string and is always truthy",
+                )
+            )
+        # A run-control decision must not branch on a credential's presence (and
+        # would risk persisting the secret into run state); secrets belong only in
+        # `with:` values passed to a step that needs them.
+        elif "secrets." in guard:
+            findings.append(
+                LintFinding(
+                    f"{base}.if",
+                    "secrets may not be referenced in an `if:` guard — control "
+                    "flow must not depend on a credential",
+                )
+            )
+        else:
+            check_string(guard, f"{base}.if")
 
 
 def lint_document(
