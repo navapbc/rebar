@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/llm/runner.py","reason":"scoped ticket tool"},{"path":"src/rebar/llm/config.py","reason":"per-step model/provider"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781760310548612001,"uuid":"7082bfb4-df3c-42c9-bd65-c6b3ccd49787"}
