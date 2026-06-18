@@ -5,9 +5,10 @@ Faithful port of ``_reconverge_tickets`` / ``_do_reconverge_tickets``
 remote-tracking refs, never HEAD/index/worktree, so it can't race a local
 committer and a slow fetch must not block writers); the reset/merge that mutate
 HEAD run UNDER the unified write lock. Resolution: unrelated histories →
-``reset --hard origin/tickets`` (never a merge); related + no local commits →
-fast-forward adopt; local strictly ahead → nothing to do; diverged →
-``merge origin/tickets`` as a union (conflict → abort, keep local, hint fsck).
+``merge --allow-unrelated-histories`` as a union (never discards local commits);
+related + no local commits → fast-forward adopt; local strictly ahead → nothing
+to do; diverged → ``merge origin/tickets`` as a union (conflict → abort, keep
+local, hint fsck).
 
 The ≤1/min throttle + ``/tmp/.ticket-sync-<md5>`` marker live in the CALLER
 (``reads.py::ensure_fresh``), NOT here — this function is throttle-free, matching
@@ -67,21 +68,13 @@ def _do_reconverge(tracker: str) -> None:
     if not _ok(tracker, "rev-parse", "--verify", "origin/tickets"):
         return
 
-    # Unrelated histories (no common ancestor): adopt origin via atomic reset.
+    # Unrelated histories (no common ancestor): UNION them, never discard local.
+    # The append-only event files are UUID-named so they never collide; the only
+    # shared mutable root files (.bridge_state/*, .reconciler-*) resolve via the
+    # tickets-branch .gitattributes `merge=ours` (WU-3). Reuses the diverged-path
+    # conflict net below (abort → keep local → hint fsck) — extend, don't reinvent.
     if not _ok(tracker, "merge-base", "HEAD", "origin/tickets"):
-        cnt = _git(tracker, "rev-list", "--count", "HEAD", "--not", "origin/tickets").stdout.strip()
-        try:
-            orphan_ahead = int(cnt or "0")
-        except ValueError:
-            orphan_ahead = 0
-        if orphan_ahead > 0:
-            print(
-                f"Warning: tickets sync — local 'tickets' history is unrelated to "
-                f"origin/tickets; adopting origin and setting aside {orphan_ahead} "
-                f'local-only commit(s) (recoverable: git -C "{tracker}" reflog)',
-                file=sys.stderr,
-            )
-        _git(tracker, "reset", "--hard", "origin/tickets", "--quiet")
+        _union_merge(tracker, "--allow-unrelated-histories")
         return
 
     # Related histories. Local-ahead measured by HEAD (the WS3 fix).
@@ -95,9 +88,19 @@ def _do_reconverge(tracker: str) -> None:
         return
 
     # Diverged → merge-as-union. Conflict → abort, keep local, hint fsck.
+    _union_merge(tracker)
+
+
+def _union_merge(tracker: str, *extra: str) -> None:
+    """Merge ``origin/tickets`` into HEAD as a union — both parents are kept, so no
+    local commit is ever orphaned (this is what lets stock ``git gc`` be safe; the
+    reflog is no longer load-bearing). ``extra`` carries ``--allow-unrelated-histories``
+    for the no-common-ancestor case. On the rare genuine conflict: abort, keep
+    local, hint fsck — never discard local commits."""
     merge = _git(
         tracker,
         "merge",
+        *extra,
         "origin/tickets",
         "--no-edit",
         "-m",
