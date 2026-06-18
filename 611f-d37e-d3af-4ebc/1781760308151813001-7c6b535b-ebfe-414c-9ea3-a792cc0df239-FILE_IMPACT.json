@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/llm/runner.py","reason":"generalize RunRequest + finalize strategy"},{"path":"src/rebar/llm/findings.py","reason":"findings as one strategy"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781760308151813001,"uuid":"7c6b535b-ebfe-414c-9ea3-a792cc0df239"}
