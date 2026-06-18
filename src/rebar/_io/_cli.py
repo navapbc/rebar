@@ -11,6 +11,7 @@ from __future__ import annotations
 import sys
 
 from .export_ndjson import export_tickets
+from .import_ndjson import import_tickets
 
 _EXPORT_USAGE = (
     "Usage: rebar export [-o FILE] [--status S[,S]] [--type T[,T]] [--parent ID] "
@@ -88,4 +89,43 @@ def export_cli(argv: list[str], *, repo_root=None) -> int:
         f"(schema_version={meta['schema_version']}, source_env={meta['source_env']})",
         file=sys.stderr,
     )
+    return 0
+
+
+_IMPORT_USAGE = "Usage: rebar import [FILE] [--dry-run]   (reads stdin if FILE omitted)"
+
+
+def import_cli(argv: list[str], *, repo_root=None) -> int:
+    """Parse flags, import NDJSON (FILE or stdin), print a summary. Returns exit code."""
+    in_file = None
+    dry_run = False
+
+    i, n = 0, len(argv)
+    while i < n:
+        a = argv[i]
+        if a == "--dry-run":
+            dry_run = True
+            i += 1
+        elif a.startswith("-") and a != "-":
+            print(f"Error: unknown option '{a}'", file=sys.stderr)
+            print(_IMPORT_USAGE, file=sys.stderr)
+            return 2
+        elif in_file is None:
+            in_file = a
+            i += 1
+        else:
+            print(f"Error: unexpected argument '{a}'", file=sys.stderr)
+            print(_IMPORT_USAGE, file=sys.stderr)
+            return 2
+
+    source = in_file if in_file is not None else sys.stdin
+    meta = import_tickets(source, dry_run=dry_run, repo_root=repo_root)
+    if dry_run:
+        print(f"[dry-run] would create {meta['would_create']} ticket(s)", file=sys.stderr)
+    else:
+        print(
+            f"imported {meta['created']} ticket(s), {meta['links']} link(s), "
+            f"{meta['comments']} comment(s); {len(meta['warnings'])} warning(s)",
+            file=sys.stderr,
+        )
     return 0

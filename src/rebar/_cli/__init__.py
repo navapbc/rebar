@@ -49,8 +49,8 @@ _COMPACT = frozenset({"compact", "compact-all"})
 # tracker), matching the dispatcher's `bridge-status`/`purge-bridge` arms.
 _BRIDGE = frozenset({"bridge-status", "bridge-fsck", "purge-bridge"})
 # Import/export arms (P1.2): NDJSON interop projection. `export` is a read
-# (init-only); `import` (later sub-task) is a write.
-_IO = frozenset({"export"})
+# (init-only); `import` composes writes (full init).
+_IO = frozenset({"export", "import"})
 # Leaf-write arms: full auto-init + reconverge before the in-process write.
 _WRITES_FULL = frozenset(
     {
@@ -365,9 +365,12 @@ def _dispatch(sub: str, rest: list[str]) -> int:
 
         return purge_bridge.purge_bridge_cli(rest)
     if sub in _IO:
-        ensure_initialized(init_only=True)
         from rebar._io import _cli as _io_cli
 
+        if sub == "import":
+            ensure_initialized(init_only=False)
+            return _io_cli.import_cli(rest)
+        ensure_initialized(init_only=True)
         return _io_cli.export_cli(rest)
     if sub == "fsck":
         ensure_initialized(init_only=False)

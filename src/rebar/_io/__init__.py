@@ -17,5 +17,11 @@ import side (:mod:`import_ndjson`) lands in a later sub-task.
 from __future__ import annotations
 
 from .export_ndjson import EXPORT_SCHEMA_VERSION, export_tickets, iter_export_states
+from .import_ndjson import import_tickets
 
-__all__ = ["export_tickets", "iter_export_states", "EXPORT_SCHEMA_VERSION"]
+__all__ = [
+    "export_tickets",
+    "iter_export_states",
+    "EXPORT_SCHEMA_VERSION",
+    "import_tickets",
+]

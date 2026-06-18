@@ -585,6 +585,25 @@ def export_tickets(
     )
 
 
+def import_tickets(source, *, dry_run: bool = False, repo_root=None) -> dict:
+    """Import tickets from rebar export NDJSON ``source`` into this repo.
+
+    ``source`` is an NDJSON file path, a file object, or an iterable of lines/dicts.
+    A provenance import for clean rebar→rebar migration: each ticket gets a fresh
+    local id + fresh HLC timestamps, with the source identity preserved as
+    ``source_*``. Events are composed through the normal locked write path (CREATE +
+    EDIT-parent + LINK + COMMENT + STATUS, two-pass), reproducing parents, links,
+    tags, comments, file-impact, verify-commands, and non-open statuses. A dangling
+    parent / link target is skipped with a warning, never a hard failure.
+    ``dry_run`` reports create counts without writing. Returns run metadata
+    ``{created, skipped, links, comments, warnings, dry_run}``. See
+    :mod:`rebar._io.import_ndjson`.
+    """
+    from rebar._io import import_ndjson
+
+    return import_ndjson.import_tickets(source, dry_run=dry_run, repo_root=repo_root)
+
+
 def list_tickets(
     *,
     status: str | None = None,
@@ -910,6 +929,7 @@ __all__ = [
     # read path
     "show_ticket",
     "export_tickets",
+    "import_tickets",
     "list_tickets",
     "deps",
     "ready",
