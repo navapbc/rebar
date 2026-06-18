@@ -167,11 +167,19 @@ report runs in CI (`.github/workflows/test.yml`) so new offenders surface in PRs
 |------|----:|--------|
 | `rebar_reconciler/reconcile.py` | ~1305 | split orchestration vs pass-driver seams |
 | `rebar_reconciler/outbound_differ.py` | ~1114 | split per-field differ seams |
-| `__init__.py` | ~830 | library facade just over the cap — split the read vs write API if it grows |
+| `__init__.py` | ~1019 | library facade well over the cap (now also carries the workflow engine entrypoints `run_workflow`/`get_workflow_status`/`get_workflow_result` + `attach_commits`, epic a88f) — split the read vs write API along the existing seam |
 | `_engine_support/reads.py` | ~930 | just over the cap (P1.1 `--sort`); split the CLI `_cmd_*` arms from the `*_state` facades along the existing seam if it grows |
 
+`src/rebar/llm/runner.py` was **decomposed** in WS-A (epic a88f): the
+filesystem/repo cluster (`_safe_path`, `_git_tracked`, `_discovery_filter`,
+`_within_root`, `_filesystem_tools`, the per-call caps + noise sets) moved verbatim
+to `src/rebar/llm/fs_tools.py` (293 LOC), bringing `runner.py` from 829 → 560 LOC,
+back under the soft cap. `fs_tools.py` is also where the workflow engine's git-ref
+snapshot code (WS-D) will land.
+
 Files in the 500–800 band (`_commands/transition.py`,
-`_commands/composer.py`, `_engine_support/next_batch.py`, `mcp_server.py`, and
+`_commands/composer.py`, `_engine_support/next_batch.py`, `mcp_server.py`,
+`llm/runner.py`, and
 several `rebar_reconciler/` modules — `apply_inbound.py`, `applier.py`,
 `_advisory_lock.py`, `acli.py`, `inbound_differ.py`, `differ.py`,
 `batch_dispatch.py`, `acli_cli_ops.py`) are at the ceiling, not over it — watch,

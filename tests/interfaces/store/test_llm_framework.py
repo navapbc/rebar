@@ -172,7 +172,7 @@ def test_read_file_tool_caps_without_slurping(tmp_path: Path) -> None:
     """read_file streams and caps at _READ_MAX_LINES, and tells the agent how to
     page (PR #6 review + windowing research)."""
     pytest.importorskip("langchain_core")
-    from rebar.llm.runner import _READ_MAX_LINES, _filesystem_tools
+    from rebar.llm.fs_tools import _READ_MAX_LINES, _filesystem_tools
 
     big = tmp_path / "big.txt"
     big.write_text(
@@ -191,7 +191,7 @@ def test_read_file_tool_caps_without_slurping(tmp_path: Path) -> None:
 
 def test_read_file_truncates_overlong_lines(tmp_path: Path) -> None:
     pytest.importorskip("langchain_core")
-    from rebar.llm.runner import _READ_MAX_LINE_CHARS, _filesystem_tools
+    from rebar.llm.fs_tools import _READ_MAX_LINE_CHARS, _filesystem_tools
 
     (tmp_path / "min.js").write_text("x" * (_READ_MAX_LINE_CHARS + 4000) + "\n", encoding="utf-8")
     read_file = {t.name: t for t in _filesystem_tools(str(tmp_path))}["read_file"]
@@ -206,7 +206,7 @@ def test_read_tools_return_recoverable_error_for_missing_path(tmp_path: Path) ->
     that aborts the agent run. Regression for a live-run FileNotFoundError in
     review_code. (A denied/escaping path is a separate hard ValueError block.)"""
     pytest.importorskip("langchain_core")
-    from rebar.llm.runner import _filesystem_tools
+    from rebar.llm.fs_tools import _filesystem_tools
 
     tools = {t.name: t for t in _filesystem_tools(str(tmp_path))}
     out = tools["read_file"].invoke({"path": "does-not-exist.py"})
@@ -223,7 +223,7 @@ def test_discovery_hides_noise_and_gitignored(rebar_repo: Path) -> None:
     """list_directory/search_files hide vendored/generated + .gitignore'd files, but
     read_file can still access an explicitly named one (large-project handling)."""
     pytest.importorskip("langchain_core")
-    from rebar.llm.runner import _filesystem_tools
+    from rebar.llm.fs_tools import _filesystem_tools
 
     (rebar_repo / ".gitignore").write_text("secret.txt\n", encoding="utf-8")
     (rebar_repo / "secret.txt").write_text("TOKEN=abc\n", encoding="utf-8")
@@ -247,7 +247,7 @@ def test_discovery_rejects_symlink_escape(tmp_path: Path) -> None:
     """list_directory/search_files must not surface symlinks pointing outside the
     repo root (PR #6 review) — read_file already blocks them via _safe_path."""
     pytest.importorskip("langchain_core")
-    from rebar.llm.runner import _filesystem_tools
+    from rebar.llm.fs_tools import _filesystem_tools
 
     outside = tmp_path / "outside"
     outside.mkdir()
