@@ -25,6 +25,7 @@ from typing import Any
 from rebar.llm.errors import WorkflowError, WorkflowParseError
 
 from . import executor as _ex
+from . import steps as _steps  # noqa: F401 — importing registers the built-in scripted steps
 from .migrate import migrate_to_current
 from .schema import load_workflow as _load_file
 
