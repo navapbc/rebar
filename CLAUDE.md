@@ -211,6 +211,14 @@ Its per-developer cache/config lives in the git-ignored `.serena/`. `grep`/the
 search tools remain the fallback when Serena is unavailable or for non-symbol
 (text/comment/string) searches.
 
+## Ticket hierarchy (parent/child)
+
+Containment (epic→story→task/bug) is the **`parent_id`** hierarchy, **not** a `link` relation:
+parent work to the epic/story it belongs to with `create --parent <id>` or `edit --parent <id>`
+(see `rebar create --help`). Don't attach an epic's workstreams with a `depends_on`/
+`discovered_from` link — **parent** them, or they aren't its children (the hierarchy is what
+`ready`/`next-batch`/`validate`/the completion gate's child-closure check operate on).
+
 ## Linking (relations + hierarchy promotion)
 
 - `link <id1> <id2> <relation>` **requires** a relation. The six relations:
