@@ -29,7 +29,9 @@
       "properties": {
         "body": { "type": "string" },
         "author": { "type": ["string", "null"] },
-        "timestamp": { "type": ["integer", "string", "null"] }
+        "timestamp": { "type": ["integer", "string", "null"] },
+        "source_author": { "type": ["string", "null"], "description": "Provenance (P1.2 import): original comment author from the source store. Present only on imported comments." },
+        "source_created_at": { "type": ["integer", "string", "null"], "description": "Provenance (P1.2 import): original comment timestamp from the source store. Present only on imported comments." }
       }
     },
     "dep": {

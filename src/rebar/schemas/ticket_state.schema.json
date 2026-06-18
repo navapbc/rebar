@@ -51,6 +51,22 @@
     },
     "bridge_alerts": { "type": "array" },
     "reverts": { "type": "array" },
-    "preconditions_summary": { "type": "object" }
+    "preconditions_summary": { "type": "object" },
+    "source_id": {
+      "type": ["string", "null"],
+      "description": "Provenance (P1.2 import): the ticket's original id in the source store. Present only on tickets created by `rebar import`."
+    },
+    "source_created_at": {
+      "type": ["integer", "null"],
+      "description": "Provenance (P1.2 import): the ticket's original creation timestamp (ns) in the source store. The local CREATE event uses a fresh HLC timestamp; this preserves the original for reporting/migration."
+    },
+    "source_author": {
+      "type": ["string", "null"],
+      "description": "Provenance (P1.2 import): the ticket's original author in the source store."
+    },
+    "source_env": {
+      "type": ["string", "null"],
+      "description": "Provenance (P1.2 import): the ticket's original environment id in the source store."
+    }
   }
 }

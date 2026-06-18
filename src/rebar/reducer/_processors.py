@@ -72,6 +72,16 @@ def process_create(
         state["alias"] = compute_alias(ticket_id)
     state["description"] = data.get("description") or ""
     state["tags"] = data.get("tags", [])
+    # Provenance (P1.2 import): a ticket re-created by `rebar import` carries the
+    # ORIGINAL store's id/date/author/env as source_* on the CREATE data (fresh
+    # local id + fresh HLC timestamp are used for the new event; foreign HLC
+    # timestamps are never injected). Surface them additively — present only when
+    # the CREATE carried them, so a normally-created ticket's state is byte-for-byte
+    # unchanged. Mirrors the conditional jira_comment_id handling in process_comment.
+    for _src_key in ("source_id", "source_created_at", "source_author", "source_env"):
+        _src_val = data.get(_src_key)
+        if _src_val is not None:
+            state[_src_key] = _src_val
     return None
 
 
@@ -177,6 +187,14 @@ def process_comment(state: dict, event: dict, data: dict) -> None:
     _jira_comment_id = data.get("jira_comment_id")
     if _jira_comment_id is not None:
         _entry["jira_comment_id"] = str(_jira_comment_id)
+    # Provenance (P1.2 import): an imported comment carries the original comment's
+    # author/timestamp as source_* (the new COMMENT event records the importer as
+    # author + a fresh HLC timestamp). Surfaced only when present, so non-imported
+    # comments keep their existing two-field shape.
+    for _src_key in ("source_author", "source_created_at"):
+        _src_val = data.get(_src_key)
+        if _src_val is not None:
+            _entry[_src_key] = _src_val
     state["comments"].append(_entry)
 
 

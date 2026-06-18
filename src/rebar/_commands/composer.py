@@ -67,6 +67,7 @@ def create_core(
     assignee: str | None = None,
     description: str | None = None,
     tags=None,
+    source: dict | None = None,
     repo_root=None,
 ) -> dict:
     """Validate, compose, and append a CREATE event; return ``{id, alias, title}``.
@@ -76,6 +77,13 @@ def create_core(
     U+2192→``->`` normalisation, priority 0-4, init check, and parent resolution
     (exists / has CREATE-or-SNAPSHOT / not closed). Raises :class:`CommandError` on
     any failure.
+
+    ``source`` (P1.2 import): optional provenance recorded onto the CREATE event so
+    the reducer can surface where an imported ticket came from. Recognised keys —
+    ``source_id``, ``source_created_at``, ``source_author``, ``source_env`` — are
+    copied into the event data when non-None. The new ticket always gets a fresh
+    local id and a fresh HLC timestamp; provenance is additive metadata, never a
+    foreign-timestamp injection.
     """
     from rebar.reducer import reduce_ticket
 
@@ -142,6 +150,11 @@ def create_core(
         data["assignee"] = assignee
     if alias:
         data["alias"] = alias
+    if source:
+        for _src_key in ("source_id", "source_created_at", "source_author", "source_env"):
+            _src_val = source.get(_src_key)
+            if _src_val is not None:
+                data[_src_key] = _src_val
 
     append_event(ticket_id, "CREATE", data, tracker, repo_root=repo_root)
     return {"id": ticket_id, "alias": alias or None, "title": title}

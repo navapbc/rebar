@@ -72,6 +72,7 @@ def create_ticket(
     assignee: str | None = None,
     description: str | None = None,
     tags: list[str] | None = None,
+    source: dict | None = None,
     return_alias: bool = False,
     repo_root=None,
 ):
@@ -80,6 +81,11 @@ def create_ticket(
     Returns the canonical 16-hex ticket id (default). With ``return_alias=True``,
     returns ``{"id": <16-hex>, "alias": <human alias>}`` so agents don't need a
     second ``show`` to learn the alias (WS5e).
+
+    ``source`` (P1.2 import): optional provenance dict — keys ``source_id``,
+    ``source_created_at``, ``source_author``, ``source_env`` are recorded on the
+    CREATE event and surfaced in compiled state, so an imported ticket preserves
+    where it came from while still getting a fresh local id + HLC timestamp.
     """
     # Composed in-process via the shared create_core (validation/alias/CREATE
     # event); the bash create path was retired with the Tier B cutover.
@@ -95,6 +101,7 @@ def create_ticket(
             assignee=assignee,
             description=description,
             tags=tags,
+            source=source,
             repo_root=repo_root,
         )
     except CommandError as exc:
@@ -338,17 +345,19 @@ def set_verify_commands(ticket_id: str, commands, *, repo_root=None) -> None:
     )
 
 
-def _python_leaf(fn, *args, repo_root, what: str) -> None:
+def _python_leaf(fn, *args, repo_root, what: str, **kwargs) -> None:
     """Run a Tier B leaf write in-process — the sole path since the cutover.
 
     Tier B retired its kill-switch after the soak (docs/bash-migration.md §4); the
     library/MCP write surface now calls ``rebar._commands`` directly. A command
     failure is mapped onto RebarError so the exit-code contract is unchanged.
+    Extra keyword arguments are forwarded verbatim to ``fn`` (e.g. ``source=`` for
+    comment provenance).
     """
     from rebar._commands._seam import CommandError
 
     try:
-        fn(*args, repo_root=repo_root)
+        fn(*args, repo_root=repo_root, **kwargs)
     except CommandError as exc:
         raise RebarError(
             f"rebar {what} failed (exit {exc.returncode}): {exc.message}",
@@ -357,10 +366,12 @@ def _python_leaf(fn, *args, repo_root, what: str) -> None:
         ) from None
 
 
-def comment(ticket_id: str, body: str, *, repo_root=None) -> None:
+def comment(ticket_id: str, body: str, *, source: dict | None = None, repo_root=None) -> None:
+    """Append a comment. ``source`` (P1.2 import): optional per-comment provenance
+    (``source_author``/``source_created_at``) preserved on the imported comment."""
     from rebar._commands import leaf
 
-    _python_leaf(leaf.comment, ticket_id, body, repo_root=repo_root, what="comment")
+    _python_leaf(leaf.comment, ticket_id, body, source=source, repo_root=repo_root, what="comment")
 
 
 def append_session_log(

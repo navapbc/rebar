@@ -45,8 +45,14 @@ def _jq_type(value) -> str:
     return "unknown"
 
 
-def comment(ticket_id: str, body: str, *, repo_root=None) -> None:
-    """Append a COMMENT event (mirrors ``ticket_comment``)."""
+def comment(ticket_id: str, body: str, *, source: dict | None = None, repo_root=None) -> None:
+    """Append a COMMENT event (mirrors ``ticket_comment``).
+
+    ``source`` (P1.2 import): optional per-comment provenance — recognised keys
+    ``source_author`` and ``source_created_at`` are copied onto the COMMENT data
+    when non-None, so the reducer can surface the original comment's author/time on
+    an imported comment (the event itself records the importer + a fresh timestamp).
+    """
     tracker = tracker_dir(repo_root)
     if not ticket_id:
         raise CommandError("Error: ticket_id must be non-empty")
@@ -54,7 +60,13 @@ def comment(ticket_id: str, body: str, *, repo_root=None) -> None:
         raise CommandError("Error: comment body must be non-empty")
     resolved = require_id(ticket_id, tracker)
     require_not_ghost(resolved, tracker)
-    append_event(resolved, "COMMENT", {"body": body}, tracker, repo_root=repo_root)
+    data: dict = {"body": body}
+    if source:
+        for _src_key in ("source_author", "source_created_at"):
+            _src_val = source.get(_src_key)
+            if _src_val is not None:
+                data[_src_key] = _src_val
+    append_event(resolved, "COMMENT", data, tracker, repo_root=repo_root)
 
 
 def tag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
