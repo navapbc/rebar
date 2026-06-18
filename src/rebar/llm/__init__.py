@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from rebar.llm.aggregate import aggregate_findings
 from rebar.llm.code_review import review_code, select_code_reviewers
+from rebar.llm.completion import verify_completion
 from rebar.llm.config import (
     LLMConfig,
     agents_extra_installed,
@@ -53,6 +54,7 @@ __all__ = [
     "review_ticket",
     "review_code",
     "scan_epics_for_spec",
+    "verify_completion",
     "select_reviewers",
     "select_code_reviewers",
     "aggregate_findings",

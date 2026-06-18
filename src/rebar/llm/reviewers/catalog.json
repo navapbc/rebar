@@ -17,6 +17,15 @@
     "default": false,
     "applies_to": []
   },
+  "completion-verifier": {
+    "dimension": "completion",
+    "title": "Completion verifier",
+    "description": "Verifies that a ticket's completion requirements (acceptance/success/close criteria, definitions of done; for bugs, that the bug is resolved) are demonstrably met by the implementation before closure. Emits a PASS/FAIL verdict with one finding per failing criterion. Used by the verify-completion operation and the optional close gate.",
+    "langfuse_prompt": "rebar-completion-verifier",
+    "fallback_file": "completion_verifier.md",
+    "default": false,
+    "applies_to": []
+  },
   "spec-alignment": {
     "dimension": "spec-alignment",
     "title": "Spec-alignment reviewer",

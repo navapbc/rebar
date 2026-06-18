@@ -76,14 +76,28 @@ class FakeRunner:
 
     name = "fake"
 
-    def __init__(self, findings: list[dict] | None = None, summary: str | None = None):
+    def __init__(
+        self,
+        findings: list[dict] | None = None,
+        summary: str | None = None,
+        structured: dict | None = None,
+    ):
         self._findings = findings or []
         self._summary = summary
+        # Canned payload for ``mode="structured"`` ops (e.g. verify_completion): the raw
+        # structured dict the agent would have emitted (e.g. {verdict, findings, summary}).
+        self._structured = structured
 
     def preflight(self) -> None:
         """Always ready — no extra, no network."""
 
     def run(self, req: RunRequest) -> dict:
+        # Structured mode (e.g. verify_completion): mirror finalize_outcome(mode="structured")
+        # — return the canned payload validated against output_schema, plus provenance. The
+        # operation does its own normalize/resolve/reconcile on top.
+        if req.mode == "structured" and self._structured is not None:
+            payload = _findings.validate_structured(dict(self._structured), req.output_schema)
+            return {**payload, "runner": self.name, "model": None, "trace_id": None}
         return _findings.finalize_findings(
             self._findings,
             runner=self.name,
