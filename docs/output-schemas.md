@@ -56,6 +56,7 @@ Structured via `--output json`:
 | `list-epics`                     | `list_epics`              |
 | `fsck`                           | `fsck`                    |
 | `review` (CLI/library)           | `review_result`           |
+| `verify-completion` (CLI/library) | `completion_verdict`     |
 
 The authoritative version of this table is `schemas.OUTPUT_SCHEMAS` in
 `src/rebar/schemas/__init__.py` — the registry the coverage guard consumes.

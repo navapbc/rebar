@@ -120,11 +120,27 @@ first, default 5).
 
 **LLM agent operations (optional, gated):** `review_ticket(ticket_id, reviewer_id,
 graph)` runs a tool-using LLM agent that reviews a ticket (or its graph) and
-returns a `review_result` (`{findings[], …}`). It is **disabled unless
-`REBAR_MCP_ALLOW_LLM=1`** (it makes a live, billable LLM call) and needs the
-`nava-rebar[agents]` extra + `ANTHROPIC_API_KEY`. This is part of the optional
-`rebar.llm` framework (CLI: `rebar review`; library: `rebar.llm.review_ticket`) —
-see [docs/llm-framework.md](docs/llm-framework.md).
+returns a `review_result` (`{findings[], …}`). `verify_completion(ticket_id,
+graph)` runs the **completion-verifier** agent that checks a ticket's completion
+requirements (acceptance/success/close criteria, definitions of done; for bugs,
+that the bug is resolved) are demonstrably met by the implementation and returns a
+`completion_verdict` (`{verdict: PASS|FAIL, findings[], …}`; on FAIL each finding
+cites the failing criterion + a source-code citation). Both are **disabled unless
+`REBAR_MCP_ALLOW_LLM=1`** (they make a live, billable LLM call) and need the
+`nava-rebar[agents]` extra + `ANTHROPIC_API_KEY`. Part of the optional `rebar.llm`
+framework (CLI: `rebar review` / `rebar verify-completion`; library:
+`rebar.llm.review_ticket` / `rebar.llm.verify_completion`) — see
+[docs/llm-framework.md](docs/llm-framework.md).
+
+> **Completion-verification close gate (optional).** When
+> `verify.require_completion_verification_for_close=true` (default off; **on for
+> this project**), closing a work ticket runs `verify_completion` first: a **FAIL**
+> verdict (or an unavailable LLM) **blocks** the close (fail-closed), and on **PASS**
+> the verdict is HMAC-**signed** onto the ticket (the trustworthy attestation, only
+> meaningful under the MCP server's environment key; CI verifies it). `--force-close`
+> closes without verifying or signing — so a **closed-without-signature** ticket is the
+> durable signal that validation did not pass. It is an *alternative* to the signature
+> gate (`require_signature_for_close`), not composed with it.
 
 ## Quality gates
 

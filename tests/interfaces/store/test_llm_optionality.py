@@ -54,7 +54,7 @@ _AGENTS = agents_extra_installed()
 # The full operation matrix. The exhaustiveness test below asserts this stays in
 # lock-step with the public ops exported by rebar.llm, so a newly-added operation
 # cannot ship without an optionality entry here.
-OPERATIONS = ("review_ticket", "review_code", "scan_epics_for_spec")
+OPERATIONS = ("review_ticket", "review_code", "scan_epics_for_spec", "verify_completion")
 
 
 # ── Import-cleanliness: every interface entrypoint imports lazily ──────────────
@@ -100,6 +100,7 @@ def test_library_operation_degrades_without_extra(op: str, rebar_repo: Path) -> 
             diff_text="--- a/x\n+++ b/x\n@@ -0,0 +1 @@\n+y\n", repo_root=r
         ),
         "scan_epics_for_spec": lambda: rebar.llm.scan_epics_for_spec("the spec", repo_root=r),
+        "verify_completion": lambda: rebar.llm.verify_completion(epic, repo_root=r),
     }
     import rebar.llm  # noqa: F401 — populate the rebar.llm attribute namespace
 
@@ -128,6 +129,7 @@ def test_cli_operation_degrades_without_extra(
         "review_ticket": ["review", epic, "ticket-quality"],
         "review_code": ["review-code", "--diff-file", str(diff)],
         "scan_epics_for_spec": ["scan-spec", "--spec-file", str(spec)],
+        "verify_completion": ["verify-completion", epic],
     }[op]
 
     rc = main(argv)
@@ -176,6 +178,7 @@ def test_mcp_operations_registered_and_gated_off_by_default(
         "review_ticket": {"ticket_id": epic},
         "review_code": {},
         "scan_spec": {"spec_text": "the spec"},
+        "verify_completion": {"ticket_id": epic},
     }
     for name, args in gated.items():
         assert name in tools, f"{name} not registered"
@@ -207,6 +210,7 @@ def test_mcp_operations_error_cleanly_when_gated_on_but_extra_absent(
         "review_ticket": {"ticket_id": epic},
         "review_code": {},
         "scan_spec": {"spec_text": "the spec"},
+        "verify_completion": {"ticket_id": epic},
     }
     for name, args in forced.items():
         with pytest.raises(Exception) as exc:  # noqa: B017
@@ -229,10 +233,10 @@ def test_optionality_matrix_covers_every_public_operation() -> None:
     have no ``runner`` parameter, are correctly excluded."""
     import inspect
 
-    from rebar.llm import code_review, operations, spec_scan
+    from rebar.llm import code_review, completion, operations, spec_scan
 
     discovered = set()
-    for mod in (operations, code_review, spec_scan):
+    for mod in (operations, code_review, spec_scan, completion):
         for name in getattr(mod, "__all__", []):
             obj = getattr(mod, name)
             if callable(obj) and "runner" in inspect.signature(obj).parameters:

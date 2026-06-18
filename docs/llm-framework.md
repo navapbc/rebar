@@ -330,6 +330,65 @@ we run an **ephemeral self-hosted stack**, not a persistent server:
    (one runner pass each, bounded cost) for coverage gaps / conflicts / overlaps,
    and concatenates + ranks the findings — reusing the same findings contract.
 
+## Pluggable output contracts (each operation declares its own shape)
+
+The runner no longer hardcodes the findings model: the **structured-output contract** is
+selected per operation by `RunRequest.output_schema` via a small registry
+(`rebar.llm.contracts.response_model_for` → a Pydantic model builder; default = findings).
+This is what lets a new operation emit a shape other than `review_result` — and it is keyed
+by a serializable **name** (not a live type) precisely because `output_schema` is also the
+string threaded from workflow DSL steps. A schema-pin test keeps each contract's Pydantic
+model in lock-step with its JSON Schema. Add a contract = register a builder +
+ship a same-named schema (parallel to "adding a reviewer").
+
+> Structured output uses LangChain `ToolStrategy` (provider-portable). Because that is
+> free-generation + code-validation, optional `None`s are dropped (`model_dump(exclude_none=
+> True)`) so they don't surface as schema-invalid `null`s. (Migrating to raw-schema/
+> AutoStrategy→ProviderStrategy — provider-native, decode-time enforcement — is a tracked
+> framework-wide follow-up.)
+
+## Completion verification + the close gate (`verify_completion`)
+
+The shipped `verify_completion` op (library `rebar.llm.verify_completion`, CLI `rebar
+verify-completion`, gated MCP `verify_completion`) is the first consumer of the pluggable
+contract. The **completion-verifier** reviewer (adapted from the DSO completion-verifier)
+answers one question — *"did we build/fix what the ticket requires?"* — verifying every
+completion requirement (acceptance/success/close criteria, definitions of done; for **bugs**,
+that the bug is resolved) against the implementation. It is read-only: line-numbered repo file
+tools + a read-only rebar `show_ticket` tool (passed via `RunRequest.extra_tools`), and emits a
+**`completion_verdict`** (`{verdict: PASS|FAIL, findings[]}`) where each FAIL finding cites the
+failing `criterion`, an explanation, and a source-code citation. The agent emits the verdict;
+the op then deterministically normalizes it and enforces FAIL⇔findings (`_reconcile`) and
+resolves citations. Findings are **failures-only** (a completion check, not a code review);
+a ticket with no explicit criteria PASSes with a note. Because verification is far more
+tool-heavy than a single review, the op raises the agent step budget to a floor (an explicit
+higher `REBAR_LLM_MAX_STEPS` still wins). The untrusted ticket/file content is delimited and
+the prompt carries an instruction-hierarchy clause (prompt-injection mitigation, OWASP LLM01).
+
+**The close gate** (`verify.require_completion_verification_for_close`, default off; **on for
+this project**) wires this into `transition` **outside the write lock**, ordering
+**verify → close → sign**:
+
+- on a non-force close it runs `verify_completion`; a **FAIL** verdict, or an **unavailable
+  LLM** (missing `[agents]` extra / API key / any verifier error), **blocks** the close
+  (fail-closed `CommandError`) with the findings + a `--force-close` hint;
+- on **PASS** it signs the verdict onto the ticket *after* the close is confirmed (so a
+  failed/raced close never leaves an orphan certified signature) via `rebar.signing.sign_manifest`;
+- **`--force-close="<reason>"`** closes without verifying or signing — a **closed-without-
+  signature** ticket is the durable signal that validation did not pass / was bypassed.
+
+**Trust model.** The signature is only *secure/meaningful* when rebar runs as the **MCP
+server**, whose environment signing key is canonical; a CLI/library install signs with a local
+key that **CI** reads as `foreign_key` (intentionally not secure). So CI verifies a closed
+ticket's attestation under the MCP server's key; local installs cannot mint a CI-trusted
+attestation. The agent is read-only and never signs its own homework — a deterministic gate
+acts on its verdict, and a successful prompt-injection can at worst flip the *advisory* verdict,
+never forge the signature. The gate is an **alternative** to the signature gate
+(`require_signature_for_close`), not composed with it (the completion gate signs *after* the
+close; the signature gate requires a signature *before* it — enabling both deadlocks a non-force
+close). An unreadable config fails this gate **off** (with a warning), so it never auto-enables
+across repos that didn't opt in.
+
 ## Deployment notes
 
 - **Langfuse** cloud is low-friction; self-hosting needs Postgres + ClickHouse +
