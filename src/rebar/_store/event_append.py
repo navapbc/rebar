@@ -49,6 +49,9 @@ EVENT_TYPES = frozenset(
         "FILE_IMPACT",
         "VERIFY_COMMANDS",
         "SIGNATURE",
+        # Workflow run-state (epic a88f / WS-C1): a run + its per-step records.
+        "WORKFLOW_RUN",
+        "WORKFLOW_STEP",
     }
 )
 
@@ -98,7 +101,7 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
         raise StoreError(
             f"Error: invalid event_type '{event_type}'. Must be one of: CREATE, STATUS, "
             "COMMENT, LINK, UNLINK, SNAPSHOT, SYNC, REVERT, EDIT, ARCHIVED, FILE_IMPACT, "
-            "VERIFY_COMMANDS, SIGNATURE",
+            "VERIFY_COMMANDS, SIGNATURE, WORKFLOW_RUN, WORKFLOW_STEP",
             1,
         )
 

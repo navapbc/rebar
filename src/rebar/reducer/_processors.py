@@ -371,6 +371,47 @@ def process_signature(state: dict, event: dict, data: dict) -> None:
     }
 
 
+def process_workflow_run(state: dict, event: dict, data: dict) -> None:
+    """Apply a WORKFLOW_RUN event: per-key LWW into ``state.workflow_runs[run_id]``.
+
+    Workflow run-state lives on rebar's only durable surface — the target ticket's
+    append-only event log (epic a88f / WS-C). Each event carries the COMPLETE
+    current run record (status, timing, inputs, the captured now/uuid for
+    deterministic replay, …); replay keeps the LAST event per ``run_id`` because
+    event files sort by ``{HLC-timestamp}-{uuid}`` and that order is identical on
+    every clone, so concurrent runs converge deterministically with no extra
+    tie-break. The map is created lazily (``setdefault``) so a ticket that never ran
+    a workflow keeps its exact prior shape — no empty ``workflow_runs`` key leaks
+    into ``show``/``list`` for the common case. Only the one ``run_id`` key is
+    replaced, never the whole map (so two runs on one ticket don't clobber).
+    """
+    run_id = data.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return
+    runs = state.setdefault("workflow_runs", {})
+    runs[run_id] = dict(data)
+
+
+def process_workflow_step(state: dict, event: dict, data: dict) -> None:
+    """Apply a WORKFLOW_STEP event: per-key LWW into
+    ``state.workflow_steps[run_id][step_id]``.
+
+    The step's idempotency marker + result: the executor commits one of these AFTER
+    a step's effect (WS-C3), carrying the full per-step record (status, outputs,
+    error, captured non-determinism). Per (run_id, step_id) it is last-writer-wins
+    in replay (HLC+UUID filename order), so a re-run/retry's later event supersedes
+    the earlier one and all clones agree. Lazy + per-key like
+    :func:`process_workflow_run`.
+    """
+    run_id = data.get("run_id")
+    step_id = data.get("step_id")
+    if not (isinstance(run_id, str) and run_id and isinstance(step_id, str) and step_id):
+        return
+    steps = state.setdefault("workflow_steps", {})
+    run_steps = steps.setdefault(run_id, {})
+    run_steps[step_id] = dict(data)
+
+
 def process_archived(state: dict) -> None:
     """Apply an ARCHIVED event: mark ticket archived and reflect in status field.
 
@@ -504,6 +545,10 @@ def replay_events(
             process_verify_commands(state, event, data)
         elif event_type == "SIGNATURE":
             process_signature(state, event, data)
+        elif event_type == "WORKFLOW_RUN":
+            process_workflow_run(state, event, data)
+        elif event_type == "WORKFLOW_STEP":
+            process_workflow_step(state, event, data)
         elif event_type == "ARCHIVED":
             process_archived(state)
         elif event_type == "SNAPSHOT":

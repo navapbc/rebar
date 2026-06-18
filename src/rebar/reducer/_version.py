@@ -47,5 +47,12 @@ KNOWN_EVENT_TYPES = frozenset(
         "SIGNATURE",
         "ARCHIVED",
         "SNAPSHOT",
+        # Workflow run-state (epic a88f / WS-C1). A workflow run and its per-step
+        # records persist as events on the TARGET ticket; the reducer folds them
+        # into ticket state as the lazy per-key maps workflow_runs / workflow_steps.
+        # Known (not forward-compat) so compaction squashes them into a SNAPSHOT
+        # (their effect is preserved in compiled_state, restored by process_snapshot).
+        "WORKFLOW_RUN",
+        "WORKFLOW_STEP",
     }
 )
