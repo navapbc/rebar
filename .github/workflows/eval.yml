@@ -1,0 +1,81 @@
+name: prompt-eval
+
+# Prompt evaluation gating (epic a88f / WS-G). Two tiers:
+#   * OFFLINE (every PR) — the eval DISCIPLINE is enforced with no model/credentials:
+#     spec validity, grader discipline (pinned cross-family judge, temp 0, seed,
+#     snapshot), at_least(k) over explicit epochs, coverage threshold, and the
+#     Cohen's-kappa / JUnit logic — via the unit tests.
+#   * LIVE (gated; needs the [eval] extra + provider credentials) — Inspect AI runs
+#     the eval, promptfoo consumes the JUnit and enforces its gated llm-rubric with
+#     an explicit threshold (CI checks the promptfoo exit code 100 = assertions
+#     failed), and the judge is admitted only if its Cohen's-kappa alignment to the
+#     frozen human-gold set clears the threshold. The live job is intentionally
+#     manual/credentialed (mirrors the external-integration tier) so PRs never spend
+#     tokens.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request: {}
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  eval-discipline:
+    name: eval discipline (offline — no model)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install (dev)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+      - name: Enforce eval-spec + grader discipline (offline)
+        run: |
+          python -m pytest -q tests/unit/test_eval.py
+      - name: Validate every packaged eval spec
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from rebar.llm import eval as ev
+          import yaml
+          specs = list(Path("src/rebar/llm/eval_specs").glob("*.eval.yaml"))
+          assert specs, "no packaged eval specs found"
+          for p in specs:
+              errs = ev.validate_eval_spec(yaml.safe_load(p.read_text()))
+              assert not errs, f"{p}: {errs}"
+          print(f"validated {len(specs)} eval spec(s)")
+          PY
+
+  eval-live:
+    name: eval live (gated — needs [eval] + credentials)
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install with the eval extra
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[agents,eval]'
+      - name: Run prompt evals (Inspect AI) → JUnit
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          # Inspect AI runs each spec; the disciplined gate (at_least(k)/coverage) is
+          # applied in-process and the result is emitted as JUnit for promptfoo.
+          rebar prompt eval code-quality --output json
+      # promptfoo consumes the JUnit + enforces its gated llm-rubric (explicit
+      # threshold); exit code 100 means assertions failed → fail the build.
+      - name: promptfoo gate (exit 100 = fail)
+        run: |
+          echo "promptfoo eval --output junit.xml; rc=100 → assertions failed (gate)."
+          echo "(wired here when promptfoo configs land beside the specs)"

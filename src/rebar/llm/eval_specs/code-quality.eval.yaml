@@ -1,0 +1,49 @@
+# Built-in prompt eval spec (epic a88f / WS-G) for the `code-quality` reviewer.
+# Ships as package data; a repo overrides it at .rebar/evals/code-quality.eval.yaml.
+# Run with `rebar prompt eval code-quality` (validates offline; the live model run
+# needs the [eval] extra + credentials via the eval CI).
+prompt: code-quality
+# The model whose output is being evaluated (the generator). The llm-judge grader
+# below must be a DIFFERENT family (no self-grading).
+model: anthropic:claude-opus-4-8
+epochs: 3
+# Release gate: at least 2 of the 3 epochs must pass the GATING (deterministic)
+# scorers. Never pass@k — that measures a single sample, not a release.
+gate: at_least(2)
+# At least 80% of dataset samples must produce a usable score.
+coverage_threshold: 0.8
+
+scorers:
+  # Deterministic scorers GATE the build.
+  - type: deterministic
+    name: emits_valid_review_result
+    description: The output validates against the review_result JSON Schema.
+  - type: deterministic
+    name: cites_real_paths
+    description: Every file citation resolves to a real repo path:line.
+
+  # LLM-judge scorers only REPORT (never gate by themselves), and need a pinned,
+  # cross-family grader (temp 0, seed, dated snapshot) + an explicit threshold.
+  - type: llm-judge
+    name: finding_usefulness
+    gates: false
+    threshold: 0.7
+    pointwise: true
+    rubric: >
+      Score 0..1 how actionable and correct each finding is on its own merits
+      (length-neutral; do not reward verbosity).
+    grader:
+      model: openai:gpt-4o-2024-08-06   # cross-family from the anthropic generator
+      temperature: 0
+      seed: 7
+      snapshot: "2024-08-06"
+
+# Frozen human-gold subset: the judge's labels are aligned to these via Cohen's
+# kappa; judge adoption is gated on kappa >= the alignment threshold (WS-G3).
+gold_set:
+  - input: "A finding citing src/x.py:10 for a real null-deref."
+    label: useful
+  - input: "A vague finding with no citation and no concrete fix."
+    label: not_useful
+  - input: "A finding flagging a genuine missing test with a path."
+    label: useful

@@ -332,6 +332,90 @@ def _workflow_show(args) -> int:
     return 0
 
 
+def _prompt(argv: list[str]) -> int:
+    """``rebar prompt eval <id>`` → prompt evaluation (WS-G). Native intercept.
+
+    Validates the git-tracked eval spec (offline; grader discipline + at_least(k) +
+    coverage) and reports the DIRTY working-tree prompt's content hash (what would be
+    evaluated). The live model run needs the ``eval`` extra + credentials (the eval
+    CI); committing the prompt is required to apply a passing edit (git-canonical)."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="rebar prompt", description="Evaluate git-canonical prompts."
+    )
+    subparsers = parser.add_subparsers(dest="cmd")
+    p_eval = subparsers.add_parser("eval", help="validate + summarize a prompt's eval spec")
+    p_eval.add_argument("prompt_id", help="prompt/reviewer id (e.g. code-quality)")
+    p_eval.add_argument("--output", "-o", choices=["text", "json"], default="text")
+
+    args = parser.parse_args(argv)
+    if args.cmd == "eval":
+        return _prompt_eval(args)
+    parser.print_help()
+    return 1
+
+
+def _prompt_eval(args) -> int:
+    import json as _json
+
+    from rebar import config
+    from rebar.llm import eval as _eval
+    from rebar.llm import prompts as _prompts
+    from rebar.llm.errors import LLMError
+
+    try:
+        repo_root = str(config.repo_root())
+    except Exception:
+        repo_root = None
+    try:
+        spec = _eval.load_eval_spec(args.prompt_id, repo_root=repo_root)
+    except LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+
+    # The DIRTY working-tree prompt is what an eval would evaluate (WS-G1).
+    dirty_hash = None
+    try:
+        rv = _prompts.get_reviewer(args.prompt_id)
+        dirty_hash = _prompts.prompt_content_hash(
+            _prompts.canonical_prompt_text(rv, repo_root=repo_root)
+        )
+    except LLMError:
+        pass  # a user-file prompt without a catalog reviewer — spec is still valid
+
+    scorers = spec.get("scorers", [])
+    report = {
+        "prompt": spec.get("prompt"),
+        "valid": True,
+        "epochs": spec.get("epochs"),
+        "gate": spec.get("gate"),
+        "coverage_threshold": spec.get("coverage_threshold"),
+        "gating_scorers": [s.get("name") for s in scorers if s.get("type") == "deterministic"],
+        "report_scorers": [s.get("name") for s in scorers if s.get("type") == "llm-judge"],
+        "gold_set_size": len(spec.get("gold_set", [])),
+        "dirty_prompt_sha256": dirty_hash,
+    }
+    if args.output == "json":
+        sys.stdout.write(_json.dumps(report) + "\n")
+    else:
+        sys.stdout.write(f"Eval spec for prompt {report['prompt']!r}: VALID\n")
+        sys.stdout.write(
+            f"  epochs={report['epochs']}  gate={report['gate']}  "
+            f"coverage>={report['coverage_threshold']}\n"
+        )
+        sys.stdout.write(f"  gating (deterministic): {report['gating_scorers']}\n")
+        sys.stdout.write(f"  reporting (llm-judge):  {report['report_scorers']}\n")
+        sys.stdout.write(f"  gold-set samples: {report['gold_set_size']}\n")
+        if dirty_hash:
+            sys.stdout.write(f"  dirty prompt sha256: {dirty_hash[:16]}…\n")
+        sys.stdout.write(
+            "  → live run needs the `eval` extra + credentials (eval CI); commit the "
+            "prompt to apply a passing edit.\n"
+        )
+    return 0
+
+
 def _llm(argv: list[str]) -> int:
     """``rebar llm setup`` → the LLM-framework onboarding wizard (WS-J2).
 
@@ -876,6 +960,10 @@ def main(argv: list[str] | None = None) -> int:
     # llm intercept (the LLM-framework setup wizard; owns its --help).
     if argv and argv[0] == "llm":
         return _llm(argv[1:])
+
+    # prompt intercept (prompt evals — WS-G; owns its --help).
+    if argv and argv[0] == "prompt":
+        return _prompt(argv[1:])
 
     # config intercept (native config-transparency read; owns its own --help, like
     # reconcile/review). No store init: it reads working-tree config files only.
