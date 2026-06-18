@@ -1,0 +1,49 @@
+# yaml-language-server: $schema=https://github.com/navapbc/rebar/schemas/workflow.v1.schema.json
+#
+# Built-in example workflow (epic a88f / WS-K3): the end-to-end demonstrator —
+# scripted fetch -> agent review -> unsecured gate -> comment. Ships as package
+# data; run it with `rebar workflow run code_review --input ticket_id=<id>
+# --ticket <id>` (add --dry-run for an offline, no-token pass). A user can override
+# it by writing their own .rebar/workflows/code_review.yaml.
+schema_version: "1"
+name: code_review
+description: Fetch a ticket's context, review it with an agent, gate the findings, and comment.
+
+inputs:
+  ticket_id:
+    type: string
+    required: true
+
+steps:
+  # 1. Deterministic context fetch (no tokens).
+  - id: fetch
+    uses: fetch_ticket
+    with:
+      ticket_id: ${{ inputs.ticket_id }}
+
+  # 2. Agentic review along the code-quality dimension (the only token-spending step).
+  - id: review
+    prompt: code-quality
+    needs: [fetch]
+    mode: findings
+    output_schema: review_result
+    with:
+      ticket_id: ${{ inputs.ticket_id }}
+      context: ${{ steps.fetch.outputs.description }}
+
+  # 3. Unsecured gate: pass/fail the findings against a versioned policy. (Cryptographic
+  #    gate security is epic 8a1c — this is an ordinary example step.)
+  - id: gate
+    uses: gate
+    needs: [review]
+    with:
+      findings: ${{ steps.review.outputs.findings }}
+      policy: default
+
+  # 4. Record the verdict back on the ticket (idempotent on the run).
+  - id: comment
+    uses: comment_verdict
+    needs: [gate]
+    with:
+      ticket_id: ${{ inputs.ticket_id }}
+      verdict: ${{ steps.gate.outputs.verdict }}

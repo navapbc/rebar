@@ -57,15 +57,25 @@ def lookup_run_location(run_id: str, repo_root: str | None) -> str | None:
         return None
 
 
+def _examples_dir() -> Path:
+    """The packaged built-in example workflows (WS-K3), shipped as package data."""
+    return Path(__file__).resolve().parent / "examples"
+
+
 def _resolve_source_path(source: str, repo_root: str | None) -> Path:
     p = Path(source)
     if p.exists():
         return p
-    cand = _repo_root(repo_root) / ".rebar" / "workflows" / f"{source}.yaml"
-    if cand.exists():
-        return cand
+    # User-authored workflows win over the built-in examples (override by name).
+    user = _repo_root(repo_root) / ".rebar" / "workflows" / f"{source}.yaml"
+    if user.exists():
+        return user
+    builtin = _examples_dir() / f"{source}.yaml"
+    if builtin.exists():
+        return builtin
     raise WorkflowParseError(
-        f"workflow {source!r} not found (no such file, and no .rebar/workflows/{source}.yaml)",
+        f"workflow {source!r} not found (no such file, no .rebar/workflows/{source}.yaml, "
+        f"and no built-in example of that name)",
         source=str(source),
     )
 

@@ -2,16 +2,16 @@
 
 A ``Runner`` takes a :class:`RunRequest` (a resolved system prompt + task
 instructions + config) and returns a validated ``review_result`` dict. This is the
-seam that makes the framework portable: the same operation runs in-process here
-(``LangGraphRunner``) or against a hosted Langflow deployment elsewhere
-(``LangflowRunner``), and a ``FakeRunner`` lets the whole pipeline be exercised
-offline with no model/network.
+seam that makes the framework portable: the default operation runs an in-process
+LangGraph agent (``LangGraphRunner``); an opt-in deepagents harness
+(``DeepAgentsRunner``) slots in behind the same protocol; and a ``FakeRunner``
+lets the whole pipeline be exercised offline with no model/network.
 
 Heavy libraries (langchain/langgraph/langfuse/anthropic) are imported **inside**
 the runner methods, never at module top, so ``import rebar.llm`` stays stdlib-only.
-The default substrate is LangChain/LangGraph — the one agent runtime native to both
-Langflow and Langfuse — but it is entirely optional (the ``nava-rebar[agents]``
-extra); a missing extra raises a clear, actionable error.
+The default substrate is LangChain/LangGraph — the agent runtime natively traced by
+Langfuse — but it is entirely optional (the ``nava-rebar[agents]`` extra); a missing
+extra raises a clear, actionable error.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from typing import Protocol, runtime_checkable
 from rebar.llm import findings as _findings
 from rebar.llm.config import LLMConfig
 from rebar.llm.config import denied_paths as _denied_realpaths
-from rebar.llm.errors import LLMConfigError, LLMRunnerError, StructuredOutputError
+from rebar.llm.errors import LLMConfigError, LLMRunnerError
 from rebar.llm.fs_tools import _filesystem_tools
 
 
@@ -91,152 +91,6 @@ class FakeRunner:
             reviewer_id=req.reviewers[0] if len(req.reviewers) == 1 else None,
             repo_path=req.config.repo_path,
         )
-
-
-# ── Langflow runner (hosted-deployment backend over REST) ─────────────────────
-class LangflowRunner:
-    """Run an operation against a hosted Langflow deployment via its REST API
-    (``POST {LANGFLOW_URL}/api/v1/run/{flow_id}``, header ``x-api-key``).
-
-    The resolved reviewer prompt + task is sent as ``input_value`` (chat in/out);
-    the flow is a thin transport whose final message must be **findings JSON**
-    (``{"findings": [...], "summary": ...}`` or a bare findings list — the
-    ReviewFindings shape). We extract that message from Langflow's deeply-nested
-    response, parse it, and run it through the same normalize/validate/citation
-    pipeline as every other runner. Configure ``LANGFLOW_URL``,
-    ``LANGFLOW_FLOW_ID`` (+ optional ``LANGFLOW_API_KEY``). Uses stdlib urllib —
-    no extra dependency."""
-
-    name = "langflow"
-
-    def __init__(self, config: LLMConfig):
-        self._config = config
-
-    def preflight(self) -> None:
-        cfg = self._config
-        if not cfg.langflow_url or not cfg.langflow_flow_id:
-            raise LLMConfigError(
-                "the langflow runner needs LANGFLOW_URL and LANGFLOW_FLOW_ID set "
-                "(+ optional LANGFLOW_API_KEY). See docs/llm-framework.md."
-            )
-
-    def run(self, req: RunRequest) -> dict:
-        cfg = self._config
-        self.preflight()
-        payload = {
-            "input_value": f"{req.system_prompt}\n\n{req.instructions}",
-            "input_type": "chat",
-            "output_type": "chat",
-        }
-        raw = _langflow_post(cfg, payload)
-        text = _langflow_extract_text(raw)
-        findings, summary = _parse_findings_json(text)
-        return _findings.finalize_findings(
-            findings,
-            runner=self.name,
-            model=cfg.model,
-            trace_id=None,
-            target=req.target,
-            reviewers=req.reviewers,
-            summary=summary,
-            reviewer_id=req.reviewers[0] if len(req.reviewers) == 1 else None,
-            repo_path=cfg.repo_path,
-        )
-
-
-def _langflow_post(cfg: LLMConfig, payload: dict) -> dict:
-    """POST to the Langflow run endpoint, returning the parsed JSON response."""
-    import json
-    import urllib.error
-    import urllib.request
-
-    url = f"{cfg.langflow_url.rstrip('/')}/api/v1/run/{cfg.langflow_flow_id}"
-    headers = {"Content-Type": "application/json"}
-    if cfg.langflow_api_key:
-        headers["x-api-key"] = cfg.langflow_api_key
-    request = urllib.request.Request(  # noqa: S310 (operator-configured URL)
-        url, data=json.dumps(payload).encode(), headers=headers, method="POST"
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=cfg.timeout_s) as resp:
-            return json.loads(resp.read().decode("utf-8", "replace"))
-    except (urllib.error.URLError, OSError) as exc:
-        raise LLMRunnerError(f"Langflow request to {url} failed: {exc}") from exc
-    except json.JSONDecodeError as exc:
-        raise LLMRunnerError(f"Langflow returned non-JSON: {exc}") from exc
-
-
-def _langflow_extract_text(raw: dict) -> str:
-    """Pull the flow's final message text out of Langflow's deeply-nested run
-    response. The shape varies by output component, so try the documented path
-    then fall back to a recursive search for a message/text string."""
-    try:
-        outs = raw["outputs"][0]["outputs"][0]
-        results = outs.get("results") or {}
-        msg = results.get("message")
-        if isinstance(msg, dict):
-            txt = msg.get("text")
-            if isinstance(txt, str) and txt.strip():
-                return txt
-            inner = msg.get("message")
-            if isinstance(inner, str) and inner.strip():
-                return inner
-    except (KeyError, IndexError, TypeError):
-        pass
-    # Fallback: search only the `outputs` subtree (never the top-level inputs/
-    # session echo) and prefer the LAST message-like string — the flow's final
-    # output component, not an echoed input or intermediate message earlier in the
-    # tree, which a first-match walk would wrongly grab.
-    subtree = raw.get("outputs", raw) if isinstance(raw, dict) else raw
-    texts = _deep_find_texts(subtree)
-    if texts:
-        return texts[-1]
-    raise StructuredOutputError("could not extract a message from the Langflow response")
-
-
-def _deep_find_texts(obj, _depth: int = 0) -> list[str]:
-    """Every non-empty string under a 'text'/'message' key, in depth-first order."""
-    out: list[str] = []
-    if _depth > 8:
-        return out
-    if isinstance(obj, dict):
-        for key in ("text", "message"):
-            val = obj.get(key)
-            if isinstance(val, str) and val.strip():
-                out.append(val)
-        for val in obj.values():
-            out.extend(_deep_find_texts(val, _depth + 1))
-    elif isinstance(obj, list):
-        for item in obj:
-            out.extend(_deep_find_texts(item, _depth + 1))
-    return out
-
-
-def _deep_find_text(obj) -> str | None:
-    """First non-empty 'text'/'message' string (kept for callers/tests)."""
-    texts = _deep_find_texts(obj)
-    return texts[0] if texts else None
-
-
-def _parse_findings_json(text: str) -> tuple[list, str | None]:
-    """Parse the flow's findings JSON (tolerating ```json fences). Returns
-    (findings, summary)."""
-    import json
-
-    t = text.strip()
-    if t.startswith("```"):
-        t = t.strip("`").strip()
-        if t[:4].lower() == "json":
-            t = t[4:].strip()
-    try:
-        obj = json.loads(t)
-    except json.JSONDecodeError as exc:
-        raise StructuredOutputError(f"Langflow output was not valid findings JSON: {exc}") from exc
-    if isinstance(obj, list):
-        return obj, None
-    if isinstance(obj, dict):
-        return obj.get("findings") or [], obj.get("summary")
-    raise StructuredOutputError("Langflow findings JSON had an unexpected shape")
 
 
 # ── LangGraph runner (default in-process backend) ─────────────────────────────
@@ -335,8 +189,6 @@ def get_runner(config: LLMConfig, *, override: Runner | None = None) -> Runner:
         return override
     if config.runner == "fake":
         return FakeRunner()
-    if config.runner == "langflow":
-        return LangflowRunner(config)
     if config.runner == "deepagents":
         return DeepAgentsRunner(config)
     if config.runner == "langgraph":

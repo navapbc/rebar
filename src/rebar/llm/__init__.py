@@ -5,11 +5,11 @@ Design in one paragraph: an **operation** (e.g. :func:`review_ticket`) assembles
 deterministic context from rebar's own reads, resolves a **reviewer** prompt from
 Langfuse prompt management (with a packaged fallback), and dispatches to a
 pluggable **Runner**. The default runner runs an in-process LangChain/LangGraph
-agent — the one runtime native to both Langflow and Langfuse — with read-only,
-line-numbered repository file tools plus MCP servers, and returns findings
-constrained to the canonical ``review_result`` JSON Schema. A Langflow runner
-(REST) and other harnesses slot in behind the same protocol. Langfuse provides
-tracing + the prompt library.
+agent — the runtime natively traced by Langfuse — with read-only, line-numbered
+repository file tools plus MCP servers, and returns findings constrained to the
+canonical ``review_result`` JSON Schema. An opt-in deepagents harness and other
+runners slot in behind the same protocol. Langfuse provides tracing + the prompt
+library.
 
 **Optionality is a hard rule:** importing this package pulls **no** heavy
 dependency — langchain/langgraph/langfuse/anthropic are imported lazily by the

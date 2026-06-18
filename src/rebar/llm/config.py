@@ -8,9 +8,8 @@ imported lazily by the runner only when an operation actually runs.
 Environment variables (all optional; sensible defaults):
 
   REBAR_LLM_EXPERIMENTAL_HARNESS  set to ``deepagents`` to opt into the experimental
-                          deepagents harness. Otherwise the runner is DERIVED: langflow
-                          iff LANGFLOW_URL+LANGFLOW_FLOW_ID are set, else in-process
-                          langgraph (the default). ``fake`` is test-only (library arg).
+                          deepagents harness. Otherwise the runner is the in-process
+                          langgraph default. ``fake`` is test-only (library arg).
   REBAR_LLM_MODEL         model id (default ``claude-opus-4-8``)
   REBAR_LLM_MAX_TOKENS    per-response token ceiling (default 8000)
   REBAR_LLM_MAX_STEPS     Max agent loop steps before abort (~2 per tool call; default
@@ -20,7 +19,6 @@ Environment variables (all optional; sensible defaults):
   REBAR_LLM_MCP_SERVERS   JSON object of MCP servers (langchain-mcp-adapters shape)
   ANTHROPIC_API_KEY       model credentials (required to actually run langgraph)
   LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST   tracing + prompts (optional)
-  LANGFLOW_URL / LANGFLOW_FLOW_ID / LANGFLOW_API_KEY   Langflow deployment (langflow runner)
 """
 
 from __future__ import annotations
@@ -35,9 +33,8 @@ from rebar import config as _root_config
 DEFAULT_MODEL = "claude-opus-4-8"
 # Execution backends. `langgraph` is the default for review; `deepagents` is an
 # opt-in harness (planning/subagents/eviction) intended mainly for future
-# task types — review stays on langgraph. `langflow` is a REST stub; `fake` is
-# the offline test seam.
-RUNNERS = ("langgraph", "deepagents", "langflow", "fake")
+# task types — review stays on langgraph. `fake` is the offline test seam.
+RUNNERS = ("langgraph", "deepagents", "fake")
 
 # Model-name prefix → provider, mirroring LangChain init_chat_model inference (used
 # for diagnostics + clear errors; init_chat_model does the authoritative dispatch).
@@ -142,9 +139,9 @@ def _env_int_aliased(name: str, legacy: str, default: int) -> int:
 # legacy .rebar/config.conf llm.* / XDG user config), read via the core loader's
 # discovery so file LOCATIONS + precedence match the rest of rebar. Resolution per
 # key: ``rebar -c llm.KEY=VALUE`` (CLI) > ``REBAR_LLM_<KEY>`` env > config file >
-# default. Secrets (REBAR_LLM_API_KEY / ANTHROPIC/OPENAI keys / LANGFUSE_* /
-# LANGFLOW_API_KEY), the runtime-only REBAR_LLM_REPO_PATH, and the DERIVED runner
-# stay env-only and are NOT config-file keys.
+# default. Secrets (REBAR_LLM_API_KEY / ANTHROPIC/OPENAI keys / LANGFUSE_*),
+# the runtime-only REBAR_LLM_REPO_PATH, and the DERIVED runner stay env-only and
+# are NOT config-file keys.
 
 
 def _read_llm_file_table(repo_root=None) -> dict:
@@ -236,21 +233,15 @@ class LLMConfig:
     repo_path: str | None = None
     mcp_servers: dict = field(default_factory=dict)
     langfuse: LangfuseConfig = field(default_factory=LangfuseConfig)
-    langflow_url: str | None = None
-    langflow_api_key: str | None = None
-    langflow_flow_id: str | None = None
 
     @classmethod
     def from_env(cls, *, repo_root=None) -> LLMConfig:
         # The runner is DERIVED, not a public env knob (EV-4): the experimental
-        # deepagents harness is an explicit opt-in; otherwise langflow is used iff a
-        # Langflow deployment is fully configured, else the in-process langgraph
-        # default. The ``fake`` runner is test-only — reachable via the library
-        # ``runner=``/``override=`` arg, never from the environment.
+        # deepagents harness is an explicit opt-in; otherwise the in-process
+        # langgraph default. The ``fake`` runner is test-only — reachable via the
+        # library ``runner=``/``override=`` arg, never from the environment.
         if os.environ.get("REBAR_LLM_EXPERIMENTAL_HARNESS", "").strip().lower() == "deepagents":
             runner = "deepagents"
-        elif os.environ.get("LANGFLOW_URL") and os.environ.get("LANGFLOW_FLOW_ID"):
-            runner = "langflow"
         else:
             runner = "langgraph"
         # Config-file layer for the non-secret knobs ([tool.rebar.llm]); env (and
@@ -295,9 +286,6 @@ class LLMConfig:
             repo_path=repo_path,
             mcp_servers=mcp_servers,
             langfuse=LangfuseConfig.from_env(),
-            langflow_url=os.environ.get("LANGFLOW_URL") or None,
-            langflow_api_key=os.environ.get("LANGFLOW_API_KEY") or None,
-            langflow_flow_id=os.environ.get("LANGFLOW_FLOW_ID") or None,
         )
 
 
@@ -326,7 +314,6 @@ def available_backends() -> dict:
         "anthropic_api_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
         "openai_api_key": bool(os.environ.get("OPENAI_API_KEY")),
         "langfuse_configured": LangfuseConfig.from_env().enabled,
-        "langflow_url": bool(os.environ.get("LANGFLOW_URL")),
         # Net-new extras (epic a88f / WS-J): detected via the core guard, no import.
         "eval_extra": _extra_installed("eval"),
         "tracing_extra": _extra_installed("tracing"),

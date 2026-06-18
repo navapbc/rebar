@@ -202,8 +202,8 @@ def _downgrade(cit: dict, note: str) -> None:
 
 
 # ── Finalization strategy (WS-D1) ─────────────────────────────────────────────
-# ONE place that turns a runner's raw output into a final dict, so FakeRunner,
-# LangflowRunner, and the agent runners stop duplicating build→resolve→validate.
+# ONE place that turns a runner's raw output into a final dict, so FakeRunner and
+# the agent runners stop duplicating build→resolve→validate.
 
 
 def finalize_findings(

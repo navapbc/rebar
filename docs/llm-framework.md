@@ -63,13 +63,11 @@ The design was chosen after a research spike + two independent Opus design revie
 
 - The agent **tool-use loop is a solved problem** — we do not reimplement one.
 - We need the agent to have **filesystem access** (a repo) and **MCP servers** as
-  tools, and we want to **configure Langflow and Langfuse** for use across
-  environments (some of which can't run Langflow).
-- Of the widely-used, actively-maintained agent runtimes, **only LangChain /
-  LangGraph is *both* the framework Langflow is built on *and* natively traced by
-  Langfuse** (every other framework — CrewAI, LlamaIndex, Pydantic AI, OpenAI
-  Agents SDK, Google ADK, the Anthropic Claude Agent SDK — integrates with Langfuse
-  only via OpenTelemetry and is unrelated to Langflow). So LangChain/LangGraph is
+  tools, and we want **Langfuse** tracing usable across environments.
+- Of the widely-used, actively-maintained agent runtimes, **LangChain / LangGraph
+  is natively traced by Langfuse** (every other framework — CrewAI, LlamaIndex,
+  Pydantic AI, OpenAI Agents SDK, Google ADK, the Anthropic Claude Agent SDK —
+  integrates with Langfuse only via OpenTelemetry). So LangChain/LangGraph is
   the **default in-process substrate** — but kept strictly optional, behind the
   `nava-rebar[agents]` extra, so it is never required by core rebar.
 
@@ -85,7 +83,7 @@ The design was chosen after a research spike + two independent Opus design revie
    │     create_agent + ToolStrategy structured      finding / citation / severity
    │     output; read-only line-numbered file        ($defs in common.schema.json)
    │     tools + MCP tools; Langfuse callback      ▲
-   ├── LangflowRunner   (REST stub; other envs) ───┘ validated + citations resolved
+   ├── DeepAgentsRunner (experimental opt-in) ─────┘ validated + citations resolved
    └── FakeRunner       (offline / tests)
 ```
 
@@ -99,13 +97,11 @@ seam:
 |--------|------|-------|
 | `LangGraphRunner` | **default, in-process; the review runner** | `langchain.agents.create_agent` + `ToolStrategy` (robust in-loop structured output; the legacy `create_react_agent(response_format=…)` makes a context-losing post-loop call and is avoided). Tools: read-only, line-numbered repo file tools + MCP via `MultiServerMCPClient`. Tracing: Langfuse callback. Needs `nava-rebar[agents]` + `ANTHROPIC_API_KEY`. |
 | `DeepAgentsRunner` | **experimental opt-in** (`REBAR_LLM_EXPERIMENTAL_HARNESS=deepagents`) | Runs on LangChain's [deepagents](https://github.com/langchain-ai/deepagents) harness (planning, subagents, large-result eviction) via `create_deep_agent`, with deepagents' native filesystem over a repo-rooted `FilesystemBackend` made **read-only** by a write-denying `FilesystemPermission`, plus our findings schema (so it still returns a `review_result`). **The review default stays `langgraph`** with our own citation-disciplined tools — this runner is the seam for future deepagents-based task types. Caveat: the rebar state-dir deny-list is enforced on citation *output* here, not on reads (use `langgraph` for read-side deny-listing). |
-| `LangflowRunner` | hosted Langflow (auto-selected when `LANGFLOW_URL`+`LANGFLOW_FLOW_ID` are set) | Calls a hosted deployment: `POST {LANGFLOW_URL}/api/v1/run/{LANGFLOW_FLOW_ID}`, header `x-api-key`, body `{"input_value", "input_type":"chat", "output_type":"chat"}` (stdlib urllib — no extra dep). The flow is a thin transport whose final message must be **findings JSON** (`{"findings":[…],"summary":…}` or a bare list); we extract it from Langflow's deeply-nested response (defensive walk + recursive fallback) and run it through the same normalize/validate/citation pipeline. Configure `LANGFLOW_URL`/`LANGFLOW_FLOW_ID` (+ optional `LANGFLOW_API_KEY`); a clear error if unset. |
 | `FakeRunner` | offline / tests | Returns canned findings — the dependency-injection seam that makes the whole pipeline (and all three interfaces) testable with no model, network, or extra. |
 
 The runner is **derived** (EV-4): the experimental deepagents harness via
-`REBAR_LLM_EXPERIMENTAL_HARNESS=deepagents`; otherwise `langflow` iff a Langflow
-deployment is configured (`LANGFLOW_URL`+`LANGFLOW_FLOW_ID`), else the `langgraph`
-default. `fake` is test-only — pass an explicit `runner=`/`override=` to an operation
+`REBAR_LLM_EXPERIMENTAL_HARNESS=deepagents`; otherwise the `langgraph` default.
+`fake` is test-only — pass an explicit `runner=`/`override=` to an operation
 (it is off the public env surface).
 
 ## Model providers (not Anthropic-only)
@@ -205,7 +201,7 @@ for the future code-review op's "deterministic reviewer-selection rules."
 
 | Var | Default | Purpose |
 |-----|---------|---------|
-| `REBAR_LLM_EXPERIMENTAL_HARNESS` | _(unset)_ | set to `deepagents` to opt into the experimental harness; otherwise the runner is derived (langflow iff configured, else langgraph). `fake` is library-arg-only. |
+| `REBAR_LLM_EXPERIMENTAL_HARNESS` | _(unset)_ | set to `deepagents` to opt into the experimental harness; otherwise the runner is the langgraph default. `fake` is library-arg-only. |
 | `REBAR_LLM_MODEL` | `claude-opus-4-8` | model id |
 | `REBAR_LLM_MODEL_PROVIDER` | inferred | provider for `init_chat_model` (`anthropic`/`openai`/`google_genai`/…); inferred from the model name if unset |
 | `REBAR_LLM_BASE_URL` | — | OpenAI-compatible endpoint (LMStudio/Ollama/vLLM) |
@@ -217,7 +213,6 @@ for the future code-review op's "deterministic reviewer-selection rules."
 | `REBAR_LLM_MCP_SERVERS` | `{}` | JSON of MCP servers (`langchain-mcp-adapters` shape) |
 | `ANTHROPIC_API_KEY` | — | model credentials (required to run langgraph) |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` | — | tracing + prompts (auto-enabled when both keys present) |
-| `LANGFLOW_URL` / `LANGFLOW_FLOW_ID` / `LANGFLOW_API_KEY` | — | hosted Langflow deployment (langflow runner) |
 | `REBAR_MCP_ALLOW_LLM` | off | gate the MCP `review_ticket` tool (it makes a live, billable call) |
 
 Langfuse is **no-op unless both keys are set** (gated before the handler is even
@@ -334,9 +329,5 @@ we run an **ephemeral self-hosted stack**, not a persistent server:
 
 ## Deployment notes
 
-- **Langflow** is a heavyweight service (≥2 GB RAM); for constrained hosts use its
-  headless `--backend-only` mode or the lightweight `lfx` executor that runs flow
-  JSON statelessly. Version-control flows as `flows/*.json`. Langflow wires Langfuse
-  natively via `LANGFLOW_LANGFUSE_*` env vars.
 - **Langfuse** cloud is low-friction; self-hosting needs Postgres + ClickHouse +
   Redis + S3. Tracing degrades to a no-op when unconfigured.

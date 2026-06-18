@@ -159,23 +159,23 @@ Env-only (NOT `[tool.rebar.llm]` keys): the secret `REBAR_LLM_API_KEY`; the
 runtime-only `REBAR_LLM_REPO_PATH` (which repo the review agent's read-only file
 tools see — an invocation-specific override, default the repo root); and the
 DERIVED runner — `REBAR_LLM_EXPERIMENTAL_HARNESS=deepagents` opts into the
-experimental harness, else `langflow` when `LANGFLOW_URL`+`LANGFLOW_FLOW_ID` are
-set, else in-process `langgraph` (`fake` is a library-arg-only test seam).
+experimental harness, else in-process `langgraph` (`fake` is a library-arg-only
+test seam).
 
 ### Secrets — environment / `.env` only (never the config file)
 
-`REBAR_SIGNING_KEY`, `REBAR_LLM_API_KEY`, `JIRA_API_TOKEN`, `LANGFLOW_API_KEY`,
+`REBAR_SIGNING_KEY`, `REBAR_LLM_API_KEY`, `JIRA_API_TOKEN`,
 and the SDK-standard `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
-`LANGFUSE_SECRET_KEY`. (`LANGFUSE_*` / `LANGFLOW_URL`/`_FLOW_ID` are read by their
-own SDKs and keep their standard names.)
+`LANGFUSE_SECRET_KEY`. (`LANGFUSE_*` is read by its own SDK and keeps its
+standard names.)
 
 ### Removed / derived (not config keys)
 
 - **Removed:** `paths.*`, `planning.external_dependency_block_enabled` (deleted),
   and the legacy `rebar_id_guard_mode` flat key (→ `reconciler.id_guard_bypass_unsafe`).
-- **Derived, not configured:** the LLM runner (Langflow is used when
-  `LANGFLOW_URL`+`LANGFLOW_FLOW_ID` are set, else in-process langgraph; `fake` is a
-  test-only injection; `deepagents` is gated by `REBAR_LLM_EXPERIMENTAL_HARNESS`).
+- **Derived, not configured:** the LLM runner (in-process langgraph by default;
+  `fake` is a test-only injection; `deepagents` is gated by
+  `REBAR_LLM_EXPERIMENTAL_HARNESS`).
 - **Runtime-only (env, not a config key):** `REBAR_LLM_REPO_PATH` — which repo the
   review agent's read-only file tools see (default: the repo root). It is an
   invocation-specific runtime override, so it stays an env var and is **not** a

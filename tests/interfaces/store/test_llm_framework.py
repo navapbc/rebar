@@ -2,7 +2,7 @@
 
 All offline: the agent run is exercised through a FakeRunner (the dependency-
 injection seam), so no model, network, or `agents` extra is needed. The live
-langgraph/langflow paths are tested only for their graceful-degradation errors.
+langgraph path is tested only for its graceful-degradation errors.
 """
 
 from __future__ import annotations
@@ -401,8 +401,6 @@ def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # REBAR_LLM_RUNNER is removed (EV-4); the runner is DERIVED — default langgraph.
     monkeypatch.delenv("REBAR_LLM_EXPERIMENTAL_HARNESS", raising=False)
-    monkeypatch.delenv("LANGFLOW_URL", raising=False)
-    monkeypatch.delenv("LANGFLOW_FLOW_ID", raising=False)
     monkeypatch.setenv("REBAR_LLM_RUNNER", "fake")  # IGNORED — no longer a knob
     monkeypatch.setenv("REBAR_LLM_MODEL", "gpt-4o")
     monkeypatch.setenv("REBAR_LLM_MODEL_PROVIDER", "openai")
@@ -419,18 +417,12 @@ def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_runner_derivation_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """EV-4: the runner is derived — deepagents only via the experimental opt-in,
-    langflow iff a Langflow deployment is configured, else langgraph. The old
-    REBAR_LLM_RUNNER knob is ignored."""
+    else langgraph. The old REBAR_LLM_RUNNER knob is ignored."""
     from rebar.llm.config import LLMConfig
 
-    for v in ("REBAR_LLM_EXPERIMENTAL_HARNESS", "LANGFLOW_URL", "LANGFLOW_FLOW_ID"):
-        monkeypatch.delenv(v, raising=False)
+    monkeypatch.delenv("REBAR_LLM_EXPERIMENTAL_HARNESS", raising=False)
     monkeypatch.setenv("REBAR_LLM_RUNNER", "deepagents")  # ignored
     assert LLMConfig.from_env(repo_root=".").runner == "langgraph"  # default
-
-    monkeypatch.setenv("LANGFLOW_URL", "http://lf")
-    monkeypatch.setenv("LANGFLOW_FLOW_ID", "f1")
-    assert LLMConfig.from_env(repo_root=".").runner == "langflow"  # auto when configured
 
     monkeypatch.setenv("REBAR_LLM_EXPERIMENTAL_HARNESS", "deepagents")
     assert LLMConfig.from_env(repo_root=".").runner == "deepagents"  # explicit opt-in wins
@@ -442,14 +434,12 @@ def test_runner_selection_and_stubs() -> None:
     from rebar.llm.runner import (
         DeepAgentsRunner,
         FakeRunner,
-        LangflowRunner,
         LangGraphRunner,
         RunRequest,
         get_runner,
     )
 
     assert isinstance(get_runner(LLMConfig(runner="fake")), FakeRunner)
-    assert isinstance(get_runner(LLMConfig(runner="langflow")), LangflowRunner)
     assert isinstance(get_runner(LLMConfig(runner="langgraph")), LangGraphRunner)
     assert isinstance(get_runner(LLMConfig(runner="deepagents")), DeepAgentsRunner)
     # The DEFAULT (review) runner is langgraph, NOT deepagents.
@@ -599,69 +589,6 @@ def test_mcp_tools_loads_from_real_stdio_server(tmp_path: Path) -> None:
     assert "echo" in {t.name for t in _mcp_tools(servers)}
 
 
-def test_langflow_parse_helpers() -> None:
-    from rebar.llm.runner import _deep_find_text, _langflow_extract_text, _parse_findings_json
-
-    nested = {"outputs": [{"outputs": [{"results": {"message": {"text": "hello"}}}]}]}
-    assert _langflow_extract_text(nested) == "hello"
-    # recursive fallback for an unexpected shape
-    assert _deep_find_text({"a": {"b": [{"message": "deep"}]}}) == "deep"
-    # findings JSON, incl. ```json fences and a bare list
-    findings, summary = _parse_findings_json('{"findings": [{"severity":"low"}], "summary":"s"}')
-    assert findings == [{"severity": "low"}] and summary == "s"
-    fenced, _ = _parse_findings_json('```json\n[{"severity":"high"}]\n```')
-    assert fenced == [{"severity": "high"}]
-
-
-def test_langflow_runner_missing_config() -> None:
-    from rebar.llm.config import LLMConfig
-    from rebar.llm.errors import LLMConfigError
-    from rebar.llm.runner import LangflowRunner, RunRequest
-
-    req = RunRequest(system_prompt="s", instructions="i", config=LLMConfig())
-    with pytest.raises(LLMConfigError):
-        LangflowRunner(LLMConfig()).run(req)
-
-
-def test_langflow_runner_end_to_end_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
-    """LangflowRunner extracts the flow's findings JSON from a nested response and
-    runs it through the shared normalize/validate/citation pipeline."""
-    from rebar.llm import runner as runner_mod
-    from rebar.llm.config import LLMConfig
-    from rebar.llm.runner import LangflowRunner, RunRequest
-
-    findings_json = json.dumps(
-        {
-            "findings": [
-                {
-                    "severity": "high",
-                    "dimension": "security",
-                    "detail": "x",
-                    "citations": [{"kind": "source", "description": "from the flow"}],
-                }
-            ],
-            "summary": "one issue",
-        }
-    )
-    raw = {"outputs": [{"outputs": [{"results": {"message": {"text": findings_json}}}]}]}
-    monkeypatch.setattr(runner_mod, "_langflow_post", lambda cfg, payload: raw)
-
-    cfg = LLMConfig(
-        runner="langflow", langflow_url="http://lf", langflow_flow_id="f1", repo_path="."
-    )
-    req = RunRequest(
-        system_prompt="s",
-        instructions="i",
-        config=cfg,
-        reviewers=["ticket-quality"],
-        target={"kind": "ticket", "ticket_ids": ["T1"]},
-    )
-    result = LangflowRunner(cfg).run(req)
-    schemas.validator(schemas.REVIEW_RESULT).validate(result)
-    assert result["runner"] == "langflow" and result["summary"] == "one issue"
-    assert result["findings"][0]["severity"] == "high"
-
-
 def test_deepagents_runner_assembles(tmp_path: Path) -> None:
     """The opt-in deepagents runner wires a read-only, repo-rooted deep agent with
     our findings schema (construction only; no model call). Skips without the lib."""
@@ -767,25 +694,6 @@ def test_aggregate_clusters_across_line_bucket_boundary() -> None:
         ],
     }
     assert len(aggregate_findings([r1, r2, r3])) == 2
-
-
-def test_langflow_extract_prefers_output_over_echoed_input() -> None:
-    """The fallback extractor must search only the `outputs` subtree and return the
-    LAST message — never an echoed input or an intermediate message."""
-    from rebar.llm.runner import _langflow_extract_text
-
-    raw = {
-        "inputs": {"text": "ECHOED PROMPT"},  # outside outputs → must be ignored
-        "outputs": [
-            {
-                "outputs": [
-                    {"results": {"text": "intermediate message"}},
-                    {"results": {"message": {"text": "FINAL OUTPUT"}}},
-                ]
-            }
-        ],
-    }
-    assert _langflow_extract_text(raw) == "FINAL OUTPUT"
 
 
 def test_changed_from_diff_covers_deletes_and_renames() -> None:
