@@ -4,7 +4,7 @@ Bug summary:
   The reconciler's _apply_batch loop pins HEAD and re-checks it on every
   iteration to detect concurrent writers. But `_apply_inbound_conflict`
   (called from the inbound dispatch loop in `apply()`) directly invokes
-  `_file_conflict_bug_ticket`, which shells out to `dso ticket create bug`.
+  `_file_conflict_bug_ticket`, which shells out to `rebar create bug`.
   That CLI commits to the `tickets` orphan branch, advancing HEAD. While
   the inbound dispatch happens BEFORE the batch loop's pin in the current
   flow, ANY future caller that reaches the batch loop with an in-flight

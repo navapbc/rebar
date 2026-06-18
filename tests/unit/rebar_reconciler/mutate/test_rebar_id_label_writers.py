@@ -202,8 +202,8 @@ def test_audit_ignores_non_rebar_id_label_mutations(applier):
         "_audit_rebar_id_label_writes not found in applier"
     )
     # Payload does not start with 'rebar-id-' — should not raise
-    non_dso_mut = _MockLabelMutation(payload="some-other-label", action="create")
-    applier._audit_rebar_id_label_writes("inbound_update", [non_dso_mut])
+    non_rebar_id_mut = _MockLabelMutation(payload="some-other-label", action="create")
+    applier._audit_rebar_id_label_writes("inbound_update", [non_rebar_id_mut])
 
     # target != 'label' — should not raise even if payload starts with 'rebar-id-'
     non_label_target_mut = _MockLabelMutation(

@@ -161,7 +161,7 @@ def test_outbound_blocked_maps_to_in_progress(outbound_differ: ModuleType) -> No
     )
 
 
-def test_outbound_blocked_emits_dso_status_blocked_label(outbound_differ: ModuleType) -> None:
+def test_outbound_blocked_emits_rebar_status_blocked_label(outbound_differ: ModuleType) -> None:
     """(a) outbound blocked must also emit rebar-status:blocked label intent."""
     ticket = _make_local_ticket(ticket_id="local-1", status="blocked")
     store = StubOutboundBindingStore()
@@ -239,7 +239,7 @@ def test_outbound_cancelled_maps_to_done(outbound_differ: ModuleType) -> None:
     )
 
 
-def test_outbound_cancelled_emits_dso_status_cancelled_label(outbound_differ: ModuleType) -> None:
+def test_outbound_cancelled_emits_rebar_status_cancelled_label(outbound_differ: ModuleType) -> None:
     """(b) outbound cancelled must also emit rebar-status:cancelled label intent."""
     ticket = _make_local_ticket(ticket_id="local-1", status="cancelled")
     store = StubOutboundBindingStore()
@@ -340,7 +340,7 @@ def test_outbound_cancelled_to_closed_removes_annotation_label(
 # ---------------------------------------------------------------------------
 
 
-def test_inbound_dso_status_blocked_label_overrides_jira_status(
+def test_inbound_rebar_status_blocked_label_overrides_jira_status(
     inbound_differ: ModuleType,
 ) -> None:
     """(d) inbound with rebar-status:blocked label → local 'blocked' regardless of workflow status.
@@ -379,7 +379,7 @@ def test_inbound_dso_status_blocked_label_overrides_jira_status(
     )
 
 
-def test_inbound_dso_status_blocked_label_sets_local_blocked_when_local_is_open(
+def test_inbound_rebar_status_blocked_label_sets_local_blocked_when_local_is_open(
     inbound_differ: ModuleType,
 ) -> None:
     """(d) inbound rebar-status:blocked label → local status 'blocked', not 'in_progress'."""
@@ -413,7 +413,7 @@ def test_inbound_dso_status_blocked_label_sets_local_blocked_when_local_is_open(
     )
 
 
-def test_inbound_dso_status_cancelled_label_sets_local_cancelled(
+def test_inbound_rebar_status_cancelled_label_sets_local_cancelled(
     inbound_differ: ModuleType,
 ) -> None:
     """(d) inbound rebar-status:cancelled label → local status = 'cancelled'."""
@@ -494,7 +494,7 @@ def test_inbound_in_review_maps_to_in_progress(inbound_differ: ModuleType) -> No
 # ---------------------------------------------------------------------------
 
 
-def test_outbound_dso_status_labels_excluded_from_tag_sync(
+def test_outbound_rebar_status_labels_excluded_from_tag_sync(
     outbound_differ: ModuleType,
 ) -> None:
     """(f) rebar-status: labels must not be synced as user tags outbound.
@@ -540,7 +540,7 @@ def test_outbound_dso_status_labels_excluded_from_tag_sync(
         )
 
 
-def test_inbound_dso_status_labels_excluded_from_local_tag_sync(
+def test_inbound_rebar_status_labels_excluded_from_local_tag_sync(
     inbound_differ: ModuleType,
 ) -> None:
     """(f) rebar-status: labels must not leak into local ticket tags via inbound label sync.

@@ -68,7 +68,7 @@ def test_mcp_exposes_expected_tools() -> None:
 
 def test_mcp_has_no_init_or_classify() -> None:
     """Documented exception: MCP has no init (operator bootstrap); classify was
-    removed entirely (DSO agent-routing)."""
+    removed entirely (legacy agent-routing)."""
     names = set(_mcp_tools())
     assert "init" not in names
     assert "classify" not in names

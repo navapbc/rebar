@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def _rebar_env(name: str, default: str | None = None) -> str | None:
-    """Read ``REBAR_<name>`` from the environment (DSO_* support removed).
+    """Read ``REBAR_<name>`` from the environment.
 
     Local to this module: the reconciler modules are spec-loaded under test (where
     ``rebar_reconciler`` is the test-package shadow), so a cross-module import of a

@@ -65,8 +65,8 @@ def _short_prefix(ticket_id: str, tracker: str) -> str:
 def _display_mode(repo_root: str | None) -> str:
     """Resolve ``ticket.display_mode`` through the unified typed config (all layers),
     default ``auto``. Display is non-critical, so an unreadable config degrades to
-    ``auto`` rather than failing. (The legacy WORKFLOW_CONFIG_FILE pointer is gone —
-    config discovery is now $REBAR_CONFIG / rebar.toml / pyproject / legacy conf.)"""
+    ``auto`` rather than failing. (Config discovery is $REBAR_CONFIG / rebar.toml /
+    pyproject / legacy conf.)"""
     from rebar.config import ConfigError, load_config
 
     try:

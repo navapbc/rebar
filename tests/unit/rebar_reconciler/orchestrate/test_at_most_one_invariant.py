@@ -72,7 +72,7 @@ def _make_alert_store_mock(deduped_keys: set[str] | None = None):
 def _make_subprocess_result(returncode: int = 0, stdout: str = "abcd-1234-5678-90ef"):
     """Build a mock subprocess.CompletedProcess result for ticket-create.sh.
 
-    The default stdout uses a canonical 16-hex dso ticket ID
+    The default stdout uses a canonical 16-hex rebar ticket ID
     (four groups of four lowercase hex digits) so that
     invariants._extract_ticket_id's regex matches the returned value.
     Tests that override stdout MUST pass a canonical-format ID for the
@@ -105,7 +105,7 @@ def test_a_clean_snapshot(tmp_path, invariants):
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
         with patch("invariants.subprocess.run") as mock_run:
             result = invariants.check_at_most_one_local_id(
-                snapshot, repo_root=tmp_path, ticket_cli="/fake/dso"
+                snapshot, repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
 
     assert result == []
@@ -135,7 +135,7 @@ def test_b_single_violation(tmp_path, invariants):
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
         with patch("invariants.subprocess.run", return_value=mock_proc_result) as mock_run:
             result = invariants.check_at_most_one_local_id(
-                snapshot, repo_root=tmp_path, ticket_cli="/fake/dso"
+                snapshot, repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
 
     # One violation returned
@@ -152,7 +152,7 @@ def test_b_single_violation(tmp_path, invariants):
 
     # Exactly one subprocess.run call (ticket-cli). The rebar dispatcher is the
     # ticket CLI itself, so the bug-filing command is `rebar create bug ...`
-    # (no `ticket` subcommand prefix as in the legacy DSO CLI).
+    # (no `ticket` subcommand prefix as in the legacy ticket CLI).
     mock_run.assert_called_once()
     cli_args = mock_run.call_args[0][0]
     assert "create" in cli_args and "bug" in cli_args
@@ -183,7 +183,7 @@ def test_c_dedup_window(tmp_path, invariants):
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
         with patch("invariants.subprocess.run") as mock_run:
             result = invariants.check_at_most_one_local_id(
-                snapshot, repo_root=tmp_path, ticket_cli="/fake/dso"
+                snapshot, repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
 
     # Deduped: no violation filed
@@ -210,7 +210,7 @@ def test_c_legacy_dedup_key_still_recognized(tmp_path, invariants):
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
         with patch("invariants.subprocess.run") as mock_run:
             result = invariants.check_at_most_one_local_id(
-                snapshot, repo_root=tmp_path, ticket_cli="/fake/dso"
+                snapshot, repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
 
     # Backward-compat path: legacy-keyed alert recognized → no re-file.
@@ -238,7 +238,7 @@ def test_d_cap_at_5(tmp_path, invariants):
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
         with patch("invariants.subprocess.run", return_value=mock_proc_result) as mock_run:
             result = invariants.check_at_most_one_local_id(
-                snapshot, repo_root=tmp_path, ticket_cli="/fake/dso"
+                snapshot, repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
 
     # Exactly 5 violations filed (cap enforced)

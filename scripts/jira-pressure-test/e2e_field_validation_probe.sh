@@ -1295,14 +1295,14 @@ for i in $(seq 0 9); do
     # The rebar-id label takes the form "rebar-id-<short-id>" or "rebar-id-<full-id>".
     # Search by the exact rebar-id label present on the known Jira key.
     jira_labels_raw=$(get_jira_labels "${JIRA_KEYS[$i]}" 2>/dev/null) || true
-    dso_label=$(python3 -c "
+    rebar_id_label=$(python3 -c "
 import json, sys
 labels = json.loads(sys.argv[1]) if sys.argv[1].startswith('[') else []
 match = [l for l in labels if l.startswith('rebar-id')]
 print(match[0] if match else '')
 " "$jira_labels_raw" 2>/dev/null) || true
 
-    if [ -z "$dso_label" ]; then
+    if [ -z "$rebar_id_label" ]; then
         skip_test "Phase2d.outbound-dedup-${i}" "no rebar-id label found on ${JIRA_KEYS[$i]}"
         continue
     fi
@@ -1315,14 +1315,14 @@ client = mod.AcliClient(
     user=os.environ['JIRA_USER'],
     api_token=os.environ['JIRA_API_TOKEN'],
 )
-results = client.search_issues('project = ${JIRA_PROJECT} AND labels = \"${dso_label}\"')
+results = client.search_issues('project = ${JIRA_PROJECT} AND labels = \"${rebar_id_label}\"')
 print(len(results))
 " 2>/dev/null) || true
     dup_count="${dup_count:-0}"
     if [ "$dup_count" = "1" ]; then
-        pass_test "Phase2d.outbound-dedup-${i} (1 Jira issue for ${dso_label})"
+        pass_test "Phase2d.outbound-dedup-${i} (1 Jira issue for ${rebar_id_label})"
     else
-        fail_test "Phase2d.outbound-dedup-${i}" "expected 1, got ${dup_count} for ${dso_label}"
+        fail_test "Phase2d.outbound-dedup-${i}" "expected 1, got ${dup_count} for ${rebar_id_label}"
         dedup_outbound_ok=false
     fi
 done

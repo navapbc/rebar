@@ -4,7 +4,7 @@ Bug 6afc-20ee-84e5-4dd5: the outbound comment-sync loop. Skill-to-skill ticket
 comments (e.g. the ``PREPLANNING_CONTEXT:`` payload defined by
 ``src/rebar/_engine/docs/contracts/pil-handoff.md``) are machine-to-machine payloads
 that must NEVER be mirrored outbound to Jira. They are large, internal, and
-exist only to hand context between DSO skills. The differ must skip any local
+exist only to hand context between agent skills. The differ must skip any local
 comment whose normalised body starts with a bridge-internal machine-marker
 prefix — mirroring the label ``_EXCLUDED_PREFIXES`` exclusion, but for comments.
 
@@ -86,7 +86,7 @@ def _make_ticket_with_comments(ticket_id: str, comment_bodies: list[str]) -> dic
 def test_preplanning_context_comment_now_emitted(
     outbound_differ: ModuleType,
 ) -> None:
-    """Post-decouple: ``PREPLANNING_CONTEXT:`` was a DSO skill-to-skill marker.
+    """Post-decouple: ``PREPLANNING_CONTEXT:`` was a skill-to-skill marker.
     rebar no longer recognizes it, so such a comment is treated as ordinary and
     IS mirrored outbound (the exclusion list is trimmed to reconciler-internal
     markers only)."""

@@ -6,7 +6,7 @@ Bug context:
   HeadDriftError to abort the pass. The d822 fix (PR #425) removed the
   in-process `_file_conflict_bug_ticket` subprocess as a commit source.
   But the drift detector still aborts on EXTERNAL writers — e.g., a
-  parallel Claude session running `dso ticket transition <id> closed`
+  parallel Claude session running `rebar transition <id> ... closed`
   triggers an auto-compact (ticket-transition.sh) which commits
   `ticket: COMPACT <id>` to the tickets branch. The reconciler aborts
   mid-pass even though the external commit doesn't conflict with the
@@ -65,7 +65,7 @@ def test_drift_is_benign_helper_exists(applier):
 
 def test_drift_tolerates_ticket_compact(applier):
     """The most common external drift trigger: parallel session running
-    `dso ticket transition <id> closed` → auto-compact via
+    `rebar transition <id> ... closed` → auto-compact via
     ticket-transition.sh:594 → `ticket: COMPACT <id>` commit."""
     assert applier._drift_is_benign("ticket: COMPACT 6d43-a70d-871c-4973") is True
 

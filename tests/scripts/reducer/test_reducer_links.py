@@ -15,7 +15,7 @@ import pytest
 from _events import _UUID, REPO_ROOT, _write_event
 
 # ---------------------------------------------------------------------------
-# Tests: LINK / UNLINK event handling (dso-vwoo)
+# Tests: LINK / UNLINK event handling (vwoo)
 # These tests MUST FAIL until ticket-reducer.py is extended to handle LINK/UNLINK.
 # ---------------------------------------------------------------------------
 
@@ -396,7 +396,7 @@ def test_reducer_deps_in_snapshot_not_duplicated(tmp_path: Path, reducer: Module
 
 
 # ---------------------------------------------------------------------------
-# same-second LINK + UNLINK sort order (dso-jwan)
+# same-second LINK + UNLINK sort order (jwan)
 # LINK must always replay before UNLINK at the same Unix-second timestamp,
 # even when the UNLINK filename UUID sorts alphabetically before the LINK UUID.
 # ---------------------------------------------------------------------------
@@ -408,7 +408,7 @@ def test_same_second_link_unlink_sort_order(reducer: ModuleType, tmp_path: Path)
     """When LINK and UNLINK share the same Unix-second timestamp, LINK must
     replay before UNLINK so the dep is correctly cancelled.
 
-    Bug scenario (dso-jwan): If filenames sort lexicographically as
+    Bug scenario (jwan): If filenames sort lexicographically as
     UNLINK < LINK (because UNLINK's UUID precedes LINK's UUID alphabetically),
     the reducer processes UNLINK first — the link_uuid is not yet in deps,
     so UNLINK is a no-op, then LINK adds the dep. The dep appears active when

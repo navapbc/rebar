@@ -32,7 +32,7 @@ from typing import Any, Protocol, runtime_checkable
 
 
 def _rebar_env(name: str, default: str | None = None) -> str | None:
-    """Read ``REBAR_<name>`` from the environment (DSO_* support removed)."""
+    """Read ``REBAR_<name>`` from the environment."""
     return os.environ.get(f"REBAR_{name}", default)
 
 

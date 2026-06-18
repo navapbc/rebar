@@ -39,7 +39,7 @@ def _load_module(name: str, path: Path) -> ModuleType:
 
 @pytest.fixture(scope="module")
 def outbound_differ() -> ModuleType:
-    return _load_module("outbound_differ_dsoid", OUTBOUND_DIFFER_PATH)
+    return _load_module("outbound_differ_rebarid", OUTBOUND_DIFFER_PATH)
 
 
 class StubBindingStore:

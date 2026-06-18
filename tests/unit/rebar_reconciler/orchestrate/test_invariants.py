@@ -73,7 +73,7 @@ def test_dup_local_ids_files_alert_and_bug(
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
         with patch.object(invariants.subprocess, "run", return_value=_ok_cli_result()):
             filed = invariants.check_at_most_one_local_id(
-                _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/dso"
+                _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
 
     assert len(filed) == 1
@@ -97,7 +97,7 @@ def test_no_duplicates_files_nothing(
     snap = {"DIG-1": {"local_ids": ["only-one"]}, "DIG-2": {}}
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
         filed = invariants.check_at_most_one_local_id(
-            snap, repo_root=tmp_path, ticket_cli="/fake/dso"
+            snap, repo_root=tmp_path, ticket_cli="/fake/rebar"
         )
 
     assert filed == []
@@ -118,7 +118,7 @@ def test_dedup_short_circuits(
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
         with patch.object(invariants.subprocess, "run") as mock_run:
             filed = invariants.check_at_most_one_local_id(
-                _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/dso"
+                _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
 
     assert filed == []
@@ -139,7 +139,7 @@ def test_cap_per_pass_limits_filings(
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
         with patch.object(invariants.subprocess, "run", return_value=_ok_cli_result()):
             filed = invariants.check_at_most_one_local_id(
-                snap, repo_root=tmp_path, ticket_cli="/fake/dso"
+                snap, repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
 
     assert len(filed) == 5
@@ -168,7 +168,7 @@ def test_timeout_surfaces_warning_does_not_patch_bug(
             side_effect=subprocess.TimeoutExpired(cmd="dso", timeout=30),
         ):
             filed = invariants.check_at_most_one_local_id(
-                _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/dso"
+                _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
 
     # Violation IS recorded (alert appended, returned) even though ticket failed
@@ -195,10 +195,10 @@ def test_oserror_surfaces_warning_does_not_patch_bug(
         with patch.object(
             invariants.subprocess,
             "run",
-            side_effect=FileNotFoundError("dso not on PATH"),
+            side_effect=FileNotFoundError("rebar not on PATH"),
         ):
             filed = invariants.check_at_most_one_local_id(
-                _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/dso"
+                _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
 
     assert len(filed) == 1
@@ -228,7 +228,7 @@ def test_non_zero_exit_surfaces_warning(
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
         with patch.object(invariants.subprocess, "run", return_value=bad_result):
             filed = invariants.check_at_most_one_local_id(
-                _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/dso"
+                _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
 
     assert len(filed) == 1
@@ -256,7 +256,7 @@ def test_programming_error_propagates(
         ):
             with pytest.raises(AttributeError, match="simulated programming defect"):
                 invariants.check_at_most_one_local_id(
-                    _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/dso"
+                    _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/rebar"
                 )
 
 
@@ -278,7 +278,7 @@ def test_non_list_local_ids_is_ignored(
     }
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
         filed = invariants.check_at_most_one_local_id(
-            snap, repo_root=tmp_path, ticket_cli="/fake/dso"
+            snap, repo_root=tmp_path, ticket_cli="/fake/rebar"
         )
 
     assert filed == []
@@ -338,7 +338,7 @@ def test_garbage_cli_output_leaves_alert_unpatched(
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
         with patch.object(invariants.subprocess, "run", return_value=garbage_result):
             filed = invariants.check_at_most_one_local_id(
-                _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/dso"
+                _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
 
     # Violation IS recorded (alert was appended) but the bug-link patch is
@@ -374,7 +374,7 @@ def test_valid_cli_output_extracts_id_and_patches_alert(
     with patch.object(invariants, "_load_alert_store", return_value=mock_alert_store):
         with patch.object(invariants.subprocess, "run", return_value=result):
             filed = invariants.check_at_most_one_local_id(
-                _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/dso"
+                _snapshot_with_dup(), repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
 
     assert len(filed) == 1
