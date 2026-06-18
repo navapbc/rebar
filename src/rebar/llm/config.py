@@ -72,6 +72,20 @@ def infer_provider(model: str, explicit: str | None = None) -> str | None:
     return None
 
 
+def resolve_model(cfg: LLMConfig, *, step: str | None = None, workflow: str | None = None) -> str:
+    """Resolve the model id for a workflow step by the documented precedence (WS-D3):
+
+        step > workflow > config > env > default
+
+    The first three are explicit here; ``cfg.model`` already folds the last two
+    (``REBAR_LLM_MODEL`` env, else ``DEFAULT_MODEL``). So a per-step ``model:``
+    (e.g. ``anthropic:claude-opus-4-8`` or ``openai:gpt-4o``) wins, then a
+    workflow-level ``model:``, then whatever the config/env/default resolved to.
+    Returns a model id consumable by ``init_chat_model`` (``provider:model`` or a
+    bare model whose provider is inferred)."""
+    return step or workflow or cfg.model
+
+
 def denied_paths(root: str) -> tuple[str, ...]:
     """Realpaths the agent must never read OR cite: git internals, reconciler
     state, and the live event store — resolved from rebar.config.tracker_dir(root)

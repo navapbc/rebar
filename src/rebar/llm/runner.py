@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Protocol, runtime_checkable
 
 from rebar.llm import findings as _findings
@@ -266,7 +266,7 @@ class LangGraphRunner:
             system_prompt=req.system_prompt,
             response_format=ToolStrategy(_findings.findings_response_model(), handle_errors=True),
         )
-        outcome, trace_id = _invoke(agent, cfg, req)
+        outcome, trace_id = _invoke_structured(agent, cfg, req)
         return _finalize_review(outcome, cfg, req, self.name, trace_id)
 
 
@@ -324,7 +324,7 @@ class DeepAgentsRunner:
             permissions=permissions,
             response_format=ToolStrategy(_findings.findings_response_model(), handle_errors=True),
         )
-        outcome, trace_id = _invoke(agent, cfg, req)
+        outcome, trace_id = _invoke_structured(agent, cfg, req)
         return _finalize_review(outcome, cfg, req, self.name, trace_id)
 
 
@@ -378,6 +378,33 @@ def _invoke(agent, cfg: LLMConfig, req: RunRequest) -> tuple[dict, str | None]:
                 ) from exc
             raise
     return outcome, trace_id
+
+
+# Repair nudge appended on the one retry when a structured-output mode produced
+# none (the "parsed-is-None" branch, WS-D4).
+_REPAIR_NUDGE = (
+    "\n\nIMPORTANT: your previous turn returned NO structured result. You MUST emit "
+    "the structured output now via the result tool — do not reply in plain prose."
+)
+
+
+def _invoke_structured(agent, cfg: LLMConfig, req: RunRequest) -> tuple[dict, str | None]:
+    """Invoke with WS-D4 structured-output hardening on top of create_agent v1's
+    ``ToolStrategy(handle_errors=True)`` (which self-corrects malformed tool-calls /
+    non-empty ``invalid_tool_calls`` in-loop): if a structured-output mode
+    (``findings``/``structured``) yields no ``structured_response`` on the first
+    turn (parsed-is-None), retry ONCE with an explicit repair nudge. ``text`` mode
+    needs no structured output, so it never retries. Returns ``(outcome, trace_id)``.
+
+    Full validation of the in-loop repair behavior needs live model calls and is
+    exercised by the WS-G evals; this layer adds the deterministic outer retry.
+    """
+    outcome, trace_id = _invoke(agent, cfg, req)
+    if req.mode == "text" or outcome.get("structured_response") is not None:
+        return outcome, trace_id
+    repaired = replace(req, instructions=req.instructions + _REPAIR_NUDGE)
+    outcome2, trace_id2 = _invoke(agent, cfg, repaired)
+    return outcome2, (trace_id2 or trace_id)
 
 
 def _finalize_review(
@@ -494,6 +521,62 @@ def _mcp_tools(servers: dict) -> list:
             f"MCP server(s) {sorted(servers)} connected but advertised zero tools — "
             "refusing to run tool-less silently. Check the server configuration."
         )
+    return tools
+
+
+def _readonly_gate() -> bool:
+    """True if the READONLY gate is set (``REBAR_MCP_READONLY`` truthy) — reused to
+    withhold the comment tool, so a read-only deployment grants the agent read-only
+    ticket access. Case-insensitive truthy (1/true/yes/on)."""
+    val = os.environ.get("REBAR_MCP_READONLY", "").strip().lower()
+    return val in ("1", "true", "yes", "on")
+
+
+def _scoped_ticket_tools(repo_path: str | None, *, allow_comment: bool | None = None) -> list:
+    """A LEAST-PRIVILEGE rebar ticket toolset for agent steps (WS-D3).
+
+    Narrows the full library surface to exactly READ + COMMENT: ``show_ticket``
+    (always) and ``comment_ticket`` (only when allowed). It exposes NOTHING ELSE —
+    no create/edit/transition/claim/reopen/link/sign — so an agentic step can read a
+    ticket and leave a comment but can never mutate work state or forge a signature.
+    The comment tool is withheld under the READONLY gate (reusing it, per WS-D3), so
+    a read-only deployment yields read-only ticket access."""
+    from langchain_core.tools import tool
+
+    if allow_comment is None:
+        allow_comment = not _readonly_gate()
+
+    @tool
+    def show_ticket(ticket_id: str) -> str:
+        """Read a ticket's compiled state (id, title, status, description, comments,
+        deps, …) as JSON. Read-only."""
+        import json
+
+        import rebar
+
+        try:
+            return json.dumps(rebar.show_ticket(ticket_id, repo_root=repo_path))
+        except Exception as exc:  # surface as a recoverable tool error, never a crash
+            return f"Error: {exc}"
+
+    tools = [show_ticket]
+
+    if allow_comment:
+
+        @tool
+        def comment_ticket(ticket_id: str, body: str) -> str:
+            """Append a comment to a ticket — the ONLY write this agent may perform.
+            Cannot transition, edit, claim, or sign."""
+            import rebar
+
+            try:
+                rebar.comment(ticket_id, body, repo_root=repo_path)
+                return f"Commented on {ticket_id}."
+            except Exception as exc:
+                return f"Error: {exc}"
+
+        tools.append(comment_ticket)
+
     return tools
 
 
