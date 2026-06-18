@@ -62,6 +62,7 @@ from .schema import (
     step_kind,
     validate_document,
 )
+from .snapshot import SnapshotError, resolve_sha, snapshot_at_ref
 from .templates import SCAFFOLD_V1, scaffold
 
 __all__ = [
@@ -100,4 +101,7 @@ __all__ = [
     "MemoryRecorder",
     "TicketEventRecorder",
     "sweep_orphan_snapshots",
+    "snapshot_at_ref",
+    "resolve_sha",
+    "SnapshotError",
 ]
