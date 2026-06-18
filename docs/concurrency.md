@@ -163,15 +163,20 @@ fetch origin tickets                                   # (network; best-effort)
 if no origin/tickets: return
 
 if merge-base(HEAD, origin/tickets) is empty:          # UNRELATED histories
-    reset --hard origin/tickets                        # stale auto-init orphan:
-                                                       # adopt remote (atomic).
-                                                       # Discarded commits survive
-                                                       # in reflog (gc.auto=0).
+    merge --allow-unrelated-histories origin/tickets   # UNION both orphans:
+        on conflict: merge --abort; keep local; hint fsck  # keep EVERY local
+                                                       # commit (UUID-named event
+                                                       # files never collide;
+                                                       # shared mutable root files
+                                                       # -> .gitattributes
+                                                       # merge=ours). Never reset.
 else:                                                  # RELATED histories
     local_ahead = rev-list origin/tickets..HEAD        # measured by HEAD,
                                                        # NOT the branch ref!
     if local_ahead is empty:
         reset --hard origin/tickets                    # fast-forward adoption
+                                                       # (origin ⊇ HEAD; discards
+                                                       # nothing local)
     elif origin/tickets is ancestor of HEAD:
         return                                          # local strictly ahead
     else:                                               # diverged
@@ -189,11 +194,33 @@ un-pushed local commit**. Measuring local-ahead by `origin/tickets..HEAD` closes
 this. (Regression tests: `tests/scripts/test-ticket-sync-detached-head-local-ahead.sh`,
 `tests/integration/test_concurrency_regression.py`.)
 
-**Why reset is retained only for unrelated histories.** Merging two
-independently-initialized orphans conflicts on committed scaffolding (`.gitignore`)
-and would wedge reads with a half-finished merge. The unrelated-history case is the
-designated "discard stale auto-init orphan, adopt remote" recovery; it is the only
-remaining force-reset, and it is atomic (a single ref move, never a merge).
+**Why union, not reset — and the safety invariant (epic 97e7 / P1.4).** The
+unrelated-history case used to `reset --hard origin/tickets`, which **orphaned**
+every local-only commit into the reflog. That is the lone reason older rebar
+forced `gc.auto=0`: the reflog was the recovery net, and stock `git gc` could
+expire it. The fix follows the universal peer pattern (git-bug, git-appraise,
+jujutsu): make recovery **non-destructive** so the reflog is never load-bearing.
+
+> **INVARIANT.** After union recovery, every commit rebar cares about is
+> ref-reachable from the `tickets` branch; therefore stock `git gc` is safe by
+> construction — it only ever collects truly *unreachable* objects.
+
+This is jujutsu's "gc-reachability == recovery guarantee" co-design, achieved for
+free: if commits are never orphaned, gc has nothing unsafe to collect. So rebar no
+longer touches `gc.auto` (init `--unset`s any stale `gc.auto=0` and sets
+`gc.autoDetach=true` so a forked background gc never serializes a foreground
+write); stock background `git gc` reclaims loose/pack growth on its own. The two
+union merges can in principle conflict only on the **shared mutable root files**
+(`.bridge_state/bindings.json`, the `.reconciler-*` lock/gate files), which the
+tickets-branch `.gitattributes` resolves `merge=ours` (they are per-pass derived
+caches the reconciler rebuilds, never ticket events; `merge=union` would line-union
+JSON into invalid JSON). UUID-named ticket-event files never collide. A genuine
+conflict still aborts → keeps local → hints `fsck` (never a hard read failure).
+
+**Scale-up posture.** `git gc`'s default cadence (`gc.auto`, ~6700 loose objects)
+suffices for normal stores; very large/active stores can schedule `git maintenance
+run` out of band. Git's own ~30-day unreachable-reflog window remains as a free
+backstop — but rebar no longer *depends* on it for correctness.
 
 ### Read-freshness policy (uniform across CLI, library, and MCP)
 

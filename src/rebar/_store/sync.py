@@ -4,11 +4,26 @@ Faithful port of ``_reconverge_tickets`` / ``_do_reconverge_tickets``
 (ticket-sync.sh). Best-effort: fetch happens OUTSIDE the write lock (it only moves
 remote-tracking refs, never HEAD/index/worktree, so it can't race a local
 committer and a slow fetch must not block writers); the reset/merge that mutate
-HEAD run UNDER the unified write lock. Resolution: unrelated histories →
-``merge --allow-unrelated-histories`` as a union (never discards local commits);
-related + no local commits → fast-forward adopt; local strictly ahead → nothing
-to do; diverged → ``merge origin/tickets`` as a union (conflict → abort, keep
-local, hint fsck).
+HEAD run UNDER the unified write lock.
+
+**Recovery is non-destructive — the safety invariant (epic 97e7 / P1.4).** Both
+the unrelated- and diverged-history paths reconverge by ``git merge`` (a UNION
+that keeps both parents), never by a reset that orphans local commits. So:
+
+    after reconverge, every commit rebar cares about is reachable from the
+    ``tickets`` ref ⇒ stock ``git gc`` is safe by construction (it can only ever
+    collect truly unreachable objects).
+
+This is why rebar no longer forces ``gc.auto=0`` (see ``init._migrate_gc_config``)
+and why the reflog is no longer load-bearing. UUID-named event files never collide
+on merge; the only shared mutable root files (``.bridge_state/*``, ``.reconciler-*``)
+resolve via the tickets-branch ``.gitattributes`` ``merge=ours`` (they are per-pass
+derived caches the reconciler rebuilds). Resolution by case: unrelated histories →
+``merge --allow-unrelated-histories`` (union); related + no local commits →
+fast-forward adopt (``reset --hard`` onto an ancestor — discards nothing); local
+strictly ahead → nothing to do; diverged → ``merge origin/tickets`` (union). Every
+merge: on conflict → ``merge --abort``, keep local, hint ``fsck`` (never reset,
+never hard-fail a read).
 
 The ≤1/min throttle + ``/tmp/.ticket-sync-<md5>`` marker live in the CALLER
 (``reads.py::ensure_fresh``), NOT here — this function is throttle-free, matching
