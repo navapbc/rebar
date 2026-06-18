@@ -237,6 +237,56 @@ def _scan_spec(argv: list[str]) -> int:
     return 0
 
 
+def _verify_completion(argv: list[str]) -> int:
+    """``rebar verify-completion`` → rebar.llm.verify_completion (native; like review).
+
+    Intercepted in main() before the bash-golden help system, so it owns its own ``--help``
+    and ships NO pinned help arm (which keeps it out of the live-driving ``--output`` coverage
+    guard, exactly like review/review-code/scan-spec). JSON output conforms to the
+    ``completion_verdict`` schema (OUTPUT_SCHEMAS['verify_completion']). Exit 0 on PASS,
+    1 on FAIL or error (scriptable, like ``verify-signature``)."""
+    import argparse
+    import json as _json
+
+    parser = argparse.ArgumentParser(
+        prog="rebar verify-completion",
+        description="Run the completion-verifier agent on a ticket and emit a PASS/FAIL verdict "
+        "that its completion requirements (acceptance/success/close criteria, definitions of "
+        "done; for bugs, that the bug is resolved) are demonstrably met by the implementation. "
+        "Needs the 'agents' extra + a model API key; see `rebar verify-completion --check`.",
+    )
+    parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")
+    parser.add_argument(
+        "--graph",
+        action="store_true",
+        help="include the ticket's descendants (default: auto — on for epics)",
+    )
+    parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
+    parser.add_argument(
+        "--check", action="store_true", help="print backend/credential availability and exit"
+    )
+    args = parser.parse_args(argv)
+
+    from rebar import llm
+
+    if args.check:
+        sys.stdout.write(_json.dumps(llm.available_backends(), indent=2) + "\n")
+        return 0
+    if not args.ticket_id:
+        parser.error("ticket_id is required")
+    ensure_initialized(init_only=True)
+    try:
+        result = llm.verify_completion(args.ticket_id, graph=True if args.graph else None)
+    except llm.LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    if args.output == "json":
+        sys.stdout.write(_json.dumps(result) + "\n")
+    else:
+        _render_verdict_text(result)
+    return 0 if result.get("verdict") == "PASS" else 1
+
+
 def _workflow(argv: list[str]) -> int:
     """``rebar workflow <new|validate|run|status|result>`` → the workflow toolchain.
 
@@ -735,6 +785,38 @@ def _render_review_text(result: dict) -> None:
                 sys.stdout.write(f"    - {c.get('description', '')}\n")
 
 
+def _render_verdict_text(result: dict) -> None:
+    """Human-readable rendering of a completion_verdict (verdict + per-criterion findings)."""
+    target = result.get("target", {})
+    ids = ", ".join(target.get("ticket_ids", [])) or "?"
+    findings = result.get("findings", [])
+    sys.stdout.write(
+        f"Completion verdict for {ids} "
+        f"({result.get('runner')}/{result.get('model') or 'n/a'}): {result.get('verdict', '?')}\n"
+    )
+    if result.get("summary"):
+        sys.stdout.write(f"\n{result['summary']}\n")
+    if findings:
+        noun = "criterion" if len(findings) == 1 else "criteria"
+        sys.stdout.write(f"\n{len(findings)} unmet {noun}:\n")
+    for f in findings:
+        crit = f.get("criterion") or f.get("dimension") or "?"
+        sys.stdout.write(f"\n[{f.get('severity', '?').upper()}] {crit}\n")
+        sys.stdout.write(f"  {f.get('detail', '')}\n")
+        for c in f.get("citations", []):
+            if c.get("kind") == "file":
+                loc = c.get("path", "")
+                if c.get("line_start"):
+                    loc += f":{c['line_start']}"
+                    if c.get("line_end") and c["line_end"] != c["line_start"]:
+                        loc += f"-{c['line_end']}"
+                sys.stdout.write(f"    @ {loc}\n")
+            elif c.get("kind") == "url":
+                sys.stdout.write(f"    @ {c.get('url', '')}\n")
+            else:
+                sys.stdout.write(f"    - {c.get('description', '')}\n")
+
+
 def _bridge_probe(argv: list[str]) -> int:
     """``rebar bridge-probe`` → live Jira capability preflight.
 
@@ -952,6 +1034,9 @@ def main(argv: list[str] | None = None) -> int:
     # scan-spec intercept (native rebar.llm batch spec-scan op).
     if argv and argv[0] == "scan-spec":
         return _scan_spec(argv[1:])
+
+    if argv and argv[0] == "verify-completion":
+        return _verify_completion(argv[1:])
 
     # workflow intercept (native rebar.llm.workflow DSL toolchain; owns its --help).
     if argv and argv[0] == "workflow":

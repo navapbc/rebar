@@ -103,6 +103,9 @@ NO_SCHEMA_EXEMPT: dict[str, str] = {
     "scan_spec": "rebar.llm batch spec-scan op: live LLM call(s) over the store's "
     "epics, returns a review_result as a plain dict (no outputSchema) "
     "— same exemption rationale as review_ticket.",
+    "verify_completion": "rebar.llm completion-verification op: live LLM call, returns a "
+    "completion_verdict as a plain dict (no outputSchema) — same exemption rationale as "
+    "review_ticket. CLI/library --output json is pinned via OUTPUT_SCHEMAS['verify_completion'].",
     "run_workflow": "workflow engine (WS-C4): async — returns {run_id, ticket_id, "
     "status:'running'} immediately and runs in the background; a plain dict (no "
     "outputSchema) because it is a fire-and-forget START ack, not the run result "

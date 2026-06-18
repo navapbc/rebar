@@ -593,6 +593,27 @@ def build_server():
 
         return rebar.llm.scan_epics_for_spec(spec_text, batch_size=batch_size)
 
+    @mcp.tool()
+    def verify_completion(ticket_id: str, graph: bool = False) -> dict:
+        """Verify a ticket's completion requirements are met -> a completion_verdict dict
+        {verdict: "PASS"|"FAIL", findings[], summary?, target, reviewers, runner, model,
+        trace_id}. Checks every acceptance/success/close criterion + definition of done (for
+        bugs, that the bug is resolved) against the implementation; on FAIL, each finding
+        carries the failing criterion, an explanation, and a source-code citation. Read-only.
+
+        DISABLED unless REBAR_MCP_ALLOW_LLM=1: this makes a live, billable LLM call and reaches
+        the network + filesystem. Needs the 'agents' extra + a model API key. Returns a plain
+        dict and advertises NO outputSchema by design — the result is model-produced, so it is
+        a documented NO_SCHEMA_EXEMPT and is not auto-driven in CI."""
+        if not _allow_llm():
+            raise ValueError(
+                "verify_completion is disabled: it makes a live, billable LLM call. "
+                "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
+            )
+        import rebar.llm
+
+        return rebar.llm.verify_completion(ticket_id, graph=True if graph else None)
+
     # ── Write tools (gated by REBAR_MCP_READONLY) ──────────────────────────────
     if not _readonly():
 
