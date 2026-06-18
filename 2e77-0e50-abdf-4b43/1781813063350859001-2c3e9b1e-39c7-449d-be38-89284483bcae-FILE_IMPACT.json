@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"docs/concurrency.md","reason":"rewrite recovery section to invariant"},{"path":"src/rebar/_store/sync.py","reason":"rewrite module docstring"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781813063350859001,"uuid":"2c3e9b1e-39c7-449d-be38-89284483bcae"}
