@@ -36,8 +36,12 @@ from __future__ import annotations
 import graphlib
 import os
 import re
+import shutil
+import time
+import uuid as _uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any
 
 from rebar.llm.errors import WorkflowError, WorkflowValidationError
@@ -52,6 +56,31 @@ _ENV_RE = re.compile(r"\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}")
 _INPUT_RE = re.compile(r"^inputs\.([A-Za-z_][A-Za-z0-9_-]*)$")
 _STEP_OUT_RE = re.compile(r"^steps\.([A-Za-z_][A-Za-z0-9_-]*)\.outputs\.([A-Za-z_][A-Za-z0-9_-]*)$")
 _SECRET_RE = re.compile(r"^secrets\.([A-Za-z_][A-Za-z0-9_]*)$")
+
+
+# ── Run identity + non-determinism capture (WS-C3) ───────────────────────────
+
+
+def new_run_id() -> str:
+    """A globally-unique, sortable run id: ``{ns-timestamp}-{uuid4hex}``.
+
+    The time prefix makes runs sort newest-last (handy for listing/sweeps); the
+    uuid suffix guarantees global uniqueness even across clones writing
+    concurrently. Generated ONCE per run and persisted on every WORKFLOW_RUN/STEP
+    event so the whole run is keyed identically on every clone.
+    """
+    return f"{time.time_ns()}-{_uuid.uuid4().hex}"
+
+
+def _capture_nondeterminism() -> dict[str, Any]:
+    """Snapshot the wall clock + a fresh uuid ONCE for a step (WS-C3).
+
+    Persisted in the WORKFLOW_STEP record so a later status/result read sees the
+    same values the step ran with, and so a side-effecting step has a stable
+    clock/uuid to pair with its (run_id, step_id) idempotency token rather than
+    reading the live clock on each retry.
+    """
+    return {"now_ns": time.time_ns(), "uuid": _uuid.uuid4().hex}
 
 
 # ── Step interfaces (the WS-E / WS-D seams) ──────────────────────────────────
@@ -74,6 +103,11 @@ class StepContext:
     workflow: Mapping[str, Any]
     target_ticket: str | None = None
     repo_root: str | None = None
+    # Non-determinism captured ONCE for this step (now_ns + a fresh step uuid),
+    # persisted in the WORKFLOW_STEP record so a status/result read reflects what
+    # actually happened (WS-C3). A side-effecting step uses (run_id, step_id) as its
+    # downstream idempotency token; ``captured`` gives it a stable clock/uuid.
+    captured: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -164,6 +198,51 @@ class MemoryRecorder(RunRecorder):
 
     def step_recorded(self, record: dict[str, Any]) -> None:
         self.steps.append(record)
+
+
+class TicketEventRecorder(RunRecorder):
+    """Durable run-state on the target ticket's event log (WS-C3).
+
+    Each call appends a WORKFLOW_RUN/WORKFLOW_STEP event (per-key LWW, WS-C1) to the
+    target ticket. The executor calls ``step_recorded`` AFTER a step's effect
+    commits — the marker-after-effect rule: a crash between effect and marker leaves
+    the effect *applied but unmarked*, so forward-only recovery re-runs the step,
+    which is safe because side-effecting steps are idempotent on (run_id, step_id).
+    ``completed_step`` reads the persisted marker so a resumed run skips steps that
+    DID get marked. All store imports are lazy so the module stays import-light.
+    """
+
+    def __init__(self, target_ticket: str, repo_root: str | None = None) -> None:
+        self.ticket = target_ticket
+        self.repo_root = repo_root
+
+    def _append(self, event_type: str, data: dict[str, Any]) -> None:
+        from rebar._commands import _seam
+
+        tracker = _seam.tracker_dir(self.repo_root)
+        _seam.append_event(self.ticket, event_type, data, tracker, repo_root=self.repo_root)
+
+    def run_started(self, record: dict[str, Any]) -> None:
+        self._append("WORKFLOW_RUN", record)
+
+    def run_finished(self, record: dict[str, Any]) -> None:
+        self._append("WORKFLOW_RUN", record)
+
+    def step_recorded(self, record: dict[str, Any]) -> None:
+        self._append("WORKFLOW_STEP", record)
+
+    def completed_step(self, run_id: str, step_id: str) -> dict[str, Any] | None:
+        from rebar._commands import _seam
+        from rebar.reducer import reduce_ticket
+
+        tracker = _seam.tracker_dir(self.repo_root)
+        try:
+            state = reduce_ticket(str(Path(tracker) / self.ticket))
+        except Exception:
+            return None
+        if not state:
+            return None
+        return state.get("workflow_steps", {}).get(run_id, {}).get(step_id)
 
 
 # ── Burr-style immutable run state ────────────────────────────────────────────
@@ -308,7 +387,7 @@ def run_workflow(
     doc: Mapping[str, Any],
     inputs: Mapping[str, Any] | None = None,
     *,
-    run_id: str,
+    run_id: str | None = None,
     target_ticket: str | None = None,
     repo_root: str | None = None,
     scripted_registry: Mapping[str, ScriptedStep] | None = None,
@@ -321,12 +400,22 @@ def run_workflow(
     Validates + lints first (raises :class:`WorkflowValidationError` on any error),
     then runs each step in ``static_order``, substituting expressions, dispatching
     scripted/agent steps, and threading named outputs forward. A failed step stops
-    the run (forward-only; WS-C3 adds idempotent resume). Returns a :class:`RunResult`
-    whose terminal-step output is the run's result.
+    the run. Returns a :class:`RunResult` whose terminal-step output is the run's
+    result.
+
+    ``run_id`` defaults to a fresh globally-unique id. When ``target_ticket`` is set
+    and no ``recorder`` is given, run-state persists durably via a
+    :class:`TicketEventRecorder` (so ``get_workflow_status/result`` can read it back
+    and a crashed run can resume idempotently); otherwise it stays in memory.
     """
+    run_id = run_id or new_run_id()
     registry = STEP_REGISTRY if scripted_registry is None else scripted_registry
     runner = FakeAgentRunner() if agent_runner is None else agent_runner
-    rec = MemoryRecorder() if recorder is None else recorder
+    if recorder is None:
+        recorder = (
+            TicketEventRecorder(target_ticket, repo_root) if target_ticket else MemoryRecorder()
+        )
+    rec = recorder
     secrets = secrets or {}
     inputs = dict(inputs or {})
 
@@ -365,6 +454,9 @@ def run_workflow(
             state = state.with_step(step_id, result)
             continue
 
+        # Capture non-determinism ONCE, before the effect, so the same clock/uuid
+        # is handed to the step and persisted in its marker (WS-C3).
+        captured = _capture_nondeterminism()
         try:
             resolved = resolve_value(dict(step.get("with") or {}), state, secrets)
             ctx = StepContext(
@@ -376,13 +468,17 @@ def run_workflow(
                 workflow=doc,
                 target_ticket=target_ticket,
                 repo_root=repo_root,
+                captured=captured,
             )
             result = _dispatch(ctx, registry, runner)
         except Exception as exc:  # a step failure is data, not a crash
             result = StepResult(outputs={}, status="failed", error=str(exc))
 
         state = state.with_step(step_id, result)
-        rec.step_recorded(_step_record(run_id, step_id, kind, result))
+        # Marker AFTER the effect: a crash between the effect and this line leaves
+        # the step applied-but-unmarked, so recovery re-runs it (idempotent on
+        # (run_id, step_id)); a present marker means definitely-done.
+        rec.step_recorded(_step_record(run_id, step_id, kind, result, captured))
 
         if result.status == "failed":
             run_status = "failed"
@@ -429,7 +525,13 @@ def _dispatch(
     return StepResult(outputs=dict(out) if isinstance(out, dict) else {})
 
 
-def _step_record(run_id: str, step_id: str, kind: str, result: StepResult) -> dict[str, Any]:
+def _step_record(
+    run_id: str,
+    step_id: str,
+    kind: str,
+    result: StepResult,
+    captured: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "run_id": run_id,
         "step_id": step_id,
@@ -437,7 +539,51 @@ def _step_record(run_id: str, step_id: str, kind: str, result: StepResult) -> di
         "status": result.status,
         "outputs": dict(result.outputs),
         "error": result.error,
+        "captured": dict(captured or {}),
     }
+
+
+# ── Snapshot TTL sweep (WS-C3 owns the sweep; WS-D owns create + teardown) ─────
+
+# Conventional location for git-ref filesystem snapshots a run creates (WS-D). The
+# sweep is here (run-lifecycle concern); WS-D writes into this directory and
+# normally tears its own snapshot down in a finally — the sweep is the backstop for
+# the crash case (a run that died before teardown leaves an orphan).
+SNAPSHOT_DIR_NAME = ".rebar/run_snapshots"
+SNAPSHOT_TTL_SECONDS = 24 * 3600  # a day; far longer than any run, short enough to GC
+
+
+def snapshot_root(repo_root: str | None = None) -> Path:
+    """The directory under which per-run filesystem snapshots live."""
+    base = Path(repo_root) if repo_root else Path.cwd()
+    return base / SNAPSHOT_DIR_NAME
+
+
+def sweep_orphan_snapshots(
+    repo_root: str | None = None, *, ttl_seconds: int = SNAPSHOT_TTL_SECONDS
+) -> list[str]:
+    """Remove snapshot tmpdirs older than ``ttl_seconds`` (orphans from crashed
+    runs). Returns the list of removed paths. Best-effort: an unremovable entry is
+    skipped, not raised — the sweep must never break a run. Idempotent and safe to
+    call at the start of every run.
+    """
+    root = snapshot_root(repo_root)
+    if not root.is_dir():
+        return []
+    cutoff = time.time() - ttl_seconds
+    removed: list[str] = []
+    for entry in root.iterdir():
+        try:
+            if entry.stat().st_mtime >= cutoff:
+                continue
+            if entry.is_dir():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                entry.unlink()
+            removed.append(str(entry))
+        except OSError:
+            continue
+    return removed
 
 
 __all__ = [
@@ -450,10 +596,16 @@ __all__ = [
     "FakeAgentRunner",
     "RunRecorder",
     "MemoryRecorder",
+    "TicketEventRecorder",
     "RunState",
     "RunResult",
     "ExpressionError",
     "resolve_value",
     "static_order",
     "run_workflow",
+    "new_run_id",
+    "snapshot_root",
+    "sweep_orphan_snapshots",
+    "SNAPSHOT_DIR_NAME",
+    "SNAPSHOT_TTL_SECONDS",
 ]

@@ -28,6 +28,18 @@ from rebar.llm.errors import (
     WorkflowVersionError,
 )
 
+from .executor import (
+    FakeAgentRunner,
+    MemoryRecorder,
+    RunResult,
+    StepContext,
+    StepResult,
+    TicketEventRecorder,
+    new_run_id,
+    register_step,
+    run_workflow,
+    sweep_orphan_snapshots,
+)
 from .lint import (
     LintFinding,
     lint_document,
@@ -78,4 +90,14 @@ __all__ = [
     "secret_scan",
     "scaffold",
     "SCAFFOLD_V1",
+    "run_workflow",
+    "new_run_id",
+    "RunResult",
+    "StepContext",
+    "StepResult",
+    "register_step",
+    "FakeAgentRunner",
+    "MemoryRecorder",
+    "TicketEventRecorder",
+    "sweep_orphan_snapshots",
 ]
