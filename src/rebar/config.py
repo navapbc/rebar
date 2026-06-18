@@ -174,6 +174,13 @@ def _warn_unknown(section: str, leftover: dict, source: str, *, strict: bool = F
 @dataclass
 class VerifyConfig:
     require_signature_for_close: bool = False
+    # Opt-in completion-verification close gate: when true, closing a work ticket runs the
+    # LLM completion-verifier (rebar.llm.verify_completion) and blocks on FAIL / unavailable
+    # LLM (fail-closed; --force-close bypasses without signing). On PASS the verdict is signed.
+    # Default off. NOTE: this and require_signature_for_close are ALTERNATIVES — the completion
+    # gate signs AFTER the close, while the signature gate requires a signature BEFORE it, so
+    # enabling both deadlocks a non-force close. Enable one.
+    require_completion_verification_for_close: bool = False
 
 
 @dataclass
@@ -266,7 +273,10 @@ _SECTION_CLASSES: dict[str, type] = {
 
 # section -> {key -> coercer(value, dotted_key) -> coerced value (raises ConfigError)}
 _SECTIONS: dict[str, dict] = {
-    "verify": {"require_signature_for_close": lambda v, k: _as_bool(v, k)},
+    "verify": {
+        "require_signature_for_close": lambda v, k: _as_bool(v, k),
+        "require_completion_verification_for_close": lambda v, k: _as_bool(v, k),
+    },
     "ticket": {"display_mode": lambda v, k: _as_str(v, k) or "auto"},
     "ticket_clarity": {"threshold": lambda v, k: _as_int(v, k, minimum=1)},
     "compact": {"threshold": lambda v, k: _as_int(v, k, minimum=1)},

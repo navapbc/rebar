@@ -144,6 +144,105 @@ def _compact_on_close(repo_root: str, ticket_id: str) -> None:
         pass
 
 
+def _completion_precheck(
+    ticket_id: str,
+    ticket_type: str,
+    cfg_root: str,
+    repo_root,
+    *,
+    reason: str,
+    force_close: str,
+):
+    """The completion-verification close gate's PRE-close half (runs outside the write lock).
+
+    Returns the manifest to **sign** on a PASS verdict, or ``None`` when the gate is off or the
+    close is a ``--force-close`` (which closes WITHOUT verifying or signing — withholding the
+    signed confirmation, so a closed-without-signature ticket is the durable signal that
+    validation did not pass). Raises :class:`CommandError` (block) on a FAIL verdict, or when
+    the LLM is unavailable / any verifier error (fail-closed). The ``rebar.llm`` import is LAZY
+    so the optionality contract holds: core stays stdlib-only unless the gate is on AND a
+    non-force close is attempted."""
+    from rebar.config import ConfigError, load_config
+
+    try:
+        on = load_config(cfg_root).verify.require_completion_verification_for_close
+    except ConfigError as exc:
+        # Unreadable config: fail this gate OFF with a WARNING (not silently), and do NOT block.
+        # Rationale: (1) this is an opt-in/default-off gate — an unreadable config must not
+        # auto-enable it across EVERY repo (and every ticket type) and run a billable LLM on a
+        # broken config; (2) the signature gate (txn._signature_gate) independently fail-CLOSES
+        # for story/epic on an unreadable config, so its stronger guarantee is preserved (and
+        # not preempted by this gate, which runs first/outside the lock); (3) within the trust
+        # model, a missing attestation is itself the "not validated" signal CI checks. The
+        # confirmed fail-CLOSED behavior still applies when the gate is readable-ON but the LLM
+        # is unavailable (below).
+        import sys
+
+        print(
+            f"Warning: could not read rebar config ({exc}); the completion-verification close "
+            f"gate is skipped for {ticket_id} (other close gates still apply).",
+            file=sys.stderr,
+        )
+        return None
+    if not on:
+        return None
+    if force_close:
+        return None  # close, but withhold the signed confirmation (no verify, no sign)
+
+    # Cheap precondition BEFORE the billable LLM call: a bug close needs a valid --reason
+    # (transition_core would reject it anyway). Shared predicate, so it can't drift.
+    if ticket_type == "bug" and not txn.bug_close_reason_ok(reason):
+        raise CommandError(
+            'Error: closing a bug requires --reason starting with "Fixed:" or '
+            '"Escalated to user:" (checked before running completion verification).',
+            returncode=1,
+        )
+
+    try:
+        from rebar import llm  # LAZY — preserves the optionality contract
+
+        result = llm.verify_completion(ticket_id, repo_root=repo_root)
+    except Exception as exc:  # missing extra/key OR any verifier failure -> fail-closed
+        raise CommandError(
+            f"Error: cannot close {ticket_id}: completion verification could not run ({exc}). "
+            "The completion-verification gate is enabled "
+            "(verify.require_completion_verification_for_close); install the 'agents' extra and "
+            'set a model API key, or override with --force-close="<reason>".',
+            returncode=1,
+        ) from None
+
+    if str(result.get("verdict", "")).upper() != "PASS":
+        items = result.get("findings", []) or []
+        lines = [
+            f"  - {(f.get('criterion') or f.get('dimension') or '?')}: {f.get('detail', '')}"
+            for f in items[:20]
+        ]
+        raise CommandError(
+            f"Error: completion verification FAILED for {ticket_id} — {len(items)} unmet "
+            "criteria; not closing.\n"
+            + "\n".join(lines)
+            + '\n  Address the criteria above, or override with --force-close="<reason>" '
+            "(closes without a completion signature).",
+            returncode=1,
+        )
+    return _verdict_manifest(result, ticket_id)
+
+
+def _verdict_manifest(result: dict, ticket_id: str) -> list[str]:
+    """Deterministic manifest (non-empty strings) of the verified PASS verdict, for signing.
+
+    The signature binds ``(ticket_id, manifest)``; the key fingerprint + head_sha on the record
+    provide attribution + freshness. Findings are failures-only, so a PASS has no per-criterion
+    list to itemize — the minimal core IS the attestation. Deterministic (no timestamps) so
+    re-signing the same verified state is reproducible."""
+    return [
+        "completion-verifier: PASS",
+        f"ticket: {ticket_id}",
+        f"model: {result.get('model') or 'n/a'}",
+        f"runner: {result.get('runner') or 'n/a'}",
+    ]
+
+
 def transition_compute(
     ticket_id: str,
     current_status: str,
@@ -232,6 +331,20 @@ def transition_compute(
                     returncode=1,
                 )
 
+    # Completion-verification close gate (opt-in; runs OUTSIDE the write lock since an LLM
+    # call must not serialize all writes). Ordering is verify -> close -> sign: the precheck
+    # runs the verifier and blocks (fail-closed) on FAIL / unavailable-LLM; on PASS it returns
+    # the manifest to sign AFTER a confirmed close (so a failed/raced close never leaves an
+    # orphan "certified" signature on an unclosed ticket). force_close skips both.
+    verified_manifest = None
+    if target_status == "closed":
+        from rebar.reducer import reduce_ticket as _reduce
+
+        ticket_type = (_reduce(os.path.join(tracker, ticket_id)) or {}).get("ticket_type", "")
+        verified_manifest = _completion_precheck(
+            ticket_id, ticket_type, repo_root_str, repo_root, reason=reason, force_close=force_close
+        )
+
     from rebar._commands import _seam
 
     env_id = _seam.env_id(config.tracker_dir(repo_root))
@@ -250,12 +363,21 @@ def transition_compute(
         force_close_reason=force_close,
     )
 
+    # PASS attestation: sign the verified verdict AFTER the close is confirmed. A crash in this
+    # (two-local-commit) window leaves closed-without-signature — the conservative direction
+    # (reads as "bypassed", never a false "validated"). Errors surface: we WANT a hard signal if
+    # the trustworthy record can't be written.
+    if target_status == "closed" and verified_manifest is not None:
+        from rebar import signing as _signing
+
+        _signing.sign_manifest(ticket_id, verified_manifest, repo_root=repo_root)
+
     # Force-close audit comment (best-effort, silenced — matches bash || true).
     if target_status == "closed" and force_close:
         session = os.environ.get("SESSION_ID") or _short_head(tracker) or "unknown"
         body = (
-            "FORCE_CLOSE: signature gate bypassed by user approval. "
-            f'Reason: "{force_close}". Session: {session}.'
+            "FORCE_CLOSE: close gate(s) bypassed by user approval — no completion/signature "
+            f'attestation was signed. Reason: "{force_close}". Session: {session}.'
         )
         try:
             from rebar._commands import leaf

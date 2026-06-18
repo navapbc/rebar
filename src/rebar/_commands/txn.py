@@ -112,6 +112,15 @@ def _unstage(tracker_dir: str, *abs_paths: str | None) -> None:
         pass
 
 
+def bug_close_reason_ok(reason: str) -> bool:
+    """True if a bug-close ``--reason`` is acceptable (starts with ``Fixed`` or
+    ``Escalated``…). Shared by :func:`transition_core`'s close guard and the completion
+    gate's pre-check (in ``transition_compute``) so the two cannot drift. Empty → False."""
+    if not reason:
+        return False
+    return reason.startswith("Fixed") or reason.lower().startswith("escalat")
+
+
 def transition_core(
     tracker_dir: str,
     ticket_id: str,
@@ -167,7 +176,7 @@ def transition_core(
 
         ticket_type = state.get("ticket_type", "")
 
-        # Bug-close-reason guard.
+        # Bug-close-reason guard (predicate shared with the completion gate's pre-check).
         if target_status == "closed" and ticket_type == "bug":
             if not close_reason:
                 raise CommandError(
@@ -175,7 +184,7 @@ def transition_core(
                     '"Fixed:" or "Escalated to user:"',
                     returncode=1,
                 )
-            if not (close_reason.startswith("Fixed") or close_reason.lower().startswith("escalat")):
+            if not bug_close_reason_ok(close_reason):
                 raise CommandError(
                     'Error: --reason must start with "Fixed:" or "Escalated to user:"',
                     returncode=1,

@@ -176,5 +176,5 @@ def test_gate_force_close_bypasses_with_warning_and_audit_comment(
     # The wrapper records a FORCE_CLOSE audit comment on the ticket.
     comments = rebar.show_ticket(tid, repo_root=str(rebar_repo))["comments"]
     bodies = "\n".join(c.get("body", "") for c in comments)
-    assert "FORCE_CLOSE: signature gate bypassed by user approval" in bodies
+    assert "FORCE_CLOSE: close gate(s) bypassed by user approval" in bodies
     assert 'Reason: "verifier offline"' in bodies
