@@ -58,6 +58,20 @@ agents = [
 ]
 # Additional model providers are opt-in (keep the default extra lean):
 #   pip install langchain-google-genai   # Gemini
+#
+# Prompt evaluation (epic a88f / WS-G). Net-new extra: Inspect AI is the eval
+# substrate; promptfoo interop is via the generated JUnit/config (no pip dep).
+# Imported lazily behind `rebar._optional.guard_import(..., extra="eval")`.
+eval = [
+    "inspect-ai>=0.3.221",
+]
+# OTLP trace sink (epic a88f / WS-J). Net-new extra. WRITE-ONLY by rule —
+# OpenTelemetry is a sink, never read back into a rebar decision (oracle
+# discipline). Imported lazily behind guard_import(..., extra="tracing").
+tracing = [
+    "opentelemetry-sdk>=1.20",
+    "opentelemetry-exporter-otlp>=1.20",
+]
 dev = [
     "pytest>=8",
     "mcp>=1.2",

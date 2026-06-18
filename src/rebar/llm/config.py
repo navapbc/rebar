@@ -313,7 +313,17 @@ def available_backends() -> dict:
         "openai_api_key": bool(os.environ.get("OPENAI_API_KEY")),
         "langfuse_configured": LangfuseConfig.from_env().enabled,
         "langflow_url": bool(os.environ.get("LANGFLOW_URL")),
+        # Net-new extras (epic a88f / WS-J): detected via the core guard, no import.
+        "eval_extra": _extra_installed("eval"),
+        "tracing_extra": _extra_installed("tracing"),
     }
+
+
+def _extra_installed(extra: str) -> bool:
+    """Thin bridge to the core optional-dependency guard (rebar._optional)."""
+    from rebar._optional import extra_installed
+
+    return extra_installed(extra)
 
 
 def agents_extra_installed() -> bool:

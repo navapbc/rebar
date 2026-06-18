@@ -747,8 +747,13 @@ def build_server():
             from rebar.llm.workflow import runs as _wf_runs
 
             run_id = _wf_exec.new_run_id()
-            # Record the index BEFORE returning so an immediate status poll resolves.
+            # Record the index AND an initial 'running' marker BEFORE returning, so an
+            # immediate get_workflow_status poll resolves and sees the run (the
+            # background thread overwrites the record with the full result, LWW).
             _wf_runs.record_run_location(run_id, ticket_id, None)
+            _wf_exec.TicketEventRecorder(ticket_id).run_started(
+                {"run_id": run_id, "status": "running", "workflow_name": workflow}
+            )
 
             def _bg() -> None:
                 # Best-effort: any failure is reflected in the persisted run-state

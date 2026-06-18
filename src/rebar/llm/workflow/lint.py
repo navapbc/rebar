@@ -483,7 +483,11 @@ def lint_workflow(
 
     findings: list[LintFinding] = []
     for msg in validate_document(doc, source=source):
-        findings.append(LintFinding(source, msg))
+        # The "note: full JSON Schema validation skipped" line (degraded path when
+        # jsonschema is absent in a lean install) is informational — a WARNING, not
+        # a blocking error, so the lean core still validates structurally + passes.
+        severity = "warning" if msg.startswith("note:") else "error"
+        findings.append(LintFinding(source, msg, severity))
     findings.extend(lint_document(doc, source=source, expressions=expressions))
     findings.extend(_scan_secret_literals(doc))
     findings.extend(secret_scan(text, source=source))

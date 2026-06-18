@@ -325,3 +325,18 @@ def test_parse_failure_returns_single_finding() -> None:
     findings = L.lint_workflow("- not a mapping\n")
     assert len(findings) == 1
     assert not L.lint_passes(findings)
+
+
+def test_lean_core_degrades_when_jsonschema_absent(monkeypatch) -> None:
+    # Simulate a no-extras install (no jsonschema): a VALID workflow still passes —
+    # structural fallback + a non-blocking warning, never a false error.
+    from rebar import schemas
+
+    def _no_jsonschema(name):
+        raise ImportError("no jsonschema in this lean install")
+
+    monkeypatch.setattr(schemas, "validator", _no_jsonschema)
+    findings = L.lint_workflow(CLEAN)
+    assert L.lint_passes(findings), _msgs(findings)
+    # The skip note is present but only as a warning.
+    assert any(f.severity == "warning" and "jsonschema" in f.message.lower() for f in findings)

@@ -419,8 +419,11 @@ def run_workflow(
     secrets = secrets or {}
     inputs = dict(inputs or {})
 
-    errors = validate_document(doc) + [str(f) for f in lint_document(doc)]
-    errors = [e for e in errors if "[warning]" not in e]
+    # Block only on real errors: the informational "note:" line (degraded
+    # jsonschema-absent path) and lint warnings never stop a run.
+    schema_errors = [e for e in validate_document(doc) if not e.startswith("note:")]
+    lint_errors = [str(f) for f in lint_document(doc) if f.severity != "warning"]
+    errors = schema_errors + lint_errors
     if errors:
         raise WorkflowValidationError(errors, source=str(doc.get("name", "<workflow>")))
 
