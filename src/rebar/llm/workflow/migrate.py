@@ -1,0 +1,96 @@
+"""Read-time schema_version up-conversion for the workflow DSL (WS-B3).
+
+The DSL evolves the way the event store does: forward-only and never destructive.
+Each released DSL version ships ONE immutable, version-pinned JSON Schema at a
+stable ``$id`` (``workflow.v1.schema.json``, ``workflow.v2.schema.json``, …) that
+is *never edited in place*. To run an older file under a newer rebar, we
+**up-convert at read time** through a chain of single-step shims
+(``vN -> v(N+1)``) and validate the result against the current schema — we never
+rewrite the file on disk. To run a *newer* file under an older rebar is a hard
+``WorkflowVersionError`` ("upgrade rebar"), because a forward shim cannot be
+invented after the fact.
+
+This mirrors the store's replay model: the bytes on disk are the immutable record;
+the in-memory shape is derived. Registering a shim is the only supported way to
+change the DSL across a version boundary, and every shim must carry a golden
+round-trip test (a vN fixture and its expected v(N+1) output) so the conversion is
+pinned, not hand-waved.
+
+``v1`` is the base version, so ``_SHIMS`` is currently empty; the chaining
+machinery is exercised by ``tests/unit/workflow/test_migrate.py`` (which registers
+a synthetic shim) so the path is proven before a real second version lands.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from copy import deepcopy
+from typing import Any
+
+from .schema import (
+    CURRENT_SCHEMA_VERSION,
+    SUPPORTED_SCHEMA_VERSIONS,
+    declared_version,
+    schema_name_for_version,
+)
+
+# A single-step up-conversion shim. Keyed by the SOURCE version string; the
+# callable takes a document at that version and returns a NEW document at the next
+# version, with ``schema_version`` advanced. Shims must be pure (no in-place
+# mutation of the input) and total over valid documents at their source version.
+Shim = Callable[[dict[str, Any]], dict[str, Any]]
+
+# The registry. Empty today (v1 is the base). When DSL v2 ships, add a
+# workflow.v2.schema.json and register ``_SHIMS["1"] = _v1_to_v2`` here, with a
+# golden round-trip test. Ordered by the natural integer order of the keys at
+# migrate time, so a multi-step chain (v1->v2->v3) composes deterministically.
+_SHIMS: dict[str, Shim] = {}
+
+
+def _next_version(version: str) -> str:
+    """The integer-successor version string (``"1" -> "2"``)."""
+    return str(int(version) + 1)
+
+
+def migrate_to_current(doc: dict[str, Any], *, source: str = "<workflow>") -> dict[str, Any]:
+    """Up-convert ``doc`` to :data:`CURRENT_SCHEMA_VERSION`, returning a NEW dict.
+
+    * Already current  -> a deep copy, unchanged.
+    * Older + reachable -> chained through ``_SHIMS`` one version at a time.
+    * Newer than this build, or older with no shim path -> ``WorkflowVersionError``.
+
+    Never mutates ``doc`` and never touches disk; this is the read-time half of the
+    store-style "immutable record, derived shape" contract. ``schema_name_for_version``
+    is the single gate for the upgrade-rebar case (it raises for a too-new version),
+    reused here so the two entry points cannot diverge.
+    """
+    version = declared_version(doc, source=source)
+    # Resolve-and-gate: raises WorkflowVersionError for a version newer than this
+    # build understands (the upgrade-rebar case) BEFORE we attempt any chaining.
+    schema_name_for_version(version, source=source)
+
+    current = deepcopy(doc)
+    # Forward-only chain. Each iteration advances exactly one version; the gate
+    # above guarantees we never loop past CURRENT, and a missing shim for a
+    # supported-but-older version is a clear, located error.
+    while version != CURRENT_SCHEMA_VERSION:
+        shim = _SHIMS.get(version)
+        if shim is None:
+            from rebar.llm.errors import WorkflowVersionError
+
+            raise WorkflowVersionError(
+                f"{source}: no migration shim from workflow schema_version {version!r} "
+                f"(supported: {', '.join(SUPPORTED_SCHEMA_VERSIONS)}); cannot up-convert"
+            )
+        nxt = _next_version(version)
+        current = shim(current)
+        # Defensive: a shim must advance the version it claims to. Catch a buggy
+        # shim that forgets to set schema_version rather than spin forever.
+        current["schema_version"] = nxt
+        version = nxt
+    return current
+
+
+def registered_source_versions() -> tuple[str, ...]:
+    """The source versions with a registered up-conversion shim (introspection)."""
+    return tuple(sorted(_SHIMS, key=int))

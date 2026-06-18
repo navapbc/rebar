@@ -28,12 +28,21 @@ from rebar.llm.errors import (
     WorkflowVersionError,
 )
 
+from .lint import (
+    LintFinding,
+    lint_document,
+    lint_passes,
+    lint_workflow,
+    secret_scan,
+)
+from .migrate import migrate_to_current, registered_source_versions
 from .schema import (
     CURRENT_SCHEMA_VERSION,
     MAX_WORKFLOW_BYTES,
     SUPPORTED_SCHEMA_VERSIONS,
     canonical_json,
     content_hash,
+    declared_version,
     dump_workflow,
     load_workflow,
     parse_workflow,
@@ -53,9 +62,17 @@ __all__ = [
     "parse_workflow",
     "load_workflow",
     "validate_document",
+    "declared_version",
     "schema_name_for_version",
+    "migrate_to_current",
+    "registered_source_versions",
     "step_kind",
     "canonical_json",
     "content_hash",
     "dump_workflow",
+    "LintFinding",
+    "lint_workflow",
+    "lint_document",
+    "lint_passes",
+    "secret_scan",
 ]
