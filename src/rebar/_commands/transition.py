@@ -201,7 +201,13 @@ def _completion_precheck(
     try:
         from rebar import llm  # LAZY — preserves the optionality contract
 
-        result = llm.verify_completion(ticket_id, repo_root=repo_root)
+        # graph=False: the close gate verifies THIS ticket's OWN completion criteria, NOT its
+        # whole descendant subtree. Children are separate tickets gated on their own close; the
+        # agent reads the actual code regardless of whether child ticket TEXT is inlined, so
+        # graph=True would only bloat the context and make an epic close re-verify the entire
+        # feature in one run (impractical — it blows the step budget). The standalone
+        # `rebar verify-completion <id> --graph` remains available for a deep human review.
+        result = llm.verify_completion(ticket_id, graph=False, repo_root=repo_root)
     except Exception as exc:  # missing extra/key OR any verifier failure -> fail-closed
         raise CommandError(
             f"Error: cannot close {ticket_id}: completion verification could not run ({exc}). "

@@ -59,6 +59,62 @@ def _readonly_ticket_tools(repo_path):
         return None
 
 
+def _child_closure_findings(ticket_id: str, repo_root) -> list[dict]:
+    """Deterministic **child-closure-trust** check (the "epic-level verdict trust" rule).
+
+    A parent (epic/story) is not complete unless every **direct** child is CLOSED **with a
+    signed/validated closure** — i.e. carries a certified completion signature. This is checked
+    deterministically (a graph + signature invariant, not an LLM judgment): we DO NOT recurse
+    into grandchildren (each child owns its own subtree), and we DO NOT re-verify a child's own
+    completion criteria — the child's **certified signature IS** the trusted attestation that its
+    criteria were validated when it closed. Returns one completion finding per direct child that
+    is not closed, or closed without a certified signature. Childless tickets (most tasks/bugs)
+    yield ``[]`` (``list_tickets(parent=…)`` is empty), so this is a natural no-op for them."""
+    import rebar
+
+    try:
+        children = rebar.list_tickets(parent=ticket_id, repo_root=repo_root)
+    except Exception:
+        return []
+    out: list[dict] = []
+    for c in children:
+        cid = c.get("ticket_id")
+        title = (c.get("title") or "")[:50]
+        status = c.get("status")
+        if status != "closed":
+            out.append(
+                {
+                    "criterion": f"direct child {cid} is closed",
+                    "severity": "high",
+                    "dimension": "completion",
+                    "detail": f"child {cid} ('{title}') is '{status}', not closed.",
+                    "citations": [{"kind": "source", "description": f"ticket {cid} status={status}"}],
+                }
+            )
+            continue
+        try:
+            verdict = rebar.verify_signature(cid, repo_root=repo_root).get("verdict")
+        except Exception as exc:  # never let a signature read crash the verification
+            verdict = f"error: {exc}"
+        if verdict != "certified":
+            out.append(
+                {
+                    "criterion": f"direct child {cid} has a signed/validated closure",
+                    "severity": "high",
+                    "dimension": "completion",
+                    "detail": (
+                        f"child {cid} ('{title}') is closed but its completion closure is not "
+                        f"certified (signature: {verdict}). Re-close it through the gate so it "
+                        "carries a validated closure."
+                    ),
+                    "citations": [
+                        {"kind": "source", "description": f"verify_signature({cid})={verdict}"}
+                    ],
+                }
+            )
+    return out
+
+
 def _reconcile(result: dict) -> None:
     """Normalize the verdict and enforce the FAIL⇔findings invariant IN PLACE.
 
@@ -184,12 +240,14 @@ def verify_completion(
 
     result["target"] = {"kind": "ticket", "ticket_ids": ids}
     result["reviewers"] = [_REVIEWER_ID]
-    # The structured path skips normalize_finding (unlike the findings path); normalize each
-    # finding here (clamp severity, coerce citations to {kind,…}, strip nulls). normalize_finding
-    # KEEPS unknown keys, so the per-finding `criterion` survives.
+    # Merge the LLM's own-criteria findings with the DETERMINISTIC child-closure-trust findings
+    # (the verifier checks this ticket's OWN criteria via the agent, PLUS that every direct child
+    # is closed+signed — without recursing or re-verifying child criteria). The structured path
+    # skips normalize_finding (unlike the findings path), so normalize all of them here (clamp
+    # severity, coerce citations, strip nulls); normalize_finding KEEPS the per-finding `criterion`.
+    merged = list(result.get("findings", [])) + _child_closure_findings(ids[0], repo_root)
     result["findings"] = [
-        findings.normalize_finding(f, reviewer_id=_REVIEWER_ID)
-        for f in result.get("findings", [])
+        findings.normalize_finding(f, reviewer_id=_REVIEWER_ID) for f in merged
     ]
     findings.resolve_citations(result, cfg.repo_path)  # downgrade hallucinated file: citations
     _reconcile(result)  # normalize verdict; enforce FAIL⇔findings

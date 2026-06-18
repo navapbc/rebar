@@ -130,6 +130,51 @@ def test_op_normalizes_verdict_casing(rebar_repo: Path) -> None:
     assert _verify(rebar_repo, tid, {"verdict": "garbage", "findings": []})["verdict"] == "FAIL"
 
 
+def test_child_closure_trust(rebar_repo: Path) -> None:
+    """Epic-level verdict trust: a parent is FAIL unless every DIRECT child is closed WITH a
+    certified signature — without recursing or re-verifying child criteria. The LLM verdict on
+    the parent's OWN criteria is PASS here (FakeRunner), so the verdict is driven purely by the
+    deterministic child-closure check."""
+    import subprocess
+
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-q", "-m", "c"], cwd=str(rebar_repo),
+        check=True, capture_output=True,
+    )
+    parent = rebar.create_ticket(
+        "epic", "parent",
+        description="Body.\n\n## Acceptance Criteria\n- [ ] x\n\n## Success Criteria\n- [ ] y\n\n## Context\nc\n",
+        repo_root=str(rebar_repo),
+    )
+    child = rebar.create_ticket(
+        "task", "child", parent=parent,
+        description="A child.\n\n## Acceptance Criteria\n- [ ] done\n", repo_root=str(rebar_repo),
+    )
+    PASS = {"verdict": "PASS", "findings": []}
+
+    def verdict():
+        return rebar.llm.verify_completion(
+            parent, repo_root=str(rebar_repo), runner=FakeRunner(structured=dict(PASS))
+        )
+
+    # 1. child OPEN -> parent FAIL (child not closed)
+    r = verdict()
+    assert r["verdict"] == "FAIL"
+    assert any("is closed" in f["criterion"] for f in r["findings"])
+
+    # 2. child CLOSED but UNSIGNED -> parent still FAIL (closure not certified)
+    rebar.transition(child, "open", "closed", repo_root=str(rebar_repo))
+    r = verdict()
+    assert r["verdict"] == "FAIL"
+    assert any("signed/validated closure" in f["criterion"] for f in r["findings"])
+
+    # 3. child closed AND signed -> child-check clears; parent PASS (own criteria PASS)
+    rebar.sign_manifest(child, ["completion-verifier: PASS"], repo_root=str(rebar_repo))
+    assert rebar.verify_signature(child, repo_root=str(rebar_repo))["verdict"] == "certified"
+    r = verdict()
+    assert r["verdict"] == "PASS", r["findings"]
+
+
 def test_op_downgrades_hallucinated_file_citation(rebar_repo: Path) -> None:
     tid = _seed(rebar_repo)
     r = _verify(

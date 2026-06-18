@@ -362,6 +362,18 @@ the op then deterministically normalizes it and enforces FAIL⇔findings (`_reco
 resolves citations. Findings are **failures-only** (a completion check, not a code review);
 a ticket with no explicit criteria PASSes with a note.
 
+**Child-closure trust (parents/epics).** A parent is not complete unless every **direct** child
+is closed **with a certified completion signature**. The op checks this **deterministically**
+(a graph + signature invariant, not an LLM judgment) and merges it with the agent's findings: it
+does **not** recurse into grandchildren, and does **not** re-verify a child's own criteria — the
+child's certified signature **is** the trusted attestation that its criteria were validated when
+it closed (the "epic-level verdict trust" pattern). So verifying an epic checks the epic's own
+success criteria (the agent, against the code) **plus** that its children each carry a signed
+closure — it never re-walks the whole subtree (which is impractical and re-does work the
+children's own gates already did). The **close gate** runs the verifier with `graph=False` for
+exactly this reason (the standalone `rebar verify-completion <id> --graph` still inlines the
+subtree for a human review).
+
 > **Model + budget tuning (important).** Completion verification wants a *decisive* model, not
 > a maximally-thorough one. The framework default (opus) over-explores — it rabbit-holes
 > confirming code is "wired" and trips the step budget even on a 2-criterion ticket — so the op
