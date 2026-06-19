@@ -113,6 +113,26 @@ def author(fallback: str = "Unknown") -> str:
     return fallback
 
 
+import re as _re
+
+_TAG_CTRL_RE = _re.compile(r"[\x00-\x1f\x7f]")
+
+
+def validate_tag_name(raw: str) -> str:
+    """Trim a tag name and reject empty/whitespace-only/control-char values (P2.3).
+
+    The single tag-name guard shared by every write path (leaf tag/untag and the
+    edit add/remove/set deltas) so ``rebar.tag``/MCP ``tag_ticket`` can't bypass it.
+    Returns the trimmed name; raises :class:`CommandError` on an invalid one.
+    """
+    t = str(raw).strip()
+    if not t:
+        raise CommandError("Error: tag name must be non-empty / non-whitespace")
+    if _TAG_CTRL_RE.search(t):
+        raise CommandError(f"Error: invalid tag name {raw!r} (contains control characters)")
+    return t
+
+
 def current_tags(ticket_id: str, tracker: Path) -> list[str]:
     """The compiled ``tags`` list for a ticket via the shared reducer (single source).
 

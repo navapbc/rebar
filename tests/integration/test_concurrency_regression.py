@@ -368,6 +368,20 @@ def test_two_clone_set_tags_table_converges(two_clones):
     assert _event_files(tracker_a) == _event_files(tracker_b)
     assert _tags(repo_a, seed) == _tags(repo_b, seed), "set‖set non-deterministic replay"
 
+    # set ‖ remove: A sets {m,n} while B removes m (m is in A's observed base from
+    # the prior phase? no — re-establish). Both clones must converge identically.
+    # Seed a shared 'm' first so B's remove targets a witnessed tag.
+    _engine_run(repo_a, "edit", seed, "--set-tags=m,n")  # online; auto-push
+    _expire_sync_marker(tracker_b)
+    _engine_run(repo_b, "list")
+    assert "m" in _tags(repo_b, seed)
+    _diverge(tracker_a, tracker_b)
+    _engine_run(repo_a, "edit", seed, "--set-tags=m,n,s")  # A keeps m, adds s
+    _engine_run(repo_b, "edit", seed, "--remove-tag=m")  # B drops m concurrently
+    _reconverge(remote, repo_a, repo_b, tracker_a, tracker_b, "comment", seed, "sync2")
+    assert _event_files(tracker_a) == _event_files(tracker_b)
+    assert _tags(repo_a, seed) == _tags(repo_b, seed), "set‖remove non-deterministic replay"
+
 
 def test_two_clone_add_remove_converges(two_clones):
     """P2.3 add ‖ remove (disjoint tags) over a shared base converges

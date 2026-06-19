@@ -109,6 +109,17 @@ def test_control_char_tag_rejected(rebar_repo: Path) -> None:
     assert _edit(rebar_repo, tid, "--add-tag=ok\x01bad") == 1
 
 
+def test_whitespace_only_tag_rejected_on_leaf_path(rebar_repo: Path) -> None:
+    """rebar.tag / MCP tag_ticket route through leaf.tag — which must also reject
+    whitespace-only / control-char names (not just empty)."""
+    tid = _seed(rebar_repo)
+    with pytest.raises(rebar.RebarError):
+        rebar.tag(tid, "   ", repo_root=str(rebar_repo))
+    with pytest.raises(rebar.RebarError):
+        rebar.tag(tid, "x\x01y", repo_root=str(rebar_repo))
+    assert _tags(rebar_repo, tid) == []
+
+
 # ── deprecated edit(tags=) alias behaves as a (convergent) set ────────────────
 def test_deprecated_tags_alias_sets(rebar_repo: Path) -> None:
     tid = _seed(rebar_repo, tags=["old"])

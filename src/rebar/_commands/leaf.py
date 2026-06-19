@@ -25,6 +25,7 @@ from rebar._commands._seam import (
     require_id,
     require_not_ghost,
     tracker_dir,
+    validate_tag_name,
 )
 
 
@@ -81,6 +82,7 @@ def tag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
     tracker = tracker_dir(repo_root)
     if not ticket_id or not tag_value:
         raise CommandError("Error: ticket_id and tag must be non-empty")
+    tag_value = validate_tag_name(tag_value)
     resolved = require_id(ticket_id, tracker)
     tags = current_tags(resolved, tracker)
     if tag_value in tags:
@@ -105,6 +107,7 @@ def untag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
     tracker = tracker_dir(repo_root)
     if not ticket_id or not tag_value:
         raise CommandError("Error: ticket_id and tag must be non-empty")
+    tag_value = validate_tag_name(tag_value)
     resolved = require_id(ticket_id, tracker)
     tags = current_tags(resolved, tracker)
     if tag_value not in tags:

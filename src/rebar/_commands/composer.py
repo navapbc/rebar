@@ -23,6 +23,7 @@ from rebar._commands._seam import (
     require_id,
     require_not_ghost,
     tracker_dir,
+    validate_tag_name,
 )
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
@@ -262,17 +263,13 @@ _EDIT_USAGE = (
     "[--add-tag=t1,t2] [--remove-tag=t1,t2] [--set-tags=t1,t2]"
 )
 
-import re as _re
-
-_TAG_CTRL_RE = _re.compile(r"[\x00-\x1f\x7f]")
-
-
 def _parse_tag_list(value, *, validate: bool) -> list[str]:
     """Normalise a tag spec (CSV string or list) to a deduped, trimmed tag list.
 
-    ``validate`` rejects empty/whitespace-only/control-char names (applied to tags
-    ENTERING state — adds/sets); removals skip it (you may legitimately remove a
-    previously-malformed tag). Order-preserving dedup.
+    ``validate`` rejects empty/whitespace-only/control-char names via the shared
+    :func:`validate_tag_name` (applied to tags ENTERING state — adds/sets);
+    removals skip it (you may legitimately remove a previously-malformed tag, and
+    an empty token there is just dropped). Order-preserving dedup.
     """
     if value is None:
         return []
@@ -281,9 +278,9 @@ def _parse_tag_list(value, *, validate: bool) -> list[str]:
     for raw in items:
         t = str(raw).strip()
         if not t:
-            continue
-        if validate and _TAG_CTRL_RE.search(t):
-            raise CommandError(f"Error: invalid tag name {raw!r} (contains control characters)")
+            continue  # CSV cleanliness: empty tokens (a,,b / --set-tags="") dropped
+        if validate:
+            t = validate_tag_name(t)  # non-empty here, so only control-char check fires
         if t not in out:
             out.append(t)
     return out
