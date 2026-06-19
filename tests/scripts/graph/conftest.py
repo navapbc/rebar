@@ -62,3 +62,38 @@ def _isolate_git_from_enclosing_repo(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", ceilings)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _link_writes_persist_without_repo(monkeypatch):
+    """Persist canonical LINK events on bare-directory trackers (no git repo).
+
+    This suite tests ``add_dependency`` as a *pure graph operation* — cycle and
+    hierarchy rules, idempotency, and the LINK event file that ``build_dep_graph``
+    reads — against plain-directory trackers (see ``_isolate_git_from_enclosing_repo``).
+    Production routes LINK writes through the ONE canonical store path
+    (``rebar._store.event_append.write_and_push``), which legitimately refuses to
+    write to an un-initialized store (no ``.git``). Rather than stand up a full git
+    store per test, persist the *composed* event file directly when the tracker is
+    not a repo (the durability/commit step is out of scope here and is covered by
+    the store-layer tests), and delegate to the real committer when a repo IS present
+    (the push-policy e2e tests create their own repo+remote under tmp_path).
+    """
+    import os
+
+    from rebar._store import event_append as _ea
+
+    _real_write_and_push = _ea.write_and_push
+
+    def _persist(tracker, ticket_id, event):
+        if os.path.exists(os.path.join(str(tracker), ".git")):
+            return _real_write_and_push(tracker, ticket_id, event)
+        ticket_dir = os.path.join(str(tracker), ticket_id)
+        os.makedirs(ticket_dir, exist_ok=True)
+        fname = _ea.event_filename(event["timestamp"], event["uuid"], event["event_type"])
+        with open(os.path.join(ticket_dir, fname), "wb") as fh:
+            fh.write(_ea.canonical_bytes(event))
+        return 0
+
+    monkeypatch.setattr(_ea, "write_and_push", _persist)
+    yield

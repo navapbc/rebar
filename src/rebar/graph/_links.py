@@ -6,9 +6,7 @@ import glob as _glob
 import json
 import os
 import sys
-import uuid
 
-from rebar._store.canonical import canonical_str
 from rebar.reducer._sort import prefix_ts as _prefix_ts
 
 from ._graph import check_cycle_at_level, check_would_create_cycle
@@ -111,148 +109,32 @@ def _write_link_event(
     relation: str,
     tracker_dir: str,
 ) -> None:
-    """Write a single LINK event to source_id's directory (no cycle check, no idempotency)."""
-    import fcntl as _fcntl
-    import subprocess as _sp
+    """Write a single LINK event to source_id's directory (no cycle check, no idempotency).
 
-    from rebar._store import hlc
+    Routes through the ONE canonical locked write path — the shared leaf-write seam
+    ``rebar._commands._seam.append_event`` → ``rebar._store.event_append.write_and_push``.
+    The seam composes the canonical envelope (real ``author`` + ``env_id``, monotonic
+    HLC tick) and the store core owns the dual-leg fcntl+mkdir lock, atomic rename,
+    rebase guard, commit, and best-effort push. Previously this function hand-rolled
+    its own ``flock`` + ``git add``/``commit`` + push-retry loop — a second write path
+    that diverged from the store core (wrong author/env_id sentinels, weaker lock, no
+    rebase guard). See epic ``clumsy-jab-yacht`` / story ``scabby-slur-junk``.
 
-    source_dir = os.path.join(tracker_dir, source_id)
-    if not os.path.isdir(source_dir):
-        os.makedirs(source_dir, exist_ok=True)
+    Raises :class:`rebar._commands._seam.CommandError` on a genuine commit failure
+    (e.g. rebase-in-progress guard, exit 75); the push step is best-effort and never
+    raises. Callers tolerate this: ``link_core`` documents "Raises CommandError" and
+    the reconciler's inbound applier wraps ``rebar.link`` in a non-fatal try/except.
+    """
+    from pathlib import Path
 
-    link_uuid = str(uuid.uuid4())
-    timestamp = hlc.next_tick(tracker_dir, source_id)
+    from rebar._commands import _seam
 
-    link_event = {
-        "event_type": "LINK",
-        "uuid": link_uuid,
-        "timestamp": timestamp,
-        "author": "ticket-graph",
-        "env_id": "00000000-0000-4000-8000-000000000000",
-        "data": {
-            "target_id": target_id,
-            "relation": relation,
-        },
-    }
-
-    filename = f"{timestamp}-{link_uuid}-LINK.json"
-    event_path = os.path.join(source_dir, filename)
-    with open(event_path, "w", encoding="utf-8") as f:
-        f.write(canonical_str(link_event))
-
-    _rel_path = os.path.relpath(event_path, tracker_dir)
-    _commit_msg = f"ticket: link {source_id} {relation} {target_id}"
-    _lock_path = os.path.join(tracker_dir, ".ticket-write.lock")
-    try:
-        with open(_lock_path, "a") as _lock_fd:
-            _fcntl.flock(_lock_fd, _fcntl.LOCK_EX)
-            try:
-                _sp.run(
-                    ["git", "-C", tracker_dir, "add", _rel_path],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-                _sp.run(
-                    [
-                        "git",
-                        "-C",
-                        tracker_dir,
-                        "commit",
-                        "-q",
-                        "--no-verify",
-                        "-m",
-                        _commit_msg,
-                    ],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-            finally:
-                _fcntl.flock(_lock_fd, _fcntl.LOCK_UN)
-    except _sp.CalledProcessError as e:
-        print(f"Warning: git commit failed for LINK event: {e.stderr}", file=sys.stderr)
-        return
-
-    # Best-effort push — mirrors bash _push_tickets_branch behavior.
-    # Skipped when the push policy is off (sync.push=off / REBAR_SYNC_PUSH=off, used by
-    # test repos with no remote) and when no remote exists.
-    # per direction). Each call pushes independently. Double best-effort pushes are harmless:
-    # the second push is a no-op if no new commits exist between the two calls, and both are
-    # non-fatal. This matches how bash write_commit_event works (one push per commit).
-    try:
-        from rebar.config import ConfigError, load_config
-
-        # Explicit root (parent of the tracker dir) → pure stat-based discovery, no
-        # git subprocess for root detection (callers here mock subprocess.run).
-        if load_config(root=os.path.dirname(tracker_dir)).sync.push == "off":
-            return
-    except ConfigError:
-        pass  # best-effort: a bad config must not break the link-event push
-    _remote_check = _sp.run(
-        ["git", "-C", tracker_dir, "remote"],
-        capture_output=True,
-        text=True,
+    _seam.append_event(
+        source_id,
+        "LINK",
+        {"target_id": target_id, "relation": relation},
+        Path(tracker_dir),
     )
-    if _remote_check.stdout.strip():
-        _max_retries = 3
-        _attempt = 0
-        # Push HEAD:tickets (not bare "tickets") so the detached-HEAD commit
-        # is pushed regardless of refs/heads/tickets state. The bash caller
-        # in ticket-lib.sh uses the same refspec for the same reason. Bug 27d8-b230.
-        _push_env = {**os.environ, "PRE_COMMIT_ALLOW_NO_CONFIG": "1"}
-        while _attempt < _max_retries:
-            _push = _sp.run(
-                ["git", "-C", tracker_dir, "push", "origin", "HEAD:tickets"],
-                capture_output=True,
-                text=True,
-                env=_push_env,
-            )
-            if _push.returncode == 0:
-                break
-            _stderr = _push.stderr or ""
-            import re as _re
-
-            if _re.search(r"non-fast-forward|rejected|fetch first", _stderr):
-                _sp.run(
-                    ["git", "-C", tracker_dir, "fetch", "origin", "tickets"],
-                    capture_output=True,
-                    text=True,
-                )
-                _rebase = _sp.run(
-                    ["git", "-C", tracker_dir, "rebase", "origin/tickets"],
-                    capture_output=True,
-                    text=True,
-                )
-                if _rebase.returncode != 0:
-                    _sp.run(
-                        ["git", "-C", tracker_dir, "rebase", "--abort"],
-                        capture_output=True,
-                        text=True,
-                    )
-                    _merge = _sp.run(
-                        [
-                            "git",
-                            "-C",
-                            tracker_dir,
-                            "merge",
-                            "origin/tickets",
-                            "--no-edit",
-                        ],
-                        capture_output=True,
-                        text=True,
-                    )
-                    if _merge.returncode != 0:
-                        _sp.run(
-                            ["git", "-C", tracker_dir, "merge", "--abort"],
-                            capture_output=True,
-                            text=True,
-                        )
-                        break  # best-effort: give up on unresolvable conflict
-            else:
-                break  # non-retryable error
-            _attempt += 1
 
 
 def add_dependency(

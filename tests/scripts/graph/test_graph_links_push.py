@@ -1,8 +1,15 @@
-"""Same-second LINK/UNLINK ordering and _write_link_event push-retry
+"""Same-second LINK/UNLINK ordering.
 
 Split from the former monolithic tests/scripts/test_ticket_graph.py along
 graph-concern seams. The `graph` fixture + autouse git-isolation fixture live in
 conftest.py; event-writing helpers + the module loader in _helpers.py.
+
+Note: the former ``_write_link_event`` push-retry tests were removed when graph
+link writes were routed through the canonical store path
+(``rebar._store.event_append.write_and_push``) — the hand-rolled flock+git+push-retry
+loop they exercised no longer exists, and push-retry/non-fast-forward behavior is
+now owned and tested at the store layer (``rebar._store.push``). See epic
+``clumsy-jab-yacht`` / story ``scabby-slur-junk``.
 """
 
 from __future__ import annotations
@@ -13,7 +20,6 @@ from types import ModuleType
 
 import pytest
 from _helpers import (
-    REPO_ROOT,
     _write_ticket,
 )
 
@@ -106,106 +112,3 @@ def test_is_active_link_same_second_unlink_sorts_after_link(
         "This indicates same-second UNLINK is sorting before LINK — the timestamp "
         "tie-breaker (event_type_order: LINK=0, UNLINK=1) is missing or incorrect."
     )
-
-
-# ---------------------------------------------------------------------------
-# Tests for _write_link_event push retry logic (bug 79de-85d4)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-@pytest.mark.scripts
-def test_write_link_event_retries_on_non_fast_forward(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """_write_link_event retries push on non-fast-forward and succeeds on second attempt.
-
-    Mock ordering note: subprocess.run is called for git add, git commit, git remote
-    BEFORE the push retry loop, so side_effects must account for all 7 calls:
-      add_ok, commit_ok, remote_ok, push_fail, fetch_ok, rebase_ok, push_ok
-    MagicMock does NOT simulate check=True raising CalledProcessError — returncode is
-    returned but no exception is raised for add/commit mocks.
-    """
-    import sys
-    from unittest.mock import MagicMock, patch
-
-    _scripts_dir = str(REPO_ROOT / "src" / "rebar" / "_engine")
-    if _scripts_dir not in sys.path:
-        sys.path.insert(0, _scripts_dir)
-
-    from rebar.graph._links import _write_link_event as _real_write_link_event
-
-    # Sandbox cwd to tmp_path so any relative file write under test stays inside
-    # the auto-cleaned fixture rather than landing in REPO_ROOT.
-    monkeypatch.chdir(tmp_path)
-
-    tracker_dir = tmp_path / ".tickets-tracker"
-    tracker_dir.mkdir()
-    (tracker_dir / "tkt-src3").mkdir()
-
-    ok = MagicMock(returncode=0, stdout="", stderr="")
-    remote_ok = MagicMock(returncode=0, stdout="origin\n", stderr="")
-    push_fail = MagicMock(
-        returncode=1, stdout="", stderr="error: non-fast-forward updates were rejected"
-    )
-    push_ok = MagicMock(returncode=0, stdout="", stderr="")
-
-    # Call order: git add, git commit, git remote, git push (fail),
-    #             git fetch, git rebase, git push (success)
-    side_effects = [ok, ok, remote_ok, push_fail, ok, ok, push_ok]
-
-    with (
-        patch("subprocess.run", side_effect=side_effects) as mock_run,
-        patch.dict("os.environ", {"REBAR_SYNC_PUSH": "always"}, clear=False),
-    ):
-        _real_write_link_event("tkt-src3", "tkt-tgt3", "depends_on", str(tracker_dir))
-
-    all_cmds = [c.args[0] for c in mock_run.call_args_list if c.args]
-    push_calls = [cmd for cmd in all_cmds if "push" in cmd]
-    assert len(push_calls) == 2, (
-        f"Expected 2 push attempts (1 non-fast-forward + 1 retry success), got {len(push_calls)}. "
-        f"All commands: {all_cmds}"
-    )
-
-
-@pytest.mark.unit
-@pytest.mark.scripts
-def test_write_link_event_push_gives_up_on_merge_conflict(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """_write_link_event is best-effort: if rebase AND merge both fail, it gives up silently."""
-    import sys
-    from unittest.mock import MagicMock, patch
-
-    _scripts_dir = str(REPO_ROOT / "src" / "rebar" / "_engine")
-    if _scripts_dir not in sys.path:
-        sys.path.insert(0, _scripts_dir)
-
-    from rebar.graph._links import _write_link_event as _real_write_link_event
-
-    # Sandbox cwd to tmp_path so any relative file write under test stays inside
-    # the auto-cleaned fixture rather than landing in REPO_ROOT.
-    monkeypatch.chdir(tmp_path)
-
-    tracker_dir = tmp_path / ".tickets-tracker"
-    tracker_dir.mkdir()
-    (tracker_dir / "tkt-src4").mkdir()
-
-    ok = MagicMock(returncode=0, stdout="", stderr="")
-    remote_ok = MagicMock(returncode=0, stdout="origin\n", stderr="")
-    push_fail = MagicMock(
-        returncode=1, stdout="", stderr="error: non-fast-forward updates were rejected"
-    )
-    rebase_fail = MagicMock(returncode=1, stdout="", stderr="CONFLICT (content): Merge conflict")
-    merge_fail = MagicMock(returncode=1, stdout="", stderr="CONFLICT (content): Merge conflict")
-
-    # git add, git commit, git remote, git push (fail), git fetch,
-    # git rebase (fail), git rebase --abort, git merge (fail), git merge --abort
-    side_effects = [ok, ok, remote_ok, push_fail, ok, rebase_fail, ok, merge_fail, ok]
-
-    with (
-        patch("subprocess.run", side_effect=side_effects),
-        patch.dict("os.environ", {"REBAR_SYNC_PUSH": "always"}, clear=False),
-    ):
-        # Must not raise — best-effort means failure is silently swallowed
-        _real_write_link_event("tkt-src4", "tkt-tgt4", "depends_on", str(tracker_dir))
