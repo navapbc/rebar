@@ -30,6 +30,9 @@ def _scan_alias_jira(target: str, tracker_dir: str) -> tuple[list[str], list[str
     hard failure listing the tracker (mirrors the helper's exit 1 — a hard failure
     must not masquerade as "no match"). Per-ticket I/O errors skip that ticket.
     """
+    # local import: reducer._alias ↔ _engine_support.resolver are a lazy-import pair
+    # (reducer._processors imports resolve_ticket_id from here at call time). Importing
+    # _alias at module scope would close that cycle at load time — keep it function-local.
     from rebar.reducer._alias import compute_alias
 
     try:

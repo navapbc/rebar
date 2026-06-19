@@ -16,6 +16,7 @@ import logging
 import urllib.error
 from typing import Any
 
+from rebar_reconciler._errors import is_not_found
 from rebar_reconciler.apply_base import (
     ApplyResult,
     _direction_guard,
@@ -412,7 +413,7 @@ def _apply_outbound_delete(mutation, *, client=None, repo_root=None) -> ApplyRes
     try:
         _call_with_retry(client.delete_issue, mutation.target)
     except JiraAPIError as exc:
-        if getattr(exc, "status_code", None) == 404:
+        if is_not_found(exc):
             # Already-gone is the post-state we want — treat as success.
             return ApplyResult(mutation.direction, mutation.action, {"already_gone": True})
         raise

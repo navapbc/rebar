@@ -178,6 +178,7 @@ def reduce_ticket(
 
 def reduce_all_tickets(
     tracker_dir: str | os.PathLike[str],
+    *,
     exclude_archived: bool = False,
     exclude_deleted: bool = False,
     exclude_session_logs: bool = False,

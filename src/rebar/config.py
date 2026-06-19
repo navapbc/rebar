@@ -407,6 +407,11 @@ _RESULT_CACHE: dict[tuple, tuple[Config, tuple]] = {}
 # resolve_with_sources fall back to this when no explicit ``cli_overrides`` arg is
 # given, so the documented CLI-wins precedence holds across every config consumer
 # without threading the overrides through every call site.
+#
+# NOT an MCP-concurrency hazard (verified, story uneven-sake-cocoa): this module
+# global is set ONLY from the CLI entrypoint (``rebar -c …`` → set_cli_overrides in
+# rebar._cli) and is NEVER set by the MCP server, so under ``rebar-mcp`` it stays
+# ``None`` for the whole process — there is no per-request mutation to race.
 _CLI_OVERRIDES: dict | None = None
 
 

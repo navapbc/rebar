@@ -993,6 +993,7 @@ __all__ = [
     "append_session_log",
     "start_session_log",
     "edit_ticket",
+    "attach_commits",
     "link",
     "unlink",
     "tag",

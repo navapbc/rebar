@@ -21,6 +21,7 @@ import time
 import urllib.error
 from pathlib import Path
 
+from rebar_reconciler._errors import http_status, is_not_found
 from rebar_reconciler.pass_io import _write_mapping_atomic
 
 logger = logging.getLogger(__name__)
@@ -297,7 +298,7 @@ def _is_illegal_transition_400(exc: Exception) -> bool:
     'transition'. These are state errors (not transient), so they must not
     be retried.
     """
-    code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    code = http_status(exc)
     if code != 400:
         return False
     msg = str(exc).lower()
@@ -508,7 +509,7 @@ def delete_one(mutation: dict, client) -> None:
     try:
         _call_with_retry(client.delete_issue, mutation.get("key"))
     except JiraAPIError as exc:
-        if getattr(exc, "status_code", None) == 404:
+        if is_not_found(exc):
             return  # already-gone is the goal of a delete mutation
         raise
 

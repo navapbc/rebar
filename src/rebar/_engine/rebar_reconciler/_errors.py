@@ -1,5 +1,28 @@
 """Domain exceptions for rebar_reconciler."""
 
+from http import HTTPStatus
+
+
+def http_status(exc: BaseException) -> int | None:
+    """Best-effort HTTP status code from a transport/HTTP exception.
+
+    Normalizes the two attribute conventions that coexist in the reconciler:
+    urllib's ``HTTPError.code`` and the REST layer's ``.status_code``. Returns
+    ``None`` when neither is present (a non-HTTP error). Centralizing this removes
+    the prior inconsistency where some sites read ``exc.code`` (which raised
+    AttributeError when the exception instead carried ``status_code``) and others
+    read ``getattr(exc, "status_code", None)``.
+    """
+    code = getattr(exc, "status_code", None)
+    if code is None:
+        code = getattr(exc, "code", None)
+    return code if isinstance(code, int) else None
+
+
+def is_not_found(exc: BaseException) -> bool:
+    """True when *exc* is an HTTP 404 (the Jira issue is gone → idempotent delete)."""
+    return http_status(exc) == HTTPStatus.NOT_FOUND
+
 
 class RebarIdLabelWriteError(Exception):
     """Raised when an unauthorized leaf attempts to emit a rebar-id label mutation.
