@@ -175,6 +175,50 @@ def test_child_closure_trust(rebar_repo: Path) -> None:
     assert r["verdict"] == "PASS", r["findings"]
 
 
+def test_child_closure_gate_short_circuits_before_llm(rebar_repo: Path) -> None:
+    """The child-closure gate is DETERMINISTIC and runs BEFORE the LLM (bug a254): when a
+    direct child is not closed+signed, verify_completion returns a FAIL verdict WITHOUT ever
+    invoking the runner (so the cost is independent of child count, and the evaluator never has
+    to reason about child closure). Once children clear, the gate passes through to the LLM."""
+
+    class _BoomRunner:
+        """A runner that fails loudly if its model run is ever reached."""
+
+        name = "boom"
+
+        def preflight(self) -> None:
+            pass
+
+        def run(self, req):
+            raise AssertionError("LLM evaluator was called despite a failing child-closure gate")
+
+    parent = rebar.create_ticket(
+        "epic", "parent",
+        description=(
+            "Body.\n\n## Acceptance Criteria\n- [ ] x\n\n"
+            "## Success Criteria\n- [ ] y\n\n## Context\nc\n"
+        ),
+        repo_root=str(rebar_repo),
+    )
+    child = rebar.create_ticket(
+        "task", "child", parent=parent,
+        description="A child.\n\n## Acceptance Criteria\n- [ ] done\n",
+        repo_root=str(rebar_repo),
+    )
+
+    # child OPEN -> deterministic FAIL; the runner is NEVER reached (no AssertionError raised).
+    r = rebar.llm.verify_completion(parent, repo_root=str(rebar_repo), runner=_BoomRunner())
+    assert r["verdict"] == "FAIL"
+    assert r["runner"] == "deterministic"  # proves no model ran
+    assert any("is closed" in f["criterion"] for f in r["findings"])
+
+    # close + sign the child -> the gate clears -> the LLM IS reached (BoomRunner now raises).
+    rebar.transition(child, "open", "closed", repo_root=str(rebar_repo))
+    rebar.sign_manifest(child, ["completion-verifier: PASS"], repo_root=str(rebar_repo))
+    with pytest.raises(AssertionError, match="LLM evaluator was called"):
+        rebar.llm.verify_completion(parent, repo_root=str(rebar_repo), runner=_BoomRunner())
+
+
 def test_op_downgrades_hallucinated_file_citation(rebar_repo: Path) -> None:
     tid = _seed(rebar_repo)
     r = _verify(

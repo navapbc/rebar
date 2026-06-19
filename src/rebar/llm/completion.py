@@ -88,7 +88,9 @@ def _child_closure_findings(ticket_id: str, repo_root) -> list[dict]:
                     "severity": "high",
                     "dimension": "completion",
                     "detail": f"child {cid} ('{title}') is '{status}', not closed.",
-                    "citations": [{"kind": "source", "description": f"ticket {cid} status={status}"}],
+                    "citations": [
+                        {"kind": "source", "description": f"ticket {cid} status={status}"}
+                    ],
                 }
             )
             continue
@@ -145,6 +147,35 @@ def _reconcile(result: dict) -> None:
     result["findings"] = items
 
 
+def _deterministic_child_failure(ticket_id: str, child_findings: list[dict], cfg) -> dict:
+    """Build a FAIL ``completion_verdict`` from the deterministic child-closure findings
+    WITHOUT invoking the LLM evaluator.
+
+    Used by the child-closure gate: a parent with a child that is not closed+signed is
+    incomplete by a graph+signature invariant, so there is nothing for the LLM to judge —
+    we return the deterministic failure directly (no billable call). Shaped like a normal
+    verdict (target/reviewers/runner) so the close gate and callers treat it uniformly;
+    ``runner='deterministic'`` records that no model ran."""
+    result = {
+        "verdict": "FAIL",
+        "findings": [
+            findings.normalize_finding(f, reviewer_id=_REVIEWER_ID) for f in child_findings
+        ],
+        "summary": (
+            f"{len(child_findings)} direct child ticket(s) are not closed with a certified "
+            "completion signature — the parent cannot be complete until they are."
+        ),
+        "target": {"kind": "ticket", "ticket_ids": [ticket_id]},
+        "reviewers": [_REVIEWER_ID],
+        "runner": "deterministic",
+        "model": None,
+        "trace_id": None,
+    }
+    findings.resolve_citations(result, cfg.repo_path)
+    _reconcile(result)  # FAIL⇔findings invariant (already satisfied; defensive)
+    return findings.validate_structured(result, _OUTPUT_SCHEMA)
+
+
 def verify_completion(
     ticket_id: str,
     *,
@@ -183,14 +214,27 @@ def verify_completion(
     # recursion cap mid-run.
     if cfg.max_iterations < _VERIFY_MIN_STEPS:
         cfg = replace(cfg, max_iterations=_VERIFY_MIN_STEPS)
-    reviewer = prompts.get_reviewer(_REVIEWER_ID)
-
-    # graph default depends on ticket type (epics verify across children). One extra local
-    # read of the root ticket (reduce_ticket-backed; no network).
+    # Resolve the canonical id + ticket type once (one local read; no network). graph
+    # default depends on ticket type (epics verify across children).
+    root = rebar.show_ticket(ticket_id, repo_root=repo_root)
+    canonical_id = root.get("ticket_id", ticket_id)
     if graph is None:
-        root = rebar.show_ticket(ticket_id, repo_root=repo_root)
         graph = root.get("ticket_type") == "epic"
 
+    # ── Deterministic child-closure gate (runs BEFORE any LLM call) ─────────────────────
+    # A parent (epic/story) is incomplete unless every DIRECT child is closed WITH a
+    # certified completion signature — a graph+signature invariant, checked deterministically
+    # here, NOT by the LLM. If any child fails it, return a FAIL verdict immediately and DO
+    # NOT call the (billable, slow, step-bounded) evaluator. Consequence: the LLM is only ever
+    # reached once children are all closed+signed, so it never has to reason about child
+    # closure — which was the source of the count-dependent false-negatives and step-budget
+    # blowups (bug a254). Childless tickets yield no findings → natural pass-through to the
+    # own-criteria check below.
+    child_findings = _child_closure_findings(canonical_id, repo_root)
+    if child_findings:
+        return _deterministic_child_failure(canonical_id, child_findings, cfg)
+
+    reviewer = prompts.get_reviewer(_REVIEWER_ID)
     context, ids = operations._assemble_context(ticket_id, graph=graph, repo_root=repo_root)
     # Fence the UNTRUSTED context so the prompt's instruction-hierarchy clause can refer to it
     # unambiguously (the delimiting half of the OWASP/Anthropic prompt-injection mitigation).
@@ -203,8 +247,13 @@ def verify_completion(
     system_prompt, langfuse_prompt = prompts.resolve_prompt(reviewer, variables, cfg.langfuse)
     instructions = (
         f"Verify whether ticket {ids[0]} has met every completion requirement it states"
-        + (" (including requirements met by its child tickets)" if graph else "")
+        + (" (its child tickets' content may satisfy some requirements — read them for context)"
+           if graph else "")
         + ".\n\n"
+        "Child-ticket CLOSURE is already verified for you: this evaluator is only reached once "
+        "every direct child is closed with a certified completion signature, so do NOT — and "
+        "you must not — re-check whether children are closed, exist, or are signed. Judge only "
+        "this ticket's OWN substantive completion requirements.\n\n"
         "You have read-only repository tools and a read-only ticket tool — USE them, do not "
         "rely on memory or guess at the code:\n"
         "- list_directory(path): explore structure (generated/ignored files are hidden)\n"
@@ -244,14 +293,13 @@ def verify_completion(
 
     result["target"] = {"kind": "ticket", "ticket_ids": ids}
     result["reviewers"] = [_REVIEWER_ID]
-    # Merge the LLM's own-criteria findings with the DETERMINISTIC child-closure-trust findings
-    # (the verifier checks this ticket's OWN criteria via the agent, PLUS that every direct child
-    # is closed+signed — without recursing or re-verifying child criteria). The structured path
-    # skips normalize_finding (unlike the findings path), so normalize all of them here (clamp
-    # severity, coerce citations, strip nulls); normalize_finding KEEPS the per-finding `criterion`.
-    merged = list(result.get("findings", [])) + _child_closure_findings(ids[0], repo_root)
+    # The deterministic child-closure gate already ran (and PASSED — else we returned a
+    # _deterministic_child_failure above), so this verdict is purely the LLM's own-criteria
+    # judgment. The structured path skips normalize_finding (unlike the findings path), so
+    # normalize here (clamp severity, coerce citations, strip nulls); it KEEPS `criterion`.
     result["findings"] = [
-        findings.normalize_finding(f, reviewer_id=_REVIEWER_ID) for f in merged
+        findings.normalize_finding(f, reviewer_id=_REVIEWER_ID)
+        for f in result.get("findings", [])
     ]
     findings.resolve_citations(result, cfg.repo_path)  # downgrade hallucinated file: citations
     _reconcile(result)  # normalize verdict; enforce FAIL⇔findings

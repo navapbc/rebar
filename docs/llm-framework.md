@@ -362,15 +362,19 @@ the op then deterministically normalizes it and enforces FAIL⇔findings (`_reco
 resolves citations. Findings are **failures-only** (a completion check, not a code review);
 a ticket with no explicit criteria PASSes with a note.
 
-**Child-closure trust (parents/epics).** A parent is not complete unless every **direct** child
-is closed **with a certified completion signature**. The op checks this **deterministically**
-(a graph + signature invariant, not an LLM judgment) and merges it with the agent's findings: it
-does **not** recurse into grandchildren, and does **not** re-verify a child's own criteria — the
-child's certified signature **is** the trusted attestation that its criteria were validated when
-it closed (the "epic-level verdict trust" pattern). So verifying an epic checks the epic's own
-success criteria (the agent, against the code) **plus** that its children each carry a signed
-closure — it never re-walks the whole subtree (which is impractical and re-does work the
-children's own gates already did). The **close gate** runs the verifier with `graph=False` for
+**Child-closure trust (parents/epics) — a deterministic gate BEFORE the LLM.** A parent is not
+complete unless every **direct** child is closed **with a certified completion signature**. This
+is a graph + signature invariant, checked **deterministically and FIRST**: `verify_completion`
+enumerates the direct children (via the `parent_id` hierarchy, `list_tickets(parent=…)`), and if
+any child is not closed+certified it returns a **FAIL verdict immediately, without ever invoking
+the LLM** (the verdict's `runner` is `"deterministic"`). It does **not** recurse into grandchildren
+and does **not** re-verify a child's own criteria — the child's certified signature **is** the
+trusted attestation that its criteria were validated when it closed. The consequence (and the fix
+for the count-dependent false-negatives + step-budget blowups of bug `a254`): the **LLM evaluator
+is only ever reached once all children are closed+signed**, so it never reasons about child
+closure — it judges only the parent's **own** substantive success criteria (the agent, against the
+code). The cost of the child check is independent of child count. It never re-walks the whole
+subtree (which is impractical and re-does work the children's own gates already did). The **close gate** runs the verifier with `graph=False` for
 exactly this reason (the standalone `rebar verify-completion <id> --graph` still inlines the
 subtree for a human review).
 
