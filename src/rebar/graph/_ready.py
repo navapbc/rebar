@@ -18,7 +18,7 @@ from pathlib import Path
 
 from rebar.reducer import reduce_all_tickets
 
-from ._relations import _BLOCKING_RELATIONS
+from ._relations import build_blocked_by
 
 _OPEN_STATUSES = {"open", "in_progress"}
 _CLOSED_STATUSES = {"closed"}
@@ -68,27 +68,8 @@ def find_ready_tickets(
             continue
         ticket_states[tid] = state
 
-    # Build blocked_by map: blocked_id → set of blocker_ids
-    # deps list in a state: each dep has {target_id, relation, link_uuid}
-    # LINK event in ticket X's dir means "X relation target_id"
-    # - "depends_on": X depends on target_id → target_id blocks X → blocker=target_id, blocked=X
-    # - "blocks":     X blocks target_id → blocker=X, blocked=target_id
-    blocked_by: dict[str, set[str]] = {}
-    for ticket_id, state in ticket_states.items():
-        for dep in state.get("deps", []):
-            relation = dep.get("relation")
-            if relation not in _BLOCKING_RELATIONS:
-                continue
-            target_id = dep.get("target_id")
-            if not target_id:
-                continue
-            if relation == "depends_on":
-                blocker_id = target_id
-                blocked_id = ticket_id
-            else:  # "blocks"
-                blocker_id = ticket_id
-                blocked_id = target_id
-            blocked_by.setdefault(blocked_id, set()).add(blocker_id)
+    # blocked_id → set of blocker_ids (shared blocking-edge inversion).
+    blocked_by = build_blocked_by(ticket_states)
 
     def all_blockers_closed(ticket_id: str) -> bool:
         blockers = blocked_by.get(ticket_id, set())

@@ -11,13 +11,13 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from rebar.llm import prompts
+from rebar.llm.aggregate import _severity_rank
 from rebar.llm.config import LLMConfig
-from rebar.llm.findings import build_result, resolve_citations, validate_result
+from rebar.llm.findings import finalize_findings
 from rebar.llm.runner import Runner, RunRequest, get_runner
 
 __all__ = ["scan_epics_for_spec"]
 
-_SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
 _DESC_CAP = 600  # per-epic description chars inlined into the batch context
 
 
@@ -96,10 +96,8 @@ def scan_epics_for_spec(
         )
         findings.extend(selected.run(req).get("findings", []))
 
-    findings.sort(
-        key=lambda f: _SEVERITY_RANK.get(str(f.get("severity", "info")).lower(), 0), reverse=True
-    )
-    result = build_result(
+    findings.sort(key=_severity_rank, reverse=True)
+    return finalize_findings(
         findings,
         runner=getattr(selected, "name", cfg.runner),
         model=cfg.model,
@@ -108,6 +106,5 @@ def scan_epics_for_spec(
         reviewers=[reviewer_id],
         summary=f"scanned {len(tickets)} epic(s) in {batches} batch(es); "
         f"{len(findings)} finding(s).",
+        repo_path=cfg.repo_path,
     )
-    resolve_citations(result, cfg.repo_path)
-    return validate_result(result)

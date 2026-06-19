@@ -491,6 +491,24 @@ def _latest_live_archived_uuid(ticket_dir: str) -> str:
     return max(live)[1] if live else ""
 
 
+def _resolve_id_or_report(raw_id: str, tracker: str, fmt: str) -> str | None:
+    """Resolve a ticket id for a ``*_cli`` handler; on failure emit the standard
+    ``ticket_not_found`` envelope (when ``fmt == "json"``) plus the stderr line, and
+    return ``None`` so the caller returns exit 1. Shared by ``transition_cli`` and
+    ``claim_cli`` (the identical resolve-id-or-emit block was inlined in both)."""
+    ticket_id = resolve_ticket_id(raw_id, tracker)
+    if ticket_id is None:
+        if fmt == "json":
+            sys.stdout.write(
+                json.dumps(
+                    error_envelope("ticket_not_found", raw_id, f"Ticket '{raw_id}' not found", 1)
+                )
+                + "\n"
+            )
+        sys.stderr.write(f"Error: ticket '{raw_id}' not found\n")
+    return ticket_id
+
+
 def transition_cli(argv: list[str], *, repo_root=None) -> int:
     """``rebar transition`` entry: parse ``--output``, autodetect/validate, run the
     un-archive seam or :func:`transition_compute`, print, return the exit code."""
@@ -505,16 +523,8 @@ def transition_cli(argv: list[str], *, repo_root=None) -> int:
 
     raw_id = rest[0]
     tracker = str(config.tracker_dir(repo_root))
-    ticket_id = resolve_ticket_id(raw_id, tracker)
+    ticket_id = _resolve_id_or_report(raw_id, tracker, fmt)
     if ticket_id is None:
-        if fmt == "json":
-            sys.stdout.write(
-                json.dumps(
-                    error_envelope("ticket_not_found", raw_id, f"Ticket '{raw_id}' not found", 1)
-                )
-                + "\n"
-            )
-        sys.stderr.write(f"Error: ticket '{raw_id}' not found\n")
         return 1
 
     tail = rest[1:]
@@ -662,16 +672,8 @@ def claim_cli(argv: list[str], *, repo_root=None) -> int:
         return exc.returncode
 
     tracker = str(config.tracker_dir(repo_root))
-    ticket_id = resolve_ticket_id(raw_id, tracker)
+    ticket_id = _resolve_id_or_report(raw_id, tracker, fmt)
     if ticket_id is None:
-        if fmt == "json":
-            sys.stdout.write(
-                json.dumps(
-                    error_envelope("ticket_not_found", raw_id, f"Ticket '{raw_id}' not found", 1)
-                )
-                + "\n"
-            )
-        sys.stderr.write(f"Error: ticket '{raw_id}' not found\n")
         return 1
 
     try:

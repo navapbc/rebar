@@ -21,7 +21,7 @@ from rebar.llm import prompts
 from rebar.llm.aggregate import aggregate_findings
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMConfigError
-from rebar.llm.findings import build_result, resolve_citations, validate_result
+from rebar.llm.findings import finalize_findings
 from rebar.llm.runner import Runner, RunRequest, get_runner
 
 __all__ = ["review_code", "select_code_reviewers"]
@@ -164,7 +164,7 @@ def review_code(
 
     merged = aggregate_findings(results)
     runner_name = results[0]["runner"] if results else getattr(selected, "name", cfg.runner)
-    result = build_result(
+    return finalize_findings(
         merged,
         runner=runner_name,
         model=cfg.model,
@@ -172,6 +172,5 @@ def review_code(
         target={"kind": "code", "commits": [base, head], "files": changed_files},
         reviewers=reviewer_ids,
         summary=f"{len(reviewer_ids)} reviewer(s); {len(merged)} finding(s) after aggregation.",
+        repo_path=cfg.repo_path,
     )
-    resolve_citations(result, cfg.repo_path)
-    return validate_result(result)

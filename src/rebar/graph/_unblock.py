@@ -21,7 +21,8 @@ from pathlib import Path
 
 from rebar.reducer import reduce_all_tickets, reduce_ticket
 
-_BLOCKING_RELATIONS = {"blocks", "depends_on"}
+from ._relations import build_blocked_by
+
 _CLOSED_STATUSES = {"closed", "deleted"}
 _VALID_EVENT_SOURCES = {"local-close", "sync-resolution"}
 
@@ -87,21 +88,8 @@ def detect_newly_unblocked(
             return True  # missing dir → tombstoned, treat as closed
         return _is_closed(state.get("status", "open"))
 
-    # blocked_by[ticket_id] = set of ticket_ids that block it (direct blockers).
-    blocked_by: dict[str, set[str]] = {}
-    for ticket_id, state in ticket_states.items():
-        for dep in state.get("deps", []):
-            relation = dep.get("relation")
-            if relation not in _BLOCKING_RELATIONS:
-                continue
-            target_id = dep.get("target_id")
-            if not target_id:
-                continue
-            if relation == "blocks":
-                blocker_id, blocked_id = ticket_id, target_id
-            else:  # depends_on: target_id blocks ticket_id
-                blocker_id, blocked_id = target_id, ticket_id
-            blocked_by.setdefault(blocked_id, set()).add(blocker_id)
+    # blocked_id → set of blocker_ids (shared blocking-edge inversion).
+    blocked_by = build_blocked_by(ticket_states)
 
     newly_unblocked: list[str] = []
     for ticket_id, state in ticket_states.items():
