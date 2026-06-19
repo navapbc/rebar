@@ -1,0 +1,19 @@
+# Module-size allowlist — grandfathered files over the 800-LOC soft cap.
+#
+# Policy (docs/architecture.md "Module-size policy"): target 200-500 LOC/file,
+# soft cap 800. The CI "module-size gate" (.github/workflows/test.yml) FAILS when a
+# file exceeds 800 LOC and is NOT listed here — so the over-cap set cannot silently
+# grow. To add a file here you must ALSO add a remedy row to the offenders table in
+# docs/architecture.md (the two are kept in lock-step). Prefer splitting along an
+# existing call-graph seam over allow-listing.
+#
+# One repo-relative path per line. Keep sorted.
+src/rebar/__init__.py
+src/rebar/_cli/__init__.py
+src/rebar/_engine/rebar_reconciler/applier.py
+src/rebar/_engine/rebar_reconciler/outbound_differ.py
+src/rebar/_engine/rebar_reconciler/reconcile.py
+src/rebar/_engine_support/reads.py
+src/rebar/config.py
+src/rebar/mcp_server.py
+</content>

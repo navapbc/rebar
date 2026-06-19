@@ -106,18 +106,34 @@ jobs:
           git config --global user.name "rebar CI"
           git config --global init.defaultBranch main
 
-      # Warn-only module-size report (policy: target 200-500 LOC, soft cap 800;
-      # see docs/architecture.md). Informational — never fails the build; it just
-      # surfaces files that grew past the cap so new offenders are visible in PRs.
-      - name: Module-size report (warn-only)
-        if: runner.os == 'Linux'
+      # Module-size gate (policy: target 200-500 LOC, soft cap 800; docs/architecture.md).
+      # FAILS when a file exceeds 800 LOC and is NOT in .github/module-size-allowlist.txt,
+      # so the over-cap set cannot silently grow. The grandfathered offenders are
+      # allow-listed (and tracked with remedies in the architecture.md table); adding to
+      # the allowlist is a deliberate, reviewed act. Runs on every OS (pure wc/shell).
+      - name: Module-size gate
         shell: bash
         run: |
-          echo "Files over the 800-LOC soft cap (policy: docs/architecture.md):"
+          allowlist=.github/module-size-allowlist.txt
           over=$(find src/rebar -name '*.py' | grep -v __pycache__ \
             | xargs wc -l 2>/dev/null \
-            | awk '$2 != "total" && $1 > 800 { printf "  %5d  %s\n", $1, $2 }' | sort -rn)
-          if [ -n "$over" ]; then echo "$over"; else echo "  (none — all units within the soft cap)"; fi
+            | awk '$2 != "total" && $1 > 800 { print $2 }' | sort)
+          allowed=$(grep -vE '^[[:space:]]*(#|$)' "$allowlist" | sort)
+          new_offenders=$(comm -23 <(printf '%s\n' "$over") <(printf '%s\n' "$allowed") | grep -v '^$' || true)
+          echo "Over-cap files (allow-listed, tracked in docs/architecture.md):"
+          if [ -n "$over" ]; then
+            printf '%s\n' "$over" | while read -r f; do [ -n "$f" ] && printf "  %5d  %s\n" "$(wc -l < "$f")" "$f"; done
+          else
+            echo "  (none)"
+          fi
+          if [ -n "$new_offenders" ]; then
+            echo "::error::New file(s) over the 800-LOC soft cap and NOT in $allowlist:"
+            printf '%s\n' "$new_offenders" | while read -r f; do [ -n "$f" ] && printf "  %5d  %s\n" "$(wc -l < "$f")" "$f"; done
+            echo "Split it along an existing call-graph seam, or (if genuinely cohesive) add"
+            echo "it to $allowlist AND add a remedy row to the docs/architecture.md table."
+            exit 1
+          fi
+          echo "Module-size gate: OK (no new over-cap files)."
 
       - name: Run the default suite (Python tiers + bash collector; excludes integration + external)
         # Pin --basetemp under the runner temp (not /tmp): on long (10-16 min) runs

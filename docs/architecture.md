@@ -165,15 +165,22 @@ The policy:
 
 ### Current offenders (> 800 LOC) and planned remedy
 
-Tracked so the over-cap set is visible, not silently growing. A warn-only size
-report runs in CI (`.github/workflows/test.yml`) so new offenders surface in PRs.
+Tracked so the over-cap set is visible, not silently growing. A CI **module-size
+gate** (`.github/workflows/test.yml`) **fails the build** when a file exceeds 800
+LOC and is not in `.github/module-size-allowlist.txt` — so a *new* offender cannot
+land silently. The allowlist below and this table are kept in lock-step: adding a
+file to one requires a row in the other. (LOC measured 2026-06-18.)
 
 | File | LOC | Remedy |
 |------|----:|--------|
-| `rebar_reconciler/reconcile.py` | ~1305 | split orchestration vs pass-driver seams |
-| `rebar_reconciler/outbound_differ.py` | ~1114 | split per-field differ seams |
-| `__init__.py` | ~1019 | library facade well over the cap (now also carries the workflow engine entrypoints `run_workflow`/`get_workflow_status`/`get_workflow_result` + `attach_commits`, epic a88f) — split the read vs write API along the existing seam |
-| `_engine_support/reads.py` | ~930 | just over the cap (P1.1 `--sort`); split the CLI `_cmd_*` arms from the `*_state` facades along the existing seam if it grows |
+| `rebar_reconciler/reconcile.py` | 1308 | split orchestration vs pass-driver seams (extract the corrupt-snapshot abort + the OM→Mutation conversion; keep the fetch→diff→apply spine inline) |
+| `rebar_reconciler/outbound_differ.py` | 1277 | split per-field differ seams (`_diff_fields`/`_diff_comments`/`_diff_labels`) |
+| `_cli/__init__.py` | 1100 | split the argv-routing/`_dispatch` arms from the lazy command-delegation seam |
+| `__init__.py` | 1036 | library facade over the cap (also carries the workflow entrypoints `run_workflow`/`get_workflow_status`/`get_workflow_result` + `attach_commits`, epic a88f) — split the read vs write API along the existing seam |
+| `_engine_support/reads.py` | 930 | split the CLI `_cmd_*` arms from the `*_state` facades along the existing seam |
+| `config.py` | 909 | split the dataclass/schema from the env/CLI-override + cache machinery along the existing seam |
+| `mcp_server.py` | 848 | thin FastMCP tool layer; split the read tools from the write/LLM tools if it grows |
+| `rebar_reconciler/applier.py` | 801 | split the apply-dispatch table from the per-action handlers |
 
 `src/rebar/llm/runner.py` was **decomposed** in WS-A (epic a88f): the
 filesystem/repo cluster (`_safe_path`, `_git_tracked`, `_discovery_filter`,
@@ -182,10 +189,8 @@ to `src/rebar/llm/fs_tools.py` (293 LOC), bringing `runner.py` from 829 → 560 
 back under the soft cap. `fs_tools.py` is also where the workflow engine's git-ref
 snapshot code (WS-D) will land.
 
-Files in the 500–800 band (`_commands/transition.py`,
-`_commands/composer.py`, `_engine_support/next_batch.py`, `mcp_server.py`,
-`llm/runner.py`, and
-several `rebar_reconciler/` modules — `apply_inbound.py`, `applier.py`,
-`_advisory_lock.py`, `acli.py`, `inbound_differ.py`, `differ.py`,
-`batch_dispatch.py`, `acli_cli_ops.py`) are at the ceiling, not over it — watch,
-don't split preemptively.
+Files in the 500–800 band (`_commands/transition.py`, `_commands/composer.py`,
+`_engine_support/next_batch.py`, `llm/runner.py`, and several `rebar_reconciler/`
+modules — `apply_inbound.py`, `_advisory_lock.py`, `acli.py`, `inbound_differ.py`,
+`differ.py`, `batch_dispatch.py`, `acli_cli_ops.py`) are at the ceiling, not over
+it — watch, don't split preemptively.
