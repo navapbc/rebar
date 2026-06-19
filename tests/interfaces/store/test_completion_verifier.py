@@ -196,3 +196,147 @@ def test_op_downgrades_hallucinated_file_citation(rebar_repo: Path) -> None:
     cit = r["findings"][0]["citations"][0]
     assert cit["kind"] == "source"  # unresolved file citation downgraded
     assert r["findings"][0]["criterion"] == "AC2"  # criterion preserved through normalize
+
+
+# ── CONTRACT: the returned verdict is a schema-valid completion_verdict for every type ─
+@pytest.mark.parametrize("ttype", ["task", "bug", "story", "epic"])
+def test_op_result_validates_against_schema(rebar_repo: Path, ttype: str) -> None:
+    """Whatever the op returns (PASS or repaired-FAIL), it MUST validate against the
+    canonical ``completion_verdict`` schema for every ticket type — the data contract the
+    CLI/MCP/gate consumers rely on. (epic graph default ⇒ children considered; a childless
+    epic still PASSes here, isolating the schema-shape guarantee from the child-closure rule.)"""
+    desc = (
+        "Body long enough for the gates.\n\n## Acceptance Criteria\n- [ ] done\n"
+        "\n## Success Criteria\n- [ ] shipped\n\n## Context\nc\n## Reproduction Steps\n- run\n"
+    )
+    tid = rebar.create_ticket(ttype, f"v {ttype}", description=desc, repo_root=str(rebar_repo))
+    # graph=None exercises the auto-default (True for epic, False otherwise).
+    r = rebar.llm.verify_completion(
+        tid, repo_root=str(rebar_repo),
+        runner=FakeRunner(structured={"verdict": "PASS", "findings": [], "summary": "met"}),
+    )
+    schemas.validator(schemas.COMPLETION_VERDICT).validate(r)
+    # provenance the op stamps on regardless of runner
+    assert r["target"]["ticket_ids"] == [tid]
+    assert r["reviewers"] == ["completion-verifier"]
+
+
+def test_op_fail_findings_each_have_criterion_and_detail(rebar_repo: Path) -> None:
+    """CONTRACT: a FAIL verdict yields a non-empty findings list, and each finding carries
+    both a ``criterion`` (the specific requirement) and a ``detail`` — the per-criterion
+    shape the gate/CLI render. Asserted on the SHAPE, not on any specific wording."""
+    tid = _seed(rebar_repo)
+    r = _verify(
+        rebar_repo, tid,
+        {"verdict": "FAIL", "findings": [
+            {"criterion": "AC1", "detail": "not done", "severity": "high", "dimension": "completion"},
+            {"criterion": "AC2", "detail": "missing", "severity": "medium", "dimension": "completion"},
+        ]},
+    )
+    assert r["verdict"] == "FAIL"
+    assert len(r["findings"]) >= 1
+    for f in r["findings"]:
+        assert f.get("criterion"), f
+        assert f.get("detail"), f
+
+
+# ── graph auto-default: epic ⇒ children considered; non-epic ⇒ not (BEHAVIORAL) ─
+def test_graph_auto_default_depends_on_ticket_type(rebar_repo: Path, monkeypatch) -> None:
+    """When ``graph`` is left as the default (None), the op resolves it from the ticket type:
+    True for an epic (success criteria span children), False otherwise. Asserted by capturing
+    the resolved ``graph`` at the deterministic context-assembly seam — no model needed."""
+    from rebar.llm import operations
+
+    seen: dict[str, bool] = {}
+    orig = operations._assemble_context
+
+    def spy(ticket_id, *, graph, repo_root):
+        seen[ticket_id] = graph
+        return orig(ticket_id, graph=graph, repo_root=repo_root)
+
+    monkeypatch.setattr(operations, "_assemble_context", spy)
+    PASS = {"verdict": "PASS", "findings": []}
+    epic = rebar.create_ticket(
+        "epic", "E",
+        description="Body.\n\n## Acceptance Criteria\n- [ ] x\n\n## Success Criteria\n- [ ] y\n\n## Context\nc\n",
+        repo_root=str(rebar_repo),
+    )
+    task = _seed(rebar_repo)
+    rebar.llm.verify_completion(epic, repo_root=str(rebar_repo), runner=FakeRunner(structured=dict(PASS)))
+    rebar.llm.verify_completion(task, repo_root=str(rebar_repo), runner=FakeRunner(structured=dict(PASS)))
+    assert seen[epic] is True   # epic ⇒ descendants considered
+    assert seen[task] is False  # non-epic ⇒ self only
+
+
+# ── child-closure-trust: grandchildren NOT recursed, child criteria NOT re-verified ─
+def test_child_closure_does_not_recurse_grandchildren(rebar_repo: Path) -> None:
+    """The deterministic child-closure check inspects ONLY the parent's DIRECT children: a
+    direct child that is closed+certified clears the check even if ITS OWN child (the epic's
+    grandchild) is still open — the grandchild is the child's responsibility, not the epic's.
+    Proves no recursion AND that a child's own criteria are not re-verified (the child's
+    certified signature is the trusted attestation)."""
+    import subprocess
+
+    from rebar._commands import transition as _t
+    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar import config as _config
+
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-q", "-m", "c"], cwd=str(rebar_repo),
+        check=True, capture_output=True,
+    )
+
+    def rid(t: str) -> str:
+        return resolve_ticket_id(t, str(_config.tracker_dir(str(rebar_repo))))
+
+    D = "Body.\n\n## Acceptance Criteria\n- [ ] x\n\n## Success Criteria\n- [ ] y\n\n## Context\nc\n"
+    epic = rebar.create_ticket("epic", "E", description=D, repo_root=str(rebar_repo))
+    child = rebar.create_ticket("story", "C", parent=epic, description=D, repo_root=str(rebar_repo))
+    grandchild = rebar.create_ticket(
+        "task", "GC", parent=child,
+        description="Body.\n\n## Acceptance Criteria\n- [ ] z\n", repo_root=str(rebar_repo),
+    )
+    rebar.transition(child, "open", "in_progress", repo_root=str(rebar_repo))
+    # Force past the open-grandchild guard so the child closes while the grandchild stays open.
+    _t.transition_compute(rid(child), "in_progress", "closed", force=True, repo_root=str(rebar_repo))
+    rebar.sign_manifest(child, ["completion-verifier: PASS"], repo_root=str(rebar_repo))
+    assert rebar.verify_signature(child, repo_root=str(rebar_repo))["verdict"] == "certified"
+    assert rebar.show_ticket(grandchild, repo_root=str(rebar_repo))["status"] == "open"
+
+    r = rebar.llm.verify_completion(
+        epic, repo_root=str(rebar_repo),
+        runner=FakeRunner(structured={"verdict": "PASS", "findings": []}),
+    )
+    # Epic PASSes: its only DIRECT child is closed+certified; the open grandchild is not recursed.
+    assert r["verdict"] == "PASS", r["findings"]
+
+
+# ── runner: output_strategy="extract" tool-less structured extraction (offline) ─
+def test_extract_structured_uses_with_structured_output(rebar_repo: Path) -> None:
+    """The ``output_strategy="extract"`` path's second step (``_extract_structured``) turns the
+    agent's free-text conclusion into the structured verdict via ``model.with_structured_output``
+    — NO tools, NO live call. Stub the model so this is fully offline; assert it returns the
+    typed verdict (contract) and returns None for an empty conclusion (so finalize raises rather
+    than inventing a verdict)."""
+    from rebar.llm import contracts
+    from rebar.llm import runner as _runner
+
+    model_cls = contracts.completion_verdict_response_model()
+
+    class _Structured:
+        def __init__(self, cls):
+            self._cls = cls
+
+        def invoke(self, messages):
+            # Faithfully transcribe a PASS conclusion (no re-judging) into the schema.
+            assert any("Extract" in str(m.get("content", "")) for m in messages)
+            return self._cls(verdict="PASS", findings=[], summary="all criteria met")
+
+    class StubModel:
+        def with_structured_output(self, cls):
+            return _Structured(cls)
+
+    out = _runner._extract_structured(StubModel(), model_cls, "Conclusion: every criterion met. PASS.")
+    assert out.verdict == "PASS" and out.summary == "all criteria met"
+    # Empty conclusion ⇒ None (StructuredOutputError downstream, never an invented verdict).
+    assert _runner._extract_structured(StubModel(), model_cls, "   ") is None

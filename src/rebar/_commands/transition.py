@@ -162,6 +162,11 @@ def _completion_precheck(
     the LLM is unavailable / any verifier error (fail-closed). The ``rebar.llm`` import is LAZY
     so the optionality contract holds: core stays stdlib-only unless the gate is on AND a
     non-force close is attempted."""
+    # session_log is lifecycle-exempt — it cannot be transitioned, so transition_core will refuse
+    # this close authoritatively. Skip the gate BEFORE the (billable) verifier runs, so a doomed
+    # close attempt never fires an LLM call.
+    if ticket_type == "session_log":
+        return None
     from rebar.config import ConfigError, load_config
 
     try:
