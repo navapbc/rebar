@@ -37,6 +37,23 @@ from __future__ import annotations
 # by this value; nothing gates behavior on it.
 SCHEMA_VERSION = 3
 
+# Types that appear on disk but are intentionally NOT in KNOWN_EVENT_TYPES because
+# they are handled OUTSIDE the main replay dispatch: the bridge-only ``SYNC`` and
+# the externally-scanned ``PRECONDITIONS``. They are recognized by this binary, so
+# the forward-compat "newer than me" warning must NOT flag them.
+_NON_REPLAY_KNOWN_TYPES = frozenset({"SYNC", "PRECONDITIONS"})
+
+
+def is_unknown_newer_type(event_type: str) -> bool:
+    """True when ``event_type`` was written by a NEWER rebar this binary does not
+    understand — i.e. neither in the replay dispatch set (``KNOWN_EVENT_TYPES``)
+    nor a recognized non-replay type (``SYNC``/``PRECONDITIONS``). Used by ``fsck``
+    / ``bridge_fsck`` to surface the otherwise-silent forward-compat window."""
+    return bool(event_type) and (
+        event_type not in KNOWN_EVENT_TYPES and event_type not in _NON_REPLAY_KNOWN_TYPES
+    )
+
+
 # The TAG_DELTA event type name — a single source of truth shared by the reducer
 # dispatch (here, via KNOWN_EVENT_TYPES), the write-path allow-list
 # (``_store.event_append.EVENT_TYPES``), and every emitter (leaf/composer/inbound),

@@ -515,3 +515,36 @@ def test_bridge_fsck_mixed_precision_alert_does_not_suppress_stale(
         "BRIDGE_ALERT exists that preceded the legacy seconds-scale SYNC. "
         f"Got stale={stale}"
     )
+
+
+def test_bridge_fsck_warns_on_unknown_newer_event_type(tmp_path: Path, fsck: ModuleType) -> None:
+    """P2.3: bridge-fsck surfaces event types newer than this binary (a reconcile
+    host on an old binary would push stale state). SYNC must NOT be flagged."""
+    tracker = tmp_path / ".tickets-tracker"
+    ticket_dir = tracker / "w21-future"
+    ticket_dir.mkdir(parents=True)
+    _write_create_event(ticket_dir, timestamp=_NOW_TS - 3600, title="Future")
+    _write_sync_event(
+        ticket_dir, jira_key="DIG-1", local_id="w21-future", timestamp=_NOW_TS - 1800
+    )
+    # A synthetic future event type a newer rebar introduced.
+    (ticket_dir / f"{_NOW_TS}-ffffffff-0000-4000-8000-000000000099-FUTURE_TYPE.json").write_text(
+        json.dumps(
+            {
+                "event_type": "FUTURE_TYPE",
+                "uuid": "ffffffff-0000-4000-8000-000000000099",
+                "timestamp": _NOW_TS,
+                "author": "a-newer-rebar",
+                "env_id": _OTHER_ENV_ID,
+                "data": {},
+            }
+        )
+    )
+
+    findings = fsck.audit_bridge_mappings(tracker, now_ts=_NOW_TS)
+    assert "FUTURE_TYPE" in findings.get("unknown_event_types", [])
+    # The recognized non-replay SYNC type must NOT be a false positive.
+    assert "SYNC" not in findings.get("unknown_event_types", [])
+    # And it renders as a WARN in the human report.
+    report = fsck._format_report(findings)
+    assert "FUTURE_TYPE" in report and "newer than this rebar" in report

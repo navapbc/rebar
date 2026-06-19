@@ -153,7 +153,7 @@ def _scan(tracker: str, no_mutate: bool) -> tuple[list[str], int]:
     # Generic over KNOWN_EVENT_TYPES — not specific to any one new type. The
     # event_type is read from the canonical filename suffix (``{ts}-{uuid}-{TYPE}``,
     # uuid hyphens precede it), matching reducer/_sort.event_sort_key.
-    from rebar.reducer._version import KNOWN_EVENT_TYPES
+    from rebar.reducer._version import is_unknown_newer_type
 
     unknown_types: set[str] = set()
     for ticket_id in _ticket_dirs(tracker):
@@ -162,7 +162,7 @@ def _scan(tracker: str, no_mutate: bool) -> tuple[list[str], int]:
             if not filename.endswith(".json") or filename.startswith("."):
                 continue
             etype = filename[: -len(".json")].rsplit("-", 1)[-1]
-            if etype and etype not in KNOWN_EVENT_TYPES:
+            if is_unknown_newer_type(etype):
                 unknown_types.add(etype)
     if unknown_types:
         lines.append(

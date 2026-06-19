@@ -75,9 +75,16 @@ def audit_bridge_mappings(
           - 'duplicates': list of {jira_key, ticket_ids}
           - 'stale': list of {ticket_id, jira_key, last_sync_ts}
     """
+    from rebar.reducer._version import is_unknown_newer_type
+
     orphaned: list[dict] = []
     duplicates: list[dict] = []
     stale: list[dict] = []
+    # Forward-compat (P2.3): event types newer than this binary understands. A
+    # reconcile host on an old binary would reduce without them and push stale
+    # state — surface it here (the operator who runs bridge-fsck is exactly that
+    # host). Informational, never a bridge "issue".
+    unknown_event_types: set[str] = set()
 
     # jira_key -> list of ticket_ids that claim it via SYNC events
     jira_key_to_tickets: dict[str, list[str]] = {}
@@ -86,7 +93,12 @@ def audit_bridge_mappings(
         now_ts = time.time_ns()
 
     if not tickets_tracker.is_dir():
-        return {"orphaned": orphaned, "duplicates": duplicates, "stale": stale}
+        return {
+            "orphaned": orphaned,
+            "duplicates": duplicates,
+            "stale": stale,
+            "unknown_event_types": [],
+        }
 
     for ticket_dir in sorted(tickets_tracker.iterdir()):
         if not ticket_dir.is_dir():
@@ -106,6 +118,8 @@ def audit_bridge_mappings(
             if data is None:
                 continue
             event_type = data.get("event_type", "")
+            if is_unknown_newer_type(event_type):
+                unknown_event_types.add(event_type)
             if event_type == "CREATE":
                 has_create = True
             elif event_type == "SYNC":
@@ -162,7 +176,12 @@ def audit_bridge_mappings(
         if len(ticket_ids) > 1:
             duplicates.append({"jira_key": jira_key, "ticket_ids": ticket_ids})
 
-    return {"orphaned": orphaned, "duplicates": duplicates, "stale": stale}
+    return {
+        "orphaned": orphaned,
+        "duplicates": duplicates,
+        "stale": stale,
+        "unknown_event_types": sorted(unknown_event_types),
+    }
 
 
 def enumerate_stale_anomalies(
@@ -382,11 +401,18 @@ def _format_report(findings: dict) -> str:
     orphaned = findings.get("orphaned", [])
     duplicates = findings.get("duplicates", [])
     stale = findings.get("stale", [])
+    unknown_types = findings.get("unknown_event_types", [])
 
     lines: list[str] = ["=== Bridge FSck Report ==="]
     lines.append(f"Orphans: {len(orphaned)}" if orphaned else "Orphans: none found")
     lines.append(f"Duplicates: {len(duplicates)}" if duplicates else "Duplicates: none found")
     lines.append(f"Stale SYNCs: {len(stale)}" if stale else "Stale SYNCs: none found")
+    if unknown_types:
+        lines.append(
+            "WARN: store contains event types newer than this rebar understands: "
+            f"{', '.join(unknown_types)} — upgrade rebar. A reconcile host on an old "
+            "binary reduces without them and may push stale state to Jira."
+        )
 
     if orphaned:
         lines.append("")
@@ -486,10 +512,19 @@ def main(argv: list[str] | None = None) -> int:
 
     findings = audit_bridge_mappings(tracker_path, now_ts=args.now_ts)
     if out_fmt == "json":
-        print(json.dumps({k: findings.get(k, []) for k in ("orphaned", "duplicates", "stale")}))
+        print(
+            json.dumps(
+                {
+                    k: findings.get(k, [])
+                    for k in ("orphaned", "duplicates", "stale", "unknown_event_types")
+                }
+            )
+        )
     else:
         print(_format_report(findings))
 
+    # unknown_event_types is an informational WARN (upgrade signal), never a bridge
+    # "issue" — it must not change the exit code.
     has_issues = any(findings.get(k) for k in ("orphaned", "duplicates", "stale"))
     return 1 if has_issues else 0
 
