@@ -115,11 +115,27 @@ def test_require_safe_extraction_guard(monkeypatch) -> None:
         SNAP._require_safe_extraction()
 
 
-def test_sweep_removes_readonly_snapshot_tree() -> None:
+def test_sweep_removes_readonly_snapshot_tree(tmp_path) -> None:
+    # Snapshot a throwaway git repo UNDER tmp (with an explicit repo_root), never the
+    # real checkout: snapshot_at_ref/sweep default the .rebar/run_snapshots location to
+    # cwd, so a bare snapshot_at_ref("HEAD") here would write .rebar into REPO_ROOT and
+    # trip the repo-isolation guard in CI (it only slips by locally because dogfooding
+    # already created a .rebar, so the new-entry guard sees nothing added).
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+    (repo / "f.txt").write_text("hi\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "c"], cwd=repo, check=True)
+
     # A published snapshot tree is chmod'd read-only; the TTL sweep must restore
     # write bits and actually remove it (a plain rmtree would silently leak it).
-    path = SNAP.snapshot_at_ref("HEAD")
+    path = SNAP.snapshot_at_ref("HEAD", str(repo))
     assert path.is_dir()
-    removed = ex.sweep_orphan_snapshots(ttl_seconds=-1)
+    removed = ex.sweep_orphan_snapshots(str(repo), ttl_seconds=-1)
     assert str(path) in removed
     assert not path.exists()

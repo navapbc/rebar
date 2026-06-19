@@ -191,8 +191,11 @@ def snapshot_at_ref(
             raise SnapshotError(
                 f"git archive {sha[:12]} failed: {stderr.decode('utf-8', 'replace').strip()}"
             )
-        _chmod_readonly(tmp)
-        # Atomic publish. If another run won the race, keep theirs and drop ours.
+        # Atomic publish FIRST, THEN make the published tree read-only. On macOS/BSD,
+        # renaming a directory requires write permission on the directory itself (to
+        # update its ``..`` entry), so chmod-readonly-before-rename raises EACCES there;
+        # rename-then-chmod is portable. If another run won the race, keep theirs and
+        # drop ours (ours is still writable here, so the cleanup succeeds).
         try:
             os.rename(tmp, dest)
         except OSError:
@@ -200,6 +203,7 @@ def snapshot_at_ref(
                 _rmtree_writable(tmp)
                 return dest
             raise
+        _chmod_readonly(dest)
         return dest
     except BaseException:
         # Reap the child rather than leaving a zombie / leaking its pipe FDs: kill
