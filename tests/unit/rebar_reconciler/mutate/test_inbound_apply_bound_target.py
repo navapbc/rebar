@@ -273,9 +273,20 @@ def _seed_create_event(tracker_dir: Path, ticket_id: str, tags: list[str]) -> No
     )
 
 
-def test_inbound_label_add_writes_edit_with_new_tag(tmp_path, applier):
-    """payload['labels']=[{action:add,label:X}] must write an EDIT event whose
-    fields.tags includes X alongside the pre-existing tags."""
+def _inbound_tag_delta(events: list[dict]) -> dict:
+    """Return the single inbound TAG_DELTA event's data, asserting it is sourced."""
+    deltas = [e for e in events if e.get("event_type") == "TAG_DELTA"]
+    assert deltas, f"Expected a TAG_DELTA event; got {[e.get('event_type') for e in events]}"
+    data = deltas[0].get("data", {})
+    assert data.get("source") == "inbound", (
+        f"inbound TAG_DELTA must carry data.source=='inbound' (a06c); got {data}"
+    )
+    return data
+
+
+def test_inbound_label_add_writes_tag_delta(tmp_path, applier):
+    """payload['labels']=[{action:add,label:X}] (P2.3) writes a TAG_DELTA whose
+    added=[X]; pre-existing tags are untouched (a delta can't clobber the set)."""
     tracker_dir = tmp_path / ".tickets-tracker"
     tracker_dir.mkdir()
     local_uuid = "57b00001-0000-0000-0000-000000000001"
@@ -292,30 +303,20 @@ def test_inbound_label_add_writes_edit_with_new_tag(tmp_path, applier):
     )
     applier._apply_inbound_update(mutation, client=None, repo_root=tmp_path)
 
-    events = _read_events(tracker_dir / local_uuid)
-    edit_events = [e for e in events if e.get("event_type") == "EDIT"]
-    assert edit_events, (
-        f"Expected an EDIT event for the label add, got events "
-        f"{[e.get('event_type') for e in events]}"
-    )
-    tags_written = None
-    for e in edit_events:
-        f = e.get("data", {}).get("fields", {})
-        if "tags" in f:
-            tags_written = f["tags"]
-            break
-    assert tags_written is not None, (
-        f"No EDIT event carried fields.tags; EDIT events: {edit_events}"
-    )
-    assert "new-tag" in tags_written, f"Expected 'new-tag' in EDIT.fields.tags, got {tags_written}"
-    assert "existing-tag" in tags_written, (
-        f"Expected pre-existing 'existing-tag' preserved in EDIT.fields.tags, got {tags_written}"
-    )
+    data = _inbound_tag_delta(_read_events(tracker_dir / local_uuid))
+    assert data.get("added") == ["new-tag"], data
+    assert data.get("removed") == [], data
+    # Reduced state keeps the pre-existing tag (delta layered on the base).
+    from rebar_reconciler import inbound_translate
+
+    reducer = inbound_translate._load_ticket_reducer()
+    state = reducer.reduce_ticket(str(tracker_dir / local_uuid))
+    assert set(state["tags"]) == {"existing-tag", "new-tag"}
 
 
-def test_inbound_label_remove_writes_edit_without_removed_tag(tmp_path, applier):
-    """payload['labels']=[{action:remove,label:X}] must write an EDIT event
-    whose fields.tags omits X but preserves other pre-existing tags."""
+def test_inbound_label_remove_writes_tag_delta(tmp_path, applier):
+    """payload['labels']=[{action:remove,label:X}] (P2.3) writes a TAG_DELTA whose
+    removed=[X]; other pre-existing tags are preserved."""
     tracker_dir = tmp_path / ".tickets-tracker"
     tracker_dir.mkdir()
     local_uuid = "57b00002-0000-0000-0000-000000000002"
@@ -332,27 +333,38 @@ def test_inbound_label_remove_writes_edit_without_removed_tag(tmp_path, applier)
     )
     applier._apply_inbound_update(mutation, client=None, repo_root=tmp_path)
 
-    events = _read_events(tracker_dir / local_uuid)
-    edit_events = [e for e in events if e.get("event_type") == "EDIT"]
-    assert edit_events, (
-        f"Expected an EDIT event for the label remove, got events "
-        f"{[e.get('event_type') for e in events]}"
+    data = _inbound_tag_delta(_read_events(tracker_dir / local_uuid))
+    assert data.get("removed") == ["drop-me"], data
+    assert data.get("added") == [], data
+    from rebar_reconciler import inbound_translate
+
+    reducer = inbound_translate._load_ticket_reducer()
+    state = reducer.reduce_ticket(str(tracker_dir / local_uuid))
+    assert set(state["tags"]) == {"keep-me"}
+
+
+def test_inbound_contradictory_add_remove_dedups_add_wins(tmp_path, applier):
+    """A contradictory inbound pass (add X and remove X) must never emit X in both
+    delta lists; add-wins (matches the reducer's intra-event contract)."""
+    tracker_dir = tmp_path / ".tickets-tracker"
+    tracker_dir.mkdir()
+    local_uuid = "57b00003-0000-0000-0000-000000000003"
+    _seed_create_event(tracker_dir, local_uuid, [])
+
+    mutation = _make_mutation(
+        applier,
+        target="DIG-5703",
+        payload={
+            "local_id": local_uuid,
+            "fields": {},
+            "labels": [{"action": "add", "label": "x"}, {"action": "remove", "label": "x"}],
+        },
     )
-    tags_written = None
-    for e in edit_events:
-        f = e.get("data", {}).get("fields", {})
-        if "tags" in f:
-            tags_written = f["tags"]
-            break
-    assert tags_written is not None, (
-        f"No EDIT event carried fields.tags; EDIT events: {edit_events}"
-    )
-    assert "drop-me" not in tags_written, (
-        f"Expected 'drop-me' removed from EDIT.fields.tags, got {tags_written}"
-    )
-    assert "keep-me" in tags_written, (
-        f"Expected 'keep-me' preserved in EDIT.fields.tags, got {tags_written}"
-    )
+    applier._apply_inbound_update(mutation, client=None, repo_root=tmp_path)
+
+    data = _inbound_tag_delta(_read_events(tracker_dir / local_uuid))
+    assert "x" not in data.get("removed", []), data  # not in both lists
+    assert data.get("added") == ["x"], data
 
 
 def test_inbound_label_add_does_not_wipe_tags_when_reducer_fails(tmp_path, applier, monkeypatch):

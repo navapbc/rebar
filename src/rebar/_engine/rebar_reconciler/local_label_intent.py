@@ -2,8 +2,9 @@
 
 Scans a bound ticket's event log under the tracker directory  # tickets-boundary-ok
 and returns the union of every label that ever appeared in a CREATE,
-EDIT (``data.fields.tags``), or SNAPSHOT (``data.compiled_state.tags``)
-event. That "ever-seen" set is consumed by the outbound differ to gate
+EDIT (``data.fields.tags``), TAG_DELTA (``data.added``, P2.3), or SNAPSHOT
+(``data.compiled_state.tags``) event. That "ever-seen" set is consumed by the
+outbound differ to gate
 label REMOVE emission — a Jira-only label only counts as a legitimate
 local-removal-intent if it appears in the ever-seen set.
 
@@ -63,6 +64,19 @@ def _extract_tags_from_event(event: dict[str, Any]) -> list[str] | None:
         tags = compiled.get("tags")
         if isinstance(tags, list):
             return [str(t) for t in tags]
+        return None
+    # P2.3: TAG_DELTA (value of rebar.reducer._version.TAG_DELTA). User-added tags
+    # now arrive as deltas, so they must contribute to the ever-seen intent set.
+    # Skip inbound-origin deltas FIRST (same rationale as the EDIT branch: they are
+    # Jira mutations applied locally, not user intent), then fold ONLY ``data.added``
+    # — NEVER ``data.removed``: this is an ever-seen UNION, so subtracting removals
+    # would resurrect the a06c spurious-REMOVE bug.
+    if event_type == "TAG_DELTA":
+        if data.get("source") == "inbound":
+            return None
+        added = data.get("added")
+        if isinstance(added, list):
+            return [str(t) for t in added]
         return None
     return None
 

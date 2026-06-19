@@ -398,9 +398,16 @@ def _apply_inbound_update(mutation, *, client=None, repo_root=None) -> ApplyResu
             )
 
         if current_state is not None:
+            # P2.3: emit a convergent TAG_DELTA (add/remove) instead of a
+            # whole-field EDIT.tags — the last live whole-field tag writer is gone,
+            # so a Jira-side label change no longer clobbers a concurrent local add.
+            # We still read current tags for NO-OP SUPPRESSION (only add absent,
+            # only remove present); the delta itself can never wipe other tags.
+            from rebar.reducer._version import TAG_DELTA
+
             current_tags: list[str] = list(current_state.get("tags", []) or [])
-            new_tags = list(current_tags)
-            changed = False
+            added: list[str] = []
+            removed: list[str] = []
             for entry in inbound_labels:
                 if not isinstance(entry, dict):
                     continue
@@ -408,26 +415,24 @@ def _apply_inbound_update(mutation, *, client=None, repo_root=None) -> ApplyResu
                 label_name = entry.get("label", "")
                 if not label_name or not isinstance(label_name, str):
                     continue
-                if action == "add" and label_name not in new_tags:
-                    new_tags.append(label_name)
-                    changed = True
-                elif action == "remove" and label_name in new_tags:
-                    new_tags = [t for t in new_tags if t != label_name]
-                    changed = True
-            if changed:
-                # Bug a06c: mark this EDIT event with source=inbound so
-                # the local_label_intent computation skips it when
-                # building the "user-intent" tag set. Without the marker,
-                # a Jira-side ADD that the inbound differ applies locally
-                # would enter local's tag history and then look identical
-                # to user intent on the next pass — so a subsequent
-                # Jira-side REMOVE would be cancelled by a spurious
-                # outbound ADD (T4 IB-REMOVE regression).
+                if action == "add" and label_name not in current_tags and label_name not in added:
+                    added.append(label_name)
+                elif action == "remove" and label_name in current_tags and label_name not in removed:
+                    removed.append(label_name)
+            # Dedup added∩removed (a contradictory inbound pass): add-wins, matching
+            # the reducer's intra-event contract — never emit a label in both lists.
+            removed = [t for t in removed if t not in added]
+            if added or removed:
+                # Bug a06c: mark this TAG_DELTA with source=inbound (at data.source)
+                # so local_label_intent skips its added tags when building the
+                # "user-intent" set. Without the marker, a Jira-side ADD applied
+                # locally would look like user intent and a later Jira-side REMOVE
+                # would be cancelled by a spurious outbound ADD (T4 IB-REMOVE).
                 path = _write_event_file(
                     tracker_dir,
                     local_id,
-                    "EDIT",
-                    {"fields": {"tags": new_tags}, "source": "inbound"},
+                    TAG_DELTA,
+                    {"added": added, "removed": removed, "source": "inbound"},
                 )
                 written.append(str(path))
 

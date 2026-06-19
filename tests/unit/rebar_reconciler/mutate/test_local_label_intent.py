@@ -188,3 +188,44 @@ def test_malformed_event_json_skipped_not_raised(
     result = local_label_intent.compute_label_intent_set("ticket-4", tracker)
 
     assert result == {"ok"}
+
+
+# ── P2.3: TAG_DELTA contributes data.added to the ever-seen intent set ─────────
+def test_tag_delta_added_counts_as_intent(local_label_intent, tmp_path: Path) -> None:
+    """A user TAG_DELTA's added tags must enter the ever-seen set, else the
+    outbound differ would suppress pushing a freshly delta-added tag to Jira."""
+    tracker = tmp_path / ".tickets-tracker"
+    ticket = tracker / "ticket-td"
+    _write_event(ticket, _make_event("CREATE", {"tags": ["base"]}))
+    _write_event(ticket, _make_event("TAG_DELTA", {"added": ["fresh"], "removed": []}))
+
+    result = local_label_intent.compute_label_intent_set("ticket-td", tracker)
+    assert result == {"base", "fresh"}
+
+
+def test_tag_delta_inbound_source_excluded_from_intent(local_label_intent, tmp_path: Path) -> None:
+    """An inbound-sourced TAG_DELTA reflects a Jira mutation applied locally, not
+    user intent — its added tags must NOT enter the ever-seen set (a06c)."""
+    tracker = tmp_path / ".tickets-tracker"
+    ticket = tracker / "ticket-tdin"
+    _write_event(ticket, _make_event("CREATE", {"tags": []}))
+    _write_event(
+        ticket,
+        _make_event("TAG_DELTA", {"added": ["from-jira"], "removed": [], "source": "inbound"}),
+    )
+
+    result = local_label_intent.compute_label_intent_set("ticket-tdin", tracker)
+    assert result == set()
+
+
+def test_tag_delta_removed_not_subtracted_from_intent(local_label_intent, tmp_path: Path) -> None:
+    """Ever-seen is a UNION: a later TAG_DELTA removing a tag must NOT subtract it
+    from the intent set (subtracting would resurrect the a06c spurious-REMOVE bug)."""
+    tracker = tmp_path / ".tickets-tracker"
+    ticket = tracker / "ticket-tdrm"
+    _write_event(ticket, _make_event("CREATE", {"tags": []}))
+    _write_event(ticket, _make_event("TAG_DELTA", {"added": ["seen"], "removed": []}))
+    _write_event(ticket, _make_event("TAG_DELTA", {"added": [], "removed": ["seen"]}))
+
+    result = local_label_intent.compute_label_intent_set("ticket-tdrm", tracker)
+    assert result == {"seen"}
