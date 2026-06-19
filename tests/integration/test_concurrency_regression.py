@@ -288,6 +288,43 @@ def test_two_clone_union_deterministic_replay_and_fork_tiebreak(two_clones):
     assert status_b[seed] == expected_status
 
 
+def _tags(repo: Path, ticket_id: str) -> set[str]:
+    """Replayed tag set for *ticket_id* via `rebar show` (merged union state)."""
+    out = _engine_run(repo, "show", ticket_id).stdout
+    return set(json.loads(out).get("tags") or [])
+
+
+def test_two_clone_concurrent_tag_adds_both_survive(two_clones):
+    """P2.3: two clones concurrently add DIFFERENT tags to the same ticket; after
+    reconvergence BOTH survive on BOTH clones. Under the old whole-field EDIT.tags
+    (LWW) one add silently clobbered the other — the bug TAG_DELTA fixes."""
+    remote, repo_a, repo_b, seed = two_clones
+    tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
+
+    # Diverge offline so neither clone witnesses the other's add.
+    _remote_remove(tracker_a)
+    _remote_remove(tracker_b)
+    _engine_run(repo_a, "edit", seed, "--add-tag=alpha")
+    _engine_run(repo_b, "edit", seed, "--add-tag=beta")
+
+    # Reconverge through the real merge-as-union push/sync paths.
+    _remote_add(tracker_a, remote)
+    _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
+    _remote_add(tracker_b, remote)
+    _engine_run(repo_b, "edit", seed, "--add-tag=gamma")  # B's write triggers reconverge push
+    _remote_add(tracker_a, remote)
+    _expire_sync_marker(tracker_a)
+    _engine_run(repo_a, "list")
+    _expire_sync_marker(tracker_a)
+    _engine_run(repo_a, "list")
+
+    # Union of events identical on both clones, and both adds (plus gamma) survive.
+    assert _event_files(tracker_a) == _event_files(tracker_b)
+    tags_a, tags_b = _tags(repo_a, seed), _tags(repo_b, seed)
+    assert tags_a == tags_b, f"non-deterministic tag replay: A={tags_a} B={tags_b}"
+    assert {"alpha", "beta", "gamma"} <= tags_a, f"concurrent adds clobbered: {tags_a}"
+
+
 # ─────────────────── HLC skewed-clock convergence (P2.1) ─────────────────────
 # Two 19-digit physical-clock injections (REBAR_HLC_NOW): A runs FAST (a clock far
 # in the future), B runs SLOW. The scenario proves the Hybrid Logical Clock makes
