@@ -420,7 +420,15 @@ def start_session_log(
 
 
 def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> None:
-    """Edit ticket fields: title, priority, assignee, ticket_type, description, tags."""
+    """Edit ticket fields: title, priority, assignee, ticket_type, description.
+
+    Tags (P2.3): use ``add_tags``/``remove_tags``/``set_tags`` (lists or CSV) to
+    mutate via convergent TAG_DELTA deltas. ``tags=`` is a DEPRECATED alias for
+    ``set_tags`` (kept for back-compat; emits the same convergent set delta).
+    """
+    tag_add = fields.pop("add_tags", None)
+    tag_remove = fields.pop("remove_tags", None)
+    tag_set = fields.pop("set_tags", None)
     normalized = {}
     for key, value in fields.items():
         if value is None:
@@ -430,7 +438,16 @@ def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> None:
         normalized[key] = str(value)
     from rebar._commands import composer
 
-    _python_leaf(composer.edit_core, ticket_id, normalized, repo_root=repo_root, what="edit")
+    _python_leaf(
+        composer.edit_core,
+        ticket_id,
+        normalized,
+        repo_root=repo_root,
+        what="edit",
+        tag_add=tag_add,
+        tag_remove=tag_remove,
+        tag_set=tag_set,
+    )
 
 
 def link(id1: str, id2: str, relation: str, *, repo_root=None) -> None:

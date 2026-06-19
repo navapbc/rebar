@@ -251,29 +251,98 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
     return 0
 
 
-_EDIT_FIELDS = ("title", "priority", "assignee", "ticket_type", "description", "tags", "parent")
+# Tags are NOT an EDIT field any more (P2.3): they mutate via TAG_DELTA deltas
+# (--add-tag/--remove-tag/--set-tags), so a whole-field EDIT can never clobber a
+# concurrent tag add. The library/MCP ``edit(tags=...)`` arg is a DEPRECATED alias
+# for --set-tags, intercepted in edit_core before this field set is validated.
+_EDIT_FIELDS = ("title", "priority", "assignee", "ticket_type", "description", "parent")
 _EDIT_USAGE = (
     "Usage: ticket edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] "
-    "[--ticket_type=VALUE] [--description=VALUE] [--tags=VALUE] [--parent=VALUE]"
+    "[--ticket_type=VALUE] [--description=VALUE] [--parent=VALUE] "
+    "[--add-tag=t1,t2] [--remove-tag=t1,t2] [--set-tags=t1,t2]"
 )
 
+import re as _re
 
-def edit_core(ticket_id: str, fields: dict, *, repo_root=None) -> None:
-    """Validate fields and append an EDIT event (mirrors ``ticket_edit``).
+_TAG_CTRL_RE = _re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _parse_tag_list(value, *, validate: bool) -> list[str]:
+    """Normalise a tag spec (CSV string or list) to a deduped, trimmed tag list.
+
+    ``validate`` rejects empty/whitespace-only/control-char names (applied to tags
+    ENTERING state — adds/sets); removals skip it (you may legitimately remove a
+    previously-malformed tag). Order-preserving dedup.
+    """
+    if value is None:
+        return []
+    items = value.split(",") if isinstance(value, str) else list(value)
+    out: list[str] = []
+    for raw in items:
+        t = str(raw).strip()
+        if not t:
+            continue
+        if validate and _TAG_CTRL_RE.search(t):
+            raise CommandError(f"Error: invalid tag name {raw!r} (contains control characters)")
+        if t not in out:
+            out.append(t)
+    return out
+
+
+def edit_core(
+    ticket_id: str,
+    fields: dict,
+    *,
+    tag_add=None,
+    tag_remove=None,
+    tag_set=None,
+    repo_root=None,
+) -> None:
+    """Validate fields and append an EDIT event (mirrors ``ticket_edit``), plus tag
+    add/remove/set deltas as a TAG_DELTA event (P2.3).
 
     Field guards: unknown-field reject, non-empty title/description, priority 0-4,
     ticket_type enum, and the ``--parent`` cascade (``null`` detaches; else resolve
     → exists → not-self → fail-closed status gate (open/in_progress only) → ancestor
     cycle walk), mapping ``parent`` → ``parent_id`` in the event. Title gets the
     U+2192→``->`` normalisation; numeric priority is stored as int.
+
+    Tags: ``tag_add``/``tag_remove`` are add/remove deltas; ``tag_set`` (mutually
+    exclusive with add/remove) is a wholesale set COMPILED to a delta against the
+    locally-observed tags (add-wins: a concurrent unobserved remote add survives).
+    A non-None ``fields['tags']`` is the DEPRECATED set-alias and is folded into
+    ``tag_set`` here, before the field allow-list is checked.
     """
     from rebar.reducer import reduce_ticket
+    from rebar.reducer._version import TAG_DELTA
 
     tracker = tracker_dir(repo_root)
+    fields = dict(fields)
+    # Deprecated alias: edit(tags=...) -> --set-tags (pre-pass, BEFORE the
+    # _EDIT_FIELDS validation loop, else 'tags' is rejected as an unknown field).
+    if "tags" in fields:
+        alias = fields.pop("tags")
+        if tag_set is None and tag_add is None and tag_remove is None:
+            tag_set = alias
+
     for name in fields:
         if name not in _EDIT_FIELDS:
             raise CommandError(f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}")
-    if not fields:
+
+    add_list = _parse_tag_list(tag_add, validate=True)
+    remove_list = _parse_tag_list(tag_remove, validate=False)
+    has_set = tag_set is not None
+    set_list = _parse_tag_list(tag_set, validate=True) if has_set else []
+    if has_set and (add_list or remove_list):
+        raise CommandError("Error: --set-tags cannot be combined with --add-tag/--remove-tag")
+    overlap = [t for t in add_list if t in remove_list]
+    if overlap:
+        raise CommandError(
+            f"Error: tag(s) {overlap} given to both --add-tag and --remove-tag"
+        )
+    has_tag_op = has_set or bool(add_list) or bool(remove_list)
+
+    if not fields and not has_tag_op:
         raise CommandError("Error: at least one --field=value pair is required")
     if not (tracker / ".env-id").is_file():
         raise CommandError("Error: ticket system not initialized. Run 'ticket init' first.")
@@ -310,10 +379,31 @@ def edit_core(ticket_id: str, fields: dict, *, repo_root=None) -> None:
             out["ticket_type"] = value
         elif key == "parent":
             out["parent_id"] = _resolve_new_parent(value, resolved, tracker, reduce_ticket)
-        else:  # assignee, tags
+        else:  # assignee
             out[key] = value
 
-    append_event(resolved, "EDIT", {"fields": out}, tracker, repo_root=repo_root)
+    if out:
+        append_event(resolved, "EDIT", {"fields": out}, tracker, repo_root=repo_root)
+
+    if has_tag_op:
+        observed = list((reduce_ticket(str(tracker / resolved)) or {}).get("tags") or [])
+        if has_set:
+            # Compile the wholesale set to a delta vs observed (add-wins):
+            # add what's missing, remove observed tags not in the target set.
+            added = [t for t in set_list if t not in observed]
+            removed = [t for t in observed if t not in set_list]
+        else:
+            # No-op suppression: only add what's absent, only remove what's present.
+            added = [t for t in add_list if t not in observed]
+            removed = [t for t in remove_list if t in observed]
+        if added or removed:
+            append_event(
+                resolved,
+                TAG_DELTA,
+                {"added": added, "removed": removed},
+                tracker,
+                repo_root=repo_root,
+            )
 
 
 def _resolve_new_parent(value: str, ticket_id: str, tracker, reduce_ticket) -> str:
@@ -357,44 +447,74 @@ def _resolve_new_parent(value: str, ticket_id: str, tracker, reduce_ticket) -> s
     return new_parent
 
 
+_TAG_FLAGS = ("add-tag", "remove-tag", "set-tags")
+
+
 def edit_cli(argv: list[str], *, repo_root=None) -> int:
-    """Dispatcher Python route for ``edit``: parse ticket_id + --field pairs."""
+    """Dispatcher Python route for ``edit``: parse ticket_id + --field pairs +
+    tag-delta flags (--add-tag / --remove-tag / --set-tags)."""
     if len(argv) < 2:
         print(_EDIT_USAGE, file=sys.stderr)
         return 1
     ticket_id, rest = argv[0], argv[1:]
     fields: dict = {}
+    tag_add: list[str] = []
+    tag_remove: list[str] = []
+    tag_set: list[str] | None = None
+
+    def _accept_tag(name: str, val: str) -> None:
+        nonlocal tag_set
+        items = [t for t in val.split(",")]
+        if name == "add-tag":
+            tag_add.extend(items)
+        elif name == "remove-tag":
+            tag_remove.extend(items)
+        else:  # set-tags
+            tag_set = (tag_set or []) + items
+
     i, n = 0, len(rest)
     while i < n:
         arg = rest[i]
         if arg.startswith("--") and "=" in arg:
             name, val = arg[2:].split("=", 1)
-            if name not in _EDIT_FIELDS:
-                print(
-                    f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}",
-                    file=sys.stderr,
-                )
-                return 1
-            fields[name] = val
             i += 1
         elif arg.startswith("--"):
             name = arg[2:]
-            if name not in _EDIT_FIELDS:
-                print(
-                    f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}",
-                    file=sys.stderr,
-                )
-                return 1
             if i + 1 >= n:
                 print(f"Error: --{name} requires a value", file=sys.stderr)
                 return 1
-            fields[name] = rest[i + 1]
+            val = rest[i + 1]
             i += 2
         else:
             print(f"Error: unexpected argument '{arg}'", file=sys.stderr)
             return 1
+
+        if name in _TAG_FLAGS:
+            _accept_tag(name, val)
+        elif name == "tags":
+            print(
+                "Error: --tags is no longer an edit field. Use --set-tags=t1,t2 to "
+                "replace, or --add-tag / --remove-tag to mutate.",
+                file=sys.stderr,
+            )
+            return 1
+        elif name not in _EDIT_FIELDS:
+            print(
+                f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}",
+                file=sys.stderr,
+            )
+            return 1
+        else:
+            fields[name] = val
     try:
-        edit_core(ticket_id, fields, repo_root=repo_root)
+        edit_core(
+            ticket_id,
+            fields,
+            tag_add=tag_add or None,
+            tag_remove=tag_remove or None,
+            tag_set=tag_set,
+            repo_root=repo_root,
+        )
     except CommandError as exc:
         print(exc.message, file=sys.stderr)
         return exc.returncode

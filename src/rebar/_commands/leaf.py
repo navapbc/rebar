@@ -70,11 +70,14 @@ def comment(ticket_id: str, body: str, *, source: dict | None = None, repo_root=
 
 
 def tag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
-    """Add a tag via an EDIT event (mirrors ``ticket_tag`` → ``_tag_add``).
+    """Add a tag via a TAG_DELTA event (P2.3; was a whole-field EDIT clobber).
 
     Idempotent: adding an already-present tag is a no-op (exit 0, no event). No
-    ghost check — matches the bash path, which resolves the id then tags.
+    ghost check — matches the bash path, which resolves the id then tags. Emits an
+    add delta so concurrent adds on other clones converge instead of clobbering.
     """
+    from rebar.reducer._version import TAG_DELTA
+
     tracker = tracker_dir(repo_root)
     if not ticket_id or not tag_value:
         raise CommandError("Error: ticket_id and tag must be non-empty")
@@ -84,8 +87,8 @@ def tag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
         return
     append_event(
         resolved,
-        "EDIT",
-        {"fields": {"tags": [*tags, tag_value]}},
+        TAG_DELTA,
+        {"added": [tag_value], "removed": []},
         tracker,
         repo_root=repo_root,
         author_fallback="unknown",
@@ -93,10 +96,12 @@ def tag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
 
 
 def untag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
-    """Remove a tag via an EDIT event (mirrors ``ticket_untag`` → ``_tag_remove``).
+    """Remove a tag via a TAG_DELTA event (P2.3; was a whole-field EDIT clobber).
 
     Idempotent: removing an absent tag is a no-op (exit 0, no event).
     """
+    from rebar.reducer._version import TAG_DELTA
+
     tracker = tracker_dir(repo_root)
     if not ticket_id or not tag_value:
         raise CommandError("Error: ticket_id and tag must be non-empty")
@@ -106,8 +111,8 @@ def untag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
         return
     append_event(
         resolved,
-        "EDIT",
-        {"fields": {"tags": [t for t in tags if t != tag_value]}},
+        TAG_DELTA,
+        {"added": [], "removed": [tag_value]},
         tracker,
         repo_root=repo_root,
         author_fallback="unknown",

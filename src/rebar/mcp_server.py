@@ -695,18 +695,28 @@ def build_server():
             priority: int | None = None,
             assignee: str | None = None,
             description: str | None = None,
-            tags: list[str] | None = None,
             ticket_type: str | None = None,
+            add_tags: list[str] | None = None,
+            remove_tags: list[str] | None = None,
+            set_tags: list[str] | None = None,
         ) -> str:
-            """Edit ticket fields (title/priority/assignee/description/tags/ticket_type)."""
+            """Edit ticket fields (title/priority/assignee/description/ticket_type).
+
+            Tags mutate via convergent deltas: add_tags / remove_tags add/remove,
+            or set_tags replaces the whole set (compiled to a delta; add-wins, so a
+            concurrent remote add is never silently clobbered). set_tags is mutually
+            exclusive with add_tags/remove_tags.
+            """
             rebar.edit_ticket(
                 ticket_id,
                 title=title,
                 priority=priority,
                 assignee=assignee,
                 description=description,
-                tags=tags,
                 ticket_type=ticket_type,
+                add_tags=add_tags,
+                remove_tags=remove_tags,
+                set_tags=set_tags,
             )
             return "ok"
 
