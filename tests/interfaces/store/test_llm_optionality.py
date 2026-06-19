@@ -291,13 +291,11 @@ def _git(*args: str, cwd: Path) -> None:
 
 # ── local seed helper (mirrors test_llm_framework._seed) ──────────────────────
 def _seed(repo: Path) -> str:
-    r = str(repo)
-    epic = rebar.create_ticket("epic", "Login epic", repo_root=r)
-    rebar.create_ticket(
-        "task",
-        "Add auth",
-        description="Body.\n\n## Acceptance Criteria\n- [ ] login works",
-        parent=epic,
-        repo_root=r,
-    )
-    return epic
+    # A CHILDLESS epic on purpose. verify_completion runs a deterministic
+    # child-closure gate BEFORE the LLM: an epic with an open/unsigned child returns
+    # a FAIL verdict without ever reaching the runner — so it would NOT exercise the
+    # missing-extra degradation path these tests assert on. A childless ticket passes
+    # the gate and reaches the runner preflight (which raises the typed "install the
+    # agents extra" error when the stack is absent). The epic-with-children
+    # deterministic path is covered in test_completion_verifier.py.
+    return rebar.create_ticket("epic", "Login epic", repo_root=str(repo))
