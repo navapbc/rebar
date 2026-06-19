@@ -246,20 +246,13 @@ def verify_completion(
     }
     system_prompt, langfuse_prompt = prompts.resolve_prompt(reviewer, variables, cfg.langfuse)
     instructions = (
-        f"Verify whether ticket {ids[0]} has met every completion requirement it states"
-        + (" (its child tickets' content may satisfy some requirements — read them for context)"
-           if graph else "")
-        + ".\n\n"
-        "Child-ticket CLOSURE is already verified for you: this evaluator is only reached once "
-        "every direct child is closed with a certified completion signature, so do NOT — and "
-        "you must not — re-check whether children are closed, exist, or are signed. Judge only "
-        "this ticket's OWN substantive completion requirements.\n\n"
+        f"Verify whether ticket {ids[0]} has met every completion requirement it states.\n\n"
         "You have read-only repository tools and a read-only ticket tool — USE them, do not "
         "rely on memory or guess at the code:\n"
         "- list_directory(path): explore structure (generated/ignored files are hidden)\n"
         "- search_files(regex, path): locate code; returns `path:line` matches\n"
         "- read_file(path, line_start, line_end): read exact lines; PAGE large files\n"
-        "- show_ticket(ticket_id): read this ticket or any related/child ticket (JSON)\n\n"
+        "- show_ticket(ticket_id): read this ticket or a ticket it references (JSON)\n\n"
         "Ground EVERY finding in what the tools actually return — cite real `path:line` from "
         "read_file output and never invent paths, line numbers, or file contents. Be DECISIVE: "
         "spend a few targeted searches/reads per criterion, then judge it and move on (don't "
