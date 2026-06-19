@@ -74,6 +74,18 @@ jobs:
       - name: a core CLI command runs on the clean wheel
         run: |
           /tmp/clean/bin/rebar --help >/dev/null
+      # The LLM-optionality *degradation* tests (skipif the agents extra is
+      # installed) verify every interface fails loudly+cleanly when the stack is
+      # ABSENT. The main test.yml lane installs [dev] -> [agents], so they always
+      # skip there; this no-extras clean venv is the one place they can run. Install
+      # only the light test deps (pytest + jsonschema + mcp/FastMCP) — NOT the agents
+      # stack — so agents_extra_installed() stays False and the skipif tests execute.
+      # Story alive-ogre-tiger (epic clumsy-jab-yacht).
+      - name: degradation-path tests run with NO agents extra
+        run: |
+          /tmp/clean/bin/pip install pytest jsonschema mcp
+          /tmp/clean/bin/python -c "from rebar.llm import agents_extra_installed; assert not agents_extra_installed(), 'agents extra must be ABSENT in the clean lane (else the degradation tests skip)'"
+          /tmp/clean/bin/python -m pytest tests/interfaces/store/test_llm_optionality.py -m "not external" -rs
 
   per-extra:
     name: extra "${{ matrix.extra }}" installs
