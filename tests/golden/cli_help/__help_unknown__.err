@@ -17,7 +17,7 @@ Subcommands:
   link        Link two tickets (relation REQUIRED: blocks|depends_on|relates_to|duplicates|supersedes|discovered_from)
   unlink      Remove ONE link between an ordered <source> <target> pair (no relation arg; most-recent first)
   deps        Show dependency graph for a ticket (<ticket_id>)
-  edit          Edit ticket fields (--title, --priority, --assignee, --ticket_type, --description, --tags)
+  edit          Edit ticket fields (--title, --priority, --assignee, --ticket_type, --description, --parent; tags via --add-tag/--remove-tag/--set-tags)
   tag           Add a tag to a ticket
   untag         Remove a tag from a ticket
   validate      Repo-wide tracker health check (NO ticket id; scores the whole store 1-5, exit 0-4; --output json, --terse, --verbose, --fix)

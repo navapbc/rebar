@@ -1,1 +1,1 @@
-Usage: rebar edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] [--ticket_type=VALUE] [--description=VALUE] [--tags=VALUE] [--parent=VALUE]
+Usage: rebar edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] [--ticket_type=VALUE] [--description=VALUE] [--parent=VALUE] [--add-tag=t1,t2] [--remove-tag=t1,t2] [--set-tags=t1,t2]
