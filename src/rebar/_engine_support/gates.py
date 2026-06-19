@@ -398,6 +398,10 @@ def summary_compute(ticket_id: str, tracker: str) -> dict:
         blockers = deps.get("blockers") or []
         ready = bool(deps.get("ready_to_work", True))
     except Exception:
+        # Safe broad catch (story lean-sloth-ham verified): this feeds only the
+        # cosmetic ``blocking_summary`` string below, never a gating/lifecycle
+        # decision. A degraded dep computation falls back to the "ready" summary — a
+        # display default, not a wrong control-flow answer.
         pass
     suffix = ("blocked by: " + " ".join(blockers)) if (blockers and not ready) else "ready"
     return {"ticket_id": ticket_id, "status": status, "title": title, "blocking_summary": suffix}

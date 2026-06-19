@@ -248,6 +248,10 @@ def check_cycle_at_level(source_id: str, target_id: str, level: str, tracker_dir
         try:
             state = reduce_ticket(current_dir)
         except Exception:
+            # Safe broad catch (story lean-sloth-ham verified): an unreducible ticket
+            # dir is skipped during the cycle-detection BFS. Worst case a cycle through
+            # a corrupt node goes undetected → the pre-write cycle guard is permissive
+            # (fail-open on a guard), not a fabricated readiness answer.
             continue
 
         if state is None or not isinstance(state, dict):

@@ -205,6 +205,17 @@ def process_link(state: dict, event: dict, data: dict, tracker_dir: str | None =
     target_id to its canonical UUID via resolve_ticket_id.  On failure (alias
     unresolvable, resolver unavailable, or no tracker_dir) the verbatim value
     is stored as a graceful fallback so no data is lost.
+
+    Deliberate boundary (do NOT "fix" this as a wrong-answer — story lean-sloth-ham
+    investigated it): when a ``depends_on`` target cannot be resolved because its
+    directory is absent, the readiness paths treat that blocker as **closed** — this
+    is the intentional *tombstone-awareness* invariant (an archived/deleted blocker
+    must not block its dependents forever), see ``_status._get_ticket_status`` and
+    ``tests/scripts/graph/test_graph_unresolved_blocker.py``. A missing-target
+    ``depends_on`` is therefore correctly NOT a blocker. Failing closed on every
+    unresolved target was tried and rejected: ``resolve_ticket_id`` returns ``None``
+    for BOTH normal archival and a genuinely-bogus alias, indistinguishably, so a
+    blanket fail-closed would break archived-blocker unblocking (a tested invariant).
     """
     raw_target = data.get("target_id", data.get("target", ""))
     resolved_target = raw_target
