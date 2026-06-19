@@ -325,6 +325,73 @@ def test_two_clone_concurrent_tag_adds_both_survive(two_clones):
     assert {"alpha", "beta", "gamma"} <= tags_a, f"concurrent adds clobbered: {tags_a}"
 
 
+def _diverge(tracker_a, tracker_b):
+    _remote_remove(tracker_a)
+    _remote_remove(tracker_b)
+
+
+def _reconverge(remote, repo_a, repo_b, tracker_a, tracker_b, *trigger):
+    """Push A (fast-forward), trigger B's merge-as-union push, read-sync A."""
+    _remote_add(tracker_a, remote)
+    _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
+    _remote_add(tracker_b, remote)
+    _engine_run(repo_b, *trigger)  # B's write triggers the reconverge push
+    _remote_add(tracker_a, remote)
+    _expire_sync_marker(tracker_a)
+    _engine_run(repo_a, "list")
+    _expire_sync_marker(tracker_a)
+    _engine_run(repo_a, "list")
+
+
+def test_two_clone_set_tags_table_converges(two_clones):
+    """P2.3 --set-tags convergence table — set is compiled to a delta (add-wins),
+    so concurrent set‖add / set‖set converge identically on both clones and a
+    concurrent unobserved add is never silently clobbered by a 'set'."""
+    remote, repo_a, repo_b, seed = two_clones
+    tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
+
+    # set ‖ add: A sets {x}, B concurrently adds y. add-wins -> {x, y} on both.
+    _diverge(tracker_a, tracker_b)
+    _engine_run(repo_a, "edit", seed, "--set-tags=x")
+    _engine_run(repo_b, "edit", seed, "--add-tag=y")
+    _reconverge(remote, repo_a, repo_b, tracker_a, tracker_b, "edit", seed, "--add-tag=z")
+    assert _event_files(tracker_a) == _event_files(tracker_b)
+    tags_a, tags_b = _tags(repo_a, seed), _tags(repo_b, seed)
+    assert tags_a == tags_b, f"set‖add diverged: A={tags_a} B={tags_b}"
+    assert {"x", "y"} <= tags_a, f"set silently clobbered a concurrent add: {tags_a}"
+
+    # set ‖ set: two concurrent sets must still converge to ONE deterministic state.
+    _diverge(tracker_a, tracker_b)
+    _engine_run(repo_a, "edit", seed, "--set-tags=p,q")
+    _engine_run(repo_b, "edit", seed, "--set-tags=q,r")
+    _reconverge(remote, repo_a, repo_b, tracker_a, tracker_b, "comment", seed, "sync")
+    assert _event_files(tracker_a) == _event_files(tracker_b)
+    assert _tags(repo_a, seed) == _tags(repo_b, seed), "set‖set non-deterministic replay"
+
+
+def test_two_clone_add_remove_converges(two_clones):
+    """P2.3 add ‖ remove (disjoint tags) over a shared base converges
+    deterministically: A removes the shared tag, B adds a new one -> {new} on both."""
+    remote, repo_a, repo_b, seed = two_clones
+    tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
+
+    # Establish a shared base tag on the pushed seed (both clones witness it).
+    _engine_run(repo_a, "edit", seed, "--add-tag=shared")
+    _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
+    _expire_sync_marker(tracker_b)  # B still has origin from the fixture -> re-sync
+    _engine_run(repo_b, "list")
+    assert "shared" in _tags(repo_b, seed)
+
+    _diverge(tracker_a, tracker_b)
+    _engine_run(repo_a, "edit", seed, "--remove-tag=shared")
+    _engine_run(repo_b, "edit", seed, "--add-tag=extra")
+    _reconverge(remote, repo_a, repo_b, tracker_a, tracker_b, "comment", seed, "sync")
+    assert _event_files(tracker_a) == _event_files(tracker_b)
+    tags_a, tags_b = _tags(repo_a, seed), _tags(repo_b, seed)
+    assert tags_a == tags_b, f"add‖remove diverged: A={tags_a} B={tags_b}"
+    assert tags_a == {"extra"}, f"expected shared removed + extra added, got {tags_a}"
+
+
 # ─────────────────── HLC skewed-clock convergence (P2.1) ─────────────────────
 # Two 19-digit physical-clock injections (REBAR_HLC_NOW): A runs FAST (a clock far
 # in the future), B runs SLOW. The scenario proves the Hybrid Logical Clock makes

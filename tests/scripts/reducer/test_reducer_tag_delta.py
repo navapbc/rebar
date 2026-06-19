@@ -97,6 +97,38 @@ def test_edit_tags_base_then_delta_carries_forward(tmp_path: Path, reducer: Modu
 
 @pytest.mark.unit
 @pytest.mark.scripts
+def test_witnessed_base_edit_before_delta_carries_forward(
+    tmp_path: Path, reducer: ModuleType
+) -> None:
+    """Witnessed base: a delta written AFTER a historical EDIT.tags (higher ts,
+    because the writer saw it) layers on top — EDIT([a,b]) @2000 then add c @3000."""
+    d = _ticket_dir(tmp_path, "td-witnessed")
+    _create(d)
+    _write_event(d, 2000, _UUID_A, "EDIT", {"fields": {"tags": ["a", "b"]}})
+    _write_event(d, 3000, _UUID_B, "TAG_DELTA", {"added": ["c"], "removed": []})
+    state = reducer.reduce_ticket(d)
+    assert sorted(state["tags"]) == ["a", "b", "c"]
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_unwitnessed_base_edit_after_delta_clobbers(tmp_path: Path, reducer: ModuleType) -> None:
+    """Unwitnessed base (the accepted no-dual-write lossy window): a legacy/old-clone
+    whole-field EDIT.tags that sorts AFTER a delta (higher ts, writer never saw the
+    delta) wholesale-wins and clobbers the delta's add. Deterministic on every clone
+    (replay order is the total order); documents — not regresses — the property."""
+    d = _ticket_dir(tmp_path, "td-unwitnessed")
+    _create(d)
+    _write_event(d, 2000, _UUID_A, "TAG_DELTA", {"added": ["c"], "removed": []})
+    _write_event(d, 3000, _UUID_B, "EDIT", {"fields": {"tags": ["a", "b"]}})
+    state = reducer.reduce_ticket(d)
+    # The later whole-field EDIT replaces the set; the concurrent add is lost until
+    # the old clone upgrades (delta files are preserved on disk; forward-compat).
+    assert sorted(state["tags"]) == ["a", "b"]
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
 def test_two_concurrent_adds_both_survive(tmp_path: Path, reducer: ModuleType) -> None:
     """Two clones each add a different tag (two TAG_DELTA events) -> both survive."""
     d = _ticket_dir(tmp_path, "td-concurrent")
