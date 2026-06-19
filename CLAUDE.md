@@ -56,7 +56,9 @@ resolves the STATUS fork deterministically by UUID, so every clone agrees.
 `clarity_check`, `check_ac`,
 `quality_check`, `validate`, `get_file_impact`, `get_verify_commands`,
 `verify_signature`, `fsck`, `summary`, `bridge_fsck`, `reconcile` (dry-run by
-default). The
+default), `get_workflow_status`, `get_workflow_result`, `render_workflow` (the
+workflow-engine read tools — run status/result by `run_id`, and a dry-render of a
+`.rebar/workflows/*.yaml` workflow). The
 typed read tools advertise an `outputSchema` (a documented, validated return
 shape) drawn from the canonical JSON Schemas — see
 [docs/output-schemas.md](docs/output-schemas.md).
@@ -73,7 +75,9 @@ shape) drawn from the canonical JSON Schemas — see
 `log_session` (capture helper — appends a verbose entry to the current
 `session_log`, creating one on first use),
 `sign_manifest` (HMAC-signs a manifest of verified steps with the environment key;
-`verify_signature` certifies it).
+`verify_signature` certifies it), and `run_workflow` (executes a
+`.rebar/workflows/*.yaml` workflow against a ticket — a lean-runtime capability
+that does not itself need the `[agents]` extra, though individual LLM steps do).
 
 There is no `init` over MCP (operator bootstrap only). `reconcile` `live` mode
 additionally requires `REBAR_MCP_ALLOW_JIRA_SYNC=1` (deprecated alias
@@ -125,10 +129,12 @@ graph)` runs the **completion-verifier** agent that checks a ticket's completion
 requirements (acceptance/success/close criteria, definitions of done; for bugs,
 that the bug is resolved) are demonstrably met by the implementation and returns a
 `completion_verdict` (`{verdict: PASS|FAIL, findings[], …}`; on FAIL each finding
-cites the failing criterion + a source-code citation). Both are **disabled unless
-`REBAR_MCP_ALLOW_LLM=1`** (they make a live, billable LLM call) and need the
-`nava-rebar[agents]` extra + `ANTHROPIC_API_KEY`. Part of the optional `rebar.llm`
-framework (CLI: `rebar review` / `rebar verify-completion`; library:
+cites the failing criterion + a source-code citation). `review_code(...)` reviews a
+diff/commit range and `scan_spec(spec_text, batch_size)` scans prose for
+spec-implied work — both emit structured findings like `review_ticket`. All are
+**disabled unless `REBAR_MCP_ALLOW_LLM=1`** (they make a live, billable LLM call)
+and need the `nava-rebar[agents]` extra + `ANTHROPIC_API_KEY`. Part of the optional
+`rebar.llm` framework (CLI: `rebar review` / `rebar verify-completion`; library:
 `rebar.llm.review_ticket` / `rebar.llm.verify_completion`) — see
 [docs/llm-framework.md](docs/llm-framework.md).
 

@@ -21,8 +21,10 @@ orphan branch (worktree at `.tickets-tracker/`); state is computed by replaying
 events. A level-triggered reconciler bidirectionally syncs tickets with Jira.
 
 This project was extracted from the `digital-service-orchestra` Claude Code
-plugin. The bash + Python engine is wrapped verbatim under `src/rebar/_engine/`;
-the three interfaces are thin layers over it.
+plugin. It began as a bash + Python engine; that engine has since been fully ported
+to in-process Python (see `docs/bash-migration.md`). The reconciler ships under
+`src/rebar/_engine/` as package data, and the three interfaces are thin layers over
+the in-process core.
 
 ## Why rebar
 
@@ -79,7 +81,8 @@ On top of that foundation, rebar adds what parallel agent work actually needs:
 
 **Runtime (system):**
 - Python ≥ 3.11
-- `git`, `bash`, `jq` — required.
+- `git` — required (the store is a git orphan branch + worktree). The engine is
+  pure in-process Python; `bash` and `jq` are **not** required at runtime.
 - `flock` from **util-linux** — recommended for robust write serialization, but
   **not strictly required**: it is not on `PATH` by default on macOS
   (`brew install util-linux`), and when no util-linux `flock` is found rebar falls
@@ -118,8 +121,9 @@ See [Install](#install) and [Tests](#tests).
 
 rebar ships from one Python package — PyPI distribution **`nava-rebar`** (the
 import package and commands stay `rebar` / `rebar-mcp`). Pick the channel that
-fits. (System prerequisites in all cases: `git`, `jq`, `flock`, `bash`,
-`python3`; `acli` only for live Jira reconciliation.)
+fits. (System prerequisites in all cases: `git` and `python3` (≥ 3.11); a
+util-linux `flock` is used for write serialization when present, with a `mkdir`
+fallback otherwise; `acli` only for live Jira reconciliation.)
 
 ### Homebrew (CLI)
 
@@ -194,24 +198,17 @@ pip install '.[mcp]'      # + MCP server (FastMCP)
 pip install -e '.[dev]'
 ```
 
-> **Packaging note — why rebar installs *unpacked* to disk.** rebar's engine is a
-> **`bash` dispatcher plus `ticket-*.sh` and Python helper files that an external
-> `bash` process executes as real on-disk files** — it `source`s its siblings by
-> path and runs the Python helpers as `python3 <file>`. That's a property of the
-> *engine*, not of Python's import system, so the package must be installed
+> **Packaging note — why rebar installs *unpacked* to disk.** The library, CLI,
+> MCP server, and the whole read/write core run **in-process** in Python. The one
+> component that runs as a subprocess is the Jira **reconciler**, which ships under
+> `src/rebar/_engine/` as package **data** (`python -m rebar_reconciler`, plus the
+> `jira-capability-probe.py` script and the alias wordlist): it is launched and
+> read from the filesystem as real on-disk files, so the package must be installed
 > unpacked to a real directory and **zipimport / zip-safe bundles (zipapp, shiv,
-> PEX, Lambda zips) are unsupported**. The subtle part: a zip-safe wheel would not
-> even help, because `bash` itself has to read the scripts from a filesystem —
-> rebar requires `bash` on the host *regardless* of how Python is packaged. Every
-> standard install satisfies this: pip/pipx wheels (hatchling builds unpacked),
-> editable installs, and Homebrew all land real files. `engine_dir()` asserts it
-> at the first engine call and fails loudly otherwise.
->
-> Reads are increasingly Python-native and run **in-process** — the library's
-> `show`/`list`/`deps`/`ready`/`search` and the MCP read tools resolve via the
-> bundled `ticket_reducer`/`ticket_graph` packages with no subprocess. The write
-> path and `next-batch` still drive the bash engine, so the unpacked-to-disk
-> requirement stands.
+> PEX, Lambda zips) are unsupported**. Every standard install satisfies this:
+> pip/pipx wheels (hatchling builds unpacked), editable installs, and Homebrew all
+> land real files. `engine_dir()` asserts the engine dir is present on disk at the
+> first reconciler call and fails loudly otherwise.
 
 ## CLI
 
@@ -441,20 +438,20 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'                       # editable + pytest, mcp, jsonschema
 pytest -m "not integration"                   # the single entry point (CI runs this)
 pytest tests/interfaces                       # interface-parity tier only
-pytest tests/scripts/test_bash_suites.py      # all bash engine suites, under pytest
+pytest tests/scripts                          # engine/reconciler tier only
 ```
 
-**`pytest` is the single entry point.** The standalone `tests/scripts/test-*.sh`
-bash suites are collected and run by `tests/scripts/test_bash_suites.py`, so a
-failing bash suite fails the Python run too — you no longer need to invoke them by
-hand. CI (`.github/workflows/test.yml`) runs `pytest -m "not integration"` on
+**`pytest` is the single entry point.** The engine is pure in-process Python
+(the bash engine and its `.sh` suites were removed in the bash→Python migration —
+see `docs/bash-migration.md`). CI (`.github/workflows/test.yml`) runs
+`pytest -m "not integration"` on
 Ubuntu and macOS for every push and PR. The `integration` tier (live Jira /
 network) is **excluded** from that default run; run it explicitly with credentials
 via `pytest -m integration`.
 
 The Python suite is sub-divided by concern:
 
-- `tests/scripts`, `tests/unit` — the engine (reducer, graph, reconciler) and bash scripts.
+- `tests/scripts`, `tests/unit` — the in-process engine (reducer, graph, reconciler).
 - `tests/interfaces` — proves the **library, CLI, and MCP** interfaces behave
   identically over one git-backed store:
   - `test_parity.py` runs each operation through all three interfaces (and a

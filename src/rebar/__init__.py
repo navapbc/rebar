@@ -555,8 +555,8 @@ def verify_signature(ticket_id: str, *, repo_root=None) -> dict:
 
 
 # ── Read path (in-process via rebar._reads; alias-aware, returns parsed JSON) ──
-# Reads compute from the native ticket_reducer/ticket_graph packages in-process —
-# no subprocess. (next_batch is the lone exception: still the bash orchestrator.)
+# Reads compute from the in-process rebar.reducer / rebar.graph packages — no
+# subprocess (the bash orchestrator was retired in the bash→Python migration).
 def show_ticket(ticket_id: str, *, repo_root=None) -> dict:
     """Compiled ticket state as a dict (alias/short-id aware)."""
     from rebar import _reads

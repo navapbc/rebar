@@ -69,6 +69,11 @@ over one git-backed store.
     level-triggered, bidirectional Jira sync, launched as a subprocess
     (`python -m rebar_reconciler`); the one component with a grandfathered
     cross-client advisory lock (`.reconciler-pass-lock`, single-writer-by-design).
+  - **Import/export** (`rebar._io`, code at `src/rebar/_io/`) — NDJSON
+    export/import of ticket state backing `rebar.export_tickets`/`import_tickets`,
+    the CLI `export`/`import` subcommands, and the MCP equivalents (see
+    [import-export.md](import-export.md)). Export streams replay-derived states;
+    import is idempotent (re-importing the same stream is a no-op).
 
 - **LLM agent operations** (`rebar.llm`, code at `src/rebar/llm/`) — an OPTIONAL
   framework for tool-using LLM agents that emit structured findings, exposed over
