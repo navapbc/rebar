@@ -291,8 +291,7 @@ def verify_completion(
     # judgment. The structured path skips normalize_finding (unlike the findings path), so
     # normalize here (clamp severity, coerce citations, strip nulls); it KEEPS `criterion`.
     result["findings"] = [
-        findings.normalize_finding(f, reviewer_id=_REVIEWER_ID)
-        for f in result.get("findings", [])
+        findings.normalize_finding(f, reviewer_id=_REVIEWER_ID) for f in result.get("findings", [])
     ]
     findings.resolve_citations(result, cfg.repo_path)  # downgrade hallucinated file: citations
     _reconcile(result)  # normalize verdict; enforce FAIL⇔findings

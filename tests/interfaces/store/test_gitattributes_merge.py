@@ -50,10 +50,14 @@ def test_init_commits_gitattributes_and_configures_driver(fresh_repo: Path) -> N
     assert ".bridge_state/* merge=ours" in show.stdout
     assert ".reconciler-* merge=ours" in show.stdout
     attr_lines = [ln for ln in show.stdout.splitlines() if ln.strip() and not ln.startswith("#")]
-    assert all("merge=union" not in ln for ln in attr_lines), "union would corrupt JSON — must NOT be used"
+    assert all("merge=union" not in ln for ln in attr_lines), (
+        "union would corrupt JSON — must NOT be used"
+    )
 
     drv = _git(tracker, "config", "--get", "merge.ours.driver")
-    assert drv.stdout.strip() == "true", "the 'ours' driver must be configured or the attr is ignored"
+    assert drv.stdout.strip() == "true", (
+        "the 'ours' driver must be configured or the attr is ignored"
+    )
 
 
 def test_gitattributes_migration_is_idempotent(fresh_repo: Path) -> None:
@@ -89,5 +93,7 @@ def test_bindings_json_race_converges_keeping_ours(fresh_repo: Path) -> None:
     _git(tracker, "commit", "-aq", "--no-verify", "-m", "our pass rewrites bindings")
 
     merge = _git(tracker, "merge", "other", "--no-edit")
-    assert merge.returncode == 0, f"bindings.json race wedged the merge:\n{merge.stdout}{merge.stderr}"
+    assert merge.returncode == 0, (
+        f"bindings.json race wedged the merge:\n{merge.stdout}{merge.stderr}"
+    )
     assert (bridge / "bindings.json").read_text() == '{"v":3}\n', "merge=ours must keep OUR copy"

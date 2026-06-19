@@ -263,6 +263,7 @@ _EDIT_USAGE = (
     "[--add-tag=t1,t2] [--remove-tag=t1,t2] [--set-tags=t1,t2]"
 )
 
+
 def _parse_tag_list(value, *, validate: bool) -> list[str]:
     """Normalise a tag spec (CSV string or list) to a deduped, trimmed tag list.
 
@@ -334,9 +335,7 @@ def edit_core(
         raise CommandError("Error: --set-tags cannot be combined with --add-tag/--remove-tag")
     overlap = [t for t in add_list if t in remove_list]
     if overlap:
-        raise CommandError(
-            f"Error: tag(s) {overlap} given to both --add-tag and --remove-tag"
-        )
+        raise CommandError(f"Error: tag(s) {overlap} given to both --add-tag and --remove-tag")
     has_tag_op = has_set or bool(add_list) or bool(remove_list)
 
     if not fields and not has_tag_op:

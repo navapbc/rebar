@@ -103,9 +103,7 @@ def _hardened_filter(max_bytes: int, max_files: int = DEFAULT_MAX_SNAPSHOT_FILES
         member = tarfile.data_filter(member, dest_path)
         seen["count"] += 1
         if seen["count"] > max_files:
-            raise SnapshotError(
-                f"snapshot exceeds the {max_files}-file cap; refusing to continue"
-            )
+            raise SnapshotError(f"snapshot exceeds the {max_files}-file cap; refusing to continue")
         seen["total"] += max(0, member.size)
         if seen["total"] > max_bytes:
             raise SnapshotError(

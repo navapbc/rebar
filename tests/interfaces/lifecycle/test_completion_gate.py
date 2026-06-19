@@ -23,9 +23,9 @@ import pytest
 
 import rebar
 import rebar.llm
+from rebar import config as _config
 from rebar._commands import transition as _t
 from rebar._engine_support.resolver import resolve_ticket_id
-from rebar import config as _config
 
 
 def _enable(repo: Path) -> None:
@@ -38,13 +38,18 @@ def _enable(repo: Path) -> None:
 
 def _commit(repo: Path) -> None:
     subprocess.run(
-        ["git", "commit", "--allow-empty", "-q", "-m", "c"], cwd=str(repo), check=True,
+        ["git", "commit", "--allow-empty", "-q", "-m", "c"],
+        cwd=str(repo),
+        check=True,
         capture_output=True,
     )
 
 
 def _make(repo: Path, ttype: str = "task") -> str:
-    desc = "Body.\n\n## Acceptance Criteria\n- [ ] done\n\n## Success Criteria\n- [ ] x\n\n## Context\nc\n"
+    desc = (
+        "Body.\n\n## Acceptance Criteria\n- [ ] done\n\n"
+        "## Success Criteria\n- [ ] x\n\n## Context\nc\n"
+    )
     tid = rebar.create_ticket(ttype, f"gate {ttype}", description=desc, repo_root=str(repo))
     rebar.transition(tid, "open", "in_progress", repo_root=str(repo))
     return tid
@@ -58,11 +63,19 @@ def _rid(tid: str, repo: Path) -> str:
     return resolve_ticket_id(tid, str(_config.tracker_dir(str(repo))))
 
 
-PASS = lambda ticket_id, **kw: {"verdict": "PASS", "findings": [], "runner": "fake", "model": "m"}
-FAIL = lambda ticket_id, **kw: {
-    "verdict": "FAIL", "runner": "fake", "model": "m",
-    "findings": [{"criterion": "AC1", "detail": "missing", "severity": "high", "dimension": "completion"}],
-}
+def PASS(ticket_id, **kw):
+    return {"verdict": "PASS", "findings": [], "runner": "fake", "model": "m"}
+
+
+def FAIL(ticket_id, **kw):
+    return {
+        "verdict": "FAIL",
+        "runner": "fake",
+        "model": "m",
+        "findings": [
+            {"criterion": "AC1", "detail": "missing", "severity": "high", "dimension": "completion"}
+        ],
+    }
 
 
 def _never(ticket_id, **kw):  # must NOT be called
@@ -111,7 +124,9 @@ def test_gate_pass_signs_strictly_after_close(rebar_repo: Path, monkeypatch) -> 
     # Subjects newest→oldest; restrict to this ticket so other writes don't interleave.
     log = subprocess.run(
         ["git", "-C", tracker, "log", "--format=%s"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.splitlines()
     subjects = [s for s in log if rid in s]
     sig_idx = next(i for i, s in enumerate(subjects) if "SIGNATURE" in s)
@@ -159,7 +174,10 @@ def test_force_close_skips_verify_and_sign(rebar_repo: Path, monkeypatch) -> Non
     monkeypatch.setattr(rebar.llm, "verify_completion", _never)  # must not be called
     tid = _make(rebar_repo)
     _t.transition_compute(
-        _rid(tid, rebar_repo), "in_progress", "closed", force_close="manual override",
+        _rid(tid, rebar_repo),
+        "in_progress",
+        "closed",
+        force_close="manual override",
         repo_root=str(rebar_repo),
     )
     assert _status(tid, rebar_repo) == "closed"
@@ -177,7 +195,9 @@ def test_bug_without_reason_rejected_before_verifier(rebar_repo: Path, monkeypat
     assert _status(tid, rebar_repo) == "in_progress"
 
 
-def test_unreadable_config_fails_gate_off_with_warning(rebar_repo: Path, monkeypatch, capsys) -> None:
+def test_unreadable_config_fails_gate_off_with_warning(
+    rebar_repo: Path, monkeypatch, capsys
+) -> None:
     # An unreadable config must NOT block this (opt-in) gate or preempt other gates.
     (rebar_repo / "rebar.toml").write_text("this is = = not valid toml [[[\n")
     monkeypatch.setattr(rebar.llm, "verify_completion", _never)  # gate-off => never verifies
@@ -291,7 +311,9 @@ def test_session_log_close_is_refused_no_signature(rebar_repo: Path, monkeypatch
     _commit(rebar_repo)
     _enable(rebar_repo)
     monkeypatch.setattr(rebar.llm, "verify_completion", _never)  # gate must skip session_log
-    log = rebar.create_ticket("session_log", "L", description="verbose body", repo_root=str(rebar_repo))
+    log = rebar.create_ticket(
+        "session_log", "L", description="verbose body", repo_root=str(rebar_repo)
+    )
     rid = _rid(log, rebar_repo)
     with pytest.raises(CommandError):
         _t.transition_compute(rid, "open", "closed", repo_root=str(rebar_repo))

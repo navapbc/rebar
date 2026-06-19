@@ -164,8 +164,7 @@ def test_variant_overlay_unions_base_declarations(monkeypatch) -> None:
     def fake(reviewer, repo_root, variant):
         if variant is None:
             return (
-                "---\nvariables: [ticket, diff]\nrequired: [ticket]\n---\n"
-                "BASE {{ticket}} {{diff}}"
+                "---\nvariables: [ticket, diff]\nrequired: [ticket]\n---\nBASE {{ticket}} {{diff}}"
             )
         if variant == "friendly":
             return "---\nvariables: [tone]\n---\nTONE {{tone}}\n<!--base-->"

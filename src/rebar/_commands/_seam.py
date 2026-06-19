@@ -13,6 +13,7 @@ invariant I5 (single locked write path) holds unchanged.
 from __future__ import annotations
 
 import os
+import re as _re
 import subprocess
 import uuid as _uuid
 from pathlib import Path
@@ -112,8 +113,6 @@ def author(fallback: str = "Unknown") -> str:
         pass
     return fallback
 
-
-import re as _re
 
 _TAG_CTRL_RE = _re.compile(r"[\x00-\x1f\x7f]")
 

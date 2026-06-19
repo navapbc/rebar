@@ -21,7 +21,9 @@ from rebar._store import sync
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=False)
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args], capture_output=True, text=True, check=False
+    )
 
 
 def _new_tickets_repo(path: Path) -> None:
@@ -89,6 +91,8 @@ def test_unrelated_history_survives_gc_prune_after_union(unrelated_origin) -> No
     assert gc.returncode == 0, gc.stderr
 
     for sha in (local_sha, origin_sha):
-        assert _git(tracker, "cat-file", "-e", sha).returncode == 0, f"{sha} lost after gc --prune=now"
+        assert _git(tracker, "cat-file", "-e", sha).returncode == 0, (
+            f"{sha} lost after gc --prune=now"
+        )
     assert (tracker / "1111-dddd-eeee-ffff").is_dir()
     assert (tracker / "0000-aaaa-bbbb-cccc").is_dir()

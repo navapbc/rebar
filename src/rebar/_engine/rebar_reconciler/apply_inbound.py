@@ -417,7 +417,9 @@ def _apply_inbound_update(mutation, *, client=None, repo_root=None) -> ApplyResu
                     continue
                 if action == "add" and label_name not in current_tags and label_name not in added:
                     added.append(label_name)
-                elif action == "remove" and label_name in current_tags and label_name not in removed:
+                elif (
+                    action == "remove" and label_name in current_tags and label_name not in removed
+                ):
                     removed.append(label_name)
             # Dedup added∩removed (a contradictory inbound pass): add-wins, matching
             # the reducer's intra-event contract — never emit a label in both lists.

@@ -83,10 +83,7 @@ def test_duplicate_top_level_key_rejected() -> None:
 
 
 def test_duplicate_step_key_rejected() -> None:
-    src = (
-        'schema_version: "1"\nname: x\nsteps:\n'
-        "  - id: a\n    uses: first\n    uses: second\n"
-    )
+    src = 'schema_version: "1"\nname: x\nsteps:\n  - id: a\n    uses: first\n    uses: second\n'
     with pytest.raises(S.WorkflowParseError, match="duplicate key 'uses'"):
         S.parse_workflow(src)
 

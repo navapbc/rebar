@@ -524,9 +524,7 @@ def test_bridge_fsck_warns_on_unknown_newer_event_type(tmp_path: Path, fsck: Mod
     ticket_dir = tracker / "w21-future"
     ticket_dir.mkdir(parents=True)
     _write_create_event(ticket_dir, timestamp=_NOW_TS - 3600, title="Future")
-    _write_sync_event(
-        ticket_dir, jira_key="DIG-1", local_id="w21-future", timestamp=_NOW_TS - 1800
-    )
+    _write_sync_event(ticket_dir, jira_key="DIG-1", local_id="w21-future", timestamp=_NOW_TS - 1800)
     # A synthetic future event type a newer rebar introduced.
     (ticket_dir / f"{_NOW_TS}-ffffffff-0000-4000-8000-000000000099-FUTURE_TYPE.json").write_text(
         json.dumps(

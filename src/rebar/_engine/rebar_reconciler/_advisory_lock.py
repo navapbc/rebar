@@ -588,6 +588,7 @@ def _write_file_to_tickets_branch(
     worktree the tickets branch ref is advanced atomically via
     ``git update-ref`` compare-and-swap.
     """
+
     def _mutate(worktree_dir: Path) -> None:
         (worktree_dir / filename).write_text(contents)
         _git_run_in(worktree_dir, ["add", filename])
@@ -606,6 +607,7 @@ def _delete_file_from_tickets_branch(repo_root: Path, filename: str, commit_mess
     committing the deletion in the detached worktree the tickets branch ref is
     advanced atomically via ``git update-ref`` compare-and-swap.
     """
+
     def _mutate(worktree_dir: Path) -> None:
         # Idempotent: ``git rm`` only an existing file (a no-op stages nothing, so the
         # shared staged-diff guard then makes no commit — same as the former

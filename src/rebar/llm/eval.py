@@ -205,9 +205,7 @@ def validate_eval_spec(spec: dict) -> list[str]:
         # An at_least(k) gate with k > epochs can never pass — catch the
         # unsatisfiable threshold at validation time, not after a full run.
         if isinstance(epochs, int) and epochs >= 1 and k > epochs:
-            errs.append(
-                f"gate at_least({k}) is unsatisfiable: k must be <= epochs ({epochs})"
-            )
+            errs.append(f"gate at_least({k}) is unsatisfiable: k must be <= epochs ({epochs})")
     except EvalError as exc:
         errs.append(str(exc))
     cov = spec.get("coverage_threshold")
@@ -295,8 +293,7 @@ def to_junit(eval_name: str, cases: list[dict]) -> str:
     read the body, not the attribute)."""
     failures = sum(1 for c in cases if not c.get("passed"))
     suite_attrs = (
-        f"name={_xml_attr(eval_name)} tests=\"{len(cases)}\" "
-        f'failures="{failures}" errors="0"'
+        f'name={_xml_attr(eval_name)} tests="{len(cases)}" failures="{failures}" errors="0"'
     )
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',

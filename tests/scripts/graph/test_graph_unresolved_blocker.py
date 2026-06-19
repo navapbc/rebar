@@ -64,9 +64,7 @@ def test_depends_on_resolvable_open_target_blocks_normally(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_depends_on_resolvable_closed_target_is_ready(
-    graph: ModuleType, tmp_path: Path
-) -> None:
+def test_depends_on_resolvable_closed_target_is_ready(graph: ModuleType, tmp_path: Path) -> None:
     """Control: depends_on a real CLOSED ticket → ready."""
     tracker = tmp_path / "tracker"
     tracker.mkdir()

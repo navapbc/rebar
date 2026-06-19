@@ -32,8 +32,12 @@ from rebar import schemas
 
 # ── canned verdicts (the op's normalize/reconcile already ran upstream of the seam) ──
 _PASS = {
-    "verdict": "PASS", "findings": [], "summary": "all criteria met",
-    "runner": "fake", "model": None, "trace_id": None,
+    "verdict": "PASS",
+    "findings": [],
+    "summary": "all criteria met",
+    "runner": "fake",
+    "model": None,
+    "trace_id": None,
     "reviewers": ["completion-verifier"],
 }
 
@@ -44,14 +48,18 @@ def _pass(ticket_id, **kw):
 
 def _fail(ticket_id, **kw):
     return {
-        "verdict": "FAIL", "runner": "fake", "model": None, "trace_id": None,
+        "verdict": "FAIL",
+        "runner": "fake",
+        "model": None,
+        "trace_id": None,
         "reviewers": ["completion-verifier"],
         "target": {"kind": "ticket", "ticket_ids": [ticket_id]},
         "findings": [
             {
                 "criterion": "AC1 — the thing exists",
                 "detail": "no implementation found",
-                "severity": "high", "dimension": "completion",
+                "severity": "high",
+                "dimension": "completion",
                 "citations": [{"kind": "file", "path": "src/x.py", "line_start": 12}],
             }
         ],
@@ -60,7 +68,8 @@ def _fail(ticket_id, **kw):
 
 def _seed(repo: Path) -> str:
     return rebar.create_ticket(
-        "task", "verify task",
+        "task",
+        "verify task",
         description="Body.\n\n## Acceptance Criteria\n- [ ] the thing exists\n",
         repo_root=str(repo),
     )
@@ -120,7 +129,9 @@ def test_cli_json_output_validates_against_schema(rebar_repo: Path, monkeypatch,
     schemas.validator(schemas.COMPLETION_VERDICT).validate(payload)
 
 
-def test_cli_text_output_renders_verdict_and_findings(rebar_repo: Path, monkeypatch, capsys) -> None:
+def test_cli_text_output_renders_verdict_and_findings(
+    rebar_repo: Path, monkeypatch, capsys
+) -> None:
     """``-o text`` renders the verdict and, for each finding, its criterion + detail +
     citation location — the operator-facing fields (asserted by their VALUES being present,
     which the renderer must surface, not by exact layout)."""
@@ -131,10 +142,10 @@ def test_cli_text_output_renders_verdict_and_findings(rebar_repo: Path, monkeypa
     rc = main(["verify-completion", tid, "-o", "text"])
     out = capsys.readouterr().out
     assert rc == 1
-    assert "FAIL" in out                       # the verdict
-    assert "AC1 — the thing exists" in out     # the criterion
-    assert "no implementation found" in out    # the detail
-    assert "src/x.py" in out                   # the citation location
+    assert "FAIL" in out  # the verdict
+    assert "AC1 — the thing exists" in out  # the criterion
+    assert "no implementation found" in out  # the detail
+    assert "src/x.py" in out  # the citation location
 
 
 def test_cli_llm_error_is_clean_exit_one(rebar_repo: Path, monkeypatch, capsys) -> None:
@@ -185,7 +196,9 @@ def test_mcp_verify_completion_gated_off_by_default(rebar_repo: Path, monkeypatc
     assert "disabled" in str(exc.value).lower(), str(exc.value)
 
 
-def test_mcp_verify_completion_gate_on_returns_schema_valid_dict(rebar_repo: Path, monkeypatch) -> None:
+def test_mcp_verify_completion_gate_on_returns_schema_valid_dict(
+    rebar_repo: Path, monkeypatch
+) -> None:
     """Gate ON + a monkeypatched verifier ⇒ the MCP tool returns a plain DICT that validates
     against the canonical ``completion_verdict`` schema (offline; no live call)."""
     import asyncio
