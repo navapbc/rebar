@@ -198,7 +198,10 @@ already call each other) — never mechanically to hit a number, and **never cre
 files < 100 LOC** by splitting. Prefer **deleting** oversized bash via the
 bash→Python strangler-fig migration over carving it into more bash. The current
 over-cap offenders and their planned remedies are tabulated in
-`docs/architecture.md` (a warn-only CI report flags new ones).
+`docs/architecture.md`, and a CI **module-size gate** (`.github/workflows/test.yml`)
+**fails the build** when a *new* file exceeds the soft cap and is not in
+`.github/module-size-allowlist.txt` (the grandfathered set), so the over-cap set
+cannot silently grow.
 
 ## Navigating the codebase (when editing rebar itself)
 
