@@ -45,7 +45,8 @@ Replay dispatch: `ticket_reducer/_processors.py` (`process_*`).
 |------|-----------|--------------------------|
 | `CREATE` | `ticket-create.sh` | Seeds `ticket_type`, `title`, `parent_id`, `priority`, `assignee`, `description`, `tags`. Exactly one per ticket (fsck checks presence). Valid `ticket_type`s: `task`, `story`, `bug`, `epic`, `session_log`. **`session_log`** is a verbose-log type that is gate/lifecycle-exempt, excluded from the graph/health compiles (via `reduce_all_tickets(exclude_session_logs=…)`) and default `list`, never synced to Jira, and refuses `STATUS` (no claim/transition) — see CLAUDE.md "Session logs". |
 | `STATUS` | `ticket_txn.py` (transition/claim) | Sets `status`; carries `current_status` (the optimistic-concurrency expectation) and `parent_status_uuid` (the prior STATUS uuid) for fork resolution. |
-| `EDIT` | `ticket-edit.sh`, `ticket_txn.py` (claim) | Merges `data.fields` (title/priority/assignee/description/tags/parent) into state (last-writer-by-replay-order). |
+| `EDIT` | `ticket-edit.sh`, `ticket_txn.py` (claim) | Merges `data.fields` (title/priority/assignee/description/parent) into state (last-writer-by-replay-order). **Tags are no longer mutated via `EDIT` (P2.3)** — historical `EDIT.fields.tags` still replays as the base, but no upgraded writer emits it; use `TAG_DELTA`. |
+| `TAG_DELTA` | `edit --add-tag/--remove-tag/--set-tags`, `tag`/`untag`, Jira inbound applier | Convergent tag add/remove deltas: `data.{added[], removed[]}` mutate the current `tags` in replay order (remove-then-add, so **add wins** on an intra-event conflict; idempotent). Replaces the whole-field `EDIT.tags` clobber so two clones adding different tags both survive. `--set-tags` is compiled to a delta vs observed tags (add-wins). The inbound reconciler marks `data.source="inbound"` so `local_label_intent` excludes it from user-intent. |
 | `COMMENT` | `ticket-comment.sh` | Appends `{body, author, timestamp}` to `comments`. |
 | `LINK` / `UNLINK` | `ticket-graph.py` / `ticket-link.sh` | Add / cancel a relation. Relations: `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`, `discovered_from` (`ticket_graph/_links.py:CANONICAL_RELATIONS`). `relates_to` is reciprocal; the rest are directional. Only `blocks`/`depends_on` can create cycles. **Hierarchy promotion:** for `blocks`/`depends_on` only, the recorded endpoints are promoted up the parent hierarchy so the dependency is between comparable levels (epic↔epic, story↔story, task/bug↔task/bug), emitting a `REDIRECT: A→B promoted to …` note; the other (non-blocking) relations are recorded exactly as given. `UNLINK` is pair-scoped (no relation arg) and cancels the most-recent link for an ordered `<source> <target>` pair, one per event — and must target the *promoted (ancestor)* endpoint to cancel a promoted blocking link. A `session_log` endpoint refuses `blocks`/`depends_on` (it never enters the dependency graph) but permits the non-blocking `relates_to`/`discovered_from`. |
 | `FILE_IMPACT` | `set-file-impact` | Records the `{path, reason}` array `next-batch` uses for conflict-aware scheduling. |
@@ -60,11 +61,14 @@ Replay dispatch: `ticket_reducer/_processors.py` (`process_*`).
 The event log is the **wire format between clones running different rebar
 versions** — they share one `origin/tickets` and merge each other's event files
 as a union. The format carries an explicit version constant:
-`reducer/_version.py: SCHEMA_VERSION` (currently `2`). Bump it when the
+`reducer/_version.py: SCHEMA_VERSION` (currently `3`). Bump it when the
 wire format changes in a way other clones must be aware of. (v2 = P2.1: the
 filename prefix became a single-integer HLC value; same width and encoding, so
 older clones still string-compare correctly — the change is semantic ordering, not
-a body change.) There is **no** VERSION event and no version negotiation —
+a body change. v3 = P2.3: the new `TAG_DELTA` event body — the **first** bump that
+adds a new event *type*, so it is the first to actually exercise the unknown-type
+forward-compat rule below; the integer is declarative, `KNOWN_EVENT_TYPES` does the
+real gating.) There is **no** VERSION event and no version negotiation —
 cross-version safety is handled by a single rule:
 
 **Unknown event types are preserved-and-ignored.** `KNOWN_EVENT_TYPES`
@@ -80,6 +84,14 @@ not the main replay) and the bridge-only `SYNC`. An event whose `event_type` is
   SNAPSHOT nor deletes it, so an older clone's compaction cannot destroy a newer
   clone's data. (The same treatment `*-SYNC.json` and `*-PRECONDITIONS*.json`
   files already get.)
+
+**Detectability + rollout (P2.3).** Preserve-and-ignore keeps an old clone from
+*corrupting* the store, but the new event's effect is *invisible* there until it
+upgrades — e.g. an un-upgraded **reconcile host** would reduce without `TAG_DELTA`
+and push a stale tag set to Jira. `fsck` therefore emits a `WARN` when the store
+contains event types newer than the running binary ("upgrade rebar"), so the
+window is detectable rather than silent. **Deployment rule: upgrade
+reconciler-running clones FIRST** when rolling out a new event type.
 
 Pinned by `tests/interfaces/contracts/test_event_schema_forward_compat.py`.
 

@@ -237,6 +237,27 @@ parent work to the epic/story it belongs to with `create --parent <id>` or `edit
   Consequence: because a blocking link may be promoted to an ancestor, `unlink`
   must target the **promoted (ancestor)** endpoint to remove it.
 
+## Tags (convergent add/remove deltas)
+
+Tags mutate via **add/remove deltas** (`TAG_DELTA` events), so two clones adding
+different tags both survive (no whole-field clobber). The surface:
+
+- `tag <id> <t>` / `untag <id> <t>` — single-tag add/remove (idempotent).
+- `edit <id> --add-tag=a,b --remove-tag=c` — batch add/remove in one event.
+- `edit <id> --set-tags=x,y` — replace the tag set. **It is compiled to a delta
+  against the tags this clone has observed (add-wins): a concurrent tag another
+  clone added that you haven't synced is NOT removed — so "set" is convergent, not
+  an authoritative reset.** `--set-tags=""` clears the *observed* tags only.
+  `--set-tags` cannot be combined with `--add-tag`/`--remove-tag` (error).
+- `--tags` is **not** an `edit` flag (it would clobber); it remains only on
+  `create` (genesis). Library/MCP `edit_ticket(tags=…)` is a deprecated alias for
+  `set_tags`; prefer `add_tags`/`remove_tags`/`set_tags`.
+- Tag names are trimmed; empty/whitespace-only/control-char names are rejected.
+
+Rollout note: a new event type is preserved-and-ignored by older clones, so a
+`TAG_DELTA` is invisible there until they upgrade — `fsck` WARNs when the store
+holds event types newer than the running binary. **Upgrade reconcile hosts first.**
+
 ## The store shares every write immediately
 
 Every write (`create`/`edit`/`transition`/`claim`/`link`/…) auto-commits its

@@ -144,6 +144,34 @@ def _scan(tracker: str, no_mutate: bool) -> tuple[list[str], int]:
     if pp:
         lines.append(pp)
 
+    # ── Check 5: forward-compat — event types newer than this binary (P2.3) ───
+    # Informational WARN (no issue_count, like push-pending): an unknown event_type
+    # is preserved-and-ignored by replay, so the store is NOT corrupt — but the
+    # event's effect is INVISIBLE until this binary is upgraded (e.g. a reconcile
+    # host on an old binary would reduce without it and push a stale tag set to
+    # Jira). Surface it so the otherwise-silent rollout window is detectable.
+    # Generic over KNOWN_EVENT_TYPES — not specific to any one new type. The
+    # event_type is read from the canonical filename suffix (``{ts}-{uuid}-{TYPE}``,
+    # uuid hyphens precede it), matching reducer/_sort.event_sort_key.
+    from rebar.reducer._version import KNOWN_EVENT_TYPES
+
+    unknown_types: set[str] = set()
+    for ticket_id in _ticket_dirs(tracker):
+        ticket_dir = os.path.join(tracker, ticket_id)
+        for filename in os.listdir(ticket_dir):
+            if not filename.endswith(".json") or filename.startswith("."):
+                continue
+            etype = filename[: -len(".json")].rsplit("-", 1)[-1]
+            if etype and etype not in KNOWN_EVENT_TYPES:
+                unknown_types.add(etype)
+    if unknown_types:
+        lines.append(
+            "WARN: store contains event types newer than this rebar understands: "
+            f"{', '.join(sorted(unknown_types))} — upgrade rebar. These events are "
+            "preserved on disk but their effect is invisible until you upgrade (a "
+            "reconcile host on an old binary may push stale state)."
+        )
+
     return lines, issue_count
 
 

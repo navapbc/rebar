@@ -150,3 +150,17 @@ def test_unknown_event_file_survives_compaction(rebar_repo: Path) -> None:
     # And replay still succeeds after compaction.
     state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
     assert state["status"] == "open"
+
+
+# ── DETECTABLE: fsck warns when the store has event types newer than this binary ─
+def test_fsck_warns_on_unknown_newer_event_type(rebar_repo: Path) -> None:
+    """P2.3: a preserved-and-ignored future event is silent in reduced state, so
+    fsck must surface it (the rollout window where an old binary under-displays /
+    a reconcile host pushes stale state). Generic over KNOWN_EVENT_TYPES."""
+    tid = _seed(rebar_repo)
+    _write_future_event(rebar_repo, tid)
+    report = rebar.fsck(repo_root=str(rebar_repo))
+    assert FUTURE_TYPE in report
+    assert "newer than this rebar understands" in report
+    # It is a WARN, not a corruption finding — fsck must still pass overall.
+    assert "CORRUPT" not in report
