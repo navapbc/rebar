@@ -289,28 +289,28 @@ def _apply_inbound_update(mutation, *, client=None, repo_root=None) -> ApplyResu
     # the local-keyed shape from the differ AND the legacy Jira-keyed
     # ``summary`` for back-compat with any caller that bypasses the differ.
     edit_fields: dict[str, Any] = {}
+    # title needs a fallback (the legacy Jira-keyed ``summary``), so it stays inline;
+    # status (a 2nd STATUS event) and labels (tag read-modify-write) are special-cased
+    # below. The remaining scalar fields are a declarative {field: Jira→local transform}
+    # table — adding a synced scalar field is now a one-line entry. Notes preserved:
+    #   - description: normalize a raw ADF dict → plain text (Bug 1bb2 defense-in-depth;
+    #     the differ should normalize at read time, but a bypassing caller may forward ADF).
+    #   - parent_id: an absent/empty parent maps to "" (clears the parent; ticket 8b25,
+    #     surfaced by the inbound differ as ``fields["parent_id"] = <local_id>``).
     if "title" in fields:
         edit_fields["title"] = fields["title"]
     elif "summary" in fields:
         edit_fields["title"] = fields["summary"]
-    if "description" in fields:
-        desc = fields["description"]
-        # Bug 1bb2: normalize ADF dict → plain text. The differ should
-        # normalize at read time, but guard here too in case a caller
-        # forwards the raw ADF dict (defense-in-depth).
-        if isinstance(desc, dict):
-            desc = _normalize_adf_body(desc)
-        edit_fields["description"] = desc
-    if "priority" in fields:
-        edit_fields["priority"] = _resolve_priority(fields["priority"])
-    if "assignee" in fields:
-        edit_fields["assignee"] = _extract_name(fields["assignee"])
-    if "ticket_type" in fields:
-        edit_fields["ticket_type"] = fields["ticket_type"]
-    # Parent sync (ticket 8b25): inbound parent_id change → include in EDIT.
-    # The inbound differ surfaces this as ``fields["parent_id"] = <local_id>``.
-    if "parent_id" in fields:
-        edit_fields["parent_id"] = fields["parent_id"] or ""
+    _scalar_transforms = {
+        "description": lambda v: _normalize_adf_body(v) if isinstance(v, dict) else v,
+        "priority": _resolve_priority,
+        "assignee": _extract_name,
+        "ticket_type": lambda v: v,
+        "parent_id": lambda v: v or "",
+    }
+    for _fname, _transform in _scalar_transforms.items():
+        if _fname in fields:
+            edit_fields[_fname] = _transform(fields[_fname])
 
     written: list[str] = []
     if edit_fields:

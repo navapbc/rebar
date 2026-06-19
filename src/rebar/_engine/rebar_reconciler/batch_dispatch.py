@@ -39,6 +39,12 @@ class RetryExhaustedError(Exception):
     """Raised when _call_with_retry exhausts all retry attempts."""
 
 
+# Per-pass REST-call budget: once create_one has issued this many REST calls in a
+# pass it defers further creates (back-pressure against Jira rate limits). Named here
+# so the threshold has one source instead of a bare literal in the guard + docstring.
+_REST_CALL_BUDGET = 200
+
+
 def _call_with_retry(fn, *args, timeout_s: int = 30, max_retries: int = 3, **kwargs):
     """Call fn(*args, **kwargs) with exponential backoff on retryable failures.
 
@@ -93,7 +99,7 @@ def create_one(
 ) -> dict | None:
     """Create a Jira issue from the mutation's fields, with budget guard and JQL dedup.
 
-    Budget guard: if rest_calls >= 200, appends mutation to deferred_creates and
+    Budget guard: if rest_calls >= _REST_CALL_BUDGET, appends mutation to deferred_creates and
     returns None without issuing any REST calls.
 
     JQL dedup: searches for an existing issue with label 'rebar-id:<local_id>' before
@@ -123,7 +129,7 @@ def create_one(
         or None when the mutation is budget-deferred.
     """
     # Budget guard: defer without any REST call when at or over the limit
-    if rest_calls >= 200:
+    if rest_calls >= _REST_CALL_BUDGET:
         if deferred_creates is not None:
             deferred_creates.append(mutation)
         return None
