@@ -73,6 +73,26 @@ def test_invalid_event_type_raises_storeerror_1(tracker: str):
     assert "invalid event_type" in str(ei.value)
 
 
+def test_event_types_all_listed_in_error_string(tracker: str):
+    """Drift guard (P2.3): every EVENT_TYPES name must appear in the hand-spelled
+    'invalid event_type' error string — the only place the names are enumerated."""
+    with pytest.raises(event_append.StoreError) as ei:
+        event_append.stage_and_commit(tracker, "tk", _event(event_type="BOGUS"))
+    msg = str(ei.value)
+    missing = [t for t in event_append.EVENT_TYPES if t not in msg]
+    assert not missing, f"event types missing from invalid-event_type error string: {missing}"
+
+
+def test_tag_delta_is_a_valid_event_type(tracker: str):
+    """TAG_DELTA (P2.3) is accepted on the write path (registered in EVENT_TYPES)."""
+    from rebar.reducer._version import TAG_DELTA
+
+    rc = event_append.stage_and_commit(
+        tracker, "tk", _event(event_type=TAG_DELTA, data={"added": ["x"], "removed": []})
+    )
+    assert rc == 0
+
+
 def test_rebase_guard_exit_75(tracker: str):
     Path(tracker, ".git", "MERGE_HEAD").write_text("deadbeef\n")
     with pytest.raises(lock.RebaseGuard) as ei:

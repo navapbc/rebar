@@ -32,6 +32,7 @@ from typing import Any
 from rebar._store import lock as _lock
 from rebar._store.canonical import canonical_bytes  # the single canonical serializer
 from rebar._store.lock import LockTimeout, RebaseGuard  # re-export for callers
+from rebar.reducer._version import TAG_DELTA  # single source of truth for the type name
 
 # I2 event-type enum (matches write_commit_event's `case` allow-list).
 EVENT_TYPES = frozenset(
@@ -54,6 +55,8 @@ EVENT_TYPES = frozenset(
         "WORKFLOW_STEP",
         # Commits-on-ticket (epic a88f / WS-H).
         "COMMITS",
+        # Tag add/remove deltas (epic P2.3).
+        TAG_DELTA,
     }
 )
 
@@ -90,7 +93,7 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
         raise StoreError(
             f"Error: invalid event_type '{event_type}'. Must be one of: CREATE, STATUS, "
             "COMMENT, LINK, UNLINK, SNAPSHOT, SYNC, REVERT, EDIT, ARCHIVED, FILE_IMPACT, "
-            "VERIFY_COMMANDS, SIGNATURE, WORKFLOW_RUN, WORKFLOW_STEP, COMMITS",
+            f"VERIFY_COMMANDS, SIGNATURE, WORKFLOW_RUN, WORKFLOW_STEP, COMMITS, {TAG_DELTA}",
             1,
         )
 

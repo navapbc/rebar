@@ -11,7 +11,7 @@ import json
 import os
 import sys
 
-from ._version import KNOWN_EVENT_TYPES
+from ._version import KNOWN_EVENT_TYPES, TAG_DELTA
 
 
 def process_create(
@@ -444,6 +444,41 @@ def process_commits(state: dict, event: dict, data: dict) -> None:
         state["commits"] = merged
 
 
+def process_tag_delta(state: dict, data: dict) -> None:
+    """Apply a TAG_DELTA event: add/remove tag deltas into ``state.tags`` (P2.3).
+
+    Replaces the whole-field ``EDIT.tags`` last-writer-wins clobber: each event
+    carries ``data.added`` / ``data.removed`` (lists of tag strings). We mutate the
+    CURRENT ``state.tags`` in replay order — remove the ``removed`` set, then union
+    the ``added`` set — so two clones concurrently adding different tags both
+    survive (union is order-insensitive) and replay order is the deterministic
+    HLC+UUID filename order, so every clone converges to the same list.
+
+    Idempotent on replay (skip-if-present add / skip-if-absent remove). INTRA-EVENT
+    CONFLICT CONTRACT: if a tag is in both ``added`` and ``removed``, **add wins**
+    (remove runs first, then add) — enforced and tested here at the reducer, the
+    cross-version convergence point, never delegated to the command layer (a
+    future/buggy/old client may emit a contradictory pair). Defensive ``isinstance``
+    guards mirror :func:`process_commits` / :func:`process_workflow_run`: a non-list
+    ``added``/``removed`` is treated as empty. Legacy/historical ``EDIT.tags`` is
+    still handled by :func:`process_edit` (unchanged) and forms the replay base.
+    """
+    added = data.get("added")
+    removed = data.get("removed")
+    if not isinstance(added, list):
+        added = []
+    if not isinstance(removed, list):
+        removed = []
+    tags = list(state.get("tags") or [])
+    remove_set = {t for t in removed if isinstance(t, str)}
+    if remove_set:
+        tags = [t for t in tags if t not in remove_set]
+    for t in added:
+        if isinstance(t, str) and t and t not in tags:
+            tags.append(t)
+    state["tags"] = tags
+
+
 def process_archived(state: dict) -> None:
     """Apply an ARCHIVED event: mark ticket archived and reflect in status field.
 
@@ -583,6 +618,8 @@ def replay_events(
             process_workflow_step(state, event, data)
         elif event_type == "COMMITS":
             process_commits(state, event, data)
+        elif event_type == TAG_DELTA:
+            process_tag_delta(state, data)
         elif event_type == "ARCHIVED":
             process_archived(state)
         elif event_type == "SNAPSHOT":

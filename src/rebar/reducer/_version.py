@@ -28,7 +28,20 @@ from __future__ import annotations
 # single-integer encoding, so older clones still string-compare correctly; the only
 # *semantic* change is skew-immune causal ordering. No event-body change, so the
 # unknown-type forward-compat machinery is not engaged.
-SCHEMA_VERSION = 2
+# v3 (P2.3): the new ``TAG_DELTA`` event body carries add/remove tag deltas so
+# concurrent tag edits converge (no whole-field clobber). This is the FIRST bump
+# that adds a new event *body* type, so it DOES engage the unknown-type forward-
+# compat path: an older (v2) clone preserves-and-ignores ``TAG_DELTA`` (the file
+# survives, the mutation is invisible until it upgrades). The integer itself is
+# declarative only — forward-compat is governed by ``KNOWN_EVENT_TYPES`` below, not
+# by this value; nothing gates behavior on it.
+SCHEMA_VERSION = 3
+
+# The TAG_DELTA event type name — a single source of truth shared by the reducer
+# dispatch (here, via KNOWN_EVENT_TYPES), the write-path allow-list
+# (``_store.event_append.EVENT_TYPES``), and every emitter (leaf/composer/inbound),
+# so the literal cannot drift between them.
+TAG_DELTA = "TAG_DELTA"
 
 # Every event_type the reducer's processor dispatch (_processors.replay) applies.
 # Anything outside this set is forward-compat payload: preserved-and-ignored.
@@ -58,5 +71,8 @@ KNOWN_EVENT_TYPES = frozenset(
         # a durable, union-merged list. NOT a Jira-synced field (the outbound differ
         # is field-driven and never reads it).
         "COMMITS",
+        # Tag add/remove deltas (epic P2.3): replace whole-field EDIT.tags (LWW
+        # clobber) so concurrent tag edits converge. Folded by process_tag_delta.
+        TAG_DELTA,
     }
 )
