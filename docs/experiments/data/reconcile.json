@@ -1,0 +1,117 @@
+{
+ "registry": {
+  "DET": [
+   "P1",
+   "P2",
+   "P3",
+   "P4",
+   "P5",
+   "P6",
+   "P7"
+  ],
+  "L2": [
+   "F1",
+   "F4",
+   "E1",
+   "E2",
+   "E3",
+   "E5",
+   "E6",
+   "G1G2",
+   "G3",
+   "G4",
+   "E4",
+   "A1"
+  ],
+  "overlays": [
+   "T1",
+   "T2",
+   "T3",
+   "T4",
+   "T5a",
+   "T5b",
+   "T5c",
+   "T5d",
+   "T5e",
+   "T6",
+   "T7",
+   "T8",
+   "T9"
+  ],
+  "crosscut": [
+   "coherence-pass",
+   "broad-pass",
+   "benign-reading-filter",
+   "anti-fabrication"
+  ]
+ },
+ "impl": {
+  "P1": "proxy via rebar check_ac only",
+  "P2": "NOT exercised",
+  "P3": "NOT exercised",
+  "P4": "proxy via clarity_check",
+  "P5": "NOT exercised",
+  "P6": "NOT exercised",
+  "P7": "NOT exercised",
+  "F1": "single-turn \u2713",
+  "F4": "single-turn \u2713",
+  "E1": "single-turn \u2713",
+  "E2": "single-turn \u2713",
+  "E3": "single-turn \u2713",
+  "E5": "single-turn \u2713",
+  "E6": "single-turn \u2713",
+  "G1G2": "agentic \u2713",
+  "E4": "agentic \u2713",
+  "A1": "agentic \u2713",
+  "G3": "DESIGNED, never run",
+  "G4": "DESIGNED, never run",
+  "G5": "used (from v3; not in v4 \u00a75 explicit list)",
+  "T1": "router only (not run as review criterion)",
+  "T2": "*** REINVENTED as 'EXP' in round 4 ***",
+  "T3": "LOST \u2014 never implemented or tested",
+  "T4": "LOST \u2014 never implemented or tested",
+  "T5a": "single-turn \u2713",
+  "T5b": "single-turn \u2713",
+  "T5c": "single-turn \u2713",
+  "T5d": "DROPPED from criteria set (round-4 router keyword only)",
+  "T5e": "single-turn \u2713",
+  "T6": "router only",
+  "T7": "router only",
+  "T8": "agentic probe + router \u2713",
+  "T9": "router only",
+  "coherence-pass": "COH in round 1, then DROPPED from criteria_v2/v3 (folded into E1)",
+  "broad-pass": "run in dogfood gate \u2713",
+  "benign-reading-filter": "in SYSTEM prompt \u2713",
+  "anti-fabrication": "in SYSTEM prompt \u2713"
+ },
+ "lost": [
+  [
+   "T2",
+   "*** REINVENTED as 'EXP' in round 4 ***"
+  ],
+  [
+   "T3",
+   "LOST \u2014 never implemented or tested"
+  ],
+  [
+   "T4",
+   "LOST \u2014 never implemented or tested"
+  ],
+  [
+   "T5d",
+   "DROPPED from criteria set (round-4 router keyword only)"
+  ],
+  [
+   "G3",
+   "DESIGNED, never run"
+  ],
+  [
+   "G4",
+   "DESIGNED, never run"
+  ],
+  [
+   "coherence-pass",
+   "COH in round 1, then DROPPED from criteria_v2/v3 (folded into E1)"
+  ]
+ ]
+}

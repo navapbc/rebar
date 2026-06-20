@@ -6,6 +6,8 @@ LLM), added a generic empirical-validation criterion (EXP), and diagnosed why ou
 fidelity review. ~110 LLM runs. The experiments suggested a **meaningful re-tune** — proportionate scrutiny by
 ticket **level and type** — which was implemented and re-run to confirm it reduces noise without losing signal.
 
+> **Correction (post-round-4):** the criterion called **EXP** below is the design's existing **T2 empirical probe**, not a new criterion — it was reinvented under a wrong name after being dropped from the round-1 subset. See `criteria-registry-reconciliation.md`. References to EXP = T2.
+
 ## Stream A — review the epic + 9 children
 
 The epic is now clean (4 minor advisory findings; **G5 decomposition resolved** once it had children). But the

@@ -1,0 +1,134 @@
+[
+ {
+  "id": "F1",
+  "exec": "1-TURN",
+  "facet": "ac-text-quality",
+  "name": "Measurability & in-session completability",
+  "scenario": "Examine each acceptance/success criterion for measurability and whether an agent can complete it within ONE working session. Apply these binary checks: (a) the criterion states a specific OBSERVABLE outcome (what changes for the user/system), not effort ('implement the service') or a subjective term ('improved/better/sufficient'); (b) it is evaluable IN-SESSION via repo artifacts, the closing PR's CI, or a deterministic command against a reachable target \u2014 NOT post-sprint-only (multi-day telemetry, adoption %, survey feedback score \u22642); (c) it is a durable end-state, not a one-time transition (litmus: could it be false before this work and true only because of it?); (d) the unit is right-sized (a coherent single-outcome deliverable, not an epic-of-epics, not a one-line triviality). SEVERITY: outcome-vague or effort-framed criteria are MAJOR; post-sprint-only validation is MAJOR; thin-but-present is MINOR. ANTI-FP: evaluate the spec AS WRITTEN, not the current codebase; observability tooling itself is valid in-session work; 'post-deployment' is fine if the check is deterministic. PASS if all criteria are measurable and in-session completable."
+ },
+ {
+  "id": "F4",
+  "exec": "1-TURN",
+  "facet": "scope-intent",
+  "name": "User/problem present (value)",
+  "scenario": "Check that the plan names WHO the work is for and WHAT problem they face, and that value is validatable. Binary checks: (a) the context names a specific user/stakeholder and the problem they have today; (b) the criteria collectively represent an observable improvement to that user or a measurable business outcome, not pure system internals; (c) it is NOT a bare technical task with no named beneficiary ('Refactor the service layer'); (d) at least one criterion carries a concrete validation mechanism (before/after workflow comparison, an operational metric target, dogfooding). SEVERITY: no named beneficiary AND no value-validation is MAJOR; missing only the validation mechanism is MINOR. ANTI-FP: an IMPLIED technical consumer counts for low-level/internal tasks (cleanup, dep upgrades, library internals) \u2014 do not flag those; backend work affecting latency/reliability scores normally via an operational signal. PASS if a beneficiary and the value are clear."
+ },
+ {
+  "id": "E1",
+  "exec": "2-STEP",
+  "facet": "coherence",
+  "name": "Criteria\u2194description coherence + terminology + duplicates",
+  "scenario": "Audit internal coherence of the requirement set (this is naturally a two-pass check: first map each criterion to the described work, then cross-check terminology and duplicates). Binary checks: (a) every acceptance criterion maps to something described in the plan body, and every described deliverable has a covering criterion (no orphan criteria, no uncovered work); (b) terminology is consistent \u2014 the same concept is named the same way throughout, and a criterion's verify step references the SAME entity its text names (e.g. 'cycle' vs 'review_cycle'); (c) no duplicate or near-duplicate requirements; (d) for migrations, criteria verify BOTH removal and replacement. SEVERITY: a deliverable with no covering criterion, or a criterion measuring nothing, is MAJOR; terminology drift / near-dup is MINOR. ANTI-FP: cite-or-omit \u2014 ground every finding in specific quoted plan text; prefer AMBIGUOUS over a hand-waved FAIL; consumers named in the spec are covered-by-definition. PASS if the set is coherent and non-redundant."
+ },
+ {
+  "id": "E2",
+  "exec": "1-TURN",
+  "facet": "ac-text-quality",
+  "name": "Ambiguity / executable-without-clarification",
+  "scenario": "Decide whether an executing agent could act on this plan WITHOUT stopping to ask a clarifying question. Run the 6-signal ambiguity scan: (1) undefined scope boundaries ('improve performance' \u2014 of what, by how much); (2) implicit acceptance criteria (types/size limits unstated); (3) conflicting signals (title says X, body Y); (4) missing persona (admin vs end-user); (5) unstated constraints (an API with no auth/rate-limit mention); (6) ambiguous priority (essential vs nice-to-have unranked). Plus flag any scope bullet that is a PLACEHOLDER not a decision: contains 'verify whether', 'check if', 'TBD', 'figure out', 'depends on investigation', or defers a real design choice to the executor ('choose an appropriate X'). SEVERITY: an ambiguity that BLOCKS planning ('cannot proceed without this') is MAJOR; a defaultable gap ('assume X unless told') is MINOR. ANTI-FP: never flag something clearly inferrable from the parent epic or an obvious convention. PASS if the plan is executable without clarification."
+ },
+ {
+  "id": "E3",
+  "exec": "2-STEP",
+  "facet": "scope-intent",
+  "name": "Intent fidelity",
+  "scenario": "Judge whether the plan faithfully serves its stated title/goal (a blind-restate-then-compare check: first restate what the plan actually does, then compare to what the title promises). Binary checks: (a) the body's work matches the headline intent \u2014 no scope drift doing MORE or LESS than the title promises; (b) each non-deferred goal has a faithful, end-state-observable proof; (c) no step contradicts the stated intent; (d) where the plan changes existing behavior, it acknowledges callers that depend on the old behavior. SEVERITY: the plan builds something materially different from its stated intent = CRITICAL (agent will build the wrong thing); partial drift = MAJOR; minor mismatch = MINOR. ANTI-FP: mixed or absent signals \u2192 AMBIGUOUS, not a forced FAIL; 'no implementation found yet' is not itself intent-contradiction. PASS if the plan is faithful to its goal."
+ },
+ {
+  "id": "E5",
+  "exec": "1-TURN",
+  "facet": "testing",
+  "name": "Testing-plan completeness",
+  "scenario": "Assess whether the plan makes the work testable by construction. Binary checks: (a) coverage extends beyond the happy path \u2014 failure/timeout/invalid/empty paths and a caller-facing contract are addressed; (b) boundary scenarios are considered (oversized input, malformed payload, non-Latin, back-button); (c) outcomes are observable/measurable, not 'works correctly'; (d) where TDD applies, each unit names a specific RED test that fails before implementation, with a declared dependency edge; (e) changed or deleted behaviors get corresponding modify/remove-test work; (f) tests assert meaningfully, isolate external deps, and avoid tautology / source-grep passes. SEVERITY: a new user-facing flow with only happy-path tests is MAJOR; a missing failure-path or a tautological test is MAJOR; thin coverage is MINOR. ANTI-FP: structural greps and command-output assertions ARE a legitimate cross-language test pattern \u2014 do not flag them as weak; valid TDD exemptions exist (no conditional logic, pure scaffolding, cited existing test). PASS if the testing plan is adequate."
+ },
+ {
+  "id": "E6",
+  "exec": "2-STEP",
+  "facet": "ac-text-quality",
+  "name": "Verification/termination + end-state reachability",
+  "scenario": "Check that the work has a clear way to be verified done and that the steps actually reach the stated end-state (a two-step check: identify the proving command for each claim, then confirm the union of steps proves every criterion). Binary checks: (a) every completion-relevant claim has a concrete proving command/check that would produce evidence on success (not 'should work'); (b) the claim is free of red-flag hedges ('should', 'probably', 'seems'); (c) every acceptance criterion maps to at least one described step; (d) the UNION of the steps actually reaches the stated end-state \u2014 no gap between 'what we'll do' and 'what done looks like'; (e) user-facing flows have an end-to-end check or a documented rationale for its absence. SEVERITY: a criterion no step reaches, or a claimed-but-unmeasured outcome, is MAJOR; a hedge without a proving command is MINOR. ANTI-FP: universal lint/format/test commands do not by themselves prove a specific criterion. PASS if done-ness is verifiable and the end-state is reachable."
+ },
+ {
+  "id": "G5",
+  "exec": "1-TURN",
+  "facet": "scope-intent",
+  "name": "Decomposition judgment",
+  "scenario": "Judge whether the ticket is right-sized or should be decomposed. Binary checks: (a) sizing signals \u2014 does it touch >3 files OR \u22653 layers OR introduce a new interface OR carry low scope-certainty? Any of these pushes toward 'too big, decompose'; (b) for an epic/parent: does it fail the single-concern test (a structural 'and' joining independent goals), span multiple personas, mix UI+backend, include a migration, or carry >6 success criteria \u2014 if so it should have children; (c) is decomposition into children present and sensible where the size demands it; (d) for a leaf: is it small enough to execute coherently in one session (not a one-criterion triviality either); (e) YAGNI/Rule-of-Three \u2014 is proposed structure justified by the current criteria, with \u22653 real call-sites for any new abstraction. SEVERITY: an epic-scale body with no children is MAJOR; a horizontal-layer split where a vertical slice is safer is MINOR. ANTI-FP: an incidental 'and' does not fail single-concern; a file list is a sample, not authoritative impact. PASS if sizing and decomposition are appropriate."
+ },
+ {
+  "id": "T5a",
+  "exec": "1-TURN",
+  "facet": "overlay-perf",
+  "name": "Performance (overlay)",
+  "trigger": "new I/O paths, data access, LLM calls, compute, batch ops, or shared resources",
+  "scenario": "OVERLAY \u2014 apply only if the plan introduces new I/O, data access, LLM/compute calls, batch ops, or shared resources; otherwise PASS as not-applicable. Binary checks: (a) latency \u2014 hot-path operations have time-bounded done-definitions and no synchronous blocking on a hot path; (b) resource_efficiency \u2014 no N+1 / redundant API or LLM calls / unbounded memory growth; (c) scalability \u2014 input-size limits, concurrency/rate-limit/pool handling, and load expectations are stated. SEVERITY: a user-facing operation with no latency target is MAJOR; an O(n) LLM-calls-per-item pattern is MAJOR \u2014 state the impact in Big-O terms. ANTI-FP: score normally only where the plan actually adds a performance-relevant path. PASS if performance characteristics are sound for the scope."
+ },
+ {
+  "id": "T5b",
+  "exec": "1-TURN",
+  "facet": "overlay-reliability",
+  "name": "Reliability (overlay)",
+  "trigger": "new failure points (LLM/external integration/file I/O), write ops, or stateful transitions",
+  "scenario": "OVERLAY \u2014 apply only if the plan adds failure points (external integration, file I/O, LLM calls), write operations, or stateful transitions; otherwise PASS as not-applicable. Binary checks: (a) error_handling \u2014 retry/backoff/circuit-breaker/graceful-degradation is present and error states are surfaced, not swallowed; (b) failover \u2014 recovery happens without data loss or corruption, writes are idempotent, partial state is safe/durable. SEVERITY: an external call with NO error handling is MAJOR; missing idempotency on a write is MAJOR. Blast-radius is a tiebreaker that only LOWERS severity, never raises it. ANTI-FP: failover is not-applicable (PASS) if there are no writes/state/external deps. PASS if the plan fails safely."
+ },
+ {
+  "id": "T5c",
+  "exec": "1-TURN",
+  "facet": "overlay-security",
+  "name": "Security (overlay)",
+  "trigger": "new endpoints, data access/storage/transmission, PII, or auth boundaries",
+  "scenario": "OVERLAY \u2014 apply only if the plan adds endpoints, data access/storage/transmission, PII handling, or auth boundaries; otherwise PASS as not-applicable. Baseline against OWASP Top 10. Binary checks: (a) access_classification \u2014 every new endpoint/path declares its access level (public/authenticated/internal-only) and sensitive-data paths require auth; AMBIGUITY about access level is itself the failure; (b) data_protection \u2014 encryption at rest and in transit where applicable, PII/secrets identified, no secret-logging or data leakage. SEVERITY: an undeclared new endpoint or sensitive path is MAJOR \u2014 cite the OWASP category (e.g. 'A01 Broken Access Control'). ANTI-FP: a documented-public endpoint with rationale scores fine; data_protection is not-applicable if there is no data storage/transmission/PII. PASS if security boundaries are explicit and sound."
+ },
+ {
+  "id": "T5e",
+  "exec": "1-TURN",
+  "facet": "overlay-maintainability",
+  "name": "Maintainability (overlay)",
+  "trigger": "crosses component boundaries, adds business rules/thresholds, or new patterns/contracts",
+  "scenario": "OVERLAY \u2014 apply only if the plan crosses component boundaries, adds business rules/thresholds/integration points, or introduces a new pattern/contract/pipeline stage; otherwise PASS as not-applicable. Binary checks: (a) coupling_risk \u2014 new cross-component dependencies are acknowledged, justified, and mitigated (via an interface or event boundary), not silently introduced; (b) changeability \u2014 rules/thresholds expected to evolve are configurable, not hardcoded; (c) documentation \u2014 a novel architectural decision is captured in an ADR / CLAUDE.md / design doc update. SEVERITY: a new pipeline stage or cross-component coupling with no doc/ADR is MAJOR on documentation; hardcoded soon-to-change thresholds are MINOR. ANTI-FP: each sub-check is not-applicable (PASS) where the plan introduces no new coupling/rules/decisions. PASS if the change keeps the system maintainable."
+ },
+ {
+  "id": "T2",
+  "exec": "1-TURN",
+  "facet": "overlay-empirical",
+  "name": "Empirical probe (red->green / spike) [overlay]",
+  "scenario": "Decide whether this plan's RISK warrants empirical validation, and whether such validation is planned. STEP 1 \u2014 is the plan complex/novel/uncertain? Signals: a novel or unproven architecture/pattern; an unverified assumption about an external system, dependency, or performance/scale behavior; a default/threshold/heuristic that is ASSERTED rather than derived from data; a design choice the author could not settle by reasoning alone; behavior whose correctness cannot be established without running it. If NONE apply (a well-understood, mechanical, or low-risk change), PASS \u2014 not applicable. STEP 2 \u2014 if complex/novel, does the plan ALREADY include an empirical-validation step: a spike, probe, prototype, benchmark, measurement, experiment, A/B, a fixture/RED test that exercises the risky behavior, or a pilot with success metrics? If YES, PASS (suppressed \u2014 experimentation already present). Only FAIL/advise if the plan is complex/novel AND asserts unvalidated choices with NO plan to test them \u2014 then recommend the specific spike/probe/measurement/experiment that would de-risk it before full build-out. SEVERITY: a core design resting on an unvalidated assumption = MAJOR; a tunable default/threshold with no measurement plan = MINOR. ANTI-FP (critical): do NOT fire when the ticket already contains experimentation \u2014 a spike, a fixture/RED test, a pilot with metrics, a measurement step, or stated success criteria for a trial. A mechanical or fully-specified change is NOT complex. Treat an explicit 'TBD: measure X' / 'derive from fixture' as validation-present. PASS unless there is a real, unvalidated, high-uncertainty choice left untested.",
+  "trigger": "complex/novel plan with an unvalidated assumption (LLM-routed)",
+  "routing": "overlay"
+ },
+ {
+  "id": "T3",
+  "exec": "AGENT",
+  "facet": "overlay-feasibility",
+  "routing": "overlay",
+  "trigger": "external integration / first-time-internal-platform / unverified capability (LLM-routed)",
+  "name": "Integration feasibility [overlay]",
+  "scenario": "OVERLAY \u2014 apply only when the plan integrates an external API/CLI/service/library or asserts a capability it has not used before; else PASS not-applicable. Binary checks (tool-grounded where possible): (a) technical_feasibility \u2014 is the integration achievable as described, or is there a capability gap? (b) for a CLI/API: do the named subcommands/endpoints actually exist (verify against --help / docs) \u2014 MATCH / MISMATCH / UNVERIFIED; (c) auth/HTTPS preconditions stated; (d) a critical capability gap should route to a SPIKE before committing the full plan. SEVERITY: an asserted-but-unverified external capability the plan depends on = MAJOR. ANTI-FP: verify before asserting a mismatch; an internal, already-used integration is not-applicable."
+ },
+ {
+  "id": "T4",
+  "exec": "1-TURN",
+  "facet": "overlay-compat",
+  "routing": "overlay",
+  "trigger": "P7 destructive/irreversible sniff, or a change to existing behavior/interface/schema/data (deterministic prior + LLM)",
+  "name": "Compat / destructiveness as an explicit justified choice [overlay]",
+  "scenario": "OVERLAY \u2014 apply when the plan changes existing behavior, an interface/schema/data shape, or performs a destructive/irreversible operation; else PASS not-applicable. BIDIRECTIONAL check: (a) UNACKNOWLEDGED breakage \u2014 does the plan change/remove something consumers rely on without acknowledging the break, an expand-contract sequence, or a rollback path? (b) GRATUITOUS compat \u2014 does it add backward-compat shims, feature flags, or version branches that aren't warranted? (c) is a destructive/irreversible step an EXPLICIT, justified choice (not incidental)? SEVERITY: unacknowledged breaking change with no migration/rollback = MAJOR. ANTI-FP: a purely additive change is not-applicable; an explicitly justified breaking change with a migration is fine."
+ },
+ {
+  "id": "T5d",
+  "exec": "1-TURN",
+  "facet": "overlay-a11y",
+  "routing": "overlay",
+  "trigger": "new user-facing UI (deterministic UI-keyword count; null otherwise)",
+  "name": "Accessibility [overlay]",
+  "scenario": "OVERLAY \u2014 apply only if the plan introduces new user-facing UI; else PASS not-applicable. Binary checks: (a) wcag_compliance \u2014 does the scope address WCAG 2.1 AA with observable a11y done-definitions (keyboard, screen-reader, contrast)? (b) inclusive_ux \u2014 reduced motion, keyboard-only, screen-reader, touch-target sizing, not color-alone/mouse-only. SEVERITY: a new interactive surface with no keyboard nav = MAJOR \u2014 cite the WCAG criterion. ANTI-FP: not-applicable for backend/infra/data work."
+ },
+ {
+  "id": "COH",
+  "exec": "1-TURN",
+  "facet": "coherence",
+  "routing": "base",
+  "name": "Cross-section coherence pass (cross-cutting)",
+  "scenario": "CROSS-CUTTING coherence pass (distinct from E1's criteria<->description check): a single structured scan for CONTRADICTIONS BETWEEN SECTIONS of the plan \u2014 e.g. the testing strategy contradicts the decomposition; the sequencing contradicts the declared dependencies; the context/problem contradicts the success criteria; an approach choice contradicts a stated constraint. One pass, not a debate. SEVERITY: a contradiction that would send the implementer in two directions = MAJOR. ANTI-FP: only flag genuine cross-section contradictions, not within-section nitpicks (those belong to E1/E2)."
+ }
+]
