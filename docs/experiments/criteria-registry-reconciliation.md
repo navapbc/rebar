@@ -50,15 +50,22 @@ new name. (The EXP *experiment* is still valid — it correctly validated the em
 2. **Restored the dropped criteria** as descriptors in `criteria_v4.json`: **T3** integration feasibility, **T4**
    compat/destructiveness, **T5d** accessibility, and the dedicated **COH** cross-section coherence pass — grounded
    in the DSO catalog (feasibility-reviewer, compat/expand-contract, accessibility.md, coherence verdict-rubric).
-3. **`criteria_v4.json` is the corrected set** (17 single-turn/overlay descriptors); this doc + the full v4 §5
-   registry are the canonical source so subsetting can't silently drop a criterion again.
+3. **Completed the set**: `criteria_v5.json` now has **all 22** single-turn/overlay descriptors (the v4 fix only
+   restored T2/T3/T4/T5d/COH — the coverage guard then revealed T1/T6/T7/T8/T9 were *still* missing, now added too),
+   plus the 5 agent-tier criteria (G1G2/E4/A1/G3/G4) in a separate harness.
+4. **Added a mechanical completeness guard** (`data/check_registry_coverage.py`): it encodes the canonical v4 §5
+   registry and **fails loudly** if any criteria file omits a criterion. Run against the old `criteria_v2.json` it
+   lists all 10 dropped criteria — i.e. it would have caught this the day it happened. This is the missing checklist
+   whose absence let the drop go unnoticed.
 
-## Still owed (in the design, no experimental data yet)
+## Still owed (in the corrected set, but no experimental DATA yet)
 
 These are in v4 §5 but have never been exercised — flagged so they aren't mistaken for "done":
-**G3/G4** container child-coverage (now runnable — the epic has children), **T3/T4/T5d** (restored as descriptors,
-not yet run), **T1/T6/T7/T9** (router-classified but never run as review criteria), and the **DET tier P2/P3/P5/P6/
-P7** (deterministic code, separate from the LLM experiments). Recommended next: a validation pass over the
-restored/never-run overlays + the container criteria, so the whole registry has coverage data.
+All 22 single-turn/overlay criteria are now descriptors, but several have never been *run*: **T1/T2/T3/T4/T5d/T6/
+T7/T8/T9** (T2/T8 were exercised; the rest are restored descriptors only), the **COH** coherence pass, **G3/G4**
+container child-coverage (now runnable — the epic has children), and the **DET tier P2/P3/P5/P6/P7** (deterministic
+code, separate from the LLM experiments). Recommended next: a validation pass over the never-run overlays +
+container criteria so the whole registry has coverage data.
 
-Data: `data/criteria_v4.json` (corrected set), `data/reconcile.json` (registry-vs-implemented map).
+Data: `data/criteria_v5.json` (complete corrected set), `data/check_registry_coverage.py` (the completeness guard),
+`data/reconcile.json` (registry-vs-implemented map).
