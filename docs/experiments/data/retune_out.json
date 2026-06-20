@@ -1,0 +1,285 @@
+{
+ "2f3c-682a-2105-4b8f": {
+  "n_nonpass": 6,
+  "fails": 2,
+  "tags": [
+   "F1:A",
+   "E1:A",
+   "E2:F",
+   "E5:F",
+   "T5e:A",
+   "EXP:A"
+  ],
+  "real": [
+   [
+    "E2",
+    "major",
+    "The chunker is required to 'pack same-facet single-turn criteria up to the configured chunk size', but the chu"
+   ],
+   [
+    "E5",
+    "major",
+    "The testing plan covers only the happy path: a fixture registry produces correct chunks, and a newly added cri"
+   ]
+  ]
+ },
+ "8e3e-50ba-765c-4d2f": {
+  "n_nonpass": 3,
+  "fails": 3,
+  "tags": [
+   "G5:F",
+   "T5e:F",
+   "EXP:F"
+  ],
+  "real": [
+   [
+    "G5",
+    "major",
+    "This ticket is epic-scale with no children. It simultaneously implements: (a) seven distinct deterministic che"
+   ],
+   [
+    "T5e",
+    "major",
+    "The plan introduces four brand-new cross-component integration points (solidlsp via Serena MCP server, ast-gre"
+   ],
+   [
+    "EXP",
+    "major",
+    "The plan contains several high-uncertainty, unvalidated assumptions with no empirical validation step planned:"
+   ]
+  ]
+ },
+ "2632-5741-090e-46c3": {
+  "n_nonpass": 5,
+  "fails": 1,
+  "tags": [
+   "F1:A",
+   "E1:A",
+   "E2:A",
+   "E5:F",
+   "G5:A"
+  ],
+  "real": [
+   [
+    "E5",
+    "major",
+    "The plan's testing scope is almost entirely limited to the EXP criterion (AC3 explicitly requires positive + n"
+   ]
+  ]
+ },
+ "6d7b-41ef-f869-40dd": {
+  "n_nonpass": 8,
+  "fails": 5,
+  "tags": [
+   "F1:A",
+   "F4:A",
+   "E1:F",
+   "E2:F",
+   "E5:F",
+   "G5:A",
+   "T5e:F",
+   "EXP:F"
+  ],
+  "real": [
+   [
+    "E1",
+    "major",
+    "The Scope section describes a calibration deliverable ('track each overlay's downstream dismissal rate \u2026 per t"
+   ],
+   [
+    "E2",
+    "major",
+    "Several design decisions are left undecided and would force an executing agent to stop and ask: (1) The keywor"
+   ],
+   [
+    "E5",
+    "major",
+    "The testing plan covers only the happy-path precision of deterministic triggers ('unit-tested for precision on"
+   ],
+   [
+    "T5e",
+    "major",
+    "The plan introduces at least two new cross-component coupling points: (a) the overlay registry gains a new fie"
+   ],
+   [
+    "EXP",
+    "minor",
+    "The plan is complex/novel in two ways: (1) The 'low-FP' assertion for the deterministic keyword signals (e.g.,"
+   ]
+  ]
+ },
+ "bfa8-aadd-6739-4904": {
+  "n_nonpass": 5,
+  "fails": 3,
+  "tags": [
+   "F1:A",
+   "E1:A",
+   "E2:F",
+   "E5:F",
+   "T5e:F"
+  ],
+  "real": [
+   [
+    "E2",
+    "major",
+    "The plan does not define what constitutes a 'material event commit' mechanically. Specifically: (1) How is the"
+   ],
+   [
+    "E5",
+    "major",
+    "The testing plan covers only two named scenarios (material edit invalidates; non-material edit does not). The "
+   ],
+   [
+    "T5e",
+    "major",
+    "The plan introduces a new pipeline stage (attestation signing bound to material-commit detection) that deliber"
+   ]
+  ]
+ },
+ "cb28-f531-66f2-49cb": {
+  "n_nonpass": 6,
+  "fails": 4,
+  "tags": [
+   "F1:A",
+   "E1:A",
+   "E2:F",
+   "E5:F",
+   "T5e:F",
+   "EXP:F"
+  ],
+  "real": [
+   [
+    "E2",
+    "major",
+    "The plan does not define what constitutes a 'material edit' that invalidates a signature. An executing agent m"
+   ],
+   [
+    "E5",
+    "major",
+    "The testing plan covers only three scenarios: (1) happy-path valid attestation, (2) missing/invalidated signat"
+   ],
+   [
+    "T5e",
+    "major",
+    "The plan introduces at least two new cross-component integration points (the claim gate wired into the `claim`"
+   ],
+   [
+    "EXP",
+    "minor",
+    "The 50 ms p95 latency target is asserted without citing any measurement, benchmark, or prior empirical basis. "
+   ]
+  ]
+ },
+ "f20a-865f-6cb3-49e4": {
+  "n_nonpass": 6,
+  "fails": 5,
+  "tags": [
+   "F1:A",
+   "E1:F",
+   "E2:F",
+   "E5:F",
+   "G5:F",
+   "T5e:F"
+  ],
+  "real": [
+   [
+    "E1",
+    "major",
+    "The plan body explicitly describes model escalation as a deliverable ('Escalation to a stronger model by size "
+   ],
+   [
+    "E2",
+    "major",
+    "An executing agent would need to stop and ask multiple clarifying questions: (1) What is the exact formula for"
+   ],
+   [
+    "E5",
+    "major",
+    "The testing plan has three significant gaps: (1) No failure/edge paths are specified for chunk-size computatio"
+   ],
+   [
+    "G5",
+    "major",
+    "This ticket bundles four largely independent technical concerns into a single leaf ticket: (1) chunk-size comp"
+   ],
+   [
+    "T5e",
+    "major",
+    "(a) Coupling risk: Model escalation introduces a new cross-component dependency between the routing layer and "
+   ]
+  ]
+ },
+ "fd92-4b4d-b24b-41da": {
+  "n_nonpass": 6,
+  "fails": 3,
+  "tags": [
+   "F1:A",
+   "E1:A",
+   "E2:F",
+   "E5:F",
+   "T5e:F",
+   "EXP:A"
+  ],
+  "real": [
+   [
+    "E2",
+    "major",
+    "Several scope decisions are underspecified to the point where an agent would need to stop and ask:\n1. 'finding"
+   ],
+   [
+    "E5",
+    "major",
+    "The only explicit test is the reducer-skip happy path (AC2). The following failure and boundary paths are unad"
+   ],
+   [
+    "T5e",
+    "major",
+    "The plan introduces a new event-type-level contract (reducer deliberately skips REVIEW_RESULT) that crosses at"
+   ]
+  ]
+ },
+ "a473-8af4-a493-4e0e": {
+  "n_nonpass": 4,
+  "fails": 4,
+  "tags": [
+   "F1:F",
+   "E1:F",
+   "E2:F",
+   "E5:F"
+  ],
+  "real": [
+   [
+    "F1",
+    "major",
+    "All three acceptance criteria are effort/deliverable-framed rather than observable-outcome-framed. AC1: 'A doc"
+   ],
+   [
+    "E1",
+    "major",
+    "Several scope items described in the body have no dedicated or clearly covering acceptance criterion. Specific"
+   ],
+   [
+    "E2",
+    "major",
+    "Multiple scope boundaries are undefined, blocking an executing agent: (1) 'every knob' in AC2 is unscoped \u2014 th"
+   ],
+   [
+    "E5",
+    "major",
+    "The plan contains zero testing provisions for the documentation artifacts themselves. For documentation work, "
+   ]
+  ]
+ },
+ "908b-11e4-dd14-4ea3": {
+  "n_nonpass": 4
+ },
+ "b1de-627f": {
+  "n_nonpass": 4
+ },
+ "7b48-b23e-c825-4853": {
+  "n_nonpass": 5
+ },
+ "5615-6b6c-d496-4b9d": {
+  "n_nonpass": 4
+ }
+}
