@@ -1,0 +1,1 @@
+{"author":"Claude","data":{"fields":{"title":"rebar write ('link') exits 0 but does not persist when stdout is piped to an early-closing reader (root cause unconfirmed)"}},"env_id":"a7f6c5e0-d538-4904-841a-a3fd102c21d7","event_type":"EDIT","timestamp":1781991033093143463,"uuid":"3d8f53c5-afb4-4c3f-b7f5-3c859ca9f145"}
