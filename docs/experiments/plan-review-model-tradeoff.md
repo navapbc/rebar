@@ -100,5 +100,5 @@ per call; G3/G4 child-coverage excluded. Thinking was **off** for both models (p
 is like-for-like; enabling adaptive thinking would shift both quality and cost and is untested here. A weaker/local
 model's ceiling is still unmeasured.
 
-Raw data: `data/runs3_opus.jsonl`, `data/runs4_group.jsonl`; harnesses `data/batch3_opus.py`,
-`data/batch4_grouping.py`; analysis `data/analyze3.py`.
+Raw data: `plan-review-gate/runs/runs3_opus.jsonl`, `plan-review-gate/runs/runs4_group.jsonl`; harnesses `plan-review-gate/harnesses/batch3_opus.py`,
+`plan-review-gate/harnesses/batch4_grouping.py`; analysis `plan-review-gate/harnesses/analyze3.py`.

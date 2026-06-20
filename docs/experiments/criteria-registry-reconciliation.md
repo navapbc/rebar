@@ -53,7 +53,7 @@ new name. (The EXP *experiment* is still valid — it correctly validated the em
 3. **Completed the set**: `criteria_v5.json` now has **all 22** single-turn/overlay descriptors (the v4 fix only
    restored T2/T3/T4/T5d/COH — the coverage guard then revealed T1/T6/T7/T8/T9 were *still* missing, now added too),
    plus the 5 agent-tier criteria (G1G2/E4/A1/G3/G4) in a separate harness.
-4. **Added a mechanical completeness guard** (`data/check_registry_coverage.py`): it encodes the canonical v4 §5
+4. **Added a mechanical completeness guard** (`plan-review-gate/harnesses/check_registry_coverage.py`): it encodes the canonical v4 §5
    registry and **fails loudly** if any criteria file omits a criterion. Run against the old `criteria_v2.json` it
    lists all 10 dropped criteria — i.e. it would have caught this the day it happened. This is the missing checklist
    whose absence let the drop go unnoticed.
@@ -67,5 +67,5 @@ container child-coverage (now runnable — the epic has children), and the **DET
 code, separate from the LLM experiments). Recommended next: a validation pass over the never-run overlays +
 container criteria so the whole registry has coverage data.
 
-Data: `data/criteria_v5.json` (complete corrected set), `data/check_registry_coverage.py` (the completeness guard),
-`data/reconcile.json` (registry-vs-implemented map).
+Data: `plan-review-gate/criteria/criteria_v5.json` (complete corrected set), `plan-review-gate/harnesses/check_registry_coverage.py` (the completeness guard),
+`plan-review-gate/runs/reconcile.json` (registry-vs-implemented map).

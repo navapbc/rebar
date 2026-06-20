@@ -28,7 +28,7 @@ AGENT_TIER = {"G1G2", "E4", "A1", "G3", "G4"}
 BROAD_TIER = {"BROAD"}
 
 def main():
-    path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "criteria_v4.json")
+    path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "criteria", "criteria_v5.json")
     have = {c["id"] for c in json.load(open(path))}
     single_turn_expected = LLM_EXPECTED - AGENT_TIER - BROAD_TIER
     missing = sorted(single_turn_expected - have)

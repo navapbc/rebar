@@ -127,7 +127,7 @@ criteria first** (they're 85× the cost), never the cheap single-turn/DET base; 
 ## Recommended edits to epic 5fd2 / plan-of-record §5–§6
 
 1. **§5 registry:** add `exec`, `facet`, `context_needs` to the criterion descriptor schema (above). Store the
-   DSO-grounded checklists (`data/dso-criteria-specs.md`) as each criterion's `checklist`, not one-liners.
+   DSO-grounded checklists (`plan-review-gate/criteria/dso-criteria-specs.md`) as each criterion's `checklist`, not one-liners.
 2. **§6 chunking:** replace the single "chunk size" knob with the **exec-tier-aware** model: DET as code; the
    `base_chunk × size_factor` formula for the single-turn tier; one-agent-per-criterion for the AGENT tier gated
    by proportionate scrutiny. Default prompt caching on. Groupings are the stored `facet` tags (advisory).
@@ -145,6 +145,6 @@ per-review premium); the `size_factor` 0.5 and `base_chunk` numbers are calibrat
 per client from live REVIEW_RESULT data. Agentic cost (~$0.12) is at ~15 tool calls / 10-iter cap — a tighter
 loop or Haiku sub-agent would lower it.
 
-Data: `data/exp1_substance.jsonl`, `data/exp2_agentic.jsonl`, `data/criteria_v2.json`,
-`data/dso-criteria-specs.md`; harnesses `data/exp1_substance.py`, `data/exp2_agentic.py`; analysis
-`data/analyze4.py`.
+Data: `plan-review-gate/runs/exp1_substance.jsonl`, `plan-review-gate/runs/exp2_agentic.jsonl`, `plan-review-gate/criteria/criteria_v2.json`,
+`plan-review-gate/criteria/dso-criteria-specs.md`; harnesses `plan-review-gate/harnesses/exp1_substance.py`, `plan-review-gate/harnesses/exp2_agentic.py`; analysis
+`plan-review-gate/harnesses/analyze4.py`.

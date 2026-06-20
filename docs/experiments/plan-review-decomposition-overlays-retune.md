@@ -95,6 +95,6 @@ The criteria themselves are well-calibrated (low-FP, addressable, convergent —
 and the deterministic/LLM overlay split, the gate stays lean *and* keeps signal (T8 recovers what DSO's
 bot-psychologist finds). No criteria-content redesign needed; the changes are routing + one new criterion (EXP).
 
-Data: `data/r4_A.jsonl` (epic+children), `data/r4_B.jsonl` (DSO sample), `data/r4_C.jsonl` (overlay triggering),
-`data/r4_D.jsonl` + `data/r4_T8.json` (PIL comparison), `data/retune_out.json` (level-aware re-run);
-`data/criteria_v3.json` (incl EXP); harnesses `data/round4.py`, `data/retune.py`; analysis `data/analyze_r4.py`.
+Data: `plan-review-gate/runs/r4_A.jsonl` (epic+children), `plan-review-gate/runs/r4_B.jsonl` (DSO sample), `plan-review-gate/runs/r4_C.jsonl` (overlay triggering),
+`plan-review-gate/runs/r4_D.jsonl` + `plan-review-gate/runs/r4_T8.json` (PIL comparison), `plan-review-gate/runs/retune_out.json` (level-aware re-run);
+`plan-review-gate/criteria/criteria_v3.json` (incl EXP); harnesses `plan-review-gate/harnesses/round4.py`, `plan-review-gate/harnesses/retune.py`; analysis `plan-review-gate/harnesses/analyze_r4.py`.

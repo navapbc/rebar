@@ -68,4 +68,4 @@ Net: the grounded defaults (severity-ranked advisory findings, anti-FP disciplin
 chunking) are well-calibrated as a baseline. The gate found real defects in its own design epic, the fixes stuck,
 and the only tuning needs are refinements already on the F-register — not a redesign.
 
-Raw run: `data/gate_run.jsonl`; protocol harness `data/run_gate.py`.
+Raw run: `plan-review-gate/runs/gate_run.jsonl`; protocol harness `plan-review-gate/harnesses/run_gate.py`.
