@@ -107,10 +107,11 @@ def pass1_chunk(title, plan, rubric_chunk, model="claude-opus-4-8", extra=""):
 GRADED = ["is_verifiable", "evidence_entails_finding", "path_reachable", "impact_follows_necessarily",
           "no_viable_alternative_explanation", "no_existing_mitigation", "severity_claim_justified"]
 PASS2_SYSTEM = (
-    "You are the independent VERIFIER (pass 2 of 3). A pass-1 reviewer has proposed a finding about a "
-    "ticket plan. Your job is to TEST that claim against the plan (and code where cited) and report "
-    "structured attributes + atomic binary sub-answers. You did NOT write the finding and must not assume "
-    "it is correct.\n\nRULES (obey strictly):\n"
+    "You are the independent VERIFIER (pass 2 of 3), adjudicating a conflict between TWO claims: the PLAN "
+    "(which implicitly claims it is adequate) and a pass-1 reviewer's FINDING (which claims the plan has a "
+    "specific defect). Pass-1 already scrutinized the plan, so YOUR skepticism is aimed at the FINDING — "
+    "test whether the criticism is actually justified. You did NOT write the finding and must not assume it "
+    "is correct. Report structured attributes + atomic binary sub-answers.\n\nRULES (obey strictly):\n"
     "- ATOMICITY: answer each sub-question about ONE proposition only.\n"
     "- INDEPENDENCE: treat the finding as an UNPROVEN claim; do not let its assertion bias your answers. "
     "Judge from the plan/evidence yourself.\n"
@@ -123,10 +124,13 @@ PASS2_SYSTEM = (
     "not deciding block/advisory (a deterministic pass does that).\n"
     "- REASON FIRST: use the `analysis` field to reason through each binary sub-question independently "
     "against the evidence BEFORE committing the yes/no/insufficient answers.\n"
-    "- ENTAILMENT IS THE PRECISION GATE: confirm a finding only when the evidence ENTAILS it. If a plausible "
-    "reading of the plan already satisfies the criterion, the finding is not entailed — answer "
-    "evidence_entails_finding=no. Judge entailment on the evidence alone, INDEPENDENT of the plan's "
-    "confidence and the finder's conclusion (this is where over-flagging is filtered without rubber-stamping)."
+    "- BE SKEPTICAL OF THE FINDING by reading the PLAN CHARITABLY: give the plan its most reasonable "
+    "reading, and confirm the finding only if the criticism still holds under that reading (the evidence "
+    "ENTAILS it). If a reasonable reading of the plan already satisfies the criterion, the criticism is not "
+    "justified — answer evidence_entails_finding=no. Charitable plan-reading here IS skepticism of the "
+    "finding (the same critical framing as Pass-1, now aimed at the criticism) — it filters over-flagging "
+    "without rubber-stamping the finder. Judge on the evidence and the plan's most reasonable reading, not "
+    "on how confident the plan or the finder sounds."
 )
 PASS2_TOOL = [{"name": "verify_finding", "description": "Verify a pass-1 finding: attributes + binary sub-answers.",
   "input_schema": {"type": "object", "properties": {
