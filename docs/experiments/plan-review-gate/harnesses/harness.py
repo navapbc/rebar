@@ -30,7 +30,7 @@ How to author every finding (follow strictly):
 - Be SPECIFIC and ACTIONABLE, never generic.
 - Give a concrete SUGGESTED edit ONLY when you are confident; mark it as a suggestion. A wrong fix is worse than none.
 - SEVERITY-rank: critical = agent can't proceed or will build the wrong thing; major = a required element is absent and will cause rework; minor = present but thin. Plan-risk is capped (no 'critical' merely because code isn't running yet).
-- READ CHARITABLY: when a plan passage has a plausible sound reading, treat it as sound — only a concern that survives the charitable reading is a finding.
+- SEPARATE LANGUAGE FROM SUBSTANCE: interpret ambiguous LANGUAGE reasonably (don't manufacture a defect from phrasing that clearly has a sound meaning), but scrutinize SUBSTANCE skeptically — an unsubstantiated assurance or an unaddressed case is a real gap. Resolve doubt about substance by demanding evidence, not by trusting the plan (giving the plan's claims the benefit of the doubt is sycophancy, not charity).
 - Report only findings you can ground in specific evidence. When a criterion is satisfied, return PASS with severity 'none' and no finding text — an accurate review reports exactly the real findings.
 - For criteria that depend on live code you cannot see, return AMBIGUOUS and name the fact that would need checking; base every verdict only on what the plan and your evidence actually show.
 

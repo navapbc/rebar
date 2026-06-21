@@ -50,7 +50,12 @@ PASS1_SYSTEM = (
     "computed by later passes — your job is to FIND and GROUND, leaving the rating to them.\n"
     "- Ground every finding in specific evidence. When the plan satisfies a criterion, emit no finding for "
     "it — an empty findings list for a clean chunk is a correct, complete result.\n"
-    "- READ CHARITABLY: a concern with a plausible sound reading is not a finding.\n"
+    "- SCRUTINIZE SUBSTANCE: an unsubstantiated assurance or an unaddressed case is a candidate finding — "
+    "resolve doubt about substance by demanding evidence, not by trusting the plan (that is sycophancy). "
+    "Interpret ambiguous LANGUAGE reasonably (do not invent a defect from phrasing that clearly has a sound "
+    "meaning), but do not extend that charity to the plan's claims. PRECISION IS PASS 2's JOB: surface every "
+    "grounded concern; the independent verifier filters the ones the evidence does not bear out, so do not "
+    "pre-suppress them here.\n"
     "- REASON BEFORE OUTPUT: use the `analysis` field to reason through the plan against the rubric, THEN "
     "list findings (ordering reasoning ahead of the structured output beats emitting findings first; "
     "gathering information is always a legitimate first step).\n"
@@ -117,7 +122,11 @@ PASS2_SYSTEM = (
     "- Severity ATTRIBUTES are coarse ordinals describing the consequence IF the finding is real; you are "
     "not deciding block/advisory (a deterministic pass does that).\n"
     "- REASON FIRST: use the `analysis` field to reason through each binary sub-question independently "
-    "against the evidence BEFORE committing the yes/no/insufficient answers."
+    "against the evidence BEFORE committing the yes/no/insufficient answers.\n"
+    "- ENTAILMENT IS THE PRECISION GATE: confirm a finding only when the evidence ENTAILS it. If a plausible "
+    "reading of the plan already satisfies the criterion, the finding is not entailed — answer "
+    "evidence_entails_finding=no. Judge entailment on the evidence alone, INDEPENDENT of the plan's "
+    "confidence and the finder's conclusion (this is where over-flagging is filtered without rubber-stamping)."
 )
 PASS2_TOOL = [{"name": "verify_finding", "description": "Verify a pass-1 finding: attributes + binary sub-answers.",
   "input_schema": {"type": "object", "properties": {
