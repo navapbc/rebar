@@ -33,7 +33,7 @@ child_ctx = ""
 for tid in CHILDREN:
     cd = json.loads(subprocess.run(["rebar", "show", tid], capture_output=True, text=True, cwd=REBAR).stdout or "{}")
     if cd:
-        child_ctx += f"\n\n### CHILD {tid}: {cd.get('title','')}\n{(cd.get('description') or '')[:4000]}"  # full body (children are <~1600 chars); 1100 truncated them -> a 'truncated AC' FP
+        child_ctx += f"\n\n### CHILD {tid}: {cd.get('title','')}\n{cd.get('description') or ''}"  # FULL child body — never truncate the reviewed artifact (truncation invalidates the review)
 EXTRA = "\n## Children (full excerpts, for container coverage/consistency G3/G4):" + child_ctx
 
 if __name__ == "__main__":
