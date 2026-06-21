@@ -111,8 +111,14 @@ addresses it via `--force` + the out-of-band design. This is the three-pass valu
 verified, calibrated result on a well-formed plan (no block-spam), and it earned its keep by finding a
 genuine omission.
 
-**Recommended follow-on (file as `discovered_from` 5fd2):** add a gate **kill-switch / disable-config**
-and a **rollout-ordering plan for the signature scheme** (the T12 gap the gate found on itself).
+**Adjudication (Joe):** the finding was an advisory **over-call** — the gate is **config-gated and
+fail-open when off**, so disabling it via config IS the kill-switch / rollback (turning it off reverts
+`claim` to current behavior instantly); no separate rollback mechanism is needed by design. The Pass-2
+`no-existing-mitigation` check should have answered *no* (config-gating IS the mitigation) and softened it.
+This is the three-pass flow working: advisory (not block) → human adjudication → dismissed. The epic's
+config Success Criterion now states config-disable = the kill-switch explicitly (so the gate won't re-flag
+it); the prematurely-filed follow-on `ce75` was closed resolved-by-design. Good calibration datum for the
+verifier's mitigation check.
 
 ## 6. Status of the five finalize items
 
@@ -125,6 +131,7 @@ and a **rollout-ordering plan for the signature scheme** (the T12 gap the gate f
 | 5 | harden structured-output parsing | **done** — `robust_findings`, 126/126 ok (§1). |
 | + | **three-pass adoption** (user directive) | **done** — §4–§5. |
 
-Remaining before implementation proper: file the F-register + the new T12-gap follow-on as tickets, then
-build per the 9 child stories (registry/orchestrator first). The three-pass framework is shared with epic
-`9da1` — coordinate the orchestrator so plan-review and code-review use one Pass-2/Pass-3 implementation.
+Remaining before implementation proper: file the F-register as tickets, then build per the 9 child stories
+(registry/orchestrator first). The T12 gate-found gap was adjudicated resolved-by-design (config-gating is
+the kill-switch; `ce75` closed). The three-pass framework is shared with epic `9da1` — coordinate the
+orchestrator so plan-review and code-review use one Pass-2/Pass-3 implementation.
