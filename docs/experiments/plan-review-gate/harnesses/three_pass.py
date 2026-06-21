@@ -311,16 +311,40 @@ def pass3_decide(verify, block_threshold=0.95, blocking_enabled=False):
             "impact_ord": impact, "blast": blast, "likelihood": like}
 
 # ------------------------------------------------------------------ orchestrator
+def _agent_finding_records(title, plan, crit, repo_root):
+    """Pass-1 for an AGENT-tier criterion: run the agentic finder (greps/reads the repo), then convert a
+    non-PASS grounded verdict into evidence-record(s) for the shared Pass-2/Pass-3. This is what makes the
+    integrated three-pass flow actually exercise codebase grounding for the AGENT criteria (T5c/T10/T11/
+    E4/G1G2/A1/G6/T8/T1/T3) rather than running them as plan-text single-turn chunks."""
+    if not repo_root:
+        return []
+    ag = G.agent(title, plan, crit["id"], repo_root)
+    out = []
+    for f in (ag.get("findings") or []):
+        if isinstance(f, dict) and f.get("verdict") in ("FAIL", "AMBIGUOUS") and (f.get("finding") or "").strip():
+            out.append({"finding": f.get("finding"), "criteria": [crit["id"]],
+                        "evidence": [f.get("location") or "(agentic: grounded in the repo)"],
+                        "scenarios": [], "impact": "", "_agentic_pass1": True, "_tool_calls": ag.get("tool_calls", 0)})
+    return out
+
+
 def run_three_pass(title, plan, rubric, repo_root=None, model="claude-opus-4-8", extra="",
                    agentic_verify=True, ticket_size="moderate", log=print):
-    chunks = G.chunk_by_facet(rubric, model, ticket_size)
-    # PASS 1 — chunks in parallel
+    G.ensure_agent_crit(rubric)
+    agent_crits = [c for c in rubric if c.get("exec") == "AGENT"]
+    st_crits = [c for c in rubric if c.get("exec") != "AGENT"]
+    chunks = G.chunk_by_facet(st_crits, model, ticket_size)
+    # PASS 1 — single-turn chunks (st_crits) + agentic finders (agent_crits, grep/read the repo) in parallel
     findings = []
     with ThreadPoolExecutor(max_workers=6) as ex:
-        for fs in ex.map(lambda ch: pass1_chunk(title, plan, ch, model, extra), chunks):
-            findings.extend(fs)
+        st_futs = [ex.submit(pass1_chunk, title, plan, ch, model, extra) for ch in chunks]
+        ag_futs = [ex.submit(_agent_finding_records, title, plan, c, repo_root) for c in agent_crits]
+        for fu in st_futs + ag_futs:
+            try: findings.extend(fu.result() or [])
+            except Exception: pass
     findings = [f for f in findings if not f.get("_error")]
-    log(f"  PASS 1: {len(findings)} findings across {len(chunks)} rubric chunks")
+    n_ag = sum(1 for f in findings if f.get("_agentic_pass1"))
+    log(f"  PASS 1: {len(findings)} findings ({len(chunks)} single-turn chunks + {len(agent_crits)} agentic finders; {n_ag} agentic findings)")
     postures = {c["id"]: c.get("default_posture", "advisory") for c in rubric}
     thresholds = {c["id"]: c.get("block_threshold", 0.95) for c in rubric}
     # PASS 2 — ONE aggregate verifier call over all findings, on a non-frontier model (separate from

@@ -1,0 +1,1346 @@
+{
+ "epic": "5fd2-a7c2-0aec-48fa",
+ "det": {
+  "check_ac": "AC_CHECK: pass (17 criteria lines)",
+  "clarity": "{\"score\": 7, \"verdict\": \"pass\", \"threshold\": 5}"
+ },
+ "findings": [
+  {
+   "finding": "The epic is decomposed horizontally (Layer-1 floor, Pass-1, Pass-2, Pass-3, attestation, claim, sidecar, registry/orchestrator, overlays, eval, docs) with no identified thin vertical-slice / evidence-gated MVP that de-risks the riskiest piece (LLM-review FP/FN rate, polyglot fail-open tooling) first. No child is designated as the end-to-end de-risking slice and no sequencing among the 11 children is stated.",
+   "criteria": [
+    "G5"
+   ],
+   "evidence": [
+    "11 children are organized by layer/pass, not by a de-risking slice",
+    "The G5 rubric itself warns 'Decomposing into many parallel parts does not by itself reduce big-bang risk' \u2014 and the plan even quotes this in the criteria registry",
+    "The plan states the gate was 'now decomposed into 11 children reflecting the converged three-pass design' but never names which child is the first thin slice or how they sequence",
+    "depends_on a prerequisite epic 8f6c and a 6f2d brainstorm but no slice ordering is given"
+   ],
+   "scenarios": [
+    "All 11 children proceed in parallel; the LLM review tier's false-fire rate turns out unacceptable late, after attestation/claim/sidecar/docs are already built around it",
+    "The riskiest assumption (polyglot fail-open tooling exists/works) is validated last"
+   ],
+   "impact": "Big-bang integration risk: the gate's core uncertainty (review precision, tooling fail-open) may be discovered too late to cheaply re-scope, defeating the purpose of decomposition.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "medium",
+     "debt_impact": "medium",
+     "blast_radius": "system",
+     "likelihood": "medium",
+     "reversibility": "moderate"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "no",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "dropped",
+   "reason": "low-confidence",
+   "confidence": 0.429,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 3,
+   "likelihood": 2
+  },
+  {
+   "finding": "The claim-path latency target (p95 < ~50ms) has no in-session proving command. The instrumentation AC explicitly states targets are 'set initially from UX/timeout projections and refined PASSIVELY from dogfood data \u2014 no upfront benchmark step required,' yet child 092b's AC asserts 'the fast check meets the latency target' as a completion criterion.",
+   "criteria": [
+    "F1",
+    "E6"
+   ],
+   "evidence": [
+    "Child 092b AC: 'the fast check meets the latency target'",
+    "Instrumentation AC: 'no upfront benchmark step required' and 'refined PASSIVELY from dogfood data'",
+    "Design summary: 'target p95 < ~50ms'"
+   ],
+   "scenarios": [
+    "Reviewer asks how 'meets the latency target' is proven before close; there is no command/benchmark, only passive dogfood telemetry which is post-sprint",
+    "The 50ms target is never validated in-session because benchmarking is deferred"
+   ],
+   "impact": "A criterion that reads as in-session verifiable ('meets the latency target') is actually only confirmable post-sprint via telemetry, so done-ness for the latency claim is not provable at close.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "low",
+     "debt_impact": "low",
+     "blast_radius": "local",
+     "likelihood": "medium",
+     "reversibility": "easy"
+    },
+    "binary": {
+     "cited_reference_accurate": "yes",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "no",
+     "no_viable_alternative_explanation": "yes",
+     "no_existing_mitigation": "insufficient",
+     "severity_claim_justified": "no"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.571,
+   "severity": "minor",
+   "impact_ord": 1,
+   "blast": 1,
+   "likelihood": 2
+  },
+  {
+   "finding": "Multiple unresolved design choices are deferred to investigation or to a dependency rather than decided in the plan, leaving the executor without an actionable decision. Notably the orchestrator's fundamental SHAPE is undecided pending another epic's brainstorm, and the eval-labeling approach is left open.",
+   "criteria": [
+    "E2"
+   ],
+   "evidence": [
+    "Child ca03 Scope: 'the exact SHAPE (gate-as-workflow vs bespoke; dynamic fan-out handling) depends on the 6f2d (soupy-spool-revel) brainstorm this epic depends_on'",
+    "Eval-suite AC: 'Open: weak auto-labels (closed tickets + completion-verification verdicts) vs. human grading'",
+    "E2 placeholder signals include 'depends on investigation' and deferring a real design choice to the executor"
+   ],
+   "scenarios": [
+    "An agent picks up ca03 and cannot proceed because the gate-as-workflow vs bespoke decision is owned by a separate brainstorm not yet complete",
+    "The eval suite is built with auto-labels that later prove too weak, requiring rework"
+   ],
+   "impact": "Executing agent must stop and resolve a core architectural choice (or wait on a dependency) that the plan defers \u2014 a planning-blocking ambiguity for the orchestrator child.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "medium",
+     "debt_impact": "medium",
+     "blast_radius": "module",
+     "likelihood": "medium",
+     "reversibility": "moderate"
+    },
+    "binary": {
+     "cited_reference_accurate": "insufficient",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "insufficient",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.5,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 2,
+   "likelihood": 2
+  },
+  {
+   "finding": "Several children's acceptance criteria are presented truncated/incomplete (cut off mid-line), so their done-ness conditions cannot be verified as written.",
+   "criteria": [
+    "E6"
+   ],
+   "evidence": [
+    "Child 012e Acceptance Criteria ends '- [ ] C' (truncated)",
+    "Child db7b Acceptance Criteria ends '- [ ] Offl' (truncated)",
+    "E6 (ac_to_step): every acceptance criterion maps to at least one described step"
+   ],
+   "scenarios": [
+    "A reviewer/agent reads child 012e or db7b and cannot determine the final acceptance condition or its proving step"
+   ],
+   "impact": "Incomplete child ACs mean the union of steps cannot be confirmed to reach the stated end-state for those children; verification coverage is unprovable for the missing criteria.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "low",
+     "debt_impact": "medium",
+     "blast_radius": "local",
+     "likelihood": "medium",
+     "reversibility": "easy"
+    },
+    "binary": {
+     "cited_reference_accurate": "insufficient",
+     "is_verifiable": "insufficient",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "yes",
+     "no_viable_alternative_explanation": "insufficient",
+     "no_existing_mitigation": "insufficient",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.643,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 1,
+   "likelihood": 2
+  },
+  {
+   "finding": "The parent AC 'Feedback-authoring conforms to the coaching spec (grounded/specific/ranked/affirming/checklist)' has no clearly owning child. The Pass-1 finder child (1913) emits the evidence-record schema but does not own the coaching-feedback authoring (affirms what passes, suggested fix when confident, severity-ranked + capped checklist), and no other child claims it.",
+   "criteria": [
+    "G5",
+    "E6"
+   ],
+   "evidence": [
+    "Parent AC: 'Feedback-authoring conforms to the coaching spec (grounded/specific/ranked/affirming/checklist)'",
+    "Child 1913 What/Scope describe the emit_findings evidence-record contract only, not coaching authoring",
+    "No child excerpt mentions the coaching spec's affirm/suggested-fix/checklist authoring"
+   ],
+   "scenarios": [
+    "At integration, the coaching-spec AC has no implementing child and is silently dropped or scrambled in",
+    "The completeness guard checks criteria registry coverage but not parent-AC-to-child coverage"
+   ],
+   "impact": "A parent acceptance criterion central to the epic's 'COACH not nitpick' posture lacks a decomposition home, risking it being unimplemented or unverified.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "medium",
+     "debt_impact": "low",
+     "blast_radius": "module",
+     "likelihood": "low",
+     "reversibility": "easy"
+    },
+    "binary": {
+     "cited_reference_accurate": "insufficient",
+     "is_verifiable": "insufficient",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "insufficient",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "insufficient",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.5,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 2,
+   "likelihood": 1
+  },
+  {
+   "finding": "End-state reachability for the registry/orchestrator child is conditional on an external, not-yet-resolved dependency (the 6f2d brainstorm) whose outcome determines the orchestrator architecture, so the union of children may not provably reach the stated end-state within this epic.",
+   "criteria": [
+    "E6"
+   ],
+   "evidence": [
+    "Child ca03: 'the exact SHAPE ... depends on the 6f2d (soupy-spool-revel) brainstorm this epic depends_on'",
+    "Context: 'Full design ... depends_on' a prerequisite epic 8f6c for tooling",
+    "E6 (end_state_reachable): no gap between what we'll do and what done looks like"
+   ],
+   "scenarios": [
+    "6f2d resolves to a shape incompatible with how the other children (pass-1/2/3, chunker) were built, forcing rework and leaving the epic's end-state unreached"
+   ],
+   "impact": "The orchestrator \u2014 the 'engine of the gate' \u2014 has an unresolved dependency on another epic's outcome, so the path from steps to end-state is not fully closed within this plan.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "medium",
+     "debt_impact": "medium",
+     "blast_radius": "module",
+     "likelihood": "low",
+     "reversibility": "moderate"
+    },
+    "binary": {
+     "cited_reference_accurate": "insufficient",
+     "is_verifiable": "insufficient",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "insufficient",
+     "impact_follows_necessarily": "no",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "no"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "dropped",
+   "reason": "low-confidence",
+   "confidence": 0.214,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 2,
+   "likelihood": 1
+  },
+  {
+   "finding": "Two success criteria contradict each other on the default behavior of the claim gate: one says claiming REQUIRES a valid signed attestation (absence blocks), the other says the plan-review requirement DEFAULTS OFF when unspecified.",
+   "criteria": [
+    "COH",
+    "E1"
+   ],
+   "evidence": [
+    "Success Criteria item 1: 'Claiming a ticket (open\u2192in_progress) requires a valid, non-stale signed plan-review attestation; absence or a material-edit-invalidated signature blocks the claim'",
+    "Success Criteria item 4: 'a config PREFERENCE that turns the plan-review requirement ON/OFF for claiming... The preference DEFAULTS OFF when unspecified'",
+    "Child 092b AC: 'Claim blocks on absent/material-edit-invalidated signature'"
+   ],
+   "scenarios": [
+    "An implementer reads Success Criterion 1, builds claim to block by default; another reads Criterion 4, builds it to no-op by default \u2014 the end-to-end proving check ('the gate-off config preference leaving claim at today's behavior') and the claim-block check ('absent/stale signature \u2192 claim succeeds after earning a signature') then encode opposite defaults.",
+    "A client upgrades rebar and is surprised whether their existing open\u2192in_progress flow suddenly starts blocking or not."
+   ],
+   "impact": "Sends the implementer in two directions on the gate's most fundamental behavior (does claiming block by default?), and makes the acceptance/proving checks mutually inconsistent.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "low",
+     "debt_impact": "low",
+     "blast_radius": "local",
+     "likelihood": "low",
+     "reversibility": "easy"
+    },
+    "binary": {
+     "cited_reference_accurate": "yes",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "no",
+     "path_reachable": "no",
+     "impact_follows_necessarily": "no",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "no"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "dropped",
+   "reason": "low-confidence",
+   "confidence": 0.143,
+   "severity": "minor",
+   "impact_ord": 1,
+   "blast": 1,
+   "likelihood": 1
+  },
+  {
+   "finding": "The disable mechanism is described as contradictory things across sections/children: the parent explicitly says it is 'an ordinary config preference, not a deploy-time kill-switch,' while the docs child repeatedly calls it a 'kill-switch.'",
+   "criteria": [
+    "COH",
+    "E1"
+   ],
+   "evidence": [
+    "Parent Success Criteria item 4: \"'rollback' is simply turning the preference off \u2014 an ordinary config preference, not a deploy-time kill-switch, and no separate rollback mechanism is needed\"",
+    "Child 6c5c What: 'the global enable/disable kill-switch'",
+    "Child 6c5c AC: 'Docs cover behavior, config (incl. the disable kill-switch)'"
+   ],
+   "scenarios": [
+    "The docs author (child 6c5c) documents a 'kill-switch' with deploy-time/global semantics, while the implementer ships an ordinary per-project config preference \u2014 docs and behavior diverge.",
+    "A reader trying to map the docs AC to the config AC cannot tell whether one mechanism or two are intended."
+   ],
+   "impact": "Terminology drift for the same concept (config-preference vs kill-switch) across parent and child produces docs that misdescribe the shipped behavior.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "none",
+     "debt_impact": "low",
+     "blast_radius": "local",
+     "likelihood": "medium",
+     "reversibility": "easy"
+    },
+    "binary": {
+     "cited_reference_accurate": "insufficient",
+     "is_verifiable": "insufficient",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "insufficient",
+     "impact_follows_necessarily": "no",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "no"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "dropped",
+   "reason": "low-confidence",
+   "confidence": 0.214,
+   "severity": "minor",
+   "impact_ord": 1,
+   "blast": 1,
+   "likelihood": 2
+  },
+  {
+   "finding": "The plan names multiple, conflicting 'canonical' descriptor files for the criteria registry (criteria_v5.json vs criteria_v8.json vs 'the full v4 \u00a75 registry'), with no single authoritative source.",
+   "criteria": [
+    "E1",
+    "COH"
+   ],
+   "evidence": [
+    "Registry reconciliation section: 'All are restored to the corrected criteria set (docs/experiments/plan-review-gate/criteria/criteria_v5.json) and the full v4 \u00a75 registry is the canonical source'",
+    "Three-pass section: 'The three-pass-native descriptor set is docs/experiments/plan-review-gate/criteria/criteria_v8.json'",
+    "Criteria registry section: 'the CURRENT descriptor set (...criteria_v8.json \u2014 32 descriptors incl. ISF; v5/v6 are superseded historical references)'"
+   ],
+   "scenarios": [
+    "The implementer loads criteria_v5.json (per the reconciliation) while the completeness guard / orchestrator expects criteria_v8.json, silently dropping or mis-loading criteria.",
+    "A reviewer cannot determine which file the 'completeness guard fails loudly' check should run against."
+   ],
+   "impact": "Conflicting canonical sources for the rubric file risk loading the wrong/stale criteria set \u2014 exactly the silent-subsetting failure the completeness guard is meant to prevent.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "low",
+     "debt_impact": "low",
+     "blast_radius": "local",
+     "likelihood": "medium",
+     "reversibility": "easy"
+    },
+    "binary": {
+     "cited_reference_accurate": "yes",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "yes",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "no",
+     "no_viable_alternative_explanation": "yes",
+     "no_existing_mitigation": "yes",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.786,
+   "severity": "minor",
+   "impact_ord": 1,
+   "blast": 1,
+   "likelihood": 2
+  },
+  {
+   "finding": "Several criteria named as canonical/restored deliverables in the registry \u2014 the dedicated COH coherence pass, G6 approach-soundness, and ISF intent-source-fidelity \u2014 are not enumerated in the parent Layer-2 Acceptance Criterion that lists implemented criteria, leaving these deliverables without a covering parent AC.",
+   "criteria": [
+    "E1"
+   ],
+   "evidence": [
+    "Reconciliation: 'the dedicated coherence pass ... All are restored to the corrected criteria set'; round-5: 'the review's findings map to COH (a criterion we'd dropped) and G6 (the one we added)'; registry lists 'ISF intent-source fidelity'",
+    "Layer-2 AC enumerates: 'measurability/agent-completable, user/problem present, ... assumption/premise verification, anti-slop, and T2 empirical-probe ... plus triggered overlays ... and a bounded broad pass' \u2014 does NOT name COH, G6, or ISF",
+    "ISF appears only in child 7284's What ('ADD the approved intent-source-fidelity criterion') and the eval-suite AC, not the criteria-implementation AC"
+   ],
+   "scenarios": [
+    "Implementation tracks the Layer-2 AC as the checklist and never implements/wires COH, G6, or ISF, with no AC failing to catch the omission.",
+    "The completeness guard checks against the registry file but the human-facing AC silently under-covers, recreating the 'silent descoping' risk this epic targets."
+   ],
+   "impact": "Described/restored criteria lack covering acceptance criteria (orphan-work in the bidirectional-coverage sense), so they can be silently dropped without an AC failing.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "low",
+     "debt_impact": "low",
+     "blast_radius": "local",
+     "likelihood": "low",
+     "reversibility": "easy"
+    },
+    "binary": {
+     "cited_reference_accurate": "yes",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "yes",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "no",
+     "no_viable_alternative_explanation": "yes",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "no"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.571,
+   "severity": "minor",
+   "impact_ord": 1,
+   "blast": 1,
+   "likelihood": 1
+  },
+  {
+   "finding": "The user-facing time-to-first-work (latency of the out-of-band heavy review the agent must complete before it can claim) has no time-bounded done-definition; only the 50ms claim-check latency is targeted, and the plan itself flags this as an unresolved residual.",
+   "criteria": [
+    "T5a"
+   ],
+   "evidence": [
+    "Design summary: 'claim is a FAST signature-verify check only ... target p95 < ~50ms ... The heavy review runs OUT-OF-BAND'",
+    "Budget section: 'heavy epic ~$1.5\u20132.0 + minutes' (no latency target/bound)",
+    "Round-5 residual + child 6c5c AC: 'state end-to-end time-to-first-work honestly (not just the 50ms claim check)' \u2014 acknowledged as not yet stated"
+   ],
+   "scenarios": [
+    "An agent claims a fresh ticket, is blocked, and must run review-plan that takes unbounded 'minutes' on a heavy epic; no SLA/timeout governs how long the agent waits before it can proceed.",
+    "A client measuring 'time to start work' sees only the 50ms figure documented and is surprised by multi-minute review latency."
+   ],
+   "impact": "The real user-facing latency (start-of-work blocking) is unbounded and undocumented, mis-setting expectations for the gate's actual cost to an agent's trajectory.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "low",
+     "debt_impact": "low",
+     "blast_radius": "local",
+     "likelihood": "high",
+     "reversibility": "easy"
+    },
+    "binary": {
+     "cited_reference_accurate": "yes",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "yes",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "yes",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "yes"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.714,
+   "severity": "minor",
+   "impact_ord": 1,
+   "blast": 1,
+   "likelihood": 3
+  },
+  {
+   "finding": "Concurrency / rate-limit / pool handling for the agentic LLM fan-out is not specified, despite the plan firing one tool-using agent per AGENT-tier criterion (\u224850s, \u224885\u00d7 cost each) potentially in parallel per plan.",
+   "criteria": [
+    "T5a",
+    "T5b"
+   ],
+   "evidence": [
+    "Budget section: 'AGENT/tool-using ... = one agent loop per criterion, ~$0.12 + ~50s each (\u224885\u00d7 a single-turn call)'",
+    "Final AGENT tier list: 'E4/G1G2/A1/G6/T8/T1/T3/T5c/T10/T11' (many agents per plan)",
+    "The plan states 'DET criteria run as parallel code' and 'one agent each' but never states rate-limit/pool/concurrency handling against the LLM provider"
+   ],
+   "scenarios": [
+    "A heavy epic fires 10+ agent-tier criteria; concurrent agent calls hit provider rate limits / 429s with no pool or backoff strategy stated.",
+    "CI runs the gate on many tickets at once, multiplying concurrent agent calls."
+   ],
+   "impact": "Unbounded concurrent expensive agent calls with no stated rate-limit/pool handling can throttle or fail the review path under load (T5a scalability) and produce unhandled provider errors (T5b error_handling).",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "medium",
+     "debt_impact": "low",
+     "blast_radius": "module",
+     "likelihood": "medium",
+     "reversibility": "moderate"
+    },
+    "binary": {
+     "cited_reference_accurate": "yes",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "insufficient",
+     "no_viable_alternative_explanation": "yes",
+     "no_existing_mitigation": "yes",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.786,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 2,
+   "likelihood": 2
+  },
+  {
+   "finding": "Error handling (retry/backoff) for the reviewer LLM calls themselves is not stated; the plan addresses budget cap-hit and tool-unavailable INDETERMINATE but never specifies behavior on transient LLM API failures/timeouts mid-pass.",
+   "criteria": [
+    "T5b"
+   ],
+   "evidence": [
+    "Plan states 'review-level INDETERMINATE remains for budget/tool-unavailable' and 'chunk-atomic checkpointing'",
+    "No mention of retry/backoff/circuit-breaker for the Pass-1/Pass-2 LLM calls on transient API errors",
+    "Layer-1 fail-open covers external TOOLS ('no server / crash / timeout \u2192 skipped = PASS') but is scoped to DET tooling, not the LLM reviewer passes"
+   ],
+   "scenarios": [
+    "A Pass-2 verify call times out transiently; without a retry policy the whole review may fall to INDETERMINATE unnecessarily, or fail in an unspecified way.",
+    "Provider 5xx mid-review leaves the review in an undefined state w.r.t. the checkpointed chunks."
+   ],
+   "impact": "Transient LLM failures on the review path have undefined handling, risking spurious INDETERMINATE outcomes or unhandled errors on a path that gates an agent's progress.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "low",
+     "debt_impact": "medium",
+     "blast_radius": "module",
+     "likelihood": "medium",
+     "reversibility": "easy"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "insufficient",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "insufficient",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.571,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 2,
+   "likelihood": 2
+  },
+  {
+   "finding": "A core architectural decision \u2014 the orchestrator's SHAPE (gate-as-workflow vs bespoke; dynamic fan-out handling) \u2014 is explicitly unresolved and deferred to an external brainstorm this epic depends on, yet children are scoped to build the orchestrator on top of it.",
+   "criteria": [
+    "T5e",
+    "COH"
+   ],
+   "evidence": [
+    "Child ca03 Scope: 'the exact SHAPE (gate-as-workflow vs bespoke; dynamic fan-out handling) depends on the 6f2d (soupy-spool-revel) brainstorm this epic depends_on'",
+    "Child ca03 What: 'Generic orchestrator: applies_at level/type routing; facet chunker ... exec-tier dispatch ... overlay routing'",
+    "No ADR/design-doc capture of the chosen orchestrator shape is named as an output of this epic"
+   ],
+   "scenarios": [
+    "Children are implemented against an assumed gate-as-workflow shape, then the 6f2d brainstorm picks bespoke, forcing rework of the orchestrator and its dispatch wiring.",
+    "A maintainer later cannot find an ADR explaining why the orchestrator took its final shape."
+   ],
+   "impact": "Building cross-component orchestration on an undecided substrate (coupling_risk) with no ADR capture (documentation) risks rework and an undocumented novel architectural decision.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "low",
+     "debt_impact": "medium",
+     "blast_radius": "module",
+     "likelihood": "low",
+     "reversibility": "moderate"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "insufficient",
+     "evidence_entails_finding": "no",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "insufficient",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "dropped",
+   "reason": "low-confidence",
+   "confidence": 0.357,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 2,
+   "likelihood": 1
+  },
+  {
+   "finding": "Two child acceptance-criteria excerpts are truncated ('- [ ] C' and '- [ ] Offl'), so the parent's claimed container coverage of those children cannot be verified, and any criterion they were meant to cover may be uncovered.",
+   "criteria": [
+    "E1"
+   ],
+   "evidence": [
+    "Child 012e Acceptance Criteria ends: '- [ ] C'",
+    "Child db7b Acceptance Criteria ends: '- [ ] Offl'"
+   ],
+   "scenarios": [
+    "A deliverable named in the parent (e.g. coverage recording, offline-analysis readiness) maps to a truncated child AC that does not actually state the proving check.",
+    "Review cannot confirm bidirectional coverage between parent ACs and these children."
+   ],
+   "impact": "Incomplete child ACs prevent verifying that every described deliverable has a covering criterion; if not merely an excerpt artifact, work in these children is unspecified.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "low",
+     "debt_impact": "low",
+     "blast_radius": "local",
+     "likelihood": "low",
+     "reversibility": "easy"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "no",
+     "evidence_entails_finding": "no",
+     "path_reachable": "insufficient",
+     "impact_follows_necessarily": "no",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "no"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "dropped",
+   "reason": "low-confidence",
+   "confidence": 0.071,
+   "severity": "minor",
+   "impact_ord": 1,
+   "blast": 1,
+   "likelihood": 1
+  },
+  {
+   "finding": "The claim path is a check-then-act sequence (fast signature-verify, then the open->in_progress state transition) with no stated atomicity or concurrency control, leaving a TOCTOU window in which a concurrent material edit (or a racing review run) can invalidate the very signature the claim just validated.",
+   "criteria": [
+    "T9"
+   ],
+   "evidence": [
+    "Plan: 'claim is a FAST signature-verify check only ... target p95 < ~50ms' then the transition occurs \u2014 a check-then-act with no stated lock/CAS/transaction.",
+    "Child 092b AC: 'Claim blocks on absent/material-edit-invalidated signature' \u2014 invalidation is bound to material edits, which can land asynchronously.",
+    "Attestation is 'bound to the latest MATERIAL event commit; invalidate on material edits' \u2014 but the plan never states the claim verification and the status transition are committed atomically against the same material-commit head.",
+    "ABSENCE: the plan never addresses the window between the 50ms signature check passing and the in_progress transition committing."
+   ],
+   "scenarios": [
+    "An agent claims a ticket; the fast check passes; a concurrent description/AC edit lands before the transition commits, so the ticket enters in_progress under a now-invalidated signature.",
+    "Two agents/CI processes race to claim the same ticket; both see a valid signature and both proceed."
+   ],
+   "impact": "The enforcement guarantee ('in_progress implies a valid non-stale signed plan-review attestation') is not actually enforced under concurrency \u2014 the gate's core invariant can be silently violated.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "medium",
+     "debt_impact": "medium",
+     "blast_radius": "module",
+     "likelihood": "low",
+     "reversibility": "moderate"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "insufficient",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "insufficient",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.571,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 2,
+   "likelihood": 1
+  },
+  {
+   "finding": "Multiple review-plan runs can execute concurrently on the same ticket and each writes the head-state signature, but the plan specifies idempotency only as an outcome ('re-running yields ONE current valid signature') without any concurrency control / ownership for the head-state attestation WRITE \u2014 two concurrent runs racing to write the head-state event is unaddressed.",
+   "criteria": [
+    "T9"
+   ],
+   "evidence": [
+    "Child db7b: 'idempotency lives on the ATTESTATION (head-state): re-running a review yields ONE current valid signature, not duplicates' \u2014 asserts the end-state, not the write-concurrency mechanism.",
+    "Plan: 'the signature stays a normal head-state event' \u2014 head-state mutation by an out-of-band review with no stated ownership/serialization.",
+    "ABSENCE: T9 'update' (concurrency/ownership clear) is never addressed for the attestation head-state event."
+   ],
+   "scenarios": [
+    "CI and the agent both trigger 'rebar review-plan <ticket>' near-simultaneously after a claim-block; both compute and write a signature bound to different material-commit snapshots.",
+    "A re-review races with a material edit, producing a signature bound to a stale commit that nonetheless registers as current."
+   ],
+   "impact": "Without defined ownership/serialization, the head-state attestation can end up bound to the wrong material commit or in a last-writer-wins state, undermining the staleness guarantee.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "low",
+     "debt_impact": "medium",
+     "blast_radius": "local",
+     "likelihood": "low",
+     "reversibility": "easy"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "insufficient",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "insufficient",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.571,
+   "severity": "minor",
+   "impact_ord": 2,
+   "blast": 1,
+   "likelihood": 1
+  },
+  {
+   "finding": "The claim-block enforcement surface is user/agent-facing, but the plan never specifies the non-happy-path guidance shown when a claim is blocked (absent/stale signature) \u2014 i.e., the message that tells the agent WHY it was blocked and to run 'rebar review-plan' / when to use --force. The coaching spec is scoped to Layer-2 findings, not the fast claim-path block.",
+   "criteria": [
+    "T6"
+   ],
+   "evidence": [
+    "Plan: claim 'absence or a material-edit-invalidated signature blocks the claim, with a recorded --force override available' \u2014 states the block but not the guidance presented.",
+    "Coaching/feedback spec applies to 'each advisory finding' (Layer-2), whereas the claim path is 'a FAST signature-verify only (no LLM)'.",
+    "ABSENCE: T6 non_happy_path/flow_entry_exit \u2014 the abandon/recovery path on a claim-block (run review-plan; or --force) is not specified as a user-facing flow."
+   ],
+   "scenarios": [
+    "An agent hits a claim-block with only a generic 'blocked' error, doesn't know to run review-plan out-of-band, and stalls or spuriously --forces.",
+    "An agent cannot earn a signature (review keeps failing) and the abandon/escape path (--force + justification) is not surfaced at the block point."
+   ],
+   "impact": "Poor block-time guidance on the highest-stakes interaction (start-of-work) drives agents to confabulate around the gate or over-use --force, defeating the coaching intent.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "low",
+     "debt_impact": "low",
+     "blast_radius": "local",
+     "likelihood": "medium",
+     "reversibility": "easy"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "insufficient",
+     "no_viable_alternative_explanation": "yes",
+     "no_existing_mitigation": "insufficient",
+     "severity_claim_justified": "no"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.643,
+   "severity": "minor",
+   "impact_ord": 1,
+   "blast": 1,
+   "likelihood": 2
+  },
+  {
+   "finding": "The plan's canonical-criteria-source references are internally inconsistent: the reconciliation note says criteria were restored to 'criteria_v5.json' as 'the corrected criteria set' and 'the full v4 \u00a75 registry is the canonical source', while the three-pass and registry sections declare 'criteria_v8.json (32 descriptors)' canonical and call v5/v6 'superseded historical references'. Documentation/references thus point at conflicting authorities.",
+   "criteria": [
+    "T7"
+   ],
+   "evidence": [
+    "'Registry reconciliation' section: 'restored to the corrected criteria set (docs/experiments/plan-review-gate/criteria/criteria_v5.json) and the full v4 \u00a75 registry is the canonical source'.",
+    "Three-pass section: 'The three-pass-native descriptor set is docs/experiments/plan-review-gate/criteria/criteria_v8.json'.",
+    "Registry section: 'live in the CURRENT descriptor set (criteria_v8.json \u2014 32 descriptors incl. ISF; v5/v6 are superseded historical references)'."
+   ],
+   "scenarios": [
+    "An implementer follows the reconciliation note to criteria_v5.json and builds against a superseded descriptor set.",
+    "The completeness guard (check_registry_coverage.py) is pointed at the wrong file, defeating its 'fails loudly if any criterion is missing' purpose."
+   ],
+   "impact": "Stale/contradictory references to the criteria source strand the implementer and risk re-introducing the exact silent-dropped-criterion failure the reconciliation was meant to fix.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "low",
+     "debt_impact": "medium",
+     "blast_radius": "local",
+     "likelihood": "medium",
+     "reversibility": "easy"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "yes",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "insufficient",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "insufficient",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.643,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 1,
+   "likelihood": 2
+  },
+  {
+   "finding": "The claim-path latency target (p95 < ~50ms) is an asserted threshold that the plan explicitly declines to validate upfront, deferring to passive dogfood refinement \u2014 yet it gates a hard enforcement point (claim). T2 is largely suppressed by the plan's pervasive experimentation, but this particular hard-path target rests on a UX/timeout projection with no upfront proving step.",
+   "criteria": [
+    "T2"
+   ],
+   "evidence": [
+    "Instrumentation AC: 'latency/cost targets are set initially from UX/timeout projections and refined PASSIVELY from dogfood data \u2014 no upfront benchmark step required.'",
+    "Child 092b AC: 'the fast check meets the latency target' \u2014 a pass criterion against an unbenchmarked number.",
+    "Plan: 'target p95 < ~50ms' stated as a target, not a measured/derived value."
+   ],
+   "scenarios": [
+    "The fast signature-verify (HMAC + material-commit resolution + head-state read) exceeds 50ms on real repos, but no upfront benchmark catches it before the 'meets the latency target' AC is signed off.",
+    "Passive dogfood data is sparse for large monorepos, so the asserted target is never empirically pressure-tested."
+   ],
+   "impact": "A hard-path enforcement check could miss its own latency AC undetected, since the AC is graded against an unvalidated projection rather than a measured floor.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "none",
+     "debt_impact": "low",
+     "blast_radius": "local",
+     "likelihood": "low",
+     "reversibility": "easy"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "no",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "no",
+     "no_viable_alternative_explanation": "yes",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "no"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "dropped",
+   "reason": "low-confidence",
+   "confidence": 0.429,
+   "severity": "minor",
+   "impact_ord": 1,
+   "blast": 1,
+   "likelihood": 1
+  },
+  {
+   "finding": "No child owns the feedback-authoring / coaching-spec OUTPUT layer (grounded/specific/severity-ranked/affirming + a checklist line + suggested-fix-when-confident), yet it is an explicit parent acceptance criterion and a parent success criterion. Pass-1 (child 1913) emits raw {finding, criteria, evidence, scenarios, impact}; Pass-3 (487d) only decides block/advisory/dropped; none of the 11 children produces the coaching-formatted findings the parent promises.",
+   "criteria": [
+    "G3"
+   ],
+   "evidence": [
+    "Parent AC: 'Feedback-authoring conforms to the coaching spec (grounded/specific/ranked/affirming/checklist)'",
+    "Parent Success Criterion: 'Layer-2 review returns coaching findings ... each carries criterion id, file/section location, severity, a checklist line, and a suggested fix when confident'",
+    "Child 1913 What emits only '{finding, criteria[], evidence[] ..., scenarios[], impact} \u2014 NO model severity/confidence' \u2014 not the coaching format",
+    "Child 487d outputs only 'decision block | advisory | dropped'",
+    "Absence: no child excerpt names checklist-line / affirm-what-passes / suggested-fix authoring as its deliverable"
+   ],
+   "scenarios": [
+    "The gate ships and emits Pass-1 evidence records and Pass-3 decisions, but the agent-facing coaching output (affirming passes, checklist, suggested fix) was never built because no child claimed it",
+    "Reviewers building 487d assume the coaching formatting is upstream in 1913; 1913 builders assume it is downstream"
+   ],
+   "impact": "A parent success/acceptance criterion (the core 'COACH agents' value proposition) is uncovered by the child decomposition and could be silently dropped during execution.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "medium",
+     "debt_impact": "medium",
+     "blast_radius": "module",
+     "likelihood": "medium",
+     "reversibility": "moderate"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "insufficient",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "insufficient",
+     "no_viable_alternative_explanation": "yes",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.571,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 2,
+   "likelihood": 2
+  },
+  {
+   "finding": "The per-plan budget cap, chunk-atomic checkpointing, and cap-hit INDETERMINATE shedding (agent/overlay-first) are a named parent acceptance criterion but are not assigned to any child. Child ca03 (orchestrator) covers applies_at filtering, facet chunking, and exec-tier dispatch but its excerpt does not mention budget caps, checkpointing, or INDETERMINATE shedding.",
+   "criteria": [
+    "G3"
+   ],
+   "evidence": [
+    "Parent AC: 'Configurable chunking; proportionate-depth routing ...; per-plan budget cap with chunk-atomic checkpointing and an INDETERMINATE outcome'",
+    "Child ca03 What: 'Generic orchestrator: applies_at level/type routing; facet chunker ...; exec-tier dispatch ...; overlay routing' \u2014 no budget/checkpoint/INDETERMINATE",
+    "Absence: no child excerpt mentions 'budget cap', 'checkpoint', or 'INDETERMINATE shedding'"
+   ],
+   "scenarios": [
+    "A heavy-epic review exceeds the $0.15 + n\u00d7$0.25 cap mid-run; with no child having built checkpointing/shedding, the run fails hard instead of returning INDETERMINATE",
+    "Cost overruns in production because the cap was never wired"
+   ],
+   "impact": "A cost-control and graceful-degradation acceptance criterion is uncovered, risking unbounded review cost or a missing INDETERMINATE outcome at execution time.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "medium",
+     "debt_impact": "medium",
+     "blast_radius": "module",
+     "likelihood": "low",
+     "reversibility": "moderate"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "insufficient",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "insufficient",
+     "no_viable_alternative_explanation": "yes",
+     "no_existing_mitigation": "insufficient",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.643,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 2,
+   "likelihood": 1
+  },
+  {
+   "finding": "The end-to-end proving-check acceptance criterion (full flow: claim-block \u2192 run review-plan \u2192 earn signature \u2192 claim succeeds, plus its edge cases) is not owned by any child. Each child tests only its own slice (012e per-tool fail-open, 092b claim check, db7b sidecar), but the cross-child integration test is unassigned.",
+   "criteria": [
+    "G3",
+    "G4"
+   ],
+   "evidence": [
+    "Parent AC: 'End-to-end proving check: an automated test exercises the full flow \u2014 claim-block ... \u2192 run review-plan \u2192 earn a signature \u2192 claim succeeds \u2014 AND its EDGE cases'",
+    "Children 092b/012e/4bb7/db7b each list only their own unit/slice tests in their ACs",
+    "Absence: no child excerpt claims the cross-child e2e flow test"
+   ],
+   "scenarios": [
+    "Each child passes its own tests but the handoff seams (Pass-3 result \u2192 attestation sign \u2192 claim verify) are never exercised together; a contract mismatch between 4bb7 and 092b ships undetected",
+    "The e2e AC is marked incomplete at epic close because no child delivered it"
+   ],
+   "impact": "The integration boundaries between children (the highest-risk seams) go untested; a parent AC requiring the full-flow proving check is uncovered.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "medium",
+     "debt_impact": "medium",
+     "blast_radius": "module",
+     "likelihood": "medium",
+     "reversibility": "moderate"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "insufficient",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "insufficient",
+     "no_viable_alternative_explanation": "yes",
+     "no_existing_mitigation": "insufficient",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.643,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 2,
+   "likelihood": 2
+  },
+  {
+   "finding": "Parent Success Criterion #4 requires a config PREFERENCE that turns the plan-review requirement ON/OFF for claim/in_progress (defaulting OFF), yet the 'Project configuration tool + UX' is explicitly spun out to a SEPARATE epic (55de). No child in this epic owns implementing that ON/OFF preference; the docs child (6c5c) only documents a 'kill-switch'. The parent thus claims a success criterion whose implementation may live outside its own decomposition.",
+   "criteria": [
+    "G3"
+   ],
+   "evidence": [
+    "Parent Success Criterion: 'INCLUDING a config PREFERENCE that turns the plan-review requirement ON/OFF ... The preference DEFAULTS OFF when unspecified'",
+    "Scope carve-out: 'Project configuration tool + UX \u2014 55de-25ab-ca20-4c79' (separate epic)",
+    "Child 6c5c only documents 'the global enable/disable kill-switch'; no child implements the preference + its default-OFF behavior on the claim path",
+    "Absence: 092b (claim) excerpt covers --force but not a gate-on/off preference"
+   ],
+   "scenarios": [
+    "At epic close the ON/OFF preference is missing because it was assumed to live in 55de; rollback-by-preference (the plan's whole rollback story) is then non-functional",
+    "The default-OFF guarantee is never enforced in code because no child built the preference"
+   ],
+   "impact": "A parent success criterion (and the plan's entire rollback mechanism) is uncovered by the children, creating a dependency-gap on a separate epic that may not ship in lockstep.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "medium",
+     "debt_impact": "medium",
+     "blast_radius": "module",
+     "likelihood": "medium",
+     "reversibility": "easy"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "insufficient",
+     "no_viable_alternative_explanation": "yes",
+     "no_existing_mitigation": "insufficient",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.714,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 2,
+   "likelihood": 2
+  },
+  {
+   "finding": "Cross-child conflicting/implicit-shared assumption on idempotency: child db7b asserts the sidecar is intentionally append-only/non-idempotent and that 'idempotency lives on the ATTESTATION (head-state): re-running a review yields ONE current valid signature, not duplicates' \u2014 but child 4bb7 (attestation), which must enforce that single-current-signature invariant, never mentions idempotency or de-duplication of signatures.",
+   "criteria": [
+    "G4"
+   ],
+   "evidence": [
+    "Child db7b Scope: 'idempotency lives on the ATTESTATION (head-state): re-running a review yields ONE current valid signature, not duplicates'",
+    "Child 4bb7 What: 'HMAC-sign ...; bind to the latest MATERIAL event commit; invalidate on material edits ...; record coverage' \u2014 no mention of single-current-signature/idempotency",
+    "Child 4bb7 ACs do not include de-duplication of repeated attestations"
+   ],
+   "scenarios": [
+    "A client re-runs review-plan three times; 4bb7 emits three valid head-state signatures because it never implemented the single-current invariant db7b assumed; the claim check sees ambiguous attestations",
+    "Stale and fresh signatures coexist on the same commit"
+   ],
+   "impact": "An invariant one child relies on is not enforced by the child responsible for it (interaction-mode: conflicting/implicit assumption), risking duplicate or ambiguous attestations.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "low",
+     "debt_impact": "medium",
+     "blast_radius": "module",
+     "likelihood": "medium",
+     "reversibility": "moderate"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "no",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "dropped",
+   "reason": "low-confidence",
+   "confidence": 0.429,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 2,
+   "likelihood": 2
+  },
+  {
+   "finding": "Residual / inconsistent reference to the canonical criteria descriptor file across the plan and its children: the body and children (012e, ca03) treat criteria_v8.json as canonical, but the registry-reconciliation section says criteria were 'restored to the corrected criteria set (criteria_v5.json)' and calls 'the full v4 \u00a75 registry ... the canonical source'. The authoritative descriptor source is stated three different ways (v4 \u00a75, v5.json, v8.json).",
+   "criteria": [
+    "G4"
+   ],
+   "evidence": [
+    "Children ca03/012e reference 'criteria_v8 descriptors' / 'criteria_v8.json'",
+    "Registry reconciliation: 'All are restored to the corrected criteria set (docs/experiments/plan-review-gate/criteria/criteria_v5.json) and the full v4 \u00a75 registry is the canonical source'",
+    "Plan: 'This list is the authority; the experiment subsets are not' (the \u00a75 registry) vs 'the CURRENT descriptor set (criteria_v8.json \u2014 32 descriptors)'"
+   ],
+   "scenarios": [
+    "ca03 implements the registry from v8.json while a reviewer audits against v5.json or v4 \u00a75 and the completeness guard disagrees about which file is canonical",
+    "A criterion restored only in v5.json (T3/T4/T5d/COH/G3/G4 per reconciliation) is missing from v8.json and silently dropped despite the coverage guard"
+   ],
+   "scenarios_note": "",
+   "impact": "Ambiguous canonical source (residual-reference interaction mode) can cause the implemented set to diverge from the audited set, defeating the completeness guard's purpose.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "low",
+     "debt_impact": "medium",
+     "blast_radius": "module",
+     "likelihood": "medium",
+     "reversibility": "easy"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "yes",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "no",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.5,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 2,
+   "likelihood": 2
+  },
+  {
+   "finding": "Cross-child ordering/dependency-gap among the verdict-pipeline children is not declared: claim integration (092b) verifies a signature produced by attestation (4bb7), which signs a result produced by Pass-3 (487d), which consumes Pass-2 (acc1) over Pass-1 (1913) findings produced by the orchestrator (ca03). None of the child excerpts declare these inter-child dependencies/ordering, except 012e's depends_on the external epic 8f6c.",
+   "criteria": [
+    "G4"
+   ],
+   "evidence": [
+    "Child 092b: 'Claim requires a valid, non-stale signed attestation' \u2014 depends on 4bb7's output",
+    "Child 4bb7 signs 'the review result' \u2014 depends on 487d's decision",
+    "Child 487d aggregates Pass-2 attributes \u2014 depends on acc1, which depends on 1913",
+    "Absence: only 012e states an explicit depends_on; no inter-child ordering is declared for the 092b\u21924bb7\u2192487d\u2192acc1\u21921913\u2192ca03 chain"
+   ],
+   "scenarios": [
+    "Children are scheduled/built in an order that surfaces integration churn because the pipeline dependencies were never declared",
+    "092b is built and 'done' against a stub attestation while 4bb7's contract is still in flux"
+   ],
+   "impact": "Undeclared cross-child ordering (interaction mode: dependency gap / ordering) risks contract drift and rework at the integration seams.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "low",
+     "debt_impact": "medium",
+     "blast_radius": "module",
+     "likelihood": "low",
+     "reversibility": "moderate"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "insufficient",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "no",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "dropped",
+   "reason": "low-confidence",
+   "confidence": 0.357,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 2,
+   "likelihood": 1
+  },
+  {
+   "finding": "T12 reversibility is only partially addressed: the plan equates rollback with 'turning the config preference OFF', which reverts the GATE BEHAVIOR but not the persisted event-log artifacts the gate writes \u2014 the new reducer-ignored REVIEW_RESULT events and the head-state HMAC attestation events bound to commits. The plan does not specify old+new coexistence / forward-compat of these event types if a client rolls back the rebar VERSION (not just the preference) to a reducer that does not recognize REVIEW_RESULT.",
+   "criteria": [
+    "T12"
+   ],
+   "evidence": [
+    "Success Criterion: \"'rollback' is simply turning the preference off \u2014 ... no separate rollback mechanism is needed\"",
+    "Child db7b introduces a new event type: 'A reducer-IGNORED REVIEW_RESULT event ... the reducer skips the type'",
+    "Child 4bb7 emits a head-state signature event bound to a commit",
+    "Absence: the plan never specifies what happens to already-emitted REVIEW_RESULT / attestation events if the rebar version is rolled back to one whose reducer does not know the type (deploy-ordering/coexistence)"
+   ],
+   "scenarios": [
+    "A client enables the gate, accumulates REVIEW_RESULT and attestation events, then downgrades rebar to a version without the reducer-skip rule; the reducer hits an unknown event type",
+    "Turning the preference OFF leaves stale signed attestations on head-state that the claim path or external CI still reads"
+   ],
+   "impact": "The 'rollback = preference off' story leaves the persisted event-schema migration un-reversed; a version rollback or partial deploy could surface unrecognized event types or orphaned attestations \u2014 the T12 deploy-ordering/coexistence check is unmet for the event log.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "low",
+     "debt_impact": "medium",
+     "blast_radius": "module",
+     "likelihood": "low",
+     "reversibility": "moderate"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "no",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "dropped",
+   "reason": "low-confidence",
+   "confidence": 0.429,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 2,
+   "likelihood": 1
+  },
+  {
+   "finding": "Three distinct structural gaps are proven by reading the code against the plan:\n\n**Gap 1 \u2014 `exec=DET` has no execution path (MAJOR):** criteria_v8.json defines P1\u2013P7 with `exec: \"DET\"` and the plan declares \"DET criteria run as parallel code (~free)\" and \"the minimal sound DET floor is the only hard blocker.\" But `run_three_pass()` in `three_pass.py` splits only on `exec == \"AGENT\"` vs. everything else \u2014 DET criteria fall into the single-turn LLM chunk branch via `chunk_by_facet`, which is silent about `exec` values. There is no DET dispatcher, no \"parallel code\" path, and no blocking wiring. The Layer-1 blocking floor would be executed as advisory single-turn LLM calls, directly inverting the design intent. Evidence: `three_pass.py` lines ~340\u2013360: `st_crits = [c for c in rubric if c.get(\"exec\") != \"AGENT\"]` (DET included here); `gate_lib.chunk_by_facet` packs all non-AGENT criteria with no DET branch.\n\n**Gap 2 \u2014 `exec=2-STEP` silently degrades to 1-TURN (MAJOR):** The plan says E1, E3, E6 use `exec: \"2-STEP\"` requiring \"two ordered calls\" (e.g., E3's blind-restate: restate first, compare second). `chunk_by_facet` treats 2-STEP identically to 1-TURN. No `pass1_chunk_2step` or ordered-call executor exists. These criteria run as single-pass, silently dropping the second ordered step that gives them their validity. Evidence: `gate_lib.py` `chunk_by_facet` has no conditional on `exec`; `three_pass.py` `pass1_chunk` is a single call.\n\n**Gap 3 \u2014 LLM overlay router is referenced but not specified (MAJOR):** The plan explicitly distinguishes \"LLM-routed\" overlays (T8/T6/T5b/T5c/T9/T10/T11/T12) from deterministic ones. `gate_lib.det_overlays()` is implemented. But the LLM router \u2014 its prompt, output vocabulary (fire/skip?), integration point with `run_three_pass`, and fallback when the router fails \u2014 is undefined anywhere in the harness code or plan. `run_three_pass` has no router call site; an implementer has no specification to follow.\n\n**Additional minor gaps:** (a) `pass3_decide` returns `decision: \"indeterminate\"` but no `indeterminate_posture` field exists in the criteria schema and the plan gives no decision rule for gate outcome on INDETERMINATE (\"non-blocking default\" is stated but not wired). (b) `_verify_batch` relies on the model using global indices in multi-batch runs \u2014 no enforcement; silent overwrite risk on index collision. (c) `_agent_finding_records` converts AGENT-tier verdicts into Pass-1 records but drops `scenarios` and `impact` for all agentic findings, degrading Pass-2 for the highest-cost criteria.",
+   "criteria": [
+    "T8"
+   ],
+   "evidence": [
+    "Three-pass review structure (criteria_v8.json exec field; `run_three_pass` in three_pass.py; chunk_by_facet in gate_lib.py; Design summary 'Two layers' and 'Execution (exec-tier-aware)')"
+   ],
+   "scenarios": [],
+   "impact": "",
+   "_agentic_pass1": true,
+   "_tool_calls": 11,
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "high",
+     "debt_impact": "high",
+     "blast_radius": "system",
+     "likelihood": "medium",
+     "reversibility": "moderate"
+    },
+    "binary": {
+     "cited_reference_accurate": "insufficient",
+     "is_verifiable": "insufficient",
+     "evidence_entails_finding": "insufficient",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "insufficient",
+     "no_viable_alternative_explanation": "yes",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.571,
+   "severity": "critical",
+   "impact_ord": 3,
+   "blast": 3,
+   "likelihood": 2
+  },
+  {
+   "finding": "Three categories of edit-target gaps:\n\n**1. Named artifact that cannot be confirmed (ambiguous \u2014 may be colloquial):** The plan repeatedly names 'rebar.llm's catalog' as an extension point to reuse alongside `contracts/prompt/runner`. No `catalog.py` or `catalog/` module exists under `src/rebar/llm/` (confirmed by glob of all `.py` files). This may be colloquial shorthand for the JSON criteria-registry file, but it is named as a Python-level seam in the same breath as `contracts.py` and `runner.py`, which do exist. An implementing agent may waste time searching for or creating a module that isn't needed.\n\n**2. Unenumerated edit targets \u2014 the reducer source:** The plan states 'reducer skips the `REVIEW_RESULT` type' (Success Criteria and ACs both). `src/rebar/_native.py` imports `from rebar.reducer import reduce_ticket, reduce_all_tickets \u2026` \u2014 the reducer is a real module that will receive the new event. The reducer's source path is never named as an edit target in the ACs, meaning the agent implementing the 'reducer skips the type' requirement has no anchor file.\n\n**3. Unenumerated edit targets \u2014 MCP server and CLI dispatch:** The plan introduces two new entrypoints: `rebar review-plan <ticket>` (CLI) and an MCP `run_workflow`/`review_plan` tool 'mirroring `rebar verify-completion`'. `verify_completion` is wired as a `@mcp.tool()` inside `build_server()` in `src/rebar/mcp_server.py`, and the CLI dispatch module (`src/rebar/_cli.py`) is the CLI anchor \u2014 but neither is named as an edit target in the ACs or implementation bullets. An agent following the ACs literally will implement the review logic but may not wire the new entrypoints into the existing dispatch surfaces.\n\nRaw evidence:\n- `src/rebar/llm/`: no `catalog.py` found (glob of `src/**/*.py` lists every module; catalog absent).\n- `src/rebar/_native.py` line 9: `from rebar.reducer import \u2026 reduce_ticket, reduce_all_tickets` \u2014 reducer exists and handles event replay.\n- `src/rebar/mcp_server.py`: `verify_completion` wired as `@mcp.tool()` inside `build_server` (~line 600); parallel `review_plan` tool not present and the file is not named in any AC.\n- `src/rebar/cli.py`: `from rebar._cli import main as _main`; `src/rebar/_cli.py` absent from file tree (not surfaced, possibly compiled/in a different path), yet the CLI dispatch must be edited to add `review-plan`.",
+   "criteria": [
+    "G1G2"
+   ],
+   "evidence": [
+    "Acceptance Criteria bullets: 'claim integration: fast signed-attestation check'; 'Layer-2 advisory criteria implemented'; 'REVIEW_RESULT reducer-ignored sidecar event'; Design summary: 'rebar review-plan <ticket> / an MCP run_workflow tool'; 'reuse rebar.llm's catalog/contracts/prompt/runner'"
+   ],
+   "scenarios": [],
+   "impact": "",
+   "_agentic_pass1": true,
+   "_tool_calls": 20,
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "medium",
+     "debt_impact": "medium",
+     "blast_radius": "module",
+     "likelihood": "medium",
+     "reversibility": "moderate"
+    },
+    "binary": {
+     "cited_reference_accurate": "insufficient",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "yes",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "yes",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "yes"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.714,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 2,
+   "likelihood": 2
+  },
+  {
+   "finding": "All other plan assertions about existing codebase elements are either confirmed or correctly acknowledged as absent. One assertion is unverified: the plan treats Anthropic prompt caching as an already-available capability in rebar's LangChain-based runner, and builds specific cost projections on it (the '$0.07\u20130.09 vs $0.10' budget math, the 'prefer Sonnet+cache+coherent for the cost floor' recommendation, and the 1.55\u00d7 vs 2.6\u00d7 overhead ratio). No evidence in the runner infrastructure (`src/rebar/llm/runner.py`, `completion.py`, or any other file examined) confirms that `cache_control: {type: ephemeral}` markers are sent to Anthropic \u2014 which LangChain does NOT wire by default. If prompt caching is not already wired, the cost floor projections are unsupported (actual costs would be ~2\u20133\u00d7 higher) and the Sonnet-vs-Opus recommendation may invert. The implementing agent will need to either confirm caching is wired or add it as explicit new work \u2014 neither is called out in the plan's scope or ACs.",
+   "criteria": [
+    "E4"
+   ],
+   "evidence": [
+    "## Experiment-grounded defaults \u2014 'Enable prompt caching (system+plan as the cached prefix)' and the budget math: 'Cached fine-chunk Sonnet (~$0.07\u20130.09/review) \u2248 one Opus pass (~$0.10)' and '1.55\u00d7 vs 2.6\u00d7'"
+   ],
+   "scenarios": [],
+   "impact": "",
+   "_agentic_pass1": true,
+   "_tool_calls": 20,
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "low",
+     "debt_impact": "medium",
+     "blast_radius": "module",
+     "likelihood": "medium",
+     "reversibility": "easy"
+    },
+    "binary": {
+     "cited_reference_accurate": "insufficient",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "yes",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "no",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "insufficient"
+    }
+   },
+   "_mode": "aggregate",
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.5,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 2,
+   "likelihood": 2
+  }
+ ]
+}

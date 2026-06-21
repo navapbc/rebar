@@ -1,0 +1,104 @@
+FINAL GATE (three-pass) on epic 5fd2-a7c2-0aec-48fa  (29966 char plan, 11 children)
+  rubric = 31 v8 criteria (all overlays forced on; ISF run separately); Pass-1 Opus; Pass-2 aggregate Sonnet
+
+  DET floor: check-ac -> AC_CHECK: pass (17 criteria lines)
+             clarity  -> {"score": 7, "verdict": "pass", "threshold": 5}
+
+  PASS 1: 31 findings (4 single-turn chunks + 10 agentic finders; 3 agentic findings)
+  PASS 2: aggregate verify of 31 findings on claude-sonnet-4-6 (31 returned)
+
+======================================================================================
+FINAL GATE RESULT (three-pass) — epic 5fd2
+======================================================================================
+PASS-1 findings: 31  ->  PASS-3 decisions: {'dropped': 10, 'advisory': 21}
+
+  ADVISORY conf=0.79 sev=minor    ['E1', 'COH']        [aggregate]
+     The plan names multiple, conflicting 'canonical' descriptor files for the criteria registry (criteria_v5.json vs criteria_v8.json vs 'the full v4 §5 r
+     evidence: ["Registry reconciliation section: 'All are restored to the corrected criteria set (docs/experiments/plan-review-gate/criteria/criteria_v5.json) and t
+  ADVISORY conf=0.79 sev=major    ['T5a', 'T5b']       [aggregate]
+     Concurrency / rate-limit / pool handling for the agentic LLM fan-out is not specified, despite the plan firing one tool-using agent per AGENT-tier cri
+     evidence: ["Budget section: 'AGENT/tool-using ... = one agent loop per criterion, ~$0.12 + ~50s each (≈85× a single-turn call)'", "Final AGENT tier list: 'E4/G1
+  ADVISORY conf=0.71 sev=minor    ['T5a']              [aggregate]
+     The user-facing time-to-first-work (latency of the out-of-band heavy review the agent must complete before it can claim) has no time-bounded done-defi
+     evidence: ["Design summary: 'claim is a FAST signature-verify check only ... target p95 < ~50ms ... The heavy review runs OUT-OF-BAND'", "Budget section: 'heavy
+  ADVISORY conf=0.71 sev=major    ['G3']               [aggregate]
+     Parent Success Criterion #4 requires a config PREFERENCE that turns the plan-review requirement ON/OFF for claim/in_progress (defaulting OFF), yet the
+     evidence: ["Parent Success Criterion: 'INCLUDING a config PREFERENCE that turns the plan-review requirement ON/OFF ... The preference DEFAULTS OFF when unspecif
+  ADVISORY conf=0.71 sev=major    ['G1G2']             [aggregate/20t]
+     Three categories of edit-target gaps:
+
+**1. Named artifact that cannot be confirmed (ambiguous — may be colloquial):** The plan repeatedly names 'reba
+     evidence: ["Acceptance Criteria bullets: 'claim integration: fast signed-attestation check'; 'Layer-2 advisory criteria implemented'; 'REVIEW_RESULT reducer-ign
+  ADVISORY conf=0.64 sev=major    ['E6']               [aggregate]
+     Several children's acceptance criteria are presented truncated/incomplete (cut off mid-line), so their done-ness conditions cannot be verified as writ
+     evidence: ["Child 012e Acceptance Criteria ends '- [ ] C' (truncated)", "Child db7b Acceptance Criteria ends '- [ ] Offl' (truncated)", 'E6 (ac_to_step): every 
+  ADVISORY conf=0.64 sev=minor    ['T6']               [aggregate]
+     The claim-block enforcement surface is user/agent-facing, but the plan never specifies the non-happy-path guidance shown when a claim is blocked (abse
+     evidence: ["Plan: claim 'absence or a material-edit-invalidated signature blocks the claim, with a recorded --force override available' — states the block but n
+  ADVISORY conf=0.64 sev=major    ['T7']               [aggregate]
+     The plan's canonical-criteria-source references are internally inconsistent: the reconciliation note says criteria were restored to 'criteria_v5.json'
+     evidence: ["'Registry reconciliation' section: 'restored to the corrected criteria set (docs/experiments/plan-review-gate/criteria/criteria_v5.json) and the ful
+  ADVISORY conf=0.64 sev=major    ['G3']               [aggregate]
+     The per-plan budget cap, chunk-atomic checkpointing, and cap-hit INDETERMINATE shedding (agent/overlay-first) are a named parent acceptance criterion 
+     evidence: ["Parent AC: 'Configurable chunking; proportionate-depth routing ...; per-plan budget cap with chunk-atomic checkpointing and an INDETERMINATE outcome
+  ADVISORY conf=0.64 sev=major    ['G3', 'G4']         [aggregate]
+     The end-to-end proving-check acceptance criterion (full flow: claim-block → run review-plan → earn signature → claim succeeds, plus its edge cases) is
+     evidence: ["Parent AC: 'End-to-end proving check: an automated test exercises the full flow — claim-block ... → run review-plan → earn a signature → claim succe
+  ADVISORY conf=0.57 sev=minor    ['F1', 'E6']         [aggregate]
+     The claim-path latency target (p95 < ~50ms) has no in-session proving command. The instrumentation AC explicitly states targets are 'set initially fro
+     evidence: ["Child 092b AC: 'the fast check meets the latency target'", "Instrumentation AC: 'no upfront benchmark step required' and 'refined PASSIVELY from dog
+  ADVISORY conf=0.57 sev=minor    ['E1']               [aggregate]
+     Several criteria named as canonical/restored deliverables in the registry — the dedicated COH coherence pass, G6 approach-soundness, and ISF intent-so
+     evidence: ["Reconciliation: 'the dedicated coherence pass ... All are restored to the corrected criteria set'; round-5: 'the review's findings map to COH (a cri
+  ADVISORY conf=0.57 sev=major    ['T5b']              [aggregate]
+     Error handling (retry/backoff) for the reviewer LLM calls themselves is not stated; the plan addresses budget cap-hit and tool-unavailable INDETERMINA
+     evidence: ["Plan states 'review-level INDETERMINATE remains for budget/tool-unavailable' and 'chunk-atomic checkpointing'", 'No mention of retry/backoff/circuit
+  ADVISORY conf=0.57 sev=major    ['T9']               [aggregate]
+     The claim path is a check-then-act sequence (fast signature-verify, then the open->in_progress state transition) with no stated atomicity or concurren
+     evidence: ["Plan: 'claim is a FAST signature-verify check only ... target p95 < ~50ms' then the transition occurs — a check-then-act with no stated lock/CAS/tra
+  ADVISORY conf=0.57 sev=minor    ['T9']               [aggregate]
+     Multiple review-plan runs can execute concurrently on the same ticket and each writes the head-state signature, but the plan specifies idempotency onl
+     evidence: ["Child db7b: 'idempotency lives on the ATTESTATION (head-state): re-running a review yields ONE current valid signature, not duplicates' — asserts th
+  ADVISORY conf=0.57 sev=major    ['G3']               [aggregate]
+     No child owns the feedback-authoring / coaching-spec OUTPUT layer (grounded/specific/severity-ranked/affirming + a checklist line + suggested-fix-when
+     evidence: ["Parent AC: 'Feedback-authoring conforms to the coaching spec (grounded/specific/ranked/affirming/checklist)'", "Parent Success Criterion: 'Layer-2 r
+  ADVISORY conf=0.57 sev=critical ['T8']               [aggregate/11t]
+     Three distinct structural gaps are proven by reading the code against the plan:
+
+**Gap 1 — `exec=DET` has no execution path (MAJOR):** criteria_v8.jso
+     evidence: ["Three-pass review structure (criteria_v8.json exec field; `run_three_pass` in three_pass.py; chunk_by_facet in gate_lib.py; Design summary 'Two laye
+  ADVISORY conf=0.50 sev=major    ['E2']               [aggregate]
+     Multiple unresolved design choices are deferred to investigation or to a dependency rather than decided in the plan, leaving the executor without an a
+     evidence: ["Child ca03 Scope: 'the exact SHAPE (gate-as-workflow vs bespoke; dynamic fan-out handling) depends on the 6f2d (soupy-spool-revel) brainstorm this e
+  ADVISORY conf=0.50 sev=major    ['G5', 'E6']         [aggregate]
+     The parent AC 'Feedback-authoring conforms to the coaching spec (grounded/specific/ranked/affirming/checklist)' has no clearly owning child. The Pass-
+     evidence: ["Parent AC: 'Feedback-authoring conforms to the coaching spec (grounded/specific/ranked/affirming/checklist)'", 'Child 1913 What/Scope describe the e
+  ADVISORY conf=0.50 sev=major    ['G4']               [aggregate]
+     Residual / inconsistent reference to the canonical criteria descriptor file across the plan and its children: the body and children (012e, ca03) treat
+     evidence: ["Children ca03/012e reference 'criteria_v8 descriptors' / 'criteria_v8.json'", "Registry reconciliation: 'All are restored to the corrected criteria 
+  ADVISORY conf=0.50 sev=major    ['E4']               [aggregate/20t]
+     All other plan assertions about existing codebase elements are either confirmed or correctly acknowledged as absent. One assertion is unverified: the 
+     evidence: ["## Experiment-grounded defaults — 'Enable prompt caching (system+plan as the cached prefix)' and the budget math: 'Cached fine-chunk Sonnet (~$0.07–
+  DROPPED  conf=0.43 sev=major    ['G5']               [aggregate]
+     The epic is decomposed horizontally (Layer-1 floor, Pass-1, Pass-2, Pass-3, attestation, claim, sidecar, registry/orchestrator, overlays, eval, docs) 
+  DROPPED  conf=0.43 sev=minor    ['T2']               [aggregate]
+     The claim-path latency target (p95 < ~50ms) is an asserted threshold that the plan explicitly declines to validate upfront, deferring to passive dogfo
+  DROPPED  conf=0.43 sev=major    ['G4']               [aggregate]
+     Cross-child conflicting/implicit-shared assumption on idempotency: child db7b asserts the sidecar is intentionally append-only/non-idempotent and that
+  DROPPED  conf=0.43 sev=major    ['T12']              [aggregate]
+     T12 reversibility is only partially addressed: the plan equates rollback with 'turning the config preference OFF', which reverts the GATE BEHAVIOR but
+  DROPPED  conf=0.36 sev=major    ['T5e', 'COH']       [aggregate]
+     A core architectural decision — the orchestrator's SHAPE (gate-as-workflow vs bespoke; dynamic fan-out handling) — is explicitly unresolved and deferr
+  DROPPED  conf=0.36 sev=major    ['G4']               [aggregate]
+     Cross-child ordering/dependency-gap among the verdict-pipeline children is not declared: claim integration (092b) verifies a signature produced by att
+  DROPPED  conf=0.21 sev=major    ['E6']               [aggregate]
+     End-state reachability for the registry/orchestrator child is conditional on an external, not-yet-resolved dependency (the 6f2d brainstorm) whose outc
+  DROPPED  conf=0.21 sev=minor    ['COH', 'E1']        [aggregate]
+     The disable mechanism is described as contradictory things across sections/children: the parent explicitly says it is 'an ordinary config preference, 
+  DROPPED  conf=0.14 sev=minor    ['COH', 'E1']        [aggregate]
+     Two success criteria contradict each other on the default behavior of the claim gate: one says claiming REQUIRES a valid signed attestation (absence b
+  DROPPED  conf=0.07 sev=minor    ['E1']               [aggregate]
+     Two child acceptance-criteria excerpts are truncated ('- [ ] C' and '- [ ] Offl'), so the parent's claimed container coverage of those children cannot
+
+wrote /Users/joeoakhart/.claude/jobs/3ef65161/tmp/final_gate_3pass.json
+FINAL GATE DONE
