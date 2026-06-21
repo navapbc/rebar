@@ -1,0 +1,141 @@
+{
+ "epic": "5fd2-a7c2-0aec-48fa",
+ "det": {
+  "check_ac": "AC_CHECK: pass (13 criteria lines)",
+  "clarity": "{\"score\": 7, \"verdict\": \"pass\", \"threshold\": 5}"
+ },
+ "findings": [
+  {
+   "finding": "The plan introduces a new blocking gate on the open->in_progress (claim) path for an existing, in-use rebar feature, but never specifies how this behavior change is rolled out to clients. There is no flag/canary/staged-rollout mechanism described for turning the gate ON; the AC reads as an absolute 'claiming a ticket requires a valid signed attestation,' implying a single flip from 'no gate' to 'gate blocks all claims.'",
+   "criteria": [
+    "T12"
+   ],
+   "evidence": [
+    "Success criterion: 'Claiming a ticket (open->in_progress) requires a valid, non-stale signed plan-review attestation; absence ... blocks the claim'",
+    "AC: 'claim integration: fast signed-attestation check with --force+justification override'",
+    "The plan never states a staged-rollout / feature-flag / canary mechanism for ENABLING the gate itself across the existing client base"
+   ],
+   "scenarios": [
+    "The gate ships enabled-by-default and every existing in-flight ticket (claimed before the gate existed, with no attestation) suddenly blocks on claim across the entire diverse client base",
+    "A client upgrades rebar and all their open tickets become unclaimable without a --force override they didn't know they needed"
+   ],
+   "impact": "A one-shot behavior change to the claim path for all users with no staged enablement could break existing workflows org-wide on upgrade, the exact MAJOR pattern T12(a) targets.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "medium",
+     "debt_impact": "low",
+     "blast_radius": "system",
+     "likelihood": "medium",
+     "reversibility": "moderate"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "no",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "no",
+     "no_viable_alternative_explanation": "no",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "no"
+    }
+   },
+   "_mode": "single-turn",
+   "_tool_calls": 0,
+   "decision": "dropped",
+   "reason": "low-confidence",
+   "confidence": 0.286,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 3,
+   "likelihood": 2
+  },
+  {
+   "finding": "Rollback/reversibility of the gate as a runtime change is never specified. The plan describes per-criterion config and --force per-claim, but offers no documented cheap, tested global kill-switch to disable the gate quickly if it misfires in production. The --force override is per-ticket-per-claim and requires justification, which is not a cheap global undo.",
+   "criteria": [
+    "T12"
+   ],
+   "evidence": [
+    "The plan never states a 'disable the gate' config flag or kill switch; config knobs listed are 'risk posture, chunking, budget caps, and per-criterion blocking'",
+    "--force is described as a per-claim escape ('a recorded --force override available'), not a global disable",
+    "Follow-on F2 'auto-demote blocking criteria on FP ceiling' is deferred OUT of this epic, leaving no in-epic remediation lever"
+   ],
+   "scenarios": [
+    "The DET Layer-1 floor produces an unexpected false-positive block pattern in production and operators need to turn the gate off fleet-wide immediately",
+    "A client hits cost/latency problems and wants to revert to pre-gate behavior without rolling back the whole rebar version"
+   ],
+   "impact": "Without an explicit, cheap, tested rollback path, a misbehaving gate has no fast undo short of a full version rollback, violating T12(b).",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "medium",
+     "debt_impact": "medium",
+     "blast_radius": "system",
+     "likelihood": "medium",
+     "reversibility": "hard"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "yes",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "no",
+     "no_viable_alternative_explanation": "yes",
+     "no_existing_mitigation": "yes",
+     "severity_claim_justified": "no"
+    }
+   },
+   "_mode": "single-turn",
+   "_tool_calls": 0,
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.714,
+   "severity": "critical",
+   "impact_ord": 2,
+   "blast": 3,
+   "likelihood": 2
+  },
+  {
+   "finding": "The attestation/signature introduces a stateful artifact (signed events, REVIEW_RESULT sidecar events, material-commit binding) but the plan does not specify deploy ordering or old+new coexistence: how tickets created/claimed before the gate (no attestation events) coexist with the new claim-check after rollout, and how reviewers/CI running mixed rebar versions interpret signatures.",
+   "criteria": [
+    "T12"
+   ],
+   "evidence": [
+    "Attestation is 'Bound to the latest MATERIAL event commit' and a 'REVIEW_RESULT reducer-IGNORED SIDECAR event' is added",
+    "AC mentions 'reducer skips the type; head/.cache/deps/validate unaffected' but does not address pre-existing tickets that have no attestation event during the transition",
+    "The plan never states a migration/coexistence story for tickets in flight at gate-enablement time, nor for clients on older rebar versions encountering the new event type / signature"
+   ],
+   "scenarios": [
+    "A CI process on an old rebar version encounters the new REVIEW_RESULT sidecar event type or signed attestation it doesn't understand",
+    "Tickets claimed and in_progress before the gate must be re-reviewed retroactively, or are grandfathered \u2014 the plan doesn't say which"
+   ],
+   "impact": "Unspecified deploy ordering / old+new coexistence can cause reducer or CI errors and inconsistent enforcement during the rollout window, the gap T12(c) targets.",
+   "_verify": {
+    "severity_attributes": {
+     "prod_impact": "medium",
+     "debt_impact": "medium",
+     "blast_radius": "system",
+     "likelihood": "medium",
+     "reversibility": "moderate"
+    },
+    "binary": {
+     "cited_reference_accurate": "na",
+     "is_verifiable": "yes",
+     "evidence_entails_finding": "yes",
+     "path_reachable": "yes",
+     "impact_follows_necessarily": "no",
+     "no_viable_alternative_explanation": "yes",
+     "no_existing_mitigation": "no",
+     "severity_claim_justified": "yes"
+    }
+   },
+   "_mode": "single-turn",
+   "_tool_calls": 0,
+   "decision": "advisory",
+   "reason": "default-advisory (v1 posture)",
+   "confidence": 0.714,
+   "severity": "major",
+   "impact_ord": 2,
+   "blast": 3,
+   "likelihood": 2
+  }
+ ]
+}

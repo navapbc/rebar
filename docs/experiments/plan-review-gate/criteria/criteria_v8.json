@@ -1,0 +1,1261 @@
+[
+ {
+  "id": "F1",
+  "exec": "1-TURN",
+  "facet": "ac-text-quality",
+  "name": "Measurability & in-session completability",
+  "scenario": "Examine each acceptance/success criterion for measurability and whether an agent can complete it within ONE working session. Apply these binary checks: (a) the criterion states a specific OBSERVABLE outcome (what changes for the user/system), not effort ('implement the service') or a subjective term ('improved/better/sufficient'); (b) it is evaluable IN-SESSION via repo artifacts, the closing PR's CI, or a deterministic command against a reachable target — NOT post-sprint-only (multi-day telemetry, adoption %, survey feedback score ≤2); (c) it is a durable end-state, not a one-time transition (litmus: could it be false before this work and true only because of it?); (d) the unit is right-sized (a coherent single-outcome deliverable, not an epic-of-epics, not a one-line triviality). SEVERITY: outcome-vague or effort-framed criteria are MAJOR; post-sprint-only validation is MAJOR; thin-but-present is MINOR. ANTI-FP: evaluate the spec AS WRITTEN, not the current codebase; observability tooling itself is valid in-session work; 'post-deployment' is fine if the check is deterministic. PASS if all criteria are measurable and in-session completable.",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "observable_outcome",
+    "check": "Each criterion states a specific observable outcome (what changes for user/system), not effort or a subjective term."
+   },
+   {
+    "key": "in_session_evaluable",
+    "check": "Evaluable in-session via repo artifacts / closing PR CI / a deterministic command — not post-sprint-only (multi-day telemetry, adoption %, survey)."
+   },
+   {
+    "key": "durable_end_state",
+    "check": "A durable end-state, not a one-time transition (could be false before this work and true only because of it)."
+   },
+   {
+    "key": "right_sized",
+    "check": "A coherent single-outcome deliverable — not an epic-of-epics, not a one-line triviality."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "F4",
+  "exec": "1-TURN",
+  "facet": "scope-intent",
+  "name": "User/problem present (value)",
+  "scenario": "Check that the plan names WHO the work is for and WHAT problem they face, and that value is validatable. Binary checks: (a) the context names a specific user/stakeholder and the problem they have today; (b) the criteria collectively represent an observable improvement to that user or a measurable business outcome, not pure system internals; (c) it is NOT a bare technical task with no named beneficiary ('Refactor the service layer'); (d) at least one criterion carries a concrete validation mechanism (before/after workflow comparison, an operational metric target, dogfooding). SEVERITY: no named beneficiary AND no value-validation is MAJOR; missing only the validation mechanism is MINOR. ANTI-FP: an IMPLIED technical consumer counts for low-level/internal tasks (cleanup, dep upgrades, library internals) — do not flag those; backend work affecting latency/reliability scores normally via an operational signal. PASS if a beneficiary and the value are clear.",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "suppress_when": [
+    "mechanical_leaf"
+   ],
+   "container_only": false,
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "named_beneficiary",
+    "check": "Names a specific user/stakeholder and the problem they have today."
+   },
+   {
+    "key": "observable_value",
+    "check": "Criteria represent an observable improvement to that user / a measurable business outcome, not pure system internals."
+   },
+   {
+    "key": "not_bare_task",
+    "check": "Not a bare technical task with no named beneficiary."
+   },
+   {
+    "key": "value_validation",
+    "check": "At least one criterion carries a concrete validation mechanism (before/after, operational metric, dogfooding)."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "E1",
+  "exec": "2-STEP",
+  "facet": "coherence",
+  "name": "Criteria↔description coherence + terminology + duplicates",
+  "scenario": "Audit internal coherence of the requirement set (this is naturally a two-pass check: first map each criterion to the described work, then cross-check terminology and duplicates). Binary checks: (a) every acceptance criterion maps to something described in the plan body, and every described deliverable has a covering criterion (no orphan criteria, no uncovered work); (b) terminology is consistent — the same concept is named the same way throughout, and a criterion's verify step references the SAME entity its text names (e.g. 'cycle' vs 'review_cycle'); (c) no duplicate or near-duplicate requirements; (d) for migrations, criteria verify BOTH removal and replacement. SEVERITY: a deliverable with no covering criterion, or a criterion measuring nothing, is MAJOR; terminology drift / near-dup is MINOR. ANTI-FP: cite-or-omit — ground every finding in specific quoted plan text; prefer AMBIGUOUS over a hand-waved FAIL; consumers named in the spec are covered-by-definition. PASS if the set is coherent and non-redundant.",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "bidirectional_coverage",
+    "check": "Every criterion maps to described work AND every described deliverable has a covering criterion (no orphans, no uncovered work)."
+   },
+   {
+    "key": "terminology_consistent",
+    "check": "Same concept named the same way throughout; a criterion's verify step references the same entity its text names."
+   },
+   {
+    "key": "no_duplicates",
+    "check": "No duplicate or near-duplicate requirements."
+   },
+   {
+    "key": "migration_both_sides",
+    "check": "For migrations, criteria verify BOTH removal and replacement."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "E2",
+  "exec": "1-TURN",
+  "facet": "ac-text-quality",
+  "name": "Ambiguity / executable-without-clarification",
+  "scenario": "Decide whether an executing agent could act on this plan WITHOUT stopping to ask a clarifying question. Run the 6-signal ambiguity scan: (1) undefined scope boundaries ('improve performance' — of what, by how much); (2) implicit acceptance criteria (types/size limits unstated); (3) conflicting signals (title says X, body Y); (4) missing persona (admin vs end-user); (5) unstated constraints (an API with no auth/rate-limit mention); (6) ambiguous priority (essential vs nice-to-have unranked). Plus flag any scope bullet that is a PLACEHOLDER not a decision: contains 'verify whether', 'check if', 'TBD', 'figure out', 'depends on investigation', or defers a real design choice to the executor ('choose an appropriate X'). SEVERITY: an ambiguity that BLOCKS planning ('cannot proceed without this') is MAJOR; a defaultable gap ('assume X unless told') is MINOR. ANTI-FP: never flag something clearly inferrable from the parent epic or an obvious convention. PASS if the plan is executable without clarification.",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "scope_boundaries",
+    "check": "No undefined scope boundaries ('improve performance' — of what, by how much)."
+   },
+   {
+    "key": "explicit_ac",
+    "check": "Acceptance criteria / types / size limits are stated, not implicit."
+   },
+   {
+    "key": "no_conflicting_signals",
+    "check": "Title and body agree; no conflicting signals."
+   },
+   {
+    "key": "persona_present",
+    "check": "The persona (admin vs end-user) is identified where it matters."
+   },
+   {
+    "key": "constraints_stated",
+    "check": "Constraints stated (e.g. an API's auth / rate-limit)."
+   },
+   {
+    "key": "priority_ranked",
+    "check": "Essential vs nice-to-have is ranked."
+   },
+   {
+    "key": "no_placeholder",
+    "check": "No scope bullet is a placeholder ('verify whether','check if','TBD','figure out','choose an appropriate X') deferring a real decision to the executor."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "E3",
+  "exec": "2-STEP",
+  "facet": "scope-intent",
+  "name": "Intent fidelity",
+  "scenario": "Judge whether the plan faithfully serves its stated title/goal (a blind-restate-then-compare check: first restate what the plan actually does, then compare to what the title promises). Binary checks: (a) the body's work matches the headline intent — no scope drift doing MORE or LESS than the title promises; (b) each non-deferred goal has a faithful, end-state-observable proof; (c) no step contradicts the stated intent; (d) where the plan changes existing behavior, it acknowledges callers that depend on the old behavior. SEVERITY: the plan builds something materially different from its stated intent = CRITICAL (agent will build the wrong thing); partial drift = MAJOR; minor mismatch = MINOR. ANTI-FP: mixed or absent signals → AMBIGUOUS, not a forced FAIL; 'no implementation found yet' is not itself intent-contradiction. PASS if the plan is faithful to its goal.",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "matches_headline",
+    "check": "Body work matches headline intent — no scope drift doing MORE or LESS than the title promises."
+   },
+   {
+    "key": "goals_proven",
+    "check": "Each non-deferred goal has a faithful, end-state-observable proof."
+   },
+   {
+    "key": "no_contradiction",
+    "check": "No step contradicts the stated intent."
+   },
+   {
+    "key": "callers_acknowledged",
+    "check": "Where behavior changes, callers depending on old behavior are acknowledged."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "E5",
+  "exec": "1-TURN",
+  "facet": "testing",
+  "name": "Testing-plan completeness (retuned v7)",
+  "scenario": "Assess whether the plan makes the work testable by construction. FIRST apply the applicability gate: fire ONLY if the plan INTRODUCES new logic/behavior that is testable. If the change is internal/mechanical (refactor, rename, config, dep-bump, doc), or testing is explicitly deferred to child tickets, PASS as not-applicable. RAISED BAR (round-4/5 over-fire fix): thin-but-present coverage is PASS, not a finding; only flag when (a) a NEW user-facing flow has happy-path-only tests with no failure/timeout/invalid/empty path; (b) a changed/deleted behavior gets no modify/remove-test work; or (c) the SELF-AUTHORED-ORACLE / change-detector anti-pattern is present — tests that snapshot current (possibly wrong) output, tautological tests, or source-greps masquerading as behavioral tests (these lock in the bug; always MAJOR). Boundary scenarios (oversized/malformed/non-Latin/back-button) and observable (not 'works correctly') outcomes are rewarded but their absence on an internal change is NOT a finding. ANTI-FP: structural greps and command-output assertions ARE a legitimate cross-language test pattern; valid TDD exemptions exist (no conditional logic, pure scaffolding, cited existing test). SEVERITY: missing failure-path on a new user-facing flow = MAJOR; change-detector/tautology = MAJOR; everything else PASS. This criterion does not run on epics (they defer tests to children) or on test-authoring tasks (the task IS the test).",
+  "applies_at": {
+   "levels": [
+    "story",
+    "task"
+   ],
+   "suppress_when": [
+    "test_task"
+   ],
+   "container_only": false,
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "introduces_testable",
+    "check": "GATE: the plan introduces new logic/behavior that is testable (else PASS not-applicable — refactor/config/doc/mechanical)."
+   },
+   {
+    "key": "beyond_happy_path",
+    "check": "For new user-facing behavior, failure/timeout/invalid/empty paths and a caller-facing contract are addressed."
+   },
+   {
+    "key": "boundaries",
+    "check": "Boundary scenarios considered (oversized input, malformed payload, non-Latin, back-button)."
+   },
+   {
+    "key": "no_self_oracle",
+    "check": "No self-authored-oracle / change-detector anti-pattern: snapshot-of-current-output, tautology, or source-grep masquerading as a behavioral test (MAJOR — locks in the bug)."
+   },
+   {
+    "key": "changed_behavior_tests",
+    "check": "Changed/deleted behaviors get corresponding modify/remove-test work."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "E6",
+  "exec": "2-STEP",
+  "facet": "ac-text-quality",
+  "name": "Verification/termination + end-state reachability",
+  "scenario": "Check that the work has a clear way to be verified done and that the steps actually reach the stated end-state (a two-step check: identify the proving command for each claim, then confirm the union of steps proves every criterion). Binary checks: (a) every completion-relevant claim has a concrete proving command/check that would produce evidence on success (not 'should work'); (b) the claim is free of red-flag hedges ('should', 'probably', 'seems'); (c) every acceptance criterion maps to at least one described step; (d) the UNION of the steps actually reaches the stated end-state — no gap between 'what we'll do' and 'what done looks like'; (e) user-facing flows have an end-to-end check or a documented rationale for its absence. SEVERITY: a criterion no step reaches, or a claimed-but-unmeasured outcome, is MAJOR; a hedge without a proving command is MINOR. ANTI-FP: universal lint/format/test commands do not by themselves prove a specific criterion. PASS if done-ness is verifiable and the end-state is reachable.",
+  "applies_at": {
+   "levels": [
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "proving_command",
+    "check": "Every completion-relevant claim has a concrete proving command/check that produces evidence on success."
+   },
+   {
+    "key": "no_hedges",
+    "check": "No red-flag hedges ('should','probably','seems') standing in for a proving command."
+   },
+   {
+    "key": "ac_to_step",
+    "check": "Every acceptance criterion maps to at least one described step."
+   },
+   {
+    "key": "end_state_reachable",
+    "check": "The union of steps actually reaches the stated end-state (no gap between 'what we'll do' and 'what done looks like')."
+   },
+   {
+    "key": "e2e_for_user_flows",
+    "check": "User-facing flows have an end-to-end check or a documented rationale for its absence."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "G5",
+  "exec": "1-TURN",
+  "facet": "scope-intent",
+  "name": "Decomposition judgment",
+  "scenario": "Judge whether the ticket is right-sized or should be decomposed. Binary checks: (a) sizing signals — does it touch >3 files OR ≥3 layers OR introduce a new interface OR carry low scope-certainty? Any of these pushes toward 'too big, decompose'; (b) for an epic/parent: does it fail the single-concern test (a structural 'and' joining independent goals), span multiple personas, mix UI+backend, include a migration, or carry >6 success criteria — if so it should have children; (c) is decomposition into children present and sensible where the size demands it; (d) for a leaf: is it small enough to execute coherently in one session (not a one-criterion triviality either); (e) YAGNI/Rule-of-Three — is proposed structure justified by the current criteria, with ≥3 real call-sites for any new abstraction. SEVERITY: an epic-scale body with no children is MAJOR; a horizontal-layer split where a vertical slice is safer is MINOR. ANTI-FP: an incidental 'and' does not fail single-concern; a file list is a sample, not authoritative impact. PASS if sizing and decomposition are appropriate. Consume the DET P4 oversize signal and the resolved edit-set rather than re-deriving file/layer counts from prose. ALSO judge SEQUENCING: is there a thin vertical-slice / evidence-gated MVP that de-risks the riskiest piece first, or is it a horizontal big-bang? (Decomposing into many parallel parts does not by itself reduce big-bang risk.)",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "sizing_signals",
+    "check": ">3 files OR >=3 layers OR a new interface OR low scope-certainty pushes toward decompose."
+   },
+   {
+    "key": "parent_single_concern",
+    "check": "An epic/parent passes single-concern (no structural 'and' joining independent goals; not multi-persona/UI+backend/with-migration/>6 criteria) or has children."
+   },
+   {
+    "key": "decomposition_present",
+    "check": "Decomposition into children is present and sensible where size demands it."
+   },
+   {
+    "key": "leaf_coherent",
+    "check": "A leaf is small enough to execute in one session (and not a one-criterion triviality)."
+   },
+   {
+    "key": "yagni",
+    "check": "Proposed structure is justified by current criteria (>=3 real call-sites for any new abstraction)."
+   },
+   {
+    "key": "vertical_slice",
+    "check": "Sequencing has a thin vertical-slice / evidence-gated MVP de-risking the riskiest piece first, not a horizontal big-bang."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "T5a",
+  "exec": "1-TURN",
+  "facet": "overlay-perf",
+  "name": "Performance (overlay)",
+  "trigger": "new I/O paths, data access, LLM calls, compute, batch ops, or shared resources",
+  "scenario": "OVERLAY — apply only if the plan introduces new I/O, data access, LLM/compute calls, batch ops, or shared resources; otherwise PASS as not-applicable. Binary checks: (a) latency — hot-path operations have time-bounded done-definitions and no synchronous blocking on a hot path; (b) resource_efficiency — no N+1 / redundant API or LLM calls / unbounded memory growth; (c) scalability — input-size limits, concurrency/rate-limit/pool handling, and load expectations are stated. SEVERITY: a user-facing operation with no latency target is MAJOR; an O(n) LLM-calls-per-item pattern is MAJOR — state the impact in Big-O terms. ANTI-FP: score normally only where the plan actually adds a performance-relevant path. PASS if performance characteristics are sound for the scope. ALSO assess COST/economics (not just latency): per-call $ (e.g. an LLM/embedding call per item), egress, always-on vs serverless, unbounded fan-out — a design can be fast and ruinously expensive.",
+  "applies_at": {
+   "levels": [
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "latency",
+    "check": "Hot-path operations have time-bounded done-definitions; no synchronous blocking on a hot path."
+   },
+   {
+    "key": "resource_efficiency",
+    "check": "No N+1 / redundant API or LLM calls / unbounded memory growth."
+   },
+   {
+    "key": "scalability",
+    "check": "Input-size limits, concurrency/rate-limit/pool handling, and load expectations stated."
+   },
+   {
+    "key": "cost",
+    "check": "Per-call $ economics sound (no per-item LLM/embedding call, egress, always-on, unbounded fan-out) — fast can still be ruinously expensive."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "T5b",
+  "exec": "1-TURN",
+  "facet": "overlay-reliability",
+  "name": "Reliability (overlay)",
+  "trigger": "new failure points (LLM/external integration/file I/O), write ops, or stateful transitions",
+  "scenario": "OVERLAY — apply only if the plan adds failure points (external integration, file I/O, LLM calls), write operations, or stateful transitions; otherwise PASS as not-applicable. Binary checks: (a) error_handling — retry/backoff/circuit-breaker/graceful-degradation is present and error states are surfaced, not swallowed; (b) failover — recovery happens without data loss or corruption, writes are idempotent, partial state is safe/durable. SEVERITY: an external call with NO error handling is MAJOR; missing idempotency on a write is MAJOR. Blast-radius is a tiebreaker that only LOWERS severity, never raises it. ANTI-FP: failover is not-applicable (PASS) if there are no writes/state/external deps. PASS if the plan fails safely. ALSO check OBSERVABILITY (are new failure points instrumented with a metric/log/trace/alert so operators can see and debug them?) and DEPENDENCY-FAILURE blast radius (when a hard external dep is down/slow: timeout, circuit-breaker, fallback/degraded-mode, or does the feature — or an unrelated one — go down?).",
+  "applies_at": {
+   "levels": [
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "error_handling",
+    "check": "Retry/backoff/circuit-breaker/graceful-degradation present; error states surfaced, not swallowed."
+   },
+   {
+    "key": "failover",
+    "check": "Recovery without data loss/corruption; writes idempotent; partial state safe/durable."
+   },
+   {
+    "key": "observability",
+    "check": "New failure points instrumented with a metric/log/trace/alert."
+   },
+   {
+    "key": "dependency_blast_radius",
+    "check": "When a hard external dep is down/slow: timeout, circuit-breaker, fallback/degraded-mode — feature (and unrelated ones) stay up."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "T5c",
+  "exec": "1-TURN",
+  "facet": "overlay-security",
+  "name": "Security (overlay)",
+  "trigger": "new endpoints, data access/storage/transmission, PII, or auth boundaries",
+  "scenario": "OVERLAY — apply only if the plan adds endpoints, data access/storage/transmission, PII handling, or auth boundaries; otherwise PASS as not-applicable. Baseline against OWASP Top 10. Binary checks: (a) access_classification — every new endpoint/path declares its access level (public/authenticated/internal-only) and sensitive-data paths require auth; AMBIGUITY about access level is itself the failure; (b) data_protection — encryption at rest and in transit where applicable, PII/secrets identified, no secret-logging or data leakage. SEVERITY: an undeclared new endpoint or sensitive path is MAJOR — cite the OWASP category (e.g. 'A01 Broken Access Control'). ANTI-FP: a documented-public endpoint with rationale scores fine; data_protection is not-applicable if there is no data storage/transmission/PII. PASS if security boundaries are explicit and sound. ALSO (broaden trigger to any plan that introduces a credential/role/grant/secret) check LEAST-PRIVILEGE (grants scoped to the minimum; no wildcard *:* / admin-for-convenience) and SECRET LIFECYCLE (no plaintext secrets in code/IaC/logs; use a secrets manager).",
+  "applies_at": {
+   "levels": [
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "access_classification",
+    "check": "Every new endpoint/path declares its access level; sensitive paths require auth (ambiguity about access level is itself the failure) — cite OWASP category."
+   },
+   {
+    "key": "data_protection",
+    "check": "Encryption at rest/in transit where applicable; PII/secrets identified; no secret-logging or data leakage."
+   },
+   {
+    "key": "least_privilege",
+    "check": "Grants scoped to the minimum; no wildcard *:* / admin-for-convenience."
+   },
+   {
+    "key": "secret_lifecycle",
+    "check": "No plaintext secrets in code/IaC/logs; use a secrets manager."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "T5e",
+  "exec": "1-TURN",
+  "facet": "overlay-maintainability",
+  "name": "Maintainability (overlay)",
+  "trigger": "crosses component boundaries, adds business rules/thresholds, or new patterns/contracts",
+  "scenario": "OVERLAY — apply only if the plan crosses component boundaries, adds business rules/thresholds/integration points, or introduces a new pattern/contract/pipeline stage; otherwise PASS as not-applicable. Binary checks: (a) coupling_risk — new cross-component dependencies are acknowledged, justified, and mitigated (via an interface or event boundary), not silently introduced; (b) changeability — rules/thresholds expected to evolve are configurable, not hardcoded; (c) documentation — a novel architectural decision is captured in an ADR / CLAUDE.md / design doc update. SEVERITY: a new pipeline stage or cross-component coupling with no doc/ADR is MAJOR on documentation; hardcoded soon-to-change thresholds are MINOR. ANTI-FP: each sub-check is not-applicable (PASS) where the plan introduces no new coupling/rules/decisions. PASS if the change keeps the system maintainable.",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "coupling_risk",
+    "check": "New cross-component dependencies acknowledged, justified, mitigated (interface/event boundary), not silently introduced."
+   },
+   {
+    "key": "changeability",
+    "check": "Rules/thresholds expected to evolve are configurable, not hardcoded."
+   },
+   {
+    "key": "documentation",
+    "check": "A novel architectural decision is captured in an ADR / CLAUDE.md / design-doc update."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "T2",
+  "exec": "1-TURN",
+  "facet": "overlay-empirical",
+  "name": "Empirical probe (red->green / spike) [overlay]",
+  "scenario": "Decide whether this plan's RISK warrants empirical validation, and whether such validation is planned. STEP 1 — is the plan complex/novel/uncertain? Signals: a novel or unproven architecture/pattern; an unverified assumption about an external system, dependency, or performance/scale behavior; a default/threshold/heuristic that is ASSERTED rather than derived from data; a design choice the author could not settle by reasoning alone; behavior whose correctness cannot be established without running it. If NONE apply (a well-understood, mechanical, or low-risk change), PASS — not applicable. STEP 2 — if complex/novel, does the plan ALREADY include an empirical-validation step: a spike, probe, prototype, benchmark, measurement, experiment, A/B, a fixture/RED test that exercises the risky behavior, or a pilot with success metrics? If YES, PASS (suppressed — experimentation already present). Only FAIL/advise if the plan is complex/novel AND asserts unvalidated choices with NO plan to test them — then recommend the specific spike/probe/measurement/experiment that would de-risk it before full build-out. SEVERITY: a core design resting on an unvalidated assumption = MAJOR; a tunable default/threshold with no measurement plan = MINOR. ANTI-FP (critical): do NOT fire when the ticket already contains experimentation — a spike, a fixture/RED test, a pilot with metrics, a measurement step, or stated success criteria for a trial. A mechanical or fully-specified change is NOT complex. Treat an explicit 'TBD: measure X' / 'derive from fixture' as validation-present. PASS unless there is a real, unvalidated, high-uncertainty choice left untested.",
+  "trigger": "complex/novel plan with an unvalidated assumption (LLM-routed)",
+  "routing": "overlay",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "risk_present",
+    "check": "STEP 1: the plan is complex/novel/uncertain (novel architecture, unverified external/scale assumption, asserted-not-derived default, correctness un-establishable without running)."
+   },
+   {
+    "key": "validation_planned",
+    "check": "STEP 2: if risky, the plan already includes a spike/probe/prototype/benchmark/RED-fixture/pilot-with-metrics — else recommend the specific one."
+   },
+   {
+    "key": "suppress_if_experimenting",
+    "check": "ANTI-FP: do NOT fire when experimentation is already present; a mechanical/fully-specified change is not complex."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95,
+  "overlay_routing": "deterministic"
+ },
+ {
+  "id": "T3",
+  "exec": "AGENT",
+  "facet": "overlay-feasibility",
+  "routing": "overlay",
+  "trigger": "external integration / first-time-internal-platform / unverified capability (LLM-routed)",
+  "name": "Integration feasibility [overlay]",
+  "scenario": "OVERLAY — apply only when the plan integrates an external API/CLI/service/library or asserts a capability it has not used before; else PASS not-applicable. Binary checks (tool-grounded where possible): (a) technical_feasibility — is the integration achievable as described, or is there a capability gap? (b) for a CLI/API: do the named subcommands/endpoints actually exist (verify against --help / docs) — MATCH / MISMATCH / UNVERIFIED; (c) auth/HTTPS preconditions stated; (d) a critical capability gap should route to a SPIKE before committing the full plan. SEVERITY: an asserted-but-unverified external capability the plan depends on = MAJOR. ANTI-FP: verify before asserting a mismatch; an internal, already-used integration is not-applicable.",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "technical_feasibility",
+    "check": "The integration is achievable as described, or a capability gap is named."
+   },
+   {
+    "key": "surface_exists",
+    "check": "Named subcommands/endpoints actually exist (verify against --help/docs) — MATCH/MISMATCH/UNVERIFIED."
+   },
+   {
+    "key": "auth_preconditions",
+    "check": "Auth/HTTPS preconditions stated."
+   },
+   {
+    "key": "gap_routes_to_spike",
+    "check": "A critical capability gap routes to a SPIKE before committing the full plan."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95,
+  "overlay_routing": "deterministic"
+ },
+ {
+  "id": "T4",
+  "exec": "1-TURN",
+  "facet": "overlay-compat",
+  "routing": "overlay",
+  "trigger": "P7 destructive/irreversible sniff, or a change to existing behavior/interface/schema/data (deterministic prior + LLM)",
+  "name": "Compat / destructiveness as an explicit justified choice [overlay]",
+  "scenario": "OVERLAY — apply when the plan changes existing behavior, an interface/schema/data shape, or performs a destructive/irreversible operation; else PASS not-applicable. BIDIRECTIONAL check: (a) UNACKNOWLEDGED breakage — does the plan change/remove something consumers rely on without acknowledging the break, an expand-contract sequence, or a rollback path? (b) GRATUITOUS compat — does it add backward-compat shims, feature flags, or version branches that aren't warranted? (c) is a destructive/irreversible step an EXPLICIT, justified choice (not incidental)? SEVERITY: unacknowledged breaking change with no migration/rollback = MAJOR. ANTI-FP: a purely additive change is not-applicable; an explicitly justified breaking change with a migration is fine. The REMEDY for a destructive/breaking change is an explicit ROLLBACK / back-out plan or expand-contract sequencing — checking only that breakage is *acknowledged* is insufficient; require the reversibility mechanism.",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "unacknowledged_breakage",
+    "check": "A change/removal consumers rely on is acknowledged with expand-contract or a rollback path."
+   },
+   {
+    "key": "gratuitous_compat",
+    "check": "No unwarranted backward-compat shims / feature flags / version branches."
+   },
+   {
+    "key": "destructive_is_explicit",
+    "check": "Any destructive/irreversible step is an explicit, justified choice."
+   },
+   {
+    "key": "reversibility_mechanism",
+    "check": "The remedy is an explicit rollback/back-out plan or expand-contract — acknowledgement alone is insufficient."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95,
+  "overlay_routing": "deterministic"
+ },
+ {
+  "id": "T5d",
+  "exec": "1-TURN",
+  "facet": "overlay-a11y",
+  "routing": "overlay",
+  "trigger": "new user-facing UI (deterministic UI-keyword count; null otherwise)",
+  "name": "Accessibility [overlay]",
+  "scenario": "OVERLAY — apply only if the plan introduces new user-facing UI; else PASS not-applicable. Binary checks: (a) wcag_compliance — does the scope address WCAG 2.1 AA with observable a11y done-definitions (keyboard, screen-reader, contrast)? (b) inclusive_ux — reduced motion, keyboard-only, screen-reader, touch-target sizing, not color-alone/mouse-only. SEVERITY: a new interactive surface with no keyboard nav = MAJOR — cite the WCAG criterion. ANTI-FP: not-applicable for backend/infra/data work.",
+  "applies_at": {
+   "levels": [
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "wcag_compliance",
+    "check": "Scope addresses WCAG 2.1 AA with observable a11y done-definitions (keyboard, screen-reader, contrast) — cite the WCAG criterion."
+   },
+   {
+    "key": "inclusive_ux",
+    "check": "Reduced motion, keyboard-only, screen-reader, touch-target sizing; not color-alone/mouse-only."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95,
+  "overlay_routing": "deterministic"
+ },
+ {
+  "id": "COH",
+  "exec": "1-TURN",
+  "facet": "coherence",
+  "routing": "base",
+  "name": "Cross-section coherence pass (cross-cutting)",
+  "scenario": "CROSS-CUTTING coherence pass (distinct from E1's criteria<->description check): a single structured scan for CONTRADICTIONS BETWEEN SECTIONS of the plan — e.g. the testing strategy contradicts the decomposition; the sequencing contradicts the declared dependencies; the context/problem contradicts the success criteria; an approach choice contradicts a stated constraint. One pass, not a debate. SEVERITY: a contradiction that would send the implementer in two directions = MAJOR. ANTI-FP: only flag genuine cross-section contradictions, not within-section nitpicks (those belong to E1/E2).",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "cross_section_contradiction",
+    "check": "No contradiction BETWEEN sections (testing vs decomposition; sequencing vs declared deps; context/problem vs success criteria; approach vs a stated constraint)."
+   },
+   {
+    "key": "not_within_section",
+    "check": "ANTI-FP: only genuine cross-section contradictions, not within-section nitpicks (those belong to E1/E2)."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "T1",
+  "exec": "AGENT",
+  "facet": "overlay-priorart",
+  "routing": "overlay",
+  "trigger": "any of the 6 bright-lines: external integration / unfamiliar dependency / security-auth / novel pattern / perf-scalability / migration (deterministic prior + agent-judgment)",
+  "name": "Prior-art / novel-architecture justification [overlay]",
+  "scenario": "OVERLAY — apply when the plan crosses a bright-line (external integration, unfamiliar dependency, security/auth, a novel architectural pattern, a performance/scalability target, or a migration). Tool-grounded where possible (web/codebase). Checks: (a) is there relevant PRIOR ART the plan should consider before committing, or is it reinventing/repackaging something that exists? (b) for a novel pattern: is the novelty justified vs an established approach (anti-repackaging, Rule-of-Three)? (c) are unverified capability assertions ('library supports X') resolved? SEVERITY: a novel architecture chosen with no consideration of prior art = MAJOR. ANTI-FP: a well-trodden pattern needs no prior-art search; not-applicable when no bright-line fires.",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "prior_art",
+    "check": "Relevant prior art is considered before committing — not reinventing/repackaging something that exists."
+   },
+   {
+    "key": "novelty_justified",
+    "check": "A novel pattern's novelty is justified vs an established approach (anti-repackaging, Rule-of-Three)."
+   },
+   {
+    "key": "capability_assertions_resolved",
+    "check": "Unverified capability assertions ('library supports X') are resolved."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95,
+  "overlay_routing": "deterministic"
+ },
+ {
+  "id": "T6",
+  "exec": "1-TURN",
+  "facet": "overlay-ux",
+  "routing": "overlay",
+  "trigger": "new user-facing UI (deterministic UI-keyword count ≥3, or classifier when ambiguous); LLM-confirmed",
+  "name": "UX non-happy-path [overlay]",
+  "scenario": "OVERLAY — apply only if the plan introduces a user-facing interaction surface; else PASS not-applicable. Checks: (a) criticality — are the highest-stakes interactions named? (b) non_happy_path — validation/timeout/empty/partial-data/error states handled, not just the happy path? (c) flow_entry_exit — entry plus both success and abandon exit points covered? SEVERITY: a new interactive flow with only the happy path = MAJOR. ANTI-FP: not-applicable for backend/infra/data work.",
+  "applies_at": {
+   "levels": [
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "criticality",
+    "check": "Highest-stakes interactions are named."
+   },
+   {
+    "key": "non_happy_path",
+    "check": "Validation/timeout/empty/partial-data/error states handled, not just the happy path."
+   },
+   {
+    "key": "flow_entry_exit",
+    "check": "Entry plus both success and abandon exit points are covered."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95,
+  "overlay_routing": "llm"
+ },
+ {
+  "id": "T7",
+  "exec": "1-TURN",
+  "facet": "overlay-docs",
+  "routing": "overlay",
+  "trigger": "new pattern/contract/config, OR touches existing documented behavior (deterministic doc/ADR keywords + LLM)",
+  "name": "Documentation [overlay]",
+  "scenario": "OVERLAY — apply when the plan introduces something that needs documenting or invalidates existing docs; else PASS not-applicable. Checks: (a) NEW-needed — a new pattern/contract/config/CLI gets a doc/ADR? (b) INVALIDATED — does the change make existing docs/references stale (deleted/renamed artifacts still referenced)? (c) not-excessive / navigable — large docs have structure; no hot-path instruction-bloat. SEVERITY: a new architectural decision with no ADR/doc, or a change that strands stale references = MAJOR. ANTI-FP: trivial/internal changes need no doc.",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "new_needed",
+    "check": "A new pattern/contract/config/CLI gets a doc/ADR."
+   },
+   {
+    "key": "invalidated",
+    "check": "The change doesn't strand stale references (deleted/renamed artifacts still referenced)."
+   },
+   {
+    "key": "navigable",
+    "check": "Large docs have structure; no hot-path instruction-bloat."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95,
+  "overlay_routing": "deterministic"
+ },
+ {
+  "id": "T8",
+  "exec": "AGENT",
+  "facet": "overlay-llm",
+  "routing": "overlay",
+  "trigger": "plan defines an LLM/agent system: prompts, sub-agents, reviewers, output schemas, enums (LLM-routed — a keyword trigger is high-FP)",
+  "name": "LLM / prompt structural-completeness probe [overlay]",
+  "scenario": "OVERLAY — apply when the plan defines an LLM/agent system (prompts, sub-agents, reviewers, output schemas, enums). Probe (tool-grounded) for STRUCTURAL GAPS a generic checklist misses: (a) a schema/enum referenced but whose value vocabulary is never defined; (b) a processing protocol/decision rule referenced but not co-located with the schema that needs it; (c) a counter/state increment with ambiguous placement; (d) an unspecified fallback for an incomplete/failed sub-step; (e) instruction-locality / pink-elephant antipatterns. Use Grep/Read to confirm referenced agents/skills/enums exist and are fully specified. Report each PROVEN gap with evidence. SEVERITY: an undefined-but-referenced enum/protocol an executor needs = MAJOR. ANTI-FP: cite concrete evidence; this is the overlay that recovers the structural-gap signal a generic checklist misses.",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "enum_vocab_defined",
+    "check": "No schema/enum referenced whose value vocabulary is never defined."
+   },
+   {
+    "key": "protocol_colocated",
+    "check": "A processing protocol/decision rule is co-located with the schema that needs it."
+   },
+   {
+    "key": "counter_placement",
+    "check": "No counter/state increment with ambiguous placement."
+   },
+   {
+    "key": "fallback_specified",
+    "check": "A fallback for an incomplete/failed sub-step is specified."
+   },
+   {
+    "key": "instruction_locality",
+    "check": "No instruction-locality / pink-elephant antipatterns; referenced agents/skills/enums exist and are fully specified (tool-verified)."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95,
+  "overlay_routing": "llm"
+ },
+ {
+  "id": "T9",
+  "exec": "1-TURN",
+  "facet": "overlay-sharedstate",
+  "routing": "overlay",
+  "trigger": "plan introduces or mutates shared/global state, a cache, a singleton, a config key, or a lifecycle (deterministic prior + LLM)",
+  "name": "Shared-state lifecycle [overlay]",
+  "scenario": "OVERLAY — apply when the plan introduces or mutates shared/global state (a cache, singleton, config key, shared file/record, or a stateful lifecycle); else PASS not-applicable. Check the full CREATE / UPDATE / CONSUME / RETIRE lifecycle: (a) who creates the state and when? (b) update concurrency / ownership clear? (c) consumers enumerated and tolerant of its absence/staleness? (d) is there a RETIRE/cleanup path, or does it leak/accumulate? SEVERITY: shared state with no defined ownership or no retirement path = MAJOR. ANTI-FP: not-applicable for purely local/stateless changes. ALSO assess CONCURRENCY SAFETY (distinct from lifecycle completeness): is shared/mutable state mutated atomically (lock/CAS/transaction, no check-then-act TOCTOU), and is the operation idempotent under retry / at-least-once delivery? A fully-specified lifecycle can still have a race.",
+  "applies_at": {
+   "levels": [
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "create",
+    "check": "Who creates the state and when is defined."
+   },
+   {
+    "key": "update",
+    "check": "Update concurrency / ownership is clear."
+   },
+   {
+    "key": "consume",
+    "check": "Consumers enumerated and tolerant of absence/staleness."
+   },
+   {
+    "key": "retire",
+    "check": "There is a RETIRE/cleanup path — it doesn't leak/accumulate."
+   },
+   {
+    "key": "concurrency_safe",
+    "check": "Shared/mutable state mutated atomically (lock/CAS/transaction, no check-then-act TOCTOU); operation idempotent under retry/at-least-once."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95,
+  "overlay_routing": "llm"
+ },
+ {
+  "id": "G1G2",
+  "exec": "AGENT",
+  "facet": "codebase-grounding",
+  "routing": "leaf",
+  "name": "Edit-set / scope accuracy [agent]",
+  "scenario": "Verify (via Glob/Grep) that every file/symbol the plan names actually exists; enumerate consumers/callers OUTSIDE the artifact's dir that a change would require updating; flag hallucinated/missing edit targets and unenumerated consumers; classify behavioral hunks in/ambiguous/out-of-scope (CREATION=new behavior->out-of-scope). High blast-radius alone is not a fail if acknowledged. ANTI-FP: report only high-confidence; STOP if scope too vague.",
+  "applies_at": {
+   "levels": [
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "targets_exist",
+    "check": "Every file/symbol the plan names exists (Glob/Grep) — flag hallucinated/missing edit targets."
+   },
+   {
+    "key": "consumers_enumerated",
+    "check": "Consumers/callers OUTSIDE the artifact's dir that a change requires updating are enumerated — flag unenumerated consumers."
+   },
+   {
+    "key": "scope_classified",
+    "check": "Behavioral hunks classified in/ambiguous/out-of-scope (CREATION=new behavior=out-of-scope); high blast-radius alone isn't a fail if acknowledged."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "E4",
+  "exec": "AGENT",
+  "facet": "codebase-grounding",
+  "routing": "leaf",
+  "name": "Assumption/premise verification [agent]",
+  "scenario": "Scan the plan for assertions about the codebase ('X already exists', 'Y does Z', hedges/confident-assertions) and FORCE a Grep/Read probe per assertion; cached/training knowledge is not a substitute. Fail-closed on absent evidence (unverifiable assertion = gap). ANTI-FP: read the named implementation file before flagging a contract-doc-only claim.",
+  "applies_at": {
+   "levels": [
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "assertions_probed",
+    "check": "Each codebase assertion ('X exists','Y does Z', hedges/confident-assertions) is verified by a Grep/Read — training knowledge is not a substitute."
+   },
+   {
+    "key": "fail_closed",
+    "check": "Fail-closed: an unverifiable assertion is a gap (no benefit of the doubt)."
+   },
+   {
+    "key": "read_before_flag",
+    "check": "ANTI-FP: read the named implementation file before flagging a contract-doc-only claim."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "A1",
+  "exec": "AGENT",
+  "facet": "codebase-grounding",
+  "routing": "leaf",
+  "name": "Anti-slop / over-engineering / NIH [agent]",
+  "scenario": "For each proposed abstraction/dependency/config, Grep the codebase to check: Rule-of-Three (>=3 existing call-sites or it's premature); YAGNI (serves a current done-definition, not a hypothetical); NIH (doesn't rebuild functionality already in the codebase or an imported dependency); no config-surface proliferation. Every finding cites concrete codebase evidence. ANTI-FP: Justified-Complexity needs affirmative evidence, not absence-of-disqualifier. ALSO screen the full anti-pattern set (DSO decider): golden-hammer (one tool/pattern forced everywhere), cargo-cult (copied without understanding why), resume-driven (trendy tech with no requirement), premature-optimization (optimizing before evidence), in addition to NIH, premature-abstraction/Rule-of-Three, and config-surface-proliferation.",
+  "applies_at": {
+   "levels": [
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "rule_of_three",
+    "check": "A proposed abstraction has >=3 existing call-sites or is premature (cite grep hits)."
+   },
+   {
+    "key": "yagni",
+    "check": "Each abstraction serves a current done-definition, not a hypothetical."
+   },
+   {
+    "key": "nih",
+    "check": "Doesn't rebuild functionality already in the codebase or an imported dependency (grep for it)."
+   },
+   {
+    "key": "config_proliferation",
+    "check": "No config-surface proliferation (a config key may already capture the toggle)."
+   },
+   {
+    "key": "antipattern_set",
+    "check": "Screen golden-hammer / cargo-cult / resume-driven / premature-optimization (DSO decider set), each cited."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "G3",
+  "exec": "AGENT",
+  "facet": "container",
+  "routing": "container",
+  "name": "Child coverage [agent, container]",
+  "scenario": "CONTAINER-only (has_children): does the union of children cover the parent's acceptance/success criteria? 4-bucket audit per criterion (fully / partially / uncovered / structural) + a coverage map; an uncovered parent criterion is a finding. ANTI-FP: a criterion covered-by-definition by a named consumer counts.",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story"
+   ],
+   "container_only": true,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "coverage_map",
+    "check": "The union of children covers each parent acceptance/success criterion — 4-bucket audit (fully/partially/uncovered/structural); an uncovered criterion is a finding."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "G4",
+  "exec": "AGENT",
+  "facet": "container",
+  "routing": "container",
+  "name": "Child consistency [agent, container]",
+  "scenario": "CONTAINER-only (has_children): check the 7 cross-child interaction modes — implicit shared state, conflicting assumptions, dependency gap, scope overlap, ordering violation, consumer impact, residual references. Each detected mode is a finding. ANTI-FP: high-confidence only; benign-reading filter.",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story"
+   ],
+   "container_only": true,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "interaction_modes",
+    "check": "Check the 7 cross-child modes: implicit shared state, conflicting assumptions, dependency gap, scope overlap, ordering violation, consumer impact, residual references — each detected mode is a finding."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95
+ },
+ {
+  "id": "G6",
+  "exec": "AGENT",
+  "facet": "approach-soundness",
+  "routing": "overlay",
+  "trigger": "a real design choice exists: novel/complex approach, multiple viable mechanisms, or an irreversible/high-blast decision (LLM-routed; skip mechanical tickets)",
+  "name": "Approach soundness, anti-patterns & alternative-selection [overlay]",
+  "scenario": "Judge whether the plan's chosen APPROACH is sound and the best available — the defect a well-formed plan can still have. (1) MECHANISM CORRECTNESS: reason through whether the proposed mechanism actually achieves the goal — logic/data-flow complete, edge/empty/concurrent/failure cases handled, no hidden ordering/atomicity assumption that breaks (e.g. a check-then-act idempotency that is really a TOCTOU race). (2) FITNESS-FOR-PURPOSE: does this solution actually solve the named problem (not a proxy)? (3) APPROACH SELECTION (alternatives WITHOUT negative priming): YOU (the reviewer) generate 1-2 plausible alternative approaches that differ structurally (data-layer / control-flow / dependency-graph / interface-boundary) and judge whether the plan's chosen approach is defensibly at-least-as-good on codebase-alignment, blast-radius, testability, simplicity, robustness. If defensible -> PASS and DISCARD your generated alternatives (never write them into the plan). If a clearly-superior alternative was missed -> a FINDING coaching the PLANNER to adopt the better approach ('consider X because Y') — the implementer's plan still contains only ONE approach. (4) Confirm the plan states a POSITIVE rationale for the chosen approach (why it fits) — its ABSENCE is a finding; do NOT require a rejected-alternatives section (that primes implementers with rejected behavior). SEVERITY: a mechanism that won't work or a clearly-wrong approach = CRITICAL (agent builds the wrong thing); a missed clearly-better alternative = MAJOR; missing positive rationale = MINOR. ANTI-FP: mechanical/well-understood changes have no real design choice -> PASS not-applicable; do not manufacture alternatives for a forced solution; ground correctness reasoning in the actual code via the tools.",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "mechanism_correctness",
+    "check": "The proposed mechanism actually achieves the goal — logic/data-flow complete; edge/empty/concurrent/failure handled; no hidden ordering/atomicity assumption (e.g. check-then-act idempotency that is a TOCTOU race)."
+   },
+   {
+    "key": "fitness_for_purpose",
+    "check": "The solution solves the named problem, not a proxy."
+   },
+   {
+    "key": "approach_selection",
+    "check": "Reviewer generates 1-2 structurally-different alternatives and judges the chosen approach defensible on codebase-alignment/blast-radius/testability/simplicity/robustness; a clearly-superior missed alternative is a coaching finding."
+   },
+   {
+    "key": "positive_rationale",
+    "check": "The plan states a POSITIVE rationale for the chosen approach (its absence is a finding); do NOT require a rejected-alternatives section (anti-priming)."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95,
+  "overlay_routing": "llm"
+ },
+ {
+  "id": "T10",
+  "exec": "AGENT",
+  "facet": "overlay-infra",
+  "routing": "overlay",
+  "trigger": "infrastructure/IaC intent (LLM-routed for plans — deterministic IaC keywords over-fire on prose; on a code DIFF use the *.tf/Dockerfile/k8s file-glob triggers from the 9da1 IaC catalog instead)",
+  "name": "Infrastructure / IaC [overlay]",
+  "scenario": "OVERLAY — apply only when the plan provisions or configures infrastructure (cloud resources, IaC: Terraform/CloudFormation/CDK/Pulumi/Ansible, Kubernetes/Helm); else PASS not-applicable. Binary checks: (a) STATE: remote state + locking (no local state); plan-before-apply discipline. (b) LEAST-PRIVILEGE IAM: roles/policies scoped to the minimum, no wildcard `*:*`/admin-for-convenience, no long-lived credentials committed. (c) IDEMPOTENCY & DRIFT: changes are idempotent; drift / out-of-band manual changes considered. (d) BLAST RADIUS & ENV ISOLATION: dev/stage/prod separation; destroy/replace safety — does an apply risk data loss (RDS deletion, S3 force-destroy, instance/volume replacement)? `prevent_destroy` on stateful resources? (e) SECRETS: no plaintext secrets in IaC/vars; use a secrets manager / SSM / vault. (f) COST & SIZING: obviously-expensive or unbounded resources flagged; limits/autoscaling/quotas considered. (g) OBSERVABILITY & OWNERSHIP: logging/metrics/alarms for new infra; the resource is reproducible (as-code) with a clear teardown. SEVERITY: a destructive apply with no safeguard, a wildcard-admin grant, or a plaintext secret = MAJOR. ANTI-FP: not-applicable for non-infra tickets; managed defaults that are documented are fine.",
+  "_v7_note": "routed 1-TURN->AGENT in v7 (codebase-grounded; resolves AMBIGUOUS-without-tools)",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "state",
+    "check": "Remote state + locking (no local state); plan-before-apply discipline."
+   },
+   {
+    "key": "least_privilege_iam",
+    "check": "Roles/policies scoped to minimum; no wildcard *:* / admin-for-convenience; no long-lived creds committed."
+   },
+   {
+    "key": "idempotency_drift",
+    "check": "Changes idempotent; drift / out-of-band manual changes considered."
+   },
+   {
+    "key": "blast_radius",
+    "check": "Dev/stage/prod separation; destroy/replace safety; prevent_destroy on stateful resources (RDS/S3/volumes)."
+   },
+   {
+    "key": "secrets",
+    "check": "No plaintext secrets in IaC/vars; secrets manager / SSM / vault."
+   },
+   {
+    "key": "cost_sizing",
+    "check": "Obviously-expensive or unbounded resources flagged; limits/autoscaling/quotas considered."
+   },
+   {
+    "key": "observability_ownership",
+    "check": "Logging/metrics/alarms for new infra; reproducible as-code with a clear teardown."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95,
+  "overlay_routing": "llm"
+ },
+ {
+  "id": "T11",
+  "exec": "AGENT",
+  "facet": "overlay-migration",
+  "routing": "overlay",
+  "trigger": "schema/data-shape change or backfill over PERSISTED data (LLM-routed — E4: deterministic 'migration' false-fires on rebar's bash->Python strangler; the LLM router correctly distinguishes data-migration)",
+  "name": "Data-migration / backfill safety [overlay]",
+  "scenario": "OVERLAY — apply only when the plan changes a schema / persisted format or backfills data; else PASS not-applicable. This is migration-EXECUTION safety (distinct from T4 which is breakage-acknowledgement). Binary checks: (a) ONLINE / EXPAND-CONTRACT: the migration runs without downtime and via expand-contract (add nullable -> backfill -> enforce), not a single blocking DDL that locks a large table. (b) BATCHING & SCALE: large backfills are batched/throttled, not one giant transaction. (c) RESUMABILITY: a partially-completed migration is resumable/idempotent (re-runnable without double-applying). (d) DUAL-WRITE WINDOW: rows written DURING the migration are handled (no lost writes between backfill and cutover). (e) ROLLBACK / DATA-LOSS: there is a back-out path and data loss is impossible on partial failure. SEVERITY: an irreversible single-shot migration with no rollback, or a long blocking lock on a large table = MAJOR. ANTI-FP: not-applicable for non-persisted/in-memory changes.",
+  "_v7_note": "routed 1-TURN->AGENT in v7 (codebase-grounded; resolves AMBIGUOUS-without-tools)",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "expand_contract",
+    "check": "Migration runs without downtime via expand-contract (add nullable -> backfill -> enforce), not a single blocking DDL on a large table."
+   },
+   {
+    "key": "batching_scale",
+    "check": "Large backfills are batched/throttled, not one giant transaction."
+   },
+   {
+    "key": "resumability",
+    "check": "A partially-completed migration is resumable/idempotent."
+   },
+   {
+    "key": "dual_write_window",
+    "check": "Rows written DURING the migration are handled (no lost writes between backfill and cutover)."
+   },
+   {
+    "key": "rollback_no_data_loss",
+    "check": "There is a back-out path and no data loss on partial failure."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95,
+  "overlay_routing": "llm"
+ },
+ {
+  "id": "T12",
+  "exec": "1-TURN",
+  "facet": "overlay-rollout",
+  "routing": "overlay",
+  "trigger": "changes runtime behavior of a deployed/long-running system (LLM-routed — E4: deterministic 'deploy'/'rollback' fired 7/19 plans, all false; LLM router fired 0)",
+  "name": "Rollout / rollback / reversibility [overlay]",
+  "scenario": "OVERLAY — apply only when the plan changes the runtime behavior of a deployed or long-running system; else PASS not-applicable (e.g. a library/CLI with no deploy surface). Binary checks: (a) STAGED ROLLOUT: a behavior change reaches production via a flag / canary / staged rollout, not a single 100%-traffic flip. (b) ROLLBACK: there is an explicit, cheap, tested way to undo the change quickly without data cleanup. (c) DEPLOY ORDERING: if producers/consumers or coordinated services change, the deploy order (and coexistence of old+new during rollout) is specified. SEVERITY: a one-shot behavior change to all traffic with no flag and no rollback path = MAJOR. ANTI-FP: not-applicable for non-deployed code; an internal-only change with trivial revert is fine.",
+  "applies_at": {
+   "levels": [
+    "epic",
+    "story",
+    "task"
+   ],
+   "container_only": false,
+   "suppress_when": [],
+   "suppress_types": [
+    "bug"
+   ]
+  },
+  "checklist": [
+   {
+    "key": "staged_rollout",
+    "check": "A behavior change reaches prod via flag/canary/staged rollout, not a single 100%-traffic flip."
+   },
+   {
+    "key": "rollback",
+    "check": "An explicit, cheap, tested way to undo quickly without data cleanup."
+   },
+   {
+    "key": "deploy_ordering",
+    "check": "If producers/consumers/coordinated services change, deploy order and old+new coexistence is specified."
+   }
+  ],
+  "severity_by": "pass3",
+  "default_posture": "advisory",
+  "block_threshold": 0.95,
+  "overlay_routing": "llm"
+ }
+]
