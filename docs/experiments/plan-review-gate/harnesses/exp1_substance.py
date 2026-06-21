@@ -31,7 +31,7 @@ def call_cached(plan_title, plan_text, chunk):
     ]
     t0 = time.time()
     resp = client.messages.create(
-        model=MODEL, max_tokens=4000, system=system,
+        model=MODEL, max_tokens=16000, system=system,
         tools=h.TOOL, tool_choice={"type": "tool", "name": "submit_review"},
         messages=[{"role": "user", "content": build_user(chunk)}],
     )

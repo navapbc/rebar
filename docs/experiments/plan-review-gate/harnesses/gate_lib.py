@@ -222,7 +222,7 @@ def single_turn(title, plan, chunk, model="claude-sonnet-4-6", extra="", retries
     for attempt in range(retries):
         try:
             t0 = time.time()
-            r = client.messages.create(model=model, max_tokens=4000, system=system, tools=h.TOOL,
+            r = client.messages.create(model=model, max_tokens=16000, system=system, tools=h.TOOL,
                                        tool_choice={"type": "tool", "name": "submit_review"},
                                        messages=[{"role": "user", "content": build_user(chunk)}])
             findings, status = robust_findings(r, expected_ids=ids)

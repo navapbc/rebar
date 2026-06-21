@@ -6,7 +6,7 @@ import harness as h
 TMP = h.TMP
 RUNS = os.path.join(TMP, 'exp2_agentic.jsonl')
 MODEL = "claude-sonnet-4-6"
-MAX_ITERS = 10
+MAX_ITERS = 20
 client = anthropic.Anthropic()
 
 # Three AGENT-tier (tool-using) criteria, fully specified with the codebase evidence they must gather.
@@ -40,14 +40,14 @@ def run_tool(name, inp, repo_root):
             cmd.append(target)
             out = subprocess.run(cmd, capture_output=True, text=True, timeout=20).stdout
             out = out.replace(repo_root + "/", "")
-            return out[:6000] if out else "(no matches)"
+            return out[:20000] if out else "(no matches)"
         if name == "read_file":
             p = os.path.join(repo_root, inp["path"]) if not inp["path"].startswith("/") else inp["path"]
             if not os.path.isfile(p):
                 return f"(no such file: {inp['path']})"
             lines = open(p, errors="replace").read().splitlines()
             s = max(0, inp.get("start", 1) - 1); lim = inp.get("limit", 120)
-            return "\n".join(lines[s:s + lim])[:6000]
+            return "\n".join(lines[s:s + lim])[:20000]
         if name == "glob":
             import glob as G
             hits = G.glob(os.path.join(repo_root, "**", inp["pattern"]), recursive=True)
@@ -77,7 +77,7 @@ def run_agentic(plan_title, plan_text, crit_id, repo_root):
             for blk in messages[-1]["content"]:
                 if isinstance(blk, dict):
                     blk["cache_control"] = {"type": "ephemeral"}
-        kw = dict(model=MODEL, max_tokens=4000, system=system, tools=TOOLS, messages=messages)
+        kw = dict(model=MODEL, max_tokens=16000, system=system, tools=TOOLS, messages=messages)
         if last:
             kw["tool_choice"] = {"type": "tool", "name": "submit_review"}
         resp = client.messages.create(**kw)

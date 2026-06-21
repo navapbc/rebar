@@ -86,7 +86,7 @@ def pass1_chunk(title, plan, rubric_chunk, model="claude-opus-4-8", extra=""):
             "Remember: NO severity/confidence; ground each finding; empty list if the plan is clean here.")
     for attempt in range(3):
         try:
-            r = client.messages.create(model=model, max_tokens=4000, system=system, tools=PASS1_TOOL,
+            r = client.messages.create(model=model, max_tokens=16000, system=system, tools=PASS1_TOOL,
                                        tool_choice={"type": "tool", "name": "emit_findings"},
                                        messages=[{"role": "user", "content": user}])
             fs = next((b.input.get("findings", []) for b in r.content if b.type == "tool_use"), [])
@@ -182,7 +182,7 @@ def pass2_verify(title, plan, finding, repo_root=None, agentic=False):
               {"type": "text", "text": f"# Plan under review\nTitle: {title}\n## Plan\n{plan}"}]
     for attempt in range(3):
         try:
-            r = client.messages.create(model="claude-sonnet-4-6", max_tokens=1500, system=system,
+            r = client.messages.create(model="claude-sonnet-4-6", max_tokens=8000, system=system,
                                        tools=PASS2_TOOL, tool_choice={"type": "tool", "name": "verify_finding"},
                                        messages=[{"role": "user", "content": _verify_user(finding)}])
             v = next((b.input for b in r.content if b.type == "tool_use"), None)
@@ -201,7 +201,7 @@ def _verify_agentic(title, plan, finding, repo_root):
     tool_calls = 0
     for it in range(8):
         last = it >= 7
-        kw = dict(model="claude-sonnet-4-6", max_tokens=1800, system=system, tools=e2.TOOLS[:-1] + PASS2_TOOL, messages=messages)
+        kw = dict(model="claude-sonnet-4-6", max_tokens=8000, system=system, tools=e2.TOOLS[:-1] + PASS2_TOOL, messages=messages)
         if last: kw["tool_choice"] = {"type": "tool", "name": "verify_finding"}
         r = client.messages.create(**kw)
         tus = [b for b in r.content if b.type == "tool_use"]
@@ -219,7 +219,7 @@ def _verify_agentic(title, plan, finding, repo_root):
         if done: return {"verify": verify, "mode": "agentic", "tool_calls": tool_calls}
     return {"verify": None, "mode": "agentic-no-verdict", "tool_calls": tool_calls}
 
-def pass2_verify_all(title, plan, findings, model=VERIFY_MODEL, max_tokens=8000):
+def pass2_verify_all(title, plan, findings, model=VERIFY_MODEL, max_tokens=32000):
     """Pass 2 as a SINGLE aggregate call over all findings, on a NON-FRONTIER model. Independent of
     Pass-1 (it never sees the finder's reasoning); each finding is presented as an unproven claim to
     TEST and judged on its own merits. Returns {finding_index: {severity_attributes, binary}}.
