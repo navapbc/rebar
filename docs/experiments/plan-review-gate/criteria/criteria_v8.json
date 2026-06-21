@@ -465,7 +465,7 @@
   "default_posture": "advisory",
   "block_threshold": 0.95,
   "_prompt_note": "scenario refined this session (review-process FP fix: domain-appropriate security, no already-in-repo leakage)",
-  "_tier_note": "flipped 1-TURN->AGENT (T5c experiment: security implications need codebase grounding to avoid speculative-from-text FPs)"
+  "_tier_note": "AGENT (experiment): a security verdict depends on the actual auth/secret implementation; single-turn speculates from plan text"
  },
  {
   "id": "T5e",
@@ -1121,7 +1121,7 @@
  },
  {
   "id": "T10",
-  "exec": "1-TURN",
+  "exec": "AGENT",
   "facet": "overlay-infra",
   "routing": "overlay",
   "trigger": "infrastructure/IaC intent (LLM-routed for plans — deterministic IaC keywords over-fire on prose; on a code DIFF use the *.tf/Dockerfile/k8s file-glob triggers from the 9da1 IaC catalog instead)",
@@ -1173,11 +1173,11 @@
   "default_posture": "advisory",
   "block_threshold": 0.95,
   "overlay_routing": "llm",
-  "_tier_note": "plan-intrinsic IaC-safety judgment from ticket + best-practice knowledge; existence/convention/NIH checks deferred to E4/G1G2/A1 (no .tf in a plan)"
+  "_tier_note": "AGENT (experiment): an IaC verdict depends on the actual .tf — the agent found a real committed secret the plan/single-turn missed"
  },
  {
   "id": "T11",
-  "exec": "1-TURN",
+  "exec": "AGENT",
   "facet": "overlay-migration",
   "routing": "overlay",
   "trigger": "schema/data-shape change or backfill over PERSISTED data (LLM-routed — E4: deterministic 'migration' false-fires on rebar's bash->Python strangler; the LLM router correctly distinguishes data-migration)",
@@ -1221,7 +1221,7 @@
   "default_posture": "advisory",
   "block_threshold": 0.95,
   "overlay_routing": "llm",
-  "_tier_note": "plan-intrinsic migration-safety judgment from ticket + best-practice knowledge; existence/convention/NIH checks deferred to E4/G1G2/A1 (no schema in a plan)"
+  "_tier_note": "AGENT (by analogy to T10; UNTESTED — no real migration in the corpus): migration safety depends on the actual schema/migration; re-test in the eval suite"
  },
  {
   "id": "T12",

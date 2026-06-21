@@ -31,7 +31,7 @@ LLM_EXPECTED = set(REGISTRY["Layer-2 judgment"]) | set(REGISTRY["Layer-2 judgmen
 # mechanism-correctness in code. G3/G4 are NOT agent — they are ticket-analysis (parent ACs vs child
 # tickets), reclassified to single-turn (the agent-vs-single-turn bright line: only criteria that must
 # probe the live codebase/environment are agent-tier).
-AGENT_TIER = {"G1G2", "E4", "A1", "G6", "T5c"}  # T5c flipped to AGENT (experiment: security needs codebase grounding)
+AGENT_TIER = {"G1G2", "E4", "A1", "G6", "T5c", "T10", "T11"}  # grounding experiment: verdict depends on actual code
 BROAD_TIER = {"BROAD"}
 
 def main():

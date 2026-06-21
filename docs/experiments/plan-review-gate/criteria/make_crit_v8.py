@@ -37,19 +37,26 @@ LLM_TRIGGER_NOTE = {
 }
 
 # Tier reclassification (the agent-vs-single-turn bright line, applied):
-# code-grounding is the SOLE responsibility of E4 / G1G2 / A1 (they grep/read the repo). Every other
-# criterion does TICKET/PLAN analysis over artifacts we already hold and DEFERS grounding to them — so it
-# is single-turn, not the tool-using AGENT tier. These four were mis-tagged AGENT:
-#   G3/G4 — container checks: compare parent ACs / sibling tickets (text we hold), no codebase probe.
-#   T10/T11 — plan-intrinsic IaC/migration safety (best-practice judgment of the plan); existence/convention
-#             checks belong to E4/G1G2/A1; on a PLAN there is no .tf/schema to read anyway. (Revert the v7
-#             1-TURN->AGENT flip.) The agentic code-grounding for IaC/migration is a CODE-REVIEW-diff concern.
-RECLASSIFY_EXEC = {"G3": "1-TURN", "G4": "1-TURN", "T10": "1-TURN", "T11": "1-TURN"}
+# G3/G4 (container checks: parent ACs vs sibling tickets — text we hold) are single-turn: no codebase probe.
+RECLASSIFY_EXEC = {"G3": "1-TURN", "G4": "1-TURN"}
 RECLASSIFY_NOTE = {
     "G3": "ticket-analysis: parent ACs vs child tickets (artifacts already held), fed as context; not tool-using",
     "G4": "ticket-analysis: cross-child consistency over the child tickets; code-grounding (consumer impact / residual refs) is owned by E4/G1G2/A1, not duplicated here",
-    "T10": "plan-intrinsic IaC-safety judgment from ticket + best-practice knowledge; existence/convention/NIH checks deferred to E4/G1G2/A1 (no .tf in a plan)",
-    "T11": "plan-intrinsic migration-safety judgment from ticket + best-practice knowledge; existence/convention/NIH checks deferred to E4/G1G2/A1 (no schema in a plan)",
+}
+# GROUNDING-AGENT overlays (the grounding experiment): an IMPLICATION overlay whose verdict depends on WHAT
+# THE ACTUAL CODE DOES — the plan can mislead by omission OR assertion — is AGENT-tier. Settled by experiment:
+#   T5c (security): single-turn speculated 'almost certainly env-var leakage'; the agent read the real
+#                   Secrets-Manager + constant-time handling and correctly dismissed it.
+#   T10 (infra):    same verdict, but the agent found a REAL committed HMAC secret in a zip the plan/ST missed.
+#   T11 (migration): no real migration in the corpus to test -> AGENT by ANALOGY to T10 (verdict depends on the
+#                   actual schema/migration); flagged untested, re-test in the eval suite.
+# KEPT single-turn (experiment: verdict was PLAN-TEXT-EVIDENT, grounding non-decisive): T5b, T9, T4, T5e, T5a
+#   (T5a/T5b borderline — perf/reliability CAN need grounding when a code mitigation exists; flag for eval).
+GROUNDING_AGENT = {"T5c", "T10", "T11"}
+GROUNDING_NOTE = {
+    "T5c": "AGENT (experiment): a security verdict depends on the actual auth/secret implementation; single-turn speculates from plan text",
+    "T10": "AGENT (experiment): an IaC verdict depends on the actual .tf — the agent found a real committed secret the plan/single-turn missed",
+    "T11": "AGENT (by analogy to T10; UNTESTED — no real migration in the corpus): migration safety depends on the actual schema/migration; re-test in the eval suite",
 }
 
 # T5c security prompt refinement (review-process fix, not an epic fix): the single-turn security overlay
@@ -99,19 +106,14 @@ def main():
         if c["id"] in RECLASSIFY_EXEC:
             n["exec"] = RECLASSIFY_EXEC[c["id"]]
             n["_tier_note"] = RECLASSIFY_NOTE[c["id"]]
-            n.pop("_v7_note", None)   # the v7 1-TURN->AGENT flip for T10/T11 is reverted
+            n.pop("_v7_note", None)
         if c["id"] in SCENARIO_OVERRIDE:
             n["scenario"] = SCENARIO_OVERRIDE[c["id"]]
             n["_prompt_note"] = "scenario refined this session (review-process FP fix: domain-appropriate security, no already-in-repo leakage)"
-        if c["id"] == "T5c":
-            # T5c experiment (2026): a sound SECURITY verdict requires grounding in the ACTUAL implementation —
-            # single-turn FP'd by speculating from plan text ("baked at deploy almost certainly means secrets in
-            # env vars"); the agent read the real auth/secret handling (Secrets Manager + constant-time compare)
-            # and correctly dismissed it. Refines (does not contradict) the bright line: an IMPLICATION overlay
-            # whose verdict depends on HOW security/ops/infra is implemented genuinely "probes the environment"
-            # and is therefore AGENT-tier (distinct from E4's assertion-existence grounding).
+        if c["id"] in GROUNDING_AGENT:   # grounding experiment: verdict depends on the actual code -> AGENT
             n["exec"] = "AGENT"
-            n["_tier_note"] = "flipped 1-TURN->AGENT (T5c experiment: security implications need codebase grounding to avoid speculative-from-text FPs)"
+            n["_tier_note"] = GROUNDING_NOTE[c["id"]]
+            n.pop("_v7_note", None)
         out.append(n)
 
     # APPROVED new criterion (this session): intent-source fidelity. NOT in v6/v7, appended here.
