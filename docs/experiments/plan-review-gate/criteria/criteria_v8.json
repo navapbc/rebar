@@ -432,7 +432,7 @@
   "facet": "overlay-security",
   "name": "Security (overlay)",
   "trigger": "new endpoints, data access/storage/transmission, PII, or auth boundaries",
-  "scenario": "OVERLAY — apply only if the plan adds endpoints, data access/storage/transmission, PII handling, or auth boundaries; otherwise PASS as not-applicable. Baseline against OWASP Top 10. Binary checks: (a) access_classification — every new endpoint/path declares its access level (public/authenticated/internal-only) and sensitive-data paths require auth; AMBIGUITY about access level is itself the failure; (b) data_protection — encryption at rest and in transit where applicable, PII/secrets identified, no secret-logging or data leakage. SEVERITY: an undeclared new endpoint or sensitive path is MAJOR — cite the OWASP category (e.g. 'A01 Broken Access Control'). ANTI-FP: a documented-public endpoint with rationale scores fine; data_protection is not-applicable if there is no data storage/transmission/PII. PASS if security boundaries are explicit and sound. ALSO (broaden trigger to any plan that introduces a credential/role/grant/secret) check LEAST-PRIVILEGE (grants scoped to the minimum; no wildcard *:* / admin-for-convenience) and SECRET LIFECYCLE (no plaintext secrets in code/IaC/logs; use a secrets manager).",
+  "scenario": "OVERLAY — apply ONLY if the plan actually adds a security surface in THIS application's domain: a new endpoint, network exposure, an authn/authz boundary, storage/transmission of sensitive data, PII, or a credential/secret/grant. If the application has no such surface (e.g. a local library / CLI / git-backed tool with no network or auth), PASS as not-applicable. DERIVE the security model from the application's ACTUAL domain — do NOT import generic web-app concepts (e.g. a 'declared access level', endpoint authn) that this application does not have; a finding that imposes a security requirement the application's domain does not contain is a FALSE POSITIVE, not a gap. Where a real surface exists, check (OWASP only where the category applies): (a) sensitive paths use the app's own auth mechanism; (b) data protection — encryption at rest/in transit where data is actually stored/transmitted; (c) LEAST-PRIVILEGE on any new credential/role/grant (no wildcard / admin-for-convenience); (d) SECRET LIFECYCLE — no plaintext secrets in code/IaC/logs; use a secrets manager. ANTI-FP: do NOT flag 'leakage' of data that is ALREADY in the ticket/repo — review findings that also live in the repo leak nothing; secrets sitting in tickets/the repo are an UPSTREAM concern, not this review's. SEVERITY priors: an undeclared sensitive surface or a plaintext secret is high. PASS if the application's actual security boundaries are explicit and sound.",
   "applies_at": {
    "levels": [
     "task"
@@ -463,7 +463,8 @@
   ],
   "severity_by": "pass3",
   "default_posture": "advisory",
-  "block_threshold": 0.95
+  "block_threshold": 0.95,
+  "_prompt_note": "scenario refined this session (review-process FP fix: domain-appropriate security, no already-in-repo leakage)"
  },
  {
   "id": "T5e",
