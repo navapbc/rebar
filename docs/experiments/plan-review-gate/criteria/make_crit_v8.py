@@ -77,6 +77,37 @@ def main():
             n.pop("_v7_note", None)   # the v7 1-TURN->AGENT flip for T10/T11 is reverted
         out.append(n)
 
+    # APPROVED new criterion (this session): intent-source fidelity. NOT in v6/v7, appended here.
+    # Catches silent descoping of an EXTERNALLY-expressed requirement (the gate's plan-internal blind spot).
+    # Single-call/2-STEP, FED the linked session log + ticket graph (NOT agent — text-vs-text); frontier model;
+    # fires ONLY when the ticket is linked to a session log.
+    out.append({
+        "id": "ISF", "exec": "2-STEP", "facet": "intent-provenance",
+        "name": "Intent-source fidelity (plan vs linked design intent)",
+        "scenario": (
+            "Compare the plan against the EXTERNAL intent expressed in the ticket's LINKED SESSION LOG (the "
+            "design/brainstorm of record), to catch requirements the plan SILENTLY DROPPED, descoped, or "
+            "contradicted relative to what the user expressed — a defect no plan-internal check can catch (E3 "
+            "compares plan-vs-its-own-title; this compares plan-vs-the-original-intent). 2-STEP: (1) extract "
+            "the discrete expressed requirements/decisions/constraints from the linked session log; (2) check "
+            "the plan + its ticket graph against each, flagging any dropped, narrowed/out-scoped-without-"
+            "rationale, or contradicted. Runs on a FRONTIER model (large session-log context) and is FED the "
+            "session log + the pre-resolved ticket graph as context — NOT agent/tool-using (deterministic "
+            "pre-retrieval if the log overflows context). ANTI-FP: a requirement DELIBERATELY descoped WITH a "
+            "stated rationale is not a finding; fire only on SILENT or unjustified divergence."),
+        "trigger": "ticket is LINKED TO A SESSION LOG (else PASS not-applicable / skip — never fabricate an intent baseline)",
+        "routing": "base",
+        "applies_at": {"levels": ["epic", "story", "task"], "container_only": False,
+                       "suppress_when": [], "suppress_types": ["bug"]},
+        "checklist": [
+            {"key": "requirements_extracted", "check": "Discrete expressed requirements/decisions/constraints are extracted from the linked session log."},
+            {"key": "each_honored", "check": "Each expressed requirement is honored by the plan + ticket graph, or descoped WITH a stated rationale."},
+            {"key": "no_silent_descope", "check": "No expressed requirement is silently dropped, narrowed, or contradicted (the visual-editing-deferred failure mode)."},
+        ],
+        "severity_by": "pass3", "default_posture": "advisory", "block_threshold": DEFAULT_BLOCK_THRESHOLD,
+        "_tier_note": "frontier-model single-call/2-STEP, FED the linked session log + ticket graph; NOT agent (text-vs-text); fires only when a session log is linked",
+    })
+
     path = os.path.join(HERE, "criteria_v8.json")
     json.dump(out, open(path, "w"), indent=1, ensure_ascii=False)
     llm = [c["id"] for c in out if c.get("overlay_routing") == "llm"]

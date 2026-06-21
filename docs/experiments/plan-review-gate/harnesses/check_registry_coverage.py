@@ -17,11 +17,15 @@ REGISTRY = {
     "Layer-2 judgment": ["F1", "F4", "E1", "E2", "E3", "E5", "E6", "G1G2", "G3", "G4", "E4", "A1"],
     # G5 (decomposition, from v3) is carried as an additional judgment criterion
     "Layer-2 judgment (v3 add)": ["G5", "G6"],
+    # ISF (intent-source fidelity) — approved this session; single-turn/2-STEP, fed the linked session log
+    # + ticket graph (NOT agent); fires only when a session log is linked.
+    "Layer-2 judgment (v8 add)": ["ISF"],
     "Triggered overlays": ["T1", "T2", "T3", "T4", "T5a", "T5b", "T5c", "T5d", "T5e", "T6", "T7", "T8", "T9", "T10", "T11", "T12"],
     "Cross-cutting": ["COH", "BROAD"],   # coherence pass + bounded broad open-ended pass
 }
 # DET is a deterministic/code tier and not expected in the LLM criteria JSON; overlays/judgment/cross-cut are.
 LLM_EXPECTED = set(REGISTRY["Layer-2 judgment"]) | set(REGISTRY["Layer-2 judgment (v3 add)"]) \
+    | set(REGISTRY["Layer-2 judgment (v8 add)"]) \
     | set(REGISTRY["Triggered overlays"]) | set(REGISTRY["Cross-cutting"])
 # AGENT tier = code-grounding only (grep/read the repo). E4/G1G2/A1 own code-grounding; G6 grounds
 # mechanism-correctness in code. G3/G4 are NOT agent — they are ticket-analysis (parent ACs vs child
