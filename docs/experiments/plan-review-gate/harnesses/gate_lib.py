@@ -110,6 +110,40 @@ def load_criteria(path=CRIT_V7):
     return json.load(open(path))
 
 
+# ---- context-window escalation (no-cap-by-design size handling) ------------
+# Before truncating or decomposing, escalate to a LARGER-CONTEXT model. Estimate input tokens, pick the
+# smallest model on the ladder whose window fits (with headroom for output), and on a context-limit API
+# error escalate to the next model. If the largest window is still exceeded -> caller decomposes (never cap).
+MODEL_LADDER = [("claude-sonnet-4-6", 200_000), ("claude-opus-4-8", 200_000)]  # extend with a 1M-window model when available
+def est_tokens(text):
+    return len(text or "") // 4   # cheap heuristic; swap a real tokenizer in production
+
+def pick_model(input_text, ladder=MODEL_LADDER, output_reserve=16_000, headroom=0.9):
+    need = est_tokens(input_text)
+    for model, window in ladder:
+        if need <= window * headroom - output_reserve:
+            return model
+    return None   # nothing fits -> caller must decompose (structural / section-chunk), never truncate
+
+def is_context_error(e):
+    s = str(e).lower()
+    return any(k in s for k in ("context", "too long", "prompt is too long", "maximum context", "exceed"))
+
+def with_context_escalation(call, ladder=MODEL_LADDER):
+    """call(model)->result; on a context-limit error, escalate up the ladder. Raises if all exhausted
+    (the caller then falls to structural decomposition / INDETERMINATE — never a cap)."""
+    last = None
+    for model, _ in ladder:
+        try:
+            return call(model)
+        except Exception as e:
+            last = e
+            if is_context_error(e):
+                continue
+            raise
+    raise last
+
+
 # ---- declarative proportionate scrutiny (replaces retune.py hard-coding) ----
 def is_test_task(plan):
     p = (plan or "").lower()

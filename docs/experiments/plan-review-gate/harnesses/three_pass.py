@@ -130,7 +130,11 @@ PASS2_SYSTEM = (
     "justified — answer evidence_entails_finding=no. Charitable plan-reading here IS skepticism of the "
     "finding (the same critical framing as Pass-1, now aimed at the criticism) — it filters over-flagging "
     "without rubber-stamping the finder. Judge on the evidence and the plan's most reasonable reading, not "
-    "on how confident the plan or the finder sounds."
+    "on how confident the plan or the finder sounds.\n"
+    "- ABSENCE / 'missing X' findings get a HIGHER BAR: a finder may have seen only a slice of the plan, so "
+    "confirm X is absent from the COMPLETE artifact (the whole plan + its children/linked context, via "
+    "retrieval) before the finding stands — if X appears anywhere in the complete artifact, "
+    "evidence_entails_finding=no (a partial-view false positive)."
 )
 PASS2_TOOL = [{"name": "verify_finding", "description": "Verify a pass-1 finding: attributes + binary sub-answers.",
   "input_schema": {"type": "object", "properties": {
