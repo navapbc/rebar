@@ -35,7 +35,15 @@ How to author every finding (follow strictly):
 - For criteria that require inspecting a live codebase you do not have access to, do NOT assert the code is wrong; return AMBIGUOUS and name the assumption/element that would need checking.
 
 Verdict per criterion: PASS (criterion satisfied), AMBIGUOUS (cannot decide / needs escalation or codebase access), FAIL (criterion not met — a real finding).
-You MUST return exactly one entry per criterion you are given, using the criterion's id."""
+You MUST return exactly one entry per criterion you are given, using the criterion's id.
+
+REASON FIRST (do not skip): use the tool's `analysis` field to think through the plan against the criteria
+BEFORE committing any verdict — forcing the verdict before reasoning measurably degrades quality. Fill
+`analysis` first, then the per-criterion entries.
+JUDGE SUBSTANCE, NOT LENGTH: a longer or more detailed plan is not automatically better, and a terse plan
+that satisfies a criterion PASSES — never reward verbosity.
+A finding exists only when the plan would cause rework or build the wrong thing; if a plausible benign
+reading dissolves the concern, there is no finding."""
 
 TOOL = [{
   "name": "submit_review",
@@ -43,6 +51,7 @@ TOOL = [{
   "input_schema": {
     "type": "object",
     "properties": {
+      "analysis": {"type": "string", "description": "REASON FIRST: think through the plan against each criterion here BEFORE the verdicts (scratchpad; fill this before `criteria`). Reasoning-before-verdict measurably beats emitting the verdict first."},
       "criteria": {
         "type": "array",
         "items": {
@@ -60,7 +69,7 @@ TOOL = [{
         }
       }
     },
-    "required": ["criteria"]
+    "required": ["analysis", "criteria"]
   }
 }]
 

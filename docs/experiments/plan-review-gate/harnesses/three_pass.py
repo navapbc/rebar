@@ -46,17 +46,23 @@ PASS1_SYSTEM = (
     "is to FIND and GROUND, not to rate.\n"
     "- Ground every finding; do not fabricate to look thorough. If the plan satisfies a criterion, emit "
     "no finding for it. It is fine to return an empty findings list for a clean chunk.\n"
-    "- A benign reading that dissolves a concern means there is no finding."
+    "- A benign reading that dissolves a concern means there is no finding.\n"
+    "- REASON FIRST: use the tool's `analysis` field to think through the plan against the rubric BEFORE "
+    "listing findings (reasoning-before-output measurably beats emitting findings first).\n"
+    "- JUDGE SUBSTANCE, NOT LENGTH: a longer/more detailed plan is not automatically better; a terse plan "
+    "that satisfies a criterion yields no finding."
 )
 PASS1_TOOL = [{"name": "emit_findings", "description": "Emit pass-1 evidence records (no severity/confidence).",
-  "input_schema": {"type": "object", "properties": {"findings": {"type": "array", "items": {"type": "object",
+  "input_schema": {"type": "object", "properties": {
+    "analysis": {"type": "string", "description": "REASON FIRST: reason through the plan against the rubric criteria here BEFORE listing findings (scratchpad; fill before `findings`)."},
+    "findings": {"type": "array", "items": {"type": "object",
     "properties": {
       "finding": {"type": "string"},
       "criteria": {"type": "array", "items": {"type": "string"}},
       "evidence": {"type": "array", "items": {"type": "string"}},
       "scenarios": {"type": "array", "items": {"type": "string"}},
       "impact": {"type": "string"}},
-    "required": ["finding", "criteria", "evidence", "impact"]}}}, "required": ["findings"]}}]
+    "required": ["finding", "criteria", "evidence", "impact"]}}}, "required": ["analysis", "findings"]}}]
 
 def pass1_chunk(title, plan, rubric_chunk, model="claude-opus-4-8", extra=""):
     ids = [c["id"] for c in rubric_chunk]
@@ -103,10 +109,13 @@ PASS2_SYSTEM = (
     "- cited_reference_accurate: answer 'yes/no' ONLY if the finding cites a specific code/file reference; "
     "otherwise 'na' (most plan findings are non-citable absence findings).\n"
     "- Severity ATTRIBUTES are coarse ordinals describing the consequence IF the finding is real; you are "
-    "not deciding block/advisory (a deterministic pass does that)."
+    "not deciding block/advisory (a deterministic pass does that).\n"
+    "- REASON FIRST: use the `analysis` field to reason through each binary sub-question independently "
+    "against the evidence BEFORE committing the yes/no/insufficient answers."
 )
 PASS2_TOOL = [{"name": "verify_finding", "description": "Verify a pass-1 finding: attributes + binary sub-answers.",
   "input_schema": {"type": "object", "properties": {
+    "analysis": {"type": "string", "description": "REASON FIRST: reason through each binary sub-question independently against the evidence here BEFORE the attributes/answers (scratchpad)."},
     "severity_attributes": {"type": "object", "properties": {
         "prod_impact": {"type": "string", "enum": ["none", "low", "medium", "high"]},
         "debt_impact": {"type": "string", "enum": ["none", "low", "medium", "high"]},
@@ -118,7 +127,7 @@ PASS2_TOOL = [{"name": "verify_finding", "description": "Verify a pass-1 finding
         "cited_reference_accurate": {"type": "string", "enum": ["yes", "no", "insufficient", "na"]},
         **{q: {"type": "string", "enum": ["yes", "no", "insufficient"]} for q in GRADED}},
       "required": ["cited_reference_accurate"] + GRADED}},
-    "required": ["severity_attributes", "binary"]}}]
+    "required": ["analysis", "severity_attributes", "binary"]}}]
 
 def _verify_user(finding):
     return ("## Finding to TEST (an unproven claim from a pass-1 reviewer)\n"
