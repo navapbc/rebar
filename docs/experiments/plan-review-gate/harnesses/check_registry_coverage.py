@@ -23,8 +23,11 @@ REGISTRY = {
 # DET is a deterministic/code tier and not expected in the LLM criteria JSON; overlays/judgment/cross-cut are.
 LLM_EXPECTED = set(REGISTRY["Layer-2 judgment"]) | set(REGISTRY["Layer-2 judgment (v3 add)"]) \
     | set(REGISTRY["Triggered overlays"]) | set(REGISTRY["Cross-cutting"])
-# G1G2/E4/A1/G3/G4 run in the AGENT tier (separate harness); BROAD runs as the broad pass.
-AGENT_TIER = {"G1G2", "E4", "A1", "G3", "G4", "G6"}
+# AGENT tier = code-grounding only (grep/read the repo). E4/G1G2/A1 own code-grounding; G6 grounds
+# mechanism-correctness in code. G3/G4 are NOT agent — they are ticket-analysis (parent ACs vs child
+# tickets), reclassified to single-turn (the agent-vs-single-turn bright line: only criteria that must
+# probe the live codebase/environment are agent-tier).
+AGENT_TIER = {"G1G2", "E4", "A1", "G6"}
 BROAD_TIER = {"BROAD"}
 
 def main():

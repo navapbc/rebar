@@ -36,6 +36,22 @@ LLM_TRIGGER_NOTE = {
            "'deploy'/'rollback' fired 7/19 plans, all false; LLM router fired 0)",
 }
 
+# Tier reclassification (the agent-vs-single-turn bright line, applied):
+# code-grounding is the SOLE responsibility of E4 / G1G2 / A1 (they grep/read the repo). Every other
+# criterion does TICKET/PLAN analysis over artifacts we already hold and DEFERS grounding to them — so it
+# is single-turn, not the tool-using AGENT tier. These four were mis-tagged AGENT:
+#   G3/G4 — container checks: compare parent ACs / sibling tickets (text we hold), no codebase probe.
+#   T10/T11 — plan-intrinsic IaC/migration safety (best-practice judgment of the plan); existence/convention
+#             checks belong to E4/G1G2/A1; on a PLAN there is no .tf/schema to read anyway. (Revert the v7
+#             1-TURN->AGENT flip.) The agentic code-grounding for IaC/migration is a CODE-REVIEW-diff concern.
+RECLASSIFY_EXEC = {"G3": "1-TURN", "G4": "1-TURN", "T10": "1-TURN", "T11": "1-TURN"}
+RECLASSIFY_NOTE = {
+    "G3": "ticket-analysis: parent ACs vs child tickets (artifacts already held), fed as context; not tool-using",
+    "G4": "ticket-analysis: cross-child consistency over the child tickets; code-grounding (consumer impact / residual refs) is owned by E4/G1G2/A1, not duplicated here",
+    "T10": "plan-intrinsic IaC-safety judgment from ticket + best-practice knowledge; existence/convention/NIH checks deferred to E4/G1G2/A1 (no .tf in a plan)",
+    "T11": "plan-intrinsic migration-safety judgment from ticket + best-practice knowledge; existence/convention/NIH checks deferred to E4/G1G2/A1 (no schema in a plan)",
+}
+
 # Pass-3 per-criterion block thresholds. Start HIGH -> advisory (9da1: gather calibration data first).
 # A criterion blocks only if Pass-3 confidence >= block_threshold AND computed severity is high enough.
 # DEFAULT advisory for every LLM criterion in v1; the DET floor is the only hard blocker.
@@ -55,6 +71,10 @@ def main():
                 n["trigger"] = LLM_TRIGGER_NOTE[c["id"]]
         elif c.get("routing") == "overlay":
             n["overlay_routing"] = "deterministic"
+        if c["id"] in RECLASSIFY_EXEC:
+            n["exec"] = RECLASSIFY_EXEC[c["id"]]
+            n["_tier_note"] = RECLASSIFY_NOTE[c["id"]]
+            n.pop("_v7_note", None)   # the v7 1-TURN->AGENT flip for T10/T11 is reverted
         out.append(n)
 
     path = os.path.join(HERE, "criteria_v8.json")

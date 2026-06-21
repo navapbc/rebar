@@ -1018,7 +1018,7 @@
  },
  {
   "id": "G3",
-  "exec": "AGENT",
+  "exec": "1-TURN",
   "facet": "container",
   "routing": "container",
   "name": "Child coverage [agent, container]",
@@ -1042,11 +1042,12 @@
   ],
   "severity_by": "pass3",
   "default_posture": "advisory",
-  "block_threshold": 0.95
+  "block_threshold": 0.95,
+  "_tier_note": "ticket-analysis: parent ACs vs child tickets (artifacts already held), fed as context; not tool-using"
  },
  {
   "id": "G4",
-  "exec": "AGENT",
+  "exec": "1-TURN",
   "facet": "container",
   "routing": "container",
   "name": "Child consistency [agent, container]",
@@ -1070,7 +1071,8 @@
   ],
   "severity_by": "pass3",
   "default_posture": "advisory",
-  "block_threshold": 0.95
+  "block_threshold": 0.95,
+  "_tier_note": "ticket-analysis: cross-child consistency over the child tickets; code-grounding (consumer impact / residual refs) is owned by E4/G1G2/A1, not duplicated here"
  },
  {
   "id": "G6",
@@ -1117,13 +1119,12 @@
  },
  {
   "id": "T10",
-  "exec": "AGENT",
+  "exec": "1-TURN",
   "facet": "overlay-infra",
   "routing": "overlay",
   "trigger": "infrastructure/IaC intent (LLM-routed for plans — deterministic IaC keywords over-fire on prose; on a code DIFF use the *.tf/Dockerfile/k8s file-glob triggers from the 9da1 IaC catalog instead)",
   "name": "Infrastructure / IaC [overlay]",
   "scenario": "OVERLAY — apply only when the plan provisions or configures infrastructure (cloud resources, IaC: Terraform/CloudFormation/CDK/Pulumi/Ansible, Kubernetes/Helm); else PASS not-applicable. Binary checks: (a) STATE: remote state + locking (no local state); plan-before-apply discipline. (b) LEAST-PRIVILEGE IAM: roles/policies scoped to the minimum, no wildcard `*:*`/admin-for-convenience, no long-lived credentials committed. (c) IDEMPOTENCY & DRIFT: changes are idempotent; drift / out-of-band manual changes considered. (d) BLAST RADIUS & ENV ISOLATION: dev/stage/prod separation; destroy/replace safety — does an apply risk data loss (RDS deletion, S3 force-destroy, instance/volume replacement)? `prevent_destroy` on stateful resources? (e) SECRETS: no plaintext secrets in IaC/vars; use a secrets manager / SSM / vault. (f) COST & SIZING: obviously-expensive or unbounded resources flagged; limits/autoscaling/quotas considered. (g) OBSERVABILITY & OWNERSHIP: logging/metrics/alarms for new infra; the resource is reproducible (as-code) with a clear teardown. SEVERITY: a destructive apply with no safeguard, a wildcard-admin grant, or a plaintext secret = MAJOR. ANTI-FP: not-applicable for non-infra tickets; managed defaults that are documented are fine.",
-  "_v7_note": "routed 1-TURN->AGENT in v7 (codebase-grounded; resolves AMBIGUOUS-without-tools)",
   "applies_at": {
    "levels": [
     "epic",
@@ -1169,17 +1170,17 @@
   "severity_by": "pass3",
   "default_posture": "advisory",
   "block_threshold": 0.95,
-  "overlay_routing": "llm"
+  "overlay_routing": "llm",
+  "_tier_note": "plan-intrinsic IaC-safety judgment from ticket + best-practice knowledge; existence/convention/NIH checks deferred to E4/G1G2/A1 (no .tf in a plan)"
  },
  {
   "id": "T11",
-  "exec": "AGENT",
+  "exec": "1-TURN",
   "facet": "overlay-migration",
   "routing": "overlay",
   "trigger": "schema/data-shape change or backfill over PERSISTED data (LLM-routed — E4: deterministic 'migration' false-fires on rebar's bash->Python strangler; the LLM router correctly distinguishes data-migration)",
   "name": "Data-migration / backfill safety [overlay]",
   "scenario": "OVERLAY — apply only when the plan changes a schema / persisted format or backfills data; else PASS not-applicable. This is migration-EXECUTION safety (distinct from T4 which is breakage-acknowledgement). Binary checks: (a) ONLINE / EXPAND-CONTRACT: the migration runs without downtime and via expand-contract (add nullable -> backfill -> enforce), not a single blocking DDL that locks a large table. (b) BATCHING & SCALE: large backfills are batched/throttled, not one giant transaction. (c) RESUMABILITY: a partially-completed migration is resumable/idempotent (re-runnable without double-applying). (d) DUAL-WRITE WINDOW: rows written DURING the migration are handled (no lost writes between backfill and cutover). (e) ROLLBACK / DATA-LOSS: there is a back-out path and data loss is impossible on partial failure. SEVERITY: an irreversible single-shot migration with no rollback, or a long blocking lock on a large table = MAJOR. ANTI-FP: not-applicable for non-persisted/in-memory changes.",
-  "_v7_note": "routed 1-TURN->AGENT in v7 (codebase-grounded; resolves AMBIGUOUS-without-tools)",
   "applies_at": {
    "levels": [
     "epic",
@@ -1217,7 +1218,8 @@
   "severity_by": "pass3",
   "default_posture": "advisory",
   "block_threshold": 0.95,
-  "overlay_routing": "llm"
+  "overlay_routing": "llm",
+  "_tier_note": "plan-intrinsic migration-safety judgment from ticket + best-practice knowledge; existence/convention/NIH checks deferred to E4/G1G2/A1 (no schema in a plan)"
  },
  {
   "id": "T12",

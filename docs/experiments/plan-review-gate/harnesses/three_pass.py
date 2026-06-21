@@ -25,7 +25,10 @@ import exp2_agentic as e2
 
 client = anthropic.Anthropic()
 TMP = h.TMP
-CODEBASE_GROUNDED = {"E4", "G1G2", "A1", "G6", "T8", "T1", "T3", "T10", "T11", "G3", "G4"}
+# Code-grounding (Pass-2 verifies agentically against the repo) is owned by these only. NOT G3/G4
+# (ticket-analysis: parent ACs vs child tickets) and NOT T10/T11 (plan-intrinsic IaC/migration safety;
+# existence/convention checks defer to E4/G1G2/A1). See the agent-vs-single-turn bright line.
+CODEBASE_GROUNDED = {"E4", "G1G2", "A1", "G6", "T8", "T1", "T3"}
 
 # ------------------------------------------------------------------ PASS 1
 PASS1_SYSTEM = (

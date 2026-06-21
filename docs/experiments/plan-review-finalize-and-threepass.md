@@ -30,7 +30,7 @@ corpus, and runs the converged plan through the gate with all overlays.
 | **D** lift sub-checks → structured `checklist[]` | all 31 descriptors now carry a `checklist[]` of binary `{key, check}` items (the Q10 follow-up; CheckEval/TICK basis). |
 | **A** proportionate scrutiny → declarative `applies_at{}` | lifted out of `retune.py`'s hard-coded `LEAF_ONLY/ALL_LEVEL` into each descriptor: `levels[]` (epic/story/task), `container_only`, `suppress_types:[bug]`, `suppress_when:[test_task, mechanical_leaf]`. Sanity: epic→20 / story→24 / task→29 candidate criteria, **bug→0 (exempt)**. |
 | **E** structured-output parse hardening | `gate_lib.robust_findings()` never crashes on `no_tool_use` / empty / malformed; coerces to the schema; synthesizes an INDETERMINATE entry for any missing id; retries on empty. **126/126 chunk calls `ok` in E4** (zero crashes). |
-| **B** route codebase-grounded criteria to AGENT | `T10/T11` flipped 1-TURN→AGENT (IaC/migration verification wants the real repo); `G6/G1G2/E4/A1/T1/T3/T8/G3/G4` already AGENT. **COH and T9 deliberately kept 1-TURN** — see §3 (the lever A/B showed their AMBIGUOUS-on-clean is a decisiveness artifact, not a tooling gap; COH is text-internal). |
+| **B** route codebase-grounded criteria to AGENT | Initially flipped `T10/T11`→AGENT, then **corrected** under the agent-vs-single-turn bright line: **code-grounding is the sole responsibility of E4/G1G2/A1 (+G6 mechanism-correctness)**; no other criterion greps the codebase. Final AGENT tier = `E4/G1G2/A1/G6/T8/T1/T3` (truly probe code/external/web); `G3/G4` (parent-vs-child ticket analysis) and `T10/T11` (plan-intrinsic IaC/migration safety) are **single-turn, fed-context**. **COH/T9 kept 1-TURN** (lever A/B: their AMBIGUOUS-on-clean is a decisiveness artifact, not a tooling gap). |
 
 `gate_lib.py` is the reusable substrate (robust parse, declarative `applies()` filter, `base_chunk(model)
 × size_factor(ticket)` chunker, deterministic overlay triggers, decisiveness-tuned SYSTEM, hardened
@@ -125,7 +125,7 @@ verifier's mitigation check.
 | # | item | status |
 |---|---|---|
 | 1 | retune E5 (was 9/12 over-fire) | **done** — declarative suppression + raised bar (v8); re-measured (§2). The durable fix is three-pass verification. |
-| 2 | route codebase-grounded criteria to AGENT | **done, evidence-refined** — T10/T11→AGENT; COH/T9 kept 1-TURN with rationale (§3); T10/T11/T12 trigger→LLM (§3). |
+| 2 | route codebase-grounded criteria to AGENT | **done, then corrected** — code-grounding centralized in E4/G1G2/A1(+G6); G3/G4/T10/T11 reclassified AGENT→single-turn (the agent-vs-single-turn bright line); final AGENT tier = E4/G1G2/A1/G6/T8/T1/T3; T10/T11/T12 trigger→LLM (§3). |
 | 3 | E4 generalization on a non-DSO corpus | **done** — rebar + snap; the over-fire-then-verify result (§2). |
 | 4 | lift prose sub-checks → `checklist[]` | **done** — 31/31 (§1). |
 | 5 | harden structured-output parsing | **done** — `robust_findings`, 126/126 ok (§1). |
