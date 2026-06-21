@@ -24,19 +24,24 @@ V8 = "/Users/joeoakhart/rebar/docs/experiments/plan-review-gate/criteria/criteri
 
 d = json.loads(subprocess.run(["rebar", "show", EPIC], capture_output=True, text=True, cwd=REBAR).stdout)
 TITLE, PLAN = d["title"], d["description"]
-CHILDREN = ["2f3c-682a-2105-4b8f", "8e3e-50ba-765c-4d2f", "2632-5741-090e-46c3", "6d7b-41ef-f869-40dd",
-            "bfa8-aadd-6739-4904", "cb28-f531-66f2-49cb", "f20a-865f-6cb3-49e4", "fd92-4b4d-b24b-41da", "a473-8af4-a493-4e0e"]
+# Open children of the epic, resolved live (the re-decomposed set). Feed each child's title + a body
+# EXCERPT (not just the title) so G3/G4 can assess coverage/consistency against the real children
+# (the Q1 fix: titles-only let stale children slip).
+_all = json.loads(subprocess.run(["rebar", "list", "--status=open,in_progress"], capture_output=True, text=True, cwd=REBAR).stdout or "[]")
+CHILDREN = [t["ticket_id"] for t in _all if t.get("parent_id") == EPIC]
 child_ctx = ""
 for tid in CHILDREN:
     cd = json.loads(subprocess.run(["rebar", "show", tid], capture_output=True, text=True, cwd=REBAR).stdout or "{}")
-    if cd: child_ctx += f"\n- CHILD {tid}: {cd.get('title','')}"
-EXTRA = "\n## Children (for container coverage G3/G4):" + child_ctx
+    if cd:
+        child_ctx += f"\n\n### CHILD {tid}: {cd.get('title','')}\n{(cd.get('description') or '')[:1100]}"
+EXTRA = "\n## Children (full excerpts, for container coverage/consistency G3/G4):" + child_ctx
 
 if __name__ == "__main__":
-    crits = G.load_criteria(V8)
+    # ISF (intent-source fidelity) needs the linked SESSION LOG fed as context — run separately, not here.
+    crits = [c for c in G.load_criteria(V8) if c["id"] != "ISF"]
     G.ensure_agent_crit(crits)
     print(f"FINAL GATE (three-pass) on epic {EPIC}  ({len(PLAN)} char plan, {len(CHILDREN)} children)")
-    print(f"  rubric = ALL {len(crits)} v8 criteria (every overlay forced on); Pass-1 Opus; Pass-2 agentic vs rebar\n")
+    print(f"  rubric = {len(crits)} v8 criteria (all overlays forced on; ISF run separately); Pass-1 Opus; Pass-2 aggregate Sonnet\n")
 
     ac = subprocess.run(["rebar", "check-ac", EPIC], capture_output=True, text=True, cwd=REBAR).stdout.strip()
     cl = subprocess.run(["rebar", "clarity-check", EPIC], capture_output=True, text=True, cwd=REBAR).stdout.strip()

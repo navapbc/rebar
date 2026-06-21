@@ -219,19 +219,12 @@ def _verify_agentic(title, plan, finding, repo_root):
         if done: return {"verify": verify, "mode": "agentic", "tool_calls": tool_calls}
     return {"verify": None, "mode": "agentic-no-verdict", "tool_calls": tool_calls}
 
-def pass2_verify_all(title, plan, findings, model=VERIFY_MODEL, max_tokens=32000):
-    """Pass 2 as a SINGLE aggregate call over all findings, on a NON-FRONTIER model. Independent of
-    Pass-1 (it never sees the finder's reasoning); each finding is presented as an unproven claim to
-    TEST and judged on its own merits. Returns {finding_index: {severity_attributes, binary}}.
-    (For the code-review variant the verifier would be agentic to check code citations; for plan review
-    most evidence is plan-text/absence, so one text call suffices — code-grounding stays with E4/G1G2/A1.)"""
-    if not findings:
-        return {}
-    system = [{"type": "text", "text": PASS2_SYSTEM},
-              {"type": "text", "text": f"# Plan under review\nTitle: {title}\n## Plan\n{plan}"}]
+def _verify_batch(system, findings, global_idx, model, max_tokens=16000):
+    """Verify one BATCH of findings in a single aggregate call; findings are labelled with their GLOBAL
+    index so returned finding_index maps straight back. Returns {global_index: {attrs, binary}}."""
     items = []
-    for i, f in enumerate(findings):
-        items.append(f"### Finding [{i}] — an UNPROVEN claim to TEST\n"
+    for gi, f in zip(global_idx, findings):
+        items.append(f"### Finding [{gi}] — an UNPROVEN claim to TEST\n"
                      f"CLAIM: {f['finding']}\n"
                      f"Rubric criteria cited: {', '.join(f.get('criteria', []))}\n"
                      f"Reviewer's evidence: {f.get('evidence')}\n"
@@ -240,22 +233,39 @@ def pass2_verify_all(title, plan, findings, model=VERIFY_MODEL, max_tokens=32000
             "do not assume any finding is correct, and do not let one finding bias another. For each, answer "
             "the binary sub-questions atomically and assign the coarse severity attributes for the "
             "consequence IF the claim is real.\n\n" + "\n\n".join(items) +
-            "\n\nCall verify_findings with exactly one entry per finding_index above.")
+            "\n\nCall verify_findings with exactly one entry per finding_index shown above (use those exact indices).")
     for attempt in range(3):
         try:
             r = client.messages.create(model=model, max_tokens=max_tokens, system=system,
                                        tools=PASS2_AGG_TOOL, tool_choice={"type": "tool", "name": "verify_findings"},
                                        messages=[{"role": "user", "content": user}])
             vs = next((b.input.get("verifications", []) for b in r.content if b.type == "tool_use"), [])
-            out = {v["finding_index"]: {"severity_attributes": v.get("severity_attributes"), "binary": v.get("binary")}
-                   for v in vs if isinstance(v, dict) and isinstance(v.get("finding_index"), int)}
-            if out or not findings:
-                return out
+            return {v["finding_index"]: {"severity_attributes": v.get("severity_attributes"), "binary": v.get("binary")}
+                    for v in vs if isinstance(v, dict) and isinstance(v.get("finding_index"), int)}
         except Exception:
             if attempt == 2:
                 return {}
             time.sleep(2 * (attempt + 1))
     return {}
+
+
+def pass2_verify_all(title, plan, findings, model=VERIFY_MODEL, batch_size=12):
+    """Pass 2 = an aggregate verifier on a NON-FRONTIER model, BATCHED so it scales: a single call over
+    ALL findings does not reliably return a verdict for every one when findings are many (a 44-finding run
+    returned 0 — silently dropping everything), so we verify in batches of `batch_size` and merge. Still
+    "aggregate" (not per-finding), still cheap, still independent of Pass-1. Returns {finding_index: {...}}.
+    Any finding the verifier omits is left ABSENT here and surfaced as INDETERMINATE by Pass-3 — never
+    silently dropped. (Code-review variant would be agentic for code citations; plan review is text.)"""
+    if not findings:
+        return {}
+    system = [{"type": "text", "text": PASS2_SYSTEM},
+              {"type": "text", "text": f"# Plan under review\nTitle: {title}\n## Plan\n{plan}"}]
+    out = {}
+    for start in range(0, len(findings), batch_size):
+        batch = findings[start:start + batch_size]
+        gidx = list(range(start, start + len(batch)))
+        out.update(_verify_batch(system, batch, gidx, model))
+    return out
 
 # ------------------------------------------------------------------ PASS 3 (deterministic)
 _ORD = {"none": 0, "low": 1, "medium": 2, "high": 3, "local": 1, "module": 2, "system": 3,
@@ -271,7 +281,9 @@ def pass3_decide(verify, block_threshold=0.95, blocking_enabled=False):
     opts a criterion into blocking, which (with high confidence + severity) yields 'block'.
     """
     if not verify:
-        return {"decision": "dropped", "reason": "no-verification", "confidence": 0.0, "severity": "none"}
+        # The verifier returned nothing for this finding — SURFACE it as INDETERMINATE (needs review),
+        # never silently drop it (the 44-findings -> 0-verifications failure mode).
+        return {"decision": "indeterminate", "reason": "no-verification", "confidence": 0.0, "severity": "none"}
     b = verify.get("binary", {}); a = verify.get("severity_attributes", {})
     # VETO: cited-reference-accuracy, only when a code citation was actually checked
     if b.get("cited_reference_accurate") == "no":
