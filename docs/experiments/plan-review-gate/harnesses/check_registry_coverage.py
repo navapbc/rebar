@@ -13,7 +13,7 @@ import json, sys, os
 
 # --- Canonical v4 §5 registry (verbatim from the design-of-record, session log 63cc) ---
 REGISTRY = {
-    "DET (Layer-1, blocks)": ["P1", "P2", "P3", "P4", "P5", "P6", "P7"],
+    "DET (Layer-1, blocks)": ["P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"],  # P8 = reviewability/context-budget (the too-big meta-finding)
     "Layer-2 judgment": ["F1", "F4", "E1", "E2", "E3", "E5", "E6", "G1G2", "G3", "G4", "E4", "A1"],
     # G5 (decomposition, from v3) is carried as an additional judgment criterion
     "Layer-2 judgment (v3 add)": ["G5", "G6"],

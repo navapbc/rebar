@@ -115,7 +115,16 @@ def load_criteria(path=CRIT_V7):
 # (this helper) -> if the largest window still can't hold (full content + one criterion), the ticket is too
 # big to review = a FAILURE FINDING that the agent must reduce it. Estimate input tokens, pick the smallest
 # model whose window fits (headroom for output), and on a context-limit API error escalate to the next model.
-MODEL_LADDER = [("claude-sonnet-4-6", 200_000), ("claude-opus-4-8", 200_000)]  # extend with a 1M-window model when available
+# Real windows (2026 context-window spike): Claude Sonnet 4.6 / Opus 4.8 are BOTH 1M-token (standard, no
+# premium); Haiku 4.5 is 200K. So the gate's working models already hold ~1M tokens — context-escalation
+# rarely fires and "ticket too big" only triggers for genuinely enormous (>1M) content. Ascending-window
+# ladder; >1M is cross-provider and configurable (Gemini ~2M on Vertex; Llama 4 Scout ~10M nominal/degraded).
+MODEL_LADDER = [
+    ("claude-haiku-4-5", 200_000),      # cheap first pass for small plans
+    ("claude-sonnet-4-6", 1_000_000),   # 1M standard — holds almost any plan
+    ("claude-opus-4-8", 1_000_000),     # 1M, top-tier capability
+    # (">1M": configure e.g. ("gemini-3-pro", 2_000_000) on Vertex, or ("llama-4-scout", 10_000_000) — nominal)
+]
 def est_tokens(text):
     return len(text or "") // 4   # cheap heuristic; swap a real tokenizer in production
 
