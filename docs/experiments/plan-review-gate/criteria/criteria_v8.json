@@ -428,7 +428,7 @@
  },
  {
   "id": "T5c",
-  "exec": "1-TURN",
+  "exec": "AGENT",
   "facet": "overlay-security",
   "name": "Security (overlay)",
   "trigger": "new endpoints, data access/storage/transmission, PII, or auth boundaries",
@@ -464,7 +464,8 @@
   "severity_by": "pass3",
   "default_posture": "advisory",
   "block_threshold": 0.95,
-  "_prompt_note": "scenario refined this session (review-process FP fix: domain-appropriate security, no already-in-repo leakage)"
+  "_prompt_note": "scenario refined this session (review-process FP fix: domain-appropriate security, no already-in-repo leakage)",
+  "_tier_note": "flipped 1-TURN->AGENT (T5c experiment: security implications need codebase grounding to avoid speculative-from-text FPs)"
  },
  {
   "id": "T5e",

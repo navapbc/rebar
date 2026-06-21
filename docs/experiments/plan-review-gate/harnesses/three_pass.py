@@ -28,7 +28,7 @@ TMP = h.TMP
 # Code-grounding (Pass-2 verifies agentically against the repo) is owned by these only. NOT G3/G4
 # (ticket-analysis: parent ACs vs child tickets) and NOT T10/T11 (plan-intrinsic IaC/migration safety;
 # existence/convention checks defer to E4/G1G2/A1). See the agent-vs-single-turn bright line.
-CODEBASE_GROUNDED = {"E4", "G1G2", "A1", "G6", "T8", "T1", "T3"}
+CODEBASE_GROUNDED = {"E4", "G1G2", "A1", "G6", "T8", "T1", "T3", "T5c"}  # T5c agent-grounded (security model)
 # Pass-2 is a SINGLE aggregate verifier over all findings, and a NON-FRONTIER model suffices: the hard
 # generative reasoning is Pass-1 (find) and Pass-3 is deterministic code — Pass-2 is mechanical binary
 # sub-question answering + coarse-attribute assignment, which a mid-tier model does reliably and cheaply.

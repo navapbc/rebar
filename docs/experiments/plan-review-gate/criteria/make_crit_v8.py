@@ -103,6 +103,15 @@ def main():
         if c["id"] in SCENARIO_OVERRIDE:
             n["scenario"] = SCENARIO_OVERRIDE[c["id"]]
             n["_prompt_note"] = "scenario refined this session (review-process FP fix: domain-appropriate security, no already-in-repo leakage)"
+        if c["id"] == "T5c":
+            # T5c experiment (2026): a sound SECURITY verdict requires grounding in the ACTUAL implementation —
+            # single-turn FP'd by speculating from plan text ("baked at deploy almost certainly means secrets in
+            # env vars"); the agent read the real auth/secret handling (Secrets Manager + constant-time compare)
+            # and correctly dismissed it. Refines (does not contradict) the bright line: an IMPLICATION overlay
+            # whose verdict depends on HOW security/ops/infra is implemented genuinely "probes the environment"
+            # and is therefore AGENT-tier (distinct from E4's assertion-existence grounding).
+            n["exec"] = "AGENT"
+            n["_tier_note"] = "flipped 1-TURN->AGENT (T5c experiment: security implications need codebase grounding to avoid speculative-from-text FPs)"
         out.append(n)
 
     # APPROVED new criterion (this session): intent-source fidelity. NOT in v6/v7, appended here.
