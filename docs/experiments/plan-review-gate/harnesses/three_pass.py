@@ -29,6 +29,10 @@ TMP = h.TMP
 # (ticket-analysis: parent ACs vs child tickets) and NOT T10/T11 (plan-intrinsic IaC/migration safety;
 # existence/convention checks defer to E4/G1G2/A1). See the agent-vs-single-turn bright line.
 CODEBASE_GROUNDED = {"E4", "G1G2", "A1", "G6", "T8", "T1", "T3"}
+# Pass-2 is a SINGLE aggregate verifier over all findings, and a NON-FRONTIER model suffices: the hard
+# generative reasoning is Pass-1 (find) and Pass-3 is deterministic code — Pass-2 is mechanical binary
+# sub-question answering + coarse-attribute assignment, which a mid-tier model does reliably and cheaply.
+VERIFY_MODEL = "claude-sonnet-4-6"
 
 # ------------------------------------------------------------------ PASS 1
 PASS1_SYSTEM = (
@@ -42,15 +46,17 @@ PASS1_SYSTEM = (
     "ABSENCE rationale ('the plan never states X') / a code citation. Absence findings are valid and "
     "common in plan review.\n"
     "- scenarios[] = concrete situations where this bites. impact = the consequence if unaddressed.\n"
-    "- DO NOT emit any severity, confidence, or priority — those are computed by later passes. Your job "
-    "is to FIND and GROUND, not to rate.\n"
-    "- Ground every finding; do not fabricate to look thorough. If the plan satisfies a criterion, emit "
-    "no finding for it. It is fine to return an empty findings list for a clean chunk.\n"
-    "- A benign reading that dissolves a concern means there is no finding.\n"
-    "- REASON FIRST: use the tool's `analysis` field to think through the plan against the rubric BEFORE "
-    "listing findings (reasoning-before-output measurably beats emitting findings first).\n"
-    "- JUDGE SUBSTANCE, NOT LENGTH: a longer/more detailed plan is not automatically better; a terse plan "
-    "that satisfies a criterion yields no finding."
+    "- Emit ONLY {finding, criteria[], evidence[], scenarios[], impact}; severity/confidence/priority are "
+    "computed by later passes — your job is to FIND and GROUND, leaving the rating to them.\n"
+    "- Ground every finding in specific evidence. When the plan satisfies a criterion, emit no finding for "
+    "it — an empty findings list for a clean chunk is a correct, complete result.\n"
+    "- READ CHARITABLY: a concern with a plausible sound reading is not a finding.\n"
+    "- REASON BEFORE OUTPUT: use the `analysis` field to reason through the plan against the rubric, THEN "
+    "list findings (ordering reasoning ahead of the structured output beats emitting findings first; "
+    "gathering information is always a legitimate first step).\n"
+    "- REVIEW QUALITY IS ACCURACY, NOT VOLUME: judge substance, not length, and treat the NUMBER of "
+    "findings as no measure of quality — a sound plan correctly yields ZERO findings. Surface a finding "
+    "only where it adds real value to the author."
 )
 PASS1_TOOL = [{"name": "emit_findings", "description": "Emit pass-1 evidence records (no severity/confidence).",
   "input_schema": {"type": "object", "properties": {
@@ -129,6 +135,21 @@ PASS2_TOOL = [{"name": "verify_finding", "description": "Verify a pass-1 finding
       "required": ["cited_reference_accurate"] + GRADED}},
     "required": ["analysis", "severity_attributes", "binary"]}}]
 
+# Aggregate verifier: ONE call over ALL findings (the single-agent, non-frontier Pass-2). Reuses the
+# per-finding attribute/binary subschemas; each finding is tested independently as an unproven claim.
+_SEV = PASS2_TOOL[0]["input_schema"]["properties"]["severity_attributes"]
+_BIN = PASS2_TOOL[0]["input_schema"]["properties"]["binary"]
+PASS2_AGG_TOOL = [{"name": "verify_findings",
+  "description": "Verify ALL pass-1 findings in one pass — exactly one entry per finding_index.",
+  "input_schema": {"type": "object", "properties": {
+    "verifications": {"type": "array", "items": {"type": "object", "properties": {
+        "finding_index": {"type": "integer"},
+        "analysis": {"type": "string", "description": "REASON FIRST: reason through THIS finding's binary sub-questions independently (treat it as an unproven claim) before answering."},
+        "severity_attributes": _SEV,
+        "binary": _BIN},
+      "required": ["finding_index", "analysis", "severity_attributes", "binary"]}}},
+    "required": ["verifications"]}}]
+
 def _verify_user(finding):
     return ("## Finding to TEST (an unproven claim from a pass-1 reviewer)\n"
             f"CLAIM: {finding['finding']}\n"
@@ -185,6 +206,44 @@ def _verify_agentic(title, plan, finding, repo_root):
         if done: return {"verify": verify, "mode": "agentic", "tool_calls": tool_calls}
     return {"verify": None, "mode": "agentic-no-verdict", "tool_calls": tool_calls}
 
+def pass2_verify_all(title, plan, findings, model=VERIFY_MODEL, max_tokens=8000):
+    """Pass 2 as a SINGLE aggregate call over all findings, on a NON-FRONTIER model. Independent of
+    Pass-1 (it never sees the finder's reasoning); each finding is presented as an unproven claim to
+    TEST and judged on its own merits. Returns {finding_index: {severity_attributes, binary}}.
+    (For the code-review variant the verifier would be agentic to check code citations; for plan review
+    most evidence is plan-text/absence, so one text call suffices — code-grounding stays with E4/G1G2/A1.)"""
+    if not findings:
+        return {}
+    system = [{"type": "text", "text": PASS2_SYSTEM},
+              {"type": "text", "text": f"# Plan under review\nTitle: {title}\n## Plan\n{plan}"}]
+    items = []
+    for i, f in enumerate(findings):
+        items.append(f"### Finding [{i}] — an UNPROVEN claim to TEST\n"
+                     f"CLAIM: {f['finding']}\n"
+                     f"Rubric criteria cited: {', '.join(f.get('criteria', []))}\n"
+                     f"Reviewer's evidence: {f.get('evidence')}\n"
+                     f"Reviewer's asserted impact: {f.get('impact')}")
+    user = ("## Independently TEST each finding below. Judge each on its own merits as an unproven claim — "
+            "do not assume any finding is correct, and do not let one finding bias another. For each, answer "
+            "the binary sub-questions atomically and assign the coarse severity attributes for the "
+            "consequence IF the claim is real.\n\n" + "\n\n".join(items) +
+            "\n\nCall verify_findings with exactly one entry per finding_index above.")
+    for attempt in range(3):
+        try:
+            r = client.messages.create(model=model, max_tokens=max_tokens, system=system,
+                                       tools=PASS2_AGG_TOOL, tool_choice={"type": "tool", "name": "verify_findings"},
+                                       messages=[{"role": "user", "content": user}])
+            vs = next((b.input.get("verifications", []) for b in r.content if b.type == "tool_use"), [])
+            out = {v["finding_index"]: {"severity_attributes": v.get("severity_attributes"), "binary": v.get("binary")}
+                   for v in vs if isinstance(v, dict) and isinstance(v.get("finding_index"), int)}
+            if out or not findings:
+                return out
+        except Exception:
+            if attempt == 2:
+                return {}
+            time.sleep(2 * (attempt + 1))
+    return {}
+
 # ------------------------------------------------------------------ PASS 3 (deterministic)
 _ORD = {"none": 0, "low": 1, "medium": 2, "high": 3, "local": 1, "module": 2, "system": 3,
         "easy": 1, "moderate": 2, "hard": 3}
@@ -239,17 +298,18 @@ def run_three_pass(title, plan, rubric, repo_root=None, model="claude-opus-4-8",
     log(f"  PASS 1: {len(findings)} findings across {len(chunks)} rubric chunks")
     postures = {c["id"]: c.get("default_posture", "advisory") for c in rubric}
     thresholds = {c["id"]: c.get("block_threshold", 0.95) for c in rubric}
-    # PASS 2 — verify each finding independently (agentic where codebase-grounded)
-    def verify_one(f):
-        res = pass2_verify(title, plan, f, repo_root, agentic=agentic_verify)
+    # PASS 2 — ONE aggregate verifier call over all findings, on a non-frontier model (separate from
+    # Pass-1; each finding judged independently as an unproven claim).
+    verifs = pass2_verify_all(title, plan, findings, model=VERIFY_MODEL)
+    log(f"  PASS 2: aggregate verify of {len(findings)} findings on {VERIFY_MODEL} ({len(verifs)} returned)")
+    # PASS 3 — deterministic decision, per finding
+    out = []
+    for i, f in enumerate(findings):
+        v = verifs.get(i)
         blocking = any(postures.get(c) == "blocking" for c in f.get("criteria", []))
         bt = min([thresholds.get(c, 0.95) for c in f.get("criteria", [])] or [0.95])
-        d = pass3_decide(res.get("verify"), block_threshold=bt, blocking_enabled=blocking)   # PASS 3 (deterministic)
-        return {**f, "_verify": res.get("verify"), "_mode": res.get("mode"),
-                "_tool_calls": res.get("tool_calls", 0), **d}
-    out = []
-    with ThreadPoolExecutor(max_workers=6) as ex:
-        out = list(ex.map(verify_one, findings))
+        d = pass3_decide(v, block_threshold=bt, blocking_enabled=blocking)   # PASS 3 (deterministic)
+        out.append({**f, "_verify": v, "_mode": "aggregate", **d})
     return out
 
 

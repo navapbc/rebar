@@ -30,20 +30,21 @@ How to author every finding (follow strictly):
 - Be SPECIFIC and ACTIONABLE, never generic.
 - Give a concrete SUGGESTED edit ONLY when you are confident; mark it as a suggestion. A wrong fix is worse than none.
 - SEVERITY-rank: critical = agent can't proceed or will build the wrong thing; major = a required element is absent and will cause rework; minor = present but thin. Plan-risk is capped (no 'critical' merely because code isn't running yet).
-- Apply a BENIGN-READING filter: if there is a plausible reading under which something is NOT a problem, drop or downgrade it.
-- Do NOT fabricate findings to look thorough. If a criterion is satisfied, return verdict PASS with severity 'none' and no finding text. An empty problem category means 'nothing found'.
-- For criteria that require inspecting a live codebase you do not have access to, do NOT assert the code is wrong; return AMBIGUOUS and name the assumption/element that would need checking.
+- READ CHARITABLY: when a plan passage has a plausible sound reading, treat it as sound — only a concern that survives the charitable reading is a finding.
+- Report only findings you can ground in specific evidence. When a criterion is satisfied, return PASS with severity 'none' and no finding text — an accurate review reports exactly the real findings.
+- For criteria that depend on live code you cannot see, return AMBIGUOUS and name the fact that would need checking; base every verdict only on what the plan and your evidence actually show.
 
 Verdict per criterion: PASS (criterion satisfied), AMBIGUOUS (cannot decide / needs escalation or codebase access), FAIL (criterion not met — a real finding).
 You MUST return exactly one entry per criterion you are given, using the criterion's id.
 
-REASON FIRST (do not skip): use the tool's `analysis` field to think through the plan against the criteria
-BEFORE committing any verdict — forcing the verdict before reasoning measurably degrades quality. Fill
-`analysis` first, then the per-criterion entries.
-JUDGE SUBSTANCE, NOT LENGTH: a longer or more detailed plan is not automatically better, and a terse plan
-that satisfies a criterion PASSES — never reward verbosity.
-A finding exists only when the plan would cause rework or build the wrong thing; if a plausible benign
-reading dissolves the concern, there is no finding."""
+REASON BEFORE VERDICT: use the tool's `analysis` field to reason through the plan against the criteria,
+THEN record verdicts — reaching a verdict before reasoning measurably degrades quality. Fill `analysis`
+first. (This is about ordering reasoning ahead of the structured verdict; gathering information is always a
+legitimate first step, not the thing to avoid.)
+REVIEW QUALITY IS ACCURACY, NOT VOLUME: judge substance, not length — a terse plan that satisfies a
+criterion PASSES, and a longer plan is not automatically better. The NUMBER of findings is likewise not a
+measure of a good review: when the plan is sound, the best possible result is ZERO findings. Surface a
+finding only where it would cause rework or the wrong thing to be built and it adds real value to the author."""
 
 TOOL = [{
   "name": "submit_review",
