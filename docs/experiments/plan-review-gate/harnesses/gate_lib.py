@@ -110,10 +110,11 @@ def load_criteria(path=CRIT_V7):
     return json.load(open(path))
 
 
-# ---- context-window escalation (no-cap-by-design size handling) ------------
-# Before truncating or decomposing, escalate to a LARGER-CONTEXT model. Estimate input tokens, pick the
-# smallest model on the ladder whose window fits (with headroom for output), and on a context-limit API
-# error escalate to the next model. If the largest window is still exceeded -> caller decomposes (never cap).
+# ---- context-window escalation (no-cap, never-chunk-content size handling) -
+# Content is ALWAYS whole. The size order is: batch criteria -> ONE criterion per call -> escalate model
+# (this helper) -> if the largest window still can't hold (full content + one criterion), the ticket is too
+# big to review = a FAILURE FINDING that the agent must reduce it. Estimate input tokens, pick the smallest
+# model whose window fits (headroom for output), and on a context-limit API error escalate to the next model.
 MODEL_LADDER = [("claude-sonnet-4-6", 200_000), ("claude-opus-4-8", 200_000)]  # extend with a 1M-window model when available
 def est_tokens(text):
     return len(text or "") // 4   # cheap heuristic; swap a real tokenizer in production
@@ -123,7 +124,8 @@ def pick_model(input_text, ladder=MODEL_LADDER, output_reserve=16_000, headroom=
     for model, window in ladder:
         if need <= window * headroom - output_reserve:
             return model
-    return None   # nothing fits -> caller must decompose (structural / section-chunk), never truncate
+    return None   # even the largest window can't hold full content + one criterion -> emit the
+                  # "ticket too big, reduce it" FAILURE FINDING (never chunk/truncate the content)
 
 def is_context_error(e):
     s = str(e).lower()

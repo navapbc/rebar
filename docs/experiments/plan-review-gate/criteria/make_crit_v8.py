@@ -132,7 +132,9 @@ def main():
             "the plan + its ticket graph against each, flagging any dropped, narrowed/out-scoped-without-"
             "rationale, or contradicted. Runs on a FRONTIER model (large session-log context) and is FED the "
             "session log + the pre-resolved ticket graph as context — NOT agent/tool-using (deterministic "
-            "pre-retrieval if the log overflows context). ANTI-FP: a requirement DELIBERATELY descoped WITH a "
+            "if the linked log exceeds the escalated context window, evaluate against a SUMMARY of the log "
+            "and RECORD that a summary was used — the finding then carries REDUCED CONFIDENCE). ANTI-FP: a "
+            "requirement DELIBERATELY descoped WITH a "
             "stated rationale is not a finding; fire only on SILENT or unjustified divergence."),
         "trigger": "ticket is LINKED TO A SESSION LOG (else PASS not-applicable / skip — never fabricate an intent baseline)",
         "routing": "base",
