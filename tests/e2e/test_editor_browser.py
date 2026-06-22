@@ -37,6 +37,18 @@ def test_editor_renders_diagram_panel_and_reacts_to_selection(browser_runner, ed
         assert report[key]["rebarGroup"], f"Rebar properties group missing for {kind}"
 
 
+def test_morph_change_type_preserves_rebar_config(browser_runner, editor_server):
+    # bpmn-js is documented to drop custom extensionElements on element type-change (morph);
+    # our registered moddle descriptor must keep <rebar:Config> intact so changing a step's
+    # kind in the UI never loses its config. (Verified in a real browser, not just docs.)
+    url, _ir = editor_server
+    report = browser_runner("browser_morph.mjs", url)
+    assert report["errors"] == [] if "errors" in report else True
+    assert report["errs"] == [], f"errors during morph: {report['errs']}"
+    assert report["type"] == "bpmn:ServiceTask"
+    assert report["before"] and report["after"] == report["before"], "morph dropped rebar config"
+
+
 def test_editor_edit_persists_to_ir_on_save(browser_runner, editor_server):
     url, ir = editor_server
     report = browser_runner("browser_edit.mjs", url)

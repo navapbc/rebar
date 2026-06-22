@@ -498,4 +498,21 @@ def test_branch_gateway_and_flows_are_labelled():
     }
     xml = bpmn.ir_to_bpmn(doc)
     assert 'name="${{ inputs.x }}"' in xml  # gateway labelled with the condition
-    assert "then (true)" in xml and "else (false)" in xml  # arm flows labelled
+    assert 'name="true"' in xml and 'name="false"' in xml  # arm flows labelled
+    # the else arm flow is the gateway's default flow (slash marker)
+    assert 'default="flow_g.else"' in xml
+
+
+def test_branch_continuation_flow_is_labelled_after():
+    # A step that runs after a branch (needs the gateway) gets an "after" label on its
+    # incoming flow, so the gateway's post-branch continuation reads as a continuation,
+    # not a third decision outcome.
+    doc = {
+        "schema_version": "2", "name": "c", "inputs": {"x": {"type": "boolean"}},
+        "steps": [
+            {"id": "g", "branch": {"when": "${{ inputs.x }}", "then": [{"id": "t", "uses": "o"}]}},
+            {"id": "after_step", "uses": "o", "needs": ["g"]},
+        ],
+    }
+    xml = bpmn.ir_to_bpmn(doc)
+    assert 'name="after"' in xml

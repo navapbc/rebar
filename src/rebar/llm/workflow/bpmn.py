@@ -226,6 +226,7 @@ def _emit_frame(container: ET.Element, steps, edges) -> None:
     sequence flows (collecting each as ``(flow_id, src, tgt)`` in ``edges`` for the DI);
     recurse into control bodies. Geometry is computed separately by :func:`_layout_frame`."""
     ids = [s["id"] for s in steps if isinstance(s, dict) and "id" in s]
+    branch_ids = {s["id"] for s in steps if isinstance(s, dict) and step_kind(s) == "branch"}
     for s in steps:
         if not isinstance(s, dict) or "id" not in s:
             continue
@@ -237,11 +238,13 @@ def _emit_frame(container: ET.Element, steps, edges) -> None:
         for n in s.get("needs") or []:
             if n in ids:
                 fid = f"flow_{n}__{s['id']}"
-                ET.SubElement(
-                    container,
-                    _q("bpmn", "sequenceFlow"),
-                    {"id": fid, "sourceRef": n, "targetRef": s["id"]},
-                )
+                attrs = {"id": fid, "sourceRef": n, "targetRef": s["id"]}
+                # A continuation OUT of a branch gateway (the step runs after the branch
+                # completes, regardless of arm) is labelled "after" — so it reads as the
+                # post-branch step, not a third decision outcome.
+                if n in branch_ids:
+                    attrs["name"] = "after"
+                ET.SubElement(container, _q("bpmn", "sequenceFlow"), attrs)
                 edges.append((fid, n, s["id"]))
 
 
@@ -291,7 +294,8 @@ def _emit_step(container, s, kind, edges) -> ET.Element:
     gw_name = when if isinstance(when, str) and when else "branch?"
     gw = ET.SubElement(container, _q("bpmn", "exclusiveGateway"), {"id": sid, "name": gw_name})
     _ext(gw, "Config", value=_config_json(s))
-    for arm, label in (("then", "then (true)"), ("else", "else (false)")):
+    else_flow_id: str | None = None
+    for arm, label in (("then", "true"), ("else", "false")):
         body = s["branch"].get(arm)
         if not isinstance(body, list):
             continue
@@ -305,9 +309,20 @@ def _emit_step(container, s, kind, edges) -> ET.Element:
         _ext(sp, "Config", value=json.dumps({_ROLE_KEY: arm}))  # role survives id rewrites
         _emit_frame(sp, body, edges)
         fid = f"flow_{sid}.{arm}"
-        attrs = {"id": fid, "name": label, "sourceRef": sid, "targetRef": arm_id}
-        ET.SubElement(container, _q("bpmn", "sequenceFlow"), attrs)
+        ET.SubElement(
+            container,
+            _q("bpmn", "sequenceFlow"),
+            {"id": fid, "name": label, "sourceRef": sid, "targetRef": arm_id},
+        )
         edges.append((fid, sid, arm_id))
+        if arm == "else":
+            else_flow_id = fid
+    # Mark the else arm as the gateway's DEFAULT flow → bpmn-js draws the default-flow slash
+    # on it, so it reads unambiguously as the fallback ("when the condition is false"). The
+    # `default` attribute is display-only here (reconstruction reads then/else from the role
+    # markers), so it does not affect the round-trip.
+    if else_flow_id is not None:
+        gw.set("default", else_flow_id)
     return gw
 
 
