@@ -76,11 +76,19 @@ requirement is met, record what you searched and treat it as NOT MET — never a
 
 Decide the overall verdict:
 
-- **PASS** — every requirement is met. (If the ticket states **no** explicit criteria and you
-  find nothing in the implementation that contradicts its title/description intent, return
-  **PASS** and explain in `summary` that there were no explicit criteria and you verified the
-  stated intent with no contrary evidence.)
+- **PASS** — every requirement is met.
 - **FAIL** — at least one requirement is not met.
+
+**Nothing to verify (do not rabbit-hole).** First decide whether the ticket states anything
+CONCRETE and verifiable at all. A ticket can have **no verifiable content**: it is empty, a
+placeholder or junk (e.g. just `test`, `asdf`, a bare title), or vague prose that states no
+checkable requirement or intent. In that case there is nothing to refute — make only a BRIEF
+effort (read the ticket; at most a read or two), do **NOT** invent criteria, and do **NOT**
+explore the codebase hunting for contrary evidence. Return **PASS** with an empty `findings`
+and a one-line `summary` noting there were no concrete completion requirements to verify. Only
+when the ticket *does* state a concrete requirement or a specific intent do you run the
+tool-heavy, criterion-by-criterion check above. (This is a deliberate guard against burning the
+step budget on tickets that carry no verifiable meaning.)
 
 Report through the structured output:
 

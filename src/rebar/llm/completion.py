@@ -43,8 +43,10 @@ _VERIFIER_DEFAULT_MODEL = "claude-sonnet-4-6"
 # default (REBAR_LLM_MAX_STEPS=25 ≈ 12 tool calls) is far too low and trips the recursion cap
 # mid-verification (→ a false fail-closed block at the gate). Use a generous verification FLOOR;
 # an operator who explicitly sets a HIGHER REBAR_LLM_MAX_STEPS still wins. Very large tickets
-# (e.g. a whole framework epic) may still need it raised further, or --force-close.
-_VERIFY_MIN_STEPS = 120
+# (e.g. a whole framework epic) may still need it raised further, or --force-close. (Doubled
+# from 120 after a substantive story tripped the cap; the verifier also now short-circuits
+# tickets with nothing to verify, so this floor is the ceiling for genuinely multi-criteria work.)
+_VERIFY_MIN_STEPS = 240
 
 
 def _readonly_ticket_tools(repo_path):
@@ -258,7 +260,14 @@ def verify_completion(
         "spend a few targeted searches/reads per criterion, then judge it and move on (don't "
         "exhaustively trace wiring or re-read files) — you have a limited step budget. Emit one "
         "finding per FAILING requirement only, then report the verdict (PASS/FAIL) and findings "
-        "via the structured output as soon as every criterion is judged."
+        "via the structured output as soon as every criterion is judged.\n\n"
+        "NOTHING TO VERIFY: first read the ticket and decide whether it states any CONCRETE, "
+        "checkable completion requirement at all. If it does not — it is empty, a placeholder "
+        "or junk (e.g. just 'test'), or vague prose with no verifiable criteria — then there is "
+        "nothing to refute: do a brief look (a read or two at most), do NOT invent criteria and "
+        "do NOT explore the codebase further, and return verdict PASS with a single informational "
+        "finding noting there were no concrete completion requirements to verify. Reserve the "
+        "tool-heavy criterion-by-criterion check for tickets that actually state requirements."
     )
 
     runner_sel = get_runner(cfg, override=runner)
