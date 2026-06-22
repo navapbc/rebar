@@ -111,10 +111,14 @@ def ir_to_bpmn(doc: dict[str, Any]) -> str:
     }
     _ext(proc, "Workflow", value=json.dumps(meta, sort_keys=True))
 
-    shapes: list[tuple[str, int, int]] = []  # (id, rank, lane) for DI
+    # 1. Emit the BPMN model (elements + sequence flows); collect the flow edges.
     edges: list[tuple[str, str, str]] = []  # (flow_id, source, target)
-    _emit_frame(proc, doc.get("steps", []), shapes, edges, lane=0)
-    _emit_di(defs, _proc_id(doc), shapes, edges)
+    _emit_frame(proc, doc.get("steps", []), edges)
+    # 2. Compute a real layered layout (boxes + which sub-processes are expanded).
+    expanded: set[str] = set()
+    boxes, _w, _h = _layout_frame(doc.get("steps", []), expanded)
+    # 3. Emit the DI from the layout (shapes, expanded flags, docked edge waypoints).
+    _emit_di(defs, _proc_id(doc), boxes, expanded, edges)
     ET.indent(defs, space="  ")
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(defs, encoding="unicode")
 
@@ -142,19 +146,15 @@ def _config_json(step: dict[str, Any]) -> str:
     return json.dumps(cfg, sort_keys=True)
 
 
-def _emit_frame(container: ET.Element, steps, shapes, edges, lane: int) -> None:
+def _emit_frame(container: ET.Element, steps, edges) -> None:
     """Emit one frame's steps as flow elements under ``container``; wire ``needs`` as
-    sequence flows; recurse into control bodies. ``lane`` offsets the DI rows so nested
-    frames don't overlap their parent visually."""
+    sequence flows (collecting each as ``(flow_id, src, tgt)`` in ``edges`` for the DI);
+    recurse into control bodies. Geometry is computed separately by :func:`_layout_frame`."""
     ids = [s["id"] for s in steps if isinstance(s, dict) and "id" in s]
-    rank = _ranks(steps)
     for s in steps:
         if not isinstance(s, dict) or "id" not in s:
             continue
-        sid = s["id"]
-        kind = step_kind(s)
-        _emit_step(container, s, kind, shapes, edges, lane)
-        shapes.append((sid, rank.get(sid, 0), lane))
+        _emit_step(container, s, step_kind(s), edges)
     # sequence flows from needs (same frame only)
     for s in steps:
         if not isinstance(s, dict) or "id" not in s:
@@ -170,7 +170,7 @@ def _emit_frame(container: ET.Element, steps, shapes, edges, lane: int) -> None:
                 edges.append((fid, n, s["id"]))
 
 
-def _emit_step(container, s, kind, shapes, edges, lane) -> ET.Element:
+def _emit_step(container, s, kind, edges) -> ET.Element:
     # NB: ``extensionElements`` (Config) is attached FIRST, before any
     # loopCharacteristics / child flowElements, to honour the BPMN 2.0 XSD child
     # ordering (extensionElements precedes loopCharacteristics precedes flowElement).
@@ -191,14 +191,14 @@ def _emit_step(container, s, kind, shapes, edges, lane) -> ET.Element:
         sp = ET.SubElement(container, _q("bpmn", "subProcess"), {"id": sid, "name": "loop"})
         _ext(sp, "Config", value=_config_json(s))
         ET.SubElement(sp, _q("bpmn", "standardLoopCharacteristics"))
-        _emit_frame(sp, s["loop"].get("body", []), shapes, edges, lane + 1)
+        _emit_frame(sp, s["loop"].get("body", []), edges)
         return sp
     if kind == "map":
         sp = ET.SubElement(container, _q("bpmn", "subProcess"), {"id": sid, "name": "map"})
         _ext(sp, "Config", value=_config_json(s))
         seq = "false" if (s["map"].get("max_concurrency") or 1) > 1 else "true"
         ET.SubElement(sp, _q("bpmn", "multiInstanceLoopCharacteristics"), {"isSequential": seq})
-        _emit_frame(sp, s["map"].get("body", []), shapes, edges, lane + 1)
+        _emit_frame(sp, s["map"].get("body", []), edges)
         return sp
     # branch -> exclusiveGateway + a then/else sub-process arm each. The arm's ROLE
     # (then/else) is carried two ways that both survive a real bpmn-js edit: a
@@ -217,8 +217,7 @@ def _emit_step(container, s, kind, shapes, edges, lane) -> ET.Element:
         arm_id = f"{sid}.{arm}"
         sp = ET.SubElement(container, _q("bpmn", "subProcess"), {"id": arm_id, "name": arm})
         _ext(sp, "Config", value=json.dumps({_ROLE_KEY: arm}))  # role survives id rewrites
-        _emit_frame(sp, body, shapes, edges, lane + 1)
-        shapes.append((arm_id, _arm_rank(sid, shapes), lane + (0 if arm == "then" else 1)))
+        _emit_frame(sp, body, edges)
         fid = f"flow_{sid}.{arm}"
         attrs = {"id": fid, "sourceRef": sid, "targetRef": arm_id}
         ET.SubElement(container, _q("bpmn", "sequenceFlow"), attrs)
@@ -226,61 +225,153 @@ def _emit_step(container, s, kind, shapes, edges, lane) -> ET.Element:
     return gw
 
 
-def _arm_rank(sid: str, shapes) -> int:
-    for s_id, rank, _lane in shapes:
-        if s_id == sid:
-            return rank + 1
-    return 1
+# ── Layout (a real layered DAG layout, generated; never committed) ──────────────
+#
+# Each frame is laid out left-to-right by longest-path rank, with same-rank nodes stacked
+# vertically (so PARALLEL siblings never collide — the old lane-only layout drew them on
+# one row, on top of each other). Control bodies are laid out recursively and their parent
+# sub-process is sized to CONTAIN them and marked expanded, so loop/map/branch bodies show
+# inline on the canvas instead of as a collapsed drill-down box. bpmn-auto-layout was
+# evaluated and rejected: for our coordinate-free, start/end-event-free, nested IR it
+# stacks nodes in a single column and emits no edges.
+
+_LEAF = (100, 80)  # task shape (bpmn-js default size)
+_GW = (50, 50)  # gateway shape
+_PAD = 30  # inner padding of an expanded sub-process
+_HDR = 30  # header band at the top of an expanded sub-process (label/marker room)
+_HGAP = 90  # horizontal gap between ranks (columns)
+_VGAP = 40  # vertical gap between nodes in the same rank
+_MARGIN = 40  # diagram margin
 
 
-def _ranks(steps) -> dict[str, int]:
-    """Longest-path rank per step over the frame's ``needs`` DAG (deterministic
-    left-to-right layout)."""
-    ids = {s["id"] for s in steps if isinstance(s, dict) and "id" in s}
-    deps = {
-        s["id"]: [n for n in (s.get("needs") or []) if n in ids]
-        for s in steps
-        if isinstance(s, dict) and "id" in s
-    }
+def _frame_rank(ids: set[str], edges: list[tuple[str, str]]) -> dict[str, int]:
+    """Longest-path rank over a frame's edge set (`(src, tgt)`), so a node sits to the
+    right of everything that must precede it."""
+    preds: dict[str, list[str]] = {i: [] for i in ids}
+    for a, b in edges:
+        if a in ids and b in ids:
+            preds[b].append(a)
     rank: dict[str, int] = {}
 
-    def depth(sid: str, seen: frozenset[str]) -> int:
-        if sid in rank:
-            return rank[sid]
-        if sid in seen or not deps.get(sid):
-            r = 0
-        else:
-            r = 1 + max((depth(d, seen | {sid}) for d in deps[sid]), default=-1)
-        rank[sid] = r
+    def depth(n: str, seen: frozenset[str]) -> int:
+        if n in rank:
+            return rank[n]
+        r = 0 if (n in seen or not preds[n]) else 1 + max(depth(p, seen | {n}) for p in preds[n])
+        rank[n] = r
         return r
 
-    for sid in ids:
-        depth(sid, frozenset())
+    for i in ids:
+        depth(i, frozenset())
     return rank
 
 
-def _emit_di(defs, proc_id, shapes, edges) -> None:
-    """A deterministic BPMN DI: x by rank, y by lane. Reproducible so the diagram
-    opens the same way every time (the layout is generated, never committed)."""
+def _layout_frame(steps, expanded: set[str]) -> tuple[dict[str, list[float]], float, float]:
+    """Lay out one frame. Returns ``(boxes, width, height)`` where ``boxes`` maps every
+    element id in this frame (and, recursively, inside its control bodies) to a LOCAL
+    ``[x, y, w, h]`` with the frame's content starting at ``(0, 0)``. Container (loop/map/
+    branch-arm) ids are added to ``expanded``."""
+    sizes: dict[str, tuple[float, float]] = {}
+    order: list[str] = []
+    children: dict[str, tuple[dict[str, list[float]], float, float]] = {}
+    frame_edges: list[tuple[str, str]] = []  # gateway -> arm (structural, for ranking)
+
+    def add(nid: str, size: tuple[float, float]) -> None:
+        sizes[nid] = size
+        order.append(nid)
+
+    for s in steps:
+        if not isinstance(s, dict) or "id" not in s:
+            continue
+        sid, kind = s["id"], step_kind(s)
+        if kind in ("scripted", "agent"):
+            add(sid, _LEAF)
+        elif kind in ("loop", "map"):
+            cb, cw, ch = _layout_frame(s[kind].get("body", []) or [], expanded)
+            children[sid] = (cb, cw, ch)
+            add(sid, (cw + 2 * _PAD, ch + _HDR + _PAD))
+            expanded.add(sid)
+        elif kind == "branch":
+            add(sid, _GW)
+            for arm in ("then", "else"):
+                body = s["branch"].get(arm)
+                if isinstance(body, list):
+                    aid = f"{sid}.{arm}"
+                    cb, cw, ch = _layout_frame(body, expanded)
+                    children[aid] = (cb, cw, ch)
+                    add(aid, (cw + 2 * _PAD, ch + _HDR + _PAD))
+                    expanded.add(aid)
+                    frame_edges.append((sid, aid))
+
+    ids = set(sizes)
+    rank_edges = list(frame_edges)
+    for s in steps:
+        if isinstance(s, dict) and "id" in s:
+            for n in s.get("needs") or []:
+                if n in ids and s["id"] in ids:
+                    rank_edges.append((n, s["id"]))
+    rank = _frame_rank(ids, rank_edges)
+
+    by_rank: dict[int, list[str]] = {}
+    for nid in order:  # document order within a rank → stable vertical stacking
+        by_rank.setdefault(rank[nid], []).append(nid)
+    rank_w = {r: max(sizes[i][0] for i in ns) for r, ns in by_rank.items()}
+    x_of = {}
+    acc = 0.0
+    for r in sorted(by_rank):
+        x_of[r] = acc
+        acc += rank_w[r] + _HGAP
+
+    boxes: dict[str, list[float]] = {}
+    for r in sorted(by_rank):
+        y = 0.0
+        for nid in by_rank[r]:
+            w, h = sizes[nid]
+            boxes[nid] = [x_of[r] + (rank_w[r] - w) / 2, y, w, h]
+            y += h + _VGAP
+
+    for cid, (cb, _cw, _ch) in children.items():
+        cx, cy = boxes[cid][0], boxes[cid][1]
+        ox, oy = cx + _PAD, cy + _HDR
+        for k, (x, y, w, h) in cb.items():
+            boxes[k] = [x + ox, y + oy, w, h]
+
+    width = max((b[0] + b[2] for b in boxes.values()), default=0.0)
+    height = max((b[1] + b[3] for b in boxes.values()), default=0.0)
+    return boxes, width, height
+
+
+def _emit_di(defs, proc_id, boxes, expanded, edges) -> None:
+    """Emit the BPMN DI from the computed layout: one ``BPMNShape`` per element (flagged
+    ``isExpanded`` for sub-processes so their bodies render inline) and one ``BPMNEdge``
+    per sequence flow, with waypoints DOCKED to the source's right edge and the target's
+    left edge (not centre-to-centre, so arrows don't cut through node labels)."""
     plane_owner = ET.SubElement(defs, _q("bpmndi", "BPMNDiagram"), {"id": "di"})
     plane = ET.SubElement(
         plane_owner, _q("bpmndi", "BPMNPlane"), {"id": "plane", "bpmnElement": proc_id}
     )
-    pos: dict[str, tuple[int, int]] = {}
-    for sid, rank, lane in shapes:
-        x, y = 160 + rank * 180, 80 + lane * 120
-        pos[sid] = (x + 50, y + 40)
-        shp = ET.SubElement(
-            plane, _q("bpmndi", "BPMNShape"), {"id": f"di_{sid}", "bpmnElement": sid}
-        )
+
+    def n(v: float) -> str:
+        return str(int(round(v)))
+
+    for sid, (x, y, w, h) in boxes.items():
+        attrs = {"id": f"di_{sid}", "bpmnElement": sid}
+        if sid in expanded:
+            attrs["isExpanded"] = "true"
+        shp = ET.SubElement(plane, _q("bpmndi", "BPMNShape"), attrs)
         ET.SubElement(
-            shp, _q("dc", "Bounds"), {"x": str(x), "y": str(y), "width": "100", "height": "80"}
+            shp,
+            _q("dc", "Bounds"),
+            {"x": n(x + _MARGIN), "y": n(y + _MARGIN), "width": n(w), "height": n(h)},
         )
     for fid, src, tgt in edges:
+        if src not in boxes or tgt not in boxes:
+            continue
+        sx, sy, sw, sh = boxes[src]
+        tx, ty, _tw, th = boxes[tgt]
         ed = ET.SubElement(plane, _q("bpmndi", "BPMNEdge"), {"id": f"di_{fid}", "bpmnElement": fid})
-        for end in (src, tgt):
-            x, y = pos.get(end, (0, 0))
-            ET.SubElement(ed, _q("di", "waypoint"), {"x": str(x), "y": str(y)})
+        wp = ET.SubElement
+        wp(ed, _q("di", "waypoint"), {"x": n(sx + sw + _MARGIN), "y": n(sy + sh / 2 + _MARGIN)})
+        wp(ed, _q("di", "waypoint"), {"x": n(tx + _MARGIN), "y": n(ty + th / 2 + _MARGIN)})
 
 
 # ── BPMN -> IR ────────────────────────────────────────────────────────────────
