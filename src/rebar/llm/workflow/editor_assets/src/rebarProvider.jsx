@@ -51,6 +51,10 @@ function configEl(bo) {
 
 function KindEntry(props) {
   const { element, id } = props;
+  // TextFieldEntry always calls useDebounce, so a `debounce` service is required even for
+  // a read-only field — omitting it throws "debounceFn is not a function" and takes the
+  // whole group down.
+  const debounce = useService("debounceInput");
   return (
     <TextFieldEntry
       id={id}
@@ -58,6 +62,7 @@ function KindEntry(props) {
       label="Rebar kind"
       getValue={() => kindOf(element.businessObject)}
       setValue={() => {}}
+      debounce={debounce}
       disabled
     />
   );

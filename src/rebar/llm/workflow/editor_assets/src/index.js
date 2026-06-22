@@ -25,7 +25,6 @@ import {
   BpmnPropertiesPanelModule,
   BpmnPropertiesProviderModule,
 } from "bpmn-js-properties-panel";
-import { layoutProcess } from "bpmn-auto-layout";
 
 import rebarPropertiesProviderModule from "./rebarProvider";
 
@@ -52,17 +51,10 @@ const modeler = new BpmnModeler({
 });
 
 async function open(xml) {
-  // Lay out fresh: bpmn-auto-layout ignores incoming DI and computes a readable
-  // left-to-right layout. If it ever throws (malformed input), fall back to importing
-  // the diagram as-is rather than showing nothing.
-  let toImport = xml;
+  // The Python serializer ships a ready-to-render layout (layered left-to-right, edges
+  // docked to node edges, sub-processes expanded inline), so we import it directly.
   try {
-    toImport = await layoutProcess(xml);
-  } catch (e) {
-    console.warn("auto-layout failed, importing as-is:", e);
-  }
-  try {
-    await modeler.importXML(toImport);
+    await modeler.importXML(xml);
     modeler.get("canvas").zoom("fit-viewport");
     status("ready — edits stay in the BPMN metamodel; only the IR file is written");
   } catch (e) {
@@ -87,4 +79,9 @@ async function save() {
 }
 
 document.getElementById("save").addEventListener("click", save);
+
+// Test hook: expose the modeler so the headless browser E2E can drive selection /
+// inspect state deterministically (harmless in normal use).
+window.__rebarModeler = modeler;
+
 open(window.REBAR_DIAGRAM);
