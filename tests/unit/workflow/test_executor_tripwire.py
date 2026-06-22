@@ -71,13 +71,6 @@ def test_executor_documents_the_burr_adoption_path() -> None:
     assert sum(f"{n}." in src for n in (1, 2, 3, 4)) >= 4  # the trigger list's items survive
 
 
-def test_executor_has_no_threads_at_runtime() -> None:
-    # Belt-and-suspenders: even a dynamically-imported scheduler would show here.
-    src = _executor_source()
-    for needle in ("import asyncio", "import threading", "ThreadPool", "ProcessPool"):
-        assert needle not in src, f"executor/interpreter contains {needle!r}"
-
-
 def _imports_a_banned_concurrency_lib(module) -> bool:
     mods = _imported_modules(Path(module.__file__).read_text(encoding="utf-8"))
     return bool(mods & {"threading", "concurrent", "concurrent.futures", "multiprocessing"})

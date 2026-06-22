@@ -198,11 +198,13 @@ def test_structured_validity_eval_false_accept_arm():
     ]
     false_accepts = 0
     for text, expected in cases:
+        # Only a parse/validation rejection is an expected "did not recover" — narrow the
+        # except so an UNEXPECTED error (a real bug) surfaces instead of being miscounted.
         try:
             obj = Model(**structured.tolerant_parse(text))
             if expected is None or obj.verdict != expected:
                 false_accepts += 1  # fabricated a wrong/unexpected value
-        except (StructuredOutputError, Exception):
+        except StructuredOutputError:
             if expected is not None:
                 false_accepts += 1  # should have recovered, didn't
     assert false_accepts == 0, f"{false_accepts} false-accept(s): garbage produced wrong output"
