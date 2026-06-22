@@ -266,3 +266,73 @@ def test_bare_control_condition_is_flagged() -> None:
     doc = _valid_v2()
     doc["steps"][2]["branch"]["when"] = "yes"
     assert any("branch.when" in e and "expression" in e for e in _lint_errors(doc))
+
+
+# ── Injection guard, if: guard, type discriminator, terminals (lint contract) ──
+
+
+def test_raw_expression_in_identifier_field_is_flagged():
+    # The Argo lesson: a raw ${{ }} in an identifier/body field (uses/id/prompt/...) is
+    # an injection vector — values must pass through `with:`, by name.
+    doc = _valid_v2()
+    doc["steps"][0]["uses"] = "${{ inputs.op }}"
+    assert any("raw expression not allowed" in e and ".uses" in e for e in _lint_errors(doc))
+
+
+def test_expression_in_a_with_key_is_flagged():
+    doc = _valid_v2()
+    doc["steps"][3]["map"]["body"][0]["with"] = {"${{ inputs.k }}": 1}
+    assert any("mapping key" in e for e in _lint_errors(doc))
+
+
+def test_bare_if_guard_is_flagged():
+    # A bare `if:` (no ${{ }}) is silently always-truthy (the GHA footgun) — rejected.
+    doc = _valid_v2()
+    doc["steps"][2]["if"] = "yes"
+    assert any(".if" in e and "expression" in e for e in _lint_errors(doc))
+
+
+def test_if_guard_may_not_reference_secret():
+    doc = _valid_v2()
+    doc["steps"][2]["if"] = "${{ secrets.TOKEN }}"
+    assert any(".if" in e and "credential" in e for e in _lint_errors(doc))
+
+
+def test_agent_only_field_on_scripted_step_is_flagged():
+    doc = _valid_v2()
+    doc["steps"][0]["model"] = "anthropic:claude-opus-4-8"  # model is agent-only
+    assert any("only applies to an agent step" in e for e in _lint_errors(doc))
+
+
+def test_type_discriminator_mismatch_is_flagged():
+    doc = _valid_v2()
+    doc["steps"][1]["type"] = "branch"  # but the step has a loop shape
+    assert any(".type" in e and "loop" in e for e in _lint_errors(doc))
+
+
+def test_index_var_binding_is_in_scope_in_map_body():
+    doc = _valid_v2()
+    doc["steps"][3]["map"]["body"][0]["with"]["j"] = "${{ map.ix }}"  # ix = the index_var
+    assert not any("map.ix" in e or "ix" in e for e in _lint_errors(doc))
+
+
+def test_undeclared_index_var_reference_is_flagged():
+    doc = _valid_v2()
+    doc["steps"][3]["map"]["body"][0]["with"]["j"] = "${{ map.nope }}"
+    assert any("map binding 'nope'" in e for e in _lint_errors(doc))
+
+
+def test_multiple_terminal_steps_flagged():
+    # Two unconnected top-level sinks -> the top frame must converge to ONE terminal.
+    doc = {
+        "schema_version": "2", "name": "twosinks",
+        "steps": [{"id": "a", "uses": "o"}, {"id": "b", "uses": "o"}],
+    }
+    assert any("exactly one terminal step" in e for e in _lint_errors(doc))
+
+
+def test_disallowed_expression_namespace_is_rejected():
+    # The allow-list is CLOSED; an unknown namespace is a disallowed expression.
+    doc = _valid_v2()
+    doc["steps"][0] = {"id": "start", "uses": "noop", "with": {"x": "${{ foo.bar }}"}}
+    assert any("disallowed expression" in e for e in _lint_errors(doc))

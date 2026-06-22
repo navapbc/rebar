@@ -109,3 +109,41 @@ def test_parallel_run_and_diff_drives_both_runners():
     report = parallel_run_and_diff(corpus, run, run, to_record=to_record)
     assert report.passed, report.gating_failures
     assert report.metrics["n"] == 40 and report.metrics["n_gold"] == 20
+
+
+def test_mismatched_lengths_raise():
+    import pytest
+
+    with pytest.raises(ValueError, match="align"):
+        parity_report([_rec()], [])  # paired records must be the same length
+
+
+def test_min_gold_override_relaxes_the_coverage_guard():
+    # The coverage guard is tunable: with min_gold=0 a goldless run is no longer failed
+    # ON THAT CRITERION (other criteria still apply).
+    v1, v2 = _good_pair(n=10, block_gold=0, safe_gold=0)
+    report = parity_report(v1, v2, min_gold=0)
+    assert report.passed, report.gating_failures
+    assert report.metrics["n_gold"] == 0
+
+
+def test_parallel_run_and_diff_maps_a_raising_runner_to_errored():
+    # A runner that raises on an item must record an `errored` ItemRecord (not crash the
+    # driver), so a v2 error regression is visible to the gate.
+    corpus = [{"id": i, "label": "advisory" if i < 20 else None} for i in range(20)]
+
+    def ok(_item):
+        return {"decision": "advisory", "valid": True}
+
+    def boom(_item):
+        raise RuntimeError("runner down")
+
+    def to_record(item, result, errored):
+        if errored or result is None:
+            return ItemRecord(valid=False, decision="dropped", errored=True, label=item["label"])
+        return ItemRecord(valid=result["valid"], decision=result["decision"], label=item["label"])
+
+    report = parallel_run_and_diff(corpus, ok, boom, to_record=to_record)  # v2 raises
+    assert not report.passed
+    assert any("error rate" in f for f in report.gating_failures)
+    assert report.metrics["error_rate"]["v2"] == 1.0 and report.metrics["error_rate"]["v1"] == 0.0

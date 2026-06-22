@@ -318,31 +318,41 @@ def _run_leaf(rc, step, sid, frame_key, kind, prefixes, bindings, iteration) -> 
             }
         )
         captured = _capture_nondeterminism()
-        resolved_input = _resolve_scoped(
-            dict(step.get("with") or {}),
-            inputs=rc.inputs,
-            outputs=rc.outputs,
-            prefixes=prefixes,
-            bindings=bindings,
-            secrets=rc.secrets,
-        )
-    try:
-        ctx = StepContext(
-            run_id=rc.run_id,
-            step_id=sid,
-            kind=kind,
-            step=step,
-            inputs=resolved_input,
-            workflow=rc.doc,
-            target_ticket=rc.target_ticket,
-            repo_root=rc.repo_root,
-            captured=captured,
-            frame_key=frame_key,
-            iteration=iteration,
-        )
-        result = _dispatch(ctx, rc.registry, rc.runner)
-    except Exception as exc:  # a step failure is data, not a crash
-        result = StepResult(outputs={}, status="failed", error=str(exc))
+        # Resolve `with` under the guard (it reads rc.outputs). A resolution failure
+        # (e.g. a declared input not supplied at run time) is STEP DATA, not a crash —
+        # captured here so it fails the step gracefully, never escaping run_workflow.
+        try:
+            resolved_input = _resolve_scoped(
+                dict(step.get("with") or {}),
+                inputs=rc.inputs,
+                outputs=rc.outputs,
+                prefixes=prefixes,
+                bindings=bindings,
+                secrets=rc.secrets,
+            )
+            resolve_error: Exception | None = None
+        except ExpressionError as exc:
+            resolved_input, resolve_error = {}, exc
+    if resolve_error is not None:
+        result = StepResult(outputs={}, status="failed", error=str(resolve_error))
+    else:
+        try:
+            ctx = StepContext(
+                run_id=rc.run_id,
+                step_id=sid,
+                kind=kind,
+                step=step,
+                inputs=resolved_input,
+                workflow=rc.doc,
+                target_ticket=rc.target_ticket,
+                repo_root=rc.repo_root,
+                captured=captured,
+                frame_key=frame_key,
+                iteration=iteration,
+            )
+            result = _dispatch(ctx, rc.registry, rc.runner)
+        except Exception as exc:  # a step failure is data, not a crash
+            result = StepResult(outputs={}, status="failed", error=str(exc))
     with _guard(rc):
         rc.outputs[frame_key] = dict(result.outputs)
         rc.statuses[frame_key] = result.status

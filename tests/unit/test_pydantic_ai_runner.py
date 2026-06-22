@@ -47,7 +47,7 @@ def _sequence_model(texts):
         state["i"] += 1
         return ModelResponse(parts=[TextPart(texts[i])])
 
-    return FunctionModel(gen)
+    return FunctionModel(gen), state  # state["i"] == number of model calls
 
 
 def _cfg(**kw):
@@ -144,35 +144,63 @@ def test_structured_path_repairs_near_miss_output():
         model_override=_function_model('```json\n{"verdict": "PASS", "findings": [],}\n```'),
     )
     out = runner.run(
-        RunRequest(system_prompt="x", instructions="y", config=runner._config, reviewers=["v"],
-                   mode="structured", output_schema="completion_verdict")
+        RunRequest(
+            system_prompt="x",
+            instructions="y",
+            config=runner._config,
+            reviewers=["v"],
+            mode="structured",
+            output_schema="completion_verdict",
+        )
     )
     assert out["verdict"] == "PASS"
 
 
-def test_structured_path_bounded_retry_recovers():
+def test_structured_path_bounded_retry_recovers_and_stops_early():
     # First reply is unparseable; the bounded retry (layer 4) feeds the error back and
-    # the second reply validates.
-    runner = PydanticAIRunner(
-        _cfg(),
-        model_override=_sequence_model(
-            ["sorry, I can't produce JSON", '{"verdict": "FAIL", "findings": [], "summary": "no"}']
-        ),
+    # the second reply validates — and the runner STOPS as soon as it validates (exactly
+    # 2 model calls here, not the full budget).
+    from rebar.llm import structured as _s
+
+    model, calls = _sequence_model(
+        ["sorry, I can't produce JSON", '{"verdict": "FAIL", "findings": [], "summary": "no"}']
     )
+    runner = PydanticAIRunner(_cfg(), model_override=model)
     out = runner.run(
-        RunRequest(system_prompt="x", instructions="y", config=runner._config, reviewers=["v"],
-                   mode="structured", output_schema="completion_verdict")
+        RunRequest(
+            system_prompt="x",
+            instructions="y",
+            config=runner._config,
+            reviewers=["v"],
+            mode="structured",
+            output_schema="completion_verdict",
+        )
     )
     assert out["verdict"] == "FAIL"
+    assert calls["i"] == 2  # recovered on the first retry; did not burn the rest of the budget
+    assert calls["i"] <= 1 + _s.OUTPUT_RETRIES
 
 
-def test_structured_path_raises_after_exhausting_retries():
-    runner = PydanticAIRunner(_cfg(), model_override=_function_model("never any json here"))
+def test_structured_path_exhausts_exactly_the_bounded_budget():
+    # An always-unparseable model: the runner makes EXACTLY 1 + OUTPUT_RETRIES attempts
+    # (one initial + the bounded retries), then raises — guarding against silent inflation
+    # of billable calls.
+    from rebar.llm import structured as _s
+
+    model, calls = _sequence_model(["never any json here"])
+    runner = PydanticAIRunner(_cfg(), model_override=model)
     with pytest.raises(LLMRunnerError):  # StructuredOutputError is an LLMRunnerError subclass
         runner.run(
-            RunRequest(system_prompt="x", instructions="y", config=runner._config, reviewers=["v"],
-                       mode="structured", output_schema="completion_verdict")
+            RunRequest(
+                system_prompt="x",
+                instructions="y",
+                config=runner._config,
+                reviewers=["v"],
+                mode="structured",
+                output_schema="completion_verdict",
+            )
         )
+    assert calls["i"] == 1 + _s.OUTPUT_RETRIES
 
 
 def test_text_mode_returns_final_text():
@@ -254,6 +282,20 @@ def test_mcp_toolsets_empty_and_malformed():
 
     with pytest.raises(LLMRunnerError, match="command|url"):
         pai_tools.mcp_toolsets({"srv": {}})
+
+
+def test_mcp_toolsets_builds_stdio_and_http():
+    # The happy paths: a `command` config builds a stdio toolset, a `url` config builds an
+    # HTTP toolset (one each). Decoupled from the concrete pydantic-ai class (which it
+    # deprecates for MCPToolset in v2) — we assert a toolset is built, not its exact type.
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)  # pydantic-ai v2 MCP rename
+        stdio = pai_tools.mcp_toolsets({"a": {"command": "echo", "args": ["hi"]}})
+        http = pai_tools.mcp_toolsets({"b": {"url": "http://localhost:9/mcp"}})
+    assert len(stdio) == 1 and stdio[0] is not None
+    assert len(http) == 1 and http[0] is not None
 
 
 def test_preflight_ok_with_extra_installed():

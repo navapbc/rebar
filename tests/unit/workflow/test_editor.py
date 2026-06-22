@@ -43,15 +43,16 @@ def _wf_file(tmp_path: Path) -> Path:
 # ── The bpmn-js host page ──────────────────────────────────────────────────────
 
 
-def test_host_html_embeds_descriptor_and_bpmn_and_modeler():
+def test_host_html_embeds_the_integration_contract():
+    # Pin the INTEGRATION CONTRACT the browser side depends on (not template internals):
+    # the rebar moddle descriptor is registered (extension survival), the diagram to edit
+    # is embedded, and Save targets the /save endpoint. The specific JS library wiring is
+    # an implementation detail and intentionally NOT asserted.
     xml = bpmn.ir_to_bpmn({"schema_version": "2", "name": "x", "steps": [{"id": "a", "uses": "o"}]})
-    html = editor.build_host_html(xml)
-    # bpmn-js Modeler (BPMN-only palette -> constrained metamodel), the rebar moddle
-    # descriptor (extension survival), and the diagram are all embedded.
-    assert "bpmn-modeler" in html and "BpmnJS" in html
-    assert "moddleExtensions" in html and "rebar" in html
-    assert "http://rebar.dev/schema/workflow/1.0" in html  # the descriptor uri
-    assert "/save" in html  # Save POSTs the edited BPMN back
+    html = editor.build_host_html(xml, token="tok")
+    assert "moddleExtensions" in html and bpmn.REBAR in html  # descriptor registered
+    assert "process id" in html  # the diagram XML is embedded
+    assert "/save" in html and "X-Rebar-Token" in html  # the save endpoint + its guard
 
 
 # ── BPMN -> IR save round-trip ─────────────────────────────────────────────────
@@ -122,7 +123,7 @@ def _save(base, token, xml):
 def test_server_serves_host_and_bpmn(_server):
     _path, base, _token = _server
     html = urllib.request.urlopen(base + "/").read().decode("utf-8")
-    assert "BpmnJS" in html
+    assert "moddleExtensions" in html and "/save" in html  # the host page's contract
     xml = urllib.request.urlopen(base + "/workflow.bpmn").read().decode("utf-8")
     assert "bpmn:process" in xml and "rebar:" in xml
 
@@ -181,3 +182,17 @@ def test_save_rejects_xxe_external_entity(tmp_path):
     errors = editor.save_bpmn_to_ir(xxe, path)
     assert errors  # rejected, not parsed/written
     assert path.read_text(encoding="utf-8") == before
+
+
+def test_sequential_saves_each_back_up_the_prior_ir(tmp_path):
+    # Two saves in a row both succeed; the .bak after the second reflects the state
+    # written by the FIRST (the backup is taken before each overwrite, so the prior IR
+    # is always recoverable).
+    path = _wf_file(tmp_path)
+    bak = path.with_suffix(".yaml.bak")
+    xml = editor._load_bpmn_for(path)
+    assert editor.save_bpmn_to_ir(xml, path) == []
+    first_saved = path.read_text(encoding="utf-8")
+    # A second save (re-serialize the now-saved IR) backs up `first_saved`.
+    assert editor.save_bpmn_to_ir(editor._load_bpmn_for(path), path) == []
+    assert bak.read_text(encoding="utf-8") == first_saved

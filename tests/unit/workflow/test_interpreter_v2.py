@@ -336,3 +336,170 @@ def test_replay_resumes_a_loop_at_the_right_iteration():
         if fk.startswith("L#"):
             assert fk not in executed, f"{fk} re-ran on replay"
     assert res2.outputs["L"] == {"iterations": 3}
+
+
+# ── Error paths, boundaries, and the if: skip-guard (behavioral coverage) ──────
+
+
+def test_map_over_not_a_list_fails_the_run():
+    _CURRENT_SINK[0] = {}
+    rec = _ReplayRecorder(sink=_CURRENT_SINK[0])
+    res = _run(_map_wf(), recorder=rec, registry=_registry(), inputs={"items": 42})
+    assert res.status == "failed"
+    assert "did not yield a list" in (res.error or "")
+
+
+def test_map_over_empty_runs_zero_iterations():
+    _CURRENT_SINK[0] = {}
+    rec = _ReplayRecorder(sink=_CURRENT_SINK[0])
+    res = _run(_map_wf(), recorder=rec, registry=_registry(), inputs={"items": []})
+    assert res.status == "succeeded"
+    assert res.outputs["M"] == {"count": 0}
+    assert not any(k.startswith("M#") for k in rec.store)  # no body iterations
+
+
+def test_unknown_scripted_step_fails_the_run():
+    _CURRENT_SINK[0] = {}
+    rec = _ReplayRecorder(sink=_CURRENT_SINK[0])
+    wf = {"schema_version": "2", "name": "u", "steps": [{"id": "a", "uses": "nonexistent"}]}
+    res = _run(wf, recorder=rec, registry=_registry())
+    assert res.status == "failed"
+    assert "unknown scripted step" in (res.error or "") and "nonexistent" in (res.error or "")
+
+
+def test_declared_input_not_supplied_at_runtime_fails_the_run():
+    # The input IS declared (so the linter passes), but is not supplied for this run —
+    # the runtime resolver raises and the step fails (vs an UNDECLARED input, which the
+    # linter rejects before execution).
+    _CURRENT_SINK[0] = {}
+    rec = _ReplayRecorder(sink=_CURRENT_SINK[0])
+    wf = {
+        "schema_version": "2",
+        "name": "mi",
+        "inputs": {"needed": {"type": "string"}},
+        "steps": [{"id": "a", "uses": "emit", "with": {"x": "${{ inputs.needed }}"}}],
+    }
+    res = _run(wf, recorder=rec, registry=_registry(), inputs={})  # 'needed' not passed
+    assert res.status == "failed"
+    assert "needed" in (res.error or "") and "not set" in (res.error or "")
+
+
+def test_if_guard_skips_step_without_running_its_effect():
+    _CURRENT_SINK[0] = {}
+    sink = _CURRENT_SINK[0]
+    rec = _ReplayRecorder(sink=sink)
+    wf = {
+        "schema_version": "2",
+        "name": "guard",
+        "inputs": {"flag": {"type": "boolean"}},
+        "steps": [
+            {"id": "start", "uses": "emit"},
+            {"id": "maybe", "needs": ["start"], "uses": "emit", "if": "${{ inputs.flag }}"},
+            {"id": "after", "needs": ["maybe"], "uses": "emit"},
+        ],
+    }
+    res = _run(wf, recorder=rec, registry=_registry(), inputs={"flag": False})
+    assert res.status == "succeeded"
+    # The guarded step is recorded SKIPPED, its effect never emitted; downstream still runs.
+    assert rec.store["maybe"]["status"] == "skipped"
+    assert "maybe" not in sink  # the side effect did not happen
+    assert "start" in sink and "after" in sink
+
+
+def test_if_guard_runs_step_when_truthy():
+    _CURRENT_SINK[0] = {}
+    sink = _CURRENT_SINK[0]
+    rec = _ReplayRecorder(sink=sink)
+    wf = {
+        "schema_version": "2",
+        "name": "guard",
+        "inputs": {"flag": {"type": "boolean"}},
+        "steps": [{"id": "a", "uses": "emit", "if": "${{ inputs.flag }}"}],
+    }
+    res = _run(wf, recorder=rec, registry=_registry(), inputs={"flag": True})
+    assert res.status == "succeeded" and "a" in sink
+
+
+def test_run_result_exposes_terminal_step_and_output():
+    _CURRENT_SINK[0] = {}
+    rec = _ReplayRecorder(sink=_CURRENT_SINK[0])
+    res = _run(_branch_wf(True), recorder=rec, registry=_registry(), inputs={"flag": True})
+    assert res.terminal_step == "gate"
+    assert res.terminal_output == {"taken": "then"}
+
+
+def test_while_is_a_pre_check_vs_until_do_while():
+    # `while` is a PRE-check and `until` a POST-check (do-while). With a condition that
+    # references the body's OWN output (unavailable at i=0): `until` runs the first
+    # iteration then re-checks; `while` runs ZERO iterations (the i=0 pre-check has no
+    # prior output -> falsy). This is the load-bearing semantic fork between the two.
+    def body_fn(out):
+        return lambda ctx: _ex.StepResult(outputs=out)
+
+    def loop_wf(cond_key, cond_expr):
+        return {
+            "schema_version": "2",
+            "name": "c",
+            "steps": [
+                {
+                    "id": "L",
+                    "loop": {
+                        "max_iterations": 5,
+                        cond_key: cond_expr,
+                        "var": "i",
+                        "body": [{"id": "a", "uses": "a"}],
+                    },
+                }
+            ],
+        }
+
+    # until: body sets done=True on iter 0 -> runs iter 0 (do-while), i=1 check stops it.
+    _CURRENT_SINK[0] = {}
+    rec_u = _ReplayRecorder(sink=_CURRENT_SINK[0])
+    res_u = _run(
+        loop_wf("until", "${{ steps.a.outputs.done }}"),
+        recorder=rec_u,
+        registry={"a": body_fn({"done": True})},
+    )
+    assert res_u.outputs["L"] == {"iterations": 1}
+
+    # while: pre-check at i=0 has no prior body output -> falsy -> zero iterations.
+    _CURRENT_SINK[0] = {}
+    rec_w = _ReplayRecorder(sink=_CURRENT_SINK[0])
+    res_w = _run(
+        loop_wf("while", "${{ steps.a.outputs.go }}"),
+        recorder=rec_w,
+        registry={"a": body_fn({"go": True})},
+    )
+    assert res_w.outputs["L"] == {"iterations": 0}
+    assert not any(k.startswith("L#") for k in rec_w.store)
+
+
+def test_map_index_var_resolves_at_runtime():
+    _CURRENT_SINK[0] = {}
+    rec = _ReplayRecorder(sink=_CURRENT_SINK[0])
+    indices: list = []
+
+    def proc(ctx):
+        indices.append(ctx.inputs.get("j"))
+        return _ex.StepResult(outputs={})
+
+    wf = {
+        "schema_version": "2",
+        "name": "mi",
+        "inputs": {"xs": {"type": "array"}},
+        "steps": [
+            {
+                "id": "M",
+                "map": {
+                    "over": "${{ inputs.xs }}",
+                    "as": "item",
+                    "index_var": "ix",
+                    "body": [{"id": "proc", "uses": "proc", "with": {"j": "${{ map.ix }}"}}],
+                },
+            }
+        ],
+    }
+    res = _run(wf, recorder=rec, registry={"proc": proc}, inputs={"xs": ["a", "b", "c"]})
+    assert res.status == "succeeded"
+    assert indices == [0, 1, 2]

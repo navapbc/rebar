@@ -61,10 +61,14 @@ def test_executor_imports_no_scheduler_or_retry_lib() -> None:
     )
 
 
-def test_executor_carries_burr_adoption_trigger_list() -> None:
+def test_executor_documents_the_burr_adoption_path() -> None:
+    # The adoption mechanism should travel with the code so a future maintainer knows
+    # WHEN to adopt Burr instead of growing a scheduler. We assert the CONCEPT is
+    # documented (tolerant of rewording — not an exact-phrase pin): "burr" appears and
+    # at least the four numbered trigger criteria are present.
     src = _executor_source().lower()
-    assert "burr-adoption trigger list" in src
-    assert "tripwire" in src
+    assert "burr" in src
+    assert sum(f"{n}." in src for n in (1, 2, 3, 4)) >= 4  # the trigger list's items survive
 
 
 def test_executor_has_no_threads_at_runtime() -> None:
@@ -74,15 +78,23 @@ def test_executor_has_no_threads_at_runtime() -> None:
         assert needle not in src, f"executor/interpreter contains {needle!r}"
 
 
-def test_map_fanout_is_the_sole_documented_tripwire_relaxation() -> None:
-    # Bounded-concurrent map fan-out is the ONE narrow relaxation (8d8e): the
-    # concurrency is confined to map_fanout.py, which must carry a recorded rationale
-    # so the deliberate exception travels with the code. The ban stays armed
-    # everywhere else (asserted above for executor.py + interpreter.py).
+def _imports_a_banned_concurrency_lib(module) -> bool:
+    mods = _imported_modules(Path(module.__file__).read_text(encoding="utf-8"))
+    return bool(mods & {"threading", "concurrent", "concurrent.futures", "multiprocessing"})
+
+
+def test_map_fanout_is_the_sole_concurrency_module() -> None:
+    # STRUCTURAL (AST), not prose-grep: bounded-concurrent map fan-out is the ONE narrow
+    # relaxation (8d8e). map_fanout.py is the only workflow module that may import a
+    # concurrency lib; the tripwire-scanned executor + interpreter must NOT. (The
+    # behavioral guarantee — commits stay serialized — is proven separately in
+    # test_map_fanout.py::test_commits_are_serialized_even_under_concurrency.)
+    import rebar.llm.workflow.executor as _exe
+    import rebar.llm.workflow.interpreter as _interp
     import rebar.llm.workflow.map_fanout as _fanout
 
-    src = Path(_fanout.__file__).read_text(encoding="utf-8")
-    assert "ThreadPoolExecutor" in src  # it really is where the concurrency lives
-    assert "RECORDED RATIONALE" in src
-    assert "tripwire" in src.lower()
-    assert "serialized" in src.lower() and "max_concurrency" in src
+    assert _imports_a_banned_concurrency_lib(_fanout)  # the relaxation really lives here
+    assert not _imports_a_banned_concurrency_lib(_exe)
+    assert not _imports_a_banned_concurrency_lib(_interp)
+    # And the deliberate exception is documented (concept present, not an exact phrase).
+    assert "rationale" in Path(_fanout.__file__).read_text(encoding="utf-8").lower()

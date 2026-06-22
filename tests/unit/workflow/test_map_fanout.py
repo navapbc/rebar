@@ -7,6 +7,7 @@ concurrency (order-independent via the iteration-keyed markers).
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 
@@ -262,7 +263,31 @@ def test_map_iteration_failure_fails_the_run():
 
     res, _ = _run(_map_wf(5, bound=5), {"work": work}, list(range(5)))
     assert res.status == "failed"
-    assert "failed" in (res.error or "")
+    # The failing iteration's frame key AND the underlying exception text surface (not a
+    # vacuous "failed" substring).
+    assert "M#2/work" in (res.error or "") and "boom" in (res.error or "")
+
+
+def test_max_concurrency_upper_bound_is_respected():
+    # The actual "bounded" guarantee: with max_concurrency=2 over 6 items, never more
+    # than 2 iterations may be in-flight at once. An atomic counter records the peak.
+    bound = 2
+    lock = threading.Lock()
+    state = {"inflight": 0, "peak": 0}
+
+    def work(ctx):
+        with lock:
+            state["inflight"] += 1
+            state["peak"] = max(state["peak"], state["inflight"])
+        time.sleep(0.02)  # widen the window so a bound violation would be observed
+        with lock:
+            state["inflight"] -= 1
+        return _ex.StepResult(outputs={})
+
+    res, _ = _run(_map_wf(6, bound=bound), {"work": work}, list(range(6)))
+    assert res.status == "succeeded"
+    assert state["peak"] <= bound, f"observed {state['peak']} concurrent > bound {bound}"
+    assert state["peak"] == bound  # and it DID saturate the bound (real concurrency)
 
 
 if __name__ == "__main__":

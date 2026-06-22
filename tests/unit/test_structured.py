@@ -156,21 +156,30 @@ def test_structured_validity_eval_meets_threshold():
     # recover a valid structured verdict from >= 99% of them (the recall/false-accept
     # gate that authorizes retiring the second-interpreter LLM). Only genuinely
     # content-empty output (no recoverable JSON) is allowed to fail.
-    corpus = list(_NEAR_MISS.values()) + [
+    recoverable = list(_NEAR_MISS.values()) + [
         '{"verdict":"FAIL","confidence":0.2}',
         'Result:\n```\n{"verdict": "PASS"}\n```',
         '{"verdict": "PASS"  "confidence": 0.7}',  # missing comma
         '{\n  "verdict": "PASS",\n  "confidence": 1.0\n}',
     ]
-    recovered = 0
-    for text in corpus:
-        try:
-            structured.validate_to(_Verdict, structured.tolerant_parse(text))
-            recovered += 1
-        except StructuredOutputError:
-            pass
-    validity = recovered / len(corpus)
+    # Include a GENUINELY unrecoverable element so `validity` is a real fraction (not a
+    # tautological 1.0): the stack must recover EVERY recoverable item AND reject the
+    # unrecoverable one, so validity over the recoverable subset is exactly 1.0 while
+    # the unrecoverable one raises.
+    corpus = recoverable + ["the model declined; there is no json anywhere here"]
+    recovered = sum(1 for text in recoverable if _recovers(text))
+    assert recovered == len(recoverable), "a recoverable near-miss was not recovered"
+    assert not _recovers(corpus[-1]), "the unrecoverable item must NOT be fabricated into a value"
+    validity = recovered / len(recoverable)
     assert validity >= 0.99, f"structured validity {validity:.2%} below the 99% gate"
+
+
+def _recovers(text: str) -> bool:
+    try:
+        structured.validate_to(_Verdict, structured.tolerant_parse(text))
+        return True
+    except StructuredOutputError:
+        return False
 
 
 def test_structured_validity_eval_false_accept_arm():
@@ -199,17 +208,36 @@ def test_structured_validity_eval_false_accept_arm():
     assert false_accepts == 0, f"{false_accepts} false-accept(s): garbage produced wrong output"
 
 
-def test_second_interpreter_llm_is_not_used_by_pydantic_ai_runner():
-    # The anti-pattern (a SECOND model call to interpret/extract output) must be gone
-    # from the new runtime: the PydanticAIRunner uses the deterministic stack +
-    # output_mode, never an extract-via-second-LLM step.
-    import inspect
+def test_no_second_interpreter_model_call_for_a_repairable_response():
+    # BEHAVIORAL proof (not a source grep): a near-miss reply that the DETERMINISTIC
+    # stack can repair must be finalized WITHOUT a second model call. We count how many
+    # times the model is invoked for a structured request whose first reply is a
+    # repairable near-miss — it must be exactly ONE (json-repair + validators do the
+    # rest; no extract-via-second-LLM step).
+    pytest.importorskip("pydantic_ai")
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
 
-    from rebar.llm import runner as R
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.runner import PydanticAIRunner, RunRequest
 
-    src = inspect.getsource(R.PydanticAIRunner) + inspect.getsource(R._pai_structured)
-    assert "_extract_structured" not in src
-    assert 'output_strategy == "extract"' not in src
-    # It dispatches through the deterministic layered stack (output_mode + parse_structured)
-    # instead of a second interpreter LLM.
-    assert "output_mode" in src and "parse_structured" in src
+    calls = {"n": 0}
+
+    def gen(messages, info):
+        calls["n"] += 1
+        # A fenced + trailing-comma near-miss the tolerant parse recovers deterministically.
+        return ModelResponse(parts=[TextPart('```json\n{"verdict": "PASS", "findings": [],}\n```')])
+
+    cfg = LLMConfig(model="anthropic:claude-opus-4-8", repo_path=".")
+    out = PydanticAIRunner(cfg, model_override=FunctionModel(gen)).run(
+        RunRequest(
+            system_prompt="x",
+            instructions="y",
+            config=cfg,
+            reviewers=["v"],
+            mode="structured",
+            output_schema="completion_verdict",
+        )
+    )
+    assert out["verdict"] == "PASS"
+    assert calls["n"] == 1, f"a repairable reply triggered {calls['n']} model calls (expected 1)"

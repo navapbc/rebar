@@ -192,3 +192,108 @@ def test_v2_loop_resume_reruns_nothing(rebar_repo: Path) -> None:
     assert calls == ["L#0/attempt", "L#1/attempt", "L#2/attempt"], (
         "a loop iteration re-ran on resume"
     )
+
+
+def test_v2_map_persists_iteration_keyed_markers(rebar_repo: Path) -> None:
+    tid = rebar.create_ticket("task", "Target", repo_root=str(rebar_repo))
+    wf = {
+        "schema_version": "2",
+        "name": "mapdemo",
+        "inputs": {"xs": {"type": "array"}},
+        "steps": [
+            {
+                "id": "M",
+                "map": {
+                    "over": "${{ inputs.xs }}",
+                    "as": "x",
+                    "body": [{"id": "proc", "uses": "echo", "with": {"v": "${{ map.x }}"}}],
+                },
+            }
+        ],
+    }
+    res = ex.run_workflow(
+        wf,
+        {"xs": ["a", "b"]},
+        run_id="MAP",
+        target_ticket=tid,
+        repo_root=str(rebar_repo),
+        scripted_registry={"echo": lambda c: {"echoed": c.inputs["v"]}},
+    )
+    assert res.status == "succeeded"
+    steps = rebar.show_ticket(tid, repo_root=str(rebar_repo))["workflow_steps"]["MAP"]
+    # The reducer must key the @/# frame paths correctly through show_ticket reconstruction.
+    assert {"M", "M#0/proc", "M#1/proc"} <= set(steps)
+    assert steps["M#0/proc"]["outputs"] == {"echoed": "a"}
+    assert steps["M"]["outputs"] == {"count": 2}
+
+
+def test_v2_branch_persists_only_the_chosen_arm(rebar_repo: Path) -> None:
+    tid = rebar.create_ticket("task", "Target", repo_root=str(rebar_repo))
+    wf = {
+        "schema_version": "2",
+        "name": "brdemo",
+        "inputs": {"flag": {"type": "boolean"}},
+        "steps": [
+            {
+                "id": "g",
+                "branch": {
+                    "when": "${{ inputs.flag }}",
+                    "then": [{"id": "yes", "uses": "noop"}],
+                    "else": [{"id": "no", "uses": "noop"}],
+                },
+            }
+        ],
+    }
+    ex.run_workflow(
+        wf,
+        {"flag": True},
+        run_id="BR",
+        target_ticket=tid,
+        repo_root=str(rebar_repo),
+        scripted_registry={"noop": lambda c: {}},
+    )
+    steps = rebar.show_ticket(tid, repo_root=str(rebar_repo))["workflow_steps"]["BR"]
+    assert "g@then/yes" in steps and steps["g"]["outputs"] == {"taken": "then"}
+    assert "g@else/no" not in steps  # the unchosen arm never ran
+
+
+def test_v2_loop_partial_resume_through_real_store(rebar_repo: Path) -> None:
+    # A run that FAILS partway (iteration 2 errors), then a fresh resume with the same
+    # run_id: the committed iterations 0,1 are idempotent-skipped and only iteration 2
+    # re-runs — exactly-once across the (simulated) restart, through the real reducer.
+    tid = rebar.create_ticket("task", "Target", repo_root=str(rebar_repo))
+    calls: list[str] = []
+
+    def flaky(ctx):
+        calls.append(ctx.frame_key)
+        if ctx.iteration == 2 and "fixed" not in calls:
+            raise RuntimeError("transient on iter 2")
+        return {"done": (ctx.iteration or 0) >= 2}
+
+    wf = _loop_wf()
+    r1 = ex.run_workflow(
+        wf,
+        run_id="PR",
+        target_ticket=tid,
+        repo_root=str(rebar_repo),
+        scripted_registry={"echo": lambda c: {"echoed": "x"}, "score": flaky},
+    )
+    assert r1.status == "failed"
+    assert calls == ["L#0/attempt", "L#1/attempt", "L#2/attempt"]  # 0,1 committed; 2 failed
+    calls.append("fixed")  # the "fix": iteration 2 now succeeds on resume
+    r2 = ex.run_workflow(
+        wf,
+        run_id="PR",
+        target_ticket=tid,
+        repo_root=str(rebar_repo),
+        scripted_registry={"echo": lambda c: {"echoed": "x"}, "score": flaky},
+    )
+    assert r2.status == "succeeded"
+    # Only iteration 2 re-ran on resume; 0 and 1 were skipped from their committed markers.
+    assert [c for c in calls if c.startswith("L#")] == [
+        "L#0/attempt",
+        "L#1/attempt",
+        "L#2/attempt",
+        "L#2/attempt",
+    ]
+    assert r2.outputs["L"] == {"iterations": 3}

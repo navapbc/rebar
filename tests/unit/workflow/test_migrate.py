@@ -69,6 +69,24 @@ def test_v1_to_v2_is_registered() -> None:
     assert "1" in mig._SHIMS
 
 
+def test_migrated_v1_validates_against_the_v2_schema() -> None:
+    # The shim's whole CONTRACT: the up-converted document is a VALID v2 file (not just
+    # a version-stamped v1) — validated against the real v2 JSON Schema.
+    v1 = {
+        "schema_version": "1",
+        "name": "demo",
+        "inputs": {"ticket_id": {"type": "string", "required": True}},
+        "steps": [
+            {"id": "fetch", "uses": "fetch_ticket",
+             "with": {"ticket_id": "${{ inputs.ticket_id }}"}},
+            {"id": "review", "prompt": "code-quality", "needs": ["fetch"]},
+        ],
+    }
+    out = mig.migrate_to_current(v1)
+    schema_errors = [e for e in wf.validate_document(out) if not e.startswith("note:")]
+    assert schema_errors == [], schema_errors
+
+
 def test_newer_version_is_upgrade_error() -> None:
     with pytest.raises(WorkflowVersionError, match="upgrade rebar"):
         mig.migrate_to_current({"schema_version": "999", "name": "x", "steps": []})
