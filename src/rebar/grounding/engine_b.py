@@ -7,7 +7,11 @@ fail-open skip) to S1's evidence model:
   slice. Pre-validated engine-faithfully (``--validate``, spike E1), then run with
   ``scan --sarif``; the SARIF is parsed by the shared :mod:`rebar.grounding.sarif`.
 * **ast-grep** — a lighter structural secondary; validated by its own per-rule
-  check, run with ``scan --json``, normalized in-module.
+  check, run with ``scan --json``, normalized in-module. A project tree-sitter
+  custom grammar (ast-grep ``customLanguages`` style) declared in the ``.rebar/``
+  slot (``.rebar/sgconfig.yml``, or a path in ``.rebar/grounding.toml``) is honored
+  for structural detectors via ``--config``; an unconfigured language fails open
+  (skipped + coverage).
 * **metric** (``scc``/``lizard``) — a size/complexity matcher with configurable
   thresholds. The tools are not installed here, so the path is real but fails open
   to ``abstain(no_tool)``.
@@ -104,7 +108,72 @@ def _repo_extensions(repo_root: Path) -> set[str]:
     return exts
 
 
-def _is_applicable(det: Detector, repo_exts: set[str], repo_root: Path) -> tuple[bool, str | None]:
+#: Where a project declares an ast-grep custom-language (tree-sitter) config, in
+#: the `.rebar/` slot. ast-grep's native project config file is `sgconfig.yml`; we
+#: read it from `.rebar/sgconfig.yml` (or a path declared in `.rebar/grounding.toml`
+#: under `[grounding] astgrep_sgconfig`). Its `customLanguages` entries register a
+#: tree-sitter grammar (ast-grep `customLanguages` style) so structural detectors in
+#: an otherwise-unsupported language are honored; an unconfigured language fails open.
+_PROJECT_SGCONFIG_REL = ".rebar/sgconfig.yml"
+_GROUNDING_TOML_REL = ".rebar/grounding.toml"
+
+
+def _resolve_astgrep_sgconfig(repo_root: Path) -> tuple[str | None, dict[str, set[str]]]:
+    """Resolve a project ast-grep ``sgconfig.yml`` (custom tree-sitter grammars).
+
+    Returns ``(sgconfig_path | None, {custom_language: {".ext", …}})``. The path is
+    passed to ast-grep via ``--config`` so its ``customLanguages`` grammars load; the
+    extension map lets a custom-language detector route as applicable (its files are
+    present) instead of being skipped as ``unsupported_lang``. Fails open to
+    ``(None, {})`` on any read/parse error — a missing or malformed slot simply means
+    no custom grammars, never a raise.
+    """
+    candidate = repo_root / _PROJECT_SGCONFIG_REL
+    declared = _sgconfig_from_toml(repo_root)
+    path = declared if declared is not None else (candidate if candidate.is_file() else None)
+    if path is None or not Path(path).is_file():
+        return None, {}
+    custom_exts: dict[str, set[str]] = {}
+    try:
+        import yaml  # PyYAML is a core dependency
+
+        doc = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+        for lang, spec in (doc.get("customLanguages") or {}).items():
+            exts = (spec or {}).get("extensions") if isinstance(spec, dict) else None
+            if isinstance(exts, list):
+                custom_exts[str(lang).lower()] = {
+                    ("." + e.lstrip(".")).lower() for e in exts if isinstance(e, str) and e.strip()
+                }
+    except Exception:  # noqa: BLE001 — a malformed sgconfig must not break the scan
+        return str(path), {}
+    return str(path), custom_exts
+
+
+def _sgconfig_from_toml(repo_root: Path) -> str | None:
+    """An ``astgrep_sgconfig`` path declared in ``.rebar/grounding.toml``, resolved
+    relative to the repo root, or None (fails open on any read/parse error)."""
+    toml_path = repo_root / _GROUNDING_TOML_REL
+    if not toml_path.is_file():
+        return None
+    try:
+        import tomllib
+
+        cfg = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+        rel = (cfg.get("grounding") or {}).get("astgrep_sgconfig")
+        if isinstance(rel, str) and rel.strip():
+            resolved = repo_root / rel
+            return str(resolved) if resolved.is_file() else None
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def _is_applicable(
+    det: Detector,
+    repo_exts: set[str],
+    repo_root: Path,
+    custom_exts: dict[str, set[str]] | None = None,
+) -> tuple[bool, str | None]:
     """Decide whether ``det`` applies to this repo.
 
     Returns ``(applicable, reason_if_not)``. A detector whose declared languages
@@ -117,10 +186,14 @@ def _is_applicable(det: Detector, repo_exts: set[str], repo_root: Path) -> tuple
         wanted: set[str] = set()
         for lang in langs:
             wanted.update(_LANG_EXTENSIONS.get(lang, ()))
+            # A project-declared custom tree-sitter grammar (ast-grep customLanguages
+            # in the `.rebar/` slot) makes an otherwise-unknown language routable.
+            if custom_exts:
+                wanted.update(custom_exts.get(lang, ()))
         if wanted and wanted.isdisjoint(repo_exts):
             return False, "unsupported_lang"
         if not wanted:
-            # A language we don't know how to route -> conservatively skip.
+            # A language neither we nor the project configured -> conservatively skip.
             return False, "unsupported_lang"
     globs = det.file_globs
     if globs:
@@ -304,7 +377,9 @@ def _run_opengrep(detectors: list[Detector], repo_root: Path) -> list[dict[str, 
 # ── ast-grep backend (secondary; validate-probe + JSON) ──────────────────────
 
 
-def _run_astgrep(detectors: list[Detector], repo_root: Path) -> list[dict[str, Any]]:
+def _run_astgrep(
+    detectors: list[Detector], repo_root: Path, sgconfig: str | None = None
+) -> list[dict[str, Any]]:
     binary = _resolve_binary(_ASTGREP_CANDIDATES)
     records: list[dict[str, Any]] = []
     if binary is None:
@@ -314,12 +389,15 @@ def _run_astgrep(detectors: list[Detector], repo_root: Path) -> list[dict[str, A
             for d in detectors
         ]
     version = _binary_version(binary)
+    # A project sgconfig.yml (custom tree-sitter grammars) is threaded to ast-grep via
+    # --config so structural detectors in a project-declared language are honored.
+    config_args = ["--config", sgconfig] if sgconfig else []
     for det in detectors:
         # ast-grep validates a rule as part of `scan -r`: a malformed rule exits
         # nonzero BEFORE producing matches (spike E1), so a scan that errors with
         # a parse complaint is the per-backend invalid-detector signal.
         res = harness.run_tool(
-            [binary, "scan", "-r", det.source_path, "--json", str(repo_root)],
+            [binary, "scan", "-r", det.source_path, *config_args, "--json", str(repo_root)],
             backend=BACKEND_ASTGREP, version=version,
         )
         if res.abstained:
@@ -486,11 +564,14 @@ def scan(
     root = Path(repo_root)
     reg = registry if registry is not None else load_registry(root)
     repo_exts = _repo_extensions(root)
+    sgconfig, custom_exts = _resolve_astgrep_sgconfig(root)
 
     records: list[dict[str, Any]] = []
     applicable_by_backend: dict[str, list[Detector]] = {b: [] for b in _BACKEND_RUNNERS}
     for det in reg:
-        applicable, reason = _is_applicable(det, repo_exts, root)
+        # Custom-grammar extensions only widen routing for the structural (ast-grep) backend.
+        det_custom = custom_exts if det.backend == BACKEND_ASTGREP else None
+        applicable, reason = _is_applicable(det, repo_exts, root, det_custom)
         if not applicable:
             records.append(_skip_record(det, det.backend, reason or "unsupported_lang"))
             continue
@@ -498,7 +579,11 @@ def scan(
 
     for backend, runner in _BACKEND_RUNNERS.items():
         dets = applicable_by_backend.get(backend) or []
-        if dets:
+        if not dets:
+            continue
+        if backend == BACKEND_ASTGREP:
+            records.extend(_run_astgrep(dets, root, sgconfig))
+        else:
             records.extend(runner(dets, root))
 
     return ScanResult(records=tuple(ev.normalize_evidence(r) for r in records))

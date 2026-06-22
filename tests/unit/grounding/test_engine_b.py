@@ -223,6 +223,63 @@ def test_astgrep_backend_matches(js_repo: Path) -> None:
     assert ag[0]["coverage"]["backend"] == engine_b.BACKEND_ASTGREP
 
 
+# ── project custom tree-sitter grammar (ast-grep customLanguages) ────────────
+
+
+def test_project_sgconfig_is_threaded_to_astgrep(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # AC5: a project custom-grammar declared in the .rebar/ slot is honored — its
+    # sgconfig.yml is passed to ast-grep via --config, and a detector in the custom
+    # language routes as applicable (its files are present) instead of being skipped.
+    (tmp_path / ".rebar").mkdir()
+    (tmp_path / ".rebar" / "sgconfig.yml").write_text(
+        "customLanguages:\n  mojo:\n    libraryPath: mojo.so\n    extensions: [mojo]\n"
+    )
+    (tmp_path / "main.mojo").write_text("fn main(): pass\n")
+    det = reg_mod.Detector(
+        id="project.mojo.smell", backend=reg_mod.BACKEND_ASTGREP, namespace="project",
+        source_path=str(tmp_path / "rule.yml"),
+        rule={"language": "mojo"}, envelope={"job": ev.JOB_SMELL, "tier": ev.TIER_T1},
+    )
+
+    sgconfig, custom_exts = engine_b._resolve_astgrep_sgconfig(tmp_path)
+    assert sgconfig and sgconfig.endswith("sgconfig.yml")
+    assert custom_exts == {"mojo": {".mojo"}}
+    # The mojo detector is applicable because the project grammar maps .mojo.
+    applicable, _ = engine_b._is_applicable(det, engine_b._repo_extensions(tmp_path), tmp_path, custom_exts)
+    assert applicable is True
+
+    # The sgconfig path is actually passed to ast-grep via --config.
+    captured: dict[str, list[str]] = {}
+
+    def fake_run_tool(cmd, **kw):
+        captured["cmd"] = cmd
+        return harness_stub
+    from rebar.grounding import harness as _h
+    harness_stub = _h.RunResult(backend="ast-grep", completed=True, returncode=0, stdout="[]")
+    monkeypatch.setattr(engine_b, "_resolve_binary", lambda c: "ast-grep")
+    monkeypatch.setattr(engine_b, "_binary_version", lambda b: "0.0")
+    monkeypatch.setattr(engine_b.harness, "run_tool", fake_run_tool)
+    engine_b._run_astgrep([det], tmp_path, sgconfig)
+    assert "--config" in captured["cmd"]
+    assert sgconfig in captured["cmd"]
+
+
+def test_unconfigured_custom_language_is_skipped_with_coverage(tmp_path: Path) -> None:
+    # AC5 fail-open: a detector in a language with NO bundled and NO project grammar
+    # is skipped as unsupported_lang with a coverage record (never run, never crash).
+    (tmp_path / "main.mojo").write_text("fn main(): pass\n")  # no sgconfig present
+    det = reg_mod.Detector(
+        id="project.mojo.smell", backend=reg_mod.BACKEND_ASTGREP, namespace="project",
+        source_path=str(tmp_path / "rule.yml"),
+        rule={"language": "mojo"}, envelope={"job": ev.JOB_SMELL, "tier": ev.TIER_T1},
+    )
+    result = engine_b.scan(tmp_path, registry=reg_mod.Registry(detectors=(det,)))
+    _all_valid(result.records)
+    skips = [r for r in result.abstains() if r.get("detector_id") == "project.mojo.smell"]
+    assert skips and skips[0]["reason"] == "unsupported_lang"
+    assert skips[0]["coverage"]["status"] == ev.STATUS_SKIPPED
+
+
 # ── metric backend (scc/lizard absent -> no_tool) ────────────────────────────
 
 
