@@ -28,6 +28,7 @@ from rebar.llm.errors import (
     WorkflowVersionError,
 )
 
+from .bpmn import REBAR_MODDLE_DESCRIPTOR, bpmn_to_ir, ir_to_bpmn
 from .executor import (
     FakeAgentRunner,
     MemoryRecorder,
@@ -91,6 +92,9 @@ __all__ = [
     "secret_scan",
     "scaffold",
     "SCAFFOLD_V1",
+    "ir_to_bpmn",
+    "bpmn_to_ir",
+    "REBAR_MODDLE_DESCRIPTOR",
     "run_workflow",
     "new_run_id",
     "RunResult",

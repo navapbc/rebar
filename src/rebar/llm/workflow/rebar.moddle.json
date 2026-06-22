@@ -1,0 +1,56 @@
+{
+  "name": "Rebar",
+  "uri": "http://rebar.dev/schema/workflow/1.0",
+  "prefix": "rebar",
+  "types": [
+    {
+      "name": "Config",
+      "superClass": [
+        "Element"
+      ],
+      "properties": [
+        {
+          "name": "value",
+          "isAttr": true,
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "Agent",
+      "superClass": [
+        "Element"
+      ],
+      "properties": [
+        {
+          "name": "prompt",
+          "isAttr": true,
+          "type": "String"
+        },
+        {
+          "name": "provider",
+          "isAttr": true,
+          "type": "String"
+        },
+        {
+          "name": "tools",
+          "isAttr": true,
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "Workflow",
+      "superClass": [
+        "Element"
+      ],
+      "properties": [
+        {
+          "name": "value",
+          "isAttr": true,
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}
