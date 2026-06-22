@@ -359,9 +359,10 @@ def test_packaged_example_round_trips():
     assert _norm(back) == _norm(doc)
 
 
-def test_foreign_bpmn_element_is_skipped_not_crashed():
-    # Robustness to bpmn-js-mutated XML: an element type the IR has no mapping for (a
-    # userTask) is skipped, not crashed — the known steps still reconstruct.
+def test_unmappable_element_is_a_loud_error_not_a_silent_drop():
+    # An element type the IR has no mapping for (a userTask) must FAIL the read loudly, so
+    # the editor Save is rejected rather than silently discarding the user's node (which
+    # would let them close the editor believing it was saved). Data loss > inconvenience.
     xml = (
         '<?xml version="1.0"?><bpmn:definitions '
         'xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL">'
@@ -370,9 +371,8 @@ def test_foreign_bpmn_element_is_skipped_not_crashed():
         '<bpmn:userTask id="human" name="approve"/>'  # foreign to the rebar IR
         "</bpmn:process></bpmn:definitions>"
     )
-    doc = bpmn.bpmn_to_ir(xml)
-    ids = {s["id"] for s in doc["steps"]}
-    assert "a" in ids and "human" not in ids  # the scriptTask survives; the userTask is dropped
+    with pytest.raises(ValueError, match="userTask.*does not map"):
+        bpmn.bpmn_to_ir(xml)
 
 
 def test_branch_gateway_missing_an_arm_round_trips_as_one_armed():

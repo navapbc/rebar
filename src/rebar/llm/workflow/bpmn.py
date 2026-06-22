@@ -92,6 +92,23 @@ _STRUCTURAL = {"id", "uses", "prompt", "branch", "loop", "map", "needs"}
 # round-trip-stable through bpmn-js, but a registered extension attribute is.
 _ROLE_KEY = "_role"
 
+# Process-child element tags that are NOT rebar steps and are legitimately ignored on
+# read (structural plumbing / diagram annotations). Anything else that isn't a known
+# step kind is a hard error (no silent drops) — see :func:`_read_frame`.
+_IGNORED_TAGS = frozenset(
+    {
+        "sequenceFlow",
+        "extensionElements",
+        "startEvent",
+        "endEvent",
+        "association",
+        "textAnnotation",
+        "group",
+        "laneSet",
+        "documentation",
+    }
+)
+
 
 # ── IR -> BPMN ────────────────────────────────────────────────────────────────
 
@@ -279,7 +296,12 @@ def _emit_step(container, s, kind, edges) -> ET.Element:
         if not isinstance(body, list):
             continue
         arm_id = f"{sid}.{arm}"
-        sp = ET.SubElement(container, _q("bpmn", "subProcess"), {"id": arm_id, "name": arm})
+        # Name the arm with its gateway id so the label is UNIQUE and visibly tied to its
+        # branch (e.g. ``decide ▸ then``) — not a bare ``then`` that repeats across every
+        # branch and can't be told apart. (Display only; role comes from the _role marker.)
+        sp = ET.SubElement(
+            container, _q("bpmn", "subProcess"), {"id": arm_id, "name": f"{sid} ▸ {arm}"}
+        )
         _ext(sp, "Config", value=json.dumps({_ROLE_KEY: arm}))  # role survives id rewrites
         _emit_frame(sp, body, edges)
         fid = f"flow_{sid}.{arm}"
@@ -554,13 +576,21 @@ def _read_frame(container: ET.Element) -> list[dict[str, Any]]:
     for el in list(container):
         tag = el.tag.split("}")[-1]
         eid = el.get("id")
-        if eid is None or tag in ("sequenceFlow", "extensionElements", "startEvent", "endEvent"):
+        if tag in _IGNORED_TAGS or eid is None:
             continue
         if eid in non_step_ids:  # a branch arm or an event — not a top step of this frame
             continue
         step = _read_step(container, el, tag)
         if step is None:
-            continue
+            # An element that is neither a known rebar step nor ignorable structural
+            # plumbing. FAIL LOUDLY rather than silently dropping it — a silent drop lets
+            # a user save and close the editor believing their node was kept when it was
+            # discarded (the data-loss footgun). They must map it to a real step kind.
+            raise ValueError(
+                f"the diagram contains a {tag!r} element (id {eid!r}) that does not map to "
+                f"a rebar step. Change it to a Script Task (scripted), a Service Task "
+                f"(agent), a loop/map sub-process, or a branch gateway — or remove it."
+            )
         if eid in needs:
             step["needs"] = needs[eid]
         steps.append(step)
