@@ -87,6 +87,11 @@ REBAR_MODDLE_DESCRIPTOR: dict[str, Any] = {
 # ``type`` discriminator IS kept in Config so a schema-valid input round-trips exactly.
 _STRUCTURAL = {"id", "uses", "prompt", "branch", "loop", "map", "needs"}
 
+# The role marker stamped (via ``<rebar:Config>``) on a branch arm sub-process so
+# reconstruction recovers then/else WITHOUT parsing the arm's id — the id is not
+# round-trip-stable through bpmn-js, but a registered extension attribute is.
+_ROLE_KEY = "_role"
+
 
 # ── IR -> BPMN ────────────────────────────────────────────────────────────────
 
@@ -195,20 +200,26 @@ def _emit_step(container, s, kind, shapes, edges, lane) -> ET.Element:
         ET.SubElement(sp, _q("bpmn", "multiInstanceLoopCharacteristics"), {"isSequential": seq})
         _emit_frame(sp, s["map"].get("body", []), shapes, edges, lane + 1)
         return sp
-    # branch -> exclusiveGateway + a then/else sub-process arm each. The ``@`` in an
-    # arm id (``<gateway>@then``) is a reserved separator — safe because the schema's
-    # identifier pattern forbids ``@`` in a real step id.
+    # branch -> exclusiveGateway + a then/else sub-process arm each. The arm's ROLE
+    # (then/else) is carried two ways that both survive a real bpmn-js edit: a
+    # ``<rebar:Config _role=…>`` marker AND the gateway->arm sequence flow. Reconstruction
+    # reads the role from those, NOT from the arm's id — so it is robust to bpmn-js
+    # regenerating ids on Save. The id itself uses ``.`` as a readable separator (a legal
+    # BPMN NCName char that the schema's step-id pattern forbids, so it can't collide with
+    # a real step id). The old ``@`` separator was an ILLEGAL BPMN id: bpmn-moddle dropped
+    # the whole arm on Save, silently deleting the branch (see tests/e2e).
     gw = ET.SubElement(container, _q("bpmn", "exclusiveGateway"), {"id": sid, "name": "branch"})
     _ext(gw, "Config", value=_config_json(s))
     for arm in ("then", "else"):
         body = s["branch"].get(arm)
         if not isinstance(body, list):
             continue
-        arm_id = f"{sid}@{arm}"
+        arm_id = f"{sid}.{arm}"
         sp = ET.SubElement(container, _q("bpmn", "subProcess"), {"id": arm_id, "name": arm})
+        _ext(sp, "Config", value=json.dumps({_ROLE_KEY: arm}))  # role survives id rewrites
         _emit_frame(sp, body, shapes, edges, lane + 1)
         shapes.append((arm_id, _arm_rank(sid, shapes), lane + (0 if arm == "then" else 1)))
-        fid = f"flow_{sid}__{arm}"
+        fid = f"flow_{sid}.{arm}"
         attrs = {"id": fid, "sourceRef": sid, "targetRef": arm_id}
         ET.SubElement(container, _q("bpmn", "sequenceFlow"), attrs)
         edges.append((fid, sid, arm_id))
@@ -303,22 +314,76 @@ def _read_ext_json(el: ET.Element, kind: str) -> dict[str, Any] | None:
     return json.loads(node.get("value"))
 
 
+def _arm_ids(container: ET.Element) -> set[str]:
+    """Ids of the branch-arm sub-processes in this frame. An arm is a SUB-PROCESS wired to
+    an exclusiveGateway by a sequence flow AND carrying a then/else role (the same role-
+    aware test :func:`_gateway_arms` uses) — so a gateway's flow to an ordinary downstream
+    step (a real ``needs`` edge, e.g. ``decide -> notify``) is NOT mistaken for an arm."""
+    gw_ids = [
+        el.get("id")
+        for el in container
+        if el.tag.split("}")[-1] == "exclusiveGateway" and el.get("id")
+    ]
+    arms: set[str] = set()
+    for gw_id in gw_ids:
+        for arm_el, _role in _gateway_arms(container, gw_id):
+            if arm_el.get("id"):
+                arms.add(arm_el.get("id"))
+    return arms
+
+
+def _gateway_arms(container: ET.Element, gw_id: str) -> list[tuple[ET.Element, str]]:
+    """[(arm_el, role)] for the branch gateway ``gw_id``. Arms are found via the gateway's
+    outgoing sequence flows (structural); each role (``then``/``else``) is read from the
+    ``<rebar:Config _role=…>`` marker, falling back to the arm's @name then an id suffix.
+    Both the flow and the extension marker survive a bpmn-js edit, so this does not rely on
+    the arm id (which bpmn-js may regenerate)."""
+    by_id = {el.get("id"): el for el in container if el.get("id")}
+    out: list[tuple[ET.Element, str]] = []
+    seen: set[str] = set()
+    for flow in container.findall(_q("bpmn", "sequenceFlow")):
+        if flow.get("sourceRef") != gw_id:
+            continue
+        tgt = by_id.get(flow.get("targetRef"))
+        if tgt is None or tgt.tag.split("}")[-1] != "subProcess":
+            continue
+        cfg = _read_ext_json(tgt, "Config") or {}
+        role = cfg.get(_ROLE_KEY)
+        if role not in ("then", "else") and tgt.get("name") in ("then", "else"):
+            role = tgt.get("name")
+        if role not in ("then", "else"):  # last resort: an id suffix
+            tid = tgt.get("id") or ""
+            for sep in (".", "@"):
+                tail = tid.rsplit(sep, 1)[-1] if sep in tid else ""
+                if tail in ("then", "else"):
+                    role = tail
+        if role in ("then", "else") and role not in seen:
+            out.append((tgt, role))
+            seen.add(role)
+    return out
+
+
 def _read_frame(container: ET.Element) -> list[dict[str, Any]]:
     """Reconstruct one frame's steps (in document order) with their ``needs`` from the
     sequence flows whose target is in this frame.
 
     Robust to an EDITED file from bpmn-js, which adds ``startEvent``/``endEvent`` and
-    wires them with sequence flows: those event ids are excluded from ``needs`` so a
-    real editor save round-trips without fabricating a dependency on a non-existent
-    step (the visual format is never committed; only this reconstruction feeds the IR).
+    wires them with sequence flows: those event ids — and the branch-arm sub-processes
+    (consumed by their gateway, never standalone steps) — are excluded from ``needs`` and
+    from the step list, so a real editor save round-trips without fabricating a dependency
+    on a non-step element (the visual format is never committed; only this reconstruction
+    feeds the IR).
     """
-    # Ids that are NOT rebar steps (events bpmn-js adds; gateway->arm plumbing has an
-    # ``@`` target). A flow touching one of these is structural, never a ``needs`` edge.
+    # Ids that are NOT first-class steps of this frame: events bpmn-js adds, and branch
+    # arm sub-processes. A flow touching one of these is structural plumbing (e.g. a
+    # gateway->arm edge), never a ``needs`` edge.
     non_step_ids = {
         el.get("id")
         for el in container
         if el.tag.split("}")[-1] in ("startEvent", "endEvent") and el.get("id")
     }
+    non_step_ids |= _arm_ids(container)
+
     # needs: target id -> [source ids] in document (= original) order, so an unsorted
     # ``needs`` round-trips exactly.
     needs: dict[str, list[str]] = {}
@@ -326,7 +391,7 @@ def _read_frame(container: ET.Element) -> list[dict[str, Any]]:
         src, tgt = flow.get("sourceRef"), flow.get("targetRef")
         if not (src and tgt):
             continue
-        if "@" in tgt or src in non_step_ids or tgt in non_step_ids:
+        if src in non_step_ids or tgt in non_step_ids:
             continue  # gateway->arm plumbing or an event flow, not a needs edge
         needs.setdefault(tgt, []).append(src)
 
@@ -336,7 +401,7 @@ def _read_frame(container: ET.Element) -> list[dict[str, Any]]:
         eid = el.get("id")
         if eid is None or tag in ("sequenceFlow", "extensionElements", "startEvent", "endEvent"):
             continue
-        if "@" in eid:  # a branch arm sub-process — consumed by its gateway, not a top step
+        if eid in non_step_ids:  # a branch arm or an event — not a top step of this frame
             continue
         step = _read_step(container, el, tag)
         if step is None:
@@ -377,10 +442,8 @@ def _read_step(container: ET.Element, el: ET.Element, tag: str) -> dict[str, Any
         return step
     if tag == "exclusiveGateway":
         branch: dict[str, Any] = dict(cfg)
-        for arm in ("then", "else"):
-            arm_el = _find_by_id(container, f"{eid}@{arm}")
-            if arm_el is not None:
-                branch[arm] = _read_frame(arm_el)
+        for arm_el, role in _gateway_arms(container, eid):
+            branch[role] = _read_frame(arm_el)
         step["branch"] = branch
         return step
     return None

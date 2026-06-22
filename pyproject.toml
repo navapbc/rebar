@@ -234,4 +234,5 @@ markers = [
     "interface: interface-parity tests (library / CLI / MCP over one store)",
     "allow_network: opt out of the network guard for a test",
     "benchmark: performance benchmark (informational; not a pass/fail gate)",
+    "e2e: faithful round-trip tests that drive the real bpmn-io libraries via a Node harness (tests/e2e); self-skips when Node/npm is unavailable",
 ]

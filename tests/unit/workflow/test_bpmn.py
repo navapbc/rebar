@@ -368,7 +368,7 @@ def test_foreign_bpmn_element_is_skipped_not_crashed():
         '<bpmn:process id="p">'
         '<bpmn:scriptTask id="a" name="op"/>'
         '<bpmn:userTask id="human" name="approve"/>'  # foreign to the rebar IR
-        '</bpmn:process></bpmn:definitions>'
+        "</bpmn:process></bpmn:definitions>"
     )
     doc = bpmn.bpmn_to_ir(xml)
     ids = {s["id"] for s in doc["steps"]}
@@ -379,11 +379,55 @@ def test_branch_gateway_missing_an_arm_round_trips_as_one_armed():
     # A bpmn-js edit that deletes the else-arm sub-process leaves a one-armed branch
     # (when + then only) — a valid IR shape, reconstructed without fabricating an else.
     doc = {
-        "schema_version": "2", "name": "oa", "inputs": {"x": {"type": "boolean"}},
-        "steps": [{"id": "g", "branch": {"when": "${{ inputs.x }}",
-                                         "then": [{"id": "t", "uses": "o"}]}}],
+        "schema_version": "2",
+        "name": "oa",
+        "inputs": {"x": {"type": "boolean"}},
+        "steps": [
+            {"id": "g", "branch": {"when": "${{ inputs.x }}", "then": [{"id": "t", "uses": "o"}]}}
+        ],
     }
     xml = bpmn.ir_to_bpmn(doc)
     back = bpmn.bpmn_to_ir(xml)
     assert "else" not in back["steps"][0]["branch"]
     assert back["steps"][0]["branch"]["then"][0]["id"] == "t"
+
+
+def test_emitted_ids_are_legal_bpmn_ncnames():
+    # Regression for the editor Save defect: branch-arm ids used '@', which is a legal XML
+    # attribute char but an ILLEGAL BPMN id (NCName) — the real bpmn-io parser DROPS such
+    # elements, silently deleting the branch. No emitted id may contain '@' (or ':').
+    import re
+
+    xml = bpmn.ir_to_bpmn(_full_v2())
+    ids = re.findall(r'\bid="([^"]+)"', xml) + re.findall(r'bpmnElement="([^"]+)"', xml)
+    bad = [i for i in ids if "@" in i or ":" in i]
+    assert bad == [], f"emitted ids illegal as BPMN NCNames: {bad}"
+
+
+def test_branch_arms_recovered_after_simulated_bpmnjs_id_rewrite():
+    # The editor reconstructs branch arms from the gateway sequence flow + the <rebar:Config
+    # _role> marker, NOT from the arm id — so even if bpmn-js regenerates the arm ids on
+    # Save (as it does for ids it considers non-canonical), the then/else arms survive.
+    doc = {
+        "schema_version": "2",
+        "name": "rw",
+        "inputs": {"x": {"type": "boolean"}},
+        "steps": [
+            {
+                "id": "g",
+                "branch": {
+                    "when": "${{ inputs.x }}",
+                    "then": [{"id": "t", "uses": "o"}],
+                    "else": [{"id": "e", "uses": "o"}],
+                },
+            }
+        ],
+    }
+    xml = bpmn.ir_to_bpmn(doc)
+    # Simulate bpmn-js assigning fresh ids to the arm sub-processes (role marker + the
+    # gateway->arm flow targetRef are what carry the meaning, and they move together).
+    xml = xml.replace("g.then", "SubProcess_0aa").replace("g.else", "SubProcess_0bb")
+    back = bpmn.bpmn_to_ir(xml)
+    branch = back["steps"][0]["branch"]
+    assert branch["then"][0]["id"] == "t"
+    assert branch["else"][0]["id"] == "e"
