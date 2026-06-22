@@ -77,9 +77,10 @@ def test_full_demo_round_trips_through_real_serializer(bpmn_harness):
     from rebar.llm.workflow.migrate import migrate_to_current
     from rebar.llm.workflow.schema import load_workflow
 
-    wf = Path(__file__).resolve().parents[2] / ".rebar" / "workflows" / "roundtrip-demo.yaml"
-    if not wf.is_file():
-        pytest.skip("roundtrip-demo.yaml not present")
+    # A TRACKED fixture (not the gitignored .rebar/workflows copy), so this runs in CI
+    # rather than silently skipping on a fresh checkout.
+    wf = Path(__file__).parent / "fixtures" / "roundtrip-demo.yaml"
+    assert wf.is_file(), "the tracked e2e fixture is missing"
     ir = migrate_to_current(load_workflow(wf))
     doc, errors = _editor_save(bpmn_harness, ir)
     assert errors == [], f"demo Save rejected: {errors}"

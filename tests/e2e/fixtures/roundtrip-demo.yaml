@@ -1,0 +1,126 @@
+schema_version: '2'
+name: roundtrip-demo
+description: Comprehensive sample that exercises EVERY v2 workflow-engine capability, so the visual-editor
+  round-trip (IR -> bpmn-js -> IR) can be fully validated. It hits scripted + agent steps, all three control
+  constructs (branch / loop / map, including deep nesting), a fan-in needs DAG with unsorted needs, an
+  if skip-guard, secrets + ${env:...} indirection, an explicit type discriminator, agent output_schema
+  / mode / model, and XML-hostile config values (escaping check).
+model: anthropic:claude-sonnet-4-6
+inputs:
+  max_rounds:
+    default: 3
+    description: Soft round budget surfaced to the refine loop.
+    type: integer
+  notify_enabled:
+    default: false
+    description: Toggles the optional notify step (exercises the if skip-guard).
+    type: boolean
+  ticket_id:
+    description: The ticket this workflow reviews.
+    required: true
+    type: string
+steps:
+- id: fetch
+  type: scripted
+  uses: fetch_ticket
+  with:
+    ticket_id: ${{ inputs.ticket_id }}
+- id: commits
+  uses: fetch_commits
+  needs:
+  - fetch
+  with:
+    ticket_id: ${{ inputs.ticket_id }}
+- id: graph
+  uses: fetch_epic_graph
+  needs:
+  - fetch
+  with:
+    ticket_id: ${{ inputs.ticket_id }}
+- id: context
+  uses: render_context
+  needs:
+  - graph
+  - commits
+  with:
+    children: ${{ steps.graph.outputs.children }}
+    commits: ${{ steps.commits.outputs.commits }}
+    note: a & b < c > "d" 日本 — escaping check
+    title: ${{ steps.fetch.outputs.title }}
+- id: review
+  prompt: review-ticket
+  needs:
+  - context
+  with:
+    context: ${{ steps.context.outputs.context }}
+  output_schema: review_result
+  mode: findings
+  model: anthropic:claude-opus-4-8
+- id: refine_loop
+  loop:
+    max_iterations: 3
+    until: ${{ steps.attempt.outputs.done }}
+    var: i
+    body:
+    - id: attempt
+      prompt: refine
+      mode: structured
+      output_schema: review_result
+      with:
+        prior: ${{ steps.review.outputs.findings }}
+        round: ${{ loop.i }}
+  needs:
+  - review
+- id: decide
+  branch:
+    when: ${{ steps.review.outputs.verdict }}
+    then:
+    - id: fanout
+      map:
+        as: child
+        index_var: ix
+        max_concurrency: 4
+        over: ${{ steps.graph.outputs.children }}
+        body:
+        - id: process
+          prompt: process-child
+          mode: text
+          with:
+            child: ${{ map.child }}
+            index: ${{ map.ix }}
+    else:
+    - id: gate
+      uses: gate
+      with:
+        findings: ${{ steps.review.outputs.findings }}
+        policy: strict
+    - id: escalate_gate
+      branch:
+        when: ${{ steps.gate.outputs.passed }}
+        then:
+        - id: tag_escalated
+          uses: tag
+          with:
+            tag: needs-attention
+      needs:
+      - gate
+  needs:
+  - refine_loop
+- id: notify
+  prompt: notify-reviewer
+  needs:
+  - decide
+  with:
+    channel: ${env:REVIEW_CHANNEL}
+    slack_token: ${{ secrets.slack_token }}
+    verdict: ${{ steps.review.outputs.verdict }}
+  mode: text
+  if: ${{ inputs.notify_enabled }}
+- id: finalize
+  uses: comment_verdict
+  needs:
+  - notify
+  with:
+    body: Round-trip demo complete.
+    ticket_id: ${{ inputs.ticket_id }}
+    verdict: ${{ steps.review.outputs.verdict }}

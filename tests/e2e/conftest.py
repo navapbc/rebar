@@ -119,10 +119,11 @@ def editor_server(tmp_path):
 
     from rebar.llm.workflow import editor as _editor
 
-    repo = Path(__file__).resolve().parents[2]
-    sample = repo / ".rebar" / "workflows" / "roundtrip-demo.yaml"
+    # A TRACKED fixture (not the gitignored .rebar/workflows copy) so the browser tier
+    # runs in CI; only skip when the built editor bundle is genuinely absent.
+    sample = Path(__file__).parent / "fixtures" / "roundtrip-demo.yaml"
     if not sample.is_file() or not _editor.assets_available():
-        pytest.skip("e2e(browser): sample workflow or built editor bundle missing")
+        pytest.skip("e2e(browser): fixture workflow or built editor bundle missing")
     ir = tmp_path / "roundtrip-demo.yaml"
     shutil.copy(sample, ir)
     server, host, port, _token = _editor.edit_workflow(
