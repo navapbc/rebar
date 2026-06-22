@@ -1,0 +1,19 @@
+{
+  "name": "rebar-workflow-editor",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Front-end for the rebar workflow visual editor: bpmn-js Modeler + properties panel + auto-layout, bundled to a single asset served locally by editor.py (no CDN, no runtime npm). Build with `npm run build`; the committed dist/ is what ships in the wheel.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@bpmn-io/properties-panel": "^3.26.0",
+    "bpmn-auto-layout": "^0.4.0",
+    "bpmn-js": "^17.11.1",
+    "bpmn-js-properties-panel": "^5.28.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

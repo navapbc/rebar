@@ -44,15 +44,29 @@ def _wf_file(tmp_path: Path) -> Path:
 
 
 def test_host_html_embeds_the_integration_contract():
-    # Pin the INTEGRATION CONTRACT the browser side depends on (not template internals):
-    # the rebar moddle descriptor is registered (extension survival), the diagram to edit
-    # is embedded, and Save targets the /save endpoint. The specific JS library wiring is
-    # an implementation detail and intentionally NOT asserted.
+    # Pin the INTEGRATION CONTRACT the browser bundle depends on (not template internals):
+    # the host shell loads the vendored bundle and hands it three globals — the rebar
+    # moddle descriptor (extension survival), the diagram to edit, and the per-session
+    # token. The editor logic (Modeler/panel/auto-layout/Save) lives in the bundle.
     xml = bpmn.ir_to_bpmn({"schema_version": "2", "name": "x", "steps": [{"id": "a", "uses": "o"}]})
     html = editor.build_host_html(xml, token="tok")
-    assert "moddleExtensions" in html and bpmn.REBAR in html  # descriptor registered
-    assert "process id" in html  # the diagram XML is embedded
-    assert "/save" in html and "X-Rebar-Token" in html  # the save endpoint + its guard
+    assert "/assets/editor.js" in html and "/assets/editor.css" in html  # loads the bundle
+    assert "REBAR_MODDLE" in html and bpmn.REBAR in html  # descriptor injected
+    assert "REBAR_DIAGRAM" in html and "process id" in html  # the diagram XML is embedded
+    assert "REBAR_TOKEN" in html and "tok" in html  # token handed to the bundle for /save
+
+
+def test_served_assets_are_allow_listed():
+    # Only the two known bundle files are served; an arbitrary name (path traversal etc.)
+    # returns nothing. Skips if the bundle has not been built in this checkout.
+    if not editor.assets_available():
+        import pytest as _pytest
+
+        _pytest.skip("editor bundle not built (run editor_assets npm build)")
+    assert editor.read_asset("editor.js") is not None
+    assert editor.read_asset("editor.css") is not None
+    assert editor.read_asset("../editor.py") is None  # no traversal
+    assert editor.read_asset("nope.js") is None
 
 
 # ── BPMN -> IR save round-trip ─────────────────────────────────────────────────
@@ -123,9 +137,14 @@ def _save(base, token, xml):
 def test_server_serves_host_and_bpmn(_server):
     _path, base, _token = _server
     html = urllib.request.urlopen(base + "/").read().decode("utf-8")
-    assert "moddleExtensions" in html and "/save" in html  # the host page's contract
+    assert "/assets/editor.js" in html and "REBAR_DIAGRAM" in html  # the host page's contract
     xml = urllib.request.urlopen(base + "/workflow.bpmn").read().decode("utf-8")
     assert "bpmn:process" in xml and "rebar:" in xml
+    # the vendored bundle is served locally (no CDN) with the right content types
+    js = urllib.request.urlopen(base + "/assets/editor.js")
+    assert js.status == 200 and "javascript" in js.headers.get("Content-Type", "")
+    css = urllib.request.urlopen(base + "/assets/editor.css")
+    assert css.status == 200 and "css" in css.headers.get("Content-Type", "")
 
 
 @pytest.mark.allow_network  # loopback only

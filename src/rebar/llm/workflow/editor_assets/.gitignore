@@ -1,0 +1,6 @@
+# Build inputs are committed; dist/ is the VENDORED, shipped bundle so it is committed too
+# (end users get the editor without npm). The repo-root .gitignore ignores `dist/`
+# globally, so re-include this one explicitly. Only the install tree is ignored.
+node_modules/
+!dist/
+!dist/**
