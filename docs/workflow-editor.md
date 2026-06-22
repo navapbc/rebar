@@ -23,9 +23,8 @@ back to the file (`Ctrl-C` to stop). On Save it writes **only** the IR `.yaml` (
 
 ## What you need to run it (almost nothing)
 
-The editor front-end (bpmn-js + properties panel + auto-layout) is **built ahead of time
-and vendored into the wheel** as a single self-contained bundle. So to *use* the editor
-you need only:
+The editor front-end (bpmn-js + properties panel) is **built ahead of time and vendored
+into the wheel** as a single self-contained bundle. So to *use* the editor you need only:
 
 - a `pip install nava-rebar` (base — no extra), and
 - a web browser.
@@ -37,25 +36,29 @@ rebar developer who is rebuilding the bundle or running the faithful E2E tier** 
 
 ## What the editor gives you
 
-- **A readable layout.** On open the diagram is laid out with
-  [`bpmn-auto-layout`](https://github.com/bpmn-io/bpmn-auto-layout): a left-to-right flow
-  where parallel steps get their own rows and arrows dock to node edges. (The Python
-  serializer no longer hand-rolls geometry; any incoming DI is discarded and recomputed.)
+- **A readable layout.** The Python serializer emits a layered left-to-right layout: rank
+  by longest path → x; same-rank siblings stacked → y, so parallel steps never collide;
+  edge waypoints dock to node edges (not centre-to-centre, so arrows don't cut through
+  labels). Nested constructs (`loop` / `map` / `branch` arms) are emitted as **expanded
+  sub-processes** sized to contain their bodies, so the nesting shows **inline on the
+  canvas** rather than as a collapsed drill-down box.
+  ([`bpmn-auto-layout`](https://github.com/bpmn-io/bpmn-auto-layout) was evaluated and
+  rejected: for our coordinate-free, start/end-event-free, nested IR it stacks nodes in a
+  single column and emits no edges.)
 - **A properties panel** ([`bpmn-js-properties-panel`](https://github.com/bpmn-io/bpmn-js-properties-panel)
   + a small custom *Rebar* provider): select any step to see its **kind** (scripted /
-  agent / branch / loop / map) and its **rebar config** — the `<rebar:Config>` JSON that
-  carries `with` / `mode` / `model` / loop bounds / the branch condition — and edit it in
-  place. (This is the exact payload the Python round-trip reads back, so what you edit is
-  what gets written; structured per-field entries can layer on later without changing the
-  contract.)
+  agent / branch / loop / map), its **action** (`uses` / `prompt`, for scripted/agent
+  steps), and its **rebar config** — the `<rebar:Config>` JSON that carries `with` /
+  `mode` / `model` / loop bounds / the branch condition — and edit it in place. (The config
+  is the exact payload the Python round-trip reads back, so what you edit is what gets
+  written; structured per-field entries can layer on later without changing the contract.)
+  Panel groups are **collapsed by default** — click a group header (e.g. *Rebar*) to
+  expand it.
 - **Constrained editing.** The palette is BPMN-only, so a shape that can't map back to the
   IR can't be drawn; an un-mappable edit is **rejected on Save** with located errors and
-  the file is left untouched.
-
-> **Known representation choice.** Nested constructs (`loop` / `map` / `branch` arms) map
-> to BPMN **sub-processes**, which `bpmn-auto-layout` renders **collapsed** (a box you
-> drill into), not expanded inline. The top-level flow stays clean; the body opens on its
-> own canvas. Inline expansion is a possible future enhancement.
+  the file is left untouched. To set a new step's *kind*, draw a task and use bpmn-js's
+  change-type menu (the wrench on the context pad) to make it a Script Task (scripted) or
+  Service Task (agent); set its action + config in the *Rebar* panel group.
 
 ## How it maps to the IR (the round-trip)
 
@@ -109,18 +112,27 @@ absent (a source checkout that hasn't built it).
 
 ## Testing (faithful, self-skipping)
 
-Two tiers cover the editor:
+Three tiers cover the editor, escalating in fidelity:
 
 - **Offline unit tests** (`tests/unit/workflow/test_bpmn.py`, `test_editor.py`) — the
-  IR↔BPMN serializer, the host page contract, the save round-trip + security guards, and
-  invariants like "no emitted id is an illegal NCName." Always run.
-- **Faithful E2E tier** (`tests/e2e/`) — round-trips BPMN through the **real bpmn-io
-  libraries** (`bpmn-moddle` for serialization, `bpmn-auto-layout` for layout) via a small
-  Node harness (`tests/e2e/js/`), so the contract is checked against the same code the
-  browser runs — not the permissive `xml.etree` the unit tests use. This is what catches
-  *faithfulness* bugs (e.g. an id the real parser rejects but `xml.etree` keeps). The tier
-  is **opt-in and self-skipping**: it needs Node + a one-time `npm install`, and skips with
-  a clear reason when Node is unavailable (so the always-on Python suite is unaffected).
+  IR↔BPMN serializer, the generated DI layout (no overlaps, edges present, sub-processes
+  expanded with children contained), the host page contract, the save round-trip + security
+  guards, and invariants like "no emitted id is an illegal NCName." Always run.
+- **Faithful serialization E2E** (`tests/e2e/test_editor_e2e.py`) — round-trips BPMN
+  through the **real `bpmn-moddle`** (the editor's read/write layer) via a small Node
+  harness (`tests/e2e/js/roundtrip.mjs`), so the contract is checked against the same code
+  the browser runs — not the permissive `xml.etree` the unit tests use. This is what
+  catches *faithfulness* bugs (e.g. an id the real parser rejects but `xml.etree` keeps).
+- **Real-browser E2E** (`tests/e2e/test_editor_browser.py`) — runs the ACTUAL bundle in
+  headless Chromium ([Playwright](https://playwright.dev)) against a live editor server and
+  asserts the runtime behavior nothing else can: edges render, shapes don't overlap, the
+  properties panel reacts to selection, and an edit made in the panel **persists to the IR
+  on Save**. This tier exists because editor changes that merely syntax-checked once shipped
+  broken at render time — the browser is the only faithful oracle for the bundle.
+
+All E2E tiers are **opt-in and self-skipping**: they need Node + a one-time `npm install`
+(and the browser tier a Chromium download), and skip with a clear reason when those are
+unavailable, so the always-on Python unit suite is unaffected.
 
 See also [docs/llm-framework.md](llm-framework.md) (the agent/runner side of the workflow
 engine) and the agent-facing tool guide in the repo-root `CLAUDE.md`.
