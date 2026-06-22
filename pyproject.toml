@@ -86,6 +86,17 @@ tracing = [
     "opentelemetry-sdk>=1.20",
     "opentelemetry-exporter-otlp>=1.20",
 ]
+# Code-grounding evidence oracle (epic 8f6c). Net-new extra. The evidence CONTRACT
+# and the fail-open execution HARNESS (story 0b2b) are stdlib-only and import-clean;
+# this extra adds only the IN-PROCESS structural-parsing binding (tree-sitter, via
+# the language pack of ~306 grammars) that later backends (Engine B detectors) run
+# inside the worker-subprocess boundary. The out-of-process backends (universal-ctags,
+# OpenGrep/ast-grep, scc/lizard) are external CLIs, not pip deps. Imported lazily
+# behind guard_import(..., extra="grounding"); a non-adopting client pays nothing.
+grounding = [
+    "tree-sitter>=0.21",
+    "tree-sitter-language-pack>=0.2",
+]
 dev = [
     "pytest>=8",
     "mcp>=1.2",

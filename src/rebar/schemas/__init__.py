@@ -67,6 +67,7 @@ __all__ = [
     "WORKFLOW_V1",
     "WORKFLOW_V2",
     "WORKFLOW_RUN",
+    "GROUNDING",
     "INPUT_SCHEMAS",
 ]
 
@@ -123,13 +124,20 @@ WORKFLOW_V1 = "workflow.v1"
 # INPUT/validation schema (a workflow file is validated against it), NOT a command
 # output, so it is in INPUT_SCHEMAS and absent from OUTPUT_SCHEMAS.
 WORKFLOW_V2 = "workflow.v2"
+# rebar.grounding — the normalized three-valued evidence contract (epic 8f6c, story
+# 0b2b). Authored as the single source of truth for the code-grounding oracle's
+# evidence model and validated directly via schemas.validator(GROUNDING); it is an
+# INTERNAL contract schema, NOT a command --output, so (like the workflow DSL
+# schemas) it is exempt from OUTPUT_SCHEMAS via INPUT_SCHEMAS below.
+GROUNDING = "grounding"
 
-# Schemas authored to validate INPUT documents rather than advertise a command's
-# JSON output. Like COMMON, they are loaded by their consumers (the workflow
-# parser/linter) and intentionally absent from OUTPUT_SCHEMAS; the coverage-guard
-# test exempts this set so an authored-but-unwired check still catches a forgotten
-# OUTPUT schema while permitting these.
-INPUT_SCHEMAS: frozenset[str] = frozenset({WORKFLOW_V1, WORKFLOW_V2})
+# Schemas authored to validate documents/objects directly rather than advertise a
+# command's JSON output: the workflow DSL INPUT files (v1/v2) and the internal
+# grounding evidence CONTRACT. Like COMMON, they are loaded by their consumers (the
+# workflow parser/linter; the grounding library) and intentionally absent from
+# OUTPUT_SCHEMAS; the coverage-guard test exempts this set so an authored-but-unwired
+# check still catches a forgotten OUTPUT schema while permitting these.
+INPUT_SCHEMAS: frozenset[str] = frozenset({WORKFLOW_V1, WORKFLOW_V2, GROUNDING})
 
 # The authoritative map of every structured (--output json / always-JSON) output
 # to its schema. Keyed by command, or <command>.<interface> when an interface's

@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "grounding.schema.json",
+  "title": "Code-grounding evidence contract",
+  "description": "The normalized three-valued evidence model emitted by the code-grounding oracle (epic 8f6c). Every probe returns ONE of these: `refuted`/`match` (resolved) or `abstain` (with a CLOSED structured reason). Match and abstain share this one shape. SARIF 2.1.0 is the interchange format at the edges; this model is a superset (SARIF has no native refuted/abstain/coverage). Authored as the single source of truth for the contract; validated directly via schemas.validator('grounding'), not wired to a command --output.",
+  "$defs": {
+    "abstain_reason": {
+      "type": "string",
+      "description": "CLOSED structured abstention reason (SMT `unknown`-with-reason model). No open `…`: `version_skew` (the #1 real failure) and `invalid_detector` (a project detector failing validation) are first-class; `other` is the explicit catch-all.",
+      "enum": [
+        "unsupported_lang",
+        "no_tool",
+        "parse_error",
+        "timeout",
+        "ambiguous",
+        "private_or_internal_suspected",
+        "network_error",
+        "rate_limited",
+        "version_skew",
+        "invalid_detector",
+        "other"
+      ]
+    },
+    "outcome": {
+      "type": "string",
+      "description": "The three-valued, confirm-only outcome. `refuted` = an asserted absence was DISPROVED (resolution lane; never an asserted absence). `match` = a detector matched (Engine B). `abstain` = fail-open skip with a recorded `reason`.",
+      "enum": ["refuted", "match", "abstain"]
+    },
+    "job": {
+      "type": "string",
+      "description": "Which of the three oracle jobs produced this evidence. `refute` = resolution lane (disprove an asserted absence). `applies` = self-declared applicability detection. `smell` = low-threshold attention-router scan.",
+      "enum": ["refute", "applies", "smell"]
+    },
+    "provenance_tier": {
+      "type": "string",
+      "description": "Provenance tier of the resolution. T0 = manifest/registry existence; T1 = universal-ctags repo-wide symbol/file existence; T2 = LSP/SCIP semantic (deferred to epic 850f, abstain-by-default in v1).",
+      "enum": ["T0", "T1", "T2"]
+    },
+    "coverage": {
+      "type": "object",
+      "description": "The coverage record for ONE backend invocation. The visible skip IS the coverage record — a `skipped` status with a `reason` is how a fail-open skip is reconstructed; never a silent no-op.",
+      "additionalProperties": true,
+      "required": ["backend", "status"],
+      "properties": {
+        "backend": {
+          "type": "string",
+          "description": "The backend that produced (or would have produced) this evidence, e.g. `ctags`, `opengrep`, `ast-grep`, `lizard`, `tree-sitter`, `registry`."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ran", "skipped"],
+          "description": "`ran` = the backend executed to completion. `skipped` = a fail-open condition tripped (the `reason` says which)."
+        },
+        "version": {
+          "type": ["string", "null"],
+          "description": "The pinned/recorded backend version (version skew is the #1 real failure, so it is recorded)."
+        },
+        "reason": {
+          "anyOf": [{ "$ref": "grounding.schema.json#/$defs/abstain_reason" }, { "type": "null" }],
+          "description": "Set iff status=skipped: why the backend was skipped (same enum as the evidence-level abstain reason)."
+        }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "description": "An EXPLICIT, structured reference checked by the resolution lane (reference-in contract — the oracle does NOT extract references from prose). The review agent emits these; the oracle verifies them. Fleshed out further by Engine A (story 1532); kept permissive here.",
+      "additionalProperties": true,
+      "required": ["kind", "name"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["import", "symbol", "dependency"],
+          "description": "What class of name is being checked: a module import, a code symbol (function/class/etc.), or a package dependency."
+        },
+        "name": {
+          "type": "string",
+          "description": "The bare name asserted absent/invalid (the high-base-rate hallucination class at T1)."
+        },
+        "language": {
+          "type": ["string", "null"],
+          "description": "Optional language hint for the reference."
+        },
+        "ecosystem": {
+          "type": ["string", "null"],
+          "description": "Optional purl ecosystem (kind=dependency): npm/pypi/cargo/golang/maven/gem/nuget."
+        }
+      }
+    },
+    "location": {
+      "type": "object",
+      "description": "Where the evidence points in the repo (Engine B match, or a refuted reference's definition site). Null for evidence with no single site (e.g. a dependency existence check).",
+      "additionalProperties": true,
+      "required": ["file"],
+      "properties": {
+        "file": { "type": "string", "description": "Repo-relative file path." },
+        "line_start": { "type": "integer", "minimum": 0, "description": "1-based start line; 0/omitted means whole file." },
+        "line_end": { "type": "integer", "minimum": 0, "description": "1-based end line; 0/omitted means through end of file." }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "description": "ONE normalized evidence record. The single internal finding/evidence shape across all backends and all three jobs; match and abstain share it.",
+      "additionalProperties": true,
+      "required": ["outcome", "job", "provenance_tier", "coverage"],
+      "properties": {
+        "outcome": { "$ref": "grounding.schema.json#/$defs/outcome" },
+        "job": { "$ref": "grounding.schema.json#/$defs/job" },
+        "provenance_tier": { "$ref": "grounding.schema.json#/$defs/provenance_tier" },
+        "reason": {
+          "anyOf": [{ "$ref": "grounding.schema.json#/$defs/abstain_reason" }, { "type": "null" }],
+          "description": "REQUIRED non-null iff outcome=abstain (the structured abstention reason); MUST be null for outcome=refuted/match."
+        },
+        "detector_id": {
+          "type": ["string", "null"],
+          "description": "The (namespaced) detector id that produced this evidence (Engine B); null on the resolution lane."
+        },
+        "reference": {
+          "anyOf": [{ "$ref": "grounding.schema.json#/$defs/reference" }, { "type": "null" }],
+          "description": "The structured reference this evidence is about (resolution lane); null for detector matches."
+        },
+        "location": {
+          "anyOf": [{ "$ref": "grounding.schema.json#/$defs/location" }, { "type": "null" }]
+        },
+        "coverage": { "$ref": "grounding.schema.json#/$defs/coverage" },
+        "attention_only": {
+          "type": "boolean",
+          "description": "True for recall-oriented attention routers (smell scans) that FLAG an area for an LLM to inspect — never blocking."
+        },
+        "detail": {
+          "type": ["string", "null"],
+          "description": "Optional human-readable context (e.g. the message for a detector match, or the failing-tool detail for an abstain)."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "outcome": { "const": "abstain" } } },
+          "then": { "properties": { "reason": { "$ref": "grounding.schema.json#/$defs/abstain_reason" } }, "required": ["reason"] },
+          "else": { "properties": { "reason": { "type": "null" } } }
+        }
+      ]
+    },
+    "coverage_report": {
+      "type": "object",
+      "description": "A roll-up of evidence + the per-backend coverage so a caller can report how much of the query was actually answered vs skipped.",
+      "additionalProperties": true,
+      "required": ["evidence", "coverage"],
+      "properties": {
+        "evidence": { "type": "array", "items": { "$ref": "grounding.schema.json#/$defs/evidence" } },
+        "coverage": { "type": "array", "items": { "$ref": "grounding.schema.json#/$defs/coverage" } }
+      }
+    }
+  },
+  "$ref": "grounding.schema.json#/$defs/evidence"
+}

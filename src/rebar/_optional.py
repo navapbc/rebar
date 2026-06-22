@@ -31,6 +31,12 @@ EXTRAS: dict[str, tuple[str, str]] = {
         "opentelemetry",
         "the OTLP trace sink (write-only — OpenTelemetry is never read back into a rebar decision)",
     ),
+    "grounding": (
+        "tree_sitter_language_pack",
+        "the code-grounding oracle's in-process structural parsing (tree-sitter) — "
+        "the contract + harness are stdlib-only; this extra adds the in-process binding "
+        "run inside the fail-open worker boundary",
+    ),
 }
 
 

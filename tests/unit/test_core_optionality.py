@@ -34,6 +34,10 @@ _HEAVY = (
     "deepagents",
     "inspect_ai",
     "opentelemetry",
+    # [grounding] extra — the in-process structural-parsing binding. The grounding
+    # contract + harness are stdlib-only; tree-sitter must stay lazy (worker boundary).
+    "tree_sitter",
+    "tree_sitter_language_pack",
 )
 
 _SRC = Path(rebar.__file__).resolve().parent
@@ -48,6 +52,7 @@ def test_lean_workflow_runtime_pulls_no_heavy_stack() -> None:
         "import rebar.llm.workflow.runs;"
         "import rebar.llm.workflow.render;"
         "import rebar.llm.workflow.lint;"
+        "import rebar.grounding;"  # grounding contract + harness must be import-clean
         f"heavy={_HEAVY!r};"
         "leaked=[m for m in heavy if m in sys.modules];"
         "print('LEAK:' + ','.join(leaked) if leaked else 'CLEAN')"
