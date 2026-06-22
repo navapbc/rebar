@@ -43,8 +43,8 @@ from rebar.llm.errors import (
 # is a hard upgrade-rebar error; lower versions are up-converted by the migrate
 # shim before validation. Bump this (and add workflow.vN.schema.json + a shim) when
 # the DSL gains a breaking change.
-CURRENT_SCHEMA_VERSION = "1"
-SUPPORTED_SCHEMA_VERSIONS = ("1",)
+CURRENT_SCHEMA_VERSION = "2"
+SUPPORTED_SCHEMA_VERSIONS = ("1", "2")
 
 # Pre-parse byte cap. Workflow files are small, hand-authored documents; a hard
 # ceiling bounds the YAML parser's work and is a cheap denial-of-service guard.
@@ -323,26 +323,46 @@ def _structural_fallback(doc: dict[str, Any]) -> list[str]:
             errors.append(f"steps/{i}: duplicate step id {sid!r}")
         else:
             seen.add(sid)
-        has_uses = "uses" in step
-        has_prompt = "prompt" in step
-        if has_uses == has_prompt:
+        # Exactly one discriminator: uses (scripted) | prompt (agent) | branch | loop
+        # | map (the v2 control constructs). The full JSON Schema enforces the precise
+        # oneOf + nested shapes; this shallow check only guards the lean (jsonschema-
+        # absent) path against a step with zero or multiple top-level discriminators.
+        present = [k for k in ("uses", "prompt", "branch", "loop", "map") if k in step]
+        if len(present) != 1:
             errors.append(
-                f"steps/{i}: a step needs exactly one of `uses` (scripted) or `prompt` (agent)"
+                f"steps/{i}: a step needs exactly one of `uses` (scripted), `prompt` "
+                f"(agent), `branch`, `loop`, or `map`; found {present or 'none'}"
             )
     return errors
 
 
-def step_kind(step: dict[str, Any]) -> str:
-    """Classify a step as ``"scripted"`` or ``"agent"`` from its shape.
+# The v2 control constructs (each carries a nested frame). A step is exactly one of
+# these or a leaf (scripted/agent); ``step_kind`` reports which.
+CONTROL_KINDS = ("branch", "loop", "map")
 
-    The DSL discriminator is presence of ``uses`` (scripted) vs ``prompt`` (agent);
-    an explicit ``type`` is honored when present. Assumes a schema-valid step
-    (exactly one of uses/prompt) — callers should validate first.
+
+def step_kind(step: dict[str, Any]) -> str:
+    """Classify a step as ``"scripted"``, ``"agent"``, or a control construct
+    (``"branch"`` / ``"loop"`` / ``"map"``) from its shape.
+
+    The DSL discriminator is the single control key present: ``uses`` (scripted),
+    ``prompt`` (agent), ``branch`` / ``loop`` / ``map`` (the v2 control constructs).
+    An explicit ``type`` is honored when present. Assumes a schema-valid step
+    (exactly one discriminator) — callers should validate first.
     """
     declared = step.get("type")
-    if declared in ("scripted", "agent"):
+    if declared in ("scripted", "agent", *CONTROL_KINDS):
         return declared
+    for kind in CONTROL_KINDS:
+        if kind in step:
+            return kind
     return "agent" if "prompt" in step else "scripted"
+
+
+def is_control_step(step: dict[str, Any]) -> bool:
+    """True if ``step`` is a v2 control construct (branch/loop/map), i.e. it carries
+    a nested frame rather than dispatching a single scripted/agent action."""
+    return step_kind(step) in CONTROL_KINDS
 
 
 # ── Deterministic serialization ───────────────────────────────────────────────
@@ -355,6 +375,9 @@ _STEP_ORDER = (
     "type",
     "uses",
     "prompt",
+    "branch",
+    "loop",
+    "map",
     "needs",
     "with",
     "output_schema",

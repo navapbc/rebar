@@ -1,88 +1,32 @@
-"""Static safety checks for the workflow DSL, beyond JSON Schema (WS-B2).
+"""The workflow lint collector: secret scan + prompt refs + the one-pass entry (WS-B2).
 
-The JSON Schema (``rebar.llm.workflow.schema``) proves a workflow file is shaped
-right; this linter proves it is *safe and coherent* before anything runs:
+The frame reference-integrity linter (reference checks, the expression allow-list,
+the injection guard) lives in :mod:`rebar.llm.workflow.lint_refs`; this module adds
+the remaining concerns and the public one-pass entry point:
 
-* **Reference integrity** — every ``${{ inputs.X }}`` resolves to a declared
-  input; every ``${{ steps.Y.outputs.Z }}`` resolves to a step that actually runs
-  upstream (Y is a transitive ``needs`` ancestor, not itself, not a stranger);
-  ``needs`` edges point at real steps; the graph is acyclic; the DAG converges to
-  exactly one terminal step. Findings are located by step + field.
+* **Secret scan** — a gitleaks-style sweep of the raw file for embedded credentials
+  (private keys, cloud/GitHub/Slack tokens) and a precise check for secret-named
+  fields assigned a literal; both demand ``${{ secrets.NAME }}`` / ``${env:VAR}``
+  indirection instead.
+* **Prompt-ref validation** (opt-in) — every agent step's ``prompt:`` resolves to a
+  real reviewer / ``.rebar/prompts/<id>.md`` file and its required vars are supplied.
 
-* **Closed expression allow-list** — the ONLY expressions permitted inside
-  ``${{ … }}`` are ``inputs.<name>``, ``steps.<id>.outputs.<name>``, and
-  ``secrets.<name>``. Anything else is rejected (no arbitrary code, no attribute
-  walks). An ``expressions=off`` kill-switch rejects *every* expression for a
-  locked-down deployment.
-
-* **Injection guard** — raw ``${{ … }}`` is forbidden in identifier/body fields
-  (``id``/``uses``/``prompt``/``model``/``output_schema``); expressions belong in
-  ``with:`` values (and the ``if`` guard), passed by name. After substituting
-  placeholders we re-validate against the schema and assert the rendered document
-  introduced no new keys or steps — the Argo lesson that a templated value must
-  never expand into structure.
-
-* **Secret scan** — a gitleaks-style sweep of the raw file for embedded
-  credentials (private keys, cloud/GitHub/Slack tokens) and a precise check for
-  secret-named fields assigned a literal; both demand ``${{ secrets.NAME }}`` /
-  ``${env:VAR}`` indirection instead.
-
-This module is pure stdlib (``re`` + ``graphlib``); ``lint_workflow`` is the
-one-pass collector ``rebar workflow validate`` calls — it returns EVERY finding,
-never just the first.
+``lint_workflow`` is the one-pass collector ``rebar workflow validate`` calls — it
+parses, migrates, schema-validates, frame-lints, and secret-scans in one pass and
+returns EVERY finding, never just the first. ``LintFinding`` / ``lint_document`` are
+re-exported here so ``rebar.llm.workflow.lint`` stays the stable import surface.
 """
 
 from __future__ import annotations
 
-import graphlib
 import re
-from dataclasses import dataclass
 from typing import Any
 
 from rebar.llm.errors import WorkflowParseError, WorkflowVersionError
 
+from .lint_refs import LintFinding, _iter_all_steps, lint_document
 from .migrate import migrate_to_current
 from .schema import parse_workflow, step_kind, validate_document
-
-# ── Findings ──────────────────────────────────────────────────────────────────
-
-
-@dataclass(frozen=True)
-class LintFinding:
-    """One located, actionable problem with a workflow file."""
-
-    location: str
-    message: str
-    severity: str = "error"  # "error" | "warning"
-
-    def __str__(self) -> str:
-        return f"[{self.severity}] {self.location}: {self.message}"
-
-
-# ── Expression grammar (the closed allow-list) ────────────────────────────────
-
-# A ${{ … }} occurrence. Non-greedy so adjacent expressions don't merge.
-_EXPR_RE = re.compile(r"\$\{\{(.*?)\}\}", re.DOTALL)
-# The ${env:VAR} literal env-indirection token (a different delimiter, allowed in
-# value position as a non-secret-leaking reference to an environment variable).
-_ENV_RE = re.compile(r"\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}")
-
-_ID = r"[A-Za-z_][A-Za-z0-9_-]*"
-_NAME = r"[A-Za-z_][A-Za-z0-9_]*"
-_ALLOWED_EXPR = (
-    ("input", re.compile(rf"^inputs\.({_ID})$")),
-    ("step_output", re.compile(rf"^steps\.({_ID})\.outputs\.({_ID})$")),
-    ("secret", re.compile(rf"^secrets\.({_NAME})$")),
-)
-
-# Fields whose value is an identifier or a body sent verbatim to an LLM/shell —
-# a raw expression here is an injection vector, so it is forbidden (pass via with:).
-_LITERAL_ONLY_FIELDS = ("id", "type", "uses", "prompt", "model", "output_schema")
-
-# A placeholder the substitution pass swaps in for every expression; chosen to be a
-# harmless scalar so re-validation exercises structure, not content.
-_PLACEHOLDER = "__rebar_subst__"
-
 
 # ── Secret scanning ───────────────────────────────────────────────────────────
 
@@ -135,346 +79,12 @@ def secret_scan(text: str, *, source: str = "<workflow>") -> list[LintFinding]:
     return findings
 
 
-# ── Graph helpers ─────────────────────────────────────────────────────────────
-
-
-def _ancestors(graph: dict[str, list[str]]) -> dict[str, set[str]] | None:
-    """Transitive ``needs`` ancestors per node, or ``None`` if the graph cycles."""
-    try:
-        order = list(graphlib.TopologicalSorter(graph).static_order())
-    except graphlib.CycleError:
-        return None
-    anc: dict[str, set[str]] = {}
-    for node in order:
-        acc: set[str] = set()
-        for dep in graph.get(node, []):
-            if dep in graph:  # ignore dangling deps (reported separately)
-                acc.add(dep)
-                acc |= anc.get(dep, set())
-        anc[node] = acc
-    return anc
-
-
-# ── Expression validation ─────────────────────────────────────────────────────
-
-
-def _validate_expression(
-    inner: str,
-    *,
-    step_id: str,
-    inputs: set[str],
-    steps: dict[str, Any],
-    ancestors: set[str],
-) -> str | None:
-    """Validate one ``${{ … }}`` body against the allow-list + reference integrity.
-
-    Returns an error message, or ``None`` if the expression is allowed and resolves.
-    """
-    expr = inner.strip()
-    kind = None
-    match = None
-    for k, pat in _ALLOWED_EXPR:
-        match = pat.match(expr)
-        if match:
-            kind = k
-            break
-    if kind is None:
-        return (
-            f"disallowed expression {expr!r} (the closed allow-list is "
-            f"inputs.<name>, steps.<id>.outputs.<name>, secrets.<name>)"
-        )
-    if kind == "input":
-        name = match.group(1)
-        if name not in inputs:
-            return f"references undeclared workflow input {name!r}"
-    elif kind == "step_output":
-        ref = match.group(1)
-        if ref == step_id:
-            return f"references its own output (steps.{ref}.outputs.*)"
-        if ref not in steps:
-            return f"references unknown step {ref!r}"
-        if ref not in ancestors:
-            return (
-                f"references output of step {ref!r}, which is not an upstream "
-                f"dependency — add {ref!r} to this step's `needs`"
-            )
-    # secrets.* is always allowed (the indirection is the point).
-    return None
-
-
-def _walk_with(value: Any, path: str, on_string, on_key_expr) -> None:
-    """Recurse a ``with`` value, invoking callbacks on strings and on any
-    expression that appears in a mapping KEY position (the structure-injection
-    guard)."""
-    if isinstance(value, dict):
-        for k, v in value.items():
-            if isinstance(k, str) and ("${{" in k or "${env:" in k):
-                on_key_expr(f"{path}[{k!r}]")
-            _walk_with(v, f"{path}.{k}", on_string, on_key_expr)
-    elif isinstance(value, list):
-        for i, v in enumerate(value):
-            _walk_with(v, f"{path}[{i}]", on_string, on_key_expr)
-    elif isinstance(value, str):
-        on_string(value, path)
-
-
-def _check_step(
-    step: dict[str, Any],
-    *,
-    step_id: str,
-    inputs: set[str],
-    steps: dict[str, Any],
-    ancestors: set[str],
-    expressions_on: bool,
-    findings: list[LintFinding],
-) -> None:
-    base = f"steps[{step_id}]"
-    kind = step_kind(step)
-
-    # 0a. Explicit `type` discriminator must agree with the uses/prompt shape, or
-    # the executor's step_kind (which honors an explicit `type`) would dispatch the
-    # wrong way.
-    declared_type = step.get("type")
-    if declared_type == "scripted" and "prompt" in step:
-        findings.append(
-            LintFinding(f"{base}.type", "`type: scripted` but the step has `prompt:` (agent shape)")
-        )
-    elif declared_type == "agent" and "uses" in step:
-        findings.append(
-            LintFinding(f"{base}.type", "`type: agent` but the step has `uses:` (scripted shape)")
-        )
-
-    # 0b. Agent-only fields on a scripted step are silently ignored at run time —
-    # flag them rather than let the author believe they take effect.
-    if kind == "scripted":
-        for agent_field in ("output_schema", "mode", "model"):
-            if agent_field in step:
-                findings.append(
-                    LintFinding(
-                        f"{base}.{agent_field}",
-                        f"`{agent_field}` only applies to an agent step (`prompt:`); "
-                        f"it is ignored on a scripted (`uses:`) step",
-                    )
-                )
-
-    # 1. Injection guard: no raw expressions in identifier/body fields.
-    for field in _LITERAL_ONLY_FIELDS:
-        val = step.get(field)
-        if isinstance(val, str) and ("${{" in val or "${env:" in val):
-            findings.append(
-                LintFinding(
-                    f"{base}.{field}",
-                    f"raw expression not allowed in `{field}` — pass values through "
-                    f"`with:` and reference them by name",
-                )
-            )
-
-    # 2. Expression-bearing positions: `with` values and the `if` guard.
-    def check_string(s: str, path: str) -> None:
-        for m in _EXPR_RE.finditer(s):
-            if not expressions_on:
-                findings.append(
-                    LintFinding(
-                        path,
-                        "expressions are disabled (expressions=off) but the workflow "
-                        f"uses ${{{{{m.group(1).strip()}}}}}",
-                    )
-                )
-                continue
-            err = _validate_expression(
-                m.group(1), step_id=step_id, inputs=inputs, steps=steps, ancestors=ancestors
-            )
-            if err:
-                findings.append(LintFinding(path, err))
-
-    def on_key_expr(path: str) -> None:
-        findings.append(
-            LintFinding(
-                path,
-                "an expression may not appear in a mapping key (it must not expand "
-                "into document structure — the Argo lesson)",
-            )
-        )
-
-    with_block = step.get("with")
-    if isinstance(with_block, dict):
-        _walk_with(with_block, f"{base}.with", check_string, on_key_expr)
-
-    guard = step.get("if")
-    if isinstance(guard, str):
-        # A bare `if:` with no `${{ … }}` resolves to its literal string and is
-        # silently truthy (the GHA `if: steps.a.outputs.ok` footgun) — require an
-        # explicit expression so the guard's semantics are unambiguous.
-        if "${{" not in guard:
-            findings.append(
-                LintFinding(
-                    f"{base}.if",
-                    "`if:` must be a `${{ … }}` expression — a bare value is "
-                    "treated as a literal string and is always truthy",
-                )
-            )
-        # A run-control decision must not branch on a credential's presence (and
-        # would risk persisting the secret into run state); secrets belong only in
-        # `with:` values passed to a step that needs them.
-        elif "secrets." in guard:
-            findings.append(
-                LintFinding(
-                    f"{base}.if",
-                    "secrets may not be referenced in an `if:` guard — control "
-                    "flow must not depend on a credential",
-                )
-            )
-        else:
-            check_string(guard, f"{base}.if")
-
-
-def lint_document(
-    doc: dict[str, Any], *, source: str = "<workflow>", expressions: bool = True
-) -> list[LintFinding]:
-    """Semantic lint of a parsed + migrated document (no raw text / secrets here).
-
-    Reference integrity, the expression allow-list, the injection guard, the
-    acyclic-one-terminal DAG shape, and the post-substitution structure-invariance
-    re-validation. Tolerant of a not-fully-schema-valid document (collects what it
-    can) so a single run surfaces both schema and semantic problems.
-    """
-    findings: list[LintFinding] = []
-    steps_list = doc.get("steps")
-    if not isinstance(steps_list, list):
-        return findings  # schema layer already flagged this
-
-    by_id: dict[str, Any] = {}
-    for i, s in enumerate(steps_list):
-        if not isinstance(s, dict):
-            continue
-        sid = s.get("id")
-        if isinstance(sid, str) and sid:
-            if sid in by_id:
-                findings.append(LintFinding(f"steps[{i}]", f"duplicate step id {sid!r}"))
-            else:
-                by_id[sid] = s
-
-    inputs = set((doc.get("inputs") or {}).keys()) if isinstance(doc.get("inputs"), dict) else set()
-
-    # Build the needs graph (only over known step ids); flag bad needs edges.
-    graph: dict[str, list[str]] = {}
-    for sid, s in by_id.items():
-        needs = s.get("needs") or []
-        edges: list[str] = []
-        if isinstance(needs, list):
-            for n in needs:
-                if not isinstance(n, str):
-                    continue
-                if n == sid:
-                    findings.append(
-                        LintFinding(f"steps[{sid}].needs", f"step {sid!r} cannot depend on itself")
-                    )
-                elif n not in by_id:
-                    findings.append(
-                        LintFinding(f"steps[{sid}].needs", f"unknown step {n!r} in `needs`")
-                    )
-                else:
-                    edges.append(n)
-        graph[sid] = edges
-
-    ancestors = _ancestors(graph)
-    if ancestors is None:
-        findings.append(LintFinding("steps", "dependency cycle detected among `needs` edges"))
-        ancestors = {sid: set() for sid in by_id}
-    else:
-        # Exactly one terminal (sink) step — the workflow's converging result.
-        depended: set[str] = set()
-        for edges in graph.values():
-            depended.update(edges)
-        sinks = sorted(sid for sid in by_id if sid not in depended)
-        if len(sinks) > 1:
-            findings.append(
-                LintFinding(
-                    "steps",
-                    f"a workflow must converge to exactly one terminal step; found "
-                    f"{len(sinks)}: {', '.join(sinks)} (add `needs` so they feed a single sink)",
-                )
-            )
-        elif not sinks and by_id:
-            findings.append(LintFinding("steps", "no terminal step found (a cycle?)"))
-
-    for sid, s in by_id.items():
-        _check_step(
-            s,
-            step_id=sid,
-            inputs=inputs,
-            steps=by_id,
-            ancestors=ancestors.get(sid, set()),
-            expressions_on=expressions,
-            findings=findings,
-        )
-
-    findings.extend(_post_substitution_check(doc, source=source))
-    return findings
-
-
-def _substitute(value: Any) -> Any:
-    """Return a copy of ``value`` with every expression / env token replaced by a
-    harmless scalar placeholder (used for the structure-invariance re-check)."""
-    if isinstance(value, dict):
-        return {k: _substitute(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_substitute(v) for v in value]
-    if isinstance(value, str):
-        s = _EXPR_RE.sub(_PLACEHOLDER, value)
-        s = _ENV_RE.sub(_PLACEHOLDER, s)
-        return s
-    return value
-
-
-def _step_ids_and_keys(doc: dict[str, Any]) -> tuple[set[str], set[str]]:
-    ids = {
-        s["id"]
-        for s in doc.get("steps", [])
-        if isinstance(s, dict) and isinstance(s.get("id"), str)
-    }
-    keys = set(doc.keys())
-    return ids, keys
-
-
-def _post_substitution_check(doc: dict[str, Any], *, source: str) -> list[LintFinding]:
-    """Render placeholders for every expression and assert the document's shape is
-    unchanged (no new top-level key, no new/renamed step) and still schema-valid —
-    the Argo guarantee that a substituted value cannot become structure."""
-    findings: list[LintFinding] = []
-    rendered = _substitute(doc)
-    before_ids, before_keys = _step_ids_and_keys(doc)
-    after_ids, after_keys = _step_ids_and_keys(rendered)
-    if before_ids != after_ids or before_keys != after_keys:
-        findings.append(
-            LintFinding(
-                source,
-                "substituting expressions changed the document's structure "
-                "(new key or step) — expressions must only fill scalar values",
-            )
-        )
-    # Re-validate the rendered doc; surface only errors substitution INTRODUCED.
-    try:
-        new_errs = set(validate_document(rendered, source=source))
-        old_errs = set(validate_document(doc, source=source))
-    except WorkflowVersionError:
-        return findings
-    for err in sorted(new_errs - old_errs):
-        findings.append(LintFinding(source, f"after substitution: {err}"))
-    return findings
-
-
 # ── Secret-named literal fields (precise, parsed-doc) ─────────────────────────
 
 
 def _scan_secret_literals(doc: dict[str, Any]) -> list[LintFinding]:
     findings: list[LintFinding] = []
-    steps = doc.get("steps")
-    if not isinstance(steps, list):
-        return findings
-    for s in steps:
-        if not isinstance(s, dict):
-            continue
+    for s in _iter_all_steps(doc):
         sid = s.get("id", "?")
         with_block = s.get("with")
         if not isinstance(with_block, dict):
@@ -532,8 +142,8 @@ def lint_prompt_refs(doc: dict[str, Any], *, repo_root=None) -> list[LintFinding
 
     findings: list[LintFinding] = []
     catalog = load_catalog()
-    for step in doc.get("steps", []):
-        if not isinstance(step, dict) or step_kind(step) != "agent":
+    for step in _iter_all_steps(doc):
+        if step_kind(step) != "agent":
             continue
         prompt_id = step.get("prompt")
         if not isinstance(prompt_id, str):
@@ -620,6 +230,7 @@ __all__ = [
     "lint_workflow",
     "lint_document",
     "secret_scan",
+    "lint_prompt_refs",
     "lint_passes",
     "step_kind",
 ]

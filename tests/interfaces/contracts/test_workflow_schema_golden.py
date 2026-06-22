@@ -33,6 +33,11 @@ _SCHEMA_DIR = Path(schemas.__file__).resolve().parent
 # workflow.v2.schema.json + a migrate shim and freeze THAT instead.
 _V1_GOLDEN_SHA256 = "45ddb6634003f48043cd8127ec473996191783806b070a85c273a1ec20e361de"
 
+# Frozen normalized-content hash of workflow.v2.schema.json. Like v1, v2 is IMMUTABLE
+# once shipped: a breaking change ships as workflow.v3.schema.json + a v2->v3 shim,
+# never an edit to v2.
+_V2_GOLDEN_SHA256 = "54fec42cc718766b5de9ff375dfb9b10052fb7d711e54f9ed3ed4ab6ba5ea6ca"
+
 
 def _normalized_hash(path: Path) -> str:
     obj = json.loads(path.read_text(encoding="utf-8"))
@@ -47,6 +52,16 @@ def test_workflow_v1_schema_is_frozen() -> None:
         "must ship as workflow.v2.schema.json + a migrate shim (bump "
         "CURRENT_SCHEMA_VERSION), not an edit to v1. If this change is genuinely "
         "non-semantic, update _V1_GOLDEN_SHA256 deliberately."
+    )
+
+
+def test_workflow_v2_schema_is_frozen() -> None:
+    actual = _normalized_hash(_SCHEMA_DIR / "workflow.v2.schema.json")
+    assert actual == _V2_GOLDEN_SHA256, (
+        "workflow.v2.schema.json changed. v2 is IMMUTABLE — a breaking DSL change "
+        "must ship as workflow.v3.schema.json + a v2->v3 migrate shim (bump "
+        "CURRENT_SCHEMA_VERSION), not an edit to v2. If this change is genuinely "
+        "non-semantic, update _V2_GOLDEN_SHA256 deliberately."
     )
 
 
@@ -70,7 +85,10 @@ def test_code_review_example_shape_frozen() -> None:
     assert [str(f) for f in L.lint_workflow(text) if f.severity != "warning"] == []
 
 
-def test_input_schema_registry_lists_v1() -> None:
-    # The DSL version this build understands is wired into the schema registry.
+def test_input_schema_registry_lists_dsl_versions() -> None:
+    # Every DSL version this build understands is wired into the schema registry,
+    # and the current authoring version is v2.
     assert schemas.WORKFLOW_V1 in schemas.INPUT_SCHEMAS
-    assert S.CURRENT_SCHEMA_VERSION == "1"
+    assert schemas.WORKFLOW_V2 in schemas.INPUT_SCHEMAS
+    assert S.CURRENT_SCHEMA_VERSION == "2"
+    assert S.SUPPORTED_SCHEMA_VERSIONS == ("1", "2")

@@ -16,9 +16,10 @@ change the DSL across a version boundary, and every shim must carry a golden
 round-trip test (a vN fixture and its expected v(N+1) output) so the conversion is
 pinned, not hand-waved.
 
-``v1`` is the base version, so ``_SHIMS`` is currently empty; the chaining
-machinery is exercised by ``tests/unit/workflow/test_migrate.py`` (which registers
-a synthetic shim) so the path is proven before a real second version lands.
+``v1`` is the base version and ``v2`` is current, so ``_SHIMS`` holds the single
+``v1 -> v2`` up-conversion (a pure version bump — v2 is a superset of v1). Its
+golden round-trip and the multi-step chaining machinery are pinned by
+``tests/unit/workflow/test_migrate.py``.
 """
 
 from __future__ import annotations
@@ -40,11 +41,31 @@ from .schema import (
 # mutation of the input) and total over valid documents at their source version.
 Shim = Callable[[dict[str, Any]], dict[str, Any]]
 
-# The registry. Empty today (v1 is the base). When DSL v2 ships, add a
-# workflow.v2.schema.json and register ``_SHIMS["1"] = _v1_to_v2`` here, with a
-# golden round-trip test. Ordered by the natural integer order of the keys at
-# migrate time, so a multi-step chain (v1->v2->v3) composes deterministically.
-_SHIMS: dict[str, Shim] = {}
+
+def _v1_to_v2(doc: dict[str, Any]) -> dict[str, Any]:
+    """Up-convert a v1 workflow document to v2.
+
+    v2 is a strict SUPERSET of v1: every v1 step is a leaf (scripted ``uses:`` or
+    agentic ``prompt:``), and v2 keeps that shape verbatim while ADDING the
+    ``branch``/``loop``/``map`` control constructs. So a v1 file is already a valid
+    v2 file apart from its ``schema_version`` stamp — the conversion is a pure
+    version bump with NO structural rewrite (the cleanest possible shim, and exactly
+    why v1 authoring ergonomics carry forward unchanged). Pure: returns a new dict,
+    never mutates ``doc`` (``migrate_to_current`` deep-copies before calling, but we
+    keep the contract here too). ``schema_version`` is advanced by the caller; we set
+    it explicitly so the shim is correct in isolation (e.g. its golden test).
+    """
+    out = dict(doc)
+    out["schema_version"] = "2"
+    return out
+
+
+# The registry. v1 is the base DSL version; ``_v1_to_v2`` up-converts it to the
+# current v2 (a pure version bump — v2 is a superset of v1). Each entry is keyed by
+# its SOURCE version and carries a golden round-trip test (see test_migrate.py).
+# Ordered by the natural integer order of the keys at migrate time, so a multi-step
+# chain (v1->v2->v3) composes deterministically.
+_SHIMS: dict[str, Shim] = {"1": _v1_to_v2}
 
 
 def _next_version(version: str) -> str:

@@ -16,16 +16,57 @@ from rebar.llm.workflow import schema as wf
 
 
 def test_current_version_is_identity() -> None:
-    doc = {"schema_version": "1", "name": "x", "steps": [{"id": "s", "uses": "u"}]}
+    # A document already at the CURRENT version (v2) migrates to itself (a copy).
+    doc = {"schema_version": "2", "name": "x", "steps": [{"id": "s", "uses": "u"}]}
     out = mig.migrate_to_current(doc)
     assert out == doc
     assert out is not doc  # a copy, never the same object
 
 
 def test_does_not_mutate_input() -> None:
+    # Up-converting v1->v2 must not mutate the caller's document.
     doc = {"schema_version": "1", "name": "x", "steps": [{"id": "s", "uses": "u"}]}
     mig.migrate_to_current(doc)
     assert doc == {"schema_version": "1", "name": "x", "steps": [{"id": "s", "uses": "u"}]}
+
+
+def test_v1_to_v2_golden_roundtrip() -> None:
+    # The golden round-trip for the real v1->v2 shim (WS-B3 discipline): a v1
+    # fixture and its pinned v2 output. v2 is a strict superset of v1, so the shim
+    # is a pure version bump — the steps are byte-identical, only schema_version
+    # advances. (The chaining machinery + upgrade gate are covered by the synthetic
+    # tests below; this pins the ACTUAL conversion.)
+    v1 = {
+        "schema_version": "1",
+        "name": "demo",
+        "inputs": {"ticket_id": {"type": "string", "required": True}},
+        "steps": [
+            {
+                "id": "fetch",
+                "uses": "fetch_ticket",
+                "with": {"ticket_id": "${{ inputs.ticket_id }}"},
+            },
+            {"id": "review", "prompt": "code-quality", "needs": ["fetch"]},
+        ],
+    }
+    expected_v2 = {**v1, "schema_version": "2"}
+    out = mig.migrate_to_current(v1)
+    assert out == expected_v2
+    # The lone difference is the version stamp; everything else round-trips verbatim.
+    assert {k: v for k, v in out.items() if k != "schema_version"} == {
+        k: v for k, v in v1.items() if k != "schema_version"
+    }
+    assert mig._v1_to_v2({"schema_version": "1", "name": "x", "steps": []}) == {
+        "schema_version": "2",
+        "name": "x",
+        "steps": [],
+    }
+
+
+def test_v1_to_v2_is_registered() -> None:
+    # v1 has a registered up-conversion path now that v2 is the current version.
+    assert mig.registered_source_versions() == ("1",)
+    assert "1" in mig._SHIMS
 
 
 def test_newer_version_is_upgrade_error() -> None:

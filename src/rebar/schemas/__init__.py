@@ -65,6 +65,7 @@ __all__ = [
     "EXPORT",
     "COMMON",
     "WORKFLOW_V1",
+    "WORKFLOW_V2",
     "WORKFLOW_RUN",
     "INPUT_SCHEMAS",
 ]
@@ -116,13 +117,19 @@ WORKFLOW_RUN = "workflow_run"
 # schemas.validator(name), and they are NOT wired into OUTPUT_SCHEMAS. Each DSL
 # version is its own frozen file at a stable $id (workflow.v1, workflow.v2, …).
 WORKFLOW_V1 = "workflow.v1"
+# rebar.llm.workflow — the v2 DSL schema: v1 plus declarative control flow
+# (branch/loop/map carrying nested frames). The current authoring version; a v1
+# file is up-converted to v2 at read time by the migrate shim. Like v1 this is an
+# INPUT/validation schema (a workflow file is validated against it), NOT a command
+# output, so it is in INPUT_SCHEMAS and absent from OUTPUT_SCHEMAS.
+WORKFLOW_V2 = "workflow.v2"
 
 # Schemas authored to validate INPUT documents rather than advertise a command's
 # JSON output. Like COMMON, they are loaded by their consumers (the workflow
 # parser/linter) and intentionally absent from OUTPUT_SCHEMAS; the coverage-guard
 # test exempts this set so an authored-but-unwired check still catches a forgotten
 # OUTPUT schema while permitting these.
-INPUT_SCHEMAS: frozenset[str] = frozenset({WORKFLOW_V1})
+INPUT_SCHEMAS: frozenset[str] = frozenset({WORKFLOW_V1, WORKFLOW_V2})
 
 # The authoritative map of every structured (--output json / always-JSON) output
 # to its schema. Keyed by command, or <command>.<interface> when an interface's

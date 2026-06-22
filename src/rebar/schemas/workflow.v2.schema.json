@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/workflow.v2.schema.json",
+  "title": "WorkflowV2",
+  "description": "The rebar workflow DSL, schema_version \"2\". A coordinate-free, GitHub-Actions-style `steps:` document, git-tracked under .rebar/workflows/<name>.yaml. v2 EXTENDS v1 (every v1 leaf step is a valid v2 step): it adds DECLARATIVE control flow expressed as DATA — `branch` (conditional), `loop` (bounded iteration, mandatory max_iterations), and `map` (fan-out over a collection) — each carrying a NESTED `body`/`then`/`else` step list (recursive). v1 had only an acyclic `needs` DAG plus an `if:` skip-guard; v2 keeps those and the same authoring ergonomics. This schema is IMMUTABLE and version-pinned at a stable $id: once shipped it is never edited in place; a new DSL version ships as workflow.v3.schema.json with a read-time v2->v3 up-conversion shim. `additionalProperties:false` everywhere so an unknown key is a located error rather than a silent no-op (the Argo lesson). A step is EXACTLY ONE of: scripted (`uses:`), agentic (`prompt:`), or a control construct (`branch`/`loop`/`map`) — never a mix (oneOf). Reference integrity (frame-scoped), the expression allow-list, loop-frame legality (raw `needs` cycles still rejected; iteration is ONLY via a declared loop frame), and the `map` `as`-binding scope are enforced by the linter (rebar.llm.workflow.lint), not by this structural schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "name", "steps"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "2",
+      "description": "DSL version, typed as a STRING (never a YAML float). For this schema it is exactly \"2\"; a value the running rebar does not recognize is a hard upgrade-rebar error (WS-B3). An older file (schema_version \"1\") is up-converted to \"2\" at read time by the migrate shim."
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Stable human workflow id (lowercase, no spaces); the file stem under .rebar/workflows/."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "model": {
+      "type": "string",
+      "description": "Workflow-level default model for agent steps, e.g. `anthropic:claude-opus-4-8`. Per-step `model` overrides this (precedence step > workflow > config > env > default)."
+    },
+    "inputs": {
+      "type": "object",
+      "description": "Declared workflow inputs, referenced as `${{ inputs.<name> }}`.",
+      "additionalProperties": { "$ref": "#/$defs/input_decl" }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The ordered step list at the top frame. Execution order WITHIN a frame is the topological order of `needs` edges, NOT array position; array order is for human readability only. A `branch`/`loop`/`map` step carries its own nested frame(s).",
+      "items": { "$ref": "#/$defs/step" }
+    }
+  },
+  "$defs": {
+    "input_decl": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["string", "integer", "number", "boolean", "array", "object"],
+          "default": "string"
+        },
+        "required": { "type": "boolean", "default": false },
+        "description": { "type": "string" },
+        "default": {}
+      }
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-zA-Z_][a-zA-Z0-9_-]*$",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "expression": {
+      "type": "string",
+      "maxLength": 256,
+      "description": "A `${{ … }}` expression from the closed allow-list (linter-enforced): inputs.<name>, steps.<id>.outputs.<name>, secrets.<name>, and the frame-scoped bindings loop.<var> / map.<as>."
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "description": "A single workflow step. Exactly one of `uses` (scripted), `prompt` (agentic), `branch` (conditional), `loop` (bounded iteration), or `map` (fan-out) is required (oneOf). A control construct carries its nested body; it takes no `with`/`output_schema`/`mode`/`model`.",
+      "properties": {
+        "id": {
+          "allOf": [{ "$ref": "#/$defs/identifier" }],
+          "description": "Stable, unique (within its frame) step id; the anchor for `${{ steps.<id>.outputs.* }}` references and the loop/map iteration key."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["scripted", "agent", "branch", "loop", "map"],
+          "description": "Optional explicit discriminator; if present it must agree with the uses/prompt/branch/loop/map shape (linter-checked). Normally inferred."
+        },
+        "uses": {
+          "allOf": [{ "$ref": "#/$defs/identifier" }],
+          "description": "Scripted step: the registry name of a deterministic built-in (rebar.llm.workflow.steps)."
+        },
+        "prompt": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_./-]+$",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Agentic step: the prompt id resolving to .rebar/prompts/<id>.md (git-canonical; WS-F)."
+        },
+        "needs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" },
+          "description": "Upstream step ids (SAME frame) this step depends on; defines the per-frame execution DAG. A `needs` edge may not cross into a sibling/inner frame, and the per-frame graph must be acyclic (iteration is expressed ONLY by a `loop` frame, never a `needs` back-edge)."
+        },
+        "with": {
+          "type": "object",
+          "description": "Inputs to a scripted/agent step: a map of name -> literal or `${{ ... }}` expression (allow-listed; the linter forbids raw ${{}} leaking into prompt/command bodies).",
+          "additionalProperties": true
+        },
+        "output_schema": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_.-]+$",
+          "description": "Agent step: the JSON Schema name constraining the step's structured output (default review_result)."
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["findings", "structured", "text"],
+          "description": "Agent step output-finalization strategy (WS-D1). `findings` = review_result pipeline; `structured` = validate against output_schema; `text` = raw text."
+        },
+        "model": {
+          "type": "string",
+          "description": "Agent step: per-step model override, e.g. `anthropic:claude-opus-4-8` or `openai:gpt-4o` (highest precedence)."
+        },
+        "if": {
+          "allOf": [{ "$ref": "#/$defs/expression" }],
+          "description": "Optional skip-guard expression (the step runs only when it evaluates truthy). Distinct from `branch`: `if` skips ONE step in place; `branch` selects between alternative nested frames."
+        },
+        "branch": { "$ref": "#/$defs/branch" },
+        "loop": { "$ref": "#/$defs/loop" },
+        "map": { "$ref": "#/$defs/map" }
+      },
+      "oneOf": [
+        {
+          "title": "scripted",
+          "required": ["uses"],
+          "properties": {
+            "prompt": false, "branch": false, "loop": false, "map": false
+          }
+        },
+        {
+          "title": "agent",
+          "required": ["prompt"],
+          "properties": {
+            "uses": false, "branch": false, "loop": false, "map": false
+          }
+        },
+        {
+          "title": "branch",
+          "required": ["branch"],
+          "properties": {
+            "uses": false, "prompt": false, "loop": false, "map": false,
+            "with": false, "output_schema": false, "mode": false, "model": false
+          }
+        },
+        {
+          "title": "loop",
+          "required": ["loop"],
+          "properties": {
+            "uses": false, "prompt": false, "branch": false, "map": false,
+            "with": false, "output_schema": false, "mode": false, "model": false
+          }
+        },
+        {
+          "title": "map",
+          "required": ["map"],
+          "properties": {
+            "uses": false, "prompt": false, "branch": false, "loop": false,
+            "with": false, "output_schema": false, "mode": false, "model": false
+          }
+        }
+      ]
+    },
+    "branch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["when", "then"],
+      "description": "Conditional construct (-> a BPMN exclusiveGateway): run the `then` frame when `when` is truthy, else the optional `else` frame. Each branch is its own nested frame (recursive step list).",
+      "properties": {
+        "when": {
+          "allOf": [{ "$ref": "#/$defs/expression" }],
+          "description": "The condition expression selecting `then` (truthy) vs `else`. May NOT reference a secret (control flow must not branch on a credential)."
+        },
+        "then": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/step" },
+          "description": "The frame run when `when` is truthy."
+        },
+        "else": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/step" },
+          "description": "The frame run when `when` is falsy (optional; omit for a one-armed guard)."
+        }
+      }
+    },
+    "loop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_iterations", "body"],
+      "description": "Bounded iteration construct (-> a BPMN standardLoopCharacteristics). The body re-executes per iteration; iteration is keyed (run_id, step_id, iteration). `max_iterations` is MANDATORY (the runaway guard). An optional `while`/`until` expression decides continuation (checked per iteration BEFORE running the body); with neither, the body runs exactly `max_iterations` times. The cycle is the loop construct ITSELF — the body's `needs` graph stays acyclic.",
+      "properties": {
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "Hard upper bound on iterations (MANDATORY). Exceeding it is a runaway-loop error, never a silent stop."
+        },
+        "while": {
+          "allOf": [{ "$ref": "#/$defs/expression" }],
+          "description": "Continue WHILE this is truthy (checked before each iteration). The loop condition MAY reference outputs of its own body steps (e.g. the previous iteration's score). Mutually exclusive with `until`."
+        },
+        "until": {
+          "allOf": [{ "$ref": "#/$defs/expression" }],
+          "description": "Continue UNTIL this becomes truthy (i.e. stop when truthy). Mutually exclusive with `while`."
+        },
+        "var": {
+          "allOf": [{ "$ref": "#/$defs/identifier" }],
+          "description": "Name bound to the zero-based iteration index inside the body, referenced as `${{ loop.<var> }}` (default `index`)."
+        },
+        "body": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/step" },
+          "description": "The per-iteration frame (recursive step list)."
+        }
+      },
+      "not": { "required": ["while", "until"] }
+    },
+    "map": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["over", "as", "body"],
+      "description": "Fan-out construct (-> a BPMN multiInstanceLoopCharacteristics): run the `body` frame once per element of the `over` collection, binding each element to `as`. Iterations are order-independent (iteration-keyed markers), so `max_concurrency` > 1 may run them concurrently (the bounded fan-out story) while replay stays deterministic.",
+      "properties": {
+        "over": {
+          "allOf": [{ "$ref": "#/$defs/expression" }],
+          "description": "An expression yielding the collection to fan out over (an input, an upstream step output, or an enclosing frame binding)."
+        },
+        "as": {
+          "allOf": [{ "$ref": "#/$defs/identifier" }],
+          "description": "Name bound to the current element inside the body, referenced as `${{ map.<as> }}`."
+        },
+        "index_var": {
+          "allOf": [{ "$ref": "#/$defs/identifier" }],
+          "description": "Optional name bound to the zero-based element index inside the body, referenced as `${{ map.<index_var> }}`."
+        },
+        "max_concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "description": "Upper bound on concurrently-running iterations (default 1 = serial). Event commits are serialized regardless; only the agent calls run in parallel."
+        },
+        "body": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/step" },
+          "description": "The per-element frame (recursive step list)."
+        }
+      }
+    }
+  }
+}
