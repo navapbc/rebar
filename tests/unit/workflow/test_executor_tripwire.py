@@ -1,11 +1,12 @@
-"""The Burr tripwire (WS-C2): the executor must stay a THIN linear pass.
+"""The Burr tripwire (WS-C2): the executor + interpreter must stay a THIN
+synchronous pass.
 
-Scoped to ``executor.py`` ONLY (not the package): the executor must not import a
-scheduler/concurrency/retry library. If a future change reaches for asyncio,
-threads, processes, or a retry lib, this fails — forcing the deliberate decision
-(adopt Burr per the trigger list, or stay thin) rather than letting the executor
-silently grow one. The trigger-list comment is also asserted present so the
-adoption criteria travel with the code.
+Scoped to ``executor.py`` AND ``interpreter.py`` (the v2 worklist interpreter the
+executor delegates to): neither may import a scheduler/concurrency/retry library. If
+a future change reaches for asyncio, threads, processes, or a retry lib, this fails —
+forcing the deliberate decision (adopt Burr per the trigger list, or stay thin)
+rather than letting the engine silently grow one. The trigger-list comment is also
+asserted present so the adoption criteria travel with the code.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import ast
 from pathlib import Path
 
 import rebar.llm.workflow.executor as _executor
+import rebar.llm.workflow.interpreter as _interpreter
 
 _BANNED = {
     "asyncio",
@@ -29,7 +31,9 @@ _BANNED = {
 
 
 def _executor_source() -> str:
-    return Path(_executor.__file__).read_text(encoding="utf-8")
+    return Path(_executor.__file__).read_text(encoding="utf-8") + Path(
+        _interpreter.__file__
+    ).read_text(encoding="utf-8")
 
 
 def _imported_modules(src: str) -> set[str]:

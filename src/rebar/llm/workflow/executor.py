@@ -46,7 +46,7 @@ from typing import Any
 from rebar.llm.errors import WorkflowError, WorkflowValidationError
 
 from .lint import lint_document
-from .schema import step_kind, validate_document
+from .schema import validate_document
 
 # Reuse the linter's expression grammar so the resolver and the static checker can
 # never disagree about what an expression is.
@@ -112,6 +112,15 @@ class StepContext:
     workflow: Mapping[str, Any]
     target_ticket: str | None = None
     repo_root: str | None = None
+    # The full FRAME KEY of this execution (``step_id`` at the top frame; a path like
+    # ``L#2/attempt`` inside a loop/map iteration). It is the durable, iteration-aware
+    # idempotency token — a side-effecting step inside a loop/map uses
+    # ``(run_id, frame_key)`` (not ``(run_id, step_id)``, which repeats every
+    # iteration) so each iteration's effect is distinct yet replay-stable (WS-C3 / v2).
+    frame_key: str = ""
+    # The immediate enclosing loop/map iteration index (None at the top frame). Carried
+    # so a step can read its own iteration; the full path is in ``frame_key``.
+    iteration: int | None = None
     # Non-determinism captured ONCE for this step execution (now_ns + a fresh uuid
     # + a random seed), persisted in the WORKFLOW_STEP record so a status/result
     # read replays what actually happened (WS-C3). A side-effecting step uses
@@ -183,8 +192,10 @@ class RunRecorder:
     def run_finished(self, record: dict[str, Any]) -> None: ...
     def step_recorded(self, record: dict[str, Any]) -> None: ...
 
-    def completed_step(self, run_id: str, step_id: str) -> dict[str, Any] | None:
-        """Return a prior SUCCEEDED step record for idempotent skip, or None.
+    def completed_step(self, run_id: str, frame_key: str) -> dict[str, Any] | None:
+        """Return a prior SUCCEEDED record for this FRAME KEY (idempotent skip), or
+        None. ``frame_key`` is the bare ``step_id`` at the top frame or an
+        iteration-embedding path inside a loop/map body.
 
         The in-memory default never skips (no prior runs); WS-C3's event recorder
         returns the persisted marker so a resumed run does not re-run a committed
@@ -241,7 +252,7 @@ class TicketEventRecorder(RunRecorder):
     def step_recorded(self, record: dict[str, Any]) -> None:
         self._append("WORKFLOW_STEP", record)
 
-    def completed_step(self, run_id: str, step_id: str) -> dict[str, Any] | None:
+    def completed_step(self, run_id: str, frame_key: str) -> dict[str, Any] | None:
         from rebar._commands import _seam
         from rebar.reducer import reduce_ticket
 
@@ -252,7 +263,7 @@ class TicketEventRecorder(RunRecorder):
             return None
         if not state:
             return None
-        return state.get("workflow_steps", {}).get(run_id, {}).get(step_id)
+        return state.get("workflow_steps", {}).get(run_id, {}).get(frame_key)
 
 
 # ── Burr-style immutable run state ────────────────────────────────────────────
@@ -400,6 +411,13 @@ def _guard_passes(step: Mapping[str, Any], state: RunState, secrets: Mapping[str
     return bool(val)
 
 
+# ── The v2 worklist interpreter ───────────────────────────────────────────────
+# The recursive frame walk (branch/loop/map + the frame-scoped resolver + _RunCtx)
+# lives in :mod:`rebar.llm.workflow.interpreter` (kept under the module-size cap and
+# scanned by the same Burr tripwire). ``run_workflow`` imports it lazily below to
+# avoid an import cycle (interpreter imports the step interfaces from here).
+
+
 def run_workflow(
     doc: Mapping[str, Any],
     inputs: Mapping[str, Any] | None = None,
@@ -445,82 +463,36 @@ def run_workflow(
         raise WorkflowValidationError(errors, source=str(doc.get("name", "<workflow>")))
 
     name = doc.get("name", "<workflow>")
-    by_id = {s["id"]: s for s in doc.get("steps", [])}
     terminal = _terminal_step(doc)
 
     rec.run_started(
         {"run_id": run_id, "workflow_name": name, "status": "running", "inputs": inputs}
     )
 
-    state = RunState(inputs=inputs)
-    run_status = "succeeded"
-    run_error: str | None = None
+    # Walk the IR frame by frame (the v2 worklist interpreter). For a leaf-only
+    # (migrated-v1) workflow this degenerates to the old linear pass: the top frame's
+    # keys ARE the bare step ids (frame_key == step_id), so the recorded markers and
+    # the RunResult below are byte-compatible with the v1 path. Imported lazily — the
+    # interpreter imports the step interfaces from here, so a module-level import
+    # would cycle.
+    from .interpreter import _execute_frame, _RunCtx
 
-    for step_id in static_order(doc):
-        step = by_id[step_id]
-        kind = step_kind(step)
+    rc = _RunCtx(
+        run_id=run_id,
+        doc=doc,
+        registry=registry,
+        runner=runner,
+        rec=rec,
+        secrets=secrets,
+        inputs=inputs,
+        target_ticket=target_ticket,
+        repo_root=repo_root,
+    )
+    _execute_frame(rc, list(doc.get("steps", [])), ("",), {}, None)
 
-        if not _guard_passes(step, state, secrets):
-            result = StepResult(outputs={}, status="skipped")
-            state = state.with_step(step_id, result)
-            rec.step_recorded(_step_record(run_id, step_id, kind, result))
-            continue
-
-        # Idempotent skip (WS-C3 recorder returns a committed marker; the in-memory
-        # default never does, so a fresh run executes every step).
-        prior = rec.completed_step(run_id, step_id)
-        if prior is not None and prior.get("status") == "succeeded":
-            result = StepResult(outputs=prior.get("outputs", {}), status="succeeded")
-            state = state.with_step(step_id, result)
-            continue
-
-        # Best-effort progress (WS-C4): record a 'running' marker BEFORE the effect
-        # so a get_workflow_status poll sees which step is in-flight. This is NOT a
-        # done-marker (completed_step only skips status=='succeeded'), so it never
-        # triggers an idempotent skip and is overwritten by the final marker below.
-        rec.step_recorded(
-            {
-                "run_id": run_id,
-                "step_id": step_id,
-                "kind": kind,
-                "status": "running",
-                "outputs": {},
-                "error": None,
-            }
-        )
-
-        # Capture non-determinism ONCE, before the effect, so the same clock/uuid
-        # is handed to the step and persisted in its marker (WS-C3).
-        captured = _capture_nondeterminism()
-        try:
-            resolved = resolve_value(dict(step.get("with") or {}), state, secrets)
-            ctx = StepContext(
-                run_id=run_id,
-                step_id=step_id,
-                kind=kind,
-                step=step,
-                inputs=resolved,
-                workflow=doc,
-                target_ticket=target_ticket,
-                repo_root=repo_root,
-                captured=captured,
-            )
-            result = _dispatch(ctx, registry, runner)
-        except Exception as exc:  # a step failure is data, not a crash
-            result = StepResult(outputs={}, status="failed", error=str(exc))
-
-        state = state.with_step(step_id, result)
-        # Marker AFTER the effect: a crash between the effect and this line leaves
-        # the step applied-but-unmarked, so recovery re-runs it (idempotent on
-        # (run_id, step_id)); a present marker means definitely-done.
-        rec.step_recorded(_step_record(run_id, step_id, kind, result, captured))
-
-        if result.status == "failed":
-            run_status = "failed"
-            run_error = f"step {step_id!r} failed: {result.error}"
-            break
-
-    terminal_output = state.outputs.get(terminal) if terminal else None
+    run_status = "failed" if rc.failed else "succeeded"
+    run_error = rc.error
+    terminal_output = rc.outputs.get(terminal) if terminal else None
     rec.run_finished(
         {
             "run_id": run_id,
@@ -530,15 +502,19 @@ def run_workflow(
             "terminal_step": terminal,
         }
     )
+    # RunResult.outputs is the TOP frame, keyed by bare step id (v1-compatible);
+    # nested-frame outputs live in the event log (and rc.outputs by path). steps
+    # carries every executed frame_key's status.
+    top_ids = [s["id"] for s in doc.get("steps", []) if isinstance(s, dict) and "id" in s]
     return RunResult(
         run_id=run_id,
         workflow_name=name,
         status=run_status,
-        outputs=dict(state.outputs),
+        outputs={sid: rc.outputs[sid] for sid in top_ids if sid in rc.outputs},
         terminal_step=terminal,
         terminal_output=terminal_output,
         error=run_error,
-        steps=dict(state.statuses),
+        steps=dict(rc.statuses),
     )
 
 
@@ -566,10 +542,17 @@ def _step_record(
     kind: str,
     result: StepResult,
     captured: Mapping[str, Any] | None = None,
+    *,
+    frame_key: str | None = None,
+    iteration: int | None = None,
 ) -> dict[str, Any]:
+    # ``frame_key`` defaults to ``step_id`` (the top frame), so the reducer keys a
+    # leaf-only run exactly as v1 did; nested executions pass the full path.
     return {
         "run_id": run_id,
         "step_id": step_id,
+        "frame_key": frame_key or step_id,
+        "iteration": iteration,
         "kind": kind,
         "status": result.status,
         "outputs": dict(result.outputs),

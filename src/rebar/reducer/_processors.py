@@ -405,22 +405,31 @@ def process_workflow_run(state: dict, event: dict, data: dict) -> None:
 
 def process_workflow_step(state: dict, event: dict, data: dict) -> None:
     """Apply a WORKFLOW_STEP event: per-key LWW into
-    ``state.workflow_steps[run_id][step_id]``.
+    ``state.workflow_steps[run_id][frame_key]``.
 
     The step's idempotency marker + result: the executor commits one of these AFTER
     a step's effect (WS-C3), carrying the full per-step record (status, outputs,
-    error, captured non-determinism). Per (run_id, step_id) it is last-writer-wins
-    in replay (HLC+UUID filename order), so a re-run/retry's later event supersedes
-    the earlier one and all clones agree. Lazy + per-key like
-    :func:`process_workflow_run`.
+    error, captured non-determinism). The slot key is the **frame key** — the bare
+    ``step_id`` at the top frame, or an iteration-embedding path (e.g.
+    ``L#2/attempt``) for a step inside a loop/map body (v2). So a step that runs once
+    per iteration gets a DISTINCT marker per iteration — the (run_id, step_id,
+    iteration) keying the v2 interpreter relies on for exactly-once replay — while a
+    flat (v1 / migrated) run stays keyed exactly as before (frame_key == step_id;
+    older events with no ``frame_key`` fall back to ``step_id``). Per key it is
+    last-writer-wins in replay (HLC+UUID filename order), so a re-run/retry's later
+    event supersedes the earlier one and all clones agree. Lazy + per-key like
+    :func:`process_workflow_run` (no nested per-iteration dict, so the flat hot path
+    is untouched).
     """
     run_id = data.get("run_id")
     step_id = data.get("step_id")
     if not (isinstance(run_id, str) and run_id and isinstance(step_id, str) and step_id):
         return
+    frame_key = data.get("frame_key")
+    key = frame_key if isinstance(frame_key, str) and frame_key else step_id
     steps = state.setdefault("workflow_steps", {})
     run_steps = steps.setdefault(run_id, {})
-    run_steps[step_id] = dict(data)
+    run_steps[key] = dict(data)
 
 
 def process_commits(state: dict, event: dict, data: dict) -> None:
