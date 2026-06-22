@@ -1,0 +1,18 @@
+# rebar built-in detector (ast-grep backend) — authored by the rebar project,
+# permissively licensed. NOT derived from any third-party rule set.
+#
+# An ast-grep structural rule: a `debugger;` statement left in JavaScript. The
+# ast-grep single-document form (top-level `rule:` + singular `language:`) is what
+# routes this to the ast-grep backend; the rebar envelope still rides in metadata.
+id: rebar.builtin.smell.js-debugger
+language: javascript
+rule:
+  pattern: debugger
+metadata:
+  rebar_envelope:
+    tier: T1
+    job: smell
+    attention_only: true
+    namespace: builtin
+    dimension: smell_generic
+    backend: ast-grep

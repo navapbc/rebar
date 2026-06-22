@@ -1,0 +1,20 @@
+# rebar built-in detector (metric backend) — authored by the rebar project,
+# permissively licensed. NOT derived from any third-party rule set.
+#
+# A METRIC detector: it has no native matcher payload (scc/lizard consume FILES,
+# not rules) — only configurable thresholds on the envelope, with shipped defaults
+# the project can override via .rebar/detectors/. `oversize_loc` flags files over
+# a LOC cutoff; `max_complexity` flags functions over a cyclomatic-complexity
+# cutoff. These feed the smell job and plan-review (P4).
+id: rebar.builtin.smell.metric-oversize
+metadata:
+  rebar_envelope:
+    tier: T1
+    job: smell
+    attention_only: true
+    namespace: builtin
+    dimension: smell_generic
+    backend: metric
+    thresholds:
+      oversize_loc: 800
+      max_complexity: 15

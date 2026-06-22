@@ -1,0 +1,22 @@
+# rebar built-in detector — authored by the rebar project, permissively licensed.
+# NOT derived from the Semgrep registry.
+#
+# An applicability trigger (job=applies): the presence of an exported JS/TS
+# function or class is a deterministic, better-than-grep signal that the repo has
+# a web-frontend surface, so the `web_frontend` overlay dimension APPLIES. The
+# match itself is the trigger; downstream (S5) consumes the dimension.
+rules:
+  - id: rebar.builtin.applies.web-frontend
+    languages: [javascript]
+    severity: INFO
+    message: "exported JS surface present -> web_frontend dimension applies"
+    metadata:
+      rebar_envelope:
+        tier: T1
+        job: applies
+        dimension: web_frontend
+        namespace: builtin
+    pattern-either:
+      - pattern: export function $F(...) { ... }
+      - pattern: export default function $F(...) { ... }
+      - pattern: export class $C { ... }

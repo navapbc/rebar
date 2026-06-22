@@ -1,0 +1,20 @@
+# rebar built-in detector — authored by the rebar project, permissively licensed
+# (same terms as rebar itself). NOT derived from the Semgrep registry.
+#
+# A low-threshold smell (job=smell): a `console.log(...)` left in JavaScript
+# source. attention_only -> it routes a human/LLM's attention, it does not assert
+# a defect. The file IS a valid opengrep/semgrep rule; the rebar envelope rides in
+# metadata.rebar_envelope and is preserved verbatim by the engine.
+rules:
+  - id: rebar.builtin.smell.js-console-log
+    languages: [javascript]
+    severity: INFO
+    message: "console.log left in JavaScript source (low-threshold smell attention-router)"
+    metadata:
+      rebar_envelope:
+        tier: T1
+        job: smell
+        attention_only: true
+        namespace: builtin
+        dimension: smell_generic
+    pattern: console.log(...)

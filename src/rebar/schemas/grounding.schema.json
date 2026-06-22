@@ -69,8 +69,8 @@
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["import", "symbol", "dependency"],
-          "description": "What class of name is being checked: a module import, a code symbol (function/class/etc.), or a package dependency."
+          "enum": ["import", "symbol", "dependency", "file", "member"],
+          "description": "What class of name is being checked: a module import, a code symbol (function/class/etc.), a package dependency (routes to the T0 deps lane), a file path, or a member/attribute (dotted recv.attr — T1-abstain, T2 territory)."
         },
         "name": {
           "type": "string",

@@ -21,7 +21,9 @@ nothing.
 
 from __future__ import annotations
 
-from . import evidence, harness, sarif
+from . import deps, engine_b, evidence, harness, resolve, sarif
+from .deps import enumerate_dependencies, refute_package, refute_packages
+from .engine_b import ScanResult, scan
 from .evidence import (
     ABSTAIN_REASONS,
     JOBS,
@@ -36,10 +38,20 @@ from .evidence import (
     refuted,
 )
 from .harness import RunResult, run_in_worker, run_tool
+from .resolve import (
+    REFERENCE_KINDS,
+    extract_references,
+    extract_references_from_diff,
+    refute_absence,
+    validate_reference,
+)
 
 __all__ = [
+    "deps",
+    "engine_b",
     "evidence",
     "harness",
+    "resolve",
     "sarif",
     # evidence contract
     "ABSTAIN_REASONS",
@@ -57,4 +69,17 @@ __all__ = [
     "RunResult",
     "run_tool",
     "run_in_worker",
+    # Engine A — refutation resolver (S2)
+    "refute_absence",
+    "validate_reference",
+    "REFERENCE_KINDS",
+    "extract_references",
+    "extract_references_from_diff",
+    # T0 — dependency existence (S3)
+    "refute_package",
+    "refute_packages",
+    "enumerate_dependencies",
+    # Engine B — detector scan (S4)
+    "scan",
+    "ScanResult",
 ]
