@@ -1020,7 +1020,7 @@
  },
  {
   "id": "G3",
-  "exec": "1-TURN",
+  "exec": "AGENT",
   "facet": "container",
   "routing": "container",
   "name": "Child coverage [agent, container]",
@@ -1045,11 +1045,12 @@
   "severity_by": "pass3",
   "default_posture": "advisory",
   "block_threshold": 0.95,
-  "_tier_note": "ticket-analysis: parent ACs vs child tickets (artifacts already held), fed as context; not tool-using"
+  "context_needs": "live ticket dependency graph + children + linked artifacts (via rebar tools + filesystem) — read live, NOT fed as a snapshot",
+  "_tier_note": "AGENT (reclassified from 1-TURN): container coverage needs the LIVE dependency graph/hierarchy; a fed snapshot is incomplete (the e6d9 dry run flagged an 'uncovered' parent criterion that a child already owned). Tool access = rebar (show/list/deps/ready/next_batch/links/children) + filesystem + any referenced artifacts."
  },
  {
   "id": "G4",
-  "exec": "1-TURN",
+  "exec": "AGENT",
   "facet": "container",
   "routing": "container",
   "name": "Child consistency [agent, container]",
@@ -1074,7 +1075,8 @@
   "severity_by": "pass3",
   "default_posture": "advisory",
   "block_threshold": 0.95,
-  "_tier_note": "ticket-analysis: cross-child consistency over the child tickets; code-grounding (consumer impact / residual refs) is owned by E4/G1G2/A1, not duplicated here"
+  "context_needs": "live ticket dependency graph + children + linked artifacts (via rebar tools + filesystem) — read live, NOT fed as a snapshot",
+  "_tier_note": "AGENT (reclassified from 1-TURN): the 7 cross-child modes (esp. dependency-gap / ordering-violation / consumer-impact) need the LIVE dependency graph; a fed snapshot misses declared depends_on edges (the e6d9 dry run flagged a 'missing sequencing edge' that already existed as 8d8e->dbc6). Tool access = rebar (deps/links/children/ready/next_batch) + filesystem + referenced artifacts. Code-grounding (consumer impact in src) still composes with E4/G1G2/A1."
  },
  {
   "id": "G6",

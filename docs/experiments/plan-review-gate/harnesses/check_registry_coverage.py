@@ -27,11 +27,15 @@ REGISTRY = {
 LLM_EXPECTED = set(REGISTRY["Layer-2 judgment"]) | set(REGISTRY["Layer-2 judgment (v3 add)"]) \
     | set(REGISTRY["Layer-2 judgment (v8 add)"]) \
     | set(REGISTRY["Triggered overlays"]) | set(REGISTRY["Cross-cutting"])
-# AGENT tier = code-grounding only (grep/read the repo). E4/G1G2/A1 own code-grounding; G6 grounds
-# mechanism-correctness in code. G3/G4 are NOT agent — they are ticket-analysis (parent ACs vs child
-# tickets), reclassified to single-turn (the agent-vs-single-turn bright line: only criteria that must
-# probe the live codebase/environment are agent-tier).
-AGENT_TIER = {"G1G2", "E4", "A1", "G6", "T5c", "T10", "T11"}  # grounding experiment: verdict depends on actual code
+# AGENT tier = tool-grounded criteria (must read live state, not a fed snapshot). Two grounding kinds:
+#   (1) CODE-grounding (grep/read the repo): E4/G1G2/A1 own it; G6 grounds mechanism-correctness in code.
+#   (2) TICKET-GRAPH grounding (rebar deps/children/links): G3/G4 (container coverage/consistency) —
+#       reclassified BACK to AGENT. The dep-graph-need IS the agent-tier signal: the e6d9 dry run produced
+#       partial-view FPs (a "missing" sequencing edge that already existed; an "uncovered" criterion a child
+#       owned) precisely because the graph was fed as an incomplete snapshot instead of read live.
+# AGENT tool-access contract (always): rebar (show/list/deps/ready/next_batch/links/children) + filesystem,
+# which together also reach any REFERENCED artifacts/analysis (linked session logs/tickets, docs/experiments).
+AGENT_TIER = {"G1G2", "E4", "A1", "G6", "T5c", "T10", "T11", "G3", "G4"}  # code-grounded + ticket-graph-grounded
 BROAD_TIER = {"BROAD"}
 
 def main():

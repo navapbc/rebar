@@ -25,10 +25,13 @@ import exp2_agentic as e2
 
 client = anthropic.Anthropic()
 TMP = h.TMP
-# Code-grounding (Pass-2 verifies agentically against the repo) is owned by these only. NOT G3/G4
-# (ticket-analysis: parent ACs vs child tickets) and NOT T10/T11 (plan-intrinsic IaC/migration safety;
-# existence/convention checks defer to E4/G1G2/A1). See the agent-vs-single-turn bright line.
-CODEBASE_GROUNDED = {"E4", "G1G2", "A1", "G6", "T8", "T1", "T3", "T5c", "T10", "T11"}  # grounding experiment
+# Tool-grounded findings get an AGENTIC Pass-2 (the verifier re-grounds with the read-only tool set:
+# filesystem + rebar). Two grounding kinds: CODE-grounding in the repo (E4/G1G2/A1/G6/T8/T1/T3/T5c/T10/T11)
+# and TICKET-GRAPH grounding via rebar deps/children/links (G3/G4 — container coverage/consistency).
+# G3/G4 were reclassified back to agent-tier: needing the LIVE dependency graph IS the agent signal, and a
+# fed snapshot produced partial-view FPs in the e6d9 dry run (a "missing" edge that existed; a "uncovered"
+# criterion a child owned). The agent tool-access contract (exp2_agentic.TOOLS) is rebar + filesystem.
+CODEBASE_GROUNDED = {"E4", "G1G2", "A1", "G6", "T8", "T1", "T3", "T5c", "T10", "T11", "G3", "G4"}  # tool-grounded
 # Pass-2 is a SINGLE aggregate verifier over all findings, and a NON-FRONTIER model suffices: the hard
 # generative reasoning is Pass-1 (find) and Pass-3 is deterministic code — Pass-2 is mechanical binary
 # sub-question answering + coarse-attribute assignment, which a mid-tier model does reliably and cheaply.

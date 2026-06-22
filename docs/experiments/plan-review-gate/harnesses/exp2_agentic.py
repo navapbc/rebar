@@ -27,6 +27,11 @@ TOOLS = [
       "required": ["path"]}},
  {"name": "glob", "description": "List files matching a glob pattern under the repo root.",
   "input_schema": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}},
+ {"name": "rebar", "description": "Read-only query of the rebar ticket store: the LIVE dependency graph, hierarchy, and linked artifacts (NOT a fed snapshot). Use 'show <id>' for a ticket incl. its deps/links/comments, 'deps <id>' for blockers/children, 'ready'/'next-batch <epic>' for unblocked work, 'search <query>' for related tickets and session logs.",
+  "input_schema": {"type": "object", "properties": {
+      "subcommand": {"type": "string", "enum": ["show", "list", "deps", "ready", "next-batch", "search"]},
+      "args": {"type": "string", "description": "args after the subcommand, e.g. a ticket id or a search query"}},
+      "required": ["subcommand"]}},
  {"name": "submit_review", "description": "Submit the per-criterion review after gathering evidence.",
   "input_schema": h.TOOL[0]["input_schema"]},
 ]
@@ -53,11 +58,20 @@ def run_tool(name, inp, repo_root):
             hits = G.glob(os.path.join(repo_root, "**", inp["pattern"]), recursive=True)
             hits = [hh.replace(repo_root + "/", "") for hh in hits][:60]
             return "\n".join(hits) if hits else "(no matches)"
+        if name == "rebar":
+            sub = inp.get("subcommand", "")
+            allow = {"show", "list", "deps", "ready", "next-batch", "search"}
+            if sub not in allow:
+                return f"(rebar: subcommand '{sub}' not allowed; read-only set is {sorted(allow)})"
+            args = (inp.get("args") or "").split()
+            out = subprocess.run(["rebar", sub, *args], capture_output=True, text=True,
+                                 timeout=30, cwd=repo_root).stdout
+            return out[:20000] if out else "(no output)"
     except Exception as e:
         return f"(tool error: {e})"
     return "(unknown tool)"
 
-SYS = h.SYSTEM + "\n\nYou have READ-ONLY codebase tools (grep, read_file, glob). USE them to gather concrete evidence BEFORE judging — this criterion is explicitly codebase-grounded and you must not answer from assumption. Be EFFICIENT: a handful of targeted greps/reads (aim for under 8 tool calls total), then call submit_review. Do not exhaustively explore the repo."
+SYS = h.SYSTEM + "\n\nYou have READ-ONLY tools: the FILE SYSTEM (grep, read_file, glob) AND rebar (show/list/deps/ready/next-batch/search) — the LIVE ticket dependency graph, hierarchy, and linked artifacts. These two families TOGETHER reach any artifact the ticket references: linked session logs and related/blocking tickets via `rebar show`/`deps`, and docs/experiments reports or research files via read_file/glob. USE them to gather concrete evidence BEFORE judging — you must not answer from assumption. For a CONTAINER or CROSS-TICKET criterion, read the LIVE dependency graph with rebar (e.g. `deps <child>`) rather than trusting a fed snapshot: a declared depends_on edge or a child's coverage you don't see in the text is in the graph. Be EFFICIENT: a handful of targeted tool calls (aim for under 8 total), then call submit_review. Do not exhaustively explore."
 
 def run_agentic(plan_title, plan_text, crit_id, repo_root):
     # cache the stable system+plan prefix
