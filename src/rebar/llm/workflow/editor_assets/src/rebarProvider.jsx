@@ -89,6 +89,52 @@ function ActionEntry(props) {
   );
 }
 
+function PromptTextEntry(props) {
+  const { element, id } = props;
+  // The prompt TEXT (resolved from the reviewer / .rebar/prompts/<id>.md by the Python
+  // side and injected as window.REBAR_PROMPTS) — read-only, so you can see what the agent
+  // step actually runs without leaving the editor. Editing prompts stays a git-file
+  // concern (the IR references a prompt id, never inlines the text).
+  const debounce = useService("debounceInput");
+  const bo = element.businessObject;
+  return (
+    <TextAreaEntry
+      id={id}
+      element={element}
+      label="Prompt text (read-only)"
+      rows={8}
+      getValue={() => (window.REBAR_PROMPTS && window.REBAR_PROMPTS[bo.name]) || ""}
+      setValue={() => {}}
+      debounce={debounce}
+      disabled
+    />
+  );
+}
+
+function WhenEntry(props) {
+  const { element, id } = props;
+  const debounce = useService("debounceInput");
+  const getWhen = () => {
+    const c = configEl(element.businessObject);
+    try {
+      return (c && JSON.parse(c.value || "{}").when) || "";
+    } catch (e) {
+      return "";
+    }
+  };
+  return (
+    <TextFieldEntry
+      id={id}
+      element={element}
+      label="Condition (when → then, else otherwise)"
+      getValue={getWhen}
+      setValue={() => {}}
+      debounce={debounce}
+      disabled
+    />
+  );
+}
+
 function ConfigEntry(props) {
   const { element, id } = props;
   const modeling = useService("modeling");
@@ -123,6 +169,11 @@ function ConfigEntry(props) {
       id={id}
       element={element}
       label="Rebar config (JSON)"
+      description={
+        'Written verbatim to the IR. e.g. {"with": {"k": "${{ inputs.x }}"}} — ' +
+        'plus mode/model/output_schema (agent), max_iterations/while/until (loop), ' +
+        "over/as/max_concurrency (map), when (branch)."
+      }
       rows={6}
       getValue={getValue}
       setValue={setValue}
@@ -136,6 +187,12 @@ function rebarGroup(element) {
   const entries = [{ id: "rebar-kind", component: KindEntry }];
   if (t === "bpmn:ScriptTask" || t === "bpmn:ServiceTask") {
     entries.push({ id: "rebar-action", component: ActionEntry });
+  }
+  if (t === "bpmn:ServiceTask") {
+    entries.push({ id: "rebar-prompt-text", component: PromptTextEntry });
+  }
+  if (t === "bpmn:ExclusiveGateway") {
+    entries.push({ id: "rebar-when", component: WhenEntry });
   }
   entries.push({ id: "rebar-config", component: ConfigEntry, isEdited: isTextAreaEntryEdited });
   return { id: "rebar", label: "Rebar", entries };

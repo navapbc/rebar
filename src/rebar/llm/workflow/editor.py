@@ -62,8 +62,62 @@ def read_asset(name: str) -> bytes | None:
     return path.read_bytes() if path.is_file() else None
 
 
+def _collect_prompt_ids(steps: list[Any]) -> set[str]:
+    """Every agent step's ``prompt`` id in a workflow (recursing into control bodies)."""
+    out: set[str] = set()
+    for s in steps:
+        if not isinstance(s, dict):
+            continue
+        if isinstance(s.get("prompt"), str):
+            out.add(s["prompt"])
+        for block, *keys in (("loop", "body"), ("map", "body"), ("branch", "then", "else")):
+            blk = s.get(block)
+            if isinstance(blk, dict):
+                for key in keys:
+                    if isinstance(blk.get(key), list):
+                        out |= _collect_prompt_ids(blk[key])
+    return out
+
+
+def resolve_prompts(doc: dict[str, Any], path: str | Path) -> dict[str, str]:
+    """Resolve each agent step's prompt id to its TEXT, so the editor can show what an
+    agent step actually runs (the prompt text is otherwise invisible — it lives in a
+    reviewer or ``.rebar/prompts/<id>.md`` file). Best-effort: an unresolved id maps to a
+    short placeholder rather than failing the editor."""
+    repo_root: Any
+    try:
+        from rebar import config
+
+        repo_root = config.repo_root()
+    except Exception:  # noqa: BLE001 - fall back to the file's own tree
+        repo_root = Path(path).resolve().parent
+
+    out: dict[str, str] = {}
+    for pid in _collect_prompt_ids(doc.get("steps", []) or []):
+        text = ""
+        try:
+            from rebar.llm.prompts import canonical_prompt_text, get_reviewer
+
+            text = canonical_prompt_text(get_reviewer(pid), repo_root=repo_root)
+        except Exception:  # noqa: BLE001 - try a user prompt file, then give up gracefully
+            try:
+                from rebar.llm.prompts import parse_front_matter
+
+                pf = Path(repo_root) / ".rebar" / "prompts" / f"{pid}.md"
+                if pf.is_file():
+                    _meta, text = parse_front_matter(pf.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                text = ""
+        out[pid] = text or f"(prompt {pid!r} not found under .rebar/prompts/)"
+    return out
+
+
 def build_host_html(
-    bpmn_xml: str, *, token: str = "", descriptor: dict[str, Any] | None = None
+    bpmn_xml: str,
+    *,
+    token: str = "",
+    descriptor: dict[str, Any] | None = None,
+    prompts: dict[str, str] | None = None,
 ) -> str:
     """The editor host page: a thin shell that loads the vendored bundle (``/assets/…``)
     and hands it three globals — the BPMN to edit, the ``rebar`` moddle descriptor (so
@@ -76,6 +130,7 @@ def build_host_html(
     desc = json.dumps(descriptor or REBAR_MODDLE_DESCRIPTOR)
     diagram = json.dumps(bpmn_xml)
     tok = json.dumps(token)
+    prompt_map = json.dumps(prompts or {})
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -109,6 +164,7 @@ def build_host_html(
     window.REBAR_MODDLE = {desc};
     window.REBAR_DIAGRAM = {diagram};
     window.REBAR_TOKEN = {tok};
+    window.REBAR_PROMPTS = {prompt_map};
   </script>
   <script src="/assets/editor.js"></script>
 </body>
@@ -187,7 +243,11 @@ def edit_workflow(
         )
 
     target = Path(path)
-    bpmn_holder = {"xml": _load_bpmn_for(target)}
+    from .migrate import migrate_to_current
+
+    doc = migrate_to_current(load_workflow(target))
+    bpmn_holder = {"xml": ir_to_bpmn(doc)}
+    prompts = resolve_prompts(doc, target)  # prompt id -> text, for the editor to display
     token = secrets.token_urlsafe(18)  # per-session secret guarding the write endpoint
 
     class _Handler(http.server.BaseHTTPRequestHandler):
@@ -212,7 +272,7 @@ def edit_workflow(
                 self._send(403, "forbidden", "text/plain")
                 return
             if self.path in ("/", "/index.html"):
-                self._send(200, build_host_html(bpmn_holder["xml"], token=token))
+                self._send(200, build_host_html(bpmn_holder["xml"], token=token, prompts=prompts))
             elif self.path == "/workflow.bpmn":
                 self._send(200, bpmn_holder["xml"], "application/xml")
             elif self.path.startswith("/assets/"):

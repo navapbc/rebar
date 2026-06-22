@@ -49,11 +49,12 @@ def test_host_html_embeds_the_integration_contract():
     # moddle descriptor (extension survival), the diagram to edit, and the per-session
     # token. The editor logic (Modeler/panel/auto-layout/Save) lives in the bundle.
     xml = bpmn.ir_to_bpmn({"schema_version": "2", "name": "x", "steps": [{"id": "a", "uses": "o"}]})
-    html = editor.build_host_html(xml, token="tok")
+    html = editor.build_host_html(xml, token="tok", prompts={"review-ticket": "do the review"})
     assert "/assets/editor.js" in html and "/assets/editor.css" in html  # loads the bundle
     assert "REBAR_MODDLE" in html and bpmn.REBAR in html  # descriptor injected
     assert "REBAR_DIAGRAM" in html and "process id" in html  # the diagram XML is embedded
     assert "REBAR_TOKEN" in html and "tok" in html  # token handed to the bundle for /save
+    assert "REBAR_PROMPTS" in html and "do the review" in html  # prompt text for display
 
 
 def test_served_assets_are_allow_listed():

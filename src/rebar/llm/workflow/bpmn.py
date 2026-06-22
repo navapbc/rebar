@@ -113,14 +113,72 @@ def ir_to_bpmn(doc: dict[str, Any]) -> str:
 
     # 1. Emit the BPMN model (elements + sequence flows); collect the flow edges.
     edges: list[tuple[str, str, str]] = []  # (flow_id, source, target)
-    _emit_frame(proc, doc.get("steps", []), edges)
-    # 2. Compute a real layered layout (boxes + which sub-processes are expanded).
+    steps = doc.get("steps", [])
+    _emit_frame(proc, steps, edges)
+    # 2. A start event -> the root step(s) and the terminal step(s) -> an end event, so the
+    #    diagram shows WHERE the workflow begins/ends (round-trip drops these: _read_frame
+    #    excludes start/end events and their flows).
+    roots, sinks = _emit_terminals(proc, steps, edges)
+    # 3. Compute a real layered layout (boxes + which sub-processes are expanded).
     expanded: set[str] = set()
-    boxes, _w, _h = _layout_frame(doc.get("steps", []), expanded)
-    # 3. Emit the DI from the layout (shapes, expanded flags, docked edge waypoints).
+    boxes, _w, _h = _layout_frame(steps, expanded)
+    _place_terminals(boxes, roots, sinks)
+    # 4. Emit the DI from the layout (shapes, expanded flags, docked edge waypoints).
     _emit_di(defs, _proc_id(doc), boxes, expanded, edges)
     ET.indent(defs, space="  ")
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(defs, encoding="unicode")
+
+
+_START_ID = "StartEvent_1"
+_END_ID = "EndEvent_1"
+
+
+def _emit_terminals(proc: ET.Element, steps, edges) -> tuple[list[str], list[str]]:
+    """Emit a top-frame ``startEvent`` -> each root step and each sink step -> an
+    ``endEvent``, recording the flows in ``edges``. Returns ``(roots, sinks)``."""
+    top = [s for s in steps if isinstance(s, dict) and "id" in s]
+    ids = {s["id"] for s in top}
+    needed: set[str] = set()
+    for s in top:
+        needed |= {n for n in (s.get("needs") or []) if n in ids}
+    roots = [s["id"] for s in top if not any(n in ids for n in (s.get("needs") or []))]
+    sinks = [s["id"] for s in top if s["id"] not in needed]
+    if not top:
+        return roots, sinks
+    ET.SubElement(proc, _q("bpmn", "startEvent"), {"id": _START_ID, "name": "start"})
+    sf = _q("bpmn", "sequenceFlow")
+    for r in roots:
+        fid = f"flow_start__{r}"
+        ET.SubElement(proc, sf, {"id": fid, "sourceRef": _START_ID, "targetRef": r})
+        edges.append((fid, _START_ID, r))
+    ET.SubElement(proc, _q("bpmn", "endEvent"), {"id": _END_ID, "name": "end"})
+    for k in sinks:
+        fid = f"flow_{k}__end"
+        ET.SubElement(proc, sf, {"id": fid, "sourceRef": k, "targetRef": _END_ID})
+        edges.append((fid, k, _END_ID))
+    return roots, sinks
+
+
+def _place_terminals(boxes: dict[str, list[float]], roots: list[str], sinks: list[str]) -> None:
+    """Add boxes for the start/end events: shift the laid-out steps right to make room for
+    the start event on the left, then place start (centred on the roots) and end (centred
+    on the sinks, at the far right)."""
+    if not boxes:
+        return
+    ev = 36.0
+    dx = ev + _HGAP
+    for b in boxes.values():
+        b[0] += dx
+
+    def _centre(ids: list[str]) -> float:
+        bs = [boxes[i] for i in ids if i in boxes]
+        if not bs:
+            return 0.0
+        return (min(b[1] for b in bs) + max(b[1] + b[3] for b in bs)) / 2 - ev / 2
+
+    boxes[_START_ID] = [0.0, _centre(roots), ev, ev]
+    end_x = max(b[0] + b[2] for b in boxes.values()) + _HGAP
+    boxes[_END_ID] = [end_x, _centre(sinks), ev, ev]
 
 
 def _proc_id(doc: dict[str, Any]) -> str:
@@ -208,9 +266,15 @@ def _emit_step(container, s, kind, edges) -> ET.Element:
     # BPMN NCName char that the schema's step-id pattern forbids, so it can't collide with
     # a real step id). The old ``@`` separator was an ILLEGAL BPMN id: bpmn-moddle dropped
     # the whole arm on Save, silently deleting the branch (see tests/e2e).
-    gw = ET.SubElement(container, _q("bpmn", "exclusiveGateway"), {"id": sid, "name": "branch"})
+    # The gateway is LABELLED with its condition (so the decision logic is visible on the
+    # canvas, not buried in config) and each outgoing flow is labelled then/else (so you can
+    # see which branch is taken when). Names are display-only — reconstruction reads the
+    # condition from <rebar:Config> and the arm role from the _role marker, never the labels.
+    when = s["branch"].get("when") if isinstance(s.get("branch"), dict) else None
+    gw_name = when if isinstance(when, str) and when else "branch?"
+    gw = ET.SubElement(container, _q("bpmn", "exclusiveGateway"), {"id": sid, "name": gw_name})
     _ext(gw, "Config", value=_config_json(s))
-    for arm in ("then", "else"):
+    for arm, label in (("then", "then (true)"), ("else", "else (false)")):
         body = s["branch"].get(arm)
         if not isinstance(body, list):
             continue
@@ -219,7 +283,7 @@ def _emit_step(container, s, kind, edges) -> ET.Element:
         _ext(sp, "Config", value=json.dumps({_ROLE_KEY: arm}))  # role survives id rewrites
         _emit_frame(sp, body, edges)
         fid = f"flow_{sid}.{arm}"
-        attrs = {"id": fid, "sourceRef": sid, "targetRef": arm_id}
+        attrs = {"id": fid, "name": label, "sourceRef": sid, "targetRef": arm_id}
         ET.SubElement(container, _q("bpmn", "sequenceFlow"), attrs)
         edges.append((fid, sid, arm_id))
     return gw
@@ -507,7 +571,10 @@ def _read_step(container: ET.Element, el: ET.Element, tag: str) -> dict[str, Any
     eid = el.get("id")
     cfg = _read_ext_json(el, "Config") or {}
     step: dict[str, Any] = {"id": eid}
-    if tag == "scriptTask":
+    if tag in ("scriptTask", "task"):
+        # A plain ``bpmn:task`` is what the bpmn-js palette draws by default; map it to a
+        # scripted step (rather than silently dropping the user's new node) so their work
+        # is never lost — they pick the real `uses`/kind in the panel.
         step["uses"] = el.get("name") or cfg.get("uses") or eid
         _merge_cfg(step, cfg)
         return step

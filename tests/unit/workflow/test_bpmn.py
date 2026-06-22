@@ -461,3 +461,41 @@ def test_layout_has_no_overlaps_edges_and_expanded_subprocesses():
     rx, ry, rw, rh = boxes["refine"]
     ax, ay, aw, ah = boxes["attempt"]
     assert rx <= ax and ry <= ay and ax + aw <= rx + rw and ay + ah <= ry + rh
+
+
+def test_generic_task_maps_to_scripted_not_dropped():
+    # A plain bpmn:task (what the editor palette draws by default) must round-trip as a
+    # scripted step, so a user's freshly-drawn node is never silently lost on Save.
+    xml = (
+        '<?xml version="1.0"?><bpmn:definitions '
+        'xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL">'
+        '<bpmn:process id="p"><bpmn:task id="testaroo" name="testaroo"/></bpmn:process>'
+        "</bpmn:definitions>"
+    )
+    doc = bpmn.bpmn_to_ir(xml)
+    assert doc["steps"][0] == {"id": "testaroo", "uses": "testaroo"}
+
+
+def test_start_and_end_events_emitted_and_ignored_on_read():
+    # The diagram gets a start event -> root(s) and sink(s) -> an end event (so the entry
+    # point is visible); reconstruction ignores them, so the round-trip is unaffected.
+    doc = {"schema_version": "2", "name": "se", "steps": [{"id": "a", "uses": "x"}]}
+    xml = bpmn.ir_to_bpmn(doc)
+    assert "bpmn:startEvent" in xml and "bpmn:endEvent" in xml
+    back = bpmn.bpmn_to_ir(xml)
+    assert [s["id"] for s in back["steps"]] == ["a"]  # no synthetic start/end step
+    assert "needs" not in back["steps"][0]  # the start->a flow is not a dependency
+
+
+def test_branch_gateway_and_flows_are_labelled():
+    # The gateway carries its condition and the arms are labelled then/else, so the decision
+    # logic is visible on the canvas (labels are display-only; not read back).
+    doc = {
+        "schema_version": "2", "name": "b", "inputs": {"x": {"type": "boolean"}},
+        "steps": [{"id": "g", "branch": {"when": "${{ inputs.x }}",
+                                         "then": [{"id": "t", "uses": "o"}],
+                                         "else": [{"id": "e", "uses": "o"}]}}],
+    }
+    xml = bpmn.ir_to_bpmn(doc)
+    assert 'name="${{ inputs.x }}"' in xml  # gateway labelled with the condition
+    assert "then (true)" in xml and "else (false)" in xml  # arm flows labelled
