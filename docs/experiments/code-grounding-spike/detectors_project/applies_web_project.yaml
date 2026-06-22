@@ -1,0 +1,10 @@
+rules:
+  - id: rebar.project.applies.web-frontend
+    languages: [javascript]
+    severity: INFO
+    message: "web/frontend indicator present -> a11y/i18n dimensions APPLY"
+    metadata:
+      rebar_envelope: {tier: T1, job: applies, dimension: web_frontend, namespace: project}
+    pattern-either:
+      - pattern: export function $F(...) { ... }
+      - pattern: export class $C { ... }

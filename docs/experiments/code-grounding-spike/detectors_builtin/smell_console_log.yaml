@@ -1,0 +1,8 @@
+rules:
+  - id: rebar.builtin.smell.js-console-log
+    languages: [javascript]
+    severity: INFO
+    message: "console.log left in source (low-threshold smell attention-router)"
+    metadata:
+      rebar_envelope: {tier: T1, job: smell, attention_only: true, namespace: builtin}
+    pattern: console.log(...)
