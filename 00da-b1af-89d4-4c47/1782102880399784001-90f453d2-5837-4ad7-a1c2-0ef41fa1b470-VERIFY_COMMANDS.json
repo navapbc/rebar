@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"verify_commands":[{"command":".venv/bin/python -m pytest tests/unit/workflow/test_bpmn.py -q","dd_id":"roundtrip","dd_text":"IR<->BPMN lossless round-trip + descriptor"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1782102880399784001,"uuid":"90f453d2-5837-4ad7-a1c2-0ef41fa1b470"}
