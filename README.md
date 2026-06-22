@@ -114,6 +114,13 @@ optional capabilities) and *developing rebar itself*:
   self-references `[agents]` so the validation tests **run** rather than skip. It
   is **required to run the full test suite** (the interface-parity tests import the
   MCP server, so they error — not skip — without `mcp`).
+  - **Node/npm** are needed **only** for the workflow visual editor's front-end —
+    *rebuilding* its vendored bundle (`src/rebar/llm/workflow/editor_assets/`, the
+    bpmn-js editor) and running the faithful editor **E2E tier** (`tests/e2e/`, which
+    drives the real bpmn-io libraries). Both are developer-only: the built bundle is
+    committed/shipped, and the E2E tier self-skips when Node is absent, so neither the
+    base install nor the default test suite needs Node. See
+    [docs/workflow-editor.md](docs/workflow-editor.md).
 
 See [Install](#install) and [Tests](#tests).
 
@@ -150,7 +157,11 @@ pip  install 'nava-rebar[agents,eval,tracing]'   # the union, if you want it all
 ```
 
 The base install runs **scripted** workflows (`rebar workflow new/validate/show/run`)
-with no extra; **agentic** workflow steps and `rebar review` need `[agents]`.
+with no extra; **agentic** workflow steps and `rebar review` need `[agents]`. Authoring
+a workflow **visually** — `rebar workflow edit <file>`, a local bpmn-js editor that
+round-trips the diagram back to the IR — also needs no extra and no Node/npm: the editor
+front-end ships pre-built in the wheel and is served locally (no CDN). See
+[docs/workflow-editor.md](docs/workflow-editor.md).
 
 The `[agents]` extra adds the optional **LLM agent-operations framework**
 (`rebar.llm`) — tool-using agents that review tickets/code and emit structured

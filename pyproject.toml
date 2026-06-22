@@ -112,19 +112,32 @@ rebar-mcp = "rebar.mcp_server:main"
 packages = ["src/rebar"]
 artifacts = [
     "src/rebar/_engine/**/*",
+    # Force-include the VENDORED workflow-editor bundle: the repo-root .gitignore
+    # ignores `dist/` globally, so without this the shipped editor.{js,css} would be
+    # dropped from the wheel (verified by tests/unit/test_engine_dir.py).
+    "src/rebar/llm/workflow/editor_assets/dist/**/*",
 ]
 # Never ship compiled bytecode. The `artifacts` glob above force-includes engine
 # files that .gitignore would otherwise drop, so spell out the bytecode exclusion
 # explicitly rather than relying on gitignore filtering (ticket fare-rant-clasp;
 # verified by tests/unit/test_engine_dir.py::test_wheel_has_no_bytecode).
+# The editor_assets npm install tree (node_modules) is a BUILD input, never shipped —
+# exclude it so it can't bloat the wheel (only the built dist/ ships, via artifacts).
 exclude = [
     "**/__pycache__",
     "**/*.pyc",
     "**/*.pyo",
+    "**/node_modules",
 ]
 
 [tool.hatch.build.targets.sdist]
 include = ["src/rebar", "tests", "README.md"]
+exclude = [
+    "**/__pycache__",
+    "**/*.pyc",
+    "**/*.pyo",
+    "**/node_modules",
+]
 
 [tool.ruff]
 # Engine ships as package data but is normal Python; lint it too. The gating set

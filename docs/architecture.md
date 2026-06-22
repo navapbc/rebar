@@ -117,6 +117,14 @@ import — so it leaks no generic name onto the library path. ACLI integration l
 at `rebar_reconciler/acli.py`, reached via ordinary `from rebar_reconciler import
 acli` package imports.
 
+The **workflow visual editor** front-end is another piece of vendored package data:
+`rebar/llm/workflow/editor_assets/` is an npm project (bpmn-js + properties panel +
+auto-layout) whose **built** bundle `dist/editor.{js,css}` is committed and shipped, and
+served locally by `editor.py` (no CDN, no runtime npm — the Python side stays stdlib).
+Node/npm are needed only to *rebuild* that bundle or to run the faithful editor E2E tier
+(`tests/e2e/`); both are developer-only and off the client/runtime path. See
+[docs/workflow-editor.md](workflow-editor.md).
+
 - **Storage** — a dedicated `tickets` git **orphan branch**, checked out as a
   worktree at `.tickets-tracker/`. Tickets are directories; mutations are
   append-only UUID-named event files (see `docs/event-schema.md`). Every write
