@@ -4,21 +4,26 @@ The executor (:mod:`rebar.llm.workflow.executor`) owns run identity, the step
 interfaces, the persistence recorders, and the ``run_workflow`` entry point; THIS
 module owns the recursive frame walk that replaced v1's single linear
 ``static_order`` pass. It recurses into a ``branch``'s then/else, a ``loop``'s body,
-and a ``map``'s body, staying SYNCHRONOUS and single-threaded so the Burr tripwire
-(``tests/unit/workflow/test_executor_tripwire.py``, which scans THIS file too) holds
-— bounded-concurrent fan-out is a separate, narrowly-scoped story.
+and a ``map``'s body. This module itself holds ZERO banned imports (no asyncio /
+threading / multiprocessing / retry library) — the Burr tripwire scans it — so the
+walk is scheduler-free. The ONE relaxation, bounded-concurrent ``map`` fan-out, lives
+out-of-line in :mod:`rebar.llm.workflow.map_fanout`; this module only carries the
+serialization machinery for it (``_RunCtx.lock`` + :func:`_guard` / :func:`_commit_state`
+/ :func:`_fail`), which is a plain no-op on the serial path.
 
 The POC discipline is load-bearing: ALL control-flow state (loop position, which
 branch, map index) is DERIVED from RECORDED OUTPUTS, never mutated out of band — so
 replay re-derives identical decisions and side effects are exactly-once. Each leaf
 execution is keyed by its full FRAME KEY (a path like ``L#2/attempt`` embedding the
 loop/map iteration), so a step that runs once per iteration gets a distinct,
-replay-stable idempotency marker (the (run_id, step_id, iteration) keying).
+replay-stable idempotency marker (the (run_id, step_id, iteration) keying). Under a
+concurrent map every commit + shared-state mutation goes through ``_guard`` so the
+event log is written one event at a time exactly as in the serial case.
 
 Burr-adoption trigger list / tripwire: see :mod:`rebar.llm.workflow.executor` — the
-same armed constraints apply here (no asyncio / threading / multiprocessing / retry
-library). Adopt Burr per that list before adding concurrency; do not grow a
-scheduler in this synchronous walk.
+same armed constraints apply here. Adopt Burr per that list before adding any
+scheduler to the WALK itself; the map fan-out's thread pool is the deliberate,
+recorded exception confined to ``map_fanout.py``.
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ import graphlib
 import os
 import re
 from collections.abc import Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -49,17 +55,9 @@ from .executor import (
 from .schema import step_kind
 
 # ── The v2 worklist interpreter (conditionals / loops / map) ──────────────────
-#
-# Replaces the v1 single linear ``static_order`` pass: the engine now walks the IR
-# FRAME BY FRAME, recursing into a ``branch``'s then/else, a ``loop``'s body, and a
-# ``map``'s body. It stays SYNCHRONOUS and single-threaded — the Burr tripwire holds
-# (bounded-concurrent fan-out is a separate, narrowly-scoped story). The POC
-# discipline is load-bearing: ALL control-flow state (loop position, which branch,
-# map index) is DERIVED from RECORDED OUTPUTS, never mutated out of band — so replay
-# re-derives identical decisions and side effects are exactly-once. Each leaf
-# execution is keyed by its full FRAME KEY (a path like ``L#2/attempt`` embedding the
-# loop/map iteration), so a step that runs once per iteration gets a distinct,
-# replay-stable idempotency marker.
+# Frame-by-frame walk (see the module docstring). Holds no banned imports; the only
+# concurrency relaxation (bounded map fan-out) is out-of-line in map_fanout.py and
+# serialized back through _guard here.
 
 _LOOP_VAR_RE = re.compile(r"^loop\.([A-Za-z_][A-Za-z0-9_-]*)$")
 _MAP_VAR_RE = re.compile(r"^map\.([A-Za-z_][A-Za-z0-9_-]*)$")
@@ -177,6 +175,39 @@ class _RunCtx:
     statuses: dict[str, str] = field(default_factory=dict)
     failed: bool = False
     error: str | None = None
+    # Set ONLY while a bounded-concurrent map is in flight (by the map_fanout module):
+    # a mutex that serializes every event commit + shared-state mutation across the
+    # worker threads, so the only thing that actually overlaps is the in-flight agent
+    # call. ``None`` on the serial path — :func:`_guard` is then a no-op.
+    lock: Any = None
+
+
+def _guard(rc: _RunCtx):
+    """A context manager serializing a critical section against concurrent map
+    workers. Returns ``rc.lock`` when a bounded-concurrent map set one, else a no-op
+    — so the serial path pays nothing and keeps the executor's synchronous semantics."""
+    return rc.lock if rc.lock is not None else _NULL_GUARD
+
+
+_NULL_GUARD = nullcontext()
+
+
+def _commit_state(rc: _RunCtx, frame_key: str, outputs: dict[str, Any], status: str) -> None:
+    """Write a step/frame's outputs + status under the guard (a no-op lock on the
+    serial path). The single chokepoint for shared-state mutation, so EVERY write —
+    leaf, skip, and the branch/loop/map summaries — is serialized when a concurrent
+    map is in flight (the invariant map_fanout relies on)."""
+    with _guard(rc):
+        rc.outputs[frame_key] = outputs
+        rc.statuses[frame_key] = status
+
+
+def _fail(rc: _RunCtx, error: str) -> None:
+    """Mark the run failed under the guard. Concurrent failures last-writer-win on the
+    (human-readable) message; ``failed`` simply converges to True."""
+    with _guard(rc):
+        rc.failed = True
+        rc.error = error
 
 
 def _frame_order(steps: list[Mapping[str, Any]]) -> list[str]:
@@ -237,18 +268,19 @@ def _execute_frame(
         kind = step_kind(step)
         frame_key = f"{cur}{sid}"
         if not _guard_scoped(step, rc, prefixes, bindings):
-            rc.outputs[frame_key] = {}
-            rc.statuses[frame_key] = "skipped"
-            rc.rec.step_recorded(
-                _step_record(
-                    rc.run_id,
-                    sid,
-                    kind,
-                    StepResult(status="skipped"),
-                    frame_key=frame_key,
-                    iteration=iteration,
+            with _guard(rc):
+                rc.outputs[frame_key] = {}
+                rc.statuses[frame_key] = "skipped"
+                rc.rec.step_recorded(
+                    _step_record(
+                        rc.run_id,
+                        sid,
+                        kind,
+                        StepResult(status="skipped"),
+                        frame_key=frame_key,
+                        iteration=iteration,
+                    )
                 )
-            )
             continue
         if kind in ("scripted", "agent"):
             _run_leaf(rc, step, sid, frame_key, kind, prefixes, bindings, iteration)
@@ -264,26 +296,29 @@ def _run_leaf(rc, step, sid, frame_key, kind, prefixes, bindings, iteration) -> 
     """Execute a scripted/agent leaf with iteration-keyed idempotency (WS-C3 / v2):
     skip if a committed marker exists for this FRAME KEY (replaying its output), else
     run, record a 'running' marker before and the durable marker after the effect."""
-    prior = rc.rec.completed_step(rc.run_id, frame_key)
-    if prior is not None and prior.get("status") == "succeeded":
-        rc.outputs[frame_key] = dict(prior.get("outputs", {}))
-        rc.statuses[frame_key] = "succeeded"
-        return
-    rc.rec.step_recorded(
-        {
-            "run_id": rc.run_id,
-            "step_id": sid,
-            "frame_key": frame_key,
-            "iteration": iteration,
-            "kind": kind,
-            "status": "running",
-            "outputs": {},
-            "error": None,
-        }
-    )
-    captured = _capture_nondeterminism()
-    try:
-        resolved = _resolve_scoped(
+    # Commit/state access is guarded by rc.lock under a concurrent map (a no-op on the
+    # serial path); the agent call (_dispatch) runs OUTSIDE the guard, so only the I/O
+    # overlaps while every event commit is serialized.
+    with _guard(rc):
+        prior = rc.rec.completed_step(rc.run_id, frame_key)
+        if prior is not None and prior.get("status") == "succeeded":
+            rc.outputs[frame_key] = dict(prior.get("outputs", {}))
+            rc.statuses[frame_key] = "succeeded"
+            return
+        rc.rec.step_recorded(
+            {
+                "run_id": rc.run_id,
+                "step_id": sid,
+                "frame_key": frame_key,
+                "iteration": iteration,
+                "kind": kind,
+                "status": "running",
+                "outputs": {},
+                "error": None,
+            }
+        )
+        captured = _capture_nondeterminism()
+        resolved_input = _resolve_scoped(
             dict(step.get("with") or {}),
             inputs=rc.inputs,
             outputs=rc.outputs,
@@ -291,12 +326,13 @@ def _run_leaf(rc, step, sid, frame_key, kind, prefixes, bindings, iteration) -> 
             bindings=bindings,
             secrets=rc.secrets,
         )
+    try:
         ctx = StepContext(
             run_id=rc.run_id,
             step_id=sid,
             kind=kind,
             step=step,
-            inputs=resolved,
+            inputs=resolved_input,
             workflow=rc.doc,
             target_ticket=rc.target_ticket,
             repo_root=rc.repo_root,
@@ -307,35 +343,37 @@ def _run_leaf(rc, step, sid, frame_key, kind, prefixes, bindings, iteration) -> 
         result = _dispatch(ctx, rc.registry, rc.runner)
     except Exception as exc:  # a step failure is data, not a crash
         result = StepResult(outputs={}, status="failed", error=str(exc))
-    rc.outputs[frame_key] = dict(result.outputs)
-    rc.statuses[frame_key] = result.status
-    rc.rec.step_recorded(
-        _step_record(
-            rc.run_id, sid, kind, result, captured, frame_key=frame_key, iteration=iteration
+    with _guard(rc):
+        rc.outputs[frame_key] = dict(result.outputs)
+        rc.statuses[frame_key] = result.status
+        rc.rec.step_recorded(
+            _step_record(
+                rc.run_id, sid, kind, result, captured, frame_key=frame_key, iteration=iteration
+            )
         )
-    )
-    if result.status == "failed":
-        rc.failed = True
-        rc.error = f"step {frame_key!r} failed: {result.error}"
+        if result.status == "failed":
+            rc.failed = True
+            rc.error = f"step {frame_key!r} failed: {result.error}"
 
 
 def _maybe_record_control(rc, sid, frame_key, iteration, kind, outputs) -> None:
     """Record a control step's completion marker AFTER its body ran, unless already
     committed (so replay doesn't re-append). A control step has no side effect; the
     marker exists for status visibility + so replay knows the frame fully completed."""
-    prior = rc.rec.completed_step(rc.run_id, frame_key)
-    if prior is not None and prior.get("status") == "succeeded":
-        return
-    rc.rec.step_recorded(
-        _step_record(
-            rc.run_id,
-            sid,
-            kind,
-            StepResult(outputs=outputs),
-            frame_key=frame_key,
-            iteration=iteration,
+    with _guard(rc):
+        prior = rc.rec.completed_step(rc.run_id, frame_key)
+        if prior is not None and prior.get("status") == "succeeded":
+            return
+        rc.rec.step_recorded(
+            _step_record(
+                rc.run_id,
+                sid,
+                kind,
+                StepResult(outputs=outputs),
+                frame_key=frame_key,
+                iteration=iteration,
+            )
         )
-    )
 
 
 def _run_branch(rc, step, sid, frame_key, prefixes, bindings, iteration) -> None:
@@ -355,12 +393,10 @@ def _run_branch(rc, step, sid, frame_key, prefixes, bindings, iteration) -> None
             )
         )
     except ExpressionError as exc:
-        rc.failed = True
-        rc.error = f"branch {frame_key!r} condition failed: {exc}"
+        _fail(rc, f"branch {frame_key!r} condition failed: {exc}")
         return
     arm = "then" if taken else "else"
-    rc.outputs[frame_key] = {"taken": arm}
-    rc.statuses[frame_key] = "succeeded"
+    _commit_state(rc, frame_key, {"taken": arm}, "succeeded")
     arm_steps = branch.get(arm)
     if isinstance(arm_steps, list):
         child = (f"{prefixes[0]}{sid}@{arm}/",) + prefixes
@@ -413,8 +449,7 @@ def _run_loop(rc, step, sid, frame_key, cur, prefixes, bindings, iteration) -> N
     loop = step.get("loop") or {}
     max_iter = loop.get("max_iterations")
     if not isinstance(max_iter, int) or max_iter < 1:
-        rc.failed = True
-        rc.error = f"loop {frame_key!r} has no valid max_iterations"
+        _fail(rc, f"loop {frame_key!r} has no valid max_iterations")
         return
     var = loop.get("var") if isinstance(loop.get("var"), str) else "index"
     count, hit_cap = 0, True
@@ -436,23 +471,35 @@ def _run_loop(rc, step, sid, frame_key, cur, prefixes, bindings, iteration) -> N
     except ExpressionError as exc:
         # A genuine mid-loop condition resolution failure (not the i==0 do-while case)
         # — fail the run with the underlying cause, never stop silently.
-        rc.failed = True
-        rc.error = f"loop {frame_key!r} condition failed: {exc}"
+        _fail(rc, f"loop {frame_key!r} condition failed: {exc}")
         return
     if runaway:
-        rc.failed = True
-        rc.error = f"loop {frame_key!r} exceeded max_iterations={max_iter} (runaway guard)"
+        _fail(rc, f"loop {frame_key!r} exceeded max_iterations={max_iter} (runaway guard)")
         return
-    rc.outputs[frame_key] = {"iterations": count}
-    rc.statuses[frame_key] = "succeeded"
+    _commit_state(rc, frame_key, {"iterations": count}, "succeeded")
     _maybe_record_control(rc, sid, frame_key, iteration, "loop", {"iterations": count})
+
+
+def _map_iteration(rc, body, cur, sid, prefixes, bindings, as_name, index_var, j, item) -> None:
+    """Execute ONE map iteration's body frame (binding ``as``/``index_var``). The body
+    runs sequentially within the iteration; iterations are independent (distinct
+    frame keys, no cross-iteration ``needs``), which is what makes bounded concurrency
+    safe and replay order-independent. Shared by the serial and concurrent paths."""
+    child = (f"{cur}{sid}#{j}/",) + prefixes
+    child_bindings = {**bindings, f"map.{as_name}": item}
+    if isinstance(index_var, str):
+        child_bindings[f"map.{index_var}"] = j
+    _execute_frame(rc, body, child, child_bindings, j)
 
 
 def _run_map(rc, step, sid, frame_key, cur, prefixes, bindings, iteration) -> None:
     """Fan-out: run the body once per element of ``over`` (resolved in THIS frame's
-    scope, before fan-out), binding each element to ``as``. Serial here — bounded
-    concurrency is a separate story — but iteration-keyed so it is order-independent
-    on replay."""
+    scope, before fan-out), binding each element to ``as``. Iterations are
+    iteration-keyed and order-independent, so ``max_concurrency`` > 1 runs them with
+    BOUNDED concurrency (parallel agent calls, serialized commits) while replay stays
+    deterministic; the default (1) is the serial path. The concurrency lives in the
+    out-of-line :mod:`rebar.llm.workflow.map_fanout` (the one narrow Burr-tripwire
+    relaxation), so this synchronous module stays scheduler-free."""
     mp = step.get("map") or {}
     try:
         collection = _resolve_scoped(
@@ -464,24 +511,31 @@ def _run_map(rc, step, sid, frame_key, cur, prefixes, bindings, iteration) -> No
             secrets=rc.secrets,
         )
     except ExpressionError as exc:
-        rc.failed = True
-        rc.error = f"map {frame_key!r} `over` failed: {exc}"
+        _fail(rc, f"map {frame_key!r} `over` failed: {exc}")
         return
     if not isinstance(collection, (list, tuple)):
-        rc.failed = True
-        rc.error = (
-            f"map {frame_key!r} `over` did not yield a list (got {type(collection).__name__})"
+        _fail(
+            rc, f"map {frame_key!r} `over` did not yield a list (got {type(collection).__name__})"
         )
         return
+    collection = list(collection)
     as_name, index_var = mp.get("as"), mp.get("index_var")
-    for j, item in enumerate(collection):
-        child = (f"{cur}{sid}#{j}/",) + prefixes
-        child_bindings = {**bindings, f"map.{as_name}": item}
-        if isinstance(index_var, str):
-            child_bindings[f"map.{index_var}"] = j
-        _execute_frame(rc, mp.get("body") or [], child, child_bindings, j)
-        if rc.failed:
-            return
-    rc.outputs[frame_key] = {"count": len(collection)}
-    rc.statuses[frame_key] = "succeeded"
+    bound = mp.get("max_concurrency")
+    bound = bound if isinstance(bound, int) and bound >= 1 else 1
+    body = mp.get("body") or []
+    if bound > 1 and len(collection) > 1:
+        # Bounded fan-out: parallel agent calls, commits serialized via rc.lock.
+        from .map_fanout import run_concurrent_map
+
+        run_concurrent_map(
+            rc, body, cur, sid, prefixes, bindings, as_name, index_var, collection, bound
+        )
+    else:
+        for j, item in enumerate(collection):
+            _map_iteration(rc, body, cur, sid, prefixes, bindings, as_name, index_var, j, item)
+            if rc.failed:
+                return
+    if rc.failed:
+        return
+    _commit_state(rc, frame_key, {"count": len(collection)}, "succeeded")
     _maybe_record_control(rc, sid, frame_key, iteration, "map", {"count": len(collection)})

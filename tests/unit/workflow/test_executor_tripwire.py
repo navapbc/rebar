@@ -71,4 +71,18 @@ def test_executor_has_no_threads_at_runtime() -> None:
     # Belt-and-suspenders: even a dynamically-imported scheduler would show here.
     src = _executor_source()
     for needle in ("import asyncio", "import threading", "ThreadPool", "ProcessPool"):
-        assert needle not in src, f"executor.py contains {needle!r}"
+        assert needle not in src, f"executor/interpreter contains {needle!r}"
+
+
+def test_map_fanout_is_the_sole_documented_tripwire_relaxation() -> None:
+    # Bounded-concurrent map fan-out is the ONE narrow relaxation (8d8e): the
+    # concurrency is confined to map_fanout.py, which must carry a recorded rationale
+    # so the deliberate exception travels with the code. The ban stays armed
+    # everywhere else (asserted above for executor.py + interpreter.py).
+    import rebar.llm.workflow.map_fanout as _fanout
+
+    src = Path(_fanout.__file__).read_text(encoding="utf-8")
+    assert "ThreadPoolExecutor" in src  # it really is where the concurrency lives
+    assert "RECORDED RATIONALE" in src
+    assert "tripwire" in src.lower()
+    assert "serialized" in src.lower() and "max_concurrency" in src
