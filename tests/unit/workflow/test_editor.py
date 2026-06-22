@@ -1,0 +1,183 @@
+"""Ephemeral bpmn-js visual editor (744b): the host page, the BPMN->IR save
+round-trip, and the loopback edit server — all offline (the in-browser visual editing
+itself is human-validated). The visual format is NEVER written to git.
+"""
+
+from __future__ import annotations
+
+import json
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+import pytest
+
+from rebar.llm.workflow import bpmn, editor
+
+
+def _wf_file(tmp_path: Path) -> Path:
+    doc = {
+        "schema_version": "2",
+        "name": "demo",
+        "inputs": {"items": {"type": "array"}},
+        "steps": [
+            {"id": "start", "uses": "noop"},
+            {
+                "id": "gate",
+                "needs": ["start"],
+                "branch": {
+                    "when": "${{ steps.start.outputs.ok }}",
+                    "then": [{"id": "approve", "uses": "emit"}],
+                    "else": [{"id": "reject", "uses": "emit"}],
+                },
+            },
+        ],
+    }
+    from rebar.llm.workflow.schema import dump_workflow
+
+    p = tmp_path / "demo.yaml"
+    p.write_text(dump_workflow(doc), encoding="utf-8")
+    return p
+
+
+# ── The bpmn-js host page ──────────────────────────────────────────────────────
+
+
+def test_host_html_embeds_descriptor_and_bpmn_and_modeler():
+    xml = bpmn.ir_to_bpmn({"schema_version": "2", "name": "x", "steps": [{"id": "a", "uses": "o"}]})
+    html = editor.build_host_html(xml)
+    # bpmn-js Modeler (BPMN-only palette -> constrained metamodel), the rebar moddle
+    # descriptor (extension survival), and the diagram are all embedded.
+    assert "bpmn-modeler" in html and "BpmnJS" in html
+    assert "moddleExtensions" in html and "rebar" in html
+    assert "http://rebar.dev/schema/workflow/1.0" in html  # the descriptor uri
+    assert "/save" in html  # Save POSTs the edited BPMN back
+
+
+# ── BPMN -> IR save round-trip ─────────────────────────────────────────────────
+
+
+def test_save_writes_ir_and_round_trips(tmp_path):
+    path = _wf_file(tmp_path)
+    original = path.read_text(encoding="utf-8")
+    # An "edit": re-serialize the current IR to BPMN (a no-op visual round-trip) and save.
+    xml = editor._load_bpmn_for(path)
+    errors = editor.save_bpmn_to_ir(xml, path)
+    assert errors == []
+    # The IR file was (re)written and still parses to the same logical workflow.
+    from rebar.llm.workflow.schema import parse_workflow
+
+    assert parse_workflow(path.read_text(encoding="utf-8"))["steps"][1]["branch"]["when"] == (
+        "${{ steps.start.outputs.ok }}"
+    )
+    # No visual artifact committed: only the .yaml exists (no .bpmn alongside it).
+    assert not list(tmp_path.glob("*.bpmn"))
+    assert original  # sanity
+
+
+def test_save_rejects_unmappable_edit_and_leaves_file_untouched(tmp_path):
+    path = _wf_file(tmp_path)
+    before = path.read_text(encoding="utf-8")
+    # A bare sub-process (no loop characteristics) is a shape the IR can't express.
+    bad = (
+        '<?xml version="1.0"?><bpmn:definitions '
+        'xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL">'
+        '<bpmn:process id="p"><bpmn:subProcess id="sp"/></bpmn:process></bpmn:definitions>'
+    )
+    errors = editor.save_bpmn_to_ir(bad, path)
+    assert errors and any("does not map" in e or "characteristics" in e for e in errors)
+    assert path.read_text(encoding="utf-8") == before  # file untouched on a rejected edit
+
+
+# ── The loopback edit server (no browser) ──────────────────────────────────────
+
+
+@pytest.fixture
+def _server(tmp_path):
+    path = _wf_file(tmp_path)
+    server, host, port, token = editor.edit_workflow(
+        path, open_browser=False, serve_forever=False, host="127.0.0.1"
+    )
+    yield path, f"http://{host}:{port}", token
+    server.shutdown()
+    server.server_close()
+
+
+def test_server_binds_loopback_only(_server):
+    _path, base, _token = _server
+    assert base.startswith("http://127.0.0.1:")  # never a public interface (it can write)
+
+
+def _save(base, token, xml):
+    req = urllib.request.Request(
+        base + "/save",
+        data=xml.encode("utf-8"),
+        method="POST",
+        headers={"X-Rebar-Token": token},
+    )
+    return urllib.request.urlopen(req)
+
+
+@pytest.mark.allow_network  # loopback only (127.0.0.1) — the edit server is local
+def test_server_serves_host_and_bpmn(_server):
+    _path, base, _token = _server
+    html = urllib.request.urlopen(base + "/").read().decode("utf-8")
+    assert "BpmnJS" in html
+    xml = urllib.request.urlopen(base + "/workflow.bpmn").read().decode("utf-8")
+    assert "bpmn:process" in xml and "rebar:" in xml
+
+
+@pytest.mark.allow_network  # loopback only
+def test_server_save_round_trips_and_backs_up(_server):
+    path, base, token = _server
+    xml = urllib.request.urlopen(base + "/workflow.bpmn").read().decode("utf-8")
+    resp = _save(base, token, xml)
+    assert resp.status == 200 and json.loads(resp.read())["ok"] is True
+    assert "schema_version" in path.read_text(encoding="utf-8")
+    # M2: the prior IR is backed up before overwrite (comments are recoverable).
+    assert path.with_suffix(".yaml.bak").is_file()
+
+
+@pytest.mark.allow_network  # loopback only
+def test_server_rejects_save_without_token(_server):
+    # CSRF guard (M1): a POST without the per-session token is forbidden — a
+    # cross-origin page can't read the host HTML to learn it.
+    path, base, _token = _server
+    before = path.read_text(encoding="utf-8")
+    xml = urllib.request.urlopen(base + "/workflow.bpmn").read().decode("utf-8")
+    req = urllib.request.Request(base + "/save", data=xml.encode("utf-8"), method="POST")
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(req)
+    assert exc.value.code == 403
+    assert path.read_text(encoding="utf-8") == before  # not overwritten
+
+
+@pytest.mark.allow_network  # loopback only
+def test_server_rejects_invalid_save(_server):
+    path, base, token = _server
+    before = path.read_text(encoding="utf-8")
+    bad = (
+        '<?xml version="1.0"?><bpmn:definitions '
+        'xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL">'
+        '<bpmn:process id="p"><bpmn:subProcess id="sp"/></bpmn:process></bpmn:definitions>'
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _save(base, token, bad)
+    assert exc.value.code == 422
+    assert json.loads(exc.value.read())["errors"]
+    assert path.read_text(encoding="utf-8") == before  # untouched
+
+
+def test_save_rejects_xxe_external_entity(tmp_path):
+    # The save parse must not resolve external entities (untrusted POST input). stdlib
+    # ElementTree blocks this; assert it so a future change can't silently reopen it.
+    path = _wf_file(tmp_path)
+    before = path.read_text(encoding="utf-8")
+    xxe = (
+        '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]>'
+        '<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL">'
+        '<bpmn:process id="&e;"/></bpmn:definitions>'
+    )
+    errors = editor.save_bpmn_to_ir(xxe, path)
+    assert errors  # rejected, not parsed/written
+    assert path.read_text(encoding="utf-8") == before

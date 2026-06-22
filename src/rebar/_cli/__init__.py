@@ -347,6 +347,13 @@ def _workflow(argv: list[str]) -> int:
     p_show = subparsers.add_parser("show", help="render a workflow as a Mermaid graph")
     p_show.add_argument("file", help="a workflow file path or a .rebar/workflows/<name> name")
 
+    p_edit = subparsers.add_parser(
+        "edit", help="open a workflow in the ephemeral bpmn-js visual editor (edit-time)"
+    )
+    p_edit.add_argument("file", help="path to a .rebar/workflows/<name>.yaml file")
+    p_edit.add_argument("--port", type=int, default=0, help="local port (default: ephemeral)")
+    p_edit.add_argument("--no-open", action="store_true", help="do not auto-open the browser")
+
     for sub in ("status", "result"):
         p = subparsers.add_parser(sub, help=f"read a run's {sub} via replay")
         p.add_argument("run_id", help="the run id returned by `workflow run`")
@@ -364,10 +371,43 @@ def _workflow(argv: list[str]) -> int:
         return _workflow_run(args)
     if args.cmd == "show":
         return _workflow_show(args)
+    if args.cmd == "edit":
+        return _workflow_edit(args)
     if args.cmd in ("status", "result"):
         return _workflow_read(args)
     parser.print_help()
     return 1
+
+
+def _workflow_edit(args) -> int:
+    from rebar.llm import errors as _werr
+    from rebar.llm.workflow import editor
+
+    try:
+        server, host, port, _token = editor.edit_workflow(
+            args.file, port=args.port, open_browser=not args.no_open, serve_forever=False
+        )
+    except _werr.WorkflowError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    except OSError as exc:
+        sys.stderr.write(f"Error: cannot start the editor server: {exc}\n")
+        return 1
+    sys.stderr.write(
+        f"rebar visual editor for {args.file} at http://{host}:{port}/  (loopback only, "
+        f"token-guarded; Save writes the IR file + a .bak). Press Ctrl-C to stop.\n"
+    )
+    try:
+        import time
+
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        sys.stderr.write("\neditor stopped.\n")
+    finally:
+        server.shutdown()
+        server.server_close()
+    return 0
 
 
 def _workflow_show(args) -> int:
