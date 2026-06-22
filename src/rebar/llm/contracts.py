@@ -44,7 +44,7 @@ def completion_verdict_response_model() -> type:
     ``completion_verdict.schema.json`` (pinned by a test). Reuses the shared ``Citation``
     model (no drift) and adds a per-finding ``criterion`` (the specific requirement that
     failed). pydantic imported lazily."""
-    from pydantic import BaseModel, Field
+    from pydantic import BaseModel, Field, field_validator
 
     Citation = findings.citation_model()
 
@@ -71,6 +71,15 @@ def completion_verdict_response_model() -> type:
         summary: str | None = Field(
             default=None, description="Optional summary / no-explicit-criteria PASS rationale."
         )
+
+        @field_validator("verdict")
+        @classmethod
+        def _norm_verdict(cls, v: str) -> str:
+            # A NORMALIZING validator (bounds in the validator, not the JSON Schema —
+            # 1268): exactly ``PASS`` (case/space-insensitive) is PASS, ANYTHING else is
+            # FAIL. Fail-safe: a garbled or truncated verdict (e.g. ``"PA"``) can never
+            # silently pass. Idempotent with the completion op's own normalization.
+            return "PASS" if str(v).strip().upper() == "PASS" else "FAIL"
 
     return CompletionVerdict
 

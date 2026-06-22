@@ -361,7 +361,7 @@ def finding_model():
     ``common.schema.json#/$defs/finding`` (with ``citations: list[Citation]``). The
     schema-pin test reaches ``Citation`` through ``Finding.model_fields['citations']``,
     so keep that annotation typed."""
-    from pydantic import BaseModel, Field
+    from pydantic import BaseModel, Field, field_validator
 
     Citation = citation_model()
 
@@ -379,6 +379,14 @@ def finding_model():
         reviewer_id: str | None = Field(
             default=None, description="Reviewer that produced this finding."
         )
+
+        @field_validator("confidence")
+        @classmethod
+        def _bound_confidence(cls, v: float | None) -> float | None:
+            # The bound lives HERE (a normalizing validator), NOT in the JSON Schema —
+            # so the schema stays inside Anthropic's strict-grammar subset (1268). An
+            # out-of-range model value is clamped to [0, 1] rather than rejected.
+            return None if v is None else max(0.0, min(1.0, v))
 
     return Finding
 

@@ -24,7 +24,7 @@ from typing import Protocol, runtime_checkable
 from rebar.llm import findings as _findings
 from rebar.llm.config import LLMConfig
 from rebar.llm.config import denied_paths as _denied_realpaths
-from rebar.llm.errors import LLMConfigError, LLMRunnerError
+from rebar.llm.errors import LLMConfigError, LLMRunnerError, StructuredOutputError
 from rebar.llm.fs_tools import _filesystem_tools
 
 
@@ -58,6 +58,13 @@ class RunRequest:
     #               tool-using agent over-explore for hundreds of steps instead of concluding —
     #               proven by A/B: 17 tool calls vs >250 on the same task/model/prompt).
     output_strategy: str = "tool"
+    # Extended-thinking flag (1268). When set, the structured-output stack uses
+    # PromptedOutput (NOT a forced/native constraint, which Anthropic 400s when thinking
+    # is on). The RECOMMENDED authoring pattern for a step that needs deep reasoning AND
+    # structured output is to SPLIT it into two steps — a `mode="text"` reasoning step
+    # then a `mode="structured"` extraction step (both already supported by the engine) —
+    # rather than forcing one step to do both; this flag covers the single-step case.
+    thinking: bool = False
 
 
 @runtime_checkable
@@ -259,11 +266,11 @@ class PydanticAIRunner:
     def run(self, req: RunRequest) -> dict:
         from types import SimpleNamespace
 
-        from rebar.llm import contracts, pai_tools
+        from rebar.llm import pai_tools
 
         cfg = self._config
         _pai_check_config(cfg)
-        Agent, PromptedOutput = _import_pydantic_ai()
+        Agent = _import_pydantic_ai()
         tools = pai_tools.filesystem_tools(cfg.repo_path) + pai_tools.rebar_tools(
             cfg.repo_path, allow_comment=not _readonly_gate()
         )
@@ -285,9 +292,7 @@ class PydanticAIRunner:
                 "messages": [SimpleNamespace(content=str(agent.run_sync(req.instructions).output))]
             }
         else:
-            model_cls = contracts.response_model_for(req.output_schema)
-            agent = Agent(model, output_type=PromptedOutput(model_cls), **kwargs)
-            outcome = {"structured_response": agent.run_sync(req.instructions).output}
+            outcome = {"structured_response": _pai_structured(Agent, model, resolved, req, kwargs)}
         return _findings.finalize_outcome(
             outcome,
             mode=req.mode,
@@ -444,13 +449,13 @@ def _import_langgraph():
 
 def _import_pydantic_ai():
     try:
-        from pydantic_ai import Agent, PromptedOutput
+        from pydantic_ai import Agent
     except ImportError as exc:
         raise LLMConfigError(
             "the pydantic_ai runner needs the 'agents' extra (pydantic-ai-slim). "
             "Install it with: pip install 'nava-rebar[agents]'"
         ) from exc
-    return Agent, PromptedOutput
+    return Agent
 
 
 # LangChain provider names -> the Pydantic AI model-string prefix. A small, declarative
@@ -461,6 +466,50 @@ _PAI_PROVIDER_PREFIX = {
     "google_genai": "google-gla",
     "google": "google-gla",
 }
+
+
+def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict):
+    """Obtain a validated structured object via the reliability stack (1268).
+
+    NATIVE path: where the provider enforces a strict json_schema (output_mode ->
+    NativeOutput), Pydantic AI does constrained decoding + validation + the bounded
+    retry — no json-repair needed. PROMPTED path (everyone else, incl. Anthropic):
+    generate FREE TEXT, then run the DETERMINISTIC tolerant parse (json-repair) +
+    Pydantic validators, with a single bounded retry that feeds the validation error
+    back to the SAME model (NOT a second interpreter LLM). Returns the validated
+    Pydantic model instance."""
+    from pydantic_ai import NativeOutput
+
+    from rebar.llm import contracts, structured
+
+    model_cls = contracts.response_model_for(req.output_schema)
+    mode_obj = structured.output_mode(model_cls, resolved, thinking=req.thinking)
+    if isinstance(mode_obj, NativeOutput):
+        agent = Agent(
+            model, output_type=mode_obj, retries={"output": structured.OUTPUT_RETRIES}, **kwargs
+        )
+        return agent.run_sync(req.instructions).output
+
+    # PromptedOutput case: free-text + deterministic parse/validate + bounded retry.
+    agent = Agent(model, **kwargs)  # free text (output_type defaults to str)
+    prompt = req.instructions
+    last: Exception | None = None
+    for _ in range(structured.OUTPUT_RETRIES + 1):
+        result = agent.run_sync(prompt)
+        try:
+            # A refused / TRUNCATED turn is surfaced as a clear error BEFORE the tolerant
+            # parse — else json-repair would "fix" a truncated fragment into a
+            # plausible-but-wrong object (the false-accept the stop-reason guard prevents).
+            structured.check_stop_reason(getattr(result.response, "finish_reason", None))
+            return structured.parse_structured(str(result.output), model_cls)
+        except StructuredOutputError as exc:
+            last = exc
+            prompt = (
+                f"{req.instructions}\n\nYour previous reply could not be parsed/validated "
+                f"({exc}). Reply with ONLY the JSON object matching the schema — no prose, "
+                f"no code fence."
+            )
+    raise last  # exhausted the bounded retry; surface the last validation error
 
 
 def _pai_check_config(cfg: LLMConfig) -> None:

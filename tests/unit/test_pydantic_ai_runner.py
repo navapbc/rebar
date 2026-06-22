@@ -9,7 +9,7 @@ import pytest
 
 from rebar.llm import pai_tools
 from rebar.llm.config import RUNNERS, LLMConfig
-from rebar.llm.errors import LLMConfigError
+from rebar.llm.errors import LLMConfigError, LLMRunnerError
 from rebar.llm.runner import (
     FakeRunner,
     PydanticAIRunner,
@@ -30,6 +30,22 @@ def _function_model(json_out: str):
 
     def gen(messages, info):
         return ModelResponse(parts=[TextPart(json_out)])
+
+    return FunctionModel(gen)
+
+
+def _sequence_model(texts):
+    """A FunctionModel that returns ``texts[i]`` on the i-th call — exercises the
+    bounded-retry path (a near-miss reply followed by a good one)."""
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
+
+    state = {"i": 0}
+
+    def gen(messages, info):
+        i = min(state["i"], len(texts) - 1)
+        state["i"] += 1
+        return ModelResponse(parts=[TextPart(texts[i])])
 
     return FunctionModel(gen)
 
@@ -118,6 +134,45 @@ def test_structured_mode_returns_validated_payload():
     )
     assert out["verdict"] == "PASS"
     assert out["runner"] == "pydantic_ai"
+
+
+def test_structured_path_repairs_near_miss_output():
+    # A markdown-fenced, trailing-comma reply (1268 layer 2 json-repair) is recovered
+    # deterministically — no second interpreter LLM, no retry needed.
+    runner = PydanticAIRunner(
+        _cfg(),
+        model_override=_function_model('```json\n{"verdict": "PASS", "findings": [],}\n```'),
+    )
+    out = runner.run(
+        RunRequest(system_prompt="x", instructions="y", config=runner._config, reviewers=["v"],
+                   mode="structured", output_schema="completion_verdict")
+    )
+    assert out["verdict"] == "PASS"
+
+
+def test_structured_path_bounded_retry_recovers():
+    # First reply is unparseable; the bounded retry (layer 4) feeds the error back and
+    # the second reply validates.
+    runner = PydanticAIRunner(
+        _cfg(),
+        model_override=_sequence_model(
+            ["sorry, I can't produce JSON", '{"verdict": "FAIL", "findings": [], "summary": "no"}']
+        ),
+    )
+    out = runner.run(
+        RunRequest(system_prompt="x", instructions="y", config=runner._config, reviewers=["v"],
+                   mode="structured", output_schema="completion_verdict")
+    )
+    assert out["verdict"] == "FAIL"
+
+
+def test_structured_path_raises_after_exhausting_retries():
+    runner = PydanticAIRunner(_cfg(), model_override=_function_model("never any json here"))
+    with pytest.raises(LLMRunnerError):  # StructuredOutputError is an LLMRunnerError subclass
+        runner.run(
+            RunRequest(system_prompt="x", instructions="y", config=runner._config, reviewers=["v"],
+                       mode="structured", output_schema="completion_verdict")
+        )
 
 
 def test_text_mode_returns_final_text():
