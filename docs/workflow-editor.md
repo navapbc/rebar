@@ -45,20 +45,29 @@ rebar developer who is rebuilding the bundle or running the faithful E2E tier** 
   ([`bpmn-auto-layout`](https://github.com/bpmn-io/bpmn-auto-layout) was evaluated and
   rejected: for our coordinate-free, start/end-event-free, nested IR it stacks nodes in a
   single column and emits no edges.)
+- **Visible flow semantics.** A **start event** points at the workflow's root step(s) and
+  the terminal step(s) point at an **end event**, so the entry/exit points are obvious. A
+  `branch` exclusiveGateway is **labelled with its `when` condition**, and its two outgoing
+  flows are labelled **`then (true)`** / **`else (false)`**, so the decision and which path
+  it takes are on the canvas. A step with more than one unconditional outgoing flow (e.g.
+  `fetch → {commits, graph}`) is a **parallel fan-out** — those successors run concurrently
+  (standard BPMN uncontrolled split); only a gateway introduces a conditional choice.
 - **A properties panel** ([`bpmn-js-properties-panel`](https://github.com/bpmn-io/bpmn-js-properties-panel)
   + a small custom *Rebar* provider): select any step to see its **kind** (scripted /
   agent / branch / loop / map), its **action** (`uses` / `prompt`, for scripted/agent
-  steps), and its **rebar config** — the `<rebar:Config>` JSON that carries `with` /
-  `mode` / `model` / loop bounds / the branch condition — and edit it in place. (The config
-  is the exact payload the Python round-trip reads back, so what you edit is what gets
-  written; structured per-field entries can layer on later without changing the contract.)
-  Panel groups are **collapsed by default** — click a group header (e.g. *Rebar*) to
-  expand it.
+  steps), the resolved **prompt text** (read-only, for agent steps — so you can see what
+  the agent runs), the **condition** (for branches), and its **rebar config** — the
+  `<rebar:Config>` JSON that carries `with` / `mode` / `model` / loop bounds / the branch
+  condition, with a format hint — editable in place. (The config is the exact payload the
+  Python round-trip reads back, so what you edit is what gets written; structured per-field
+  entries can layer on later without changing the contract.) Panel groups are **collapsed
+  by default** — click a group header (e.g. *Rebar*) to expand it.
 - **Constrained editing.** The palette is BPMN-only, so a shape that can't map back to the
   IR can't be drawn; an un-mappable edit is **rejected on Save** with located errors and
-  the file is left untouched. To set a new step's *kind*, draw a task and use bpmn-js's
-  change-type menu (the wrench on the context pad) to make it a Script Task (scripted) or
-  Service Task (agent); set its action + config in the *Rebar* panel group.
+  the file is left untouched. A newly-drawn plain task maps to a **scripted** step by
+  default (so your node is never lost); to make it an agent step use bpmn-js's change-type
+  menu (the wrench on the context pad) → Service Task, then set its action + config in the
+  *Rebar* panel group.
 
 ## How it maps to the IR (the round-trip)
 
