@@ -34,7 +34,7 @@ DEFAULT_MODEL = "claude-opus-4-8"
 # Execution backends. `langgraph` is the default for review; `deepagents` is an
 # opt-in harness (planning/subagents/eviction) intended mainly for future
 # task types — review stays on langgraph. `fake` is the offline test seam.
-RUNNERS = ("langgraph", "deepagents", "fake")
+RUNNERS = ("langgraph", "pydantic_ai", "deepagents", "fake")
 
 # Model-name prefix → provider, mirroring LangChain init_chat_model inference (used
 # for diagnostics + clear errors; init_chat_model does the authoritative dispatch).

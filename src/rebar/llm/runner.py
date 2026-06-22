@@ -229,6 +229,79 @@ class DeepAgentsRunner:
         return _finalize_review(outcome, cfg, req, self.name, trace_id)
 
 
+# ── Pydantic AI runner (provider-agnostic, behind the same seam) ──────────────
+class PydanticAIRunner:
+    """Run an operation on a provider-agnostic Pydantic AI agent (epic
+    hump-seam-spice / 7d58) — single-turn LLM calls AND tool-using agents with the
+    same capability surface as the LangGraph runner (filesystem + MCP + least-priv
+    rebar ops), but at ~half the dependency weight and with NO per-provider code: the
+    provider is chosen by the model string (``anthropic:…`` / ``openai:…`` /
+    ``google-gla:…``). Structured output uses ``PromptedOutput`` (NOT the forced-tool
+    ``ToolOutput``), the provider-agnostic mode the runtime POC proved also dodges the
+    Claude extended-thinking + forced-tool 400. The reliability hardening
+    (NativeOutput/json-repair/bounded retry) is layered on in a later story (1268).
+
+    ``model_override`` injects a Pydantic AI model (e.g. ``TestModel``) for offline
+    tests, exactly mirroring the ``FakeRunner`` seam without a live, billable call."""
+
+    name = "pydantic_ai"
+
+    def __init__(self, config: LLMConfig, *, model_override=None):
+        self._config = config
+        self._model_override = model_override
+
+    def preflight(self) -> None:
+        """Fail fast if the ``agents`` extra (pydantic-ai-slim) is absent or the config
+        uses settings this runner does not yet honour — both offline, no model call."""
+        _import_pydantic_ai()
+        _pai_check_config(self._config)
+
+    def run(self, req: RunRequest) -> dict:
+        from types import SimpleNamespace
+
+        from rebar.llm import contracts, pai_tools
+
+        cfg = self._config
+        _pai_check_config(cfg)
+        Agent, PromptedOutput = _import_pydantic_ai()
+        tools = pai_tools.filesystem_tools(cfg.repo_path) + pai_tools.rebar_tools(
+            cfg.repo_path, allow_comment=not _readonly_gate()
+        )
+        if req.extra_tools:
+            tools = [*tools, *req.extra_tools]
+        toolsets = pai_tools.mcp_toolsets(cfg.mcp_servers)
+        resolved = _pai_model(cfg)
+        model = self._model_override or resolved
+        # Provenance records the PROVIDER-QUALIFIED string actually invoked (or a marker
+        # for an injected test model), not the bare config model — so a parity diff sees
+        # exactly what ran.
+        ran_model = (
+            f"test:{type(self._model_override).__name__}" if self._model_override else resolved
+        )
+        kwargs = {"system_prompt": req.system_prompt, "tools": tools, "toolsets": toolsets}
+        if req.mode == "text":
+            agent = Agent(model, **kwargs)
+            outcome = {
+                "messages": [SimpleNamespace(content=str(agent.run_sync(req.instructions).output))]
+            }
+        else:
+            model_cls = contracts.response_model_for(req.output_schema)
+            agent = Agent(model, output_type=PromptedOutput(model_cls), **kwargs)
+            outcome = {"structured_response": agent.run_sync(req.instructions).output}
+        return _findings.finalize_outcome(
+            outcome,
+            mode=req.mode,
+            output_schema=req.output_schema,
+            runner=self.name,
+            model=ran_model,
+            trace_id=None,
+            target=req.target,
+            reviewers=req.reviewers,
+            repo_path=cfg.repo_path,
+            reviewer_id=req.reviewers[0] if len(req.reviewers) == 1 else None,
+        )
+
+
 def get_runner(config: LLMConfig, *, override: Runner | None = None) -> Runner:
     """Select the runner for ``config`` (or use an explicit ``override``, the test
     injection seam). ``langgraph`` (default) requires the ``agents`` extra."""
@@ -238,6 +311,8 @@ def get_runner(config: LLMConfig, *, override: Runner | None = None) -> Runner:
         return FakeRunner()
     if config.runner == "deepagents":
         return DeepAgentsRunner(config)
+    if config.runner == "pydantic_ai":
+        return PydanticAIRunner(config)
     if config.runner == "langgraph":
         return LangGraphRunner(config)
     # from_env only ever derives a valid runner; a bad value can only come from an
@@ -365,6 +440,58 @@ def _import_langgraph():
             "pip install 'nava-rebar[agents]'"
         ) from exc
     return create_agent, ToolStrategy, init_chat_model
+
+
+def _import_pydantic_ai():
+    try:
+        from pydantic_ai import Agent, PromptedOutput
+    except ImportError as exc:
+        raise LLMConfigError(
+            "the pydantic_ai runner needs the 'agents' extra (pydantic-ai-slim). "
+            "Install it with: pip install 'nava-rebar[agents]'"
+        ) from exc
+    return Agent, PromptedOutput
+
+
+# LangChain provider names -> the Pydantic AI model-string prefix. A small, declarative
+# map (NOT per-provider behaviour) so the provider is chosen purely by the model string.
+_PAI_PROVIDER_PREFIX = {
+    "anthropic": "anthropic",
+    "openai": "openai",
+    "google_genai": "google-gla",
+    "google": "google-gla",
+}
+
+
+def _pai_check_config(cfg: LLMConfig) -> None:
+    """Refuse, LOUDLY, config this runner does not yet honour rather than silently
+    dropping it. ``base_url`` / ``api_key`` (OpenAI-compatible local servers) are
+    passed through by the LangGraph runner; the Pydantic AI runner picks the model
+    purely from the model string, so an explicit endpoint/key would be silently
+    ignored — a real capability gap. Fail with a clear message until it is wired
+    through a Pydantic AI provider object (tracked for the d6d1 cutover)."""
+    unsupported = [k for k in ("base_url", "api_key") if getattr(cfg, k, None)]
+    if unsupported:
+        raise LLMConfigError(
+            f"the pydantic_ai runner does not yet support {unsupported} "
+            f"(OpenAI-compatible local-server config); use the langgraph runner for "
+            f"that, or omit these settings. Not silently ignored."
+        )
+
+
+def _pai_model(cfg: LLMConfig):
+    """The Pydantic AI model string for ``cfg`` (provider-qualified). If ``cfg.model``
+    already carries a ``provider:`` prefix it is used verbatim; otherwise the provider
+    is inferred (or taken from ``cfg.model_provider``) and mapped to Pydantic AI's
+    prefix — no per-provider code, the string is the only switch."""
+    m = cfg.model
+    if ":" in m:
+        return m
+    from rebar.llm.config import infer_provider
+
+    prov = cfg.model_provider or infer_provider(m, None)
+    prefix = _PAI_PROVIDER_PREFIX.get(prov or "", prov)
+    return f"{prefix}:{m}" if prefix else m
 
 
 def _import_deepagents():

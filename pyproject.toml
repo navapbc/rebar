@@ -61,6 +61,14 @@ agents = [
     "langfuse>=3",
     "pydantic>=2",
     "deepagents>=0.6",  # opt-in harness runner (planning/subagents); not the review default
+    # Provider-agnostic agent runtime (epic hump-seam-spice / 7d58): the PydanticAIRunner
+    # behind the Runner seam. ~half the deps of the langgraph stack; the provider is
+    # chosen by the model string (no per-provider code). `[anthropic]` is the primary
+    # provider SDK; OpenAI/Google are opt-in (`pydantic-ai-slim[openai|google]`). The
+    # tolerant structured-output parse uses json-repair (no LLM). LangGraph is dropped
+    # in a later story (d6d1) once the parity bar is met.
+    "pydantic-ai-slim[anthropic]>=1,<2",
+    "json-repair>=0.30",
 ]
 # Additional model providers are opt-in (keep the default extra lean):
 #   pip install langchain-google-genai   # Gemini
