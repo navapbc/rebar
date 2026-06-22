@@ -1,0 +1,9 @@
+Usage: rebar grounding-info [--output json]
+
+Print the STATIC code-grounding oracle integration contract (epic 8f6c): the
+closed dimension-ID vocabulary + version, the reference kinds, the closed
+abstain-reason enum (+ outcome/job/tier vocabularies), and the available
+backends with their detected availability/version. Repo-independent and
+deterministic (no repo is scanned; only fail-open tool-version probes run).
+Default output is a human-readable summary; --output json emits the
+grounding_info schema.

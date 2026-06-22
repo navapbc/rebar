@@ -873,6 +873,49 @@ def _bridge_probe(argv: list[str]) -> int:
     return subprocess.call([sys.executable, script, *argv], env=engine_env())
 
 
+def _grounding_info(argv: list[str]) -> int:
+    """``rebar grounding-info`` → the static code-grounding oracle contract.
+
+    Repo-independent (no store, no auto-init). The ``report`` profile: a human
+    summary by default, the ``grounding_info`` schema under ``--output json``.
+    """
+    import json as _json
+
+    import rebar
+    from rebar._engine_support.output import OutputFormatError, parse_output
+
+    try:
+        fmt, rest = parse_output(argv, "report")
+    except OutputFormatError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 2
+    if rest:
+        sys.stderr.write("Usage: rebar grounding-info [--output json]\n")
+        return 1
+
+    info = rebar.grounding_info()
+    if fmt == "json":
+        sys.stdout.write(_json.dumps(info, ensure_ascii=False) + "\n")
+        return 0
+
+    lines = [
+        f"code-grounding oracle contract (dimensions v{info['dimensions_version']})",
+        f"  dimensions:      {', '.join(info['dimensions'])}",
+        f"  reference kinds: {', '.join(info['reference_kinds'])}",
+        f"  abstain reasons: {', '.join(info['abstain_reasons'])}",
+        f"  outcomes:        {', '.join(info['outcomes'])}",
+        f"  jobs:            {', '.join(info['jobs'])}",
+        f"  tiers:           {', '.join(info['provenance_tiers'])}",
+        "  backends:",
+    ]
+    for b in info["backends"]:
+        mark = "available" if b["available"] else "unavailable"
+        ver = f" {b['version']}" if b.get("version") else ""
+        lines.append(f"    - {b['name']}: {mark}{ver}")
+    sys.stdout.write("\n".join(lines) + "\n")
+    return 0
+
+
 def _emit_subcommand_help(sub: str) -> int:
     """Print ``sub``'s usage (``_print_subcommand_help`` parity).
 
@@ -1020,6 +1063,10 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         return signing.verify_signature_cli(rest)
     if sub == "bridge-probe":
         return _bridge_probe(rest)
+    if sub == "grounding-info":
+        # Repo-INDEPENDENT static read (no store, no auto-init): the code-grounding
+        # oracle integration contract. Owns its own --output parsing (report profile).
+        return _grounding_info(rest)
     # Every known subcommand is routed in-process above, and main() rejects
     # unknown subcommands before reaching _dispatch. Arriving here means a
     # subcommand was added to the known set without an in-process arm — a wiring

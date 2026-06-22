@@ -53,3 +53,4 @@ Subcommands:
   format        Render a ticket for display (<ticket_id> [mode])
   export        Export the store as NDJSON (one ticket per line) [-o FILE] [--strip-external]
   import        Import tickets from export NDJSON (clean rebar->rebar migration) [FILE] [--dry-run]
+  grounding-info  Print the code-grounding oracle contract (dimensions/kinds/reasons/backends) [--output json]

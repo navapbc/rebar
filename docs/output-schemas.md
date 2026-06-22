@@ -57,6 +57,7 @@ Structured via `--output json`:
 | `fsck`                           | `fsck`                    |
 | `review` (CLI/library)           | `review_result`           |
 | `verify-completion` (CLI/library) | `completion_verdict`     |
+| `grounding-info`                 | `grounding_info`          |
 
 The authoritative version of this table is `schemas.OUTPUT_SCHEMAS` in
 `src/rebar/schemas/__init__.py` — the registry the coverage guard consumes.

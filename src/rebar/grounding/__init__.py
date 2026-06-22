@@ -21,9 +21,16 @@ nothing.
 
 from __future__ import annotations
 
-from . import deps, engine_b, evidence, harness, resolve, sarif
+from . import deps, engine_b, evidence, harness, oracle, resolve, sarif
 from .deps import enumerate_dependencies, refute_package, refute_packages
-from .engine_b import ScanResult, scan
+from .engine_b import ScanResult
+from .oracle import (
+    DIMENSIONS,
+    DIMENSIONS_VERSION,
+    applies,
+    contract,
+    is_known_dimension,
+)
 from .evidence import (
     ABSTAIN_REASONS,
     JOBS,
@@ -38,11 +45,11 @@ from .evidence import (
     refuted,
 )
 from .harness import RunResult, run_in_worker, run_tool
+from .oracle import refute_absence, scan  # the unified public facade (S5)
 from .resolve import (
     REFERENCE_KINDS,
     extract_references,
     extract_references_from_diff,
-    refute_absence,
     validate_reference,
 )
 
@@ -51,6 +58,7 @@ __all__ = [
     "engine_b",
     "evidence",
     "harness",
+    "oracle",
     "resolve",
     "sarif",
     # evidence contract
@@ -70,7 +78,6 @@ __all__ = [
     "run_tool",
     "run_in_worker",
     # Engine A — refutation resolver (S2)
-    "refute_absence",
     "validate_reference",
     "REFERENCE_KINDS",
     "extract_references",
@@ -80,6 +87,13 @@ __all__ = [
     "refute_packages",
     "enumerate_dependencies",
     # Engine B — detector scan (S4)
-    "scan",
     "ScanResult",
+    # Public oracle facade — the three query surfaces (S5)
+    "refute_absence",
+    "applies",
+    "scan",
+    "contract",
+    "DIMENSIONS",
+    "DIMENSIONS_VERSION",
+    "is_known_dimension",
 ]

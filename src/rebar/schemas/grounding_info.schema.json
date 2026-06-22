@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "grounding_info.schema.json",
+  "title": "GroundingInfo",
+  "description": "The STATIC, repo-independent integration contract of the code-grounding oracle (epic 8f6c, story S5), emitted by `rebar grounding-info --output json` / the `grounding_info` MCP read tool. A fast, deterministic discovery surface for the oracle's consumers (5fd2 DET floor, 9da1 Pass-2 reviewers): the closed dimension-ID vocabulary + its version, the reference kinds, the closed abstain-reason enum and the outcome/job/tier vocabularies, and the available backends with their DETECTED availability/version. No repo is scanned; only fail-open tool-version probes run.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "dimensions_version",
+    "dimensions",
+    "reference_kinds",
+    "abstain_reasons",
+    "outcomes",
+    "jobs",
+    "provenance_tiers",
+    "backends"
+  ],
+  "properties": {
+    "dimensions_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Monotonic version of the closed dimension vocabulary; bumps on any add/remove."
+    },
+    "dimensions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "The CANONICAL closed set of applicability/overlay dimension IDs a consumer passes to `applies()` and a detector declares (owned by rebar.grounding.oracle.DIMENSIONS)."
+    },
+    "reference_kinds": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "The closed reference-in `kind` set the refutation surface routes on (defined in S2; exposed here)."
+    },
+    "abstain_reasons": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "The CLOSED structured abstain-reason enum every backend draws from (mirrors the grounding evidence contract)."
+    },
+    "outcomes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "The three-valued outcome vocabulary (refuted/match/abstain)."
+    },
+    "jobs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "The three oracle jobs (refute/applies/smell)."
+    },
+    "provenance_tiers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "The provenance tiers (T0/T1/T2)."
+    },
+    "backends": {
+      "type": "array",
+      "description": "One entry per oracle backend with its detected availability/version (fail-open: an absent tool reports available=false with a null version).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "available"],
+        "properties": {
+          "name": { "type": "string" },
+          "available": { "type": "boolean" },
+          "version": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

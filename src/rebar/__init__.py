@@ -345,6 +345,21 @@ def set_verify_commands(ticket_id: str, commands, *, repo_root=None) -> None:
     )
 
 
+def grounding_info() -> dict:
+    """Return the STATIC code-grounding oracle integration contract (epic 8f6c).
+
+    A fast, deterministic, repo-INDEPENDENT read: the closed dimension-ID
+    vocabulary + version, the reference kinds, the closed abstain-reason enum (and
+    the outcome/job/tier vocabularies), and the available oracle backends with
+    their detected availability/version. A discovery surface for the oracle's
+    consumers (5fd2/9da1); conforms to the ``grounding_info`` schema. No repo is
+    scanned — only fail-open tool-version probes run.
+    """
+    from rebar.grounding import oracle
+
+    return oracle.contract()
+
+
 def _python_leaf(fn, *args, repo_root, what: str, **kwargs) -> None:
     """Run a Tier B leaf write in-process — the sole path since the cutover.
 
@@ -1013,6 +1028,8 @@ __all__ = [
     "set_file_impact",
     "get_verify_commands",
     "set_verify_commands",
+    # code-grounding oracle (epic 8f6c)
+    "grounding_info",
     # cryptographic manifest signing
     "sign_manifest",
     "verify_signature",

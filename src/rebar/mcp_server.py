@@ -157,6 +157,24 @@ try:
         verdict: str
         reason: str
 
+    class GroundingBackendOut(_Out):
+        # One backend entry of GroundingInfoOut.backends.
+        name: str
+        available: bool
+        version: str | None = None
+
+    class GroundingInfoOut(_Out):
+        # Mirrors src/rebar/schemas/grounding_info.schema.json — the STATIC
+        # code-grounding oracle integration contract (epic 8f6c / S5).
+        dimensions_version: int
+        dimensions: list[str] = []
+        reference_kinds: list[str] = []
+        abstain_reasons: list[str] = []
+        outcomes: list[str] = []
+        jobs: list[str] = []
+        provenance_tiers: list[str] = []
+        backends: list[GroundingBackendOut] = []
+
     class WorkflowRunOut(_Out):
         # Mirrors src/rebar/schemas/workflow_run.schema.json — one permissive model
         # for both get_workflow_status and get_workflow_result (extra=allow covers
@@ -180,6 +198,7 @@ except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     ListEpicsOut = BridgeFsckOut = None  # type: ignore[assignment,misc]
     SignResultOut = VerifySignatureResultOut = None  # type: ignore[assignment,misc]
     WorkflowRunOut = None  # type: ignore[assignment,misc]
+    GroundingInfoOut = GroundingBackendOut = None  # type: ignore[assignment,misc]
 
 
 def _mcp_gate(attr: str, *, fail: bool) -> bool:
@@ -430,6 +449,15 @@ def build_server():
         return [
             VerifyCommandItemOut.model_validate(e) for e in rebar.get_verify_commands(ticket_id)
         ]
+
+    @mcp.tool()
+    def grounding_info() -> GroundingInfoOut:
+        """The STATIC code-grounding oracle integration contract (epic 8f6c): the
+        closed dimension-ID vocabulary + version, the reference kinds, the closed
+        abstain-reason enum (+ outcome/job/tier vocabularies), and the available
+        backends with their detected availability/version. A fast, deterministic,
+        repo-independent discovery surface (no repo is scanned). Takes no args."""
+        return GroundingInfoOut.model_validate(rebar.grounding_info())
 
     @mcp.tool()
     def summary(ticket_ids: list[str]) -> list[dict]:

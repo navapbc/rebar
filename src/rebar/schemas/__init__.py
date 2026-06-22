@@ -68,6 +68,7 @@ __all__ = [
     "WORKFLOW_V2",
     "WORKFLOW_RUN",
     "GROUNDING",
+    "GROUNDING_INFO",
     "INPUT_SCHEMAS",
 ]
 
@@ -130,6 +131,11 @@ WORKFLOW_V2 = "workflow.v2"
 # INTERNAL contract schema, NOT a command --output, so (like the workflow DSL
 # schemas) it is exempt from OUTPUT_SCHEMAS via INPUT_SCHEMAS below.
 GROUNDING = "grounding"
+# rebar.grounding — the STATIC oracle integration contract (epic 8f6c, story S5),
+# emitted by `rebar grounding-info --output json` and the `grounding_info` MCP read
+# tool. Unlike the GROUNDING evidence contract (an INTERNAL schema validated
+# directly), THIS is a command --output, so it IS wired into OUTPUT_SCHEMAS below.
+GROUNDING_INFO = "grounding_info"
 
 # Schemas authored to validate documents/objects directly rather than advertise a
 # command's JSON output: the workflow DSL INPUT files (v1/v2) and the internal
@@ -187,6 +193,9 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     # them on a seeded run and validates the real output against this schema.
     "get_workflow_status": WORKFLOW_RUN,
     "get_workflow_result": WORKFLOW_RUN,
+    # The static code-grounding oracle integration contract (S5): a repo-independent
+    # read driven by both the CLI (`grounding-info`) and the MCP `grounding_info` tool.
+    "grounding_info": GROUNDING_INFO,
     # `export` emits NDJSON (one EXPORT line per ticket), not the canonical
     # --output json envelope, so it is not driven by the --output coverage guard;
     # registered here so the every-schema-file-is-wired guard sees it.

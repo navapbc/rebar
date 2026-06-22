@@ -58,7 +58,11 @@ resolves the STATUS fork deterministically by UUID, so every clone agrees.
 `verify_signature`, `fsck`, `summary`, `bridge_fsck`, `reconcile` (dry-run by
 default), `get_workflow_status`, `get_workflow_result`, `render_workflow` (the
 workflow-engine read tools — run status/result by `run_id`, and a dry-render of a
-`.rebar/workflows/*.yaml` workflow). The
+`.rebar/workflows/*.yaml` workflow), `grounding_info` (the code-grounding oracle's
+static integration contract — the closed dimension-ID vocabulary + version, the
+reference kinds, the closed abstain-reason enum, and the available backends + their
+detected versions; a fast, repo-independent read — see
+[docs/grounding.md](docs/grounding.md)). The
 typed read tools advertise an `outputSchema` (a documented, validated return
 shape) drawn from the canonical JSON Schemas — see
 [docs/output-schemas.md](docs/output-schemas.md).

@@ -64,6 +64,7 @@ CANONICAL: dict[str, str] = {
     "verify_signature": schemas.VERIFY_SIGNATURE_RESULT,
     "get_workflow_status": schemas.WORKFLOW_RUN,
     "get_workflow_result": schemas.WORKFLOW_RUN,
+    "grounding_info": schemas.GROUNDING_INFO,
 }
 
 # Advertisers with no canonical structured shape — they return a generic
@@ -272,6 +273,7 @@ def _call_args(name: str, s: dict) -> dict:
         "verify_signature": {"ticket_id": s["task"]},
         "get_workflow_status": {"run_id": s["run_id"], "ticket_id": s["task"]},
         "get_workflow_result": {"run_id": s["run_id"], "ticket_id": s["task"]},
+        "grounding_info": {},
     }[name]
 
 

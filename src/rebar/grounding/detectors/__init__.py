@@ -11,8 +11,8 @@ Public surface (import from this subpackage, not the package ``__init__``):
 * :class:`Detector` — one loaded, parsed detector (id, envelope, backend, source).
 * :class:`Registry` — the read-only in-memory snapshot of all detectors.
 * :func:`load_registry` — the process-local, mtime-cached registry builder.
-* :data:`DIMENSIONS` — the **provisional** closed dimension vocabulary (S5 owns the
-  canonical set; see the module docstring in :mod:`registry`).
+* :data:`DIMENSIONS` — a mirror of the canonical closed dimension vocabulary owned
+  by :data:`rebar.grounding.oracle.DIMENSIONS` (kept in sync; see :mod:`registry`).
 """
 
 from __future__ import annotations

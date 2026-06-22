@@ -41,17 +41,30 @@ BACKEND_ASTGREP = "ast-grep"
 BACKEND_METRIC = "metric"
 BACKENDS: frozenset[str] = frozenset({BACKEND_OPENGREP, BACKEND_ASTGREP, BACKEND_METRIC})
 
-#: PROVISIONAL closed dimension vocabulary. **S5 (ticket family 55de) owns the
-#: canonical set**; this is a tiny placeholder so S4 can route applicability
-#: detectors today. A detector whose ``dimension`` is outside this set still
-#: loads (we do not gate on it here) but is flagged via :attr:`Detector.unknown_dimension`
-#: so the integration with S5 is a one-line vocabulary swap, not a rewrite.
-#: TODO(S5/55de): replace with the canonical dimension-ID registry and gate on it.
+def _canonical_dimensions() -> frozenset[str]:
+    """The canonical closed dimension vocabulary, OWNED by :mod:`..oracle` (S5).
+
+    Imported lazily (inside this function, not at module scope) because
+    :mod:`..oracle` imports this subpackage — a top-level import would be a cycle.
+    The registry does not GATE on this set (a detector outside it still loads); it
+    only flags an out-of-vocabulary dimension via :attr:`Detector.unknown_dimension`.
+    """
+    from ..oracle import DIMENSIONS as _CANON
+
+    return _CANON
+
+
+#: Backward-compatible module-level alias of the canonical vocabulary. Resolved at
+#: import time of :mod:`..oracle`; kept so existing ``registry.DIMENSIONS`` readers
+#: (and the ``detectors`` re-export) keep working. The authority is S5's
+#: :data:`rebar.grounding.oracle.DIMENSIONS`.
 DIMENSIONS: frozenset[str] = frozenset(
     {
         "web_frontend",
         "has_iac",
         "touches_auth",
+        "has_migrations",
+        "has_tests",
         "smell_generic",
     }
 )
@@ -117,9 +130,10 @@ class Detector:
 
     @property
     def unknown_dimension(self) -> bool:
-        """True iff a declared dimension is outside the provisional vocabulary."""
+        """True iff a declared dimension is outside the canonical vocabulary
+        (S5's :data:`rebar.grounding.oracle.DIMENSIONS`)."""
         d = self.dimension
-        return d is not None and d not in DIMENSIONS
+        return d is not None and d not in _canonical_dimensions()
 
     @property
     def thresholds(self) -> dict[str, Any]:
