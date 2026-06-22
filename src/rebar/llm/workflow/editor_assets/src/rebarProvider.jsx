@@ -68,6 +68,27 @@ function KindEntry(props) {
   );
 }
 
+function ActionEntry(props) {
+  const { element, id } = props;
+  // The step's action — `uses` (scripted) / `prompt` (agent) — round-trips through the
+  // element NAME, which isn't obvious; surface it as a first-class, labelled field so a
+  // new step can be told what to run without knowing the name==action convention.
+  const modeling = useService("modeling");
+  const debounce = useService("debounceInput");
+  const bo = element.businessObject;
+  const label = bo.$type === "bpmn:ServiceTask" ? "Prompt id" : "Script (uses)";
+  return (
+    <TextFieldEntry
+      id={id}
+      element={element}
+      label={label}
+      getValue={() => bo.name || ""}
+      setValue={(v) => modeling.updateProperties(element, { name: v || "" })}
+      debounce={debounce}
+    />
+  );
+}
+
 function ConfigEntry(props) {
   const { element, id } = props;
   const modeling = useService("modeling");
@@ -111,14 +132,13 @@ function ConfigEntry(props) {
 }
 
 function rebarGroup(element) {
-  return {
-    id: "rebar",
-    label: "Rebar",
-    entries: [
-      { id: "rebar-kind", component: KindEntry },
-      { id: "rebar-config", component: ConfigEntry, isEdited: isTextAreaEntryEdited },
-    ],
-  };
+  const t = element.businessObject.$type;
+  const entries = [{ id: "rebar-kind", component: KindEntry }];
+  if (t === "bpmn:ScriptTask" || t === "bpmn:ServiceTask") {
+    entries.push({ id: "rebar-action", component: ActionEntry });
+  }
+  entries.push({ id: "rebar-config", component: ConfigEntry, isEdited: isTextAreaEntryEdited });
+  return { id: "rebar", label: "Rebar", entries };
 }
 
 class RebarPropertiesProvider {

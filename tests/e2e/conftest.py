@@ -68,3 +68,68 @@ def bpmn_harness():
         return resp
 
     return run
+
+
+@pytest.fixture(scope="session")
+def browser_runner():
+    """A callable ``run(script_name, url) -> dict`` that runs a Playwright browser probe
+    (``js/browser_*.mjs``) against a running editor URL in real headless Chromium. Skips if
+    Node, Playwright, or the Chromium download is unavailable — the real browser is the
+    only place the bundle's runtime behavior (rendering, panel, selection) can be checked."""
+    node = _have_node()
+    if not node:
+        pytest.skip("e2e(browser): `node` not on PATH")
+    if not (_JS_DIR / "node_modules" / "playwright").is_dir():
+        pytest.skip("e2e(browser): playwright not installed (npm install in tests/e2e/js)")
+    # Confirm a browser actually launches (the download may be absent in CI).
+    check = subprocess.run(
+        [
+            node,
+            "-e",
+            "require('playwright').chromium.launch().then(b=>b.close()).then(()=>process.exit(0)).catch(()=>process.exit(3))",
+        ],
+        cwd=_JS_DIR,
+        capture_output=True,
+        text=True,
+    )
+    if check.returncode != 0:
+        pytest.skip("e2e(browser): Chromium unavailable (run `npx playwright install chromium`)")
+
+    def run(script_name: str, url: str) -> dict:
+        proc = subprocess.run(
+            [node, str(_JS_DIR / script_name), url],
+            capture_output=True,
+            text=True,
+            timeout=150,
+        )
+        if not proc.stdout.strip():
+            raise AssertionError(
+                f"{script_name} produced no output; stderr:\n{proc.stderr[-1500:]}"
+            )
+        return json.loads(proc.stdout)
+
+    return run
+
+
+@pytest.fixture
+def editor_server(tmp_path):
+    """Start the real editor HTTP server on the round-trip demo (loopback, background
+    thread) and yield ``(url, ir_path)``; tear it down after the test."""
+    import shutil
+
+    from rebar.llm.workflow import editor as _editor
+
+    repo = Path(__file__).resolve().parents[2]
+    sample = repo / ".rebar" / "workflows" / "roundtrip-demo.yaml"
+    if not sample.is_file() or not _editor.assets_available():
+        pytest.skip("e2e(browser): sample workflow or built editor bundle missing")
+    ir = tmp_path / "roundtrip-demo.yaml"
+    shutil.copy(sample, ir)
+    server, host, port, _token = _editor.edit_workflow(
+        ir, open_browser=False, serve_forever=False, host="127.0.0.1"
+    )
+    try:
+        yield f"http://{host}:{port}/", ir
+    finally:
+        server.shutdown()
+        server.server_close()

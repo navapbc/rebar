@@ -431,3 +431,33 @@ def test_branch_arms_recovered_after_simulated_bpmnjs_id_rewrite():
     branch = back["steps"][0]["branch"]
     assert branch["then"][0]["id"] == "t"
     assert branch["else"][0]["id"] == "e"
+
+
+def test_layout_has_no_overlaps_edges_and_expanded_subprocesses():
+    # The generated DI must be readable: parallel siblings get distinct positions (no
+    # single-row collision), every needs/gateway edge has a BPMNEdge, and control bodies
+    # are expanded sub-processes whose children sit INSIDE the parent bounds.
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(bpmn.ir_to_bpmn(_full_v2()))
+    DI = "{" + bpmn._NS["bpmndi"] + "}"
+    DC = "{" + bpmn._NS["dc"] + "}"
+    boxes, expanded = {}, []
+    for shp in root.iter(f"{DI}BPMNShape"):
+        b = shp.find(f"{DC}Bounds")
+        if b is None:
+            continue
+        keys = ("x", "y", "width", "height")
+        boxes[shp.get("bpmnElement")] = tuple(float(b.get(k)) for k in keys)
+        if shp.get("isExpanded") == "true":
+            expanded.append(shp.get("bpmnElement"))
+    # no two shapes share an exact top-left (the overlap bug)
+    tops = [(round(x), round(y)) for (x, y, _w, _h) in boxes.values()]
+    assert len(set(tops)) == len(tops), "shapes overlap exactly"
+    # edges exist for the flows
+    assert sum(1 for _ in root.iter(f"{DI}BPMNEdge")) > 0
+    # loop/map sub-processes are expanded with children contained
+    assert "refine" in expanded and "fanout" in expanded
+    rx, ry, rw, rh = boxes["refine"]
+    ax, ay, aw, ah = boxes["attempt"]
+    assert rx <= ax and ry <= ay and ax + aw <= rx + rw and ay + ah <= ry + rh
