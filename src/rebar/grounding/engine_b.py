@@ -29,13 +29,13 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from . import evidence as ev
-from . import harness
-from . import sarif
+from . import harness, sarif
 from .detectors import (
     BACKEND_ASTGREP,
     BACKEND_METRIC,
@@ -75,6 +75,21 @@ def _resolve_binary(candidates: Iterable[str]) -> str | None:
     return None
 
 
+def astgrep_binary() -> str | None:
+    """Path to a GENUINE ast-grep binary on PATH, or None. Validates each candidate's
+    identity via ``--version`` so the unrelated shadow-utils ``sg`` (the Linux
+    run-as-different-group command, also answered by ``which sg``) is NOT mistaken for
+    ast-grep — which would otherwise run the wrong tool and yield no matches instead of
+    cleanly abstaining (no_tool). Used by the scan path AND the tests' availability gate."""
+    for name in _ASTGREP_CANDIDATES:
+        path = shutil.which(name)
+        if path:
+            ver = _binary_version(path)
+            if ver and "ast-grep" in ver.lower():
+                return path
+    return None
+
+
 @dataclass(frozen=True)
 class ScanResult:
     """The outcome of one Engine B scan: every emitted evidence record.
@@ -98,9 +113,11 @@ class ScanResult:
 
 def _repo_extensions(repo_root: Path) -> set[str]:
     exts: set[str] = set()
-    for dirpath, dirnames, filenames in os.walk(repo_root):
+    for _dirpath, dirnames, filenames in os.walk(repo_root):
         # Skip VCS + common heavy dirs so routing is cheap and deterministic.
-        dirnames[:] = [d for d in dirnames if d not in (".git", "node_modules", ".venv", "__pycache__")]
+        dirnames[:] = [
+            d for d in dirnames if d not in (".git", "node_modules", ".venv", "__pycache__")
+        ]
         for fn in filenames:
             ext = os.path.splitext(fn)[1].lower()
             if ext:
@@ -246,7 +263,9 @@ def _opengrep_validate(binary: str, det: Detector) -> harness.RunResult:
     )
 
 
-def _opengrep_scan(binary: str, configs: list[str], repo_root: Path, version: str | None) -> harness.RunResult:
+def _opengrep_scan(
+    binary: str, configs: list[str], repo_root: Path, version: str | None
+) -> harness.RunResult:
     cmd = [binary, "scan", "--sarif", "--metrics=off", "--no-git-ignore"]
     for cfg in configs:
         cmd += ["--config", cfg]
@@ -267,13 +286,17 @@ def _match_declared(engine_id: str, by_id: dict[str, Detector]) -> Detector | No
     """
     if engine_id in by_id:
         return by_id[engine_id]
-    candidates = [det for did, det in by_id.items() if engine_id == did or engine_id.endswith("." + did)]
+    candidates = [
+        det for did, det in by_id.items() if engine_id == did or engine_id.endswith("." + did)
+    ]
     if not candidates:
         return None
     return max(candidates, key=lambda d: len(d.id))
 
 
-def _enrich_sarif_envelopes(sarif_doc: dict[str, Any], by_id: dict[str, Detector], repo_root: Path) -> None:
+def _enrich_sarif_envelopes(
+    sarif_doc: dict[str, Any], by_id: dict[str, Detector], repo_root: Path
+) -> None:
     """Re-attach envelopes + canonicalize ids on the engine's SARIF (in place).
 
     Two fix-ups before the shared :func:`sarif.from_sarif` parses the doc:
@@ -324,9 +347,14 @@ def _run_opengrep(detectors: list[Detector], repo_root: Path) -> list[dict[str, 
     binary = _resolve_binary(_OPENGREP_CANDIDATES)
     if binary is None:
         return [
-            ev.abstain("no_tool", job=_job_for(d), provenance_tier=_tier_for(d),
-                       backend=BACKEND_OPENGREP, detector_id=d.id,
-                       detail="no opengrep/semgrep binary on PATH")
+            ev.abstain(
+                "no_tool",
+                job=_job_for(d),
+                provenance_tier=_tier_for(d),
+                backend=BACKEND_OPENGREP,
+                detector_id=d.id,
+                detail="no opengrep/semgrep binary on PATH",
+            )
             for d in detectors
         ]
     version = _binary_version(binary)
@@ -335,15 +363,25 @@ def _run_opengrep(detectors: list[Detector], repo_root: Path) -> list[dict[str, 
     for det in detectors:
         vres = _opengrep_validate(binary, det)
         if vres.abstained:
-            records.append(vres.as_abstain(job=_job_for(det), provenance_tier=_tier_for(det), detector_id=det.id))
+            records.append(
+                vres.as_abstain(
+                    job=_job_for(det), provenance_tier=_tier_for(det), detector_id=det.id
+                )
+            )
             continue
         if vres.returncode != 0:
             # Engine-faithful quarantine: a schema-invalid rule -> invalid_detector.
-            records.append(ev.abstain(
-                "invalid_detector", job=_job_for(det), provenance_tier=_tier_for(det),
-                backend=BACKEND_OPENGREP, version=version, detector_id=det.id,
-                detail=f"{det.id}: opengrep --validate exit {vres.returncode}",
-            ))
+            records.append(
+                ev.abstain(
+                    "invalid_detector",
+                    job=_job_for(det),
+                    provenance_tier=_tier_for(det),
+                    backend=BACKEND_OPENGREP,
+                    version=version,
+                    detector_id=det.id,
+                    detail=f"{det.id}: opengrep --validate exit {vres.returncode}",
+                )
+            )
             continue
         valid.append(det)
 
@@ -356,16 +394,23 @@ def _run_opengrep(detectors: list[Detector], repo_root: Path) -> list[dict[str, 
     if scan.abstained:
         # Whole-scan fail-open: every valid detector gets a coverage skip.
         records.extend(
-            scan.as_abstain(job=_job_for(d), provenance_tier=_tier_for(d), detector_id=d.id) for d in valid
+            scan.as_abstain(job=_job_for(d), provenance_tier=_tier_for(d), detector_id=d.id)
+            for d in valid
         )
         return records
     try:
         sarif_doc = json.loads(scan.stdout) if scan.stdout.strip() else {"runs": []}
     except json.JSONDecodeError:
         records.extend(
-            ev.abstain("parse_error", job=_job_for(d), provenance_tier=_tier_for(d),
-                       backend=BACKEND_OPENGREP, version=version, detector_id=d.id,
-                       detail=f"{d.id}: opengrep SARIF was not JSON")
+            ev.abstain(
+                "parse_error",
+                job=_job_for(d),
+                provenance_tier=_tier_for(d),
+                backend=BACKEND_OPENGREP,
+                version=version,
+                detector_id=d.id,
+                detail=f"{d.id}: opengrep SARIF was not JSON",
+            )
             for d in valid
         )
         return records
@@ -380,12 +425,18 @@ def _run_opengrep(detectors: list[Detector], repo_root: Path) -> list[dict[str, 
 def _run_astgrep(
     detectors: list[Detector], repo_root: Path, sgconfig: str | None = None
 ) -> list[dict[str, Any]]:
-    binary = _resolve_binary(_ASTGREP_CANDIDATES)
+    binary = astgrep_binary()
     records: list[dict[str, Any]] = []
     if binary is None:
         return [
-            ev.abstain("no_tool", job=_job_for(d), provenance_tier=_tier_for(d),
-                       backend=BACKEND_ASTGREP, detector_id=d.id, detail="no ast-grep binary on PATH")
+            ev.abstain(
+                "no_tool",
+                job=_job_for(d),
+                provenance_tier=_tier_for(d),
+                backend=BACKEND_ASTGREP,
+                detector_id=d.id,
+                detail="no ast-grep binary on PATH",
+            )
             for d in detectors
         ]
     version = _binary_version(binary)
@@ -398,39 +449,70 @@ def _run_astgrep(
         # a parse complaint is the per-backend invalid-detector signal.
         res = harness.run_tool(
             [binary, "scan", "-r", det.source_path, *config_args, "--json", str(repo_root)],
-            backend=BACKEND_ASTGREP, version=version,
+            backend=BACKEND_ASTGREP,
+            version=version,
         )
         if res.abstained:
-            records.append(res.as_abstain(job=_job_for(det), provenance_tier=_tier_for(det), detector_id=det.id))
+            records.append(
+                res.as_abstain(
+                    job=_job_for(det), provenance_tier=_tier_for(det), detector_id=det.id
+                )
+            )
             continue
         if res.returncode != 0:
-            reason = "invalid_detector" if "parse rule" in res.stderr.lower() or "not a valid" in res.stderr.lower() else "other"
-            records.append(ev.abstain(
-                reason, job=_job_for(det), provenance_tier=_tier_for(det),
-                backend=BACKEND_ASTGREP, version=version, detector_id=det.id,
-                detail=f"{det.id}: ast-grep exit {res.returncode}: {res.stderr.strip()[:120]}",
-            ))
+            reason = (
+                "invalid_detector"
+                if "parse rule" in res.stderr.lower() or "not a valid" in res.stderr.lower()
+                else "other"
+            )
+            records.append(
+                ev.abstain(
+                    reason,
+                    job=_job_for(det),
+                    provenance_tier=_tier_for(det),
+                    backend=BACKEND_ASTGREP,
+                    version=version,
+                    detector_id=det.id,
+                    detail=f"{det.id}: ast-grep exit {res.returncode}: {res.stderr.strip()[:120]}",
+                )
+            )
             continue
         records.extend(_astgrep_matches(res.stdout, det, repo_root, version))
     return records
 
 
-def _astgrep_matches(stdout: str, det: Detector, repo_root: Path, version: str | None) -> list[dict[str, Any]]:
+def _astgrep_matches(
+    stdout: str, det: Detector, repo_root: Path, version: str | None
+) -> list[dict[str, Any]]:
     try:
         hits = json.loads(stdout) if stdout.strip() else []
     except json.JSONDecodeError:
-        return [ev.abstain("parse_error", job=_job_for(det), provenance_tier=_tier_for(det),
-                           backend=BACKEND_ASTGREP, version=version, detector_id=det.id,
-                           detail=f"{det.id}: ast-grep JSON was not parseable")]
+        return [
+            ev.abstain(
+                "parse_error",
+                job=_job_for(det),
+                provenance_tier=_tier_for(det),
+                backend=BACKEND_ASTGREP,
+                version=version,
+                detector_id=det.id,
+                detail=f"{det.id}: ast-grep JSON was not parseable",
+            )
+        ]
     out: list[dict[str, Any]] = []
     cov = ev.coverage(backend=BACKEND_ASTGREP, status=ev.STATUS_RAN, version=version)
     for hit in hits if isinstance(hits, list) else []:
         loc = _astgrep_location(hit, repo_root)
-        out.append(ev.match(
-            job=_job_for(det), provenance_tier=_tier_for(det), coverage=cov,
-            detector_id=det.id, location=loc, attention_only=det.attention_only,
-            detail=hit.get("message") or None,
-        ))
+        out.append(
+            ev.match(
+                job=_job_for(det),
+                provenance_tier=_tier_for(det),
+                coverage=cov,
+                detector_id=det.id,
+                location=loc,
+                attention_only=det.attention_only,
+                detail=hit.get("message") or None,
+            )
+        )
     return out
 
 
@@ -473,17 +555,24 @@ def _run_metric(detectors: list[Detector], repo_root: Path) -> list[dict[str, An
         thresholds = {"oversize_loc": 800, "max_complexity": 15}
         thresholds.update(det.thresholds)  # project/envelope override
         if binary is None:
-            records.append(ev.abstain(
-                "no_tool", job=_job_for(det), provenance_tier=_tier_for(det),
-                backend=BACKEND_METRIC, detector_id=det.id,
-                detail=f"{det.id}: no scc/lizard on PATH (thresholds={thresholds})",
-            ))
+            records.append(
+                ev.abstain(
+                    "no_tool",
+                    job=_job_for(det),
+                    provenance_tier=_tier_for(det),
+                    backend=BACKEND_METRIC,
+                    detector_id=det.id,
+                    detail=f"{det.id}: no scc/lizard on PATH (thresholds={thresholds})",
+                )
+            )
             continue
         records.extend(_metric_invoke(binary, det, repo_root, thresholds))
     return records
 
 
-def _metric_invoke(binary: str, det: Detector, repo_root: Path, thresholds: dict[str, Any]) -> list[dict[str, Any]]:
+def _metric_invoke(
+    binary: str, det: Detector, repo_root: Path, thresholds: dict[str, Any]
+) -> list[dict[str, Any]]:
     """Invoke a present metric tool (scc) and normalize oversize files.
 
     Real but minimal: scc emits per-language/file LOC as JSON. A binary that errors
@@ -492,29 +581,50 @@ def _metric_invoke(binary: str, det: Detector, repo_root: Path, thresholds: dict
     """
     res = harness.run_tool([binary, "--format", "json", str(repo_root)], backend=BACKEND_METRIC)
     if res.abstained:
-        return [res.as_abstain(job=_job_for(det), provenance_tier=_tier_for(det), detector_id=det.id)]
+        return [
+            res.as_abstain(job=_job_for(det), provenance_tier=_tier_for(det), detector_id=det.id)
+        ]
     if res.returncode != 0:
-        return [ev.abstain("other", job=_job_for(det), provenance_tier=_tier_for(det),
-                           backend=BACKEND_METRIC, detector_id=det.id,
-                           detail=f"{det.id}: metric tool exit {res.returncode}")]
+        return [
+            ev.abstain(
+                "other",
+                job=_job_for(det),
+                provenance_tier=_tier_for(det),
+                backend=BACKEND_METRIC,
+                detector_id=det.id,
+                detail=f"{det.id}: metric tool exit {res.returncode}",
+            )
+        ]
     try:
         data = json.loads(res.stdout) if res.stdout.strip() else []
     except json.JSONDecodeError:
-        return [ev.abstain("parse_error", job=_job_for(det), provenance_tier=_tier_for(det),
-                           backend=BACKEND_METRIC, detector_id=det.id,
-                           detail=f"{det.id}: metric JSON not parseable")]
+        return [
+            ev.abstain(
+                "parse_error",
+                job=_job_for(det),
+                provenance_tier=_tier_for(det),
+                backend=BACKEND_METRIC,
+                detector_id=det.id,
+                detail=f"{det.id}: metric JSON not parseable",
+            )
+        ]
     cov = ev.coverage(backend=BACKEND_METRIC, status=ev.STATUS_RAN)
     cutoff = int(thresholds.get("oversize_loc", 800))
     out: list[dict[str, Any]] = []
     for entry in _scc_files(data):
         loc = entry.get("Code", 0)
         if isinstance(loc, int) and loc > cutoff:
-            out.append(ev.match(
-                job=_job_for(det), provenance_tier=_tier_for(det), coverage=cov,
-                detector_id=det.id, location={"file": entry.get("Location", "?")},
-                attention_only=det.attention_only,
-                detail=f"{entry.get('Location','?')}: {loc} LOC > {cutoff}",
-            ))
+            out.append(
+                ev.match(
+                    job=_job_for(det),
+                    provenance_tier=_tier_for(det),
+                    coverage=cov,
+                    detector_id=det.id,
+                    location={"file": entry.get("Location", "?")},
+                    attention_only=det.attention_only,
+                    detail=f"{entry.get('Location', '?')}: {loc} LOC > {cutoff}",
+                )
+            )
     return out
 
 

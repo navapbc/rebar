@@ -17,7 +17,6 @@ Every emitted record must pass ``ev.validate``.
 
 from __future__ import annotations
 
-import os
 import shutil
 import time
 from pathlib import Path
@@ -31,7 +30,10 @@ from rebar.grounding.detectors import registry as reg_mod
 pytestmark = pytest.mark.unit
 
 _HAVE_SEMGREP = shutil.which("opengrep") or shutil.which("semgrep")
-_HAVE_ASTGREP = shutil.which("ast-grep") or shutil.which("sg")
+# Validate identity, not just PATH presence: the Linux shadow-utils `sg` (run-as-group)
+# also answers `which sg` but is NOT ast-grep — gating on it ran the wrong tool, so the
+# positive match assertions failed on CI runners without a real ast-grep installed.
+_HAVE_ASTGREP = engine_b.astgrep_binary() is not None
 
 
 # ── fixtures ─────────────────────────────────────────────────────────────────
@@ -128,7 +130,9 @@ def test_unparseable_file_is_dropped_not_raised(tmp_path: Path) -> None:
 def test_builtin_smell_matches_via_real_engine(js_repo: Path) -> None:
     result = engine_b.scan(js_repo)
     _all_valid(result.records)
-    matches = [m for m in result.matches() if m.get("detector_id") == "rebar.builtin.smell.js-console-log"]
+    matches = [
+        m for m in result.matches() if m.get("detector_id") == "rebar.builtin.smell.js-console-log"
+    ]
     assert matches, "expected the console.log built-in to match"
     m = matches[0]
     assert m["outcome"] == ev.OUTCOME_MATCH
@@ -151,12 +155,15 @@ def test_invalid_detector_is_quarantined_and_does_not_abort_scan(js_repo: Path) 
     result = engine_b.scan(js_repo)
     _all_valid(result.records)
     quarantined = [
-        r for r in result.abstains()
+        r
+        for r in result.abstains()
         if r.get("detector_id") == "project.broken.rule" and r.get("reason") == "invalid_detector"
     ]
     assert quarantined, "invalid detector must be quarantined as abstain(invalid_detector)"
     # The scan did NOT abort: the good built-in still matched.
-    assert any(m.get("detector_id") == "rebar.builtin.smell.js-console-log" for m in result.matches())
+    assert any(
+        m.get("detector_id") == "rebar.builtin.smell.js-console-log" for m in result.matches()
+    )
 
 
 @pytest.mark.skipif(not _HAVE_SEMGREP, reason="opengrep/semgrep not installed")
@@ -167,7 +174,8 @@ def test_absent_language_detector_skipped_with_coverage(tmp_path: Path) -> None:
     result = engine_b.scan(tmp_path)
     _all_valid(result.records)
     skips = [
-        r for r in result.abstains()
+        r
+        for r in result.abstains()
         if r.get("detector_id") == "rebar.builtin.smell.js-console-log"
         and r.get("reason") == "unsupported_lang"
     ]
@@ -189,11 +197,14 @@ def test_non_relative_paths_glob_is_quarantined_not_a_crash(js_repo: Path) -> No
     result = engine_b.scan(js_repo)  # must not raise
     _all_valid(result.records)
     bad = [
-        r for r in result.abstains()
+        r
+        for r in result.abstains()
         if r.get("detector_id") == "project.badpath.rule" and r.get("reason") == "invalid_detector"
     ]
     assert bad, "a detector with a non-relative paths glob must be quarantined, not crash the scan"
-    assert any(m.get("detector_id") == "rebar.builtin.smell.js-console-log" for m in result.matches())
+    assert any(
+        m.get("detector_id") == "rebar.builtin.smell.js-console-log" for m in result.matches()
+    )
 
 
 def test_suffix_ambiguity_attributes_to_most_specific_detector() -> None:
@@ -203,8 +214,11 @@ def test_suffix_ambiguity_attributes_to_most_specific_detector() -> None:
 
     def _det(did: str) -> Detector:
         return Detector(
-            id=did, backend=reg_mod.BACKEND_OPENGREP, namespace="project",
-            source_path="x.yaml", rule={"languages": ["javascript"]},
+            id=did,
+            backend=reg_mod.BACKEND_OPENGREP,
+            namespace="project",
+            source_path="x.yaml",
+            rule={"languages": ["javascript"]},
             envelope={"job": ev.JOB_SMELL, "tier": ev.TIER_T1},
         )
 
@@ -226,7 +240,9 @@ def test_astgrep_backend_matches(js_repo: Path) -> None:
 # ── project custom tree-sitter grammar (ast-grep customLanguages) ────────────
 
 
-def test_project_sgconfig_is_threaded_to_astgrep(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_project_sgconfig_is_threaded_to_astgrep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # AC5: a project custom-grammar declared in the .rebar/ slot is honored — its
     # sgconfig.yml is passed to ast-grep via --config, and a detector in the custom
     # language routes as applicable (its files are present) instead of being skipped.
@@ -236,16 +252,21 @@ def test_project_sgconfig_is_threaded_to_astgrep(tmp_path: Path, monkeypatch: py
     )
     (tmp_path / "main.mojo").write_text("fn main(): pass\n")
     det = reg_mod.Detector(
-        id="project.mojo.smell", backend=reg_mod.BACKEND_ASTGREP, namespace="project",
+        id="project.mojo.smell",
+        backend=reg_mod.BACKEND_ASTGREP,
+        namespace="project",
         source_path=str(tmp_path / "rule.yml"),
-        rule={"language": "mojo"}, envelope={"job": ev.JOB_SMELL, "tier": ev.TIER_T1},
+        rule={"language": "mojo"},
+        envelope={"job": ev.JOB_SMELL, "tier": ev.TIER_T1},
     )
 
     sgconfig, custom_exts = engine_b._resolve_astgrep_sgconfig(tmp_path)
     assert sgconfig and sgconfig.endswith("sgconfig.yml")
     assert custom_exts == {"mojo": {".mojo"}}
     # The mojo detector is applicable because the project grammar maps .mojo.
-    applicable, _ = engine_b._is_applicable(det, engine_b._repo_extensions(tmp_path), tmp_path, custom_exts)
+    applicable, _ = engine_b._is_applicable(
+        det, engine_b._repo_extensions(tmp_path), tmp_path, custom_exts
+    )
     assert applicable is True
 
     # The sgconfig path is actually passed to ast-grep via --config.
@@ -254,9 +275,11 @@ def test_project_sgconfig_is_threaded_to_astgrep(tmp_path: Path, monkeypatch: py
     def fake_run_tool(cmd, **kw):
         captured["cmd"] = cmd
         return harness_stub
+
     from rebar.grounding import harness as _h
+
     harness_stub = _h.RunResult(backend="ast-grep", completed=True, returncode=0, stdout="[]")
-    monkeypatch.setattr(engine_b, "_resolve_binary", lambda c: "ast-grep")
+    monkeypatch.setattr(engine_b, "astgrep_binary", lambda: "ast-grep")
     monkeypatch.setattr(engine_b, "_binary_version", lambda b: "0.0")
     monkeypatch.setattr(engine_b.harness, "run_tool", fake_run_tool)
     engine_b._run_astgrep([det], tmp_path, sgconfig)
@@ -269,9 +292,12 @@ def test_unconfigured_custom_language_is_skipped_with_coverage(tmp_path: Path) -
     # is skipped as unsupported_lang with a coverage record (never run, never crash).
     (tmp_path / "main.mojo").write_text("fn main(): pass\n")  # no sgconfig present
     det = reg_mod.Detector(
-        id="project.mojo.smell", backend=reg_mod.BACKEND_ASTGREP, namespace="project",
+        id="project.mojo.smell",
+        backend=reg_mod.BACKEND_ASTGREP,
+        namespace="project",
         source_path=str(tmp_path / "rule.yml"),
-        rule={"language": "mojo"}, envelope={"job": ev.JOB_SMELL, "tier": ev.TIER_T1},
+        rule={"language": "mojo"},
+        envelope={"job": ev.JOB_SMELL, "tier": ev.TIER_T1},
     )
     result = engine_b.scan(tmp_path, registry=reg_mod.Registry(detectors=(det,)))
     _all_valid(result.records)
@@ -294,10 +320,15 @@ def test_metric_backend_no_tool_when_absent(js_repo: Path, monkeypatch: pytest.M
         return real_which(name, *a, **k)
 
     monkeypatch.setattr(engine_b.shutil, "which", fake_which)
-    records = engine_b._run_metric(list(reg_mod.load_registry().by_backend(reg_mod.BACKEND_METRIC)), js_repo)
+    records = engine_b._run_metric(
+        list(reg_mod.load_registry().by_backend(reg_mod.BACKEND_METRIC)), js_repo
+    )
     _all_valid(records)
     assert records
-    assert all(r["reason"] == "no_tool" and r["coverage"]["backend"] == engine_b.BACKEND_METRIC for r in records)
+    assert all(
+        r["reason"] == "no_tool" and r["coverage"]["backend"] == engine_b.BACKEND_METRIC
+        for r in records
+    )
 
 
 # ── missing engine binary still fails open ───────────────────────────────────
@@ -309,7 +340,10 @@ def test_missing_opengrep_binary_fails_open(js_repo: Path, monkeypatch: pytest.M
     records = engine_b._run_opengrep(dets, js_repo)
     _all_valid(records)
     assert records
-    assert all(r["reason"] == "no_tool" and r["coverage"]["backend"] == engine_b.BACKEND_OPENGREP for r in records)
+    assert all(
+        r["reason"] == "no_tool" and r["coverage"]["backend"] == engine_b.BACKEND_OPENGREP
+        for r in records
+    )
 
 
 def test_missing_astgrep_binary_fails_open(js_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:

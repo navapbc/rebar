@@ -29,10 +29,8 @@ from pathlib import Path
 
 import pytest
 
-from rebar.grounding import deps
-from rebar.grounding import engine_b
+from rebar.grounding import deps, engine_b, harness
 from rebar.grounding import evidence as ev
-from rebar.grounding import harness
 from rebar.grounding import resolve as r
 from rebar.grounding.detectors import registry as reg_mod
 
@@ -40,9 +38,13 @@ from . import _worker_payloads as wp
 
 pytestmark = pytest.mark.unit
 
-_HAVE_CTAGS = shutil.which("ctags") is not None
+# Validate tool IDENTITY, not just PATH presence (CI runners ship impostors):
+#  * macOS preinstalls BSD `ctags` (answers `which ctags`) — not Universal Ctags, whose
+#    JSON index the resolve lane needs; gate on the version probe that matches "Universal".
+#  * Linux preinstalls shadow-utils `sg` (run-as-group) — not ast-grep; gate on identity.
+_HAVE_CTAGS = r.ctags_version() is not None
 _HAVE_SEMGREP = bool(shutil.which("opengrep") or shutil.which("semgrep"))
-_HAVE_ASTGREP = bool(shutil.which("ast-grep") or shutil.which("sg"))
+_HAVE_ASTGREP = engine_b.astgrep_binary() is not None
 
 _BOGUS = "this-binary-does-not-exist-xyzzy-9000"
 
@@ -108,7 +110,9 @@ def _harness_timeout() -> harness.RunResult:
 def _harness_version_skew() -> harness.RunResult:
     return harness.run_tool(
         [sys.executable, "-c", "raise SystemExit('should not run')"],
-        backend="ctags", version="6.0.0", expected_version="6.2.1",
+        backend="ctags",
+        version="6.0.0",
+        expected_version="6.2.1",
     )
 
 
@@ -158,9 +162,7 @@ def test_ctags_missing_tool(repo, monkeypatch) -> None:
 def test_ctags_timeout(repo) -> None:
     # No prebuilt index -> the lane builds one under the clamped timeout and the ctags
     # child is reaped -> timeout abstain (a prebuilt index would skip the build).
-    rec = r.refute_absence(
-        {"kind": "symbol", "name": "TicketStore"}, repo_root=repo, timeout=1e-9
-    )
+    rec = r.refute_absence({"kind": "symbol", "name": "TicketStore"}, repo_root=repo, timeout=1e-9)
     _assert_fail_open(rec, expected_reason="timeout")
 
 
@@ -168,7 +170,8 @@ def test_ctags_timeout(repo) -> None:
 def test_ctags_unsupported_lang(repo, ctags_index) -> None:
     rec = r.refute_absence(
         {"kind": "symbol", "name": "X", "language": "Brainfuck-9000"},
-        repo_root=repo, index=ctags_index,
+        repo_root=repo,
+        index=ctags_index,
     )
     _assert_fail_open(rec, expected_reason="unsupported_lang")
 
@@ -195,11 +198,17 @@ def _dep(name: str = "requests", eco: str = "pypi") -> dict:
     "failure_mode, raiser, expected_reason",
     [
         ("timeout", TimeoutError("read timed out"), "timeout"),
-        ("network-error (offline)", __import__("urllib.error", fromlist=["URLError"]).URLError("offline"), "network_error"),
+        (
+            "network-error (offline)",
+            __import__("urllib.error", fromlist=["URLError"]).URLError("offline"),
+            "network_error",
+        ),
         ("crash (OSError)", OSError("connection reset"), "network_error"),
     ],
 )
-def test_registry_lane_transient_failures(monkeypatch, failure_mode, raiser, expected_reason) -> None:
+def test_registry_lane_transient_failures(
+    monkeypatch, failure_mode, raiser, expected_reason
+) -> None:
     def _raise(url, timeout=10.0):
         raise raiser
 
@@ -216,7 +225,9 @@ def test_registry_lane_rate_limited(monkeypatch) -> None:
 
 def test_registry_lane_unsupported_ecosystem(monkeypatch) -> None:
     # The deps analogue of unsupported-lang: an ecosystem with no oracle.
-    monkeypatch.setattr(deps, "_http_get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no probe")))
+    monkeypatch.setattr(
+        deps, "_http_get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no probe"))
+    )
     rec = deps.refute_package(_dep("whatever", "cocoapods"))
     _assert_fail_open(rec, expected_reason="unsupported_lang")
 
@@ -294,7 +305,8 @@ def test_opengrep_invalid_detector_is_quarantined_scan_continues(repo) -> None:
     for rec in result.records:
         ev.validate(rec)
     quarantined = [
-        r for r in result.abstains()
+        r
+        for r in result.abstains()
         if r.get("detector_id") == "project.broken.rule" and r.get("reason") == "invalid_detector"
     ]
     assert quarantined, "invalid detector must be quarantined as abstain(invalid_detector)"
@@ -325,9 +337,12 @@ def test_metric_unsupported_lang_when_no_matching_files(tmp_path, monkeypatch) -
     # an unsupported_lang coverage record (routing, not a tool failure).
     (tmp_path / "only.txt").write_text("hello\n")
     det = reg_mod.Detector(
-        id="project.metric.go-only", backend=reg_mod.BACKEND_METRIC, namespace="project",
+        id="project.metric.go-only",
+        backend=reg_mod.BACKEND_METRIC,
+        namespace="project",
         source_path=str(tmp_path / "m.yaml"),
-        rule={"languages": ["go"]}, envelope={"job": ev.JOB_SMELL, "tier": ev.TIER_T1},
+        rule={"languages": ["go"]},
+        envelope={"job": ev.JOB_SMELL, "tier": ev.TIER_T1},
     )
     result = engine_b.scan(tmp_path, registry=reg_mod.Registry(detectors=(det,)))
     skips = [r for r in result.abstains() if r.get("detector_id") == "project.metric.go-only"]
@@ -346,11 +361,18 @@ def test_metric_unsupported_lang_when_no_matching_files(tmp_path, monkeypatch) -
         ("hang (uninterruptible)", wp.hangs_forever, (), None, "timeout"),
         ("crash (signal death / segfault stand-in)", wp.hard_crash, (), None, "parse_error"),
         ("raise (python exception)", wp.raises_error, (), None, "other"),
-        ("version-skew (binding ABI)", wp.returns_value, (1,),
-         {"version": "0.20", "expected_version": "0.21"}, "version_skew"),
+        (
+            "version-skew (binding ABI)",
+            wp.returns_value,
+            (1,),
+            {"version": "0.20", "expected_version": "0.21"},
+            "version_skew",
+        ),
     ],
 )
-def test_worker_boundary_failure_modes(failure_mode, payload, args, kwargs, expected_reason) -> None:
+def test_worker_boundary_failure_modes(
+    failure_mode, payload, args, kwargs, expected_reason
+) -> None:
     """The in-process binding boundary maps every failure mode to a closed abstain.
 
     A tree-sitter binding can hang or segfault a C-extension; run_in_worker isolates it
@@ -383,8 +405,13 @@ def test_matrix_dimensions_are_complete() -> None:
     """
     backends = {"ctags", "registry", "opengrep", "ast-grep", "metric", "worker"}
     modes = {
-        "unsupported-lang", "missing-tool", "parse-error", "crash",
-        "timeout", "version-skew", "invalid-detector",
+        "unsupported-lang",
+        "missing-tool",
+        "parse-error",
+        "crash",
+        "timeout",
+        "version-skew",
+        "invalid-detector",
     }
     # Every backend is exercised by at least one cell above; every failure mode is
     # exercised by at least one backend. (The harness-boundary test proves the shared
