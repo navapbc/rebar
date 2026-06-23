@@ -243,3 +243,40 @@ def test_no_second_interpreter_model_call_for_a_repairable_response():
     )
     assert out["verdict"] == "PASS"
     assert calls["n"] == 1, f"a repairable reply triggered {calls['n']} model calls (expected 1)"
+
+
+def test_citation_model_coerces_out_of_enum_kind() -> None:
+    # A model may emit a citation kind outside the closed enum (e.g. 'code'); the shared
+    # Citation model must coerce it (path→file, url→url, else source) so it doesn't fail the
+    # whole structured output — which falsely blocked the completion close gate (dogfood bug).
+    from rebar.llm.findings import citation_model
+
+    C = citation_model()
+    assert C(kind="code", path="a.py", line_start=1).kind == "file"
+    assert C(kind="code", url="http://x").kind == "url"
+    assert C(kind="bogus", description="evidence").kind == "source"
+    assert C(kind="file", path="a.py").kind == "file"  # valid kinds untouched
+
+
+def test_completion_verdict_accepts_coerced_citation_kind() -> None:
+    # End-to-end: a completion_verdict whose finding cites kind='code' validates (coerced to
+    # 'file') instead of raising 'code is not one of [file, url, source]'.
+    from rebar import schemas
+    from rebar.llm import contracts
+
+    model = contracts.response_model_for("completion_verdict")
+    obj = model.model_validate(
+        {
+            "verdict": "FAIL",
+            "findings": [
+                {
+                    "criterion": "X",
+                    "detail": "missing",
+                    "citations": [{"kind": "code", "path": "a.py", "line_start": 1, "line_end": 2}],
+                }
+            ],
+        }
+    )
+    dumped = obj.model_dump(exclude_none=True)
+    schemas.validator(schemas.COMPLETION_VERDICT).validate(dumped)
+    assert dumped["findings"][0]["citations"][0]["kind"] == "file"

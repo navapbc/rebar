@@ -341,7 +341,7 @@ def citation_model():
     ``common.schema.json#/$defs/citation``. Factored out (not nested) so OTHER output
     contracts (e.g. ``completion_verdict``) reuse the SAME citation shape — one source
     of truth, no drift. pydantic imported here, never at module top."""
-    from pydantic import BaseModel, Field
+    from pydantic import BaseModel, Field, model_validator
 
     class Citation(BaseModel):
         kind: str = Field(description="One of: file | url | source.")
@@ -352,6 +352,18 @@ def citation_model():
         description: str | None = Field(
             default=None, description="Freeform source/evidence (kind=source)."
         )
+
+        @model_validator(mode="before")
+        @classmethod
+        def _coerce_kind(cls, data):
+            # A model may emit a kind outside the closed enum (e.g. 'code'); coerce it like
+            # _coerce_citation (path→file, url→url, else source) rather than failing the whole
+            # structured output (which would falsely block, e.g., the completion close gate).
+            if isinstance(data, dict) and data.get("kind") not in CITATION_KINDS:
+                d = dict(data)
+                d["kind"] = "file" if d.get("path") else ("url" if d.get("url") else "source")
+                return d
+            return data
 
     return Citation
 
