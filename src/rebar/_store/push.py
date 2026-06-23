@@ -107,9 +107,20 @@ def push_tickets_branch(base_path: str) -> None:
     if not remote or not remote[0].strip():
         return  # no remote — nothing to push
 
+    # Branch resolved from the MAIN repo config (the tracker's parent), matching
+    # _push_mode. Best-effort: on a malformed config, skip rather than push to a
+    # guessed branch (a wrong refspec would publish to the wrong remote branch).
+    from rebar.config import ConfigError, tickets_branch
+
+    try:
+        branch = tickets_branch(os.path.dirname(base_path))
+    except ConfigError:
+        return
+    remote_ref = f"origin/{branch}"
+
     push_env = {**os.environ, "PRE_COMMIT_ALLOW_NO_CONFIG": "1"}
     for attempt in range(1, _MAX_RETRIES + 1):
-        res = _git(base_path, "push", "origin", "HEAD:tickets", env=push_env)
+        res = _git(base_path, "push", "origin", f"HEAD:{branch}", env=push_env)
         if res.returncode == 0:
             return
         stderr = res.stderr or ""
@@ -121,7 +132,7 @@ def push_tickets_branch(base_path: str) -> None:
             return  # non-retriable class — best-effort
 
         # Non-fast-forward: reconcile by MERGE (not rebase).
-        _git(base_path, "fetch", "origin", "tickets")
+        _git(base_path, "fetch", "origin", branch)
         from rebar._store import lock as _lock
 
         try:
@@ -137,10 +148,10 @@ def push_tickets_branch(base_path: str) -> None:
         merge = _git(
             base_path,
             "merge",
-            "origin/tickets",
+            remote_ref,
             "--no-edit",
             "-m",
-            "Merge origin/tickets (auto-reconcile during push retry)",
+            f"Merge {remote_ref} (auto-reconcile during push retry)",
         )
         if merge.returncode == 0:
             continue  # merged clean — retry push next iter
@@ -159,10 +170,10 @@ def push_tickets_branch(base_path: str) -> None:
             merge2 = _git(
                 base_path,
                 "merge",
-                "origin/tickets",
+                remote_ref,
                 "--no-edit",
                 "-m",
-                "Merge origin/tickets (auto-reconcile, post-stash)",
+                f"Merge {remote_ref} (auto-reconcile, post-stash)",
             )
             _git(base_path, "stash", "pop", "--quiet")  # pop unconditionally
             if merge2.returncode != 0:

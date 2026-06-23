@@ -189,12 +189,17 @@ def ensure_fresh(tracker: str, *, no_sync: bool = False) -> None:
     if no_sync or _sync_disabled(os.path.dirname(os.path.realpath(tracker))):
         return
     try:
+        from rebar.config import tickets_branch
+
         tracker_abs = os.path.realpath(tracker)
         if not os.path.isdir(tracker_abs):
             return
+        # Branch resolved from the MAIN repo config (parent of the tracker), matching
+        # _sync_disabled above; a ConfigError is swallowed by the outer best-effort guard.
+        branch = tickets_branch(os.path.dirname(tracker_abs))
         # Only sync a tracker with a real tickets branch (matches _ensure_initialized).
         r = subprocess.run(
-            ["git", "-C", tracker_abs, "rev-parse", "--verify", "tickets"],
+            ["git", "-C", tracker_abs, "rev-parse", "--verify", branch],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

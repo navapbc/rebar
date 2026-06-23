@@ -282,30 +282,33 @@ def _acquire_init_lock(lock_dir: str) -> bool:
 
 
 def _mount_or_create_branch(repo: str, tracker: str) -> int:
-    local = _git_ok(repo, "rev-parse", "--verify", "tickets")
-    remote = _git_ok(repo, "rev-parse", "--verify", "origin/tickets")
+    from rebar.config import tickets_branch
+
+    branch = tickets_branch(repo)  # configured tracker.branch (default "tickets")
+    local = _git_ok(repo, "rev-parse", "--verify", branch)
+    remote = _git_ok(repo, "rev-parse", "--verify", f"origin/{branch}")
     if local:
-        cp = _git(repo, "worktree", "add", tracker, "tickets")
+        cp = _git(repo, "worktree", "add", tracker, branch)
         if cp.returncode != 0:
             sys.stderr.write(f"ERROR: git worktree add (local branch) failed: {cp.stderr}\n")
             return 1
         return 0
     if remote:
-        _git(repo, "fetch", "origin", "tickets")
-        cp = _git(repo, "worktree", "add", tracker, "tickets")
+        _git(repo, "fetch", "origin", branch)
+        cp = _git(repo, "worktree", "add", tracker, branch)
         if cp.returncode != 0:
             sys.stderr.write(f"ERROR: git worktree add (remote branch) failed: {cp.stderr}\n")
             return 1
         return 0
     # Orphan branch.
-    cp = _git(repo, "worktree", "add", "--orphan", "-b", "tickets", tracker)
+    cp = _git(repo, "worktree", "add", "--orphan", "-b", branch, tracker)
     if cp.returncode != 0:
         # Fallback for git < 2.40.
         cp2 = _git(repo, "worktree", "add", "--detach", tracker)
         if cp2.returncode != 0:
             sys.stderr.write(f"ERROR: git worktree add --orphan failed: {cp.stderr}\n")
             return 1
-        _git(tracker, "checkout", "--orphan", "tickets")
+        _git(tracker, "checkout", "--orphan", branch)
         _git(tracker, "rm", "-rf", ".", "--quiet")
     _ensure_branch_user_config(repo, tracker)
     _git(tracker, "config", "commit.gpgsign", "false")

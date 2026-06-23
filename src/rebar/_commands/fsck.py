@@ -222,18 +222,25 @@ def _push_pending(tracker: str) -> str | None:
     def _git(*args: str) -> subprocess.CompletedProcess:
         return subprocess.run(["git", "-C", tracker, *args], capture_output=True, text=True)
 
+    # Branch resolved from the MAIN repo config (the tracker's parent); best-effort:
+    # a malformed config yields no push-pending notice rather than a crash.
+    try:
+        branch = config.tickets_branch(os.path.dirname(os.path.realpath(tracker)))
+    except config.ConfigError:
+        return None
+    remote_ref = f"origin/{branch}"
     if _git("remote", "get-url", "origin").returncode != 0:
         return None
-    if _git("rev-parse", "--verify", "origin/tickets").returncode != 0:
+    if _git("rev-parse", "--verify", remote_ref).returncode != 0:
         return None
-    cp = _git("rev-list", "origin/tickets..HEAD", "--count")
+    cp = _git("rev-list", f"{remote_ref}..HEAD", "--count")
     try:
         ahead = int((cp.stdout or "0").strip() or "0")
     except ValueError:
         ahead = 0
     if ahead > 0:
         return (
-            f"PUSH_PENDING: local tickets branch is ahead of origin/tickets by {ahead} "
+            f"PUSH_PENDING: local '{branch}' branch is ahead of {remote_ref} by {ahead} "
             "commit(s) — push pending (run a ticket write to retry the push, or check "
             "connectivity to origin)"
         )

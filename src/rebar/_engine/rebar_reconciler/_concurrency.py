@@ -52,8 +52,11 @@ def snapshot_head(repo_root: Path) -> str:
     callers can proceed and the drift guard simply treats every comparison
     as stable until the first commit lands.
     """
+    from rebar.config import tickets_branch
+
+    branch = tickets_branch(repo_root)  # configured tracker.branch (default "tickets")
     result = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", "tickets"],
+        ["git", "-C", str(repo_root), "rev-parse", branch],
         capture_output=True,
         text=True,
         check=False,

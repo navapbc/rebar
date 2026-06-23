@@ -490,12 +490,16 @@ def _commit_in_detached_tickets_worktree(repo_root: Path, commit_message: str, m
     import shutil as _shutil
     import tempfile as _tempfile
 
+    from rebar.config import tickets_branch
+
+    branch = tickets_branch(repo_root)  # configured tracker.branch (default "tickets")
+
     def _mutate_and_advance() -> None:
         # Snapshot the tickets HEAD *before* the commit so the CAS old-sha matches
         # rebase_retry's before-snapshot. Read inside the retried unit so a CAS race
         # re-reads the new tip and the change is rebuilt on it (bug 1f47-9337-3db0-4f3c).
         old_sha_result = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "tickets"],
+            ["git", "-C", str(repo_root), "rev-parse", branch],
             capture_output=True,
             text=True,
             check=False,
@@ -528,9 +532,9 @@ def _commit_in_detached_tickets_worktree(repo_root: Path, commit_message: str, m
 
             _shutil_preflight.rmtree(worktree_dir, ignore_errors=True)
         try:
-            # --detach avoids "fatal: 'tickets' is already used by worktree at ..." when a
-            # sibling worktree (e.g. .tickets-tracker) has tickets checked out.
-            _git_run(repo_root, ["worktree", "add", "--detach", str(worktree_dir), "tickets"])
+            # --detach avoids "fatal: '<branch>' is already used by worktree at ..." when a
+            # sibling worktree (e.g. the tracker dir) has the tickets branch checked out.
+            _git_run(repo_root, ["worktree", "add", "--detach", str(worktree_dir), branch])
             mutate_fn(worktree_dir)
             # Commit ONLY if there are staged changes (idempotent guard for retries and
             # for a no-op mutate — see the docstring's predicate-normalization note).

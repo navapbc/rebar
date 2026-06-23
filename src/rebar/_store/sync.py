@@ -66,8 +66,9 @@ def _ok(tracker: str, *args: str) -> bool:
     return _git(tracker, *args).returncode == 0
 
 
-def _do_reconverge(tracker: str) -> None:
+def _do_reconverge(tracker: str, branch: str) -> None:
     """The locked mutation critical section (lock held, fetch already ran)."""
+    remote = f"origin/{branch}"
     # Recovery guard, re-checked under the lock (637b): a reset/merge through an
     # interrupted rebase/merge would strand picks / clear MERGE_HEAD.
     try:
@@ -80,7 +81,7 @@ def _do_reconverge(tracker: str) -> None:
         )
         return
 
-    if not _ok(tracker, "rev-parse", "--verify", "origin/tickets"):
+    if not _ok(tracker, "rev-parse", "--verify", remote):
         return
 
     # Unrelated histories (no common ancestor): UNION them, never discard local.
@@ -88,26 +89,26 @@ def _do_reconverge(tracker: str) -> None:
     # shared mutable root files (.bridge_state/*, .reconciler-*) resolve via the
     # tickets-branch .gitattributes `merge=ours` (WU-3). Reuses the diverged-path
     # conflict net below (abort → keep local → hint fsck) — extend, don't reinvent.
-    if not _ok(tracker, "merge-base", "HEAD", "origin/tickets"):
-        _union_merge(tracker, "--allow-unrelated-histories")
+    if not _ok(tracker, "merge-base", "HEAD", remote):
+        _union_merge(tracker, remote, "--allow-unrelated-histories")
         return
 
     # Related histories. Local-ahead measured by HEAD (the WS3 fix).
-    local_ahead = _git(tracker, "rev-list", "origin/tickets..HEAD").stdout.strip()
+    local_ahead = _git(tracker, "rev-list", f"{remote}..HEAD").stdout.strip()
     if not local_ahead:
-        _git(tracker, "reset", "--hard", "origin/tickets", "--quiet")  # ff-adopt
+        _git(tracker, "reset", "--hard", remote, "--quiet")  # ff-adopt
         return
 
     # Local strictly ahead (origin is an ancestor of HEAD) → nothing to merge.
-    if _ok(tracker, "merge-base", "--is-ancestor", "origin/tickets", "HEAD"):
+    if _ok(tracker, "merge-base", "--is-ancestor", remote, "HEAD"):
         return
 
     # Diverged → merge-as-union. Conflict → abort, keep local, hint fsck.
-    _union_merge(tracker)
+    _union_merge(tracker, remote)
 
 
-def _union_merge(tracker: str, *extra: str) -> None:
-    """Merge ``origin/tickets`` into HEAD as a union — both parents are kept, so no
+def _union_merge(tracker: str, remote: str, *extra: str) -> None:
+    """Merge ``origin/<branch>`` into HEAD as a union — both parents are kept, so no
     local commit is ever orphaned (this is what lets stock ``git gc`` be safe; the
     reflog is no longer load-bearing). ``extra`` carries ``--allow-unrelated-histories``
     for the no-common-ancestor case. On the rare genuine conflict: abort, keep
@@ -116,15 +117,15 @@ def _union_merge(tracker: str, *extra: str) -> None:
         tracker,
         "merge",
         *extra,
-        "origin/tickets",
+        remote,
         "--no-edit",
         "-m",
-        "Merge origin/tickets (auto-reconcile during sync)",
+        f"Merge {remote} (auto-reconcile during sync)",
     )
     if merge.returncode != 0:
         _git(tracker, "merge", "--abort")
         print(
-            "Warning: tickets sync could not auto-merge origin/tickets — local state "
+            f"Warning: tickets sync could not auto-merge {remote} — local state "
             "kept; run: rebar fsck-recover",
             file=sys.stderr,
         )
@@ -147,16 +148,25 @@ def reconverge(tracker: str | os.PathLike) -> None:
         )
         return
 
-    # Fetch OUTSIDE the lock (only moves remote-tracking refs).
-    if not _ok(tracker, "fetch", "origin", "tickets", "--quiet"):
+    # Branch resolved from the MAIN repo config (the tracker's parent), matching
+    # reads._sync_disabled / _push_mode. Best-effort: a malformed config skips sync.
+    from rebar.config import ConfigError, tickets_branch
+
+    try:
+        branch = tickets_branch(os.path.dirname(str(tracker)))
+    except ConfigError:
         return
-    if not _ok(tracker, "rev-parse", "--verify", "origin/tickets"):
+
+    # Fetch OUTSIDE the lock (only moves remote-tracking refs).
+    if not _ok(tracker, "fetch", "origin", branch, "--quiet"):
+        return
+    if not _ok(tracker, "rev-parse", "--verify", f"origin/{branch}"):
         return
 
     # Locked reset/merge. Best-effort on lock contention (another writer/syncer holds
     # it) — bash does `flock -w 15 || exit 0`, so a timeout silently skips this round.
     try:
         with _lock.write_lock(tracker, timeout=_SYNC_LOCK_TIMEOUT, attempts=1, dual_window=True):
-            _do_reconverge(tracker)
+            _do_reconverge(tracker, branch)
     except _lock.LockTimeout:
         return
