@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/llm/workflow/editor.py","reason":"/validate endpoint"},{"path":"src/rebar/llm/workflow/editor_assets","reason":"debounce + markers + help panel"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782231648372257001,"uuid":"7a5a7077-4998-4478-8fc4-ac748eeca484"}
