@@ -77,8 +77,11 @@ def test_migrated_v1_validates_against_the_v2_schema() -> None:
         "name": "demo",
         "inputs": {"ticket_id": {"type": "string", "required": True}},
         "steps": [
-            {"id": "fetch", "uses": "fetch_ticket",
-             "with": {"ticket_id": "${{ inputs.ticket_id }}"}},
+            {
+                "id": "fetch",
+                "uses": "fetch_ticket",
+                "with": {"ticket_id": "${{ inputs.ticket_id }}"},
+            },
             {"id": "review", "prompt": "code-quality", "needs": ["fetch"]},
         ],
     }

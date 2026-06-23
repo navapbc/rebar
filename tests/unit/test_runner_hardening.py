@@ -72,7 +72,10 @@ def test_text_mode_makes_a_single_call() -> None:
     # text mode needs no structured output, so it never retries.
     model, calls = _sequence_model(["just some prose"])
     req = RunRequest(
-        system_prompt="x", instructions="y", config=LLMConfig(repo_path="."), reviewers=["v"],
+        system_prompt="x",
+        instructions="y",
+        config=LLMConfig(repo_path="."),
+        reviewers=["v"],
         mode="text",
     )
     out = PydanticAIRunner(LLMConfig(repo_path="."), model_override=model).run(req)

@@ -325,7 +325,8 @@ def test_undeclared_index_var_reference_is_flagged():
 def test_multiple_terminal_steps_flagged():
     # Two unconnected top-level sinks -> the top frame must converge to ONE terminal.
     doc = {
-        "schema_version": "2", "name": "twosinks",
+        "schema_version": "2",
+        "name": "twosinks",
         "steps": [{"id": "a", "uses": "o"}, {"id": "b", "uses": "o"}],
     }
     assert any("exactly one terminal step" in e for e in _lint_errors(doc))

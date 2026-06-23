@@ -66,7 +66,9 @@ def test_pydantic_review_ticket_opus(rebar_repo: Path) -> None:
     )
     (rebar_repo / "app.py").write_text("API_KEY = 'hardcoded-secret'\n", encoding="utf-8")
     result = llm.review_ticket(
-        epic, "ticket-quality", repo_root=str(rebar_repo),
+        epic,
+        "ticket-quality",
+        repo_root=str(rebar_repo),
         config=_cfg(rebar_repo, "claude-opus-4-8"),
     )
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
@@ -80,13 +82,14 @@ def test_pydantic_review_code(rebar_repo: Path) -> None:
     import rebar.llm as llm
 
     diff = (
-        "--- a/auth.py\n+++ b/auth.py\n@@ -0,0 +1,2 @@\n"
-        "+def check(t):\n+    return True  # TODO\n"
+        "--- a/auth.py\n+++ b/auth.py\n@@ -0,0 +1,2 @@\n+def check(t):\n+    return True  # TODO\n"
     )
     body = "def check(t):\n    return True  # TODO\n"
     (rebar_repo / "auth.py").write_text(body, encoding="utf-8")
     result = llm.review_code(
-        diff_text=diff, changed_files=["auth.py"], reviewers=["code-quality"],
+        diff_text=diff,
+        changed_files=["auth.py"],
+        reviewers=["code-quality"],
         config=_cfg(rebar_repo, _SONNET),
     )
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
@@ -99,13 +102,15 @@ def test_pydantic_scan_spec(rebar_repo: Path) -> None:
     import rebar.llm as llm
 
     rebar.create_ticket(
-        "epic", "Authentication",
+        "epic",
+        "Authentication",
         description="Login.\n\n## Acceptance Criteria\n- [ ] users can log in",
         repo_root=str(rebar_repo),
     )
     result = llm.scan_epics_for_spec(
         "The product must support multi-factor authentication and password reset.",
-        repo_root=str(rebar_repo), config=_cfg(rebar_repo, _SONNET),
+        repo_root=str(rebar_repo),
+        config=_cfg(rebar_repo, _SONNET),
     )
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
     assert result["runner"] == "pydantic_ai"
@@ -118,7 +123,8 @@ def test_pydantic_verify_completion(rebar_repo: Path) -> None:
     from rebar.llm.completion import verify_completion
 
     t = rebar.create_ticket(
-        "task", "Add a greeting helper",
+        "task",
+        "Add a greeting helper",
         description=(
             "Add a greet() function.\n\n## Acceptance Criteria\n"
             "- [ ] a function `greet(name)` exists in greet.py returning 'hello, <name>'"
@@ -145,7 +151,9 @@ def test_pydantic_text_mode(rebar_repo: Path) -> None:
     req = RunRequest(
         system_prompt="You are a concise assistant.",
         instructions="Reply with exactly the word: ready",
-        config=cfg, mode="text", reviewers=[],
+        config=cfg,
+        mode="text",
+        reviewers=[],
     )
     out = runner.run(req)
     assert out["runner"] == "pydantic_ai"
@@ -162,18 +170,21 @@ def test_pydantic_workflow_agent_step(rebar_repo: Path) -> None:
     from rebar.llm.workflow.runs import RunnerAgentStep
 
     t = rebar.create_ticket(
-        "task", "Review me",
+        "task",
+        "Review me",
         description="A task.\n\n## Acceptance Criteria\n- [ ] does the thing",
         repo_root=str(rebar_repo),
     )
     doc = {
-        "schema_version": "2", "name": "live-agent",
+        "schema_version": "2",
+        "name": "live-agent",
         "steps": [{"id": "review", "prompt": "ticket-quality", "mode": "findings"}],
     }
     agent_runner = RunnerAgentStep(
         runner=PydanticAIRunner(_cfg(rebar_repo, _SONNET)), repo_root=str(rebar_repo)
     )
-    res = run_workflow(doc, {"ticket_id": t}, target_ticket=t, repo_root=str(rebar_repo),
-                       agent_runner=agent_runner)
+    res = run_workflow(
+        doc, {"ticket_id": t}, target_ticket=t, repo_root=str(rebar_repo), agent_runner=agent_runner
+    )
     # The run completed and the agent step produced an output via pydantic_ai.
     assert res is not None

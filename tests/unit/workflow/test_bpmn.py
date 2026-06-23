@@ -491,10 +491,19 @@ def test_branch_gateway_and_flows_are_labelled():
     # The gateway carries its condition and the arms are labelled then/else, so the decision
     # logic is visible on the canvas (labels are display-only; not read back).
     doc = {
-        "schema_version": "2", "name": "b", "inputs": {"x": {"type": "boolean"}},
-        "steps": [{"id": "g", "branch": {"when": "${{ inputs.x }}",
-                                         "then": [{"id": "t", "uses": "o"}],
-                                         "else": [{"id": "e", "uses": "o"}]}}],
+        "schema_version": "2",
+        "name": "b",
+        "inputs": {"x": {"type": "boolean"}},
+        "steps": [
+            {
+                "id": "g",
+                "branch": {
+                    "when": "${{ inputs.x }}",
+                    "then": [{"id": "t", "uses": "o"}],
+                    "else": [{"id": "e", "uses": "o"}],
+                },
+            }
+        ],
     }
     xml = bpmn.ir_to_bpmn(doc)
     assert 'name="${{ inputs.x }}"' in xml  # gateway labelled with the condition
@@ -508,7 +517,9 @@ def test_branch_continuation_flow_is_labelled_after():
     # incoming flow, so the gateway's post-branch continuation reads as a continuation,
     # not a third decision outcome.
     doc = {
-        "schema_version": "2", "name": "c", "inputs": {"x": {"type": "boolean"}},
+        "schema_version": "2",
+        "name": "c",
+        "inputs": {"x": {"type": "boolean"}},
         "steps": [
             {"id": "g", "branch": {"when": "${{ inputs.x }}", "then": [{"id": "t", "uses": "o"}]}},
             {"id": "after_step", "uses": "o", "needs": ["g"]},

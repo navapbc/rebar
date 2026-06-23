@@ -35,9 +35,7 @@ def test_pydantic_runner_honours_max_iterations_budget():
             parts=[ToolCallPart(tool_name=info.function_tools[0].name, args={"path": "."})]
         )
 
-    cfg = replace(
-        LLMConfig.from_env(), runner="pydantic_ai", repo_path=".", max_iterations=5
-    )
+    cfg = replace(LLMConfig.from_env(), runner="pydantic_ai", repo_path=".", max_iterations=5)
     runner = PydanticAIRunner(cfg, model_override=FunctionModel(loop))
     req = RunRequest(
         system_prompt="x",
