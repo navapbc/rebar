@@ -863,20 +863,58 @@ def _file_token(path: Path) -> tuple[str, int | None, int | None]:
         return (str(path), None, None)
 
 
+def _config_probe_paths(root: str | os.PathLike[str] | None = None) -> list[Path]:
+    """Every project-config location the discovery walk PROBES (present or not),
+    mirroring :func:`_discover_project_config`'s candidate order. Including their
+    stat-tokens in the resolved-Config validation lets a warm cache hit detect a
+    config file that APPEARS where none was found (or a higher-priority one
+    appearing) — the gap that an only-read-files validation cannot catch (an empty
+    validation is vacuously 'fresh' forever). This is exercised when ``load_config``
+    runs BEFORE a config file is written in the same process (e.g. ``init`` →
+    ``tracker_dir`` → resolve, then a config file is created). Stat-only, and only on
+    a COLD resolve (cache miss), so it adds no warm-hit walk."""
+    env = os.environ.get("REBAR_CONFIG")
+    if env:
+        return [Path(env)]
+    base = repo_root(root)
+    out: list[Path] = []
+    cur = base
+    while True:
+        out.append(cur / "rebar.toml")
+        out.append(cur / "pyproject.toml")
+        if (cur / ".git").exists() or cur.parent == cur:
+            break
+        cur = cur.parent
+    out.append(base / ".rebar" / "config.conf")
+    out.append(base / ".rebar.conf")
+    return out
+
+
 def _resolve(
     root: str | os.PathLike[str] | None, cli_overrides: dict | None
 ) -> tuple[Config, tuple]:
     """Resolve the Config AND the validation token (stat-tokens of the files that
-    actually fed the result), so a warm cache hit can detect an edit without a walk."""
+    fed the result PLUS the probed candidate locations), so a warm cache hit can
+    detect both an edit to a read file and a config file APPEARING where none was
+    found — without a re-walk."""
     layers, proj = _ordered_layers(root, cli_overrides=cli_overrides, strict=_strict_unknown_keys())
     cfg = Config.from_mapping(merge_sparse(*(sparse for _, sparse in layers)))
-    read_paths: list[Path] = []
     up = user_config_path()
+    read_paths: list[Path] = []
     if up.is_file():
         read_paths.append(up)
     if proj is not None:
         read_paths.append(proj[0])
-    return cfg, tuple(_file_token(p) for p in read_paths)
+    # Read files first, then the (possibly-absent) probe candidates — deduped, so a
+    # newly-appearing higher-priority config invalidates the warm-hit cache.
+    tokens: list[tuple] = []
+    seen: set[str] = set()
+    for p in [*read_paths, *_config_probe_paths(root), up]:
+        key = str(p)
+        if key not in seen:
+            seen.add(key)
+            tokens.append(_file_token(p))
+    return cfg, tuple(tokens)
 
 
 def load_config(
