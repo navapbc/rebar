@@ -38,37 +38,22 @@ dependencies = [
 [project.optional-dependencies]
 mcp = ["mcp>=1.2"]
 # LLM agent-operations framework (rebar.llm). OPTIONAL — never required by core
-# rebar (the engine stays stdlib-only, `dependencies = []`). The default in-process
-# runner is the LangChain/LangGraph stack — the one agent runtime native to BOTH
-# Langflow and Langfuse — but everything here is imported lazily, so `import rebar`
-# and even `import rebar.llm` stay dependency-free; only *running* an operation
-# needs this extra. langchain/langgraph are pinned to the v1 line (the
-# `langchain.agents.create_agent` API); langfuse forces pydantic v2. The Langflow
-# runner needs no dependency (a stubbed REST seam); custom read-only filesystem
-# tools avoid langchain-community.
+# rebar (the engine stays stdlib-only, `dependencies = []`). The in-process runner is the
+# provider-agnostic pydantic-ai runtime (the LangChain/LangGraph stack was dropped in the
+# d6d1 cutover). Everything here is imported lazily, so `import rebar` and even
+# `import rebar.llm` stay dependency-free; only *running* an operation needs this extra.
 agents = [
-    "langchain>=1,<2",
-    # Exact-pin the langgraph stack (WS-D4). create_agent v1's structured-output
-    # path (ToolStrategy) is version-sensitive, so the stack is pinned and upgrades
-    # are gated behind the WS-G prompt evals — never picked up silently. Bump these
-    # three together after an eval pass.
-    "langgraph==1.2.5",
-    "langgraph-prebuilt==1.1.0",
-    "langgraph-checkpoint==4.1.1",
-    "langchain-anthropic>=0.3",  # Claude (default provider)
-    "langchain-openai>=0.2",     # ChatGPT / OpenAI-compatible local servers
-    "langchain-mcp-adapters>=0.3",
-    "langfuse>=3",
-    "pydantic>=2",
-    "deepagents>=0.6",  # opt-in harness runner (planning/subagents); not the review default
-    # Provider-agnostic agent runtime (epic hump-seam-spice / 7d58): the PydanticAIRunner
-    # behind the Runner seam. ~half the deps of the langgraph stack; the provider is
-    # chosen by the model string (no per-provider code). `[anthropic]` is the primary
-    # provider SDK; OpenAI/Google are opt-in (`pydantic-ai-slim[openai|google]`). The
-    # tolerant structured-output parse uses json-repair (no LLM). LangGraph is dropped
-    # in a later story (d6d1) once the parity bar is met.
+    # Provider-agnostic agent runtime (epic hump-seam-spice): the PydanticAIRunner behind
+    # the Runner seam — THE runtime since the d6d1 cutover dropped the LangChain/LangGraph
+    # stack (it was validated live across every operation first). The provider is chosen by
+    # the model string (no per-provider code); `[anthropic]` is the primary provider SDK,
+    # OpenAI/Google are opt-in (`pydantic-ai-slim[openai|google]`). MCP is native to
+    # pydantic-ai (no langchain-mcp-adapters). The tolerant structured-output parse uses
+    # json-repair (no LLM). Tracing is the optional `[tracing]` OTel exporter (Langfuse is
+    # an OTLP endpoint, not an SDK dep here).
     "pydantic-ai-slim[anthropic]>=1,<2",
     "json-repair>=0.30",
+    "pydantic>=2",
 ]
 # Additional model providers are opt-in (keep the default extra lean):
 #   pip install langchain-google-genai   # Gemini

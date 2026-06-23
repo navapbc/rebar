@@ -48,8 +48,9 @@ exact `pip install nava-rebar[<extra>]`), and CI-enforced lean by
 `.github/workflows/optionality.yml` (an AST import-linter + a clean-core-wheel job
 that asserts the heavy stack is *not* importable + per-extra and union jobs):
 
-- **`[agents]`** — the LLM agent runtime (langchain/langgraph + a provider SDK):
-  agent workflow steps, `review_*`, the workflow agent runner.
+- **`[agents]`** — the LLM agent runtime (`pydantic-ai-slim[anthropic]` +
+  `json-repair`, `pydantic>=2`): agent workflow steps, `review_*`, the workflow
+  agent runner.
 - **`[eval]`** — prompt evaluation (Inspect AI + promptfoo interop).
 - **`[tracing]`** — the OTLP trace sink. **Write-only by rule:** OpenTelemetry is a
   *sink*, never read back into a rebar decision (the oracle-discipline rule). The
@@ -64,29 +65,37 @@ else is one of these extras. A scripted-only workflow runs with no extra at all.
 The design was chosen after a research spike + two independent Opus design reviews
 (both *GO-WITH-CHANGES*; their must-fixes are folded in below).
 
+> **Stack note (d6d1 cutover).** The original runtime was built on
+> LangChain/LangGraph (with a deepagents experimental harness); that stack was
+> **removed in the d6d1 cutover**. The runtime is now the provider-agnostic,
+> in-process **pydantic-ai** runner — this doc describes that current state, so
+> don't be confused by the LangChain/LangGraph references in git history.
+
 - The agent **tool-use loop is a solved problem** — we do not reimplement one.
 - We need the agent to have **filesystem access** (a repo) and **MCP servers** as
   tools, and we want **Langfuse** tracing usable across environments.
-- Of the widely-used, actively-maintained agent runtimes, **LangChain / LangGraph
-  is natively traced by Langfuse** (every other framework — CrewAI, LlamaIndex,
-  Pydantic AI, OpenAI Agents SDK, Google ADK, the Anthropic Claude Agent SDK —
-  integrates with Langfuse only via OpenTelemetry). So LangChain/LangGraph is
-  the **default in-process substrate** — but kept strictly optional, behind the
-  `nava-rebar[agents]` extra, so it is never required by core rebar.
+- The chosen substrate is the provider-agnostic, in-process **pydantic-ai**
+  runtime (`PydanticAIRunner`): it resolves any provider from a `provider:model`
+  string, speaks **MCP natively** (no adapter shim), and gives a reliable
+  structured-output stack (NativeOutput/PromptedOutput + `json-repair` + bounded
+  retry). Tracing is the optional `[tracing]` OpenTelemetry exporter to Langfuse's
+  OTLP endpoint (Langfuse is an OTLP sink, not an SDK dependency). The whole
+  runtime is kept strictly optional behind the `nava-rebar[agents]` extra, so it
+  is never required by core rebar.
 
 ```
  operation (review_ticket)                      reviewer registry
    │  assemble deterministic context              │ catalog.json  (id, dimension,
    │  (rebar reads, sorted, no timestamps)        │   selection rules — local, tested)
-   │  resolve reviewer prompt ───────────────────▶│ prompt TEXT ◀── Langfuse prompt mgmt
-   │                                              │   (packaged *.md fallback offline)
-   ▼
+   │  resolve reviewer prompt ───────────────────▶│ prompt TEXT (git-canonical:
+   │                                              │   .rebar/prompts/<id>.md override
+   ▼                                              │   ▸ packaged reviewers/*.md)
  Runner (pluggable)                              findings contract
-   ├── LangGraphRunner  (default, in-process)      review_result.schema.json
-   │     create_agent + ToolStrategy structured      finding / citation / severity
-   │     output; read-only line-numbered file        ($defs in common.schema.json)
-   │     tools + MCP tools; Langfuse callback      ▲
-   ├── DeepAgentsRunner (experimental opt-in) ─────┘ validated + citations resolved
+   ├── PydanticAIRunner (the runtime, in-process)  review_result.schema.json
+   │     provider from model string; native          finding / citation / severity
+   │     pydantic-ai MCP toolsets; read-only          ($defs in common.schema.json)
+   │     line-numbered file tools; structured      ▲
+   │     output stack; OTel tracing       ─────────┘ validated + citations resolved
    └── FakeRunner       (offline / tests)
 ```
 
@@ -98,39 +107,37 @@ seam:
 
 | Runner | When | Notes |
 |--------|------|-------|
-| `LangGraphRunner` | **default, in-process; the review runner** | `langchain.agents.create_agent` + `ToolStrategy` (robust in-loop structured output; the legacy `create_react_agent(response_format=…)` makes a context-losing post-loop call and is avoided). Tools: read-only, line-numbered repo file tools + MCP via `MultiServerMCPClient`. Tracing: Langfuse callback. Needs `nava-rebar[agents]` + `ANTHROPIC_API_KEY`. |
-| `DeepAgentsRunner` | **experimental opt-in** (`REBAR_LLM_EXPERIMENTAL_HARNESS=deepagents`) | Runs on LangChain's [deepagents](https://github.com/langchain-ai/deepagents) harness (planning, subagents, large-result eviction) via `create_deep_agent`, with deepagents' native filesystem over a repo-rooted `FilesystemBackend` made **read-only** by a write-denying `FilesystemPermission`, plus our findings schema (so it still returns a `review_result`). **The review default stays `langgraph`** with our own citation-disciplined tools — this runner is the seam for future deepagents-based task types. Caveat: the rebar state-dir deny-list is enforced on citation *output* here, not on reads (use `langgraph` for read-side deny-listing). |
+| `PydanticAIRunner` | **the runtime, in-process; the review runner** | Provider-agnostic: pydantic-ai resolves the provider from the model string (`provider:model`, e.g. `anthropic:claude-opus-4-8`). Tools: read-only, line-numbered repo file tools + a read-only rebar `show_ticket` tool + MCP via **native pydantic-ai MCP toolsets** (no adapter shim). Structured output via the reliability stack — `NativeOutput`/`PromptedOutput` + `json-repair` + bounded retry. Cost bounded by a `usage_limits` budget. Tracing via the optional `[tracing]` OpenTelemetry exporter. Needs `nava-rebar[agents]` + `ANTHROPIC_API_KEY` (or the relevant provider key). |
 | `FakeRunner` | offline / tests | Returns canned findings — the dependency-injection seam that makes the whole pipeline (and all three interfaces) testable with no model, network, or extra. |
 
-The runner is **derived** (EV-4): the experimental deepagents harness via
-`REBAR_LLM_EXPERIMENTAL_HARNESS=deepagents`; otherwise the `langgraph` default.
-`fake` is test-only — pass an explicit `runner=`/`override=` to an operation
-(it is off the public env surface).
+`RUNNERS = ("pydantic_ai", "fake")`. The runner is **derived** (EV-4): the
+`pydantic_ai` runtime is always the runner — it is not a public env knob. `fake`
+is test-only — pass an explicit `runner=`/`override=` to an operation (it is
+library-arg-only, off the public env surface).
 
 ## Model providers (not Anthropic-only)
 
-The LangGraph runner builds its model with LangChain's `init_chat_model`, so it is
-**provider-agnostic**. The provider is inferred from the model name (`claude-*` →
-Anthropic, `gpt-*` → OpenAI, `gemini-*` → Google) or set explicitly with
-`REBAR_LLM_MODEL_PROVIDER`:
+The pydantic-ai runner is **provider-agnostic**: pydantic-ai resolves the provider
+from the model string in `provider:model` form (e.g. `anthropic:claude-opus-4-8`,
+`openai:gpt-4o`, `google:gemini-2.5-pro`). The provider can also be inferred from a
+bare model name or set explicitly with `REBAR_LLM_MODEL_PROVIDER`:
 
 ```bash
-REBAR_LLM_MODEL=gpt-4o REBAR_LLM_MODEL_PROVIDER=openai rebar review <id>
-REBAR_LLM_MODEL=gemini-2.5-pro REBAR_LLM_MODEL_PROVIDER=google_genai rebar review <id>
+REBAR_LLM_MODEL=openai:gpt-4o rebar review <id>
+REBAR_LLM_MODEL=google:gemini-2.5-pro rebar review <id>
 # local OpenAI-compatible server (LMStudio / Ollama / vLLM):
 REBAR_LLM_MODEL=local-model REBAR_LLM_MODEL_PROVIDER=openai \
   REBAR_LLM_BASE_URL=http://localhost:1234/v1 REBAR_LLM_API_KEY=not-needed rebar review <id>
 ```
 
-The `[agents]` extra ships both **`langchain-anthropic` (Claude, the default)** and
-**`langchain-openai` (ChatGPT + OpenAI-compatible local servers)** out of the box;
-other providers need their integration package (`pip install langchain-google-genai`
-for Gemini) — a missing one raises a clear error naming the package. We deliberately
-**never send `temperature`** (claude-opus-4.x reject it; other providers use their
-default). Structured output uses `ToolStrategy` precisely because it is
-provider-*portable* (unlike provider-native strategies). One caveat: `ToolStrategy`
-forces tool choice, which Anthropic rejects when **extended thinking** is enabled —
-so thinking is left off on the model.
+The `[agents]` extra ships **`pydantic-ai-slim[anthropic]`** (Claude, the default)
+out of the box; other providers need their pydantic-ai slim group
+(`pip install 'pydantic-ai-slim[openai]'` for ChatGPT + OpenAI-compatible local
+servers, `pydantic-ai-slim[google]` for Gemini) — a missing one raises a clear
+error naming the package. We deliberately **never send `temperature`**
+(claude-opus-4.x reject it; other providers use their default). Structured output
+uses pydantic-ai's reliability stack (`NativeOutput`/`PromptedOutput` +
+`json-repair` + bounded retry), which is provider-*portable*.
 
 ## Findings contract
 
@@ -151,7 +158,7 @@ Every operation returns a **`review_result`** (`src/rebar/schemas/review_result.
     }
   ],
   "target": {"kind": "ticket", "ticket_ids": ["…"]},
-  "reviewers": ["ticket-quality"], "runner": "langgraph",
+  "reviewers": ["ticket-quality"], "runner": "pydantic_ai",
   "model": "claude-opus-4-8", "trace_id": null, "summary": "…"
 }
 ```
@@ -160,9 +167,9 @@ The schema is the **single source of truth** (`finding`/`citation`/`severity` ar
 shared `$defs` in `common.schema.json`); the runner's Pydantic structured-output
 model mirrors it (pinned by a test). Correctness guarantees:
 
-- **No silent empty reviews.** If the agent returns no structured payload
-  (LangChain #36349, a plain-text turn), the runner raises `StructuredOutputError`
-  rather than returning zero findings — an empty review must never look "clean."
+- **No silent empty reviews.** If the agent returns no structured payload (e.g. a
+  plain-text turn), the runner raises `StructuredOutputError` rather than returning
+  zero findings — an empty review must never look "clean."
 - **Citations are real.** Every `kind=file` citation is resolved against the actual
   repo; a missing file or out-of-range line is downgraded to a freeform `source`
   note. File tools print `<lineno>: <content>` so the model cites accurately.
@@ -192,9 +199,12 @@ model mirrors it (pinned by a test). Correctness guarantees:
 
 Reviewer **identity + selection rules** live in a versioned, testable local catalog
 (`src/rebar/llm/reviewers/catalog.json`): `id`, `dimension`, `applies_to` globs,
-`default`. Reviewer **prompt text** comes from **Langfuse prompt management**
-(`get_prompt(name, label="production", fallback=…)`), with a packaged `*.md`
-fallback so the framework runs offline / when Langfuse is unconfigured.
+`default`. Reviewer **prompt text is git-canonical** — resolved from the repo, never
+from Langfuse: a project override at `.rebar/prompts/<id>.md` wins if present,
+otherwise the packaged `reviewers/*.md` shipped with the framework. Langfuse is
+**never consulted for prompt text** (it is only an optional trace sink). The
+resolved prompt's **content hash is recorded** for trace provenance, so a trace can
+be tied back to the exact prompt text that produced it.
 
 `select_reviewers(changed_files)` is the deterministic rule layer (union of every
 `default` reviewer and every reviewer whose `applies_to` globs match) — the basis
@@ -204,33 +214,32 @@ for the future code-review op's "deterministic reviewer-selection rules."
 
 | Var | Default | Purpose |
 |-----|---------|---------|
-| `REBAR_LLM_EXPERIMENTAL_HARNESS` | _(unset)_ | set to `deepagents` to opt into the experimental harness; otherwise the runner is the langgraph default. `fake` is library-arg-only. |
-| `REBAR_LLM_MODEL` | `claude-opus-4-8` | model id |
-| `REBAR_LLM_MODEL_PROVIDER` | inferred | provider for `init_chat_model` (`anthropic`/`openai`/`google_genai`/…); inferred from the model name if unset |
+| `REBAR_LLM_MODEL` | `claude-opus-4-8` | model id (or a `provider:model` string) |
+| `REBAR_LLM_MODEL_PROVIDER` | inferred | pydantic-ai provider (`anthropic`/`openai`/`google`/…); inferred from the model string if unset |
 | `REBAR_LLM_BASE_URL` | — | OpenAI-compatible endpoint (LMStudio/Ollama/vLLM) |
 | `REBAR_LLM_API_KEY` | — | explicit model key (e.g. a dummy key for a local server) |
 | `REBAR_LLM_MAX_TOKENS` | `8000` | per-response token ceiling |
 | `REBAR_LLM_MAX_ITERS` | `25` | agent-loop recursion cap |
 | `REBAR_LLM_TIMEOUT` | `600` | per-operation seconds |
 | `REBAR_LLM_REPO_PATH` | repo root | repo the read-only file tools see |
-| `REBAR_LLM_MCP_SERVERS` | `{}` | JSON of MCP servers (`langchain-mcp-adapters` shape) |
-| `ANTHROPIC_API_KEY` | — | model credentials (required to run langgraph) |
-| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` | — | tracing + prompts (auto-enabled when both keys present) |
+| `REBAR_LLM_MCP_SERVERS` | `{}` | JSON of MCP servers (pydantic-ai MCP server / toolset shape) |
+| `ANTHROPIC_API_KEY` | — | model credentials (required to run the agent runtime) |
+| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` | — | OTLP trace sink only (auto-enabled when both keys present + the `[tracing]` extra); never used for prompt text |
 | `REBAR_MCP_ALLOW_LLM` | off | gate the MCP `review_ticket` tool (it makes a live, billable call) |
 
-Langfuse is **no-op unless both keys are set** (gated before the handler is even
-constructed — the reliable degradation pattern). The runner wraps each run in a
-span and **flushes before returning** so short-lived CLI processes don't lose
-traces (the v3 SDK buffers on a background thread). Prompt→trace linkage is
-best-effort: Langfuse's first-class linkage attaches `langfuse_prompt` to a
-LangChain `PromptTemplate`, but `create_agent` builds messages internally, so the
-link may not register in every SDK version. Heavy deps are an optional extra; a
-missing extra/credential raises a clear, actionable error.
+Tracing is the optional `[tracing]` **OpenTelemetry exporter** to Langfuse's OTLP
+endpoint (Langfuse is an OTLP sink, not an SDK dependency) — wired in
+`src/rebar/llm/tracing.py` (`setup_tracing`). It is **best-effort / no-op** without
+the `[tracing]` extra or the `LANGFUSE_*` keys. The exporter **flushes before
+returning** so short-lived CLI processes don't lose spans. Prompt→trace provenance
+is by **content hash**: the resolved (git-canonical) prompt's hash is recorded on
+the run so a span can be tied back to the exact prompt text. Heavy deps are an
+optional extra; a missing extra/credential raises a clear, actionable error.
 
 ## Using it
 
 ```bash
-pip install 'nava-rebar[agents]'        # langchain/langgraph/langfuse/anthropic
+pip install 'nava-rebar[agents]'        # pydantic-ai-slim[anthropic] + json-repair + pydantic
 export ANTHROPIC_API_KEY=...            # model credentials
 rebar review --check                    # show backend/credential availability
 rebar review <ticket-id> ticket-quality # JSON review_result on stdout
@@ -302,9 +311,10 @@ we run an **ephemeral self-hosted stack**, not a persistent server:
 
 ## Adding an operation or reviewer
 
-- **New reviewer:** add an entry to `reviewers/catalog.json` (+ a packaged `*.md`
-  fallback) and create the same-named prompt in Langfuse. `applies_to` globs make
-  it eligible for rule-based selection.
+- **New reviewer:** add an entry to `reviewers/catalog.json` and ship a same-named
+  packaged prompt (`reviewers/<id>.md`); a project can override it with
+  `.rebar/prompts/<id>.md`. `applies_to` globs make it eligible for rule-based
+  selection.
 - **New operation:** assemble its deterministic context, resolve reviewer prompt(s)
   via `prompts.resolve_prompt`, build a `RunRequest`, and call
   `get_runner(config, override=…).run(req)`. Return a validated `review_result`.
@@ -341,11 +351,9 @@ string threaded from workflow DSL steps. A schema-pin test keeps each contract's
 model in lock-step with its JSON Schema. Add a contract = register a builder +
 ship a same-named schema (parallel to "adding a reviewer").
 
-> Structured output uses LangChain `ToolStrategy` (provider-portable). Because that is
-> free-generation + code-validation, optional `None`s are dropped (`model_dump(exclude_none=
-> True)`) so they don't surface as schema-invalid `null`s. (Migrating to raw-schema/
-> AutoStrategy→ProviderStrategy — provider-native, decode-time enforcement — is a tracked
-> framework-wide follow-up.)
+> Structured output uses pydantic-ai's reliability stack (`NativeOutput`/`PromptedOutput`
+> + `json-repair` + bounded retry), which is provider-portable. Optional `None`s are dropped
+> (`model_dump(exclude_none=True)`) so they don't surface as schema-invalid `null`s.
 
 ## Completion verification + the close gate (`verify_completion`)
 
@@ -378,23 +386,23 @@ subtree (which is impractical and re-does work the children's own gates already 
 exactly this reason (the standalone `rebar verify-completion <id> --graph` still inlines the
 subtree for a human review).
 
-> **Why the verifier uses natural termination, not forced structured output (root cause).** A
-> tool-using agent bound with LangChain `ToolStrategy` (forced `tool_choice`) **does not
-> terminate naturally** — it keeps calling exploration tools instead of concluding, so on a
-> code-heavy ticket it over-explores for hundreds of steps and trips the budget. Verified by
-> A/B on the same model/prompt/ticket: **>250 tool calls (timeout) with ToolStrategy vs ~17 and a
-> clean verdict without it** (a Claude-Code sonnet subagent on the same task: ~12). So the
-> verifier sets `RunRequest.output_strategy="extract"`: it runs the agent with **no forced
-> response_format** (it reasons, stops, and concludes in text), then does a **tool-less**
-> structured-output call to extract the verdict from that conclusion. This is the proven fix and
-> the field consensus (forcing the loop is the documented anti-pattern; LangGraph: a high
-> `recursion_limit` means "you're paying for a loop, fix the loop").
+> **Why the verifier uses natural termination, not forced structured output (root cause).**
+> Forcing a tool-using agent's output (forced `tool_choice`) makes it **not terminate
+> naturally** — it keeps calling exploration tools instead of concluding, so on a code-heavy
+> ticket it over-explores for hundreds of steps and trips the budget. (This was first measured
+> on the now-removed LangChain `ToolStrategy` runtime, by A/B on the same model/prompt/ticket:
+> **>250 tool calls (timeout) with forced output vs ~17 and a clean verdict without it** — a
+> Claude-Code sonnet subagent on the same task: ~12 — and the finding carries over to the
+> pydantic-ai runtime.) So the verifier sets `RunRequest.output_strategy="extract"`: it runs
+> the agent with **no forced output** (it reasons, stops, and concludes in text), then does a
+> **tool-less** structured-output call to extract the verdict from that conclusion. This is the
+> proven fix and the field consensus (forcing the loop is the documented anti-pattern; a high
+> recursion limit means "you're paying for a loop, fix the loop").
 >
 > The verifier also **defaults to `claude-sonnet-4-6`** — a *decisive* model, not a
 > maximally-thorough one: larger/reasoning models *over-explore more* on bounded agentic tasks
 > (the documented "overthinking" effect), so escalating to a bigger model is the **wrong** lever
-> here. An explicit non-default `REBAR_LLM_MODEL` still wins. (`review`/`code`/`scan` keep the
-> `ToolStrategy` default; migrating the framework default is a tracked follow-up.) The untrusted ticket/file content is delimited and
+> here. An explicit non-default `REBAR_LLM_MODEL` still wins. The untrusted ticket/file content is delimited and
 the prompt carries an instruction-hierarchy clause (prompt-injection mitigation, OWASP LLM01).
 
 **The close gate** (`verify.require_completion_verification_for_close`, default off; **on for

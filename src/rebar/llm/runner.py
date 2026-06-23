@@ -157,6 +157,11 @@ class PydanticAIRunner:
 
         cfg = self._config
         _pai_check_config(cfg)
+        # Best-effort OTLP→Langfuse tracing: no-op without the [tracing] extra / Langfuse
+        # keys, never raises, idempotent. Write-only (never read back into a decision).
+        from rebar.llm.tracing import setup_tracing
+
+        setup_tracing(cfg.langfuse)
         Agent = _import_pydantic_ai()
         tools = pai_tools.filesystem_tools(cfg.repo_path) + pai_tools.rebar_tools(
             cfg.repo_path, allow_comment=not _readonly_gate()
