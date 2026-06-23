@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"verify_commands":[{"command":".venv/bin/python -m pytest tests/unit/test_frontmatter_roundtrip.py -q","dd_id":"S2-DD1","dd_text":"round-trip/idempotency/boundary (port E1)"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1782231623418551001,"uuid":"d2816dae-f0b1-421d-ab0a-1b2440e68d1e"}
