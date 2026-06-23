@@ -163,7 +163,22 @@ INPUT_SCHEMAS: frozenset[str] = frozenset({WORKFLOW_V1, WORKFLOW_V2, GROUNDING})
 # consumed directly (by the inspector + linter) rather than advertised as a command's
 # --output, so the coverage guard exempts them. Kept as a SEPARATE set from
 # INPUT_SCHEMAS so intent reads true: these are step contracts, not DSL input files.
-CONTRACT_SCHEMAS: frozenset[str] = frozenset({FETCH_TICKET_INPUT, FETCH_TICKET_OUTPUT})
+# One <op>_input + <op>_output pair per built-in scripted step (story e050 backfills
+# the seven beyond the 5e78 fetch_ticket skeleton).
+CONTRACT_SCHEMAS: frozenset[str] = frozenset(
+    f"{op}_{io}"
+    for op in (
+        "fetch_ticket",
+        "fetch_commits",
+        "fetch_epic_graph",
+        "render_context",
+        "gate",
+        "comment_verdict",
+        "tag",
+        "set_fields",
+    )
+    for io in ("input", "output")
+)
 
 # The authoritative map of every structured (--output json / always-JSON) output
 # to its schema. Keyed by command, or <command>.<interface> when an interface's

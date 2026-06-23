@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/fetch_epic_graph_output.schema.json",
+  "title": "FetchEpicGraphOutput",
+  "description": "OUTPUT contract of `fetch_epic_graph`: the dependency/child graph + its slices.",
+  "type": "object",
+  "properties": {
+    "graph": {
+      "type": "object",
+      "description": "The full dependency/child graph (the `deps` compile).",
+      "additionalProperties": true
+    },
+    "children": {
+      "type": "array",
+      "description": "Child ticket entries."
+    },
+    "blockers": {
+      "type": "array",
+      "description": "Open blocker entries."
+    },
+    "deps": {
+      "type": "array",
+      "description": "Dependency edges."
+    }
+  },
+  "required": [
+    "graph",
+    "children",
+    "blockers",
+    "deps"
+  ],
+  "additionalProperties": false
+}

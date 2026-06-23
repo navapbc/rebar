@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/render_context_output.schema.json",
+  "title": "RenderContextOutput",
+  "description": "OUTPUT contract of `render_context`: one assembled text block.",
+  "type": "object",
+  "properties": {
+    "context": {
+      "type": "string",
+      "description": "The assembled `## <key>` context text."
+    }
+  },
+  "required": [
+    "context"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/tag_input.schema.json",
+  "title": "TagInput",
+  "description": "INPUT contract of the `tag` step.",
+  "type": "object",
+  "properties": {
+    "ticket_id": {
+      "type": [
+        "string"
+      ],
+      "description": "The ticket id; optional \u2014 falls back to the workflow target ticket."
+    },
+    "tag": {
+      "type": "string",
+      "description": "The tag to add."
+    }
+  },
+  "required": [
+    "tag"
+  ],
+  "additionalProperties": false
+}

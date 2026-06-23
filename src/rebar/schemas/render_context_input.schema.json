@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/render_context_input.schema.json",
+  "title": "RenderContextInput",
+  "description": "INPUT contract of `render_context`: arbitrary named values, each rendered as a `## <key>` section. additionalProperties is OPEN by design.",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": true
+}

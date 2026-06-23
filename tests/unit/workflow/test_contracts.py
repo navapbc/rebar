@@ -15,7 +15,7 @@ from rebar import schemas
 from rebar.llm.workflow import lint as L
 from rebar.llm.workflow import steps  # noqa: F401 - registers the built-in contracts
 from rebar.llm.workflow.editor import resolve_contracts, step_contract_view
-from rebar.llm.workflow.executor import contract_for
+from rebar.llm.workflow.executor import STEP_CONTRACTS, STEP_REGISTRY, contract_for
 from rebar.llm.workflow.lint_refs import ENGINE_INJECTED_INPUTS
 
 # fetch_ticket's declared output fields (the OUTPUT contract's properties).
@@ -103,8 +103,8 @@ def test_resolve_contracts_keys_by_op_name() -> None:
     contracts = resolve_contracts(doc)
     assert "fetch_ticket" in contracts
     assert contracts["fetch_ticket"]["has_contract"] is True
-    # render_context has no declared contract in this slice → empty state, not absent.
-    assert contracts["render_context"]["has_contract"] is False
+    # render_context now also carries a contract (backfilled in e050).
+    assert contracts["render_context"]["has_contract"] is True
 
 
 # ── AC #3 + #5: the linter consumes the output contract ─────────────────────────
@@ -123,16 +123,17 @@ def test_lint_flags_a_bad_output_field_reference() -> None:
 
 
 def test_lint_skips_unknown_producer_never_a_false_error() -> None:
-    # AC #5: an upstream step with NO declared output contract is UNKNOWN — a ref to
-    # any of its fields must NOT be flagged (only fetch_ticket is annotated here).
+    # AC #5: an upstream step whose op has NO declared output contract is UNKNOWN — a
+    # ref to any of its fields must NOT be flagged. `u` is an unregistered op (no
+    # contract), so its outputs are unknowable to the linter.
     wf = """\
 schema_version: "1"
 name: unknown_producer
 steps:
   - id: a
-    uses: render_context
+    uses: u
   - id: b
-    uses: render_context
+    uses: u
     needs: [a]
     with:
       v: ${{ steps.a.outputs.anything_at_all }}
@@ -174,3 +175,86 @@ steps:
 """
     findings = L.lint_workflow(wf)
     assert any("undeclared workflow input" in f.message for f in findings), _msgs(findings)
+
+
+# ── e050: every built-in op carries a contract (backfill beyond the skeleton) ────
+
+
+def test_every_registered_step_has_a_contract() -> None:
+    # The registry-coverage guard (mirrors the schema coverage-guard pattern): a NEW
+    # built-in op that forgets its contract fails this test.
+    missing = [name for name in STEP_REGISTRY if name not in STEP_CONTRACTS]
+    assert not missing, f"registered ops with no declared contract: {sorted(missing)}"
+    for name, c in STEP_CONTRACTS.items():
+        assert c.input_schema, f"{name}: no input_schema"
+        assert c.output_schema, f"{name}: no output_schema"
+        assert c.description, f"{name}: no description"
+
+
+def test_all_op_contract_schemas_resolve_2020_12() -> None:
+    pytest.importorskip("jsonschema")
+    for c in STEP_CONTRACTS.values():
+        schemas.validator(c.input_schema)  # builds → valid 2020-12 + resolves
+        schemas.validator(c.output_schema)
+
+
+# ── e050: input schemas REJECT malformed input (negative tests) ─────────────────
+
+
+def _rejects(schema_name: str, instance: object) -> bool:
+    return not schemas.validator(schema_name).is_valid(instance)
+
+
+def test_input_schemas_reject_malformed_input() -> None:
+    pytest.importorskip("jsonschema")
+    # gate: policy must be one of the known names; findings must be an array.
+    assert _rejects("gate_input", {"policy": "nonsense"})
+    assert _rejects("gate_input", {"findings": "not-a-list"})
+    # tag: `tag` is required and must be a string.
+    assert _rejects("tag_input", {})
+    assert _rejects("tag_input", {"tag": 123})
+    # set_fields: `fields` is required.
+    assert _rejects("set_fields_input", {"ticket_id": "x"})
+    # unknown keys are rejected (additionalProperties: false) on a closed-input op.
+    assert _rejects("tag_input", {"tag": "ok", "bogus": 1})
+
+
+def test_input_schemas_accept_valid_input() -> None:
+    pytest.importorskip("jsonschema")
+    assert schemas.validator("gate_input").is_valid({"findings": [], "policy": "strict"})
+    assert schemas.validator("tag_input").is_valid({"tag": "reviewed"})
+    assert schemas.validator("set_fields_input").is_valid({"fields": {"priority": 0}})
+    # render_context is open by design (arbitrary named inputs).
+    assert schemas.validator("render_context_input").is_valid({"anything": "goes", "n": 1})
+
+
+# ── e050: pure ops' declared output schema matches what they return ──────────────
+
+
+def _ctx(inputs):
+    from rebar.llm.workflow.executor import StepContext
+
+    return StepContext(
+        run_id="R",
+        step_id="s",
+        kind="scripted",
+        step={},
+        inputs=inputs,
+        workflow={},
+        target_ticket=None,
+        repo_root=".",
+    )
+
+
+def test_pure_op_outputs_match_their_output_schema() -> None:
+    pytest.importorskip("jsonschema")
+    # render_context
+    out = steps.render_context(_ctx({"a": "x", "b": {"k": 1}}))
+    schemas.validator("render_context_output").validate(out)
+    # gate (pass + fail)
+    g_pass = steps.gate(_ctx({"findings": [], "policy": "default"}))
+    schemas.validator("gate_output").validate(g_pass)
+    assert g_pass["verdict"] == "pass"
+    g_fail = steps.gate(_ctx({"findings": [{"severity": "critical"}], "policy": "default"}))
+    schemas.validator("gate_output").validate(g_fail)
+    assert g_fail["verdict"] == "fail"

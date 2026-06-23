@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/gate_input.schema.json",
+  "title": "GateInput",
+  "description": "INPUT contract of the `gate` step.",
+  "type": "object",
+  "properties": {
+    "findings": {
+      "type": "array",
+      "description": "Findings to evaluate; each item is an object with a `severity`."
+    },
+    "policy": {
+      "type": "string",
+      "description": "Policy name.",
+      "enum": [
+        "default",
+        "strict",
+        "advisory"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

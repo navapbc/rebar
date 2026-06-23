@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/fetch_epic_graph_input.schema.json",
+  "title": "FetchEpicGraphInput",
+  "description": "INPUT contract of the `fetch_epic_graph` step.",
+  "type": "object",
+  "properties": {
+    "ticket_id": {
+      "type": [
+        "string"
+      ],
+      "description": "The ticket id; optional \u2014 falls back to the workflow target ticket."
+    }
+  },
+  "additionalProperties": false
+}

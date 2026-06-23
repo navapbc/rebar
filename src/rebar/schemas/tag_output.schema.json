@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/tag_output.schema.json",
+  "title": "TagOutput",
+  "description": "OUTPUT contract of `tag`: the tag added.",
+  "type": "object",
+  "properties": {
+    "tagged": {
+      "type": "string",
+      "description": "The tag that was added."
+    }
+  },
+  "required": [
+    "tagged"
+  ],
+  "additionalProperties": false
+}

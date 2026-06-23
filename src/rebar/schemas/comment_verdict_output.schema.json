@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/comment_verdict_output.schema.json",
+  "title": "CommentVerdictOutput",
+  "description": "OUTPUT contract of `comment_verdict` (post OR idempotent-skip path).",
+  "type": "object",
+  "properties": {
+    "commented": {
+      "type": "boolean",
+      "description": "True iff a new comment was posted."
+    },
+    "idempotent_skip": {
+      "type": "boolean",
+      "description": "True iff a same-run marker was already present (skip)."
+    },
+    "marker": {
+      "type": "string",
+      "description": "The `[rebar-run <run>/<step>]` idempotency marker."
+    },
+    "verdict": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The verdict label, when posting."
+    }
+  },
+  "required": [
+    "commented",
+    "marker"
+  ],
+  "additionalProperties": false
+}
