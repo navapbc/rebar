@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"verify_commands":[{"command":".venv/bin/python -m pytest tests/e2e/ -k 'properties' -q","dd_id":"S8-DD1","dd_text":"structured editing round-trip e2e"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1782231655151664001,"uuid":"a2bb3ccb-65e7-47ef-8b51-7e71db32db2d"}

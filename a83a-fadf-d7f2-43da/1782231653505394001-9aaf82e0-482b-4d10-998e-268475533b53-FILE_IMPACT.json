@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/llm/workflow/editor.py","reason":"structured per-field entries"},{"path":"src/rebar/llm/workflow/editor_assets","reason":"structured fields UI"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782231653505394001,"uuid":"9aaf82e0-482b-4d10-998e-268475533b53"}
