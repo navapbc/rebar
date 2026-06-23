@@ -285,7 +285,12 @@ def verify_completion(
         langfuse_prompt=langfuse_prompt,
         mode="structured",
         output_schema=_OUTPUT_SCHEMA,
-        extra_tools=_readonly_ticket_tools(cfg.repo_path),
+        # Read-only ticket tools. The langchain-based runners (langgraph/deepagents) have no
+        # native rebar tools, so we inject langchain ones; the pydantic_ai runner ALREADY
+        # provides `show_ticket` natively (pai_tools.rebar_tools) and would CRASH on a
+        # langchain `StructuredTool` (it has no `__name__`) — so pass None there and let it
+        # use its own. (Post-cutover, when only pydantic_ai remains, this is always None.)
+        extra_tools=None if cfg.runner == "pydantic_ai" else _readonly_ticket_tools(cfg.repo_path),
         # NATURAL termination + tool-less extraction (NOT ToolStrategy's forced tool_choice,
         # which makes a tool-using verifier over-explore for hundreds of steps instead of
         # concluding — proven by A/B: 17 tool calls vs >250 on the same ticket/model/prompt).
