@@ -83,6 +83,14 @@ shape) drawn from the canonical JSON Schemas — see
 `.rebar/workflows/*.yaml` workflow against a ticket — a lean-runtime capability
 that does not itself need the `[agents]` extra, though individual LLM steps do).
 
+> **Authoring workflows + prompts.** The visual editor is
+> [docs/workflow-editor.md](docs/workflow-editor.md); the contract-bearing
+> prompt/step model behind it (prompt front-matter + closed key set + overrides, the
+> prompt↔op↔registry contract conventions, the derived prompt index + CI drift gate,
+> `execution_mode`, and the 3-state + runtime validation) is
+> [docs/workflow-authoring-v2.md](docs/workflow-authoring-v2.md), with ADRs under
+> [docs/adr/](docs/adr/).
+
 There is no `init` over MCP (operator bootstrap only). `reconcile` `live` mode
 additionally requires `REBAR_MCP_ALLOW_JIRA_SYNC=1` (deprecated alias
 `REBAR_MCP_ALLOW_RECONCILE_LIVE`). Both env gates accept
