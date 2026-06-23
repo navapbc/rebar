@@ -17,6 +17,7 @@ SAME path a default CI run takes.
 
 from __future__ import annotations
 
+import ast
 import subprocess
 import sys
 from pathlib import Path
@@ -24,6 +25,24 @@ from pathlib import Path
 import pytest
 
 pytestmark = pytest.mark.unit
+
+
+def _uses_external_marker(tree: ast.AST) -> bool:
+    """True iff the module actually USES the ``external`` pytest marker — a
+    ``…mark.external`` attribute access (a ``@pytest.mark.external`` decorator or a
+    ``pytestmark`` assignment), as opposed to merely MENTIONING the name in a
+    docstring / comment / string literal. Mirrors the authoritative collection-time
+    check (``item.get_closest_marker("external")`` in tests/conftest.py), which keys
+    off the real marker, not source text — so a prose mention is not a violation."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr == "external":
+            base = node.value
+            if (isinstance(base, ast.Attribute) and base.attr == "mark") or (
+                isinstance(base, ast.Name) and base.id == "mark"
+            ):
+                return True
+    return False
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _EXTERNAL_DIR = _REPO_ROOT / "tests" / "external"
@@ -68,25 +87,25 @@ def test_external_dir_all_skipped_without_opt_in(tmp_path: Path) -> None:
 def test_no_external_marked_test_outside_external_dir() -> None:
     """The confinement invariant: every test marked ``external`` is under tests/external/.
 
-    Greps the test tree for the ``external`` marker (decorator or module-level
-    ``pytestmark``) and asserts no occurrence lives outside tests/external/. This
+    Scans each test module's AST for the ``external`` marker (decorator or
+    module-level ``pytestmark``) and asserts none lives outside tests/external/. This
     mirrors the hard-fail the root conftest raises at collection, but as a plain
     assertion so a violation is a readable test failure rather than a collection
     abort.
     """
     offenders: list[str] = []
     tests_dir = _REPO_ROOT / "tests"
-    this_file = Path(__file__).resolve()
     for path in tests_dir.rglob("test_*.py"):
         resolved = path.resolve()
         if resolved.is_relative_to(_EXTERNAL_DIR):
             continue
-        # This meta-test file references the marker name in strings/comments; the
-        # authoritative check is the root conftest collection hook, so skip self.
-        if resolved == this_file:
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
             continue
-        text = path.read_text(encoding="utf-8", errors="replace")
-        if "mark.external" in text:
+        # AST attribute access only — a docstring/comment mentioning the marker (e.g.
+        # tests/unit/grounding/test_deps.py, which is pytest.mark.unit) is NOT a use.
+        if _uses_external_marker(tree):
             offenders.append(str(path.relative_to(_REPO_ROOT)))
     assert not offenders, (
         "external-marked test(s) found outside tests/external/ — move them under "
