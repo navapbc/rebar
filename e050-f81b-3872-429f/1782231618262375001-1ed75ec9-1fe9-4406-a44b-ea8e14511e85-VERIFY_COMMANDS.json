@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"verify_commands":[{"command":".venv/bin/python -m pytest tests/ -k 'op_contract' -q","dd_id":"S1-DD1","dd_text":"contract coverage + per-op output shape"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1782231618262375001,"uuid":"1ed75ec9-1fe9-4406-a44b-ea8e14511e85"}
