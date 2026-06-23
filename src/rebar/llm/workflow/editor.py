@@ -112,12 +112,109 @@ def resolve_prompts(doc: dict[str, Any], path: str | Path) -> dict[str, str]:
     return out
 
 
+# The defined EMPTY/no-contract inspector state (workflow authoring v2, 5e78 AC): a
+# step with no declared contract — or nothing selected — renders this, never a crash.
+_EMPTY_CONTRACT_VIEW: dict[str, Any] = {
+    "has_contract": False,
+    "description": "",
+    "consumes": [],
+    "produces": [],
+}
+
+
+def _schema_fields(schema_name: str | None) -> list[dict[str, Any]]:
+    """The flat field list (``{name, type, required, description}``) of a contract
+    schema's top-level object ``properties``, for the inspector's CONSUMES/PRODUCES.
+    Best-effort: an unreadable/non-object schema yields an empty list (never raises)."""
+    if not schema_name:
+        return []
+    try:
+        from rebar import schemas
+
+        schema = schemas.load(schema_name)
+    except Exception:  # noqa: BLE001 - an unresolvable contract surfaces as empty, not a crash
+        return []
+    props = schema.get("properties")
+    if not isinstance(props, dict):
+        return []
+    required = set(schema.get("required") or [])
+    fields: list[dict[str, Any]] = []
+    for name, sub in props.items():
+        sub = sub if isinstance(sub, dict) else {}
+        typ = sub.get("type")
+        if typ is None and "$ref" in sub:
+            typ = "object"
+        if isinstance(typ, list):
+            typ = " | ".join(str(t) for t in typ)
+        fields.append(
+            {
+                "name": name,
+                "type": typ or "",
+                "required": name in required,
+                "description": sub.get("description", ""),
+            }
+        )
+    return fields
+
+
+def step_contract_view(uses: str | None) -> dict[str, Any]:
+    """The editor inspector's read-only view of a scripted op's CONTRACT: its
+    description plus CONSUMES (input fields) and PRODUCES (output fields). An op with
+    no declared contract (or ``None``/unknown) yields the defined empty state, so the
+    inspector always renders something (workflow authoring v2, 5e78)."""
+    if not uses:
+        return dict(_EMPTY_CONTRACT_VIEW)
+    try:
+        from .executor import contract_for
+
+        contract = contract_for(uses)
+    except Exception:  # noqa: BLE001 - registry trouble degrades to the empty state
+        contract = None
+    if contract is None:
+        return dict(_EMPTY_CONTRACT_VIEW)
+    return {
+        "has_contract": True,
+        "description": contract.description,
+        "consumes": _schema_fields(contract.input_schema),
+        "produces": _schema_fields(contract.output_schema),
+    }
+
+
+def resolve_contracts(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Map each scripted step's ``uses`` op name to its :func:`step_contract_view`, so
+    the editor can surface a selected node's contract read-only (keyed by op name, the
+    same ``name``-based lookup the bundle uses for prompts)."""
+    out: dict[str, dict[str, Any]] = {}
+    for s in doc.get("steps", []) or []:
+        out.update(_contracts_in(s))
+    return out
+
+
+def _contracts_in(step: Any) -> dict[str, dict[str, Any]]:
+    """Recurse a step (and any nested branch/loop/map frames) collecting the contract
+    view of every scripted ``uses`` op encountered."""
+    out: dict[str, dict[str, Any]] = {}
+    if not isinstance(step, dict):
+        return out
+    uses = step.get("uses")
+    if isinstance(uses, str) and uses and uses not in out:
+        out[uses] = step_contract_view(uses)
+    for block, *keys in (("loop", "body"), ("map", "body"), ("branch", "then", "else")):
+        blk = step.get(block)
+        if isinstance(blk, dict):
+            for key in keys:
+                for child in blk.get(key) or []:
+                    out.update(_contracts_in(child))
+    return out
+
+
 def build_host_html(
     bpmn_xml: str,
     *,
     token: str = "",
     descriptor: dict[str, Any] | None = None,
     prompts: dict[str, str] | None = None,
+    contracts: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     """The editor host page: a thin shell that loads the vendored bundle (``/assets/…``)
     and hands it three globals — the BPMN to edit, the ``rebar`` moddle descriptor (so
@@ -131,6 +228,7 @@ def build_host_html(
     diagram = json.dumps(bpmn_xml)
     tok = json.dumps(token)
     prompt_map = json.dumps(prompts or {})
+    contract_map = json.dumps(contracts or {})
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -165,6 +263,7 @@ def build_host_html(
     window.REBAR_DIAGRAM = {diagram};
     window.REBAR_TOKEN = {tok};
     window.REBAR_PROMPTS = {prompt_map};
+    window.REBAR_CONTRACTS = {contract_map};
   </script>
   <script src="/assets/editor.js"></script>
 </body>
@@ -248,6 +347,7 @@ def edit_workflow(
     doc = migrate_to_current(load_workflow(target))
     bpmn_holder = {"xml": ir_to_bpmn(doc)}
     prompts = resolve_prompts(doc, target)  # prompt id -> text, for the editor to display
+    contracts = resolve_contracts(doc)  # op name -> contract view, for the inspector
     token = secrets.token_urlsafe(18)  # per-session secret guarding the write endpoint
 
     class _Handler(http.server.BaseHTTPRequestHandler):
@@ -272,7 +372,12 @@ def edit_workflow(
                 self._send(403, "forbidden", "text/plain")
                 return
             if self.path in ("/", "/index.html"):
-                self._send(200, build_host_html(bpmn_holder["xml"], token=token, prompts=prompts))
+                self._send(
+                    200,
+                    build_host_html(
+                        bpmn_holder["xml"], token=token, prompts=prompts, contracts=contracts
+                    ),
+                )
             elif self.path == "/workflow.bpmn":
                 self._send(200, bpmn_holder["xml"], "application/xml")
             elif self.path.startswith("/assets/"):

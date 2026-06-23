@@ -111,6 +111,53 @@ function PromptTextEntry(props) {
   );
 }
 
+function formatContract(view) {
+  // Render a scripted op's contract (window.REBAR_CONTRACTS[uses]) as legible read-only
+  // text: its description + CONSUMES (input fields) / PRODUCES (output fields). A node
+  // with no declared contract shows a defined empty state, never a blank/crash.
+  if (!view || !view.has_contract) {
+    return "(no declared contract for this step)";
+  }
+  const fmt = (fields) =>
+    !fields || fields.length === 0
+      ? "  (none)"
+      : fields
+          .map((f) => {
+            const req = f.required ? " (required)" : "";
+            const typ = f.type ? `: ${f.type}` : "";
+            const desc = f.description ? ` — ${f.description}` : "";
+            return `  ${f.name}${typ}${req}${desc}`;
+          })
+          .join("\n");
+  const lines = [];
+  if (view.description) lines.push(view.description, "");
+  lines.push("CONSUMES:", fmt(view.consumes), "", "PRODUCES:", fmt(view.produces));
+  return lines.join("\n");
+}
+
+function ContractEntry(props) {
+  const { element, id } = props;
+  // The scripted op's I/O CONTRACT (resolved Python-side and injected as
+  // window.REBAR_CONTRACTS, keyed by the `uses` op name == the element NAME) — read-only,
+  // so a human can see what a step consumes/produces before wiring `${{ steps.… }}` refs.
+  const debounce = useService("debounceInput");
+  const bo = element.businessObject;
+  return (
+    <TextAreaEntry
+      id={id}
+      element={element}
+      label="Contract (read-only)"
+      rows={10}
+      getValue={() =>
+        formatContract(window.REBAR_CONTRACTS && window.REBAR_CONTRACTS[bo.name])
+      }
+      setValue={() => {}}
+      debounce={debounce}
+      disabled
+    />
+  );
+}
+
 function WhenEntry(props) {
   const { element, id } = props;
   const debounce = useService("debounceInput");
@@ -187,6 +234,9 @@ function rebarGroup(element) {
   const entries = [{ id: "rebar-kind", component: KindEntry }];
   if (t === "bpmn:ScriptTask" || t === "bpmn:ServiceTask") {
     entries.push({ id: "rebar-action", component: ActionEntry });
+  }
+  if (t === "bpmn:ScriptTask") {
+    entries.push({ id: "rebar-contract", component: ContractEntry });
   }
   if (t === "bpmn:ServiceTask") {
     entries.push({ id: "rebar-prompt-text", component: PromptTextEntry });

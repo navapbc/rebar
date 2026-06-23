@@ -33,7 +33,7 @@ def _wf(if_value: str) -> str:
         "name: t\n"
         "steps:\n"
         "  - id: a\n"
-        "    uses: fetch_ticket\n"
+        "    uses: u\n"
         "  - id: b\n"
         "    uses: tag_step\n"
         "    needs: [a]\n"

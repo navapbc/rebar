@@ -69,7 +69,10 @@ __all__ = [
     "WORKFLOW_RUN",
     "GROUNDING",
     "GROUNDING_INFO",
+    "FETCH_TICKET_INPUT",
+    "FETCH_TICKET_OUTPUT",
     "INPUT_SCHEMAS",
+    "CONTRACT_SCHEMAS",
 ]
 
 COMMON = "common"
@@ -136,6 +139,16 @@ GROUNDING = "grounding"
 # tool. Unlike the GROUNDING evidence contract (an INTERNAL schema validated
 # directly), THIS is a command --output, so it IS wired into OUTPUT_SCHEMAS below.
 GROUNDING_INFO = "grounding_info"
+# rebar.llm.workflow — the per-step I/O CONTRACT schemas (workflow authoring v2,
+# walking skeleton 5e78). A scripted step DECLARES an input + output schema BY NAME
+# via `@register_step(input_schema=…, output_schema=…)`; the names resolve to these
+# files through the registry. They are surfaced read-only in the editor inspector
+# (CONSUMES/PRODUCES) and consumed by the linter (name-existence of a referenced
+# output field). Like the workflow DSL schemas they are validated/consumed directly,
+# never advertised as a command's --output, so they are exempt from OUTPUT_SCHEMAS
+# via CONTRACT_SCHEMAS below.
+FETCH_TICKET_INPUT = "fetch_ticket_input"
+FETCH_TICKET_OUTPUT = "fetch_ticket_output"
 
 # Schemas authored to validate documents/objects directly rather than advertise a
 # command's JSON output: the workflow DSL INPUT files (v1/v2) and the internal
@@ -144,6 +157,13 @@ GROUNDING_INFO = "grounding_info"
 # OUTPUT_SCHEMAS; the coverage-guard test exempts this set so an authored-but-unwired
 # check still catches a forgotten OUTPUT schema while permitting these.
 INPUT_SCHEMAS: frozenset[str] = frozenset({WORKFLOW_V1, WORKFLOW_V2, GROUNDING})
+
+# Per-step I/O CONTRACT schemas (workflow authoring v2): a step's declared input and
+# output shapes, resolved by name from `@register_step`. Like INPUT_SCHEMAS these are
+# consumed directly (by the inspector + linter) rather than advertised as a command's
+# --output, so the coverage guard exempts them. Kept as a SEPARATE set from
+# INPUT_SCHEMAS so intent reads true: these are step contracts, not DSL input files.
+CONTRACT_SCHEMAS: frozenset[str] = frozenset({FETCH_TICKET_INPUT, FETCH_TICKET_OUTPUT})
 
 # The authoritative map of every structured (--output json / always-JSON) output
 # to its schema. Keyed by command, or <command>.<interface> when an interface's

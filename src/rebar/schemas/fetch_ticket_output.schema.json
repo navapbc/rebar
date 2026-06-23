@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/fetch_ticket_output.schema.json",
+  "title": "FetchTicketOutput",
+  "description": "The OUTPUT contract of the `fetch_ticket` scripted step (workflow authoring v2, walking skeleton). Declared via `@register_step(output_schema=...)`, surfaced read-only in the editor inspector as the step's PRODUCES, and consumed by the linter: a `${{ steps.<id>.outputs.<name> }}` reference to this step is checked NAME-EXISTENCE against these properties.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "ticket": {
+      "description": "The compiled ticket state (the full TicketState object).",
+      "$ref": "ticket_state.schema.json"
+    },
+    "ticket_id": {
+      "type": "string",
+      "description": "The id of the fetched ticket."
+    },
+    "title": {
+      "type": ["string", "null"],
+      "description": "The ticket title."
+    },
+    "description": {
+      "type": ["string", "null"],
+      "description": "The ticket description (markdown body)."
+    },
+    "status": {
+      "type": ["string", "null"],
+      "description": "The ticket's current lifecycle status."
+    },
+    "ticket_type": {
+      "type": ["string", "null"],
+      "description": "The ticket type (task/story/bug/epic/session_log)."
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "The ticket's tags."
+    }
+  },
+  "required": ["ticket", "ticket_id"]
+}

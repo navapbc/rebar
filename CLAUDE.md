@@ -285,6 +285,13 @@ background so per-write network latency doesn't serialize a batch claim, and `of
 keeps commits local — both still surface `PUSH_PENDING` via `fsck` (see
 `docs/concurrency.md`).
 
+## Git workflow (code changes)
+
+**Merge code changes to `main` via a pull request, not a direct push.** Branch the
+work, open a PR, let CI + review run, and merge through the PR — never push commits
+straight to `main`. (This governs *code*; rebar's own ticket events on the `tickets`
+branch still auto-commit/auto-push as described above.)
+
 ## Library quick reference
 
 ```python

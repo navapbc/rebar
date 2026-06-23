@@ -46,7 +46,16 @@ def _ticket_id(ctx: StepContext) -> str:
 # ── read steps ────────────────────────────────────────────────────────────────
 
 
-@register_step("fetch_ticket")
+@register_step(
+    "fetch_ticket",
+    input_schema="fetch_ticket_input",
+    output_schema="fetch_ticket_output",
+    description=(
+        "Fetch a ticket's compiled state. Consumes an optional `ticket_id` (falls "
+        "back to the workflow target ticket); produces the ticket plus its title, "
+        "description, status, type, and tags."
+    ),
+)
 def fetch_ticket(ctx: StepContext) -> dict[str, Any]:
     """Compiled ticket state for the target ticket → {ticket, title, description, …}."""
     import rebar

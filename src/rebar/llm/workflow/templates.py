@@ -44,7 +44,7 @@ steps:
     prompt: code-quality
     needs: [fetch]
     with:
-      context: ${{ steps.fetch.outputs.context }}
+      context: ${{ steps.fetch.outputs.description }}
     output_schema: review_result
     mode: findings
 

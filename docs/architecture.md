@@ -200,6 +200,7 @@ file to one requires a row in the other. (LOC measured 2026-06-18.)
 | `_engine_support/reads.py` | 930 | split the CLI `_cmd_*` arms from the `*_state` facades along the existing seam |
 | `config.py` | 909 | split the dataclass/schema from the env/CLI-override + cache machinery along the existing seam |
 | `mcp_server.py` | 848 | thin FastMCP tool layer; split the read tools from the write/LLM tools if it grows |
+| `llm/workflow/lint_refs.py` | 815 | grew past cap adding the prompt/step CONTRACT awareness (workflow authoring v2, 5e78): the engine-injected-inputs allow-list + the `${{ steps.*.outputs.* }}` name-existence map. Extract a `lint_contracts.py` once stories e050 (8 op contracts) + c768 (3-state validation depth) add the related logic that clears the 100-LOC floor; today that seam alone is sub-floor |
 | `rebar_reconciler/applier.py` | 801 | split the apply-dispatch table from the per-action handlers |
 
 `src/rebar/llm/runner.py` was **decomposed** in WS-A (epic a88f): the

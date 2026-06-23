@@ -24,7 +24,7 @@ steps:
     prompt: code_quality
     needs: [fetch]
     with:
-      diff: ${{ steps.fetch.outputs.diff }}
+      context: ${{ steps.fetch.outputs.description }}
       token: ${{ secrets.GH_TOKEN }}
 """
 

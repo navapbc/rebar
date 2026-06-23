@@ -147,14 +147,60 @@ ScriptedStep = Callable[[StepContext], "StepResult | dict[str, Any]"]
 STEP_REGISTRY: dict[str, ScriptedStep] = {}
 
 
-def register_step(name: str) -> Callable[[ScriptedStep], ScriptedStep]:
-    """Decorator: register a scripted step under ``name`` (used by WS-E)."""
+@dataclass(frozen=True)
+class StepContract:
+    """A step kind's authored I/O CONTRACT (workflow authoring v2, 5e78).
+
+    Every step kind should advertise an INPUT contract, an OUTPUT contract, and a
+    description so the editor can present a typed palette + inspector and the linter
+    can check a `${{ steps.<id>.outputs.<name> }}` reference against the producing
+    step's declared outputs. ``input_schema`` / ``output_schema`` are SCHEMA NAMES
+    (resolvable via :mod:`rebar.schemas`), not inline schemas; either may be ``None``
+    for a step whose I/O is not yet annotated (the linter then treats that step's
+    outputs as UNKNOWN and never flags a reference to them)."""
+
+    input_schema: str | None = None
+    output_schema: str | None = None
+    description: str = ""
+
+
+# The contracts registered alongside scripted steps. Keyed by the same `uses` name as
+# STEP_REGISTRY; a name absent here is a step with no declared contract (UNKNOWN).
+STEP_CONTRACTS: dict[str, StepContract] = {}
+
+
+def register_step(
+    name: str,
+    *,
+    input_schema: str | None = None,
+    output_schema: str | None = None,
+    description: str | None = None,
+) -> Callable[[ScriptedStep], ScriptedStep]:
+    """Decorator: register a scripted step under ``name`` (used by WS-E).
+
+    The optional ``input_schema`` / ``output_schema`` (schema NAMES) and
+    ``description`` declare the step's contract (workflow authoring v2). When any is
+    given a :class:`StepContract` is recorded in ``STEP_CONTRACTS`` and exposed via
+    :func:`contract_for` — consumed by the editor inspector and the reference linter.
+    """
 
     def deco(fn: ScriptedStep) -> ScriptedStep:
         STEP_REGISTRY[name] = fn
+        if input_schema is not None or output_schema is not None or description is not None:
+            STEP_CONTRACTS[name] = StepContract(
+                input_schema=input_schema,
+                output_schema=output_schema,
+                description=description or "",
+            )
         return fn
 
     return deco
+
+
+def contract_for(step_name: str) -> StepContract | None:
+    """The declared :class:`StepContract` for a scripted step ``name``, or ``None``
+    when the step is unregistered or declares no contract (UNKNOWN to the linter)."""
+    return STEP_CONTRACTS.get(step_name)
 
 
 class AgentStepRunner:

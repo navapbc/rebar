@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import graphlib
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -71,6 +72,12 @@ _ALLOWED_EXPR = (
 # Fields whose value is an identifier or a body sent verbatim to an LLM/shell —
 # a raw expression here is an injection vector, so it is forbidden (pass via with:).
 _LITERAL_ONLY_FIELDS = ("id", "type", "uses", "prompt", "model", "output_schema")
+
+# The engine-injected `${{ inputs.* }}` namespace (workflow authoring v2, 5e78): vars
+# the executor seeds into every run (target ticket + its rendered context + repo root),
+# valid to reference though NOT declared in `inputs:`. SINGLE SOURCE OF TRUTH — the
+# linter allow-lists these and the engine seeds exactly these; never hard-code inline.
+ENGINE_INJECTED_INPUTS: frozenset[str] = frozenset({"ticket_id", "ticket_context", "repo_path"})
 
 # A placeholder the substitution pass swaps in for every expression; chosen to be a
 # harmless scalar so re-validation exercises structure, not content.
@@ -125,6 +132,10 @@ class _Scope:
     outer: frozenset[str]
     loop_vars: frozenset[str]
     map_binds: frozenset[str]
+    # Doc-wide step-id → declared OUTPUT field names (None when the producer has no
+    # contract). A `${{ steps.<id>.outputs.<f> }}` ref checks <f> against this when
+    # known; an UNKNOWN producer is never flagged (workflow authoring v2, 5e78).
+    output_fields: Mapping[str, frozenset[str] | None]
 
 
 def _validate_expression(inner: str, *, step_id: str, scope: _Scope) -> str | None:
@@ -149,10 +160,13 @@ def _validate_expression(inner: str, *, step_id: str, scope: _Scope) -> str | No
         )
     if kind == "input":
         name = match.group(1)
-        if name not in scope.inputs:
+        # An engine-injected var (the target ticket + context + repo root) is always
+        # valid even when not declared in `inputs:`; everything else must be declared.
+        if name not in scope.inputs and name not in ENGINE_INJECTED_INPUTS:
             return f"references undeclared workflow input {name!r}"
     elif kind == "step_output":
         ref = match.group(1)
+        field_name = match.group(2)
         if ref == step_id:
             return f"references its own output (steps.{ref}.outputs.*)"
         # Same-frame precedence: if the id names a sibling, it MUST be an upstream
@@ -166,6 +180,14 @@ def _validate_expression(inner: str, *, step_id: str, scope: _Scope) -> str | No
                 )
         elif ref not in scope.outer:
             return f"references unknown step {ref!r}"
+        # Name-existence against the producer's declared OUTPUT contract — only when
+        # KNOWN; a producer with no contract maps to None and is never flagged.
+        declared = scope.output_fields.get(ref)
+        if declared is not None and field_name not in declared:
+            return (
+                f"references output {field_name!r} not produced by step {ref!r} — its "
+                f"declared outputs are {{{', '.join(sorted(declared))}}}"
+            )
     elif kind == "loop_var":
         name = match.group(1)
         if name not in scope.loop_vars:
@@ -394,6 +416,7 @@ def _lint_control(
     scope: _Scope,
     child_outer_ids: frozenset[str],
     inputs: frozenset[str],
+    output_fields: Mapping[str, frozenset[str] | None],
     expressions_on: bool,
     findings: list[LintFinding],
 ) -> None:
@@ -427,6 +450,7 @@ def _lint_control(
                     outer_ids=child_outer_ids,
                     loop_vars=scope.loop_vars,
                     map_binds=scope.map_binds,
+                    output_fields=output_fields,
                     expressions_on=expressions_on,
                     is_top=False,
                 )
@@ -464,6 +488,7 @@ def _lint_control(
                 outer_ids=child_outer_ids,
                 loop_vars=scope.loop_vars | {var},
                 map_binds=scope.map_binds,
+                output_fields=output_fields,
                 expressions_on=expressions_on,
                 is_top=False,
             )
@@ -491,9 +516,44 @@ def _lint_control(
                 outer_ids=child_outer_ids,
                 loop_vars=scope.loop_vars,
                 map_binds=scope.map_binds | binds,
+                output_fields=output_fields,
                 expressions_on=expressions_on,
                 is_top=False,
             )
+
+
+def _output_fields_map(doc: dict[str, Any]) -> dict[str, frozenset[str] | None]:
+    """Step id → declared OUTPUT field names (or ``None`` for a producer with no known
+    contract), built once per lint and shared across frames so a
+    `${{ steps.<id>.outputs.<name> }}` ref can be checked NAME-EXISTENCE. ``None`` is
+    "skip" — never a false error (5e78: an unannotated producer is UNKNOWN). Only
+    scripted (`uses`) steps carry a contract in this slice; agent/control → UNKNOWN."""
+    # Importing the step library registers its contracts (decorators run on import); a
+    # bare lint may not have triggered that. Lazy + best-effort → else all UNKNOWN.
+    try:
+        from rebar import schemas
+
+        from . import steps  # noqa: F401  (side effect: register built-in contracts)
+        from .executor import contract_for
+    except Exception:  # noqa: BLE001
+        return {}
+
+    def fields(uses: str) -> frozenset[str] | None:
+        try:
+            contract = contract_for(uses)
+            if contract is None or not contract.output_schema:
+                return None
+            props = schemas.load(contract.output_schema).get("properties")
+            return frozenset(props.keys()) if isinstance(props, dict) else None
+        except Exception:  # noqa: BLE001 - any resolution failure is UNKNOWN
+            return None
+
+    out: dict[str, frozenset[str] | None] = {}
+    for s in _iter_all_steps(doc):
+        sid, uses = s.get("id"), s.get("uses")
+        if isinstance(sid, str) and sid:
+            out[sid] = fields(uses) if isinstance(uses, str) else None
+    return out
 
 
 def _frame_ids(steps_list: Any) -> frozenset[str]:
@@ -516,6 +576,7 @@ def _lint_frame(
     outer_ids: frozenset[str],
     loop_vars: frozenset[str],
     map_binds: frozenset[str],
+    output_fields: Mapping[str, frozenset[str] | None],
     expressions_on: bool,
     is_top: bool,
 ) -> None:
@@ -603,6 +664,7 @@ def _lint_frame(
             outer=outer_ids,
             loop_vars=loop_vars,
             map_binds=map_binds,
+            output_fields=output_fields,
         )
         _check_step(
             s,
@@ -624,6 +686,7 @@ def _lint_frame(
                 # step's same-frame ancestors (all guaranteed-before the frame runs).
                 child_outer_ids=outer_ids | frozenset(ancestors.get(sid, set())),
                 inputs=inputs,
+                output_fields=output_fields,
                 expressions_on=expressions_on,
                 findings=findings,
             )
@@ -660,6 +723,7 @@ def lint_document(
         outer_ids=frozenset(),
         loop_vars=frozenset(),
         map_binds=frozenset(),
+        output_fields=_output_fields_map(doc),
         expressions_on=expressions,
         is_top=True,
     )
