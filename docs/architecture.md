@@ -127,6 +127,12 @@ Node/npm are needed only to *rebuild* that bundle or to run the faithful editor 
 (`tests/e2e/`); both are developer-only and off the client/runtime path. See
 [docs/workflow-editor.md](workflow-editor.md).
 
+The workflow engine's hardest assumption — that the thin interpreter can resume
+exactly-once across every crash point — was de-risked up front by
+[`engine_interpreter_poc.py`](experiments/workflow-remediation-pocs/engine_interpreter_poc.py);
+that and the other workflow-engine-v2 de-risk POCs are indexed in
+[docs/experiments/workflow-remediation-pocs/README.md](experiments/workflow-remediation-pocs/README.md).
+
 - **Storage** — a dedicated `tickets` git **orphan branch**, checked out as a
   worktree at `.tickets-tracker/`. Tickets are directories; mutations are
   append-only UUID-named event files (see `docs/event-schema.md`). Every write

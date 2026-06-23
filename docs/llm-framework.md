@@ -69,7 +69,10 @@ The design was chosen after a research spike + two independent Opus design revie
 > LangChain/LangGraph (with a deepagents experimental harness); that stack was
 > **removed in the d6d1 cutover**. The runtime is now the provider-agnostic,
 > in-process **pydantic-ai** runner — this doc describes that current state, so
-> don't be confused by the LangChain/LangGraph references in git history.
+> don't be confused by the LangChain/LangGraph references in git history. The
+> cross-provider runtime was de-risked first by
+> [`runtime_pydanticai_poc.py`](experiments/workflow-remediation-pocs/runtime_pydanticai_poc.py)
+> (see the [de-risk POC index](experiments/workflow-remediation-pocs/README.md)).
 
 - The agent **tool-use loop is a solved problem** — we do not reimplement one.
 - We need the agent to have **filesystem access** (a repo) and **MCP servers** as

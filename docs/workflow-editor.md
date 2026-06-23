@@ -143,5 +143,9 @@ All E2E tiers are **opt-in and self-skipping**: they need Node + a one-time `npm
 (and the browser tier a Chromium download), and skip with a clear reason when those are
 unavailable, so the always-on Python unit suite is unaffected.
 
+The IR↔BPMN round-trip was de-risked up front by
+[`visual_bpmn_roundtrip_poc.mjs`](experiments/workflow-remediation-pocs/visual_bpmn_roundtrip_poc.mjs)
+(see the [de-risk POC index](experiments/workflow-remediation-pocs/README.md)).
+
 See also [docs/llm-framework.md](llm-framework.md) (the agent/runner side of the workflow
 engine) and the agent-facing tool guide in the repo-root `CLAUDE.md`.
