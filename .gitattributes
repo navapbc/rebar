@@ -1,0 +1,12 @@
+# LF-canonical prompt + workflow contract files (workflow authoring v2, d25d).
+#
+# The prompt front-matter canonical writer (rebar.llm.prompts.write_front_matter)
+# emits LF, and prompt/workflow content hashes must be platform-stable — so a
+# Windows checkout or core.autocrlf can never rewrite these to CRLF (which would
+# defeat the \n-anchored front-matter fence and change the content hash). Pin the
+# prompt files, the user prompt-override dir, the derived prompt index, and the
+# workflow IR/index files to eol=lf.
+src/rebar/llm/reviewers/*.md   eol=lf
+.rebar/prompts/**              eol=lf
+.rebar/prompts.index.json      eol=lf
+.rebar/workflows/**            eol=lf
