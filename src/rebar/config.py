@@ -149,6 +149,51 @@ def _as_choice(v: Any, key: str, choices: set[str]) -> str:
     return s
 
 
+# Characters git's check-ref-format forbids anywhere in a ref component.
+_BAD_REF_CHARS = set(" ~^:?*[\\\x7f") | {chr(c) for c in range(0x20)}
+
+
+def _as_git_ref(v: Any, key: str) -> str:
+    """Validate a single-level git branch name against a `git check-ref-format`-style
+    rule set (the subset that matters for a branch): reject empty, whitespace, `..`,
+    a leading `-` or `.`, any of ``~^:?*[\\`` / control / DEL chars, an ``@{`` sequence,
+    a bare ``@``, a trailing ``/`` / ``.lock`` / ``.``, a leading/trailing/double slash,
+    and a component beginning with ``.``. Keeps the tracker branch a valid, pushable ref."""
+    s = _as_str(v, key).strip()
+    if not s:
+        raise ConfigError(f"{key}: branch name must not be empty")
+    if s == "@" or "@{" in s or ".." in s:
+        raise ConfigError(f"{key}: invalid branch name {s!r} (contains '@', '@{{', or '..')")
+    if s.startswith("-") or s.startswith("/") or s.endswith("/") or "//" in s:
+        raise ConfigError(f"{key}: invalid branch name {s!r} (bad slash placement or leading '-')")
+    if s.endswith("."):  # per-component '.lock' is caught by the loop below
+        raise ConfigError(f"{key}: invalid branch name {s!r} (ends with '.')")
+    bad = sorted(_BAD_REF_CHARS & set(s))
+    if bad:
+        raise ConfigError(f"{key}: invalid branch name {s!r} (forbidden char(s) {bad})")
+    for comp in s.split("/"):
+        if not comp or comp.startswith(".") or comp.endswith(".lock"):
+            raise ConfigError(f"{key}: invalid branch name {s!r} (bad path component {comp!r})")
+    return s
+
+
+def _as_tracker_dir(v: Any, key: str) -> str:
+    """Validate the tracker store dir. Allows a bare relative name (the common case,
+    e.g. ``.tickets-tracker`` — used as the repo-root symlink name + gitignore entry)
+    AND an absolute path (the supported relocated/decoupled store, EV-3b, set via
+    ``REBAR_TRACKER_DIR``). Rejects empty/whitespace, any ``..`` traversal component,
+    and control chars — values that would break the symlink/exclude or escape the repo."""
+    s = _as_str(v, key).strip()
+    if not s:
+        raise ConfigError(f"{key}: tracker dir must not be empty")
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in s):
+        raise ConfigError(f"{key}: tracker dir {s!r} contains control characters")
+    parts = s.replace("\\", "/").split("/")
+    if ".." in parts:
+        raise ConfigError(f"{key}: tracker dir {s!r} must not contain a '..' traversal component")
+    return s
+
+
 def _warn_unknown(section: str, leftover: dict, source: str, *, strict: bool = False) -> None:
     """Handle keys left over after coercion (unknown to the schema). During the
     deprecation window (``strict=False``, the default) WARN and ignore them — a typo
@@ -233,6 +278,15 @@ class ScratchConfig:
 
 
 @dataclass
+class TrackerConfig:
+    # The ticket event-store worktree/symlink dir (repo-root-relative name by default;
+    # an absolute path relocates the store — EV-3b) and the orphan branch the event log
+    # lives on. Both default to today's values, so every existing repo is unaffected.
+    dir: str = ".tickets-tracker"
+    branch: str = "tickets"
+
+
+@dataclass
 class Config:
     """The typed core configuration — defaults baked in; build with
     :meth:`from_mapping`. Secrets are NOT here (env/.env only)."""
@@ -246,6 +300,7 @@ class Config:
     reconciler: ReconcilerConfig = field(default_factory=ReconcilerConfig)
     jira: JiraConfig = field(default_factory=JiraConfig)
     scratch: ScratchConfig = field(default_factory=ScratchConfig)
+    tracker: TrackerConfig = field(default_factory=TrackerConfig)
 
     @classmethod
     def from_mapping(cls, raw: dict | None, *, source: str = "", strict: bool = False) -> Config:
@@ -269,6 +324,7 @@ _SECTION_CLASSES: dict[str, type] = {
     "reconciler": ReconcilerConfig,
     "jira": JiraConfig,
     "scratch": ScratchConfig,
+    "tracker": TrackerConfig,
 }
 
 # section -> {key -> coercer(value, dotted_key) -> coerced value (raises ConfigError)}
@@ -301,6 +357,10 @@ _SECTIONS: dict[str, dict] = {
         "project": lambda v, k: _as_str(v, k),
     },
     "scratch": {"base_dir": lambda v, k: _as_str(v, k)},
+    "tracker": {
+        "dir": lambda v, k: _as_tracker_dir(v, k),
+        "branch": lambda v, k: _as_git_ref(v, k),
+    },
 }
 
 # section -> {deprecated_key -> canonical_key}
@@ -636,6 +696,7 @@ _LEGACY_ENV_ALIASES: dict[str, tuple[str, str, str]] = {
     "REBAR_NO_SYNC": ("sync", "pull", "REBAR_SYNC_PULL"),
     "COMPACT_THRESHOLD": ("compact", "threshold", "REBAR_COMPACT_THRESHOLD"),
     "SCRATCH_BASE_DIR": ("scratch", "base_dir", "REBAR_SCRATCH_BASE_DIR"),
+    "TICKETS_TRACKER_DIR": ("tracker", "dir", "REBAR_TRACKER_DIR"),
     "REBAR_MCP_ALLOW_RECONCILE_LIVE": ("mcp", "allow_jira_sync", "REBAR_MCP_ALLOW_JIRA_SYNC"),
     # reconciler.* (EV-3c renames) — canonical names are the ergonomic ones above.
     "REBAR_ACLI_TIMEOUT": ("reconciler", "jira_cli_timeout", "REBAR_JIRA_CLI_TIMEOUT"),

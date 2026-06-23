@@ -108,7 +108,29 @@ mcp.allow_jira_sync  = false   # live (applying) Jira writes (alias env REBAR_MC
 
 # scratch space
 scratch.base_dir = ""   # default <repo>/.rebar/scratch (env REBAR_SCRATCH_BASE_DIR; alias SCRATCH_BASE_DIR)
+
+# ticket store (worktree/symlink dir + orphan branch) — both default to today's values
+tracker.dir    = ".tickets-tracker"  # env REBAR_TRACKER_DIR (alias TICKETS_TRACKER_DIR); a bare
+                                      # relative name (the repo-root symlink + gitignore entry) or an
+                                      # absolute path to relocate the store (EV-3b). Validated: no
+                                      # empty / `..` traversal / control chars.
+tracker.branch = "tickets"           # env REBAR_TRACKER_BRANCH; the orphan branch the event log lives
+                                      # on (+ its origin/<branch> ref). Validated as a git ref:
+                                      # rejects spaces, `..`, leading `-`, ~^:?*[\ / control, trailing
+                                      # `/` or `.lock`.
 ```
+
+> **Resolution change (tracker.dir).** `tracker_dir()` (and the new `tickets_branch()`) now
+> resolve through the full precedence chain (`-c` flag > `REBAR_<KEY>` env > project > user >
+> default), not the env-only path used historically. `REBAR_TRACKER_DIR` keeps working (it is
+> the canonical env override); `TICKETS_TRACKER_DIR` is honored as a deprecated alias.
+>
+> **Set at `init`, not auto-migrated.** Both values are read at `rebar init` and on every
+> read/write thereafter. Changing `tracker.dir`/`tracker.branch` on an **already-initialized**
+> repo does **not** migrate the existing store — it orphans the old branch/dir (the old data is
+> left intact but unreferenced). Renaming an existing store is a separate migration and is out
+> of scope; `rebar fsck` WARNs when the configured branch/dir does not match what is actually
+> mounted so the divergence is observable.
 
 ### Reconciler + Jira tunables — config-file wired (consumed via `load_config`)
 

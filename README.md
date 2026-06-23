@@ -18,7 +18,9 @@ It's an event-sourced ticket system with a Jira reconciler, exposed three ways:
 
 Tickets are stored as an append-only event log on a dedicated `tickets` git
 orphan branch (worktree at `.tickets-tracker/`); state is computed by replaying
-events. A level-triggered reconciler bidirectionally syncs tickets with Jira.
+events. A level-triggered reconciler bidirectionally syncs tickets with Jira. Both
+the branch name and the worktree/symlink dir default to those values but are
+configurable (`tracker.branch` / `tracker.dir`) — see [Configuration](#configuration).
 
 This project was extracted from the `digital-service-orchestra` Claude Code
 plugin. It began as a bash + Python engine; that engine has since been fully ported
@@ -451,6 +453,8 @@ sync.push = "always"                       # always | async | off
 sync.pull = "on"                           # on | off
 mcp.readonly = false
 scratch.base_dir = ""                      # default <repo>/.rebar/scratch
+tracker.dir    = ".tickets-tracker"        # store worktree/symlink dir (env REBAR_TRACKER_DIR)
+tracker.branch = "tickets"                 # orphan branch the event log lives on (env REBAR_TRACKER_BRANCH)
 ```
 
 The full key set, the `REBAR_<KEY>` env names, and deprecation aliases are in

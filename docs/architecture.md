@@ -138,7 +138,11 @@ that and the other workflow-engine-v2 de-risk POCs are indexed in
   append-only UUID-named event files (see `docs/event-schema.md`). Every write
   auto-commits its event **and** auto-pushes `tickets` to `origin/tickets` when an
   `origin` remote exists, so local ticket activity is shared with the remote
-  immediately (best-effort; see `docs/concurrency.md` "Outbound — push").
+  immediately (best-effort; see `docs/concurrency.md` "Outbound — push"). The
+  branch name and the worktree/symlink dir shown here are the **defaults**; both are
+  configurable via `tracker.branch` / `tracker.dir` (resolved through `tickets_branch()`
+  / `tracker_dir()`), set at `init` and not auto-migrated thereafter — see
+  [`docs/config.md`](config.md).
 
 - **Init vs. symlink (two distinct concepts).** *Initializing* a store materializes
   the orphan `tickets` branch + the linked worktree and edits `.git/info/exclude`
