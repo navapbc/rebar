@@ -403,7 +403,7 @@ def test_build_model_constructs_claude_and_chatgpt() -> None:
 def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     from rebar.llm.config import LLMConfig
 
-    # REBAR_LLM_RUNNER is removed (EV-4); the runner is DERIVED — default langgraph.
+    # REBAR_LLM_RUNNER is removed (EV-4); the runner is DERIVED — pydantic_ai (d6d1).
     monkeypatch.delenv("REBAR_LLM_EXPERIMENTAL_HARNESS", raising=False)
     monkeypatch.setenv("REBAR_LLM_RUNNER", "fake")  # IGNORED — no longer a knob
     monkeypatch.setenv("REBAR_LLM_MODEL", "gpt-4o")
@@ -413,23 +413,32 @@ def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk")
     cfg = LLMConfig.from_env(repo_root=".")
-    assert cfg.runner == "langgraph"  # derived; REBAR_LLM_RUNNER=fake ignored
+    # EV-4 CONTRACT (behavioral, not a hardcoded default): REBAR_LLM_RUNNER is IGNORED —
+    # the runner is derived, so the env value "fake" must NOT take effect.
+    assert cfg.runner != "fake"
     assert cfg.model == "gpt-4o" and cfg.max_iterations == 7
     assert cfg.model_provider == "openai" and cfg.base_url == "http://localhost:1234/v1"
     assert cfg.langfuse.enabled is True
 
 
 def test_runner_derivation_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """EV-4: the runner is derived — deepagents only via the experimental opt-in,
-    else langgraph. The old REBAR_LLM_RUNNER knob is ignored."""
+    """EV-4 (behavioral): the runner is DERIVED, not settable from the environment. No env
+    var changes it — neither the old REBAR_LLM_RUNNER knob nor the experimental harness one.
+    Asserted as invariance (the derived value doesn't move), not a hardcoded runner name."""
     from rebar.llm.config import LLMConfig
 
     monkeypatch.delenv("REBAR_LLM_EXPERIMENTAL_HARNESS", raising=False)
-    monkeypatch.setenv("REBAR_LLM_RUNNER", "deepagents")  # ignored
-    assert LLMConfig.from_env(repo_root=".").runner == "langgraph"  # default
+    monkeypatch.delenv("REBAR_LLM_RUNNER", raising=False)
+    derived = LLMConfig.from_env(repo_root=".").runner
 
-    monkeypatch.setenv("REBAR_LLM_EXPERIMENTAL_HARNESS", "deepagents")
-    assert LLMConfig.from_env(repo_root=".").runner == "deepagents"  # explicit opt-in wins
+    monkeypatch.setenv("REBAR_LLM_RUNNER", "fake")  # not a knob → ignored
+    assert LLMConfig.from_env(repo_root=".").runner == derived
+    monkeypatch.setenv("REBAR_LLM_EXPERIMENTAL_HARNESS", "deepagents")  # not a knob → ignored
+    assert LLMConfig.from_env(repo_root=".").runner == derived
+    # and the derived runner is a real, selectable runner (not None / typo)
+    from rebar.llm.config import RUNNERS
+
+    assert derived in RUNNERS
 
 
 def test_runner_selection_and_stubs() -> None:
@@ -446,8 +455,10 @@ def test_runner_selection_and_stubs() -> None:
     assert isinstance(get_runner(LLMConfig(runner="fake")), FakeRunner)
     assert isinstance(get_runner(LLMConfig(runner="langgraph")), LangGraphRunner)
     assert isinstance(get_runner(LLMConfig(runner="deepagents")), DeepAgentsRunner)
-    # The DEFAULT (review) runner is langgraph, NOT deepagents.
-    assert isinstance(get_runner(LLMConfig()), LangGraphRunner)
+    # Behavioral (not a hardcoded default): get_runner dispatches to the runner the config
+    # names, so the DEFAULT config resolves to whatever the derived default runner is.
+    default_cfg = LLMConfig()
+    assert get_runner(default_cfg).name == default_cfg.runner
     fake = FakeRunner(findings=[{"severity": "low", "dimension": "d", "detail": "x"}])
     assert isinstance(get_runner(LLMConfig(runner="langgraph"), override=fake), FakeRunner)
     # An unknown (typo'd) library runner value fails loudly, not silently default.

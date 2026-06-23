@@ -218,7 +218,7 @@ class LangfuseConfig:
 
 @dataclass
 class LLMConfig:
-    runner: str = "langgraph"
+    runner: str = "pydantic_ai"
     model: str = DEFAULT_MODEL
     # Provider is OPTIONAL: LangChain's init_chat_model infers it from the model
     # name (claude-*→anthropic, gpt-*→openai, gemini-*→google_genai). Set it
@@ -236,14 +236,12 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls, *, repo_root=None) -> LLMConfig:
-        # The runner is DERIVED, not a public env knob (EV-4): the experimental
-        # deepagents harness is an explicit opt-in; otherwise the in-process
-        # langgraph default. The ``fake`` runner is test-only — reachable via the
+        # The runner is DERIVED, not a public env knob (EV-4). The provider-agnostic
+        # in-process ``pydantic_ai`` runner is THE runtime (story d6d1: the LangChain/
+        # LangGraph stack was dropped after the PydanticAI runner was validated live
+        # across every operation). The ``fake`` runner is test-only — reachable via the
         # library ``runner=``/``override=`` arg, never from the environment.
-        if os.environ.get("REBAR_LLM_EXPERIMENTAL_HARNESS", "").strip().lower() == "deepagents":
-            runner = "deepagents"
-        else:
-            runner = "langgraph"
+        runner = "pydantic_ai"
         # Config-file layer for the non-secret knobs ([tool.rebar.llm]); env (and
         # `rebar -c llm.*`) override it. Secrets/runtime/derived values stay env-only.
         table = _read_llm_file_table(repo_root)
