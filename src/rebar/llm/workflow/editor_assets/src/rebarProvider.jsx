@@ -240,6 +240,12 @@ function ContractEntry(props) {
 
 function WhenEntry(props) {
   const { element, id } = props;
+  // The branch's `when` is an EDITABLE structured field (a83a): it writes the
+  // condition slice of rebar:Config like every other structured entry. (The deeper
+  // branch UX — adding/removing arms + connection routing — is the deferred S9 scope;
+  // this is just the condition field so `branch` is covered by structured fields.)
+  const modeling = useService("modeling");
+  const bpmnFactory = useService("bpmnFactory");
   const debounce = useService("debounceInput");
   const getWhen = () => {
     const c = configEl(element.businessObject);
@@ -249,15 +255,20 @@ function WhenEntry(props) {
       return "";
     }
   };
+  const setWhen = (value) => {
+    mutateConfig(element, modeling, bpmnFactory, (cfg) => {
+      if (value) cfg.when = value;
+      else delete cfg.when;
+    });
+  };
   return (
     <TextFieldEntry
       id={id}
       element={element}
       label="Condition (when → then, else otherwise)"
       getValue={getWhen}
-      setValue={() => {}}
+      setValue={setWhen}
       debounce={debounce}
-      disabled
     />
   );
 }
@@ -591,7 +602,8 @@ function rebarGroup(element) {
   const entries = [{ id: "rebar-kind", component: KindEntry }];
 
   if (kind === "branch") {
-    // Branch UX is deferred (a83a): keep the read-only `when` + raw editor as-is.
+    // Branch gets a structured `when` condition field (a83a). The deeper branch UX —
+    // arm add/remove + connection routing — is the deferred S9 scope.
     entries.push({ id: "rebar-when", component: WhenEntry });
     entries.push({
       id: "rebar-config",
