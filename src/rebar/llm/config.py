@@ -1,23 +1,22 @@
 """Configuration + backend detection for the rebar LLM agent-operations framework.
 
 ``LLMConfig`` is a plain dataclass resolved from the environment (and explicit
-overrides). It is **stdlib-only** — importing it never pulls langchain/langfuse/
-anthropic — so ``import rebar.llm`` stays dependency-free; the heavy libraries are
-imported lazily by the runner only when an operation actually runs.
+overrides). It is **stdlib-only** — importing it never pulls the agent runtime
+(pydantic-ai) or anthropic — so ``import rebar.llm`` stays dependency-free; the
+heavy libraries are imported lazily by the runner only when an operation runs.
 
 Environment variables (all optional; sensible defaults):
 
-  REBAR_LLM_EXPERIMENTAL_HARNESS  set to ``deepagents`` to opt into the experimental
-                          deepagents harness. Otherwise the runner is the in-process
-                          langgraph default. ``fake`` is test-only (library arg).
-  REBAR_LLM_MODEL         model id (default ``claude-opus-4-8``)
+  REBAR_LLM_MODEL         model id (default ``claude-opus-4-8``); the runner is the
+                          provider-agnostic pydantic_ai runtime (``fake`` is test-only,
+                          reachable only via the library ``runner=`` arg).
   REBAR_LLM_MAX_TOKENS    per-response token ceiling (default 8000)
   REBAR_LLM_MAX_STEPS     Max agent loop steps before abort (~2 per tool call; default
                           25 ~= 12 tool calls). Deprecated alias: REBAR_LLM_MAX_ITERS.
   REBAR_LLM_TIMEOUT       per-operation wall-clock seconds (default 600)
   REBAR_LLM_REPO_PATH     repo root the agent's read-only file tools see (default: repo root)
-  REBAR_LLM_MCP_SERVERS   JSON object of MCP servers (langchain-mcp-adapters shape)
-  ANTHROPIC_API_KEY       model credentials (required to actually run langgraph)
+  REBAR_LLM_MCP_SERVERS   JSON object of MCP servers (Pydantic AI MCP toolset shape)
+  ANTHROPIC_API_KEY       model credentials (required to actually run an operation)
   LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST   tracing + prompts (optional)
 """
 
@@ -31,13 +30,12 @@ from importlib.util import find_spec
 from rebar import config as _root_config
 
 DEFAULT_MODEL = "claude-opus-4-8"
-# Execution backends. `langgraph` is the default for review; `deepagents` is an
-# opt-in harness (planning/subagents/eviction) intended mainly for future
-# task types — review stays on langgraph. `fake` is the offline test seam.
-RUNNERS = ("langgraph", "pydantic_ai", "deepagents", "fake")
+# Execution backends. `pydantic_ai` is THE runtime (story d6d1 cutover dropped the
+# in-process graph stack). `fake` is the offline test seam.
+RUNNERS = ("pydantic_ai", "fake")
 
-# Model-name prefix → provider, mirroring LangChain init_chat_model inference (used
-# for diagnostics + clear errors; init_chat_model does the authoritative dispatch).
+# Model-name prefix → provider (used for diagnostics + clear errors and to pick the
+# provider-qualified model string the pydantic_ai runtime dispatches on).
 _PROVIDER_PREFIXES = (
     ("claude", "anthropic"),
     ("gpt-", "openai"),
@@ -47,12 +45,6 @@ _PROVIDER_PREFIXES = (
     ("chatgpt", "openai"),
     ("gemini", "google_genai"),
 )
-# provider → the LangChain integration package a client project must install.
-PROVIDER_PACKAGES = {
-    "anthropic": "langchain-anthropic",
-    "openai": "langchain-openai",
-    "google_genai": "langchain-google-genai",
-}
 
 
 def infer_provider(model: str, explicit: str | None = None) -> str | None:
@@ -78,8 +70,8 @@ def resolve_model(cfg: LLMConfig, *, step: str | None = None, workflow: str | No
     (``REBAR_LLM_MODEL`` env, else ``DEFAULT_MODEL``). So a per-step ``model:``
     (e.g. ``anthropic:claude-opus-4-8`` or ``openai:gpt-4o``) wins, then a
     workflow-level ``model:``, then whatever the config/env/default resolved to.
-    Returns a model id consumable by ``init_chat_model`` (``provider:model`` or a
-    bare model whose provider is inferred)."""
+    Returns a model id consumable by the runner (``provider:model`` or a bare model
+    whose provider is inferred)."""
     return step or workflow or cfg.model
 
 
@@ -220,10 +212,10 @@ class LangfuseConfig:
 class LLMConfig:
     runner: str = "pydantic_ai"
     model: str = DEFAULT_MODEL
-    # Provider is OPTIONAL: LangChain's init_chat_model infers it from the model
-    # name (claude-*→anthropic, gpt-*→openai, gemini-*→google_genai). Set it
-    # explicitly for ambiguous names or OpenAI-compatible local servers
-    # (LMStudio/Ollama/vLLM: model_provider="openai" + base_url).
+    # Provider is OPTIONAL: it is inferred from the model name (claude-*→anthropic,
+    # gpt-*→openai, gemini-*→google_genai) to build the provider-qualified model
+    # string the pydantic_ai runtime dispatches on. Set it explicitly for ambiguous
+    # names.
     model_provider: str | None = None
     base_url: str | None = None  # OpenAI-compatible endpoint (local models)
     api_key: str | None = None  # explicit key (e.g. a dummy key for local servers)
@@ -237,10 +229,10 @@ class LLMConfig:
     @classmethod
     def from_env(cls, *, repo_root=None) -> LLMConfig:
         # The runner is DERIVED, not a public env knob (EV-4). The provider-agnostic
-        # in-process ``pydantic_ai`` runner is THE runtime (story d6d1: the LangChain/
-        # LangGraph stack was dropped after the PydanticAI runner was validated live
-        # across every operation). The ``fake`` runner is test-only — reachable via the
-        # library ``runner=``/``override=`` arg, never from the environment.
+        # in-process ``pydantic_ai`` runner is THE runtime (story d6d1 cutover: the
+        # in-process graph stack was dropped after the PydanticAI runner was validated
+        # live across every operation). The ``fake`` runner is test-only — reachable via
+        # the library ``runner=``/``override=`` arg, never from the environment.
         runner = "pydantic_ai"
         # Config-file layer for the non-secret knobs ([tool.rebar.llm]); env (and
         # `rebar -c llm.*`) override it. Secrets/runtime/derived values stay env-only.
@@ -300,14 +292,10 @@ def available_backends() -> dict:
     and the ``rebar review --check`` surface. Pure detection (no heavy imports).
     """
     return {
-        "langchain": _module_available("langchain") and _module_available("langgraph"),
-        # model-provider integrations (langchain-anthropic ships with the extra;
-        # the others are opt-in installs for OpenAI / Gemini).
-        "provider_anthropic": _module_available("langchain_anthropic"),
-        "provider_openai": _module_available("langchain_openai"),
-        "provider_google": _module_available("langchain_google_genai"),
-        "deepagents": _module_available("deepagents"),
-        "langchain_mcp_adapters": _module_available("langchain_mcp_adapters"),
+        # The provider-agnostic Pydantic AI runtime (the `agents` extra). The provider
+        # is chosen by the model string, so there are no per-provider integration
+        # packages to detect — anthropic/openai/google all run on the same stack.
+        "pydantic_ai": _module_available("pydantic_ai"),
         "langfuse": _module_available("langfuse"),
         "anthropic_api_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
         "openai_api_key": bool(os.environ.get("OPENAI_API_KEY")),
@@ -326,7 +314,7 @@ def _extra_installed(extra: str) -> bool:
 
 
 def agents_extra_installed() -> bool:
-    """True when the ``nava-rebar[agents]`` extra is importable (the langgraph path,
-    default Anthropic provider). Other providers (OpenAI/Gemini) are opt-in extras."""
-    b = available_backends()
-    return b["langchain"] and b["provider_anthropic"] and b["langchain_mcp_adapters"]
+    """True when the ``nava-rebar[agents]`` extra is importable — i.e. the
+    provider-agnostic Pydantic AI runtime is present. The provider is selected by the
+    model string, so no per-provider integration package is required to run."""
+    return available_backends()["pydantic_ai"]

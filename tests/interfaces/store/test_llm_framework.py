@@ -2,7 +2,7 @@
 
 All offline: the agent run is exercised through a FakeRunner (the dependency-
 injection seam), so no model, network, or `agents` extra is needed. The live
-langgraph path is tested only for its graceful-degradation errors.
+pydantic_ai path is tested only for its graceful-degradation errors.
 """
 
 from __future__ import annotations
@@ -20,13 +20,12 @@ from rebar import schemas
 
 # ── import-cleanliness (the hard optionality rule) ────────────────────────────
 def test_import_rebar_llm_pulls_no_heavy_deps() -> None:
-    """`import rebar.llm` must not import langchain/langfuse/anthropic/pydantic —
-    they are lazy. Run in a clean subprocess so import order can't mask it."""
+    """`import rebar.llm` must not import the agent runtime (pydantic_ai) / langfuse /
+    anthropic — they are lazy. Run in a clean subprocess so import order can't mask it."""
     code = (
         "import sys, rebar.llm;"
         "heavy=[m for m in "
-        "('langchain','langgraph','langchain_anthropic','langchain_mcp_adapters',"
-        "'langfuse','anthropic','pydantic') if m in sys.modules];"
+        "('pydantic_ai','langfuse','anthropic') if m in sys.modules];"
         "print('HEAVY' if heavy else 'CLEAN', heavy)"
     )
     cp = subprocess.run(
@@ -172,87 +171,79 @@ def test_resolve_citations_rejects_denied_state_paths(tmp_path: Path) -> None:
     assert kinds == ["source", "source"]  # both denied -> downgraded
 
 
-def test_read_file_tool_caps_without_slurping(tmp_path: Path) -> None:
-    """read_file streams and caps at _READ_MAX_LINES, and tells the agent how to
-    page (PR #6 review + windowing research)."""
-    pytest.importorskip("langchain_core")
-    from rebar.llm.fs_tools import _READ_MAX_LINES, _filesystem_tools
+def _fs_tools(root):
+    """The pydantic_ai file tools (plain functions) keyed by name."""
+    pytest.importorskip("pydantic_ai")
+    from rebar.llm import pai_tools
+
+    return {t.__name__: t for t in pai_tools.filesystem_tools(str(root))}
+
+
+def test_read_file_tool_windows_a_large_file(tmp_path: Path) -> None:
+    """read_file returns at most _READ_MAX_LINES of a large file (a bounded window),
+    not the whole thing, and a narrow range returns exactly that range."""
+    from rebar.llm.fs_tools import _SCAN_MAX_FILES  # noqa: F401  (import-light sanity)
+    from rebar.llm.pai_tools import _READ_MAX_LINES
 
     big = tmp_path / "big.txt"
     big.write_text(
         "".join(f"line {i}\n" for i in range(1, _READ_MAX_LINES + 501)), encoding="utf-8"
     )
-    read_file = {t.name: t for t in _filesystem_tools(str(tmp_path))}["read_file"]
-    out = read_file.invoke({"path": "big.txt"})
-    assert "truncated" in out
-    assert f"line_start={_READ_MAX_LINES + 1}" in out  # paging guidance for next window
-    assert out.count("\n") <= _READ_MAX_LINES + 1  # capped, not the full file
-    # a narrow range returns exactly that window, no truncation note
-    narrow = read_file.invoke({"path": "big.txt", "line_start": 5, "line_end": 7})
-    assert "truncated" not in narrow and narrow.startswith("5: line 5")
-    assert narrow.strip().endswith("7: line 7")
+    read_file = _fs_tools(tmp_path)["read_file"]
+    out = read_file("big.txt")
+    assert out.count("\n") <= _READ_MAX_LINES  # capped window, not the full file
+    # a narrow range returns exactly that window (tab-delimited `lineno\ttext`)
+    narrow = read_file("big.txt", line_start=5, line_end=7)
+    assert narrow.startswith("5\tline 5")
+    assert narrow.strip().endswith("7\tline 7")
 
 
 def test_read_file_truncates_overlong_lines(tmp_path: Path) -> None:
-    pytest.importorskip("langchain_core")
-    from rebar.llm.fs_tools import _READ_MAX_LINE_CHARS, _filesystem_tools
+    from rebar.llm.pai_tools import _READ_MAX_LINE_CHARS
 
     (tmp_path / "min.js").write_text("x" * (_READ_MAX_LINE_CHARS + 4000) + "\n", encoding="utf-8")
-    read_file = {t.name: t for t in _filesystem_tools(str(tmp_path))}["read_file"]
-    out = read_file.invoke({"path": "min.js"})
-    assert "chars truncated" in out
+    out = _fs_tools(tmp_path)["read_file"]("min.js")
+    assert "truncated" in out
     assert len(out) < _READ_MAX_LINE_CHARS + 500  # the 4000-char tail was clipped
 
 
 def test_read_tools_return_recoverable_error_for_missing_path(tmp_path: Path) -> None:
     """A missing/unreadable path (e.g. a file named in a diff but not on disk, or a
-    directory) must return a recoverable message — NOT raise an uncaught OSError
-    that aborts the agent run. Regression for a live-run FileNotFoundError in
-    review_code. (A denied/escaping path is a separate hard ValueError block.)"""
-    pytest.importorskip("langchain_core")
-    from rebar.llm.fs_tools import _filesystem_tools
-
-    tools = {t.name: t for t in _filesystem_tools(str(tmp_path))}
-    out = tools["read_file"].invoke({"path": "does-not-exist.py"})
-    assert out.startswith("Error: cannot read 'does-not-exist.py'")
+    directory) must return a recoverable ``Error:`` message — NOT raise an uncaught
+    OSError that aborts the agent run. (A denied/escaping path is a separate block.)"""
+    tools = _fs_tools(tmp_path)
+    assert tools["read_file"]("does-not-exist.py").startswith("Error:")
     # read_file on a directory is also recoverable, not a crash.
     (tmp_path / "subdir").mkdir()
-    assert tools["read_file"].invoke({"path": "subdir"}).startswith("Error: cannot read")
+    assert tools["read_file"]("subdir").startswith("Error:")
     # list_directory on a missing path is recoverable too.
-    miss = tools["list_directory"].invoke({"path": "no-such-dir"})
-    assert miss.startswith("Error: cannot list 'no-such-dir'")
+    assert tools["list_directory"]("no-such-dir").startswith("Error:")
 
 
 def test_discovery_hides_noise_and_gitignored(rebar_repo: Path) -> None:
     """list_directory/search_files hide vendored/generated + .gitignore'd files, but
     read_file can still access an explicitly named one (large-project handling)."""
-    pytest.importorskip("langchain_core")
-    from rebar.llm.fs_tools import _filesystem_tools
-
     (rebar_repo / ".gitignore").write_text("secret.txt\n", encoding="utf-8")
     (rebar_repo / "secret.txt").write_text("TOKEN=abc\n", encoding="utf-8")
     (rebar_repo / "visible.py").write_text("TOKEN_marker = 1\n", encoding="utf-8")
     (rebar_repo / "node_modules").mkdir()
     (rebar_repo / "node_modules" / "dep.js").write_text("TOKEN_marker\n", encoding="utf-8")
 
-    tools = {t.name: t for t in _filesystem_tools(str(rebar_repo))}
-    listing = tools["list_directory"].invoke({"path": "."})
+    tools = _fs_tools(rebar_repo)
+    listing = tools["list_directory"](".")
     assert "visible.py" in listing
     assert "secret.txt" not in listing and "node_modules" not in listing
     # search skips the gitignored file and the vendored dir, finds the tracked one
-    found = tools["search_files"].invoke({"pattern": "TOKEN_marker"})
+    found = tools["search_files"]("TOKEN_marker")
     assert "visible.py" in found
     assert "secret.txt" not in found and "node_modules" not in found
     # but an explicitly named ignored file is still readable (not a security deny)
-    assert "TOKEN=abc" in tools["read_file"].invoke({"path": "secret.txt"})
+    assert "TOKEN=abc" in tools["read_file"]("secret.txt")
 
 
 def test_discovery_rejects_symlink_escape(tmp_path: Path) -> None:
     """list_directory/search_files must not surface symlinks pointing outside the
-    repo root (PR #6 review) — read_file already blocks them via _safe_path."""
-    pytest.importorskip("langchain_core")
-    from rebar.llm.fs_tools import _filesystem_tools
-
+    repo root — read_file already blocks them via _safe_path."""
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "secret.txt").write_text("TOPSECRET\n", encoding="utf-8")
@@ -262,21 +253,20 @@ def test_discovery_rejects_symlink_escape(tmp_path: Path) -> None:
     (repo / "escape_dir").symlink_to(outside, target_is_directory=True)
     (repo / "escape_file").symlink_to(outside / "secret.txt")
 
-    tools = {t.name: t for t in _filesystem_tools(str(repo))}
-    listing = tools["list_directory"].invoke({"path": "."})
+    tools = _fs_tools(repo)
+    listing = tools["list_directory"](".")
     assert "normal.txt" in listing
     assert "escape_dir" not in listing and "escape_file" not in listing
-    found = tools["search_files"].invoke({"pattern": "TOPSECRET"})
+    found = tools["search_files"]("TOPSECRET")
     assert "normal.txt" in found and "secret.txt" not in found
     # An explicit read of an escaping symlink is BLOCKED, but as a recoverable
     # refusal message — not an uncaught ValueError that would abort the agent run.
     # (The secret content must never appear in the returned string.)
-    refusal = tools["read_file"].invoke({"path": "escape_file"})
-    assert refusal.startswith("Error:") and "escape" in refusal
+    refusal = tools["read_file"]("escape_file")
+    assert refusal.startswith("Error:")
     assert "TOPSECRET" not in refusal
-    # Same hard block, same recoverable shape, for an absolute path the model may
-    # pass (e.g. list_directory("/")) — regression for a live-run abort.
-    assert tools["list_directory"].invoke({"path": "/"}).startswith("Error:")
+    # Same hard block, same recoverable shape, for an absolute path the model may pass.
+    assert tools["list_directory"]("/").startswith("Error:")
 
 
 def test_validate_rejects_bad_result() -> None:
@@ -346,58 +336,17 @@ def test_infer_provider() -> None:
     assert infer_provider("mystery-model") is None
 
 
-def test_build_model_wiring_is_provider_agnostic() -> None:
-    """_build_model must pass model/provider/base_url/api_key straight through to
-    init_chat_model and never inject temperature (claude-opus-4.x reject it)."""
+def test_model_string_selection_is_provider_agnostic() -> None:
+    """The runtime picks the provider purely from the model string (no per-provider
+    code): a bare name is provider-qualified, a qualified string is used verbatim."""
+    pytest.importorskip("pydantic_ai")
     from rebar.llm.config import LLMConfig
-    from rebar.llm.runner import _build_model
+    from rebar.llm.runner import _pai_model
 
-    captured: dict = {}
-
-    def fake_init(model, model_provider=None, **kw):
-        captured.update(model=model, provider=model_provider, kw=kw)
-        return object()
-
-    _build_model(
-        LLMConfig(
-            model="gpt-4o",
-            model_provider="openai",
-            base_url="http://h/v1",
-            api_key="k",
-            max_tokens=123,
-            timeout_s=7,
-        ),
-        fake_init,
-    )
-    assert captured["model"] == "gpt-4o" and captured["provider"] == "openai"
-    assert captured["kw"]["base_url"] == "http://h/v1" and captured["kw"]["api_key"] == "k"
-    assert captured["kw"]["max_tokens"] == 123 and captured["kw"]["timeout"] == 7
-    assert "temperature" not in captured["kw"]
-
-
-def test_build_model_constructs_claude_and_chatgpt() -> None:
-    """Validate the real multi-provider path: Claude -> ChatAnthropic, ChatGPT ->
-    ChatOpenAI (construction only; no API call). Skips when the libs are absent."""
-    pytest.importorskip("langchain")
-    pytest.importorskip("langchain_anthropic")
-    pytest.importorskip("langchain_openai")
-    from rebar.llm.config import LLMConfig
-    from rebar.llm.runner import _build_model, _import_langgraph
-
-    _, _, init_chat_model = _import_langgraph()
-    claude = _build_model(LLMConfig(model="claude-opus-4-8", api_key="test"), init_chat_model)
-    assert type(claude).__name__ == "ChatAnthropic"
-    assert getattr(claude, "temperature", None) is None  # never sent
-    gpt = _build_model(
-        LLMConfig(model="gpt-4o", model_provider="openai", api_key="test"), init_chat_model
-    )
-    assert type(gpt).__name__ == "ChatOpenAI"
-    # OpenAI-compatible local server (LMStudio/Ollama/vLLM) via base_url.
-    local = _build_model(
-        LLMConfig(model="m", model_provider="openai", api_key="x", base_url="http://h/v1"),
-        init_chat_model,
-    )
-    assert type(local).__name__ == "ChatOpenAI"
+    assert _pai_model(LLMConfig(model="claude-opus-4-8")) == "anthropic:claude-opus-4-8"
+    assert _pai_model(LLMConfig(model="gpt-4o", model_provider="openai")) == "openai:gpt-4o"
+    qualified = "google-gla:gemini-2.5-flash"
+    assert _pai_model(LLMConfig(model=qualified)) == qualified
 
 
 def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -442,192 +391,23 @@ def test_runner_derivation_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_runner_selection_and_stubs() -> None:
-    from rebar.llm.config import LLMConfig
+    from rebar.llm.config import RUNNERS, LLMConfig
     from rebar.llm.errors import LLMConfigError
-    from rebar.llm.runner import (
-        DeepAgentsRunner,
-        FakeRunner,
-        LangGraphRunner,
-        RunRequest,
-        get_runner,
-    )
+    from rebar.llm.runner import FakeRunner, get_runner
 
     assert isinstance(get_runner(LLMConfig(runner="fake")), FakeRunner)
-    assert isinstance(get_runner(LLMConfig(runner="langgraph")), LangGraphRunner)
-    assert isinstance(get_runner(LLMConfig(runner="deepagents")), DeepAgentsRunner)
-    # Behavioral (not a hardcoded default): get_runner dispatches to the runner the config
-    # names, so the DEFAULT config resolves to whatever the derived default runner is.
+    # Behavioral (not a hardcoded default): get_runner dispatches to the runner the
+    # config NAMES, so the resolved runner's name matches the config's runner field.
+    for name in RUNNERS:
+        assert get_runner(LLMConfig(runner=name)).name == name
     default_cfg = LLMConfig()
     assert get_runner(default_cfg).name == default_cfg.runner
+    # An explicit override always wins over the config-named runner.
     fake = FakeRunner(findings=[{"severity": "low", "dimension": "d", "detail": "x"}])
-    assert isinstance(get_runner(LLMConfig(runner="langgraph"), override=fake), FakeRunner)
-    # An unknown (typo'd) library runner value fails loudly, not silently default.
-
+    assert get_runner(LLMConfig(runner="pydantic_ai"), override=fake) is fake
+    # An unknown (typo'd) library runner value fails loudly, naming the valid set.
     with pytest.raises(LLMConfigError, match="unknown runner"):
         get_runner(LLMConfig(runner="bogus"))
-
-    req = RunRequest(system_prompt="s", instructions="i", config=LLMConfig(repo_path="."))
-    # LangGraph runner without the 'agents' extra (langchain) gives a clear install
-    # error. Guard on langchain's actual absence — when it IS installed, running
-    # needs real credentials, which this offline test does not exercise.
-    from rebar.llm.config import _module_available
-
-    if not _module_available("langchain"):
-        with pytest.raises(LLMConfigError):
-            LangGraphRunner(LLMConfig(repo_path=".")).run(req)
-    # deepagents runner without the extra installed gives the same clear error.
-    if not _module_available("deepagents"):
-        with pytest.raises(LLMConfigError):
-            DeepAgentsRunner(LLMConfig(repo_path=".")).run(req)
-
-
-def test_trace_yields_once_and_propagates_when_body_raises(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Regression: ``_trace`` must yield EXACTLY once even when the wrapped body
-    raises. A naive ``with span: yield`` wrapped in ``try/except: yield`` double-
-    yields on a thrown-in exception, so @contextmanager dies with 'generator
-    didn't stop after throw()' and MASKS the real error. The body's exception must
-    propagate unchanged, the span must close, and flush() must still run."""
-    pytest.importorskip("langfuse")
-    import langfuse
-    import langfuse.langchain as lflc
-
-    from rebar.llm.config import LangfuseConfig, LLMConfig
-    from rebar.llm.runner import _trace
-
-    flushed: list = []
-    exited: list = []
-
-    class _FakeSpan:
-        trace_id = "abc123def"
-
-    class _FakeSpanCM:
-        def __enter__(self):
-            return _FakeSpan()
-
-        def __exit__(self, *exc):
-            exited.append(exc[0])
-            return False  # do NOT suppress
-
-    class _FakeClient:
-        def start_as_current_observation(self, **kw):
-            return _FakeSpanCM()
-
-        def get_current_trace_id(self):
-            return "abc123def"
-
-        def flush(self):
-            flushed.append(True)
-
-    monkeypatch.setattr(langfuse, "get_client", lambda: _FakeClient())
-    monkeypatch.setattr(lflc, "CallbackHandler", lambda: object())
-
-    cfg = LLMConfig(langfuse=LangfuseConfig(public_key="pk", secret_key="sk"))
-    assert cfg.langfuse.enabled
-
-    boom = RuntimeError("body failed")
-    with pytest.raises(RuntimeError) as exc:
-        with _trace(cfg) as (trace_id, callbacks):
-            assert trace_id == "abc123def" and callbacks  # span id + handler wired
-            raise boom
-    assert exc.value is boom  # the REAL error, not a masked contextlib RuntimeError
-    assert flushed == [True]  # flushed despite the raise
-    assert exited and exited[0] is RuntimeError  # span closed, told about the exc
-
-    # And the happy path still yields the trace id and flushes.
-    flushed.clear()
-    with _trace(cfg) as (trace_id, callbacks):
-        assert trace_id == "abc123def"
-    assert flushed == [True]
-
-
-def test_mcp_tools_downed_server_is_loud_not_silent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A configured MCP server that fails to load, or connects but advertises zero
-    tools, must raise a clean LLMRunnerError — NEVER silently degrade to a tool-less
-    run (ticket 9bd5: 'a downed MCP server does NOT silently yield zero tools').
-    A fresh client per call also gives the stateless re-spawn the ticket asks for."""
-    pytest.importorskip("langchain_mcp_adapters")
-    from rebar.llm.errors import LLMRunnerError
-    from rebar.llm.runner import _mcp_tools
-
-    # No servers configured -> empty list, no error (the default/lazy case).
-    assert _mcp_tools({}) == []
-
-    # A configured-but-DOWN server (missing stdio binary) -> clean, actionable error.
-    down = {"x": {"command": "no-such-mcp-binary-zzz", "args": [], "transport": "stdio"}}
-    with pytest.raises(LLMRunnerError) as exc:
-        _mcp_tools(down)
-    assert "x" in str(exc.value) and "REBAR_LLM_MCP_SERVERS" in str(exc.value)
-
-    # A server that connects but advertises ZERO tools -> also loud, not silent.
-    import langchain_mcp_adapters.client as lmc
-
-    class _EmptyClient:
-        def __init__(self, servers: dict) -> None:
-            pass
-
-        async def get_tools(self) -> list:
-            return []
-
-    monkeypatch.setattr(lmc, "MultiServerMCPClient", _EmptyClient)
-    with pytest.raises(LLMRunnerError) as exc2:
-        _mcp_tools({"y": {"url": "http://127.0.0.1:1/mcp", "transport": "streamable_http"}})
-    assert "zero tools" in str(exc2.value)
-
-
-def test_mcp_tools_loads_from_real_stdio_server(tmp_path: Path) -> None:
-    """End-to-end (ticket 9bd5): _mcp_tools spawns a REAL stdio MCP server and loads
-    its tools — the positive path complementing the downed-server negative path.
-    A second call spawns a fresh session (stateless re-spawn) and still loads."""
-    pytest.importorskip("langchain_mcp_adapters")
-    pytest.importorskip("mcp")
-    import sys
-
-    from rebar.llm.runner import _mcp_tools
-
-    server = tmp_path / "mini_mcp_server.py"
-    server.write_text(
-        "from mcp.server.fastmcp import FastMCP\n"
-        "mcp = FastMCP('probe')\n"
-        "@mcp.tool()\n"
-        "def echo(text: str) -> str:\n"
-        "    '''Echo the input back.'''\n"
-        "    return text\n"
-        "if __name__ == '__main__':\n"
-        "    mcp.run()\n",
-        encoding="utf-8",
-    )
-    servers = {"probe": {"command": sys.executable, "args": [str(server)], "transport": "stdio"}}
-    assert "echo" in {t.name for t in _mcp_tools(servers)}
-    # Stateless re-spawn: an independent second call spawns a fresh session.
-    assert "echo" in {t.name for t in _mcp_tools(servers)}
-
-
-def test_deepagents_runner_assembles(tmp_path: Path) -> None:
-    """The opt-in deepagents runner wires a read-only, repo-rooted deep agent with
-    our findings schema (construction only; no model call). Skips without the lib."""
-    pytest.importorskip("deepagents")
-    pytest.importorskip("langchain_anthropic")
-    from rebar.llm import findings as F
-    from rebar.llm.config import LLMConfig
-    from rebar.llm.runner import _build_model, _import_deepagents, _import_langgraph
-
-    _, ToolStrategy, init_chat_model = _import_langgraph()
-    create_deep_agent, FilesystemBackend, FilesystemPermission = _import_deepagents()
-    model = _build_model(
-        LLMConfig(model="claude-opus-4-8", api_key="test", repo_path=str(tmp_path)),
-        init_chat_model,
-    )
-    agent = create_deep_agent(
-        model=model,
-        tools=[],
-        system_prompt="review",
-        backend=FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True),
-        permissions=[FilesystemPermission(operations=["write"], paths=["/**"], mode="deny")],
-        response_format=ToolStrategy(F.findings_response_model(), handle_errors=True),
-    )
-    assert agent is not None
 
 
 # ── code review + multi-reviewer aggregation ──────────────────────────────────
@@ -884,7 +664,7 @@ def test_cli_review_check(capsys: pytest.CaptureFixture) -> None:
     out = capsys.readouterr().out
     assert rc == 0
     data = json.loads(out)
-    assert "langchain" in data and "anthropic_api_key" in data
+    assert "pydantic_ai" in data and "anthropic_api_key" in data
 
 
 def test_cli_review_with_fake_runner(

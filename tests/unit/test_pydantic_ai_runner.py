@@ -252,7 +252,7 @@ def test_search_files_skips_vendored_noise(tmp_path):
 
 def test_unsupported_config_is_a_loud_error():
     # base_url / api_key are dropped by this runner; surfacing them must FAIL, not
-    # silently ignore (a capability regression vs the langgraph runner).
+    # silently ignore (they would otherwise be a silent capability gap).
     runner = PydanticAIRunner(_cfg(base_url="http://localhost:1234/v1"))
     with pytest.raises(LLMConfigError, match="base_url"):
         runner.preflight()

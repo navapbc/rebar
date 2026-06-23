@@ -4,17 +4,17 @@ findings, exposed (like the rest of rebar) over library, CLI, and MCP.
 Design in one paragraph: an **operation** (e.g. :func:`review_ticket`) assembles
 deterministic context from rebar's own reads, resolves a **reviewer** prompt from
 Langfuse prompt management (with a packaged fallback), and dispatches to a
-pluggable **Runner**. The default runner runs an in-process LangChain/LangGraph
-agent — the runtime natively traced by Langfuse — with read-only, line-numbered
-repository file tools plus MCP servers, and returns findings constrained to the
-canonical ``review_result`` JSON Schema. An opt-in deepagents harness and other
-runners slot in behind the same protocol. Langfuse provides tracing + the prompt
-library.
+pluggable **Runner**. The default runner runs an in-process, provider-agnostic
+Pydantic AI agent — the provider chosen by the model string — with read-only,
+line-numbered repository file tools plus MCP servers, and returns findings
+constrained to the canonical ``review_result`` JSON Schema. Other runners slot in
+behind the same protocol. Langfuse provides tracing + the prompt library.
 
 **Optionality is a hard rule:** importing this package pulls **no** heavy
-dependency — langchain/langgraph/langfuse/anthropic are imported lazily by the
-runner only when an operation runs. ``import rebar`` and ``import rebar.llm`` stay
-stdlib-only; running needs the ``nava-rebar[agents]`` extra + ``ANTHROPIC_API_KEY``.
+dependency — the agent runtime (pydantic-ai) / langfuse / anthropic are imported
+lazily by the runner only when an operation runs. ``import rebar`` and ``import
+rebar.llm`` stay stdlib-only; running needs the ``nava-rebar[agents]`` extra +
+``ANTHROPIC_API_KEY``.
 
     import rebar.llm
     result = rebar.llm.review_ticket("abc123", "ticket-quality")   # -> review_result dict
@@ -41,7 +41,6 @@ from rebar.llm.findings import build_result, normalize_finding, validate_result
 from rebar.llm.operations import review_ticket, select_reviewers
 from rebar.llm.prompts import Reviewer, get_reviewer, load_catalog
 from rebar.llm.runner import (
-    DeepAgentsRunner,
     FakeRunner,
     Runner,
     RunRequest,
@@ -70,7 +69,6 @@ __all__ = [
     "Runner",
     "RunRequest",
     "FakeRunner",
-    "DeepAgentsRunner",
     "get_runner",
     # reviewer registry
     "Reviewer",

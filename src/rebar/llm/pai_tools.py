@@ -1,9 +1,8 @@
 """Provider-agnostic agent tools for the Pydantic AI runtime (7d58).
 
-The LangGraph runner binds LangChain ``@tool`` objects; Pydantic AI binds PLAIN
-PYTHON FUNCTIONS (and native MCP toolsets). This module supplies the same capability
-surface in Pydantic AI's shape, with the SAME safety guarantees as the LangGraph
-path so the swap is behaviour-preserving:
+Pydantic AI binds PLAIN PYTHON FUNCTIONS (and native MCP toolsets). This module
+supplies the agent's capability surface in Pydantic AI's shape, with read-only
+safety guarantees enforced by the shared ``fs_tools`` primitives:
 
   * **Filesystem** (read-only) — ``read_file`` / ``list_directory`` / ``search_files``,
     confined to the repo root and refusing traversal + the state-dir deny-list by

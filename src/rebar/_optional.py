@@ -25,7 +25,7 @@ from importlib.util import find_spec
 # extra -> (probe module that proves it's installed, one-line capability blurb).
 # The probe is the lightest import-name that is present iff the extra is.
 EXTRAS: dict[str, tuple[str, str]] = {
-    "agents": ("langchain", "LLM agent steps, review operations, and the workflow agent runner"),
+    "agents": ("pydantic_ai", "LLM agent steps, review operations, and the workflow agent runner"),
     "eval": ("inspect_ai", "prompt evaluation (Inspect AI + promptfoo interop)"),
     "tracing": (
         "opentelemetry",

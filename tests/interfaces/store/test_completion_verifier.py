@@ -406,34 +406,21 @@ def test_child_closure_does_not_recurse_grandchildren(rebar_repo: Path) -> None:
     assert r["verdict"] == "PASS", r["findings"]
 
 
-# ── runner: output_strategy="extract" tool-less structured extraction (offline) ─
-def test_extract_structured_uses_with_structured_output(rebar_repo: Path) -> None:
-    """The ``output_strategy="extract"`` path's second step (``_extract_structured``) turns the
-    agent's free-text conclusion into the structured verdict via ``model.with_structured_output``
-    — NO tools, NO live call. Stub the model so this is fully offline; assert it returns the
-    typed verdict (contract) and returns None for an empty conclusion (so finalize raises rather
-    than inventing a verdict)."""
-    from rebar.llm import contracts
-    from rebar.llm import runner as _runner
+# ── runner: free-text → validated structured verdict (offline) ──────────────────
+def test_free_text_conclusion_parses_into_structured_verdict() -> None:
+    """The structured-output stack turns a model's free-text JSON conclusion into a
+    validated verdict via the deterministic tolerant parse (no second LLM, no live
+    call), and rejects an empty conclusion (so finalize raises rather than inventing a
+    verdict). This is the successor to the removed extract-step contract."""
+    from rebar.llm import contracts, structured
+    from rebar.llm.errors import StructuredOutputError
 
     model_cls = contracts.completion_verdict_response_model()
 
-    class _Structured:
-        def __init__(self, cls):
-            self._cls = cls
-
-        def invoke(self, messages):
-            # Faithfully transcribe a PASS conclusion (no re-judging) into the schema.
-            assert any("Extract" in str(m.get("content", "")) for m in messages)
-            return self._cls(verdict="PASS", findings=[], summary="all criteria met")
-
-    class StubModel:
-        def with_structured_output(self, cls):
-            return _Structured(cls)
-
-    out = _runner._extract_structured(
-        StubModel(), model_cls, "Conclusion: every criterion met. PASS."
+    out = structured.parse_structured(
+        '{"verdict": "PASS", "findings": [], "summary": "all criteria met"}', model_cls
     )
     assert out.verdict == "PASS" and out.summary == "all criteria met"
-    # Empty conclusion ⇒ None (StructuredOutputError downstream, never an invented verdict).
-    assert _runner._extract_structured(StubModel(), model_cls, "   ") is None
+    # An empty / non-JSON conclusion is a hard error, never an invented verdict.
+    with pytest.raises(StructuredOutputError):
+        structured.parse_structured("   ", model_cls)

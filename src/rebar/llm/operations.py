@@ -110,7 +110,7 @@ def review_ticket(
         repo_root: rebar repo root (defaults to the resolved root).
         config: an :class:`LLMConfig` (defaults to :meth:`LLMConfig.from_env`).
         runner: an explicit runner (the test-injection seam; defaults to the
-            config-selected runner — ``langgraph`` unless overridden).
+            config-selected runner — ``pydantic_ai`` unless overridden).
 
     Returns a validated ``review_result`` dict ({findings[], target, reviewers,
     runner, model, trace_id, summary}). Raises :class:`LLMError` subclasses on

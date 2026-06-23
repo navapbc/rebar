@@ -392,8 +392,8 @@ def finding_model():
 
 
 def findings_response_model():
-    """Build (lazily) the Pydantic model the LangGraph runner binds as its
-    structured-output contract. Mirrors ``common.schema.json#/$defs/finding``;
+    """Build (lazily) the Pydantic model the runner binds as its structured-output
+    contract. Mirrors ``common.schema.json#/$defs/finding``;
     pinned against the JSON Schema by a test so the two never drift. Requires
     pydantic (the ``agents`` extra) — imported here, not at module top."""
     from pydantic import BaseModel, Field

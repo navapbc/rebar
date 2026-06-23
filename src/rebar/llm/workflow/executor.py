@@ -158,7 +158,7 @@ def register_step(name: str) -> Callable[[ScriptedStep], ScriptedStep]:
 
 
 class AgentStepRunner:
-    """The agentic-step seam (WS-D supplies the real LangGraph-backed runner)."""
+    """The agentic-step seam (the real pydantic_ai-backed runner plugs in here)."""
 
     def run(self, ctx: StepContext) -> StepResult:  # pragma: no cover - interface
         raise NotImplementedError

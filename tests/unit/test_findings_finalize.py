@@ -28,7 +28,7 @@ def test_finalize_findings_builds_valid_review_result() -> None:
 def test_finalize_outcome_findings_mode() -> None:
     pytest.importorskip("jsonschema")
     outcome = {"structured_response": {"findings": [], "summary": "all clear"}}
-    result = F.finalize_outcome(outcome, mode="findings", runner="langgraph", model="m")
+    result = F.finalize_outcome(outcome, mode="findings", runner="pydantic_ai", model="m")
     assert result["summary"] == "all clear"
     assert result["findings"] == []
 
@@ -38,17 +38,17 @@ def test_finalize_outcome_text_mode() -> None:
         content = "the final answer"
 
     outcome = {"messages": [_Msg()], "structured_response": None}
-    result = F.finalize_outcome(outcome, mode="text", runner="langgraph")
+    result = F.finalize_outcome(outcome, mode="text", runner="pydantic_ai")
     assert result["text"] == "the final answer"
-    assert result["runner"] == "langgraph"
+    assert result["runner"] == "pydantic_ai"
 
 
 def test_finalize_outcome_structured_no_schema_passthrough() -> None:
     outcome = {"structured_response": {"k": "v", "n": 1}}
-    result = F.finalize_outcome(outcome, mode="structured", runner="langgraph")
+    result = F.finalize_outcome(outcome, mode="structured", runner="pydantic_ai")
     assert result["k"] == "v"
     assert result["n"] == 1
-    assert result["runner"] == "langgraph"
+    assert result["runner"] == "pydantic_ai"
 
 
 def test_finalize_outcome_structured_validates_against_schema() -> None:
@@ -57,7 +57,7 @@ def test_finalize_outcome_structured_validates_against_schema() -> None:
     outcome = {"structured_response": {"foo": "bar"}}
     with pytest.raises(F.FindingsError, match="gate_result"):
         F.finalize_outcome(
-            outcome, mode="structured", output_schema="gate_result", runner="langgraph"
+            outcome, mode="structured", output_schema="gate_result", runner="pydantic_ai"
         )
 
 
@@ -65,14 +65,14 @@ def test_finalize_outcome_structured_passes_valid_schema() -> None:
     pytest.importorskip("jsonschema")
     outcome = {"structured_response": {"verdict": "pass", "reason": "ok"}}
     result = F.finalize_outcome(
-        outcome, mode="structured", output_schema="gate_result", runner="langgraph"
+        outcome, mode="structured", output_schema="gate_result", runner="pydantic_ai"
     )
     assert result["verdict"] == "pass"
 
 
 def test_finalize_outcome_missing_structured_response_raises() -> None:
     with pytest.raises(StructuredOutputError, match="no structured"):
-        F.finalize_outcome({"structured_response": None}, mode="findings", runner="langgraph")
+        F.finalize_outcome({"structured_response": None}, mode="findings", runner="pydantic_ai")
 
 
 def test_runrequest_defaults_are_backward_compatible() -> None:

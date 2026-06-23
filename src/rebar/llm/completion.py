@@ -14,9 +14,9 @@ run to a :class:`~rebar.llm.runner.Runner`. The structured-output **contract** i
 verdict; the operation then deterministically normalizes/reconciles it (the verdict is the
 agent's, with a guardrail — see :func:`_reconcile`) and resolves citations against the repo.
 
-Optionality: stdlib-only at import; the agent stack is lazy-imported by the runner; the
-read-only ticket tool is built only when langchain is present (so the offline FakeRunner path
-needs no extra).
+Optionality: stdlib-only at import; the agent stack is lazy-imported by the runner. The
+pydantic_ai runner provides ``show_ticket`` natively (pai_tools.rebar_tools), so the verifier
+needs no injected ticket tool.
 """
 
 from __future__ import annotations
@@ -47,18 +47,6 @@ _VERIFIER_DEFAULT_MODEL = "claude-sonnet-4-6"
 # from 120 after a substantive story tripped the cap; the verifier also now short-circuits
 # tickets with nothing to verify, so this floor is the ceiling for genuinely multi-criteria work.)
 _VERIFY_MIN_STEPS = 240
-
-
-def _readonly_ticket_tools(repo_path):
-    """A read-only rebar ``show_ticket`` tool for the verifier, or ``None`` when langchain
-    isn't installed (the offline FakeRunner path — the real runners require the ``agents``
-    extra and build their own tools, so None there is fine). Never grants comment/write."""
-    try:
-        from rebar.llm.runner import _scoped_ticket_tools
-
-        return _scoped_ticket_tools(repo_path, allow_comment=False)
-    except (ImportError, ModuleNotFoundError):
-        return None
 
 
 def _child_closure_findings(ticket_id: str, repo_root) -> list[dict]:
@@ -285,12 +273,9 @@ def verify_completion(
         langfuse_prompt=langfuse_prompt,
         mode="structured",
         output_schema=_OUTPUT_SCHEMA,
-        # Read-only ticket tools. The langchain-based runners (langgraph/deepagents) have no
-        # native rebar tools, so we inject langchain ones; the pydantic_ai runner ALREADY
-        # provides `show_ticket` natively (pai_tools.rebar_tools) and would CRASH on a
-        # langchain `StructuredTool` (it has no `__name__`) — so pass None there and let it
-        # use its own. (Post-cutover, when only pydantic_ai remains, this is always None.)
-        extra_tools=None if cfg.runner == "pydantic_ai" else _readonly_ticket_tools(cfg.repo_path),
+        # No injected ticket tools: the pydantic_ai runner (the only non-fake runner
+        # post-cutover) provides `show_ticket` natively via pai_tools.rebar_tools.
+        extra_tools=None,
         # NATURAL termination + tool-less extraction (NOT ToolStrategy's forced tool_choice,
         # which makes a tool-using verifier over-explore for hundreds of steps instead of
         # concluding — proven by A/B: 17 tool calls vs >250 on the same ticket/model/prompt).

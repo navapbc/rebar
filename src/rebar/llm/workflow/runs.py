@@ -100,7 +100,7 @@ class RunnerAgentStep(_ex.AgentStepRunner):
     precedence (step > workflow > config > env > default); ``mode``/``output_schema``
     flow into the RunRequest (the WS-D1 generalized contract). An injected ``runner``
     (e.g. FakeRunner) is the offline/parallel-diff seam; otherwise the config-selected
-    runner is used (langgraph; a missing extra/key fails cleanly via get_runner)."""
+    runner is used (pydantic_ai; a missing extra/key fails cleanly via get_runner)."""
 
     def __init__(self, *, runner=None, repo_root: str | None = None) -> None:
         self._runner = runner

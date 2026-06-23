@@ -3,8 +3,9 @@ for *every* interface (library / CLI / MCP) and *every* operation
 (``review_ticket`` / ``review_code`` / ``scan_epics_for_spec``).
 
 This is the single, deliberately-redundant contract test for the hard rule stated
-in the ``rebar.llm`` epic: core rebar stays stdlib-only; the langchain/langfuse/
-anthropic stack is behind ``nava-rebar[agents]`` and lazy-imported; and when the
+in the ``rebar.llm`` epic: core rebar stays stdlib-only; the agent runtime
+(pydantic-ai) / langfuse / anthropic stack is behind ``nava-rebar[agents]`` and
+lazy-imported; and when the
 extra is absent every surface **degrades cleanly** (a typed ``LLMError`` / a
 ``Error:`` + non-zero exit / a gated tool error) rather than crashing with an
 ``ImportError`` traceback or — worse — silently doing nothing.
@@ -36,17 +37,12 @@ from rebar.llm.config import _module_available
 # it arrives via FastMCP, a dependency of the MCP interface itself, not the agents
 # extra — so it is allowed in `import rebar.mcp_server`.)
 _AGENTS_STACK = (
-    "langchain",
-    "langgraph",
-    "langchain_anthropic",
-    "langchain_openai",
-    "langchain_mcp_adapters",
+    "pydantic_ai",
     "langfuse",
     "anthropic",
-    "deepagents",
 )
 
-# Whether the langgraph default path is actually installed in THIS environment.
+# Whether the agent runtime (pydantic_ai) is actually installed in THIS environment.
 # When True we skip the "missing-extra" degradation assertions (they would need
 # live credentials to exercise the path); import-cleanliness + gating still run.
 _AGENTS = agents_extra_installed()
@@ -87,7 +83,7 @@ def test_interface_import_pulls_no_agents_stack(module: str) -> None:
 @pytest.mark.skipif(_AGENTS, reason="agents extra installed → degradation path not exercised")
 @pytest.mark.parametrize("op", OPERATIONS)
 def test_library_operation_degrades_without_extra(op: str, rebar_repo: Path) -> None:
-    """Calling a library op with the default (langgraph) runner and no extra must
+    """Calling a library op with the default (pydantic_ai) runner and no extra must
     raise a typed ``LLMError`` whose message points at the extra — never an
     ``ImportError``/``AttributeError`` traceback, and never a silent success."""
     from rebar.llm.errors import LLMError
@@ -150,7 +146,7 @@ def test_cli_review_check_is_offline_and_truthful(capsys: pytest.CaptureFixture)
     out = capsys.readouterr().out
     assert rc == 0
     data = json.loads(out)
-    assert data["langchain"] is _module_available("langchain")
+    assert data["pydantic_ai"] is _module_available("pydantic_ai")
 
 
 # ── MCP surface: every op is gated off by default and degrades when forced ─────

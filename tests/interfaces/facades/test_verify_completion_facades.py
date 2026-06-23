@@ -84,7 +84,7 @@ def test_cli_check_is_offline_and_exits_zero(rebar_repo: Path, capsys) -> None:
     out = capsys.readouterr().out
     assert rc == 0
     data = json.loads(out)  # a valid JSON object
-    assert isinstance(data, dict) and "langchain" in data
+    assert isinstance(data, dict) and "pydantic_ai" in data
 
 
 def test_cli_missing_ticket_id_is_a_usage_error(rebar_repo: Path) -> None:

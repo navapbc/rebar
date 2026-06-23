@@ -1,65 +1,80 @@
-"""WS-D4: agent-runtime hardening — structured-output retry/repair + exact pins."""
+"""Structured-output hardening contract (post-cutover).
+
+The pre-cutover ``_invoke_structured`` outer retry was replaced by the pydantic_ai
+reliability stack's bounded retry (``structured.OUTPUT_RETRIES``). This pins the
+cross-cutting CONTRACT that survives the cutover: a structured-output run recovers
+from a near-miss reply within a BOUNDED number of model calls and then stops — it
+never silently inflates billable calls. (The per-runner mechanics are exercised in
+test_pydantic_ai_runner.py; this file pins the budget invariant via the public seam.)
+"""
 
 from __future__ import annotations
 
-from pathlib import Path
+import pytest
 
-import tomllib
-
-from rebar.llm import runner
+from rebar.llm import structured as _structured
 from rebar.llm.config import LLMConfig
-from rebar.llm.runner import RunRequest
+from rebar.llm.errors import LLMRunnerError
+from rebar.llm.runner import PydanticAIRunner, RunRequest
+
+pytest.importorskip("pydantic_ai")
 
 
-class _FakeAgent:
-    """A stub create_agent: returns queued outcomes, counts invocations."""
+def _sequence_model(texts):
+    """A FunctionModel that returns ``texts[i]`` on the i-th call (clamping to the
+    last), and a state dict whose ``i`` counts the model calls made."""
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
 
-    def __init__(self, outcomes):
-        self._outcomes = list(outcomes)
-        self.calls = 0
-        self.last_input = None
+    state = {"i": 0}
 
-    def invoke(self, inp, config=None):
-        self.calls += 1
-        self.last_input = inp
-        return self._outcomes.pop(0)
+    def gen(messages, info):
+        idx = min(state["i"], len(texts) - 1)
+        state["i"] += 1
+        return ModelResponse(parts=[TextPart(texts[idx])])
 
-
-def _req(mode="findings"):
-    return RunRequest(system_prompt="s", instructions="do it", config=LLMConfig(), mode=mode)
+    return FunctionModel(gen), state
 
 
-def test_retries_once_on_empty_structured_response() -> None:
-    agent = _FakeAgent(
-        [
-            {"structured_response": None, "messages": []},  # parsed-is-None
-            {"structured_response": {"findings": []}, "messages": []},  # repaired
-        ]
+def _structured_req():
+    return RunRequest(
+        system_prompt="x",
+        instructions="y",
+        config=LLMConfig(repo_path="."),
+        reviewers=["v"],
+        mode="structured",
+        output_schema="completion_verdict",
     )
-    outcome, _ = runner._invoke_structured(agent, LLMConfig(), _req())
-    assert agent.calls == 2  # retried once
-    assert outcome["structured_response"] == {"findings": []}
-    # The repair nudge was appended to the retried instructions.
-    assert "structured" in str(agent.last_input).lower()
 
 
-def test_no_retry_when_structured_present() -> None:
-    agent = _FakeAgent([{"structured_response": {"findings": []}, "messages": []}])
-    runner._invoke_structured(agent, LLMConfig(), _req())
-    assert agent.calls == 1
+def test_bounded_retry_recovers_and_stops_early() -> None:
+    # First reply is unparseable; the bounded retry feeds the error back and the second
+    # reply validates — the run STOPS as soon as it validates (does not burn the budget).
+    model, calls = _sequence_model(
+        ["sorry, no JSON", '{"verdict": "FAIL", "findings": [], "summary": "no"}']
+    )
+    out = PydanticAIRunner(LLMConfig(repo_path="."), model_override=model).run(_structured_req())
+    assert out["verdict"] == "FAIL"
+    assert calls["i"] == 2  # recovered on the first retry
+    assert calls["i"] <= 1 + _structured.OUTPUT_RETRIES  # within the bounded budget
 
 
-def test_text_mode_never_retries() -> None:
-    # text mode needs no structured output, so an absent structured_response is fine.
-    agent = _FakeAgent([{"structured_response": None, "messages": []}])
-    runner._invoke_structured(agent, LLMConfig(), _req(mode="text"))
-    assert agent.calls == 1
+def test_exhausting_the_budget_raises_and_does_not_inflate_calls() -> None:
+    # An always-unparseable model makes EXACTLY 1 + OUTPUT_RETRIES attempts, then raises —
+    # the guard against silent inflation of billable calls.
+    model, calls = _sequence_model(["never any json"])
+    with pytest.raises(LLMRunnerError):  # StructuredOutputError is an LLMRunnerError subclass
+        PydanticAIRunner(LLMConfig(repo_path="."), model_override=model).run(_structured_req())
+    assert calls["i"] == 1 + _structured.OUTPUT_RETRIES
 
 
-def test_langgraph_stack_is_exact_pinned() -> None:
-    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
-    data = tomllib.loads(pyproject.read_text())
-    agents = data["project"]["optional-dependencies"]["agents"]
-    assert "langgraph==1.2.5" in agents
-    assert "langgraph-prebuilt==1.1.0" in agents
-    assert "langgraph-checkpoint==4.1.1" in agents
+def test_text_mode_makes_a_single_call() -> None:
+    # text mode needs no structured output, so it never retries.
+    model, calls = _sequence_model(["just some prose"])
+    req = RunRequest(
+        system_prompt="x", instructions="y", config=LLMConfig(repo_path="."), reviewers=["v"],
+        mode="text",
+    )
+    out = PydanticAIRunner(LLMConfig(repo_path="."), model_override=model).run(req)
+    assert out["text"] == "just some prose"
+    assert calls["i"] == 1
