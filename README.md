@@ -353,6 +353,36 @@ deprecated alias `REBAR_NO_SYNC=1`) or pass `--no-pull` to any read subcommand
 fetch/merge is skipped; the local reduce/cache path is unchanged. See
 [`docs/concurrency.md`](docs/concurrency.md#read-freshness-policy-uniform-across-cli-library-and-mcp).
 
+### The on-disk store is not human-readable — read it with `rebar`
+
+The `tickets` branch is rebar's **internal storage format, not a document for
+people to read.** Each ticket is a directory of append-only JSON **event** files
+(`${hlc}-${uuid}-${TYPE}.json`); the current state of a ticket is what you get by
+**replaying** those events through the reducer. Two consequences follow:
+
+- **It isn't laid out in order.** Event files are named by a Hybrid Logical Clock
+  + UUID and merge across clones as a union, so the files for one ticket are not a
+  top-to-bottom narrative — they are an unordered set that only becomes meaningful
+  after the reducer sorts and folds them. A single `EDIT`/`STATUS`/`TAG_DELTA`
+  file in isolation tells you a delta, not the ticket.
+- **The current state is computed, never stored.** Nothing on the branch holds the
+  compiled "current" ticket except a local, rebuildable `.cache.json` (gitignored).
+  Reading the raw files by hand will mislead you — a later event may supersede an
+  earlier one, a `SNAPSHOT` may fold many away, and concurrent forks resolve by a
+  deterministic rule you'd have to apply yourself.
+
+So **don't `cat` the `.tickets-tracker/` worktree to find out where a ticket
+stands** — use the read commands, which run the reducer for you: `rebar show
+<id>`, `rebar list`, `rebar deps <id>`, `rebar search <query>` (CLI), the matching
+library calls (`rebar.show_ticket(...)`), or the MCP read tools.
+
+For reference, [`docs/sample-ticket-log.jsonl`](docs/sample-ticket-log.jsonl) is a
+small **synthetic** event log (one event per line) showing what the underlying
+data actually looks like — a two-agent epic + child tickets exercising
+create/claim/comment/link/tag/file-impact/sign/transition. Note that its lines are
+deliberately **not** in timestamp order: that is the point. The event body schema
+is documented in [`docs/event-schema.md`](docs/event-schema.md).
+
 ## Python library
 
 ```python
