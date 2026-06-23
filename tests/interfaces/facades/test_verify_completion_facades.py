@@ -155,7 +155,7 @@ def test_cli_llm_error_is_clean_exit_one(rebar_repo: Path, monkeypatch, capsys) 
     from rebar.llm.errors import LLMError
 
     def _boom(ticket_id, **kw):
-        raise LLMError("the langgraph runner needs the 'agents' extra")
+        raise LLMError("the agent runner needs the 'agents' extra")
 
     monkeypatch.setattr(rebar.llm, "verify_completion", _boom)
     tid = _seed(rebar_repo)

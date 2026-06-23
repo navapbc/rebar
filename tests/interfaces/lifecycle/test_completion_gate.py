@@ -85,7 +85,7 @@ def _never(ticket_id, **kw):  # must NOT be called
 def _boom(ticket_id, **kw):  # simulate missing extra/key / any verifier failure
     from rebar.llm.errors import LLMConfigError
 
-    raise LLMConfigError("the langgraph runner needs the 'agents' extra")
+    raise LLMConfigError("the agent runner needs the 'agents' extra")
 
 
 def test_gate_off_by_default_does_not_verify(rebar_repo: Path, monkeypatch) -> None:

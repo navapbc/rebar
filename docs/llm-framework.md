@@ -393,11 +393,12 @@ subtree for a human review).
 > on the now-removed LangChain `ToolStrategy` runtime, by A/B on the same model/prompt/ticket:
 > **>250 tool calls (timeout) with forced output vs ~17 and a clean verdict without it** — a
 > Claude-Code sonnet subagent on the same task: ~12 — and the finding carries over to the
-> pydantic-ai runtime.) So the verifier sets `RunRequest.output_strategy="extract"`: it runs
-> the agent with **no forced output** (it reasons, stops, and concludes in text), then does a
-> **tool-less** structured-output call to extract the verdict from that conclusion. This is the
-> proven fix and the field consensus (forcing the loop is the documented anti-pattern; a high
-> recursion limit means "you're paying for a loop, fix the loop").
+> pydantic-ai runtime.) So the verifier runs in `mode="structured"` on the pydantic-ai
+> reliability stack: the agent reasons with the read-only tools and produces the verdict via
+> NATIVE/PROMPTED structured output (NOT a forced tool_choice that makes a tool-using verifier
+> over-explore). This is the proven fix and the field consensus (forcing the loop is the
+> documented anti-pattern; a high recursion limit means "you're paying for a loop, fix the
+> loop").
 >
 > The verifier also **defaults to `claude-sonnet-4-6`** — a *decisive* model, not a
 > maximally-thorough one: larger/reasoning models *over-explore more* on bounded agentic tasks
