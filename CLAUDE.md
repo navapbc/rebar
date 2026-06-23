@@ -292,6 +292,12 @@ work, open a PR, let CI + review run, and merge through the PR — never push co
 straight to `main`. (This governs *code*; rebar's own ticket events on the `tickets`
 branch still auto-commit/auto-push as described above.)
 
+**Auto-merge is authorized.** When you open a PR you may enable GitHub auto-merge
+(`gh pr merge --auto --squash`) so it merges itself once the required CI checks pass
+and review requirements are met — you don't have to babysit and merge by hand. The
+`main` ruleset still gates the merge (required status checks must be green), so
+auto-merge never bypasses CI.
+
 ## Library quick reference
 
 ```python
