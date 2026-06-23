@@ -5,15 +5,28 @@
  * rebar semantics, and the config is editable in place, so a human can both READ what a
  * step does and CHANGE it (or fill one in for a freshly-drawn step) before Save.
  *
- * The config is presented as JSON (one textarea) deliberately: it is the exact payload
- * the Python round-trip reads back from `<rebar:Config>`, so what you edit is what gets
- * written to the IR — no lossy field mapping in between. Structured per-field entries can
- * layer on later without changing the round-trip contract.
+ * Structured-vs-raw (story a83a). For the KNOWN step kinds (scripted/agent/loop/map) we
+ * render typed, per-field entries — `with.<field>` driven by the step's contract
+ * (window.REBAR_CONTRACTS[name].consumes), plus mode/model (agent) and the loop/map
+ * bounds — so authoring no longer means hand-editing JSON. Every structured field
+ * read/writes a SLICE of the SAME parsed `rebar:Config` blob (parse → mutate slice →
+ * re-serialize → updateModdleProperties), so the Python round-trip contract is unchanged
+ * and the raw editor and the structured fields stay consistent (one source of truth).
+ *
+ * The raw JSON textarea is kept as an "Advanced (raw JSON)" fallback so an UNKNOWN /
+ * uncommon config (keys outside the structured set) is always editable and never lost;
+ * for a node whose kind is not one of the known kinds it is the ONLY editor. Field-level
+ * invalids (a non-numeric bound, an empty required field) surface a visible entry error
+ * via each entry's `validate` and DO NOT mutate the blob — the prior value is preserved.
  */
 import {
+  CollapsibleEntry,
+  SelectEntry,
   TextAreaEntry,
   TextFieldEntry,
+  isSelectEntryEdited,
   isTextAreaEntryEdited,
+  isTextFieldEntryEdited,
 } from "@bpmn-io/properties-panel";
 import { useService } from "bpmn-js-properties-panel";
 
@@ -24,6 +37,29 @@ const REBAR_KINDS = [
   "bpmn:ExclusiveGateway",
   "bpmn:SubProcess",
 ];
+
+// The closed set of structured step kinds (a83a). Anything else is "uncommon" and falls
+// back to the raw JSON editor entirely.
+function rebarKind(bo) {
+  switch (bo.$type) {
+    case "bpmn:ScriptTask":
+      return "scripted";
+    case "bpmn:ServiceTask":
+      return "agent";
+    case "bpmn:ExclusiveGateway":
+      return "branch";
+    case "bpmn:SubProcess": {
+      const lc = bo.loopCharacteristics || {};
+      if (lc.$type === "bpmn:MultiInstanceLoopCharacteristics") return "map";
+      if (lc.$type === "bpmn:StandardLoopCharacteristics") return "loop";
+      return "sub-process";
+    }
+    default:
+      return null;
+  }
+}
+
+const STRUCTURED_KINDS = ["scripted", "agent", "loop", "map"];
 
 function kindOf(bo) {
   switch (bo.$type) {
@@ -47,6 +83,47 @@ function kindOf(bo) {
 function configEl(bo) {
   const ee = bo.extensionElements;
   return ee && (ee.values || []).find((v) => v.$type === "rebar:Config");
+}
+
+// Parse the node's `rebar:Config` blob into an object; an empty / malformed blob parses
+// to {} so structured reads never throw (the raw editor remains the place to repair
+// genuinely broken JSON).
+function parseConfig(bo) {
+  const c = configEl(bo);
+  if (!c || !c.value) return {};
+  try {
+    const v = JSON.parse(c.value);
+    return v && typeof v === "object" ? v : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+// THE single write path every structured field and the raw editor share: replace the
+// node's whole `rebar:Config` value, creating the extensionElements/Config nodes on first
+// write. `mutate(cfg)` receives the parsed object to edit in place.
+function writeConfig(element, modeling, bpmnFactory, value) {
+  const bo = element.businessObject;
+  let ee = bo.extensionElements;
+  if (!ee) {
+    ee = bpmnFactory.create("bpmn:ExtensionElements", { values: [] });
+    ee.$parent = bo;
+    modeling.updateProperties(element, { extensionElements: ee });
+  }
+  let c = configEl(bo);
+  if (!c) {
+    c = bpmnFactory.create("rebar:Config", { value: value || "" });
+    c.$parent = ee;
+    modeling.updateModdleProperties(element, ee, { values: [...(ee.values || []), c] });
+  } else {
+    modeling.updateModdleProperties(element, c, { value: value || "" });
+  }
+}
+
+function mutateConfig(element, modeling, bpmnFactory, mutate) {
+  const cfg = parseConfig(element.businessObject);
+  mutate(cfg);
+  writeConfig(element, modeling, bpmnFactory, JSON.stringify(cfg));
 }
 
 function KindEntry(props) {
@@ -185,7 +262,211 @@ function WhenEntry(props) {
   );
 }
 
-function ConfigEntry(props) {
+// ── Structured fields (a83a) ────────────────────────────────────────────────────
+// Each structured entry reads/writes ONE slice of the shared `rebar:Config` blob via
+// mutateConfig (parse → mutate → re-serialize), so the round-trip contract is unchanged
+// and the raw "Advanced" editor stays consistent with the typed fields.
+
+// Coerce a raw text field value to the contract field's declared type. Strings pass
+// through; booleans accept true/false; numbers accept a finite numeric literal — anything
+// non-coercible for number/boolean is reported via `coerceError` so the caller can show a
+// field error and skip the write (never silently storing a bad value).
+function coerceTyped(raw, type) {
+  const t = String(type || "").toLowerCase();
+  if (raw === "" || raw == null) return { value: "", empty: true };
+  if (t === "number" || t === "integer") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || String(raw).trim() === "") {
+      return { error: "Must be a number" };
+    }
+    if (t === "integer" && !Number.isInteger(n)) return { error: "Must be an integer" };
+    return { value: n };
+  }
+  if (t === "boolean") {
+    const s = String(raw).trim().toLowerCase();
+    if (s === "true") return { value: true };
+    if (s === "false") return { value: false };
+    return { error: "Must be true or false" };
+  }
+  return { value: String(raw) };
+}
+
+// One typed `with.<field>` entry for a contract input field. A REQUIRED field that is
+// emptied shows an error; a type-mismatched value shows an error; neither mutates the blob
+// (the prior value is preserved, never silently dropped).
+function WithFieldEntry(props) {
+  const { element, id, field } = props;
+  const modeling = useService("modeling");
+  const bpmnFactory = useService("bpmnFactory");
+  const debounce = useService("debounceInput");
+  const name = field.name;
+
+  const getValue = () => {
+    const w = parseConfig(element.businessObject).with || {};
+    const v = w[name];
+    return v == null ? "" : typeof v === "string" ? v : JSON.stringify(v);
+  };
+
+  const validate = (v) => {
+    if ((v === "" || v == null) && field.required) return "Required";
+    const c = coerceTyped(v, field.type);
+    return c.error || null;
+  };
+
+  const setValue = (v, err) => {
+    if (err) return; // invalid → leave the blob (and prior value) untouched
+    const c = coerceTyped(v, field.type);
+    if (c.error) return;
+    mutateConfig(element, modeling, bpmnFactory, (cfg) => {
+      const w = cfg.with && typeof cfg.with === "object" ? cfg.with : {};
+      if (c.empty) {
+        delete w[name];
+      } else {
+        w[name] = c.value;
+      }
+      if (Object.keys(w).length) cfg.with = w;
+      else delete cfg.with;
+    });
+  };
+
+  const typ = field.type ? ` (${field.type})` : "";
+  return (
+    <TextFieldEntry
+      id={id}
+      element={element}
+      label={`with.${name}${field.required ? " *" : ""}${typ}`}
+      description={field.description || undefined}
+      getValue={getValue}
+      setValue={setValue}
+      validate={validate}
+      debounce={debounce}
+    />
+  );
+}
+
+// A plain text slice of the config (e.g. loop `var`/`while`/`until`, map `over`/`as`).
+// Empty clears the key. `required` makes empty an error.
+function ConfigTextEntry(props) {
+  const { element, id, ckey, label, required, description } = props;
+  const modeling = useService("modeling");
+  const bpmnFactory = useService("bpmnFactory");
+  const debounce = useService("debounceInput");
+
+  const getValue = () => {
+    const v = parseConfig(element.businessObject)[ckey];
+    return v == null ? "" : String(v);
+  };
+  const validate = (v) => ((v === "" || v == null) && required ? "Required" : null);
+  const setValue = (v, err) => {
+    if (err) return;
+    mutateConfig(element, modeling, bpmnFactory, (cfg) => {
+      if (v === "" || v == null) delete cfg[ckey];
+      else cfg[ckey] = String(v);
+    });
+  };
+  return (
+    <TextFieldEntry
+      id={id}
+      element={element}
+      label={label}
+      description={description || undefined}
+      getValue={getValue}
+      setValue={setValue}
+      validate={validate}
+      debounce={debounce}
+    />
+  );
+}
+
+// A NUMERIC slice of the config (loop `max_iterations`, map `max_concurrency`). Kept a
+// TEXT field with a numeric `validate` rather than a number input so a NON-NUMERIC entry
+// surfaces a visible error AND the prior numeric value is preserved (an HTML number input
+// would silently swallow the bad keystrokes — defeating the "shows an error, no loss" AC).
+function ConfigNumberEntry(props) {
+  const { element, id, ckey, label, description } = props;
+  const modeling = useService("modeling");
+  const bpmnFactory = useService("bpmnFactory");
+  const debounce = useService("debounceInput");
+
+  const getValue = () => {
+    const v = parseConfig(element.businessObject)[ckey];
+    return v == null ? "" : String(v);
+  };
+  const validate = (v) => {
+    if (v === "" || v == null) return null; // empty clears it (optional bound)
+    const n = Number(v);
+    if (!Number.isFinite(n) || String(v).trim() === "") return "Must be a number";
+    if (!Number.isInteger(n)) return "Must be an integer";
+    return null;
+  };
+  const setValue = (v, err) => {
+    if (err) return; // non-numeric → keep prior value, show error, no blob mutation
+    mutateConfig(element, modeling, bpmnFactory, (cfg) => {
+      if (v === "" || v == null) delete cfg[ckey];
+      else cfg[ckey] = Number(v);
+    });
+  };
+  return (
+    <TextFieldEntry
+      id={id}
+      element={element}
+      label={label}
+      description={description || undefined}
+      getValue={getValue}
+      setValue={setValue}
+      validate={validate}
+      debounce={debounce}
+    />
+  );
+}
+
+// Agent `mode`: a closed select over the three execution modes.
+function ModeEntry(props) {
+  const { element, id } = props;
+  const modeling = useService("modeling");
+  const bpmnFactory = useService("bpmnFactory");
+  const getValue = () => parseConfig(element.businessObject).mode || "";
+  const setValue = (v) =>
+    mutateConfig(element, modeling, bpmnFactory, (cfg) => {
+      if (!v) delete cfg.mode;
+      else cfg.mode = v;
+    });
+  const getOptions = () => [
+    { value: "", label: "(default)" },
+    { value: "findings", label: "findings" },
+    { value: "structured", label: "structured" },
+    { value: "text", label: "text" },
+  ];
+  return (
+    <SelectEntry
+      id={id}
+      element={element}
+      label="mode"
+      getValue={getValue}
+      setValue={setValue}
+      getOptions={getOptions}
+    />
+  );
+}
+
+// The list of `with.<field>` entries a step's contract declares (REBAR_CONTRACTS keyed by
+// the element NAME == its uses/prompt id). No contract → no structured `with` fields (the
+// raw editor remains available for ad-hoc `with` keys).
+function withFieldEntries(element) {
+  const bo = element.businessObject;
+  const view = window.REBAR_CONTRACTS && window.REBAR_CONTRACTS[bo.name];
+  const consumes = (view && view.consumes) || [];
+  return consumes.map((field) => ({
+    id: `rebar-with-${field.name}`,
+    component: (p) => <WithFieldEntry {...p} field={field} />,
+    isEdited: isTextFieldEntryEdited,
+  }));
+}
+
+// The raw JSON editor — the shared blob's verbatim view. PRIMARY editor for an unknown
+// kind; an "Advanced (raw JSON)" FALLBACK (kept reachable) for the known kinds so an
+// uncommon config outside the structured set is always editable and never lost.
+function RawConfigEntry(props) {
   const { element, id } = props;
   const modeling = useService("modeling");
   const bpmnFactory = useService("bpmnFactory");
@@ -195,24 +476,10 @@ function ConfigEntry(props) {
     const c = configEl(element.businessObject);
     return c ? c.value : "";
   };
-
-  const setValue = (value) => {
-    const bo = element.businessObject;
-    let ee = bo.extensionElements;
-    if (!ee) {
-      ee = bpmnFactory.create("bpmn:ExtensionElements", { values: [] });
-      ee.$parent = bo;
-      modeling.updateProperties(element, { extensionElements: ee });
-    }
-    let c = configEl(bo);
-    if (!c) {
-      c = bpmnFactory.create("rebar:Config", { value: value || "" });
-      c.$parent = ee;
-      modeling.updateModdleProperties(element, ee, { values: [...(ee.values || []), c] });
-    } else {
-      modeling.updateModdleProperties(element, c, { value: value || "" });
-    }
-  };
+  // The raw editor is the one place genuinely-broken JSON can be repaired, so it accepts
+  // any text verbatim; malformed JSON surfaces as an error via the live /validate region
+  // (story 998e), not by blocking the keystroke.
+  const setValue = (value) => writeConfig(element, modeling, bpmnFactory, value || "");
 
   return (
     <TextAreaEntry
@@ -232,24 +499,122 @@ function ConfigEntry(props) {
   );
 }
 
-function rebarGroup(element) {
-  const t = element.businessObject.$type;
-  const entries = [{ id: "rebar-kind", component: KindEntry }];
-  if (t === "bpmn:ScriptTask" || t === "bpmn:ServiceTask") {
+// Wrap the raw editor in a collapsible "Advanced (raw JSON)" entry so it stays reachable
+// without competing with the structured fields for the known kinds.
+function AdvancedRawEntry(props) {
+  const { element, id } = props;
+  return (
+    <CollapsibleEntry
+      id={id}
+      element={element}
+      label="Advanced (raw JSON)"
+      entries={[{ id: `${id}-raw`, component: RawConfigEntry }]}
+    />
+  );
+}
+
+// The structured entries for a known kind, in declaration order.
+function structuredEntries(element, kind) {
+  const entries = [];
+  if (kind === "scripted") {
     entries.push({ id: "rebar-action", component: ActionEntry });
-  }
-  if (t === "bpmn:ScriptTask" || t === "bpmn:ServiceTask") {
-    // Read-only I/O contract: a scripted op's `uses` contract OR an agent step's
-    // prompt inputs/outputs contract (both keyed by the element NAME in REBAR_CONTRACTS).
     entries.push({ id: "rebar-contract", component: ContractEntry });
-  }
-  if (t === "bpmn:ServiceTask") {
+    entries.push(...withFieldEntries(element));
+  } else if (kind === "agent") {
+    entries.push({ id: "rebar-action", component: ActionEntry });
+    entries.push({ id: "rebar-contract", component: ContractEntry });
     entries.push({ id: "rebar-prompt-text", component: PromptTextEntry });
+    entries.push({
+      id: "rebar-mode",
+      component: ModeEntry,
+      isEdited: isSelectEntryEdited,
+    });
+    entries.push({
+      id: "rebar-model",
+      component: (p) => <ConfigTextEntry {...p} ckey="model" label="model" />,
+      isEdited: isTextFieldEntryEdited,
+    });
+    entries.push(...withFieldEntries(element));
+  } else if (kind === "loop") {
+    entries.push({
+      id: "rebar-loop-var",
+      component: (p) => <ConfigTextEntry {...p} ckey="var" label="var (loop variable)" />,
+      isEdited: isTextFieldEntryEdited,
+    });
+    entries.push({
+      id: "rebar-loop-max",
+      component: (p) => (
+        <ConfigNumberEntry {...p} ckey="max_iterations" label="max_iterations" />
+      ),
+      isEdited: isTextFieldEntryEdited,
+    });
+    entries.push({
+      id: "rebar-loop-while",
+      component: (p) => <ConfigTextEntry {...p} ckey="while" label="while" />,
+      isEdited: isTextFieldEntryEdited,
+    });
+    entries.push({
+      id: "rebar-loop-until",
+      component: (p) => <ConfigTextEntry {...p} ckey="until" label="until" />,
+      isEdited: isTextFieldEntryEdited,
+    });
+  } else if (kind === "map") {
+    entries.push({
+      id: "rebar-map-over",
+      component: (p) => <ConfigTextEntry {...p} ckey="over" label="over" required />,
+      isEdited: isTextFieldEntryEdited,
+    });
+    entries.push({
+      id: "rebar-map-as",
+      component: (p) => <ConfigTextEntry {...p} ckey="as" label="as (item variable)" />,
+      isEdited: isTextFieldEntryEdited,
+    });
+    entries.push({
+      id: "rebar-map-index",
+      component: (p) => <ConfigTextEntry {...p} ckey="index_var" label="index_var" />,
+      isEdited: isTextFieldEntryEdited,
+    });
+    entries.push({
+      id: "rebar-map-conc",
+      component: (p) => (
+        <ConfigNumberEntry {...p} ckey="max_concurrency" label="max_concurrency" />
+      ),
+      isEdited: isTextFieldEntryEdited,
+    });
   }
-  if (t === "bpmn:ExclusiveGateway") {
+  return entries;
+}
+
+function rebarGroup(element) {
+  const bo = element.businessObject;
+  const kind = rebarKind(bo);
+  const entries = [{ id: "rebar-kind", component: KindEntry }];
+
+  if (kind === "branch") {
+    // Branch UX is deferred (a83a): keep the read-only `when` + raw editor as-is.
     entries.push({ id: "rebar-when", component: WhenEntry });
+    entries.push({
+      id: "rebar-config",
+      component: RawConfigEntry,
+      isEdited: isTextAreaEntryEdited,
+    });
+    return { id: "rebar", label: "Rebar", entries };
   }
-  entries.push({ id: "rebar-config", component: ConfigEntry, isEdited: isTextAreaEntryEdited });
+
+  if (STRUCTURED_KINDS.includes(kind)) {
+    // KNOWN kind: structured fields are the primary path; the raw editor stays reachable
+    // as an "Advanced (raw JSON)" fallback for uncommon keys.
+    entries.push(...structuredEntries(element, kind));
+    entries.push({ id: "rebar-config-advanced", component: AdvancedRawEntry });
+    return { id: "rebar", label: "Rebar", entries };
+  }
+
+  // UNKNOWN / uncommon kind: the raw JSON editor is the only editor (nothing lost).
+  entries.push({
+    id: "rebar-config",
+    component: RawConfigEntry,
+    isEdited: isTextAreaEntryEdited,
+  });
   return { id: "rebar", label: "Rebar", entries };
 }
 
