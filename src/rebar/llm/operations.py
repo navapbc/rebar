@@ -14,6 +14,8 @@ reproducible run-to-run.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from rebar.llm import prompts
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMError
@@ -21,6 +23,14 @@ from rebar.llm.prompts import select_reviewers  # re-export (rules layer)
 from rebar.llm.runner import Runner, RunRequest, get_runner
 
 __all__ = ["review_ticket", "select_reviewers"]
+
+# A tool-using review is inherently multi-step (explore → search → read several files →
+# report). The framework review default (REBAR_LLM_MAX_STEPS=25 ≈ 12 tool calls) is far too
+# low and trips the recursion cap mid-review (→ LLMRunnerError 'agent exceeded its step
+# budget'). Raise the agent step budget to a review-appropriate FLOOR; an operator who
+# explicitly sets a HIGHER REBAR_LLM_MAX_STEPS still wins. Mirrors completion.py's
+# _VERIFY_MIN_STEPS pattern (a review is lighter than a multi-criteria completion verify).
+_REVIEW_MIN_STEPS = 120
 
 
 def _default_reviewer_id() -> str:
@@ -107,6 +117,8 @@ def review_ticket(
     missing deps/credentials or a failed/empty structured review.
     """
     cfg = config or LLMConfig.from_env(repo_root=repo_root)
+    if cfg.max_iterations < _REVIEW_MIN_STEPS:
+        cfg = replace(cfg, max_iterations=_REVIEW_MIN_STEPS)
     rid = reviewer_id or _default_reviewer_id()
     reviewer = prompts.get_reviewer(rid)
 

@@ -16,6 +16,7 @@ extra raises a clear, actionable error.
 
 from __future__ import annotations
 
+import math
 import os
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field, replace
@@ -266,6 +267,9 @@ class PydanticAIRunner:
     def run(self, req: RunRequest) -> dict:
         from types import SimpleNamespace
 
+        from pydantic_ai.exceptions import UsageLimitExceeded
+        from pydantic_ai.usage import UsageLimits
+
         from rebar.llm import pai_tools
 
         cfg = self._config
@@ -286,13 +290,29 @@ class PydanticAIRunner:
             f"test:{type(self._model_override).__name__}" if self._model_override else resolved
         )
         kwargs = {"system_prompt": req.system_prompt, "tools": tools, "toolsets": toolsets}
-        if req.mode == "text":
-            agent = Agent(model, **kwargs)
-            outcome = {
-                "messages": [SimpleNamespace(content=str(agent.run_sync(req.instructions).output))]
-            }
-        else:
-            outcome = {"structured_response": _pai_structured(Agent, model, resolved, req, kwargs)}
+        # pydantic-ai's request_limit counts MODEL REQUESTS (~1 per tool-call cycle),
+        # whereas langgraph's recursion_limit counts super-steps (~2 per cycle). Halve
+        # max_iterations so a given cfg.max_iterations allows the SAME number of
+        # tool-call cycles across both runners (and so we DON'T silently inherit
+        # pydantic-ai's default request_limit=50).
+        usage_limits = UsageLimits(request_limit=max(1, math.ceil(cfg.max_iterations / 2)))
+        try:
+            if req.mode == "text":
+                agent = Agent(model, **kwargs)
+                output = agent.run_sync(req.instructions, usage_limits=usage_limits).output
+                outcome = {"messages": [SimpleNamespace(content=str(output))]}
+            else:
+                outcome = {
+                    "structured_response": _pai_structured(
+                        Agent, model, resolved, req, kwargs, usage_limits
+                    )
+                }
+        except UsageLimitExceeded as exc:
+            raise LLMRunnerError(
+                f"agent exceeded its step budget (max_iterations={cfg.max_iterations}; "
+                "~1 model request per tool call). Raise REBAR_LLM_MAX_STEPS or narrow "
+                "the task."
+            ) from exc
         return _findings.finalize_outcome(
             outcome,
             mode=req.mode,
@@ -468,7 +488,7 @@ _PAI_PROVIDER_PREFIX = {
 }
 
 
-def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict):
+def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, usage_limits):
     """Obtain a validated structured object via the reliability stack (1268).
 
     NATIVE path: where the provider enforces a strict json_schema (output_mode ->
@@ -488,14 +508,14 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict):
         agent = Agent(
             model, output_type=mode_obj, retries={"output": structured.OUTPUT_RETRIES}, **kwargs
         )
-        return agent.run_sync(req.instructions).output
+        return agent.run_sync(req.instructions, usage_limits=usage_limits).output
 
     # PromptedOutput case: free-text + deterministic parse/validate + bounded retry.
     agent = Agent(model, **kwargs)  # free text (output_type defaults to str)
     prompt = req.instructions
     last: Exception | None = None
     for _ in range(structured.OUTPUT_RETRIES + 1):
-        result = agent.run_sync(prompt)
+        result = agent.run_sync(prompt, usage_limits=usage_limits)
         try:
             # A refused / TRUNCATED turn is surfaced as a clear error BEFORE the tolerant
             # parse — else json-repair would "fix" a truncated fragment into a

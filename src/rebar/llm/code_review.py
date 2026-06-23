@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import subprocess
 from collections import defaultdict
+from dataclasses import replace
 
 from rebar.llm import prompts
 from rebar.llm.aggregate import aggregate_findings
@@ -27,6 +28,13 @@ from rebar.llm.runner import Runner, RunRequest, get_runner
 __all__ = ["review_code", "select_code_reviewers"]
 
 _DIFF_CHAR_CAP = 60000  # keep the inlined diff bounded; the agent reads files for more
+# A tool-using code review is inherently multi-step (read each changed file + its context,
+# per reviewer). The framework review default (REBAR_LLM_MAX_STEPS=25 ≈ 12 tool calls) is far
+# too low and trips the recursion cap mid-review (→ LLMRunnerError 'agent exceeded its step
+# budget'). Raise the agent step budget to a review-appropriate FLOOR; an operator who
+# explicitly sets a HIGHER REBAR_LLM_MAX_STEPS still wins. Mirrors completion.py's
+# _VERIFY_MIN_STEPS / operations.py's _REVIEW_MIN_STEPS pattern.
+_REVIEW_MIN_STEPS = 120
 
 
 def select_code_reviewers(changed_files: list[str]) -> list[str]:
@@ -121,6 +129,8 @@ def review_code(
     each carries ``agreement`` + ``reviewers``.
     """
     cfg = config or LLMConfig.from_env(repo_root=repo_root)
+    if cfg.max_iterations < _REVIEW_MIN_STEPS:
+        cfg = replace(cfg, max_iterations=_REVIEW_MIN_STEPS)
     repo = cfg.repo_path or "."
     if diff_text is None:
         diff_text = _git(repo, ["diff", f"{base}..{head}"])
