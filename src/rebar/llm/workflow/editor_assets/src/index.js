@@ -27,6 +27,8 @@ import {
 } from "bpmn-js-properties-panel";
 
 import rebarPropertiesProviderModule from "./rebarProvider";
+import rebarInsertionProviderModule from "./insertionProvider";
+import { mountPromptLibrary } from "./promptLibrary";
 
 import "bpmn-js/dist/assets/diagram-js.css";
 import "bpmn-js/dist/assets/bpmn-js.css";
@@ -46,6 +48,7 @@ const modeler = new BpmnModeler({
     BpmnPropertiesPanelModule,
     BpmnPropertiesProviderModule,
     rebarPropertiesProviderModule,
+    rebarInsertionProviderModule,
   ],
   moddleExtensions: { rebar: window.REBAR_MODDLE },
 });
@@ -83,5 +86,16 @@ document.getElementById("save").addEventListener("click", save);
 // Test hook: expose the modeler so the headless browser E2E can drive selection /
 // inspect state deterministically (harmless in normal use).
 window.__rebarModeler = modeler;
+
+// Mount the prompt LIBRARY + create/edit + typed INSERTION panel (story 6592) into its
+// own container, if the host page provided one.
+const libContainer = document.getElementById("rebar-library");
+if (libContainer) {
+  try {
+    mountPromptLibrary(modeler, libContainer);
+  } catch (e) {
+    console.error("prompt library failed to mount:", e);
+  }
+}
 
 open(window.REBAR_DIAGRAM);

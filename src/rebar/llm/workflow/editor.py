@@ -33,6 +33,7 @@ from typing import Any
 
 from .bpmn import REBAR_MODDLE_DESCRIPTOR, bpmn_to_ir, ir_to_bpmn
 from .lint import lint_workflow
+from .prompt_authoring import list_prompts, prompt_write_target, save_prompt
 from .schema import dump_workflow, load_workflow
 
 # The editor front-end (bpmn-js Modeler + properties panel + auto-layout) is BUILT from
@@ -284,6 +285,16 @@ def build_host_html(
     #canvas {{ flex: 1 1 auto; height: 100%; }}
     #properties {{ flex: 0 0 320px; height: 100%; overflow: auto;
                    border-left: 1px solid #ccc; background: #fafafa; }}
+    #rebar-library {{ flex: 0 0 300px; height: 100%; overflow: auto; padding: 8px;
+                      border-left: 1px solid #ccc; background: #f4f6fa;
+                      box-sizing: border-box; font-size: 13px; }}
+    #rebar-library h3 {{ margin: 8px 0 4px; font-size: 13px; }}
+    #rebar-library select, #rebar-library input, #rebar-library textarea, #rebar-library button
+      {{ display: block; width: 100%; margin: 3px 0; box-sizing: border-box; }}
+    #rebar-library label {{ display: block; margin: 4px 0; }}
+    #rebar-library .rebar-lib-target {{ font-family: monospace; font-size: 11px; color: #555;
+                                        margin-top: 6px; word-break: break-all; }}
+    #rebar-library .ok {{ color: #1a7f37; }} #rebar-library .err {{ color: #cf222e; }}
   </style>
 </head>
 <body>
@@ -295,6 +306,7 @@ def build_host_html(
   <div id="main">
     <div id="canvas"></div>
     <div id="properties"></div>
+    <div id="rebar-library"></div>
   </div>
   <script>
     window.REBAR_MODDLE = {desc};
@@ -403,6 +415,52 @@ def edit_workflow(
             h = (self.headers.get("Host") or "").split(":")[0]
             return h in ("127.0.0.1", "localhost", "[::1]", "")
 
+        def _authed(self) -> bool:
+            # The shared CSRF / DNS-rebinding guard for the WRITE-or-sensitive endpoints
+            # (/save, /prompts, /prompt, /prompt/save): a loopback Host AND the
+            # per-session token (a cross-origin page can't read the host HTML to learn it).
+            return self._host_ok() and secrets.compare_digest(
+                self.headers.get("X-Rebar-Token", ""), token
+            )
+
+        def _serve_prompt(self):
+            # GET /prompt?id=<id> → {id, text, meta, target} (the resolved write target
+            # shown BEFORE save, per AC). Token+Host guarded; 404/JSON for an unknown id.
+            if not self._authed():
+                self._send(403, '{"errors":["forbidden (bad token/origin)"]}', "application/json")
+                return
+            from urllib.parse import parse_qs, urlsplit
+
+            pid = (parse_qs(urlsplit(self.path).query).get("id") or [""])[0]
+            target = prompt_write_target(pid, repo_root=_repo_root)
+            try:
+                from rebar.llm.prompts import get_prompt, parse_front_matter
+
+                prompt = get_prompt(pid, repo_root=_repo_root)
+                meta, _body = parse_front_matter(self._raw_prompt_text(pid) or "")
+                payload = {"id": pid, "text": prompt.text, "meta": meta, "target": target}
+                self._send(200, json.dumps(payload), "application/json")
+            except Exception as exc:  # noqa: BLE001 - unknown/malformed id is a clean 404
+                self._send(
+                    404,
+                    json.dumps({"errors": [f"unknown prompt {pid!r}: {exc}"], "target": target}),
+                    "application/json",
+                )
+
+        def _raw_prompt_text(self, pid: str) -> str | None:
+            # The RAW prompt file text (front-matter intact) so the edit form gets the
+            # current front-matter; a project override wins over the packaged copy.
+            from rebar.llm.prompts import _catalog_dir, _packaged_prompt_files
+
+            if _repo_root:
+                user = Path(_repo_root) / ".rebar" / "prompts" / f"{pid}.md"
+                if user.is_file():
+                    return user.read_text(encoding="utf-8")
+            packaged = _packaged_prompt_files()
+            if pid in packaged:
+                return Path(str(_catalog_dir())).joinpath(packaged[pid]).read_text(encoding="utf-8")
+            return None
+
         def _send(self, code, body, ctype="text/html; charset=utf-8"):
             data = body.encode("utf-8") if isinstance(body, str) else body
             self.send_response(code)
@@ -424,6 +482,17 @@ def edit_workflow(
                 )
             elif self.path == "/workflow.bpmn":
                 self._send(200, bpmn_holder["xml"], "application/xml")
+            elif self.path == "/prompts":
+                # The prompt LIBRARY: built-in + project prompts (story 6592). Same
+                # token+Host guard as /save (it reveals the repo's prompt inventory).
+                if not self._authed():
+                    self._send(
+                        403, '{"errors":["forbidden (bad token/origin)"]}', "application/json"
+                    )
+                    return
+                self._send(200, json.dumps(list_prompts(_repo_root)), "application/json")
+            elif self.path.startswith("/prompt?"):
+                self._serve_prompt()
             elif self.path.startswith("/assets/"):
                 name = self.path[len("/assets/") :]
                 data = read_asset(name)
@@ -435,14 +504,12 @@ def edit_workflow(
                 self._send(404, "not found", "text/plain")
 
         def do_POST(self):  # noqa: N802 - stdlib handler name
-            if self.path != "/save":
+            if self.path not in ("/save", "/prompt/save"):
                 self._send(404, '{"errors":["unknown endpoint"]}', "application/json")
                 return
             # CSRF / DNS-rebinding guard: require the per-session token (a cross-origin
             # page can't read the host HTML to learn it) AND a loopback Host.
-            if not self._host_ok() or not secrets.compare_digest(
-                self.headers.get("X-Rebar-Token", ""), token
-            ):
+            if not self._authed():
                 self._send(403, '{"errors":["forbidden (bad token/origin)"]}', "application/json")
                 return
             try:
@@ -450,13 +517,52 @@ def edit_workflow(
             except ValueError:
                 self._send(400, '{"errors":["bad Content-Length"]}', "application/json")
                 return
-            xml = self.rfile.read(length).decode("utf-8")
+            payload = self.rfile.read(length)
+            if self.path == "/prompt/save":
+                self._save_prompt(payload)
+                return
+            xml = payload.decode("utf-8")
             errors = save_bpmn_to_ir(xml, target)
             if errors:
                 self._send(422, json.dumps({"errors": errors}), "application/json")
             else:
                 bpmn_holder["xml"] = _load_bpmn_for(target)  # re-baseline from the saved IR
                 self._send(200, json.dumps({"ok": True}), "application/json")
+
+        def _save_prompt(self, raw: bytes):
+            # POST /prompt/save body {id, meta, body, overwrite?} → save_prompt(...).
+            # 200 {ok, path, kind} or 4xx {errors:[...]} for the non-happy paths (invalid
+            # id / collision / neither-writable) — already token+Host guarded above.
+            from .prompt_authoring import PromptWriteError
+
+            try:
+                data = json.loads(raw.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as exc:
+                self._send(
+                    400, json.dumps({"errors": [f"bad JSON body: {exc}"]}), "application/json"
+                )
+                return
+            try:
+                result = save_prompt(
+                    data.get("id", ""),
+                    data.get("meta") or {},
+                    data.get("body", ""),
+                    repo_root=_repo_root,
+                    overwrite=bool(data.get("overwrite")),
+                )
+            except PromptWriteError as exc:
+                self._send(400, json.dumps({"errors": [str(exc)]}), "application/json")
+                return
+            except Exception as exc:  # noqa: BLE001 - any other write failure → clear 4xx
+                self._send(
+                    400, json.dumps({"errors": [f"prompt save failed: {exc}"]}), "application/json"
+                )
+                return
+            self._send(
+                200,
+                json.dumps({"ok": True, "path": result["path"], "kind": result["kind"]}),
+                "application/json",
+            )
 
     server = http.server.ThreadingHTTPServer((host, port), _Handler)
     bound_host, bound_port = server.server_address[0], server.server_address[1]
