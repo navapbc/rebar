@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"verify_commands":[{"command":".venv/bin/python -m pytest tests/ -k 'validate_endpoint' -q","dd_id":"S7-DD1","dd_text":"validate endpoint + live e2e"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1782231650395295001,"uuid":"c440a6cb-71b9-450e-a1ca-df15ea1dae66"}
