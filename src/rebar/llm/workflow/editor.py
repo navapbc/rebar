@@ -247,6 +247,149 @@ def _contracts_in(step: Any, *, repo_root: Any = None) -> dict[str, dict[str, An
     return out
 
 
+# ── The defined /validate response shape (story 998e) ───────────────────────────
+# Every path through validate_node_config returns EXACTLY this shape so the bundle
+# can map it uniformly: {"ok": bool, "errors": [{"path": str, "message": str}],
+# "unavailable": bool}. The three failure axes are kept DISTINCT:
+#   * empty config           → ok:True,  errors:[],   unavailable:False (valid)
+#   * malformed JSON         → ok:False, errors:[…],  unavailable:False (user-fixable)
+#   * schema violation       → ok:False, errors:[…],  unavailable:False (user-fixable)
+#   * validator itself errored → ok:False, errors:[…], unavailable:True (dead validator)
+# `unavailable:True` is NEVER a false `ok:True` and NEVER a silent swallow — it is the
+# explicit "validation unavailable" state the front-end renders as a distinct banner.
+
+
+def _config_input_schema(kind: str, action: str | None, repo_root: Any) -> str | None:
+    """The INPUT-contract schema NAME a node's ``with`` must satisfy, by kind:
+    scripted → the registered op's ``contract_for(action).input_schema``; agent →
+    the prompt's front-matter ``inputs`` (when it is a schema name). Any other kind
+    (or a missing/contract-less action) has nothing to validate → ``None``."""
+    if not action:
+        return None
+    if kind == "scripted":
+        try:
+            from . import steps as _steps  # noqa: F401 - registers the step contracts
+            from .executor import contract_for
+
+            contract = contract_for(action)
+        except Exception:  # noqa: BLE001 - registry trouble → nothing to validate against
+            return None
+        return contract.input_schema if contract else None
+    if kind == "agent":
+        from rebar.llm.prompts import get_prompt
+
+        prompt = get_prompt(action, repo_root=repo_root)
+        return prompt.inputs if isinstance(prompt.inputs, str) else None
+    return None
+
+
+def validate_node_config(
+    kind: str, action: str | None, config_text: str, repo_root: Any = None
+) -> dict[str, Any]:
+    """Validate one editor node's raw JSON config against its INPUT contract,
+    returning the DEFINED shape ``{"ok", "errors": [{"path","message"}], "unavailable"}``.
+
+    The decision table (each axis kept DISTINCT — see the module note above):
+
+    * EMPTY (empty/whitespace ``config_text``) → ``ok:True`` (an empty config is valid,
+      not malformed).
+    * MALFORMED JSON (unparseable) → ``ok:False`` + a single ``invalid JSON: <detail>``
+      error, ``unavailable:False`` (a real, user-fixable error — NOT unavailable).
+    * PARSEABLE → validate ``config["with"]`` against the node's input contract:
+      - no contract → ``ok:True`` (nothing to validate).
+      - schema VIOLATION → ``ok:False`` + one ``{path, message}`` per ``ValidationError``,
+        ``unavailable:False``.
+      - validator FAILURE (the validator itself errors — unresolvable ``$ref`` / unknown
+        schema / any non-``ValidationError``) → ``ok:False`` + a single
+        ``validation unavailable: <detail>`` error AND ``unavailable:True``. NEVER a
+        false ``ok:True``, never a silent swallow."""
+    if not config_text or not config_text.strip():
+        return {"ok": True, "errors": [], "unavailable": False}
+    try:
+        config = json.loads(config_text)
+    except (ValueError, UnicodeDecodeError) as exc:
+        return {
+            "ok": False,
+            "errors": [{"path": "", "message": f"invalid JSON: {exc}"}],
+            "unavailable": False,
+        }
+    schema_name = _config_input_schema(kind, action, repo_root)
+    if not schema_name:
+        return {"ok": True, "errors": [], "unavailable": False}
+    with_value = config.get("with", {}) if isinstance(config, dict) else config
+
+    from rebar import schemas
+
+    try:
+        validator = schemas.validator(schema_name)
+        errors = sorted(validator.iter_errors(with_value), key=lambda e: list(e.absolute_path))
+    except Exception as exc:  # noqa: BLE001 - validator itself errored: fail-loud, DISTINCT
+        return {
+            "ok": False,
+            "errors": [{"path": "", "message": f"validation unavailable: {exc}"}],
+            "unavailable": True,
+        }
+    if not errors:
+        return {"ok": True, "errors": [], "unavailable": False}
+    out: list[dict[str, str]] = []
+    for err in errors:
+        try:
+            path = err.json_path
+        except Exception:  # noqa: BLE001 - older jsonschema without json_path
+            path = "/".join(str(p) for p in err.absolute_path)
+        out.append({"path": path, "message": err.message})
+    return {"ok": False, "errors": out, "unavailable": False}
+
+
+# ── Per-kind HELP data (story 998e) ─────────────────────────────────────────────
+# The single source of truth for the editor's help panel: the 5 element kinds, each
+# with the JSON shape its config carries. Surfaced to the bundle as a window global
+# (and via GET /help) so the help text is testable and never drifts from Python.
+_NODE_KIND_HELP: dict[str, dict[str, Any]] = {
+    "scripted": {
+        "title": "Scripted step",
+        "summary": "Runs a registered Python op (deterministic). Its `with` is "
+        "validated against the op's input contract.",
+        "action_key": "uses",
+        "shape": {"uses": "<op-id>", "with": {"<input>": "<value>"}},
+    },
+    "agent": {
+        "title": "Agent step",
+        "summary": "Runs a prompt against the LLM. Its `with` is validated against "
+        "the prompt's declared inputs contract.",
+        "action_key": "prompt",
+        "shape": {"prompt": "<prompt-id>", "with": {"<input>": "<value>"}},
+    },
+    "branch": {
+        "title": "Branch (conditional)",
+        "summary": "Chooses between `then` / `else` bodies on a condition.",
+        "action_key": None,
+        "shape": {"branch": {"when": "<expr>", "then": ["<step>"], "else": ["<step>"]}},
+    },
+    "loop": {
+        "title": "Loop",
+        "summary": "Repeats a `body` while a condition holds (bounded by max iterations).",
+        "action_key": None,
+        "shape": {"loop": {"while": "<expr>", "max": 10, "body": ["<step>"]}},
+    },
+    "map": {
+        "title": "Map (fan-out)",
+        "summary": "Runs a `body` once per item of an input collection.",
+        "action_key": None,
+        "shape": {"map": {"over": "<expr>", "as": "<var>", "body": ["<step>"]}},
+    },
+}
+
+
+def node_kind_help() -> dict[str, dict[str, Any]]:
+    """The per-kind help DATA for the editor's help panel: the 5 element kinds
+    (scripted/agent/branch/loop/map), each with a title, a one-line summary, and the
+    expected JSON ``shape`` of its config. The single Python source of truth the
+    bundle renders (window global + ``GET /help``) so the help never drifts from the
+    contracts. Returns a deep copy so callers cannot mutate the canonical map."""
+    return json.loads(json.dumps(_NODE_KIND_HELP))
+
+
 def build_host_html(
     bpmn_xml: str,
     *,
@@ -268,6 +411,7 @@ def build_host_html(
     tok = json.dumps(token)
     prompt_map = json.dumps(prompts or {})
     contract_map = json.dumps(contracts or {})
+    help_map = json.dumps(node_kind_help())
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -295,6 +439,17 @@ def build_host_html(
     #rebar-library .rebar-lib-target {{ font-family: monospace; font-size: 11px; color: #555;
                                         margin-top: 6px; word-break: break-all; }}
     #rebar-library .ok {{ color: #1a7f37; }} #rebar-library .err {{ color: #cf222e; }}
+    #rebar-validate-region {{ white-space: pre-wrap; font-size: 12px; padding: 8px;
+                              margin: 0 0 6px; border-radius: 4px; box-sizing: border-box; }}
+    .rebar-validate-errors {{ background: #ffeef0; color: #cf222e;
+                              border: 1px solid #cf222e; }}
+    .rebar-validate-unavailable {{ background: #fff8c5; color: #7d4e00;
+                                   border: 1px solid #d4a72c; }}
+    #rebar-kind-help h3 {{ margin: 12px 0 4px; }}
+    #rebar-kind-help .rebar-help-kind {{ margin: 0 0 10px; }}
+    #rebar-kind-help .rebar-help-summary {{ color: #555; margin: 2px 0; }}
+    #rebar-kind-help .rebar-help-shape {{ background: #eef1f6; padding: 6px; margin: 3px 0;
+                                          font-size: 11px; overflow: auto; }}
   </style>
 </head>
 <body>
@@ -314,6 +469,7 @@ def build_host_html(
     window.REBAR_TOKEN = {tok};
     window.REBAR_PROMPTS = {prompt_map};
     window.REBAR_CONTRACTS = {contract_map};
+    window.REBAR_KIND_HELP = {help_map};
   </script>
   <script src="/assets/editor.js"></script>
 </body>
@@ -417,7 +573,7 @@ def edit_workflow(
 
         def _authed(self) -> bool:
             # The shared CSRF / DNS-rebinding guard for the WRITE-or-sensitive endpoints
-            # (/save, /prompts, /prompt, /prompt/save): a loopback Host AND the
+            # (/save, /prompts, /prompt, /prompt/save, /validate): a loopback Host AND the
             # per-session token (a cross-origin page can't read the host HTML to learn it).
             return self._host_ok() and secrets.compare_digest(
                 self.headers.get("X-Rebar-Token", ""), token
@@ -491,6 +647,11 @@ def edit_workflow(
                     )
                     return
                 self._send(200, json.dumps(list_prompts(_repo_root)), "application/json")
+            elif self.path == "/help":
+                # The per-kind help DATA (story 998e): element kinds + expected JSON
+                # shape per kind. Host-guarded (read-only, no token needed — it is the
+                # same static map already injected as window.REBAR_KIND_HELP).
+                self._send(200, json.dumps(node_kind_help()), "application/json")
             elif self.path.startswith("/prompt?"):
                 self._serve_prompt()
             elif self.path.startswith("/assets/"):
@@ -504,7 +665,7 @@ def edit_workflow(
                 self._send(404, "not found", "text/plain")
 
         def do_POST(self):  # noqa: N802 - stdlib handler name
-            if self.path not in ("/save", "/prompt/save"):
+            if self.path not in ("/save", "/prompt/save", "/validate"):
                 self._send(404, '{"errors":["unknown endpoint"]}', "application/json")
                 return
             # CSRF / DNS-rebinding guard: require the per-session token (a cross-origin
@@ -520,6 +681,9 @@ def edit_workflow(
             payload = self.rfile.read(length)
             if self.path == "/prompt/save":
                 self._save_prompt(payload)
+                return
+            if self.path == "/validate":
+                self._validate(payload)
                 return
             xml = payload.decode("utf-8")
             errors = save_bpmn_to_ir(xml, target)
@@ -563,6 +727,36 @@ def edit_workflow(
                 json.dumps({"ok": True, "path": result["path"], "kind": result["kind"]}),
                 "application/json",
             )
+
+        def _validate(self, raw: bytes):
+            # POST /validate body {kind, action, config} → validate_node_config(...) as
+            # JSON 200 (the defined shape; even ok:false is HTTP 200 — a normal
+            # validation result). If the endpoint handler ITSELF crashes unexpectedly,
+            # return HTTP 500 with the same shape + unavailable:true so the client can
+            # map 500 → the "validation unavailable" state too (story 998e).
+            try:
+                data = json.loads(raw.decode("utf-8"))
+                result = validate_node_config(
+                    str(data.get("kind", "")),
+                    data.get("action"),
+                    data.get("config", "") or "",
+                    repo_root=_repo_root,
+                )
+                self._send(200, json.dumps(result), "application/json")
+            except Exception as exc:  # noqa: BLE001 - endpoint crash → 500 + unavailable
+                self._send(
+                    500,
+                    json.dumps(
+                        {
+                            "ok": False,
+                            "unavailable": True,
+                            "errors": [
+                                {"path": "", "message": f"validation endpoint error: {exc}"}
+                            ],
+                        }
+                    ),
+                    "application/json",
+                )
 
     server = http.server.ThreadingHTTPServer((host, port), _Handler)
     bound_host, bound_port = server.server_address[0], server.server_address[1]

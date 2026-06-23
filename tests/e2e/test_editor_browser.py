@@ -57,3 +57,32 @@ def test_editor_edit_persists_to_ir_on_save(browser_runner, editor_server):
     assert report["status"] == "saved to IR", f"save did not succeed: {report['status']}"
     # The decisive check: the edit is in the written IR (the round-trip the user does).
     assert "EDITED_BY_TEST" in ir.read_text(encoding="utf-8")
+
+
+def test_editor_live_validation_error_clear_and_unavailable(browser_runner, editor_server):
+    # Story 998e: live config validation drives a red inline error region, a valid config
+    # CLEARS it, and a 500 from /validate surfaces the DISTINCT "validation unavailable"
+    # banner (never false-valid). Save is BLOCKED while errors exist OR while unavailable.
+    url, _ir = editor_server
+    report = browser_runner("browser_validate.mjs", url)
+    assert report["errors"] == [], f"console/page errors in the editor: {report['errors']}"
+
+    # INVALID → red error region visible, Save blocked.
+    inv = report["invalid"]
+    assert inv["visible"] and inv["cls"] == "rebar-validate-errors"
+    assert inv["saveDisabled"] is True and inv["state"] == "errors"
+
+    # VALID → error cleared, Save re-enabled.
+    val = report["valid"]
+    assert val["hidden"] and val["saveDisabled"] is False and val["state"] == "valid"
+
+    # UNAVAILABLE (a 500 from /validate) → amber banner, Save blocked, NOT rendered valid.
+    una = report["unavailable"]
+    assert una["visible"] and una["cls"] == "rebar-validate-unavailable"
+    assert una["saveDisabled"] is True and una["state"] == "unavailable"
+    assert "validation unavailable" in una["text"]
+
+    # The per-kind help panel rendered the element types + shapes.
+    assert report["help"]["present"]
+    for kind in ("scripted", "agent", "branch", "loop", "map"):
+        assert kind in report["help"]["text"]

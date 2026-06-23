@@ -29,6 +29,7 @@ import {
 import rebarPropertiesProviderModule from "./rebarProvider";
 import rebarInsertionProviderModule from "./insertionProvider";
 import { mountPromptLibrary } from "./promptLibrary";
+import { mountConfigValidation, renderKindHelp } from "./configValidation";
 
 import "bpmn-js/dist/assets/diagram-js.css";
 import "bpmn-js/dist/assets/bpmn-js.css";
@@ -65,7 +66,19 @@ async function open(xml) {
   }
 }
 
+// Live config validation (debounced /validate round-trip) + Save-blocking gate.
+const validation = mountConfigValidation(modeler);
+// Test hook: expose the validation controller so the E2E / Node harness can assert the
+// error / unavailable states and the Save gate without driving a real keyboard.
+window.__rebarValidation = validation;
+
 async function save() {
+  // Fail-closed Save: refuse client-side while validation errors exist OR while in the
+  // 'unavailable' state, mirroring the disabled Save button (defense in depth).
+  if (validation.isSaveBlocked()) {
+    status("save blocked: fix config validation first", "err");
+    return;
+  }
   try {
     const { xml } = await modeler.saveXML({ format: true });
     const r = await fetch("/save", {
@@ -95,6 +108,13 @@ if (libContainer) {
     mountPromptLibrary(modeler, libContainer);
   } catch (e) {
     console.error("prompt library failed to mount:", e);
+  }
+  // The per-kind HELP panel: element types + expected JSON shape per kind, driven by
+  // window.REBAR_KIND_HELP (the single Python source of truth, also served by /help).
+  try {
+    renderKindHelp(libContainer);
+  } catch (e) {
+    console.error("kind help panel failed to render:", e);
   }
 }
 
