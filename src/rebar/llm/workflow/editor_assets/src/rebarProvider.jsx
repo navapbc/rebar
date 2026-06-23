@@ -115,8 +115,11 @@ function formatContract(view) {
   // Render a scripted op's contract (window.REBAR_CONTRACTS[uses]) as legible read-only
   // text: its description + CONSUMES (input fields) / PRODUCES (output fields). A node
   // with no declared contract shows a defined empty state, never a blank/crash.
-  if (!view || !view.has_contract) {
-    return "(no declared contract for this step)";
+  // An opaque / contract-less node (checked === false, or no view) is UNCHECKED: the
+  // static contract check has nothing to verify against, so flag it visibly rather than
+  // let a blank read as "fine" (c768).
+  if (!view || !view.has_contract || view.checked === false) {
+    return "⚠ unchecked (opaque source)\n(no declared contract for this step)";
   }
   const fmt = (fields) =>
     !fields || fields.length === 0

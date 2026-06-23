@@ -116,6 +116,11 @@ def resolve_prompts(doc: dict[str, Any], path: str | Path) -> dict[str, str]:
 # step with no declared contract — or nothing selected — renders this, never a crash.
 _EMPTY_CONTRACT_VIEW: dict[str, Any] = {
     "has_contract": False,
+    # `checked` is the UI's "unchecked badge" signal (c768): False for an opaque /
+    # contract-less node (nothing declared to statically check against), True once a
+    # contract is present. Mirrors `has_contract` here but is a distinct, explicit
+    # affordance the bundle renders as a visible "⚠ unchecked (opaque source)" label.
+    "checked": False,
     "description": "",
     "consumes": [],
     "produces": [],
@@ -174,6 +179,7 @@ def step_contract_view(uses: str | None) -> dict[str, Any]:
         return dict(_EMPTY_CONTRACT_VIEW)
     return {
         "has_contract": True,
+        "checked": True,
         "description": contract.description,
         "consumes": _schema_fields(contract.input_schema),
         "produces": _schema_fields(contract.output_schema),
@@ -201,6 +207,7 @@ def prompt_contract_view(prompt_id: str | None, *, repo_root: Any = None) -> dic
         return dict(_EMPTY_CONTRACT_VIEW)
     return {
         "has_contract": True,
+        "checked": True,
         "description": prompt.description or "",
         "consumes": consumes,
         "produces": produces,

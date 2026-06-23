@@ -63,6 +63,81 @@ _LOOP_VAR_RE = re.compile(r"^loop\.([A-Za-z_][A-Za-z0-9_-]*)$")
 _MAP_VAR_RE = re.compile(r"^map\.([A-Za-z_][A-Za-z0-9_-]*)$")
 
 
+def _consumer_input_schema(kind: str, step: Mapping[str, Any], repo_root: str | None) -> str | None:
+    """The CONSUMER step's declared INPUT schema NAME, or ``None`` when none is
+    declared (UNKNOWN — validation is skipped, never failed):
+
+    * scripted (``uses``) → its :class:`StepContract`'s ``input_schema``;
+    * agent (``prompt``) → the prompt's front-matter ``inputs`` (when a schema name).
+
+    Resolution trouble (unregistered op / unknown prompt) degrades to ``None`` (no
+    contract to validate against) — distinct from a validator that ERRORS while
+    running, which the caller surfaces loudly."""
+    if kind == "scripted":
+        from .executor import contract_for
+
+        name = step.get("uses")
+        if not isinstance(name, str):
+            return None
+        try:
+            # Ensure the built-in contracts are registered (decorators run on import);
+            # a call path that hasn't imported the step library must not see an empty
+            # registry and silently SKIP validation — that would be a false-pass, the
+            # very thing c768's fail-loud net exists to prevent.
+            from . import steps  # noqa: F401  (side effect: populate STEP_CONTRACTS)
+
+            contract = contract_for(name)
+        except Exception:  # noqa: BLE001 - registry trouble → no contract (UNKNOWN)
+            return None
+        return contract.input_schema if contract is not None else None
+    if kind == "agent":
+        from rebar.llm.prompts import get_prompt
+
+        pid = step.get("prompt")
+        if not isinstance(pid, str):
+            return None
+        try:
+            prompt = get_prompt(pid, repo_root=repo_root)
+        except Exception:  # noqa: BLE001 - an unknown/malformed prompt → UNKNOWN (skip)
+            return None
+        return prompt.inputs if isinstance(prompt.inputs, str) else None
+    return None
+
+
+def validate_consumer_input(
+    kind: str, step: Mapping[str, Any], resolved_input: Any, repo_root: str | None
+) -> tuple[str | None, bool]:
+    """Validate a step's RESOLVED ``with`` inputs against the CONSUMER's declared
+    INPUT contract — the runtime safety net (story c768).
+
+    Returns ``(error_message, errored)``:
+
+    * ``(None, False)`` — either no contract is declared (UNKNOWN: skip, never fail —
+      keeps contract-less workflows working) or the value satisfies the contract.
+    * a VALIDATION MISMATCH (the value violates the schema) → an ``"input contract
+      violation (<schema>): …"`` message with ``errored=False`` (fail-loud).
+    * a VALIDATOR FAILURE (the validator itself errors — unresolvable ``$ref``,
+      unknown schema name, any non-``ValidationError`` while building/running it) → a
+      DISTINCT ``"input validation UNAVAILABLE/errored (<schema>): …"`` message with
+      ``errored=True``. Never silently passes the value (never false-pass)."""
+    schema_name = _consumer_input_schema(kind, step, repo_root)
+    if not schema_name:
+        return None, False  # UNKNOWN — no declared input contract; skip
+    from jsonschema.exceptions import ValidationError
+
+    from rebar import schemas
+
+    try:
+        validator = schemas.validator(schema_name)
+        validator.validate(resolved_input)
+    except ValidationError as exc:
+        detail = exc.message
+        return f"input contract violation ({schema_name}): {detail}", False
+    except Exception as exc:  # noqa: BLE001 - validator itself errored: fail-loud, distinct
+        return f"input validation UNAVAILABLE/errored ({schema_name}): {exc}", True
+    return None, False
+
+
 def _truthy(val: Any) -> bool:
     """The engine's truthiness rule (shared by guards + control conditions): a string
     is falsy only when empty/``false``/``0``/``no`` (case-insensitive)."""
@@ -336,6 +411,31 @@ def _run_leaf(rc, step, sid, frame_key, kind, prefixes, bindings, iteration) -> 
     if resolve_error is not None:
         result = StepResult(outputs={}, status="failed", error=str(resolve_error))
     else:
+        # Runtime safety net (c768): validate the resolved inputs against the CONSUMER
+        # step's declared INPUT contract before dispatch. A genuine mismatch FAILS the
+        # step (fail-loud); a validator that itself errors surfaces a DISTINCT, visible
+        # "UNAVAILABLE/errored" signal and never silently passes the value. No declared
+        # contract → skipped (UNKNOWN), so contract-less workflows are unaffected.
+        contract_error, _errored = validate_consumer_input(kind, step, resolved_input, rc.repo_root)
+        if contract_error is not None:
+            result = StepResult(outputs={}, status="failed", error=contract_error)
+            with _guard(rc):
+                rc.outputs[frame_key] = {}
+                rc.statuses[frame_key] = "failed"
+                rc.rec.step_recorded(
+                    _step_record(
+                        rc.run_id,
+                        sid,
+                        kind,
+                        result,
+                        captured,
+                        frame_key=frame_key,
+                        iteration=iteration,
+                    )
+                )
+                rc.failed = True
+                rc.error = f"step {frame_key!r} failed: {result.error}"
+            return
         try:
             ctx = StepContext(
                 run_id=rc.run_id,
