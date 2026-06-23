@@ -97,19 +97,29 @@ def sort_states(states: list[dict], sort: str) -> list[dict]:
 
 # ───────────────────────────── tracker resolution ────────────────────────────
 def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
-    """Resolve the tracker dir: the explicit override (REBAR_TRACKER_DIR, deprecated
-    alias TICKETS_TRACKER_DIR), else <repo_root>/.tickets-tracker.
+    """Resolve the tracker dir for the read path. The configurable dir NAME comes from
+    the single source of truth (``rebar.config``: the ``REBAR_TRACKER_DIR`` override or
+    the ``tracker.dir`` config key, default ``.tickets-tracker``); this function adds the
+    read-path-specific git precondition + ``sys.exit`` on an uninitialized root.
 
-    repo_root precedence: explicit arg > REBAR_ROOT > git toplevel
-    of cwd. Mirrors the shims' resolution so the CLI/library agree.
+    Resolution: an explicit override / absolute configured dir is returned verbatim with
+    NO git precondition (test fixtures and tooling point this at a hand-built tracker on
+    purpose); otherwise the relative dir name is joined under the resolved repo root
+    (explicit arg > REBAR_ROOT > git toplevel of cwd), which must be a git work tree.
     """
-    from rebar.config import tracker_dir_override
+    from rebar.config import ConfigError, load_config, tracker_dir_override
 
     env_dir = tracker_dir_override()
     if env_dir:
-        # Explicit tracker dir — read it directly, no git precondition (test
-        # fixtures and tooling point this at a hand-built tracker on purpose).
         return env_dir
+    try:
+        name = load_config(root=repo_root).tracker.dir
+    except ConfigError:
+        name = ".tickets-tracker"  # malformed config never breaks a read's path resolution
+    if os.path.isabs(name):
+        # An absolute configured dir relocates the store (EV-3b) — like the env
+        # override, return it verbatim with no git precondition on the repo root.
+        return name
     root = str(repo_root) if repo_root is not None else os.environ.get("REBAR_ROOT")
     if not root:
         try:
@@ -146,7 +156,7 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
                 file=sys.stderr,
             )
             sys.exit(1)
-    return os.path.join(root, ".tickets-tracker")
+    return os.path.join(root, name)
 
 
 # ───────────────────────────── freshness policy ──────────────────────────────

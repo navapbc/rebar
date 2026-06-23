@@ -79,12 +79,36 @@ def tracker_dir_override() -> str | None:
 
 
 def tracker_dir(root: str | os.PathLike[str] | None = None) -> Path:
-    """Path to the ticket event store (.tickets-tracker), honoring the env override
-    (``REBAR_TRACKER_DIR``, deprecated alias ``TICKETS_TRACKER_DIR``)."""
+    """Path to the ticket event store, resolved through the full config precedence:
+    the explicit env override (``REBAR_TRACKER_DIR``, deprecated alias
+    ``TICKETS_TRACKER_DIR``) wins verbatim; otherwise the configured ``tracker.dir``
+    (``-c`` flag > project/user config > default ``.tickets-tracker``) — an absolute
+    value relocates the store (EV-3b), a relative one is the dir name under the repo
+    root. Previously this consulted env only; it now reads the typed config too."""
     env = tracker_dir_override()
     if env:
         return Path(env)
-    return repo_root(root) / ".tickets-tracker"
+    try:
+        name = load_config(root).tracker.dir
+    except ConfigError:
+        # Locating the store must not be coupled to config validity (it was env-only
+        # before): a malformed config falls back to the default name. The fail-closed
+        # gates (close/verify) surface the ConfigError via their own load_config.
+        name = ".tickets-tracker"
+    return Path(name) if os.path.isabs(name) else repo_root(root) / name
+
+
+def tickets_branch(root: str | os.PathLike[str] | None = None) -> str:
+    """The orphan git branch the ticket event log lives on (and the basis for its
+    ``origin/<branch>`` ref), resolved through the full config precedence: the
+    configured ``tracker.branch`` (``-c`` flag > ``REBAR_TRACKER_BRANCH`` env >
+    project/user config > default ``tickets``). The single source of the branch name
+    for every git path (init/sync/push/reconciler/fsck/reads).
+
+    Unlike :func:`tracker_dir`, a malformed config is NOT swallowed here: silently
+    defaulting the branch could mis-route writes to the wrong branch (a data-integrity
+    risk), so the ``ConfigError`` propagates and the operation fails loudly."""
+    return load_config(root).tracker.branch
 
 
 # ── Typed config (the single source of truth for non-secret settings) ─────────
