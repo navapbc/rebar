@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"verify_commands":[{"command":"test -d docs && grep -rl 'execution_mode' docs/ | head","dd_id":"DOCS-DD1","dd_text":"docs present + referenced"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1782235925044165001,"uuid":"91826b9a-3b6e-462c-a5c8-447905494634"}
