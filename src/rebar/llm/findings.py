@@ -309,9 +309,9 @@ def finalize_outcome(
         )
     # exclude_none: a Pydantic optional left unset dumps as explicit ``null``, which a
     # shape-only schema (fields typed ``string``) rejects in `validate_structured` BEFORE
-    # the op can normalize — and `ToolStrategy` is free-generation + code-validation, so
-    # optional-None leakage is real (BI-1). Harmless for the findings path (normalize_finding
-    # strips nulls anyway); also hardens existing mode="structured" workflow steps.
+    # the op can normalize — and the structured-output path is free-generation +
+    # code-validation, so optional-None leakage is real (BI-1). Harmless for the findings
+    # path (normalize_finding strips nulls anyway); also hardens mode="structured" steps.
     data = (
         structured.model_dump(exclude_none=True)
         if hasattr(structured, "model_dump")

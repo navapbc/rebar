@@ -83,7 +83,8 @@ over one git-backed store.
   (the in-process, provider-agnostic pydantic-ai runtime; a `FakeRunner` for tests)
   runs the agent with read-only repo file tools + MCP
   tools; output is constrained to the `review_result` JSON Schema.
-  Langfuse provides tracing + the reviewer-prompt library. See
+  Langfuse is the optional OTLP tracing endpoint (`[tracing]` extra); reviewer prompts are
+  git-canonical (packaged `reviewers/*.md` or project `.rebar/prompts/`). See
   [llm-framework.md](llm-framework.md).
 
 ### Python package layout & the engine import boundary

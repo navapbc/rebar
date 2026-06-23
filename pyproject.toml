@@ -56,7 +56,7 @@ agents = [
     "pydantic>=2",
 ]
 # Additional model providers are opt-in (keep the default extra lean):
-#   pip install langchain-google-genai   # Gemini
+#   pip install 'pydantic-ai-slim[google]'   # Gemini
 #
 # Prompt evaluation (epic a88f / WS-G). Net-new extra: Inspect AI is the eval
 # substrate; promptfoo interop is via the generated JUnit/config (no pip dep).

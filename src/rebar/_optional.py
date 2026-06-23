@@ -6,7 +6,7 @@ lazily, so ``import rebar`` — and even running a scripted workflow — never p
 the heavy stack:
 
   * ``[agents]``  — LLM agent steps, the review ops, the workflow agent runner
-    (langchain/langgraph + a model provider SDK).
+    (the provider-agnostic pydantic-ai runtime: ``pydantic-ai-slim[anthropic]`` + json-repair).
   * ``[eval]``    — prompt evals (Inspect AI + promptfoo interop).
   * ``[tracing]`` — the OTLP trace sink. WRITE-ONLY by rule: OpenTelemetry is a
     sink, never read back into a rebar decision (the oracle-discipline rule).
@@ -78,7 +78,7 @@ def guard_import(module: str, *, extra: str):
     """Import ``module``, or raise :class:`OptionalDependencyError` naming the extra.
 
     The single chokepoint for optional imports: ``mod = guard_import(
-    'langchain.chat_models', extra='agents')``. A missing dependency becomes one
+    'pydantic_ai', extra='agents')``. A missing dependency becomes one
     legible error with the exact ``pip install`` rather than a bare ImportError.
     """
     try:

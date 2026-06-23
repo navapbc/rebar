@@ -185,7 +185,8 @@ def _llm_int(table: dict, cli: dict, env_name: str, file_key: str, default: int,
 
 @dataclass
 class LangfuseConfig:
-    """Langfuse credentials/host, plus whether tracing+prompts are *enabled*.
+    """Langfuse credentials/host, plus whether OTLP tracing is *enabled* (Langfuse is the
+    optional trace endpoint only; prompts are git-canonical and never fetched from Langfuse).
 
     Enabled is derived purely from key-presence (both keys set) — the runner gates
     on this BEFORE constructing any handler, the documented no-op pattern (a stale

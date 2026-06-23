@@ -276,10 +276,6 @@ def verify_completion(
         # No injected ticket tools: the pydantic_ai runner (the only non-fake runner
         # post-cutover) provides `show_ticket` natively via pai_tools.rebar_tools.
         extra_tools=None,
-        # NATURAL termination + tool-less extraction (NOT ToolStrategy's forced tool_choice,
-        # which makes a tool-using verifier over-explore for hundreds of steps instead of
-        # concluding — proven by A/B: 17 tool calls vs >250 on the same ticket/model/prompt).
-        output_strategy="extract",
     )
     result = runner_sel.run(req)  # {verdict, findings, summary?, runner, model, trace_id}
 
