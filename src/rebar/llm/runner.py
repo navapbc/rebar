@@ -148,6 +148,12 @@ class PydanticAIRunner:
         _pai_check_config(self._config)
 
     def run(self, req: RunRequest) -> dict:
+        # Guard the agents extra FIRST — before importing any pydantic_ai submodule —
+        # so an absent extra surfaces as a clean LLMConfigError (naming the extra), not a
+        # raw ModuleNotFoundError from the `pydantic_ai.exceptions`/`.usage` imports below.
+        # run() is reachable (library/CLI/MCP) without a preceding preflight().
+        Agent = _import_pydantic_ai()
+
         from types import SimpleNamespace
 
         from pydantic_ai.exceptions import UsageLimitExceeded
@@ -162,7 +168,6 @@ class PydanticAIRunner:
         from rebar.llm.tracing import setup_tracing
 
         setup_tracing(cfg.langfuse)
-        Agent = _import_pydantic_ai()
         tools = pai_tools.filesystem_tools(cfg.repo_path) + pai_tools.rebar_tools(
             cfg.repo_path, allow_comment=not _readonly_gate()
         )
