@@ -138,7 +138,7 @@ def lint_prompt_refs(doc: dict[str, Any], *, repo_root=None) -> list[LintFinding
     prompt (a catalog reviewer or a ``.rebar/prompts/<id>.md`` file), AND the step's
     inputs must satisfy the prompt's declared required-variable schema. Imports the
     (stdlib-only) prompt registry lazily so the core linter stays uncoupled."""
-    from rebar.llm.prompts import get_reviewer, load_catalog, prompt_input_schema, prompt_ref_exists
+    from rebar.llm.prompts import get_prompt, load_catalog, prompt_input_schema, prompt_ref_exists
 
     findings: list[LintFinding] = []
     catalog = load_catalog()
@@ -163,7 +163,8 @@ def lint_prompt_refs(doc: dict[str, Any], *, repo_root=None) -> list[LintFinding
         # we can resolve; user-file prompts are existence-checked above.)
         if prompt_id in catalog:
             try:
-                schema = prompt_input_schema(get_reviewer(prompt_id), repo_root=repo_root)
+                prompt = get_prompt(prompt_id, repo_root=repo_root)
+                schema = prompt_input_schema(prompt, repo_root=repo_root)
             except Exception:  # a malformed prompt is the prompt's own lint, not this
                 continue
             available = _ENGINE_PROVIDED_VARS | set((step.get("with") or {}).keys())

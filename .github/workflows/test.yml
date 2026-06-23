@@ -135,6 +135,22 @@ jobs:
           fi
           echo "Module-size gate: OK (no new over-cap files)."
 
+      # Prompt-index drift gate (story afe6): reviewers/index.json is DERIVED from the
+      # prompt front-matter and committed. Regenerate it and fail if the working tree
+      # now differs — a stale index means a prompt's front-matter changed without the
+      # committed index being regenerated. Style mirrors the Module-size gate above.
+      - name: Prompt-index drift gate
+        shell: bash
+        run: |
+          python -m rebar.llm.prompts regenerate-index
+          if ! git diff --exit-code -- src/rebar/llm/reviewers/index.json; then
+            echo "::error::reviewers/index.json is stale — regenerate it with"
+            echo "  python -m rebar.llm.prompts regenerate-index"
+            echo "and commit the result (it is derived from the prompt front-matter)."
+            exit 1
+          fi
+          echo "Prompt-index drift gate: OK (index.json is up to date)."
+
       - name: Run the default suite (Python tiers + bash collector; excludes integration + external)
         # Pin --basetemp under the runner temp (not /tmp): on long (10-16 min) runs
         # the macOS tmp-cleaner reaps pytest's default /tmp/pytest-of-* basetemp

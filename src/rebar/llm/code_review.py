@@ -149,7 +149,7 @@ def review_code(
 
     results: list[dict] = []
     for rid in reviewer_ids:
-        reviewer = prompts.get_reviewer(rid)
+        reviewer = prompts.get_prompt(rid, repo_root=repo_root)
         variables = {
             "ticket_id": "(code review)",
             "ticket_context": context,

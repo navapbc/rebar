@@ -121,7 +121,7 @@ class RunnerAgentStep(_ex.AgentStepRunner):
             ),
         )
         prompt_id = ctx.step.get("prompt") or ""
-        reviewer = prompts.get_reviewer(prompt_id)
+        prompt = prompts.get_prompt(prompt_id, repo_root=self._repo_root)
         ticket_id = str(ctx.inputs.get("ticket_id") or ctx.target_ticket or "")
         variables = {
             "ticket_id": ticket_id,
@@ -130,10 +130,10 @@ class RunnerAgentStep(_ex.AgentStepRunner):
             ),
             "repo_path": cfg.repo_path or "",
         }
-        system_prompt, langfuse_prompt = prompts.resolve_prompt(reviewer, variables, cfg.langfuse)
+        system_prompt, langfuse_prompt = prompts.resolve_prompt(prompt, variables, cfg.langfuse)
         instructions = str(
             ctx.inputs.get("instructions")
-            or f"Review along the '{reviewer.dimension}' dimension using the read-only "
+            or f"Review along the '{prompt.dimension}' dimension using the read-only "
             "repository tools; ground every finding in tool output."
         )
         req = RunRequest(

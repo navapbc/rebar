@@ -39,7 +39,7 @@ from rebar.llm.errors import (
 )
 from rebar.llm.findings import build_result, normalize_finding, validate_result
 from rebar.llm.operations import review_ticket, select_reviewers
-from rebar.llm.prompts import Reviewer, get_reviewer, load_catalog
+from rebar.llm.prompts import Prompt, Reviewer, get_prompt, load_catalog
 from rebar.llm.runner import (
     FakeRunner,
     Runner,
@@ -70,9 +70,10 @@ __all__ = [
     "RunRequest",
     "FakeRunner",
     "get_runner",
-    # reviewer registry
+    # prompt / reviewer registry
+    "Prompt",
     "Reviewer",
-    "get_reviewer",
+    "get_prompt",
     "load_catalog",
     # exceptions
     "LLMError",
