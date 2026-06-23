@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"verify_commands":[{"command":".venv/bin/python -m pytest tests/ -k 'contract and skeleton' -q","dd_id":"S0-DD1","dd_text":"registry+decorator+lint+inspector e2e"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1782231613047280001,"uuid":"c4e14342-2191-43fd-b262-05bfb6437580"}
