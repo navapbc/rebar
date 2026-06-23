@@ -874,10 +874,12 @@ def _config_probe_paths(root: str | os.PathLike[str] | None = None) -> list[Path
     ``tracker_dir`` → resolve, then a config file is created). Stat-only, and only on
     a COLD resolve (cache miss), so it adds no warm-hit walk."""
     env = os.environ.get("REBAR_CONFIG")
-    if env:
-        return [Path(env)]
+    if env and Path(env).is_file():
+        return [Path(env)]  # discovery short-circuits only when the env file EXISTS
     base = repo_root(root)
-    out: list[Path] = []
+    # When REBAR_CONFIG points at a not-yet-existent file, discovery falls through to
+    # the walk — so probe BOTH (the env path, to detect its creation, AND the walk).
+    out: list[Path] = [Path(env)] if env else []
     cur = base
     while True:
         out.append(cur / "rebar.toml")
