@@ -36,7 +36,9 @@ _HAVE_CTAGS = shutil.which("ctags") is not None
 requires_ctags = pytest.mark.skipif(not _HAVE_CTAGS, reason="universal-ctags not on PATH")
 
 # The independent real corpus: rebar's own source tree.
-_SRC_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "src", "rebar"))
+_SRC_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "src", "rebar")
+)
 #: A floor for the measured yield. The spike measured 88%; the relative-import subset
 #: here measures ~75% (the rest are legitimately collisions / dotted refs the guard
 #: abstains). We assert a conservative floor, not the exact value (it is MEASURED).
@@ -122,7 +124,7 @@ def test_refutation_yield_and_zero_false_refute_on_real_corpus(corpus_index, cap
             f"  internal cross-file refs : {total}\n"
             f"  refuted (resolved)       : {len(refuted_names)}\n"
             f"  abstained (collision/dotted/not-found): {abstained}\n"
-            f"  MEASURED refute yield    : {yield_frac*100:.1f}%\n"
+            f"  MEASURED refute yield    : {yield_frac * 100:.1f}%\n"
             f"  hallucinated controls    : {len(distinct)}\n"
             f"  FALSE-REFUTES            : {len(false_refutes)}"
         )
@@ -141,7 +143,9 @@ def test_unique_real_symbol_resolves_dotted_member_abstains(corpus_index) -> Non
     """
     # 'GroundingContractError' is defined exactly once (evidence.py) -> a unique refute.
     rec = r.refute_absence(
-        {"kind": "import", "name": "GroundingContractError"}, repo_root=_SRC_ROOT, index=corpus_index
+        {"kind": "import", "name": "GroundingContractError"},
+        repo_root=_SRC_ROOT,
+        index=corpus_index,
     )
     ev.validate(rec)
     assert rec["outcome"] == ev.OUTCOME_REFUTED
@@ -149,7 +153,8 @@ def test_unique_real_symbol_resolves_dotted_member_abstains(corpus_index) -> Non
     # A dotted/member reference is T2 -> never refuted at T1.
     rec2 = r.refute_absence(
         {"kind": "member", "name": "evidence.GroundingContractError"},
-        repo_root=_SRC_ROOT, index=corpus_index,
+        repo_root=_SRC_ROOT,
+        index=corpus_index,
     )
     ev.validate(rec2)
     assert rec2["outcome"] == ev.OUTCOME_ABSTAIN

@@ -24,9 +24,8 @@ from pathlib import Path
 
 import pytest
 
-from rebar.grounding import engine_b
+from rebar.grounding import engine_b, oracle
 from rebar.grounding import evidence as ev
-from rebar.grounding import oracle
 
 pytestmark = pytest.mark.unit
 
@@ -102,7 +101,9 @@ def test_full_backend_account_is_present(mixed_repo, capsys) -> None:
         print("\n[AC5] reconstructed coverage account:")
         for backend, stats in sorted(table.items()):
             reasons = dict(stats["reasons"])
-            print(f"  {backend:10s} ran={stats['ran']} skipped={stats['skipped']} reasons={reasons}")
+            print(
+                f"  {backend:10s} ran={stats['ran']} skipped={stats['skipped']} reasons={reasons}"
+            )
     # The metric backend is always present (its detectors are language-agnostic).
     assert engine_b.BACKEND_METRIC in table
     # At least one structural backend participated (ran or skipped) on the JS surface.

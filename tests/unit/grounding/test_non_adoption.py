@@ -23,10 +23,8 @@ import sys
 
 import pytest
 
-from rebar.grounding import deps
-from rebar.grounding import engine_b
+from rebar.grounding import deps, engine_b, oracle
 from rebar.grounding import evidence as ev
-from rebar.grounding import oracle
 from rebar.grounding import resolve as r
 
 pytestmark = pytest.mark.unit
@@ -104,9 +102,7 @@ def test_refute_query_with_ctags_absent_fails_open(tmp_path, monkeypatch) -> Non
     (tmp_path / "x.py").write_text("def f(): pass\n")
     monkeypatch.setattr(r, "_CTAGS_BIN", "definitely-not-a-real-ctags-xyz")
     r._CACHED_CTAGS_LANGS = None
-    rec = oracle.refute_absence(
-        {"kind": "symbol", "name": "f"}, repo_root=str(tmp_path)
-    )
+    rec = oracle.refute_absence({"kind": "symbol", "name": "f"}, repo_root=str(tmp_path))
     ev.validate(rec)
     assert rec["outcome"] == ev.OUTCOME_ABSTAIN
     assert rec["outcome"] != ev.OUTCOME_REFUTED

@@ -77,12 +77,47 @@ _HTTP_TIMEOUT = 10.0
 # Node.js builtin modules (no scheme prefix). A `require('fs')` is not an npm dep.
 _NODE_BUILTINS: frozenset[str] = frozenset(
     {
-        "assert", "async_hooks", "buffer", "child_process", "cluster", "console",
-        "constants", "crypto", "dgram", "diagnostics_channel", "dns", "domain",
-        "events", "fs", "http", "http2", "https", "inspector", "module", "net",
-        "os", "path", "perf_hooks", "process", "punycode", "querystring",
-        "readline", "repl", "stream", "string_decoder", "sys", "timers", "tls",
-        "trace_events", "tty", "url", "util", "v8", "vm", "wasi", "worker_threads",
+        "assert",
+        "async_hooks",
+        "buffer",
+        "child_process",
+        "cluster",
+        "console",
+        "constants",
+        "crypto",
+        "dgram",
+        "diagnostics_channel",
+        "dns",
+        "domain",
+        "events",
+        "fs",
+        "http",
+        "http2",
+        "https",
+        "inspector",
+        "module",
+        "net",
+        "os",
+        "path",
+        "perf_hooks",
+        "process",
+        "punycode",
+        "querystring",
+        "readline",
+        "repl",
+        "stream",
+        "string_decoder",
+        "sys",
+        "timers",
+        "tls",
+        "trace_events",
+        "tty",
+        "url",
+        "util",
+        "v8",
+        "vm",
+        "wasi",
+        "worker_threads",
         "zlib",
     }
 )
@@ -91,10 +126,37 @@ _NODE_BUILTINS: frozenset[str] = frozenset(
 # the heuristic; this set covers the common explicit cases).
 _GO_STD_FIRST: frozenset[str] = frozenset(
     {
-        "fmt", "errors", "strings", "strconv", "bytes", "io", "os", "net", "time",
-        "sort", "sync", "context", "math", "encoding", "crypto", "bufio", "regexp",
-        "unicode", "reflect", "runtime", "container", "hash", "log", "path",
-        "testing", "flag", "bufbuild", "embed", "slices", "maps", "cmp",
+        "fmt",
+        "errors",
+        "strings",
+        "strconv",
+        "bytes",
+        "io",
+        "os",
+        "net",
+        "time",
+        "sort",
+        "sync",
+        "context",
+        "math",
+        "encoding",
+        "crypto",
+        "bufio",
+        "regexp",
+        "unicode",
+        "reflect",
+        "runtime",
+        "container",
+        "hash",
+        "log",
+        "path",
+        "testing",
+        "flag",
+        "bufbuild",
+        "embed",
+        "slices",
+        "maps",
+        "cmp",
     }
 )
 
@@ -211,7 +273,9 @@ def _import_mismatch_abstain(eco: str, name: str) -> dict[str, Any] | None:
     return None
 
 
-def _workspace_abstain(eco: str, name: str, workspace_members: set[str] | None) -> dict[str, Any] | None:
+def _workspace_abstain(
+    eco: str, name: str, workspace_members: set[str] | None
+) -> dict[str, Any] | None:
     """Abstain iff ``name`` is a local workspace/monorepo member (internal)."""
     if not workspace_members:
         return None
@@ -224,7 +288,7 @@ def _workspace_abstain(eco: str, name: str, workspace_members: set[str] | None) 
             provenance_tier=ev.TIER_T0,
             backend=_BACKEND,
             reference=_dep_reference(name, eco),
-            detail="declared as a local workspace/monorepo member — internal, not a public-registry package",
+            detail="declared as a local workspace/monorepo member — internal, not a public-registry package",  # noqa: E501
         )
     return None
 
@@ -269,26 +333,44 @@ def _probe_registry(eco: str, name: str) -> dict[str, Any]:
     ref = _dep_reference(name, eco)
     try:
         code = _http_get(url)
-    except (TimeoutError,) as exc:  # urllib raises TimeoutError (or socket.timeout subclass) on read timeout
+    except (
+        TimeoutError
+    ) as exc:  # urllib raises TimeoutError (or socket.timeout subclass) on read timeout
         return ev.abstain(
-            "timeout", job=ev.JOB_REFUTE, provenance_tier=ev.TIER_T0,
-            backend=_BACKEND, reference=ref, detail=f"registry probe timed out: {exc!r}",
+            "timeout",
+            job=ev.JOB_REFUTE,
+            provenance_tier=ev.TIER_T0,
+            backend=_BACKEND,
+            reference=ref,
+            detail=f"registry probe timed out: {exc!r}",
         )
     except urllib.error.URLError as exc:
         reason = exc.reason
         if isinstance(reason, TimeoutError):
             return ev.abstain(
-                "timeout", job=ev.JOB_REFUTE, provenance_tier=ev.TIER_T0,
-                backend=_BACKEND, reference=ref, detail=f"registry probe timed out: {exc!r}",
+                "timeout",
+                job=ev.JOB_REFUTE,
+                provenance_tier=ev.TIER_T0,
+                backend=_BACKEND,
+                reference=ref,
+                detail=f"registry probe timed out: {exc!r}",
             )
         return ev.abstain(
-            "network_error", job=ev.JOB_REFUTE, provenance_tier=ev.TIER_T0,
-            backend=_BACKEND, reference=ref, detail=f"registry unreachable: {exc!r}",
+            "network_error",
+            job=ev.JOB_REFUTE,
+            provenance_tier=ev.TIER_T0,
+            backend=_BACKEND,
+            reference=ref,
+            detail=f"registry unreachable: {exc!r}",
         )
     except OSError as exc:  # DNS/connection-level
         return ev.abstain(
-            "network_error", job=ev.JOB_REFUTE, provenance_tier=ev.TIER_T0,
-            backend=_BACKEND, reference=ref, detail=f"registry probe failed: {exc!r}",
+            "network_error",
+            job=ev.JOB_REFUTE,
+            provenance_tier=ev.TIER_T0,
+            backend=_BACKEND,
+            reference=ref,
+            detail=f"registry probe failed: {exc!r}",
         )
 
     if code == 200:
@@ -301,25 +383,39 @@ def _probe_registry(eco: str, name: str) -> dict[str, Any]:
     if code in (404, 410):
         return ev.abstain(
             "private_or_internal_suspected",
-            job=ev.JOB_REFUTE, provenance_tier=ev.TIER_T0,
-            backend=_BACKEND, reference=ref,
+            job=ev.JOB_REFUTE,
+            provenance_tier=ev.TIER_T0,
+            backend=_BACKEND,
+            reference=ref,
             detail=f"not on public registry (HTTP {code}) — cannot prove absence; "
             "could be private/internal/new. NEVER 'absent'.",
         )
     if code == 429:
         return ev.abstain(
-            "rate_limited", job=ev.JOB_REFUTE, provenance_tier=ev.TIER_T0,
-            backend=_BACKEND, reference=ref, detail=f"registry rate-limited (HTTP {code})",
+            "rate_limited",
+            job=ev.JOB_REFUTE,
+            provenance_tier=ev.TIER_T0,
+            backend=_BACKEND,
+            reference=ref,
+            detail=f"registry rate-limited (HTTP {code})",
         )
     if 500 <= code <= 599:
         return ev.abstain(
-            "network_error", job=ev.JOB_REFUTE, provenance_tier=ev.TIER_T0,
-            backend=_BACKEND, reference=ref, detail=f"registry server error (HTTP {code})",
+            "network_error",
+            job=ev.JOB_REFUTE,
+            provenance_tier=ev.TIER_T0,
+            backend=_BACKEND,
+            reference=ref,
+            detail=f"registry server error (HTTP {code})",
         )
     # Any other status (e.g. 401/403/3xx) — undecidable; abstain rather than guess.
     return ev.abstain(
-        "other", job=ev.JOB_REFUTE, provenance_tier=ev.TIER_T0,
-        backend=_BACKEND, reference=ref, detail=f"unexpected registry status (HTTP {code})",
+        "other",
+        job=ev.JOB_REFUTE,
+        provenance_tier=ev.TIER_T0,
+        backend=_BACKEND,
+        reference=ref,
+        detail=f"unexpected registry status (HTTP {code})",
     )
 
 
@@ -351,15 +447,21 @@ def refute_package(
 
     if not name:
         return ev.abstain(
-            "ambiguous", job=ev.JOB_REFUTE, provenance_tier=ev.TIER_T0,
-            backend=_BACKEND, detail="empty package name",
+            "ambiguous",
+            job=ev.JOB_REFUTE,
+            provenance_tier=ev.TIER_T0,
+            backend=_BACKEND,
+            detail="empty package name",
         )
 
     # Unknown / unsupported ecosystem → abstain, never absent.
     if eco not in _DEPSDEV_SYSTEM and eco not in _NO_REGISTRY_ORACLE:
         return ev.abstain(
-            "unsupported_lang", job=ev.JOB_REFUTE, provenance_tier=ev.TIER_T0,
-            backend=_BACKEND, reference=_dep_reference(name, eco or "unknown"),
+            "unsupported_lang",
+            job=ev.JOB_REFUTE,
+            provenance_tier=ev.TIER_T0,
+            backend=_BACKEND,
+            reference=_dep_reference(name, eco or "unknown"),
             detail=f"unknown/unsupported ecosystem {eco or '<empty>'!r}",
         )
 
@@ -375,8 +477,11 @@ def refute_package(
     # Ecosystem we can normalize/enumerate but have no existence oracle for.
     if eco in _NO_REGISTRY_ORACLE:
         return ev.abstain(
-            "unsupported_lang", job=ev.JOB_REFUTE, provenance_tier=ev.TIER_T0,
-            backend=_BACKEND, reference=_dep_reference(name, eco),
+            "unsupported_lang",
+            job=ev.JOB_REFUTE,
+            provenance_tier=ev.TIER_T0,
+            backend=_BACKEND,
+            reference=_dep_reference(name, eco),
             detail=f"no public existence oracle wired for ecosystem {eco!r} (enumeration only)",
         )
 
@@ -473,6 +578,7 @@ def enumerate_dependencies(root: str | Path) -> dict[str, Any]:
 
 # Each parser returns (list[(ecosystem, name)], set[workspace_member_name]).
 
+
 def _parse_pyproject(path: Path) -> tuple[list[tuple[str, str]], set[str]]:
     import tomllib
 
@@ -491,7 +597,7 @@ def _parse_pyproject(path: Path) -> tuple[list[tuple[str, str]], set[str]]:
     # Poetry layout.
     poetry = data.get("tool", {}).get("poetry", {})
     for key in ("dependencies", "dev-dependencies"):
-        for dep_name in (poetry.get(key, {}) or {}):
+        for dep_name in poetry.get(key, {}) or {}:
             if dep_name.lower() != "python":
                 out.append(("pypi", dep_name))
     return out, set()
@@ -519,7 +625,7 @@ def _parse_package_json(path: Path) -> tuple[list[tuple[str, str]], set[str]]:
     data = json.loads(path.read_text(encoding="utf-8"))
     out: list[tuple[str, str]] = []
     for field in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
-        for name in (data.get(field, {}) or {}):
+        for name in data.get(field, {}) or {}:
             out.append(("npm", name))
     members: set[str] = set()
     # npm/yarn workspaces: {"workspaces": [...]} or {"workspaces": {"packages": [...]}}
@@ -573,7 +679,7 @@ def _parse_go_mod(path: Path) -> tuple[list[tuple[str, str]], set[str]]:
             in_require = False
             continue
         if line.startswith("require "):
-            mod = line[len("require "):].strip().split()
+            mod = line[len("require ") :].strip().split()
             if mod:
                 out.append(("golang", mod[0]))
             continue
@@ -584,7 +690,7 @@ def _parse_go_mod(path: Path) -> tuple[list[tuple[str, str]], set[str]]:
             continue
         if line.startswith("replace "):
             # `replace X => ./local` marks X as locally-provided (internal).
-            body = line[len("replace "):]
+            body = line[len("replace ") :]
             lhs = body.split("=>", 1)[0].strip().split()
             if lhs:
                 replaced.add(lhs[0])

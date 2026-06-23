@@ -338,7 +338,9 @@ def test_extensibility_slot_threads_into_ctags_cmd(repo):
 
 
 def test_extract_references_from_python_source():
-    src = "from rebar.grounding import evidence as ev, harness\nimport os, sys\nfrom .mod import *\n"
+    src = (
+        "from rebar.grounding import evidence as ev, harness\nimport os, sys\nfrom .mod import *\n"
+    )
     refs = r.extract_references(src, in_file="x.py")
     names = {ref["name"] for ref in refs}
     assert names == {"ev", "harness", "os", "sys"}  # 'as' binds to ev; wildcard dropped

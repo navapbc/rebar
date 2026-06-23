@@ -24,13 +24,6 @@ from __future__ import annotations
 from . import deps, engine_b, evidence, harness, oracle, resolve, sarif
 from .deps import enumerate_dependencies, refute_package, refute_packages
 from .engine_b import ScanResult
-from .oracle import (
-    DIMENSIONS,
-    DIMENSIONS_VERSION,
-    applies,
-    contract,
-    is_known_dimension,
-)
 from .evidence import (
     ABSTAIN_REASONS,
     JOBS,
@@ -45,7 +38,15 @@ from .evidence import (
     refuted,
 )
 from .harness import RunResult, run_in_worker, run_tool
-from .oracle import refute_absence, scan  # the unified public facade (S5)
+from .oracle import (  # the unified public facade (S5)
+    DIMENSIONS,
+    DIMENSIONS_VERSION,
+    applies,
+    contract,
+    is_known_dimension,
+    refute_absence,
+    scan,
+)
 from .resolve import (
     REFERENCE_KINDS,
     extract_references,

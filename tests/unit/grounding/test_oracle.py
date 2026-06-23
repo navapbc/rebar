@@ -54,9 +54,7 @@ def test_reference_kinds_are_exposed_not_redefined() -> None:
 
 def test_refute_absence_routes_file_kind(tmp_path: Path) -> None:
     (tmp_path / "present.py").write_text("x = 1\n", encoding="utf-8")
-    rec = oracle.refute_absence(
-        {"kind": "file", "name": "present.py"}, repo_root=str(tmp_path)
-    )
+    rec = oracle.refute_absence({"kind": "file", "name": "present.py"}, repo_root=str(tmp_path))
     ev.validate(rec)
     assert rec["outcome"] == ev.OUTCOME_REFUTED
 
@@ -64,9 +62,9 @@ def test_refute_absence_routes_file_kind(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "bad_reference",
     [
-        {"kind": "bogus", "name": "x"},   # out-of-vocab kind
-        {"kind": "file"},                  # missing name
-        "not-a-mapping",                   # wrong type entirely
+        {"kind": "bogus", "name": "x"},  # out-of-vocab kind
+        {"kind": "file"},  # missing name
+        "not-a-mapping",  # wrong type entirely
     ],
 )
 def test_refute_absence_malformed_reference_fails_open(bad_reference, tmp_path: Path) -> None:

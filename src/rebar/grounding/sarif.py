@@ -53,7 +53,15 @@ def to_sarif(records: list[dict[str, Any]]) -> dict[str, Any]:
     for rec in records:
         rec = ev.normalize_evidence(rec)
         rid = rec.get("detector_id") or f"rebar.{rec['job']}.{rec['outcome']}"
-        rule_ids.setdefault(rid, {"id": rid, "properties": {"rebar_envelope": {"tier": rec["provenance_tier"], "job": rec["job"]}}})
+        rule_ids.setdefault(
+            rid,
+            {
+                "id": rid,
+                "properties": {
+                    "rebar_envelope": {"tier": rec["provenance_tier"], "job": rec["job"]}
+                },
+            },
+        )
         result: dict[str, Any] = {
             "ruleId": rid,
             "kind": _KIND_FOR_OUTCOME.get(rec["outcome"], "review"),

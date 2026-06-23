@@ -80,7 +80,12 @@ def test_abstain_synthesizes_skipped_coverage_and_validates() -> None:
     )
     assert rec["outcome"] == ev.OUTCOME_ABSTAIN
     assert rec["reason"] == "timeout"
-    assert rec["coverage"] == {"backend": "ctags", "status": "skipped", "version": "6.2.1", "reason": "timeout"}
+    assert rec["coverage"] == {
+        "backend": "ctags",
+        "status": "skipped",
+        "version": "6.2.1",
+        "reason": "timeout",
+    }
     assert not ev.is_resolved(rec)
     ev.validate(rec)
 
@@ -97,7 +102,9 @@ def test_every_closed_reason_builds_a_valid_abstain(reason: str) -> None:
 
 def test_abstain_rejects_unknown_reason() -> None:
     with pytest.raises(ev.GroundingContractError):
-        ev.abstain("definitely-not-a-reason", job=ev.JOB_REFUTE, provenance_tier=ev.TIER_T1, backend="x")
+        ev.abstain(
+            "definitely-not-a-reason", job=ev.JOB_REFUTE, provenance_tier=ev.TIER_T1, backend="x"
+        )
 
 
 def test_coverage_skipped_requires_reason_ran_forbids_it() -> None:
@@ -119,7 +126,9 @@ def test_resolved_rejects_unknown_job_and_tier() -> None:
 
 
 def test_normalize_clamps_unknown_outcome_and_reason() -> None:
-    rec = ev.normalize_evidence({"outcome": "weird", "reason": "also-weird", "coverage": {"backend": "z"}})
+    rec = ev.normalize_evidence(
+        {"outcome": "weird", "reason": "also-weird", "coverage": {"backend": "z"}}
+    )
     assert rec["outcome"] == ev.OUTCOME_ABSTAIN  # unknown outcome → abstain
     assert rec["reason"] == "other"  # unknown reason → other
     ev.validate(rec)
@@ -127,7 +136,13 @@ def test_normalize_clamps_unknown_outcome_and_reason() -> None:
 
 def test_normalize_strips_reason_from_resolved_record() -> None:
     rec = ev.normalize_evidence(
-        {"outcome": "match", "job": "smell", "provenance_tier": "T1", "reason": "timeout", "coverage": {"backend": "z", "status": "ran"}}
+        {
+            "outcome": "match",
+            "job": "smell",
+            "provenance_tier": "T1",
+            "reason": "timeout",
+            "coverage": {"backend": "z", "status": "ran"},
+        }
     )
     assert "reason" not in rec  # _drop_nulls removes the nulled reason
     ev.validate(rec)

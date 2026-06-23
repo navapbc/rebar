@@ -362,7 +362,11 @@ replace example.com/internal => ./internal
     )
     res = deps.enumerate_dependencies(tmp_path)
     names = {r["name"] for r in res["references"]}
-    assert {"github.com/pkg/errors", "github.com/spf13/cobra", "github.com/stretchr/testify"} <= names
+    assert {
+        "github.com/pkg/errors",
+        "github.com/spf13/cobra",
+        "github.com/stretchr/testify",
+    } <= names
     assert "example.com/internal" in res["workspace_members"]
 
 
@@ -408,11 +412,13 @@ def test_enumerate_empty_dir(tmp_path) -> None:
     assert res == {"references": [], "workspace_members": set(), "errors": []}
 
 
-def test_enumeration_feeds_refutation_workspace_guard(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_enumeration_feeds_refutation_workspace_guard(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # End-to-end: a Cargo workspace member enumerated as internal must abstain even
     # if the registry would 200 — the workspace guard wins.
     (tmp_path / "Cargo.toml").write_text(
-        '[package]\nname = "foo"\n[workspace]\nmembers = ["crates/foo"]\n[dependencies]\nserde = "1"\n',
+        '[package]\nname = "foo"\n[workspace]\nmembers = ["crates/foo"]\n[dependencies]\nserde = "1"\n',  # noqa: E501
         encoding="utf-8",
     )
     res = deps.enumerate_dependencies(tmp_path)

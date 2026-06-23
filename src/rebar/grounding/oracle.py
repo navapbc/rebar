@@ -40,10 +40,13 @@ from __future__ import annotations
 
 import fnmatch
 import os
-from typing import Any, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
-from . import deps, engine_b, evidence as ev, resolve
-from .detectors import BACKENDS as _ENGINE_B_BACKENDS, Registry, load_registry
+from . import deps, engine_b, resolve
+from . import evidence as ev
+from .detectors import BACKENDS as _ENGINE_B_BACKENDS
+from .detectors import Registry, load_registry
 
 # ── The closed dimension-ID vocabulary (OWNED HERE; versioned) ────────────────
 
@@ -128,14 +131,15 @@ def refute_absence(
     except resolve.ReferenceError as exc:
         return ev.normalize_evidence(
             ev.abstain(
-                "invalid_detector", job=ev.JOB_REFUTE, provenance_tier=ev.TIER_T1,
-                backend="oracle", detail=f"malformed reference: {exc}",
+                "invalid_detector",
+                job=ev.JOB_REFUTE,
+                provenance_tier=ev.TIER_T1,
+                backend="oracle",
+                detail=f"malformed reference: {exc}",
             )
         )
     if ref["kind"] == "dependency":
-        rec = deps.refute_package(
-            ref, workspace_members=kwargs.get("workspace_members")
-        )
+        rec = deps.refute_package(ref, workspace_members=kwargs.get("workspace_members"))
     else:
         rec = resolve.refute_absence(
             ref,

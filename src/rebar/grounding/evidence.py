@@ -108,7 +108,9 @@ def coverage(
     if status == STATUS_RAN and reason is not None:
         raise GroundingContractError("a ran coverage record must not carry a skip reason")
     if reason is not None and reason not in ABSTAIN_REASONS:
-        raise GroundingContractError(f"reason {reason!r} not in the closed set {sorted(ABSTAIN_REASONS)}")
+        raise GroundingContractError(
+            f"reason {reason!r} not in the closed set {sorted(ABSTAIN_REASONS)}"
+        )
     return _drop_nulls({"backend": backend, "status": status, "version": version, "reason": reason})
 
 
@@ -216,14 +218,18 @@ def abstain(
     record is synthesized for you.
     """
     if reason not in ABSTAIN_REASONS:
-        raise GroundingContractError(f"reason {reason!r} not in the closed set {sorted(ABSTAIN_REASONS)}")
+        raise GroundingContractError(
+            f"reason {reason!r} not in the closed set {sorted(ABSTAIN_REASONS)}"
+        )
     if job not in JOBS:
         raise GroundingContractError(f"job {job!r} not in {sorted(JOBS)}")
     if provenance_tier not in TIERS:
         raise GroundingContractError(f"provenance_tier {provenance_tier!r} not in {sorted(TIERS)}")
     if coverage is None:
         if backend is None:
-            raise GroundingContractError("abstain() needs a coverage dict or a backend to synthesize one")
+            raise GroundingContractError(
+                "abstain() needs a coverage dict or a backend to synthesize one"
+            )
         coverage = _skipped_coverage(backend, version, reason)
     return _drop_nulls(
         {
@@ -241,7 +247,9 @@ def abstain(
 
 
 def _skipped_coverage(backend: str, version: str | None, reason: str) -> dict[str, Any]:
-    return _drop_nulls({"backend": backend, "status": STATUS_SKIPPED, "version": version, "reason": reason})
+    return _drop_nulls(
+        {"backend": backend, "status": STATUS_SKIPPED, "version": version, "reason": reason}
+    )
 
 
 # ── Normalization (lenient, never raises) ────────────────────────────────────
@@ -285,7 +293,9 @@ def normalize_evidence(raw: dict[str, Any]) -> dict[str, Any]:
         repaired["version"] = cov["version"]
     if status == STATUS_SKIPPED:
         cov_reason = cov.get("reason")
-        repaired["reason"] = cov_reason if cov_reason in ABSTAIN_REASONS else (e["reason"] or DEFAULT_REASON)
+        repaired["reason"] = (
+            cov_reason if cov_reason in ABSTAIN_REASONS else (e["reason"] or DEFAULT_REASON)
+        )
     e["coverage"] = repaired
 
     return _drop_nulls(e)

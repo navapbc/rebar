@@ -41,6 +41,7 @@ BACKEND_ASTGREP = "ast-grep"
 BACKEND_METRIC = "metric"
 BACKENDS: frozenset[str] = frozenset({BACKEND_OPENGREP, BACKEND_ASTGREP, BACKEND_METRIC})
 
+
 def _canonical_dimensions() -> frozenset[str]:
     """The canonical closed dimension vocabulary, OWNED by :mod:`..oracle` (S5).
 

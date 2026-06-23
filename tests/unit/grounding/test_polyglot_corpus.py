@@ -27,8 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from rebar.grounding import deps
-from rebar.grounding import engine_b
+from rebar.grounding import deps, engine_b
 from rebar.grounding import evidence as ev
 from rebar.grounding import resolve as r
 
@@ -186,9 +185,12 @@ def test_sgconfig_customlanguages_slot_widens_astgrep_routing(corpus) -> None:
     from rebar.grounding.detectors import registry as reg_mod
 
     det = reg_mod.Detector(
-        id="project.mojo.smell", backend=reg_mod.BACKEND_ASTGREP, namespace="project",
+        id="project.mojo.smell",
+        backend=reg_mod.BACKEND_ASTGREP,
+        namespace="project",
         source_path=str(Path(corpus) / "rule.yml"),
-        rule={"language": "mojo"}, envelope={"job": ev.JOB_SMELL, "tier": ev.TIER_T1},
+        rule={"language": "mojo"},
+        envelope={"job": ev.JOB_SMELL, "tier": ev.TIER_T1},
     )
     applicable, _ = engine_b._is_applicable(
         det, engine_b._repo_extensions(Path(corpus)), Path(corpus), custom_exts
@@ -206,7 +208,9 @@ def _dep(name: str, eco: str = "pypi") -> dict:
 def test_workspace_member_abstains_never_absent(monkeypatch) -> None:
     # A monorepo workspace member must abstain even if the registry would 200 — the
     # internal guard wins, never a false absence.
-    monkeypatch.setattr(deps, "_http_get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no probe")))
+    monkeypatch.setattr(
+        deps, "_http_get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no probe"))
+    )
     rec = deps.refute_package(
         _dep("my-internal-crate", "cargo"), workspace_members={"my-internal-crate"}
     )
@@ -218,7 +222,9 @@ def test_workspace_member_abstains_never_absent(monkeypatch) -> None:
 def test_import_vs_distribution_name_mismatch_abstains(monkeypatch) -> None:
     # bs4 is the IMPORT name; the DISTRIBUTION is beautifulsoup4 -> ambiguous abstain,
     # never a false absence (the probe must not even run for a known import alias).
-    monkeypatch.setattr(deps, "_http_get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no probe")))
+    monkeypatch.setattr(
+        deps, "_http_get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no probe"))
+    )
     rec = deps.refute_package(_dep("bs4", "pypi"))
     ev.validate(rec)
     assert rec["outcome"] == ev.OUTCOME_ABSTAIN
@@ -257,7 +263,9 @@ def test_stdlib_short_circuit_guards_the_guard(monkeypatch) -> None:
     for name, eco in (("os", "pypi"), ("fmt", "golang")):
         rec = deps.refute_package(_dep(name, eco))
         ev.validate(rec)
-        assert rec["outcome"] == ev.OUTCOME_ABSTAIN, f"{name}: stdlib must not refute under a 200 registry"
+        assert rec["outcome"] == ev.OUTCOME_ABSTAIN, (
+            f"{name}: stdlib must not refute under a 200 registry"
+        )
         assert "stdlib" in (rec.get("detail") or "").lower()
     # control: a genuine package still refutes under the same 200 router.
     assert deps.refute_package(_dep("requests", "pypi"))["outcome"] == ev.OUTCOME_REFUTED

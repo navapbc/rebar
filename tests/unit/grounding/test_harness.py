@@ -133,7 +133,9 @@ def test_worker_large_result_does_not_deadlock_into_a_false_timeout() -> None:
     # return the real value well within the timeout.
     n = 1_000_000
     r = harness.run_in_worker(wp.returns_big, n, backend="ts", timeout=10)
-    assert r.completed and not r.abstained, f"large result misreported: {r.abstain_reason} ({r.detail})"
+    assert r.completed and not r.abstained, (
+        f"large result misreported: {r.abstain_reason} ({r.detail})"
+    )
     assert isinstance(r.value, str) and len(r.value) == n
 
 

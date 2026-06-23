@@ -30,8 +30,9 @@ import multiprocessing
 import os
 import signal
 import subprocess
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from . import evidence as ev
 
@@ -209,28 +210,59 @@ def run_tool(
     try:
         p = subprocess.Popen(list(cmd), **popen_kwargs)
     except (FileNotFoundError, NotADirectoryError):
-        return RunResult(backend=backend, completed=False, abstain_reason="no_tool", version=version,
-                         detail=f"{backend} binary not found: {cmd[0]!r}")
+        return RunResult(
+            backend=backend,
+            completed=False,
+            abstain_reason="no_tool",
+            version=version,
+            detail=f"{backend} binary not found: {cmd[0]!r}",
+        )
     except PermissionError:
-        return RunResult(backend=backend, completed=False, abstain_reason="no_tool", version=version,
-                         detail=f"{backend} binary not executable: {cmd[0]!r}")
+        return RunResult(
+            backend=backend,
+            completed=False,
+            abstain_reason="no_tool",
+            version=version,
+            detail=f"{backend} binary not executable: {cmd[0]!r}",
+        )
     except OSError as exc:
-        return RunResult(backend=backend, completed=False, abstain_reason="other", version=version,
-                         detail=f"{backend} spawn failed: {exc}")
+        return RunResult(
+            backend=backend,
+            completed=False,
+            abstain_reason="other",
+            version=version,
+            detail=f"{backend} spawn failed: {exc}",
+        )
 
     try:
         out, err = p.communicate(timeout=call_timeout)
     except subprocess.TimeoutExpired:
         _reap_process_group(p)
-        return RunResult(backend=backend, completed=False, abstain_reason="timeout", version=version,
-                         detail=f"{backend} exceeded {call_timeout}s")
+        return RunResult(
+            backend=backend,
+            completed=False,
+            abstain_reason="timeout",
+            version=version,
+            detail=f"{backend} exceeded {call_timeout}s",
+        )
     except OSError as exc:
         # A broken-pipe / read error mid-communicate must fail open, not propagate.
         _reap_process_group(p)
-        return RunResult(backend=backend, completed=False, abstain_reason="other", version=version,
-                         detail=f"{backend} communicate failed: {exc}")
-    return RunResult(backend=backend, completed=True, returncode=p.returncode, stdout=out, stderr=err,
-                     version=version)
+        return RunResult(
+            backend=backend,
+            completed=False,
+            abstain_reason="other",
+            version=version,
+            detail=f"{backend} communicate failed: {exc}",
+        )
+    return RunResult(
+        backend=backend,
+        completed=True,
+        returncode=p.returncode,
+        stdout=out,
+        stderr=err,
+        version=version,
+    )
 
 
 # ── In-process boundary (worker subprocess) ──────────────────────────────────
@@ -303,7 +335,10 @@ def run_in_worker(
     """
     if expected_version is not None and version is not None and expected_version != version:
         return RunResult(
-            backend=backend, completed=False, abstain_reason="version_skew", version=version,
+            backend=backend,
+            completed=False,
+            abstain_reason="version_skew",
+            version=version,
             detail=f"{backend} version {version!r} != pinned {expected_version!r}",
         )
 
@@ -320,8 +355,13 @@ def run_in_worker(
         # fail open, not propagate — this harness wraps every in-process backend.
         _safe_close(parent_conn, child_conn)
         _safe_close_proc(proc)
-        return RunResult(backend=backend, completed=False, abstain_reason="other", version=version,
-                         detail=f"{backend} worker spawn failed: {exc}")
+        return RunResult(
+            backend=backend,
+            completed=False,
+            abstain_reason="other",
+            version=version,
+            detail=f"{backend} worker spawn failed: {exc}",
+        )
     child_conn.close()  # parent keeps only the read end
 
     try:
@@ -338,8 +378,13 @@ def run_in_worker(
         if payload is None and proc.is_alive():
             # Nothing arrived within the timeout and the worker is still running → hang.
             _reap_worker(proc)
-            return RunResult(backend=backend, completed=False, abstain_reason="timeout", version=version,
-                             detail=f"{backend} worker exceeded {call_timeout}s")
+            return RunResult(
+                backend=backend,
+                completed=False,
+                abstain_reason="timeout",
+                version=version,
+                detail=f"{backend} worker exceeded {call_timeout}s",
+            )
 
         # The worker produced a result or died; ensure it is reaped before inspecting.
         proc.join(_DRAIN_SECONDS)
@@ -350,16 +395,33 @@ def run_in_worker(
         if payload is None:
             if exitcode is not None and exitcode < 0:
                 signame = _signal_name(-exitcode)
-                return RunResult(backend=backend, completed=False, abstain_reason="parse_error", version=version,
-                                 detail=f"{backend} worker killed by {signame} "
-                                        "(in-process binding crashed or was killed)")
-            return RunResult(backend=backend, completed=False, abstain_reason="other", version=version,
-                             detail=f"{backend} worker exited {exitcode} with no result")
+                return RunResult(
+                    backend=backend,
+                    completed=False,
+                    abstain_reason="parse_error",
+                    version=version,
+                    detail=f"{backend} worker killed by {signame} "
+                    "(in-process binding crashed or was killed)",
+                )
+            return RunResult(
+                backend=backend,
+                completed=False,
+                abstain_reason="other",
+                version=version,
+                detail=f"{backend} worker exited {exitcode} with no result",
+            )
         tag, body = payload
         if tag == "ok":
-            return RunResult(backend=backend, completed=True, returncode=exitcode, value=body, version=version)
-        return RunResult(backend=backend, completed=False, abstain_reason="other", version=version,
-                         detail=f"{backend} worker raised: {body}")
+            return RunResult(
+                backend=backend, completed=True, returncode=exitcode, value=body, version=version
+            )
+        return RunResult(
+            backend=backend,
+            completed=False,
+            abstain_reason="other",
+            version=version,
+            detail=f"{backend} worker raised: {body}",
+        )
     finally:
         _safe_close(parent_conn)
         _safe_close_proc(proc)

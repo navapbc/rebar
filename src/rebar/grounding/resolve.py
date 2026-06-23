@@ -41,8 +41,9 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 from . import evidence as ev
 from . import harness
@@ -98,7 +99,9 @@ def validate_reference(ref: Mapping[str, Any]) -> dict[str, Any]:
         raise ReferenceError(f"reference must be a mapping, got {type(ref).__name__}")
     kind = ref.get("kind")
     if kind not in REFERENCE_KINDS:
-        raise ReferenceError(f"reference kind {kind!r} not in the closed set {sorted(REFERENCE_KINDS)}")
+        raise ReferenceError(
+            f"reference kind {kind!r} not in the closed set {sorted(REFERENCE_KINDS)}"
+        )
     name = ref.get("name")
     if not isinstance(name, str) or not name.strip():
         raise ReferenceError("reference requires a non-empty string 'name'")
@@ -218,7 +221,9 @@ def ctags_languages(timeout: float | None = 10) -> frozenset[str]:
     global _CACHED_CTAGS_LANGS
     if _CACHED_CTAGS_LANGS is not None:
         return _CACHED_CTAGS_LANGS
-    result = harness.run_tool([_CTAGS_BIN, "--list-languages"], backend=BACKEND_CTAGS, timeout=timeout)
+    result = harness.run_tool(
+        [_CTAGS_BIN, "--list-languages"], backend=BACKEND_CTAGS, timeout=timeout
+    )
     if result.abstained or not result.stdout:
         _CACHED_CTAGS_LANGS = frozenset()
         return _CACHED_CTAGS_LANGS
@@ -232,7 +237,9 @@ def ctags_languages(timeout: float | None = 10) -> frozenset[str]:
     return _CACHED_CTAGS_LANGS
 
 
-def _language_supported(language: str, config: GroundingConfig, *, timeout: float | None = None) -> bool:
+def _language_supported(
+    language: str, config: GroundingConfig, *, timeout: float | None = None
+) -> bool:
     """True iff ``language`` is parseable by ctags OR declared in project config.
 
     The project extensibility slot wins: a language listed in
@@ -250,7 +257,9 @@ def _language_supported(language: str, config: GroundingConfig, *, timeout: floa
     return norm in ctags_languages(timeout=timeout)
 
 
-def _ctags_cmd(repo_root: str, *, optlib_dirs: Sequence[str] = (), options: Sequence[str] = ()) -> list[str]:
+def _ctags_cmd(
+    repo_root: str, *, optlib_dirs: Sequence[str] = (), options: Sequence[str] = ()
+) -> list[str]:
     """Assemble the universal-ctags repo-wide JSON-index command.
 
     ``--fields=+lK`` adds the language (``l``) and long kind (``K``) fields so the
@@ -294,7 +303,9 @@ def build_index(
     if not idx.defs and result.returncode not in (0, None):
         # ctags ran but produced no parseable tags AND failed — treat as parse_error.
         result.abstain_reason = "parse_error"
-        result.detail = f"ctags exited {result.returncode} with no parseable tags: {result.stderr[:200]!r}"
+        result.detail = (
+            f"ctags exited {result.returncode} with no parseable tags: {result.stderr[:200]!r}"
+        )
         return None, result
     return idx, result
 
@@ -366,7 +377,11 @@ def load_config(repo_root: str) -> GroundingConfig:
         return tuple(out)
 
     langs_raw = section.get("supported_languages", [])
-    langs = frozenset(s for s in langs_raw if isinstance(s, str) and s.strip()) if isinstance(langs_raw, list) else frozenset()
+    langs = (
+        frozenset(s for s in langs_raw if isinstance(s, str) and s.strip())
+        if isinstance(langs_raw, list)
+        else frozenset()
+    )
     return GroundingConfig(
         ctags_optlib_dirs=_abs_strs("ctags_optlib_dirs"),
         ctags_options=_abs_strs("ctags_options"),
@@ -416,7 +431,7 @@ def refute_absence(
             provenance_tier=ev.TIER_T0,
             backend="registry",
             reference=_schema_safe_reference(ref),
-            detail="kind=dependency routes to the T0 deps lane (story S3); not resolved by the T1 ctags lane",
+            detail="kind=dependency routes to the T0 deps lane (story S3); not resolved by the T1 ctags lane",  # noqa: E501
         )
 
     # `file` → plain path existence (a path is a path, not a member ref — so this
@@ -438,7 +453,9 @@ def refute_absence(
         )
 
     # `symbol` / `import` → the ctags repo-wide name-existence guard.
-    return _refute_symbol(name, ref, repo_root=repo_root, index=index, config=config, timeout=timeout)
+    return _refute_symbol(
+        name, ref, repo_root=repo_root, index=index, config=config, timeout=timeout
+    )
 
 
 def _refute_file(name: str, ref: dict[str, Any], *, repo_root: str) -> dict[str, Any]:
@@ -446,7 +463,9 @@ def _refute_file(name: str, ref: dict[str, Any], *, repo_root: str) -> dict[str,
     rel = name.lstrip("/")
     candidate = os.path.normpath(os.path.join(repo_root, rel))
     # Guard against path-escape (`../`): only refute paths inside the repo.
-    inside = os.path.commonpath([os.path.abspath(candidate), os.path.abspath(repo_root)]) == os.path.abspath(repo_root)
+    inside = os.path.commonpath(
+        [os.path.abspath(candidate), os.path.abspath(repo_root)]
+    ) == os.path.abspath(repo_root)
     if inside and os.path.exists(candidate):
         cov = ev.coverage(backend=BACKEND_FS, status=ev.STATUS_RAN)
         return ev.refuted(
@@ -463,7 +482,7 @@ def _refute_file(name: str, ref: dict[str, Any], *, repo_root: str) -> dict[str,
         provenance_tier=ev.TIER_T1,
         backend=BACKEND_FS,
         reference=_schema_safe_reference(ref),
-        detail=f"file path {rel!r} not found under the repo — cannot disprove absence (confirm-only)",
+        detail=f"file path {rel!r} not found under the repo — cannot disprove absence (confirm-only)",  # noqa: E501
     )
 
 
@@ -490,7 +509,7 @@ def _refute_symbol(
             provenance_tier=ev.TIER_T1,
             backend=BACKEND_CTAGS,
             reference=_schema_safe_reference(ref),
-            detail=f"language {lang!r} is not supported by ctags and no project optlib/grammar is configured for it",
+            detail=f"language {lang!r} is not supported by ctags and no project optlib/grammar is configured for it",  # noqa: E501
         )
 
     if index is None:
@@ -536,7 +555,7 @@ def _refute_symbol(
             backend=BACKEND_CTAGS,
             version=version,
             reference=_schema_safe_reference(ref),
-            detail=f"{len(defs)} definitions of {name!r} ({sites}) — cannot bind the intended one at T1",
+            detail=f"{len(defs)} definitions of {name!r} ({sites}) — cannot bind the intended one at T1",  # noqa: E501
         )
 
     # Zero defs → NOT found. Confirm-only: abstain, never assert absence.
@@ -547,7 +566,7 @@ def _refute_symbol(
         backend=BACKEND_CTAGS,
         version=version,
         reference=_schema_safe_reference(ref),
-        detail=f"no definition of {name!r} in the repo index — cannot disprove absence (confirm-only, never asserts absent)",
+        detail=f"no definition of {name!r} in the repo index — cannot disprove absence (confirm-only, never asserts absent)",  # noqa: E501
     )
 
 
@@ -575,7 +594,13 @@ def _schema_reference_kinds() -> frozenset[str]:
         from rebar import schemas
 
         schema = schemas.load(schemas.GROUNDING)
-        enum = schema.get("$defs", {}).get("reference", {}).get("properties", {}).get("kind", {}).get("enum")
+        enum = (
+            schema.get("$defs", {})
+            .get("reference", {})
+            .get("properties", {})
+            .get("kind", {})
+            .get("enum")
+        )
         _CACHED_SCHEMA_KINDS = frozenset(enum) if isinstance(enum, list) and enum else fallback
     except Exception:  # noqa: BLE001 — never let schema introspection break resolution
         _CACHED_SCHEMA_KINDS = fallback
@@ -607,7 +632,9 @@ _PY_IMPORT_RE = re.compile(r"^\s*import\s+(.+?)(?:#.*)?$", re.MULTILINE)
 _DIFF_ADDED_RE = re.compile(r"^\+(?!\+\+)(.*)$", re.MULTILINE)
 
 
-def extract_references(text: str, *, language: str = "python", in_file: str | None = None) -> list[dict[str, Any]]:
+def extract_references(
+    text: str, *, language: str = "python", in_file: str | None = None
+) -> list[dict[str, Any]]:
     """Deterministically extract ``import`` references from source ``text``.
 
     Returns reference-in dicts (``kind=import``) for the imported NAMES of Python
@@ -648,7 +675,9 @@ def extract_references(text: str, *, language: str = "python", in_file: str | No
     return refs
 
 
-def extract_references_from_diff(diff: str, *, language: str = "python", in_file: str | None = None) -> list[dict[str, Any]]:
+def extract_references_from_diff(
+    diff: str, *, language: str = "python", in_file: str | None = None
+) -> list[dict[str, Any]]:
     """Extract ``import`` references from the ADDED lines of a unified diff.
 
     Collects the ``+``-prefixed (added, non-header) lines and runs

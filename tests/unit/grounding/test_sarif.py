@@ -33,7 +33,13 @@ def test_match_round_trips_losslessly() -> None:
 
 
 def test_abstain_is_not_dropped_round_trips_via_property_bag() -> None:
-    rec = ev.abstain("version_skew", job=ev.JOB_REFUTE, provenance_tier=ev.TIER_T1, backend="ctags", version="6.0")
+    rec = ev.abstain(
+        "version_skew",
+        job=ev.JOB_REFUTE,
+        provenance_tier=ev.TIER_T1,
+        backend="ctags",
+        version="6.0",
+    )
     log = sarif.to_sarif([rec])
     # abstain has no faithful native SARIF kind → notApplicable, real outcome in properties.rebar
     assert log["runs"][0]["results"][0]["kind"] == "notApplicable"
@@ -54,7 +60,13 @@ def test_foreign_sarif_without_rebar_bag_ingests_via_envelope() -> None:
                         "rules": [
                             {
                                 "id": "rebar.builtin.smell.console-log",
-                                "properties": {"rebar_envelope": {"tier": "T1", "job": "smell", "attention_only": True}},
+                                "properties": {
+                                    "rebar_envelope": {
+                                        "tier": "T1",
+                                        "job": "smell",
+                                        "attention_only": True,
+                                    }
+                                },
                             }
                         ],
                     }
@@ -64,7 +76,12 @@ def test_foreign_sarif_without_rebar_bag_ingests_via_envelope() -> None:
                         "ruleId": "rebar.builtin.smell.console-log",
                         "message": {"text": "console.log smell"},
                         "locations": [
-                            {"physicalLocation": {"artifactLocation": {"uri": "a.js"}, "region": {"startLine": 1}}}
+                            {
+                                "physicalLocation": {
+                                    "artifactLocation": {"uri": "a.js"},
+                                    "region": {"startLine": 1},
+                                }
+                            }
                         ],
                     }
                 ],
@@ -91,12 +108,30 @@ def test_untrusted_rebar_bag_is_ignored_when_distrusted() -> None:
         "version": "2.1.0",
         "runs": [
             {
-                "tool": {"driver": {"name": "evil", "rules": [{"id": "x.y", "properties": {"rebar_envelope": {"tier": "T1", "job": "smell"}}}]}},
+                "tool": {
+                    "driver": {
+                        "name": "evil",
+                        "rules": [
+                            {
+                                "id": "x.y",
+                                "properties": {"rebar_envelope": {"tier": "T1", "job": "smell"}},
+                            }
+                        ],
+                    }
+                },
                 "results": [
                     {
                         "ruleId": "x.y",
                         "message": {"text": "m"},
-                        "properties": {"rebar": {"outcome": "refuted", "job": "refute", "provenance_tier": "T2", "detector_id": "spoofed", "coverage": {"backend": "evil", "status": "ran"}}},
+                        "properties": {
+                            "rebar": {
+                                "outcome": "refuted",
+                                "job": "refute",
+                                "provenance_tier": "T2",
+                                "detector_id": "spoofed",
+                                "coverage": {"backend": "evil", "status": "ran"},
+                            }
+                        },
                         "locations": [{"physicalLocation": {"artifactLocation": {"uri": "a.py"}}}],
                     }
                 ],
