@@ -36,6 +36,20 @@ from rebar.llm.errors import LLMConfigError
 
 _VAR = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
 
+# The CLOSED prompt-level execution_mode enum (workflow authoring v2, story 4b2f).
+#
+# `execution_mode` is a PROMPT-level concern: it tells the runner HOW to drive the
+# model for this prompt — `agentic` (a tool-using loop: filesystem + rebar read
+# tools, multiple model requests) vs `single_turn` (exactly ONE model call, NO
+# tools, asking directly for structured output validated against the prompt's
+# `outputs` contract). It is DISTINCT from and ORTHOGONAL to a workflow step's
+# `mode: {findings, structured, text}`, which controls OUTPUT SHAPING (how the
+# step finalizes the agent's outcome). A prompt with no `execution_mode` defaults
+# to `agentic` (the historical tool-using behavior). The two never collide: the
+# runner's single_turn dispatch sets the step's effective `mode` to `structured`
+# under the hood (see RunnerAgentStep).
+EXECUTION_MODES: tuple[str, ...] = ("single_turn", "agentic")
+
 
 class ReviewerError(LLMConfigError):
     """Raised when a reviewer id is not in the catalog. Subclasses ``LLMConfigError``
@@ -175,11 +189,19 @@ def get_prompt(prompt_id: str, *, repo_root=None) -> Prompt:
         raise PromptNotFound(f"unknown prompt '{prompt_id}'; known built-ins: {sorted(packaged)}")
     meta, body = parse_front_matter(raw)
     category = meta.get("category")
+    execution_mode = meta.get("execution_mode")
+    if execution_mode is None:
+        execution_mode = "agentic"  # absent → the historical tool-using default
+    elif execution_mode not in EXECUTION_MODES:
+        raise PromptError(
+            f"prompt {prompt_id!r} declares execution_mode {execution_mode!r}; "
+            f"it must be one of {EXECUTION_MODES}"
+        )
     return Prompt(
         id=prompt_id,
         text=body,
         category=category,
-        execution_mode=meta.get("execution_mode"),
+        execution_mode=execution_mode,
         is_reviewer=(category == "review"),
         default=bool(meta.get("default", False)),
         dimension=meta.get("dimension"),
@@ -563,6 +585,48 @@ def prompt_ref_exists(prompt_id: str, *, repo_root=None) -> bool:
         except OSError:
             return False
     return False
+
+
+def prompt_override_drift(repo_root=None) -> list[str]:
+    """Findings for project prompt OVERRIDES that changed a built-in's ``outputs``
+    contract (workflow authoring v2, story 4b2f).
+
+    For each ``.rebar/prompts/<id>.md`` whose ``<id>`` is ALSO a built-in packaged
+    prompt, compare the override's front-matter ``outputs`` to the built-in's. A
+    CHANGED ``outputs`` contract on an override is BREAKING (downstream steps bind to
+    the declared output contract), so it returns a finding string; an identical or
+    absent ``outputs`` is clean. Best-effort: any read/parse trouble is swallowed (the
+    linter must never crash on a malformed prompt — that is the prompt's own lint)."""
+    if not repo_root:
+        return []
+    findings: list[str] = []
+    packaged = _packaged_prompt_files()
+    override_dir = Path(repo_root) / ".rebar" / "prompts"
+    try:
+        entries = sorted(override_dir.glob("*.md"))
+    except OSError:
+        return []
+    for path in entries:
+        stem = path.name[:-3]
+        if "." in stem:  # a `<id>.<variant>.md` overlay, not a base prompt
+            continue
+        pid = stem.replace("_", "-")
+        if pid not in packaged:
+            continue  # an override with no built-in counterpart cannot drift
+        try:
+            override_meta, _ = parse_front_matter(path.read_text(encoding="utf-8"))
+            builtin_raw = _catalog_dir().joinpath(packaged[pid]).read_text(encoding="utf-8")
+            builtin_meta, _ = parse_front_matter(builtin_raw)
+        except Exception:  # noqa: BLE001 - unreadable/malformed prompt is not this check's job
+            continue
+        if override_meta.get("outputs") != builtin_meta.get("outputs"):
+            findings.append(
+                f"prompt override .rebar/prompts/{path.name} changes the built-in "
+                f"{pid!r} outputs contract (built-in {builtin_meta.get('outputs')!r} → "
+                f"override {override_meta.get('outputs')!r}); a changed outputs contract "
+                f"on an override is BREAKING for downstream steps"
+            )
+    return findings
 
 
 def prompt_content_hash(text: str) -> str:

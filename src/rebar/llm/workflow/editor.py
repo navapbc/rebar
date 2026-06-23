@@ -180,31 +180,62 @@ def step_contract_view(uses: str | None) -> dict[str, Any]:
     }
 
 
-def resolve_contracts(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Map each scripted step's ``uses`` op name to its :func:`step_contract_view`, so
-    the editor can surface a selected node's contract read-only (keyed by op name, the
-    same ``name``-based lookup the bundle uses for prompts)."""
+def prompt_contract_view(prompt_id: str | None, *, repo_root: Any = None) -> dict[str, Any]:
+    """The inspector's read-only contract view of an AGENT step's prompt (story 4b2f):
+    its ``description`` plus CONSUMES (``inputs``) / PRODUCES (``outputs``), built from
+    the prompt front-matter. A prompt's ``inputs``/``outputs`` may be schema NAMES
+    (resolved via ``rebar.schemas`` like the scripted path) or may be absent → the
+    empty/no-contract state. Best-effort: an unresolvable/unknown prompt id degrades to
+    the empty state, never raises."""
+    if not prompt_id:
+        return dict(_EMPTY_CONTRACT_VIEW)
+    try:
+        from rebar.llm.prompts import get_prompt
+
+        prompt = get_prompt(prompt_id, repo_root=repo_root)
+    except Exception:  # noqa: BLE001 - an unknown/malformed prompt surfaces as empty, not a crash
+        return dict(_EMPTY_CONTRACT_VIEW)
+    consumes = _schema_fields(prompt.inputs) if isinstance(prompt.inputs, str) else []
+    produces = _schema_fields(prompt.outputs) if isinstance(prompt.outputs, str) else []
+    if not (prompt.description or consumes or produces):
+        return dict(_EMPTY_CONTRACT_VIEW)
+    return {
+        "has_contract": True,
+        "description": prompt.description or "",
+        "consumes": consumes,
+        "produces": produces,
+    }
+
+
+def resolve_contracts(doc: dict[str, Any], *, repo_root: Any = None) -> dict[str, dict[str, Any]]:
+    """Map each step's contract-bearing key to its read-only contract view, so the
+    editor can surface a selected node's contract (keyed by the element ``name`` the
+    bundle looks up): a SCRIPTED step's ``uses`` op name → :func:`step_contract_view`,
+    and an AGENT step's ``prompt`` id → :func:`prompt_contract_view`."""
     out: dict[str, dict[str, Any]] = {}
     for s in doc.get("steps", []) or []:
-        out.update(_contracts_in(s))
+        out.update(_contracts_in(s, repo_root=repo_root))
     return out
 
 
-def _contracts_in(step: Any) -> dict[str, dict[str, Any]]:
+def _contracts_in(step: Any, *, repo_root: Any = None) -> dict[str, dict[str, Any]]:
     """Recurse a step (and any nested branch/loop/map frames) collecting the contract
-    view of every scripted ``uses`` op encountered."""
+    view of every scripted ``uses`` op AND every agent ``prompt`` id encountered."""
     out: dict[str, dict[str, Any]] = {}
     if not isinstance(step, dict):
         return out
     uses = step.get("uses")
     if isinstance(uses, str) and uses and uses not in out:
         out[uses] = step_contract_view(uses)
+    prompt_id = step.get("prompt")
+    if isinstance(prompt_id, str) and prompt_id and prompt_id not in out:
+        out[prompt_id] = prompt_contract_view(prompt_id, repo_root=repo_root)
     for block, *keys in (("loop", "body"), ("map", "body"), ("branch", "then", "else")):
         blk = step.get(block)
         if isinstance(blk, dict):
             for key in keys:
                 for child in blk.get(key) or []:
-                    out.update(_contracts_in(child))
+                    out.update(_contracts_in(child, repo_root=repo_root))
     return out
 
 
@@ -347,7 +378,13 @@ def edit_workflow(
     doc = migrate_to_current(load_workflow(target))
     bpmn_holder = {"xml": ir_to_bpmn(doc)}
     prompts = resolve_prompts(doc, target)  # prompt id -> text, for the editor to display
-    contracts = resolve_contracts(doc)  # op name -> contract view, for the inspector
+    try:
+        from rebar import config as _cfg
+
+        _repo_root: Any = _cfg.repo_root()
+    except Exception:  # noqa: BLE001 - fall back to the file's own tree
+        _repo_root = Path(target).resolve().parent
+    contracts = resolve_contracts(doc, repo_root=_repo_root)  # op/prompt -> view, for inspector
     token = secrets.token_urlsafe(18)  # per-session secret guarding the write endpoint
 
     class _Handler(http.server.BaseHTTPRequestHandler):

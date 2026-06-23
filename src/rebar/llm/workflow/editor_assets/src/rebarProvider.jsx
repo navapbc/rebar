@@ -235,7 +235,9 @@ function rebarGroup(element) {
   if (t === "bpmn:ScriptTask" || t === "bpmn:ServiceTask") {
     entries.push({ id: "rebar-action", component: ActionEntry });
   }
-  if (t === "bpmn:ScriptTask") {
+  if (t === "bpmn:ScriptTask" || t === "bpmn:ServiceTask") {
+    // Read-only I/O contract: a scripted op's `uses` contract OR an agent step's
+    // prompt inputs/outputs contract (both keyed by the element NAME in REBAR_CONTRACTS).
     entries.push({ id: "rebar-contract", component: ContractEntry });
   }
   if (t === "bpmn:ServiceTask") {

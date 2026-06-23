@@ -218,7 +218,23 @@ def lint_workflow(
     findings.extend(secret_scan(text, source=source))
     if check_prompts:
         findings.extend(lint_prompt_refs(doc, repo_root=repo_root))
+    findings.extend(_prompt_override_drift_findings(repo_root))
     return findings
+
+
+def _prompt_override_drift_findings(repo_root) -> list[LintFinding]:
+    """Surface override-vs-built-in ``outputs`` drift (story 4b2f) as error findings.
+    Best-effort: the prompt registry is imported lazily and any failure is swallowed
+    (the linter must never crash because a prompt override can't be read)."""
+    try:
+        from rebar.llm.prompts import prompt_override_drift
+
+        return [
+            LintFinding(".rebar/prompts", msg, "error")
+            for msg in prompt_override_drift(repo_root=repo_root)
+        ]
+    except Exception:  # noqa: BLE001 - drift detection is advisory; never break the linter
+        return []
 
 
 def lint_passes(findings: list[LintFinding]) -> bool:
