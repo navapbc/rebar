@@ -83,6 +83,67 @@ def test_invalid_values_fail_closed(raw: dict, msg: str) -> None:
     assert msg in str(exc.value)
 
 
+def test_tracker_defaults() -> None:
+    c = Config.from_mapping(None)
+    assert c.tracker.dir == ".tickets-tracker"
+    assert c.tracker.branch == "tickets"
+
+
+@pytest.mark.parametrize(
+    "branch",
+    ["tickets", "rebar-tickets", "feature/x", "release-1.2", "tickets/v2", "a-b_c.d"],
+)
+def test_tracker_branch_accepts_valid_refs(branch: str) -> None:
+    assert Config.from_mapping({"tracker": {"branch": branch}}).tracker.branch == branch
+
+
+@pytest.mark.parametrize(
+    "branch",
+    [
+        "",  # empty
+        "bad branch",  # interior space
+        "-leading",  # leading dash
+        "a..b",  # double dot
+        "foo.lock",  # .lock suffix
+        "x.lock/y",  # .lock on any component
+        "feat/",  # trailing slash
+        "/abs",  # leading slash
+        "a//b",  # double slash
+        "ends.",  # trailing dot
+        ".hidden",  # component starts with dot
+        "a/.b",  # later component starts with dot
+        "ti\tcket",  # control char (tab)
+        "ca~ret",  # forbidden ~
+        "co:lon",  # forbidden :
+        "ref@{x}",  # @{ sequence
+        "@",  # bare @
+    ],
+)
+def test_tracker_branch_rejects_invalid_refs(branch: str) -> None:
+    with pytest.raises(ConfigError) as exc:
+        Config.from_mapping({"tracker": {"branch": branch}})
+    assert "tracker.branch" in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "dir_",
+    [".tickets-tracker", "my-tickets", ".rebar/tracker", "/var/lib/rebar/store"],
+)
+def test_tracker_dir_accepts_valid(dir_: str) -> None:
+    # Bare relative names AND absolute paths (the EV-3b relocated store) are allowed.
+    assert Config.from_mapping({"tracker": {"dir": dir_}}).tracker.dir == dir_
+
+
+@pytest.mark.parametrize(
+    "dir_",
+    ["", "   ", "../escape", "a/../b", "tic\x00ken", "ctrl\x01"],
+)
+def test_tracker_dir_rejects_unsafe(dir_: str) -> None:
+    with pytest.raises(ConfigError) as exc:
+        Config.from_mapping({"tracker": {"dir": dir_}})
+    assert "tracker.dir" in str(exc.value)
+
+
 def test_unknown_key_and_section_warn_not_drop(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING, logger="rebar.config"):
         c = Config.from_mapping(
