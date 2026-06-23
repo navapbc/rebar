@@ -127,6 +127,16 @@ def _resolve_repo_root(repo_root) -> str | None:
     return cp.stdout.strip() if cp.returncode == 0 and cp.stdout.strip() else None
 
 
+def _tracker_exclude_entry(repo: str, tracker: str) -> str | None:
+    """The ``.git/info/exclude`` entry for the tracker: its path RELATIVE to the repo
+    working tree (so git ignores the worktree/symlink), honoring a custom
+    ``tracker.dir``. Returns ``None`` when the tracker lives OUTSIDE the repo (an
+    absolute relocation) — there is nothing in the repo tree to exclude."""
+    rel = os.path.relpath(tracker, repo)
+    outside = rel == os.curdir or rel == os.pardir or rel.startswith(os.pardir + os.sep)
+    return None if outside or os.path.isabs(rel) else rel
+
+
 def _exclude(git_dir: str, *entries: str) -> None:
     exclude_file = os.path.join(git_dir, "info", "exclude")
     os.makedirs(os.path.dirname(exclude_file), exist_ok=True)
@@ -149,7 +159,9 @@ def init_core(repo_root=None, *, silent: bool = False) -> int:
     if repo is None:
         sys.stderr.write("Error: not inside a git repository\n")
         return 1
-    tracker = os.path.join(repo, ".tickets-tracker")
+    from rebar.config import tracker_dir
+
+    tracker = str(tracker_dir(repo))
 
     # ── Idempotency: valid worktree already mounted ──────────────────────────
     if os.path.isdir(tracker) and os.path.isfile(os.path.join(tracker, ".git")):
@@ -196,7 +208,8 @@ def init_core(repo_root=None, *, silent: bool = False) -> int:
     # ── Exclude tracker + scratch from the host repo ─────────────────────────
     host_git = _resolve_git_dir(repo)
     if host_git:
-        _exclude(host_git, ".tickets-tracker", ".scratch/")
+        entry = _tracker_exclude_entry(repo, tracker)
+        _exclude(host_git, *([entry] if entry else []), ".scratch/")
 
     # ── Init lock (mkdir, 30s) ───────────────────────────────────────────────
     lock_dir = _init_lock_dir(repo)
@@ -409,13 +422,16 @@ def _gen_local_files(tracker: str) -> None:
 
 
 def _main_worktree_tracker(repo: str) -> str | None:
-    """Path to the MAIN worktree's ``.tickets-tracker`` — the real store a linked
-    worktree symlinks to — or None when the main worktree can't be resolved. Does
-    NOT check whether that path exists / is initialized; callers decide."""
+    """Path to the MAIN worktree's tracker dir (the configured ``tracker.dir``,
+    default ``.tickets-tracker``) — the real store a linked worktree symlinks to —
+    or None when the main worktree can't be resolved. Does NOT check whether that
+    path exists / is initialized; callers decide."""
+    from rebar.config import tracker_dir
+
     wl = _git(repo, "worktree", "list", "--porcelain").stdout
     for line in wl.splitlines():
         if line.startswith("worktree "):
-            return os.path.join(line[len("worktree ") :], ".tickets-tracker")
+            return str(tracker_dir(line[len("worktree ") :]))
     return None
 
 
@@ -458,7 +474,7 @@ def _init_via_symlink(repo: str, tracker: str, silent: bool) -> int:
     if os.path.isdir(tracker) and not os.path.islink(tracker):
         if os.path.isfile(os.path.join(tracker, ".git")):
             sys.stderr.write(
-                "Error: .tickets-tracker/ is a real git worktree in this worktree "
+                f"Error: {os.path.basename(tracker)}/ is a real git worktree in this worktree "
                 "checkout. Remove it manually first.\n"
             )
             return 1
@@ -466,7 +482,9 @@ def _init_via_symlink(repo: str, tracker: str, silent: bool) -> int:
     os.symlink(main_tracker, tracker)
     wt_git = _resolve_git_dir(repo)
     if wt_git:
-        _exclude(wt_git, ".tickets-tracker")
+        entry = _tracker_exclude_entry(repo, tracker)
+        if entry:
+            _exclude(wt_git, entry)
     _ensure_env_id(tracker)
     _emit("Ticket system initialized (symlink to main repo).", silent)
     return 0
