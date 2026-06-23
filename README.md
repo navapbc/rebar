@@ -103,8 +103,8 @@ optional capabilities) and *developing rebar itself*:
   lazy-imported, so the base stays light and CI enforces that):
   - **`[mcp]`** — the `rebar-mcp` server (`mcp>=1.2`).
   - **`[agents]`** — the LLM agent-operations framework + **agentic workflow
-    steps** (`rebar review`, the `code_review` workflow): langchain/langgraph (the
-    langgraph stack is exact-pinned) + a model-provider SDK.
+    steps** (`rebar review`, the `code_review` workflow): the provider-agnostic
+    pydantic-ai runtime (`pydantic-ai-slim[anthropic]` + `json-repair`).
   - **`[eval]`** — prompt evaluation (`rebar prompt eval`): Inspect AI. An
     authoring/CI capability, not needed to serve.
   - **`[tracing]`** — the OTLP trace sink (write-only; OpenTelemetry is never read

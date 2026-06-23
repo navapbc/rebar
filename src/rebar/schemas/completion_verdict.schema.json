@@ -34,7 +34,7 @@
       "items": { "type": "string" },
       "description": "Reviewer prompt ids that ran (['completion-verifier'])."
     },
-    "runner": { "type": "string", "description": "Execution backend: 'langgraph', 'deepagents', 'fake', …" },
+    "runner": { "type": "string", "description": "Execution backend: 'pydantic_ai', 'fake'." },
     "model": { "type": ["string", "null"], "description": "Model id used (null for non-LLM/fake runners)." },
     "trace_id": { "type": ["string", "null"], "description": "Langfuse trace id when tracing is enabled; null otherwise." }
   }

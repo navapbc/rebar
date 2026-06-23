@@ -79,9 +79,9 @@ over one git-backed store.
   framework for tool-using LLM agents that emit structured findings, exposed over
   library/CLI (`rebar review`)/MCP (`review_ticket`). The engine core needs NO LLM
   dependency (its only runtime dep is `pyyaml`, the workflow DSL loader); everything
-  here is behind the `nava-rebar[agents]` extra and lazy-imported. A pluggable `Runner` (default in-process LangChain/LangGraph for
-  review; an opt-in deepagents harness for future task types;
-  a `FakeRunner` for tests) runs the agent with read-only repo file tools + MCP
+  here is behind the `nava-rebar[agents]` extra and lazy-imported. A pluggable `Runner`
+  (the in-process, provider-agnostic pydantic-ai runtime; a `FakeRunner` for tests)
+  runs the agent with read-only repo file tools + MCP
   tools; output is constrained to the `review_result` JSON Schema.
   Langfuse provides tracing + the reviewer-prompt library. See
   [llm-framework.md](llm-framework.md).
@@ -193,8 +193,10 @@ file to one requires a row in the other. (LOC measured 2026-06-18.)
 
 `src/rebar/llm/runner.py` was **decomposed** in WS-A (epic a88f): the
 filesystem/repo cluster (`_safe_path`, `_git_tracked`, `_discovery_filter`,
-`_within_root`, `_filesystem_tools`, the per-call caps + noise sets) moved verbatim
-to `src/rebar/llm/fs_tools.py` (293 LOC), bringing `runner.py` from 829 → 560 LOC,
+`_within_root`, the per-call caps + noise sets) moved to
+`src/rebar/llm/fs_tools.py` (the langchain tool-builder that lived there was later
+removed in the d6d1 cutover; the shared path-safety helpers remain and are reused by
+the pydantic-ai tools in `pai_tools.py`), bringing `runner.py` from 829 → 560 LOC,
 back under the soft cap. `fs_tools.py` is also where the workflow engine's git-ref
 snapshot code (WS-D) will land.
 

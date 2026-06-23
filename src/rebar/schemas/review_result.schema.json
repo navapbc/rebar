@@ -26,7 +26,7 @@
       "items": { "type": "string" },
       "description": "Reviewer prompt ids that ran."
     },
-    "runner": { "type": "string", "description": "Execution backend that produced this result: 'langgraph', 'deepagents', 'fake', …" },
+    "runner": { "type": "string", "description": "Execution backend that produced this result: 'pydantic_ai', 'fake'." },
     "model": { "type": ["string", "null"], "description": "Model id used (when applicable; null for non-LLM/fake runners)." },
     "trace_id": { "type": ["string", "null"], "description": "Langfuse trace id, when tracing is enabled; null otherwise." },
     "summary": { "type": "string", "description": "Optional reviewer-written summary of the review." }

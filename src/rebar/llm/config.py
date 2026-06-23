@@ -296,7 +296,6 @@ def available_backends() -> dict:
         # is chosen by the model string, so there are no per-provider integration
         # packages to detect — anthropic/openai/google all run on the same stack.
         "pydantic_ai": _module_available("pydantic_ai"),
-        "langfuse": _module_available("langfuse"),
         "anthropic_api_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
         "openai_api_key": bool(os.environ.get("OPENAI_API_KEY")),
         "langfuse_configured": LangfuseConfig.from_env().enabled,

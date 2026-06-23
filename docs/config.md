@@ -161,9 +161,8 @@ mcp_servers    = {}                  # env REBAR_LLM_MCP_SERVERS (JSON); a TOML 
 Env-only (NOT `[tool.rebar.llm]` keys): the secret `REBAR_LLM_API_KEY`; the
 runtime-only `REBAR_LLM_REPO_PATH` (which repo the review agent's read-only file
 tools see — an invocation-specific override, default the repo root); and the
-DERIVED runner — `REBAR_LLM_EXPERIMENTAL_HARNESS=deepagents` opts into the
-experimental harness, else in-process `langgraph` (`fake` is a library-arg-only
-test seam).
+DERIVED runner — the in-process, provider-agnostic `pydantic_ai` runtime (`fake` is
+a library-arg-only test seam).
 
 ### Secrets — environment / `.env` only (never the config file)
 
@@ -176,9 +175,8 @@ standard names.)
 
 - **Removed:** `paths.*`, `planning.external_dependency_block_enabled` (deleted),
   and the legacy `rebar_id_guard_mode` flat key (→ `reconciler.id_guard_bypass_unsafe`).
-- **Derived, not configured:** the LLM runner (in-process langgraph by default;
-  `fake` is a test-only injection; `deepagents` is gated by
-  `REBAR_LLM_EXPERIMENTAL_HARNESS`).
+- **Derived, not configured:** the LLM runner (the in-process, provider-agnostic
+  `pydantic_ai` runtime; `fake` is a test-only injection).
 - **Runtime-only (env, not a config key):** `REBAR_LLM_REPO_PATH` — which repo the
   review agent's read-only file tools see (default: the repo root). It is an
   invocation-specific runtime override, so it stays an env var and is **not** a
