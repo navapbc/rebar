@@ -61,7 +61,7 @@ def _ticket_dirs(tracker: str) -> list[str]:
     )
 
 
-def _scan(tracker: str, no_mutate: bool) -> tuple[list[str], int]:
+def _scan(tracker: str, no_mutate: bool, repo_root=None) -> tuple[list[str], int]:
     lines: list[str] = []
     issue_count = 0
 
@@ -144,6 +144,11 @@ def _scan(tracker: str, no_mutate: bool) -> tuple[list[str], int]:
     if pp:
         lines.append(pp)
 
+    # ── Check 4.6: configured-vs-mounted branch mismatch (informational) ──────
+    bm = _branch_mismatch(tracker, repo_root)
+    if bm:
+        lines.append(bm)
+
     # ── Check 5: forward-compat — event types newer than this binary (P2.3) ───
     # Informational WARN (no issue_count, like push-pending): an unknown event_type
     # is preserved-and-ignored by replay, so the store is NOT corrupt — but the
@@ -218,6 +223,34 @@ def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> 
     return out
 
 
+def _branch_mismatch(tracker: str, repo_root=None) -> str | None:
+    """Informational WARN when the tracker worktree's actually-checked-out branch
+    differs from the configured ``tracker.branch``. 'configured' = the precedence-
+    resolved config (from ``repo_root`` when known, else the MAIN repo = the tracker's
+    parent); 'mounted' = the branch the worktree has checked out. This catches a
+    ``tracker.branch`` changed in project config AFTER init: the store is NOT
+    auto-migrated, so it stays on the old branch. Best-effort: skip on a malformed
+    config or a detached/unreadable HEAD."""
+    root = repo_root if repo_root is not None else os.path.dirname(os.path.realpath(tracker))
+    try:
+        configured = config.tickets_branch(root)
+    except config.ConfigError:
+        return None
+    cp = subprocess.run(
+        ["git", "-C", tracker, "symbolic-ref", "--quiet", "--short", "HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    mounted = cp.stdout.strip()
+    if cp.returncode != 0 or not mounted or mounted == configured:
+        return None  # detached/unreadable, or a match — nothing to report
+    return (
+        f"WARN: configured tracker.branch '{configured}' does not match the mounted "
+        f"branch '{mounted}' — the store was initialized on '{mounted}' and is NOT "
+        "auto-migrated. Revert the config, or re-init on the new branch."
+    )
+
+
 def _push_pending(tracker: str) -> str | None:
     def _git(*args: str) -> subprocess.CompletedProcess:
         return subprocess.run(["git", "-C", tracker, *args], capture_output=True, text=True)
@@ -286,12 +319,22 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
 
     tracker = str(config.tracker_dir(repo_root))
     if not os.path.isdir(tracker):
+        # Dir-mismatch hint: the configured tracker.dir is absent, but a default-named
+        # store still exists alongside → tracker.dir was changed without migrating.
+        repo_guess = os.path.dirname(os.path.realpath(tracker))
+        legacy = os.path.join(repo_guess, ".tickets-tracker")
+        mismatch_hint = ""
+        if os.path.realpath(legacy) != os.path.realpath(tracker) and os.path.isdir(legacy):
+            mismatch_hint = (
+                f"\nWARN: configured tracker.dir resolves to {tracker} (absent), but a "
+                f"store exists at {legacy} — tracker.dir was changed without migrating."
+            )
         if fmt == "json":
-            sys.stdout.write(_transform_json("") + "\n")
+            sys.stdout.write(_transform_json(mismatch_hint.strip()) + "\n")
             return 1
         sys.stderr.write(
-            "Error: ticket system not initialized (.tickets-tracker/ not found).\n"
-            "Run 'ticket init' first.\n"
+            f"Error: ticket system not initialized ({tracker} not found).\n"
+            f"Run 'ticket init' first.{mismatch_hint}\n"
         )
         return 1
 
@@ -299,7 +342,7 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
     # not read from the environment: read paths (list/show via rebar.fsck(report_only=
     # True)) pass no_mutate=True so they never delete the stale lock; the CLI `fsck`
     # always mutates (default False).
-    lines, issue_count = _scan(tracker, no_mutate)
+    lines, issue_count = _scan(tracker, no_mutate, repo_root)
     summary = (
         "fsck complete: no issues found"
         if issue_count == 0
