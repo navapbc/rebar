@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/_cli/","reason":"diagnostics to stderr"},{"path":"src/rebar/_commands/","reason":"keep stdout data prints"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782341892209571001,"uuid":"9e956ae5-1cba-4df3-8440-36bb6cdebc49"}
