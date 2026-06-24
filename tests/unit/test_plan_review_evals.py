@@ -54,6 +54,15 @@ def test_finder_covers_observed_false_positive_modes() -> None:
         assert required in modes, f"finder eval missing false-fire mode {required!r}"
 
 
+def test_finder_has_t12_discrimination_pair() -> None:
+    # 7284 AC: T12 validated for DISCRIMINATION — a recall case (deployed-system change
+    # → fire) AND a suppression case (library/CLI → not-applicable), not just suppression.
+    ds = E.load_eval_spec("plan-review-finder").get("dataset", [])
+    t12 = [c for c in ds if c.get("criterion") == "T12"]
+    assert any(c.get("expect") == "finding" for c in t12), "T12 needs a recall (fire) case"
+    assert any(c.get("expect") == "pass" for c in t12), "T12 needs a suppression case"
+
+
 def test_verifier_has_discrimination_pairs() -> None:
     # acc1 AC: a labeled set of {true finding, planted FALSE finding}; Pass-2 must give
     # the false ones LOWER validity. Assert the pairs + both polarities exist.

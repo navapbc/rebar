@@ -75,6 +75,16 @@ dataset:
     expect: finding
     input: >
       A story with a solution but no statement of the user/problem it serves.
+  - id: R-T12-snap
+    corpus: snap
+    criterion: T12
+    expect: finding
+    input: >
+      A plan that changes the live behavior of a DEPLOYED, long-running web service —
+      switching the production payments provider for all traffic at once — with no
+      staged rollout, no feature flag, and no rollback path. T12 SHOULD fire (recall):
+      the change is to a deployed runtime and lacks staged-rollout/rollback/deploy-
+      ordering. This validates T12 DISCRIMINATION, not just its library/CLI suppression.
   # ── false-fire GOOD cases (sound plan → NO finding), seeded from observed FPs ──
   - id: FP1-T5c
     corpus: rebar
@@ -111,6 +121,16 @@ dataset:
       A plan adopting Pydantic AI for provider-agnostic LLM calls. T2 must NOT demand the
       plan re-prove provider-agnosticism (the library's documented headline contract);
       adoption IS the mitigation. (A specific immature FEATURE of the library would differ.)
+  - id: T12-suppress-rebar
+    corpus: rebar
+    criterion: T12
+    expect: pass
+    mode: not-applicable-library-or-cli
+    input: >
+      A change to rebar itself (a git-backed library + CLI), which is not a deployed,
+      long-running system with production traffic. T12 must PASS not-applicable — the
+      core anti-FP that pairs with the R-T12-snap recall case (discrimination, not
+      blanket suppression).
   - id: FP7-A1
     corpus: rebar
     criterion: A1
