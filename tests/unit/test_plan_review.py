@@ -9,6 +9,8 @@ tests/interfaces/test_plan_review_gate.py.
 
 from __future__ import annotations
 
+import pytest
+
 from rebar.llm.plan_review import attest, det_floor, orchestrator, passes, registry, sidecar, sizing
 from rebar.llm.plan_review.det_floor import PlanContext
 
@@ -116,9 +118,6 @@ def _oracle_outcome(kind: str):
         # The oracle's three-valued contract: an unsupported lang → an `abstain` record.
         return lambda *a, **k: {"outcome": "abstain", "reason": "unsupported_language"}
     raise AssertionError(kind)
-
-
-import pytest  # noqa: E402
 
 
 @pytest.mark.parametrize("mode", ["crash", "timeout", "no-server", "unsupported-lang"])
@@ -538,9 +537,7 @@ def test_largest_window_uses_configured_model_window() -> None:
     assert orchestrator.largest_window_tokens("claude-haiku-4-5") == 1_000_000  # escalates up
     assert orchestrator.largest_window_tokens("claude-opus-4-8") == 1_000_000
     assert orchestrator.largest_window_tokens(None) == sizing.MODEL_LADDER[-1][1]
-    assert (
-        orchestrator.largest_window_tokens("some-unknown-model") == sizing.MODEL_LADDER[-1][1]
-    )
+    assert orchestrator.largest_window_tokens("some-unknown-model") == sizing.MODEL_LADDER[-1][1]
 
 
 def test_advisory_cap_assertion_guards_blocking_leak() -> None:
