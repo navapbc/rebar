@@ -2,13 +2,15 @@
 findings, exposed (like the rest of rebar) over library, CLI, and MCP.
 
 Design in one paragraph: an **operation** (e.g. :func:`review_ticket`) assembles
-deterministic context from rebar's own reads, resolves a **reviewer** prompt from
-Langfuse prompt management (with a packaged fallback), and dispatches to a
+deterministic context from rebar's own reads, resolves a **prompt** git-canonically
+(a packaged prompt or a ``.rebar/prompts/<id>.md`` override — Langfuse is never
+consulted for prompt text), and dispatches to a
 pluggable **Runner**. The default runner runs an in-process, provider-agnostic
 Pydantic AI agent — the provider chosen by the model string — with read-only,
 line-numbered repository file tools plus MCP servers, and returns findings
 constrained to the canonical ``review_result`` JSON Schema. Other runners slot in
-behind the same protocol. Langfuse provides tracing + the prompt library.
+behind the same protocol. Langfuse provides tracing (and is an optional read-replica
+of prompts, never the source of truth).
 
 **Optionality is a hard rule:** importing this package pulls **no** heavy
 dependency — the agent runtime (pydantic-ai) / langfuse / anthropic are imported

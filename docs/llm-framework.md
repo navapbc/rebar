@@ -88,8 +88,8 @@ The design was chosen after a research spike + two independent Opus design revie
 
 ```
  operation (review_ticket)                      reviewer registry
-   │  assemble deterministic context              │ catalog.json  (id, dimension,
-   │  (rebar reads, sorted, no timestamps)        │   selection rules — local, tested)
+   │  assemble deterministic context              │ index.json (DERIVED: id, dimension,
+   │  (rebar reads, sorted, no timestamps)        │   selection rules — from front-matter)
    │  resolve reviewer prompt ───────────────────▶│ prompt TEXT (git-canonical:
    │                                              │   .rebar/prompts/<id>.md override
    ▼                                              │   ▸ packaged reviewers/*.md)
@@ -200,9 +200,13 @@ model mirrors it (pinned by a test). Correctness guarantees:
 
 ## Reviewer registry
 
-Reviewer **identity + selection rules** live in a versioned, testable local catalog
-(`src/rebar/llm/reviewers/catalog.json`): `id`, `dimension`, `applies_to` globs,
-`default`. Reviewer **prompt text is git-canonical** — resolved from the repo, never
+Reviewers are now a **subset of prompts**, flagged by an explicit `category: review` in
+the prompt front-matter (see [workflow-authoring-v2.md](workflow-authoring-v2.md)).
+Reviewer **identity + selection rules** (`id`, `dimension`, `applies_to` globs,
+`default`) are **derived** from that front-matter into a generated, committed index
+(`src/rebar/llm/reviewers/index.json`; regenerate with `python -m rebar.llm.prompts
+regenerate-index`, enforced by a CI drift gate) — there is no hand-edited catalog.
+Reviewer **prompt text is git-canonical** — resolved from the repo, never
 from Langfuse: a project override at `.rebar/prompts/<id>.md` wins if present,
 otherwise the packaged `reviewers/*.md` shipped with the framework. Langfuse is
 **never consulted for prompt text** (it is only an optional trace sink). The
@@ -314,10 +318,11 @@ we run an **ephemeral self-hosted stack**, not a persistent server:
 
 ## Adding an operation or reviewer
 
-- **New reviewer:** add an entry to `reviewers/catalog.json` and ship a same-named
-  packaged prompt (`reviewers/<id>.md`); a project can override it with
-  `.rebar/prompts/<id>.md`. `applies_to` globs make it eligible for rule-based
-  selection.
+- **New reviewer:** ship a packaged prompt (`reviewers/<id>.md`) whose front-matter
+  carries `category: review` plus `dimension` / `applies_to` / `default`, then
+  regenerate the derived index (`python -m rebar.llm.prompts regenerate-index`); a
+  project can override it with `.rebar/prompts/<id>.md`. `applies_to` globs make it
+  eligible for rule-based selection. (No hand-edited catalog — the index is derived.)
 - **New operation:** assemble its deterministic context, resolve reviewer prompt(s)
   via `prompts.resolve_prompt`, build a `RunRequest`, and call
   `get_runner(config, override=…).run(req)`. Return a validated `review_result`.
