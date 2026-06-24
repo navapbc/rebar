@@ -232,3 +232,51 @@ def test_contract_view_exposes_checked_flag() -> None:
     checked = editor.step_contract_view("tag")
     assert checked["has_contract"] is True
     assert checked["checked"] is True
+
+
+# ── agent-step runtime input validation (review T1) ─────────────────────────────
+
+
+def _agent_prompt(tmp_path, pid, inputs_schema):
+    pdir = tmp_path / ".rebar" / "prompts"
+    pdir.mkdir(parents=True, exist_ok=True)
+    (pdir / f"{pid}.md").write_text(
+        f"---\ncategory: review\ninputs: {inputs_schema}\n---\nBody.\n", encoding="utf-8"
+    )
+    return str(tmp_path)
+
+
+def test_agent_step_input_violation_fails(tmp_path) -> None:
+    # An agent step whose prompt declares an `inputs` contract is validated at runtime
+    # just like a scripted op: a violating `with` fails the step (fail-loud).
+    from rebar.llm.workflow.interpreter import validate_consumer_input
+
+    repo = _agent_prompt(tmp_path, "checker", "gate_input")
+    err, errored = validate_consumer_input(
+        "agent", {"prompt": "checker"}, {"policy": "bogus"}, repo
+    )
+    assert err is not None and "input contract violation" in err and errored is False
+
+
+def test_agent_step_validator_failure_is_distinct(tmp_path) -> None:
+    # If the prompt's declared inputs schema cannot be resolved, the agent step
+    # surfaces the DISTINCT 'validation UNAVAILABLE/errored' signal — never a false-pass.
+    from rebar.llm.workflow.interpreter import validate_consumer_input
+
+    repo = _agent_prompt(tmp_path, "checker2", "no_such_schema_xyz")
+    err, errored = validate_consumer_input("agent", {"prompt": "checker2"}, {"a": 1}, repo)
+    assert err is not None and errored is True and "UNAVAILABLE" in err
+
+
+def test_agent_step_without_inputs_contract_is_skipped(tmp_path) -> None:
+    # A prompt that declares NO inputs contract → UNKNOWN → validation skipped (a
+    # contract-less agent step keeps working, never spuriously fails).
+    from rebar.llm.workflow.interpreter import validate_consumer_input
+
+    pdir = tmp_path / ".rebar" / "prompts"
+    pdir.mkdir(parents=True, exist_ok=True)
+    (pdir / "plain.md").write_text("---\ncategory: review\n---\nBody.\n", encoding="utf-8")
+    err, errored = validate_consumer_input(
+        "agent", {"prompt": "plain"}, {"anything": 1}, str(tmp_path)
+    )
+    assert err is None and errored is False

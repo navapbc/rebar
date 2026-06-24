@@ -129,3 +129,24 @@ def test_legacy_no_version_still_parses() -> None:
     )
     meta, body = parse_front_matter("---\nvariables: [x]\n---\nHi {{x}}\n")
     assert meta == {"variables": ["x"]} and body == "Hi {{x}}\n"
+
+
+# ── front-matter VALUES: CRLF/BOM round-trip safely (review T3/T4) ───────────────
+
+
+def test_crlf_in_front_matter_value_round_trips_safely() -> None:
+    # The writer LF-normalizes the dumped YAML block, but PyYAML escapes a CRLF inside
+    # a scalar VALUE (emits the literal "\r\n" escape, not raw bytes), so the value is
+    # preserved byte-for-byte and the write stays idempotent.
+    out = write_front_matter({"title": "line1\r\nline2", "description": "d"}, "body\n")
+    meta, body = _split_front_matter_raw(out)
+    assert meta["title"] == "line1\r\nline2"
+    assert write_front_matter(meta, body) == out  # idempotent over a CRLF-bearing value
+
+
+def test_bom_inside_a_value_is_preserved_not_a_file_bom() -> None:
+    # A BOM is only refused as the FIRST byte of the BODY (it would defeat the fence);
+    # a BOM that merely appears INSIDE a front-matter value is harmless and round-trips.
+    out = write_front_matter({"title": "\ufeffhello"}, "b\n")
+    meta, _ = _split_front_matter_raw(out)
+    assert meta["title"] == "\ufeffhello"
