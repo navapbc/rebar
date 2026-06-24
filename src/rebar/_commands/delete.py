@@ -10,7 +10,7 @@ just commits any straggler UNLINKs and exits 0 silently.
 
 Event bytes go through the single canonical serializer
 ``rebar._store.canonical.canonical_str`` (sorted keys, P1.0). Reuses
-``rebar.reducer`` (reduce_all_tickets / compute_alias / write_marker),
+``rebar.reducer`` (reduce_all_tickets / write_marker), ``rebar._alias.compute_alias``,
 ``rebar.graph._unblock`` and the resolver.
 """
 
@@ -25,6 +25,7 @@ import uuid
 from pathlib import Path
 
 from rebar import config
+from rebar._alias import compute_alias
 from rebar._commands import scratch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
@@ -32,7 +33,6 @@ from rebar._store import hlc
 from rebar._store.canonical import canonical_str
 from rebar.graph._unblock import batch_close_operations
 from rebar.reducer import reduce_all_tickets
-from rebar.reducer._alias import compute_alias
 from rebar.reducer.marker import write_marker
 
 

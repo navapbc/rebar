@@ -45,7 +45,7 @@ def _new_ticket_id() -> str:
 
 
 def _compute_alias(ticket_id: str) -> str:
-    """Human alias via the in-process reducer (``rebar.reducer._alias``).
+    """Human alias via the in-process helper (``rebar._alias``).
 
     Tier E E6.5a: replaced the ``ticket-alias-compute.py`` subprocess with the
     canonical in-process helper — byte-identical adj-noun-noun derivation, the same
@@ -54,7 +54,7 @@ def _compute_alias(ticket_id: str) -> str:
     ``or`` guards the ``None`` a malformed (<8-hex) id would return; native ids are
     always 16-hex so this is belt-and-suspenders.
     """
-    from rebar.reducer._alias import compute_alias
+    from rebar._alias import compute_alias
 
     return compute_alias(ticket_id) or ticket_id.replace("-", "")[:8]
 
