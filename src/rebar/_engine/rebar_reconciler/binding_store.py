@@ -21,13 +21,16 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from rebar_reconciler.timeutil import utc_now_iso
+
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    # Canonical Z-suffix UTC (twin of rebar.timeutils.utc_now_iso); retained as the
+    # local spelling used across this module's call sites.
+    return utc_now_iso()
 
 
 _EMPTY_STORE: dict[str, Any] = {

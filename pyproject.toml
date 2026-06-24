@@ -16,18 +16,29 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-# Core stays deliberately tiny. The ONLY runtime dependency is a YAML loader for
-# the workflow DSL (epic a88f): loading + running a `.rebar/workflows/*.yaml`
-# workflow is a LEAN-RUNTIME capability — it must work without the heavy
-# `[agents]`/`[eval]`/`[tracing]` extras — so its parser cannot itself be optional.
+# Core stays deliberately tiny. Two runtime dependencies, both serving the
+# LEAN-RUNTIME workflow + schema capability (epic a88f) that must work WITHOUT the
+# heavy `[agents]`/`[eval]`/`[tracing]` extras:
+#   - pyyaml: the YAML loader for the workflow DSL — loading + running a
+#     `.rebar/workflows/*.yaml` workflow cannot have an optional parser. PyYAML's
+#     SafeLoader is hardened toward YAML 1.2 Core by rebar.llm.workflow.schema
+#     (anchors/merge keys rejected, 1.1 yes/no/on/off bools dropped).
+#   - jsonschema: the JSON-Schema validator behind the core schema registry
+#     (rebar.schemas) and the workflow interpreter's input/output-contract checks
+#     (rebar.llm.workflow.interpreter). These are imported on lean-runtime paths
+#     (run_workflow needs NO extra), so the validator cannot be optional either —
+#     it was previously dev-only, which made `rebar.schemas.validator()` and
+#     contract validation raise ImportError on a plain install. `referencing` is
+#     declared explicitly because rebar.schemas imports it directly (it is also a
+#     transitive of jsonschema, but we declare what we import).
 # This is consistent with the optionality CI (the import-linter ban-list targets
 # only the heavy ML/telemetry stack: anthropic/inspect_ai/langchain*/langgraph*/
-# opentelemetry*; pyyaml is intentionally permitted in core). PyYAML's SafeLoader
-# is hardened toward YAML 1.2 Core by rebar.llm.workflow.schema (anchors/merge
-# keys rejected, 1.1 yes/no/on/off bools dropped). Everything else — the engine
-# core and the reconciler — remains stdlib-only.
+# opentelemetry*; pyyaml + jsonschema are intentionally permitted in core).
+# Everything else — the engine core and the reconciler — remains stdlib-only.
 dependencies = [
     "pyyaml>=6",
+    "jsonschema>=4.18",
+    "referencing>=0.30",
 ]
 
 # The engine assets (the rebar_reconciler package + jira-capability-probe.py + the
@@ -85,7 +96,8 @@ grounding = [
 dev = [
     "pytest>=8",
     "mcp>=1.2",
-    "jsonschema>=4.18",
+    # jsonschema/referencing moved to core [project.dependencies] — the schema
+    # registry + workflow contract validation are lean-runtime paths, not dev-only.
     "hatchling>=1.18",
     # Lint/format tool — pinned EXACTLY (not a floor) so `make format`, `make lint`,
     # the pre-commit hook, and CI all run the IDENTICAL ruff: ruff changes format/lint

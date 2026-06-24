@@ -17,9 +17,10 @@ if needed, though the normal convention is one file per pass_id.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from rebar_reconciler.timeutil import utc_now_iso
 
 
 class SyncLogger:
@@ -38,7 +39,7 @@ class SyncLogger:
             **kwargs:   Event-specific fields merged into the log entry.
         """
         entry: dict[str, Any] = {
-            "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") + "Z",
+            "ts": utc_now_iso(),
             "event": event_type,
             **kwargs,
         }

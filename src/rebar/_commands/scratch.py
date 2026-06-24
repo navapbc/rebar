@@ -20,9 +20,9 @@ import re
 import shutil
 import sys
 import tempfile
-from datetime import datetime, timezone
 
 from rebar import config
+from rebar.timeutils import utc_now_iso
 
 _MAX_BYTES = 98304
 _CONTROL_RE = re.compile(r"[\x00-\x1f]")
@@ -117,7 +117,7 @@ def _set(args: list[str]) -> int:
     if abs_path is None:
         return rc
 
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ts = utc_now_iso()
     envelope = json.dumps({"ts": ts, "value": value})
     payload = envelope.encode("utf-8")
     if len(payload) > _MAX_BYTES:

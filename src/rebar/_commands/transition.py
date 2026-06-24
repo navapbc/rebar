@@ -167,29 +167,18 @@ def _completion_precheck(
     # close attempt never fires an LLM call.
     if ticket_type == "session_log":
         return None
-    from rebar.config import ConfigError, load_config
+    from rebar._commands import gates
 
-    try:
-        on = load_config(cfg_root).verify.require_completion_verification_for_close
-    except ConfigError as exc:
-        # Unreadable config: fail this gate OFF with a WARNING (not silently), and do NOT block.
-        # Rationale: (1) this is an opt-in/default-off gate — an unreadable config must not
-        # auto-enable it across EVERY repo (and every ticket type) and run a billable LLM on a
-        # broken config; (2) the signature gate (txn._signature_gate) independently fail-CLOSES
-        # for story/epic on an unreadable config, so its stronger guarantee is preserved (and
-        # not preempted by this gate, which runs first/outside the lock); (3) within the trust
-        # model, a missing attestation is itself the "not validated" signal CI checks. The
-        # confirmed fail-CLOSED behavior still applies when the gate is readable-ON but the LLM
-        # is unavailable (below).
-        import sys
-
-        print(
-            f"Warning: could not read rebar config ({exc}); the completion-verification close "
-            f"gate is skipped for {ticket_id} (other close gates still apply).",
-            file=sys.stderr,
-        )
-        return None
-    if not on:
+    # Shared resolution + fail-OPEN-on-unreadable-config posture (see _commands/gates.py).
+    # The confirmed fail-CLOSED behavior still applies when the gate is readable-ON but the
+    # LLM is unavailable (below).
+    if not gates.gate_enabled(
+        cfg_root,
+        "require_completion_verification_for_close",
+        ticket_id=ticket_id,
+        gate_label="the completion-verification close gate",
+        extra=" (other close gates still apply)",
+    ):
         return None
     if force_close:
         return None  # close, but withhold the signed confirmation (no verify, no sign)

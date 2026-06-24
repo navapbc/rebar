@@ -9,11 +9,9 @@
 #
 # One repo-relative path per line. Keep sorted.
 src/rebar/__init__.py
-src/rebar/_cli/__init__.py
 src/rebar/_engine/rebar_reconciler/applier.py
 src/rebar/_engine/rebar_reconciler/outbound_differ.py
 src/rebar/_engine/rebar_reconciler/reconcile.py
-src/rebar/_engine_support/reads.py
 src/rebar/config.py
 src/rebar/llm/workflow/lint_refs.py
 src/rebar/mcp_server.py

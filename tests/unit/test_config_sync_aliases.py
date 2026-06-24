@@ -139,7 +139,10 @@ def test_no_pull_flag_strips_and_opts_out(
 ) -> None:
     """The read dispatcher strips --no-pull / --no-sync before the subcommand and
     passes the opt-out to ensure_fresh; the subcommand never sees the flag."""
-    from rebar._engine_support import reads
+    # The read dispatcher (main / _COMMANDS / facade calls) lives in reads_cli; patch
+    # there (reads_cli binds the facades at its own import, so patching `reads` wouldn't
+    # affect the dispatcher).
+    from rebar._engine_support import reads_cli
 
     seen: dict = {}
 
@@ -150,10 +153,10 @@ def test_no_pull_flag_strips_and_opts_out(
         seen["rest"] = rest
         return 0
 
-    monkeypatch.setattr(reads, "ensure_fresh", _fake_fresh)
-    monkeypatch.setattr(reads, "tracker_dir", lambda *a, **k: str(tmp_path))
-    monkeypatch.setitem(reads._COMMANDS, "dummy", _dummy)
-    rc = reads.main(["dummy", "--id", "x", *flags])
+    monkeypatch.setattr(reads_cli, "ensure_fresh", _fake_fresh)
+    monkeypatch.setattr(reads_cli, "tracker_dir", lambda *a, **k: str(tmp_path))
+    monkeypatch.setitem(reads_cli._COMMANDS, "dummy", _dummy)
+    rc = reads_cli.main(["dummy", "--id", "x", *flags])
     assert rc == 0
     assert seen["no_sync"] is expected_no_sync
     assert seen["rest"] == ["--id", "x"]  # flag stripped, other args intact

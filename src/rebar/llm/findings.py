@@ -126,16 +126,14 @@ def build_result(
 
 def validate_result(result: dict) -> dict:
     """Validate ``result`` against the canonical ``review_result`` schema (and its
-    cross-file ``$ref``s). No-ops gracefully if ``jsonschema`` isn't installed
-    (the ``dev`` extra), so the framework runs without the validation libs."""
-    try:
-        validator = schemas.validator(schemas.REVIEW_RESULT)
-    except Exception:  # jsonschema/referencing not installed — skip deep validation
-        if "findings" not in result or not isinstance(result["findings"], list):
-            raise FindingsError("review result missing a 'findings' array") from None
-        return result
+    cross-file ``$ref``s).
+
+    Fails closed: ``jsonschema`` is a core runtime dependency, so the validator is
+    always available — a construction failure here is a real environment problem and
+    propagates rather than being silently skipped."""
     import jsonschema
 
+    validator = schemas.validator(schemas.REVIEW_RESULT)
     try:
         validator.validate(result)
     except jsonschema.ValidationError as exc:
@@ -245,21 +243,21 @@ def _final_text(outcome: dict) -> str:
 
 
 def validate_structured(data: dict, output_schema: str | None) -> dict:
-    """Best-effort validate a structured payload against a named JSON Schema.
+    """Validate a structured payload against a named JSON Schema.
 
     Public (used by the verify-completion op for its final re-validation, and by
-    ``finalize_outcome``). No-ops when ``output_schema`` is unset, the schema isn't a
-    packaged rebar schema, or jsonschema isn't installed — mirroring
-    ``validate_result``'s graceful degradation. Raises :class:`FindingsError` on a
-    real validation failure."""
-    if not output_schema:
-        return data
-    try:
-        validator = schemas.validator(output_schema)
-    except Exception:  # unknown schema name or jsonschema absent — skip
+    ``finalize_outcome``). No-ops only when ``output_schema`` is unset or names a
+    schema that isn't packaged with rebar (there is nothing to validate against).
+
+    Fails closed otherwise: ``jsonschema`` is a core runtime dependency, so once the
+    schema name IS recognized the validator is always built and run — a construction
+    failure propagates rather than silently passing unvalidated data. Raises
+    :class:`FindingsError` on a real validation failure."""
+    if not output_schema or output_schema not in schemas.names():
         return data
     import jsonschema
 
+    validator = schemas.validator(output_schema)
     try:
         validator.validate(data)
     except jsonschema.ValidationError as exc:

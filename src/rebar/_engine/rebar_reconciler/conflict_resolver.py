@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
 from typing import Any
+
+from rebar_reconciler.timeutil import utc_now_iso
 
 # ---------------------------------------------------------------------------
 # Field class registry
@@ -251,7 +252,7 @@ class ProvenanceLedger:
             raise ValueError(f"side must be 'local' or 'jira', got {side!r}")
         entry = {
             "side": side,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": utc_now_iso(),
             "value_hash": _hash_value(value),
         }
         self._records.setdefault(element_key, []).append(entry)

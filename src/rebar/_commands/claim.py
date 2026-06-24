@@ -73,21 +73,17 @@ def _plan_review_precheck(
     Raises :class:`CommandError` (block) when the attestation is absent/stale/wrong.
     Returns ``None`` (allow) when the gate is off, the ticket is exempt, or the
     attestation is valid."""
-    from rebar.config import ConfigError, load_config
+    from rebar._commands import gates
     from rebar.reducer import reduce_ticket as _reduce
 
-    try:
-        on = load_config(cfg_root).verify.require_plan_review_for_claim
-    except ConfigError as exc:
-        # Unreadable config: fail this opt-in gate OFF with a warning (do not block
-        # every claim on a broken config), mirroring the completion gate's posture.
-        print(
-            f"Warning: could not read rebar config ({exc}); the plan-review claim gate is "
-            f"skipped for {ticket_id}.",
-            file=sys.stderr,
-        )
-        return None
-    if not on:
+    # Shared resolution + fail-OPEN-on-unreadable-config posture (see _commands/gates.py),
+    # mirroring the completion close gate so the two can't drift.
+    if not gates.gate_enabled(
+        cfg_root,
+        "require_plan_review_for_claim",
+        ticket_id=ticket_id,
+        gate_label="the plan-review claim gate",
+    ):
         return None
     ticket_type = (_reduce(os.path.join(str(config.tracker_dir(repo_root)), ticket_id)) or {}).get(
         "ticket_type", ""

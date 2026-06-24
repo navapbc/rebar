@@ -253,7 +253,7 @@ def test_ticket_show_outputs_health_warning_when_unresolved_alerts(
     """The in-process `show` read surfaces a bridge alert indicator for tickets
     with unresolved alerts (in the printed state JSON and/or the stderr warning).
     """
-    from rebar._engine_support.reads import _cmd_show
+    from rebar._engine_support.reads_cli import _cmd_show
 
     # Build a minimal tickets-tracker directory structure
     tracker_dir = tmp_path / ".tickets-tracker"
@@ -311,7 +311,7 @@ def test_ticket_list_includes_bridge_alerts_in_output(
 ) -> None:
     """The in-process `list` read surfaces bridge_alerts for tickets with alerts
     (in the printed state JSON and/or the stderr warning)."""
-    from rebar._engine_support.reads import _cmd_list
+    from rebar._engine_support.reads_cli import _cmd_list
 
     # Build minimal tracker directory
     tracker_dir = tmp_path / ".tickets-tracker"
