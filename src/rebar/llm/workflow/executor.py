@@ -216,8 +216,8 @@ def input_schema_for(kind: str, action: str | None, repo_root: Any = None) -> st
         return None
     if kind == "scripted":
         try:
-            # registering the built-in step library populates STEP_CONTRACTS; a caller
-            # that hasn't imported it must not see an empty registry and false-pass.
+            # importing the step library populates STEP_CONTRACTS (else an empty
+            # registry would false-pass when no one has imported it yet).
             from . import steps  # noqa: F401  (side effect: register contracts)
 
             contract = contract_for(action)
@@ -282,9 +282,7 @@ def shallow_contract_check(source: dict, target: dict) -> str:
 
     A STANDALONE static building block (c768): the ENFORCED net is the runtime
     consumer-input check in :mod:`.interpreter`; this is the cheap edit-time/static
-    counterpart (e.g. a future cross-edge advisory or an editor hint). It lives here,
-    beside :class:`StepContract`/:func:`contract_for` which it reasons over — import it
-    from this module directly.
+    counterpart. Lives here beside :class:`StepContract`/:func:`contract_for`.
 
     A deliberately small STRUCTURAL check, NOT a subsumption engine:
 
