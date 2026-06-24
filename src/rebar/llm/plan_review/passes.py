@@ -210,7 +210,16 @@ def pass1_chunk(
     result = runner.run(req)
     out: list[dict[str, Any]] = []
     for f in result.get("findings", []) or []:
-        crit = [c for c in (f.get("criteria") or []) if c in ids] or ids[:1]
+        # Keep ONLY criteria in this chunk's rubric. A finding that maps to no
+        # in-chunk criterion is the model violating the instruction ("return ONLY
+        # findings whose criteria are in this id set") — DROP it rather than
+        # fabricate an attribution (the old `or ids[:1]` silently mis-attributed it
+        # to the chunk's first criterion, corrupting the finding→criterion mapping
+        # the coach + sidecar depend on). A genuine finding for another criterion is
+        # surfaced when ITS chunk runs.
+        crit = [c for c in (f.get("criteria") or []) if c in ids]
+        if not crit:
+            continue
         out.append(
             {
                 "finding": f.get("finding", ""),

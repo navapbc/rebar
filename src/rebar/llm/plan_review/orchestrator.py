@@ -155,7 +155,7 @@ def mint_finding_id(finding: dict[str, Any]) -> str:
     coach + sidecar reference, never restate). Keyed on the finding text + its
     criteria so the same defect across runs gets the same id."""
     basis = finding.get("finding", "") + "|" + ",".join(sorted(finding.get("criteria", [])))
-    return "f" + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:12]
+    return "f" + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
 
 
 # ── routing ──────────────────────────────────────────────────────────────────────

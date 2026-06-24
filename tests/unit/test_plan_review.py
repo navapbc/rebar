@@ -177,6 +177,26 @@ def test_criteria_load_from_the_prompt_library() -> None:
         assert desc["scenario"] == prompt.text.strip()  # rubric came from the library file
 
 
+def test_pass1_drops_findings_mapped_outside_the_chunk() -> None:
+    # A finding whose criteria are NOT in the chunk must be DROPPED, never silently
+    # re-attributed to the chunk's first criterion (the old `or ids[:1]` bug).
+    from rebar.llm.runner import FakeRunner
+
+    fr = FakeRunner(
+        structured={
+            "analysis": "",
+            "findings": [
+                {"finding": "in chunk", "criteria": ["E2"]},
+                {"finding": "out of chunk", "criteria": ["T8"]},  # not in [E2]
+                {"finding": "no criteria", "criteria": []},
+            ],
+        }
+    )
+    out = passes.pass1_chunk(fr, _fake_cfg(), plan="p", chunk=[{"id": "E2", "name": "x"}])
+    assert [f["finding"] for f in out] == ["in chunk"]
+    assert all(f["criteria"] == ["E2"] for f in out)
+
+
 def test_no_inline_pass_prompt_constants() -> None:
     # Regression guard: the pass prompts must live in the library, never as inline
     # module constants (the shortcut the plan explicitly forbids).
