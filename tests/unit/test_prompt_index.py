@@ -115,3 +115,12 @@ def test_non_review_prompts_excluded_from_index(monkeypatch, tmp_path: Path) -> 
     _write_prompt(d, "xform.md", "category: transform")
     _scan_dir(monkeypatch, d)
     assert set(prompts.build_prompt_index()) == {"rev"}  # only reviewers
+
+
+def test_get_prompt_rejects_path_traversal_ids() -> None:
+    # Defense-in-depth (three-pass review finding S1/S2): a prompt id becomes a path
+    # component, so a traversal id must never resolve — even though the editor's read
+    # endpoints are loopback+token guarded.
+    for bad in ("../jira-config", "../../.env", "a/b", "x..y", "", "/etc/passwd"):
+        with pytest.raises(prompts.PromptNotFound):
+            prompts.get_prompt(bad, repo_root=".")

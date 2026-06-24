@@ -133,8 +133,10 @@ class RunnerAgentStep(_ex.AgentStepRunner):
         system_prompt, langfuse_prompt = prompts.resolve_prompt(prompt, variables, cfg.langfuse)
         instructions = str(
             ctx.inputs.get("instructions")
-            or f"Review along the '{prompt.dimension}' dimension using the read-only "
-            "repository tools; ground every finding in tool output."
+            # `dimension` is optional on a prompt (None for a non-reviewer); fall back
+            # to the prompt id so the default instructions never read "the 'None' …".
+            or f"Review along the '{prompt.dimension or prompt.id}' dimension using the "
+            "read-only repository tools; ground every finding in tool output."
         )
         req = build_agent_request(
             prompt,

@@ -171,6 +171,11 @@ def get_prompt(prompt_id: str, *, repo_root=None) -> Prompt:
     built-in packaged ``reviewers/<file>.md``. Front-matter is parsed; ``is_reviewer``
     is EXPLICIT (``category == "review"``). ``text`` is the body (front-matter
     stripped). Raises :class:`PromptNotFound` for an unknown id."""
+    # Defense-in-depth: a prompt id becomes a filesystem path component below, so a
+    # traversal id (``../x``, an absolute/separatored path) must never escape the
+    # prompts dir even when read paths are reached over the editor's loopback server.
+    if not prompt_id or "/" in prompt_id or "\\" in prompt_id or ".." in prompt_id:
+        raise PromptNotFound(f"invalid prompt id {prompt_id!r}")
     fallback_file: str | None = None
     raw: str | None = None
     if repo_root:

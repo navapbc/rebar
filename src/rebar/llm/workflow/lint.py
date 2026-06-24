@@ -24,7 +24,7 @@ from typing import Any
 
 from rebar.llm.errors import WorkflowParseError, WorkflowVersionError
 
-from .lint_refs import LintFinding, _iter_all_steps, lint_document
+from .lint_refs import ENGINE_INJECTED_INPUTS, LintFinding, _iter_all_steps, lint_document
 from .migrate import migrate_to_current
 from .schema import parse_workflow, step_kind, validate_document
 
@@ -128,9 +128,10 @@ def _scan_secret_literals(doc: dict[str, Any]) -> list[LintFinding]:
 # ── The one-pass collector ────────────────────────────────────────────────────
 
 
-# Variables the agent runner always supplies to a prompt (RunnerAgentStep); a
-# step needn't declare these in `with`.
-_ENGINE_PROVIDED_VARS = frozenset({"ticket_id", "ticket_context", "repo_path"})
+# Variables the engine always injects into a prompt (RunnerAgentStep); a step needn't
+# declare these in `with`. Single source of truth lives in lint_refs
+# (ENGINE_INJECTED_INPUTS) — reuse it rather than re-declaring (they must not diverge).
+_ENGINE_PROVIDED_VARS = ENGINE_INJECTED_INPUTS
 
 
 def lint_prompt_refs(doc: dict[str, Any], *, repo_root=None) -> list[LintFinding]:
