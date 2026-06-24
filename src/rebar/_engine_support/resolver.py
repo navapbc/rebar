@@ -8,8 +8,8 @@ Alias/jira_key lookup is done IN-PROCESS (Tier E E6.5a — replacing the
 ``ticket-alias-resolve.py`` subprocess): the alias-mode scan reads each ticket's
 CREATE event (and the latest SNAPSHOT, for compacted tickets) and matches a
 stored ``data.alias``/``data.jira_key`` or a backfilled ``compute_alias`` — the
-same single-source alias helper (``rebar.reducer._alias``) the create path uses,
-so stored-at-create and backfilled-at-resolve aliases stay in lock-step.
+same single-source alias helper (``rebar._alias``) the create path uses, so
+stored-at-create and backfilled-at-resolve aliases stay in lock-step.
 """
 
 from __future__ import annotations
@@ -18,6 +18,8 @@ import json
 import os
 import re
 import sys
+
+from rebar._alias import compute_alias
 
 _FULL_ID_RE = re.compile(r"^[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$")
 _SHORT_ID_RE = re.compile(r"^[a-z0-9]{4}-[a-z0-9]{4}$")
@@ -30,11 +32,6 @@ def _scan_alias_jira(target: str, tracker_dir: str) -> tuple[list[str], list[str
     hard failure listing the tracker (mirrors the helper's exit 1 — a hard failure
     must not masquerade as "no match"). Per-ticket I/O errors skip that ticket.
     """
-    # local import: reducer._alias ↔ _engine_support.resolver are a lazy-import pair
-    # (reducer._processors imports resolve_ticket_id from here at call time). Importing
-    # _alias at module scope would close that cycle at load time — keep it function-local.
-    from rebar.reducer._alias import compute_alias
-
     try:
         entries = sorted(os.listdir(tracker_dir))
     except OSError as exc:

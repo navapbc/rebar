@@ -1,9 +1,9 @@
-"""Tests for ticket_reducer._alias.compute_alias and the read-time backfill
+"""Tests for rebar._alias.compute_alias and the read-time backfill
 applied by ticket_reducer._processors.process_create.
 
 Tier E E7d: the bash-era helpers ``ticket-alias-compute.py`` (alias computation)
 and ``ticket-alias-resolve.py`` (alias/jira_key resolution) were thin CLI wrappers
-over the in-process logic — ``rebar.reducer._alias.compute_alias`` and
+over the in-process logic — ``rebar._alias.compute_alias`` and
 ``rebar._engine_support.resolver.resolve_ticket_id`` respectively. These tests
 exercise that in-process logic directly instead of subprocessing the (deleted)
 helpers.
@@ -23,9 +23,9 @@ import time
 import uuid
 from pathlib import Path
 
+from rebar._alias import compute_alias
 from rebar._engine_support.resolver import _scan_alias_jira, resolve_ticket_id
 from rebar.reducer import reduce_ticket
-from rebar.reducer._alias import compute_alias
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -207,7 +207,7 @@ def test_load_warns_once_when_wordlist_missing(tmp_path, capsys, monkeypatch):
     diagnostic — silent fallback to the 8-hex alias hides a real
     misconfiguration. The warning must appear exactly once per process even
     across many _load() calls (cache + warned-flag both prevent re-emission)."""
-    from rebar.reducer import _alias as alias_mod
+    from rebar import _alias as alias_mod
 
     # Reset the module-level cache + warned flag so this test starts clean
     monkeypatch.setattr(alias_mod, "_WORDS_CACHE", None)

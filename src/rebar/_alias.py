@@ -1,5 +1,10 @@
 """Compute deterministic adjective-noun-noun aliases from ticket IDs.
 
+Stdlib-only leaf (imports no ``rebar`` subpackage) so both ``rebar.reducer``
+(``_processors`` create path) and ``rebar._engine_support.resolver`` (read-time
+backfill) import it directly — breaking the former ``reducer ↔ _engine_support``
+lazy-import cycle. Moved here from ``rebar/reducer/_alias.py``.
+
 Used as a read-time fallback for tickets created before the alias feature
 shipped (their CREATE event has no `data.alias`). Mirrors the algorithm in
 `ticket-alias-compute.py` so legacy tickets surface the same alias they
@@ -18,12 +23,14 @@ _WARNED_MISSING: bool = False
 def _wordlist_path() -> str:
     """Resolve the bundled wordlist path (self-resolved; not a user knob).
 
-    This module lives at ``<rebar>/reducer/_alias.py``; the bundled wordlist ships
+    This module lives at ``<rebar>/_alias.py`` (a top-of-tree, stdlib-only leaf so
+    both ``rebar.reducer`` and ``rebar._engine_support.resolver`` can import it
+    without a package cycle); the bundled wordlist ships
     with the engine at ``<rebar>/_engine/resources/ticket-wordlist.txt``. The
     in-process library and engine subprocesses resolve to this same path (engine
     subprocesses no longer receive a TICKET_WORDLIST_PATH handoff)."""
     here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.normpath(os.path.join(here, "..", "_engine", "resources", "ticket-wordlist.txt"))
+    return os.path.normpath(os.path.join(here, "_engine", "resources", "ticket-wordlist.txt"))
 
 
 def _load() -> tuple[list[str], list[str]]:

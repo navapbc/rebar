@@ -86,7 +86,7 @@ def engine_env(repo_root: str | os.PathLike[str] | None = None) -> dict[str, str
     - Pins ``REBAR_ROOT`` (the single repo-root override) when a repo_root is given.
 
     The wordlist path and the ticket-reader CLI are NOT pinned: subprocesses
-    self-resolve them (``reducer._alias`` resolves the bundled wordlist directly;
+    self-resolve them (``rebar._alias`` resolves the bundled wordlist directly;
     the reconciler/validate readers call :func:`in_process_cli`), so there is no
     env handoff to keep in sync.
     """

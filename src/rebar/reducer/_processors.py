@@ -67,7 +67,7 @@ def process_create(
     if stored_alias:
         state["alias"] = stored_alias
     else:
-        from ._alias import compute_alias
+        from rebar._alias import compute_alias
 
         state["alias"] = compute_alias(ticket_id)
     state["description"] = data.get("description") or ""
