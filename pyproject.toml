@@ -87,7 +87,11 @@ dev = [
     "mcp>=1.2",
     "jsonschema>=4.18",
     "hatchling>=1.18",
-    "ruff>=0.6",
+    # Lint/format tool — pinned EXACTLY (not a floor) so `make format`, `make lint`,
+    # the pre-commit hook, and CI all run the IDENTICAL ruff: ruff changes format/lint
+    # rules between releases, so an unpinned floor lets local and CI drift (green here,
+    # red there). Bump deliberately (and in lock-step with the pre-commit usage).
+    "ruff==0.15.19",
     "mypy>=1.10",
     "pytest-cov>=5",
     # Pull the full agents stack so the rebar.llm validation tests (provider
