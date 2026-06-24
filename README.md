@@ -235,12 +235,16 @@ rebar comment <id> "<body>"
 rebar link <id1> <id2> <relation>            # relation REQUIRED (see relations below)
 rebar unlink <source> <target>               # remove ONE link for the ordered pair (no relation arg)
 rebar deps <id>                               # dependency graph
+rebar search <query>                          # full-text over titles/descriptions/comments/tags (JSON)
 rebar ready                                   # tickets with all blockers closed
 rebar next-batch <epic-id>                    # unblocked tickets under an epic's hierarchy
 rebar validate                                # repo-wide tracker health (NO ticket id; whole-store score 1-5)
 rebar clarity-check <id> / check-ac <id> / quality-check <id>   # per-ticket quality gates
+rebar review-plan <id>                        # plan-review gate: DET floor + 3-pass advisory; signs an attestation (exit 0=PASS,1=BLOCK,2=INDETERMINATE)
 rebar sign <id> '["ran tests: PASS", "lint clean"]'   # HMAC-sign a manifest of verified steps
 rebar verify-signature <id>                   # certify the steps match the signature (exit 0=certified)
+rebar export [-o FILE]                        # store -> NDJSON (one ticket/line; for jq/DuckDB/pandas + rebar->rebar migration)
+rebar import [FILE]                           # import export NDJSON (fresh local ids; [--dry-run])
 rebar reconcile [--mode dry-run|reconcile-check|live]   # Jira sync (default: dry-run)
 ```
 
