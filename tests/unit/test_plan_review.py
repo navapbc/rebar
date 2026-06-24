@@ -530,6 +530,32 @@ def test_isf_excluded_from_normal_routing() -> None:
     assert "ISF" not in {c["id"] for c in single + agent}
 
 
+def test_ticket_graph_blob_includes_parent_children_links() -> None:
+    ctx = _ctx(
+        _GOOD_AC,
+        ttype="story",
+        state={
+            "parent_id": "ep01",
+            "deps": [{"relation": "relates_to", "target_id": "log01"}],
+        },
+        children=[{"ticket_id": "c1", "title": "child one"}],
+    )
+    blob = orchestrator._ticket_graph_blob(ctx)
+    assert "parent: ep01" in blob and "c1: child one" in blob and "relates_to -> log01" in blob
+
+
+def test_pass1_isf_is_fed_the_ticket_graph() -> None:
+    from rebar.llm.runner import FakeRunner
+
+    fr = FakeRunner(structured={"analysis": "", "findings": []})
+    # No assertion on output beyond no-crash; the graph is rendered into instructions
+    # (covered by _ticket_graph_blob above). Confirms the param is accepted + wired.
+    out = passes.pass1_isf(
+        fr, _fake_cfg(), plan="p", session_log_text="log", ticket_graph="parent: x"
+    )
+    assert out == []
+
+
 def test_pass1_isf_tags_findings_and_reduced_confidence() -> None:
     from rebar.llm.runner import FakeRunner
 

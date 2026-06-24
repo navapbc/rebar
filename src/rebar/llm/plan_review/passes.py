@@ -295,20 +295,29 @@ def pass1_isf(
     *,
     plan: str,
     session_log_text: str,
+    ticket_graph: str = "",
     summarized: bool = False,
 ) -> list[dict[str, Any]]:
     """The Intent-Source-Fidelity finder (child 681b). Fed the plan + the linked
-    SESSION LOG as context (single-turn, NOT agentic — the design forbids the tool
-    loop here). When the log was summarized to fit the window, each finding is
-    tagged ``_reduced_confidence`` (the design's "carries reduced confidence")."""
+    SESSION LOG + the PRE-RESOLVED TICKET GRAPH as context (single-turn, NOT agentic —
+    the design forbids the tool loop here; the graph is resolved by the orchestrator
+    and injected, not fetched by the model). When the log was summarized to fit the
+    window, each finding is tagged ``_reduced_confidence``."""
+    graph_block = (
+        f"## Ticket graph (pre-resolved — parent / children / dependency links)\n{ticket_graph}\n\n"
+        if ticket_graph
+        else ""
+    )
     req = RunRequest(
         system_prompt=_resolve_system(PASS_ISF, plan, cfg),
         instructions=(
             "## Linked session log (the external intent of record)\n"
             f"{session_log_text}\n\n"
-            "Extract the expressed requirements/decisions/constraints, then flag any the plan "
-            "silently dropped, narrowed without rationale, or contradicted. A clean comparison "
-            "returns an empty findings list."
+            f"{graph_block}"
+            "Extract the expressed requirements/decisions/constraints, then check the plan AND "
+            "its ticket graph (children may cover an expressed requirement) before flagging any "
+            "the plan silently dropped, narrowed without rationale, or contradicted. A clean "
+            "comparison returns an empty findings list."
         ),
         config=cfg,
         reviewers=["plan-isf"],

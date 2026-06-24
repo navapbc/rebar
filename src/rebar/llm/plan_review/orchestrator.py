@@ -391,6 +391,30 @@ def _run_container(
     return out
 
 
+def _ticket_graph_blob(ctx: PlanContext) -> str:
+    """A compact, PRE-RESOLVED ticket-graph context for ISF (parent / children /
+    dependency links) — resolved by the orchestrator from the already-loaded state
+    and INJECTED (ISF is single-turn, not agentic, so it never fetches the graph
+    itself). Children may cover an expressed requirement, so ISF needs the graph to
+    avoid false 'silently dropped' findings."""
+    lines: list[str] = []
+    parent = ctx.state.get("parent_id")
+    if parent:
+        lines.append(f"parent: {parent}")
+    if ctx.children:
+        lines.append("children:")
+        lines.extend(
+            f"  - {c.get('ticket_id')}: {(c.get('title') or '')[:80]}" for c in ctx.children
+        )
+    deps = ctx.state.get("deps", []) or []
+    if deps:
+        lines.append("links:")
+        lines.extend(
+            f"  - {d.get('relation')} -> {d.get('target_id')}" for d in deps if d.get("target_id")
+        )
+    return "\n".join(lines)
+
+
 def _linked_session_log(ctx: PlanContext, cfg: LLMConfig, runner) -> tuple[str | None, bool]:
     """The text of the ticket's linked SESSION LOG(s) for the ISF criterion, and
     whether it was summarized to fit the window. Returns ``(None, False)`` when no
@@ -651,7 +675,12 @@ def _run_passes(
         try:
             findings.extend(
                 passes.pass1_isf(
-                    runner, cfg, plan=plan, session_log_text=log_text, summarized=summarized
+                    runner,
+                    cfg,
+                    plan=plan,
+                    session_log_text=log_text,
+                    ticket_graph=_ticket_graph_blob(ctx),
+                    summarized=summarized,
                 )
             )
         except Exception as exc:
