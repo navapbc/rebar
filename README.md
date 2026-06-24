@@ -98,9 +98,10 @@ optional capabilities) and *developing rebar itself*:
 
 - **Runtime — base.** `pip install nava-rebar` gives the `rebar` CLI + `import
   rebar` library + the **lean workflow engine** (author/validate/render/run
-  *scripted* workflows). Its ONLY runtime dependency is **`pyyaml`** (the workflow
-  DSL loader, epic a88f) — the engine core and reconciler are otherwise
-  stdlib-only.
+  *scripted* workflows). Its only runtime dependencies are **`pyyaml`** (the
+  workflow DSL loader, epic a88f) and **`jsonschema`** (the schema-registry +
+  workflow input/output-contract validator) — both lean-runtime paths — so the
+  engine core and reconciler are otherwise stdlib-only.
 - **Runtime — optional capability extras** (install only what you use; each is
   lazy-imported, so the base stays light and CI enforces that):
   - **`[mcp]`** — the `rebar-mcp` server (`mcp>=1.2`).
@@ -112,7 +113,7 @@ optional capabilities) and *developing rebar itself*:
   - **`[tracing]`** — the OTLP trace sink (write-only; OpenTelemetry is never read
     back into a rebar decision).
 - **Development (working ON rebar).** `pip install -e '.[dev]'` adds the
-  test/lint/type tooling (`pytest`, `ruff`, `mypy`, `jsonschema`, `hatchling`) and
+  test/lint/type tooling (`pytest`, `ruff`, `mypy`, `hatchling`) and
   self-references `[agents]` so the validation tests **run** rather than skip. It
   is **required to run the full test suite** (the interface-parity tests import the
   MCP server, so they error — not skip — without `mcp`).
@@ -150,7 +151,7 @@ the MCP server via Homebrew users, install the `[mcp]` extra with pipx/uvx below
 
 ```bash
 pipx install nava-rebar              # isolated CLI on PATH: rebar (+ lean workflow engine)
-pip  install nava-rebar              # library: import rebar  (only runtime dep: pyyaml)
+pip  install nava-rebar              # library: import rebar  (runtime deps: pyyaml, jsonschema)
 pip  install 'nava-rebar[mcp]'       # + MCP server: rebar-mcp
 pip  install 'nava-rebar[agents]'    # + LLM agent ops + agentic workflow steps (rebar.llm)
 pip  install 'nava-rebar[eval]'      # + prompt evaluation: `rebar prompt eval` (Inspect AI)
@@ -204,7 +205,7 @@ whitespace tolerated); anything else (incl. unset) is off.
 
 ```bash
 git clone https://github.com/navapbc/rebar && cd rebar
-pip install .              # library + CLI (runtime; pyyaml only)
+pip install .              # library + CLI (runtime deps: pyyaml, jsonschema)
 pip install '.[mcp]'      # + MCP server (FastMCP)
 # Developing rebar itself — the full dev environment (test/lint/type tooling +
 # the agents stack so the LLM validation tests RUN, not skip):
@@ -484,7 +485,7 @@ interpreter without the `mcp` extra will **error** rather than skip.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e '.[dev]'                       # editable + pytest, mcp, jsonschema
+pip install -e '.[dev]'                       # editable + pytest, mcp, ruff, mypy
 pytest -m "not integration"                   # the single entry point (CI runs this)
 pytest tests/interfaces                       # interface-parity tier only
 pytest tests/scripts                          # engine/reconciler tier only

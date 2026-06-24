@@ -348,8 +348,9 @@ contracts — Pass-1 findings, Pass-2 verification, Pass-4 coach.)
 ```python
 findings.validate_structured(data: dict, output_schema: str | None) -> dict
 # Best-effort: validates `data` against the PACKAGED JSON Schema named output_schema.
-# No-ops when the name is unset / not a packaged schema / jsonschema absent.
+# No-ops when the name is unset / not a packaged schema.
 # Raises FindingsError on a real validation failure.
+# (jsonschema is a core runtime dependency, so the validator is always available.)
 ```
 
 Packaged JSON Schemas live in `src/rebar/schemas/*.schema.json` and are named in

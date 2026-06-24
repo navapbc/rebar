@@ -78,7 +78,8 @@ over one git-backed store.
 - **LLM agent operations** (`rebar.llm`, code at `src/rebar/llm/`) — an OPTIONAL
   framework for tool-using LLM agents that emit structured findings, exposed over
   library/CLI (`rebar review`)/MCP (`review_ticket`). The engine core needs NO LLM
-  dependency (its only runtime dep is `pyyaml`, the workflow DSL loader); everything
+  dependency (its only runtime deps are `pyyaml`, the workflow DSL loader, and
+  `jsonschema`, the schema-registry/contract validator); everything
   here is behind the `nava-rebar[agents]` extra and lazy-imported. A pluggable `Runner`
   (the in-process, provider-agnostic pydantic-ai runtime; a `FakeRunner` for tests)
   runs the agent with read-only repo file tools + MCP
