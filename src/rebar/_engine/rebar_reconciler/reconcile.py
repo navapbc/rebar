@@ -426,6 +426,10 @@ def _read_local_tickets(repo_root: Path, *, no_sync: bool = False) -> list[dict]
     self-resolved via :func:`in_process_cli`. If the CLI is unavailable (unit
     tests, minimal environments), return an empty list with a warning on stderr.
 
+    Passes ``--full`` because ``rebar list`` is lean by default (it omits the
+    ``description``/``comments`` bodies) and the outbound differ compares those
+    bodies against Jira — a lean read would compute spurious mutations.
+
     ``no_sync=True`` sets REBAR_SYNC_PULL=off for the subprocess so the read does not
     trigger the tickets-branch fetch/reconverge (a git working-tree mutation).
     Cap-0 reconcile passes (dry-run/reconcile-check) pass this so a no-write
@@ -446,7 +450,7 @@ def _read_local_tickets(repo_root: Path, *, no_sync: bool = False) -> list[dict]
     _env = dict(_os.environ, REBAR_SYNC_PULL="off") if no_sync else None
     try:
         result = _sp.run(
-            [str(cli), "list"],
+            [str(cli), "list", "--full"],
             capture_output=True,
             text=True,
             cwd=str(repo_root),

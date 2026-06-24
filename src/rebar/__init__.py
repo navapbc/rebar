@@ -729,6 +729,7 @@ def list_tickets(
     blocking_state: str = "",
     with_children_count: bool = False,
     sort: str | None = None,
+    full: bool = True,
     repo_root=None,
 ) -> list[dict]:
     """List tickets as a list of dicts, with optional filters.
@@ -742,6 +743,9 @@ def list_tickets(
     so the default shape matches show/search — the single-reducer invariant).
     ``sort`` orders the result by ``priority|created|updated|id|status`` (prefix
     ``-`` for descending; unset values sort last); the default keeps store order.
+    ``full`` (default ``True``) emits the bulky ``description``/``comments`` fields;
+    pass ``full=False`` for a lean summary (the default for the ``list`` CLI and the
+    MCP ``list_tickets`` tool).
     """
     from rebar import _reads
 
@@ -758,6 +762,7 @@ def list_tickets(
         blocking_state=blocking_state,
         with_children_count=with_children_count,
         sort=sort,
+        include_body=full,
         repo_root=repo_root,
     )
 

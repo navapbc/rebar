@@ -319,6 +319,7 @@ def build_server():
         blocking_state: str = "",
         with_children_count: bool = False,
         sort: str | None = None,
+        full: bool = False,
     ) -> list[TicketStateOut]:
         """List tickets as a JSON array, with optional filters.
 
@@ -329,6 +330,11 @@ def build_server():
         ``children_count``; ``min_children`` keeps tickets with >= N direct
         children, and ``blocking_state`` ("unblocked"/"blocked") filters by
         readiness (all blockers closed vs an open blocker).
+
+        The list is **lean by default** — the bulky ``description`` and
+        ``comments`` fields are omitted so a broad list stays small. Pass
+        ``full=True`` for the complete ticket shape (or use ``show_ticket`` for a
+        single ticket's body).
         """
         return [
             TicketStateOut.model_validate(t)
@@ -345,6 +351,7 @@ def build_server():
                 blocking_state=blocking_state,
                 with_children_count=with_children_count,
                 sort=sort,
+                full=full,
             )
         ]
 

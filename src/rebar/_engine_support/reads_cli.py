@@ -107,7 +107,7 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         "Usage: ticket list [--output llm] [--include-archived] [--exclude-deleted] "
         "[--type=<type>] [--status=<status>] [--priority=<n>] [--parent=<id>] "
         "[--has-tag=<tag>] [--without-tag=<tag>] [--min-children=<n>] "
-        "[--unblocked|--blocked] [--with-children-count] "
+        "[--unblocked|--blocked] [--with-children-count] [--full] "
         "[--sort=<priority|created|updated|id|status>] (prefix '-' for descending)"
     )
     try:
@@ -128,10 +128,15 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         "blocking_state": "",
         "with_children_count": False,
         "sort": "",
+        # Lean by default: drop the bulky description/comments bodies. `--full`
+        # opts back into the full ticket shape (matching show/search).
+        "include_body": False,
     }
     for arg in rest:
         if arg == "--include-archived":
             opts["include_archived"] = True
+        elif arg == "--full":
+            opts["include_body"] = True
         elif arg.startswith("--sort="):
             opts["sort"] = arg[len("--sort=") :]
         elif arg == "--exclude-deleted":
@@ -171,7 +176,7 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
             print(
                 "Valid filters: --type --status --priority --parent --has-tag "
                 "--without-tag --min-children --unblocked --blocked --with-children-count "
-                "--sort --include-archived --exclude-deleted --output llm",
+                "--full --sort --include-archived --exclude-deleted --output llm",
                 file=sys.stderr,
             )
             # Unrecognized option is a usage error (2), not a runtime error (1) —

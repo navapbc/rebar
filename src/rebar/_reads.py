@@ -73,6 +73,7 @@ def list_tickets(
     blocking_state: str = "",
     with_children_count: bool = False,
     sort: str | None = None,
+    include_body: bool = True,
     repo_root=None,
 ) -> list[dict]:
     tracker = _tracker(repo_root)
@@ -91,6 +92,7 @@ def list_tickets(
         blocking_state=blocking_state,
         with_children_count=with_children_count,
         sort=sort or "",
+        include_body=include_body,
     )
 
 
