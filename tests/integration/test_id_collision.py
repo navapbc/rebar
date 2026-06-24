@@ -25,8 +25,8 @@ import re
 
 import pytest
 
-from rebar._commands.composer import _new_ticket_id
 from rebar._alias import compute_alias
+from rebar._commands.composer import _new_ticket_id
 
 pytestmark = pytest.mark.integration
 

@@ -23,9 +23,9 @@ import time
 import uuid
 from pathlib import Path
 
+from rebar._alias import compute_alias
 from rebar._engine_support.resolver import _scan_alias_jira, resolve_ticket_id
 from rebar.reducer import reduce_ticket
-from rebar._alias import compute_alias
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
