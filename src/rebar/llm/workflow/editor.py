@@ -424,8 +424,11 @@ def edit_workflow(
 
         def _host_ok(self) -> bool:
             # DNS-rebinding defense: the Host header must be the loopback we bound to.
+            # A missing/empty Host is rejected — HTTP/1.1 clients (browsers, urllib)
+            # always send one; only HTTP/1.0 or crafted requests omit it, which this
+            # guard should refuse rather than admit.
             h = (self.headers.get("Host") or "").split(":")[0]
-            return h in ("127.0.0.1", "localhost", "[::1]", "")
+            return h in ("127.0.0.1", "localhost", "[::1]")
 
         def _authed(self) -> bool:
             # The shared CSRF / DNS-rebinding guard for the WRITE-or-sensitive endpoints

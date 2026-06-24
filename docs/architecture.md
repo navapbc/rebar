@@ -189,29 +189,33 @@ The policy:
 Tracked so the over-cap set is visible, not silently growing. A CI **module-size
 gate** (`.github/workflows/test.yml`) **fails the build** when a file exceeds 800
 LOC and is not in `.github/module-size-allowlist.txt` — so a *new* offender cannot
-land silently. The allowlist below and this table are kept in lock-step: adding a
-file to one requires a row in the other. (LOC measured 2026-06-18.)
+land silently. **`.github/module-size-allowlist.txt` is the source of truth for the
+over-cap set** (and the live LOC: `wc -l` the file, or read the CI gate output);
+exact line counts are deliberately **not** duplicated here — they drift every commit
+and a stale number is worse than none. This table mirrors the allowlist's membership
+and records the **planned remedy seam** per file; adding a file to the allowlist
+requires a row here.
 
-| File | LOC | Remedy |
-|------|----:|--------|
-| `rebar_reconciler/reconcile.py` | 1308 | split orchestration vs pass-driver seams (extract the corrupt-snapshot abort + the OM→Mutation conversion; keep the fetch→diff→apply spine inline) |
-| `rebar_reconciler/outbound_differ.py` | 1277 | split per-field differ seams (`_diff_fields`/`_diff_comments`/`_diff_labels`) |
-| `_cli/__init__.py` | 1100 | split the argv-routing/`_dispatch` arms from the lazy command-delegation seam |
-| `__init__.py` | 1036 | library facade over the cap (also carries the workflow entrypoints `run_workflow`/`get_workflow_status`/`get_workflow_result` + `attach_commits`, epic a88f) — split the read vs write API along the existing seam |
-| `_engine_support/reads.py` | 930 | split the CLI `_cmd_*` arms from the `*_state` facades along the existing seam |
-| `config.py` | 909 | split the dataclass/schema from the env/CLI-override + cache machinery along the existing seam |
-| `mcp_server.py` | 848 | thin FastMCP tool layer; split the read tools from the write/LLM tools if it grows |
-| `llm/workflow/lint_refs.py` | 815 | grew past cap adding the prompt/step CONTRACT awareness (workflow authoring v2, 5e78): the engine-injected-inputs allow-list + the `${{ steps.*.outputs.* }}` name-existence map. Extract a `lint_contracts.py` once stories e050 (8 op contracts) + c768 (3-state validation depth) add the related logic that clears the 100-LOC floor; today that seam alone is sub-floor |
-| `rebar_reconciler/applier.py` | 801 | split the apply-dispatch table from the per-action handlers |
+| File | Remedy |
+|------|--------|
+| `rebar_reconciler/reconcile.py` | decompose the ~750-LOC `reconcile_once` into named in-place phase helpers (corrupt-snapshot abort, OM→Mutation conversion); the natural sub-blocks are below the 100-LOC file floor, so prefer in-place helpers over a sibling module |
+| `rebar_reconciler/outbound_differ.py` | extract the comment-diff cluster (`_diff_comments` + its `_normalize_comment_body`/`_decorate_outbound_comment`/`_map_comments_for_create`/`_is_machine_marker_comment`/`_load_comment_limits`/`_load_adf` satellites) to a sibling `outbound_comments.py`; keep the field/label/link differs + `compute_outbound_mutations` orchestrator |
+| `_cli/__init__.py` | extract the LLM/workflow command handlers (`_review*`/`_scan_spec`/`_verify_completion`/`_review_plan`/`_workflow*`/`_prompt*` + their `_render_*_text` formatters) to `_cli/_llm_commands.py`; keep the argv router (`_dispatch`/`main`/`build_parser`) + `_reconcile` |
+| `__init__.py` | library facade over the cap (also carries the workflow entrypoints `run_workflow`/`get_workflow_status`/`get_workflow_result` + `attach_commits`, epic a88f). KEEP as one surface: it is a deliberate flat public-API namespace whose functions share private helpers; a read/write split forces re-exports for no readability gain |
+| `_engine_support/reads.py` | split the CLI `_cmd_*` arms from the `*_state` facades along the existing seam (the facades are imported widely; the `_cmd_*` arms only by the local `main`) |
+| `config.py` | split the dataclass/schema from the env/CLI-override + cache machinery along the existing seam |
+| `mcp_server.py` | thin FastMCP tool layer. `build_server` is ~30 `@mcp.tool()` closures over a local `mcp`; splitting needs a registrar refactor — watch, don't split preemptively |
+| `llm/workflow/lint_refs.py` | grew past cap adding the prompt/step CONTRACT awareness (workflow authoring v2, 5e78): the engine-injected-inputs allow-list + the `${{ steps.*.outputs.* }}` name-existence map. Extract a `lint_contracts.py` once stories e050 (8 op contracts) + c768 (3-state validation depth) add the related logic that clears the 100-LOC floor; today that seam alone is sub-floor |
+| `rebar_reconciler/applier.py` | split the apply-dispatch table from the per-action handlers |
 
 `src/rebar/llm/runner.py` was **decomposed** in WS-A (epic a88f): the
 filesystem/repo cluster (`_safe_path`, `_git_tracked`, `_discovery_filter`,
 `_within_root`, the per-call caps + noise sets) moved to
 `src/rebar/llm/fs_tools.py` (the langchain tool-builder that lived there was later
 removed in the d6d1 cutover; the shared path-safety helpers remain and are reused by
-the pydantic-ai tools in `pai_tools.py`), bringing `runner.py` from 829 → 560 LOC,
-back under the soft cap. `fs_tools.py` is also where the workflow engine's git-ref
-snapshot code (WS-D) will land.
+the pydantic-ai tools in `pai_tools.py`), bringing `runner.py` back under the soft
+cap. `fs_tools.py` is also where the workflow engine's git-ref snapshot code (WS-D)
+will land.
 
 Files in the 500–800 band (`_commands/transition.py`, `_commands/composer.py`,
 `_engine_support/next_batch.py`, `llm/runner.py`, and several `rebar_reconciler/`
