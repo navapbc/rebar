@@ -102,7 +102,6 @@ class Prompt:
     text: str
     category: str | None = None
     execution_mode: str | None = None
-    is_reviewer: bool = False
     default: bool = False
     dimension: str | None = None
     applies_to: list[str] = field(default_factory=list)
@@ -112,6 +111,13 @@ class Prompt:
     title: str = ""
     description: str = ""
     fallback_file: str | None = None
+
+    @property
+    def is_reviewer(self) -> bool:
+        """A reviewer is EXPLICITLY a prompt whose ``category == "review"`` — derived,
+        so ``category`` stays the single source of truth (never inferred from an
+        output schema)."""
+        return self.category == "review"
 
     @property
     def prompt_name(self) -> str:
@@ -207,7 +213,6 @@ def get_prompt(prompt_id: str, *, repo_root=None) -> Prompt:
         text=body,
         category=category,
         execution_mode=execution_mode,
-        is_reviewer=(category == "review"),
         default=bool(meta.get("default", False)),
         dimension=meta.get("dimension"),
         applies_to=list(meta.get("applies_to") or []),
