@@ -71,6 +71,10 @@ def step_contract_view(uses: str | None) -> dict[str, Any]:
     if not uses:
         return dict(_EMPTY_CONTRACT_VIEW)
     try:
+        # importing the step library registers the built-in contracts (decorators run
+        # on import); without this the inspector would show every scripted op as
+        # contract-less when nothing else has imported `steps` yet.
+        from . import steps  # noqa: F401  (side effect: populate STEP_CONTRACTS)
         from .executor import contract_for
 
         contract = contract_for(uses)

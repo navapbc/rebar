@@ -258,3 +258,20 @@ def test_pure_op_outputs_match_their_output_schema() -> None:
     g_fail = steps.gate(_ctx({"findings": [{"severity": "critical"}], "policy": "default"}))
     schemas.validator("gate_output").validate(g_fail)
     assert g_fail["verdict"] == "fail"
+
+
+def test_inspector_surfaces_scripted_contract_without_preimporting_steps() -> None:
+    # Regression (caught dogfooding the editor demo): the inspector must register the
+    # step library itself, else a fresh process (the real editor) shows every scripted
+    # op as contract-less. Asserted in a CLEAN subprocess since this suite imports
+    # `steps` at module top, which would otherwise mask the bug.
+    import subprocess
+    import sys
+
+    code = (
+        "from rebar.llm.workflow.editor import step_contract_view;"
+        "v = step_contract_view('fetch_ticket');"
+        "assert v['has_contract'] and 'ticket' in [f['name'] for f in v['produces']], v"
+    )
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
