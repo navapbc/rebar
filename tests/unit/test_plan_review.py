@@ -343,6 +343,18 @@ def test_bug_is_exempt() -> None:
     assert v["verdict"] == "PASS" and v["runner"] == "exempt"
 
 
+def test_review_records_latency_metrics() -> None:
+    from rebar.llm.runner import FakeRunner
+
+    fr = FakeRunner(structured={"analysis": "", "findings": []})
+    v = orchestrator.run_review(_ctx(_GOOD_AC, ttype="task"), _fake_cfg(), runner=fr)
+    m = v["coverage"]["metrics"]
+    assert "det_ms" in m and "llm_ms" in m and "total_ms" in m and "llm_calls" in m
+    assert m["total_ms"] >= 0 and "no-llm/no-network" in m["claim_path"]
+    # The sidecar payload lifts metrics to the top level for offline join.
+    assert sidecar.build_payload(v, material="x")["metrics"] == m
+
+
 class _SeqRunner:
     """A runner returning a scripted sequence of outcomes (dict) or raising
     (Exception) per call — exercises the size-handling ladder deterministically."""

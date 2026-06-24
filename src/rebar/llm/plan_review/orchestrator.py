@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -428,8 +429,17 @@ def run_review(
     if ctx.ticket_type == "session_log":
         return _exempt_verdict(ctx, reason="session_log tickets are gate-exempt")
 
+    # Per-pass LATENCY capture (child db7b AC5): wall-clock timing for the DET tier,
+    # the out-of-band LLM review, and the total — recorded on the sidecar so
+    # latency/cost targets are refined PASSIVELY from dogfood data (no upfront
+    # benchmark). The CLAIM-path check is structurally LLM/network-free (092b), so its
+    # cost is recorded as a constant marker, not timed here.
+    _t_total = time.monotonic()
+
     # ── DET tier (exec=DET) ──────────────────────────────────────────────────────
+    _t_det = time.monotonic()
     det_results = det_floor.run_det_floor(ctx)
+    det_ms = round((time.monotonic() - _t_det) * 1000, 1)
     det_blocks = det_floor.det_blocking_findings(det_results)
     det_advisories = det_floor.det_advisory_findings(det_results)
     coverage: dict[str, Any] = {"det": det_floor.det_coverage(det_results)}
@@ -440,6 +450,7 @@ def run_review(
 
     findings: list[dict[str, Any]] = []
     llm_ran = False
+    llm_ms = 0.0
     if not p8_too_big:
         single, agent = route_criteria(ctx)
         coverage["routing"] = {
@@ -449,7 +460,9 @@ def run_review(
         runner_sel = runner or get_runner(cfg)
         try:
             runner_sel.preflight()
+            _t_llm = time.monotonic()
             findings = _run_passes(ctx, cfg, runner_sel, single, agent, coverage)
+            llm_ms = round((time.monotonic() - _t_llm) * 1000, 1)
             llm_ran = True
         except Exception as exc:  # LLM unavailable → DET-only review (advisory still works)
             coverage["llm_error"] = str(exc)
@@ -533,6 +546,16 @@ def run_review(
         "advisory_overflow": len(overflow),
         "dropped": len(dropped),
         "indeterminate": len(indeterminate),
+    }
+    # Per-pass latency + a cost proxy (LLM-call count) for passive refinement (db7b AC5).
+    coverage["metrics"] = {
+        "det_ms": det_ms,
+        "llm_ms": llm_ms,
+        "total_ms": round((time.monotonic() - _t_total) * 1000, 1),
+        "llm_calls": int(coverage.get("chunks", 0))
+        + len(coverage.get("routing", {}).get("agent_tier", []))
+        + (1 if llm_ran and (surfaced or overflow) else 0),
+        "claim_path": "no-llm/no-network (structural; the fast claim check is a local HMAC verify)",
     }
     return {
         "verdict": verdict,

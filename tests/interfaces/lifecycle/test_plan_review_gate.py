@@ -191,6 +191,38 @@ def test_claim_path_makes_no_llm_call(rebar_repo: Path, monkeypatch) -> None:
     assert _status(tid, rebar_repo) == "in_progress"
 
 
+# ── REVIEW_RESULT retention prune bounds growth (db7b AC4) ──────────────────────
+def test_sidecar_prune_bounds_growth(rebar_repo: Path) -> None:
+    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar.llm.plan_review import sidecar
+
+    _commit(rebar_repo)
+    tid = _make(rebar_repo)
+    # Emit more sidecars than the retention bound; prune keeps the most-recent `keep`.
+    for _ in range(5):
+        sidecar.emit(
+            {
+                "ticket_id": tid,
+                "verdict": "PASS",
+                "coverage": {},
+                "blocking": [],
+                "advisory": [],
+                "overflow": [],
+                "indeterminate": [],
+                "dropped": [],
+                "coaching": [],
+            },
+            repo_root=str(rebar_repo),
+        )
+    tracker = Path(_config.tracker_dir(str(rebar_repo)))
+    rid = resolve_ticket_id(tid, str(tracker))
+    sidecar.prune(tid, keep=2, repo_root=str(rebar_repo))
+    remaining = list((tracker / rid).glob("*-REVIEW_RESULT.json"))
+    assert len(remaining) == 2, f"prune should retain 2, found {len(remaining)}"
+    # The ticket is still readable (reducer-ignored events never affect state).
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "open"
+
+
 # ── config: dotted enables, default off ─────────────────────────────────────────
 def test_config_flag_default_off(tmp_path: Path) -> None:
     from rebar import config
