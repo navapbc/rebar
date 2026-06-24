@@ -162,7 +162,7 @@ def transition(ticket_id: str, current_status: str, target_status: str, *, repo_
     }
 
 
-def claim(ticket_id: str, *, assignee=None, repo_root=None) -> dict:
+def claim(ticket_id: str, *, assignee=None, force=None, repo_root=None) -> dict:
     """Atomically claim an OPEN ticket: move it to ``in_progress`` and set its
     assignee in one locked critical section.
 
@@ -170,6 +170,11 @@ def claim(ticket_id: str, *, assignee=None, repo_root=None) -> dict:
     ``open`` — i.e. someone else already claimed it — and :class:`RebarError` for
     other failures. This is the optimistic-concurrency primitive parallel agents
     use to grab work without double-assignment.
+
+    When the plan-review claim gate is enabled
+    (``verify.require_plan_review_for_claim``), a non-bug/non-session_log claim
+    requires a fresh certified plan-review attestation; pass ``force="<reason>"``
+    to bypass the gate with an audit comment.
     """
     # In-process (Tier E E3): resolve the id, then run the shared claim core
     # (ticket-claim.sh was retired from this path). Returns the structured result
@@ -188,7 +193,9 @@ def claim(ticket_id: str, *, assignee=None, repo_root=None) -> dict:
             stderr=f"Error: ticket '{ticket_id}' not found\n",
         )
     try:
-        return _transition.claim_compute(resolved, assignee=assignee or "", repo_root=repo_root)
+        return _transition.claim_compute(
+            resolved, assignee=assignee or "", force_plan_review=force or "", repo_root=repo_root
+        )
     except ConcurrencyMismatch as exc:
         raise ConcurrencyError(
             f"claim rejected: {ticket_id} is not open (already claimed). {exc.message}",

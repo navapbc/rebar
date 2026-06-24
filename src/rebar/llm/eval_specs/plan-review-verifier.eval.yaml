@@ -1,0 +1,104 @@
+# Standing eval spec for the plan-review Pass-2 VERIFIER (epic 5fd2 / child acc1 + 7284).
+# The DISCRIMINATION proving check: a labeled set of {true finding, planted FALSE
+# finding}; Pass-2 must return `no`/`insufficient` (or LOWER graded validity) on the
+# false ones while leaving true findings standing — so the verifier DISCRIMINATES and
+# does not rubber-stamp. Distinct from the per-criterion finder cases. Also measures the
+# INVERSE (sycophancy) axis: the verifier must not charitably PASS a real defect.
+# Validate offline: `rebar prompt eval plan-review-verifier`.
+prompt: plan-review-verifier
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  - type: deterministic
+    name: emits_valid_verification
+    description: The output validates against the plan_review_verification contract.
+  - type: deterministic
+    name: discriminates_true_from_false
+    description: >
+      For each {true, planted-false} pair, the planted-false finding's graded validity
+      (the Pass-3 fraction of yes/insufficient/no binary sub-answers) is STRICTLY LOWER
+      than the true finding's — and false findings tend to no/insufficient. No
+      rubber-stamping (not all-yes), no over-suppression of true findings.
+  - type: deterministic
+    name: no_sycophancy_on_real_defects
+    description: >
+      A true, high-impact finding is not charitably dismissed: its graded validity stays
+      >= 0.5 (the Pass-3 drop floor) so a real defect is not silently passed.
+
+  - type: llm-judge
+    name: verification_reasoning_quality
+    gates: false
+    threshold: 0.7
+    pointwise: true
+    rubric: >
+      Score 0..1 whether the per-finding binary sub-answers are justified by the plan
+      text (verdict-with-citation, not verdict-with-fix), atomic, and independent of the
+      finding's own asserted conclusion.
+    grader:
+      model: openai:gpt-4o-2024-08-06
+      temperature: 0
+      seed: 11
+      snapshot: "2024-08-06"
+
+# Labeled discrimination pairs. `kind: true` = a genuine defect Pass-2 should uphold
+# (graded validity high); `kind: false` = a planted false-fire Pass-2 should knock down
+# (low validity). `pair` links a true/false case on the same criterion + axis.
+dataset:
+  - id: D1-true
+    criterion: E5
+    kind: "true"
+    pair: testing-plan
+    finding: "The payments-webhook plan states no idempotency test; a retried webhook would double-charge."
+    expect: high_validity
+  - id: D1-false
+    criterion: E5
+    kind: "false"
+    pair: testing-plan
+    mode: already-mitigated
+    finding: "The plan has no tests at all."
+    note: "Planted-false: the plan DOES specify request specs + an idempotency test elsewhere."
+    expect: low_validity
+  - id: D2-true
+    criterion: T5c
+    kind: "true"
+    pair: security
+    finding: "The OAuth host logs the raw bearer token at debug level (plan §logging)."
+    expect: high_validity
+  - id: D2-false
+    criterion: T5c
+    kind: "false"
+    pair: security
+    mode: speculative-from-text
+    finding: "Secrets 'baked at deploy' almost certainly means env-var leakage."
+    note: "Planted-false: speculation; the code uses Secrets Manager + constant-time compare."
+    expect: low_validity
+  - id: D3-false
+    criterion: T2
+    kind: "false"
+    pair: library-contract
+    mode: library-guaranteed-capability
+    finding: "Provider-agnosticism is unproven because completion was only run on Anthropic."
+    note: >
+      Planted-false (FP6): provider-agnosticism is the adopted library's documented
+      contract — no_existing_mitigation should be YES; the verifier must DROP this.
+    expect: low_validity
+  - id: D3-true
+    criterion: T3
+    kind: "true"
+    pair: library-contract
+    finding: "Pydantic AI NativeOutput for Anthropic specifically is a maturing feature, not proven here."
+    note: "True (the FP6-vs-T3 boundary): a specific immature integration point IS worth flagging."
+    expect: high_validity
+
+gold_set:
+  - input: "A planted-false 'no tests' finding when the plan specifies tests (D1-false)."
+    label: should_drop
+  - input: "A true missing-idempotency-test finding on a payments webhook (D1-true)."
+    label: should_uphold
+  - input: "FP6 'provider-agnosticism unproven' against an adopted library's contract (D3-false)."
+    label: should_drop
+  - input: "A real raw-token-logged security finding with a plan citation (D2-true)."
+    label: should_uphold

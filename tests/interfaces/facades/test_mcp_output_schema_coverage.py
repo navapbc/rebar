@@ -107,6 +107,9 @@ NO_SCHEMA_EXEMPT: dict[str, str] = {
     "verify_completion": "rebar.llm completion-verification op: live LLM call, returns a "
     "completion_verdict as a plain dict (no outputSchema) — same exemption rationale as "
     "review_ticket. CLI/library --output json is pinned via OUTPUT_SCHEMAS['verify_completion'].",
+    "review_plan": "rebar.llm plan-review gate (epic 5fd2): live LLM call(s), returns a "
+    "plan_review_verdict as a plain dict (no outputSchema) — same model-produced exemption "
+    "rationale as verify_completion. Inverse of the completion-verification close gate.",
     "run_workflow": "workflow engine (WS-C4): async — returns {run_id, ticket_id, "
     "status:'running'} immediately and runs in the background; a plain dict (no "
     "outputSchema) because it is a fire-and-forget START ack, not the run result "

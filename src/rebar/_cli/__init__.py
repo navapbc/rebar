@@ -287,6 +287,78 @@ def _verify_completion(argv: list[str]) -> int:
     return 0 if result.get("verdict") == "PASS" else 1
 
 
+def _review_plan(argv: list[str]) -> int:
+    """``rebar review-plan`` → rebar.llm.review_plan (native; like verify-completion).
+
+    Runs the three-pass plan-review gate on a ticket's whole plan, emits the
+    ``REVIEW_RESULT`` sidecar, and (on a non-blocking PASS) signs a plan-review
+    attestation so a subsequent ``claim`` passes the gate (when enabled). Needs the
+    'agents' extra + a model API key to run the LLM tiers; the DET floor runs
+    without them. Exit 0 on PASS, 1 on BLOCK, 2 on INDETERMINATE."""
+    import argparse
+    import json as _json
+
+    parser = argparse.ArgumentParser(
+        prog="rebar review-plan",
+        description="Run the plan-review gate on a ticket: a deterministic Layer-1 floor + a "
+        "three-pass (find → verify → decide) advisory coaching review of the plan, then sign a "
+        "plan-review attestation on a non-blocking PASS. The inverse of verify-completion.",
+    )
+    parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")
+    parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
+    parser.add_argument(
+        "--no-sign", action="store_true", help="run the review but do NOT sign an attestation"
+    )
+    parser.add_argument(
+        "--check", action="store_true", help="print backend/credential availability and exit"
+    )
+    args = parser.parse_args(argv)
+
+    from rebar import llm
+
+    if args.check:
+        sys.stdout.write(_json.dumps(llm.available_backends(), indent=2) + "\n")
+        return 0
+    if not args.ticket_id:
+        parser.error("ticket_id is required")
+    ensure_initialized(init_only=True)
+    try:
+        result = llm.review_plan(args.ticket_id, sign=not args.no_sign)
+    except llm.LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    if args.output == "json":
+        sys.stdout.write(_json.dumps(result) + "\n")
+    else:
+        _render_plan_review_text(result)
+    verdict = result.get("verdict")
+    return 0 if verdict == "PASS" else (2 if verdict == "INDETERMINATE" else 1)
+
+
+def _render_plan_review_text(result: dict) -> None:
+    """Human-readable plan-review summary (verdict + blocking/advisory + coaching)."""
+    v = result.get("verdict", "?")
+    sys.stdout.write(f"PLAN REVIEW: {v} for {result.get('ticket_id')}\n")
+    counts = (result.get("coverage", {}) or {}).get("counts", {}) or {}
+    sys.stdout.write(
+        f"  blocking={counts.get('blocking', 0)} "
+        f"advisory={counts.get('advisory_surfaced', 0)} "
+        f"dropped={counts.get('dropped', 0)} indeterminate={counts.get('indeterminate', 0)}\n"
+    )
+    for f in result.get("blocking", []):
+        sys.stdout.write(f"  [BLOCK {','.join(f.get('criteria', []))}] {f.get('finding', '')}\n")
+    for f in result.get("advisory", []):
+        sys.stdout.write(
+            f"  [advisory {','.join(f.get('criteria', []))} "
+            f"sev={f.get('severity')}] {f.get('finding', '')}\n"
+        )
+    for c in result.get("coaching", []):
+        sys.stdout.write(f"  → {c.get('coaching', '')}\n")
+    sig = result.get("signature", {})
+    if sig.get("signed"):
+        sys.stdout.write("  signed: plan-review attestation written\n")
+
+
 def _workflow(argv: list[str]) -> int:
     """``rebar workflow <new|validate|run|status|result>`` → the workflow toolchain.
 
@@ -1123,6 +1195,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if argv and argv[0] == "verify-completion":
         return _verify_completion(argv[1:])
+
+    # review-plan intercept (native rebar.llm plan-review gate; owns its --help).
+    if argv and argv[0] == "review-plan":
+        return _review_plan(argv[1:])
 
     # workflow intercept (native rebar.llm.workflow DSL toolchain; owns its --help).
     if argv and argv[0] == "workflow":

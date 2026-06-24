@@ -438,6 +438,17 @@ close; the signature gate requires a signature *before* it — enabling both dea
 close). An unreadable config fails this gate **off** (with a warning), so it never auto-enables
 across repos that didn't opt in.
 
+## See also — reuse reference + the plan-review gate
+
+- **[reuse-surface.md](reuse-surface.md)** — the developer API reference for the
+  reusable machinery a new capability builds on: the **signing** surface
+  (`rebar.signing`), the **runner + workflow-executor** runtime, the
+  **prompt/contract** model, and the **output-schema** seam. Exact signatures +
+  return shapes + invariants, for both human and LLM authors.
+- **[plan-review-gate.md](plan-review-gate.md)** — the plan-review gate
+  (`rebar.llm.review_plan` / `rebar review-plan`; the claim gate): the *inverse* of
+  the completion close gate, a worked consumer of all of the above.
+
 ## Deployment notes
 
 - **Langfuse** cloud is low-friction; self-hosting needs Postgres + ClickHouse +

@@ -4,7 +4,10 @@ rebar is an event-sourced ticket system + Jira reconciler exposed as a Python
 library (`import rebar`), a CLI (`rebar`), and an MCP server (`rebar-mcp`), all
 over one git-backed store. This guide is for **agents** driving rebar (especially
 over MCP). For internals see `docs/architecture.md`, `docs/event-schema.md`, and
-`docs/concurrency.md`.
+`docs/concurrency.md`. For the LLM/agent surfaces see `docs/llm-framework.md`, the
+reusable-machinery API reference `docs/reuse-surface.md` (signing + LLM runtime +
+prompt/contract + output-schema seams), and the plan-review gate
+`docs/plan-review-gate.md`.
 
 > **Record your work in rebar, not in scratch notes.** Before starting, `search`/
 > `list` for an existing ticket; if none fits, `create` one and capture the plan
@@ -37,6 +40,26 @@ list / search ──▶ ready ──▶ next-batch ──▶ claim ──▶ (wo
 4. **Finish** — `transition <id> in_progress closed` (optimistic-concurrency:
    pass the status you believe is current; a mismatch is exit 10). Use `reopen`
    to move a closed ticket back to open.
+
+## Gate protocols (MANDATORY)
+
+These two gates are not advisory — adhere to them strictly.
+
+**Plan-review protocol (before you claim).** A ticket must have a **successful plan
+review before it can be claimed**. Run `rebar review-plan <id>` (MCP `review_plan`)
+first. If the review **fails** (a BLOCK verdict), you must **remediate the failure
+and re-run the review** until it passes — do not claim a ticket with a failing or
+absent review. Even on a review that **passes**, you must **remediate all valid
+advisory findings** before continuing (triage each: fix the valid ones; a finding
+you judge invalid must be justified, not silently ignored). The coaching notes tell
+you the productive next move per finding.
+
+**Completion-verifier protocol (to close).** Closing a work ticket runs the
+completion verifier. If it **fails**, you must **remediate the failure and try to
+close the ticket again** — repeat until it passes (the signed verdict is the proof
+the criteria are met). Do **not** reach for `--force-close` to paper over a real
+failure; `--force` is for genuine emergencies under user direction and leaves a
+durable closed-without-signature signal.
 
 ## Optimistic concurrency (read this)
 

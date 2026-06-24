@@ -1,0 +1,10 @@
+---
+schema_version: 1
+title: Approach soundness, anti-patterns & alternative-selection [overlay]
+description: Plan-review approach-soundness criterion G6 (AGENT). The rubric the Pass-1
+  finder applies; routing in criteria_routing.json.
+execution_mode: agentic
+category: plan-review-criterion
+dimension: approach-soundness
+---
+Judge whether the plan's chosen APPROACH is sound and the best available — the defect a well-formed plan can still have. (1) MECHANISM CORRECTNESS: reason through whether the proposed mechanism actually achieves the goal — logic/data-flow complete, edge/empty/concurrent/failure cases handled, no hidden ordering/atomicity assumption that breaks (e.g. a check-then-act idempotency that is really a TOCTOU race). (2) FITNESS-FOR-PURPOSE: does this solution actually solve the named problem (not a proxy)? (3) APPROACH SELECTION (alternatives WITHOUT negative priming): YOU (the reviewer) generate 1-2 plausible alternative approaches that differ structurally (data-layer / control-flow / dependency-graph / interface-boundary) and judge whether the plan's chosen approach is defensibly at-least-as-good on codebase-alignment, blast-radius, testability, simplicity, robustness. If defensible -> PASS and DISCARD your generated alternatives (never write them into the plan). If a clearly-superior alternative was missed -> a FINDING coaching the PLANNER to adopt the better approach ('consider X because Y') — the implementer's plan still contains only ONE approach. (4) Confirm the plan states a POSITIVE rationale for the chosen approach (why it fits) — its ABSENCE is a finding; do NOT require a rejected-alternatives section (that primes implementers with rejected behavior). SEVERITY: a mechanism that won't work or a clearly-wrong approach = CRITICAL (agent builds the wrong thing); a missed clearly-better alternative = MAJOR; missing positive rationale = MINOR. ANTI-FP: mechanical/well-understood changes have no real design choice -> PASS not-applicable; do not manufacture alternatives for a forced solution; ground correctness reasoning in the actual code via the tools.

@@ -250,6 +250,14 @@ class VerifyConfig:
     # gate signs AFTER the close, while the signature gate requires a signature BEFORE it, so
     # enabling both deadlocks a non-force close. Enable one.
     require_completion_verification_for_close: bool = False
+    # Opt-in plan-review gate (epic 5fd2): when true, claiming a work ticket
+    # (open→in_progress) requires a fresh, certified plan-review attestation (run
+    # `rebar review-plan <id>` to earn one). Absent / stale (code-HEAD moved) /
+    # material-edited signatures BLOCK the claim; `--force` bypasses with a logged
+    # justification. A FAST local HMAC check only — no LLM on the claim path. Bugs
+    # and session_logs are exempt. Default off ⇒ `claim` keeps today's behavior;
+    # turning it off is the rollback (an ordinary preference, no kill-switch needed).
+    require_plan_review_for_claim: bool = False
 
 
 @dataclass
@@ -356,6 +364,7 @@ _SECTIONS: dict[str, dict] = {
     "verify": {
         "require_signature_for_close": lambda v, k: _as_bool(v, k),
         "require_completion_verification_for_close": lambda v, k: _as_bool(v, k),
+        "require_plan_review_for_claim": lambda v, k: _as_bool(v, k),
     },
     "ticket": {"display_mode": lambda v, k: _as_str(v, k) or "auto"},
     "ticket_clarity": {"threshold": lambda v, k: _as_int(v, k, minimum=1)},

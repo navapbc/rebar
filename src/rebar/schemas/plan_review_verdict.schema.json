@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_verdict.schema.json",
+  "title": "PlanReviewVerdict",
+  "description": "Output of the rebar.llm plan-review gate (`rebar review-plan <id>`): a PASS/BLOCK/INDETERMINATE verdict from a deterministic Layer-1 floor (P1-P8) + a three-pass (find -> verify -> decide) advisory coaching review of a ticket's whole plan, the inverse of the completion-verification close gate. SHAPE-ONLY: posture/decision rules are enforced by the orchestrator (code), not the schema. `verdict` is `string` (not a strict enum) so casing can be normalized. Findings are permissive objects (each carries an `id`, `criteria`, `decision`, `severity`, `priority`, etc.); the BLOCKING set is exempt from the advisory cap. The MCP `review_plan` tool returns this shape as a plain dict but advertises no outputSchema (live LLM call - a documented NO_SCHEMA_EXEMPT), exactly like verify_completion.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["verdict", "ticket_id"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "description": "PASS | BLOCK | INDETERMINATE (normalized by the orchestrator; not a strict enum)."
+    },
+    "ticket_id": { "type": "string", "description": "The reviewed ticket's canonical id." },
+    "ticket_type": { "type": "string", "description": "task | story | epic | bug | session_log." },
+    "blocking": {
+      "type": "array",
+      "description": "Findings that BLOCK the claim (DET floor by default; an LLM criterion only when opted in). EXEMPT from the advisory cap - all are always returned.",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "advisory": {
+      "type": "array",
+      "description": "Surfaced advisory (coaching) findings, capped at the config top-N by priority. Overflow goes to the REVIEW_RESULT sidecar, not here.",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "coaching": {
+      "type": "array",
+      "description": "Pass-4 affirmative coach notes over the surviving advisory findings: {move_id, move_name, subject, finding_refs[], coaching}. Prose is rendered deterministically from a locked move template.",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "indeterminate": {
+      "type": "array",
+      "description": "Findings the verifier could not resolve (e.g. budget/tool-unavailable).",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "overflow": {
+      "type": "array",
+      "description": "Advisory findings beyond the cap (sidecar-only; not surfaced to the agent).",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "dropped": {
+      "type": "array",
+      "description": "Findings dropped by Pass-3 (low validity / cited-reference veto; sidecar-only).",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "What ran: the DET-floor per-check coverage, the criteria routing, chunk count, llm_ran, and the verdict counts - recorded on the attestation so the review's completeness is visible."
+    },
+    "material_fingerprint": {
+      "type": ["string", "null"],
+      "description": "Hash of the plan's material content (description/AC/file_impact/decomposition), bound into the signed attestation for material-edit invalidation."
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Attestation status: {signed: bool, key_id?, head_sha?} on a signed PASS, or {signed: false, reason|error}."
+    },
+    "sidecar_emitted": {
+      "type": "boolean",
+      "description": "Whether the REVIEW_RESULT observability sidecar event was written (best-effort)."
+    },
+    "runner": { "type": "string", "description": "Execution backend: 'pydantic_ai', 'fake', 'exempt'." },
+    "model": { "type": ["string", "null"], "description": "Model id used (null for non-LLM/exempt)." }
+  }
+}

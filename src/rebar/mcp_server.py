@@ -642,6 +642,29 @@ def build_server():
 
         return rebar.llm.verify_completion(ticket_id, graph=True if graph else None)
 
+    @mcp.tool()
+    def review_plan(ticket_id: str) -> dict:
+        """Run the plan-review gate on a ticket -> a plan_review_verdict dict
+        {verdict: "PASS"|"BLOCK"|"INDETERMINATE", blocking[], advisory[], coaching[],
+        indeterminate[], coverage, signature?, ...}. A deterministic Layer-1 floor (P1-P8)
+        plus a three-pass (find -> verify -> decide) advisory coaching review of the ticket's
+        whole plan — the inverse of verify_completion. On a non-blocking PASS it signs a
+        plan-review attestation (so a subsequent claim passes the gate when enabled) and emits
+        the REVIEW_RESULT sidecar; in READONLY mode it runs a pure read (no sign, no sidecar).
+
+        DISABLED unless REBAR_MCP_ALLOW_LLM=1: this makes live, billable LLM calls and reaches
+        the network + filesystem. Needs the 'agents' extra + a model API key. Returns a plain
+        dict and advertises NO outputSchema by design (model-produced result; NO_SCHEMA_EXEMPT)."""
+        if not _allow_llm():
+            raise ValueError(
+                "review_plan is disabled: it makes live, billable LLM calls. "
+                "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
+            )
+        import rebar.llm
+
+        ro = _readonly()
+        return rebar.llm.review_plan(ticket_id, sign=not ro, emit_sidecar=not ro)
+
     # ── Write tools (gated by REBAR_MCP_READONLY) ──────────────────────────────
     if not _readonly():
 

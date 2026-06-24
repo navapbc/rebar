@@ -41,6 +41,7 @@ from rebar.llm.errors import (
 )
 from rebar.llm.findings import build_result, normalize_finding, validate_result
 from rebar.llm.operations import review_ticket, select_reviewers
+from rebar.llm.plan_review import claim_gate_check, review_plan
 from rebar.llm.prompts import Prompt, Reviewer, get_prompt, load_catalog
 from rebar.llm.runner import (
     FakeRunner,
@@ -56,6 +57,8 @@ __all__ = [
     "review_code",
     "scan_epics_for_spec",
     "verify_completion",
+    "review_plan",
+    "claim_gate_check",
     "select_reviewers",
     "select_code_reviewers",
     "aggregate_findings",

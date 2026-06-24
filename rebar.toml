@@ -11,6 +11,15 @@
 # Requires the `nava-rebar[agents]` extra + a model API key (e.g. ANTHROPIC_API_KEY).
 require_completion_verification_for_close = true
 
+# Plan-review claim gate (epic 5fd2): claiming a work ticket (open->in_progress)
+# requires a fresh, certified plan-review attestation — run `rebar review-plan <id>`
+# to earn one. Absent/stale/material-edited signatures BLOCK the claim; `--force`
+# bypasses with an audit comment. A FAST local HMAC check only (no LLM on the claim
+# path); the heavy three-pass review runs out-of-band. Bugs/session_logs are exempt.
+# Independent of the close gates (this gates CLAIM, they gate CLOSE). See
+# docs/plan-review-gate.md. Turning this off is the rollback.
+require_plan_review_for_claim = true
+
 [mcp]
 # Enable the LLM agent operations over the MCP server (review_ticket / review_code /
 # scan_spec / verify_completion). They make live, billable LLM calls.
