@@ -201,7 +201,6 @@ requires a row here.
 | `rebar_reconciler/reconcile.py` | decompose the ~750-LOC `reconcile_once` into named in-place phase helpers (corrupt-snapshot abort, OM→Mutation conversion); the natural sub-blocks are below the 100-LOC file floor, so prefer in-place helpers over a sibling module |
 | `rebar_reconciler/outbound_differ.py` | extract the comment-diff cluster (`_diff_comments` + its `_normalize_comment_body`/`_decorate_outbound_comment`/`_map_comments_for_create`/`_is_machine_marker_comment`/`_load_comment_limits`/`_load_adf` satellites) to a sibling `outbound_comments.py`; keep the field/label/link differs + `compute_outbound_mutations` orchestrator |
 | `__init__.py` | library facade over the cap (also carries the workflow entrypoints `run_workflow`/`get_workflow_status`/`get_workflow_result` + `attach_commits`, epic a88f). KEEP as one surface: it is a deliberate flat public-API namespace whose functions share private helpers; a read/write split forces re-exports for no readability gain |
-| `_engine_support/reads.py` | split the CLI `_cmd_*` arms from the `*_state` facades along the existing seam (the facades are imported widely; the `_cmd_*` arms only by the local `main`) |
 | `config.py` | split the dataclass/schema from the env/CLI-override + cache machinery along the existing seam |
 | `mcp_server.py` | thin FastMCP tool layer. `build_server` is ~30 `@mcp.tool()` closures over a local `mcp`; splitting needs a registrar refactor — watch, don't split preemptively |
 | `llm/workflow/lint_refs.py` | grew past cap adding the prompt/step CONTRACT awareness (workflow authoring v2, 5e78): the engine-injected-inputs allow-list + the `${{ steps.*.outputs.* }}` name-existence map. Extract a `lint_contracts.py` once stories e050 (8 op contracts) + c768 (3-state validation depth) add the related logic that clears the 100-LOC floor; today that seam alone is sub-floor |
@@ -222,6 +221,14 @@ workflow handlers to `src/rebar/_cli/_workflow_commands.py`, leaving the argv ro
 (`_dispatch`/`main`/`build_parser` + `_reconcile`) under the soft cap. `main()`
 imports the entrypoints it dispatches to; the two command modules don't import each
 other.
+
+`src/rebar/_engine_support/reads.py` was **split** the same way: the argv-facing
+`_cmd_*` arms + the `main` dispatcher moved to
+`src/rebar/_engine_support/reads_cli.py`, leaving the widely-imported `*_state`
+facades (and `tracker_dir`/`ensure_fresh`/`ReadError`) in `reads.py` under the cap.
+`reads_cli` imports the facades from `reads` (one direction); `reads.main` is a thin
+lazy wrapper that delegates to `reads_cli.main` for backward compatibility (avoids an
+import cycle).
 
 Files in the 500–800 band (`_commands/transition.py`, `_commands/composer.py`,
 `_engine_support/next_batch.py`, `llm/runner.py`, and several `rebar_reconciler/`
