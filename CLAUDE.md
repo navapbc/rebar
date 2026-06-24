@@ -41,6 +41,26 @@ list / search ──▶ ready ──▶ next-batch ──▶ claim ──▶ (wo
    pass the status you believe is current; a mismatch is exit 10). Use `reopen`
    to move a closed ticket back to open.
 
+## Gate protocols (MANDATORY)
+
+These two gates are not advisory — adhere to them strictly.
+
+**Plan-review protocol (before you claim).** A ticket must have a **successful plan
+review before it can be claimed**. Run `rebar review-plan <id>` (MCP `review_plan`)
+first. If the review **fails** (a BLOCK verdict), you must **remediate the failure
+and re-run the review** until it passes — do not claim a ticket with a failing or
+absent review. Even on a review that **passes**, you must **remediate all valid
+advisory findings** before continuing (triage each: fix the valid ones; a finding
+you judge invalid must be justified, not silently ignored). The coaching notes tell
+you the productive next move per finding.
+
+**Completion-verifier protocol (to close).** Closing a work ticket runs the
+completion verifier. If it **fails**, you must **remediate the failure and try to
+close the ticket again** — repeat until it passes (the signed verdict is the proof
+the criteria are met). Do **not** reach for `--force-close` to paper over a real
+failure; `--force` is for genuine emergencies under user direction and leaves a
+durable closed-without-signature signal.
+
 ## Optimistic concurrency (read this)
 
 State-dependent ops (`transition`, `claim`, `reopen`) re-read the ticket under a

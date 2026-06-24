@@ -59,15 +59,31 @@ def _pass1_model() -> type:
     class P1Finding(BaseModel):
         finding: str = Field(description="The defect/gap, stated as a claim to verify.")
         criteria: list[str] = Field(default_factory=list, description="Rubric criterion id(s).")
+        location: str = Field(
+            default="",
+            description="WHERE: the plan section / file path / AC line the finding is about.",
+        )
         evidence: list[str] = Field(
             default_factory=list,
             description="Flexible grounding: a plan quote, section name, or ABSENCE rationale.",
         )
         scenarios: list[str] = Field(default_factory=list, description="Where this bites.")
         impact: str = Field(default="", description="Consequence if unaddressed.")
+        checklist_item: str = Field(
+            default="",
+            description="The finding expressed as ONE actionable `- [ ]` checklist line.",
+        )
+        suggested_fix: str = Field(
+            default="",
+            description="A concrete fix — ONLY when you are confident; leave empty otherwise.",
+        )
 
     class P1Output(BaseModel):
         analysis: str = Field(default="", description="Scratchpad — reason before emitting.")
+        affirmations: list[str] = Field(
+            default_factory=list,
+            description="Criteria this chunk PASSES — affirm what already holds (not findings).",
+        )
         findings: list[P1Finding] = Field(default_factory=list)
 
     return P1Output
@@ -144,12 +160,17 @@ _DECISIVENESS = (
 PASS1_SYSTEM = (
     "You are an expert software-plan reviewer running PASS 1 of a three-pass review. Your job is "
     "to COACH the author toward a better plan by surfacing grounded findings — not to nitpick or "
-    "roadblock. Output one record PER distinct finding: {finding, criteria[], evidence[], "
-    "scenarios[], impact}. criteria[] = the rubric id(s) the finding maps to. evidence[] = "
-    "flexible free text: a quoted plan phrase, a named section, an ABSENCE rationale (plan-review "
-    "findings are often non-citable), or a code citation. Do NOT emit severity, confidence, or "
-    "priority — a separate pass computes those. Ground every finding in specific evidence. A clean "
-    "chunk returns an empty findings list (that is expected and good)." + _DECISIVENESS
+    "roadblock. Conform to the COACHING SPEC for every finding: (a) ground it in a specific "
+    "CRITERION and a LOCATION (the plan section / file path / AC line — set `location`); (b) make "
+    "it specific and actionable; (c) express it as ONE `- [ ]` checklist line (set "
+    "`checklist_item`); (d) provide a `suggested_fix` ONLY when you are confident, else leave it "
+    "empty. Also AFFIRM what already passes: list the criteria this chunk satisfies in "
+    "`affirmations` (positive feedback, not findings). criteria[] = the rubric id(s) the finding "
+    "maps to. evidence[] = flexible free text: a quoted plan phrase, a named section, an ABSENCE "
+    "rationale (plan-review findings are often non-citable), or a code citation. Do NOT emit "
+    "severity, confidence, or priority — a separate pass computes those. A clean chunk returns an "
+    "empty findings list (and affirms the criteria it passed) — that is expected and good."
+    + _DECISIVENESS
 )
 
 PASS2_SYSTEM = (
@@ -223,10 +244,78 @@ def pass1_chunk(
             {
                 "finding": f.get("finding", ""),
                 "criteria": crit,
+                "location": f.get("location", ""),
                 "evidence": f.get("evidence", []) or [],
                 "scenarios": f.get("scenarios", []) or [],
                 "impact": f.get("impact", ""),
+                "checklist_item": f.get("checklist_item", ""),
+                "suggested_fix": f.get("suggested_fix", ""),
                 "_agentic": agentic,
+            }
+        )
+    return out
+
+
+CONTAINER_SYSTEM = (
+    "You are running a CONTAINER criterion (child coverage / child consistency) for ONE "
+    "(parent + single child) pairing at a time — both shown WHOLE. G3 = does the child help cover "
+    "the parent's acceptance/success criteria (and are any parent criteria left uncovered)? "
+    "G4 = is the child CONSISTENT with the parent and its siblings (no contradiction, scope "
+    "overlap, or ordering gap)? You are given the COMPLETE sibling roster — when you flag an "
+    "ABSENCE ('the parent criterion X is not covered'), CHECK it against the WHOLE roster first; "
+    "only flag it if NO sibling covers it. Emit findings {finding, criteria[], location, "
+    "evidence[], scenarios[], impact, checklist_item, suggested_fix} — no severity/confidence."
+)
+
+
+def pass1_container(
+    runner: Runner,
+    cfg: LLMConfig,
+    *,
+    parent_plan: str,
+    child: dict[str, Any],
+    criterion: dict[str, Any],
+    sibling_roster: str,
+) -> list[dict[str, Any]]:
+    """Run a container criterion (G3/G4) for ONE (parent + single child) pairing,
+    agentic (it reads the live graph). The complete sibling roster is supplied so an
+    absence finding can be cross-checked against ALL siblings before it stands."""
+    cid = criterion["id"]
+    child_id = child.get("ticket_id", "?")
+    child_whole = f"### child {child_id}: {child.get('title', '')}\n{child.get('description', '')}"
+    req = RunRequest(
+        system_prompt=_plan_system(CONTAINER_SYSTEM, parent_plan),
+        instructions=(
+            f"## Criterion {cid}\n{_criterion_block(criterion)}\n\n"
+            f"## The one child under review (whole)\n{child_whole}\n\n"
+            f"## Complete sibling roster (for absence cross-check)\n{sibling_roster}\n\n"
+            f"Evaluate the parent + THIS child for {cid}. An absence is a finding only if NO "
+            "sibling in the roster covers it. A clean pairing returns an empty findings list."
+        ),
+        config=cfg,
+        reviewers=["plan-container"],
+        mode="structured",
+        output_schema="plan_review_findings",
+        execution_mode="agentic",
+    )
+    result = runner.run(req)
+    out: list[dict[str, Any]] = []
+    for f in result.get("findings", []) or []:
+        out.append(
+            {
+                "finding": f.get("finding", ""),
+                "criteria": [cid],
+                "location": f.get("location", "") or f"child {child_id}",
+                "evidence": [
+                    *(f.get("evidence", []) or []),
+                    f"per-child pairing: parent + {child_id}",
+                ],
+                "scenarios": f.get("scenarios", []) or [],
+                "impact": f.get("impact", ""),
+                "checklist_item": f.get("checklist_item", ""),
+                "suggested_fix": f.get("suggested_fix", ""),
+                "_agentic": True,
+                "_container_child": child_id,
             }
         )
     return out

@@ -302,6 +302,49 @@ def test_route_criteria_splits_agent_and_single() -> None:
     assert all(registry.exec_tier(c) == "AGENT" for c in agent)
 
 
+def test_pass1_finding_carries_coaching_spec_fields() -> None:
+    from rebar.llm.runner import FakeRunner
+
+    fr = FakeRunner(
+        structured={
+            "analysis": "",
+            "affirmations": ["F4"],
+            "findings": [
+                {
+                    "finding": "vague AC",
+                    "criteria": ["E2"],
+                    "location": "## Acceptance Criteria line 2",
+                    "checklist_item": "- [ ] make AC 2 measurable",
+                    "suggested_fix": "state an observable outcome",
+                }
+            ],
+        }
+    )
+    out = passes.pass1_chunk(fr, _fake_cfg(), plan="p", chunk=[{"id": "E2", "name": "x"}])
+    assert out[0]["location"] and out[0]["checklist_item"] and out[0]["suggested_fix"]
+
+
+def test_container_loop_per_child_and_too_big_pairing() -> None:
+    from rebar.llm.runner import FakeRunner
+
+    children = [
+        {"ticket_id": "c1", "title": "C1", "description": "small child"},
+        {"ticket_id": "c2", "title": "C2", "description": "x " * 200_000},  # oversized pairing
+    ]
+    ctx = _ctx(_GOOD_AC, ttype="epic", children=children, largest_window_tokens=50_000)
+    fr = FakeRunner(
+        structured={"analysis": "", "findings": [{"finding": "gap", "criteria": ["G3"]}]}
+    )
+    g3 = registry.by_id()["G3"]
+    cov: dict = {}
+    out = orchestrator._run_container(ctx, _fake_cfg(), fr, [g3], cov)
+    # c1 pairing fits → a per-child finding tagged with the child; c2 is too-big → a
+    # failure finding citing the oversized pairing.
+    assert any(f.get("_container_child") == "c1" for f in out)
+    assert any("too big" in f["finding"].lower() and "c2" in f["finding"] for f in out)
+    assert cov["container"]["children"] == 2
+
+
 def test_isf_excluded_from_normal_routing() -> None:
     # ISF is fed the session log separately; it must never enter the rubric chunks.
     single, agent = orchestrator.route_criteria(_ctx(_GOOD_AC, ttype="story"))

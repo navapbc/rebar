@@ -192,6 +192,79 @@ def route_criteria(ctx: PlanContext) -> tuple[list[dict], list[dict]]:
     return single, agent
 
 
+# Container criteria (parent + one child at a time); handled by the dedicated
+# per-child loop, never the normal agent path.
+CONTAINER_CRITERIA = ("G3", "G4")
+
+
+def _run_container(
+    ctx: PlanContext,
+    cfg: LLMConfig,
+    runner: Runner,
+    container: list[dict],
+    coverage: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Run the container criteria (G3/G4) as (parent + ONE child) pairings, both
+    whole, and aggregate. A pairing too big for the largest window is a failure
+    finding (reduce the ticket), not a skip. The complete sibling roster is fed so
+    absence findings can be cross-checked against ALL siblings before they stand."""
+    roster = "\n".join(
+        f"- {c.get('ticket_id')}: {c.get('title', '')}" for c in ctx.children
+    )
+    budget = (
+        int(ctx.largest_window_tokens * det_floor.P8_HEADROOM) - det_floor.P8_OUTPUT_RESERVE_TOKENS
+    )
+    parent_tokens = det_floor.est_tokens(ctx.plan_text)
+    out: list[dict[str, Any]] = []
+    pairings = 0
+    for crit in container:
+        for child in ctx.children:
+            pair_tokens = parent_tokens + det_floor.est_tokens(
+                f"{child.get('title', '')}\n{child.get('description', '')}"
+            )
+            if pair_tokens > budget:
+                out.append(
+                    {
+                        "finding": (
+                            f"The (parent + child {child.get('ticket_id')}) pairing is too big to "
+                            f"review together for {crit['id']} (~{pair_tokens} tokens > budget)."
+                        ),
+                        "criteria": [crit["id"]],
+                        "location": f"child {child.get('ticket_id')}",
+                        "evidence": [f"parent+child ~{pair_tokens} tokens exceeds ~{budget}"],
+                        "scenarios": [],
+                        "impact": "Container coverage/consistency cannot be checked at this size.",
+                        "checklist_item": (
+                            f"- [ ] Reduce the parent or child {child.get('ticket_id')} so they "
+                            "review together."
+                        ),
+                        "suggested_fix": "Decompose the oversized ticket(s).",
+                        "tier": "DET",
+                    }
+                )
+                continue
+            try:
+                out.extend(
+                    passes.pass1_container(
+                        runner,
+                        cfg,
+                        parent_plan=ctx.plan_text,
+                        child=child,
+                        criterion=crit,
+                        sibling_roster=roster,
+                    )
+                )
+            except Exception:  # a failed pairing drops its findings, never aborts
+                pass
+            pairings += 1
+    coverage["container"] = {
+        "criteria": [c["id"] for c in container],
+        "children": len(ctx.children),
+        "pairings_evaluated": pairings,
+    }
+    return out
+
+
 def _linked_session_log(ctx: PlanContext, cfg: LLMConfig, runner) -> tuple[str | None, bool]:
     """The text of the ticket's linked SESSION LOG(s) for the ISF criterion, and
     whether it was summarized to fit the window. Returns ``(None, False)`` when no
@@ -386,6 +459,10 @@ def _run_passes(
     aggregate verify → Pass-3 deterministic decide. Returns findings with decisions."""
     plan = ctx.plan_text
     size = _ticket_size(ctx)
+    # Container criteria (G3/G4) run via the dedicated per-child loop, not the normal
+    # agent path — pull them out of `agent`.
+    container = [c for c in agent if c["id"] in CONTAINER_CRITERIA]
+    agent = [c for c in agent if c["id"] not in CONTAINER_CRITERIA]
     chunks = registry.chunk_by_facet(single, model=cfg.model, ticket_size=size)
     coverage["chunks"] = len(chunks)
 
@@ -402,6 +479,14 @@ def _run_passes(
                 findings.extend(fu.result() or [])
             except Exception:  # a failed chunk drops its findings, never aborts the review
                 pass
+
+    # Container criteria (G3 child coverage / G4 child consistency): evaluate
+    # (parent + ONE child) per call, both whole, and AGGREGATE — never the whole
+    # child set in one call. A too-big (parent+child) pairing is a failure finding
+    # (reduce the ticket), not a silent skip. Absence findings are cross-checked
+    # against the COMPLETE sibling roster (fed to the finder + re-verified in Pass-2).
+    if container and ctx.has_children:
+        findings.extend(_run_container(ctx, cfg, runner, container, coverage))
 
     # ISF (child 681b): fed the LINKED SESSION LOG (not a rubric chunk), single-turn,
     # fires ONLY when a session log is linked. Oversized logs fall back to a SUMMARY
