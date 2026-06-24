@@ -15,7 +15,7 @@ name: test
 
 on:
   push:
-    branches: ["main"]
+    branches: ["**"]  # run on every branch, not just main (pre-PR CI feedback)
   pull_request: {}
   workflow_dispatch: {}
 
