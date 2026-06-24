@@ -42,39 +42,19 @@ from .det_floor import PlanContext
 # findings are EXEMPT — the cap can never weaken the block decision.
 DEFAULT_ADVISORY_CAP = 10
 
-# Model-by-window escalation ladder (child ca03 size handling). Estimated tokens →
-# the smallest model whose window fits; escalate up on a context-limit signal.
-MODEL_LADDER = (
-    ("claude-haiku-4-5", 200_000),
-    ("claude-sonnet-4-6", 1_000_000),
-    ("claude-opus-4-8", 1_000_000),
+# The size/budget/ladder/checkpoint cluster lives in :mod:`.sizing`; re-export the
+# names this module + the tests use (backward-compatible public surface). Private
+# aliases (``_centrality`` etc.) preserve the historical call sites.
+from . import sizing  # noqa: E402
+from .sizing import (  # noqa: E402
+    largest_window_tokens,
 )
 
-# Per-plan BUDGET CAP (experiment-grounded tiers; config-overridable via
-# REBAR_PLAN_REVIEW_BUDGET). DET ~free, single-turn ~$0.006 cached, AGENT ~$0.12 (≈85×
-# a single-turn call), container fans out one AGENT call per child. On a projected
-# cap-hit the orchestrator SHEDS the lowest-priority AGENT/overlay criteria FIRST
-# (never the cheap single-turn base), recording each shed criterion as an INDETERMINATE
-# outcome (non-blocking default). Centrality SCALES the cap (a central plan earns more).
-COST_SINGLE_TURN_USD = 0.006
-COST_AGENT_USD = 0.12
-DEFAULT_BUDGET_CAP_USD = 2.0
-
-
-def plan_budget_cap(ctx: PlanContext) -> float:
-    """The per-plan budget cap in USD: a base cap scaled by centrality (a central,
-    high-blast-radius plan earns up to 2× scrutiny), overridable by the
-    ``REBAR_PLAN_REVIEW_BUDGET`` env var (the base, before centrality scaling)."""
-    import os
-
-    base = DEFAULT_BUDGET_CAP_USD
-    raw = os.environ.get("REBAR_PLAN_REVIEW_BUDGET", "").strip()
-    if raw:
-        try:
-            base = float(raw)
-        except ValueError:
-            pass
-    return round(base * (1.0 + ctx.centrality), 4)
+_centrality = sizing.centrality
+_is_context_limit_error = sizing.is_context_limit_error
+_models_at_or_above = sizing.models_at_or_above
+_pass1_with_ladder = sizing.pass1_with_ladder
+_shed_to_budget = sizing.shed_to_budget
 
 
 # Pass-4 move registry (moves 1-9,11,12 with LOCKED templates; project-extensible
@@ -184,33 +164,6 @@ def assemble_context(
     )
 
 
-def _centrality(state: dict[str, Any], children: list[dict[str, Any]]) -> float:
-    """Blast-radius signal ∈ [0,1] computed at plan time from the ticket graph:
-    how many tickets DEPEND ON this one (incoming blocks / depends_on) + how many
-    children it has. A central, high-fan-in plan earns more scrutiny + budget. A
-    saturating map (≈1.0 by ~10 dependents) keeps it bounded."""
-    deps = state.get("deps", []) or []
-    dependents = sum(1 for d in deps if d.get("relation") in ("blocks", "depends_on"))
-    blast = dependents + len(children)
-    return round(min(1.0, blast / 10.0), 3)
-
-
-def largest_window_tokens(model: str | None) -> int:
-    """The largest context window the gate can escalate to for P8's budget. If the
-    configured model is on the ladder, the ladder's top window applies (we can
-    escalate up to it); an unknown model uses its own ladder entry if present, else
-    the ladder's maximum. A model SMALLER than the ladder top (e.g. a haiku-only
-    deployment) caps P8 at that model's window so P8 doesn't under-block."""
-    if model:
-        for name, _window in MODEL_LADDER:
-            if name in model:
-                # The gate escalates UP the ladder from this model, so the effective
-                # ceiling is the max window at-or-above it.
-                idx = [n for n, _ in MODEL_LADDER].index(name)
-                return max(w for _, w in MODEL_LADDER[idx:])
-    return MODEL_LADDER[-1][1]
-
-
 # ── finding id (content fingerprint — orchestrator is the SOLE owner) ─────────────
 def mint_finding_id(finding: dict[str, Any]) -> str:
     """A stable content fingerprint for a finding (the caller-visible ``id`` the
@@ -257,111 +210,6 @@ def route_criteria(ctx: PlanContext) -> tuple[list[dict], list[dict]]:
 # Container criteria (parent + one child at a time); handled by the dedicated
 # per-child loop, never the normal agent path.
 CONTAINER_CRITERIA = ("G3", "G4")
-
-
-def _is_context_limit_error(exc: Exception) -> bool:
-    """Heuristic: does ``exc`` look like a provider context-window/too-many-tokens
-    error (vs an unrelated failure)? Matches the common phrasings across providers."""
-    msg = str(exc).lower()
-    return any(
-        s in msg
-        for s in (
-            "context",
-            "too many tokens",
-            "maximum context",
-            "context_length",
-            "prompt is too long",
-            "input length",
-            "exceeds the maximum",
-            "token limit",
-        )
-    )
-
-
-def _models_at_or_above(model: str | None) -> list[str]:
-    """The model ladder from ``model`` upward (by window), for runtime escalation.
-    Unknown/absent model → the whole ladder."""
-    names = [n for n, _w in MODEL_LADDER]
-    if model:
-        for i, n in enumerate(names):
-            if n in model:
-                return names[i:]
-    return list(names)
-
-
-def _pass1_with_ladder(
-    runner: Runner,
-    cfg: LLMConfig,
-    plan: str,
-    chunk: list[dict],
-    agentic: bool,
-    events: list[str],
-) -> list[dict[str, Any]]:
-    """Run a Pass-1 finder call with the SIZE-HANDLING LADDER (ca03 AC4/AC6):
-
-    1. run the criteria BATCH (chunk) at the configured model;
-    2. on a context-limit signal, fall back to ONE CRITERION PER CALL (full content,
-       minimal rubric — content is never chunked);
-    3. on a context-limit signal for a single criterion, ESCALATE up the model ladder
-       to a higher-context window and retry;
-    4. if a single criterion still won't fit at the largest window, emit a FAILURE
-       FINDING (P8: the ticket is too big to review in full — reduce/decompose it).
-
-    Non-context errors drop the unit's findings (never abort the review), as before.
-    ``events`` accumulates a human-readable ladder trace for the coverage record."""
-    from dataclasses import replace
-
-    try:
-        return passes.pass1_chunk(runner, cfg, plan=plan, chunk=chunk, agentic=agentic)
-    except Exception as exc:  # noqa: BLE001
-        if not _is_context_limit_error(exc):
-            return []  # unrelated failure → drop this unit's findings (never abort)
-
-    # Step 2/3: drop to one-criterion-per-call, escalating the model per criterion.
-    if len(chunk) > 1:
-        events.append(f"batch of {len(chunk)} hit the context limit → one-criterion-per-call")
-    out: list[dict[str, Any]] = []
-    for crit in chunk:
-        produced = False
-        for model in _models_at_or_above(cfg.model):
-            try:
-                out.extend(
-                    passes.pass1_chunk(
-                        runner, replace(cfg, model=model), plan=plan, chunk=[crit], agentic=agentic
-                    )
-                )
-                if model != cfg.model:
-                    events.append(f"{crit['id']}: escalated to {model}")
-                produced = True
-                break
-            except Exception as exc:  # noqa: BLE001
-                if not _is_context_limit_error(exc):
-                    produced = True  # non-size failure → drop, don't escalate
-                    break
-                continue  # context limit at this model → escalate to the next
-        if not produced:
-            # Step 4: still too big at the largest window, one criterion at a time.
-            events.append(f"{crit['id']}: too big even at the largest model → failure finding")
-            out.append(
-                {
-                    "finding": (
-                        "The ticket is too large to review in full even for a single criterion "
-                        f"({crit['id']}) at the largest context window."
-                    ),
-                    "criteria": [crit["id"]],
-                    "location": "(whole plan)",
-                    "evidence": [
-                        "content exceeds the largest model window one-criterion-at-a-time"
-                    ],
-                    "scenarios": [],
-                    "impact": "The plan cannot be reviewed whole; reduce/decompose it (P8/G5).",
-                    "checklist_item": "- [ ] Reduce/decompose the ticket so it fits a review pass.",
-                    "suggested_fix": "Split the ticket into smaller children.",
-                    "tier": "DET",
-                    "_too_big": True,
-                }
-            )
-    return out
 
 
 def _run_container(
@@ -428,60 +276,6 @@ def _run_container(
         "pairings_evaluated": pairings,
     }
     return out
-
-
-def _shed_to_budget(
-    ctx: PlanContext,
-    chunks: list,
-    agent: list[dict],
-    container: list[dict],
-    coverage: dict[str, Any],
-) -> tuple[list[dict], list[dict], list[dict]]:
-    """Shed the lowest-priority AGENT/overlay criteria first when the projected spend
-    exceeds the per-plan budget cap. Returns (kept_agent, kept_container, shed). The
-    cheap single-turn chunks + the DET floor always run; we shed only the 85× AGENT
-    criteria — overlays (T*) before the core code-grounding set, then container — and
-    record the shed set so the caller can emit INDETERMINATE outcomes for them."""
-    cap = plan_budget_cap(ctx)
-    n_children = max(1, len(ctx.children))
-
-    def project(ag: list[dict], cont: list[dict]) -> float:
-        return round(
-            len(chunks) * COST_SINGLE_TURN_USD
-            + len(ag) * COST_AGENT_USD
-            + len(cont) * n_children * COST_AGENT_USD,
-            4,
-        )
-
-    projected_initial = project(agent, container)
-    agent = list(agent)
-    container = list(container)
-    shed: list[dict] = []
-    # Sheddable, lowest-priority first: overlay AGENT criteria, then container, then
-    # the core code-grounding criteria (E4/G1G2/A1/G6) last (most load-bearing).
-    overlay_agent = [c for c in agent if registry.is_overlay(c["id"])]
-    core_agent = [c for c in agent if not registry.is_overlay(c["id"])]
-    shed_queue = (
-        [("agent", c) for c in overlay_agent]
-        + [("container", c) for c in container]
-        + [("agent", c) for c in core_agent]
-    )
-    while project(agent, container) > cap and shed_queue:
-        kind, c = shed_queue.pop(0)
-        c = {**c, "_tier": "AGENT"}
-        shed.append(c)
-        if kind == "container":
-            container = [x for x in container if x["id"] != c["id"]]
-        else:
-            agent = [x for x in agent if x["id"] != c["id"]]
-    coverage["budget"] = {
-        "cap_usd": cap,
-        "centrality": ctx.centrality,
-        "projected_usd_initial": projected_initial,
-        "projected_usd_final": project(agent, container),
-        "shed": [c["id"] for c in shed],
-    }
-    return agent, container, shed
 
 
 def _ticket_graph_blob(ctx: PlanContext) -> str:
@@ -758,16 +552,26 @@ def _run_passes(
 
     findings: list[dict[str, Any]] = list(budget_indeterminate)
     ladder_events: list[str] = []
+    # Chunk-atomic CHECKPOINTING: resume completed Pass-1 chunks from a prior run
+    # (keyed by the ticket's MATERIAL fingerprint, so an edit invalidates the cache),
+    # and persist each chunk's result atomically as it completes.
+    material = material_fingerprint(ctx)
+    resumed = 0
+
+    def _chunk(chunk: list[dict], agentic: bool) -> list[dict[str, Any]]:
+        nonlocal resumed
+        cached = sizing.load_checkpoint(ctx, material, chunk, cfg.model, agentic)
+        if cached is not None:
+            resumed += 1
+            return cached
+        out = _pass1_with_ladder(runner, cfg, plan, chunk, agentic, ladder_events)
+        sizing.save_checkpoint(ctx, material, chunk, cfg.model, agentic, out)
+        return out
+
     max_workers = max(1, min(6, len(chunks) + len(agent)))
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        st_futs = [
-            ex.submit(_pass1_with_ladder, runner, cfg, plan, ch, False, ladder_events)
-            for ch in chunks
-        ]
-        ag_futs = [
-            ex.submit(_pass1_with_ladder, runner, cfg, plan, [c], True, ladder_events)
-            for c in agent
-        ]
+        st_futs = [ex.submit(_chunk, ch, False) for ch in chunks]
+        ag_futs = [ex.submit(_chunk, [c], True) for c in agent]
         for fu in st_futs + ag_futs:
             try:
                 findings.extend(fu.result() or [])
@@ -775,6 +579,7 @@ def _run_passes(
                 pass
     if ladder_events:
         coverage["size_ladder"] = ladder_events
+    coverage["checkpoint"] = {"chunks_resumed": resumed, "chunks_total": len(chunks) + len(agent)}
 
     # Container criteria (G3 child coverage / G4 child consistency): evaluate
     # (parent + ONE child) per call, both whole, and AGGREGATE — never the whole

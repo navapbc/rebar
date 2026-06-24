@@ -72,8 +72,16 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
         rels = [f"{rid}/{f}" for f in old]
         subprocess.run(["git", "-C", tracker, "rm", "-q", *rels], check=True, capture_output=True)
         subprocess.run(
-            ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m",
-             f"prune: REVIEW_RESULT sidecar for {rid} (retain {keep})"],
+            [
+                "git",
+                "-C",
+                tracker,
+                "commit",
+                "-q",
+                "--no-verify",
+                "-m",
+                f"prune: REVIEW_RESULT sidecar for {rid} (retain {keep})",
+            ],
             check=True,
             capture_output=True,
         )

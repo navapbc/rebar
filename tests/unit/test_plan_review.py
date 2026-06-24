@@ -9,7 +9,7 @@ tests/interfaces/test_plan_review_gate.py.
 
 from __future__ import annotations
 
-from rebar.llm.plan_review import attest, det_floor, orchestrator, passes, registry, sidecar
+from rebar.llm.plan_review import attest, det_floor, orchestrator, passes, registry, sidecar, sizing
 from rebar.llm.plan_review.det_floor import PlanContext
 
 
@@ -104,20 +104,36 @@ def test_p2_p3_never_block_and_fail_open_without_repo() -> None:
     assert p2.status in ("pass", "abstain") and p3.status in ("pass", "abstain")
 
 
-def test_p2_p3_fail_open_when_oracle_unavailable(monkeypatch) -> None:
-    # Per-tool fail-open: if the grounding oracle is unavailable / raises (missing
-    # tool, unsupported lang, crash, timeout) the check ABSTAINS — never blocks, never
-    # raises. Simulate by making the oracle import path raise inside the probe.
+def _oracle_outcome(kind: str):
+    """A fake grounding.refute_absence for each fail-open mode."""
+    if kind == "crash":
+        return lambda *a, **k: (_ for _ in ()).throw(RuntimeError("backend crashed"))
+    if kind == "timeout":
+        return lambda *a, **k: (_ for _ in ()).throw(TimeoutError("ctags timed out"))
+    if kind == "no-server":
+        return lambda *a, **k: (_ for _ in ()).throw(ConnectionError("deps.dev unreachable"))
+    if kind == "unsupported-lang":
+        # The oracle's three-valued contract: an unsupported lang → an `abstain` record.
+        return lambda *a, **k: {"outcome": "abstain", "reason": "unsupported_language"}
+    raise AssertionError(kind)
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("mode", ["crash", "timeout", "no-server", "unsupported-lang"])
+def test_p2_p3_fail_open_per_tool(monkeypatch, mode: str) -> None:
+    # Per-tool fail-open (epic AC): a missing tool / unsupported-lang / no-server /
+    # crash / timeout at the oracle layer ABSTAINS (skipped=pass) — never blocks, never
+    # raises. Asserted for EACH named mode.
     import rebar.grounding as grounding
 
-    ctx = _ctx(_GOOD_AC + "\nWe touch `src/foo/bar.py`.", repo_root="/tmp/nope")
-    monkeypatch.setattr(
-        grounding, "refute_absence", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no tool"))
-    )
+    ctx = _ctx(_GOOD_AC + "\nWe touch `src/foo/bar.py` and pip install leftpad.", repo_root="/x")
+    monkeypatch.setattr(grounding, "refute_absence", _oracle_outcome(mode))
     p2 = det_floor.p2_resolution(ctx)
-    # Either every reference abstained (status pass with abstained count) or the whole
-    # check abstained — in no case does it block or raise.
+    p3 = det_floor.p3_package_existence(ctx)
     assert not p2.blocking and p2.status in ("pass", "abstain")
+    assert not p3.blocking and p3.status in ("pass", "abstain")
 
 
 # ── Pass-3 deterministic math ─────────────────────────────────────────────────
@@ -397,6 +413,17 @@ def test_bug_is_exempt() -> None:
     assert v["verdict"] == "PASS" and v["runner"] == "exempt"
 
 
+def test_checkpoint_save_resume_and_material_invalidation(tmp_path) -> None:
+    ctx = _ctx(_GOOD_AC, repo_root=str(tmp_path))
+    chunk = [{"id": "E2"}]
+    assert sizing.load_checkpoint(ctx, "matFP", chunk, "m", False) is None  # cold miss
+    sizing.save_checkpoint(ctx, "matFP", chunk, "m", False, [{"finding": "x", "criteria": ["E2"]}])
+    got = sizing.load_checkpoint(ctx, "matFP", chunk, "m", False)  # resume
+    assert got and got[0]["finding"] == "x"
+    # A material edit (different fingerprint) ⇒ cache miss (stale checkpoint ignored).
+    assert sizing.load_checkpoint(ctx, "OTHER_FP", chunk, "m", False) is None
+
+
 def test_centrality_from_ticket_graph() -> None:
     state = {
         "deps": [
@@ -413,8 +440,8 @@ def test_centrality_from_ticket_graph() -> None:
 
 def test_budget_cap_scales_with_centrality(monkeypatch) -> None:
     monkeypatch.setenv("REBAR_PLAN_REVIEW_BUDGET", "1.0")
-    low = orchestrator.plan_budget_cap(_ctx(_GOOD_AC))  # centrality 0 → 1.0
-    high = orchestrator.plan_budget_cap(_ctx(_GOOD_AC, centrality=1.0))  # → 2.0
+    low = sizing.plan_budget_cap(_ctx(_GOOD_AC))  # centrality 0 → 1.0
+    high = sizing.plan_budget_cap(_ctx(_GOOD_AC, centrality=1.0))  # → 2.0
     assert low == 1.0 and high == 2.0
 
 
@@ -510,9 +537,9 @@ def test_largest_window_uses_configured_model_window() -> None:
     # A haiku-only deployment caps P8 at haiku's window, not the ladder's 1M top.
     assert orchestrator.largest_window_tokens("claude-haiku-4-5") == 1_000_000  # escalates up
     assert orchestrator.largest_window_tokens("claude-opus-4-8") == 1_000_000
-    assert orchestrator.largest_window_tokens(None) == orchestrator.MODEL_LADDER[-1][1]
+    assert orchestrator.largest_window_tokens(None) == sizing.MODEL_LADDER[-1][1]
     assert (
-        orchestrator.largest_window_tokens("some-unknown-model") == orchestrator.MODEL_LADDER[-1][1]
+        orchestrator.largest_window_tokens("some-unknown-model") == sizing.MODEL_LADDER[-1][1]
     )
 
 
