@@ -223,6 +223,35 @@ def test_sidecar_prune_bounds_growth(rebar_repo: Path) -> None:
     assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "open"
 
 
+# ── E2E edge case: fail-open on an unavailable LLM (unsupported stack) ──────────
+def test_review_fail_open_on_unavailable_llm(rebar_repo: Path) -> None:
+    class _BrokenRunner:
+        name = "broken"
+
+        def preflight(self):
+            raise RuntimeError("the agents extra is missing")
+
+        def run(self, req):  # noqa: ANN001
+            raise AssertionError("run must not be reached when preflight fails")
+
+    _commit(rebar_repo)
+    tid = _make(rebar_repo)
+    v = rebar.llm.review_plan(tid, runner=_BrokenRunner(), repo_root=str(rebar_repo), sign=False)
+    # DET floor still ran + passed (AC present) ⇒ no blocks; LLM tier degraded cleanly.
+    assert v["verdict"] in ("PASS", "INDETERMINATE")
+    assert v["coverage"]["llm_ran"] is False and "llm_error" in v["coverage"]
+
+
+# ── E2E edge case: cap-hit INDETERMINATE (budget shed) ──────────────────────────
+def test_review_cap_hit_indeterminate(rebar_repo: Path, monkeypatch) -> None:
+    monkeypatch.setenv("REBAR_PLAN_REVIEW_BUDGET", "0")  # near-zero cap ⇒ shed agent/overlay
+    _commit(rebar_repo)
+    tid = _make(rebar_repo, "story")
+    v = rebar.llm.review_plan(tid, runner=_CLEAN, repo_root=str(rebar_repo), sign=False)
+    assert v["coverage"]["budget"]["shed"], "expected agent/overlay criteria shed at cap 0"
+    assert any(f.get("reason") == "budget-cap-shed" for f in v["indeterminate"])
+
+
 # ── config: dotted enables, default off ─────────────────────────────────────────
 def test_config_flag_default_off(tmp_path: Path) -> None:
     from rebar import config

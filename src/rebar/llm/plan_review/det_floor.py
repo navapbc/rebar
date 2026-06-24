@@ -99,6 +99,10 @@ class PlanContext:
     children: list[dict[str, Any]] = field(default_factory=list)
     repo_root: str | None = None
     largest_window_tokens: int = DEFAULT_LARGEST_WINDOW_TOKENS
+    # Centrality / blast-radius signal in [0,1], computed at plan time from the ticket
+    # graph (dependents + children) — scales review depth + the budget cap (a central,
+    # high-blast-radius plan earns more scrutiny). 0 = a leaf nobody depends on.
+    centrality: float = 0.0
 
     @property
     def has_children(self) -> bool:

@@ -50,6 +50,33 @@ MODEL_LADDER = (
     ("claude-opus-4-8", 1_000_000),
 )
 
+# Per-plan BUDGET CAP (experiment-grounded tiers; config-overridable via
+# REBAR_PLAN_REVIEW_BUDGET). DET ~free, single-turn ~$0.006 cached, AGENT ~$0.12 (≈85×
+# a single-turn call), container fans out one AGENT call per child. On a projected
+# cap-hit the orchestrator SHEDS the lowest-priority AGENT/overlay criteria FIRST
+# (never the cheap single-turn base), recording each shed criterion as an INDETERMINATE
+# outcome (non-blocking default). Centrality SCALES the cap (a central plan earns more).
+COST_SINGLE_TURN_USD = 0.006
+COST_AGENT_USD = 0.12
+DEFAULT_BUDGET_CAP_USD = 2.0
+
+
+def plan_budget_cap(ctx: PlanContext) -> float:
+    """The per-plan budget cap in USD: a base cap scaled by centrality (a central,
+    high-blast-radius plan earns up to 2× scrutiny), overridable by the
+    ``REBAR_PLAN_REVIEW_BUDGET`` env var (the base, before centrality scaling)."""
+    import os
+
+    base = DEFAULT_BUDGET_CAP_USD
+    raw = os.environ.get("REBAR_PLAN_REVIEW_BUDGET", "").strip()
+    if raw:
+        try:
+            base = float(raw)
+        except ValueError:
+            pass
+    return round(base * (1.0 + ctx.centrality), 4)
+
+
 # Pass-4 move registry (moves 1-9,11,12 with LOCKED templates; project-extensible
 # via .rebar later — child 75a9). The LLM picks the move + names a {subject}; the
 # prose is rendered deterministically from these templates (it never authors prose).
@@ -153,7 +180,19 @@ def assemble_context(
         children=children,
         repo_root=str(repo_root) if repo_root else (cfg.repo_path if cfg else None),
         largest_window_tokens=largest_window_tokens(cfg.model if cfg else None),
+        centrality=_centrality(state, children),
     )
+
+
+def _centrality(state: dict[str, Any], children: list[dict[str, Any]]) -> float:
+    """Blast-radius signal ∈ [0,1] computed at plan time from the ticket graph:
+    how many tickets DEPEND ON this one (incoming blocks / depends_on) + how many
+    children it has. A central, high-fan-in plan earns more scrutiny + budget. A
+    saturating map (≈1.0 by ~10 dependents) keeps it bounded."""
+    deps = state.get("deps", []) or []
+    dependents = sum(1 for d in deps if d.get("relation") in ("blocks", "depends_on"))
+    blast = dependents + len(children)
+    return round(min(1.0, blast / 10.0), 3)
 
 
 def largest_window_tokens(model: str | None) -> int:
@@ -389,6 +428,60 @@ def _run_container(
         "pairings_evaluated": pairings,
     }
     return out
+
+
+def _shed_to_budget(
+    ctx: PlanContext,
+    chunks: list,
+    agent: list[dict],
+    container: list[dict],
+    coverage: dict[str, Any],
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Shed the lowest-priority AGENT/overlay criteria first when the projected spend
+    exceeds the per-plan budget cap. Returns (kept_agent, kept_container, shed). The
+    cheap single-turn chunks + the DET floor always run; we shed only the 85× AGENT
+    criteria — overlays (T*) before the core code-grounding set, then container — and
+    record the shed set so the caller can emit INDETERMINATE outcomes for them."""
+    cap = plan_budget_cap(ctx)
+    n_children = max(1, len(ctx.children))
+
+    def project(ag: list[dict], cont: list[dict]) -> float:
+        return round(
+            len(chunks) * COST_SINGLE_TURN_USD
+            + len(ag) * COST_AGENT_USD
+            + len(cont) * n_children * COST_AGENT_USD,
+            4,
+        )
+
+    projected_initial = project(agent, container)
+    agent = list(agent)
+    container = list(container)
+    shed: list[dict] = []
+    # Sheddable, lowest-priority first: overlay AGENT criteria, then container, then
+    # the core code-grounding criteria (E4/G1G2/A1/G6) last (most load-bearing).
+    overlay_agent = [c for c in agent if registry.is_overlay(c["id"])]
+    core_agent = [c for c in agent if not registry.is_overlay(c["id"])]
+    shed_queue = (
+        [("agent", c) for c in overlay_agent]
+        + [("container", c) for c in container]
+        + [("agent", c) for c in core_agent]
+    )
+    while project(agent, container) > cap and shed_queue:
+        kind, c = shed_queue.pop(0)
+        c = {**c, "_tier": "AGENT"}
+        shed.append(c)
+        if kind == "container":
+            container = [x for x in container if x["id"] != c["id"]]
+        else:
+            agent = [x for x in agent if x["id"] != c["id"]]
+    coverage["budget"] = {
+        "cap_usd": cap,
+        "centrality": ctx.centrality,
+        "projected_usd_initial": projected_initial,
+        "projected_usd_final": project(agent, container),
+        "shed": [c["id"] for c in shed],
+    }
+    return agent, container, shed
 
 
 def _ticket_graph_blob(ctx: PlanContext) -> str:
@@ -638,7 +731,32 @@ def _run_passes(
     chunks = registry.chunk_by_facet(single, model=cfg.model, ticket_size=size)
     coverage["chunks"] = len(chunks)
 
-    findings: list[dict[str, Any]] = []
+    # ── per-plan budget cap: shed the lowest-priority AGENT/overlay criteria first ──
+    # Single-turn chunks (cheap) + DET (free) always run; if the projected spend
+    # exceeds the cap, shed AGENT/overlay criteria (the 85× calls) lowest-priority
+    # first — overlays before core code-grounding — recording each as INDETERMINATE.
+    agent, container, shed = _shed_to_budget(ctx, chunks, agent, container, coverage)
+    budget_indeterminate = [
+        {
+            "finding": f"Criterion {c['id']} was not evaluated: per-plan budget cap reached.",
+            "criteria": [c["id"]],
+            "location": "(budget cap)",
+            "evidence": ["AGENT/overlay criterion shed to stay within the per-plan budget cap"],
+            "scenarios": [],
+            "impact": "This criterion is unverified for this review (non-blocking INDETERMINATE).",
+            "decision": "indeterminate",
+            "reason": "budget-cap-shed",
+            "severity": "none",
+            "validity": 0.0,
+            "impact_score": 0.0,
+            "priority": 0.0,
+            "tier": c.get("_tier", "AGENT"),
+            "_shed": True,
+        }
+        for c in shed
+    ]
+
+    findings: list[dict[str, Any]] = list(budget_indeterminate)
     ladder_events: list[str] = []
     max_workers = max(1, min(6, len(chunks) + len(agent)))
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
@@ -703,7 +821,10 @@ def _run_passes(
         for f in findings
         if f.get("_too_big")
     ]
-    findings = [f for f in findings if not f.get("_too_big")]
+    # Budget-shed criteria are pre-decided INDETERMINATE (non-blocking) and bypass
+    # Pass-2/3 — there is nothing to verify (they did not run).
+    shed_indeterminate = [f for f in findings if f.get("_shed")]
+    findings = [f for f in findings if not f.get("_too_big") and not f.get("_shed")]
 
     # Pass 2: one aggregate verification pass (agentic if any code-grounded finding).
     grounded = any(
@@ -714,7 +835,7 @@ def _run_passes(
 
     # Pass 3: deterministic decision + thresholds per criterion.
     crit_by_id = registry.by_id()
-    decided: list[dict[str, Any]] = list(too_big)
+    decided: list[dict[str, Any]] = [*too_big, *shed_indeterminate]
     for i, f in enumerate(findings):
         thresholds = [
             float(crit_by_id.get(c, {}).get("block_threshold", passes.DEFAULT_BLOCK_THRESHOLD))

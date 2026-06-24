@@ -104,6 +104,22 @@ def test_p2_p3_never_block_and_fail_open_without_repo() -> None:
     assert p2.status in ("pass", "abstain") and p3.status in ("pass", "abstain")
 
 
+def test_p2_p3_fail_open_when_oracle_unavailable(monkeypatch) -> None:
+    # Per-tool fail-open: if the grounding oracle is unavailable / raises (missing
+    # tool, unsupported lang, crash, timeout) the check ABSTAINS — never blocks, never
+    # raises. Simulate by making the oracle import path raise inside the probe.
+    import rebar.grounding as grounding
+
+    ctx = _ctx(_GOOD_AC + "\nWe touch `src/foo/bar.py`.", repo_root="/tmp/nope")
+    monkeypatch.setattr(
+        grounding, "refute_absence", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no tool"))
+    )
+    p2 = det_floor.p2_resolution(ctx)
+    # Either every reference abstained (status pass with abstained count) or the whole
+    # check abstained — in no case does it block or raise.
+    assert not p2.blocking and p2.status in ("pass", "abstain")
+
+
 # ── Pass-3 deterministic math ─────────────────────────────────────────────────
 def _verif(binary=None, attrs=None):
     base_b = {q: "yes" for q in passes.GRADED_BINARY}
@@ -379,6 +395,42 @@ def _fake_cfg():
 def test_bug_is_exempt() -> None:
     v = orchestrator.run_review(_ctx(_GOOD_AC, ttype="bug"), _fake_cfg())
     assert v["verdict"] == "PASS" and v["runner"] == "exempt"
+
+
+def test_centrality_from_ticket_graph() -> None:
+    state = {
+        "deps": [
+            {"relation": "blocks", "target_id": "a"},
+            {"relation": "depends_on", "target_id": "b"},
+            {"relation": "relates_to", "target_id": "c"},  # not a blast-radius edge
+        ]
+    }
+    children = [{"ticket_id": "k1"}, {"ticket_id": "k2"}]
+    # 2 blast edges + 2 children = 4/10 = 0.4
+    assert orchestrator._centrality(state, children) == 0.4
+    assert orchestrator._centrality({}, []) == 0.0
+
+
+def test_budget_cap_scales_with_centrality(monkeypatch) -> None:
+    monkeypatch.setenv("REBAR_PLAN_REVIEW_BUDGET", "1.0")
+    low = orchestrator.plan_budget_cap(_ctx(_GOOD_AC))  # centrality 0 → 1.0
+    high = orchestrator.plan_budget_cap(_ctx(_GOOD_AC, centrality=1.0))  # → 2.0
+    assert low == 1.0 and high == 2.0
+
+
+def test_budget_cap_sheds_agent_overlay_first_and_marks_indeterminate(monkeypatch) -> None:
+    # A near-zero cap sheds every AGENT/overlay criterion (the 85x calls); the cheap
+    # single-turn chunks still run. Shed criteria are recorded + emitted INDETERMINATE.
+    from rebar.llm.runner import FakeRunner
+
+    monkeypatch.setenv("REBAR_PLAN_REVIEW_BUDGET", "0")
+    fr = FakeRunner(structured={"analysis": "", "findings": []})
+    v = orchestrator.run_review(_ctx(_GOOD_AC, ttype="story"), _fake_cfg(), runner=fr)
+    budget = v["coverage"]["budget"]
+    assert budget["cap_usd"] == 0.0 and budget["shed"], "expected agent/overlay criteria shed"
+    assert any(f.get("reason") == "budget-cap-shed" for f in v["indeterminate"])
+    # No shed criterion ever blocks (INDETERMINATE is non-blocking).
+    assert all(f["decision"] != "block" for f in v["indeterminate"])
 
 
 def test_review_records_latency_metrics() -> None:
