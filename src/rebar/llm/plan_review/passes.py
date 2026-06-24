@@ -232,6 +232,84 @@ def pass1_chunk(
     return out
 
 
+ISF_SYSTEM = (
+    "You are running the INTENT-SOURCE-FIDELITY (ISF) check. Compare the plan under review against "
+    "the EXTERNAL intent expressed in the ticket's LINKED SESSION LOG (the design/brainstorm of "
+    "record), to catch requirements the plan SILENTLY DROPPED, narrowed/out-scoped WITHOUT a "
+    "stated rationale, or CONTRADICTED relative to what the user expressed. (1) extract the "
+    "discrete expressed requirements/decisions/constraints from the log; (2) check the plan vs "
+    "each. ANTI-FP: a requirement DELIBERATELY descoped WITH a stated rationale is NOT a finding; "
+    "fire ONLY on a silent drop/narrowing/contradiction. Emit findings as "
+    "{finding, criteria:['ISF'], evidence[], scenarios[], impact} — no severity/confidence."
+)
+
+
+def pass1_isf(
+    runner: Runner,
+    cfg: LLMConfig,
+    *,
+    plan: str,
+    session_log_text: str,
+    summarized: bool = False,
+) -> list[dict[str, Any]]:
+    """The Intent-Source-Fidelity finder (child 681b). Fed the plan + the linked
+    SESSION LOG as context (single-turn, NOT agentic — the design forbids the tool
+    loop here). When the log was summarized to fit the window, each finding is
+    tagged ``_reduced_confidence`` (the design's "carries reduced confidence")."""
+    req = RunRequest(
+        system_prompt=_plan_system(ISF_SYSTEM, plan),
+        instructions=(
+            "## Linked session log (the external intent of record)\n"
+            f"{session_log_text}\n\n"
+            "Extract the expressed requirements/decisions/constraints, then flag any the plan "
+            "silently dropped, narrowed without rationale, or contradicted. A clean comparison "
+            "returns an empty findings list."
+        ),
+        config=cfg,
+        reviewers=["plan-isf"],
+        mode="structured",
+        output_schema="plan_review_findings",
+        execution_mode="single_turn",
+    )
+    result = runner.run(req)
+    out: list[dict[str, Any]] = []
+    for f in result.get("findings", []) or []:
+        evidence = f.get("evidence", []) or []
+        if summarized:
+            evidence = [*evidence, "(ISF ran against a SUMMARY of an oversized session log)"]
+        out.append(
+            {
+                "finding": f.get("finding", ""),
+                "criteria": ["ISF"],
+                "evidence": evidence,
+                "scenarios": f.get("scenarios", []) or [],
+                "impact": f.get("impact", ""),
+                "_agentic": False,
+                "_reduced_confidence": summarized,
+            }
+        )
+    return out
+
+
+def summarize_for_isf(runner: Runner, cfg: LLMConfig, *, log_text: str) -> str:
+    """Compress an oversized session log to fit the ISF context window (a single
+    text call). Used only when the log exceeds the budget — the PLAN is never
+    summarized, only this supporting context."""
+    req = RunRequest(
+        system_prompt=(
+            "Summarize the following design/brainstorm session log into its discrete expressed "
+            "REQUIREMENTS, DECISIONS, and CONSTRAINTS — preserve every distinct intent verbatim "
+            "enough to check a plan against it; drop only narrative/repetition."
+        ),
+        instructions=log_text,
+        config=cfg,
+        reviewers=["plan-isf-summarizer"],
+        mode="text",
+        execution_mode="single_turn",
+    )
+    return str(runner.run(req).get("text", ""))
+
+
 # ── Pass 2: verify ───────────────────────────────────────────────────────────────
 def pass2_verify(
     runner: Runner,

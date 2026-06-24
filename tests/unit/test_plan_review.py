@@ -300,3 +300,22 @@ def test_route_criteria_splits_agent_and_single() -> None:
     assert single and agent
     assert all(registry.exec_tier(c) != "AGENT" for c in single)
     assert all(registry.exec_tier(c) == "AGENT" for c in agent)
+
+
+def test_isf_excluded_from_normal_routing() -> None:
+    # ISF is fed the session log separately; it must never enter the rubric chunks.
+    single, agent = orchestrator.route_criteria(_ctx(_GOOD_AC, ttype="story"))
+    assert "ISF" not in {c["id"] for c in single + agent}
+
+
+def test_pass1_isf_tags_findings_and_reduced_confidence() -> None:
+    from rebar.llm.runner import FakeRunner
+
+    fr = FakeRunner(
+        structured={"analysis": "", "findings": [{"finding": "dropped req X", "criteria": ["ISF"]}]}
+    )
+    out = passes.pass1_isf(
+        fr, _fake_cfg(), plan="plan", session_log_text="log: must do X", summarized=True
+    )
+    assert out and out[0]["criteria"] == ["ISF"] and out[0]["_reduced_confidence"] is True
+    assert any("SUMMARY" in e for e in out[0]["evidence"])

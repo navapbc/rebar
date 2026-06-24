@@ -167,6 +167,11 @@ def route_criteria(ctx: PlanContext) -> tuple[list[dict], list[dict]]:
     single, agent = [], []
     for c in registry.load_criteria():
         cid = c["id"]
+        # ISF is special: it is fed the linked SESSION LOG (not the rubric chunk) and
+        # fires only when a session log is linked — handled separately in _run_passes,
+        # so it never enters the normal single/agent routing.
+        if cid == "ISF":
+            continue
         if not registry.applies(
             c,
             level=ctx.level,
@@ -185,6 +190,42 @@ def route_criteria(ctx: PlanContext) -> tuple[list[dict], list[dict]]:
         else:
             single.append(c)
     return single, agent
+
+
+def _linked_session_log(ctx: PlanContext, cfg: LLMConfig, runner) -> tuple[str | None, bool]:
+    """The text of the ticket's linked SESSION LOG(s) for the ISF criterion, and
+    whether it was summarized to fit the window. Returns ``(None, False)`` when no
+    session log is linked (ISF then does not run). Best-effort: any read error →
+    ``(None, False)`` (ISF is skipped, never crashes the review)."""
+    import rebar
+
+    bodies: list[str] = []
+    try:
+        for dep in ctx.state.get("deps", []) or []:
+            tgt = dep.get("target_id")
+            if not tgt:
+                continue
+            try:
+                log = rebar.show_ticket(tgt, repo_root=ctx.repo_root)
+            except Exception:
+                continue
+            if log.get("ticket_type") == "session_log":
+                bodies.append(f"# {log.get('title', '')}\n{log.get('description', '')}")
+    except Exception:
+        return (None, False)
+    if not bodies:
+        return (None, False)
+    text = "\n\n".join(bodies)
+    budget = (
+        int(ctx.largest_window_tokens * det_floor.P8_HEADROOM) - det_floor.P8_OUTPUT_RESERVE_TOKENS
+    )
+    if det_floor.est_tokens(text) <= budget:
+        return (text, False)
+    # Oversized: summarize (the supporting context only — never the plan).
+    try:
+        return (passes.summarize_for_isf(runner, cfg, log_text=text), True)
+    except Exception:
+        return (None, False)
 
 
 def _ticket_size(ctx: PlanContext) -> str:
@@ -361,6 +402,23 @@ def _run_passes(
                 findings.extend(fu.result() or [])
             except Exception:  # a failed chunk drops its findings, never aborts the review
                 pass
+
+    # ISF (child 681b): fed the LINKED SESSION LOG (not a rubric chunk), single-turn,
+    # fires ONLY when a session log is linked. Oversized logs fall back to a SUMMARY
+    # (recorded; findings carry reduced confidence). The plan is never summarized.
+    log_text, summarized = _linked_session_log(ctx, cfg, runner)
+    if log_text:
+        coverage["isf"] = {"ran": True, "summarized": summarized}
+        try:
+            findings.extend(
+                passes.pass1_isf(
+                    runner, cfg, plan=plan, session_log_text=log_text, summarized=summarized
+                )
+            )
+        except Exception as exc:
+            coverage["isf"]["error"] = str(exc)
+    else:
+        coverage["isf"] = {"ran": False, "reason": "no linked session_log"}
 
     # Pass 2: one aggregate verification pass (agentic if any code-grounded finding).
     grounded = any(
