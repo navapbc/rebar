@@ -89,10 +89,12 @@ const invalid = await page.evaluate(() => {
 });
 const configAfterInvalid = await readConfig(loopId);
 
-// 3. RAW FALLBACK present for the known kind.
+// 3. NO RAW JSON editor for the known kind (da27 AC "no raw JSON textarea"): neither the
+// removed "Advanced (raw JSON)" fallback nor a bare raw-config entry is present.
 const rawFallback = await page.evaluate(() => {
   const adv = document.querySelector('[data-entry-id="rebar-config-advanced"]');
-  return { present: !!adv, text: adv ? adv.textContent : "" };
+  const raw = document.querySelector('[data-entry-id="rebar-config"]');
+  return { present: !!adv || !!raw };
 });
 
 // 4. Persist the VALID edit to the IR (save), so the Python side can reload-assert.

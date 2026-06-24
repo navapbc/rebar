@@ -59,13 +59,14 @@ def test_editor_edit_persists_to_ir_on_save(browser_runner, editor_server):
     assert "EDITED_BY_TEST" in ir.read_text(encoding="utf-8")
 
 
-def test_editor_structured_fields_roundtrip_error_and_raw_fallback(browser_runner, editor_server):
-    # Story a83a: the structured per-field entries replace the raw JSON textarea for the
-    # common path. Drive the LOOP step's structured `max_iterations` field and assert the
+def test_editor_structured_fields_roundtrip_error_and_no_raw_editor(browser_runner, editor_server):
+    # Story a83a + da27 AC "no raw JSON textarea": the structured per-field entries are the
+    # SOLE editor. Drive the LOOP step's structured `max_iterations` field and assert the
     # three ACs in a real browser: (1) a valid edit writes back into rebar:Config and the
     # save persists to the IR (round-trip); (2) a non-numeric entry shows a FIELD ERROR and
-    # does NOT lose the prior value (no silent loss / corruption); (3) the raw JSON editor
-    # stays reachable as an "Advanced (raw JSON)" fallback for the known kind.
+    # does NOT lose the prior value (no silent loss / corruption); (3) there is NO raw JSON
+    # editor for the known kind — neither the old "Advanced (raw JSON)" fallback nor a bare
+    # raw-config entry.
     import json
 
     url, ir = editor_server
@@ -82,9 +83,9 @@ def test_editor_structured_fields_roundtrip_error_and_raw_fallback(browser_runne
     held = json.loads(report["configAfterInvalid"])
     assert held["max_iterations"] == 7, f"invalid entry corrupted/dropped the value: {held}"
 
-    # (3) The raw JSON editor remains reachable as a fallback for the known kind.
-    assert report["rawFallback"]["present"], "Advanced (raw JSON) fallback entry missing"
-    assert "raw json" in report["rawFallback"]["text"].lower()
+    # (3) There is NO raw JSON editor for the known kind (the structured fields are the
+    # sole editor; uncommon keys round-trip via the slice-write, not a free-form textarea).
+    assert not report["rawFallback"]["present"], "a raw JSON config editor is still present"
 
     # The final valid edit (9) persisted to the IR — the round-trip the user does.
     assert report["status"] == "saved to IR", f"save failed: {report['status']}"

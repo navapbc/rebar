@@ -71,11 +71,12 @@ def test_served_assets_are_allow_listed():
 
 
 def test_built_bundle_carries_structured_field_paths():
-    # Story a83a: the properties panel now renders STRUCTURED per-field entries for the
-    # common path (with the raw JSON editor kept as a fallback). The faithful oracle is the
-    # browser tier (tests/e2e/test_editor_browser.py), but as an always-on floor assert the
-    # built bundle actually carries the structured-field, raw-fallback, and field-validation
-    # code paths — so a build that dropped them can't pass silently. Skips if not built.
+    # Story a83a + da27 AC "no raw JSON textarea": the properties panel renders STRUCTURED
+    # per-field entries as the SOLE editor. The faithful oracle is the browser tier
+    # (tests/e2e/test_editor_browser.py), but as an always-on floor assert the built bundle
+    # carries the structured-field + field-validation code paths AND no longer carries the
+    # removed raw-JSON editor — so a build that dropped the structured paths (or reintroduced
+    # the raw textarea) can't pass silently. Skips if not built.
     if not editor.assets_available():
         import pytest as _pytest
 
@@ -84,8 +85,9 @@ def test_built_bundle_carries_structured_field_paths():
     text = js.decode("utf-8", "replace")
     # Structured fields (per-kind labels + entry ids surfaced into the DOM).
     assert "max_iterations" in text and "max_concurrency" in text and "index_var" in text
-    assert "rebar-config-advanced" in text  # the structured group references the raw fallback
-    assert "Advanced (raw JSON)" in text  # the raw-JSON fallback entry label
+    # The raw JSON editor is GONE (no "Advanced (raw JSON)" fallback, no rebar-config-advanced).
+    assert "rebar-config-advanced" not in text
+    assert "Advanced (raw JSON)" not in text
     # Field-level validation messaging (the "shows an error, never silent loss" path).
     assert "Must be a number" in text
 

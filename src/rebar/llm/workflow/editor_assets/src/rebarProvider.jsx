@@ -5,27 +5,24 @@
  * rebar semantics, and the config is editable in place, so a human can both READ what a
  * step does and CHANGE it (or fill one in for a freshly-drawn step) before Save.
  *
- * Structured-vs-raw (story a83a). For the KNOWN step kinds (scripted/agent/loop/map) we
- * render typed, per-field entries — `with.<field>` driven by the step's contract
- * (window.REBAR_CONTRACTS[name].consumes), plus mode/model (agent) and the loop/map
- * bounds — so authoring no longer means hand-editing JSON. Every structured field
- * read/writes a SLICE of the SAME parsed `rebar:Config` blob (parse → mutate slice →
- * re-serialize → updateModdleProperties), so the Python round-trip contract is unchanged
- * and the raw editor and the structured fields stay consistent (one source of truth).
- *
- * The raw JSON textarea is kept as an "Advanced (raw JSON)" fallback so an UNKNOWN /
- * uncommon config (keys outside the structured set) is always editable and never lost;
- * for a node whose kind is not one of the known kinds it is the ONLY editor. Field-level
- * invalids (a non-numeric bound, an empty required field) surface a visible entry error
- * via each entry's `validate` and DO NOT mutate the blob — the prior value is preserved.
+ * Structured-only authoring (story a83a; da27 AC "no raw JSON textarea"). Every step kind
+ * is edited through typed, per-field entries — `with.<field>` driven by the step's contract
+ * (window.REBAR_CONTRACTS[name].consumes), plus mode/model (agent), the loop/map bounds, and
+ * the branch `when` condition — so authoring NEVER means hand-editing JSON. There is NO raw
+ * JSON textarea anywhere in the panel: the free-form `rebar:Config` editor has been removed.
+ * Every structured field read/writes a SLICE of the SAME parsed `rebar:Config` blob (parse →
+ * mutate slice → re-serialize → updateModdleProperties), so the Python round-trip contract is
+ * unchanged. Keys outside the structured set are NOT shown, but a slice-write preserves them
+ * verbatim (mutateConfig edits one key and re-serializes the rest), so they are never lost on
+ * round-trip — they are simply not hand-editable in the UI. Field-level invalids (a non-numeric
+ * bound, an empty required field) surface a visible entry error via each entry's `validate` and
+ * DO NOT mutate the blob — the prior value is preserved.
  */
 import {
-  CollapsibleEntry,
   SelectEntry,
   TextAreaEntry,
   TextFieldEntry,
   isSelectEntryEdited,
-  isTextAreaEntryEdited,
   isTextFieldEntryEdited,
 } from "@bpmn-io/properties-panel";
 import { useService } from "bpmn-js-properties-panel";
@@ -86,8 +83,8 @@ function configEl(bo) {
 }
 
 // Parse the node's `rebar:Config` blob into an object; an empty / malformed blob parses
-// to {} so structured reads never throw (the raw editor remains the place to repair
-// genuinely broken JSON).
+// to {} so structured reads never throw. A genuinely-broken blob is surfaced by the live
+// /validate region (story 998e) rather than edited as raw JSON in this panel.
 function parseConfig(bo) {
   const c = configEl(bo);
   if (!c || !c.value) return {};
@@ -474,56 +471,6 @@ function withFieldEntries(element) {
   }));
 }
 
-// The raw JSON editor — the shared blob's verbatim view. PRIMARY editor for an unknown
-// kind; an "Advanced (raw JSON)" FALLBACK (kept reachable) for the known kinds so an
-// uncommon config outside the structured set is always editable and never lost.
-function RawConfigEntry(props) {
-  const { element, id } = props;
-  const modeling = useService("modeling");
-  const bpmnFactory = useService("bpmnFactory");
-  const debounce = useService("debounceInput");
-
-  const getValue = () => {
-    const c = configEl(element.businessObject);
-    return c ? c.value : "";
-  };
-  // The raw editor is the one place genuinely-broken JSON can be repaired, so it accepts
-  // any text verbatim; malformed JSON surfaces as an error via the live /validate region
-  // (story 998e), not by blocking the keystroke.
-  const setValue = (value) => writeConfig(element, modeling, bpmnFactory, value || "");
-
-  return (
-    <TextAreaEntry
-      id={id}
-      element={element}
-      label="Rebar config (JSON)"
-      description={
-        'Written verbatim to the IR. e.g. {"with": {"k": "${{ inputs.x }}"}} — ' +
-        'plus mode/model/output_schema (agent), max_iterations/while/until (loop), ' +
-        "over/as/max_concurrency (map), when (branch)."
-      }
-      rows={6}
-      getValue={getValue}
-      setValue={setValue}
-      debounce={debounce}
-    />
-  );
-}
-
-// Wrap the raw editor in a collapsible "Advanced (raw JSON)" entry so it stays reachable
-// without competing with the structured fields for the known kinds.
-function AdvancedRawEntry(props) {
-  const { element, id } = props;
-  return (
-    <CollapsibleEntry
-      id={id}
-      element={element}
-      label="Advanced (raw JSON)"
-      entries={[{ id: `${id}-raw`, component: RawConfigEntry }]}
-    />
-  );
-}
-
 // The structured entries for a known kind, in declaration order.
 function structuredEntries(element, kind) {
   const entries = [];
@@ -602,31 +549,23 @@ function rebarGroup(element) {
   const entries = [{ id: "rebar-kind", component: KindEntry }];
 
   if (kind === "branch") {
-    // Branch gets a structured `when` condition field (a83a). The deeper branch UX —
-    // arm add/remove + connection routing — is the deferred S9 scope.
+    // Branch's only step config is the `when` condition, edited via a structured field
+    // (a83a). The deeper branch UX — arm add/remove + connection routing — is deferred
+    // S9 scope. No raw JSON editor: any non-`when` keys round-trip via the slice-write.
     entries.push({ id: "rebar-when", component: WhenEntry });
-    entries.push({
-      id: "rebar-config",
-      component: RawConfigEntry,
-      isEdited: isTextAreaEntryEdited,
-    });
     return { id: "rebar", label: "Rebar", entries };
   }
 
   if (STRUCTURED_KINDS.includes(kind)) {
-    // KNOWN kind: structured fields are the primary path; the raw editor stays reachable
-    // as an "Advanced (raw JSON)" fallback for uncommon keys.
+    // KNOWN kind: structured fields are the sole editor. Keys outside the structured set
+    // are not shown but are preserved verbatim by the slice-write (mutateConfig), so no
+    // raw JSON fallback is needed and none is offered.
     entries.push(...structuredEntries(element, kind));
-    entries.push({ id: "rebar-config-advanced", component: AdvancedRawEntry });
     return { id: "rebar", label: "Rebar", entries };
   }
 
-  // UNKNOWN / uncommon kind: the raw JSON editor is the only editor (nothing lost).
-  entries.push({
-    id: "rebar-config",
-    component: RawConfigEntry,
-    isEdited: isTextAreaEntryEdited,
-  });
+  // A bare sub-process (or any other rebar element with no structured step config) shows
+  // its kind only; it carries no editable step config, so there is no raw JSON editor.
   return { id: "rebar", label: "Rebar", entries };
 }
 
