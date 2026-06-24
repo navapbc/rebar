@@ -203,6 +203,38 @@ def contract_for(step_name: str) -> StepContract | None:
     return STEP_CONTRACTS.get(step_name)
 
 
+def input_schema_for(kind: str, action: str | None, repo_root: Any = None) -> str | None:
+    """The INPUT-contract schema NAME a leaf step's resolved ``with`` must satisfy:
+    scripted (``action`` = the ``uses`` op) → ``contract_for(action).input_schema``;
+    agent (``action`` = the ``prompt`` id) → the prompt's front-matter ``inputs`` (when
+    a schema name). ``None`` for any other kind, a missing action, or a contract-less
+    step (UNKNOWN → validation is skipped, never failed).
+
+    The SINGLE resolver shared by the runtime validator (interpreter) and the
+    edit-time validator (editor) so the two can never diverge (story b642)."""
+    if not isinstance(action, str) or not action:
+        return None
+    if kind == "scripted":
+        try:
+            # registering the built-in step library populates STEP_CONTRACTS; a caller
+            # that hasn't imported it must not see an empty registry and false-pass.
+            from . import steps  # noqa: F401  (side effect: register contracts)
+
+            contract = contract_for(action)
+        except Exception:  # noqa: BLE001 - registry trouble → nothing to validate against
+            return None
+        return contract.input_schema if contract is not None else None
+    if kind == "agent":
+        try:
+            from rebar.llm.prompts import get_prompt
+
+            prompt = get_prompt(action, repo_root=repo_root)
+        except Exception:  # noqa: BLE001 - unknown/malformed prompt → UNKNOWN (skip)
+            return None
+        return prompt.inputs if isinstance(prompt.inputs, str) else None
+    return None
+
+
 # ── 3-state SHALLOW structural compatibility check (port of spike E2, c768) ───
 # Lives here (not lint_refs.py, which is at its size cap) beside the contract model
 # it reasons over. A deliberately small STRUCTURAL check — NOT a subsumption engine.

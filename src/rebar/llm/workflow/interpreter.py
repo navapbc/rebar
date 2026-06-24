@@ -64,44 +64,16 @@ _MAP_VAR_RE = re.compile(r"^map\.([A-Za-z_][A-Za-z0-9_-]*)$")
 
 
 def _consumer_input_schema(kind: str, step: Mapping[str, Any], repo_root: str | None) -> str | None:
-    """The CONSUMER step's declared INPUT schema NAME, or ``None`` when none is
-    declared (UNKNOWN — validation is skipped, never failed):
+    """The CONSUMER step's declared INPUT schema NAME, or ``None`` when none is declared
+    (UNKNOWN — validation is skipped, never failed). Extracts the step's action
+    (``uses``/``prompt``) and delegates to the shared resolver so the runtime net and
+    the editor's edit-time check can never diverge (story b642). Resolution trouble
+    degrades to ``None`` — distinct from a validator that ERRORS while running, which
+    the caller surfaces loudly."""
+    from .executor import input_schema_for
 
-    * scripted (``uses``) → its :class:`StepContract`'s ``input_schema``;
-    * agent (``prompt``) → the prompt's front-matter ``inputs`` (when a schema name).
-
-    Resolution trouble (unregistered op / unknown prompt) degrades to ``None`` (no
-    contract to validate against) — distinct from a validator that ERRORS while
-    running, which the caller surfaces loudly."""
-    if kind == "scripted":
-        from .executor import contract_for
-
-        name = step.get("uses")
-        if not isinstance(name, str):
-            return None
-        try:
-            # Ensure the built-in contracts are registered (decorators run on import);
-            # a call path that hasn't imported the step library must not see an empty
-            # registry and silently SKIP validation — that would be a false-pass, the
-            # very thing c768's fail-loud net exists to prevent.
-            from . import steps  # noqa: F401  (side effect: populate STEP_CONTRACTS)
-
-            contract = contract_for(name)
-        except Exception:  # noqa: BLE001 - registry trouble → no contract (UNKNOWN)
-            return None
-        return contract.input_schema if contract is not None else None
-    if kind == "agent":
-        from rebar.llm.prompts import get_prompt
-
-        pid = step.get("prompt")
-        if not isinstance(pid, str):
-            return None
-        try:
-            prompt = get_prompt(pid, repo_root=repo_root)
-        except Exception:  # noqa: BLE001 - an unknown/malformed prompt → UNKNOWN (skip)
-            return None
-        return prompt.inputs if isinstance(prompt.inputs, str) else None
-    return None
+    action = step.get("uses") if kind == "scripted" else step.get("prompt")
+    return input_schema_for(kind, action, repo_root)
 
 
 def validate_consumer_input(

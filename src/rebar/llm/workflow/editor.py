@@ -260,27 +260,11 @@ def _contracts_in(step: Any, *, repo_root: Any = None) -> dict[str, dict[str, An
 
 
 def _config_input_schema(kind: str, action: str | None, repo_root: Any) -> str | None:
-    """The INPUT-contract schema NAME a node's ``with`` must satisfy, by kind:
-    scripted → the registered op's ``contract_for(action).input_schema``; agent →
-    the prompt's front-matter ``inputs`` (when it is a schema name). Any other kind
-    (or a missing/contract-less action) has nothing to validate → ``None``."""
-    if not action:
-        return None
-    if kind == "scripted":
-        try:
-            from . import steps as _steps  # noqa: F401 - registers the step contracts
-            from .executor import contract_for
+    """The INPUT-contract schema NAME a node's ``with`` must satisfy — delegates to the
+    shared resolver so edit-time validation matches the runtime net exactly (b642)."""
+    from .executor import input_schema_for
 
-            contract = contract_for(action)
-        except Exception:  # noqa: BLE001 - registry trouble → nothing to validate against
-            return None
-        return contract.input_schema if contract else None
-    if kind == "agent":
-        from rebar.llm.prompts import get_prompt
-
-        prompt = get_prompt(action, repo_root=repo_root)
-        return prompt.inputs if isinstance(prompt.inputs, str) else None
-    return None
+    return input_schema_for(kind, action, repo_root)
 
 
 def validate_node_config(
