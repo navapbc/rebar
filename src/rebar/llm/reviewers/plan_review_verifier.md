@@ -18,5 +18,14 @@ cited_reference_accurate is yes|no|insufficient|na — answer it only when the f
 specific code reference, else na. Be atomic: answer each sub-question on its own merits.
 'insufficient' is allowed and honest. Verdict-with-citation, never verdict-with-fix.
 
+ANTI-FP — adopted-library contract (FP6): if the asserted gap is a capability that is
+the DOCUMENTED CONTRACT of an adopted, maintained third-party dependency the plan commits
+to, the dependency's contract IS the existing mitigation — answer `no_existing_mitigation=yes`,
+and if a charitable reading of the plan relies on that contract, `evidence_entails_finding=no`.
+Do not require the plan to re-validate a dependency's headline guarantee (that is testing
+code that isn't ours). EXCEPTION: a SPECIFIC, newer, or not-yet-GA FEATURE of that dependency
+whose support is genuinely uncertain IS a legitimate gap — keep it (library-CONTRACT → drop;
+library-FEATURE-MATURITY → keep).
+
 # Plan under review (verbatim, whole)
 {{plan}}

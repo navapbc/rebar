@@ -1,0 +1,77 @@
+# Standing eval spec for the plan-review ISF finder (epic 5fd2 / child 681b + 7284).
+# Intent-source-fidelity recall / false-fire cases: ISF compares the plan against the
+# EXTERNAL intent in the linked SESSION LOG. RECALL = a requirement the log expressed
+# and the plan SILENTLY dropped/narrowed/contradicted → ISF fires. FALSE-FIRE = the plan
+# honors the intent, OR descopes a requirement WITH a stated rationale → ISF must NOT
+# fire. Validate offline: `rebar prompt eval plan-review-isf-finder`.
+prompt: plan-review-isf-finder
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  - type: deterministic
+    name: emits_valid_findings
+    description: The output validates against the plan_review_findings contract (criteria ['ISF']).
+  - type: deterministic
+    name: recall_on_silent_drop
+    description: A requirement the log expressed but the plan omits without rationale produces a finding.
+  - type: deterministic
+    name: no_fire_on_honored_or_justified_descope
+    description: >
+      No finding when the plan honors the logged intent, or descopes a requirement WITH
+      an explicit stated rationale (the anti-FP rule).
+
+  - type: llm-judge
+    name: intent_mapping_quality
+    gates: false
+    threshold: 0.7
+    pointwise: true
+    rubric: >
+      Score 0..1 whether each ISF finding correctly maps a DISCRETE expressed requirement
+      from the session log to a silent drop/narrowing/contradiction in the plan (not a
+      vague or already-honored one).
+    grader:
+      model: openai:gpt-4o-2024-08-06
+      temperature: 0
+      seed: 13
+      snapshot: "2024-08-06"
+
+dataset:
+  - id: ISF-R1
+    corpus: rebar
+    expect: finding
+    log: "Brainstorm decided the gate MUST be advisory-by-default with per-criterion blocking opt-in."
+    plan: "The plan implements only hard blocking on every criterion."
+    note: "Silent CONTRADICTION of an expressed decision → ISF fires."
+  - id: ISF-R2
+    corpus: snap
+    expect: finding
+    log: "The user required the importer to handle partial CSV rows by quarantining them."
+    plan: "The plan handles only fully-valid rows; partial rows are unmentioned."
+    note: "Silent DROP of an expressed requirement → ISF fires."
+  - id: ISF-F1
+    corpus: rebar
+    expect: pass
+    mode: honored
+    log: "Decided to sign the attestation with the existing HMAC machinery."
+    plan: "The plan reuses rebar.signing.sign_manifest for the attestation."
+    note: "Plan HONORS the intent → no finding."
+  - id: ISF-F2
+    corpus: dso
+    expect: pass
+    mode: justified-descope
+    log: "Considered a real-time dashboard for the review results."
+    plan: "Out of scope: the dashboard is deferred to a follow-on (stated rationale: v1 ships the sidecar; offline analysis only)."
+    note: "Descoped WITH a stated rationale → NOT a finding (anti-FP)."
+
+gold_set:
+  - input: "A plan contradicting a logged advisory-by-default decision (ISF-R1)."
+    label: finding
+  - input: "A plan that defers a logged idea WITH a stated rationale (ISF-F2)."
+    label: pass
+  - input: "A plan that honors a logged signing decision (ISF-F1)."
+    label: pass
+  - input: "A plan silently dropping a logged partial-row requirement (ISF-R2)."
+    label: finding

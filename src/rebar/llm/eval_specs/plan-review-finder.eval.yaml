@@ -1,0 +1,135 @@
+# Standing eval spec for the plan-review Pass-1 FINDER (epic 5fd2 / child 7284).
+# Per-criterion recall / false-accept / false-fire cases for the plan-review gate,
+# drawn from all three corpuses (DSO read-only · snap-oakhart-manual · rebar's own
+# tickets) and seeded from REAL observed false-fires
+# (docs/experiments/plan-review-gate/eval/observed-false-positives.md).
+# Validate offline: `rebar prompt eval plan-review-finder`. The live model run needs
+# the [eval] extra + credentials (the eval CI). The gold_set is the human-adjudicated
+# subset the llm-judge is aligned to (Cohen's kappa); the labels here are a best-effort
+# seed pending human adjudication — see eval_specs/README.plan-review.md.
+prompt: plan-review-finder
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  # Deterministic scorers GATE the build.
+  - type: deterministic
+    name: emits_valid_findings
+    description: The output validates against the plan_review_findings contract.
+  - type: deterministic
+    name: no_fire_on_good_cases
+    description: >
+      A finding's criteria are confined to the chunk's rubric ids, and a GOOD-case
+      (false-fire) plan produces no finding for the criterion under test.
+  - type: deterministic
+    name: recall_on_seeded_defects
+    description: A plan with a planted defect produces a finding for the right criterion.
+
+  # LLM-judge REPORTS only (cross-family grader; no self-grading).
+  - type: llm-judge
+    name: finding_is_grounded_and_actionable
+    gates: false
+    threshold: 0.7
+    pointwise: true
+    rubric: >
+      Score 0..1 how well each finding is grounded in the plan (a quote / section /
+      absence rationale) and is actionable (a criterion + location + checklist line);
+      length-neutral. A finding manufactured from sound phrasing scores low.
+    grader:
+      model: openai:gpt-4o-2024-08-06
+      temperature: 0
+      seed: 7
+      snapshot: "2024-08-06"
+
+# The labeled case set (recall / false-accept / false-fire), drawn from the 3 corpuses.
+# `expect: finding` = the criterion SHOULD fire (recall); `expect: pass` = a GOOD case
+# the criterion must NOT fire on (false-fire). `mode` ties false-fires to the taxonomy.
+dataset:
+  # ── recall (bad plan → finding) ──────────────────────────────────────────────
+  - id: R-E2-rebar
+    corpus: rebar
+    criterion: E2
+    expect: finding
+    input: >
+      A task whose only acceptance criterion is "improve the reconciler so it is more
+      robust" — no observable outcome, no verification.
+  - id: R-E5-snap
+    corpus: snap
+    criterion: E5
+    expect: finding
+    input: >
+      A Rails story adding a payments webhook with acceptance criteria but no testing
+      plan at all (no request specs, no idempotency test).
+  - id: R-G5-dso
+    corpus: dso
+    criterion: G5
+    expect: finding
+    input: >
+      An epic-sized task bundling schema migration + API + UI + docs into one ticket
+      with a flat 18-item AC list and no decomposition.
+  - id: R-F4-rebar
+    corpus: rebar
+    criterion: F4
+    expect: finding
+    input: >
+      A story with a solution but no statement of the user/problem it serves.
+  # ── false-fire GOOD cases (sound plan → NO finding), seeded from observed FPs ──
+  - id: FP1-T5c
+    corpus: rebar
+    criterion: T5c
+    expect: pass
+    mode: domain-inappropriate-standard-import
+    input: >
+      A rebar (git-backed library/CLI) change; the plan has no "access level" concept
+      because the domain has none. T5c must NOT import a generic web-app access-control
+      requirement.
+  - id: FP4-G6
+    corpus: rebar
+    criterion: G6
+    expect: pass
+    mode: debatable-misinterpretation-of-intent
+    input: >
+      A gate that is fail-open at the DET floor and advisory-by-default WITH per-criterion
+      blocking levers (thresholds high during calibration BY DESIGN). G6 must not read this
+      as a "hollow signal" — it is a deliberate, documented posture.
+  - id: FP5-T5a
+    corpus: rebar
+    criterion: T5a
+    expect: pass
+    mode: low-impact-nitpick
+    input: >
+      A plan that sets initial latency targets from UX/timeout projections and refines
+      them from passive logging. T5a must not demand an upfront benchmark step (immaterial).
+  - id: FP6-T2
+    corpus: rebar
+    criterion: T2
+    expect: pass
+    mode: library-guaranteed-capability
+    input: >
+      A plan adopting Pydantic AI for provider-agnostic LLM calls. T2 must NOT demand the
+      plan re-prove provider-agnosticism (the library's documented headline contract);
+      adoption IS the mitigation. (A specific immature FEATURE of the library would differ.)
+  - id: FP7-A1
+    corpus: rebar
+    criterion: A1
+    expect: pass
+    mode: rebuild-of-designated-experiment-reference
+    input: >
+      A plan to build a production workflow engine where a v1 POC/reference exists
+      (designated experimental validation). A1 must not flag NIH/rebuild — rebuilding a
+      designated probe for production is the intended lifecycle (coach to confirm framing
+      when production-vs-reference is ambiguous from location).
+
+# Frozen human-gold subset (kappa alignment for the llm-judge). SEED labels — pending
+# human adjudication (the gating gold subset; auto-labels seed the bulk corpus).
+gold_set:
+  - input: "A criterion finding grounded in a quoted AC line with a checklist fix."
+    label: useful
+  - input: "T5c flagging 'no access level' on a git-backed CLI (FP1)."
+    label: not_useful
+  - input: "T2 demanding re-proof of an adopted library's documented contract (FP6)."
+    label: not_useful
+  - input: "A real missing-testing-plan finding on a payments webhook with a path."
+    label: useful
