@@ -197,6 +197,111 @@ def route_criteria(ctx: PlanContext) -> tuple[list[dict], list[dict]]:
 CONTAINER_CRITERIA = ("G3", "G4")
 
 
+def _is_context_limit_error(exc: Exception) -> bool:
+    """Heuristic: does ``exc`` look like a provider context-window/too-many-tokens
+    error (vs an unrelated failure)? Matches the common phrasings across providers."""
+    msg = str(exc).lower()
+    return any(
+        s in msg
+        for s in (
+            "context",
+            "too many tokens",
+            "maximum context",
+            "context_length",
+            "prompt is too long",
+            "input length",
+            "exceeds the maximum",
+            "token limit",
+        )
+    )
+
+
+def _models_at_or_above(model: str | None) -> list[str]:
+    """The model ladder from ``model`` upward (by window), for runtime escalation.
+    Unknown/absent model → the whole ladder."""
+    names = [n for n, _w in MODEL_LADDER]
+    if model:
+        for i, n in enumerate(names):
+            if n in model:
+                return names[i:]
+    return list(names)
+
+
+def _pass1_with_ladder(
+    runner: Runner,
+    cfg: LLMConfig,
+    plan: str,
+    chunk: list[dict],
+    agentic: bool,
+    events: list[str],
+) -> list[dict[str, Any]]:
+    """Run a Pass-1 finder call with the SIZE-HANDLING LADDER (ca03 AC4/AC6):
+
+    1. run the criteria BATCH (chunk) at the configured model;
+    2. on a context-limit signal, fall back to ONE CRITERION PER CALL (full content,
+       minimal rubric — content is never chunked);
+    3. on a context-limit signal for a single criterion, ESCALATE up the model ladder
+       to a higher-context window and retry;
+    4. if a single criterion still won't fit at the largest window, emit a FAILURE
+       FINDING (P8: the ticket is too big to review in full — reduce/decompose it).
+
+    Non-context errors drop the unit's findings (never abort the review), as before.
+    ``events`` accumulates a human-readable ladder trace for the coverage record."""
+    from dataclasses import replace
+
+    try:
+        return passes.pass1_chunk(runner, cfg, plan=plan, chunk=chunk, agentic=agentic)
+    except Exception as exc:  # noqa: BLE001
+        if not _is_context_limit_error(exc):
+            return []  # unrelated failure → drop this unit's findings (never abort)
+
+    # Step 2/3: drop to one-criterion-per-call, escalating the model per criterion.
+    if len(chunk) > 1:
+        events.append(f"batch of {len(chunk)} hit the context limit → one-criterion-per-call")
+    out: list[dict[str, Any]] = []
+    for crit in chunk:
+        produced = False
+        for model in _models_at_or_above(cfg.model):
+            try:
+                out.extend(
+                    passes.pass1_chunk(
+                        runner, replace(cfg, model=model), plan=plan, chunk=[crit], agentic=agentic
+                    )
+                )
+                if model != cfg.model:
+                    events.append(f"{crit['id']}: escalated to {model}")
+                produced = True
+                break
+            except Exception as exc:  # noqa: BLE001
+                if not _is_context_limit_error(exc):
+                    produced = True  # non-size failure → drop, don't escalate
+                    break
+                continue  # context limit at this model → escalate to the next
+        if not produced:
+            # Step 4: still too big at the largest window, one criterion at a time.
+            events.append(f"{crit['id']}: too big even at the largest model → failure finding")
+            out.append(
+                {
+                    "finding": (
+                        "The ticket is too large to review in full even for a single criterion "
+                        f"({crit['id']}) at the largest context window."
+                    ),
+                    "criteria": [crit["id"]],
+                    "location": "(whole plan)",
+                    "evidence": [
+                        "content exceeds the largest model window one-criterion-at-a-time"
+                    ],
+                    "scenarios": [],
+                    "impact": "The plan cannot be reviewed whole; reduce/decompose it (P8/G5).",
+                    "checklist_item": "- [ ] Reduce/decompose the ticket so it fits a review pass.",
+                    "suggested_fix": "Split the ticket into smaller children.",
+                    "tier": "DET",
+                    "_too_big": True,
+                }
+            )
+    return out
+
+
 def _run_container(
     ctx: PlanContext,
     cfg: LLMConfig,
@@ -465,11 +570,15 @@ def _run_passes(
     coverage["chunks"] = len(chunks)
 
     findings: list[dict[str, Any]] = []
+    ladder_events: list[str] = []
     max_workers = max(1, min(6, len(chunks) + len(agent)))
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        st_futs = [ex.submit(passes.pass1_chunk, runner, cfg, plan=plan, chunk=ch) for ch in chunks]
+        st_futs = [
+            ex.submit(_pass1_with_ladder, runner, cfg, plan, ch, False, ladder_events)
+            for ch in chunks
+        ]
         ag_futs = [
-            ex.submit(passes.pass1_chunk, runner, cfg, plan=plan, chunk=[c], agentic=True)
+            ex.submit(_pass1_with_ladder, runner, cfg, plan, [c], True, ladder_events)
             for c in agent
         ]
         for fu in st_futs + ag_futs:
@@ -477,6 +586,8 @@ def _run_passes(
                 findings.extend(fu.result() or [])
             except Exception:  # a failed chunk drops its findings, never aborts the review
                 pass
+    if ladder_events:
+        coverage["size_ladder"] = ladder_events
 
     # Container criteria (G3 child coverage / G4 child consistency): evaluate
     # (parent + ONE child) per call, both whole, and AGGREGATE — never the whole
@@ -503,6 +614,23 @@ def _run_passes(
     else:
         coverage["isf"] = {"ran": False, "reason": "no linked session_log"}
 
+    # The size-ladder's "too big even at the largest model" findings are DET-style
+    # BLOCKS (the P8 outcome discovered at runtime) — route them straight to the
+    # blocking set with a fixed verdict; they do NOT go through Pass-2/3.
+    too_big = [
+        {
+            **f,
+            "decision": "block",
+            "severity": "critical",
+            "priority": 1.0,
+            "validity": 1.0,
+            "impact": 1.0,
+        }
+        for f in findings
+        if f.get("_too_big")
+    ]
+    findings = [f for f in findings if not f.get("_too_big")]
+
     # Pass 2: one aggregate verification pass (agentic if any code-grounded finding).
     grounded = any(
         any(c in registry.CODEBASE_GROUNDED for c in f.get("criteria", [])) for f in findings
@@ -512,7 +640,7 @@ def _run_passes(
 
     # Pass 3: deterministic decision + thresholds per criterion.
     crit_by_id = registry.by_id()
-    decided: list[dict[str, Any]] = []
+    decided: list[dict[str, Any]] = list(too_big)
     for i, f in enumerate(findings):
         thresholds = [
             float(crit_by_id.get(c, {}).get("block_threshold", passes.DEFAULT_BLOCK_THRESHOLD))

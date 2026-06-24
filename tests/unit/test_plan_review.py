@@ -343,6 +343,67 @@ def test_bug_is_exempt() -> None:
     assert v["verdict"] == "PASS" and v["runner"] == "exempt"
 
 
+class _SeqRunner:
+    """A runner returning a scripted sequence of outcomes (dict) or raising
+    (Exception) per call — exercises the size-handling ladder deterministically."""
+
+    name = "seq"
+
+    def __init__(self, outcomes):
+        self._outcomes = list(outcomes)
+        self.calls = 0
+
+    def preflight(self):
+        pass
+
+    def run(self, req):
+        o = self._outcomes[min(self.calls, len(self._outcomes) - 1)]
+        self.calls += 1
+        if isinstance(o, Exception):
+            raise o
+        return o
+
+
+def test_is_context_limit_error_and_ladder() -> None:
+    assert orchestrator._is_context_limit_error(Exception("prompt is too long: 1.2M tokens"))
+    assert not orchestrator._is_context_limit_error(Exception("connection reset"))
+    assert orchestrator._models_at_or_above("claude-haiku-4-5") == [
+        "claude-haiku-4-5",
+        "claude-sonnet-4-6",
+        "claude-opus-4-8",
+    ]
+    assert orchestrator._models_at_or_above("claude-opus-4-8") == ["claude-opus-4-8"]
+
+
+def test_size_ladder_batch_falls_back_to_one_per_call() -> None:
+    # Batch hits the context limit → one-criterion-per-call recovers both findings.
+    ctx_err = Exception("prompt is too long")
+    runner = _SeqRunner(
+        [
+            ctx_err,  # the batch call
+            {"findings": [{"finding": "a", "criteria": ["E2"]}]},  # per-criterion E2
+            {"findings": [{"finding": "b", "criteria": ["E5"]}]},  # per-criterion E5
+        ]
+    )
+    events: list = []
+    out = orchestrator._pass1_with_ladder(
+        runner, _fake_cfg(), "plan", [{"id": "E2"}, {"id": "E5"}], False, events
+    )
+    assert sorted(f["finding"] for f in out) == ["a", "b"]
+    assert any("one-criterion-per-call" in e for e in events)
+
+
+def test_size_ladder_too_big_emits_blocking_failure_finding() -> None:
+    # A single criterion that context-limits at EVERY model → a too-big failure finding.
+    runner = _SeqRunner([Exception("maximum context length exceeded")])
+    events: list = []
+    out = orchestrator._pass1_with_ladder(
+        runner, _fake_cfg(), "plan", [{"id": "E2"}], False, events
+    )
+    assert len(out) == 1 and out[0]["_too_big"] is True and out[0]["criteria"] == ["E2"]
+    assert any("too big" in e for e in events)
+
+
 def test_largest_window_uses_configured_model_window() -> None:
     # A haiku-only deployment caps P8 at haiku's window, not the ladder's 1M top.
     assert orchestrator.largest_window_tokens("claude-haiku-4-5") == 1_000_000  # escalates up
