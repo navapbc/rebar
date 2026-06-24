@@ -1,0 +1,33 @@
+# Pre-commit hooks for rebar — CHECK-ONLY by policy (modeled on Pydantic).
+#
+# A commit must never silently rewrite code: these hooks FAIL the commit and tell you
+# to run `make format`, but they do not mutate your files (no `ruff --fix`, no
+# format-write). This avoids the unstaged-mutation footgun (pre-commit leaves a fixing
+# hook's changes unstaged) and keeps an agent's in-memory view of a file valid across
+# sequential edits. Mutation happens only when you explicitly run `make format`.
+#
+# Install: `make install` (or `pre-commit install`). The ruff used by the `lint` hook
+# is the version pinned EXACTLY in pyproject's [dev] extra, so the hook, `make lint`,
+# and CI all agree.
+repos:
+  # Lightweight, CHECK-ONLY hygiene hooks (these error; they do not reformat code).
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+
+  # The code gate — runs `make lint` (ruff check + ruff format --check). CHECK-ONLY:
+  # it fails if the code isn't formatted/clean and points you at `make format`; it
+  # never rewrites files. Routed through the Makefile so the hook, CI, and local all
+  # run the identical command + pinned ruff.
+  - repo: local
+    hooks:
+      - id: lint
+        name: lint (ruff check + format --check; never mutates)
+        entry: make lint
+        language: system
+        pass_filenames: false
+        types_or: [python, pyi]

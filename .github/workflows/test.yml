@@ -41,15 +41,14 @@ jobs:
           python -m pip install -e '.[dev]'
 
       # GATING: the flake8 "real-bug" smoke set (configured in pyproject
-      # [tool.ruff.lint]) — syntax errors + undefined names. This is the gate that
-      # catches NameError-on-error-path bugs (e.g. a missing `import urllib` used
-      # only inside an `except` clause).
-      - name: ruff — real-bug rules (gating)
-        run: ruff check src tests
-
-      # GATING: formatting consistency (ruff format, recommended defaults).
-      - name: ruff format — check (gating)
-        run: ruff format --check src tests
+      # [tool.ruff.lint]) — syntax errors + undefined names — plus formatting
+      # consistency (ruff format --check). Routed through `make lint` (the single
+      # source of truth shared by local + the pre-commit hook), running the EXACT
+      # ruff pinned in pyproject's [dev] extra so CI and local never drift. CHECK-ONLY
+      # (never mutates) — a failure means "run `make format`". This is the gate that
+      # catches NameError-on-error-path bugs + format drift.
+      - name: lint (ruff check + format --check, gating)
+        run: make lint
 
       # ADVISORY: the broader stylistic set (unused imports, etc.). Reported into
       # the job summary as a ratchet view; the step always SUCCEEDS (green) so the
@@ -61,9 +60,10 @@ jobs:
           ruff check --select E,F,W,I,UP,B --statistics src tests \
             | tee -a "$GITHUB_STEP_SUMMARY" || true
 
-      # GATING: the pure in-process library core is kept type-clean.
+      # GATING: the pure in-process library core is kept type-clean. Via `make
+      # typecheck` (same command as local).
       - name: mypy — library core (gating)
-        run: mypy src/rebar/reducer src/rebar/graph src/rebar/_store
+        run: make typecheck
 
       # ADVISORY: the rest of the tree (engine helpers, reconciler) — same
       # green-with-summary treatment as the advisory ruff step above.
