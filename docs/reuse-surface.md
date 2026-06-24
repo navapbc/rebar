@@ -14,7 +14,9 @@ Worked consumer of all four: the plan-review gate
 ([plan-review-gate.md](plan-review-gate.md), `src/rebar/llm/plan_review/`).
 
 > Audience: human developers and LLM agents. Every signature below is verified
-> against the current source; re-verify with `inspect.signature(...)` if in doubt.
+> against the current source by `tests/unit/test_reuse_surface_doc.py` (a CI
+> anti-drift gate that introspects each documented callable) — re-verify with
+> `inspect.signature(...)` if in doubt.
 
 ---
 
