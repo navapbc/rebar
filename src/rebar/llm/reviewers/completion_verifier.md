@@ -6,6 +6,8 @@ description: Verifies that a ticket's completion requirements (acceptance/succes
   met by the implementation before closure. Emits a PASS/FAIL verdict with one finding
   per failing criterion. Used by the verify-completion operation and the optional
   close gate.
+inputs: reviewer_input
+outputs: completion_verdict
 execution_mode: agentic
 category: review
 dimension: completion

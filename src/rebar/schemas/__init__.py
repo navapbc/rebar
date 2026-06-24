@@ -178,7 +178,11 @@ CONTRACT_SCHEMAS: frozenset[str] = frozenset(
         "set_fields",
     )
     for io in ("input", "output")
-)
+) | {
+    # The shared INPUT contract for the built-in reviewer PROMPTS (their `outputs` are
+    # the existing review_result / completion_verdict schemas). Permissive by design.
+    "reviewer_input",
+}
 
 # The authoritative map of every structured (--output json / always-JSON) output
 # to its schema. Keyed by command, or <command>.<interface> when an interface's

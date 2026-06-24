@@ -3,6 +3,8 @@ schema_version: 1
 title: Code quality reviewer
 description: Reviews a code change (commits/diff) for correctness, bugs, edge cases,
   clarity, and maintainability. The default reviewer for the code-review operation.
+inputs: reviewer_input
+outputs: review_result
 execution_mode: agentic
 category: review
 dimension: code-quality

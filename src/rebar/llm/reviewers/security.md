@@ -3,6 +3,8 @@ schema_version: 1
 title: Security reviewer
 description: Looks for security-relevant concerns (authn/authz, secrets, input handling,
   injection, unsafe deserialization).
+inputs: reviewer_input
+outputs: review_result
 execution_mode: agentic
 category: review
 dimension: security

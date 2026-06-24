@@ -184,9 +184,10 @@ def test_prompt_contract_view_unknown_prompt_degrades_to_empty() -> None:
 def test_prompt_override_drift_flags_changed_outputs(tmp_path: Path) -> None:
     pdir = tmp_path / ".rebar" / "prompts"
     pdir.mkdir(parents=True)
-    # ticket-quality is a built-in with NO outputs front-matter; declaring one is drift.
+    # ticket-quality's built-in outputs contract is review_result; an override that
+    # CHANGES it (here to completion_verdict) is breaking drift.
     (pdir / "ticket-quality.md").write_text(
-        "---\ncategory: review\ndimension: ticket-quality\noutputs: review_result\n---\n"
+        "---\ncategory: review\ndimension: ticket-quality\noutputs: completion_verdict\n---\n"
         "Body {{ticket_id}}",
         encoding="utf-8",
     )
@@ -199,9 +200,11 @@ def test_prompt_override_drift_flags_changed_outputs(tmp_path: Path) -> None:
 def test_prompt_override_drift_identical_override_is_clean(tmp_path: Path) -> None:
     pdir = tmp_path / ".rebar" / "prompts"
     pdir.mkdir(parents=True)
-    # An override that does NOT touch outputs (same as built-in: absent) → clean.
+    # An override that keeps the SAME outputs contract as the built-in (review_result)
+    # → no drift.
     (pdir / "ticket-quality.md").write_text(
-        "---\ncategory: review\ndimension: ticket-quality\n---\nBody {{ticket_id}}",
+        "---\ncategory: review\ndimension: ticket-quality\noutputs: review_result\n---\n"
+        "Body {{ticket_id}}",
         encoding="utf-8",
     )
     assert prompts.prompt_override_drift(repo_root=str(tmp_path)) == []
@@ -218,7 +221,7 @@ def test_lint_workflow_surfaces_override_drift(tmp_path: Path) -> None:
     pdir = tmp_path / ".rebar" / "prompts"
     pdir.mkdir(parents=True)
     (pdir / "ticket-quality.md").write_text(
-        "---\ncategory: review\ndimension: ticket-quality\noutputs: review_result\n---\n"
+        "---\ncategory: review\ndimension: ticket-quality\noutputs: completion_verdict\n---\n"
         "Body {{ticket_id}}",
         encoding="utf-8",
     )

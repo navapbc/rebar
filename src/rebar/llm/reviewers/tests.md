@@ -3,6 +3,8 @@ schema_version: 1
 title: Test-coverage reviewer
 description: Assesses whether changes are adequately covered by tests and flags missing
   edge cases.
+inputs: reviewer_input
+outputs: review_result
 execution_mode: agentic
 category: review
 dimension: test-coverage

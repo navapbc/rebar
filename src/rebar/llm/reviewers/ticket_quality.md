@@ -4,6 +4,8 @@ title: Ticket quality reviewer
 description: Reviews a ticket (or ticket graph) for clarity, acceptance criteria,
   scope, dependencies, and implementation risk. The default reviewer for the `review`
   operation.
+inputs: reviewer_input
+outputs: review_result
 execution_mode: agentic
 category: review
 dimension: ticket-quality
