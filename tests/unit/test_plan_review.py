@@ -262,6 +262,44 @@ def test_overlay_triggers_are_low_fp_set() -> None:
 
 
 # ── Pass-4 subject validator (C1 enforcement) ─────────────────────────────────
+def test_pass4_coach_maps_findings_and_renders_deterministically() -> None:
+    from rebar.llm.runner import FakeRunner
+
+    moves = orchestrator.MOVE_REGISTRY
+    fr = FakeRunner(
+        structured={
+            "notes": [
+                {"move_id": "1", "subject": "the retry/timeout policy", "finding_refs": ["f1"]},
+                # invalid subject (imperative) → dropped (C1 fallback)
+                {"move_id": "5", "subject": "Add a cache", "finding_refs": ["f2"]},
+                # unknown move id → dropped
+                {"move_id": "99", "subject": "the thing", "finding_refs": ["f3"]},
+            ]
+        }
+    )
+    notes = passes.pass4_coach(
+        fr, _fake_cfg(), plan="p", surviving=[{"id": "f1", "finding": "x"}], move_registry=moves
+    )
+    assert len(notes) == 1  # only the valid move+subject survives
+    n = notes[0]
+    assert n["move_id"] == "1" and n["finding_refs"] == ["f1"]
+    # Prose rendered DETERMINISTICALLY from the locked template (the LLM didn't author it).
+    assert n["coaching"] == moves["1"]["template"].format(subject="the retry/timeout policy")
+
+
+def test_load_move_registry_merges_project_extensions(tmp_path) -> None:
+    (tmp_path / ".rebar").mkdir()
+    (tmp_path / ".rebar" / "plan_review_moves.json").write_text(
+        '{"99": {"name": "custom move", "template": "Do custom thing for {subject}."},'
+        ' "bad": {"name": "no placeholder", "template": "no subject slot"}}',
+        encoding="utf-8",
+    )
+    reg = orchestrator.load_move_registry(repo_root=str(tmp_path))
+    assert "1" in reg  # built-ins retained
+    assert reg["99"]["name"] == "custom move"  # project move added
+    assert "bad" not in reg  # rejected: template lacks {subject}
+
+
 def test_subject_validator_accepts_noun_phrase() -> None:
     assert passes._validate_subject("the retry/timeout policy") == "the retry/timeout policy"
 

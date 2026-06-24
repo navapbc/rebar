@@ -29,6 +29,7 @@ import hashlib
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 from rebar.llm.config import LLMConfig
@@ -98,6 +99,27 @@ MOVE_REGISTRY: dict[str, dict[str, str]] = {
         "template": "Generalize {subject} across the rest of the work.",
     },
 }
+
+
+def load_move_registry(repo_root=None) -> dict[str, dict[str, str]]:
+    """The Pass-4 move registry: the built-in moves PLUS project extensions from
+    ``.rebar/plan_review_moves.json`` (a ``{move_id: {name, template}}`` map; a
+    project entry adds a new move or overrides a built-in by id). The template must
+    contain a single ``{subject}`` placeholder — the LLM never authors prose.
+    Best-effort: a missing/malformed file → built-ins only (never crashes the review)."""
+    moves = {mid: dict(m) for mid, m in MOVE_REGISTRY.items()}
+    if not repo_root:
+        return moves
+    try:
+        path = Path(repo_root) / ".rebar" / "plan_review_moves.json"
+        if path.is_file():
+            extra = json.loads(path.read_text(encoding="utf-8"))
+            for mid, m in (extra or {}).items():
+                if isinstance(m, dict) and m.get("name") and "{subject}" in str(m.get("template")):
+                    moves[str(mid)] = {"name": m["name"], "template": m["template"]}
+    except Exception:  # noqa: BLE001 — project move file is best-effort
+        pass
+    return moves
 
 
 # ── context assembly ─────────────────────────────────────────────────────────────
@@ -532,7 +554,7 @@ def run_review(
                 cfg,
                 plan=ctx.plan_text,
                 surviving=surfaced,
-                move_registry=MOVE_REGISTRY,
+                move_registry=load_move_registry(ctx.repo_root),
             )
         except Exception as exc:
             coverage["coach_error"] = str(exc)

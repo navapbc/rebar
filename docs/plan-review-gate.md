@@ -16,8 +16,12 @@ coverage), never turned into a false accusation.
 > Implementation: `src/rebar/llm/plan_review/` (epic `5fd2-a7c2-0aec-48fa`).
 > Reusable machinery it builds on: [llm-framework.md](llm-framework.md) (the runner
 > + contracts), [reuse-surface.md](reuse-surface.md) (the signing surface + LLM
-> runtime API), [grounding.md](grounding.md) (the code-grounding oracle),
-> [event-schema.md](event-schema.md) (the `SIGNATURE` + `REVIEW_RESULT` events).
+> runtime API + the prompt library), [grounding.md](grounding.md) (the code-grounding
+> oracle), [event-schema.md](event-schema.md) (the `SIGNATURE` + `REVIEW_RESULT`
+> events). The gate runs **on the workflow engine** — see the workflow-engine usage
+> docs [workflow-authoring-v2.md](workflow-authoring-v2.md) +
+> [workflow-editor.md](workflow-editor.md) (the consolidated `docs/workflow-engine.md`
+> is the pending 6f2d WS-DOC deliverable; these are the current authoritative refs).
 
 ## Two surfaces
 
@@ -97,6 +101,33 @@ when a finding cites a specific code reference) → **dropped**; `validity < 0.5
 else **advisory**. v1 ships thresholds high and posture advisory, so the LLM tiers
 are almost entirely advisory during calibration — only the DET floor blocks by
 default.
+
+### The Pass-4 move registry
+
+The coach maps each surviving advisory finding to one **move** and renders the prose
+**deterministically** from the move's locked template (the LLM only picks the move id
+and fills a bounded noun-phrase `{subject}`). The built-in registry
+(`orchestrator.MOVE_REGISTRY`):
+
+| id | move | template (rendered with `{subject}`) |
+|----|------|--------------------------------------|
+| 1 | spike | "Consider a short spike to de-risk {subject} before committing the plan." |
+| 2 | prior-art research | "Research prior art / OSS for {subject} before building it custom." |
+| 3 | pre-mortem | "Run a quick pre-mortem on {subject}: how could this plan fail?" |
+| 4 | riskiest-assumption test | "Test the riskiest assumption behind {subject} first." |
+| 5 | weigh alternatives | "Weigh at least one structural alternative for {subject}." |
+| 6 | specification by example | "Pin down {subject} with a concrete worked example." |
+| 7 | thin vertical slice | "Prove {subject} end-to-end with a thin vertical slice first." |
+| 8 | ADR / one-way-door | "Record an ADR for {subject} — it reads like a one-way door." |
+| 9 | plan the verification | "Plan how {subject} will be verified before implementing it." |
+| 11 | propagate to children | "Propagate the revision for {subject} to the child tickets." |
+| 12 | generalize the finding | "Generalize {subject} across the rest of the work." |
+
+**Project-extensible:** a project adds or overrides moves by id via
+`.rebar/plan_review_moves.json` (`{move_id: {name, template}}`; the template must
+contain a single `{subject}` placeholder). The **C1 subject validator**
+(`passes._validate_subject`) rejects code/imperatives/overlong subjects so the move
+can only ever name what to investigate, never hand over a solution.
 
 ### The advisory cap
 
