@@ -60,6 +60,7 @@ __all__ = [
     "FSCK",
     "REVIEW_RESULT",
     "COMPLETION_VERDICT",
+    "PLAN_REVIEW_VERDICT",
     "SIGN_RESULT",
     "VERIFY_SIGNATURE_RESULT",
     "EXPORT",
@@ -105,6 +106,11 @@ REVIEW_RESULT = "review_result"
 # Like review_result, the MCP tool is exempt (live LLM call → plain dict, no
 # outputSchema); the CLI/library JSON path is pinned via the "verify_completion" key.
 COMPLETION_VERDICT = "completion_verdict"
+# rebar.llm — output of the plan-review gate (`rebar review-plan`). The inverse of
+# completion_verdict; same exemption (the MCP `review_plan` tool is NO_SCHEMA_EXEMPT
+# — live LLM call → plain dict); the CLI/library JSON path is pinned via the
+# "review_plan" key below.
+PLAN_REVIEW_VERDICT = "plan_review_verdict"
 # signing.py — the persisted SIGNATURE record (`rebar sign`) and the uniform
 # verify verdict (`rebar verify-signature`), both over `--output json`.
 SIGN_RESULT = "sign_result"
@@ -224,6 +230,11 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     # coverage guard never drives it live) and the MCP tool is NO_SCHEMA_EXEMPT;
     # registered here so the every-schema-file-is-wired guard sees completion_verdict.
     "verify_completion": COMPLETION_VERDICT,
+    # plan-review gate: like `review`/`verify_completion`, no CLI help arm (the
+    # --output coverage guard never drives it live) and the MCP tool is
+    # NO_SCHEMA_EXEMPT; registered here so the every-schema-file-is-wired guard sees
+    # plan_review_verdict and the CLI/library --output json path is pinned.
+    "review_plan": PLAN_REVIEW_VERDICT,
     "sign": SIGN_RESULT,
     "verify_signature": VERIFY_SIGNATURE_RESULT,
     "verify_signature.not_found": ERROR_ENVELOPE,

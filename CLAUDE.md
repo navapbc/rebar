@@ -4,7 +4,10 @@ rebar is an event-sourced ticket system + Jira reconciler exposed as a Python
 library (`import rebar`), a CLI (`rebar`), and an MCP server (`rebar-mcp`), all
 over one git-backed store. This guide is for **agents** driving rebar (especially
 over MCP). For internals see `docs/architecture.md`, `docs/event-schema.md`, and
-`docs/concurrency.md`.
+`docs/concurrency.md`. For the LLM/agent surfaces see `docs/llm-framework.md`, the
+reusable-machinery API reference `docs/reuse-surface.md` (signing + LLM runtime +
+prompt/contract + output-schema seams), and the plan-review gate
+`docs/plan-review-gate.md`.
 
 > **Record your work in rebar, not in scratch notes.** Before starting, `search`/
 > `list` for an existing ticket; if none fits, `create` one and capture the plan

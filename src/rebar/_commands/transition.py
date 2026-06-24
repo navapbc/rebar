@@ -592,10 +592,23 @@ def transition_cli(argv: list[str], *, repo_root=None) -> int:
 
 
 _CLAIM_USAGE = (
-    "Usage: ticket claim <ticket_id> [--assignee=<name>]\n"
+    "Usage: ticket claim <ticket_id> [--assignee=<name>] [--force[=<reason>]]\n"
     "  Claims an OPEN ticket (-> in_progress) and sets its assignee atomically.\n"
     "  Exits 10 if the ticket is not open (someone else already claimed it).\n"
+    "  --force bypasses the plan-review claim gate (when enabled) with an audit note.\n"
 )
+
+
+def _parse_force(args: list[str]) -> str:
+    """Parse [--force[=<reason>]] from claim's args. A bare ``--force`` yields a
+    default justification so the bypass is still audit-logged (never empty)."""
+    for i, a in enumerate(args):
+        if a.startswith("--force="):
+            return a[len("--force=") :] or "(no reason given)"
+        if a == "--force":
+            nxt = args[i + 1] if i + 1 < len(args) else ""
+            return nxt if nxt and not nxt.startswith("--") else "(no reason given)"
+    return ""
 
 
 def _parse_assignee(args: list[str]) -> str:
@@ -618,7 +631,73 @@ def _parse_assignee(args: list[str]) -> str:
     return assignee
 
 
-def claim_compute(ticket_id: str, *, assignee: str = "", repo_root=None) -> dict:
+def _plan_review_precheck(
+    ticket_id: str, cfg_root: str, repo_root, *, force_plan_review: str
+) -> None:
+    """The plan-review CLAIM gate (epic 5fd2; runs BEFORE the locked claim core).
+
+    When ``verify.require_plan_review_for_claim`` is on, claiming a work ticket
+    requires a fresh, certified plan-review attestation (earn one with
+    ``rebar review-plan <id>``). This is a FAST, LOCAL HMAC verify + freshness/
+    material binding — NO LLM and NO network call (the heavy review is out-of-band).
+    Bugs and session_logs are EXEMPT. ``--force`` bypasses with an audit comment.
+    Raises :class:`CommandError` (block) when the attestation is absent/stale/wrong.
+    Returns ``None`` (allow) when the gate is off, the ticket is exempt, or the
+    attestation is valid."""
+    from rebar.config import ConfigError, load_config
+    from rebar.reducer import reduce_ticket as _reduce
+
+    try:
+        on = load_config(cfg_root).verify.require_plan_review_for_claim
+    except ConfigError as exc:
+        # Unreadable config: fail this opt-in gate OFF with a warning (do not block
+        # every claim on a broken config), mirroring the completion gate's posture.
+        print(
+            f"Warning: could not read rebar config ({exc}); the plan-review claim gate is "
+            f"skipped for {ticket_id}.",
+            file=sys.stderr,
+        )
+        return None
+    if not on:
+        return None
+    ticket_type = (_reduce(os.path.join(str(config.tracker_dir(repo_root)), ticket_id)) or {}).get(
+        "ticket_type", ""
+    )
+    if ticket_type in ("bug", "session_log"):
+        return None  # exempt from the plan-review gate
+    if force_plan_review:
+        # Audit the bypass (best-effort) so a forced claim is a durable signal.
+        try:
+            from rebar._commands import leaf
+
+            leaf.comment(
+                ticket_id,
+                "FORCE_CLAIM: plan-review gate bypassed by user approval — no plan-review "
+                f'attestation was verified. Reason: "{force_plan_review}".',
+                repo_root=repo_root,
+            )
+        except Exception:
+            pass
+        return None
+    from rebar import llm  # LAZY — preserves optionality (claim_gate_check is stdlib-only though)
+
+    check = llm.claim_gate_check(ticket_id, repo_root=repo_root)
+    if check.get("ok"):
+        return None
+    raise CommandError(
+        f"Error: cannot claim {ticket_id}: {check.get('reason')}.\n"
+        "  The plan-review claim gate is enabled (verify.require_plan_review_for_claim).\n"
+        "  Recovery: run the plan review to earn an attestation, then claim:\n"
+        f"    rebar review-plan {ticket_id}\n"
+        f"    rebar claim {ticket_id}\n"
+        '  Override: use --force="<reason>" to bypass (requires user approval).',
+        returncode=1,
+    )
+
+
+def claim_compute(
+    ticket_id: str, *, assignee: str = "", force_plan_review: str = "", repo_root=None
+) -> dict:
     """Claim an ALREADY-RESOLVED ticket (ghost/init checks + the locked claim core).
     Returns ``{ticket_id, status, assignee}``; raises :class:`ConcurrencyMismatch`
     (exit 10) / :class:`CommandError`."""
@@ -637,6 +716,14 @@ def claim_compute(ticket_id: str, *, assignee: str = "", repo_root=None) -> dict
         raise CommandError(
             "Error: ticket system not initialized. Run 'ticket init' first.", returncode=1
         )
+
+    # Plan-review claim gate (opt-in; runs OUTSIDE the lock — a fast LOCAL HMAC
+    # verify, no LLM/network). Blocks (fail-closed) on a missing/stale/wrong
+    # attestation when enabled; --force bypasses with an audit comment. cfg_root is
+    # the REPO root (parent of the tracker), where .rebar/config.conf lives.
+    _plan_review_precheck(
+        ticket_id, os.path.dirname(tracker), repo_root, force_plan_review=force_plan_review
+    )
 
     from rebar._commands import _seam
 
@@ -670,6 +757,7 @@ def claim_cli(argv: list[str], *, repo_root=None) -> int:
     except CommandError as exc:
         sys.stderr.write(exc.message + "\n")
         return exc.returncode
+    force_plan_review = _parse_force(rest[1:])
 
     tracker = str(config.tracker_dir(repo_root))
     ticket_id = _resolve_id_or_report(raw_id, tracker, fmt)
@@ -677,7 +765,9 @@ def claim_cli(argv: list[str], *, repo_root=None) -> int:
         return 1
 
     try:
-        claim_compute(ticket_id, assignee=assignee, repo_root=repo_root)
+        claim_compute(
+            ticket_id, assignee=assignee, force_plan_review=force_plan_review, repo_root=repo_root
+        )
     except ConcurrencyMismatch as exc:
         sys.stderr.write(exc.message + "\n")
         if fmt == "json":

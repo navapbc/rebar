@@ -1,1 +1,1 @@
-Usage: rebar claim <ticket_id> [--assignee=<name>] [--output json]   (atomic open -> in_progress; exit 10 if already claimed)
+Usage: rebar claim <ticket_id> [--assignee=<name>] [--force[=<reason>]] [--output json]   (atomic open -> in_progress; exit 10 if already claimed; --force bypasses the plan-review gate)
