@@ -809,20 +809,6 @@ def _post_substitution_check(doc: dict[str, Any], *, source: str) -> list[LintFi
     return findings
 
 
-def __getattr__(name: str):
-    # `shallow_contract_check` is authored in :mod:`.executor` (this module is at its
-    # size cap) beside the StepContract model it reasons over; re-exported here LAZILY
-    # because a module-level import of executor would cycle (executor → lint →
-    # lint_refs). The story's named home for the check stays importable from lint_refs.
-    if name == "shallow_contract_check":
-        from .executor import shallow_contract_check
-
-        return shallow_contract_check
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-# `shallow_contract_check` is intentionally NOT in __all__ (it is provided lazily via
-# __getattr__ to avoid an import cycle) but remains importable by name from this module.
 __all__ = [
     "LintFinding",
     "lint_document",

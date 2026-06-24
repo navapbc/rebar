@@ -280,6 +280,12 @@ def shallow_contract_check(source: dict, target: dict) -> str:
     (``source``) against a consumer's INPUT schema (``target``). Returns exactly
     ``"OK"``, ``"UNKNOWN"`` (abstain), or ``"ERROR"``.
 
+    A STANDALONE static building block (c768): the ENFORCED net is the runtime
+    consumer-input check in :mod:`.interpreter`; this is the cheap edit-time/static
+    counterpart (e.g. a future cross-edge advisory or an editor hint). It lives here,
+    beside :class:`StepContract`/:func:`contract_for` which it reasons over — import it
+    from this module directly.
+
     A deliberately small STRUCTURAL check, NOT a subsumption engine:
 
     * **UNKNOWN** if either schema is opaque at the top level (a combinator

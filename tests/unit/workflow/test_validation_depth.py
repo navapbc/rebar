@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 import rebar
-from rebar.llm.workflow.lint_refs import shallow_contract_check
+from rebar.llm.workflow.executor import shallow_contract_check
 
 pytest.importorskip("jsonschema")
 
