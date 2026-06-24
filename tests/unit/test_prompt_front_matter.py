@@ -17,6 +17,8 @@ from rebar.llm.prompts import (
     PROMPT_SCHEMA_VERSION,
     PromptError,
     PromptVersionError,
+    _catalog_dir,
+    _packaged_prompt_files,
     _split_front_matter_raw,
     parse_front_matter,
     write_front_matter,
@@ -150,3 +152,50 @@ def test_bom_inside_a_value_is_preserved_not_a_file_bom() -> None:
     out = write_front_matter({"title": "\ufeffhello"}, "b\n")
     meta, _ = _split_front_matter_raw(out)
     assert meta["title"] == "\ufeffhello"
+
+
+# \u2500\u2500 golden round-trip over the MIGRATED BUILT-IN prompts (the 6 reviewers) \u2500\u2500
+#
+# The synthetic cases above prove the writer's invariants on constructed inputs; this
+# block proves the same invariants on the ACTUAL packaged reviewer `.md` files that the
+# afe6 reviewer\u2192front-matter migration produced. The canonical files committed in the
+# wheel must already be a fixed point of the writer, so `write(*split_raw(file)) == file`
+# holds byte-for-byte \u2014 otherwise the CI drift gate would churn on every regenerate and
+# an editor save would silently rewrite the body.
+
+
+def _packaged_prompt_paths():
+    """The packaged base reviewer `.md` files, as (id, traversable) pairs."""
+    cat = _catalog_dir()
+    return [(pid, cat.joinpath(fname)) for pid, fname in sorted(_packaged_prompt_files().items())]
+
+
+def test_built_in_prompts_are_discovered() -> None:
+    # Guard against a vacuous parametrize: the 6 migrated reviewers must be present, so
+    # an empty packaged set can never make the golden round-trip silently pass on nothing.
+    ids = {pid for pid, _ in _packaged_prompt_paths()}
+    assert {
+        "code-quality",
+        "completion-verifier",
+        "security",
+        "spec-alignment",
+        "tests",
+        "ticket-quality",
+    } <= ids
+
+
+@pytest.mark.parametrize("prompt_id,path", _packaged_prompt_paths())
+def test_built_in_prompt_round_trips_canonically(prompt_id: str, path) -> None:
+    text = path.read_text(encoding="utf-8")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # a shipped prompt must carry NO unknown keys
+        meta, body = _split_front_matter_raw(text)
+        rewritten = write_front_matter(meta, body)
+    # write(*split_raw(file)) == file \u2014 the committed file is a canonical fixed point.
+    assert rewritten == text, f"{prompt_id}: packaged prompt is not in canonical form"
+    # body preserved byte-for-byte: the file is the front-matter block followed verbatim
+    # by the body, and the split recovers that exact body.
+    assert text.endswith(body)
+    assert text[len(text) - len(body) :] == body
+    # the migration stamped the contract-bearing front-matter (not a bare legacy file).
+    assert meta.get("schema_version") == PROMPT_SCHEMA_VERSION
