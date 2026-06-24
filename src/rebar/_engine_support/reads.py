@@ -319,6 +319,7 @@ def list_states(
     blocking_state: str = "",
     with_children_count: bool = False,
     sort: str = "",
+    include_body: bool = True,
 ) -> list[dict]:
     """List ticket states. Two universal cross-ticket filters reuse the same
     reducer/graph the bespoke ``list-epics`` used: ``min_children`` (keep tickets
@@ -327,7 +328,13 @@ def list_states(
     ``with_children_count`` additionally surfaces a ``children_count`` field — kept
     OPT-IN so the default list shape stays identical to show/search (the
     single-reducer invariant, bug f026). These generalize what ``list-epics``
-    filtered by, so it becomes a thin wrapper over ``list``."""
+    filtered by, so it becomes a thin wrapper over ``list``.
+
+    ``include_body`` (default ``True``) controls whether the bulky ``description``
+    and ``comments`` fields are emitted. Agent-facing list surfaces (the ``list``
+    CLI and the MCP ``list_tickets`` tool) pass ``False`` so the default list stays
+    lean; internal callers (``validate``/``next_batch``/``list-epics``) keep the
+    default and still receive the bodies they consume."""
     # detected_by:* tags are bug-only — auto-intersect with --type=bug.
     if has_tag.startswith("detected_by:") and not ticket_type:
         ticket_type = "bug"
@@ -377,6 +384,9 @@ def list_states(
         if min_children is not None and cc < min_children:
             continue
         ps = public_state(t)
+        if not include_body:
+            ps.pop("description", None)
+            ps.pop("comments", None)
         if with_children_count:
             ps["children_count"] = cc
         out.append(ps)

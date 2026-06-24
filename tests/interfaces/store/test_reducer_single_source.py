@@ -105,15 +105,16 @@ def test_native_reduce_matches_interface_modulo_internal_keys(rebar_repo: Path) 
 
 
 def test_llm_parity_show_vs_list(rebar_repo: Path) -> None:
-    """`show --output llm` and the `list --output llm` element for the same ticket
-    are identical (both internal-marker-free)."""
+    """`show --output llm` and the `list --full --output llm` element for the same
+    ticket are identical (both internal-marker-free). `list` is lean by default
+    (no `desc`/`cm`), so full parity is asserted against `--full`."""
     tid = _rich_ticket(rebar_repo)
     r = str(rebar_repo)
 
     show_llm = json.loads(_cli("show", "--output", "llm", tid, cwd=r).stdout)
     list_lines = [
         json.loads(ln)
-        for ln in _cli("list", "--output", "llm", cwd=r).stdout.splitlines()
+        for ln in _cli("list", "--full", "--output", "llm", cwd=r).stdout.splitlines()
         if ln.strip()
     ]
     list_llm = next(t for t in list_lines if t.get("id") == tid)
@@ -121,3 +122,29 @@ def test_llm_parity_show_vs_list(rebar_repo: Path) -> None:
     assert show_llm == list_llm
     for internal in INTERNAL_KEYS:
         assert internal not in show_llm
+
+
+def test_list_lean_by_default_omits_body(rebar_repo: Path) -> None:
+    """The default `list` is lean: it drops the bulky `description`/`comments`
+    fields (and their LLM short keys `desc`/`cm`); `--full` restores them."""
+    tid = _rich_ticket(rebar_repo)
+    r = str(rebar_repo)
+
+    # JSON form: lean default omits description/comments; --full includes them.
+    lean = next(t for t in json.loads(_cli("list", cwd=r).stdout) if t["ticket_id"] == tid)
+    assert "description" not in lean
+    assert "comments" not in lean
+    full = next(
+        t for t in json.loads(_cli("list", "--full", cwd=r).stdout) if t["ticket_id"] == tid
+    )
+    assert "description" in full
+    assert "comments" in full
+
+    # LLM form mirrors the lean default (short keys desc/cm absent).
+    lean_llm = next(
+        json.loads(ln)
+        for ln in _cli("list", "--output", "llm", cwd=r).stdout.splitlines()
+        if ln.strip() and json.loads(ln).get("id") == tid
+    )
+    assert "desc" not in lean_llm
+    assert "cm" not in lean_llm
