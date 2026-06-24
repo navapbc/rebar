@@ -1,0 +1,10 @@
+---
+schema_version: 1
+title: Empirical probe (red->green / spike) [overlay]
+description: Plan-review overlay-empirical criterion T2 (1-TURN). The rubric the Pass-1
+  finder applies; routing in criteria_routing.json.
+execution_mode: single_turn
+category: plan-review-criterion
+dimension: overlay-empirical
+---
+Decide whether this plan's RISK warrants empirical validation, and whether such validation is planned. STEP 1 — is the plan complex/novel/uncertain? Signals: a novel or unproven architecture/pattern; an unverified assumption about an external system, dependency, or performance/scale behavior; a default/threshold/heuristic that is ASSERTED rather than derived from data; a design choice the author could not settle by reasoning alone; behavior whose correctness cannot be established without running it. If NONE apply (a well-understood, mechanical, or low-risk change), PASS — not applicable. STEP 2 — if complex/novel, does the plan ALREADY include an empirical-validation step: a spike, probe, prototype, benchmark, measurement, experiment, A/B, a fixture/RED test that exercises the risky behavior, or a pilot with success metrics? If YES, PASS (suppressed — experimentation already present). Only FAIL/advise if the plan is complex/novel AND asserts unvalidated choices with NO plan to test them — then recommend the specific spike/probe/measurement/experiment that would de-risk it before full build-out. SEVERITY: a core design resting on an unvalidated assumption = MAJOR; a tunable default/threshold with no measurement plan = MINOR. ANTI-FP (critical): do NOT fire when the ticket already contains experimentation — a spike, a fixture/RED test, a pilot with metrics, a measurement step, or stated success criteria for a trial. A mechanical or fully-specified change is NOT complex. Treat an explicit 'TBD: measure X' / 'derive from fixture' as validation-present. PASS unless there is a real, unvalidated, high-uncertainty choice left untested.

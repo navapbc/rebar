@@ -1,40 +1,48 @@
 """Criteria registry + routing for the plan-review gate (child ca03).
 
-Loads the declarative criteria descriptors (``criteria_v8.json`` — 32 descriptors:
-the Layer-2 judgment criteria F/E/G/A, the T1–T12 triggered overlays, the
-cross-cutting COH, and the intent-source-fidelity ISF criterion), and provides the
-generic routing the orchestrator needs:
+The PRODUCTION criteria live in the workflow-engine **prompt library**, NOT in an
+inline constant or the experiment ``criteria_v8.json`` (design reference only). Each
+criterion's RUBRIC is a contract-bearing prompt file
+(``src/rebar/llm/reviewers/plan_review_<id>.md``, ``category:
+plan-review-criterion``) resolved through the da27 prompt machinery
+(:func:`rebar.llm.prompts.get_prompt` → front-matter contract + ``.rebar/prompts/``
+project overrides). Its ROUTING (``exec`` / ``applies_at`` / ``block_threshold`` /
+``default_posture`` / ``checklist``) lives in the derived ``criteria_routing.json``
+index — the analog of the reviewers' ``index.json``, which likewise separates prompt
+TEXT (library) from selection/routing metadata. :func:`load_criteria` MERGES the two
+into a descriptor (32: the Layer-2 judgment F/E/G/A, the T1–T12 overlays, COH, ISF).
 
-* :func:`load_criteria` — read + validate the descriptor set (cached).
+This registry provides the generic routing the orchestrator needs:
+
+* :func:`load_criteria` — merge each criterion's library prompt + routing entry (cached).
 * :func:`applies` — proportionate-scrutiny filter (``applies_at``: levels /
   container-only / suppress-by-type / suppress-when-test-or-mechanical).
 * :func:`chunk_by_facet` — pack same-``facet`` single-turn criteria into chunks of
   ``base_chunk(model) × size_factor(ticket)`` (the RUBRIC is the lever that fits a
   context window — the ticket content is NEVER chunked).
-* :func:`overlay_triggers` — deterministic low-FP overlay triggers (T1/T5a/T5d…),
+* :func:`overlay_triggers` — deterministic low-FP overlay triggers (T5a/T5d/T7/T12),
   the rest are LLM-routed at Pass-1.
-* :func:`check_registry_coverage` — the completeness guard (the canonical v4 §5
-  registry must be fully covered; fails loudly if any criterion is missing).
+* :func:`check_registry_coverage` — the completeness guard (every criterion in the
+  canonical v4 §5 registry must have a loadable library prompt + routing entry).
 
-The descriptor schema (per criterion)::
+The merged descriptor (per criterion)::
 
     {
       "id": str, "exec": "1-TURN"|"2-STEP"|"AGENT", "facet": str,
-      "name": str, "scenario": str (the prompt body),
+      "name": str, "scenario": str (the rubric body, from the library prompt),
       "applies_at": {"levels": [..], "container_only": bool,
                      "suppress_types": [..], "suppress_when": [..]},
       "checklist": [{"key": str, "check": str}, ...],
-      "severity_by": "pass3", "default_posture": "advisory"|"blocking",
-      "block_threshold": float
+      "default_posture": "advisory"|"blocking", "block_threshold": float
     }
 
 The DET floor (P1–P8) is NOT in this file — it is the ``exec=DET`` tier in
-:mod:`.det_floor`. This registry owns the LLM tiers (1-TURN / 2-STEP / AGENT).
+:mod:`.det_floor`. This registry owns the LLM tiers (1-TURN / 2-STEP / AGENT). See
+``docs/reuse-surface.md`` §3 for the prompt-library contract this builds on.
 """
 
 from __future__ import annotations
 
-import json
 import re
 from functools import lru_cache
 from importlib import resources
@@ -96,39 +104,87 @@ CANONICAL_LLM = frozenset(
     }
 )
 
-_CRITERIA_RESOURCE = "criteria_v8.json"
-
-
-@lru_cache(maxsize=1)
-def load_criteria() -> tuple[dict[str, Any], ...]:
-    """Load + lightly validate the packaged criteria descriptors (cached).
-
-    Raises :class:`RegistryError` if the resource is missing/malformed or a
-    descriptor lacks the required keys."""
-    try:
-        raw = (
-            resources.files("rebar.llm.plan_review")
-            .joinpath(_CRITERIA_RESOURCE)
-            .read_text(encoding="utf-8")
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise RegistryError(f"cannot read {_CRITERIA_RESOURCE}: {exc}") from exc
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise RegistryError(f"{_CRITERIA_RESOURCE} is not valid JSON: {exc}") from exc
-    if not isinstance(data, list) or not data:
-        raise RegistryError(f"{_CRITERIA_RESOURCE} must be a non-empty JSON array")
-    out = []
-    for c in data:
-        if not isinstance(c, dict) or "id" not in c or "exec" not in c:
-            raise RegistryError(f"malformed criterion descriptor: {c!r}")
-        out.append(c)
-    return tuple(out)
+# Each criterion's RUBRIC is a contract-bearing PROMPT FILE in the workflow-engine
+# prompt library (src/rebar/llm/reviewers/plan_review_<id>.md), loaded via the da27
+# prompt machinery (get_prompt → front-matter contract + `.rebar/prompts/<id>.md`
+# project override). Its ROUTING (exec / applies_at / block_threshold /
+# default_posture / checklist) lives in the DERIVED routing index
+# (criteria_routing.json) — the analog of the reviewers' index.json, which likewise
+# separates prompt TEXT (library) from selection/routing metadata. The production
+# criteria do NOT live in the experiment criteria_v8.json (design reference only).
+_PROMPT_ID_PREFIX = "plan-review-"
+_ROUTING_RESOURCE = "criteria_routing.json"
 
 
 class RegistryError(Exception):
     """The criteria registry could not be loaded/validated."""
+
+
+@lru_cache(maxsize=1)
+def _routing_index() -> dict[str, Any]:
+    """The derived per-criterion routing index (cached)."""
+    import json
+
+    raw = (
+        resources.files("rebar.llm.plan_review")
+        .joinpath(_ROUTING_RESOURCE)
+        .read_text(encoding="utf-8")
+    )
+    return json.loads(raw)
+
+
+def _descriptor_from_prompt(cid: str) -> dict[str, Any]:
+    """Build a criterion descriptor by merging its prompt-library file (the RUBRIC
+    body + facet/exec-mode from front-matter, resolved via the prompt machinery with
+    `.rebar/prompts/` overrides) with its routing index entry."""
+    from rebar.llm import prompts
+
+    repo_root = None
+    try:
+        from rebar import config as _config
+
+        repo_root = str(_config.repo_root())
+    except Exception:  # noqa: BLE001 — no repo ⇒ packaged prompts only
+        repo_root = None
+    prompt = prompts.get_prompt(f"{_PROMPT_ID_PREFIX}{cid}", repo_root=repo_root)
+    routing = _routing_index().get(cid)
+    if routing is None:
+        raise RegistryError(f"criterion {cid!r} has no entry in {_ROUTING_RESOURCE}")
+    return {
+        "id": cid,
+        "exec": routing.get("exec", "1-TURN"),
+        "facet": prompt.dimension or routing.get("facet", "misc"),
+        "name": prompt.title or cid,
+        "scenario": prompt.text.strip(),
+        "applies_at": routing.get("applies_at", {}),
+        "checklist": routing.get("checklist", []),
+        "block_threshold": routing.get("block_threshold", 0.95),
+        "default_posture": routing.get("default_posture", "advisory"),
+        "routing": routing.get("routing"),
+        "trigger": routing.get("trigger"),
+        "overlay_routing": routing.get("overlay_routing"),
+    }
+
+
+@lru_cache(maxsize=1)
+def load_criteria() -> tuple[dict[str, Any], ...]:
+    """Load the production criteria from the prompt library (cached).
+
+    For every criterion in the canonical set, resolve its contract-bearing prompt
+    file (project override > packaged) and build its descriptor from the front-matter
+    + body. Raises :class:`RegistryError` if a criterion's prompt is missing or
+    lacks its contract."""
+    out = []
+    for cid in sorted(CANONICAL_LLM):
+        try:
+            out.append(_descriptor_from_prompt(cid))
+        except RegistryError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise RegistryError(
+                f"cannot load criterion prompt for {cid!r} from the prompt library: {exc}"
+            ) from exc
+    return tuple(out)
 
 
 def by_id() -> dict[str, dict[str, Any]]:
@@ -240,11 +296,16 @@ def is_overlay(crit_id: str) -> bool:
 # ── completeness guard ─────────────────────────────────────────────────────────
 def check_registry_coverage() -> tuple[bool, list[str]]:
     """The canonical-registry completeness guard: every LLM criterion in the
-    canonical v4 §5 registry must be present in the shipped descriptor set.
-    Returns ``(ok, missing_ids)``. (G1G2 is a single combined descriptor; BROAD is
-    the orchestrator's bounded pass, not a descriptor.)"""
-    have = set(by_id())
-    missing = sorted(CANONICAL_LLM - have)
+    canonical v4 §5 registry must have a contract-bearing prompt FILE in the prompt
+    library that loads with its `exec` contract. Returns ``(ok, missing_ids)``.
+    (G1G2 is a single combined descriptor; BROAD is the orchestrator's bounded pass,
+    not a descriptor.)"""
+    missing: list[str] = []
+    for cid in sorted(CANONICAL_LLM):
+        try:
+            _descriptor_from_prompt(cid)
+        except Exception:  # noqa: BLE001 — missing/malformed prompt ⇒ not covered
+            missing.append(cid)
     return (not missing, missing)
 
 

@@ -55,9 +55,16 @@ The gate has **two layers**:
   P4/P6/P7 (oversize / AC-quality / destructive-op sniff) are advisory.
 
 * **Layer 2 — the advisory coaching review (the three passes)** — never blocks by
-  default. Each criterion is a declarative descriptor in the registry
-  (`criteria_v8.json`, 32 descriptors: the F/E/G/A judgment criteria, the T1–T12
-  triggered overlays, COH, and ISF).
+  default. Each of the 32 criteria (the F/E/G/A judgment criteria, the T1–T12
+  triggered overlays, COH, and ISF) ships as a **contract-bearing prompt in the
+  prompt library** (`src/rebar/llm/reviewers/plan_review_<id>.md`, `category:
+  plan-review-criterion`), loaded via `get_prompt` with `.rebar/prompts/` project
+  overrides; its routing (exec/applies_at/block_threshold/posture/checklist) is the
+  derived `criteria_routing.json` index. The five pass prompts (finder/verifier/
+  coach/ISF/container) are `plan-review-pass` library prompts resolved via
+  `resolve_prompt` — no inline prompt strings. (`criteria_v8.json` under
+  `docs/experiments/` is the design reference, not the production artifact.) See
+  [reuse-surface.md](reuse-surface.md) §3.
 
 The three passes (adopted from the shared three-pass framework, epic `9da1`) — the
 model emits **no** holistic severity/confidence anywhere in the decision path:

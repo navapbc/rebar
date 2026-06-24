@@ -219,31 +219,95 @@ author-editable pipeline → a **workflow**.
 
 ---
 
-## 3. The prompt / contract model — `rebar.llm.prompts`
+## 3. The prompt library — `rebar.llm.prompts`
 
-A prompt is a front-matter-bearing file (packaged, or a `.rebar/prompts/<id>.md`
-project override that wins) declaring a **closed-key contract**:
+The prompt library is the **single source of truth for prompt TEXT**: every prompt
+is a git-canonical, front-matter-bearing `*.md` file. Prompts are **never inline
+string constants in Python** — an operation resolves its prompt from the library so
+the text is reviewable, project-overridable, content-hashed into traces, and never
+silently divergent. This section is the full reference; the canonical reviewer
+examples live in `src/rebar/llm/reviewers/` and the plan-review prompts there too.
+
+### Where prompts live + how they resolve
+
+| Layer | Path | Notes |
+|-------|------|-------|
+| **Packaged (built-in)** | `src/rebar/llm/reviewers/<file>.md` | Ships in the wheel. The id is the file stem with `_`→`-` (`ticket_quality.md` → `ticket-quality`). |
+| **Project override** | `<repo>/.rebar/prompts/<id>.md` | **Wins** over the packaged prompt of the same id (project > built-in). The override seam for adopters. |
+| **Variant overlay** | `<id>.<variant>.md` | Overlays a base via `variant_of` front-matter + a `<!--base-->` splice marker; cycle-guarded. |
 
 ```python
-prompts.get_prompt(prompt_id: str, *, repo_root=None) -> Prompt
-prompts.resolve_prompt(reviewer, variables: dict, langfuse_cfg=None,
-                       *, repo_root=None, variant=None) -> tuple[str, dict]
-# → (resolved_system_prompt, langfuse_prompt). Substitutes {{var}} from `variables`.
+prompts.get_prompt(prompt_id, *, repo_root=None) -> Prompt
+# Resolves override → packaged; parses front-matter. Prompt fields: id, text (body,
+# front-matter stripped), category, execution_mode, inputs, outputs, dimension,
+# applies_to, default, title, description. `is_reviewer` == (category == "review").
+
+prompts.resolve_prompt(reviewer_or_prompt, variables, langfuse_cfg=None,
+                       *, repo_root=None, variant=None) -> (compiled_text, meta)
+# Renders {{var}} STRICTLY (an unsupplied used var raises — never a silent empty),
+# applies any variant overlay, and returns the compiled system prompt + meta
+# (content_sha256 + provenance, threaded into traces). Langfuse is NEVER read for text.
 ```
 
-Front-matter closed keys: `category` (e.g. `review` marks a reviewer),
-`execution_mode` (`single_turn` | `agentic` — flows into `RunRequest.execution_mode`),
-`inputs` / `outputs` (schema-registry **names**, not inline schemas — `outputs` is
-the structured-output contract, §4), plus the prompt body with `{{var}}`
-placeholders. A derived **prompt index** + a CI **drift gate** keep the index and
-the front-matter in lock-step. `.rebar/prompts/<id>.md` overrides the packaged
-prompt of the same id (project > built-in).
+### The front-matter contract (closed key set)
 
-**Adding a reviewer/prompt:** write `<id>.md` with the front-matter above; resolve
-it with `get_prompt` → `resolve_prompt`; pass the resolved system prompt +
-`output_schema=<the prompt's `outputs` name>` into a `RunRequest`. (The plan-review
-gate registers its per-pass contracts in code via §4 instead of shipping a prompt
-file per pass, but the mechanism is the same contract seam.)
+`rebar.llm.prompts.FRONT_MATTER_KEYS` (canonical emit order):
+`schema_version`, `title`, `description`, `inputs`, `outputs`, `execution_mode`,
+`category`, `model`, `tags`, `dimension`, `applies_to`, `langfuse_prompt`, `default`.
+
+- **`category`** — free text; `review` marks the prompt as a reviewer (the only
+  category that populates the reviewer index). Other categories (e.g.
+  `plan-review-criterion`, `plan-review-pass`) are ordinary prompts excluded from
+  the index.
+- **`execution_mode`** — `single_turn` (one model call, no tools) | `agentic` (the
+  tool-using loop). Flows into `RunRequest.execution_mode`. Absent → `agentic`.
+- **`inputs` / `outputs`** — schema-registry **names** (never inline schemas);
+  `outputs` is the structured-output contract (§4).
+- **`dimension` / `applies_to` / `default`** — reviewer selection metadata (the
+  rule layer `select_reviewers` uses).
+- **Unknown keys are WARN+PRESERVEd** by the writer, BUT a *shipped built-in* prompt
+  must use only the closed set: `test_built_in_prompt_round_trips_canonically`
+  asserts every packaged prompt is byte-identical to `write_front_matter(parse(file))`
+  with **no warnings**. So built-ins carry only closed keys and are canonical.
+
+### Derived index + CI gates
+
+- **Reviewer index** — `reviewers/index.json` is DERIVED from the `category: review`
+  prompts' front-matter (`regenerate_prompt_index()` / `python -m rebar.llm.prompts
+  regenerate-index`). It is the offline-testable selection catalog; a CI **drift
+  gate** regenerates-then-diffs it. Invariants: exactly one `default: true` reviewer,
+  no `dimension` collision.
+- **Canonical-form gate** — see above; keeps built-ins clean + round-trippable.
+- **Parity gate** — `check_prompt_parity` diffs declared `variables` vs the
+  `{{vars}}` actually used.
+
+### Separating prompt TEXT from routing metadata (the reuse pattern)
+
+The library deliberately holds only prompt TEXT + the closed contract. Richer,
+domain-specific routing/selection metadata lives in a **derived index** beside it:
+
+- Reviewers: prompt text in `reviewers/*.md` + selection rules in `index.json`.
+- The **plan-review gate** mirrors this exactly: each criterion's RUBRIC is a library
+  prompt (`reviewers/plan_review_<id>.md`, `category: plan-review-criterion`,
+  resolved via `get_prompt` + `.rebar/prompts/` overrides), and its routing (`exec`,
+  `applies_at`, `block_threshold`, `default_posture`, `checklist`) is the derived
+  `src/rebar/llm/plan_review/criteria_routing.json`. The five pass prompts
+  (`plan_review_finder` / `verifier` / `coach` / `isf_finder` / `container`) are
+  `category: plan-review-pass` library prompts resolved via `resolve_prompt`. Use
+  this split whenever your prompts need metadata that doesn't fit the closed key set,
+  rather than inlining prompts or stuffing custom keys into a built-in's front-matter.
+
+### Adding a prompt
+
+1. Write `src/rebar/llm/reviewers/<name>.md` with canonical front-matter (only closed
+   keys) + a body using `{{var}}` placeholders. Keep it byte-canonical (author via
+   `write_front_matter`, or run the canonical-form test).
+2. If it's a `category: review` reviewer, run `python -m rebar.llm.prompts
+   regenerate-index` and commit the updated `index.json`.
+3. Resolve it: `p = get_prompt("<id>", repo_root=...)`; `system, _ =
+   resolve_prompt(p, {var: ...}, repo_root=...)`; pass `system` +
+   `output_schema=<p.outputs>` into a `RunRequest` (§2a). Projects can override it at
+   `.rebar/prompts/<id>.md`.
 
 ---
 

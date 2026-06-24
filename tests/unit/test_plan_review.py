@@ -165,6 +165,54 @@ def test_registry_coverage_guard_passes() -> None:
     assert ok, f"registry missing: {missing}"
 
 
+def test_criteria_load_from_the_prompt_library() -> None:
+    # ca03 AC: the registry loads each criterion's rubric from the prompt library
+    # (a contract-bearing prompt file), NOT from an inline constant / packaged JSON.
+    from rebar.llm import prompts
+
+    for cid in ("F1", "E2", "T5a", "ISF", "G3"):
+        desc = registry.by_id()[cid]
+        prompt = prompts.get_prompt(f"plan-review-{cid}")
+        assert prompt.category == "plan-review-criterion"
+        assert desc["scenario"] == prompt.text.strip()  # rubric came from the library file
+
+
+def test_no_inline_pass_prompt_constants() -> None:
+    # Regression guard: the pass prompts must live in the library, never as inline
+    # module constants (the shortcut the plan explicitly forbids).
+    assert not hasattr(passes, "PASS1_SYSTEM")
+    assert not hasattr(passes, "PASS2_SYSTEM")
+    assert not hasattr(passes, "_plan_system")
+    from rebar.llm import prompts
+
+    for pid in (
+        "plan-review-finder",
+        "plan-review-verifier",
+        "plan-review-coach",
+        "plan-review-isf-finder",
+        "plan-review-container",
+    ):
+        assert prompts.get_prompt(pid).category == "plan-review-pass"
+
+
+def test_criterion_prompt_supports_project_override(tmp_path, monkeypatch) -> None:
+    # A `.rebar/prompts/plan-review-<id>.md` override wins over the packaged rubric.
+    from rebar import config as _config
+
+    (tmp_path / ".rebar" / "prompts").mkdir(parents=True)
+    (tmp_path / ".rebar" / "prompts" / "plan-review-F1.md").write_text(
+        "---\nschema_version: 1\ntitle: Override\nexecution_mode: single_turn\n"
+        "category: plan-review-criterion\ndimension: ac-text-quality\n---\nOVERRIDDEN RUBRIC.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(_config, "repo_root", lambda *a, **k: tmp_path)
+    registry.load_criteria.cache_clear()
+    try:
+        assert registry.by_id()["F1"]["scenario"] == "OVERRIDDEN RUBRIC."
+    finally:
+        registry.load_criteria.cache_clear()
+
+
 def test_registry_loads_descriptors() -> None:
     assert len(registry.load_criteria()) >= 31
 

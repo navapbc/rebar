@@ -208,9 +208,7 @@ def _run_container(
     whole, and aggregate. A pairing too big for the largest window is a failure
     finding (reduce the ticket), not a skip. The complete sibling roster is fed so
     absence findings can be cross-checked against ALL siblings before they stand."""
-    roster = "\n".join(
-        f"- {c.get('ticket_id')}: {c.get('title', '')}" for c in ctx.children
-    )
+    roster = "\n".join(f"- {c.get('ticket_id')}: {c.get('title', '')}" for c in ctx.children)
     budget = (
         int(ctx.largest_window_tokens * det_floor.P8_HEADROOM) - det_floor.P8_OUTPUT_RESERVE_TOKENS
     )

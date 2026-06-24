@@ -148,52 +148,16 @@ def register_contracts() -> None:
 register_contracts()
 
 
-# ── prompts ────────────────────────────────────────────────────────────────────
-_DECISIVENESS = (
-    "\n\nDECISIVENESS: Reserve an absence/AMBIGUOUS finding for cases where the PLAN ITSELF "
-    "genuinely under-specifies the criterion, or where a specific codebase fact is load-bearing "
-    "AND unknowable from the plan text. Do NOT raise a finding merely because you cannot run or "
-    "read the live code: if the plan's own text affirmatively satisfies the criterion, it PASSES "
-    "(emit no finding). A well-specified plan you simply can't execute is a PASS."
-)
-
-PASS1_SYSTEM = (
-    "You are an expert software-plan reviewer running PASS 1 of a three-pass review. Your job is "
-    "to COACH the author toward a better plan by surfacing grounded findings — not to nitpick or "
-    "roadblock. Conform to the COACHING SPEC for every finding: (a) ground it in a specific "
-    "CRITERION and a LOCATION (the plan section / file path / AC line — set `location`); (b) make "
-    "it specific and actionable; (c) express it as ONE `- [ ]` checklist line (set "
-    "`checklist_item`); (d) provide a `suggested_fix` ONLY when you are confident, else leave it "
-    "empty. Also AFFIRM what already passes: list the criteria this chunk satisfies in "
-    "`affirmations` (positive feedback, not findings). criteria[] = the rubric id(s) the finding "
-    "maps to. evidence[] = flexible free text: a quoted plan phrase, a named section, an ABSENCE "
-    "rationale (plan-review findings are often non-citable), or a code citation. Do NOT emit "
-    "severity, confidence, or priority — a separate pass computes those. A clean chunk returns an "
-    "empty findings list (and affirms the criteria it passed) — that is expected and good."
-    + _DECISIVENESS
-)
-
-PASS2_SYSTEM = (
-    "You are an INDEPENDENT verifier running PASS 2 of a three-pass review. Each finding below is "
-    "an unproven CLAIM TO TEST — its conclusion is NOT asserted; do not assume it is correct. "
-    "Re-ground in the plan (and, for code-grounded findings, the actual code). For EACH finding, "
-    "by its 0-based index, emit (a) coarse severity ATTRIBUTES {prod_impact, debt_impact "
-    "(none|low|medium|high), blast_radius (local|module|system), likelihood (low|medium|high), "
-    "reversibility (easy|moderate|hard)} and (b) typed BINARY sub-answers (yes|no|insufficient). "
-    "cited_reference_accurate is yes|no|insufficient|na — answer it only when the finding cites a "
-    "specific code reference, else na). Be atomic: answer each sub-question on its own merits. "
-    "'insufficient' is allowed and honest. Verdict-with-citation, never verdict-with-fix."
-)
-
-PASS4_SYSTEM = (
-    "You are an affirmative COACH running PASS 4 (advisory; after the gate decision). For each "
-    "SURVIVING advisory finding, select the single most useful MOVE from the move registry below "
-    "and extract a short noun-phrase SUBJECT (≤8 words). Output {move_id, subject, finding_refs}. "
-    "Reference findings BY their id — never restate them. The subject must be a NOUN PHRASE naming "
-    "what to investigate (e.g. 'the retry/timeout policy'), NOT code, NOT an imperative, NOT the "
-    "solution. The coaching prose is rendered deterministically from the move template — you only "
-    "pick the move and name the subject."
-)
+# ── prompts (loaded from the workflow-engine prompt library, NOT inline) ─────────
+# The pass system prompts are contract-bearing prompt FILES in the prompt library
+# (src/rebar/llm/reviewers/plan_review_*.md), resolved via the da27 prompt machinery
+# (prompts.get_prompt / resolve_prompt) with `.rebar/prompts/<id>.md` project
+# overrides — never inline string constants. Prompt ids:
+PASS_FINDER = "plan-review-finder"  # Pass-1
+PASS_VERIFIER = "plan-review-verifier"  # Pass-2
+PASS_COACH = "plan-review-coach"  # Pass-4
+PASS_ISF = "plan-review-isf-finder"  # ISF finder
+PASS_CONTAINER = "plan-review-container"  # G3/G4 container finder
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────
@@ -204,9 +168,16 @@ def _criterion_block(c: dict[str, Any]) -> str:
     return body + (f"\n  Checklist:\n{bullets}" if bullets else "")
 
 
-def _plan_system(system: str, ctx_plan: str) -> str:
-    """System prompt with the WHOLE plan appended (never chunked/truncated)."""
-    return f"{system}\n\n# Plan under review (verbatim, whole)\n{ctx_plan}"
+def _resolve_system(prompt_id: str, plan: str, cfg: LLMConfig) -> str:
+    """Resolve a plan-review pass prompt from the prompt library to its compiled
+    system prompt (the WHOLE plan rendered into the {{plan}} var). A project
+    `.rebar/prompts/<id>.md` override wins over the packaged prompt. Reuses the da27
+    prompt machinery — no inline prompt strings."""
+    from rebar.llm import prompts
+
+    prompt = prompts.get_prompt(prompt_id, repo_root=cfg.repo_path)
+    system, _meta = prompts.resolve_prompt(prompt, {"plan": plan}, repo_root=cfg.repo_path)
+    return system
 
 
 # ── Pass 1: find ─────────────────────────────────────────────────────────────────
@@ -224,7 +195,7 @@ def pass1_chunk(
     ids = [c["id"] for c in chunk]
     rubric = "\n\n".join(_criterion_block(c) for c in chunk)
     req = RunRequest(
-        system_prompt=_plan_system(PASS1_SYSTEM, plan),
+        system_prompt=_resolve_system(PASS_FINDER, plan, cfg),
         instructions=(
             f"## Rubric criteria for this pass (ids: {', '.join(ids)})\n{rubric}\n\n"
             "Surface every grounded finding for these criteria. Return ONLY findings whose "
@@ -256,18 +227,6 @@ def pass1_chunk(
     return out
 
 
-CONTAINER_SYSTEM = (
-    "You are running a CONTAINER criterion (child coverage / child consistency) for ONE "
-    "(parent + single child) pairing at a time — both shown WHOLE. G3 = does the child help cover "
-    "the parent's acceptance/success criteria (and are any parent criteria left uncovered)? "
-    "G4 = is the child CONSISTENT with the parent and its siblings (no contradiction, scope "
-    "overlap, or ordering gap)? You are given the COMPLETE sibling roster — when you flag an "
-    "ABSENCE ('the parent criterion X is not covered'), CHECK it against the WHOLE roster first; "
-    "only flag it if NO sibling covers it. Emit findings {finding, criteria[], location, "
-    "evidence[], scenarios[], impact, checklist_item, suggested_fix} — no severity/confidence."
-)
-
-
 def pass1_container(
     runner: Runner,
     cfg: LLMConfig,
@@ -284,7 +243,7 @@ def pass1_container(
     child_id = child.get("ticket_id", "?")
     child_whole = f"### child {child_id}: {child.get('title', '')}\n{child.get('description', '')}"
     req = RunRequest(
-        system_prompt=_plan_system(CONTAINER_SYSTEM, parent_plan),
+        system_prompt=_resolve_system(PASS_CONTAINER, parent_plan, cfg),
         instructions=(
             f"## Criterion {cid}\n{_criterion_block(criterion)}\n\n"
             f"## The one child under review (whole)\n{child_whole}\n\n"
@@ -321,18 +280,6 @@ def pass1_container(
     return out
 
 
-ISF_SYSTEM = (
-    "You are running the INTENT-SOURCE-FIDELITY (ISF) check. Compare the plan under review against "
-    "the EXTERNAL intent expressed in the ticket's LINKED SESSION LOG (the design/brainstorm of "
-    "record), to catch requirements the plan SILENTLY DROPPED, narrowed/out-scoped WITHOUT a "
-    "stated rationale, or CONTRADICTED relative to what the user expressed. (1) extract the "
-    "discrete expressed requirements/decisions/constraints from the log; (2) check the plan vs "
-    "each. ANTI-FP: a requirement DELIBERATELY descoped WITH a stated rationale is NOT a finding; "
-    "fire ONLY on a silent drop/narrowing/contradiction. Emit findings as "
-    "{finding, criteria:['ISF'], evidence[], scenarios[], impact} — no severity/confidence."
-)
-
-
 def pass1_isf(
     runner: Runner,
     cfg: LLMConfig,
@@ -346,7 +293,7 @@ def pass1_isf(
     loop here). When the log was summarized to fit the window, each finding is
     tagged ``_reduced_confidence`` (the design's "carries reduced confidence")."""
     req = RunRequest(
-        system_prompt=_plan_system(ISF_SYSTEM, plan),
+        system_prompt=_resolve_system(PASS_ISF, plan, cfg),
         instructions=(
             "## Linked session log (the external intent of record)\n"
             f"{session_log_text}\n\n"
@@ -384,12 +331,12 @@ def summarize_for_isf(runner: Runner, cfg: LLMConfig, *, log_text: str) -> str:
     """Compress an oversized session log to fit the ISF context window (a single
     text call). Used only when the log exceeds the budget — the PLAN is never
     summarized, only this supporting context."""
+    from rebar.llm import prompts
+
+    prompt = prompts.get_prompt("plan-review-isf-summarizer", repo_root=cfg.repo_path)
+    system, _meta = prompts.resolve_prompt(prompt, {}, repo_root=cfg.repo_path)
     req = RunRequest(
-        system_prompt=(
-            "Summarize the following design/brainstorm session log into its discrete expressed "
-            "REQUIREMENTS, DECISIONS, and CONSTRAINTS — preserve every distinct intent verbatim "
-            "enough to check a plan against it; drop only narrative/repetition."
-        ),
+        system_prompt=system,
         instructions=log_text,
         config=cfg,
         reviewers=["plan-isf-summarizer"],
@@ -423,7 +370,7 @@ def pass2_verify(
             for i, f in batch
         )
         req = RunRequest(
-            system_prompt=_plan_system(PASS2_SYSTEM, plan),
+            system_prompt=_resolve_system(PASS_VERIFIER, plan, cfg),
             instructions=(
                 "Verify each finding below by its index. Emit one verification per finding "
                 f"(indices {batch[0][0]}–{batch[-1][0]}).\n\n{listing}"
@@ -550,7 +497,7 @@ def pass4_coach(
     listing = "\n".join(f"- id={f['id']} :: {f['finding'][:200]}" for f in surviving)
     moves = "\n".join(f"  {mid}: {m['name']}" for mid, m in sorted(move_registry.items()))
     req = RunRequest(
-        system_prompt=_plan_system(PASS4_SYSTEM, plan),
+        system_prompt=_resolve_system(PASS_COACH, plan, cfg),
         instructions=(
             f"## Move registry\n{moves}\n\n## Surviving advisory findings (by id)\n{listing}\n\n"
             "Emit one note per finding you can map to a useful move (skip findings no move fits)."
