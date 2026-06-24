@@ -41,6 +41,13 @@ class RunRequest:
     # constraining/validating ``structured`` output.
     output_schema: str | None = None
     mode: str = "findings"
+    # Prompt-level execution mode (story 4b2f) — how the runner DRIVES the model,
+    # distinct from `mode` (output shaping). ``agentic`` (default) is the tool-using
+    # loop; ``single_turn`` is exactly ONE model call with NO tools/toolsets, going
+    # through the structured-output path against ``output_schema``. The caller
+    # (RunnerAgentStep) sets `mode="structured"` + `output_schema=<prompt.outputs>`
+    # when this is single_turn, so the two stay consistent.
+    execution_mode: str = "agentic"
     # Per-operation extra tools appended to the agent's tool list (e.g. a read-only
     # rebar ``show_ticket`` for the completion verifier). DEFAULTED None so existing
     # review callers are unchanged. (Post-cutover the pydantic_ai runner supplies
@@ -168,12 +175,19 @@ class PydanticAIRunner:
         from rebar.llm.tracing import setup_tracing
 
         setup_tracing(cfg.langfuse)
-        tools = pai_tools.filesystem_tools(cfg.repo_path) + pai_tools.rebar_tools(
-            cfg.repo_path, allow_comment=not _readonly_gate()
-        )
-        if req.extra_tools:
-            tools = [*tools, *req.extra_tools]
-        toolsets = pai_tools.mcp_toolsets(cfg.mcp_servers)
+        # single_turn (story 4b2f): exactly ONE model call with NO tools and NO
+        # toolsets — the agent cannot enter a tool loop. agentic: the full
+        # filesystem + rebar (+ MCP) tool surface, as before.
+        if req.execution_mode == "single_turn":
+            tools: list = []
+            toolsets: list = []
+        else:
+            tools = pai_tools.filesystem_tools(cfg.repo_path) + pai_tools.rebar_tools(
+                cfg.repo_path, allow_comment=not _readonly_gate()
+            )
+            if req.extra_tools:
+                tools = [*tools, *req.extra_tools]
+            toolsets = pai_tools.mcp_toolsets(cfg.mcp_servers)
         resolved = _pai_model(cfg)
         model = self._model_override or resolved
         # Provenance records the PROVIDER-QUALIFIED string actually invoked (or a marker

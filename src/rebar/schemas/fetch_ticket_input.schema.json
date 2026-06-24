@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/fetch_ticket_input.schema.json",
+  "title": "FetchTicketInput",
+  "description": "The INPUT contract of the `fetch_ticket` scripted step (workflow authoring v2, walking skeleton). Declared via `@register_step(input_schema=...)` and surfaced read-only in the editor inspector as the step's CONSUMES. A step's `with:` block is validated against this. `ticket_id` is optional: when omitted the step falls back to the workflow's target ticket.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "ticket_id": {
+      "type": "string",
+      "description": "The ticket to fetch. Optional — falls back to the workflow's target ticket (`${{ inputs.ticket_id }}`) when not supplied."
+    }
+  }
+}

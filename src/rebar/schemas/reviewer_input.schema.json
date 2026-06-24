@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/reviewer_input.schema.json",
+  "title": "ReviewerInput",
+  "description": "The INPUT contract shared by the built-in reviewer prompts (workflow authoring v2). Deliberately PERMISSIVE: a reviewer's core variables (ticket_id / ticket_context / repo_path) are INJECTED by the engine at run time, and an author may pass extra `with:` fields, so nothing is required and additional properties are allowed — runtime validation of a reviewer step never spuriously fails. The named properties are what the editor inspector surfaces as the step's CONSUMES.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "context": {
+      "type": "string",
+      "description": "The assembled review context (e.g. the output of a `render_context` step)."
+    },
+    "ticket_id": {
+      "type": "string",
+      "description": "The ticket under review (engine-injected when omitted)."
+    },
+    "ticket_context": {
+      "type": "string",
+      "description": "Compiled ticket context (engine-injected)."
+    },
+    "instructions": {
+      "type": "string",
+      "description": "Optional override of the default per-dimension review instructions."
+    }
+  }
+}

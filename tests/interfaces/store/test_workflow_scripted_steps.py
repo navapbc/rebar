@@ -11,10 +11,19 @@ from pathlib import Path
 import pytest
 
 import rebar
+from rebar import schemas
 from rebar.llm.workflow import steps
-from rebar.llm.workflow.executor import StepContext
+from rebar.llm.workflow.executor import StepContext, contract_for
 
 pytest.importorskip("jsonschema")
+
+
+def _check_output(op_name: str, output) -> None:
+    """e050 per-op output-shape guard: the op's ACTUAL output validates against its
+    declared OUTPUT contract schema (a StepResult is unwrapped to its outputs)."""
+    out = output.outputs if hasattr(output, "outputs") else output
+    schema_name = contract_for(op_name).output_schema
+    schemas.validator(schema_name).validate(out)
 
 
 def _ctx(repo, tid, inputs, *, run_id="R", step_id="s"):
@@ -36,6 +45,18 @@ def test_fetch_ticket(rebar_repo: Path) -> None:
     assert out["title"] == "My Title"
     assert out["status"] == "open"
     assert out["ticket"]["ticket_id"] == tid
+    _check_output("fetch_ticket", out)
+
+
+def test_fetch_commits_and_epic_graph_outputs(rebar_repo: Path) -> None:
+    # e050: exercise the two remaining read ops + validate their output contracts.
+    tid = rebar.create_ticket("task", "T", repo_root=str(rebar_repo))
+    fc = steps.fetch_commits(_ctx(rebar_repo, tid, {}))
+    assert fc["commit_count"] == 0 and fc["commits"] == []
+    _check_output("fetch_commits", fc)
+    fg = steps.fetch_epic_graph(_ctx(rebar_repo, tid, {}))
+    assert set(fg) == {"graph", "children", "blockers", "deps"}
+    _check_output("fetch_epic_graph", fg)
 
 
 def test_comment_verdict_is_idempotent(rebar_repo: Path) -> None:
@@ -43,6 +64,7 @@ def test_comment_verdict_is_idempotent(rebar_repo: Path) -> None:
     ctx = _ctx(rebar_repo, tid, {"verdict": "pass", "summary": "looks good"})
     r1 = steps.comment_verdict(ctx)
     assert r1.outputs["commented"] is True
+    _check_output("comment_verdict", r1)
     # Same (run_id, step_id) -> the marker is found, so no second comment.
     r2 = steps.comment_verdict(ctx)
     assert r2.outputs["commented"] is False
@@ -54,14 +76,16 @@ def test_comment_verdict_is_idempotent(rebar_repo: Path) -> None:
 
 def test_tag_step(rebar_repo: Path) -> None:
     tid = rebar.create_ticket("task", "T", repo_root=str(rebar_repo))
-    steps.tag_step(_ctx(rebar_repo, tid, {"tag": "reviewed"}))
+    out = steps.tag_step(_ctx(rebar_repo, tid, {"tag": "reviewed"}))
+    _check_output("tag", out)
     state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
     assert "reviewed" in state["tags"]
 
 
 def test_set_fields_step(rebar_repo: Path) -> None:
     tid = rebar.create_ticket("task", "T", repo_root=str(rebar_repo))
-    steps.set_fields(_ctx(rebar_repo, tid, {"fields": {"priority": 0}}))
+    out = steps.set_fields(_ctx(rebar_repo, tid, {"fields": {"priority": 0}}))
+    _check_output("set_fields", out)
     state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
     assert state["priority"] == 0
 

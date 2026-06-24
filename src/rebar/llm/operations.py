@@ -120,7 +120,7 @@ def review_ticket(
     if cfg.max_iterations < _REVIEW_MIN_STEPS:
         cfg = replace(cfg, max_iterations=_REVIEW_MIN_STEPS)
     rid = reviewer_id or _default_reviewer_id()
-    reviewer = prompts.get_reviewer(rid)
+    reviewer = prompts.get_prompt(rid, repo_root=repo_root)
 
     context, ids = _assemble_context(ticket_id, graph=graph, repo_root=repo_root)
     variables = {

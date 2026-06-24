@@ -70,6 +70,26 @@ def test_served_assets_are_allow_listed():
     assert editor.read_asset("nope.js") is None
 
 
+def test_built_bundle_carries_structured_field_paths():
+    # Story a83a: the properties panel now renders STRUCTURED per-field entries for the
+    # common path (with the raw JSON editor kept as a fallback). The faithful oracle is the
+    # browser tier (tests/e2e/test_editor_browser.py), but as an always-on floor assert the
+    # built bundle actually carries the structured-field, raw-fallback, and field-validation
+    # code paths — so a build that dropped them can't pass silently. Skips if not built.
+    if not editor.assets_available():
+        import pytest as _pytest
+
+        _pytest.skip("editor bundle not built (run editor_assets npm build)")
+    js = editor.read_asset("editor.js") or b""
+    text = js.decode("utf-8", "replace")
+    # Structured fields (per-kind labels + entry ids surfaced into the DOM).
+    assert "max_iterations" in text and "max_concurrency" in text and "index_var" in text
+    assert "rebar-config-advanced" in text  # the structured group references the raw fallback
+    assert "Advanced (raw JSON)" in text  # the raw-JSON fallback entry label
+    # Field-level validation messaging (the "shows an error, never silent loss" path).
+    assert "Must be a number" in text
+
+
 # ── BPMN -> IR save round-trip ─────────────────────────────────────────────────
 
 

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/set_fields_output.schema.json",
+  "title": "SetFieldsOutput",
+  "description": "OUTPUT contract of `set_fields`: the field names updated.",
+  "type": "object",
+  "properties": {
+    "updated": {
+      "type": "array",
+      "description": "The field names edited (sorted).",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "updated"
+  ],
+  "additionalProperties": false
+}

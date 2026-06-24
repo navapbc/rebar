@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/fetch_commits_output.schema.json",
+  "title": "FetchCommitsOutput",
+  "description": "OUTPUT contract of `fetch_commits`: attached commit SHAs + their count.",
+  "type": "object",
+  "properties": {
+    "commits": {
+      "type": "array",
+      "description": "Commit SHAs attached to the ticket.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "commit_count": {
+      "type": "integer",
+      "description": "Number of attached commits."
+    }
+  },
+  "required": [
+    "commits",
+    "commit_count"
+  ],
+  "additionalProperties": false
+}

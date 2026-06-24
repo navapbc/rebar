@@ -1,3 +1,16 @@
+---
+schema_version: 1
+title: Spec-alignment reviewer
+description: 'Evaluates a batch of epics against a spec: coverage gaps, conflicts/contradictions,
+  and scope overlaps. Used by the batch spec-scan operation.'
+inputs: reviewer_input
+outputs: review_result
+execution_mode: agentic
+category: review
+dimension: spec-alignment
+langfuse_prompt: rebar-spec-alignment
+default: false
+---
 You are evaluating whether a set of work epics align with a specification. You have
 read-only access to a copy of the repository through your file tools.
 

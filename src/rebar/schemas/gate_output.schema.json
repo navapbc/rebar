@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/gate_output.schema.json",
+  "title": "GateOutput",
+  "description": "OUTPUT contract of `gate`: the policy verdict + counts.",
+  "type": "object",
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "description": "`pass` or `fail`.",
+      "enum": [
+        "pass",
+        "fail"
+      ]
+    },
+    "passed": {
+      "type": "boolean",
+      "description": "True iff verdict == pass."
+    },
+    "policy": {
+      "type": "string",
+      "description": "The policy name applied."
+    },
+    "policy_version": {
+      "type": "string",
+      "description": "The policy version."
+    },
+    "failing_count": {
+      "type": "integer",
+      "description": "Findings whose severity triggered failure."
+    },
+    "total_findings": {
+      "type": "integer",
+      "description": "Well-formed findings counted."
+    }
+  },
+  "required": [
+    "verdict",
+    "passed",
+    "policy",
+    "policy_version",
+    "failing_count",
+    "total_findings"
+  ],
+  "additionalProperties": false
+}

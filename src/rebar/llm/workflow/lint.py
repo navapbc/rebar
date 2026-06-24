@@ -24,7 +24,7 @@ from typing import Any
 
 from rebar.llm.errors import WorkflowParseError, WorkflowVersionError
 
-from .lint_refs import LintFinding, _iter_all_steps, lint_document
+from .lint_refs import ENGINE_INJECTED_INPUTS, LintFinding, _iter_all_steps, lint_document
 from .migrate import migrate_to_current
 from .schema import parse_workflow, step_kind, validate_document
 
@@ -128,9 +128,10 @@ def _scan_secret_literals(doc: dict[str, Any]) -> list[LintFinding]:
 # ── The one-pass collector ────────────────────────────────────────────────────
 
 
-# Variables the agent runner always supplies to a prompt (RunnerAgentStep); a
-# step needn't declare these in `with`.
-_ENGINE_PROVIDED_VARS = frozenset({"ticket_id", "ticket_context", "repo_path"})
+# Variables the engine always injects into a prompt (RunnerAgentStep); a step needn't
+# declare these in `with`. Single source of truth lives in lint_refs
+# (ENGINE_INJECTED_INPUTS) — reuse it rather than re-declaring (they must not diverge).
+_ENGINE_PROVIDED_VARS = ENGINE_INJECTED_INPUTS
 
 
 def lint_prompt_refs(doc: dict[str, Any], *, repo_root=None) -> list[LintFinding]:
@@ -138,7 +139,7 @@ def lint_prompt_refs(doc: dict[str, Any], *, repo_root=None) -> list[LintFinding
     prompt (a catalog reviewer or a ``.rebar/prompts/<id>.md`` file), AND the step's
     inputs must satisfy the prompt's declared required-variable schema. Imports the
     (stdlib-only) prompt registry lazily so the core linter stays uncoupled."""
-    from rebar.llm.prompts import get_reviewer, load_catalog, prompt_input_schema, prompt_ref_exists
+    from rebar.llm.prompts import get_prompt, load_catalog, prompt_input_schema, prompt_ref_exists
 
     findings: list[LintFinding] = []
     catalog = load_catalog()
@@ -163,7 +164,8 @@ def lint_prompt_refs(doc: dict[str, Any], *, repo_root=None) -> list[LintFinding
         # we can resolve; user-file prompts are existence-checked above.)
         if prompt_id in catalog:
             try:
-                schema = prompt_input_schema(get_reviewer(prompt_id), repo_root=repo_root)
+                prompt = get_prompt(prompt_id, repo_root=repo_root)
+                schema = prompt_input_schema(prompt, repo_root=repo_root)
             except Exception:  # a malformed prompt is the prompt's own lint, not this
                 continue
             available = _ENGINE_PROVIDED_VARS | set((step.get("with") or {}).keys())
@@ -217,7 +219,23 @@ def lint_workflow(
     findings.extend(secret_scan(text, source=source))
     if check_prompts:
         findings.extend(lint_prompt_refs(doc, repo_root=repo_root))
+    findings.extend(_prompt_override_drift_findings(repo_root))
     return findings
+
+
+def _prompt_override_drift_findings(repo_root) -> list[LintFinding]:
+    """Surface override-vs-built-in ``outputs`` drift (story 4b2f) as error findings.
+    Best-effort: the prompt registry is imported lazily and any failure is swallowed
+    (the linter must never crash because a prompt override can't be read)."""
+    try:
+        from rebar.llm.prompts import prompt_override_drift
+
+        return [
+            LintFinding(".rebar/prompts", msg, "error")
+            for msg in prompt_override_drift(repo_root=repo_root)
+        ]
+    except Exception:  # noqa: BLE001 - drift detection is advisory; never break the linter
+        return []
 
 
 def lint_passes(findings: list[LintFinding]) -> bool:

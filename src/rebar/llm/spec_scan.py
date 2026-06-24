@@ -60,7 +60,7 @@ def scan_epics_for_spec(
     """
     cfg = config or LLMConfig.from_env(repo_root=repo_root)
     tickets = _fetch_epics(epics, repo_root)
-    reviewer = prompts.get_reviewer(reviewer_id)
+    reviewer = prompts.get_prompt(reviewer_id, repo_root=repo_root)
     selected = get_runner(cfg, override=runner)
     # Probe runner readiness up front (import-only, no model call) so a missing
     # ``agents`` extra (or a misconfigured runner) degrades cleanly even when there

@@ -46,7 +46,16 @@ def _ticket_id(ctx: StepContext) -> str:
 # ── read steps ────────────────────────────────────────────────────────────────
 
 
-@register_step("fetch_ticket")
+@register_step(
+    "fetch_ticket",
+    input_schema="fetch_ticket_input",
+    output_schema="fetch_ticket_output",
+    description=(
+        "Fetch a ticket's compiled state. Consumes an optional `ticket_id` (falls "
+        "back to the workflow target ticket); produces the ticket plus its title, "
+        "description, status, type, and tags."
+    ),
+)
 def fetch_ticket(ctx: StepContext) -> dict[str, Any]:
     """Compiled ticket state for the target ticket → {ticket, title, description, …}."""
     import rebar
@@ -64,7 +73,12 @@ def fetch_ticket(ctx: StepContext) -> dict[str, Any]:
     }
 
 
-@register_step("fetch_commits")
+@register_step(
+    "fetch_commits",
+    input_schema="fetch_commits_input",
+    output_schema="fetch_commits_output",
+    description="Fetch the commit SHAs attached to a ticket (and their count).",
+)
 def fetch_commits(ctx: StepContext) -> dict[str, Any]:
     """Commit SHAs attached to a ticket (the WS-H commits-on-ticket surface).
 
@@ -78,7 +92,12 @@ def fetch_commits(ctx: StepContext) -> dict[str, Any]:
     return {"commits": commits, "commit_count": len(commits)}
 
 
-@register_step("fetch_epic_graph")
+@register_step(
+    "fetch_epic_graph",
+    input_schema="fetch_epic_graph_input",
+    output_schema="fetch_epic_graph_output",
+    description="Fetch a ticket's dependency/child graph and its children/blockers/deps slices.",
+)
 def fetch_epic_graph(ctx: StepContext) -> dict[str, Any]:
     """A ticket's dependency/child graph → {deps, blockers, children}."""
     import rebar
@@ -93,7 +112,12 @@ def fetch_epic_graph(ctx: StepContext) -> dict[str, Any]:
     }
 
 
-@register_step("render_context")
+@register_step(
+    "render_context",
+    input_schema="render_context_input",
+    output_schema="render_context_output",
+    description="Assemble arbitrary named inputs into one readable `## <key>` text context block.",
+)
 def render_context(ctx: StepContext) -> dict[str, Any]:
     """Assemble a readable text context block from the step's inputs.
 
@@ -130,7 +154,12 @@ GATE_POLICIES: dict[str, dict[str, Any]] = {
 }
 
 
-@register_step("gate")
+@register_step(
+    "gate",
+    input_schema="gate_input",
+    output_schema="gate_output",
+    description="Evaluate findings against a versioned policy → a pass/fail verdict + counts.",
+)
 def gate(ctx: StepContext) -> dict[str, Any]:
     """Evaluate findings against a versioned policy → {verdict, passed, …}.
 
@@ -161,7 +190,12 @@ def gate(ctx: StepContext) -> dict[str, Any]:
 # ── side-effecting steps (idempotent on (run_id, step_id)) ────────────────────
 
 
-@register_step("comment_verdict")
+@register_step(
+    "comment_verdict",
+    input_schema="comment_verdict_input",
+    output_schema="comment_verdict_output",
+    description="Post a verdict/summary comment to the ticket (idempotent within a run).",
+)
 def comment_verdict(ctx: StepContext) -> StepResult:
     """Post a verdict/summary comment to the ticket — idempotent within a run.
 
@@ -188,7 +222,12 @@ def comment_verdict(ctx: StepContext) -> StepResult:
     return StepResult(outputs={"commented": True, "marker": marker, "verdict": verdict})
 
 
-@register_step("tag")
+@register_step(
+    "tag",
+    input_schema="tag_input",
+    output_schema="tag_output",
+    description="Add a tag to the ticket (idempotent: adding an existing tag is a no-op).",
+)
 def tag_step(ctx: StepContext) -> dict[str, Any]:
     """Add a tag to the ticket (idempotent: adding an existing tag is a no-op)."""
     import rebar
@@ -201,7 +240,12 @@ def tag_step(ctx: StepContext) -> dict[str, Any]:
     return {"tagged": label}
 
 
-@register_step("set_fields")
+@register_step(
+    "set_fields",
+    input_schema="set_fields_input",
+    output_schema="set_fields_output",
+    description="Edit ticket fields from `with: {fields: {...}}` (LWW; idempotent).",
+)
 def set_fields(ctx: StepContext) -> dict[str, Any]:
     """Edit ticket fields from ``with: {fields: {name: value, …}}`` (LWW; idempotent
     when the values are unchanged)."""

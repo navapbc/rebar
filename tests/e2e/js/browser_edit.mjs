@@ -26,12 +26,23 @@ await page.evaluate(() => {
   );
   if (hdr) hdr.click();
 });
-await page.waitForSelector("#bio-properties-panel-rebar-config", { state: "visible", timeout: 5000 });
+// `commits` is a scripted (known) kind: the raw JSON editor now lives behind the
+// "Advanced (raw JSON)" collapsible fallback (story a83a). Expand it to reach the textarea.
+await page.waitForTimeout(200);
+await page.evaluate(() => {
+  const adv = document.querySelector('[data-entry-id="rebar-config-advanced"]');
+  const hdr = adv && adv.querySelector(".bio-properties-panel-collapsible-entry-header");
+  if (hdr) hdr.click();
+});
+await page.waitForSelector("#bio-properties-panel-rebar-config-advanced-raw", {
+  state: "visible",
+  timeout: 5000,
+});
 
 // Edit the config JSON: add a key under `with`.
 const newConfig = JSON.stringify({ with: { ticket_id: "${{ inputs.ticket_id }}", note: "EDITED_BY_TEST" } });
-await page.fill("#bio-properties-panel-rebar-config", newConfig);
-await page.dispatchEvent("#bio-properties-panel-rebar-config", "change");
+await page.fill("#bio-properties-panel-rebar-config-advanced-raw", newConfig);
+await page.dispatchEvent("#bio-properties-panel-rebar-config-advanced-raw", "change");
 await page.waitForTimeout(600);
 
 // Confirm the edit reached the model before saving.

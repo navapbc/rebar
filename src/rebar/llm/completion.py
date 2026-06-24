@@ -224,7 +224,7 @@ def verify_completion(
     if child_findings:
         return _deterministic_child_failure(canonical_id, child_findings, cfg)
 
-    reviewer = prompts.get_reviewer(_REVIEWER_ID)
+    reviewer = prompts.get_prompt(_REVIEWER_ID, repo_root=repo_root)
     context, ids = operations._assemble_context(ticket_id, graph=graph, repo_root=repo_root)
     # Fence the UNTRUSTED context so the prompt's instruction-hierarchy clause can refer to it
     # unambiguously (the delimiting half of the OWASP/Anthropic prompt-injection mitigation).

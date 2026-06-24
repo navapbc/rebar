@@ -63,6 +63,53 @@ _LOOP_VAR_RE = re.compile(r"^loop\.([A-Za-z_][A-Za-z0-9_-]*)$")
 _MAP_VAR_RE = re.compile(r"^map\.([A-Za-z_][A-Za-z0-9_-]*)$")
 
 
+def _consumer_input_schema(kind: str, step: Mapping[str, Any], repo_root: str | None) -> str | None:
+    """The CONSUMER step's declared INPUT schema NAME, or ``None`` when none is declared
+    (UNKNOWN — validation is skipped, never failed). Extracts the step's action
+    (``uses``/``prompt``) and delegates to the shared resolver so the runtime net and
+    the editor's edit-time check can never diverge (story b642). Resolution trouble
+    degrades to ``None`` — distinct from a validator that ERRORS while running, which
+    the caller surfaces loudly."""
+    from .executor import input_schema_for
+
+    action = step.get("uses") if kind == "scripted" else step.get("prompt")
+    return input_schema_for(kind, action, repo_root)
+
+
+def validate_consumer_input(
+    kind: str, step: Mapping[str, Any], resolved_input: Any, repo_root: str | None
+) -> tuple[str | None, bool]:
+    """Validate a step's RESOLVED ``with`` inputs against the CONSUMER's declared
+    INPUT contract — the runtime safety net (story c768).
+
+    Returns ``(error_message, errored)``:
+
+    * ``(None, False)`` — either no contract is declared (UNKNOWN: skip, never fail —
+      keeps contract-less workflows working) or the value satisfies the contract.
+    * a VALIDATION MISMATCH (the value violates the schema) → an ``"input contract
+      violation (<schema>): …"`` message with ``errored=False`` (fail-loud).
+    * a VALIDATOR FAILURE (the validator itself errors — unresolvable ``$ref``,
+      unknown schema name, any non-``ValidationError`` while building/running it) → a
+      DISTINCT ``"input validation UNAVAILABLE/errored (<schema>): …"`` message with
+      ``errored=True``. Never silently passes the value (never false-pass)."""
+    schema_name = _consumer_input_schema(kind, step, repo_root)
+    if not schema_name:
+        return None, False  # UNKNOWN — no declared input contract; skip
+    from jsonschema.exceptions import ValidationError
+
+    from rebar import schemas
+
+    try:
+        validator = schemas.validator(schema_name)
+        validator.validate(resolved_input)
+    except ValidationError as exc:
+        detail = exc.message
+        return f"input contract violation ({schema_name}): {detail}", False
+    except Exception as exc:  # noqa: BLE001 - validator itself errored: fail-loud, distinct
+        return f"input validation UNAVAILABLE/errored ({schema_name}): {exc}", True
+    return None, False
+
+
 def _truthy(val: Any) -> bool:
     """The engine's truthiness rule (shared by guards + control conditions): a string
     is falsy only when empty/``false``/``0``/``no`` (case-insensitive)."""
@@ -336,6 +383,31 @@ def _run_leaf(rc, step, sid, frame_key, kind, prefixes, bindings, iteration) -> 
     if resolve_error is not None:
         result = StepResult(outputs={}, status="failed", error=str(resolve_error))
     else:
+        # Runtime safety net (c768): validate the resolved inputs against the CONSUMER
+        # step's declared INPUT contract before dispatch. A genuine mismatch FAILS the
+        # step (fail-loud); a validator that itself errors surfaces a DISTINCT, visible
+        # "UNAVAILABLE/errored" signal and never silently passes the value. No declared
+        # contract → skipped (UNKNOWN), so contract-less workflows are unaffected.
+        contract_error, _errored = validate_consumer_input(kind, step, resolved_input, rc.repo_root)
+        if contract_error is not None:
+            result = StepResult(outputs={}, status="failed", error=contract_error)
+            with _guard(rc):
+                rc.outputs[frame_key] = {}
+                rc.statuses[frame_key] = "failed"
+                rc.rec.step_recorded(
+                    _step_record(
+                        rc.run_id,
+                        sid,
+                        kind,
+                        result,
+                        captured,
+                        frame_key=frame_key,
+                        iteration=iteration,
+                    )
+                )
+                rc.failed = True
+                rc.error = f"step {frame_key!r} failed: {result.error}"
+            return
         try:
             ctx = StepContext(
                 run_id=rc.run_id,

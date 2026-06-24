@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/set_fields_input.schema.json",
+  "title": "SetFieldsInput",
+  "description": "INPUT contract of the `set_fields` step.",
+  "type": "object",
+  "properties": {
+    "ticket_id": {
+      "type": [
+        "string"
+      ],
+      "description": "The ticket id; optional \u2014 falls back to the workflow target ticket."
+    },
+    "fields": {
+      "type": "object",
+      "description": "Field name \u2192 value edits (LWW).",
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "fields"
+  ],
+  "additionalProperties": false
+}

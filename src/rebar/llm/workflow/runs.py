@@ -111,7 +111,7 @@ class RunnerAgentStep(_ex.AgentStepRunner):
 
         from rebar.llm import prompts
         from rebar.llm.config import LLMConfig, resolve_model
-        from rebar.llm.runner import RunRequest, get_runner
+        from rebar.llm.runner import get_runner
 
         cfg = LLMConfig.from_env(repo_root=self._repo_root)
         cfg = _replace(
@@ -121,7 +121,7 @@ class RunnerAgentStep(_ex.AgentStepRunner):
             ),
         )
         prompt_id = ctx.step.get("prompt") or ""
-        reviewer = prompts.get_reviewer(prompt_id)
+        prompt = prompts.get_prompt(prompt_id, repo_root=self._repo_root)
         ticket_id = str(ctx.inputs.get("ticket_id") or ctx.target_ticket or "")
         variables = {
             "ticket_id": ticket_id,
@@ -130,23 +130,78 @@ class RunnerAgentStep(_ex.AgentStepRunner):
             ),
             "repo_path": cfg.repo_path or "",
         }
-        system_prompt, langfuse_prompt = prompts.resolve_prompt(reviewer, variables, cfg.langfuse)
+        system_prompt, langfuse_prompt = prompts.resolve_prompt(prompt, variables, cfg.langfuse)
         instructions = str(
             ctx.inputs.get("instructions")
-            or f"Review along the '{reviewer.dimension}' dimension using the read-only "
-            "repository tools; ground every finding in tool output."
+            # `dimension` is optional on a prompt (None for a non-reviewer); fall back
+            # to the prompt id so the default instructions never read "the 'None' …".
+            or f"Review along the '{prompt.dimension or prompt.id}' dimension using the "
+            "read-only repository tools; ground every finding in tool output."
         )
-        req = RunRequest(
+        req = build_agent_request(
+            prompt,
+            ctx,
+            cfg,
             system_prompt=system_prompt,
             instructions=instructions,
-            config=cfg,
-            reviewers=[prompt_id],
-            target={"kind": "workflow_step", "ticket_ids": [ticket_id] if ticket_id else []},
             langfuse_prompt=langfuse_prompt,
-            mode=ctx.step.get("mode", "findings"),
-            output_schema=ctx.step.get("output_schema"),
+            ticket_id=ticket_id,
         )
         return _ex.StepResult(outputs=get_runner(cfg, override=self._runner).run(req))
+
+
+def build_agent_request(
+    prompt,
+    ctx: _ex.StepContext,
+    cfg,
+    *,
+    system_prompt: str,
+    instructions: str,
+    langfuse_prompt,
+    ticket_id: str,
+):
+    """Build the :class:`RunRequest` for an agent step (story 4b2f) — the single,
+    testable place the execution_mode → mode/output_schema dispatch lives.
+
+    The prompt's ``execution_mode`` (already defaulted to ``agentic`` by
+    ``get_prompt``) selects how the runner drives the model:
+
+      * ``single_turn`` — ONE model call, NO tools, asking for structured output
+        validated against the PROMPT's ``outputs`` contract. So we OVERRIDE the
+        step's mode/output_schema with ``mode="structured"`` +
+        ``output_schema=prompt.outputs``. A single_turn prompt with no declared
+        ``outputs`` is a config error (it has nothing to validate against).
+      * ``agentic`` — the tool-using path, honoring the step's own
+        ``mode``/``output_schema`` (the historical behavior).
+    """
+    from rebar.llm.prompts import PromptError
+    from rebar.llm.runner import RunRequest
+
+    em = prompt.execution_mode or "agentic"
+    if em == "single_turn":
+        outputs = prompt.outputs
+        if not outputs:
+            raise PromptError(
+                f"prompt {prompt.id!r} is single_turn but declares no `outputs` contract; "
+                "a single_turn prompt MUST declare the outputs schema its one structured "
+                "call is validated against"
+            )
+        mode = "structured"
+        output_schema = outputs if isinstance(outputs, str) else None
+    else:
+        mode = ctx.step.get("mode", "findings")
+        output_schema = ctx.step.get("output_schema")
+    return RunRequest(
+        system_prompt=system_prompt,
+        instructions=instructions,
+        config=cfg,
+        reviewers=[prompt.id],
+        target={"kind": "workflow_step", "ticket_ids": [ticket_id] if ticket_id else []},
+        langfuse_prompt=langfuse_prompt,
+        mode=mode,
+        output_schema=output_schema,
+        execution_mode=em,
+    )
 
 
 def _agent_runner(

@@ -15,7 +15,7 @@ from rebar.llm.prompts import PromptError
 
 
 def _reviewer():
-    return prompts.get_reviewer("ticket-quality")
+    return prompts.get_prompt("ticket-quality")
 
 
 def test_resolve_is_git_canonical_with_content_hash() -> None:

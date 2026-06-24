@@ -32,7 +32,14 @@ from pathlib import Path
 from typing import Any
 
 from .bpmn import REBAR_MODDLE_DESCRIPTOR, bpmn_to_ir, ir_to_bpmn
+
+# Inspector contract-views live in their own module; re-exported (explicit `as` form)
+# so `editor.step_contract_view` / `resolve_contracts` stay the stable surface (748a).
+from .editor_contracts import prompt_contract_view as prompt_contract_view
+from .editor_contracts import resolve_contracts as resolve_contracts
+from .editor_contracts import step_contract_view as step_contract_view
 from .lint import lint_workflow
+from .prompt_authoring import list_prompts, prompt_write_target, save_prompt
 from .schema import dump_workflow, load_workflow
 
 # The editor front-end (bpmn-js Modeler + properties panel + auto-layout) is BUILT from
@@ -96,9 +103,9 @@ def resolve_prompts(doc: dict[str, Any], path: str | Path) -> dict[str, str]:
     for pid in _collect_prompt_ids(doc.get("steps", []) or []):
         text = ""
         try:
-            from rebar.llm.prompts import canonical_prompt_text, get_reviewer
+            from rebar.llm.prompts import get_prompt
 
-            text = canonical_prompt_text(get_reviewer(pid), repo_root=repo_root)
+            text = get_prompt(pid, repo_root=repo_root).text
         except Exception:  # noqa: BLE001 - try a user prompt file, then give up gracefully
             try:
                 from rebar.llm.prompts import parse_front_matter
@@ -112,12 +119,140 @@ def resolve_prompts(doc: dict[str, Any], path: str | Path) -> dict[str, str]:
     return out
 
 
+# ── The defined /validate response shape (story 998e) ───────────────────────────
+# Every path through validate_node_config returns EXACTLY this shape so the bundle
+# can map it uniformly: {"ok": bool, "errors": [{"path": str, "message": str}],
+# "unavailable": bool}. The three failure axes are kept DISTINCT:
+#   * empty config           → ok:True,  errors:[],   unavailable:False (valid)
+#   * malformed JSON         → ok:False, errors:[…],  unavailable:False (user-fixable)
+#   * schema violation       → ok:False, errors:[…],  unavailable:False (user-fixable)
+#   * validator itself errored → ok:False, errors:[…], unavailable:True (dead validator)
+# `unavailable:True` is NEVER a false `ok:True` and NEVER a silent swallow — it is the
+# explicit "validation unavailable" state the front-end renders as a distinct banner.
+
+
+def _config_input_schema(kind: str, action: str | None, repo_root: Any) -> str | None:
+    """The INPUT-contract schema NAME a node's ``with`` must satisfy — delegates to the
+    shared resolver so edit-time validation matches the runtime net exactly (b642)."""
+    from .executor import input_schema_for
+
+    return input_schema_for(kind, action, repo_root)
+
+
+def validate_node_config(
+    kind: str, action: str | None, config_text: str, repo_root: Any = None
+) -> dict[str, Any]:
+    """Validate one editor node's raw JSON config against its INPUT contract,
+    returning the DEFINED shape ``{"ok", "errors": [{"path","message"}], "unavailable"}``.
+
+    The decision table (each axis kept DISTINCT — see the module note above):
+
+    * EMPTY (empty/whitespace ``config_text``) → ``ok:True`` (an empty config is valid,
+      not malformed).
+    * MALFORMED JSON (unparseable) → ``ok:False`` + a single ``invalid JSON: <detail>``
+      error, ``unavailable:False`` (a real, user-fixable error — NOT unavailable).
+    * PARSEABLE → validate ``config["with"]`` against the node's input contract:
+      - no contract → ``ok:True`` (nothing to validate).
+      - schema VIOLATION → ``ok:False`` + one ``{path, message}`` per ``ValidationError``,
+        ``unavailable:False``.
+      - validator FAILURE (the validator itself errors — unresolvable ``$ref`` / unknown
+        schema / any non-``ValidationError``) → ``ok:False`` + a single
+        ``validation unavailable: <detail>`` error AND ``unavailable:True``. NEVER a
+        false ``ok:True``, never a silent swallow."""
+    if not config_text or not config_text.strip():
+        return {"ok": True, "errors": [], "unavailable": False}
+    try:
+        config = json.loads(config_text)
+    except (ValueError, UnicodeDecodeError) as exc:
+        return {
+            "ok": False,
+            "errors": [{"path": "", "message": f"invalid JSON: {exc}"}],
+            "unavailable": False,
+        }
+    schema_name = _config_input_schema(kind, action, repo_root)
+    if not schema_name:
+        return {"ok": True, "errors": [], "unavailable": False}
+    with_value = config.get("with", {}) if isinstance(config, dict) else config
+
+    from rebar import schemas
+
+    try:
+        validator = schemas.validator(schema_name)
+        errors = sorted(validator.iter_errors(with_value), key=lambda e: list(e.absolute_path))
+    except Exception as exc:  # noqa: BLE001 - validator itself errored: fail-loud, DISTINCT
+        return {
+            "ok": False,
+            "errors": [{"path": "", "message": f"validation unavailable: {exc}"}],
+            "unavailable": True,
+        }
+    if not errors:
+        return {"ok": True, "errors": [], "unavailable": False}
+    out: list[dict[str, str]] = []
+    for err in errors:
+        try:
+            path = err.json_path
+        except Exception:  # noqa: BLE001 - older jsonschema without json_path
+            path = "/".join(str(p) for p in err.absolute_path)
+        out.append({"path": path, "message": err.message})
+    return {"ok": False, "errors": out, "unavailable": False}
+
+
+# ── Per-kind HELP data (story 998e) ─────────────────────────────────────────────
+# The single source of truth for the editor's help panel: the 5 element kinds, each
+# with the JSON shape its config carries. Surfaced to the bundle as a window global
+# (and via GET /help) so the help text is testable and never drifts from Python.
+_NODE_KIND_HELP: dict[str, dict[str, Any]] = {
+    "scripted": {
+        "title": "Scripted step",
+        "summary": "Runs a registered Python op (deterministic). Its `with` is "
+        "validated against the op's input contract.",
+        "action_key": "uses",
+        "shape": {"uses": "<op-id>", "with": {"<input>": "<value>"}},
+    },
+    "agent": {
+        "title": "Agent step",
+        "summary": "Runs a prompt against the LLM. Its `with` is validated against "
+        "the prompt's declared inputs contract.",
+        "action_key": "prompt",
+        "shape": {"prompt": "<prompt-id>", "with": {"<input>": "<value>"}},
+    },
+    "branch": {
+        "title": "Branch (conditional)",
+        "summary": "Chooses between `then` / `else` bodies on a condition.",
+        "action_key": None,
+        "shape": {"branch": {"when": "<expr>", "then": ["<step>"], "else": ["<step>"]}},
+    },
+    "loop": {
+        "title": "Loop",
+        "summary": "Repeats a `body` while a condition holds (bounded by max iterations).",
+        "action_key": None,
+        "shape": {"loop": {"while": "<expr>", "max": 10, "body": ["<step>"]}},
+    },
+    "map": {
+        "title": "Map (fan-out)",
+        "summary": "Runs a `body` once per item of an input collection.",
+        "action_key": None,
+        "shape": {"map": {"over": "<expr>", "as": "<var>", "body": ["<step>"]}},
+    },
+}
+
+
+def node_kind_help() -> dict[str, dict[str, Any]]:
+    """The per-kind help DATA for the editor's help panel: the 5 element kinds
+    (scripted/agent/branch/loop/map), each with a title, a one-line summary, and the
+    expected JSON ``shape`` of its config. The single Python source of truth the
+    bundle renders (window global + ``GET /help``) so the help never drifts from the
+    contracts. Returns a deep copy so callers cannot mutate the canonical map."""
+    return json.loads(json.dumps(_NODE_KIND_HELP))
+
+
 def build_host_html(
     bpmn_xml: str,
     *,
     token: str = "",
     descriptor: dict[str, Any] | None = None,
     prompts: dict[str, str] | None = None,
+    contracts: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     """The editor host page: a thin shell that loads the vendored bundle (``/assets/…``)
     and hands it three globals — the BPMN to edit, the ``rebar`` moddle descriptor (so
@@ -131,6 +266,8 @@ def build_host_html(
     diagram = json.dumps(bpmn_xml)
     tok = json.dumps(token)
     prompt_map = json.dumps(prompts or {})
+    contract_map = json.dumps(contracts or {})
+    help_map = json.dumps(node_kind_help())
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -148,6 +285,27 @@ def build_host_html(
     #canvas {{ flex: 1 1 auto; height: 100%; }}
     #properties {{ flex: 0 0 320px; height: 100%; overflow: auto;
                    border-left: 1px solid #ccc; background: #fafafa; }}
+    #rebar-library {{ flex: 0 0 300px; height: 100%; overflow: auto; padding: 8px;
+                      border-left: 1px solid #ccc; background: #f4f6fa;
+                      box-sizing: border-box; font-size: 13px; }}
+    #rebar-library h3 {{ margin: 8px 0 4px; font-size: 13px; }}
+    #rebar-library select, #rebar-library input, #rebar-library textarea, #rebar-library button
+      {{ display: block; width: 100%; margin: 3px 0; box-sizing: border-box; }}
+    #rebar-library label {{ display: block; margin: 4px 0; }}
+    #rebar-library .rebar-lib-target {{ font-family: monospace; font-size: 11px; color: #555;
+                                        margin-top: 6px; word-break: break-all; }}
+    #rebar-library .ok {{ color: #1a7f37; }} #rebar-library .err {{ color: #cf222e; }}
+    #rebar-validate-region {{ white-space: pre-wrap; font-size: 12px; padding: 8px;
+                              margin: 0 0 6px; border-radius: 4px; box-sizing: border-box; }}
+    .rebar-validate-errors {{ background: #ffeef0; color: #cf222e;
+                              border: 1px solid #cf222e; }}
+    .rebar-validate-unavailable {{ background: #fff8c5; color: #7d4e00;
+                                   border: 1px solid #d4a72c; }}
+    #rebar-kind-help h3 {{ margin: 12px 0 4px; }}
+    #rebar-kind-help .rebar-help-kind {{ margin: 0 0 10px; }}
+    #rebar-kind-help .rebar-help-summary {{ color: #555; margin: 2px 0; }}
+    #rebar-kind-help .rebar-help-shape {{ background: #eef1f6; padding: 6px; margin: 3px 0;
+                                          font-size: 11px; overflow: auto; }}
   </style>
 </head>
 <body>
@@ -159,12 +317,15 @@ def build_host_html(
   <div id="main">
     <div id="canvas"></div>
     <div id="properties"></div>
+    <div id="rebar-library"></div>
   </div>
   <script>
     window.REBAR_MODDLE = {desc};
     window.REBAR_DIAGRAM = {diagram};
     window.REBAR_TOKEN = {tok};
     window.REBAR_PROMPTS = {prompt_map};
+    window.REBAR_CONTRACTS = {contract_map};
+    window.REBAR_KIND_HELP = {help_map};
   </script>
   <script src="/assets/editor.js"></script>
 </body>
@@ -248,6 +409,13 @@ def edit_workflow(
     doc = migrate_to_current(load_workflow(target))
     bpmn_holder = {"xml": ir_to_bpmn(doc)}
     prompts = resolve_prompts(doc, target)  # prompt id -> text, for the editor to display
+    try:
+        from rebar import config as _cfg
+
+        _repo_root: Any = _cfg.repo_root()
+    except Exception:  # noqa: BLE001 - fall back to the file's own tree
+        _repo_root = Path(target).resolve().parent
+    contracts = resolve_contracts(doc, repo_root=_repo_root)  # op/prompt -> view, for inspector
     token = secrets.token_urlsafe(18)  # per-session secret guarding the write endpoint
 
     class _Handler(http.server.BaseHTTPRequestHandler):
@@ -258,6 +426,52 @@ def edit_workflow(
             # DNS-rebinding defense: the Host header must be the loopback we bound to.
             h = (self.headers.get("Host") or "").split(":")[0]
             return h in ("127.0.0.1", "localhost", "[::1]", "")
+
+        def _authed(self) -> bool:
+            # The shared CSRF / DNS-rebinding guard for the WRITE-or-sensitive endpoints
+            # (/save, /prompts, /prompt, /prompt/save, /validate): a loopback Host AND the
+            # per-session token (a cross-origin page can't read the host HTML to learn it).
+            return self._host_ok() and secrets.compare_digest(
+                self.headers.get("X-Rebar-Token", ""), token
+            )
+
+        def _serve_prompt(self):
+            # GET /prompt?id=<id> → {id, text, meta, target} (the resolved write target
+            # shown BEFORE save, per AC). Token+Host guarded; 404/JSON for an unknown id.
+            if not self._authed():
+                self._send(403, '{"errors":["forbidden (bad token/origin)"]}', "application/json")
+                return
+            from urllib.parse import parse_qs, urlsplit
+
+            pid = (parse_qs(urlsplit(self.path).query).get("id") or [""])[0]
+            target = prompt_write_target(pid, repo_root=_repo_root)
+            try:
+                from rebar.llm.prompts import get_prompt, parse_front_matter
+
+                prompt = get_prompt(pid, repo_root=_repo_root)
+                meta, _body = parse_front_matter(self._raw_prompt_text(pid) or "")
+                payload = {"id": pid, "text": prompt.text, "meta": meta, "target": target}
+                self._send(200, json.dumps(payload), "application/json")
+            except Exception as exc:  # noqa: BLE001 - unknown/malformed id is a clean 404
+                self._send(
+                    404,
+                    json.dumps({"errors": [f"unknown prompt {pid!r}: {exc}"], "target": target}),
+                    "application/json",
+                )
+
+        def _raw_prompt_text(self, pid: str) -> str | None:
+            # The RAW prompt file text (front-matter intact) so the edit form gets the
+            # current front-matter; a project override wins over the packaged copy.
+            from rebar.llm.prompts import _catalog_dir, _packaged_prompt_files
+
+            if _repo_root:
+                user = Path(_repo_root) / ".rebar" / "prompts" / f"{pid}.md"
+                if user.is_file():
+                    return user.read_text(encoding="utf-8")
+            packaged = _packaged_prompt_files()
+            if pid in packaged:
+                return Path(str(_catalog_dir())).joinpath(packaged[pid]).read_text(encoding="utf-8")
+            return None
 
         def _send(self, code, body, ctype="text/html; charset=utf-8"):
             data = body.encode("utf-8") if isinstance(body, str) else body
@@ -272,9 +486,30 @@ def edit_workflow(
                 self._send(403, "forbidden", "text/plain")
                 return
             if self.path in ("/", "/index.html"):
-                self._send(200, build_host_html(bpmn_holder["xml"], token=token, prompts=prompts))
+                self._send(
+                    200,
+                    build_host_html(
+                        bpmn_holder["xml"], token=token, prompts=prompts, contracts=contracts
+                    ),
+                )
             elif self.path == "/workflow.bpmn":
                 self._send(200, bpmn_holder["xml"], "application/xml")
+            elif self.path == "/prompts":
+                # The prompt LIBRARY: built-in + project prompts (story 6592). Same
+                # token+Host guard as /save (it reveals the repo's prompt inventory).
+                if not self._authed():
+                    self._send(
+                        403, '{"errors":["forbidden (bad token/origin)"]}', "application/json"
+                    )
+                    return
+                self._send(200, json.dumps(list_prompts(_repo_root)), "application/json")
+            elif self.path == "/help":
+                # The per-kind help DATA (story 998e): element kinds + expected JSON
+                # shape per kind. Host-guarded (read-only, no token needed — it is the
+                # same static map already injected as window.REBAR_KIND_HELP).
+                self._send(200, json.dumps(node_kind_help()), "application/json")
+            elif self.path.startswith("/prompt?"):
+                self._serve_prompt()
             elif self.path.startswith("/assets/"):
                 name = self.path[len("/assets/") :]
                 data = read_asset(name)
@@ -286,14 +521,12 @@ def edit_workflow(
                 self._send(404, "not found", "text/plain")
 
         def do_POST(self):  # noqa: N802 - stdlib handler name
-            if self.path != "/save":
+            if self.path not in ("/save", "/prompt/save", "/validate"):
                 self._send(404, '{"errors":["unknown endpoint"]}', "application/json")
                 return
             # CSRF / DNS-rebinding guard: require the per-session token (a cross-origin
             # page can't read the host HTML to learn it) AND a loopback Host.
-            if not self._host_ok() or not secrets.compare_digest(
-                self.headers.get("X-Rebar-Token", ""), token
-            ):
+            if not self._authed():
                 self._send(403, '{"errors":["forbidden (bad token/origin)"]}', "application/json")
                 return
             try:
@@ -301,13 +534,85 @@ def edit_workflow(
             except ValueError:
                 self._send(400, '{"errors":["bad Content-Length"]}', "application/json")
                 return
-            xml = self.rfile.read(length).decode("utf-8")
+            payload = self.rfile.read(length)
+            if self.path == "/prompt/save":
+                self._save_prompt(payload)
+                return
+            if self.path == "/validate":
+                self._validate(payload)
+                return
+            xml = payload.decode("utf-8")
             errors = save_bpmn_to_ir(xml, target)
             if errors:
                 self._send(422, json.dumps({"errors": errors}), "application/json")
             else:
                 bpmn_holder["xml"] = _load_bpmn_for(target)  # re-baseline from the saved IR
                 self._send(200, json.dumps({"ok": True}), "application/json")
+
+        def _save_prompt(self, raw: bytes):
+            # POST /prompt/save body {id, meta, body, overwrite?} → save_prompt(...).
+            # 200 {ok, path, kind} or 4xx {errors:[...]} for the non-happy paths (invalid
+            # id / collision / neither-writable) — already token+Host guarded above.
+            from .prompt_authoring import PromptWriteError
+
+            try:
+                data = json.loads(raw.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as exc:
+                self._send(
+                    400, json.dumps({"errors": [f"bad JSON body: {exc}"]}), "application/json"
+                )
+                return
+            try:
+                result = save_prompt(
+                    data.get("id", ""),
+                    data.get("meta") or {},
+                    data.get("body", ""),
+                    repo_root=_repo_root,
+                    overwrite=bool(data.get("overwrite")),
+                )
+            except PromptWriteError as exc:
+                self._send(400, json.dumps({"errors": [str(exc)]}), "application/json")
+                return
+            except Exception as exc:  # noqa: BLE001 - any other write failure → clear 4xx
+                self._send(
+                    400, json.dumps({"errors": [f"prompt save failed: {exc}"]}), "application/json"
+                )
+                return
+            self._send(
+                200,
+                json.dumps({"ok": True, "path": result["path"], "kind": result["kind"]}),
+                "application/json",
+            )
+
+        def _validate(self, raw: bytes):
+            # POST /validate body {kind, action, config} → validate_node_config(...) as
+            # JSON 200 (the defined shape; even ok:false is HTTP 200 — a normal
+            # validation result). If the endpoint handler ITSELF crashes unexpectedly,
+            # return HTTP 500 with the same shape + unavailable:true so the client can
+            # map 500 → the "validation unavailable" state too (story 998e).
+            try:
+                data = json.loads(raw.decode("utf-8"))
+                result = validate_node_config(
+                    str(data.get("kind", "")),
+                    data.get("action"),
+                    data.get("config", "") or "",
+                    repo_root=_repo_root,
+                )
+                self._send(200, json.dumps(result), "application/json")
+            except Exception as exc:  # noqa: BLE001 - endpoint crash → 500 + unavailable
+                self._send(
+                    500,
+                    json.dumps(
+                        {
+                            "ok": False,
+                            "unavailable": True,
+                            "errors": [
+                                {"path": "", "message": f"validation endpoint error: {exc}"}
+                            ],
+                        }
+                    ),
+                    "application/json",
+                )
 
     server = http.server.ThreadingHTTPServer((host, port), _Handler)
     bound_host, bound_port = server.server_address[0], server.server_address[1]

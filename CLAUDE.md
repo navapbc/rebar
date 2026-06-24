@@ -83,6 +83,14 @@ shape) drawn from the canonical JSON Schemas — see
 `.rebar/workflows/*.yaml` workflow against a ticket — a lean-runtime capability
 that does not itself need the `[agents]` extra, though individual LLM steps do).
 
+> **Authoring workflows + prompts.** The visual editor is
+> [docs/workflow-editor.md](docs/workflow-editor.md); the contract-bearing
+> prompt/step model behind it (prompt front-matter + closed key set + overrides, the
+> prompt↔op↔registry contract conventions, the derived prompt index + CI drift gate,
+> `execution_mode`, and the 3-state + runtime validation) is
+> [docs/workflow-authoring-v2.md](docs/workflow-authoring-v2.md), with ADRs under
+> [docs/adr/](docs/adr/).
+
 There is no `init` over MCP (operator bootstrap only). `reconcile` `live` mode
 additionally requires `REBAR_MCP_ALLOW_JIRA_SYNC=1` (deprecated alias
 `REBAR_MCP_ALLOW_RECONCILE_LIVE`). Both env gates accept
@@ -284,6 +292,19 @@ The **`REBAR_SYNC_PUSH`** env var tunes this (default `always`; deprecated alias
 background so per-write network latency doesn't serialize a batch claim, and `off`
 keeps commits local — both still surface `PUSH_PENDING` via `fsck` (see
 `docs/concurrency.md`).
+
+## Git workflow (code changes)
+
+**Merge code changes to `main` via a pull request, not a direct push.** Branch the
+work, open a PR, let CI + review run, and merge through the PR — never push commits
+straight to `main`. (This governs *code*; rebar's own ticket events on the `tickets`
+branch still auto-commit/auto-push as described above.)
+
+**Auto-merge is authorized.** When you open a PR you may enable GitHub auto-merge
+(`gh pr merge --auto --squash`) so it merges itself once the required CI checks pass
+and review requirements are met — you don't have to babysit and merge by hand. The
+`main` ruleset still gates the merge (required status checks must be green), so
+auto-merge never bypasses CI.
 
 ## Library quick reference
 

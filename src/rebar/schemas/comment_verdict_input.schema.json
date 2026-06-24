@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/comment_verdict_input.schema.json",
+  "title": "CommentVerdictInput",
+  "description": "INPUT contract of the `comment_verdict` step.",
+  "type": "object",
+  "properties": {
+    "ticket_id": {
+      "type": [
+        "string"
+      ],
+      "description": "The ticket id; optional \u2014 falls back to the workflow target ticket."
+    },
+    "verdict": {
+      "type": [
+        "string"
+      ],
+      "description": "Verdict label rendered into the comment header."
+    },
+    "body": {
+      "type": [
+        "string"
+      ],
+      "description": "Comment body (preferred)."
+    },
+    "summary": {
+      "type": [
+        "string"
+      ],
+      "description": "Comment body (alias for `body`)."
+    }
+  },
+  "additionalProperties": false
+}

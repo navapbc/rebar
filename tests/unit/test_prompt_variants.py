@@ -11,7 +11,7 @@ from rebar.llm.prompts import PromptError
 
 
 def _rv():
-    return prompts.get_reviewer("ticket-quality")
+    return prompts.get_prompt("ticket-quality")
 
 
 def _write(tmp_path: Path, name: str, text: str) -> None:

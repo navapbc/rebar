@@ -46,7 +46,8 @@ def test_catalog_and_fallback_prompt_render() -> None:
     catalog = llm.load_catalog()
     assert "ticket-quality" in catalog
     assert catalog["ticket-quality"].default is True
-    rv = llm.get_reviewer("ticket-quality")
+    rv = llm.get_prompt("ticket-quality")
+    assert rv.is_reviewer is True  # category == "review" → reviewer
     text, meta = prompts.resolve_prompt(
         rv, {"ticket_id": "T1", "ticket_context": "CTX", "repo_path": "/x"}, None
     )
@@ -60,10 +61,10 @@ def test_catalog_and_fallback_prompt_render() -> None:
 
 def test_unknown_reviewer_raises() -> None:
     import rebar.llm as llm
-    from rebar.llm.prompts import ReviewerError
+    from rebar.llm.prompts import PromptNotFound
 
-    with pytest.raises(ReviewerError):
-        llm.get_reviewer("does-not-exist")
+    with pytest.raises(PromptNotFound):
+        llm.get_prompt("does-not-exist")
 
 
 # ── deterministic reviewer selection (the rules layer) ────────────────────────

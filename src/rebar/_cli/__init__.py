@@ -467,9 +467,8 @@ def _prompt_eval(args) -> int:
     # The DIRTY working-tree prompt is what an eval would evaluate (WS-G1).
     dirty_hash = None
     try:
-        rv = _prompts.get_reviewer(args.prompt_id)
         dirty_hash = _prompts.prompt_content_hash(
-            _prompts.canonical_prompt_text(rv, repo_root=repo_root)
+            _prompts.get_prompt(args.prompt_id, repo_root=repo_root).text
         )
     except LLMError:
         pass  # a user-file prompt without a catalog reviewer — spec is still valid
