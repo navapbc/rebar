@@ -423,7 +423,7 @@ def _run_leaf(rc, step, sid, frame_key, kind, prefixes, bindings, iteration) -> 
                 iteration=iteration,
             )
             result = _dispatch(ctx, rc.registry, rc.runner)
-        except Exception as exc:  # a step failure is data, not a crash
+        except Exception as exc:  # noqa: BLE001 — a step failure is data, not a crash: captured as a failed StepResult (error in-band), the workflow continues
             result = StepResult(outputs={}, status="failed", error=str(exc))
     with _guard(rc):
         rc.outputs[frame_key] = dict(result.outputs)

@@ -89,7 +89,7 @@ def denied_paths(root: str) -> tuple[str, ...]:
     ]
     try:
         candidates.append(str(_root_config.tracker_dir(root)))
-    except Exception:
+    except Exception:  # noqa: BLE001 — best-effort config-path candidate: skip the tracker dir if it can't be resolved
         pass
     return tuple(dict.fromkeys(os.path.realpath(p) for p in candidates))
 

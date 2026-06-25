@@ -166,7 +166,7 @@ def lint_prompt_refs(doc: dict[str, Any], *, repo_root=None) -> list[LintFinding
             try:
                 prompt = get_prompt(prompt_id, repo_root=repo_root)
                 schema = prompt_input_schema(prompt, repo_root=repo_root)
-            except Exception:  # a malformed prompt is the prompt's own lint, not this
+            except Exception:  # noqa: BLE001 — a malformed prompt is the prompt's own lint concern, not this workflow lint; skip it
                 continue
             available = _ENGINE_PROVIDED_VARS | set((step.get("with") or {}).keys())
             missing = sorted(set(schema.get("required", [])) - available)

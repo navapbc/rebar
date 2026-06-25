@@ -16,8 +16,11 @@ The ``mcp`` dependency is an optional extra and is imported lazily.
 from __future__ import annotations
 
 import importlib.util
+import logging
 
 import rebar
+
+logger = logging.getLogger(__name__)
 
 
 # The reconcile tool gates modes by the engine's canonical MODE_CAPS table, which
@@ -884,13 +887,21 @@ def build_server():
                         run_id=run_id,
                         dry_run=dry_run,
                     )
-                except Exception as exc:  # noqa: BLE001 - reflected in run-state, not raised
+                except Exception as exc:  # noqa: BLE001 — background run failure is reflected in run-state, not raised
                     try:
                         _wf_exec.TicketEventRecorder(ticket_id).run_finished(
                             {"run_id": run_id, "status": "failed", "error": str(exc)}
                         )
-                    except Exception:
-                        pass
+                    except Exception:  # noqa: BLE001 — the failure-recording path must not mask the original run error
+                        # Don't let a failure in the error-reporting path hide the
+                        # original run failure: log BOTH (the recorder error with its
+                        # traceback, and the original run error it was trying to record).
+                        logger.warning(
+                            "failed to record workflow run %s failure (original run error: %s)",
+                            run_id,
+                            exc,
+                            exc_info=True,
+                        )
 
             threading.Thread(target=_bg, daemon=True).start()
             return {"run_id": run_id, "ticket_id": ticket_id, "status": "running"}

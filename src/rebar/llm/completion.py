@@ -64,7 +64,7 @@ def _child_closure_findings(ticket_id: str, repo_root) -> list[dict]:
 
     try:
         children = rebar.list_tickets(parent=ticket_id, repo_root=repo_root)
-    except Exception:
+    except Exception:  # noqa: BLE001 — no children on a list failure (natural no-op for childless tickets)
         return []
     out: list[dict] = []
     for c in children:
@@ -86,7 +86,7 @@ def _child_closure_findings(ticket_id: str, repo_root) -> list[dict]:
             continue
         try:
             verdict = rebar.verify_signature(cid, repo_root=repo_root).get("verdict")
-        except Exception as exc:  # never let a signature read crash the verification
+        except Exception as exc:  # noqa: BLE001 — never let a signature read crash the verification: the error is recorded in-band as the verdict string
             verdict = f"error: {exc}"
         if verdict != "certified":
             out.append(

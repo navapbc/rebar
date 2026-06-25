@@ -111,7 +111,7 @@ def _build_loader():
                     )
                 try:
                     key = self.construct_object(key_node, deep=True)
-                except Exception:  # pragma: no cover - unusual/non-constructible key
+                except Exception:  # noqa: BLE001 — a non-constructible YAML key is skipped (this is duplicate-key detection only)  # pragma: no cover - unusual/non-constructible key
                     continue
                 if isinstance(key, (str, int, float, bool)) or key is None:
                     if key in seen:

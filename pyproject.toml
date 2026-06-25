@@ -214,16 +214,10 @@ select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201"]
 # next_batch emit print(json.dumps(...)) machine-contract stdout + human status on its
 # own stderr), a legitimate-print surface like _cli/_commands.
 "src/rebar/_engine_support/*" = ["T201"]
-# MCP surface + workflow + llm top-level — swept by ceaa. NOTE: ruff per-file-ignore
-# globs match `*` across `/`, so a `src/rebar/llm/*.py` glob would WRONGLY exempt the
-# exemplar `plan_review/`. The llm top-level files are therefore enumerated explicitly
-# so plan_review/ stays gated.
-"src/rebar/mcp_server.py" = ["BLE001"]
-"src/rebar/llm/completion.py" = ["BLE001"]
-"src/rebar/llm/config.py" = ["BLE001"]
-"src/rebar/llm/pai_tools.py" = ["BLE001"]
-"src/rebar/llm/parity.py" = ["BLE001"]
-"src/rebar/llm/workflow/*" = ["BLE001"]
+# MCP surface (mcp_server.py) + llm/workflow/ + llm top-level — SWEPT by ceaa; removed.
+# The mcp_server.py:892 masking swallow was fixed (the failure-recording path now logs
+# instead of swallowing); the two cleanup-and-reraise `except BaseException` sites
+# (prompt_authoring/snapshot) carry justified noqas. No prints existed in this scope.
 # CLI surface — BLE001 SWEPT by fd72 (_cli has no prints; removed entirely). `_commands`
 # is the CLI presentation layer (usage strings, `Error:` messages, `exc.message`, and
 # command data output) so it KEEPS T201; its broad-excepts were swept.
