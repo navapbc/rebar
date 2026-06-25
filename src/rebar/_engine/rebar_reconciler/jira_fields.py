@@ -17,9 +17,13 @@ import logging
 
 from rebar_reconciler.comment_limits import (  # shared send/diff truncation
     _JIRA_COMMENT_MAX_CHARS,
+    _JIRA_DESCRIPTION_MAX_CHARS,
 )
 from rebar_reconciler.comment_limits import (
     truncate_comment_body as _truncate_comment_body,
+)
+from rebar_reconciler.comment_limits import (
+    truncate_description as _truncate_description,
 )
 
 logger = logging.getLogger(__name__)
@@ -134,6 +138,32 @@ def _sanitize_summary(summary: str) -> str:
         len(stripped),
         len(truncated),
     )
+    return truncated
+
+
+def _sanitize_description(description: str) -> str:
+    """Truncate an over-length description to fit Jira's 32,767-char limit.
+
+    Jira rejects descriptions > 32,767 chars; ACLI surfaces this as a create/edit
+    failure that aborts the WHOLE reconciler pass (bug 626d follow-up — a 46k-char
+    epic killed a live cutover pass). Truncating here (mirroring ``_sanitize_summary``
+    / ``_sanitize_comment``) lets the mutation land. The truncation rule is the shared
+    ``comment_limits.truncate_description`` so the differ's description comparison
+    applies the IDENTICAL transform and the diff converges. Send-side only — the
+    local store is never mutated; a warning is emitted so an operator can investigate.
+    """
+    if not isinstance(description, str):
+        raise ValueError(
+            f"Description must be str, got {type(description).__name__}: {description!r}"
+        )
+    truncated = _truncate_description(description)
+    if len(truncated) != len(description):
+        logger.warning(
+            "Description exceeded Jira's %d-char limit (%d chars); truncated to %d chars",
+            _JIRA_DESCRIPTION_MAX_CHARS,
+            len(description),
+            len(truncated),
+        )
     return truncated
 
 
