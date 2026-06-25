@@ -226,3 +226,53 @@ def test_non_drift_error_fails_fast_without_retry(lock_mod, conc_mod, monkeypatc
 
     assert call_count["n"] == 1, "Non-drift errors must fail fast (single attempt)"
     assert sleep_mock.call_count == 0
+
+
+# ── unified backoff helper: both constant sets route through _jittered_backoff ──────────────────
+# civil-marlin-flare cluster 2: _compute_backoff_seconds (lock-acquire) and
+# _cas_backoff_seconds (tickets-ref CAS) were two hand-copied jittered-exponential
+# formulas; they are now thin wrappers binding their constants over the single
+# _jittered_backoff. These tests pin BOTH constant sets through the unified function.
+def test_jittered_backoff_formula_capped_no_jitter(lock_mod):
+    """The shared schedule = min(base*factor**i, cap) before jitter (uniform pinned to 1.0)."""
+
+    def bo(i: int) -> float:
+        return lock_mod._jittered_backoff(i, base=0.2, factor=2.0, cap=5.0, jitter_fraction=0.3)
+
+    with patch.object(lock_mod.random, "uniform", return_value=1.0):
+        assert bo(0) == 0.2  # base
+        assert bo(3) == 1.6  # 0.2 * 2**3, below the cap
+        assert bo(10) == 5.0  # 0.2 * 2**10 = 204.8 -> saturates at the 5.0 cap
+
+
+def test_lock_wrapper_binds_lock_constants(lock_mod):
+    """_compute_backoff_seconds routes through _jittered_backoff with the LOCK constants."""
+    with patch.object(lock_mod.random, "uniform", return_value=1.0):
+        for i in range(lock_mod._LOCK_RETRY_BUDGET_DEFAULT + 2):
+            expected = min(
+                lock_mod._BACKOFF_BASE_SECONDS * (lock_mod._BACKOFF_FACTOR**i),
+                lock_mod._BACKOFF_CAP_SECONDS,
+            )
+            assert lock_mod._compute_backoff_seconds(i) == expected
+
+
+def test_cas_wrapper_binds_cas_constants(lock_mod):
+    """_cas_backoff_seconds routes through _jittered_backoff with the CAS constants."""
+    with patch.object(lock_mod.random, "uniform", return_value=1.0):
+        for i in range(lock_mod._CAS_RETRY_BUDGET + 2):
+            expected = min(
+                lock_mod._CAS_BACKOFF_BASE_SECONDS * (lock_mod._BACKOFF_FACTOR**i),
+                lock_mod._CAS_BACKOFF_CAP_SECONDS,
+            )
+            assert lock_mod._cas_backoff_seconds(i) == expected
+
+
+def test_both_wrappers_apply_their_jitter_band_in_one_uniform_draw(lock_mod):
+    """Each wrapper performs exactly ONE random.uniform draw over its own jitter band."""
+    for fn, frac in (
+        (lock_mod._compute_backoff_seconds, lock_mod._BACKOFF_JITTER_FRACTION),
+        (lock_mod._cas_backoff_seconds, lock_mod._CAS_BACKOFF_JITTER_FRACTION),
+    ):
+        with patch.object(lock_mod.random, "uniform", return_value=0.85) as uniform_mock:
+            fn(2)
+            uniform_mock.assert_called_once_with(1.0 - frac, 1.0 + frac)

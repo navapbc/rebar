@@ -23,25 +23,54 @@ structural guard) and ``tests/interfaces/store/test_canonical_event_bytes.py``
 (every committed event file, written by any live producer, equals
 ``canonical_bytes`` of its own parsed content).
 
-This module is deliberately **lock-free and dependency-free** (stdlib ``json``
-only): the txn/link/delete paths rename+commit inline under their own lock and
-must be able to import the serializer without pulling in the write lock.
+This module is deliberately **lock-free and dependency-free** (stdlib ``json`` +
+``hashlib`` only): the txn/link/delete paths rename+commit inline under their own
+lock and must be able to import the serializer without pulling in the write lock.
 Re-serialization is replay-safe — the reducer reads parsed keys, not raw bytes,
 so routing an existing writer through this helper never changes replay behavior.
+
+**Beyond the event path — the one true canonical-JSON/hash home.** This is also
+the single seam for the other "sorted-key compact JSON (+ sha256)" sites that had
+each reimplemented it inline (signing, workflow content-hash, reconciler manifest
++ provenance ledger). Two encoding axes are exposed as **additive, keyword-only**
+parameters so a caller that deliberately diverges does so *explicitly* (a named
+param with a cited consumer) rather than via a silent copy — and so the existing
+positional callers ``canonical_str(event)`` / ``canonical_bytes(event)`` keep
+their exact bytes untouched:
+
+- ``ascii_only`` (``ensure_ascii``) — default ``False`` (literal UTF-8, the
+  canonical event form). ``ascii_only=True`` reproduces a site that relied on the
+  stdlib ``ensure_ascii=True`` default (``\\uXXXX`` escapes): the reconciler
+  manifest (``mutation.serialize_manifest``) and provenance ledger
+  (``conflict_resolver._hash_value``).
+- ``default`` — the ``json.dumps`` fallback serializer for non-JSON-native values
+  (e.g. ``default=str`` for the provenance ledger, which hashes arbitrary values).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
 
-def canonical_str(event: dict[str, Any]) -> str:
+def canonical_str(doc: Any, *, ascii_only: bool = False, default: Any = None) -> str:
     """The canonical committed text: sorted keys, compact separators,
-    ``ensure_ascii=False``, no trailing newline."""
-    return json.dumps(event, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    ``ensure_ascii=False`` (unless ``ascii_only``), no trailing newline.
+
+    The keyword-only ``ascii_only`` / ``default`` params are additive: the
+    positional ``canonical_str(doc)`` call is byte-identical to before.
+    """
+    return json.dumps(
+        doc, ensure_ascii=ascii_only, separators=(",", ":"), sort_keys=True, default=default
+    )
 
 
-def canonical_bytes(event: dict[str, Any]) -> bytes:
+def canonical_bytes(doc: Any, *, ascii_only: bool = False, default: Any = None) -> bytes:
     """:func:`canonical_str` UTF-8 encoded — the exact bytes committed to the store."""
-    return canonical_str(event).encode("utf-8")
+    return canonical_str(doc, ascii_only=ascii_only, default=default).encode("utf-8")
+
+
+def content_hash(doc: Any, *, ascii_only: bool = False, default: Any = None) -> str:
+    """Stable hex sha256 of :func:`canonical_bytes` — the one content-hash primitive."""
+    return hashlib.sha256(canonical_bytes(doc, ascii_only=ascii_only, default=default)).hexdigest()
