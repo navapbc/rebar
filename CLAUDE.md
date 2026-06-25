@@ -54,6 +54,16 @@ advisory findings** before continuing (triage each: fix the valid ones; a findin
 you judge invalid must be justified, not silently ignored). The coaching notes tell
 you the productive next move per finding.
 
+> **Claim immediately after a passing `review-plan`, before committing other work**
+> (stopgap until bug `worm-folly-barge` is fixed). The attestation is bound to the
+> current code **HEAD**, so *any* intervening commit — even one in an unrelated file —
+> staleness-invalidates it and you get a `attestation is stale (signed at X, HEAD is Y)`
+> block at claim, forcing a slow re-review for no semantic reason. Corollary: don't run
+> `review-plan` concurrently with anything that can move HEAD (a background test suite,
+> another commit, or subagents whose worktree isolation can flip the checkout) — it may
+> sign against the wrong commit. Keep `review-plan → claim` adjacent and serial; commit
+> the ticket's own work *after* claiming.
+
 **Completion-verifier protocol (to close).** Closing a work ticket runs the
 completion verifier. If it **fails**, you must **remediate the failure and try to
 close the ticket again** — repeat until it passes (the signed verdict is the proof
