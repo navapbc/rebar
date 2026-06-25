@@ -97,6 +97,54 @@ def test_distinct_run_id_does_not_skip(rebar_repo: Path) -> None:
     assert calls["n"] == 2  # a different run is independent
 
 
+def test_run_against_nonexistent_ticket_fails_fast_and_writes_nothing(rebar_repo: Path) -> None:
+    """Regression for bind-hcd-dam: a workflow targeting a non-existent ticket id
+    must FAIL FAST and write ZERO event files — no phantom CREATE-less directory
+    that `fsck` then flags MISSING_CREATE forever. The run recorder previously
+    appended WORKFLOW_RUN to the bogus id, and the committer's
+    `os.makedirs(exist_ok=True)` materialized the directory."""
+    tracker = rebar_repo / ".tickets-tracker"
+    doc = _wf([{"id": "a", "uses": "echo", "with": {"v": "x"}}])
+
+    with pytest.raises(Exception) as exc:  # noqa: PT011 — the seam raises CommandError
+        ex.run_workflow(
+            doc,
+            run_id="GHOST",
+            target_ticket="no-such-ticket",
+            repo_root=str(rebar_repo),
+            scripted_registry={"echo": lambda c: {"echoed": c.inputs["v"]}},
+        )
+    assert "not found" in str(exc.value) or "no CREATE" in str(exc.value)
+
+    # No phantom directory was materialized for the bogus id...
+    assert not (tracker / "no-such-ticket").exists(), "phantom ticket dir was created"
+    # ...and the store stays healthy (no MISSING_CREATE).
+    report = rebar.fsck(repo_root=str(rebar_repo))
+    assert "MISSING_CREATE" not in report, report
+
+
+def test_run_against_alias_records_to_canonical_ticket(rebar_repo: Path) -> None:
+    """bind-hcd-dam variant: a valid ALIAS must resolve to the canonical ticket dir,
+    not spawn a CREATE-less `<alias>/` directory holding the run-state."""
+    created = rebar.create_ticket("task", "Aliased target", repo_root=str(rebar_repo), return_alias=True)
+    tid, alias = created["id"], created["alias"]
+    tracker = rebar_repo / ".tickets-tracker"
+    doc = _wf([{"id": "a", "uses": "echo", "with": {"v": "x"}}])
+
+    res = ex.run_workflow(
+        doc,
+        run_id="ALIASRUN",
+        target_ticket=alias,
+        repo_root=str(rebar_repo),
+        scripted_registry={"echo": lambda c: {"echoed": c.inputs["v"]}},
+    )
+    assert res.status == "succeeded"
+    # Run-state landed on the canonical ticket, and no `<alias>/` dir was created.
+    assert not (tracker / alias).exists(), "run-state wrote to an alias-named phantom dir"
+    state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
+    assert state["workflow_runs"]["ALIASRUN"]["status"] == "succeeded"
+
+
 def test_failed_step_is_not_marked_succeeded(rebar_repo: Path) -> None:
     tid = rebar.create_ticket("task", "Target", repo_root=str(rebar_repo))
 

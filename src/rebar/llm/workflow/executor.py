@@ -399,11 +399,25 @@ class TicketEventRecorder(RunRecorder):
     def __init__(self, target_ticket: str, repo_root: str | None = None) -> None:
         self.ticket = target_ticket
         self.repo_root = repo_root
+        self._validated = False
 
     def _append(self, event_type: str, data: dict[str, Any]) -> None:
         from rebar._commands import _seam
 
         tracker = _seam.tracker_dir(self.repo_root)
+        # Resolve + ghost-check the target ONCE, before the first event is written
+        # (bug bind-hcd-dam). The leaf-write commands guard with require_id +
+        # require_not_ghost; the recorder did neither, so a bogus/ghost id flowed
+        # straight into append_event whose committer does makedirs(exist_ok=True),
+        # materializing a phantom CREATE-less directory that fsck flags forever.
+        # Doing it here — the single chokepoint for the library/CLI/MCP entry points
+        # — fails fast (no event file written) and resolves an alias to its canonical
+        # dir so run-state never lands on a `<alias>/` phantom.
+        if not self._validated:
+            resolved = _seam.require_id(self.ticket, tracker)
+            _seam.require_not_ghost(resolved, tracker)
+            self.ticket = resolved
+            self._validated = True
         _seam.append_event(self.ticket, event_type, data, tracker, repo_root=self.repo_root)
 
     def run_started(self, record: dict[str, Any]) -> None:
