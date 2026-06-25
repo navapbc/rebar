@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/llm/workflow/","reason":"editor render/round-trip for overlay + batch"},{"path":"tests/e2e/","reason":"editor test for new constructs"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782371245109608001,"uuid":"d4b9ce4e-6d75-4b5e-8f1b-69c5a7b50988"}
