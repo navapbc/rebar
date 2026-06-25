@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/llm/workflow/examples/","reason":"throwaway demo workflow"},{"path":"tests/unit/workflow/","reason":"offline dry-run test"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782371243372035001,"uuid":"0933cc06-2b92-452e-ab8f-e2ac595696f4"}
