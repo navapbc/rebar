@@ -197,10 +197,10 @@ def create_one(
             _call_with_retry(client.set_entity_property, jira_key, "local_id", local_id)
             if binding_store is not None and local_id:
                 binding_store.bind_confirm(local_id, jira_key)
-        except Exception as write_err:
+        except Exception as write_err:  # noqa: BLE001 — rollback handler: delete the issue + write a failure alert, then re-raise the original write_err (never masked)
             try:
                 client.delete_issue(jira_key)
-            except Exception:
+            except Exception:  # noqa: BLE001 — best-effort rollback delete; swallow the delete error so the original write_err re-raises
                 pass  # rollback failure must not mask original error
             # Emit BRIDGE_ALERT for identity-write rollback so the event is
             # surfaced in the tickets-tracker for observability.  # tickets-boundary-ok
@@ -236,7 +236,7 @@ def create_one(
                     },
                 }
                 _alert_path.write_text(canonical_str(_alert_event))
-            except Exception:
+            except Exception:  # noqa: BLE001 — alert-write failure must not mask the original error (write_err is re-raised below)
                 pass  # alert write failure must not mask original error
             raise write_err
 
@@ -434,7 +434,7 @@ def update_one(mutation: dict, client, comment_errors: list[str] | None = None) 
             comment = f"local status changed to {new_status}"
             try:
                 client.add_comment(issue_key, comment)
-            except Exception:
+            except Exception:  # noqa: BLE001 — secondary add_comment failure must not mask the comment-fallback path
                 pass  # secondary failure must not mask the comment-fallback path
             log_entry = json.dumps(
                 {

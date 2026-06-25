@@ -119,7 +119,7 @@ def _load_alert_store():
     sys.modules[_ALERT_STORE_KEY] = mod
     try:
         spec.loader.exec_module(mod)
-    except Exception:
+    except Exception:  # noqa: BLE001 — loader cleanup: drop the half-initialised module from sys.modules, then re-raise (never swallowed)
         # Cleanup: don't leave a half-initialised module in sys.modules
         # for the next caller to reuse. Mirrors the sibling-loader pattern.
         sys.modules.pop(_ALERT_STORE_KEY, None)

@@ -223,8 +223,13 @@ select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201"]
 # command data output) so it KEEPS T201; its broad-excepts were swept.
 "src/rebar/_commands/*" = ["T201"]
 "src/rebar/_alias.py" = ["T201"]
-# reconciler subprocess — swept LAST by 0569; T201 are operational stderr prints
-"src/rebar/_engine/rebar_reconciler/*" = ["BLE001", "T201"]
+# reconciler subprocess — BLE001 SWEPT by 0569 (20 broad-excepts: cleanup-and-reraise,
+# rollback-must-not-mask-original, and fail-open fallbacks, all justified inline;
+# characterization tests pin the is_not_found/http_status classification). KEEPS T201:
+# the reconciler is a subprocess whose stderr (RECON:/ERROR:/health) + stdout (OK:/report/
+# json result) prints ARE its operational output — a legitimate-print surface. The
+# close-out reconciles the inline `# noqa: T201` sites against this per-file-ignore.
+"src/rebar/_engine/rebar_reconciler/*" = ["T201"]
 "src/rebar/_engine/jira-capability-probe.py" = ["T201"]
 
 [tool.mypy]

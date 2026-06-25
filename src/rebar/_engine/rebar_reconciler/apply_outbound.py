@@ -117,7 +117,7 @@ def _apply_outbound_create(mutation, *, client=None, repo_root=None) -> ApplyRes
     payload = dict(mutation.payload)
     try:
         _call_with_retry(client.create_issue, payload)
-    except Exception:
+    except Exception:  # noqa: BLE001 — rollback path: best-effort delete of the issue created before the failure, then the ORIGINAL create error re-raises
         # Rollback path: if a Jira issue was (likely) created before the failure
         # surfaced, delete it via the same retry helper so transient delete
         # failures are also retried. Swallow any rollback error so the ORIGINAL
@@ -459,7 +459,7 @@ def _apply_outbound_conflict(mutation, *, client=None, repo_root=None) -> ApplyR
                 mutation.target,
                 f"reconciler conflict detected: {payload.get('reason', 'unspecified')}",
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — best-effort conflict comment; the suppress_pair follow-on still informs reconcile_once, so a failed comment is non-fatal
             # Best-effort comment; do not propagate — the suppress_pair
             # follow-on still informs reconcile_once to drop further work.
             pass

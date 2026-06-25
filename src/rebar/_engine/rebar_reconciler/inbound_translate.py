@@ -132,7 +132,7 @@ def _jira_status_to_local(jira_status: str) -> str:
         cfg_mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cfg_mod)  # type: ignore[union-attr]
         mapping = getattr(cfg_mod, "jira_to_local_status", {}) or {}
-    except Exception:
+    except Exception:  # noqa: BLE001 — fail-open: a missing/broken status-mapping config defaults the inbound status to open
         return "open"
     return mapping.get(jira_status, "open")
 
