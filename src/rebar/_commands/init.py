@@ -491,6 +491,28 @@ def pending_init_is_symlink(repo_root=None) -> bool:
     return bool(main_tracker) and os.path.isdir(main_tracker)
 
 
+def pending_init_attaches_to_existing(repo_root=None) -> bool:
+    """True when a ``tickets`` branch already exists locally or on ``origin``, so
+    initializing THIS repo only MOUNTS that existing shared state (a linked
+    worktree via ``_mount_or_create_branch``'s local/remote arms) rather than
+    fabricating a brand-new orphan store.
+
+    Like the worktree-symlink case, this is safe to do automatically — including
+    non-interactively — because it does not create new ticket history; it attaches
+    to a store that already exists. Distinguishes "attach to an existing
+    origin/tickets" from a true first-time init, so the auto-init gate need not
+    refuse it for lack of a TTY (bug wet-chair-peg)."""
+    repo = _resolve_repo_root(repo_root)
+    if repo is None:
+        return False
+    from rebar.config import tickets_branch
+
+    branch = tickets_branch(repo)
+    return _git_ok(repo, "rev-parse", "--verify", branch) or _git_ok(
+        repo, "rev-parse", "--verify", f"origin/{branch}"
+    )
+
+
 def _init_via_symlink(repo: str, tracker: str, silent: bool) -> int:
     main_tracker = _main_worktree_tracker(repo)
     if main_tracker is None:

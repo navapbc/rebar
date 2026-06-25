@@ -90,6 +90,18 @@ def _create_tracker(repo_root: str) -> None:
             )
             raise SystemExit(1)
         return
+    # Attaching to an existing tickets branch (local or origin/tickets) only mounts
+    # already-shared state — no new orphan store is fabricated — so, like the
+    # symlink case, do it AUTOMATICALLY, even with no TTY (bug wet-chair-peg). Only a
+    # genuine first-time init (no branch to attach to) requires consent below.
+    if _init_cmd.pending_init_attaches_to_existing(repo_root):
+        if _init_cmd.init_core(repo_root, silent=False) != 0:
+            sys.stderr.write(
+                "Error: could not attach to the existing ticket store. "
+                "Run 'rebar init' manually.\n"
+            )
+            raise SystemExit(1)
+        return
     _confirm_and_init(repo_root)
 
 
