@@ -1,0 +1,273 @@
+# rebar — Jira <-> rebar Reconcile Bridge
+#
+# Runs the drift-healing reconciler on a ~20-minute cadence to keep the Jira
+# project (JIRA_PROJECT) and the local rebar `tickets` store in sync.
+#
+# This is a TEMPLATE: client projects copy this file verbatim and set the repo
+# variables/secrets listed in docs/jira-sync-setup.md. The only project-specific
+# inputs are GitHub repo Variables/Secrets — nothing in this file changes.
+#
+# Single-flight concurrency (cancel-in-progress: false) ensures a running pass
+# completes before the next scheduled invocation starts; the reconciler's own
+# pass-lock (.reconciler-pass-lock on the tickets branch) is a second guard
+# (exit 3 == "another pass already running", treated as benign here).
+#
+# rebar divergences from DSO's reconcile-bridge (see docs/jira-sync-setup.md
+# "Necessary & sufficient"):
+#   * invocation is `rebar reconcile --mode <mode>` (== python -m rebar_reconciler)
+#   * exit 75 = reschedule (next cron retries), exit 3 = pass-in-flight — both benign
+#   * the reconciler writes inbound events as UNCOMMITTED files AND makes its own
+#     binding commit but never pushes — so the commit-back step must push whenever
+#     the worktree is dirty OR the local tickets branch is ahead of origin.
+
+name: Reconcile Bridge
+
+on:
+  schedule:
+    - cron: '*/20 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Reconciler rollout-safety mode'
+        required: false
+        default: 'live'
+        type: choice
+        options:
+          - reconcile-check   # read-only diagnostic (no lock, no writes) — safe first run
+          - dry-run           # compute mutations, apply none
+          - bootstrap-strict
+          - bootstrap-throttle
+          - live
+
+concurrency:
+  group: reconcile-bridge
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # push reconciler events back to the tickets orphan branch
+
+jobs:
+  reconcile:
+    name: Run rebar reconciler
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      MODE: ${{ github.event.inputs.mode || 'live' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true   # the mounted worktree reuses these creds to push
+          fetch-depth: 1
+
+      - name: Validate Jira configuration
+        env:
+          JIRA_URL: ${{ vars.JIRA_URL }}
+          JIRA_USER: ${{ vars.JIRA_USER }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -z "${JIRA_URL:-}" ] && missing="$missing JIRA_URL(var)"
+          [ -z "${JIRA_USER:-}" ] && missing="$missing JIRA_USER(var)"
+          [ -z "${JIRA_API_TOKEN:-}" ] && missing="$missing JIRA_API_TOKEN(secret)"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required Jira config:$missing — see docs/jira-sync-setup.md"
+            exit 1
+          fi
+
+      - name: Mount tickets branch as a worktree
+        # The store lives on the `tickets` orphan branch at the repo root. Mount it
+        # as .tickets-tracker on the ACTUAL `tickets` branch (not detached) so
+        # tracker.branch matches and `rebar fsck` does not WARN on a mismatch.
+        run: |
+          set -euo pipefail
+          git fetch origin '+tickets:refs/remotes/origin/tickets' --depth=1
+          rm -rf .tickets-tracker
+          git worktree add -B tickets .tickets-tracker origin/tickets
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install rebar
+        # TEMPLATE NOTE: client projects use `pip install nava-rebar==<pinned>`.
+        # This repo IS rebar, so it installs the checked-out source to reconcile
+        # against the code on `main`. Reconcile does NOT need the [agents] extra.
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+
+      - name: Cache acli binary
+        id: cache-acli
+        uses: actions/cache@v4
+        with:
+          path: ~/.acli
+          key: acli-${{ runner.os }}-${{ vars.ACLI_VERSION || 'unset' }}
+
+      - name: Download + verify + install acli
+        if: steps.cache-acli.outputs.cache-hit != 'true'
+        env:
+          ACLI_VERSION: ${{ vars.ACLI_VERSION }}
+          ACLI_SHA256: ${{ vars.ACLI_SHA256 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ACLI_VERSION:-}" ] || [ "$ACLI_VERSION" = "latest" ]; then
+            echo "::error::ACLI_VERSION repo variable is unset or 'latest'. Pin a specific version (e.g. 1.3.14-stable) and set ACLI_SHA256 to its digest."
+            exit 1
+          fi
+          mkdir -p ~/.acli
+          curl -sSL "https://acli.atlassian.com/linux/${ACLI_VERSION}/acli_${ACLI_VERSION}_linux_amd64.tar.gz" -o ~/.acli/acli.tar.gz
+          if [ -n "${ACLI_SHA256:-}" ]; then
+            echo "${ACLI_SHA256}  $HOME/.acli/acli.tar.gz" | sha256sum -c --strict
+          else
+            echo "::warning::ACLI_SHA256 unset — proceeding without checksum verification. Set it to: $(sha256sum ~/.acli/acli.tar.gz | awk '{print $1}')"
+          fi
+          tar xzf ~/.acli/acli.tar.gz -C ~/.acli/ --strip-components=1
+          chmod +x ~/.acli/acli
+          rm -f ~/.acli/acli.tar.gz
+          if [ ! -s "$HOME/.acli/acli" ] || [ ! -x "$HOME/.acli/acli" ]; then
+            echo "::error::Extracted acli binary missing, empty, or not executable"
+            ls -la ~/.acli/ || true
+            exit 1
+          fi
+          if ! "$HOME/.acli/acli" --version >/dev/null 2>&1; then
+            echo "::error::Extracted acli binary failed --version smoke check"
+            exit 1
+          fi
+
+      - name: Add acli to PATH and authenticate
+        env:
+          JIRA_URL: ${{ vars.JIRA_URL }}
+          JIRA_USER: ${{ vars.JIRA_USER }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          sudo ln -sf "$HOME/.acli/acli" /usr/local/bin/acli
+          echo "$JIRA_API_TOKEN" | acli jira auth login \
+            --site "$JIRA_URL" \
+            --email "$JIRA_USER" \
+            --token
+
+      - name: Configure git identity for the bridge bot
+        # --global so every worktree (the checkout, the mounted .tickets-tracker,
+        # and any temp worktrees the reconciler's advisory lock creates) inherits
+        # it. Without an identity, `git commit` fails exit 128 ("empty ident name")
+        # on CI runners.
+        env:
+          BRIDGE_BOT_NAME: ${{ vars.BRIDGE_BOT_NAME || 'rebar-bridge[bot]' }}
+          BRIDGE_BOT_EMAIL: ${{ vars.BRIDGE_BOT_EMAIL || 'rebar-bridge@users.noreply.github.com' }}
+        run: |
+          set -euo pipefail
+          git config --global user.name "${BRIDGE_BOT_NAME}"
+          git config --global user.email "${BRIDGE_BOT_EMAIL}"
+
+      - name: Run reconciler
+        # Exit-code contract (src/rebar/_engine/rebar_reconciler/__main__.py):
+        #   0  converged
+        #   75 reschedule (rebase-retry exhausted) — the next cron run retries
+        #   3  another pass already in flight — benign under */20 cadence
+        #   *  unrecoverable — fail the job
+        env:
+          JIRA_URL: ${{ vars.JIRA_URL }}
+          JIRA_USER: ${{ vars.JIRA_USER }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_PROJECT: ${{ vars.JIRA_PROJECT }}
+          REBAR_ENV_ID: ${{ vars.REBAR_ENV_ID || 'reconciler' }}
+        run: |
+          set -uo pipefail
+          echo "Reconciling in mode: $MODE"
+          set +e
+          rebar reconcile --mode "$MODE"
+          rc=$?
+          set -e
+          case "$rc" in
+            0)  echo "Reconcile converged." ;;
+            75) echo "::notice::Reconcile rescheduled (exit 75) — next scheduled run will retry." ;;
+            3)  echo "::notice::Another reconcile pass is in flight (exit 3) — benign, skipping." ;;
+            *)  echo "::error::Reconcile failed (exit $rc)"; exit "$rc" ;;
+          esac
+
+      - name: Commit reconciler events back and push to origin/tickets
+        # rebar-specific: the reconciler leaves inbound events UNCOMMITTED and makes
+        # its own binding-store commit WITHOUT pushing. So we (a) commit any dirty
+        # state, then (b) push whenever the local tickets branch is ahead of origin
+        # — a clean worktree does NOT imply nothing to push.
+        env:
+          BRIDGE_BOT_NAME: ${{ vars.BRIDGE_BOT_NAME || 'rebar-bridge[bot]' }}
+          BRIDGE_BOT_EMAIL: ${{ vars.BRIDGE_BOT_EMAIL || 'rebar-bridge@users.noreply.github.com' }}
+        run: |
+          set -euo pipefail
+          cd .tickets-tracker
+          git config user.name "${BRIDGE_BOT_NAME}"
+          git config user.email "${BRIDGE_BOT_EMAIL}"
+
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git commit -m "chore: sync events from rebar reconciler [run ${{ github.run_id }}]"
+          fi
+
+          git fetch origin tickets --depth=1 || true
+          ahead=$(git rev-list --count origin/tickets..HEAD 2>/dev/null || echo 0)
+          if [ "$ahead" -eq 0 ]; then
+            echo "Local tickets branch not ahead of origin — nothing to push."
+            exit 0
+          fi
+          echo "Local tickets branch is ahead by $ahead commit(s) — pushing."
+
+          max_retries=5
+          attempt=0
+          while [ "$attempt" -lt "$max_retries" ]; do
+            attempt=$((attempt + 1))
+            push_stderr=""
+            push_exit=0
+            push_stderr=$(git push origin HEAD:tickets 2>&1) || push_exit=$?
+
+            if [ "$push_exit" -eq 0 ]; then
+              echo "Push succeeded (attempt $attempt)."
+              exit 0
+            fi
+
+            if echo "$push_stderr" | grep -qiE 'non-fast-forward|rejected|fetch first'; then
+              printf 'Push rejected (attempt %d):\n%s\n' "$attempt" "$push_stderr" >&2
+              git fetch origin tickets --depth=1 2>&1 || echo "Fetch failed — retrying with stale remote" >&2
+            else
+              echo "Push failed (non-retryable, exit $push_exit): $push_stderr" >&2
+              exit 1
+            fi
+
+            if ! git rebase origin/tickets 2>&1; then
+              git rebase --abort 2>/dev/null || true
+              echo "Rebase conflict during push retry (attempt $attempt)" >&2
+              exit 1
+            fi
+
+            if [ "$attempt" -lt "$max_retries" ]; then
+              backoff=$(( (1 << attempt) + RANDOM % 3 ))
+              echo "Waiting ${backoff}s before retry $((attempt + 1))..." >&2
+              sleep "$backoff"
+            fi
+          done
+
+          echo "Push failed after $max_retries retries. Last stderr: $push_stderr" >&2
+          exit 1
+
+      - name: Notify on bridge failure
+        if: failure()
+        env:
+          GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo "## :rotating_light: Reconcile Bridge run FAILED"
+            echo ""
+            echo "- **Workflow:** \`${{ github.workflow }}\`"
+            echo "- **Run:** $GH_RUN_URL"
+            echo "- **Mode:** \`${MODE}\`"
+            echo "- **Triggered by:** \`${{ github.event_name }}\`"
+            echo ""
+            echo "The Reconciler Heartbeat Canary will open a bug ticket if this stays stale."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error title=Reconcile Bridge failed::See run summary — $GH_RUN_URL"
