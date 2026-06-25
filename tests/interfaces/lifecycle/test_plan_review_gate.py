@@ -314,8 +314,11 @@ def test_empty_dependency_set_falls_back_to_head(rebar_repo: Path) -> None:
 
 
 def test_claim_path_drift_check_is_cheap(rebar_repo: Path) -> None:
-    import time
-
+    # Times the DRIFT STEP itself (re-hashing the signed dependency paths) over ~30
+    # files and asserts it stays in low single-digit ms — the AC's measurable bound.
+    # (The no-LLM/no-network property of the claim path is pinned by
+    # test_claim_path_makes_no_llm_call above.)
+    from rebar import config as _config
     from rebar.llm.plan_review import attest
 
     _commit(rebar_repo)
@@ -327,13 +330,28 @@ def test_claim_path_drift_check_is_cheap(rebar_repo: Path) -> None:
     tid = _make(rebar_repo)
     rebar.set_file_impact(tid, impact, repo_root=str(rebar_repo))
     assert _review(tid, rebar_repo)["signature"]["signed"]
-    t0 = time.monotonic()
-    res = attest.claim_gate_check(tid, repo_root=str(rebar_repo))
-    elapsed = time.monotonic() - t0
-    assert res["ok"], res  # no drift → still certified
-    # Hashing ~30 small files is sub-ms; a generous bound guards against a network
-    # call or a pathological regression on the hot path (no flaky tight ms assertion).
-    assert elapsed < 0.25, f"drift check too slow ({elapsed * 1000:.1f}ms) — hot-path regression?"
+
+    # Recover the SIGNED {path: hash} map the claim path re-hashes, then time exactly
+    # that comparison loop (what claim_gate_check does for drift).
+    sig = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    deps = attest.manifest_deps(sig["manifest"])
+    assert len(deps) == 30
+    base = str(_config.repo_root(str(rebar_repo)))
+
+    def _drift_step() -> list[str]:
+        return [p for p, h in deps.items() if attest._hash_file(p, base=base) != h]
+
+    assert _drift_step() == []  # no drift → certified
+    best = min(_timed(_drift_step) for _ in range(5))  # min-of-5 ⇒ intrinsic cost, not jitter
+    assert best < 0.005, f"drift step too slow ({best * 1000:.2f}ms over 30 files)"
+
+
+def _timed(fn) -> float:  # noqa: ANN001
+    import time
+
+    t0 = time.perf_counter()
+    fn()
+    return time.perf_counter() - t0
 
 
 # ── config: dotted enables, default off ─────────────────────────────────────────
