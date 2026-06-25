@@ -28,12 +28,17 @@ from __future__ import annotations
 import errno
 import fcntl
 import os
+import socket
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 
 WRITE_LOCK_NAME = ".ticket-write.lock"
 MKDIR_LOCK_NAME = ".ticket-write.lock.d"
+# Ownership stamp written inside the mkdir lock dir so a future acquirer can detect
+# (and reclaim) a lock orphaned by a process that died before releasing it. Lives
+# INSIDE .ticket-write.lock.d/, which is gitignored, so it never surfaces untracked.
+_MKDIR_OWNER_FILE = "owner"
 
 # Bash parity: FLOCK_STAGE_COMMIT_TIMEOUT (default 30s) per attempt × max_retries(2).
 _DEFAULT_TIMEOUT = 30
@@ -135,18 +140,89 @@ def _acquire_fcntl(lock_path: str, deadline: float) -> int:
             time.sleep(0.05)
 
 
+def _owner_stamp() -> str:
+    """Identity written into a freshly-acquired mkdir lock: ``<hostname>:<pid>``."""
+    return f"{socket.gethostname()}:{os.getpid()}"
+
+
+def _pid_alive(pid: int) -> bool:
+    """Whether *pid* is a live process. ``os.kill(pid, 0)`` probes existence without
+    signalling. A PermissionError means the pid exists but is owned by another user
+    (alive); any other error is treated as alive (conservative — never reclaim on
+    uncertainty)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def _mkdir_lock_is_stale(lock_dir: str) -> bool:
+    """A held mkdir lock is reclaimable ONLY when its owner stamp proves a DEAD
+    process on THIS host. An absent/unparseable stamp (a bash-style lock, or one
+    observed in the brief window between mkdir and the stamp write), a foreign-host
+    owner (whose liveness we cannot check — the shared-filesystem case), or a live
+    PID all return False: never reclaim on anything short of proof (bug
+    yaw-gravel-linen)."""
+    try:
+        with open(os.path.join(lock_dir, _MKDIR_OWNER_FILE), encoding="utf-8") as fh:
+            stamp = fh.read().strip()
+    except OSError:
+        return False
+    host, sep, pid_s = stamp.partition(":")
+    if not sep or host != socket.gethostname():
+        return False
+    try:
+        pid = int(pid_s)
+    except ValueError:
+        return False
+    return not _pid_alive(pid)
+
+
+def _reclaim_mkdir_lock(lock_dir: str) -> None:
+    """Remove a provably-stale mkdir lock (owner stamp + dir). Best-effort: a failure
+    just leaves the next acquirer to wait/retry — never a correctness hazard."""
+    try:
+        os.remove(os.path.join(lock_dir, _MKDIR_OWNER_FILE))
+    except OSError:
+        pass
+    try:
+        os.rmdir(lock_dir)
+    except OSError:
+        pass
+
+
 def _acquire_mkdir(lock_dir: str, deadline: float) -> bool:
-    """Poll ``mkdir`` (atomic on POSIX) until acquired or ``deadline``."""
+    """Poll ``mkdir`` (atomic on POSIX) until acquired or ``deadline``.
+
+    On contention, reclaim a provably-stale lock (see :func:`_mkdir_lock_is_stale`).
+    This is race-safe because :func:`acquire` already holds the fcntl leg before
+    calling here, so no other Python acquirer is between mkdir and release — and a
+    dead owner stamp proves no process holds the lock."""
     while True:
         try:
             os.mkdir(lock_dir)
+            # Stamp ownership so a later acquirer can reclaim this lock if we die
+            # before releasing. Best-effort: a failed stamp only forfeits early
+            # reclamation of our own lock (no correctness impact — we hold it).
+            try:
+                with open(os.path.join(lock_dir, _MKDIR_OWNER_FILE), "w", encoding="utf-8") as fh:
+                    fh.write(_owner_stamp())
+            except OSError:
+                pass
             return True
         except FileExistsError:
+            if _mkdir_lock_is_stale(lock_dir):
+                _reclaim_mkdir_lock(lock_dir)
             if time.monotonic() >= deadline:
                 return False
             time.sleep(0.1)
         except OSError as exc:  # pragma: no cover - unexpected fs error
             if exc.errno == errno.EEXIST:
+                if _mkdir_lock_is_stale(lock_dir):
+                    _reclaim_mkdir_lock(lock_dir)
                 if time.monotonic() >= deadline:
                     return False
                 time.sleep(0.1)
@@ -174,6 +250,12 @@ class LockHandle:
             return
         self._released = True
         if self._have_mkdir:
+            # Remove our ownership stamp before rmdir — the dir is no longer empty
+            # now that acquire stamps it (bug yaw-gravel-linen).
+            try:
+                os.remove(os.path.join(self._lock_dir, _MKDIR_OWNER_FILE))
+            except OSError:
+                pass
             try:
                 os.rmdir(self._lock_dir)
             except OSError:
