@@ -16,9 +16,10 @@ change the DSL across a version boundary, and every shim must carry a golden
 round-trip test (a vN fixture and its expected v(N+1) output) so the conversion is
 pinned, not hand-waved.
 
-``v1`` is the base version and ``v2`` is current, so ``_SHIMS`` holds the single
-``v1 -> v2`` up-conversion (a pure version bump — v2 is a superset of v1). Its
-golden round-trip and the multi-step chaining machinery are pinned by
+``v1`` is the base version and ``v3`` is current, so ``_SHIMS`` holds the
+``v1 -> v2`` and ``v2 -> v3`` up-conversions (each a pure version bump — every
+release is a superset of the prior; v3 adds the ``batch`` construct). Their golden
+round-trips and the multi-step chaining machinery are pinned by
 ``tests/unit/workflow/test_migrate.py``.
 """
 
@@ -60,12 +61,27 @@ def _v1_to_v2(doc: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-# The registry. v1 is the base DSL version; ``_v1_to_v2`` up-converts it to the
-# current v2 (a pure version bump — v2 is a superset of v1). Each entry is keyed by
-# its SOURCE version and carries a golden round-trip test (see test_migrate.py).
-# Ordered by the natural integer order of the keys at migrate time, so a multi-step
-# chain (v1->v2->v3) composes deterministically.
-_SHIMS: dict[str, Shim] = {"1": _v1_to_v2}
+def _v2_to_v3(doc: dict[str, Any]) -> dict[str, Any]:
+    """Up-convert a v2 workflow document to v3.
+
+    v3 is a strict SUPERSET of v2: it keeps every v2 step shape verbatim and ADDS the
+    ``batch`` control construct (a thin step delegating budgeted batch orchestration over
+    a prompt-library-backed ``criteria`` list to a runner). A v2 file uses no construct v3
+    lacks, so the conversion is a pure version bump with NO structural rewrite — the same
+    cleanest-possible shim as ``_v1_to_v2``. Pure: returns a new dict, never mutates
+    ``doc``; ``schema_version`` is set explicitly so the shim is correct in isolation.
+    """
+    out = dict(doc)
+    out["schema_version"] = "3"
+    return out
+
+
+# The registry. v1 is the base DSL version; the shims up-convert one version at a time to
+# the current version (each a pure version bump — every release is a superset of the
+# prior). Each entry is keyed by its SOURCE version and carries a golden round-trip test
+# (see test_migrate.py). Ordered by the natural integer order of the keys at migrate time,
+# so a multi-step chain (v1->v2->v3) composes deterministically.
+_SHIMS: dict[str, Shim] = {"1": _v1_to_v2, "2": _v2_to_v3}
 
 
 def _next_version(version: str) -> str:

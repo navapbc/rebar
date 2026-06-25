@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/overlay_triggers_input.schema.json",
+  "title": "OverlayTriggersInput",
+  "description": "INPUT contract of the `overlay_triggers` scripted step. It computes boolean OVERLAY triggers a downstream criterion's `if:` skip-guard reads, so conditional criterion inclusion needs no expression-grammar extension. KEYWORD triggers: `keyword_triggers` maps a trigger name to a list of keywords, each matched case-insensitively as a substring against `text`. STRUCTURAL triggers (from the ticket graph) are emitted when `structural` is true or `linked_types` is non-empty AND a ticket is in scope: `has_children`, and `has_linked_<type>` per `linked_types` entry. All fields optional.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "text": {
+      "type": "string",
+      "description": "Text scanned for KEYWORD triggers (case-insensitive substring match)."
+    },
+    "keyword_triggers": {
+      "type": "object",
+      "description": "Map of trigger name -> list of keywords; each becomes a boolean output (true iff any keyword is a substring of `text`).",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+    "ticket_id": {
+      "type": "string",
+      "description": "Ticket for STRUCTURAL triggers. Optional — falls back to the workflow's target ticket."
+    },
+    "linked_types": {
+      "type": "array",
+      "description": "Ticket types to test among the ticket's links; emits `has_linked_<type>: bool` for each.",
+      "items": { "type": "string" }
+    },
+    "structural": {
+      "type": "boolean",
+      "description": "Force structural triggers (e.g. `has_children`) even when `linked_types` is empty (a ticket must be in scope)."
+    }
+  }
+}

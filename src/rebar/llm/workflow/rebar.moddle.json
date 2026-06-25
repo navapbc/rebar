@@ -40,6 +40,19 @@
       ]
     },
     {
+      "name": "Batch",
+      "superClass": [
+        "Element"
+      ],
+      "properties": [
+        {
+          "name": "finder",
+          "isAttr": true,
+          "type": "String"
+        }
+      ]
+    },
+    {
       "name": "Workflow",
       "superClass": [
         "Element"
