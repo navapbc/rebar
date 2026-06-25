@@ -131,8 +131,15 @@ def _union_merge(tracker: str, remote: str, *extra: str) -> None:
         )
 
 
-def reconverge(tracker: str | os.PathLike) -> None:
-    """Acquire the write lock, then reconverge (best-effort). No throttle here."""
+def reconverge(tracker: str | os.PathLike, *, lock_timeout: int = _SYNC_LOCK_TIMEOUT) -> None:
+    """Acquire the write lock, then reconverge (best-effort). No throttle here.
+
+    ``lock_timeout`` bounds how long to wait for the write lock before skipping this
+    round. The read path passes a SHORT value (bug slim-fetch-ledge): reconverge is
+    a freshness optimization, so a read must prefer its consistent local snapshot
+    over stalling many seconds while a concurrent background push holds the lock.
+    Writers keep the default (a sync is still best-effort, but they tolerate a
+    longer wait)."""
     if not os.path.isdir(str(tracker)):
         return
     tracker = _lock.canonical_tracker(tracker)
@@ -165,7 +172,7 @@ def reconverge(tracker: str | os.PathLike) -> None:
     # Locked reset/merge. Best-effort on lock contention (another writer/syncer holds
     # it) — bash does `flock -w 15 || exit 0`, so a timeout silently skips this round.
     try:
-        with _lock.write_lock(tracker, timeout=_SYNC_LOCK_TIMEOUT, attempts=1, dual_window=True):
+        with _lock.write_lock(tracker, timeout=lock_timeout, attempts=1, dual_window=True):
             _do_reconverge(tracker, branch)
     except _lock.LockTimeout:
         return
