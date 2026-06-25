@@ -126,7 +126,9 @@ def test_run_against_nonexistent_ticket_fails_fast_and_writes_nothing(rebar_repo
 def test_run_against_alias_records_to_canonical_ticket(rebar_repo: Path) -> None:
     """bind-hcd-dam variant: a valid ALIAS must resolve to the canonical ticket dir,
     not spawn a CREATE-less `<alias>/` directory holding the run-state."""
-    created = rebar.create_ticket("task", "Aliased target", repo_root=str(rebar_repo), return_alias=True)
+    created = rebar.create_ticket(
+        "task", "Aliased target", repo_root=str(rebar_repo), return_alias=True
+    )
     tid, alias = created["id"], created["alias"]
     tracker = rebar_repo / ".tickets-tracker"
     doc = _wf([{"id": "a", "uses": "echo", "with": {"v": "x"}}])

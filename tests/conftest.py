@@ -19,7 +19,6 @@ these tiers) may opt out via ``@pytest.mark.allow_network``.
 
 from __future__ import annotations
 
-import os
 import shutil
 import socket
 import sys

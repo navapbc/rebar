@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 import subprocess
 
-
 # Volatile REPO_ROOT state dirs a test must never write into, but which exist
 # locally because this checkout dogfoods rebar (so ``.rebar/`` is always present).
 # Watched ONE level deep so a leak INTO them is caught locally — not only on a
