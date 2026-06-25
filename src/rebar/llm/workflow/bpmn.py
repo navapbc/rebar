@@ -8,6 +8,10 @@ and round-trips edits back. The projection is BOTH structural and lossless:
     flow edit maps back to the IR):
       scripted step  -> ``bpmn:scriptTask``
       agent step     -> ``bpmn:serviceTask`` + a typed ``<rebar:Agent>`` (prompt/…)
+      batch step (v3)-> ``bpmn:serviceTask`` + a ``<rebar:Batch>`` marker; the authored,
+                        prompt-library-backed ``criteria`` list (+ finder/budget/ladder)
+                        rides in ``<rebar:Config>`` so add/remove/edit of a criterion is
+                        a lossless round-trip
       branch         -> ``bpmn:exclusiveGateway`` + a ``then``/``else`` sub-process arm
       loop           -> ``bpmn:subProcess`` + ``standardLoopCharacteristics``
       map            -> ``bpmn:subProcess`` + ``multiInstanceLoopCharacteristics``
@@ -73,6 +77,14 @@ REBAR_MODDLE_DESCRIPTOR: dict[str, Any] = {
                 {"name": "provider", "isAttr": True, "type": "String"},
                 {"name": "tools", "isAttr": True, "type": "String"},
             ],
+        },
+        {
+            # Display-only marker on a `batch` serviceTask (like <rebar:Agent>): the editor
+            # shows the finder; reconstruction reads the batch dict (incl. criteria) from
+            # <rebar:Config>, never from here. Registered so bpmn-js does not silently strip it.
+            "name": "Batch",
+            "superClass": ["Element"],
+            "properties": [{"name": "finder", "isAttr": True, "type": "String"}],
         },
         {
             "name": "Workflow",
@@ -265,6 +277,19 @@ def _emit_step(container, s, kind, edges) -> ET.Element:
         # ``name``, never from here, so provider/tools are display fixtures.
         _ext(el, "Agent", prompt=s.get("prompt"), provider="anthropic", tools="fs,mcp,rebar")
         return el
+    if kind == "batch":
+        # A `batch` step is leaf-like (it carries an authored `criteria` LIST, not a nested
+        # step frame), so it renders as a serviceTask. The whole `batch` dict — finder prompt,
+        # the editable criteria, budget/ladder — rides in <rebar:Config> (batch ∉ _STRUCTURAL),
+        # so an add/remove/edit of a criterion round-trips losslessly. The <rebar:Batch> marker
+        # is display-only (like <rebar:Agent>); reconstruction reads the dict from Config.
+        finder = (s.get("batch") or {}).get("prompt") or "batch"
+        el = ET.SubElement(
+            container, _q("bpmn", "serviceTask"), {"id": sid, "name": f"batch: {finder}"}
+        )
+        _ext(el, "Config", value=_config_json(s))
+        _ext(el, "Batch", finder=finder)
+        return el
     if kind == "loop":
         sp = ET.SubElement(container, _q("bpmn", "subProcess"), {"id": sid, "name": "loop"})
         _ext(sp, "Config", value=_config_json(s))
@@ -384,7 +409,10 @@ def _layout_frame(steps, expanded: set[str]) -> tuple[dict[str, list[float]], fl
         if not isinstance(s, dict) or "id" not in s:
             continue
         sid, kind = s["id"], step_kind(s)
-        if kind in ("scripted", "agent"):
+        if kind in ("scripted", "agent", "batch"):
+            # batch is a leaf in the diagram (a single serviceTask), like agent — its
+            # criteria fan-out is internal, not a sub-process; without this it'd get no
+            # DI shape and its sequence flows would be dropped from the layout.
             add(sid, _LEAF)
         elif kind in ("loop", "map"):
             cb, cw, ch = _layout_frame(s[kind].get("body", []) or [], expanded)
@@ -624,6 +652,13 @@ def _read_step(container: ET.Element, el: ET.Element, tag: str) -> dict[str, Any
         _merge_cfg(step, cfg)
         return step
     if tag == "serviceTask":
+        # A serviceTask is an AGENT step, UNLESS its Config carries a `batch` dict — then it
+        # is a v3 `batch` step (the whole dict, incl. the criteria list, round-trips via
+        # Config). Distinguish on the Config key, not the display name.
+        if "batch" in cfg:
+            step["batch"] = cfg["batch"]
+            _merge_cfg(step, cfg, skip={"batch"})  # `if` etc. merge; batch already set
+            return step
         step["prompt"] = cfg.get("prompt") or el.get("name") or eid
         _merge_cfg(step, cfg, skip={"prompt"})
         return step

@@ -1,9 +1,9 @@
 """Unit tests for the workflow schema_version migration shim (WS-B3).
 
-v1 is the base DSL version, so there is no real shim to round-trip yet. These
-tests prove the chaining machinery + the upgrade-rebar gate, and register a
-SYNTHETIC shim to demonstrate the golden round-trip discipline every future shim
-must follow.
+v1 is the base DSL version; v3 is current. There are two real shims — ``v1->v2``
+(v2 = v1 + control constructs) and ``v2->v3`` (v3 = v2 + the ``batch`` construct) —
+each a pure version bump pinned by a golden round-trip below. These tests also prove
+the chaining machinery + the upgrade-rebar gate.
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from rebar.llm.workflow import schema as wf
 
 
 def test_current_version_is_identity() -> None:
-    # A document already at the CURRENT version (v2) migrates to itself (a copy).
-    doc = {"schema_version": "2", "name": "x", "steps": [{"id": "s", "uses": "u"}]}
+    # A document already at the CURRENT version (v3) migrates to itself (a copy).
+    doc = {"schema_version": "3", "name": "x", "steps": [{"id": "s", "uses": "u"}]}
     out = mig.migrate_to_current(doc)
     assert out == doc
     assert out is not doc  # a copy, never the same object
@@ -31,11 +31,10 @@ def test_does_not_mutate_input() -> None:
 
 
 def test_v1_to_v2_golden_roundtrip() -> None:
-    # The golden round-trip for the real v1->v2 shim (WS-B3 discipline): a v1
-    # fixture and its pinned v2 output. v2 is a strict superset of v1, so the shim
-    # is a pure version bump — the steps are byte-identical, only schema_version
-    # advances. (The chaining machinery + upgrade gate are covered by the synthetic
-    # tests below; this pins the ACTUAL conversion.)
+    # Golden round-trip for the real shims (WS-B3 discipline). v2/v3 are strict supersets
+    # of their predecessor, so each shim is a pure version bump — the steps are
+    # byte-identical, only schema_version advances. The direct `_v1_to_v2` shim produces
+    # "2"; `migrate_to_current` CHAINS v1->v2->v3 to the current "3".
     v1 = {
         "schema_version": "1",
         "name": "demo",
@@ -49,13 +48,13 @@ def test_v1_to_v2_golden_roundtrip() -> None:
             {"id": "review", "prompt": "code-quality", "needs": ["fetch"]},
         ],
     }
-    expected_v2 = {**v1, "schema_version": "2"}
     out = mig.migrate_to_current(v1)
-    assert out == expected_v2
+    assert out == {**v1, "schema_version": "3"}  # chained to the current version
     # The lone difference is the version stamp; everything else round-trips verbatim.
     assert {k: v for k, v in out.items() if k != "schema_version"} == {
         k: v for k, v in v1.items() if k != "schema_version"
     }
+    # The direct single-step shim advances exactly one version.
     assert mig._v1_to_v2({"schema_version": "1", "name": "x", "steps": []}) == {
         "schema_version": "2",
         "name": "x",
@@ -63,10 +62,23 @@ def test_v1_to_v2_golden_roundtrip() -> None:
     }
 
 
-def test_v1_to_v2_is_registered() -> None:
-    # v1 has a registered up-conversion path now that v2 is the current version.
-    assert mig.registered_source_versions() == ("1",)
-    assert "1" in mig._SHIMS
+def test_v2_to_v3_golden_roundtrip() -> None:
+    # Golden round-trip for the real v2->v3 shim: v3 = v2 + the `batch` construct, so a v2
+    # file is already valid v3 apart from the stamp — a pure version bump, no rewrite.
+    assert mig._v2_to_v3({"schema_version": "2", "name": "x", "steps": []}) == {
+        "schema_version": "3",
+        "name": "x",
+        "steps": [],
+    }
+    v2 = {"schema_version": "2", "name": "d", "steps": [{"id": "a", "uses": "fetch_ticket"}]}
+    out = mig.migrate_to_current(v2)
+    assert out == {**v2, "schema_version": "3"}
+
+
+def test_shims_are_registered() -> None:
+    # v1 and v2 both have a registered up-conversion path now that v3 is current.
+    assert mig.registered_source_versions() == ("1", "2")
+    assert "1" in mig._SHIMS and "2" in mig._SHIMS
 
 
 def test_migrated_v1_validates_against_the_v2_schema() -> None:

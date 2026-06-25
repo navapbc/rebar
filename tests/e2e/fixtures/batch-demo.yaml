@@ -1,0 +1,48 @@
+schema_version: '3'
+name: batch-demo
+description: >-
+  A v3 fixture for the visual editor's batch-step support (epic A, story A4). It exercises the
+  three editable constructs the editor must surface for the new constructs — an overlay_triggers
+  precompute step, a batch step whose authored criteria list (one criterion gated by a when
+  overlay) is add/remove/edit-able, and a prompt step carrying an if overlay predicate. Kept
+  minimal and disposable; its only job is to give the browser tier a batch node to select and
+  mutate.
+inputs:
+  text:
+    description: Text scanned by overlay_triggers for keyword triggers.
+    type: string
+    default: please review the auth token handling
+  notify_enabled:
+    description: Toggles the optional notify step (exercises a prompt step's if overlay).
+    type: boolean
+    default: false
+steps:
+- id: triggers
+  uses: overlay_triggers
+  with:
+    text: ${{ inputs.text }}
+    keyword_triggers:
+      security:
+      - auth
+      - token
+      - secret
+- id: finders
+  needs:
+  - triggers
+  batch:
+    prompt: code-quality
+    criteria:
+    - prompt: tests
+    - prompt: security
+      when: ${{ steps.triggers.outputs.security }}
+    usd_budget: 2.0
+    model_ladder:
+    - claude-haiku-4-5
+    - claude-sonnet-4-6
+- id: notify
+  prompt: notify-reviewer
+  needs:
+  - finders
+  with:
+    note: batch review complete
+  if: ${{ inputs.notify_enabled }}

@@ -113,6 +113,67 @@ def fetch_epic_graph(ctx: StepContext) -> dict[str, Any]:
 
 
 @register_step(
+    "overlay_triggers",
+    input_schema="overlay_triggers_input",
+    output_schema="overlay_triggers_output",
+    description=(
+        "Compute boolean OVERLAY triggers for conditional criterion inclusion. A criterion "
+        "(prompt) step then branches on a trigger with the existing `if:` skip-guard — "
+        "`if: ${{ steps.<this-step>.outputs.<name> }}` — so the deliberately-tiny expression "
+        "grammar never needs operators/regex (the boolean is COMPUTED here, deterministically, "
+        "and the guard merely tests its truthiness). Two trigger kinds: (1) KEYWORD triggers — "
+        "`keyword_triggers: {name: [keyword, ...]}` are each matched case-insensitively as "
+        "substrings against `text`, producing `outputs.<name>: bool`; (2) STRUCTURAL triggers "
+        "from the ticket graph, emitted when `structural: true` or `linked_types` is set and a "
+        "ticket is in scope — `has_children: bool`, and `has_linked_<type>: bool` for each entry "
+        "of `linked_types` (e.g. `session_log`). Side-effect-free; the result is recorded as the "
+        "step's output, so `if:` evaluates over the journaled value and replay is deterministic."
+    ),
+)
+def overlay_triggers(ctx: StepContext) -> dict[str, Any]:
+    """Compute overlay-trigger booleans → ``{<name>: bool, has_children?, has_linked_<type>?…}``.
+
+    KEYWORD triggers are pure (text only, no ticket). STRUCTURAL triggers read the ticket graph
+    once (via ``rebar.deps`` / ``rebar.show_ticket``) and reduce it to booleans; the booleans —
+    not the graph — are what a downstream ``if:`` reads, keeping the expression grammar tiny.
+    """
+    out: dict[str, Any] = {}
+    # (1) Keyword/text triggers — pure substring match, case-insensitive. No ticket needed.
+    text = str(ctx.inputs.get("text") or "").lower()
+    for name, keywords in (ctx.inputs.get("keyword_triggers") or {}).items():
+        out[str(name)] = any(str(kw).lower() in text for kw in (keywords or []))
+
+    # (2) Structural triggers from the ticket graph — only when asked AND a ticket is in scope.
+    linked_types = [str(t) for t in (ctx.inputs.get("linked_types") or [])]
+    if (linked_types or ctx.inputs.get("structural")) and (
+        ctx.inputs.get("ticket_id") or ctx.target_ticket
+    ):
+        import rebar
+
+        tid = str(ctx.inputs.get("ticket_id") or ctx.target_ticket)
+        graph = rebar.deps(tid, repo_root=ctx.repo_root)
+        out["has_children"] = bool(graph.get("children"))
+        if linked_types:
+            wanted = set(linked_types)
+            present: set[str] = set()
+            for dep in graph.get("deps", []) or []:
+                target = dep.get("target_id")
+                if not target:
+                    continue
+                try:
+                    linked_type = rebar.show_ticket(target, repo_root=ctx.repo_root).get(
+                        "ticket_type"
+                    )
+                except Exception:  # noqa: BLE001 — an unreadable/missing linked ticket simply isn't counted
+                    continue
+                if linked_type in wanted:
+                    present.add(linked_type)
+            for t in wanted:
+                out[f"has_linked_{t}"] = t in present
+    return out
+
+
+@register_step(
     "render_context",
     input_schema="render_context_input",
     output_schema="render_context_output",

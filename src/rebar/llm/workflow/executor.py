@@ -46,6 +46,14 @@ from typing import Any
 from rebar.llm.errors import WorkflowError, WorkflowValidationError
 
 from .lint import lint_document
+from .runners import (
+    AgentStepRunner,
+    BatchRunner,
+    BatchRunRequest,
+    BatchRunResult,
+    DefaultBatchRunner,
+    FakeAgentRunner,
+)
 from .schema import validate_document
 
 # Reuse the linter's expression grammar so the resolver and the static checker can
@@ -320,27 +328,9 @@ def shallow_contract_check(source: dict, target: dict) -> str:
     return "OK"
 
 
-class AgentStepRunner:
-    """The agentic-step seam (the real pydantic_ai-backed runner plugs in here)."""
-
-    def run(self, ctx: StepContext) -> StepResult:  # pragma: no cover - interface
-        raise NotImplementedError
-
-
-class FakeAgentRunner(AgentStepRunner):
-    """A no-token agent runner: deterministic, offline. Used for ``--dry-run`` and
-    tests until WS-D wires the real runner. Echoes a stable, schema-shaped stub so
-    downstream wiring can be exercised without a model call."""
-
-    def run(self, ctx: StepContext) -> StepResult:
-        mode = ctx.step.get("mode", "findings")
-        if mode == "findings":
-            outputs = {"findings": [], "summary": f"[fake] {ctx.step_id}", "_fake": True}
-        elif mode == "text":
-            outputs = {"text": f"[fake output for {ctx.step_id}]", "_fake": True}
-        else:
-            outputs = {"result": {}, "_fake": True}
-        return StepResult(outputs=outputs, status="succeeded")
+# The agent + batch runner SEAMS live in `runners.py` (imported above and re-exported via
+# __all__) so this module stays under the module-size cap. They are constructed at call time
+# in `run_workflow` (FakeAgentRunner / DefaultBatchRunner defaults).
 
 
 # ── Run recorder seam (WS-C3 supplies the event-backed, idempotent one) ───────
@@ -590,6 +580,7 @@ def run_workflow(
     repo_root: str | None = None,
     scripted_registry: Mapping[str, ScriptedStep] | None = None,
     agent_runner: AgentStepRunner | None = None,
+    batch_runner: BatchRunner | None = None,
     recorder: RunRecorder | None = None,
     secrets: Mapping[str, str] | None = None,
 ) -> RunResult:
@@ -609,6 +600,7 @@ def run_workflow(
     run_id = run_id or new_run_id()
     registry = STEP_REGISTRY if scripted_registry is None else scripted_registry
     runner = FakeAgentRunner() if agent_runner is None else agent_runner
+    batcher = DefaultBatchRunner() if batch_runner is None else batch_runner
     if recorder is None:
         recorder = (
             TicketEventRecorder(target_ticket, repo_root) if target_ticket else MemoryRecorder()
@@ -650,6 +642,7 @@ def run_workflow(
         inputs=inputs,
         target_ticket=target_ticket,
         repo_root=repo_root,
+        batch_runner=batcher,
     )
     _execute_frame(rc, list(doc.get("steps", [])), ("",), {}, None)
 
@@ -783,6 +776,10 @@ __all__ = [
     "register_step",
     "AgentStepRunner",
     "FakeAgentRunner",
+    "BatchRunner",
+    "BatchRunRequest",
+    "BatchRunResult",
+    "DefaultBatchRunner",
     "RunRecorder",
     "MemoryRecorder",
     "TicketEventRecorder",

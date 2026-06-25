@@ -54,14 +54,22 @@ rebar developer who is rebuilding the bundle or running the faithful E2E tier** 
   (standard BPMN uncontrolled split); only a gateway introduces a conditional choice.
 - **A properties panel** ([`bpmn-js-properties-panel`](https://github.com/bpmn-io/bpmn-js-properties-panel)
   + a small custom *Rebar* provider): select any step to see its **kind** (scripted /
-  agent / branch / loop / map), its **action** (`uses` / `prompt`, for scripted/agent
+  agent / batch / branch / loop / map), its **action** (`uses` / `prompt`, for scripted/agent
   steps), the resolved **prompt text** (read-only, for agent steps — so you can see what
-  the agent runs), the **condition** (for branches), and its **rebar config** — the
-  `<rebar:Config>` JSON that carries `with` / `mode` / `model` / loop bounds / the branch
-  condition, with a format hint — editable in place. (The config is the exact payload the
-  Python round-trip reads back, so what you edit is what gets written; structured per-field
-  entries can layer on later without changing the contract.) Panel groups are **collapsed
-  by default** — click a group header (e.g. *Rebar*) to expand it.
+  the agent runs), the **condition** (for branches), the **`if:` overlay predicate** (for
+  scripted/agent/batch steps — the step is included only when it is truthy), and its **rebar
+  config** — the `<rebar:Config>` JSON that carries `with` / `mode` / `model` / loop bounds /
+  the branch condition — edited through **structured per-field entries** (no raw JSON). (The
+  config is the exact payload the Python round-trip reads back, so what you edit is what gets
+  written.) Panel groups are **collapsed by default** — click a group header (e.g. *Rebar*)
+  to expand it.
+- **The v3 `batch` step.** A batch step (budgeted fan-out of a finder prompt over an authored
+  **criteria** list) is a `bpmn:serviceTask` told apart from an agent step by its config. The
+  *Rebar* panel shows its **finder** (`prompt`), **`usd_budget`**, and **`model_ladder`**; a
+  separate **Batch criteria** list group lets you **add / remove / edit** each criterion (a
+  prompt-library id + an optional `when` overlay predicate) with the stock list ＋/✕ controls.
+  A `ServiceTask kind` toggle converts a step between **agent** and **batch** (seeding/dropping
+  its `batch` config), so a batch can be authored from a freshly-drawn Service Task.
 - **Constrained editing.** The palette is BPMN-only, so a shape that can't map back to the
   IR can't be drawn; an un-mappable edit is **rejected on Save** with located errors and
   the file is left untouched. A newly-drawn plain task maps to a **scripted** step by
@@ -77,6 +85,7 @@ rebar developer who is rebuilding the bundle or running the faithful E2E tier** 
 |---|---|
 | scripted (`uses`) | `bpmn:scriptTask` |
 | agent (`prompt`) | `bpmn:serviceTask` + `<rebar:Agent>` |
+| `batch` (v3: finder + criteria) | `bpmn:serviceTask` + `<rebar:Batch>` (batch dict in `<rebar:Config>`) |
 | `branch` | `bpmn:exclusiveGateway` + a `then`/`else` sub-process arm each |
 | `loop` | `bpmn:subProcess` + `standardLoopCharacteristics` |
 | `map` | `bpmn:subProcess` + `multiInstanceLoopCharacteristics` |

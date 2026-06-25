@@ -19,6 +19,7 @@
  * DO NOT mutate the blob — the prior value is preserved.
  */
 import {
+  ListGroup,
   SelectEntry,
   TextAreaEntry,
   TextFieldEntry,
@@ -35,6 +36,13 @@ const REBAR_KINDS = [
   "bpmn:SubProcess",
 ];
 
+// A v3 `batch` step and an `agent` step are BOTH `bpmn:ServiceTask` — they are told apart by
+// the `batch` object in the node's rebar:Config (the same key the Python serializer reads).
+function isBatch(bo) {
+  const cfg = parseConfig(bo);
+  return !!(cfg && typeof cfg.batch === "object" && cfg.batch);
+}
+
 // The closed set of structured step kinds (a83a). Anything else is "uncommon" and falls
 // back to the raw JSON editor entirely.
 function rebarKind(bo) {
@@ -42,7 +50,7 @@ function rebarKind(bo) {
     case "bpmn:ScriptTask":
       return "scripted";
     case "bpmn:ServiceTask":
-      return "agent";
+      return isBatch(bo) ? "batch" : "agent";
     case "bpmn:ExclusiveGateway":
       return "branch";
     case "bpmn:SubProcess": {
@@ -56,14 +64,14 @@ function rebarKind(bo) {
   }
 }
 
-const STRUCTURED_KINDS = ["scripted", "agent", "loop", "map"];
+const STRUCTURED_KINDS = ["scripted", "agent", "batch", "loop", "map"];
 
 function kindOf(bo) {
   switch (bo.$type) {
     case "bpmn:ScriptTask":
       return "scripted (uses)";
     case "bpmn:ServiceTask":
-      return "agent (prompt)";
+      return isBatch(bo) ? "batch (finder + criteria)" : "agent (prompt)";
     case "bpmn:ExclusiveGateway":
       return "branch";
     case "bpmn:SubProcess": {
@@ -111,7 +119,9 @@ function writeConfig(element, modeling, bpmnFactory, value) {
   if (!c) {
     c = bpmnFactory.create("rebar:Config", { value: value || "" });
     c.$parent = ee;
-    modeling.updateModdleProperties(element, ee, { values: [...(ee.values || []), c] });
+    modeling.updateModdleProperties(element, ee, {
+      values: [...(ee.values || []), c],
+    });
   } else {
     modeling.updateModdleProperties(element, c, { value: value || "" });
   }
@@ -177,7 +187,9 @@ function PromptTextEntry(props) {
       element={element}
       label="Prompt text (read-only)"
       rows={8}
-      getValue={() => (window.REBAR_PROMPTS && window.REBAR_PROMPTS[bo.name]) || ""}
+      getValue={() =>
+        (window.REBAR_PROMPTS && window.REBAR_PROMPTS[bo.name]) || ""
+      }
       setValue={() => {}}
       debounce={debounce}
       disabled
@@ -208,7 +220,13 @@ function formatContract(view) {
           .join("\n");
   const lines = [];
   if (view.description) lines.push(view.description, "");
-  lines.push("CONSUMES:", fmt(view.consumes), "", "PRODUCES:", fmt(view.produces));
+  lines.push(
+    "CONSUMES:",
+    fmt(view.consumes),
+    "",
+    "PRODUCES:",
+    fmt(view.produces),
+  );
   return lines.join("\n");
 }
 
@@ -226,7 +244,9 @@ function ContractEntry(props) {
       label="Contract (read-only)"
       rows={10}
       getValue={() =>
-        formatContract(window.REBAR_CONTRACTS && window.REBAR_CONTRACTS[bo.name])
+        formatContract(
+          window.REBAR_CONTRACTS && window.REBAR_CONTRACTS[bo.name],
+        )
       }
       setValue={() => {}}
       debounce={debounce}
@@ -287,7 +307,8 @@ function coerceTyped(raw, type) {
     if (!Number.isFinite(n) || String(raw).trim() === "") {
       return { error: "Must be a number" };
     }
-    if (t === "integer" && !Number.isInteger(n)) return { error: "Must be an integer" };
+    if (t === "integer" && !Number.isInteger(n))
+      return { error: "Must be an integer" };
     return { value: n };
   }
   if (t === "boolean") {
@@ -364,7 +385,8 @@ function ConfigTextEntry(props) {
     const v = parseConfig(element.businessObject)[ckey];
     return v == null ? "" : String(v);
   };
-  const validate = (v) => ((v === "" || v == null) && required ? "Required" : null);
+  const validate = (v) =>
+    (v === "" || v == null) && required ? "Required" : null;
   const setValue = (v, err) => {
     if (err) return;
     mutateConfig(element, modeling, bpmnFactory, (cfg) => {
@@ -403,7 +425,8 @@ function ConfigNumberEntry(props) {
   const validate = (v) => {
     if (v === "" || v == null) return null; // empty clears it (optional bound)
     const n = Number(v);
-    if (!Number.isFinite(n) || String(v).trim() === "") return "Must be a number";
+    if (!Number.isFinite(n) || String(v).trim() === "")
+      return "Must be a number";
     if (!Number.isInteger(n)) return "Must be an integer";
     return null;
   };
@@ -457,6 +480,261 @@ function ModeEntry(props) {
   );
 }
 
+// A `bpmn:ServiceTask` is EITHER an agent step (prompt) or a v3 batch step — a closed select
+// lets the author convert between them, so a freshly-drawn ServiceTask can BECOME a batch.
+// Switching to batch seeds an (invalid-until-filled) cfg.batch the criteria UI then completes;
+// switching to agent drops cfg.batch. Either way the rest of cfg is preserved (slice-write).
+function ServiceKindEntry(props) {
+  const { element, id } = props;
+  const modeling = useService("modeling");
+  const bpmnFactory = useService("bpmnFactory");
+  const getValue = () => (isBatch(element.businessObject) ? "batch" : "agent");
+  const setValue = (v) =>
+    mutateConfig(element, modeling, bpmnFactory, (cfg) => {
+      if (v === "batch") {
+        if (!cfg.batch || typeof cfg.batch !== "object")
+          cfg.batch = { prompt: "", criteria: [] };
+      } else {
+        delete cfg.batch;
+      }
+    });
+  const getOptions = () => [
+    { value: "agent", label: "agent (prompt)" },
+    { value: "batch", label: "batch (finder + criteria)" },
+  ];
+  return (
+    <SelectEntry
+      id={id}
+      element={element}
+      label="ServiceTask kind"
+      getValue={getValue}
+      setValue={setValue}
+      getOptions={getOptions}
+    />
+  );
+}
+
+// ── Batch step fields (epic A: the v3 `batch` step) ───────────────────────────────
+// A batch step's params live under cfg.batch (NOT cfg directly), so these read/write a
+// slice of cfg.batch — keeping the SAME parse → mutate → re-serialize round-trip contract.
+
+// The batch FINDER prompt (cfg.batch.prompt) — the single packing/finder pass the runner
+// applies per batch. Required (a batch with no finder is meaningless).
+function BatchFinderEntry(props) {
+  const { element, id } = props;
+  const modeling = useService("modeling");
+  const bpmnFactory = useService("bpmnFactory");
+  const debounce = useService("debounceInput");
+  const getValue = () =>
+    (parseConfig(element.businessObject).batch || {}).prompt || "";
+  const validate = (v) => (v === "" || v == null ? "Required" : null);
+  const setValue = (v, err) => {
+    if (err) return;
+    mutateConfig(element, modeling, bpmnFactory, (cfg) => {
+      const batch = cfg.batch && typeof cfg.batch === "object" ? cfg.batch : {};
+      if (v === "" || v == null) delete batch.prompt;
+      else batch.prompt = String(v);
+      cfg.batch = batch;
+    });
+  };
+  return (
+    <TextFieldEntry
+      id={id}
+      element={element}
+      label="finder (prompt id) *"
+      getValue={getValue}
+      setValue={setValue}
+      validate={validate}
+      debounce={debounce}
+    />
+  );
+}
+
+// A NUMERIC slice of cfg.batch (usd_budget). Text field + numeric validate so a bad value
+// shows an error and keeps the prior one (mirrors ConfigNumberEntry, but float-allowing).
+function BatchNumberEntry(props) {
+  const { element, id, ckey, label } = props;
+  const modeling = useService("modeling");
+  const bpmnFactory = useService("bpmnFactory");
+  const debounce = useService("debounceInput");
+  const getValue = () => {
+    const v = (parseConfig(element.businessObject).batch || {})[ckey];
+    return v == null ? "" : String(v);
+  };
+  const validate = (v) => {
+    if (v === "" || v == null) return null; // empty clears it (optional)
+    const n = Number(v);
+    if (!Number.isFinite(n) || String(v).trim() === "")
+      return "Must be a number";
+    return null;
+  };
+  const setValue = (v, err) => {
+    if (err) return;
+    mutateConfig(element, modeling, bpmnFactory, (cfg) => {
+      const batch = cfg.batch && typeof cfg.batch === "object" ? cfg.batch : {};
+      if (v === "" || v == null) delete batch[ckey];
+      else batch[ckey] = Number(v);
+      cfg.batch = batch;
+    });
+  };
+  return (
+    <TextFieldEntry
+      id={id}
+      element={element}
+      label={label}
+      getValue={getValue}
+      setValue={setValue}
+      validate={validate}
+      debounce={debounce}
+    />
+  );
+}
+
+// The model_ladder (cfg.batch.model_ladder) — an ordered escalation list, edited as a
+// comma-separated field and stored as a string array (empty clears it).
+function BatchLadderEntry(props) {
+  const { element, id } = props;
+  const modeling = useService("modeling");
+  const bpmnFactory = useService("bpmnFactory");
+  const debounce = useService("debounceInput");
+  const getValue = () => {
+    const v = (parseConfig(element.businessObject).batch || {}).model_ladder;
+    return Array.isArray(v) ? v.join(", ") : "";
+  };
+  const setValue = (v) => {
+    mutateConfig(element, modeling, bpmnFactory, (cfg) => {
+      const batch = cfg.batch && typeof cfg.batch === "object" ? cfg.batch : {};
+      const list = String(v || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (list.length) batch.model_ladder = list;
+      else delete batch.model_ladder;
+      cfg.batch = batch;
+    });
+  };
+  return (
+    <TextFieldEntry
+      id={id}
+      element={element}
+      label="model_ladder (comma-separated)"
+      getValue={getValue}
+      setValue={setValue}
+      debounce={debounce}
+    />
+  );
+}
+
+// One field (prompt / when) of the criterion at cfg.batch.criteria[index]. Each criterion
+// is a prompt-library-backed entry with an optional `when` overlay predicate.
+function CriterionFieldEntry(props) {
+  const { element, id, index, ckey, label, required } = props;
+  const modeling = useService("modeling");
+  const bpmnFactory = useService("bpmnFactory");
+  const debounce = useService("debounceInput");
+  const getValue = () => {
+    const crit =
+      ((parseConfig(element.businessObject).batch || {}).criteria || [])[
+        index
+      ] || {};
+    return crit[ckey] == null ? "" : String(crit[ckey]);
+  };
+  const validate = (v) =>
+    (v === "" || v == null) && required ? "Required" : null;
+  const setValue = (v, err) => {
+    if (err) return;
+    mutateConfig(element, modeling, bpmnFactory, (cfg) => {
+      const batch = cfg.batch && typeof cfg.batch === "object" ? cfg.batch : {};
+      const crit = Array.isArray(batch.criteria) ? batch.criteria : [];
+      const c =
+        crit[index] && typeof crit[index] === "object" ? crit[index] : {};
+      if (v === "" || v == null) delete c[ckey];
+      else c[ckey] = String(v);
+      crit[index] = c;
+      batch.criteria = crit;
+      cfg.batch = batch;
+    });
+  };
+  return (
+    <TextFieldEntry
+      id={id}
+      element={element}
+      label={label}
+      getValue={getValue}
+      setValue={setValue}
+      validate={validate}
+      debounce={debounce}
+    />
+  );
+}
+
+// The "Batch criteria" ListGroup: a per-criterion collapsible (prompt id + `when`) with the
+// stock add (+) / remove (×) affordances. add/remove edit cfg.batch.criteria via mutateConfig
+// (no hooks — they fire on click, so they take modeling/bpmnFactory captured by the provider).
+function batchCriteriaGroup(element, modeling, bpmnFactory) {
+  const criteria =
+    (parseConfig(element.businessObject).batch || {}).criteria || [];
+  const list = Array.isArray(criteria) ? criteria : [];
+  const items = list.map((c, i) => ({
+    id: `criterion-${i}`,
+    label: (c && c.prompt) || `criterion ${i + 1}`,
+    entries: [
+      {
+        id: `criterion-${i}-prompt`,
+        component: (p) => (
+          <CriterionFieldEntry
+            {...p}
+            index={i}
+            ckey="prompt"
+            label="prompt id *"
+            required
+          />
+        ),
+        isEdited: isTextFieldEntryEdited,
+      },
+      {
+        id: `criterion-${i}-when`,
+        component: (p) => (
+          <CriterionFieldEntry
+            {...p}
+            index={i}
+            ckey="when"
+            label="when (overlay predicate)"
+          />
+        ),
+        isEdited: isTextFieldEntryEdited,
+      },
+    ],
+    remove: () =>
+      mutateConfig(element, modeling, bpmnFactory, (cfg) => {
+        const batch =
+          cfg.batch && typeof cfg.batch === "object" ? cfg.batch : {};
+        const cr = Array.isArray(batch.criteria) ? batch.criteria : [];
+        cr.splice(i, 1);
+        batch.criteria = cr;
+        cfg.batch = batch;
+      }),
+  }));
+  return {
+    id: "rebar-criteria",
+    label: "Batch criteria",
+    component: ListGroup,
+    element,
+    items,
+    add: (event) => {
+      if (event && event.stopPropagation) event.stopPropagation();
+      mutateConfig(element, modeling, bpmnFactory, (cfg) => {
+        const batch =
+          cfg.batch && typeof cfg.batch === "object" ? cfg.batch : {};
+        const cr = Array.isArray(batch.criteria) ? batch.criteria : [];
+        cr.push({ prompt: "" });
+        batch.criteria = cr;
+        cfg.batch = batch;
+      });
+    },
+  };
+}
+
 // The list of `with.<field>` entries a step's contract declares (REBAR_CONTRACTS keyed by
 // the element NAME == its uses/prompt id). No contract → no structured `with` fields (the
 // raw editor remains available for ad-hoc `with` keys).
@@ -474,11 +752,32 @@ function withFieldEntries(element) {
 // The structured entries for a known kind, in declaration order.
 function structuredEntries(element, kind) {
   const entries = [];
+  // The `if:` overlay predicate (epic A: conditional criterion/step inclusion) is a
+  // non-structural step key that round-trips via rebar:Config — editable on the common
+  // leaf steps (scripted/agent) so a step can be conditionally INCLUDED from the editor.
+  const ifEntry = {
+    id: "rebar-if",
+    component: (p) => (
+      <ConfigTextEntry
+        {...p}
+        ckey="if"
+        label="if (overlay predicate)"
+        description="Step is included only when this expression is truthy (else skipped)."
+      />
+    ),
+    isEdited: isTextFieldEntryEdited,
+  };
   if (kind === "scripted") {
     entries.push({ id: "rebar-action", component: ActionEntry });
     entries.push({ id: "rebar-contract", component: ContractEntry });
+    entries.push(ifEntry);
     entries.push(...withFieldEntries(element));
   } else if (kind === "agent") {
+    entries.push({
+      id: "rebar-service-kind",
+      component: ServiceKindEntry,
+      isEdited: isSelectEntryEdited,
+    });
     entries.push({ id: "rebar-action", component: ActionEntry });
     entries.push({ id: "rebar-contract", component: ContractEntry });
     entries.push({ id: "rebar-prompt-text", component: PromptTextEntry });
@@ -492,17 +791,50 @@ function structuredEntries(element, kind) {
       component: (p) => <ConfigTextEntry {...p} ckey="model" label="model" />,
       isEdited: isTextFieldEntryEdited,
     });
+    entries.push(ifEntry);
     entries.push(...withFieldEntries(element));
+  } else if (kind === "batch") {
+    // A v3 batch step's structural params live in cfg.batch.{prompt,usd_budget,model_ladder};
+    // the criteria LIST (add/remove/edit) is a separate ListGroup (batchCriteriaGroup).
+    entries.push({
+      id: "rebar-service-kind",
+      component: ServiceKindEntry,
+      isEdited: isSelectEntryEdited,
+    });
+    entries.push({ id: "rebar-batch-finder", component: BatchFinderEntry });
+    entries.push({
+      id: "rebar-batch-budget",
+      component: (p) => (
+        <BatchNumberEntry
+          {...p}
+          ckey="usd_budget"
+          label="usd_budget (USD cost ceiling)"
+        />
+      ),
+      isEdited: isTextFieldEntryEdited,
+    });
+    entries.push({
+      id: "rebar-batch-ladder",
+      component: BatchLadderEntry,
+      isEdited: isTextFieldEntryEdited,
+    });
+    entries.push(ifEntry);
   } else if (kind === "loop") {
     entries.push({
       id: "rebar-loop-var",
-      component: (p) => <ConfigTextEntry {...p} ckey="var" label="var (loop variable)" />,
+      component: (p) => (
+        <ConfigTextEntry {...p} ckey="var" label="var (loop variable)" />
+      ),
       isEdited: isTextFieldEntryEdited,
     });
     entries.push({
       id: "rebar-loop-max",
       component: (p) => (
-        <ConfigNumberEntry {...p} ckey="max_iterations" label="max_iterations" />
+        <ConfigNumberEntry
+          {...p}
+          ckey="max_iterations"
+          label="max_iterations"
+        />
       ),
       isEdited: isTextFieldEntryEdited,
     });
@@ -519,23 +851,33 @@ function structuredEntries(element, kind) {
   } else if (kind === "map") {
     entries.push({
       id: "rebar-map-over",
-      component: (p) => <ConfigTextEntry {...p} ckey="over" label="over" required />,
+      component: (p) => (
+        <ConfigTextEntry {...p} ckey="over" label="over" required />
+      ),
       isEdited: isTextFieldEntryEdited,
     });
     entries.push({
       id: "rebar-map-as",
-      component: (p) => <ConfigTextEntry {...p} ckey="as" label="as (item variable)" />,
+      component: (p) => (
+        <ConfigTextEntry {...p} ckey="as" label="as (item variable)" />
+      ),
       isEdited: isTextFieldEntryEdited,
     });
     entries.push({
       id: "rebar-map-index",
-      component: (p) => <ConfigTextEntry {...p} ckey="index_var" label="index_var" />,
+      component: (p) => (
+        <ConfigTextEntry {...p} ckey="index_var" label="index_var" />
+      ),
       isEdited: isTextFieldEntryEdited,
     });
     entries.push({
       id: "rebar-map-conc",
       component: (p) => (
-        <ConfigNumberEntry {...p} ckey="max_concurrency" label="max_concurrency" />
+        <ConfigNumberEntry
+          {...p}
+          ckey="max_concurrency"
+          label="max_concurrency"
+        />
       ),
       isEdited: isTextFieldEntryEdited,
     });
@@ -570,7 +912,9 @@ function rebarGroup(element) {
 }
 
 class RebarPropertiesProvider {
-  constructor(propertiesPanel) {
+  constructor(propertiesPanel, modeling, bpmnFactory) {
+    this._modeling = modeling;
+    this._bpmnFactory = bpmnFactory;
     propertiesPanel.registerProvider(LOW_PRIORITY, this);
   }
   getGroups(element) {
@@ -578,12 +922,22 @@ class RebarPropertiesProvider {
       const bo = element.businessObject;
       if (bo && REBAR_KINDS.includes(bo.$type)) {
         groups.push(rebarGroup(element));
+        // A batch step gets a second group: its editable, add/remove criteria LIST.
+        if (rebarKind(bo) === "batch") {
+          groups.push(
+            batchCriteriaGroup(element, this._modeling, this._bpmnFactory),
+          );
+        }
       }
       return groups;
     };
   }
 }
-RebarPropertiesProvider.$inject = ["propertiesPanel"];
+RebarPropertiesProvider.$inject = [
+  "propertiesPanel",
+  "modeling",
+  "bpmnFactory",
+];
 
 export default {
   __init__: ["rebarPropertiesProvider"],

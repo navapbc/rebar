@@ -143,8 +143,30 @@ def lint_prompt_refs(doc: dict[str, Any], *, repo_root=None) -> list[LintFinding
 
     findings: list[LintFinding] = []
     catalog = load_catalog()
+
+    def _check_exists(loc: str, pid: Any) -> None:
+        if isinstance(pid, str) and not prompt_ref_exists(pid, repo_root=repo_root):
+            findings.append(
+                LintFinding(
+                    loc,
+                    f"prompt {pid!r} does not resolve to a known reviewer or a "
+                    f".rebar/prompts/{pid}.md file",
+                )
+            )
+
     for step in _iter_all_steps(doc):
-        if step_kind(step) != "agent":
+        kind = step_kind(step)
+        # A `batch` step's prompts are nested (batch.prompt finder + criteria[].prompt),
+        # so the agent-step path below misses them — existence-check them here.
+        if kind == "batch":
+            batch = step.get("batch") or {}
+            sid = step.get("id", "?")
+            _check_exists(f"steps[{sid}].batch.prompt", batch.get("prompt"))
+            for j, crit in enumerate(batch.get("criteria") or []):
+                loc = f"steps[{sid}].batch.criteria[{j}].prompt"
+                _check_exists(loc, (crit or {}).get("prompt"))
+            continue
+        if kind != "agent":
             continue
         prompt_id = step.get("prompt")
         if not isinstance(prompt_id, str):
