@@ -58,8 +58,7 @@ def _acli_module_returning(client):
 def test_builders_scope_to_the_given_project(fetcher):
     assert fetcher.jql_active("REB") == 'project = REB AND status != "Done"'
     assert (
-        fetcher.jql_done_recent("REB")
-        == 'project = REB AND status = "Done" ORDER BY updated DESC'
+        fetcher.jql_done_recent("REB") == 'project = REB AND status = "Done" ORDER BY updated DESC'
     )
     assert "DIG" not in fetcher.jql_active("REB")
     assert fetcher.jqls_for("REB") == (

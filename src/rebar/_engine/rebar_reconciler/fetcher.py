@@ -71,15 +71,13 @@ def jql_active(project: str) -> str:
 
 def jql_done_recent(project: str) -> str:
     """Recent-Done query (``ORDER BY updated DESC``) scoped to ``project``."""
-    return (
-        f'project = {_validate_project_key(project)} '
-        f'AND status = "Done" ORDER BY updated DESC'
-    )
+    return f'project = {_validate_project_key(project)} AND status = "Done" ORDER BY updated DESC'
 
 
 def jqls_for(project: str) -> tuple[str, str]:
     """The ordered (active, done-recent) JQL pair for ``project``."""
     return (jql_active(project), jql_done_recent(project))
+
 
 # Hard ACLI per-query ceiling. Raised from 1,000 to 1,200 in bug f6cc
 # after empirical confirmation that the DIG working set has 1,050 active

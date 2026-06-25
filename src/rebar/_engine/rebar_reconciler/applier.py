@@ -242,9 +242,7 @@ class CrossProjectTargetError(Exception):
 _JIRA_KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]*)-\d+$")
 
 
-def _cross_project_targets(
-    mutations: list[dict], configured_project: str
-) -> list[tuple[str, str]]:
+def _cross_project_targets(mutations: list[dict], configured_project: str) -> list[tuple[str, str]]:
     """Return ``(key, project)`` for outbound update/delete mutations whose target
     Jira key belongs to a project other than ``configured_project``.
 
