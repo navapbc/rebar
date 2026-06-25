@@ -68,3 +68,24 @@ def truncate_comment_body(body: str) -> str:
         return body
     keep = _JIRA_COMMENT_MAX_CHARS - len(_TRUNCATION_SUFFIX)
     return body[:keep] + _TRUNCATION_SUFFIX
+
+
+# Jira's description field shares the same 32,767-char hard limit as comments.
+# ACLI surfaces an over-length description as a create/edit failure that aborts
+# the whole reconciler pass (observed during the REB cutover: a 46,271-char epic
+# description killed a live pass after 154 successful creates — bug 626d follow-up).
+_JIRA_DESCRIPTION_MAX_CHARS: int = _JIRA_COMMENT_MAX_CHARS
+
+
+def truncate_description(text: str) -> str:
+    """Truncate an over-length description to Jira's 32,767-char limit.
+
+    Same contract as :func:`truncate_comment_body` (idempotent, deterministic,
+    suffix counted against the cap). Used by BOTH the send path (``acli`` create /
+    update) and the differ's description comparison, so the two never drift and the
+    diff converges. Send-side only — the local ticket store is never mutated.
+    """
+    if not isinstance(text, str) or len(text) <= _JIRA_DESCRIPTION_MAX_CHARS:
+        return text
+    keep = _JIRA_DESCRIPTION_MAX_CHARS - len(_TRUNCATION_SUFFIX)
+    return text[:keep] + _TRUNCATION_SUFFIX
