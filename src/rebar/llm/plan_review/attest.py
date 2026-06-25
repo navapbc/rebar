@@ -10,7 +10,7 @@ invalidation-on-material-edit the epic requires, layered on top of the code-HEAD
 freshness binding.
 
 The claim path is a FAST, LOCAL check only — no LLM, no network beyond a couple of
-local reads — so it stays well within the ~50ms target. The heavy three-pass review
+local reads — so it stays well within the ~50ms target. The heavy four-pass review
 runs OUT-OF-BAND via ``rebar review-plan`` (which signs on a non-blocking result);
 ``claim`` only verifies a fresh, non-stale, material-matching plan-review signature
 exists. ``--force`` (with a justification) bypasses it and is audit-logged.

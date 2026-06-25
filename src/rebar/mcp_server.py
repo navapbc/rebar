@@ -654,7 +654,7 @@ def build_server():
         """Run the plan-review gate on a ticket -> a plan_review_verdict dict
         {verdict: "PASS"|"BLOCK"|"INDETERMINATE", blocking[], advisory[], coaching[],
         indeterminate[], coverage, signature?, ...}. A deterministic Layer-1 floor (P1-P8)
-        plus a three-pass (find -> verify -> decide) advisory coaching review of the ticket's
+        plus a four-pass (find -> verify -> decide -> coach) review of the ticket's
         whole plan — the inverse of verify_completion. On a non-blocking PASS it signs a
         plan-review attestation (so a subsequent claim passes the gate when enabled) and emits
         the REVIEW_RESULT sidecar; in READONLY mode it runs a pure read (no sign, no sidecar).
