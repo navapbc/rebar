@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"verify_commands":[{"command":"make lint","dd_id":"lint","dd_text":"ruff lint + format-check pass"},{"command":"make test","dd_id":"test","dd_text":"full default test suite passes"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1782412460452727001,"uuid":"8cf0517f-1af8-48cc-9b96-f60756f39a65"}
