@@ -210,7 +210,7 @@ def _detectors_from_file(path: Path) -> tuple[list[Detector], str | None]:
     """
     try:
         doc = _parse_yaml(path)
-    except Exception:
+    except Exception:  # noqa: BLE001 — per-file fail-open: an unparseable/misshapen rule file is dropped as "parse_error", never raised (documented contract)
         return [], "parse_error"
     if not isinstance(doc, dict):
         return [], "parse_error"

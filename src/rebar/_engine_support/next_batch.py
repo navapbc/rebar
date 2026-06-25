@@ -93,7 +93,7 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
         raise EpicNotFound(epic_id)
     try:
         epic_state = reduce_ticket(os.path.join(tracker, resolved))
-    except Exception:
+    except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible epic is reported as not-found below
         epic_state = None
     if not isinstance(epic_state, dict) or epic_state.get("status") is None:
         raise EpicNotFound(epic_id)
@@ -149,7 +149,7 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
                     with open(tb) as tbf:
                         ts = json.loads(tbf.read())
                     ticket_status_map[entry.name] = str(ts.get("status", "deleted")).lower()
-                except Exception:
+                except Exception:  # noqa: BLE001 — per-entry tombstone read fail-open: a malformed tombstone defaults to deleted
                     ticket_status_map[entry.name] = "deleted"
 
     # Derive ready (unblocked) tasks scoped to the epic's descendants.

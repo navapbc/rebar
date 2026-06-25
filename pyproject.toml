@@ -208,11 +208,12 @@ select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201"]
 # removed from the allowlist. Inline `# noqa` carry the justifications; _io/_cli.py keeps
 # inline `# noqa: T201` (CLI presentation), graph/_links.py keeps one inline T201 (stdout
 # data contract). The 7 _io/import_ndjson.py BLE001 noqas were re-validated here.
-# grounding + _engine_support — swept by d360 (BLE001); _engine_support T201 is the
-# data-CLI stdout contract (reads_cli/validate/next_batch)
-"src/rebar/grounding/*" = ["BLE001"]
-"src/rebar/grounding/detectors/*" = ["BLE001"]
-"src/rebar/_engine_support/*" = ["BLE001", "T201"]
+# grounding — SWEPT by d360 (removed; the BLE0001 typo at harness.py:281 fixed and the
+# BaseException narrowed to Exception). _engine_support BLE001 also SWEPT by d360; it
+# KEEPS T201 — it is the data-CLI presentation layer (validate/reads_cli/resolver/
+# next_batch emit print(json.dumps(...)) machine-contract stdout + human status on its
+# own stderr), a legitimate-print surface like _cli/_commands.
+"src/rebar/_engine_support/*" = ["T201"]
 # MCP surface + workflow + llm top-level — swept by ceaa. NOTE: ruff per-file-ignore
 # globs match `*` across `/`, so a `src/rebar/llm/*.py` glob would WRONGLY exempt the
 # exemplar `plan_review/`. The llm top-level files are therefore enumerated explicitly

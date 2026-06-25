@@ -221,14 +221,14 @@ def ensure_fresh(tracker: str, *, no_sync: bool = False) -> None:
 
         try:
             _store_sync.reconverge(tracker_abs)
-        except Exception:
+        except Exception:  # noqa: BLE001 — best-effort reconverge: a sync failure never breaks a read (fsck surfaces PUSH_PENDING)
             pass
         try:
             with open(marker, "w") as fh:
                 fh.write(str(now))
         except OSError:
             pass
-    except Exception:
+    except Exception:  # noqa: BLE001 — freshness is best-effort; never let it break a read
         # Freshness is best-effort; never let it break a read.
         return
 
@@ -400,7 +400,7 @@ def deps_state(ticket_id: str, tracker: str, *, include_archived: bool = False) 
     if not include_archived:
         try:
             target_state = reduce_ticket(os.path.join(tracker, resolved))
-        except Exception:
+        except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible target skips the archived check
             target_state = None
         if isinstance(target_state, dict) and target_state.get("archived") is True:
             raise ReadError(

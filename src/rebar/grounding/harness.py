@@ -278,12 +278,12 @@ def _worker_entry(conn: Any, func: Callable[..., Any], args: tuple, kwargs: dict
     try:
         result = func(*args, **(kwargs or {}))
         conn.send(("ok", result))
-    except BaseException as exc:  # noqa: BLE0001 — fail-open: any error becomes evidence, never a host crash
+    except Exception as exc:  # noqa: BLE001 — worker boundary: any error becomes evidence sent to the parent; narrowed from BaseException (was an inert `BLE0001` typo) so KeyboardInterrupt/SystemExit propagate (parent maps signal-death/join-timeout to a fail-open abstain — see docstring)
         conn.send(("err", f"{type(exc).__name__}: {exc}"))
     finally:
         try:
             conn.close()
-        except Exception:
+        except Exception:  # noqa: BLE001 — best-effort pipe close in finally; nothing actionable on failure
             pass
 
 
@@ -431,13 +431,13 @@ def _reap_worker(proc: Any) -> None:
     """SIGTERM → grace → SIGKILL a hung worker process, bounded drain."""
     try:
         proc.terminate()
-    except Exception:
+    except Exception:  # noqa: BLE001 — best-effort reap: a terminate() failure falls through to kill()
         pass
     proc.join(_GRACE_SECONDS)
     if proc.is_alive():
         try:
             proc.kill()
-        except Exception:
+        except Exception:  # noqa: BLE001 — best-effort reap: a kill() failure is logged below if the proc survives
             pass
         proc.join(_DRAIN_SECONDS)
         if proc.is_alive():
