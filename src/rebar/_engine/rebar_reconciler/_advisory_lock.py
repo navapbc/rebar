@@ -123,18 +123,31 @@ def _resolve_retry_budget() -> int:
     return max(1, value)
 
 
-def _compute_backoff_seconds(retry_index: int) -> float:
-    """Return jittered backoff for the *retry_index*-th retry (0-indexed).
+def _jittered_backoff(
+    retry_index: int, *, base: float, factor: float, cap: float, jitter_fraction: float
+) -> float:
+    """Jittered exponential backoff for the *retry_index*-th retry (0-indexed).
 
-    Schedule: base * factor**retry_index, capped at cap, then multiplied by
-    a uniform factor in [1 - jitter, 1 + jitter]. Stdlib only (random.uniform).
+    The single shared schedule: ``base * factor**retry_index``, capped at *cap*,
+    then multiplied by a uniform factor in ``[1 - jitter_fraction, 1 + jitter_fraction]``.
+    Exactly one ``random.uniform`` draw per call (stdlib only). The two retry sites
+    (lock-acquire and tickets-ref CAS) bind their own constants via the thin wrappers
+    below; this is the only place the formula lives.
     """
-    base = min(
-        _BACKOFF_BASE_SECONDS * (_BACKOFF_FACTOR**retry_index),
-        _BACKOFF_CAP_SECONDS,
+    capped = min(base * (factor**retry_index), cap)
+    jitter = random.uniform(1.0 - jitter_fraction, 1.0 + jitter_fraction)
+    return capped * jitter
+
+
+def _compute_backoff_seconds(retry_index: int) -> float:
+    """Jittered backoff for the *retry_index*-th lock-acquire retry (0-indexed)."""
+    return _jittered_backoff(
+        retry_index,
+        base=_BACKOFF_BASE_SECONDS,
+        factor=_BACKOFF_FACTOR,
+        cap=_BACKOFF_CAP_SECONDS,
+        jitter_fraction=_BACKOFF_JITTER_FRACTION,
     )
-    jitter = random.uniform(1.0 - _BACKOFF_JITTER_FRACTION, 1.0 + _BACKOFF_JITTER_FRACTION)
-    return base * jitter
 
 
 # ---------------------------------------------------------------------------
@@ -419,14 +432,17 @@ def _cas_backoff_seconds(retry_index: int) -> float:
 
     Short backoff (50ms base) capped at 1s — a CAS race resolves in the time it
     takes a concurrent writer to land its commit, far quicker than the
-    coarse-grained outer lock-acquire backoff.
+    coarse-grained outer lock-acquire backoff. Shares :func:`_jittered_backoff`
+    with the lock-acquire path (and the same ``_BACKOFF_FACTOR``); only the
+    base/cap constants differ.
     """
-    base = min(
-        _CAS_BACKOFF_BASE_SECONDS * (_BACKOFF_FACTOR**retry_index),
-        _CAS_BACKOFF_CAP_SECONDS,
+    return _jittered_backoff(
+        retry_index,
+        base=_CAS_BACKOFF_BASE_SECONDS,
+        factor=_BACKOFF_FACTOR,
+        cap=_CAS_BACKOFF_CAP_SECONDS,
+        jitter_fraction=_CAS_BACKOFF_JITTER_FRACTION,
     )
-    jitter = random.uniform(1.0 - _CAS_BACKOFF_JITTER_FRACTION, 1.0 + _CAS_BACKOFF_JITTER_FRACTION)
-    return base * jitter
 
 
 def _cas_advance_with_retry(repo_root: Path, mutate_and_advance) -> None:
