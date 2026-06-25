@@ -252,6 +252,90 @@ def test_review_cap_hit_indeterminate(rebar_repo: Path, monkeypatch) -> None:
     assert any(f.get("reason") == "budget-cap-shed" for f in v["indeterminate"])
 
 
+# ── code-drift invalidation (epic boil-golem-veto / ADR 0002) ───────────────────
+def _scoped(repo: Path, *, dep: str = "dep.py", content: str = "v = 1\n") -> str:
+    """A claimable, reviewed ticket whose attestation is SCOPED to one dependency
+    file (via file_impact). Returns the ticket id; the attestation is signed."""
+    (repo / dep).write_text(content)
+    tid = _make(repo)
+    rebar.set_file_impact(
+        tid, [{"path": dep, "reason": "the code under review"}], repo_root=str(repo)
+    )
+    v = _review(tid, repo)
+    assert v["signature"]["signed"], "scoped ticket should earn a signed attestation"
+    return tid
+
+
+def test_code_drift_in_dependency_file_invalidates(rebar_repo: Path) -> None:
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _scoped(rebar_repo)
+    (rebar_repo / "dep.py").write_text("v = 2  # changed\n")  # drift in the reviewed file
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.claim(tid, repo_root=str(rebar_repo))
+    assert "drift" in ei.value.stderr.lower()
+    assert _status(tid, rebar_repo) == "open"
+
+
+def test_unrelated_change_does_not_invalidate_attestation(rebar_repo: Path) -> None:
+    # The worm-folly-barge scenario: an unrelated commit (HEAD moves) must NOT stale a
+    # still-correct, scoped attestation.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _scoped(rebar_repo)
+    (rebar_repo / "unrelated.py").write_text("noise = True\n")
+    _commit(rebar_repo)  # HEAD advances; dep.py is untouched
+    rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "in_progress"
+
+
+def test_dependency_file_deletion_invalidates(rebar_repo: Path) -> None:
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _scoped(rebar_repo)
+    (rebar_repo / "dep.py").unlink()  # deleting a reviewed file is drift
+    with pytest.raises(rebar.RebarError):
+        rebar.claim(tid, repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "open"
+
+
+def test_empty_dependency_set_falls_back_to_head(rebar_repo: Path) -> None:
+    # No file_impact and (FakeRunner) no citations ⇒ unscopable ⇒ conservative
+    # whole-HEAD freshness: any commit invalidates.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    assert _review(tid, rebar_repo)["signature"]["signed"]
+    _commit(rebar_repo)  # HEAD advances; nothing to scope to
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.claim(tid, repo_root=str(rebar_repo))
+    assert "stale" in ei.value.stderr.lower()
+    assert _status(tid, rebar_repo) == "open"
+
+
+def test_claim_path_drift_check_is_cheap(rebar_repo: Path) -> None:
+    import time
+
+    from rebar.llm.plan_review import attest
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    impact = []
+    for i in range(30):
+        (rebar_repo / f"d{i}.py").write_text(f"x = {i}\n")
+        impact.append({"path": f"d{i}.py", "reason": "r"})
+    tid = _make(rebar_repo)
+    rebar.set_file_impact(tid, impact, repo_root=str(rebar_repo))
+    assert _review(tid, rebar_repo)["signature"]["signed"]
+    t0 = time.monotonic()
+    res = attest.claim_gate_check(tid, repo_root=str(rebar_repo))
+    elapsed = time.monotonic() - t0
+    assert res["ok"], res  # no drift → still certified
+    # Hashing ~30 small files is sub-ms; a generous bound guards against a network
+    # call or a pathological regression on the hot path (no flaky tight ms assertion).
+    assert elapsed < 0.25, f"drift check too slow ({elapsed * 1000:.1f}ms) — hot-path regression?"
+
+
 # ── config: dotted enables, default off ─────────────────────────────────────────
 def test_config_flag_default_off(tmp_path: Path) -> None:
     from rebar import config

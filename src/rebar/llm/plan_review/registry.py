@@ -36,7 +36,7 @@ The merged descriptor (per criterion)::
       "default_posture": "advisory"|"blocking", "block_threshold": float
     }
 
-The DET floor (P1–P8) is NOT in this file — it is the ``exec=DET`` tier in
+The DET floor (P1–P9) is NOT in this file — it is the ``exec=DET`` tier in
 :mod:`.det_floor`. This registry owns the LLM tiers (1-TURN / 2-STEP / AGENT). See
 ``docs/reuse-surface.md`` §3 for the prompt-library contract this builds on.
 """
@@ -62,8 +62,8 @@ AGENT_TIER = frozenset(
 )
 
 # The canonical v4 §5 registry — the completeness guard's authority. The DET floor
-# P1–P8 live in det_floor.py; BROAD is the orchestrator's bounded open-ended pass.
-CANONICAL_DET = ("P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8")
+# P1–P9 live in det_floor.py; BROAD is the orchestrator's bounded open-ended pass.
+CANONICAL_DET = ("P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9")
 CANONICAL_LLM = frozenset(
     {
         # Layer-2 judgment

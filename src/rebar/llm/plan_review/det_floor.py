@@ -1,4 +1,4 @@
-"""Layer-1 deterministic floor (P1–P8) for the plan-review gate (child 012e).
+"""Layer-1 deterministic floor (P1–P9) for the plan-review gate (child 012e).
 
 The DET floor is the ONLY tier that blocks **by default** in v1 (every LLM-tier
 criterion is advisory unless a project opts it into blocking via its
@@ -34,6 +34,9 @@ The checks
   the content (or, for a container, a parent+child pairing) exceeds the largest
   configured context window even at one-criterion-per-call ("too big to review in
   full; reduce/decompose it" — the extreme of P4 / G5).
+* **P9 file-impact coverage** — for a LEAF work ticket, warns (advisory, **never
+  blocks**) when ``file_impact`` is empty: without it the code-drift gate (ADR 0002)
+  cannot scope the attestation and falls back to invalidating on any commit.
 
 The only sound, unambiguous blockers are therefore **P1, P5 (cycle), and P8**.
 Everything else is advisory or coverage-only, consistent with "the DET floor
@@ -630,6 +633,41 @@ def p8_reviewability(ctx: PlanContext) -> DetResult:
     )
 
 
+# ── P9 file-impact coverage (advisory; epic boil-golem-veto / ADR 0002) ──────────
+def p9_file_impact_coverage(ctx: PlanContext) -> DetResult:
+    """Advisory. A LEAF work ticket with no ``file_impact`` cannot have its plan-review
+    attestation scoped to specific files, so the code-drift gate (ADR 0002) falls back
+    to invalidating on ANY commit, and ``next_batch`` cannot schedule it conflict-free.
+    Surfaces a coaching nudge to declare the files; NEVER blocks. Not applicable to
+    containers (anything with children) or non-work types, where ``file_impact`` is
+    legitimately absent — those pass."""
+    fi = ctx.state.get("file_impact") or []
+    ttype = (ctx.ticket_type or "").lower()
+    applicable = not ctx.children and ttype in ("task", "story", "bug")
+    cov = {"ran": True, "file_impact": len(fi), "applicable": applicable}
+    if not applicable or fi:
+        return DetResult("P9", "file-impact-coverage", "pass", coverage=cov)
+    return DetResult(
+        "P9",
+        "file-impact-coverage",
+        "fail",
+        finding={
+            "finding": "No file_impact declared on a leaf work ticket.",
+            "evidence": ["file_impact is empty"],
+            "impact": (
+                "The plan-review attestation cannot be scoped to specific files, so ANY "
+                "commit invalidates it (the conservative code-drift fallback, ADR 0002), "
+                "and next_batch cannot schedule this ticket conflict-free."
+            ),
+            "suggested_fix": (
+                "Record the {path, reason} files this work will touch (e.g. via "
+                "set_file_impact) so the attestation is scoped to them."
+            ),
+        },
+        coverage=cov,
+    )
+
+
 # ── the floor ──────────────────────────────────────────────────────────────────
 DET_CHECKS = (
     p1_readiness_shape,
@@ -640,6 +678,7 @@ DET_CHECKS = (
     p6_ac_quality,
     p7_destructive,
     p8_reviewability,
+    p9_file_impact_coverage,
 )
 
 
