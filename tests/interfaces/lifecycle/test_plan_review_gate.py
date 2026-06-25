@@ -294,6 +294,32 @@ def test_workflow_surfaces_unavailable_llm_as_failed_step(rebar_repo: Path) -> N
     assert res.status == "failed" and res.error  # surfaced, not swallowed into success
 
 
+def test_per_criterion_failure_is_fail_open_when_tier_ran(rebar_repo: Path) -> None:
+    # Fail-open PRESERVED at the LLM tier: a NON-systemic per-criterion failure (the tier
+    # RAN; a finder raised an ordinary error, not LLMUnavailableError) drops that unit's
+    # findings but does NOT mark the tier unavailable → still PASS + signed, claim succeeds.
+    # (Distinguishes a systemic outage, which is INDETERMINATE, from a one-off hiccup.)
+    class _FlakyFinder:
+        name = "flaky"
+
+        def preflight(self):
+            return None  # tier IS available
+
+        def run(self, req):  # noqa: ANN001
+            raise ValueError("transient parse hiccup for one criterion")  # non-systemic
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    v = rebar.llm.review_plan(tid, runner=_FlakyFinder(), repo_root=str(rebar_repo))
+    assert v["verdict"] == "PASS"  # tier ran (no systemic failure) → NOT INDETERMINATE
+    assert v["coverage"]["llm_ran"] is True
+    assert v["coverage"].get("llm_unavailable") is not True
+    assert v["signature"]["signed"]
+    rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "in_progress"
+
+
 # ── E2E edge case: cap-hit INDETERMINATE (budget shed) ──────────────────────────
 def test_review_cap_hit_indeterminate(rebar_repo: Path, monkeypatch) -> None:
     monkeypatch.setenv("REBAR_PLAN_REVIEW_BUDGET", "0")  # near-zero cap ⇒ shed agent/overlay
