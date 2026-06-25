@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import pytest
 
+from rebar.llm.config import LLMConfig
+from rebar.llm.errors import LLMConfigError, LLMUnavailableError
 from rebar.llm.plan_review import attest, det_floor, orchestrator, passes, registry, sidecar, sizing
 from rebar.llm.plan_review.det_floor import PlanContext
 
@@ -390,6 +392,65 @@ def test_p9_not_applicable_for_container() -> None:
         _ctx(_GOOD_AC, ttype="story", children=[{"ticket_id": "c1"}])
     )
     assert r.status == "pass" and r.coverage["applicable"] is False
+
+
+# ── LLM-unavailable: INDETERMINATE, never a hollow PASS (fuel-posse-ball) ────────
+class _NoDepsRunner:
+    """preflight raises (missing agents extra) — the LLM tier cannot run at all."""
+
+    name = "no-deps"
+
+    def preflight(self) -> None:
+        raise LLMConfigError("the 'agents' extra is missing")
+
+    def run(self, req):  # noqa: ANN001
+        raise AssertionError("run must not be reached when preflight fails")
+
+
+class _NoKeyRunner:
+    """preflight ok (deps present) but the provider call fails (missing/invalid key) —
+    surfaces as LLMUnavailableError, provider-agnostic."""
+
+    name = "no-key"
+
+    def preflight(self) -> None:
+        return None
+
+    def run(self, req):  # noqa: ANN001
+        raise LLMUnavailableError("the LLM provider call failed: OPENAI_API_KEY not set")
+
+
+class _FlakyRunner:
+    """preflight ok; a finder call raises a NON-systemic error — a per-criterion hiccup,
+    not a tier outage."""
+
+    name = "flaky"
+
+    def preflight(self) -> None:
+        return None
+
+    def run(self, req):  # noqa: ANN001
+        raise ValueError("transient parse hiccup for one criterion")
+
+
+def test_run_review_indeterminate_when_deps_unavailable() -> None:
+    v = orchestrator.run_review(_ctx(_GOOD_AC), LLMConfig(), runner=_NoDepsRunner())
+    assert v["verdict"] == "INDETERMINATE"  # NOT a DET-only PASS
+    assert v["coverage"]["llm_ran"] is False and v["coverage"].get("llm_unavailable") is True
+
+
+def test_run_review_indeterminate_when_key_unavailable_at_runtime() -> None:
+    v = orchestrator.run_review(_ctx(_GOOD_AC), LLMConfig(), runner=_NoKeyRunner())
+    assert v["verdict"] == "INDETERMINATE"
+    assert v["coverage"].get("llm_unavailable") is True
+
+
+def test_run_review_pass_on_per_criterion_failure_when_tier_ran() -> None:
+    # Fail-open PRESERVED: a non-systemic per-criterion failure (tier available) drops that
+    # unit's findings but the tier RAN → PASS, never INDETERMINATE.
+    v = orchestrator.run_review(_ctx(_GOOD_AC), LLMConfig(), runner=_FlakyRunner())
+    assert v["verdict"] == "PASS"
+    assert v["coverage"]["llm_ran"] is True and v["coverage"].get("llm_unavailable") is not True
 
 
 def test_material_fingerprint_changes_on_material_edit() -> None:
