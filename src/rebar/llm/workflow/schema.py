@@ -26,13 +26,14 @@ fallback when ``jsonschema`` is absent and says so.
 
 from __future__ import annotations
 
-import json
 import re
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from rebar import schemas
+from rebar._store.canonical import canonical_str
+from rebar._store.canonical import content_hash as _canonical_content_hash
 from rebar.llm.errors import (
     WorkflowParseError,
     WorkflowVersionError,
@@ -391,16 +392,19 @@ def canonical_json(doc: Any) -> str:
     """A canonical JSON string for a document (sorted keys, compact separators).
 
     Used for content-hashing a workflow so a run can record exactly which
-    definition it executed; NOT the human-facing form.
+    definition it executed; NOT the human-facing form. Thin public re-export of
+    the canonical seam (:func:`rebar._store.canonical.canonical_str`,
+    ``ensure_ascii=False``) — byte-identical to the prior inline form.
     """
-    return json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return canonical_str(doc)
 
 
 def content_hash(doc: Any) -> str:
-    """A short, stable content hash (sha256 of the canonical JSON) for a document."""
-    import hashlib
+    """A short, stable content hash (sha256 of the canonical JSON) for a document.
 
-    return hashlib.sha256(canonical_json(doc).encode("utf-8")).hexdigest()
+    Thin public re-export of :func:`rebar._store.canonical.content_hash`.
+    """
+    return _canonical_content_hash(doc)
 
 
 def _ordered(mapping: dict[str, Any], order: tuple[str, ...]) -> dict[str, Any]:
