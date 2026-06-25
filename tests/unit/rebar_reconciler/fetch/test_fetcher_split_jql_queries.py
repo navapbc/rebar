@@ -88,20 +88,22 @@ def test_both_split_jqls_issued_in_order_active_then_done(tmp_path, fetcher):
     the Done-recent JQL — observable from client.calls in order."""
     client = _JqlRoutedClient(
         sizes={
-            fetcher.JQL_ACTIVE: 150,
-            fetcher.JQL_DONE_RECENT: 80,
+            fetcher.jql_active("DIG"): 150,
+            fetcher.jql_done_recent("DIG"): 80,
         }
     )
     with patch.object(fetcher, "_load_acli", return_value=_make_acli_module_returning(client)):
         fetcher.fetch_snapshot("split-order-test", repo_root=tmp_path)
 
     # First call must use the active JQL; later calls switch to Done-recent.
-    assert client.calls[0]["jql"] == fetcher.JQL_ACTIVE, (
+    assert client.calls[0]["jql"] == fetcher.jql_active("DIG"), (
         f"Expected first call to use active JQL; got {client.calls[0]['jql']!r}"
     )
     seen_jqls_in_order = [c["jql"] for c in client.calls]
-    active_indices = [i for i, j in enumerate(seen_jqls_in_order) if j == fetcher.JQL_ACTIVE]
-    done_indices = [i for i, j in enumerate(seen_jqls_in_order) if j == fetcher.JQL_DONE_RECENT]
+    active_jql = fetcher.jql_active("DIG")
+    done_jql = fetcher.jql_done_recent("DIG")
+    active_indices = [i for i, j in enumerate(seen_jqls_in_order) if j == active_jql]
+    done_indices = [i for i, j in enumerate(seen_jqls_in_order) if j == done_jql]
     # Both queries reached — guard before calling max/min on indices.
     # (Without these guards the assertion below would crash with ValueError
     # instead of a diagnostic assertion failure if a regression caused Q1
@@ -128,8 +130,8 @@ def test_done_query_capped_at_done_recent_cap(tmp_path, fetcher):
     cap = fetcher._DONE_RECENT_CAP
     client = _JqlRoutedClient(
         sizes={
-            fetcher.JQL_ACTIVE: 10,
-            fetcher.JQL_DONE_RECENT: cap + 100,  # 100 more than the cap
+            fetcher.jql_active("DIG"): 10,
+            fetcher.jql_done_recent("DIG"): cap + 100,  # 100 more than the cap
         }
     )
     with patch.object(fetcher, "_load_acli", return_value=_make_acli_module_returning(client)):
@@ -138,7 +140,7 @@ def test_done_query_capped_at_done_recent_cap(tmp_path, fetcher):
     # Count Done issues consumed = sum of max_results actually returned for Done JQL.
     done_consumed = 0
     for c in client.calls:
-        if c["jql"] == fetcher.JQL_DONE_RECENT:
+        if c["jql"] == fetcher.jql_done_recent("DIG"):
             size = client._sizes[c["jql"]]
             page_len = min(c["max_results"], max(0, size - c["start_at"]))
             done_consumed += page_len
@@ -159,8 +161,8 @@ def test_active_query_uncapped_consumes_everything_under_ceiling(tmp_path, fetch
     # 1100 active issues — under the 1200 ceiling.
     client = _JqlRoutedClient(
         sizes={
-            fetcher.JQL_ACTIVE: 1100,
-            fetcher.JQL_DONE_RECENT: 0,
+            fetcher.jql_active("DIG"): 1100,
+            fetcher.jql_done_recent("DIG"): 0,
         }
     )
     with patch.object(fetcher, "_load_acli", return_value=_make_acli_module_returning(client)):

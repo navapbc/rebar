@@ -195,6 +195,9 @@ def test_readonly_dry_run_reconcile_performs_zero_store_writes(
     is persisted."""
     monkeypatch.setenv("REBAR_MCP_READONLY", "1")
     monkeypatch.delenv("REBAR_MCP_ALLOW_RECONCILE_LIVE", raising=False)
+    # bug 626d: the inbound fetch is scoped to jira.project and fails closed on an
+    # empty key; configure one so the dry-run reaches the (empty) acli fetch.
+    monkeypatch.setenv("JIRA_PROJECT", "DIG")
     srv = build_server()
 
     before = _store_write_tree(rebar_repo)
