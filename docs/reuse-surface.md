@@ -178,7 +178,8 @@ Always call `runner.preflight()` before `run()` so a missing extra / misconfig
 surfaces as a clean `LLMConfigError` **before** any billable call (this is what
 lets a gate degrade cleanly on missing infra).
 
-**Pattern for a custom multi-call operation** (e.g. the plan-review three passes):
+**Pattern for a custom multi-call operation** (e.g. the plan-review's three
+model-driven passes — find/verify/coach; Pass 3 "decide" is pure arithmetic, no call):
 build one `RunRequest` per call with the right `system_prompt` / `instructions` /
 `output_schema` / `execution_mode`, call `runner.run(req)`, and read the validated
 dict. See `rebar.llm.plan_review.passes`.

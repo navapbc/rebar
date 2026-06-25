@@ -7,7 +7,7 @@ default in v1) and emits a signed **attestation** that a review process was foll
 
 Two surfaces:
 
-* :func:`review_plan` — the heavy, out-of-band capability: run the three-pass
+* :func:`review_plan` — the heavy, out-of-band capability: run the four-pass
   review against a ticket's whole plan, emit the ``REVIEW_RESULT`` sidecar, and (on
   a non-blocking PASS) sign a plan-review attestation. CLI: ``rebar review-plan``;
   write-gated MCP: ``review_plan``.
@@ -45,8 +45,9 @@ def review_plan(
 ) -> dict[str, Any]:
     """Run the plan-review gate on ``ticket_id`` and return a ``plan_review_verdict``.
 
-    Assembles the whole-ticket context, runs the DET floor + the three-pass LLM
-    review, mints finding ids, applies the advisory cap, runs the Pass-4 coach, emits
+    Assembles the whole-ticket context, runs the DET floor + the find → verify →
+    decide LLM passes, mints finding ids, applies the advisory cap, runs the Pass-4
+    coach, emits
     the ``REVIEW_RESULT`` sidecar (best-effort), and — on a non-blocking ``PASS`` —
     signs a plan-review attestation (so a subsequent ``claim`` passes the gate).
 

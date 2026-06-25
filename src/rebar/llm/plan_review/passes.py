@@ -1,4 +1,4 @@
-"""The three-pass review engine for the plan-review gate.
+"""The four-pass review engine for the plan-review gate.
 
 Implements the evidence → binary-verify → deterministic-gate model (adopted from
 epic ``9da1``), plus the Pass-4 affirmative coach:

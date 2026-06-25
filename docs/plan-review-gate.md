@@ -30,7 +30,7 @@ stays fast — target p95 < ~50 ms, no LLM, no network):
 
 1. **`rebar review-plan <ticket>`** (CLI) / **`review_plan`** (write-gated MCP tool)
    / **`rebar.llm.review_plan(ticket_id)`** (library) — the out-of-band review. It
-   runs the deterministic floor + the three-pass LLM review on the ticket's *whole*
+   runs the deterministic floor + the four-pass LLM review on the ticket's *whole*
    plan, emits a `REVIEW_RESULT` sidecar, and on a non-blocking `PASS` **signs** a
    plan-review attestation. This is where the cost + latency live; run it on a
    claim-block or from CI.
@@ -46,7 +46,7 @@ A review is a **process, not a dialog**: when a finding blocks (or you want to
 clear advisories), revise the ticket and re-run `review-plan` to earn a fresh
 signature — exactly like the completion verifier.
 
-## The verdict model — three passes + a coach
+## The verdict model — four passes (find → verify → decide → coach)
 
 The gate has **two layers**:
 
@@ -58,7 +58,7 @@ The gate has **two layers**:
   P2/P3 (file/package resolution via the grounding oracle) are coverage-only;
   P4/P6/P7 (oversize / AC-quality / destructive-op sniff) are advisory.
 
-* **Layer 2 — the advisory coaching review (the three passes)** — never blocks by
+* **Layer 2 — the advisory coaching review (the four passes)** — never blocks by
   default. Each of the 32 criteria (the F/E/G/A judgment criteria, the T1–T12
   triggered overlays, COH, and ISF) ships as a **contract-bearing prompt in the
   prompt library** (`src/rebar/llm/reviewers/plan_review_<id>.md`, `category:
@@ -70,7 +70,8 @@ The gate has **two layers**:
   `docs/experiments/` is the design reference, not the production artifact.) See
   [reuse-surface.md](reuse-surface.md) §3.
 
-The three passes (adopted from the shared three-pass framework, epic `9da1`) — the
+The four passes — the find → verify → decide decision core is the shared three-pass
+framework (epic `9da1`), plus a coach — the
 model emits **no** holistic severity/confidence anywhere in the decision path:
 
 | Pass | What | Where |
@@ -233,7 +234,7 @@ completion close gate's signed-verdict / closed-without-signature pair.
 The **claim** check is fast (a local HMAC verify; the ~50 ms target is a structural
 property — it makes no LLM/network call, proven by a test). But the **honest**
 end-to-end time to start work includes the out-of-band `review-plan` run: the LLM
-three-pass review takes seconds to minutes depending on ticket size + tier, and the
+four-pass review takes seconds to minutes depending on ticket size + tier, and the
 edit→re-review convergence loop (~2–3 rounds for a plan that needs revision) busts
 the prompt cache each round, so the real cost-to-signature ≈ per-run cost ×
 revisions. Per-run latency/cost is captured on the sidecar for passive refinement —

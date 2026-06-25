@@ -212,7 +212,7 @@ def _verify_completion(argv: list[str]) -> int:
 def _review_plan(argv: list[str]) -> int:
     """``rebar review-plan`` → rebar.llm.review_plan (native; like verify-completion).
 
-    Runs the three-pass plan-review gate on a ticket's whole plan, emits the
+    Runs the four-pass plan-review gate on a ticket's whole plan, emits the
     ``REVIEW_RESULT`` sidecar, and (on a non-blocking PASS) signs a plan-review
     attestation so a subsequent ``claim`` passes the gate (when enabled). Needs the
     'agents' extra + a model API key to run the LLM tiers; the DET floor runs
@@ -222,7 +222,7 @@ def _review_plan(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="rebar review-plan",
         description="Run the plan-review gate on a ticket: a deterministic Layer-1 floor + a "
-        "three-pass (find → verify → decide) advisory coaching review of the plan, then sign a "
+        "four-pass (find → verify → decide → coach) review of the plan, then sign a "
         "plan-review attestation on a non-blocking PASS. The inverse of verify-completion.",
     )
     parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")
