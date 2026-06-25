@@ -18,8 +18,26 @@ import sys
 from pathlib import Path
 
 import pytest
+import tomllib
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _allowlisted_path_for(code: str) -> str | None:
+    """Return a concrete source path under a per-file-ignores entry that suppresses *code*
+    (a still-un-swept package), or None if the allowlist no longer exempts any src/ package
+    for that code (e.g. after the close-out empties it). Reads the live pyproject so the
+    test tracks the shrinking allowlist instead of hardcoding a package that gets swept."""
+    data = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text())
+    ignores = data["tool"]["ruff"]["lint"]["per-file-ignores"]
+    for glob, codes in ignores.items():
+        if code in codes and glob.startswith("src/") and "plan_review" not in glob:
+            # Turn a glob like "src/rebar/_commands/*" or "src/rebar/mcp_server.py" into a
+            # concrete file path the ignore matches.
+            base = glob.rstrip("*")
+            return base if base.endswith(".py") else base + "_probe.py"
+    return None
+
 
 # Synthetic offender: a blind except (BLE001) and a print (T201).
 _OFFENDING_SRC = (
@@ -63,9 +81,16 @@ def test_exemplar_path_is_gated() -> None:
 
 def test_allowlisted_path_is_suppressed() -> None:
     """The same code on a not-yet-swept (allowlisted) path is suppressed — the shrinking
-    allowlist is in effect."""
-    codes = _ruff_codes("src/rebar/_store/_probe.py")
-    assert codes == set(), f"expected the allowlist to suppress both rules, got {codes}"
+    allowlist is in effect. Skips once the allowlist no longer exempts any src/ package
+    (the close-out empties it), since there is then no allowlisted path to probe."""
+    ble_path = _allowlisted_path_for("BLE001")
+    if ble_path is None:
+        pytest.skip("BLE001 allowlist is empty (close-out reached) — nothing to suppress")
+    assert "BLE001" not in _ruff_codes(ble_path), f"expected {ble_path} to suppress BLE001"
+
+    t201_path = _allowlisted_path_for("T201")
+    if t201_path is not None:
+        assert "T201" not in _ruff_codes(t201_path), f"expected {t201_path} to suppress T201"
 
 
 def test_exemplar_package_is_clean() -> None:

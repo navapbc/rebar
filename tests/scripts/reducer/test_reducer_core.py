@@ -8,6 +8,7 @@ conftest.py; event-writing helpers (`_write_event`, `_UUID*`) in _events.py.
 from __future__ import annotations
 
 import json
+import logging
 import warnings
 from pathlib import Path
 from types import ModuleType
@@ -654,9 +655,16 @@ def test_reducer_skips_corrupt_json_event_and_returns_valid_state(
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_reducer_emits_warning_for_corrupt_event(
-    tmp_path: Path, reducer: ModuleType, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, reducer: ModuleType, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Reducer prints WARNING to stderr for corrupt event files."""
+    """Reducer logs a WARNING (named logger) for corrupt event files.
+
+    Per the error-handling convention (epic ring-gun-jot) the reducer is library code:
+    it emits the corrupt-event diagnostic via ``logging.getLogger(__name__)``, not an
+    unconditional stderr print. The record surfaces on stderr only once an entrypoint
+    installs the handler (CLI/MCP); here we assert the log RECORD is emitted, which
+    ``caplog`` captures regardless of handler configuration.
+    """
     ticket_dir = tmp_path / "tkt-corrupt-warn"
     ticket_dir.mkdir()
 
@@ -680,12 +688,14 @@ def test_reducer_emits_warning_for_corrupt_event(
     if cache_file.exists():
         cache_file.unlink()
 
-    reducer.reduce_ticket(ticket_dir)
+    with caplog.at_level(logging.WARNING, logger="rebar.reducer"):
+        reducer.reduce_ticket(ticket_dir)
 
-    captured = capsys.readouterr()
-    assert "WARNING" in captured.err, f"Expected WARNING in stderr, got: {captured.err!r}"
-    assert "corrupt" in captured.err.lower() or str(corrupt_file) in captured.err, (
-        f"Expected corrupt file path or 'corrupt' in stderr warning, got: {captured.err!r}"
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings, "Expected a WARNING log record for the corrupt event"
+    text = caplog.text
+    assert "corrupt" in text.lower() or str(corrupt_file) in text, (
+        f"Expected corrupt file path or 'corrupt' in the warning, got: {text!r}"
     )
 
 
