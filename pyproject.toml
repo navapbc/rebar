@@ -204,12 +204,10 @@ select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201"]
 # assert on failures) and print (debug/diagnostic output). PERMANENT, not part of
 # the shrinking allowlist.
 "tests/**" = ["BLE001", "T201"]
-# core leaves — swept by 8d01 (crow-aeon-muck)
-"src/rebar/__init__.py" = ["BLE001"]
-"src/rebar/reducer/*" = ["T201"]
-"src/rebar/graph/*" = ["BLE001", "T201"]
-"src/rebar/_store/*" = ["BLE001", "T201"]
-"src/rebar/_io/*" = ["T201"]
+# core leaves (__init__, reducer, graph, _store, _io) — SWEPT by 8d01 (crow-aeon-muck);
+# removed from the allowlist. Inline `# noqa` carry the justifications; _io/_cli.py keeps
+# inline `# noqa: T201` (CLI presentation), graph/_links.py keeps one inline T201 (stdout
+# data contract). The 7 _io/import_ndjson.py BLE001 noqas were re-validated here.
 # grounding + _engine_support — swept by d360 (BLE001); _engine_support T201 is the
 # data-CLI stdout contract (reads_cli/validate/next_batch)
 "src/rebar/grounding/*" = ["BLE001"]

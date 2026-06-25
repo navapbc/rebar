@@ -8,10 +8,12 @@ applies the event's effect to state in-place.  All processors return None.
 from __future__ import annotations
 
 import json
+import logging
 import os
-import sys
 
 from ._version import KNOWN_EVENT_TYPES, TAG_DELTA
+
+logger = logging.getLogger(__name__)
 
 
 def process_create(
@@ -141,12 +143,12 @@ def process_status(state: dict, event: dict, data: dict, filepath: str) -> None:
             loser_env_id = event.get("env_id", "") or ""
 
         ticket_id = state.get("ticket_id", "")
-        print(
-            f"PARENT_CHAIN_FORK_RESOLVED ticket={ticket_id}"
-            f" winner={winner_uuid}"
-            f" dropped=[{loser_uuid}]"
-            f" loser_env_id=[{loser_env_id}]",
-            file=sys.stderr,
+        logger.warning(
+            "PARENT_CHAIN_FORK_RESOLVED ticket=%s winner=%s dropped=[%s] loser_env_id=[%s]",
+            ticket_id,
+            winner_uuid,
+            loser_uuid,
+            loser_env_id,
         )
     else:
         state["status"] = data.get("status", state["status"])
@@ -575,7 +577,7 @@ def replay_events(
             with open(filepath, encoding="utf-8") as f:
                 event = json.load(f)
         except (json.JSONDecodeError, OSError):
-            print(f"WARNING: skipping corrupt event {filepath}", file=sys.stderr)
+            logger.warning("skipping corrupt event %s", filepath, exc_info=True)
             continue
 
         valid_event_count += 1

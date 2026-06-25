@@ -44,7 +44,7 @@ def _get_ticket_status(ticket_id: str, tracker_dir: str) -> str:
     # Reduce the ticket to get its compiled state
     try:
         state = reduce_ticket(ticket_dir)
-    except Exception:
+    except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible ticket has no effective status, default closed
         return "closed"
 
     if state is None:

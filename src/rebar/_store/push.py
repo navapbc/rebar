@@ -13,10 +13,13 @@ dirty-working-tree stash→merge→pop dance (bug 12a6). ALWAYS returns ``None``
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
 import sys
+
+logger = logging.getLogger(__name__)
 
 _NON_FF = re.compile(r"non-fast-forward|rejected|fetch first", re.IGNORECASE)
 _DIRTY_WD = re.compile(
@@ -125,10 +128,7 @@ def push_tickets_branch(base_path: str) -> None:
             return
         stderr = res.stderr or ""
         if not _NON_FF.search(stderr):
-            print(
-                f"Warning: tickets branch push failed (exit {res.returncode}): {stderr}",
-                file=sys.stderr,
-            )
+            logger.warning("tickets branch push failed (exit %s): %s", res.returncode, stderr)
             return  # non-retriable class — best-effort
 
         # Non-fast-forward: reconcile by MERGE (not rebase).
@@ -138,10 +138,9 @@ def push_tickets_branch(base_path: str) -> None:
         try:
             _lock.check_no_rebase_in_progress(base_path)
         except _lock.RebaseGuard:
-            print(
-                "Warning: cannot reconcile push — tracker is in rebase/merge recovery "
-                "state. Run ticket-fsck-recover.sh.",
-                file=sys.stderr,
+            logger.warning(
+                "cannot reconcile push — tracker is in rebase/merge recovery "
+                "state. Run ticket-fsck-recover.sh."
             )
             return  # best-effort
 
@@ -162,10 +161,7 @@ def push_tickets_branch(base_path: str) -> None:
                 base_path, "stash", "push", "--quiet", "-m", "_push_tickets_branch:auto-stash"
             )
             if stash.returncode != 0:
-                print(
-                    f"Warning: tickets branch push failed: stash failed (attempt {attempt})",
-                    file=sys.stderr,
-                )
+                logger.warning("tickets branch push failed: stash failed (attempt %s)", attempt)
                 continue
             merge2 = _git(
                 base_path,
@@ -178,21 +174,16 @@ def push_tickets_branch(base_path: str) -> None:
             _git(base_path, "stash", "pop", "--quiet")  # pop unconditionally
             if merge2.returncode != 0:
                 _git(base_path, "merge", "--abort")
-                print(
-                    f"Warning: tickets branch merge failed after stash recovery "
-                    f"(attempt {attempt})",
-                    file=sys.stderr,
+                logger.warning(
+                    "tickets branch merge failed after stash recovery (attempt %s)", attempt
                 )
             continue
 
         # Real content conflict — retry won't help, but continue so _MAX_RETRIES is honored.
         _git(base_path, "merge", "--abort")
-        print(
-            f"Warning: tickets branch push failed (merge conflict, attempt {attempt})",
-            file=sys.stderr,
-        )
+        logger.warning("tickets branch push failed (merge conflict, attempt %s)", attempt)
 
-    print(f"Warning: tickets branch push failed after {_MAX_RETRIES} retries", file=sys.stderr)
+    logger.warning("tickets branch push failed after %s retries", _MAX_RETRIES)
 
 
 def push_after_commit(tracker: str | os.PathLike) -> None:
@@ -212,5 +203,8 @@ def push_after_commit(tracker: str | os.PathLike) -> None:
         from rebar._store import lock as _lock
 
         push_tickets_branch(_lock.canonical_tracker(str(tracker)))
-    except Exception:
-        pass
+    except Exception:  # noqa: BLE001 — best-effort async push; broad-but-logged, fsck surfaces PUSH_PENDING
+        logger.warning(
+            "best-effort tickets-branch push failed; PUSH_PENDING will surface via fsck",
+            exc_info=True,
+        )

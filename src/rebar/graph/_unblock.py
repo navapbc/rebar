@@ -67,7 +67,7 @@ def detect_newly_unblocked(
                 try:
                     _ts = json.loads(tombstone_path.read_text())
                     tombstone_status = str(_ts.get("status", "deleted"))
-                except Exception:
+                except Exception:  # noqa: BLE001 — tombstone read best-effort: a malformed/missing tombstone defaults to deleted
                     tombstone_status = "deleted"
             state = reduce_ticket(entry.path)
             if state is None:

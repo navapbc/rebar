@@ -43,10 +43,13 @@ lock-ordering hazard.
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from contextlib import contextmanager
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _FALSY = {"0", "false", "no", "off", ""}
 
@@ -151,5 +154,6 @@ def next_tick(tracker: str | os.PathLike, ticket_id: str) -> int:
             tick = max(_read_state(rebar_dir), witness, physical_now()) + 1
             _write_state(rebar_dir, tick)
         return tick
-    except Exception:
+    except Exception:  # noqa: BLE001 — HLC fallback: a failed monotonic read falls back to physical time; broad-but-logged
+        logger.warning("HLC monotonic tick failed; falling back to physical clock", exc_info=True)
         return physical_now()

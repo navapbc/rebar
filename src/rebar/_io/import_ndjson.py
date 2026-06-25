@@ -27,12 +27,14 @@ creates (a re-run duplicates — documented).
 from __future__ import annotations
 
 import json
+import logging
 import os
-import sys
 from collections.abc import Iterable, Iterator
 from typing import Any
 
 from . import _provenance
+
+logger = logging.getLogger(__name__)
 
 
 def _iter_records(source: Any) -> Iterator[dict]:
@@ -54,7 +56,7 @@ def _iter_records(source: Any) -> Iterator[dict]:
             try:
                 yield json.loads(line)
             except json.JSONDecodeError:
-                print(f"WARNING: skipping unparseable NDJSON line: {line[:80]}", file=sys.stderr)
+                logger.warning("skipping unparseable NDJSON line: %s", line[:80], exc_info=True)
         return
     raise TypeError(f"unsupported import source: {type(source).__name__}")
 
@@ -109,7 +111,7 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
 
     def warn(msg: str) -> None:
         warnings.append(msg)
-        print(f"WARNING: {msg}", file=sys.stderr)
+        logger.warning("%s", msg)
 
     rr = None if repo_root is None else str(repo_root)
     tracker = str(config.tracker_dir(rr))
@@ -234,13 +236,13 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
             if fi:
                 try:
                     set_file_impact(local, fi, repo_root=rr)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001 — per-row fail-open: one bad file_impact never aborts the import run; collected via warn()
                     warn(f"could not set file_impact on {local}: {exc}")
             vc = rec.get("verify_commands")
             if vc:
                 try:
                     set_verify_commands(local, vc, repo_root=rr)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001 — per-row fail-open: one bad verify_commands never aborts the import run; collected via warn()
                     warn(f"could not set verify_commands on {local}: {exc}")
 
         # ── Pass 2d: comments (with provenance) ────────────────────────────────
@@ -255,7 +257,7 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
                 try:
                     comment(local, body, source=_provenance.comment_source(entry), repo_root=rr)
                     comments += 1
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001 — per-comment fail-open: one bad comment never aborts the import run; collected via warn()
                     warn(f"could not add comment on {local}: {exc}")
 
         # ── Pass 2e: statuses last (children before parents; archived via archive)
@@ -268,12 +270,12 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
             if status in ("in_progress", "blocked"):
                 try:
                     transition_compute(local, "open", status, repo_root=rr)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001 — per-row fail-open: one bad status transition never aborts the import run; collected via warn()
                     warn(f"could not set {local} to {status}: {exc}")
             elif status == "archived" or rec.get("archived"):
                 try:
                     archive(local, repo_root=rr)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001 — per-row fail-open: one bad archive never aborts the import run; collected via warn()
                     warn(f"could not archive {local}: {exc}")
             elif status == "closed":
                 closes.append((local, rec.get("ticket_id")))
@@ -286,7 +288,7 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
             # archived were set above); force is a safety net for non-closed children.
             try:
                 transition_compute(local, "open", "closed", force=True, repo_root=rr)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 — per-row fail-open: one bad close never aborts the import run; collected via warn()
                 warn(f"could not close {local}: {exc}")
     finally:
         # Restore the caller's push policy before the single final push.

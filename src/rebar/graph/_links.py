@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import glob as _glob
 import json
+import logging
 import os
-import sys
 
 from rebar.reducer._sort import prefix_ts as _prefix_ts
 
@@ -13,6 +13,8 @@ from ._graph import check_cycle_at_level, check_would_create_cycle
 from ._hierarchy import resolve_hierarchy_link
 from ._loader import reduce_ticket
 from ._status import _get_ticket_status
+
+logger = logging.getLogger(__name__)
 
 CANONICAL_RELATIONS: frozenset[str] = frozenset(
     # discovered_from: emergent-work provenance (B discovered_from A). Directional
@@ -170,7 +172,7 @@ def add_dependency(
             f"ERROR: redundant link — {source_id} and {target_id} are in a direct "
             "parent-child relationship"
         )
-        print(msg, file=sys.stderr)
+        logger.error(msg)
         raise ValueError(msg)
 
     resolved_source = str(hierarchy_result["resolved_source"])
@@ -178,12 +180,14 @@ def add_dependency(
     was_redirected = bool(hierarchy_result.get("was_redirected"))
 
     if was_redirected:
-        print(
-            f"REDIRECT: {source_id}\u2192{target_id} promoted to "
-            f"{resolved_source}\u2192{resolved_target}",
-            file=sys.stderr,
+        logger.warning(
+            "REDIRECT: %s\u2192%s promoted to %s\u2192%s",
+            source_id,
+            target_id,
+            resolved_source,
+            resolved_target,
         )
-        print(
+        print(  # noqa: T201 \u2014 stdout data: machine-readable redirect record (CLI contract)
             json.dumps(
                 {
                     "redirected": True,

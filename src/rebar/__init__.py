@@ -232,7 +232,11 @@ def _json_or(out: str, default):
 
     try:
         return _json.loads(out)
-    except Exception:
+    except _json.JSONDecodeError:
+        # Opportunistic narrowing (epic ring-gun-jot): the only expected failure here is
+        # malformed/empty JSON from a quality-gate subprocess; narrowed (with a regression
+        # test) from a blind `except` so a genuine bug (e.g. a TypeError) is no longer
+        # masked by the sentinel default. In the `import rebar` hot path.
         return default
 
 
