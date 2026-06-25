@@ -19,6 +19,7 @@ import importlib.util
 import json
 import logging
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -224,6 +225,51 @@ def _load_acli():
 
 class HeadDriftError(Exception):
     """Raised when the tickets-branch HEAD changes mid-pass, indicating concurrent write."""
+
+
+class CrossProjectTargetError(Exception):
+    """Raised when an outbound mutation targets a Jira project other than jira.project.
+
+    A fail-closed safety guard (bug 626d): stale bindings/labels from a prior sync to
+    another project would otherwise silently push updates/deletes at the wrong
+    project's issues. Raised pre-flight (before any Jira write) so a misconfiguration
+    cannot leak even a single mutation.
+    """
+
+
+# A real Jira issue key: PROJECTKEY-NUMBER (e.g. "DIG-1234"). Create mutations
+# carry a local-id placeholder here, not a real key, so they don't match.
+_JIRA_KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]*)-\d+$")
+
+
+def _cross_project_targets(
+    mutations: list[dict], configured_project: str
+) -> list[tuple[str, str]]:
+    """Return ``(key, project)`` for outbound update/delete mutations whose target
+    Jira key belongs to a project other than ``configured_project``.
+
+    Creates are excluded — their ``key`` is a local-id placeholder and they target
+    the configured project via the client's ``jira_project``. Inbound mutations are
+    excluded. An empty/unset ``configured_project`` disables the check (returns ``[]``)
+    so it never fires on shims that don't configure a project.
+    """
+    cp = (configured_project or "").upper()
+    if not cp:
+        return []
+    offenders: list[tuple[str, str]] = []
+    for m in mutations:
+        if (m.get("direction") or "outbound") == "inbound":
+            continue
+        if m.get("action") not in ("update", "delete"):
+            continue
+        key = str(m.get("key") or m.get("local_id") or "")
+        match = _JIRA_KEY_RE.match(key)
+        if not match:
+            continue
+        proj = match.group(1).upper()
+        if proj != cp:
+            offenders.append((key, match.group(1)))
+    return offenders
 
 
 def _load_concurrency():
@@ -568,6 +614,23 @@ def _apply_batch(
         if not write_result.ok:
             _handle_failed_write_result(write_result, pass_id)
         return manifest_path
+
+    # Cross-project safety guard (bug 626d): refuse — BEFORE issuing any Jira
+    # write — to push outbound updates/deletes at issues outside the configured
+    # jira.project. Stale bindings/labels from a prior sync to another project
+    # would otherwise silently mutate the wrong project's issues. Fail-closed:
+    # abort the whole pass (no partial writes) so a misconfiguration cannot leak.
+    offenders = _cross_project_targets(mutations, _s.project)
+    if offenders:
+        sample = ", ".join(f"{k}(→{p})" for k, p in offenders[:5])
+        more = " …" if len(offenders) > 5 else ""
+        raise CrossProjectTargetError(
+            f"refusing to apply {len(offenders)} outbound mutation(s) targeting a "
+            f"Jira project other than configured {_s.project!r}: {sample}{more}. "
+            f"The store carries bindings/labels for another project; re-target it to "
+            f"{_s.project!r} (clear stale bindings + strip foreign id labels) before "
+            f"syncing — see docs/jira-sync-setup.md."
+        )
 
     # Pin HEAD before first mutation
     head_pin = concurrency.snapshot_head(repo_root)

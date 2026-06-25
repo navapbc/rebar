@@ -37,6 +37,13 @@ def _load_applier():
     return mod
 
 
+@pytest.fixture(autouse=True)
+def _dso_project(monkeypatch):
+    # DSO-keyed drift fixtures: pin the configured project to DSO (overriding the
+    # conftest DIG default) so the bug-626d cross-project guard doesn't flag them.
+    monkeypatch.setenv("JIRA_PROJECT", "DSO")
+
+
 @pytest.fixture(scope="module")
 def applier():
     """Load the applier module, failing all tests if absent."""

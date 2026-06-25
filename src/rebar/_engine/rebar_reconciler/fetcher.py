@@ -15,6 +15,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import sys
 import urllib.error
 from pathlib import Path
@@ -33,18 +34,52 @@ from pathlib import Path
 #       intentionally NOT in the snapshot. They remain in Jira but are
 #       outside the bridge's reconciliation window.
 #
-# "Done" is the only Done-equivalent status in the DIG workflow (probe
-# confirmed: To Do, In Progress, Done — no Closed / Resolved). If the
-# DIG workflow adds a second closed-equivalent status, this list must
-# extend OR the queries must move to `statusCategory != "Done"`.
-JQL_ACTIVE = 'project = DIG AND status != "Done"'
-JQL_DONE_RECENT = 'project = DIG AND status = "Done" ORDER BY updated DESC'
+# The inbound search JQL is scoped to the CONFIGURED jira.project, built per
+# pass from the resolved project key (see ``_build_snapshot``). It was previously
+# hardcoded to ``project = DIG`` (bug 626d): the reconciler fetched DIG's issues
+# regardless of ``[jira] project`` / ``JIRA_PROJECT``, so re-pointing the bridge at
+# a different project still pulled (and tried to mutate) the wrong project. The
+# builders below derive the project from config; an absent/invalid project key is
+# rejected (fail-closed) rather than silently searching all projects.
+#
+# "Done" is assumed the only Done-equivalent status (probe confirmed on DIG:
+# To Do, In Progress, Done — no Closed / Resolved). A project whose workflow adds
+# another closed-equivalent status would need this to move to
+# `statusCategory != "Done"`.
+_PROJECT_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
-# Public JQL list (ordered: active first, then Done-recent). Exposed for
-# observability tests that want to assert "the fetcher emitted these JQL
-# strings". DO NOT export the single legacy `JQL` constant any more —
-# bug f6cc replaced the single-query design.
-JQLS: tuple[str, ...] = (JQL_ACTIVE, JQL_DONE_RECENT)
+
+def _validate_project_key(project: str) -> str:
+    """Return ``project`` if it is a syntactically valid Jira project key, else raise.
+
+    Guards both correctness (an empty key would make ACLI search every project) and
+    JQL-injection safety (the key is interpolated unquoted into the JQL).
+    """
+    if not project or not _PROJECT_KEY_RE.match(project):
+        raise ValueError(
+            f"inbound fetch requires a valid jira.project key "
+            f"(JIRA_PROJECT / [jira] project); got {project!r}. "
+            f"Refusing to search Jira unscoped."
+        )
+    return project
+
+
+def jql_active(project: str) -> str:
+    """Active-working-set query (``status != \"Done\"``) scoped to ``project``."""
+    return f'project = {_validate_project_key(project)} AND status != "Done"'
+
+
+def jql_done_recent(project: str) -> str:
+    """Recent-Done query (``ORDER BY updated DESC``) scoped to ``project``."""
+    return (
+        f'project = {_validate_project_key(project)} '
+        f'AND status = "Done" ORDER BY updated DESC'
+    )
+
+
+def jqls_for(project: str) -> tuple[str, str]:
+    """The ordered (active, done-recent) JQL pair for ``project``."""
+    return (jql_active(project), jql_done_recent(project))
 
 # Hard ACLI per-query ceiling. Raised from 1,000 to 1,200 in bug f6cc
 # after empirical confirmation that the DIG working set has 1,050 active
@@ -55,7 +90,7 @@ JQLS: tuple[str, ...] = (JQL_ACTIVE, JQL_DONE_RECENT)
 _ACLI_CEILING = 1200
 
 # Cap on the Done snapshot — keep the N most-recently-updated Done issues
-# only. ORDER BY updated DESC in JQL_DONE_RECENT ensures the cap selects
+# only. ORDER BY updated DESC in jql_done_recent() ensures the cap selects
 # the most-recently-updated items; older Done items are dropped at the
 # fetch boundary (a documented trade-off in bug f6cc).
 _DONE_RECENT_CAP = 1000
@@ -231,10 +266,11 @@ def _build_snapshot(
 
     This is the snapshot-BUILDING body shared by :func:`fetch_snapshot` (which
     writes the result) and :func:`compute_snapshot` (which returns it without
-    writing). Issues two queries in order (see ``JQLS``):
+    writing). Issues two queries in order (see ``jqls_for``), both scoped to the
+    configured ``jira.project``:
 
-      1. ``JQL_ACTIVE``  — active working set (``status != "Done"``).
-      2. ``JQL_DONE_RECENT`` — Done issues, ``ORDER BY updated DESC``,
+      1. ``jql_active(project)``  — active working set (``status != "Done"``).
+      2. ``jql_done_recent(project)`` — Done issues, ``ORDER BY updated DESC``,
          capped at ``_DONE_RECENT_CAP``.
 
     Each query paginates via ``_iter_pages``. Results are merged into a
@@ -272,10 +308,13 @@ def _build_snapshot(
     # Per-query caps: active is uncapped (the ACLI ceiling is its only
     # bound); Done is intentionally capped to the most-recently-updated
     # _DONE_RECENT_CAP issues. Stored as a tuple of (jql, cap) so the
-    # iteration is straightforward and observable.
+    # iteration is straightforward and observable. Both queries are scoped to
+    # the configured jira.project (bug 626d) — an absent/invalid project key
+    # raises in jql_active(), failing the pass closed rather than searching all
+    # projects.
     queries: tuple[tuple[str, int | None], ...] = (
-        (JQL_ACTIVE, None),
-        (JQL_DONE_RECENT, _DONE_RECENT_CAP),
+        (jql_active(_s.project), None),
+        (jql_done_recent(_s.project), _DONE_RECENT_CAP),
     )
 
     for jql, cap in queries:

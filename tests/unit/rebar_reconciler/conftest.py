@@ -102,6 +102,24 @@ def _sandbox_repo_root(tmp_path, monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _default_jira_project(monkeypatch):
+    """Pin ``JIRA_PROJECT=DIG`` for reconciler unit tests (overridable per-test).
+
+    Bug 626d made the configured project load-bearing: the inbound JQL is now
+    scoped to ``jira.project`` (an empty key raises), and the outbound applier
+    refuses to target a project other than the configured one. These legacy tests
+    use DIG-keyed fixtures and were written against the historical implicit
+    ``project_default="DIG"``. Config discovery would otherwise pick up whatever
+    ``[jira] project`` the repo's ``rebar.toml`` carries (REB), breaking
+    hermeticity. The env override (env > config) pins DIG deterministically; a test
+    that needs another project sets ``JIRA_PROJECT`` itself (it runs after this
+    fixture and wins).
+    """
+    monkeypatch.setenv("JIRA_PROJECT", "DIG")
+    yield
+
+
 @pytest.fixture
 def state_divergence():
     """State-class divergence: local 'In Progress', remote 'Done'."""
