@@ -30,7 +30,6 @@ import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from typing import Any
 
 from rebar.llm.config import LLMConfig
@@ -61,76 +60,10 @@ _pass1_with_ladder = sizing.pass1_with_ladder
 _shed_to_budget = sizing.shed_to_budget
 
 
-# Pass-4 move registry (moves 1-9,11,12 with LOCKED templates; project-extensible
-# via .rebar later — child 75a9). The LLM picks the move + names a {subject}; the
-# prose is rendered deterministically from these templates (it never authors prose).
-MOVE_REGISTRY: dict[str, dict[str, str]] = {
-    "1": {
-        "name": "spike",
-        "template": "Consider a short spike to de-risk {subject} before committing the plan.",
-    },
-    "2": {
-        "name": "prior-art research",
-        "template": "Research prior art / OSS for {subject} before building it custom.",
-    },
-    "3": {
-        "name": "pre-mortem",
-        "template": "Run a quick pre-mortem on {subject}: how could this plan fail?",
-    },
-    "4": {
-        "name": "riskiest-assumption test",
-        "template": "Test the riskiest assumption behind {subject} first.",
-    },
-    "5": {
-        "name": "weigh alternatives",
-        "template": "Weigh at least one structural alternative for {subject}.",
-    },
-    "6": {
-        "name": "specification by example",
-        "template": "Pin down {subject} with a concrete worked example.",
-    },
-    "7": {
-        "name": "thin vertical slice",
-        "template": "Prove {subject} end-to-end with a thin vertical slice first.",
-    },
-    "8": {
-        "name": "ADR / one-way-door",
-        "template": "Record an ADR for {subject} — it reads like a one-way door.",
-    },
-    "9": {
-        "name": "plan the verification",
-        "template": "Plan how {subject} will be verified before implementing it.",
-    },
-    "11": {
-        "name": "propagate to children",
-        "template": "Propagate the revision for {subject} to the child tickets.",
-    },
-    "12": {
-        "name": "generalize the finding",
-        "template": "Generalize {subject} across the rest of the work.",
-    },
-}
-
-
-def load_move_registry(repo_root=None) -> dict[str, dict[str, str]]:
-    """The Pass-4 move registry: the built-in moves PLUS project extensions from
-    ``.rebar/plan_review_moves.json`` (a ``{move_id: {name, template}}`` map; a
-    project entry adds a new move or overrides a built-in by id). The template must
-    contain a single ``{subject}`` placeholder — the LLM never authors prose.
-    Best-effort: a missing/malformed file → built-ins only (never crashes the review)."""
-    moves = {mid: dict(m) for mid, m in MOVE_REGISTRY.items()}
-    if not repo_root:
-        return moves
-    try:
-        path = Path(repo_root) / ".rebar" / "plan_review_moves.json"
-        if path.is_file():
-            extra = json.loads(path.read_text(encoding="utf-8"))
-            for mid, m in (extra or {}).items():
-                if isinstance(m, dict) and m.get("name") and "{subject}" in str(m.get("template")):
-                    moves[str(mid)] = {"name": m["name"], "template": m["template"]}
-    except Exception:  # noqa: BLE001 — project move file is best-effort
-        pass
-    return moves
+# The Pass-4 move registry + loader live with their consumer (pass4_coach) in
+# :mod:`.passes`; re-exported here for the historical ``orchestrator.MOVE_REGISTRY`` /
+# ``orchestrator.load_move_registry`` call sites (module-size seam, child 75a9).
+from .passes import MOVE_REGISTRY, load_move_registry  # noqa: E402,F401
 
 
 # ── context assembly ─────────────────────────────────────────────────────────────
