@@ -80,7 +80,7 @@ def _parent_status_uuid(ticket_dir_path: str) -> str | None:
             with open(most_recent, encoding="utf-8") as sf:
                 prev = json.load(sf)
             return prev.get("uuid") or None
-    except Exception:
+    except Exception:  # noqa: BLE001 — best-effort prev-STATUS read; fall open to None (no expected-status guard)
         return None
     return None
 
@@ -233,7 +233,7 @@ def transition_core(
             except OSError:
                 pass
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — fail-closed: any write failure re-raises as CommandError (exit 1)
         raise CommandError(f"Error: {exc}", returncode=1) from None
     finally:
         handle.release()
@@ -429,7 +429,7 @@ def claim_core(
                 except OSError:
                     pass
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — fail-closed: any claim-write failure re-raises as CommandError (exit 1)
         raise CommandError(f"Error: {exc}", returncode=1) from None
     finally:
         handle.release()

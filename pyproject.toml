@@ -224,9 +224,10 @@ select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201"]
 "src/rebar/llm/pai_tools.py" = ["BLE001"]
 "src/rebar/llm/parity.py" = ["BLE001"]
 "src/rebar/llm/workflow/*" = ["BLE001"]
-# CLI surface — swept by fd72; `_commands` keeps T201 (CLI presentation data prints)
-"src/rebar/_cli/*" = ["BLE001"]
-"src/rebar/_commands/*" = ["BLE001", "T201"]
+# CLI surface — BLE001 SWEPT by fd72 (_cli has no prints; removed entirely). `_commands`
+# is the CLI presentation layer (usage strings, `Error:` messages, `exc.message`, and
+# command data output) so it KEEPS T201; its broad-excepts were swept.
+"src/rebar/_commands/*" = ["T201"]
 "src/rebar/_alias.py" = ["T201"]
 # reconciler subprocess — swept LAST by 0569; T201 are operational stderr prints
 "src/rebar/_engine/rebar_reconciler/*" = ["BLE001", "T201"]

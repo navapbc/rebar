@@ -15,6 +15,7 @@ claim's error-envelope (ticket_not_found / concurrency_conflict / claim_failed) 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -27,6 +28,8 @@ from rebar._engine_support.output import OutputFormatError, error_envelope, pars
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar.graph._unblock import batch_close_operations
 from rebar.reducer import reduce_ticket
+
+logger = logging.getLogger(__name__)
 
 _VALID_STATUSES = ("open", "in_progress", "closed", "blocked")
 
@@ -140,8 +143,10 @@ def _compact_on_close(repo_root: str, ticket_id: str) -> None:
     try:
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             _compact.compact_cli([ticket_id, "--threshold=0", "--skip-sync"], repo_root=repo_root)
-    except Exception:
-        pass
+    except Exception:  # noqa: BLE001 — compact-on-close is non-blocking; broad-but-logged, the close still stands
+        logger.warning(
+            "compact-on-close failed for %s; continuing (close stands)", ticket_id, exc_info=True
+        )
 
 
 def _completion_precheck(
@@ -202,7 +207,7 @@ def _completion_precheck(
         # feature in one run (impractical — it blows the step budget). The standalone
         # `rebar verify-completion <id> --graph` remains available for a deep human review.
         result = llm.verify_completion(ticket_id, graph=False, repo_root=repo_root)
-    except Exception as exc:  # missing extra/key OR any verifier failure -> fail-closed
+    except Exception as exc:  # noqa: BLE001 — missing extra/key OR any verifier failure -> fail-closed (re-raise CommandError)
         raise CommandError(
             f"Error: cannot close {ticket_id}: completion verification could not run ({exc}). "
             "The completion-verification gate is enabled "
@@ -383,8 +388,12 @@ def transition_compute(
             from rebar._commands import leaf
 
             leaf.comment(ticket_id, body, repo_root=repo_root)
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001 — best-effort force-close audit comment; broad-but-logged, close proceeds
+            logger.warning(
+                "could not write FORCE_CLOSE audit comment on %s; continuing",
+                ticket_id,
+                exc_info=True,
+            )
 
     if target_status == "closed":
         _compact_on_close(repo_root_str, ticket_id)
@@ -415,7 +424,7 @@ def _short_head(tracker: str) -> str:
             text=True,
             timeout=5,
         ).stdout.strip()
-    except Exception:
+    except Exception:  # noqa: BLE001 — short-HEAD is a session-id nicety; fall open to "" if git is unavailable
         return ""
 
 
@@ -467,7 +476,7 @@ def _latest_live_archived_uuid(ticket_dir: str) -> str:
         try:
             with open(os.path.join(ticket_dir, fname), encoding="utf-8") as f:
                 ev = json.load(f)
-        except Exception:
+        except Exception:  # noqa: BLE001 — per-file best-effort event parse; skip an unreadable/corrupt event file
             continue
         et = ev.get("event_type")
         if et == "ARCHIVED":

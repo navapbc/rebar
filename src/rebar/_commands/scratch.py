@@ -141,7 +141,7 @@ def _set(args: list[str]) -> int:
             pass
         finally:
             os.close(dir_fd)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — atomic-write failure surfaced to stderr below; clean up temp + return 2
         for cleanup in (lambda: os.close(fd), lambda: os.unlink(tmp_path)):
             try:
                 cleanup()

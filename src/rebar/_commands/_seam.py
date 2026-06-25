@@ -143,7 +143,7 @@ def current_tags(ticket_id: str, tracker: Path) -> list[str]:
 
     try:
         return list(reduce_ticket(str(tracker / ticket_id)).get("tags") or [])
-    except Exception:
+    except Exception:  # noqa: BLE001 — bash tag helpers swallow show failures too; fall open to no observed tags
         return []
 
 

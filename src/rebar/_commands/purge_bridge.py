@@ -46,7 +46,7 @@ def _project_key(ticket_dir: str) -> str:
             ev = json.load(fh)
         jira_key = ev.get("data", {}).get("jira_key", "")
         return jira_key.split("-")[0] if "-" in jira_key else ""
-    except Exception:
+    except Exception:  # noqa: BLE001 — unreadable/malformed CREATE event yields no project key; fall open to ""
         return ""
 
 

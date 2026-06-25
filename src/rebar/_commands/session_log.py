@@ -69,7 +69,7 @@ def _is_live_session_log(ticket_id: str, tracker: str) -> bool:
         return False
     try:
         state = reduce_ticket(d)
-    except Exception:
+    except Exception:  # noqa: BLE001 — unreadable/corrupt ticket is not a live session_log; fall open to False
         return False
     return (
         isinstance(state, dict)

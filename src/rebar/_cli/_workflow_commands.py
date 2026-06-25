@@ -270,7 +270,7 @@ def _workflow_validate(args) -> int:
     # a .rebar/prompts/<id>.md file (repo-scoped).
     try:
         repo_root = str(config.repo_root())
-    except Exception:  # not in a repo — skip the repo-scoped prompt-file lookup
+    except Exception:  # noqa: BLE001 — not in a repo — skip the repo-scoped prompt-file lookup
         repo_root = None
     findings = _lint.lint_workflow(
         text,
