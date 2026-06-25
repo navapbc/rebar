@@ -227,6 +227,10 @@ class _RunCtx:
     # worker threads, so the only thing that actually overlaps is the in-flight agent
     # call. ``None`` on the serial path — :func:`_guard` is then a no-op.
     lock: Any = None
+    # The batch-runner seam used by a v3 ``batch`` step (set by run_workflow; defaults to
+    # the reference DefaultBatchRunner). The interpreter hands it the INCLUDED criteria and
+    # stores its opaque journaled plan as the step output, never branching on its internals.
+    batch_runner: Any = None
 
 
 def _guard(rc: _RunCtx):
@@ -337,6 +341,54 @@ def _execute_frame(
             _run_loop(rc, step, sid, frame_key, cur, prefixes, bindings, iteration)
         elif kind == "map":
             _run_map(rc, step, sid, frame_key, cur, prefixes, bindings, iteration)
+        elif kind == "batch":
+            _run_batch(rc, step, sid, frame_key, prefixes, bindings, iteration)
+
+
+def _run_batch(rc, step, sid, frame_key, prefixes, bindings, iteration) -> None:
+    """Execute a v3 ``batch`` step: resolve each criterion's ``when`` (inclusion, the same
+    rule as a step's ``if:``), then DELEGATE the budgeted batch orchestration to the
+    batch-runner. The runner journals an OPAQUE plan; the interpreter stores it as part of
+    the step's output but NEVER reads/branches on its internals. Idempotent like a leaf:
+    a committed marker replays its recorded output instead of re-running."""
+    from .executor import BatchRunRequest, DefaultBatchRunner
+
+    with _guard(rc):
+        prior = rc.rec.completed_step(rc.run_id, frame_key)
+        if prior is not None and prior.get("status") == "succeeded":
+            rc.outputs[frame_key] = dict(prior.get("outputs", {}))
+            rc.statuses[frame_key] = "succeeded"
+            return
+
+    batch = step.get("batch") or {}
+    all_criteria = list(batch.get("criteria") or [])
+    # Inclusion: a criterion runs unless its `when` resolves falsy — exactly the `if:` rule,
+    # reused by routing each `when` through _guard_scoped (frame scope, fail-closed, truthy).
+    included = [
+        c for c in all_criteria if _guard_scoped({"if": c.get("when")}, rc, prefixes, bindings)
+    ]
+
+    req = BatchRunRequest(
+        finder=batch.get("prompt"),
+        criteria=tuple(included),
+        usd_budget=batch.get("usd_budget"),
+        model_ladder=tuple(batch.get("model_ladder") or []),
+        workflow=rc.doc,
+        target_ticket=rc.target_ticket,
+        repo_root=rc.repo_root,
+        run_id=rc.run_id,
+        step_id=sid,
+    )
+    runner = rc.batch_runner if rc.batch_runner is not None else DefaultBatchRunner()
+    result = runner.run(req, rc.runner)
+
+    # The runner's outputs (findings + the OPAQUE batch_plan) plus the inclusion record.
+    # The interpreter copies the dict wholesale and never inspects batch_plan internals.
+    outputs = dict(result.outputs)
+    outputs["included"] = [c.get("prompt") for c in included]
+    outputs["skipped"] = [c.get("prompt") for c in all_criteria if c not in included]
+    _commit_state(rc, frame_key, outputs, "succeeded")
+    _maybe_record_control(rc, sid, frame_key, iteration, "batch", outputs)
 
 
 def _run_leaf(rc, step, sid, frame_key, kind, prefixes, bindings, iteration) -> None:

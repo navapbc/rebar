@@ -20,6 +20,26 @@ from rebar.llm.workflow import schema as S
 # loops, nested control, unsorted needs, if-guard, explicit type, agent config,
 # XML-hostile values).
 _ROUND_TRIP_CASES = {
+    "batch_with_criteria": {
+        "schema_version": "3",
+        "name": "a",
+        "steps": [
+            {"id": "t", "uses": "o"},
+            {
+                "id": "f",
+                "needs": ["t"],
+                "batch": {
+                    "prompt": "code-quality",
+                    "criteria": [
+                        {"prompt": "tests"},
+                        {"prompt": "security", "when": "${{ steps.t.outputs.sec }}"},
+                    ],
+                    "usd_budget": 2.0,
+                    "model_ladder": ["m1", "m2"],
+                },
+            },
+        ],
+    },
     "unsorted_needs": {
         "schema_version": "2",
         "name": "a",
@@ -180,6 +200,31 @@ def test_round_trip_identity_property(name):
     doc = _ROUND_TRIP_CASES[name]
     back = bpmn.bpmn_to_ir(bpmn.ir_to_bpmn(doc))
     assert _norm(back) == _norm(doc), f"{name} did not round-trip"
+
+
+def test_batch_step_gets_a_di_shape_and_edges():
+    # A `batch` step is a diagram leaf (serviceTask): it must get a DI BPMNShape (so
+    # bpmn-js can render it) AND its needs/terminal flows must survive into the DI
+    # (the layout drops any edge whose endpoints lack a shape). Regression guard for
+    # batch being omitted from _layout_frame's leaf branch.
+    di = "{" + bpmn._NS["bpmndi"] + "}"
+    xml = bpmn.ir_to_bpmn(_ROUND_TRIP_CASES["batch_with_criteria"])
+    root = ET.fromstring(xml.encode("utf-8"))
+    shapes = {shp.get("bpmnElement") for shp in root.iter(f"{di}BPMNShape")}
+    assert "f" in shapes, "batch step got no DI shape — bpmn-js cannot render it"
+    edges = {
+        (e.get("sourceRef"), e.get("targetRef")) for e in root.iter(_q("bpmn", "sequenceFlow"))
+    }
+    di_edge_ids = {e.get("bpmnElement") for e in root.iter(f"{di}BPMNEdge")}
+    # the t->f needs edge and the f->end terminal flow both touch the batch node and
+    # must be present in the DI, not silently dropped.
+    assert ("t", "f") in edges
+    flow_ids = {
+        e.get("id")
+        for e in root.iter(_q("bpmn", "sequenceFlow"))
+        if e.get("sourceRef") == "f" or e.get("targetRef") == "f"
+    }
+    assert flow_ids <= di_edge_ids, "a batch-incident flow was dropped from the DI"
 
 
 def test_editor_save_with_start_end_events_does_not_fabricate_needs():

@@ -134,3 +134,26 @@ def editor_server(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+@pytest.fixture
+def editor_server_batch(tmp_path):
+    """Like :func:`editor_server` but serves the v3 ``batch-demo`` fixture, so the browser
+    tier can select a `batch` step and exercise the criteria-list add/remove/edit UI (A4)."""
+    import shutil
+
+    from rebar.llm.workflow import editor as _editor
+
+    sample = Path(__file__).parent / "fixtures" / "batch-demo.yaml"
+    if not sample.is_file() or not _editor.assets_available():
+        pytest.skip("e2e(browser): batch fixture workflow or built editor bundle missing")
+    ir = tmp_path / "batch-demo.yaml"
+    shutil.copy(sample, ir)
+    server, host, port, _token = _editor.edit_workflow(
+        ir, open_browser=False, serve_forever=False, host="127.0.0.1"
+    )
+    try:
+        yield f"http://{host}:{port}/", ir
+    finally:
+        server.shutdown()
+        server.server_close()

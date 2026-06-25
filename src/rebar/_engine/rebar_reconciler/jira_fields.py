@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 
+from rebar_reconciler.adf import fit_text_to_adf_limit as _fit_description_to_adf_limit
 from rebar_reconciler.comment_limits import (  # shared send/diff truncation
     _JIRA_COMMENT_MAX_CHARS,
 )
@@ -135,6 +136,32 @@ def _sanitize_summary(summary: str) -> str:
         len(truncated),
     )
     return truncated
+
+
+def _sanitize_description(description: str) -> str:
+    """Truncate an over-length description so its ADF representation fits Jira.
+
+    Jira enforces the description limit on the ADF document, not the plain text, and
+    ACLI surfaces an over-length ADF as a create/edit failure that aborts the WHOLE
+    reconciler pass (bug 626d follow-up — a 46k-char epic, whose ADF was ~50k, killed
+    a live cutover pass). Fit via the shared ``adf.fit_text_to_adf_limit`` so the
+    differ's description comparison applies the IDENTICAL transform and the diff
+    converges. Send-side only — the local store is never mutated; a warning is
+    emitted so an operator can investigate.
+    """
+    if not isinstance(description, str):
+        raise ValueError(
+            f"Description must be str, got {type(description).__name__}: {description!r}"
+        )
+    fitted = _fit_description_to_adf_limit(description)
+    if len(fitted) != len(description):
+        logger.warning(
+            "Description ADF exceeded Jira's limit (%d plain chars); truncated to %d "
+            "chars so its ADF representation fits",
+            len(description),
+            len(fitted),
+        )
+    return fitted
 
 
 def _sanitize_comment(body: str) -> str:

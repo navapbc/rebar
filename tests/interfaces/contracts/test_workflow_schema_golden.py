@@ -87,8 +87,9 @@ def test_code_review_example_shape_frozen() -> None:
 
 def test_input_schema_registry_lists_dsl_versions() -> None:
     # Every DSL version this build understands is wired into the schema registry,
-    # and the current authoring version is v2.
+    # and the current authoring version is v3 (v3 = v2 + the `batch` construct).
     assert schemas.WORKFLOW_V1 in schemas.INPUT_SCHEMAS
     assert schemas.WORKFLOW_V2 in schemas.INPUT_SCHEMAS
-    assert S.CURRENT_SCHEMA_VERSION == "2"
-    assert S.SUPPORTED_SCHEMA_VERSIONS == ("1", "2")
+    assert schemas.WORKFLOW_V3 in schemas.INPUT_SCHEMAS
+    assert S.CURRENT_SCHEMA_VERSION == "3"
+    assert S.SUPPORTED_SCHEMA_VERSIONS == ("1", "2", "3")

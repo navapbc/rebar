@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=https://github.com/navapbc/rebar/schemas/workflow.v3.schema.json
+#
+# DISPOSABLE de-risking skeleton (epic A / story A3 — sage-votary-logic). It proves the
+# 4-pass review SHAPE that epic B migrates plan-review onto runs end-to-end on the v3
+# engine, OFFLINE (--dry-run / FakeAgentRunner, no tokens): an overlay precompute ->
+# a `batch` finder over an authored, prompt-library-backed `criteria` list (one criterion
+# conditionally included via `when`) -> one aggregate verify -> a deterministic decide.
+#
+# It uses catalog prompt-ids (code-quality/security/tests/ticket-quality/completion-verifier)
+# because the plan-review criterion prompts are NOT yet in the workflow prompt catalog — a
+# de-risking finding recorded for epic B (the criteria-library<->prompt-library wiring).
+#
+# Epic B REMOVES this file after the migration; meanwhile it is the visual-editing sample.
+schema_version: "3"
+name: review_skeleton
+description: Disposable 4-pass review skeleton proving overlay + batch + verify + decide on the v3 engine.
+
+inputs:
+  plan:
+    type: string
+    required: true
+
+steps:
+  # 1. Overlay precompute: turn input signals into boolean triggers an `if:`/`when` reads.
+  - id: triggers
+    uses: overlay_triggers
+    with:
+      text: ${{ inputs.plan }}
+      keyword_triggers:
+        security: [secret, password, token, credential]
+
+  # 2. Pass-1 finders: a `batch` runs the finder over the INCLUDED criteria in budgeted
+  #    batches. Each criterion is an authored, prompt-library-backed entry; `security`
+  #    fires only when the overlay trigger is truthy (conditional inclusion).
+  - id: finders
+    needs: [triggers]
+    batch:
+      prompt: code-quality
+      criteria:
+        - prompt: ticket-quality
+        - prompt: security
+          when: ${{ steps.triggers.outputs.security }}
+        - prompt: tests
+      usd_budget: 2.0
+      model_ladder: [claude-haiku-4-5, claude-sonnet-4-6, claude-opus-4-8]
+
+  # 3. Pass-2 verify: ONE aggregate verifier call over the Pass-1 findings.
+  - id: verify
+    prompt: completion-verifier
+    needs: [finders]
+    mode: findings
+    with:
+      findings: ${{ steps.finders.outputs.findings }}
+
+  # 4. Pass-3 decide: deterministic gate over the verified findings (no tokens).
+  - id: decide
+    uses: gate
+    needs: [verify]
+    with:
+      findings: ${{ steps.verify.outputs.findings }}
+      policy: default
