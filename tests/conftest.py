@@ -156,14 +156,18 @@ def _network_guard(request: pytest.FixtureRequest) -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 def _no_repo_root_leaks() -> Iterator[None]:
-    before = set(os.listdir(_REPO_ROOT))
+    from _isolation import repo_leak_snapshot as _repo_leak_snapshot
+
+    before = _repo_leak_snapshot(_REPO_ROOT)
     try:
         yield
     finally:
-        after = set(os.listdir(_REPO_ROOT))
+        after = _repo_leak_snapshot(_REPO_ROOT)
         leaked = after - before
         if leaked:
-            for name in leaked:
+            # Deepest-first so a leaked file under a watched dir is removed before
+            # we would touch the dir itself (top-level names sort shorter).
+            for name in sorted(leaked, key=len, reverse=True):
                 target = _REPO_ROOT / name
                 if target.is_dir():
                     shutil.rmtree(target, ignore_errors=True)
