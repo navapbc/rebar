@@ -274,6 +274,13 @@ def main(argv: list[str] | None = None) -> int:
       5. acquire_pass_lock  — claim the lock for this pass
       6. try/finally        — run_pass() with guaranteed release_pass_lock (dd-3)
     """
+    # Observability floor: install a stderr handler on the reconciler's own logger
+    # root. The reconciler's modules log under the sibling ``rebar_reconciler.*`` root
+    # (it is imported top-level), so this is distinct from the ``rebar`` root handler.
+    from rebar._logging import install_stderr_handler
+
+    install_stderr_handler("rebar_reconciler")
+
     parser = argparse.ArgumentParser(prog="rebar_reconciler")
     parser.add_argument(
         "--repo-root",

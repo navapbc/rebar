@@ -899,6 +899,12 @@ def build_server():
 
 
 def main() -> None:
+    # Observability floor: install a stderr handler on the ``rebar`` root logger so
+    # swallowed failures surface. Never stdout — MCP-over-stdio reserves stdout for
+    # JSON-RPC framing. See ``rebar._logging`` for the convention.
+    from rebar._logging import install_stderr_handler
+
+    install_stderr_handler("rebar")
     build_server().run()
 
 
