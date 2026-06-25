@@ -24,3 +24,10 @@ require_plan_review_for_claim = true
 # Enable the LLM agent operations over the MCP server (review_ticket / review_code /
 # scan_spec / verify_completion). They make live, billable LLM calls.
 allow_llm = true
+
+[jira]
+# Jira reconciliation target (Atlassian-standard, UNPREFIXED env overrides).
+# The SECRET `JIRA_API_TOKEN` is env-only — never a config key (see docs/config.md).
+url     = "https://navasage.atlassian.net"   # env JIRA_URL
+user    = "joeoakhart@navapbc.com"           # env JIRA_USER
+project = "REB"                              # env JIRA_PROJECT; the "Rebar" project

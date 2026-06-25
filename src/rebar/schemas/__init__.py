@@ -67,6 +67,7 @@ __all__ = [
     "COMMON",
     "WORKFLOW_V1",
     "WORKFLOW_V2",
+    "WORKFLOW_V3",
     "WORKFLOW_RUN",
     "GROUNDING",
     "GROUNDING_INFO",
@@ -134,6 +135,12 @@ WORKFLOW_V1 = "workflow.v1"
 # INPUT/validation schema (a workflow file is validated against it), NOT a command
 # output, so it is in INPUT_SCHEMAS and absent from OUTPUT_SCHEMAS.
 WORKFLOW_V2 = "workflow.v2"
+# rebar.llm.workflow — the v3 DSL schema: v2 plus the `batch` control construct (a thin
+# step delegating budgeted batch orchestration over a prompt-library-backed `criteria`
+# list to a runner). The current authoring version; v1/v2 files are up-converted to v3 at
+# read time by the migrate shim. Like v1/v2 it is an INPUT/validation schema, exempt from
+# OUTPUT_SCHEMAS via INPUT_SCHEMAS.
+WORKFLOW_V3 = "workflow.v3"
 # rebar.grounding — the normalized three-valued evidence contract (epic 8f6c, story
 # 0b2b). Authored as the single source of truth for the code-grounding oracle's
 # evidence model and validated directly via schemas.validator(GROUNDING); it is an
@@ -162,7 +169,7 @@ FETCH_TICKET_OUTPUT = "fetch_ticket_output"
 # workflow parser/linter; the grounding library) and intentionally absent from
 # OUTPUT_SCHEMAS; the coverage-guard test exempts this set so an authored-but-unwired
 # check still catches a forgotten OUTPUT schema while permitting these.
-INPUT_SCHEMAS: frozenset[str] = frozenset({WORKFLOW_V1, WORKFLOW_V2, GROUNDING})
+INPUT_SCHEMAS: frozenset[str] = frozenset({WORKFLOW_V1, WORKFLOW_V2, WORKFLOW_V3, GROUNDING})
 
 # Per-step I/O CONTRACT schemas (workflow authoring v2): a step's declared input and
 # output shapes, resolved by name from `@register_step`. Like INPUT_SCHEMAS these are

@@ -43,8 +43,8 @@ from rebar.llm.errors import (
 # is a hard upgrade-rebar error; lower versions are up-converted by the migrate
 # shim before validation. Bump this (and add workflow.vN.schema.json + a shim) when
 # the DSL gains a breaking change.
-CURRENT_SCHEMA_VERSION = "2"
-SUPPORTED_SCHEMA_VERSIONS = ("1", "2")
+CURRENT_SCHEMA_VERSION = "3"
+SUPPORTED_SCHEMA_VERSIONS = ("1", "2", "3")
 
 # Pre-parse byte cap. Workflow files are small, hand-authored documents; a hard
 # ceiling bounds the YAML parser's work and is a cheap denial-of-service guard.
@@ -327,11 +327,11 @@ def _structural_fallback(doc: dict[str, Any]) -> list[str]:
         # | map (the v2 control constructs). The full JSON Schema enforces the precise
         # oneOf + nested shapes; this shallow check only guards the lean (jsonschema-
         # absent) path against a step with zero or multiple top-level discriminators.
-        present = [k for k in ("uses", "prompt", "branch", "loop", "map") if k in step]
+        present = [k for k in ("uses", "prompt", "branch", "loop", "map", "batch") if k in step]
         if len(present) != 1:
             errors.append(
                 f"steps/{i}: a step needs exactly one of `uses` (scripted), `prompt` "
-                f"(agent), `branch`, `loop`, or `map`; found {present or 'none'}"
+                f"(agent), `branch`, `loop`, `map`, or `batch`; found {present or 'none'}"
             )
     return errors
 
@@ -342,18 +342,19 @@ CONTROL_KINDS = ("branch", "loop", "map")
 
 
 def step_kind(step: dict[str, Any]) -> str:
-    """Classify a step as ``"scripted"``, ``"agent"``, or a control construct
-    (``"branch"`` / ``"loop"`` / ``"map"``) from its shape.
+    """Classify a step as ``"scripted"``, ``"agent"``, a control construct
+    (``"branch"`` / ``"loop"`` / ``"map"``), or ``"batch"`` from its shape.
 
-    The DSL discriminator is the single control key present: ``uses`` (scripted),
-    ``prompt`` (agent), ``branch`` / ``loop`` / ``map`` (the v2 control constructs).
-    An explicit ``type`` is honored when present. Assumes a schema-valid step
-    (exactly one discriminator) — callers should validate first.
+    The DSL discriminator is the single key present: ``uses`` (scripted), ``prompt``
+    (agent), ``branch`` / ``loop`` / ``map`` (the v2 control constructs), or ``batch``
+    (the v3 delegating construct — NOT a control construct: it carries a criteria LIST,
+    not a nested step frame). An explicit ``type`` is honored when present. Assumes a
+    schema-valid step (exactly one discriminator) — callers should validate first.
     """
     declared = step.get("type")
-    if declared in ("scripted", "agent", *CONTROL_KINDS):
+    if declared in ("scripted", "agent", "batch", *CONTROL_KINDS):
         return declared
-    for kind in CONTROL_KINDS:
+    for kind in (*CONTROL_KINDS, "batch"):
         if kind in step:
             return kind
     return "agent" if "prompt" in step else "scripted"
@@ -378,6 +379,7 @@ _STEP_ORDER = (
     "branch",
     "loop",
     "map",
+    "batch",
     "needs",
     "with",
     "output_schema",
