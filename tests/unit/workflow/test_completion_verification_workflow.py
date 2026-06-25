@@ -192,6 +192,25 @@ def test_reconcile_pass_with_findings_flips_to_fail(monkeypatch):
     assert verdict["verdict"] == "FAIL", "a listed failure finding must block (PASS→FAIL)"
 
 
+def test_unsupported_file_citation_is_downgraded(monkeypatch):
+    # AC4(c): a finding citing a nonexistent file must be downgraded (kind file → source, the
+    # path/line fields dropped) by the reconcile op's resolve_citations pass — the same
+    # hallucinated-citation guardrail completion.py applies, exercised through the workflow.
+    finding = {
+        "criterion": "AC1",
+        "severity": "high",
+        "dimension": "completion",
+        "detail": "claims a file that does not exist",
+        "citations": [{"kind": "file", "path": "no/such/hallucinated_file.py", "line_start": 3}],
+    }
+    runner = _CannedRunner(verdict="FAIL", findings=[finding])
+    rec, _ = _run(runner, monkeypatch, children=[])
+    verdict = _terminal_verdict(rec)
+    cits = verdict["findings"][0]["citations"]
+    assert cits and cits[0]["kind"] == "source", "an unresolved file citation must be downgraded"
+    assert "path" not in cits[0], "the hallucinated path must be dropped on downgrade"
+
+
 def test_reconcile_matches_completion_py_tail(monkeypatch):
     # Parity: the workflow's reconcile produces the SAME completion_verdict as completion.py's
     # own normalize → resolve_citations → reconcile → validate tail on the same raw agent output.
