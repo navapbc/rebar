@@ -78,6 +78,9 @@ def outbound_differ_mod():
     _prev_adf = sys.modules.get(_ADF_KEY)
     adf_stub = types.ModuleType(_ADF_KEY)
     adf_stub.adf_to_text = lambda x: str(x) if isinstance(x, str) else ""
+    # bug 626d follow-up: the differ now fits over-length descriptions to Jira's ADF
+    # limit before comparison; these fixtures are short, so identity is correct.
+    adf_stub.fit_text_to_adf_limit = lambda x, **_kw: x
     sys.modules[_ADF_KEY] = adf_stub
     mod = _load_module("_test_bcs_outbound_differ", OUTBOUND_DIFFER_PATH)
     yield mod
