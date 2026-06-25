@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/completion_precheck_output.schema.json",
+  "title": "CompletionPrecheckOutput",
+  "description": "OUTPUT of `completion_precheck`: the deterministic child-closure gate result. `run_verify` is true iff the LLM verify should run (no blocking child-closure findings); `verdict` is the deterministic FAIL completion_verdict when the precheck fails, else null.",
+  "type": "object",
+  "properties": {
+    "run_verify": { "type": "boolean", "description": "True iff the agentic verify step should run." },
+    "precheck_failed": { "type": "boolean", "description": "True iff a child-closure finding blocks completion." },
+    "canonical_id": { "type": "string", "description": "The resolved canonical ticket id." },
+    "verdict": { "type": ["object", "null"], "description": "The deterministic FAIL completion_verdict on precheck failure, else null." }
+  },
+  "required": ["run_verify", "precheck_failed", "canonical_id", "verdict"],
+  "additionalProperties": false
+}

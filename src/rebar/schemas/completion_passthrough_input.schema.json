@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/completion_passthrough_input.schema.json",
+  "title": "CompletionPassthroughInput",
+  "description": "INPUT of `completion_passthrough`: the already-reconciled deterministic completion_verdict to emit verbatim (the branch ELSE arm on precheck failure).",
+  "type": "object",
+  "properties": {
+    "verdict": { "type": "object", "description": "The deterministic FAIL completion_verdict from the precheck." }
+  },
+  "required": ["verdict"],
+  "additionalProperties": false
+}
