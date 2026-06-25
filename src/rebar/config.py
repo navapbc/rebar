@@ -259,6 +259,12 @@ class VerifyConfig:
     # turning it off is the rollback (an ordinary preference, no kill-switch needed).
     require_plan_review_for_claim: bool = False
 
+    # Progressive drift-refresh (Story 2, epic boil-golem-veto / ADR 0002): on a
+    # drift-only-stale re-review, run a cheap E4+G1G2 probe and, if the plan still holds,
+    # REFRESH the attestation instead of a full re-review. OFF by default — opt-in until the
+    # token/latency saving is measured on a representative ticket.
+    progressive_drift_refresh: bool = False
+
 
 @dataclass
 class TicketConfig:
@@ -365,6 +371,7 @@ _SECTIONS: dict[str, dict] = {
         "require_signature_for_close": lambda v, k: _as_bool(v, k),
         "require_completion_verification_for_close": lambda v, k: _as_bool(v, k),
         "require_plan_review_for_claim": lambda v, k: _as_bool(v, k),
+        "progressive_drift_refresh": lambda v, k: _as_bool(v, k),
     },
     "ticket": {"display_mode": lambda v, k: _as_str(v, k) or "auto"},
     "ticket_clarity": {"threshold": lambda v, k: _as_int(v, k, minimum=1)},

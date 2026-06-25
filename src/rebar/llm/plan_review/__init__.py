@@ -36,6 +36,17 @@ logger = logging.getLogger(__name__)
 __all__ = ["review_plan", "claim_gate_check", "registry_coverage"]
 
 
+def _progressive_enabled(repo_root) -> bool:
+    """Whether the progressive drift-refresh path is opted in
+    (``verify.progressive_drift_refresh``, default off)."""
+    from rebar import config as _config
+
+    try:
+        return bool(_config.load_config(repo_root).verify.progressive_drift_refresh)
+    except Exception:  # noqa: BLE001 — config unreadable → conservative full review
+        return False
+
+
 def review_plan(
     ticket_id: str,
     *,
@@ -64,7 +75,8 @@ def review_plan(
     # Progressive drift-refresh (Story 2): when the attestation is stale ONLY because
     # reviewed code drifted (material + registry unchanged) and a cheap probe confirms the
     # plan still matches the code, refresh the attestation instead of a full re-review.
-    if sign:
+    # OPT-IN (verify.progressive_drift_refresh, default off) until the saving is measured.
+    if sign and _progressive_enabled(repo_root):
         refreshed = orchestrator.drift_refresh(ctx, cfg, runner=runner, repo_root=repo_root)
         if refreshed is not None:
             from rebar.llm import findings

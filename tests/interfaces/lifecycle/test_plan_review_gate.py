@@ -39,9 +39,12 @@ _DESC = (
 )
 
 
-def _enable(repo: Path) -> None:
+def _enable(repo: Path, *, progressive: bool = True) -> None:
     (repo / ".rebar").mkdir(exist_ok=True)
-    (repo / ".rebar" / "config.conf").write_text("verify.require_plan_review_for_claim = true\n")
+    conf = "verify.require_plan_review_for_claim = true\n"
+    if progressive:
+        conf += "verify.progressive_drift_refresh = true\n"
+    (repo / ".rebar" / "config.conf").write_text(conf)
 
 
 def _commit(repo: Path) -> None:
@@ -435,6 +438,28 @@ def test_drift_refresh_escalates_on_probe_finding(rebar_repo: Path, monkeypatch)
     cfg = LLMConfig.from_env(repo_root=str(rebar_repo))
     ctx = orchestrator.assemble_context(tid, repo_root=str(rebar_repo), cfg=cfg)
     assert orchestrator.drift_refresh(ctx, cfg, runner=_CLEAN, repo_root=str(rebar_repo)) is None
+
+
+def test_drift_refresh_skips_when_no_prior_verdict(rebar_repo: Path) -> None:
+    # First-time review (no prior attestation to reuse) → full review, never the
+    # progressive path, even with the flag on.
+    _commit(rebar_repo)
+    _enable(rebar_repo)  # progressive on
+    tid = _make(rebar_repo)
+    v = _review(tid, rebar_repo)
+    assert "drift_refresh" not in v["coverage"]
+    assert v["verdict"] == "PASS" and v["signature"]["signed"]
+
+
+def test_progressive_drift_refresh_is_opt_in(rebar_repo: Path) -> None:
+    # With the flag OFF (default), code drift falls back to a FULL re-review — the
+    # progressive path is never taken ("measure before enabling by default").
+    _commit(rebar_repo)
+    _enable(rebar_repo, progressive=False)
+    tid = _scoped(rebar_repo)
+    (rebar_repo / "dep.py").write_text("v = 1  # cosmetic\n")  # drift
+    v = _review(tid, rebar_repo)
+    assert "drift_refresh" not in v["coverage"]  # opt-in: not enabled by default
 
 
 # ── config: dotted enables, default off ─────────────────────────────────────────
