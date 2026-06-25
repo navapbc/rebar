@@ -61,6 +61,15 @@ def review_plan(
     """
     cfg = config or LLMConfig.from_env(repo_root=repo_root)
     ctx = orchestrator.assemble_context(ticket_id, repo_root=repo_root, cfg=cfg)
+    # Progressive drift-refresh (Story 2): when the attestation is stale ONLY because
+    # reviewed code drifted (material + registry unchanged) and a cheap probe confirms the
+    # plan still matches the code, refresh the attestation instead of a full re-review.
+    if sign:
+        refreshed = orchestrator.drift_refresh(ctx, cfg, runner=runner, repo_root=repo_root)
+        if refreshed is not None:
+            from rebar.llm import findings
+
+            return findings.validate_structured(refreshed, "plan_review_verdict")
     cap = advisory_cap if advisory_cap is not None else orchestrator.DEFAULT_ADVISORY_CAP
     verdict = orchestrator.run_review(ctx, cfg, runner=runner, advisory_cap=cap)
 

@@ -48,9 +48,12 @@ from functools import lru_cache
 from importlib import resources
 from typing import Any
 
-# Code-grounding is the SOLE responsibility of this set: only these AGENT-tier
-# criteria grep/read the live codebase (the orchestrator enforces it — no other
-# criterion greps). (criteria_v8 + the three-pass CODEBASE_GROUNDED set.)
+# The DESIGNATED code-grounding criteria: the ones whose job is to reason about the
+# live codebase (used e.g. to route Pass-2 verification agentic). NOTE: this is NOT a
+# tool-capability boundary — agentic tooling (filesystem + rebar) is granted by a
+# prompt's ``execution_mode``, not per criterion-id, so EVERY AGENT-tier criterion can
+# read code. (Story 2's progressive drift-refresh therefore does NOT reuse a
+# "code-blind" subset of findings; it gates whole-verdict reuse on a fresh probe.)
 CODEBASE_GROUNDED = frozenset({"E4", "G1G2", "A1", "G6"})
 
 # AGENT-tier criteria (one tool-using agent loop each; ~85× a single-turn call) —
