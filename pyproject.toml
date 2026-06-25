@@ -176,7 +176,62 @@ line-length = 100
 [tool.ruff.format]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B"]
+# BLE001 (blind-except) + T201 (print) are the error-handling-convention gate
+# (epic ring-gun-jot). They are enabled tree-wide and gated behind a *shrinking*
+# per-file-ignores allowlist (below): every not-yet-swept package is exempted until
+# its sweep brings it to the observability floor, then removed from the allowlist.
+# The exemplar package `src/rebar/llm/plan_review/` is deliberately NOT exempt.
+select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201"]
+
+# ── BLE001 / T201 shrinking allowlist (epic ring-gun-jot) ─────────────────────
+# Clone of the `.github/module-size-allowlist.txt` strangler pattern: each entry is
+# a package not yet remediated to the error-handling convention, exempted from
+# BLE001 (broad `except`) and/or T201 (`print`) until its sweep lands. Entries are
+# DELETED as each sweep completes; the close-out (ticket 0ec1) empties the set.
+#
+# Two kinds of T201 ignore are mixed here and the close-out separates them:
+#   • transitional — diagnostics that MIGRATE to the logger (_store, reducer, graph,
+#     _io stderr prints); their T201 ignore is removed once migrated.
+#   • legitimate-print surfaces — the CLI presentation layer (`_commands`) + the
+#     read CLIs (`_engine_support`: reads_cli/validate/next_batch emit
+#     `print(json.dumps(...))` machine-contract stdout) + the reconciler subprocess
+#     (`_engine/rebar_reconciler`, `_engine/jira-capability-probe.py`) which prints
+#     operational RECON:/ERROR: lines to its OWN stderr. These stay print-bearing;
+#     the close-out keeps their justification (inline `# noqa: T201` for the
+#     reconciler's 41 sites; the data-CLI surfaces keep a scoped ignore).
+[tool.ruff.lint.per-file-ignores]
+# Test code is out of the convention's scope: tests legitimately catch broadly (to
+# assert on failures) and print (debug/diagnostic output). PERMANENT, not part of
+# the shrinking allowlist.
+"tests/**" = ["BLE001", "T201"]
+# core leaves — swept by 8d01 (crow-aeon-muck)
+"src/rebar/__init__.py" = ["BLE001"]
+"src/rebar/reducer/*" = ["T201"]
+"src/rebar/graph/*" = ["BLE001", "T201"]
+"src/rebar/_store/*" = ["BLE001", "T201"]
+"src/rebar/_io/*" = ["T201"]
+# grounding + _engine_support — swept by d360 (BLE001); _engine_support T201 is the
+# data-CLI stdout contract (reads_cli/validate/next_batch)
+"src/rebar/grounding/*" = ["BLE001"]
+"src/rebar/grounding/detectors/*" = ["BLE001"]
+"src/rebar/_engine_support/*" = ["BLE001", "T201"]
+# MCP surface + workflow + llm top-level — swept by ceaa. NOTE: ruff per-file-ignore
+# globs match `*` across `/`, so a `src/rebar/llm/*.py` glob would WRONGLY exempt the
+# exemplar `plan_review/`. The llm top-level files are therefore enumerated explicitly
+# so plan_review/ stays gated.
+"src/rebar/mcp_server.py" = ["BLE001"]
+"src/rebar/llm/completion.py" = ["BLE001"]
+"src/rebar/llm/config.py" = ["BLE001"]
+"src/rebar/llm/pai_tools.py" = ["BLE001"]
+"src/rebar/llm/parity.py" = ["BLE001"]
+"src/rebar/llm/workflow/*" = ["BLE001"]
+# CLI surface — swept by fd72; `_commands` keeps T201 (CLI presentation data prints)
+"src/rebar/_cli/*" = ["BLE001"]
+"src/rebar/_commands/*" = ["BLE001", "T201"]
+"src/rebar/_alias.py" = ["T201"]
+# reconciler subprocess — swept LAST by 0569; T201 are operational stderr prints
+"src/rebar/_engine/rebar_reconciler/*" = ["BLE001", "T201"]
+"src/rebar/_engine/jira-capability-probe.py" = ["T201"]
 
 [tool.mypy]
 # Scoped, opt-in type checking. The pure in-process library core

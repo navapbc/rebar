@@ -180,7 +180,7 @@ def load_criteria() -> tuple[dict[str, Any], ...]:
             out.append(_descriptor_from_prompt(cid))
         except RegistryError:
             raise
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — translate ANY prompt-load failure into a RegistryError (re-raised, never swallowed)
             raise RegistryError(
                 f"cannot load criterion prompt for {cid!r} from the prompt library: {exc}"
             ) from exc

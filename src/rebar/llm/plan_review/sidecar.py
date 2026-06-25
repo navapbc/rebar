@@ -16,8 +16,11 @@ preserved-and-ignored-by-older-clones rollout (upgrade reconcile hosts first).
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 EVENT_TYPE = "REVIEW_RESULT"
 
@@ -41,7 +44,11 @@ def emit(verdict: dict[str, Any], *, material: str | None = None, repo_root=None
         tracker = _config.tracker_dir(repo_root)
         payload = build_payload(verdict, material=material)
         append_event(verdict["ticket_id"], EVENT_TYPE, payload, tracker, repo_root=repo_root)
-    except Exception:
+    except Exception:  # noqa: BLE001 — best-effort observability sidecar; broad-but-logged below, never fails the review
+        # Observability floor: the sidecar is best-effort observability — a failed emit
+        # must never fail the review, but the failure itself is a real signal worth a
+        # stderr diagnostic (broad-but-logged; see rebar._logging).
+        logger.warning("REVIEW_RESULT sidecar emit failed; continuing", exc_info=True)
         return False
     prune(verdict.get("ticket_id", ""), repo_root=repo_root)  # best-effort retention
     return True
@@ -86,7 +93,10 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
             capture_output=True,
         )
         return len(old)
-    except Exception:
+    except Exception:  # noqa: BLE001 — best-effort retention prune; broad-but-logged below, never fails the review
+        # Best-effort retention; a failed prune never fails the review (sidecars are
+        # reducer-ignored, so removing old ones is safe). Log the failure (floor).
+        logger.warning("REVIEW_RESULT sidecar prune failed; continuing", exc_info=True)
         return 0
 
 

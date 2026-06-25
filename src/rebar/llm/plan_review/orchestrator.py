@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -37,6 +38,8 @@ from rebar.llm.runner import Runner, get_runner
 
 from . import det_floor, passes, registry
 from .det_floor import PlanContext
+
+logger = logging.getLogger(__name__)
 
 # Advisory surfacing cap (config-overridable; owned by child 55de). Blocking
 # findings are EXEMPT — the cap can never weaken the block decision.
@@ -143,13 +146,15 @@ def assemble_context(
     children: list[dict[str, Any]] = []
     try:
         listed = rebar.list_tickets(parent=canonical, repo_root=repo_root) or []
-    except Exception:
+    except Exception:  # noqa: BLE001 — children enumeration degrades P5/P8 if it fails; broad-but-logged below, review continues
+        # Failing to enumerate children degrades P5/P8 coverage — a real signal, logged.
+        logger.warning("could not list children of %s; reviewing without", canonical, exc_info=True)
         listed = []
     for c in listed:
         cid = c.get("ticket_id")
         try:  # fetch full child state (deps + file_impact) for P5/P8
             children.append(rebar.show_ticket(cid, repo_root=repo_root))
-        except Exception:
+        except Exception:  # noqa: BLE001 — per-child best-effort full-state fetch; fall back to the summary
             children.append(c)
     return PlanContext(
         ticket_id=canonical,
@@ -267,7 +272,7 @@ def _run_container(
                         sibling_roster=roster,
                     )
                 )
-            except Exception:  # a failed pairing drops its findings, never aborts
+            except Exception:  # noqa: BLE001 — a failed P5 pairing drops its findings, never aborts the review
                 pass
             pairings += 1
     coverage["container"] = {
@@ -317,11 +322,14 @@ def _linked_session_log(ctx: PlanContext, cfg: LLMConfig, runner) -> tuple[str |
                 continue
             try:
                 log = rebar.show_ticket(tgt, repo_root=ctx.repo_root)
-            except Exception:
+            except Exception:  # noqa: BLE001 — per-dep best-effort session-log fetch; skip unreadable deps
                 continue
             if log.get("ticket_type") == "session_log":
                 bodies.append(f"# {log.get('title', '')}\n{log.get('description', '')}")
-    except Exception:
+    except Exception:  # noqa: BLE001 — ISF is supporting context, not the plan; broad-but-logged below, ISF skipped
+        # ISF is supporting context, not the plan — any read error skips it, but log
+        # the failure so a silently-missing ISF context is observable.
+        logger.warning("ISF session-log gather failed; skipping ISF", exc_info=True)
         return (None, False)
     if not bodies:
         return (None, False)
@@ -334,7 +342,9 @@ def _linked_session_log(ctx: PlanContext, cfg: LLMConfig, runner) -> tuple[str |
     # Oversized: summarize (the supporting context only — never the plan).
     try:
         return (passes.summarize_for_isf(runner, cfg, log_text=text), True)
-    except Exception:
+    except Exception:  # noqa: BLE001 — ISF summarization is best-effort; broad-but-logged below, ISF skipped
+        # Summarization failure → ISF runs without the oversized log; log it (floor).
+        logger.warning("ISF summarization failed; skipping ISF", exc_info=True)
         return (None, False)
 
 
@@ -397,7 +407,10 @@ def run_review(
             findings = _run_passes(ctx, cfg, runner_sel, single, agent, coverage)
             llm_ms = round((time.monotonic() - _t_llm) * 1000, 1)
             llm_ran = True
-        except Exception as exc:  # LLM unavailable → DET-only review (advisory still works)
+        except Exception as exc:  # noqa: BLE001 — LLM unavailable → fail-open to DET-only review; broad-but-logged + recorded in coverage
+            # Fail-open to a DET-only review, but record the error in-band (coverage)
+            # AND on the logger so a degraded review is observable to the operator.
+            logger.warning("LLM passes failed; falling back to DET-only review", exc_info=True)
             coverage["llm_error"] = str(exc)
             coverage["llm_ran"] = False
     coverage.setdefault("llm_ran", llm_ran)
@@ -467,7 +480,10 @@ def run_review(
                 surviving=surfaced,
                 move_registry=load_move_registry(ctx.repo_root),
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — coaching is advisory polish; broad-but-logged + recorded in coverage, never blocks the verdict
+            # Coaching is advisory polish — its failure never blocks the verdict, but
+            # record it in-band and on the logger (floor).
+            logger.warning("pass-4 coaching failed; verdict emitted without it", exc_info=True)
             coverage["coach_error"] = str(exc)
 
     verdict = (
@@ -575,7 +591,7 @@ def _run_passes(
         for fu in st_futs + ag_futs:
             try:
                 findings.extend(fu.result() or [])
-            except Exception:  # a failed chunk drops its findings, never aborts the review
+            except Exception:  # noqa: BLE001 — a failed chunk drops its findings, never aborts the review
                 pass
     if ladder_events:
         coverage["size_ladder"] = ladder_events
@@ -606,7 +622,9 @@ def _run_passes(
                     summarized=summarized,
                 )
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — ISF pass is best-effort; broad-but-logged + recorded in coverage, never blocks the verdict
+            # ISF (in-session-failure) pass is best-effort; record in-band + log (floor).
+            logger.warning("ISF pass failed; verdict emitted without ISF findings", exc_info=True)
             coverage["isf"]["error"] = str(exc)
     else:
         coverage["isf"] = {"ran": False, "reason": "no linked session_log"}
