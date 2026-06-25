@@ -12,8 +12,18 @@ class LLMError(RuntimeError):
     """Base class for all rebar.llm failures."""
 
 
-class LLMConfigError(LLMError):
-    """A required dependency (the ``agents`` extra) or credential is missing."""
+class LLMUnavailableError(LLMError):
+    """The LLM runtime could not run AT ALL — a SYSTEMIC failure: the ``agents`` extra
+    is absent, credentials are missing/invalid, or the provider rejected/could not be
+    reached (auth / connection / rate-limit). Provider-agnostic: the wrapped message
+    carries whatever the provider said. The shared contract for every prompt-using
+    client is that a systemic failure must surface as a FAILED/INDETERMINATE outcome —
+    never be absorbed into an empty 'clean' result (the fuel-posse-ball class of bug)."""
+
+
+class LLMConfigError(LLMUnavailableError):
+    """A required dependency (the ``agents`` extra) or credential is missing. A kind of
+    :class:`LLMUnavailableError` (so one ``except`` catches deps + runtime failures)."""
 
 
 class LLMRunnerError(LLMError):

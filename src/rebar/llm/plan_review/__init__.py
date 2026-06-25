@@ -96,7 +96,15 @@ def review_plan(
     # Sign on a non-blocking PASS (not for exempt/blocking/indeterminate). The
     # attestation = "process followed, no blocking red flags + coverage", NOT
     # "perfect"; advisory findings are coaching, not blocks.
-    if sign and verdict.get("verdict") == "PASS" and verdict.get("runner") != "exempt":
+    # Sign only a genuine PASS where the LLM tier actually ran. The verdict is already
+    # INDETERMINATE when the tier was unavailable; the explicit llm_ran guard is
+    # defense-in-depth so a DET-only result can never be signed (fuel-posse-ball).
+    if (
+        sign
+        and verdict.get("verdict") == "PASS"
+        and verdict.get("runner") != "exempt"
+        and verdict.get("coverage", {}).get("llm_ran") is not False
+    ):
         try:
             sig = attest.sign_plan_review(verdict, material=material, repo_root=repo_root)
             verdict["signature"] = {
