@@ -95,13 +95,18 @@ def completion_reconcile(ctx: StepContext) -> dict[str, Any]:
     result: dict[str, Any] = {
         "verdict": ctx.inputs.get("raw_verdict", ""),
         "findings": list(ctx.inputs.get("raw_findings") or []),
-        "summary": ctx.inputs.get("summary"),
         "target": {"kind": "ticket", "ticket_ids": [ticket_id]},
         "reviewers": [_REVIEWER_ID],
         "runner": ctx.inputs.get("runner"),
         "model": ctx.inputs.get("model"),
         "trace_id": ctx.inputs.get("trace_id"),
     }
+    # Mirror the structured runner's exclude_none: only carry `summary` when present (the
+    # completion_verdict schema's `summary` is a string, never null). An absent summary is the
+    # common case (the verifier usually omits it); a None here would fail validation.
+    summary = ctx.inputs.get("summary")
+    if summary is not None:
+        result["summary"] = summary
     # Same normalize → resolve_citations → reconcile → validate pipeline as
     # completion.verify_completion's tail (completion.py:288-295), so the workflow path is
     # behaviourally equivalent to the bespoke call.

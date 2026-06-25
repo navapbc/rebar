@@ -57,19 +57,26 @@ class _Rec(_ex.RunRecorder):
 
 
 class _CannedRunner(AgentStepRunner):
-    """A no-token agent runner returning a fixed completion_verdict-shaped output, counting calls
-    so a test can assert the LLM was (or was NOT) reached."""
+    """A no-token agent runner returning a completion_verdict-shaped output, counting calls so a
+    test can assert the LLM was (or was NOT) reached. It MIRRORS the real structured runner
+    (findings.finalize_outcome): the payload (verdict/findings/summary) is emitted with
+    exclude_none semantics — an omitted `summary` is ABSENT, not None — while runner/model/
+    trace_id are added unconditionally afterwards (so a workflow referencing them never raises)."""
 
-    def __init__(self, **outputs):
-        self.outputs = {
-            "verdict": "PASS",
-            "findings": [],
-            "summary": "ok",
-            "runner": "canned",
-            "model": "fake",
-            "trace_id": None,
-            **outputs,
-        }
+    def __init__(
+        self,
+        *,
+        verdict="PASS",
+        findings=None,
+        summary=None,
+        runner="canned",
+        model="fake",
+        trace_id=None,
+    ):
+        payload: dict = {"verdict": verdict, "findings": findings or []}
+        if summary is not None:
+            payload["summary"] = summary
+        self.outputs = {**payload, "runner": runner, "model": model, "trace_id": trace_id}
         self.calls = 0
 
     def run(self, ctx) -> StepResult:
@@ -130,12 +137,16 @@ def test_workflow_validates_and_lints():
 
 
 def test_happy_path_runs_verify_and_reconciles(monkeypatch):
-    runner = _CannedRunner(verdict="PASS", findings=[])
+    # The verifier omits `summary` (the common case: the structured runner drops it via
+    # exclude_none) — the run must NOT raise on the missing output, and the reconciled verdict
+    # must be schema-valid with no `summary` key (mirroring completion.py).
+    runner = _CannedRunner(verdict="PASS", findings=[])  # no summary
     rec, res = _run(runner, monkeypatch, children=[])  # childless → precheck passes
     assert res.status == "succeeded"
     assert runner.calls == 1, "the agentic verify must run when the precheck passes"
     verdict = _terminal_verdict(rec)
     assert verdict and verdict["verdict"] == "PASS"
+    assert "summary" not in verdict, "an absent agent summary must stay absent (no None)"
     assert verdict["target"] == {"kind": "ticket", "ticket_ids": ["T-1"]}
     assert verdict["reviewers"] == ["completion-verifier"]
 
@@ -191,9 +202,9 @@ def test_reconcile_matches_completion_py_tail(monkeypatch):
     raw_findings = [
         {"criterion": "AC1", "severity": "high", "dimension": "completion", "detail": "d"}
     ]
-    runner = _CannedRunner(
-        verdict="FAIL", findings=raw_findings, summary="s", runner="r", model="m"
-    )
+    # No summary (the faithful common case) → the workflow and completion.py produce IDENTICAL
+    # verdicts. (Carrying an agent-supplied summary is the documented B4 parity gap.)
+    runner = _CannedRunner(verdict="FAIL", findings=raw_findings, runner="r", model="m")
     rec, _ = _run(runner, monkeypatch, children=[])
     got = _terminal_verdict(rec)
 
@@ -203,7 +214,6 @@ def test_reconcile_matches_completion_py_tail(monkeypatch):
         "findings": [
             _findings.normalize_finding(f, reviewer_id=_REVIEWER_ID) for f in raw_findings
         ],
-        "summary": "s",
         "target": {"kind": "ticket", "ticket_ids": ["T-1"]},
         "reviewers": [_REVIEWER_ID],
         "runner": "r",
