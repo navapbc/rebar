@@ -39,9 +39,12 @@ _DESC = (
 )
 
 
-def _enable(repo: Path) -> None:
+def _enable(repo: Path, *, progressive: bool = True) -> None:
     (repo / ".rebar").mkdir(exist_ok=True)
-    (repo / ".rebar" / "config.conf").write_text("verify.require_plan_review_for_claim = true\n")
+    conf = "verify.require_plan_review_for_claim = true\n"
+    if progressive:
+        conf += "verify.progressive_drift_refresh = true\n"
+    (repo / ".rebar" / "config.conf").write_text(conf)
 
 
 def _commit(repo: Path) -> None:
@@ -352,6 +355,111 @@ def _timed(fn) -> float:  # noqa: ANN001
     t0 = time.perf_counter()
     fn()
     return time.perf_counter() - t0
+
+
+# ── progressive drift-refresh (Story 2, epic boil-golem-veto / ADR 0002) ────────
+def test_drift_refresh_reuses_on_immaterial_drift(rebar_repo: Path) -> None:
+    # A clean probe (FakeRunner finds nothing) means the drift didn't break the plan →
+    # the attestation is REFRESHED (not fully re-reviewed) and the claim then succeeds.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _scoped(rebar_repo)  # signed; dep.py hashed into the manifest
+    (rebar_repo / "dep.py").write_text("v = 1  # cosmetic edit; plan still holds\n")  # drift
+    v = _review(tid, rebar_repo)
+    assert v["coverage"].get("drift_refresh") is True
+    assert v["signature"].get("refreshed") is True and v["verdict"] == "PASS"
+    rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "in_progress"
+
+
+def test_refreshed_attestation_rebinds_to_current_code(rebar_repo: Path) -> None:
+    # The refreshed attestation is re-bound to the CURRENT dependency hashes: a FURTHER
+    # drift after the refresh staleness-blocks the claim (no stale reuse).
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _scoped(rebar_repo)
+    (rebar_repo / "dep.py").write_text("v = 2\n")
+    _review(tid, rebar_repo)  # refresh, now bound to "v = 2"
+    (rebar_repo / "dep.py").write_text("v = 3\n")  # drift again
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.claim(tid, repo_root=str(rebar_repo))
+    assert "drift" in ei.value.stderr.lower()
+
+
+def test_drift_refresh_skips_on_material_edit(rebar_repo: Path) -> None:
+    # A ticket material edit is NOT a drift-only staleness → no refresh; a full review runs.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _scoped(rebar_repo)
+    rebar.edit_ticket(
+        tid,
+        description=_DESC + "\nNEW materially-different requirement.",
+        repo_root=str(rebar_repo),
+    )
+    v = _review(tid, rebar_repo)
+    assert "drift_refresh" not in v["coverage"]  # full review, not the progressive path
+
+
+def test_drift_refresh_skips_on_registry_skew(rebar_repo: Path, monkeypatch) -> None:
+    # If the criteria registry changed since signing, the probe's meaning may differ →
+    # fall back to a FULL re-review rather than refreshing.
+    from rebar.llm.plan_review import attest
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _scoped(rebar_repo)
+    (rebar_repo / "dep.py").write_text("v = 9\n")  # drift
+    monkeypatch.setattr(attest, "registry_version", lambda: "different-version-stamp")
+    v = _review(tid, rebar_repo)
+    assert "drift_refresh" not in v["coverage"]
+
+
+def test_drift_refresh_escalates_on_probe_finding(rebar_repo: Path, monkeypatch) -> None:
+    # A probe finding citing a drifted file means the plan may no longer hold →
+    # drift_refresh escalates (returns None) so the caller runs the full review.
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.plan_review import orchestrator
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _scoped(rebar_repo)
+    (rebar_repo / "dep.py").write_text("v = 42  # material change\n")
+
+    def _block(*a, **k):
+        return [
+            {
+                "decision": "block",
+                "criteria": ["E4"],
+                "citations": [{"kind": "file", "path": "dep.py"}],
+            }
+        ]
+
+    monkeypatch.setattr(orchestrator, "_run_passes", _block)
+    cfg = LLMConfig.from_env(repo_root=str(rebar_repo))
+    ctx = orchestrator.assemble_context(tid, repo_root=str(rebar_repo), cfg=cfg)
+    assert orchestrator.drift_refresh(ctx, cfg, runner=_CLEAN, repo_root=str(rebar_repo)) is None
+
+
+def test_drift_refresh_skips_when_no_prior_verdict(rebar_repo: Path) -> None:
+    # First-time review (no prior attestation to reuse) → full review, never the
+    # progressive path, even with the flag on.
+    _commit(rebar_repo)
+    _enable(rebar_repo)  # progressive on
+    tid = _make(rebar_repo)
+    v = _review(tid, rebar_repo)
+    assert "drift_refresh" not in v["coverage"]
+    assert v["verdict"] == "PASS" and v["signature"]["signed"]
+
+
+def test_progressive_drift_refresh_is_opt_in(rebar_repo: Path) -> None:
+    # With the flag OFF (default), code drift falls back to a FULL re-review — the
+    # progressive path is never taken ("measure before enabling by default").
+    _commit(rebar_repo)
+    _enable(rebar_repo, progressive=False)
+    tid = _scoped(rebar_repo)
+    (rebar_repo / "dep.py").write_text("v = 1  # cosmetic\n")  # drift
+    v = _review(tid, rebar_repo)
+    assert "drift_refresh" not in v["coverage"]  # opt-in: not enabled by default
 
 
 # ── config: dotted enables, default off ─────────────────────────────────────────

@@ -522,6 +522,83 @@ def run_review(
     }
 
 
+# ── progressive drift-refresh (Story 2, epic boil-golem-veto / ADR 0002) ──────────
+_PROBE_CRITERIA = ("E4", "G1G2")  # "is the plan accurate vs the codebase" — both mandatory in v1
+
+
+def drift_refresh(
+    ctx: PlanContext, cfg: LLMConfig, *, runner: Runner | None = None, repo_root=None
+) -> dict[str, Any] | None:
+    """The progressive (tripwire) drift re-review. If the ticket's attestation is stale
+    ONLY because reviewed code drifted (ticket material + criteria-registry unchanged),
+    run a cheap probe (E4+G1G2) against the CURRENT code; if the plan still holds, REFRESH
+    the attestation (re-sign the prior verdict with current dependency hashes) and return a
+    refreshed PASS verdict. Returns None when not applicable, or when the probe escalates
+    (a blocking finding, or a finding citing a drifted dependency file) — the caller then
+    runs the FULL review. Soundness is whole-verdict, gated by the probe: NO per-criterion
+    finding reuse, so the (unenforced) code-blind criterion partition is not relied upon."""
+    from . import attest
+
+    if ctx.ticket_type in ("bug", "session_log"):
+        return None
+    cand = attest.drift_refresh_candidate(ctx.ticket_id, repo_root=repo_root)
+    if cand is None:
+        return None
+    current = attest._rehash(cand["deps"].keys(), repo_root=repo_root)
+    drifted = {p for p, h in cand["deps"].items() if current.get(p) != h}
+
+    runner_sel = runner or get_runner(cfg)
+    try:
+        runner_sel.preflight()
+        probe_crits = [c for c in (registry.by_id().get(cid) for cid in _PROBE_CRITERIA) if c]
+        findings = _run_passes(ctx, cfg, runner_sel, [], probe_crits, {})
+    except Exception:  # noqa: BLE001 — probe unavailable → FULL re-review (fail-safe)
+        logger.warning("drift-probe failed; falling back to a full re-review", exc_info=True)
+        return None
+
+    # Escalate iff any blocking finding, or any block/advisory finding citing a drifted file.
+    for f in findings:
+        if f.get("decision") == "block":
+            return None
+        if f.get("decision") in ("block", "advisory"):
+            cited = {c.get("path") for c in (f.get("citations") or []) if isinstance(c, dict)}
+            if cited & drifted:
+                return None
+
+    # Clean probe → the drift was immaterial → refresh the attestation wholesale.
+    sig = attest.refresh_attestation(
+        ctx.ticket_id, cand["manifest"], probe="PASS", repo_root=repo_root
+    )
+    return {
+        "verdict": "PASS",
+        "ticket_id": ctx.ticket_id,
+        "ticket_type": ctx.ticket_type,
+        "blocking": [],
+        "advisory": [],
+        "coaching": [],
+        "overflow": [],
+        "indeterminate": [],
+        "dropped": [],
+        "coverage": {
+            "drift_refresh": True,
+            "probe": "PASS",
+            "probe_criteria": list(_PROBE_CRITERIA),
+            "drifted_files": sorted(drifted),
+            "llm_ran": True,
+        },
+        "runner": runner_sel.name,
+        "model": cfg.model,
+        "material_fingerprint": attest.manifest_material(cand["manifest"]),
+        "sidecar_emitted": False,
+        "signature": {
+            "signed": True,
+            "key_id": sig.get("key_id"),
+            "head_sha": sig.get("head_sha"),
+            "refreshed": True,
+        },
+    }
+
+
 def _run_passes(
     ctx: PlanContext,
     cfg: LLMConfig,
