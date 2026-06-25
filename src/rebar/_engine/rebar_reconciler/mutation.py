@@ -6,12 +6,12 @@ by an explicit allowlist (`_VALID_COMBINATIONS`): clean_label and
 repair_property are inbound-only — they have no outbound semantics.
 """
 
-import hashlib
-import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
+
+from rebar._store.canonical import canonical_str, content_hash
 
 
 class MutationDirection(StrEnum):
@@ -103,6 +103,9 @@ def serialize_manifest(mutations: Iterable[Mutation]) -> tuple[str, str]:
         }
         for m in sorted_muts
     ]
-    json_text = json.dumps(items, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    sha256_hash = hashlib.sha256(json_text.encode("utf-8")).hexdigest()
+    # ``ascii_only=True`` preserves this manifest's historical ``ensure_ascii=True``
+    # bytes (``\\uXXXX`` escapes) via the canonical seam — NOT normalized to the
+    # seam's UTF-8 default, which would gratuitously change the manifest hash.
+    json_text = canonical_str(items, ascii_only=True)
+    sha256_hash = content_hash(items, ascii_only=True)
     return json_text, sha256_hash

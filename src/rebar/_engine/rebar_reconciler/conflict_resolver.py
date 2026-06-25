@@ -16,10 +16,9 @@ elements can be echo-suppressed individually; it is consumed by differ's
 
 from __future__ import annotations
 
-import hashlib
-import json
 from typing import Any
 
+from rebar._store.canonical import content_hash
 from rebar_reconciler.timeutil import utc_now_iso
 
 # ---------------------------------------------------------------------------
@@ -213,10 +212,16 @@ def resolve_field(
 
 
 def _hash_value(value: Any) -> str:
-    """Stable sha256 of a JSON-serialized value."""
-    return hashlib.sha256(
-        json.dumps(value, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+    """Stable sha256 of a JSON-serialized value.
+
+    Routed through the canonical seam. ``ascii_only=True`` is load-bearing: the
+    prior inline ``json.dumps`` omitted ``ensure_ascii``, so it relied on the
+    stdlib default ``ensure_ascii=True`` (``\\uXXXX`` escapes) — the seam default
+    is ``False``, so dropping ``ascii_only=True`` would flip non-ASCII provenance
+    values' bytes and change the stored ``value_hash`` / echo-suppression verdict.
+    ``default=str`` is also load-bearing (provenance values may be non-JSON-native).
+    """
+    return content_hash(value, ascii_only=True, default=str)
 
 
 class ProvenanceLedger:

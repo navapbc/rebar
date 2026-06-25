@@ -44,6 +44,7 @@ import uuid as _uuid
 from pathlib import Path
 
 from rebar import config
+from rebar._store.canonical import canonical_bytes
 
 # HMAC over SHA-256. Recorded on every signature so a future algorithm migration
 # is detectable on old records rather than silently mis-verified.
@@ -185,18 +186,19 @@ def parse_manifest(payload) -> list[str]:
 
 
 def _canonical_payload(ticket_id: str, manifest: list[str]) -> bytes:
-    """Deterministic bytes signed/verified: sorted-key compact JSON."""
-    return json.dumps(
+    """Deterministic bytes signed/verified: sorted-key compact JSON.
+
+    Routed through the canonical seam (:func:`rebar._store.canonical.canonical_bytes`,
+    ``ensure_ascii=False``) — byte-identical to the prior inline ``json.dumps``.
+    """
+    return canonical_bytes(
         {
             "v": PAYLOAD_VERSION,
             "algorithm": ALGORITHM,
             "ticket_id": ticket_id,
             "manifest": manifest,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")
+        }
+    )
 
 
 def compute_signature(ticket_id: str, manifest: list[str], key: bytes) -> str:
