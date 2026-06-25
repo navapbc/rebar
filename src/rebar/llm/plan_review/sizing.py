@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from rebar.llm.config import LLMConfig
+from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.runner import Runner
 
 from . import passes, registry
@@ -133,6 +134,8 @@ def pass1_with_ladder(
     accumulates a human-readable ladder trace for the coverage record."""
     try:
         return passes.pass1_chunk(runner, cfg, plan=plan, chunk=chunk, agentic=agentic)
+    except LLMUnavailableError:
+        raise  # SYSTEMIC failure (deps/key/auth/connection) — surface, never drop (fuel-posse-ball)
     except Exception as exc:  # noqa: BLE001 — broad to inspect is_context_limit_error(exc); a non-context failure drops findings, a context error falls through to the size-ladder
         if not is_context_limit_error(exc):
             return []  # unrelated failure → drop this unit's findings (never abort)
@@ -153,6 +156,8 @@ def pass1_with_ladder(
                     events.append(f"{crit['id']}: escalated to {model}")
                 produced = True
                 break
+            except LLMUnavailableError:
+                raise  # SYSTEMIC failure — surface, never drop (fuel-posse-ball)
             except Exception as exc:  # noqa: BLE001 — broad to inspect is_context_limit_error(exc); a non-size failure drops, a context error escalates to the next model
                 if not is_context_limit_error(exc):
                     produced = True  # non-size failure → drop, don't escalate

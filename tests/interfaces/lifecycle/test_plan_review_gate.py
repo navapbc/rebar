@@ -226,23 +226,72 @@ def test_sidecar_prune_bounds_growth(rebar_repo: Path) -> None:
     assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "open"
 
 
-# ── E2E edge case: fail-open on an unavailable LLM (unsupported stack) ──────────
-def test_review_fail_open_on_unavailable_llm(rebar_repo: Path) -> None:
-    class _BrokenRunner:
-        name = "broken"
+# ── LLM unavailable → fail LOUD, never a hollow PASS (fuel-posse-ball) ──────────
+def test_review_fails_loud_when_deps_unavailable(rebar_repo: Path) -> None:
+    # preflight raises (missing agents extra) ⇒ the LLM tier cannot run ⇒ INDETERMINATE
+    # (NOT a DET-only PASS), and never signed.
+    from rebar.llm.errors import LLMConfigError
+
+    class _NoDeps:
+        name = "no-deps"
 
         def preflight(self):
-            raise RuntimeError("the agents extra is missing")
+            raise LLMConfigError("the 'agents' extra is missing — install nava-rebar[agents]")
 
         def run(self, req):  # noqa: ANN001
             raise AssertionError("run must not be reached when preflight fails")
 
     _commit(rebar_repo)
     tid = _make(rebar_repo)
-    v = rebar.llm.review_plan(tid, runner=_BrokenRunner(), repo_root=str(rebar_repo), sign=False)
-    # DET floor still ran + passed (AC present) ⇒ no blocks; LLM tier degraded cleanly.
-    assert v["verdict"] in ("PASS", "INDETERMINATE")
-    assert v["coverage"]["llm_ran"] is False and "llm_error" in v["coverage"]
+    v = rebar.llm.review_plan(tid, runner=_NoDeps(), repo_root=str(rebar_repo))
+    assert v["verdict"] == "INDETERMINATE"  # NOT PASS — no hollow pass
+    assert v["coverage"]["llm_ran"] is False and v["coverage"].get("llm_unavailable") is True
+    assert not v["signature"]["signed"]  # never signed when the tier did not run
+
+
+def test_review_fails_loud_when_key_unavailable_at_runtime(rebar_repo: Path) -> None:
+    # preflight passes (deps present) but the provider call fails (e.g. missing/invalid
+    # API key) — surfaces as LLMUnavailableError from the runner ⇒ INDETERMINATE, unsigned,
+    # claim stays blocked. Covers any provider, not just Anthropic.
+    from rebar.llm.errors import LLMUnavailableError
+
+    class _NoKey:
+        name = "no-key"
+
+        def preflight(self):
+            return None  # deps fine
+
+        def run(self, req):  # noqa: ANN001
+            raise LLMUnavailableError("the LLM provider call failed: OPENAI_API_KEY not set")
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    v = rebar.llm.review_plan(tid, runner=_NoKey(), repo_root=str(rebar_repo))
+    assert v["verdict"] == "INDETERMINATE" and not v["signature"]["signed"]
+    assert v["coverage"].get("llm_unavailable") is True
+    with pytest.raises(rebar.RebarError):  # no attestation earned → claim blocked
+        rebar.claim(tid, repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "open"
+
+
+def test_workflow_surfaces_unavailable_llm_as_failed_step(rebar_repo: Path) -> None:
+    # The shared contract holds for the OTHER prompt-using client: a workflow whose agent
+    # step hits an unavailable LLM reports the run FAILED (not a silently-empty success).
+    from rebar.llm.errors import LLMUnavailableError
+    from rebar.llm.workflow import executor as _wf
+
+    class _NoKeyAgent(_wf.AgentStepRunner):
+        def run(self, ctx):  # noqa: ANN001
+            raise LLMUnavailableError("the LLM provider call failed: ANTHROPIC_API_KEY not set")
+
+    doc = {
+        "schema_version": "1",
+        "name": "wf",
+        "steps": [{"id": "s1", "prompt": "code-quality", "mode": "text", "with": {}}],
+    }
+    res = _wf.run_workflow(doc, agent_runner=_NoKeyAgent(), repo_root=str(rebar_repo))
+    assert res.status == "failed" and res.error  # surfaced, not swallowed into success
 
 
 # ── E2E edge case: cap-hit INDETERMINATE (budget shed) ──────────────────────────

@@ -22,7 +22,13 @@ from typing import Protocol, runtime_checkable
 
 from rebar.llm import findings as _findings
 from rebar.llm.config import LLMConfig
-from rebar.llm.errors import LLMConfigError, LLMRunnerError, StructuredOutputError
+from rebar.llm.errors import (
+    LLMConfigError,
+    LLMError,
+    LLMRunnerError,
+    LLMUnavailableError,
+    StructuredOutputError,
+)
 
 
 @dataclass
@@ -219,6 +225,13 @@ class PydanticAIRunner:
                 "~1 model request per tool call). Raise REBAR_LLM_MAX_STEPS or narrow "
                 "the task."
             ) from exc
+        except LLMError:
+            raise  # our own typed errors (e.g. StructuredOutputError) pass through unchanged
+        except Exception as exc:  # noqa: BLE001 — a SYSTEMIC provider failure (auth / missing
+            # key / connection / rate-limit). Unify into the provider-agnostic
+            # LLMUnavailableError so every prompt-using client gets ONE recognizable
+            # "LLM couldn't run" signal — never a swallowed empty result (fuel-posse-ball).
+            raise LLMUnavailableError(f"the LLM provider call failed: {exc}") from exc
         return _findings.finalize_outcome(
             outcome,
             mode=req.mode,

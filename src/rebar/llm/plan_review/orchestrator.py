@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from rebar.llm.config import LLMConfig
+from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.runner import Runner, get_runner
 
 from . import det_floor, passes, registry
@@ -407,12 +408,21 @@ def run_review(
             findings = _run_passes(ctx, cfg, runner_sel, single, agent, coverage)
             llm_ms = round((time.monotonic() - _t_llm) * 1000, 1)
             llm_ran = True
-        except Exception as exc:  # noqa: BLE001 — LLM unavailable → fail-open to DET-only review; broad-but-logged + recorded in coverage
-            # Fail-open to a DET-only review, but record the error in-band (coverage)
-            # AND on the logger so a degraded review is observable to the operator.
-            logger.warning("LLM passes failed; falling back to DET-only review", exc_info=True)
+        except LLMUnavailableError as exc:
+            # SYSTEMIC failure — the LLM tier could not run at all (missing agents extra,
+            # missing/invalid key, provider auth/connection/rate-limit). This must NOT
+            # degrade to a hollow DET-only PASS (fuel-posse-ball): mark the tier
+            # unavailable so the verdict becomes INDETERMINATE and is never signed.
+            logger.warning("plan-review LLM tier unavailable: %s", exc)
             coverage["llm_error"] = str(exc)
             coverage["llm_ran"] = False
+            coverage["llm_unavailable"] = True
+        except Exception as exc:  # noqa: BLE001 — an UNEXPECTED tier failure: also never a silent
+            # pass. Treat as unavailable (INDETERMINATE, unsigned) + record in-band/logger.
+            logger.warning("plan-review LLM tier failed unexpectedly", exc_info=True)
+            coverage["llm_error"] = str(exc)
+            coverage["llm_ran"] = False
+            coverage["llm_unavailable"] = True
     coverage.setdefault("llm_ran", llm_ran)
 
     # ── assemble: ids, decisions already attached; merge DET findings ─────────────
@@ -486,9 +496,16 @@ def run_review(
             logger.warning("pass-4 coaching failed; verdict emitted without it", exc_info=True)
             coverage["coach_error"] = str(exc)
 
-    verdict = (
-        "BLOCK" if blocking else ("INDETERMINATE" if indeterminate and not surfaced else "PASS")
-    )
+    # A DET block is still an actionable BLOCK even with no LLM. Otherwise, a SYSTEMIC
+    # LLM-tier failure (llm_unavailable) makes the review INDETERMINATE — never a hollow
+    # PASS — so it is not signed (fuel-posse-ball). A genuine unsupported-stack abstain
+    # (the tier ran, a criterion couldn't ground) is NOT llm_unavailable → still PASS.
+    if blocking:
+        verdict = "BLOCK"
+    elif coverage.get("llm_unavailable") or (indeterminate and not surfaced):
+        verdict = "INDETERMINATE"
+    else:
+        verdict = "PASS"
     coverage["counts"] = {
         "blocking": len(blocking),
         "advisory_surfaced": len(surfaced),
@@ -668,8 +685,16 @@ def _run_passes(
         for fu in st_futs + ag_futs:
             try:
                 findings.extend(fu.result() or [])
-            except Exception:  # noqa: BLE001 — a failed chunk drops its findings, never aborts the review
-                pass
+            except LLMUnavailableError:
+                # SYSTEMIC failure (auth / missing key / connection / rate-limit) affects
+                # the whole tier — surface it, never silently drop (fuel-posse-ball). The
+                # run_review caller turns this into an INDETERMINATE, unsigned verdict.
+                raise
+            except Exception:  # noqa: BLE001 — a NON-systemic per-chunk failure: drop its findings, never aborts
+                coverage["chunk_errors"] = coverage.get("chunk_errors", 0) + 1
+                logger.warning(
+                    "a plan-review chunk failed (non-systemic); findings dropped", exc_info=True
+                )
     if ladder_events:
         coverage["size_ladder"] = ladder_events
     coverage["checkpoint"] = {"chunks_resumed": resumed, "chunks_total": len(chunks) + len(agent)}
