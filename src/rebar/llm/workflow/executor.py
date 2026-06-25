@@ -46,6 +46,14 @@ from typing import Any
 from rebar.llm.errors import WorkflowError, WorkflowValidationError
 
 from .lint import lint_document
+from .runners import (
+    AgentStepRunner,
+    BatchRunner,
+    BatchRunRequest,
+    BatchRunResult,
+    DefaultBatchRunner,
+    FakeAgentRunner,
+)
 from .schema import validate_document
 
 # Reuse the linter's expression grammar so the resolver and the static checker can
@@ -320,133 +328,9 @@ def shallow_contract_check(source: dict, target: dict) -> str:
     return "OK"
 
 
-class AgentStepRunner:
-    """The agentic-step seam (the real pydantic_ai-backed runner plugs in here)."""
-
-    def run(self, ctx: StepContext) -> StepResult:  # pragma: no cover - interface
-        raise NotImplementedError
-
-
-class FakeAgentRunner(AgentStepRunner):
-    """A no-token agent runner: deterministic, offline. Used for ``--dry-run`` and
-    tests until WS-D wires the real runner. Echoes a stable, schema-shaped stub so
-    downstream wiring can be exercised without a model call."""
-
-    def run(self, ctx: StepContext) -> StepResult:
-        mode = ctx.step.get("mode", "findings")
-        if mode == "findings":
-            outputs = {"findings": [], "summary": f"[fake] {ctx.step_id}", "_fake": True}
-        elif mode == "text":
-            outputs = {"text": f"[fake output for {ctx.step_id}]", "_fake": True}
-        else:
-            outputs = {"result": {}, "_fake": True}
-        return StepResult(outputs=outputs, status="succeeded")
-
-
-# ── Batch-runner seam (the v3 `batch` construct) ──────────────────────────────
-
-
-@dataclass(frozen=True)
-class BatchRunRequest:
-    """What a batch-runner needs. The interpreter resolves each criterion's ``when``
-    BEFORE building this, so ``criteria`` is the INCLUDED set only — each entry a
-    prompt-library-backed ``{prompt, with?}``. ``finder`` is the per-batch prompt id."""
-
-    finder: str
-    criteria: tuple[Mapping[str, Any], ...]
-    usd_budget: float | None
-    model_ladder: tuple[str, ...]
-    workflow: Mapping[str, Any]
-    target_ticket: str | None
-    repo_root: str | None
-    run_id: str
-    step_id: str
-
-
-@dataclass(frozen=True)
-class BatchRunResult:
-    """A batch-runner's result. ``outputs`` is the ``batch`` step's output dict — it
-    carries the aggregated ``findings`` AND the journaled ``batch_plan`` (OPAQUE to the
-    interpreter, which stores it but never branches on its internals)."""
-
-    outputs: dict[str, Any]
-
-
-class BatchRunner:
-    """The batch-orchestration seam: pack the included criteria into cost-bounded
-    batches, run the ``finder`` once per batch (via the agent runner), handle
-    context-limit fallback / model-escalation / budget-shedding, and JOURNAL an opaque
-    plan. The PRODUCTION runner (epic B, extracted from the gate's ``sizing.py``) plugs
-    in here; epic A ships the reference :class:`DefaultBatchRunner`."""
-
-    def run(
-        self, req: BatchRunRequest, agent_runner: AgentStepRunner
-    ) -> BatchRunResult:  # pragma: no cover - interface
-        raise NotImplementedError
-
-
-class DefaultBatchRunner(BatchRunner):
-    """Reference batch-runner (epic A): proves the seam + journaling end-to-end.
-
-    Real but minimal — it packs the included criteria into batches of at most
-    ``max_batch_size`` and runs the finder once per batch; on a per-batch context-limit
-    signal (the agent result carries a truthy ``_context_limit``) it SPLITS the batch and
-    retries each half (one genuine fallback path). ``usd_budget`` / ``model_ladder`` /
-    shedding are accepted and RECORDED in the plan but NOT enforced — the production
-    runner (epic B) implements the adaptive cost-escalation/shed. Journals a
-    ``batch_plan`` the interpreter stores opaquely."""
-
-    def __init__(self, max_batch_size: int = 4) -> None:
-        self.max_batch_size = max_batch_size
-
-    def run(self, req: BatchRunRequest, agent_runner: AgentStepRunner) -> BatchRunResult:
-        model = req.model_ladder[0] if req.model_ladder else None
-        plan: dict[str, Any] = {
-            "finder": req.finder,
-            "max_batch_size": self.max_batch_size,
-            "usd_budget": req.usd_budget,
-            "model_ladder": list(req.model_ladder),
-            "enforced": False,  # reference runner does not enforce budget/escalation (epic B does)
-            "batches": [],
-            "shed": [],
-        }
-        findings: list[Any] = []
-        for i in range(0, len(req.criteria), self.max_batch_size):
-            self._run_one(
-                req,
-                agent_runner,
-                list(req.criteria[i : i + self.max_batch_size]),
-                model,
-                plan,
-                findings,
-                0,
-            )
-        return BatchRunResult(
-            outputs={"findings": findings, "criteria_count": len(req.criteria), "batch_plan": plan}
-        )
-
-    def _run_one(self, req, agent_runner, batch, model, plan, findings, depth) -> None:
-        ids = [c.get("prompt") for c in batch]
-        ctx = StepContext(
-            run_id=req.run_id,
-            step_id=f"{req.step_id}:batch{len(plan['batches'])}",
-            kind="agent",
-            step={"prompt": req.finder, "mode": "findings", **({"model": model} if model else {})},
-            inputs={"finder": req.finder, "criteria": ids},
-            workflow=req.workflow,
-            target_ticket=req.target_ticket,
-            repo_root=req.repo_root,
-        )
-        out = agent_runner.run(ctx).outputs or {}
-        if out.get("_context_limit") and len(batch) > 1 and depth < 8:
-            # Fallback: a batch that hit the context limit is split and each half retried.
-            mid = len(batch) // 2
-            plan["batches"].append({"criteria": ids, "model": model, "outcome": "split"})
-            self._run_one(req, agent_runner, batch[:mid], model, plan, findings, depth + 1)
-            self._run_one(req, agent_runner, batch[mid:], model, plan, findings, depth + 1)
-            return
-        plan["batches"].append({"criteria": ids, "model": model, "outcome": "ran"})
-        findings.extend(out.get("findings", []) or [])
+# The agent + batch runner SEAMS live in `runners.py` (imported above and re-exported via
+# __all__) so this module stays under the module-size cap. They are constructed at call time
+# in `run_workflow` (FakeAgentRunner / DefaultBatchRunner defaults).
 
 
 # ── Run recorder seam (WS-C3 supplies the event-backed, idempotent one) ───────
