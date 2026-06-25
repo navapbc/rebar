@@ -19,6 +19,7 @@ exists. ``--force`` (with a justification) bypasses it and is audit-logged.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 from typing import Any
@@ -27,7 +28,32 @@ logger = logging.getLogger(__name__)
 
 _MANIFEST_PREFIX = "plan-review"
 _DEP_PREFIX = "dep"
+_REGVER_PREFIX = "regver:"  # criteria-registry version stamp (progressive drift-refresh, ADR 0002)
+_REFRESHED_PREFIX = "refreshed-from:"  # provenance on a drift-refreshed attestation
 _ABSENT_HASH = "absent"  # sentinel for a dependency path that does not exist on disk
+
+
+def registry_version() -> str:
+    """A short, deterministic stamp of the criteria registry the review ran against
+    (the canonical DET + LLM id sets + the routing index). Bound into the manifest so
+    a progressive drift-refresh can detect that the registry changed since signing
+    (version skew) and fall back to a FULL re-review instead of reusing the verdict."""
+    from . import registry
+
+    try:
+        routing = json.dumps(registry._routing_index(), sort_keys=True)
+    except Exception:  # noqa: BLE001 — routing unreadable → stamp the id sets alone; still detects drift
+        routing = ""
+    basis = json.dumps(
+        {
+            "det": sorted(registry.CANONICAL_DET),
+            "llm": sorted(registry.CANONICAL_LLM),
+            "grounded": sorted(registry.CODEBASE_GROUNDED),
+            "routing": routing,
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
 
 
 # ── code-drift dependency set (epic boil-golem-veto / ADR 0002) ───────────────────
@@ -83,12 +109,18 @@ def dependency_hashes(verdict: dict[str, Any], *, repo_root=None) -> dict[str, s
 
 # ── manifest ─────────────────────────────────────────────────────────────────────
 def build_manifest(
-    verdict: dict[str, Any], *, material: str, deps: dict[str, str] | None = None
+    verdict: dict[str, Any],
+    *,
+    material: str,
+    deps: dict[str, str] | None = None,
+    regver: str | None = None,
+    refreshed_from: str | None = None,
 ) -> list[str]:
     """The deterministic manifest signed for a passing plan-review verdict. The
     signature binds ``(ticket_id, manifest)``; the manifest records the verdict, the
     material fingerprint (for material-edit invalidation), the per-path code-drift
-    dependency map (for code-drift invalidation, ADR 0002), and provenance. No
+    dependency map (for code-drift invalidation, ADR 0002), the criteria-registry
+    version stamp (for progressive-refresh skew detection), and provenance. No
     timestamps, so re-signing the same verified state is reproducible."""
     counts = (verdict.get("coverage", {}) or {}).get("counts", {}) or {}
     lines = [
@@ -100,6 +132,10 @@ def build_manifest(
         f"blocking: {counts.get('blocking', 0)}",
         f"advisory: {counts.get('advisory_surfaced', 0)}",
     ]
+    if regver:
+        lines.append(f"{_REGVER_PREFIX} {regver}")
+    if refreshed_from:
+        lines.append(f"{_REFRESHED_PREFIX} {refreshed_from}")
     # Per-path dependency hashes (sorted), one line each: ``dep <sha256> <path>``.
     # The hash is fixed-width so the path (which may contain spaces) is an unambiguous
     # remainder. A per-path map (not a rolled-up root) is the contract Story 2 builds on.
@@ -122,6 +158,14 @@ def manifest_deps(manifest: list[str] | None) -> dict[str, str]:
     return out
 
 
+def manifest_regver(manifest: list[str] | None) -> str | None:
+    """The criteria-registry version stamp from a manifest (None if pre-stamp)."""
+    for line in manifest or []:
+        if str(line).startswith(_REGVER_PREFIX):
+            return str(line).split(":", 1)[1].strip()
+    return None
+
+
 def is_plan_review_manifest(manifest: list[str] | None) -> bool:
     return bool(manifest) and str(manifest[0]).startswith(_MANIFEST_PREFIX + ":")
 
@@ -140,8 +184,99 @@ def sign_plan_review(verdict: dict[str, Any], *, material: str, repo_root=None) 
     from rebar import signing
 
     deps = dependency_hashes(verdict, repo_root=repo_root)
-    manifest = build_manifest(verdict, material=material, deps=deps)
+    manifest = build_manifest(verdict, material=material, deps=deps, regver=registry_version())
     return signing.sign_manifest(verdict["ticket_id"], manifest, repo_root=repo_root)
+
+
+def _rehash(paths, *, repo_root=None) -> dict[str, str]:
+    """Re-hash the given dependency paths at CURRENT working-tree content."""
+    from rebar import config as _config
+
+    base = str(_config.repo_root(repo_root))
+    return {p: _hash_file(p, base=base) for p in sorted(paths)}
+
+
+def drift_refresh_candidate(ticket_id: str, *, repo_root=None) -> dict[str, Any] | None:
+    """Decide whether ``ticket_id`` is a REFRESHABLE drift-only-stale attestation: a
+    certified plan-review PASS whose material fingerprint and registry stamp still match,
+    but whose signed dependency files have drifted. Returns
+    ``{"manifest", "deps", "key_id"}`` for the progressive path, or None (→ full review)
+    when there is nothing safely reusable (no signature, wrong manifest, material edited,
+    registry skew, no scoped deps, or no actual drift)."""
+    from rebar import signing
+
+    try:
+        result = signing.verify_signature(ticket_id, repo_root=repo_root)
+    except Exception:  # noqa: BLE001 — signing unavailable → no refresh, fall back to full review
+        return None
+    if not result.get("verified"):
+        return None
+    manifest = result.get("manifest")
+    if not is_plan_review_manifest(manifest):
+        return None
+    # Registry skew → the probe's meaning may have changed → full review.
+    if manifest_regver(manifest) != registry_version():
+        return None
+    # Material edit is a separate invalidation (handled by the material-fingerprint gate).
+    signed_material = manifest_material(manifest)
+    if signed_material is None or signed_material != current_material_fingerprint(
+        ticket_id, repo_root=repo_root
+    ):
+        return None
+    deps = manifest_deps(manifest)
+    if not deps:  # unscoped attestation — nothing to probe against; full review
+        return None
+    current = _rehash(deps.keys(), repo_root=repo_root)
+    if current == deps:  # no drift → not a drift re-review at all
+        return None
+    return {"manifest": manifest, "deps": deps, "key_id": result.get("key_id")}
+
+
+def refresh_attestation(
+    ticket_id: str, prior_manifest: list[str], *, probe: str, repo_root=None
+) -> dict[str, Any]:
+    """Re-sign a drift-refreshed attestation: the PRIOR verdict (verdict/material/
+    model/runner/counts) re-bound to the CURRENT hashes of the SAME dependency paths,
+    with a ``refreshed-from`` provenance line + the current registry stamp. Reuses the
+    prior signed paths (authoritative) rather than re-deriving the set."""
+    from rebar import signing
+
+    fields = {
+        "verdict": "PASS",
+        "ticket_id": ticket_id,
+        "model": _manifest_field(prior_manifest, "model:"),
+        "runner": _manifest_field(prior_manifest, "runner:"),
+        "coverage": {
+            "counts": {
+                "blocking": _manifest_int(prior_manifest, "blocking:"),
+                "advisory_surfaced": _manifest_int(prior_manifest, "advisory:"),
+            }
+        },
+    }
+    prior_digest = signing.verify_signature(ticket_id, repo_root=repo_root).get("key_id", "?")
+    new_deps = _rehash(manifest_deps(prior_manifest).keys(), repo_root=repo_root)
+    manifest = build_manifest(
+        fields,
+        material=manifest_material(prior_manifest) or "",
+        deps=new_deps,
+        regver=registry_version(),
+        refreshed_from=f"{prior_digest} probe={probe}",
+    )
+    return signing.sign_manifest(ticket_id, manifest, repo_root=repo_root)
+
+
+def _manifest_field(manifest: list[str] | None, prefix: str) -> str:
+    for line in manifest or []:
+        if str(line).startswith(prefix):
+            return str(line).split(":", 1)[1].strip()
+    return "n/a"
+
+
+def _manifest_int(manifest: list[str] | None, prefix: str) -> int:
+    try:
+        return int(_manifest_field(manifest, prefix))
+    except (TypeError, ValueError):
+        return 0
 
 
 # ── the fast claim-gate check (no LLM, no heavy reads) ────────────────────────────

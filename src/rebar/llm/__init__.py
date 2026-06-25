@@ -37,6 +37,7 @@ from rebar.llm.errors import (
     LLMConfigError,
     LLMError,
     LLMRunnerError,
+    LLMUnavailableError,
     StructuredOutputError,
 )
 from rebar.llm.findings import build_result, normalize_finding, validate_result
@@ -83,6 +84,7 @@ __all__ = [
     # exceptions
     "LLMError",
     "LLMConfigError",
+    "LLMUnavailableError",
     "LLMRunnerError",
     "StructuredOutputError",
 ]

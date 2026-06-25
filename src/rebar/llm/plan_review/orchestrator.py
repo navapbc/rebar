@@ -30,10 +30,10 @@ import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from typing import Any
 
 from rebar.llm.config import LLMConfig
+from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.runner import Runner, get_runner
 
 from . import det_floor, passes, registry
@@ -60,76 +60,10 @@ _pass1_with_ladder = sizing.pass1_with_ladder
 _shed_to_budget = sizing.shed_to_budget
 
 
-# Pass-4 move registry (moves 1-9,11,12 with LOCKED templates; project-extensible
-# via .rebar later — child 75a9). The LLM picks the move + names a {subject}; the
-# prose is rendered deterministically from these templates (it never authors prose).
-MOVE_REGISTRY: dict[str, dict[str, str]] = {
-    "1": {
-        "name": "spike",
-        "template": "Consider a short spike to de-risk {subject} before committing the plan.",
-    },
-    "2": {
-        "name": "prior-art research",
-        "template": "Research prior art / OSS for {subject} before building it custom.",
-    },
-    "3": {
-        "name": "pre-mortem",
-        "template": "Run a quick pre-mortem on {subject}: how could this plan fail?",
-    },
-    "4": {
-        "name": "riskiest-assumption test",
-        "template": "Test the riskiest assumption behind {subject} first.",
-    },
-    "5": {
-        "name": "weigh alternatives",
-        "template": "Weigh at least one structural alternative for {subject}.",
-    },
-    "6": {
-        "name": "specification by example",
-        "template": "Pin down {subject} with a concrete worked example.",
-    },
-    "7": {
-        "name": "thin vertical slice",
-        "template": "Prove {subject} end-to-end with a thin vertical slice first.",
-    },
-    "8": {
-        "name": "ADR / one-way-door",
-        "template": "Record an ADR for {subject} — it reads like a one-way door.",
-    },
-    "9": {
-        "name": "plan the verification",
-        "template": "Plan how {subject} will be verified before implementing it.",
-    },
-    "11": {
-        "name": "propagate to children",
-        "template": "Propagate the revision for {subject} to the child tickets.",
-    },
-    "12": {
-        "name": "generalize the finding",
-        "template": "Generalize {subject} across the rest of the work.",
-    },
-}
-
-
-def load_move_registry(repo_root=None) -> dict[str, dict[str, str]]:
-    """The Pass-4 move registry: the built-in moves PLUS project extensions from
-    ``.rebar/plan_review_moves.json`` (a ``{move_id: {name, template}}`` map; a
-    project entry adds a new move or overrides a built-in by id). The template must
-    contain a single ``{subject}`` placeholder — the LLM never authors prose.
-    Best-effort: a missing/malformed file → built-ins only (never crashes the review)."""
-    moves = {mid: dict(m) for mid, m in MOVE_REGISTRY.items()}
-    if not repo_root:
-        return moves
-    try:
-        path = Path(repo_root) / ".rebar" / "plan_review_moves.json"
-        if path.is_file():
-            extra = json.loads(path.read_text(encoding="utf-8"))
-            for mid, m in (extra or {}).items():
-                if isinstance(m, dict) and m.get("name") and "{subject}" in str(m.get("template")):
-                    moves[str(mid)] = {"name": m["name"], "template": m["template"]}
-    except Exception:  # noqa: BLE001 — project move file is best-effort
-        pass
-    return moves
+# The Pass-4 move registry + loader live with their consumer (pass4_coach) in
+# :mod:`.passes`; re-exported here for the historical ``orchestrator.MOVE_REGISTRY`` /
+# ``orchestrator.load_move_registry`` call sites (module-size seam, child 75a9).
+from .passes import MOVE_REGISTRY, load_move_registry  # noqa: E402,F401
 
 
 # ── context assembly ─────────────────────────────────────────────────────────────
@@ -407,12 +341,21 @@ def run_review(
             findings = _run_passes(ctx, cfg, runner_sel, single, agent, coverage)
             llm_ms = round((time.monotonic() - _t_llm) * 1000, 1)
             llm_ran = True
-        except Exception as exc:  # noqa: BLE001 — LLM unavailable → fail-open to DET-only review; broad-but-logged + recorded in coverage
-            # Fail-open to a DET-only review, but record the error in-band (coverage)
-            # AND on the logger so a degraded review is observable to the operator.
-            logger.warning("LLM passes failed; falling back to DET-only review", exc_info=True)
+        except LLMUnavailableError as exc:
+            # SYSTEMIC failure — the LLM tier could not run at all (missing agents extra,
+            # missing/invalid key, provider auth/connection/rate-limit). This must NOT
+            # degrade to a hollow DET-only PASS (fuel-posse-ball): mark the tier
+            # unavailable so the verdict becomes INDETERMINATE and is never signed.
+            logger.warning("plan-review LLM tier unavailable: %s", exc)
             coverage["llm_error"] = str(exc)
             coverage["llm_ran"] = False
+            coverage["llm_unavailable"] = True
+        except Exception as exc:  # noqa: BLE001 — an UNEXPECTED tier failure: also never a silent
+            # pass. Treat as unavailable (INDETERMINATE, unsigned) + record in-band/logger.
+            logger.warning("plan-review LLM tier failed unexpectedly", exc_info=True)
+            coverage["llm_error"] = str(exc)
+            coverage["llm_ran"] = False
+            coverage["llm_unavailable"] = True
     coverage.setdefault("llm_ran", llm_ran)
 
     # ── assemble: ids, decisions already attached; merge DET findings ─────────────
@@ -486,9 +429,16 @@ def run_review(
             logger.warning("pass-4 coaching failed; verdict emitted without it", exc_info=True)
             coverage["coach_error"] = str(exc)
 
-    verdict = (
-        "BLOCK" if blocking else ("INDETERMINATE" if indeterminate and not surfaced else "PASS")
-    )
+    # A DET block is still an actionable BLOCK even with no LLM. Otherwise, a SYSTEMIC
+    # LLM-tier failure (llm_unavailable) makes the review INDETERMINATE — never a hollow
+    # PASS — so it is not signed (fuel-posse-ball). A genuine unsupported-stack abstain
+    # (the tier ran, a criterion couldn't ground) is NOT llm_unavailable → still PASS.
+    if blocking:
+        verdict = "BLOCK"
+    elif coverage.get("llm_unavailable") or (indeterminate and not surfaced):
+        verdict = "INDETERMINATE"
+    else:
+        verdict = "PASS"
     coverage["counts"] = {
         "blocking": len(blocking),
         "advisory_surfaced": len(surfaced),
@@ -519,6 +469,83 @@ def run_review(
         "coverage": coverage,
         "runner": (runner.name if runner else cfg.runner),
         "model": cfg.model,
+    }
+
+
+# ── progressive drift-refresh (Story 2, epic boil-golem-veto / ADR 0002) ──────────
+_PROBE_CRITERIA = ("E4", "G1G2")  # "is the plan accurate vs the codebase" — both mandatory in v1
+
+
+def drift_refresh(
+    ctx: PlanContext, cfg: LLMConfig, *, runner: Runner | None = None, repo_root=None
+) -> dict[str, Any] | None:
+    """The progressive (tripwire) drift re-review. If the ticket's attestation is stale
+    ONLY because reviewed code drifted (ticket material + criteria-registry unchanged),
+    run a cheap probe (E4+G1G2) against the CURRENT code; if the plan still holds, REFRESH
+    the attestation (re-sign the prior verdict with current dependency hashes) and return a
+    refreshed PASS verdict. Returns None when not applicable, or when the probe escalates
+    (a blocking finding, or a finding citing a drifted dependency file) — the caller then
+    runs the FULL review. Soundness is whole-verdict, gated by the probe: NO per-criterion
+    finding reuse, so the (unenforced) code-blind criterion partition is not relied upon."""
+    from . import attest
+
+    if ctx.ticket_type in ("bug", "session_log"):
+        return None
+    cand = attest.drift_refresh_candidate(ctx.ticket_id, repo_root=repo_root)
+    if cand is None:
+        return None
+    current = attest._rehash(cand["deps"].keys(), repo_root=repo_root)
+    drifted = {p for p, h in cand["deps"].items() if current.get(p) != h}
+
+    runner_sel = runner or get_runner(cfg)
+    try:
+        runner_sel.preflight()
+        probe_crits = [c for c in (registry.by_id().get(cid) for cid in _PROBE_CRITERIA) if c]
+        findings = _run_passes(ctx, cfg, runner_sel, [], probe_crits, {})
+    except Exception:  # noqa: BLE001 — probe unavailable → FULL re-review (fail-safe)
+        logger.warning("drift-probe failed; falling back to a full re-review", exc_info=True)
+        return None
+
+    # Escalate iff any blocking finding, or any block/advisory finding citing a drifted file.
+    for f in findings:
+        if f.get("decision") == "block":
+            return None
+        if f.get("decision") in ("block", "advisory"):
+            cited = {c.get("path") for c in (f.get("citations") or []) if isinstance(c, dict)}
+            if cited & drifted:
+                return None
+
+    # Clean probe → the drift was immaterial → refresh the attestation wholesale.
+    sig = attest.refresh_attestation(
+        ctx.ticket_id, cand["manifest"], probe="PASS", repo_root=repo_root
+    )
+    return {
+        "verdict": "PASS",
+        "ticket_id": ctx.ticket_id,
+        "ticket_type": ctx.ticket_type,
+        "blocking": [],
+        "advisory": [],
+        "coaching": [],
+        "overflow": [],
+        "indeterminate": [],
+        "dropped": [],
+        "coverage": {
+            "drift_refresh": True,
+            "probe": "PASS",
+            "probe_criteria": list(_PROBE_CRITERIA),
+            "drifted_files": sorted(drifted),
+            "llm_ran": True,
+        },
+        "runner": runner_sel.name,
+        "model": cfg.model,
+        "material_fingerprint": attest.manifest_material(cand["manifest"]),
+        "sidecar_emitted": False,
+        "signature": {
+            "signed": True,
+            "key_id": sig.get("key_id"),
+            "head_sha": sig.get("head_sha"),
+            "refreshed": True,
+        },
     }
 
 
@@ -591,8 +618,16 @@ def _run_passes(
         for fu in st_futs + ag_futs:
             try:
                 findings.extend(fu.result() or [])
-            except Exception:  # noqa: BLE001 — a failed chunk drops its findings, never aborts the review
-                pass
+            except LLMUnavailableError:
+                # SYSTEMIC failure (auth / missing key / connection / rate-limit) affects
+                # the whole tier — surface it, never silently drop (fuel-posse-ball). The
+                # run_review caller turns this into an INDETERMINATE, unsigned verdict.
+                raise
+            except Exception:  # noqa: BLE001 — a NON-systemic per-chunk failure: drop its findings, never aborts
+                coverage["chunk_errors"] = coverage.get("chunk_errors", 0) + 1
+                logger.warning(
+                    "a plan-review chunk failed (non-systemic); findings dropped", exc_info=True
+                )
     if ladder_events:
         coverage["size_ladder"] = ladder_events
     coverage["checkpoint"] = {"chunks_resumed": resumed, "chunks_total": len(chunks) + len(agent)}

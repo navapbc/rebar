@@ -39,9 +39,12 @@ _DESC = (
 )
 
 
-def _enable(repo: Path) -> None:
+def _enable(repo: Path, *, progressive: bool = True) -> None:
     (repo / ".rebar").mkdir(exist_ok=True)
-    (repo / ".rebar" / "config.conf").write_text("verify.require_plan_review_for_claim = true\n")
+    conf = "verify.require_plan_review_for_claim = true\n"
+    if progressive:
+        conf += "verify.progressive_drift_refresh = true\n"
+    (repo / ".rebar" / "config.conf").write_text(conf)
 
 
 def _commit(repo: Path) -> None:
@@ -223,23 +226,98 @@ def test_sidecar_prune_bounds_growth(rebar_repo: Path) -> None:
     assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "open"
 
 
-# ── E2E edge case: fail-open on an unavailable LLM (unsupported stack) ──────────
-def test_review_fail_open_on_unavailable_llm(rebar_repo: Path) -> None:
-    class _BrokenRunner:
-        name = "broken"
+# ── LLM unavailable → fail LOUD, never a hollow PASS (fuel-posse-ball) ──────────
+def test_review_fails_loud_when_deps_unavailable(rebar_repo: Path) -> None:
+    # preflight raises (missing agents extra) ⇒ the LLM tier cannot run ⇒ INDETERMINATE
+    # (NOT a DET-only PASS), and never signed.
+    from rebar.llm.errors import LLMConfigError
+
+    class _NoDeps:
+        name = "no-deps"
 
         def preflight(self):
-            raise RuntimeError("the agents extra is missing")
+            raise LLMConfigError("the 'agents' extra is missing — install nava-rebar[agents]")
 
         def run(self, req):  # noqa: ANN001
             raise AssertionError("run must not be reached when preflight fails")
 
     _commit(rebar_repo)
     tid = _make(rebar_repo)
-    v = rebar.llm.review_plan(tid, runner=_BrokenRunner(), repo_root=str(rebar_repo), sign=False)
-    # DET floor still ran + passed (AC present) ⇒ no blocks; LLM tier degraded cleanly.
-    assert v["verdict"] in ("PASS", "INDETERMINATE")
-    assert v["coverage"]["llm_ran"] is False and "llm_error" in v["coverage"]
+    v = rebar.llm.review_plan(tid, runner=_NoDeps(), repo_root=str(rebar_repo))
+    assert v["verdict"] == "INDETERMINATE"  # NOT PASS — no hollow pass
+    assert v["coverage"]["llm_ran"] is False and v["coverage"].get("llm_unavailable") is True
+    assert not v["signature"]["signed"]  # never signed when the tier did not run
+
+
+def test_review_fails_loud_when_key_unavailable_at_runtime(rebar_repo: Path) -> None:
+    # preflight passes (deps present) but the provider call fails (e.g. missing/invalid
+    # API key) — surfaces as LLMUnavailableError from the runner ⇒ INDETERMINATE, unsigned,
+    # claim stays blocked. Covers any provider, not just Anthropic.
+    from rebar.llm.errors import LLMUnavailableError
+
+    class _NoKey:
+        name = "no-key"
+
+        def preflight(self):
+            return None  # deps fine
+
+        def run(self, req):  # noqa: ANN001
+            raise LLMUnavailableError("the LLM provider call failed: OPENAI_API_KEY not set")
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    v = rebar.llm.review_plan(tid, runner=_NoKey(), repo_root=str(rebar_repo))
+    assert v["verdict"] == "INDETERMINATE" and not v["signature"]["signed"]
+    assert v["coverage"].get("llm_unavailable") is True
+    with pytest.raises(rebar.RebarError):  # no attestation earned → claim blocked
+        rebar.claim(tid, repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "open"
+
+
+def test_workflow_surfaces_unavailable_llm_as_failed_step(rebar_repo: Path) -> None:
+    # The shared contract holds for the OTHER prompt-using client: a workflow whose agent
+    # step hits an unavailable LLM reports the run FAILED (not a silently-empty success).
+    from rebar.llm.errors import LLMUnavailableError
+    from rebar.llm.workflow import executor as _wf
+
+    class _NoKeyAgent(_wf.AgentStepRunner):
+        def run(self, ctx):  # noqa: ANN001
+            raise LLMUnavailableError("the LLM provider call failed: ANTHROPIC_API_KEY not set")
+
+    doc = {
+        "schema_version": "1",
+        "name": "wf",
+        "steps": [{"id": "s1", "prompt": "code-quality", "mode": "text", "with": {}}],
+    }
+    res = _wf.run_workflow(doc, agent_runner=_NoKeyAgent(), repo_root=str(rebar_repo))
+    assert res.status == "failed" and res.error  # surfaced, not swallowed into success
+
+
+def test_per_criterion_failure_is_fail_open_when_tier_ran(rebar_repo: Path) -> None:
+    # Fail-open PRESERVED at the LLM tier: a NON-systemic per-criterion failure (the tier
+    # RAN; a finder raised an ordinary error, not LLMUnavailableError) drops that unit's
+    # findings but does NOT mark the tier unavailable → still PASS + signed, claim succeeds.
+    # (Distinguishes a systemic outage, which is INDETERMINATE, from a one-off hiccup.)
+    class _FlakyFinder:
+        name = "flaky"
+
+        def preflight(self):
+            return None  # tier IS available
+
+        def run(self, req):  # noqa: ANN001
+            raise ValueError("transient parse hiccup for one criterion")  # non-systemic
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    v = rebar.llm.review_plan(tid, runner=_FlakyFinder(), repo_root=str(rebar_repo))
+    assert v["verdict"] == "PASS"  # tier ran (no systemic failure) → NOT INDETERMINATE
+    assert v["coverage"]["llm_ran"] is True
+    assert v["coverage"].get("llm_unavailable") is not True
+    assert v["signature"]["signed"]
+    rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "in_progress"
 
 
 # ── E2E edge case: cap-hit INDETERMINATE (budget shed) ──────────────────────────
@@ -352,6 +430,111 @@ def _timed(fn) -> float:  # noqa: ANN001
     t0 = time.perf_counter()
     fn()
     return time.perf_counter() - t0
+
+
+# ── progressive drift-refresh (Story 2, epic boil-golem-veto / ADR 0002) ────────
+def test_drift_refresh_reuses_on_immaterial_drift(rebar_repo: Path) -> None:
+    # A clean probe (FakeRunner finds nothing) means the drift didn't break the plan →
+    # the attestation is REFRESHED (not fully re-reviewed) and the claim then succeeds.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _scoped(rebar_repo)  # signed; dep.py hashed into the manifest
+    (rebar_repo / "dep.py").write_text("v = 1  # cosmetic edit; plan still holds\n")  # drift
+    v = _review(tid, rebar_repo)
+    assert v["coverage"].get("drift_refresh") is True
+    assert v["signature"].get("refreshed") is True and v["verdict"] == "PASS"
+    rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "in_progress"
+
+
+def test_refreshed_attestation_rebinds_to_current_code(rebar_repo: Path) -> None:
+    # The refreshed attestation is re-bound to the CURRENT dependency hashes: a FURTHER
+    # drift after the refresh staleness-blocks the claim (no stale reuse).
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _scoped(rebar_repo)
+    (rebar_repo / "dep.py").write_text("v = 2\n")
+    _review(tid, rebar_repo)  # refresh, now bound to "v = 2"
+    (rebar_repo / "dep.py").write_text("v = 3\n")  # drift again
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.claim(tid, repo_root=str(rebar_repo))
+    assert "drift" in ei.value.stderr.lower()
+
+
+def test_drift_refresh_skips_on_material_edit(rebar_repo: Path) -> None:
+    # A ticket material edit is NOT a drift-only staleness → no refresh; a full review runs.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _scoped(rebar_repo)
+    rebar.edit_ticket(
+        tid,
+        description=_DESC + "\nNEW materially-different requirement.",
+        repo_root=str(rebar_repo),
+    )
+    v = _review(tid, rebar_repo)
+    assert "drift_refresh" not in v["coverage"]  # full review, not the progressive path
+
+
+def test_drift_refresh_skips_on_registry_skew(rebar_repo: Path, monkeypatch) -> None:
+    # If the criteria registry changed since signing, the probe's meaning may differ →
+    # fall back to a FULL re-review rather than refreshing.
+    from rebar.llm.plan_review import attest
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _scoped(rebar_repo)
+    (rebar_repo / "dep.py").write_text("v = 9\n")  # drift
+    monkeypatch.setattr(attest, "registry_version", lambda: "different-version-stamp")
+    v = _review(tid, rebar_repo)
+    assert "drift_refresh" not in v["coverage"]
+
+
+def test_drift_refresh_escalates_on_probe_finding(rebar_repo: Path, monkeypatch) -> None:
+    # A probe finding citing a drifted file means the plan may no longer hold →
+    # drift_refresh escalates (returns None) so the caller runs the full review.
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.plan_review import orchestrator
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _scoped(rebar_repo)
+    (rebar_repo / "dep.py").write_text("v = 42  # material change\n")
+
+    def _block(*a, **k):
+        return [
+            {
+                "decision": "block",
+                "criteria": ["E4"],
+                "citations": [{"kind": "file", "path": "dep.py"}],
+            }
+        ]
+
+    monkeypatch.setattr(orchestrator, "_run_passes", _block)
+    cfg = LLMConfig.from_env(repo_root=str(rebar_repo))
+    ctx = orchestrator.assemble_context(tid, repo_root=str(rebar_repo), cfg=cfg)
+    assert orchestrator.drift_refresh(ctx, cfg, runner=_CLEAN, repo_root=str(rebar_repo)) is None
+
+
+def test_drift_refresh_skips_when_no_prior_verdict(rebar_repo: Path) -> None:
+    # First-time review (no prior attestation to reuse) → full review, never the
+    # progressive path, even with the flag on.
+    _commit(rebar_repo)
+    _enable(rebar_repo)  # progressive on
+    tid = _make(rebar_repo)
+    v = _review(tid, rebar_repo)
+    assert "drift_refresh" not in v["coverage"]
+    assert v["verdict"] == "PASS" and v["signature"]["signed"]
+
+
+def test_progressive_drift_refresh_is_opt_in(rebar_repo: Path) -> None:
+    # With the flag OFF (default), code drift falls back to a FULL re-review — the
+    # progressive path is never taken ("measure before enabling by default").
+    _commit(rebar_repo)
+    _enable(rebar_repo, progressive=False)
+    tid = _scoped(rebar_repo)
+    (rebar_repo / "dep.py").write_text("v = 1  # cosmetic\n")  # drift
+    v = _review(tid, rebar_repo)
+    assert "drift_refresh" not in v["coverage"]  # opt-in: not enabled by default
 
 
 # ── config: dotted enables, default off ─────────────────────────────────────────
