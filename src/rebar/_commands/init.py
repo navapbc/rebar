@@ -26,13 +26,24 @@ import sys
 import time
 import uuid
 
-_GITIGNORE = """.env-id
+from rebar._store.lock import MKDIR_LOCK_NAME, WRITE_LOCK_NAME
+from rebar.graph._cache import _GRAPH_CACHE_FILE
+
+# Runtime artifacts created in the tracker worktree that must never be committed.
+# The lock/cache names are sourced from their defining constants so this ignore
+# list cannot drift from them (bug stem-ewe-tomb). The flock write-lock file is
+# intentionally NOT unlinked on release (deleting it races other lockers), so it
+# persists after every write; the graph cache is rewritten on every graph compile.
+_GITIGNORE = f""".env-id
 .closure-key
 .signing-key
 .state-cache
 .scratch/
 .cache.json
 */.cache.json
+{WRITE_LOCK_NAME}
+{MKDIR_LOCK_NAME}/
+{_GRAPH_CACHE_FILE}
 """
 
 _GITATTRIBUTES = """# Shared mutable root files are per-pass derived CACHES the reconciler rebuilds,
@@ -193,6 +204,7 @@ def init_core(repo_root=None, *, silent: bool = False) -> int:
             _migrate_gc_config(tracker)
             _ensure_merge_ours_driver(tracker)
             _commit_gitattributes(tracker)  # migrate trackers predating WU-3
+            _commit_gitignore(tracker)  # migrate trackers predating the lock/cache ignores
             _emit("Ticket system already initialized.", silent)
             return 0
 
@@ -334,7 +346,8 @@ def _ensure_branch_user_config(repo: str, tracker: str) -> None:
 
 
 def _commit_gitignore(tracker: str) -> None:
-    if _git(tracker, "show", "tickets:.gitignore").returncode != 0:
+    show = _git(tracker, "show", "tickets:.gitignore")
+    if show.returncode != 0:
         with open(os.path.join(tracker, ".gitignore"), "w", encoding="utf-8") as f:
             f.write(_GITIGNORE)
         _git(tracker, "add", ".gitignore")
@@ -345,6 +358,26 @@ def _commit_gitignore(tracker: str) -> None:
             "--no-verify",
             "-m",
             "chore: add .gitignore for env-id, state-cache, scratch, and reducer cache",
+        )
+        return
+    # Migration (bug stem-ewe-tomb): an existing tracker's committed .gitignore may
+    # predate the lock/cache entries. Append any missing lines (idempotent — init
+    # re-runs harmlessly) so existing stores stop surfacing the artifacts untracked.
+    existing = set(show.stdout.splitlines())
+    missing = [ln for ln in _GITIGNORE.splitlines() if ln and ln not in existing]
+    if missing:
+        path = os.path.join(tracker, ".gitignore")
+        body = show.stdout if show.stdout.endswith("\n") else show.stdout + "\n"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(body + "\n".join(missing) + "\n")
+        _git(tracker, "add", ".gitignore")
+        _git(
+            tracker,
+            "commit",
+            "-q",
+            "--no-verify",
+            "-m",
+            "chore: gitignore write-lock and graph-cache runtime artifacts",
         )
 
 
