@@ -183,22 +183,29 @@ line-length = 100
 # The exemplar package `src/rebar/llm/plan_review/` is deliberately NOT exempt.
 select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201"]
 
-# ── BLE001 / T201 shrinking allowlist (epic ring-gun-jot) ─────────────────────
-# Clone of the `.github/module-size-allowlist.txt` strangler pattern: each entry is
-# a package not yet remediated to the error-handling convention, exempted from
-# BLE001 (broad `except`) and/or T201 (`print`) until its sweep lands. Entries are
-# DELETED as each sweep completes; the close-out (ticket 0ec1) empties the set.
+# ── BLE001 / T201 per-file-ignores (epic ring-gun-jot — CLOSED OUT) ───────────
+# The shrinking allowlist (a clone of the `.github/module-size-allowlist.txt`
+# strangler) has been fully worked through (substrate → exemplar → 5 sweeps → 0ec1):
 #
-# Two kinds of T201 ignore are mixed here and the close-out separates them:
-#   • transitional — diagnostics that MIGRATE to the logger (_store, reducer, graph,
-#     _io stderr prints); their T201 ignore is removed once migrated.
-#   • legitimate-print surfaces — the CLI presentation layer (`_commands`) + the
-#     read CLIs (`_engine_support`: reads_cli/validate/next_batch emit
-#     `print(json.dumps(...))` machine-contract stdout) + the reconciler subprocess
-#     (`_engine/rebar_reconciler`, `_engine/jira-capability-probe.py`) which prints
-#     operational RECON:/ERROR: lines to its OWN stderr. These stay print-bearing;
-#     the close-out keeps their justification (inline `# noqa: T201` for the
-#     reconciler's 41 sites; the data-CLI surfaces keep a scoped ignore).
+#   • BLE001 — the allowlist is EMPTY. No src/ package is exempt: every broad
+#     `except` across the tree carries a justified inline `# noqa: BLE001 — <reason>`,
+#     so a NEW unguarded blind-except fails CI everywhere.
+#   • T201 — the ONLY remaining entries are the genuine, PERMANENT legitimate-print
+#     surfaces (not a transitional allowlist): the CLI presentation layer
+#     (`_commands`; `_cli` has no prints), the read-CLIs (`_engine_support`:
+#     validate/reads_cli/next_batch emit `print(json.dumps(...))` machine-contract
+#     stdout + human status on stderr), the reconciler subprocess
+#     (`_engine/rebar_reconciler`, `_engine/jira-capability-probe.py`) whose
+#     stderr (RECON:/ERROR:/health) + stdout (OK:/report/json) prints ARE its
+#     operational output, and `_alias.py`. These print BY DESIGN, so banning print
+#     there is wrong — they keep a scoped T201 ignore. (Plan-review G6 confirmed AC5's
+#     literal "empty the T201 allowlist" is non-executable without breaking these
+#     documented surfaces; this is the resolution.) The transitional T201 ignores
+#     (_store, reducer, graph, _io stderr diagnostics) were MIGRATED to the logger
+#     and removed. The reconciler's inline `# noqa: T201` sites are now redundant with
+#     this scoped entry but left in place as per-site documentation.
+#   • `tests/**` is out of the convention's scope (test code legitimately catches
+#     broadly and prints) — a permanent exemption, never part of the allowlist.
 [tool.ruff.lint.per-file-ignores]
 # Test code is out of the convention's scope: tests legitimately catch broadly (to
 # assert on failures) and print (debug/diagnostic output). PERMANENT, not part of

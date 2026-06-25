@@ -180,7 +180,7 @@ def _sgconfig_from_toml(repo_root: Path) -> str | None:
         if isinstance(rel, str) and rel.strip():
             resolved = repo_root / rel
             return str(resolved) if resolved.is_file() else None
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — fail-open: any toml read/parse error → None (no sgconfig)
         return None
     return None
 

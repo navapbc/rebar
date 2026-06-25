@@ -101,7 +101,7 @@ def rebase_retry(
         head_before = snapshot_head(repo_root)
         try:
             value = write_fn()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — in-band capture: error returned as abort Result
             # Errors fail fast — do not retry.
             return Result(
                 ok=False,

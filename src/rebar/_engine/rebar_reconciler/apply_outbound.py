@@ -125,7 +125,7 @@ def _apply_outbound_create(mutation, *, client=None, repo_root=None) -> ApplyRes
         key = payload.get("key_hint") or mutation.target
         try:
             _call_with_retry(client.delete_issue, key)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — rollback-must-not-mask-original
             # Best-effort rollback: swallow delete errors so the original
             # create exception propagates to the caller unchanged.
             pass
@@ -226,7 +226,7 @@ def _apply_outbound_update(mutation, *, client=None, repo_root=None) -> ApplyRes
                     parent_key,
                     exc,
                 )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — fail-open: set_parent non-fatal, logged
             logger.warning(
                 "_apply_outbound_update: set_parent failed for %s parent=%r: %r",
                 mutation.target,
@@ -258,7 +258,7 @@ def _apply_outbound_update(mutation, *, client=None, repo_root=None) -> ApplyRes
                 elif action == "remove":
                     _call_with_retry(client.remove_label, mutation.target, label_name)
                     labels_applied.append(f"-{label_name}")
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 — fail-open: per-label failure non-fatal, logged
                 logger.warning(
                     "_apply_outbound_update: label %s failed for %s label=%r: %r",
                     action,
@@ -287,7 +287,7 @@ def _apply_outbound_update(mutation, *, client=None, repo_root=None) -> ApplyRes
             try:
                 _call_with_retry(client.add_comment, mutation.target, body)
                 comments_applied += 1
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 — in-band capture into comment_errors (non-fatal)
                 # Bug 6afc-20ee-84e5-4dd5: non-fatal, but surface in the result
                 # payload so a swallowed comment failure is observable in the
                 # outcome instead of vanishing into the log.
@@ -330,7 +330,7 @@ def _apply_outbound_update(mutation, *, client=None, repo_root=None) -> ApplyRes
         if any(isinstance(e, dict) and e.get("action") == "add" for e in links):
             try:
                 existing_links = _index_existing_links(client.get_issue_links(mutation.target))
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 — fail-open: probe non-fatal, fall back to add
                 # Non-fatal probe failure: fall back to attempting the add(s).
                 existing_links = None
                 logger.warning(
@@ -355,7 +355,7 @@ def _apply_outbound_update(mutation, *, client=None, repo_root=None) -> ApplyRes
             try:
                 _call_with_retry(client.set_relationship, mutation.target, to_key, link_type)
                 links_applied += 1
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 — in-band capture into link_errors (non-fatal)
                 link_errors.append(f"set_relationship failed ({to_key}/{link_type}): {exc!s}")
                 logger.warning(
                     "_apply_outbound_update: set_relationship failed for %s -> %s (%s): %r",

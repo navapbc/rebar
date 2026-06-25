@@ -222,7 +222,7 @@ def _apply_inbound_create(
             raw_comments = client.get_comments(jira_key)
             if not isinstance(raw_comments, list):
                 raw_comments = []
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — fail-open: skip comment bootstrap, CREATE still succeeds
             import sys as _sys
 
             print(  # noqa: T201
@@ -482,7 +482,7 @@ def _apply_inbound_update(mutation, *, client=None, repo_root=None) -> ApplyResu
             try:
                 rebar.link(local_id, target_local_id, relation, repo_root=repo_root)
                 links_applied += 1
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 — fail-open: skip this link, continue applying others
                 logger.warning(
                     "_apply_inbound_update: rebar.link failed for %s -> %s (%s): %r",
                     local_id,

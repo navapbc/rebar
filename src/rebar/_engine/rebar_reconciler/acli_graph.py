@@ -251,7 +251,7 @@ class AcliGraphMixin:
                         exc,
                     )
                 break
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 — fail-open: degrade gracefully, parent data absent
                 _log.warning(
                     "get_parent_map: REST search failed: %r; "
                     "degrading gracefully — parent data will be absent this pass",
@@ -353,7 +353,7 @@ class AcliGraphMixin:
                         exc,
                     )
                 break
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 — fail-open: degrade to per-ticket fallback
                 _log.warning(
                     "get_comment_map: REST search failed: %r; "
                     "degrading gracefully — per-ticket fallback applies",

@@ -127,7 +127,7 @@ def verify_attested_commit(sha: str, allowlist: list[str]) -> bool:
         )
         if result.returncode != 0:
             return False
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — any verify failure (incl. timeout) treated as unverified
         return False
 
     try:
@@ -141,7 +141,7 @@ def verify_attested_commit(sha: str, allowlist: list[str]) -> bool:
         if email_result.returncode != 0:
             return False
         committer_email = email_result.stdout.strip()
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — any lookup failure treated as unverified (fail-closed)
         return False
 
     if committer_email in allowlist:

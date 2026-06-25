@@ -166,7 +166,7 @@ def _run_reconcile_check(repo_root: Path) -> int:
         rc_mod.write_report_json(report, output_path)
         print(f"\nFull report written to {output_path}")
         return 0
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — CLI top-level: log and return exit code 1
         print(f"ERROR: reconcile-check failed: {exc}", file=sys.stderr)
         return 1
 
@@ -216,7 +216,7 @@ def run_pass(
             target_mode=target_mode,
             filter_local_ids=filter_local_ids,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — body-inspecting: classify reschedule vs error to pick exit code
         if reschedule_error_cls is not None and isinstance(exc, reschedule_error_cls):
             print(
                 f"RESCHEDULE: reconcile_once signalled reschedule: {exc}",
@@ -429,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
             target_mode=target_mode,
             filter_local_ids=filter_local_ids,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — CLI top-level: log + traceback, return exit code 1
         # Print the prefixed line first so grep-based probes see it, THEN
         # the traceback so operators can root-cause. Both go to stderr.
         print(f"ERROR: run_pass raised: {exc}", file=sys.stderr)
@@ -441,7 +441,7 @@ def main(argv: list[str] | None = None) -> int:
         if acquired:
             try:
                 advisory.release_pass_lock(pass_id, repo_root)
-            except Exception as _rel_exc:  # noqa: BLE001
+            except Exception as _rel_exc:  # noqa: BLE001 — release in finally must not mask original error
                 # Release failure must not mask the original error path.
                 print(
                     f"WARN: release_pass_lock failed for pass_id={pass_id!r}: {_rel_exc!r}",

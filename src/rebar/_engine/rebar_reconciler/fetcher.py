@@ -352,7 +352,7 @@ def _build_snapshot(
                 exc.code,
                 exc,
             )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — fail-open: skip parent enrichment, write degraded snapshot
         _fetcher_log.warning(
             "fetch_snapshot: parent enrichment failed (%r); "
             "snapshot written without parent data (degraded)",
@@ -394,7 +394,7 @@ def _build_snapshot(
                 exc.code,
                 exc,
             )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — fail-open: skip comment enrichment, per-ticket fallback
         _fetcher_log.warning(
             "fetch_snapshot: comment enrichment failed (%r); "
             "snapshot written without comment data (per-ticket fallback)",

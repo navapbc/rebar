@@ -86,7 +86,7 @@ def signature_findings(tracker: str) -> list:
     out: list = []
     try:
         key = signing.signing_key(tracker, create_if_missing=False)
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — fail-open: no key means nothing to certify, return empty
         return out
     if not key:  # _NO_KEY: nothing to certify against here.
         return out
