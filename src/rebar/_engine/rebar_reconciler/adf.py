@@ -13,6 +13,7 @@ Round-trip property:
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -248,3 +249,43 @@ def text_to_adf(text: str) -> dict[str, Any]:
         else:
             paragraphs.append({"type": "paragraph", "content": []})
     return {"type": "doc", "version": 1, "content": paragraphs}
+
+
+# Jira enforces the description-field length limit on the ADF representation, NOT
+# the plain text. ``text_to_adf`` wraps every line in its own paragraph node, so a
+# multi-line description inflates well past its plain-text length (a 32,767-char
+# description observed serializing to ~50,566 ADF chars — bug 626d follow-up).
+# Target a budget safely under Jira's 32,767-char limit (margin for serialization
+# differences between this measurement and ACLI's wire form).
+_ADF_DESCRIPTION_LIMIT: int = 32000
+_ADF_TRUNCATION_SUFFIX: str = " … [truncated by reconciler]"
+
+
+def _adf_serialized_len(text: str) -> int:
+    """Length of ``text``'s ADF serialization — the size Jira actually limits."""
+    return len(json.dumps(text_to_adf(text)))
+
+
+def fit_text_to_adf_limit(text: str, *, limit: int = _ADF_DESCRIPTION_LIMIT) -> str:
+    """Truncate ``text`` so its ADF serialization fits within ``limit`` chars.
+
+    A plain-text cap is insufficient because ADF structure inflates the size, so we
+    binary-search the largest text prefix whose ADF (plus a truncation marker)
+    serializes within ``limit``. Idempotent and deterministic: a value already
+    within ``limit`` is returned unchanged, and the function is its own fixed point —
+    so the send path (``acli`` create/update) and the differ's description comparison
+    apply it identically and the diff converges. Send/diff-side only; the local
+    ticket store is never mutated.
+    """
+    if not isinstance(text, str) or _adf_serialized_len(text) <= limit:
+        return text
+    lo, hi, best = 0, len(text), _ADF_TRUNCATION_SUFFIX
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        candidate = text[:mid] + _ADF_TRUNCATION_SUFFIX
+        if _adf_serialized_len(candidate) <= limit:
+            best = candidate
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best

@@ -18,6 +18,7 @@ Hard constraint: the truncated description is NEVER written back to the local st
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -27,9 +28,10 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[4]
 ENGINE = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
 OUTBOUND_DIFFER_PATH = ENGINE / "outbound_differ.py"
-COMMENT_LIMITS_PATH = ENGINE / "comment_limits.py"
+ADF_PATH = ENGINE / "adf.py"
 
-_JIRA_DESCRIPTION_MAX_CHARS = 32767
+# The budget the fit targets (must match adf._ADF_DESCRIPTION_LIMIT).
+_ADF_DESCRIPTION_LIMIT = 32000
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -47,8 +49,8 @@ def outbound_differ() -> ModuleType:
 
 
 @pytest.fixture(scope="module")
-def comment_limits() -> ModuleType:
-    return _load_module("comment_limits_desc_conv", COMMENT_LIMITS_PATH)
+def adf() -> ModuleType:
+    return _load_module("adf_desc_conv", ADF_PATH)
 
 
 class StubBindingStore:
@@ -92,22 +94,29 @@ def _make_ticket(ticket_id: str, description: str) -> dict:
     }
 
 
-_OVERSIZE_DESC = "X" * 40000
+# A MULTI-LINE oversize description: text_to_adf wraps each line in its own
+# paragraph node, so the ADF inflates far past the plain-text length — the real
+# failure mode (a 46k-char epic serialized to ~50k ADF). 1,500 short lines ⇒ ~46k
+# plain but ADF well over the limit, so the fit must cut to far fewer plain chars.
+_OVERSIZE_DESC = ("X" * 30 + "\n") * 1500
 
 
 # ---------------------------------------------------------------------------
-# Pure truncation helper
+# Pure ADF-aware fit helper
 # ---------------------------------------------------------------------------
 
 
-def test_truncate_description_contract(comment_limits: ModuleType) -> None:
+def test_fit_description_contract(adf: ModuleType) -> None:
     short = "hello"
-    assert comment_limits.truncate_description(short) == short  # under-limit: unchanged
-    out = comment_limits.truncate_description(_OVERSIZE_DESC)
-    assert len(out) == _JIRA_DESCRIPTION_MAX_CHARS  # capped exactly at the limit
-    assert len(out) <= _JIRA_DESCRIPTION_MAX_CHARS
-    # idempotent: truncating the result again is a no-op
-    assert comment_limits.truncate_description(out) == out
+    assert adf.fit_text_to_adf_limit(short) == short  # under-limit: unchanged
+
+    out = adf.fit_text_to_adf_limit(_OVERSIZE_DESC)
+    # The fit is on the ADF representation, not the plain text.
+    assert len(json.dumps(adf.text_to_adf(out))) <= _ADF_DESCRIPTION_LIMIT
+    assert len(out) < len(_OVERSIZE_DESC)  # actually truncated
+    # idempotent: fitting the result again is a no-op (fixed point — load-bearing
+    # for convergence).
+    assert adf.fit_text_to_adf_limit(out) == out
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +126,7 @@ def test_truncate_description_contract(comment_limits: ModuleType) -> None:
 
 
 def test_oversize_description_converges_over_two_passes(
-    outbound_differ: ModuleType, comment_limits: ModuleType
+    outbound_differ: ModuleType, adf: ModuleType
 ) -> None:
     jira_key = "DIG-8001"
     ticket = _make_ticket("local-desc-1", _OVERSIZE_DESC)
@@ -133,9 +142,10 @@ def test_oversize_description_converges_over_two_passes(
     )
     assert _desc_mutations(result_1), "Pass 1 must emit a description update"
 
-    # The send path truncates before it lands; model that with the shared helper.
-    landed = comment_limits.truncate_description(_OVERSIZE_DESC)
-    assert len(landed) <= _JIRA_DESCRIPTION_MAX_CHARS
+    # The send path fits the description to the ADF limit before it lands; model
+    # that with the shared helper.
+    landed = adf.fit_text_to_adf_limit(_OVERSIZE_DESC)
+    assert len(json.dumps(adf.text_to_adf(landed))) <= _ADF_DESCRIPTION_LIMIT
 
     # Pass 2: Jira now carries the truncated body that actually landed.
     snap_2 = _make_jira_snapshot(jira_key, landed)
