@@ -170,6 +170,15 @@ def append_event(
     from rebar._store.event_append import StoreError
     from rebar._store.lock import LockTimeout, RebaseGuard
 
+    # Init gate at the single write seam (bug roar-nurse-stomp): every write —
+    # create/edit/link AND the leaf appends (comment/tag/set_*/sign/...) — flows
+    # through here, so enforcing `.env-id` once keeps the precondition consistent
+    # across ALL write commands and guarantees no event is ever appended without an
+    # env_id provenance stamp. (composer/transition keep their own pre-checks for an
+    # early, identical message; this is the backstop none can bypass.)
+    if not (Path(tracker) / ".env-id").is_file():
+        raise CommandError("Error: ticket system not initialized. Run 'ticket init' first.")
+
     timestamp, uuid_str = hlc.next_tick(str(tracker), ticket_id), str(_uuid.uuid4())
     event = {
         "timestamp": timestamp,
