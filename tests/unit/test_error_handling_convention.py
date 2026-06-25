@@ -56,6 +56,9 @@ def _ruff_codes(stdin_filename: str) -> set[str]:
             "-m",
             "ruff",
             "check",
+            # --no-cache: never write a .ruff_cache into the checkout (cwd=REPO_ROOT);
+            # the repo-isolation guard fails the run if a test leaks a new entry.
+            "--no-cache",
             "--select",
             "BLE001,T201",
             "--output-format",
@@ -101,6 +104,7 @@ def test_exemplar_package_is_clean() -> None:
             "-m",
             "ruff",
             "check",
+            "--no-cache",  # don't leak a .ruff_cache into the checkout (cwd=REPO_ROOT)
             "--select",
             "BLE001,T201",
             "src/rebar/llm/plan_review/",
