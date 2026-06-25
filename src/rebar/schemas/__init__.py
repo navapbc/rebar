@@ -177,6 +177,7 @@ CONTRACT_SCHEMAS: frozenset[str] = frozenset(
         "fetch_ticket",
         "fetch_commits",
         "fetch_epic_graph",
+        "overlay_triggers",
         "render_context",
         "gate",
         "comment_verdict",
