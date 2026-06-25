@@ -6,7 +6,7 @@ prompt/contract model) and the sibling modules (:mod:`.det_floor`, :mod:`.passes
 
 1. **Assemble** the whole ticket context (plan + children) from rebar's own reads
    — content is ALWAYS whole; never truncated, never content-chunked.
-2. **DET tier** — run the deterministic floor (P1–P8) via the code executor; its
+2. **DET tier** — run the deterministic floor (P1–P9) via the code executor; its
    blocking findings (P1/P5-cycle/P8) are the gate's only default blocks.
 3. **Route** the LLM criteria: ``applies_at`` proportionate scrutiny + overlay
    triggering; only the code-grounding set greps the codebase.

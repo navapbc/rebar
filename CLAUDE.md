@@ -7,7 +7,10 @@ over MCP). For internals see `docs/architecture.md`, `docs/event-schema.md`, and
 `docs/concurrency.md`. For the LLM/agent surfaces see `docs/llm-framework.md`, the
 reusable-machinery API reference `docs/reuse-surface.md` (signing + LLM runtime +
 prompt/contract + output-schema seams), and the plan-review gate
-`docs/plan-review-gate.md`.
+`docs/plan-review-gate.md`. When developing rebar itself — running the gates/LLM
+ops or testing config behavior — run the **repo checkout's** build, not a global
+install (a stale global build silently ignores newer config keys and may lack the
+`[agents]` extra): see `docs/local-dev-env.md`.
 
 > **Record your work in rebar, not in scratch notes.** Before starting, `search`/
 > `list` for an existing ticket; if none fits, `create` one and capture the plan

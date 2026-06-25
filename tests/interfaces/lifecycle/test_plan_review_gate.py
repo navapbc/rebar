@@ -252,6 +252,108 @@ def test_review_cap_hit_indeterminate(rebar_repo: Path, monkeypatch) -> None:
     assert any(f.get("reason") == "budget-cap-shed" for f in v["indeterminate"])
 
 
+# ── code-drift invalidation (epic boil-golem-veto / ADR 0002) ───────────────────
+def _scoped(repo: Path, *, dep: str = "dep.py", content: str = "v = 1\n") -> str:
+    """A claimable, reviewed ticket whose attestation is SCOPED to one dependency
+    file (via file_impact). Returns the ticket id; the attestation is signed."""
+    (repo / dep).write_text(content)
+    tid = _make(repo)
+    rebar.set_file_impact(
+        tid, [{"path": dep, "reason": "the code under review"}], repo_root=str(repo)
+    )
+    v = _review(tid, repo)
+    assert v["signature"]["signed"], "scoped ticket should earn a signed attestation"
+    return tid
+
+
+def test_code_drift_in_dependency_file_invalidates(rebar_repo: Path) -> None:
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _scoped(rebar_repo)
+    (rebar_repo / "dep.py").write_text("v = 2  # changed\n")  # drift in the reviewed file
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.claim(tid, repo_root=str(rebar_repo))
+    assert "drift" in ei.value.stderr.lower()
+    assert _status(tid, rebar_repo) == "open"
+
+
+def test_unrelated_change_does_not_invalidate_attestation(rebar_repo: Path) -> None:
+    # The worm-folly-barge scenario: an unrelated commit (HEAD moves) must NOT stale a
+    # still-correct, scoped attestation.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _scoped(rebar_repo)
+    (rebar_repo / "unrelated.py").write_text("noise = True\n")
+    _commit(rebar_repo)  # HEAD advances; dep.py is untouched
+    rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "in_progress"
+
+
+def test_dependency_file_deletion_invalidates(rebar_repo: Path) -> None:
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _scoped(rebar_repo)
+    (rebar_repo / "dep.py").unlink()  # deleting a reviewed file is drift
+    with pytest.raises(rebar.RebarError):
+        rebar.claim(tid, repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "open"
+
+
+def test_empty_dependency_set_falls_back_to_head(rebar_repo: Path) -> None:
+    # No file_impact and (FakeRunner) no citations ⇒ unscopable ⇒ conservative
+    # whole-HEAD freshness: any commit invalidates.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    assert _review(tid, rebar_repo)["signature"]["signed"]
+    _commit(rebar_repo)  # HEAD advances; nothing to scope to
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.claim(tid, repo_root=str(rebar_repo))
+    assert "stale" in ei.value.stderr.lower()
+    assert _status(tid, rebar_repo) == "open"
+
+
+def test_claim_path_drift_check_is_cheap(rebar_repo: Path) -> None:
+    # Times the DRIFT STEP itself (re-hashing the signed dependency paths) over ~30
+    # files and asserts it stays in low single-digit ms — the AC's measurable bound.
+    # (The no-LLM/no-network property of the claim path is pinned by
+    # test_claim_path_makes_no_llm_call above.)
+    from rebar import config as _config
+    from rebar.llm.plan_review import attest
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    impact = []
+    for i in range(30):
+        (rebar_repo / f"d{i}.py").write_text(f"x = {i}\n")
+        impact.append({"path": f"d{i}.py", "reason": "r"})
+    tid = _make(rebar_repo)
+    rebar.set_file_impact(tid, impact, repo_root=str(rebar_repo))
+    assert _review(tid, rebar_repo)["signature"]["signed"]
+
+    # Recover the SIGNED {path: hash} map the claim path re-hashes, then time exactly
+    # that comparison loop (what claim_gate_check does for drift).
+    sig = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    deps = attest.manifest_deps(sig["manifest"])
+    assert len(deps) == 30
+    base = str(_config.repo_root(str(rebar_repo)))
+
+    def _drift_step() -> list[str]:
+        return [p for p, h in deps.items() if attest._hash_file(p, base=base) != h]
+
+    assert _drift_step() == []  # no drift → certified
+    best = min(_timed(_drift_step) for _ in range(5))  # min-of-5 ⇒ intrinsic cost, not jitter
+    assert best < 0.005, f"drift step too slow ({best * 1000:.2f}ms over 30 files)"
+
+
+def _timed(fn) -> float:  # noqa: ANN001
+    import time
+
+    t0 = time.perf_counter()
+    fn()
+    return time.perf_counter() - t0
+
+
 # ── config: dotted enables, default off ─────────────────────────────────────────
 def test_config_flag_default_off(tmp_path: Path) -> None:
     from rebar import config

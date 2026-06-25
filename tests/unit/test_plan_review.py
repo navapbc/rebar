@@ -1,6 +1,6 @@
 """Unit tests for the plan-review gate's deterministic core (epic 5fd2).
 
-These exercise the pure, I/O-free seams — the DET floor (P1-P8) on synthetic
+These exercise the pure, I/O-free seams — the DET floor (P1-P9) on synthetic
 contexts, the Pass-3 deterministic math, the criteria registry + routing, the
 Pass-4 subject validator, and the attestation/sidecar helpers — with no git store,
 no LLM, no network. The store/CLI/MCP integration is pinned in
@@ -353,6 +353,43 @@ def test_manifest_roundtrip_and_material() -> None:
     m = attest.build_manifest(verdict, material="deadbeef")
     assert attest.is_plan_review_manifest(m)
     assert attest.manifest_material(m) == "deadbeef"
+
+
+def test_manifest_deps_roundtrip_and_backcompat() -> None:
+    verdict = {
+        "verdict": "PASS",
+        "ticket_id": "t1",
+        "model": "m",
+        "runner": "r",
+        "coverage": {"counts": {}},
+    }
+    m = attest.build_manifest(verdict, material="x", deps={"src/b.py": "h2", "src/a.py": "h1"})
+    # per-path map round-trips (sorted), and the manifest stays a valid plan-review one
+    assert attest.manifest_deps(m) == {"src/a.py": "h1", "src/b.py": "h2"}
+    assert attest.is_plan_review_manifest(m) and attest.manifest_material(m) == "x"
+    # no deps → empty map: an attestation predating ADR 0002 parses cleanly
+    assert attest.manifest_deps(attest.build_manifest(verdict, material="x")) == {}
+
+
+# ── P9 file-impact coverage (ADR 0002) ─────────────────────────────────────────
+def test_p9_warns_on_empty_file_impact_leaf() -> None:
+    r = det_floor.p9_file_impact_coverage(_ctx(_GOOD_AC, ttype="task"))
+    assert r.status == "fail" and not r.blocking and r.finding
+    assert r.coverage["applicable"] is True
+
+
+def test_p9_passes_when_file_impact_present() -> None:
+    r = det_floor.p9_file_impact_coverage(
+        _ctx(_GOOD_AC, ttype="task", state={"file_impact": [{"path": "src/x.py", "reason": "y"}]})
+    )
+    assert r.status == "pass"
+
+
+def test_p9_not_applicable_for_container() -> None:
+    r = det_floor.p9_file_impact_coverage(
+        _ctx(_GOOD_AC, ttype="story", children=[{"ticket_id": "c1"}])
+    )
+    assert r.status == "pass" and r.coverage["applicable"] is False
 
 
 def test_material_fingerprint_changes_on_material_edit() -> None:
