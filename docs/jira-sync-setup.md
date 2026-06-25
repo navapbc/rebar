@@ -193,6 +193,37 @@ without breaking durable sync) and **sufficient** (nothing else is required).
   commit on `origin/tickets` is revertable like any other commit (the event log is a
   union merge, so reverts converge across clones).
 
+## Re-targeting an existing store to a new project
+
+Changing `[jira] project` only governs where **new, unbound** tickets are created.
+A store that previously synced to another project keeps that project's **bindings**
+(`.bridge_state/bindings.json`) and a stale remote snapshot
+(`.bridge_state/prev_snapshot.json`), so the reconciler keeps targeting the old
+project's issues. Since the cross-project guard (bug 626d) the outbound applier
+**refuses** such writes (fail-closed) — so to actually move to the new project you
+must clear that legacy bind-state and let every local ticket re-create fresh.
+
+Use the migration tool (dry-run by default; writes nothing until `--apply`):
+
+```sh
+# 1. report what would change (no writes):
+python scripts/retarget_jira_project.py --tracker-dir .tickets-tracker
+
+# 2. apply — clears bindings.json + prev_snapshot.json (backs them up first);
+#    add --strip-tags to also remove residual dso-id:jira-<old>-* id tags:
+python scripts/retarget_jira_project.py --tracker-dir .tickets-tracker --apply
+
+# 3. VERIFY before enabling live sync — the plan must show 0 old-project targets:
+rebar reconcile --mode dry-run
+```
+
+This was validated on a clone of a DIG-bound store: clearing bindings +
+`prev_snapshot.json` dropped the dry-run plan from **1415 mutations (1017 targeting
+DIG)** to **398 clean outbound creates with 0 DIG targets** — i.e. every active
+ticket re-creates fresh in the new project. **A live pass after this bulk-creates
+one new issue per active local ticket**, so run it deliberately (off-cadence; pause
+the schedule), and commit the cleared bind-state back to the `tickets` branch.
+
 ## Optional hardening
 
 DSO also ships a **weekly bridge-fsck audit**. rebar exposes the same check as
