@@ -14,12 +14,19 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+import logging
 import subprocess
 import sys
 from typing import Any
 
 from rebar import config
 from rebar._engine import engine_dir, engine_env
+
+# Library hygiene — quiet by default. Attach a NullHandler to the ``rebar`` root logger
+# so importing rebar as a library never emits to stderr or warns about a missing
+# handler. Entrypoints install a real stderr handler via
+# ``rebar._logging.install_stderr_handler``. See ``rebar._logging`` for the convention.
+logging.getLogger("rebar").addHandler(logging.NullHandler())
 
 try:
     # Single source of truth: derive the version from the installed package
@@ -225,7 +232,11 @@ def _json_or(out: str, default):
 
     try:
         return _json.loads(out)
-    except Exception:
+    except _json.JSONDecodeError:
+        # Opportunistic narrowing (epic ring-gun-jot): the only expected failure here is
+        # malformed/empty JSON from a quality-gate subprocess; narrowed (with a regression
+        # test) from a blind `except` so a genuine bug (e.g. a TypeError) is no longer
+        # masked by the sentinel default. In the `import rebar` hot path.
         return default
 
 

@@ -119,7 +119,7 @@ def _load_alert_store():
     sys.modules[_ALERT_STORE_KEY] = mod
     try:
         spec.loader.exec_module(mod)
-    except Exception:
+    except Exception:  # noqa: BLE001 — loader cleanup: drop the half-initialised module from sys.modules, then re-raise (never swallowed)
         # Cleanup: don't leave a half-initialised module in sys.modules
         # for the next caller to reuse. Mirrors the sibling-loader pattern.
         sys.modules.pop(_ALERT_STORE_KEY, None)
@@ -352,7 +352,7 @@ def _build_snapshot(
                 exc.code,
                 exc,
             )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — fail-open: skip parent enrichment, write degraded snapshot
         _fetcher_log.warning(
             "fetch_snapshot: parent enrichment failed (%r); "
             "snapshot written without parent data (degraded)",
@@ -394,7 +394,7 @@ def _build_snapshot(
                 exc.code,
                 exc,
             )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — fail-open: skip comment enrichment, per-ticket fallback
         _fetcher_log.warning(
             "fetch_snapshot: comment enrichment failed (%r); "
             "snapshot written without comment data (per-ticket fallback)",

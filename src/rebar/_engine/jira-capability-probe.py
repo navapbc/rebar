@@ -151,7 +151,7 @@ def main() -> None:
             else:
                 print("PROBE_PASS step=STEP_PROPERTY_READ")
 
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — in-band capture: records PROBE_FAIL + sets failed flag
         print(f"PROBE_FAIL reason=exception detail={exc}")
         failed = True
 
@@ -161,7 +161,7 @@ def main() -> None:
             try:
                 client.delete_issue(issue_key)
                 print("PROBE_PASS step=STEP_DELETE")
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 — in-band capture: PROBE_FAIL + failed flag
                 print(f"PROBE_FAIL step=STEP_DELETE reason=exception detail={exc}")
                 failed = True
 

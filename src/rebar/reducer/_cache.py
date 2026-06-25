@@ -5,8 +5,10 @@ from __future__ import annotations
 import glob
 import hashlib
 import json
+import logging
 import os
-import sys
+
+logger = logging.getLogger(__name__)
 
 # Reducer-logic cache version. The dir-hash captures EVENT-FILE changes, but not
 # changes to how the reducer PROJECTS those events into state. When the reducer's
@@ -39,10 +41,7 @@ def write_cache(cache_path: str, dir_hash: str, state: dict, ticket_dir: str) ->
             json.dump({"dir_hash": dir_hash, "state": state}, tf, ensure_ascii=False)
         os.rename(cache_tmp, cache_path)
     except OSError:
-        print(
-            f"WARNING: failed to write cache for {ticket_dir}",
-            file=sys.stderr,
-        )
+        logger.warning("failed to write cache for %s", ticket_dir, exc_info=True)
 
 
 def compute_dir_hash(ticket_dir: str, event_filenames: list[str]) -> str:

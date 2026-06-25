@@ -313,7 +313,7 @@ def _prompt_eval(args) -> int:
 
     try:
         repo_root = str(config.repo_root())
-    except Exception:
+    except Exception:  # noqa: BLE001 — not in a repo (or unreadable) — fall open to repo_root=None
         repo_root = None
     try:
         spec = _eval.load_eval_spec(args.prompt_id, repo_root=repo_root)

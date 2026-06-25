@@ -54,6 +54,16 @@ advisory findings** before continuing (triage each: fix the valid ones; a findin
 you judge invalid must be justified, not silently ignored). The coaching notes tell
 you the productive next move per finding.
 
+> **Claim immediately after a passing `review-plan`, before committing other work**
+> (stopgap until bug `worm-folly-barge` is fixed). The attestation is bound to the
+> current code **HEAD**, so *any* intervening commit — even one in an unrelated file —
+> staleness-invalidates it and you get a `attestation is stale (signed at X, HEAD is Y)`
+> block at claim, forcing a slow re-review for no semantic reason. Corollary: don't run
+> `review-plan` concurrently with anything that can move HEAD (a background test suite,
+> another commit, or subagents whose worktree isolation can flip the checkout) — it may
+> sign against the wrong commit. Keep `review-plan → claim` adjacent and serial; commit
+> the ticket's own work *after* claiming.
+
 **Completion-verifier protocol (to close).** Closing a work ticket runs the
 completion verifier. If it **fails**, you must **remediate the failure and try to
 close the ticket again** — repeat until it passes (the signed verdict is the proof
@@ -237,6 +247,39 @@ over-cap offenders and their planned remedies are tabulated in
 **fails the build** when a *new* file exceeds the soft cap and is not in
 `.github/module-size-allowlist.txt` (the grandfathered set), so the over-cap set
 cannot silently grow.
+
+## Error-handling convention (when editing rebar itself)
+
+One observable, lint-enforced way to handle errors across rebar's library / CLI / MCP
+surfaces (epic `ring-gun-jot`). The canonical reference is the **`src/rebar/_logging.py`
+module docstring** — read it before adding a broad `except` or a diagnostic `print`. The
+essentials:
+
+- **Named loggers, quiet by default.** Modules log via `logger = logging.getLogger(__name__)`
+  (records resolve under the `rebar` root, or the sibling `rebar_reconciler` root for the
+  reconciler subprocess). `__init__.py` attaches a `NullHandler`; the three entrypoints —
+  CLI, MCP, and the reconciler `__main__` — install a **stderr** `StreamHandler` via
+  `rebar._logging.install_stderr_handler`. Importing rebar as a library never emits output.
+- **stdout is sacred.** CLI *data* `print(json.dumps(...))` is a machine contract (the
+  reconciler `json.loads` a subprocess' stdout) and MCP-over-stdio reserves stdout for
+  JSON-RPC framing. Only **stderr diagnostics** flow through the logger; stdout data prints
+  stay. A stdout-purity contract test guards this.
+- **MCP surface: raise, don't catch-and-return.** Tool handlers `raise` (the framework turns
+  the exception into an `isError` result); use `ToolError` for clean client-facing messages.
+  Don't catch-and-return error dicts; never let a failure-reporting path mask the original error.
+- **The observability floor (lint-enforced).** ruff **BLE001** (blind-except) and **T201**
+  (print) are enabled tree-wide. Every broad `except Exception` / `except BaseException` must
+  carry a justified **`# noqa: BLE001 — <reason>`** (reason required); when the catch swallows
+  something operator-actionable, also `logger.warning(..., exc_info=True)`. `KeyboardInterrupt` /
+  `SystemExit` are never swallowed — a broad catch that must run on *any* exit (cleanup) keeps
+  `except BaseException` **only if it re-raises**. Narrowing is opportunistic and **test-backed**;
+  fail-open / body-inspecting / public-API sites stay broad-but-justified. There is intentionally
+  **no shared swallow helper** (peers don't have one).
+- **T201 scope.** print is banned in the library/core/MCP; it is allowed on the genuine
+  presentation surfaces — the CLI layer (`_cli`/`_commands`), the read-CLIs (`_engine_support`),
+  and the reconciler subprocess's own operational stderr (`_engine/rebar_reconciler`) — which
+  keep a scoped `per-file-ignores` T201 entry in `pyproject.toml`. The **BLE001** allowlist is
+  empty: a new unguarded blind-except fails CI everywhere.
 
 ## Navigating the codebase (when editing rebar itself)
 

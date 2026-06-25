@@ -159,6 +159,6 @@ def parallel_run_and_diff(corpus, run_v1, run_v2, *, to_record) -> ParityReport:
         for runner, sink in ((run_v1, v1), (run_v2, v2)):
             try:
                 sink.append(to_record(item, runner(item), False))
-            except Exception:
+            except Exception:  # noqa: BLE001 — parity harness: a runner failure is recorded as a failure entry (errored=True), never aborts the comparison
                 sink.append(to_record(item, None, True))
     return parity_report(v1, v2)

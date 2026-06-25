@@ -32,11 +32,13 @@ bash. Always returns ``None``.
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
-import sys
 
 from rebar._store import lock as _lock
+
+logger = logging.getLogger(__name__)
 
 _SYNC_LOCK_TIMEOUT = 15  # bash TICKET_SYNC_LOCK_TIMEOUT default
 # Bound git calls (notably the network `fetch`) so a stuck remote can't hang a
@@ -74,10 +76,9 @@ def _do_reconverge(tracker: str, branch: str) -> None:
     try:
         _lock.check_no_rebase_in_progress(tracker)
     except _lock.RebaseGuard:
-        print(
-            "Warning: tickets sync skipped — tracker in rebase/merge recovery state "
-            "(run: rebar fsck-recover)",
-            file=sys.stderr,
+        logger.warning(
+            "tickets sync skipped — tracker in rebase/merge recovery state "
+            "(run: rebar fsck-recover)"
         )
         return
 
@@ -124,10 +125,9 @@ def _union_merge(tracker: str, remote: str, *extra: str) -> None:
     )
     if merge.returncode != 0:
         _git(tracker, "merge", "--abort")
-        print(
-            f"Warning: tickets sync could not auto-merge {remote} — local state "
-            "kept; run: rebar fsck-recover",
-            file=sys.stderr,
+        logger.warning(
+            "tickets sync could not auto-merge %s — local state kept; run: rebar fsck-recover",
+            remote,
         )
 
 
@@ -141,10 +141,9 @@ def reconverge(tracker: str | os.PathLike) -> None:
     try:
         _lock.check_no_rebase_in_progress(tracker)
     except _lock.RebaseGuard:
-        print(
-            "Warning: tickets sync skipped — tracker in rebase/merge recovery state "
-            "(run: rebar fsck-recover)",
-            file=sys.stderr,
+        logger.warning(
+            "tickets sync skipped — tracker in rebase/merge recovery state "
+            "(run: rebar fsck-recover)"
         )
         return
 

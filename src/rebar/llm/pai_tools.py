@@ -155,7 +155,7 @@ def rebar_tools(repo_path: str | None, *, allow_comment: bool) -> list[Callable]
 
         try:
             return json.dumps(rebar.show_ticket(ticket_id, repo_root=repo_path))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — agent-tool boundary: surface the error to the LLM as a tool-result string, never crash the agent loop
             return f"Error: {exc}"
 
     tools: list[Callable] = [show_ticket]
@@ -170,7 +170,7 @@ def rebar_tools(repo_path: str | None, *, allow_comment: bool) -> list[Callable]
             try:
                 rebar.comment(ticket_id, body, repo_root=repo_path)
                 return f"Commented on {ticket_id}."
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — agent-tool boundary: surface the error to the LLM as a tool-result string, never crash the agent loop
                 return f"Error: {exc}"
 
         tools.append(comment_ticket)

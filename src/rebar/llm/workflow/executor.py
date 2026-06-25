@@ -422,7 +422,7 @@ class TicketEventRecorder(RunRecorder):
         tracker = _seam.tracker_dir(self.repo_root)
         try:
             state = reduce_ticket(str(Path(tracker) / self.ticket))
-        except Exception:
+        except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible ticket yields no state (None)
             return None
         if not state:
             return None

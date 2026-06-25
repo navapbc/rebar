@@ -458,7 +458,7 @@ def apply(
                         pending.get("description", ""),
                         pending.get("parent_id", ""),
                     )
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001 — best-effort deferred bug filing must not fail pass
                     print(  # noqa: T201
                         f"deferred_bug_filing_failed: "
                         f"local_id={pending.get('local_id')!r} "

@@ -138,7 +138,7 @@ def _get_all_blocked_by(ticket_id: str, tracker_dir: str) -> set[str]:
         if os.path.isdir(current_dir):
             try:
                 state = reduce_ticket(current_dir)
-            except Exception:
+            except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible ticket dir is skipped during traversal
                 state = None
 
             if state is not None and isinstance(state, dict):
@@ -167,7 +167,7 @@ def _get_all_blocked_by(ticket_id: str, tracker_dir: str) -> set[str]:
                 continue
             try:
                 e_state = reduce_ticket(entry_path)
-            except Exception:
+            except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible ticket dir is skipped during traversal
                 e_state = None
             if e_state is None or not isinstance(e_state, dict):
                 continue
@@ -247,7 +247,7 @@ def check_cycle_at_level(source_id: str, target_id: str, level: str, tracker_dir
 
         try:
             state = reduce_ticket(current_dir)
-        except Exception:
+        except Exception:  # noqa: BLE001 — safe broad catch (story lean-sloth-ham verified): unreducible node skipped in the cycle BFS (fail-open guard)
             # Safe broad catch (story lean-sloth-ham verified): an unreducible ticket
             # dir is skipped during the cycle-detection BFS. Worst case a cycle through
             # a corrupt node goes undetected → the pre-write cycle guard is permissive
@@ -270,7 +270,7 @@ def check_cycle_at_level(source_id: str, target_id: str, level: str, tracker_dir
                     if os.path.isdir(target_dir):
                         try:
                             t_state = reduce_ticket(target_dir)
-                        except Exception:
+                        except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible neighbour is skipped during traversal
                             t_state = None
                         if t_state and t_state.get("ticket_type", "").lower() == level:
                             queue.append(target)

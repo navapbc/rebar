@@ -197,10 +197,10 @@ def create_one(
             _call_with_retry(client.set_entity_property, jira_key, "local_id", local_id)
             if binding_store is not None and local_id:
                 binding_store.bind_confirm(local_id, jira_key)
-        except Exception as write_err:
+        except Exception as write_err:  # noqa: BLE001 — rollback handler: delete the issue + write a failure alert, then re-raise the original write_err (never masked)
             try:
                 client.delete_issue(jira_key)
-            except Exception:
+            except Exception:  # noqa: BLE001 — best-effort rollback delete; swallow the delete error so the original write_err re-raises
                 pass  # rollback failure must not mask original error
             # Emit BRIDGE_ALERT for identity-write rollback so the event is
             # surfaced in the tickets-tracker for observability.  # tickets-boundary-ok
@@ -236,7 +236,7 @@ def create_one(
                     },
                 }
                 _alert_path.write_text(canonical_str(_alert_event))
-            except Exception:
+            except Exception:  # noqa: BLE001 — alert-write failure must not mask the original error (write_err is re-raised below)
                 pass  # alert write failure must not mask original error
             raise write_err
 
@@ -265,7 +265,7 @@ def create_one(
                     continue
                 try:
                     _call_with_retry(client.add_label, jira_key, label_name)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001 — best-effort label add; non-fatal, logged to stderr
                     print(  # noqa: T201
                         f"create_one: add_label failed for {jira_key} "
                         f"label={label_name!r}: {exc!r}",
@@ -282,7 +282,7 @@ def create_one(
                     continue
                 try:
                     _call_with_retry(client.add_comment, jira_key, body)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001 — in-band capture into comment_errors; non-fatal
                     # Bug ea6d-e4b2-a316-45ec: non-fatal, but surface it so the
                     # batch outcome no longer reports error=None for an outbound
                     # CREATE whose comment sub-mutation failed. Mirrors update_one.
@@ -397,7 +397,7 @@ def update_one(mutation: dict, client, comment_errors: list[str] | None = None) 
                     parent_key,
                     exc,
                 )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — best-effort set_parent; non-fatal, logged
             logger.warning(
                 "update_one: set_parent failed for %s parent=%r: %r",
                 issue_key,
@@ -434,7 +434,7 @@ def update_one(mutation: dict, client, comment_errors: list[str] | None = None) 
             comment = f"local status changed to {new_status}"
             try:
                 client.add_comment(issue_key, comment)
-            except Exception:
+            except Exception:  # noqa: BLE001 — secondary add_comment failure must not mask the comment-fallback path
                 pass  # secondary failure must not mask the comment-fallback path
             log_entry = json.dumps(
                 {
@@ -467,7 +467,7 @@ def update_one(mutation: dict, client, comment_errors: list[str] | None = None) 
                     _call_with_retry(client.add_label, issue_key, label_name)
                 elif action == "remove":
                     _call_with_retry(client.remove_label, issue_key, label_name)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 — best-effort label op; non-fatal, logged to stderr
                 print(  # noqa: T201
                     f"update_one: label {action} failed for {issue_key} "
                     f"label={label_name!r}: {exc!r}",
@@ -484,7 +484,7 @@ def update_one(mutation: dict, client, comment_errors: list[str] | None = None) 
                 continue
             try:
                 _call_with_retry(client.add_comment, issue_key, body)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 — in-band capture into comment_errors; non-fatal
                 # Bug 6afc-20ee-84e5-4dd5: non-fatal, but surface it so the batch
                 # outcome no longer reports error=None for a mutation whose
                 # comment sub-mutation failed.

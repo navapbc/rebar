@@ -332,7 +332,7 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
                 kwargs.pop("assignee")
                 try:
                     self.unassign_issue(jira_key)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001 — fail-open: unassign non-fatal, batch continues
                     print(  # noqa: T201
                         f"update_issue: unassign_issue({jira_key}) failed: {exc!r}",
                         file=sys.stderr,

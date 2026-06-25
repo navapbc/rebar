@@ -70,13 +70,13 @@ def is_deduped(key: str, repo_root: Path, window_ns: int = _24H_NS) -> bool:
             for line in jf.read_text(encoding="utf-8").splitlines():
                 try:
                     rec = json.loads(line)
-                except Exception:
+                except Exception:  # noqa: BLE001 — skip an unparseable alert-store line (per-line fail-open during the dedupe scan)
                     continue
                 if rec.get("key") == key and not rec.get("resolved"):
                     ts = rec.get("timestamp_ns", 0)
                     if now - ts <= window_ns:
                         return True
-        except Exception:
+        except Exception:  # noqa: BLE001 — skip an unreadable alert file (per-file fail-open during the dedupe scan)
             continue
     return False
 
@@ -150,5 +150,5 @@ def patch_bug_filed(key: str, bug_ticket_id: str, repo_root: Path) -> None:
             if patched:
                 _atomic_write(jf, "\n".join(out_lines) + "\n")
                 return
-        except Exception:
+        except Exception:  # noqa: BLE001 — skip an unwritable/unparseable alert file (per-file fail-open during the patch scan)
             continue

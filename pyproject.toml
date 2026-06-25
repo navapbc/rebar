@@ -176,7 +176,68 @@ line-length = 100
 [tool.ruff.format]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B"]
+# BLE001 (blind-except) + T201 (print) are the error-handling-convention gate
+# (epic ring-gun-jot). They are enabled tree-wide and gated behind a *shrinking*
+# per-file-ignores allowlist (below): every not-yet-swept package is exempted until
+# its sweep brings it to the observability floor, then removed from the allowlist.
+# The exemplar package `src/rebar/llm/plan_review/` is deliberately NOT exempt.
+select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201"]
+
+# ── BLE001 / T201 per-file-ignores (epic ring-gun-jot — CLOSED OUT) ───────────
+# The shrinking allowlist (a clone of the `.github/module-size-allowlist.txt`
+# strangler) has been fully worked through (substrate → exemplar → 5 sweeps → 0ec1):
+#
+#   • BLE001 — the allowlist is EMPTY. No src/ package is exempt: every broad
+#     `except` across the tree carries a justified inline `# noqa: BLE001 — <reason>`,
+#     so a NEW unguarded blind-except fails CI everywhere.
+#   • T201 — the ONLY remaining entries are the genuine, PERMANENT legitimate-print
+#     surfaces (not a transitional allowlist): the CLI presentation layer
+#     (`_commands`; `_cli` has no prints), the read-CLIs (`_engine_support`:
+#     validate/reads_cli/next_batch emit `print(json.dumps(...))` machine-contract
+#     stdout + human status on stderr), the reconciler subprocess
+#     (`_engine/rebar_reconciler`, `_engine/jira-capability-probe.py`) whose
+#     stderr (RECON:/ERROR:/health) + stdout (OK:/report/json) prints ARE its
+#     operational output, and `_alias.py`. These print BY DESIGN, so banning print
+#     there is wrong — they keep a scoped T201 ignore. (Plan-review G6 confirmed AC5's
+#     literal "empty the T201 allowlist" is non-executable without breaking these
+#     documented surfaces; this is the resolution.) The transitional T201 ignores
+#     (_store, reducer, graph, _io stderr diagnostics) were MIGRATED to the logger
+#     and removed. The reconciler's inline `# noqa: T201` sites are now redundant with
+#     this scoped entry but left in place as per-site documentation.
+#   • `tests/**` is out of the convention's scope (test code legitimately catches
+#     broadly and prints) — a permanent exemption, never part of the allowlist.
+[tool.ruff.lint.per-file-ignores]
+# Test code is out of the convention's scope: tests legitimately catch broadly (to
+# assert on failures) and print (debug/diagnostic output). PERMANENT, not part of
+# the shrinking allowlist.
+"tests/**" = ["BLE001", "T201"]
+# core leaves (__init__, reducer, graph, _store, _io) — SWEPT by 8d01 (crow-aeon-muck);
+# removed from the allowlist. Inline `# noqa` carry the justifications; _io/_cli.py keeps
+# inline `# noqa: T201` (CLI presentation), graph/_links.py keeps one inline T201 (stdout
+# data contract). The 7 _io/import_ndjson.py BLE001 noqas were re-validated here.
+# grounding — SWEPT by d360 (removed; the BLE0001 typo at harness.py:281 fixed and the
+# BaseException narrowed to Exception). _engine_support BLE001 also SWEPT by d360; it
+# KEEPS T201 — it is the data-CLI presentation layer (validate/reads_cli/resolver/
+# next_batch emit print(json.dumps(...)) machine-contract stdout + human status on its
+# own stderr), a legitimate-print surface like _cli/_commands.
+"src/rebar/_engine_support/*" = ["T201"]
+# MCP surface (mcp_server.py) + llm/workflow/ + llm top-level — SWEPT by ceaa; removed.
+# The mcp_server.py:892 masking swallow was fixed (the failure-recording path now logs
+# instead of swallowing); the two cleanup-and-reraise `except BaseException` sites
+# (prompt_authoring/snapshot) carry justified noqas. No prints existed in this scope.
+# CLI surface — BLE001 SWEPT by fd72 (_cli has no prints; removed entirely). `_commands`
+# is the CLI presentation layer (usage strings, `Error:` messages, `exc.message`, and
+# command data output) so it KEEPS T201; its broad-excepts were swept.
+"src/rebar/_commands/*" = ["T201"]
+"src/rebar/_alias.py" = ["T201"]
+# reconciler subprocess — BLE001 SWEPT by 0569 (20 broad-excepts: cleanup-and-reraise,
+# rollback-must-not-mask-original, and fail-open fallbacks, all justified inline;
+# characterization tests pin the is_not_found/http_status classification). KEEPS T201:
+# the reconciler is a subprocess whose stderr (RECON:/ERROR:/health) + stdout (OK:/report/
+# json result) prints ARE its operational output — a legitimate-print surface. The
+# close-out reconciles the inline `# noqa: T201` sites against this per-file-ignore.
+"src/rebar/_engine/rebar_reconciler/*" = ["T201"]
+"src/rebar/_engine/jira-capability-probe.py" = ["T201"]
 
 [tool.mypy]
 # Scoped, opt-in type checking. The pure in-process library core

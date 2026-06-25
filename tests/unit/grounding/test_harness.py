@@ -110,6 +110,51 @@ def test_worker_raise_maps_to_other() -> None:
     ev.validate(r.as_abstain(job=ev.JOB_SMELL, provenance_tier=ev.TIER_T1))
 
 
+class _FakeConn:
+    """Records what the worker trampoline ships back, in-process (no subprocess)."""
+
+    def __init__(self) -> None:
+        self.sent: list = []
+        self.closed = False
+
+    def send(self, msg: object) -> None:
+        self.sent.append(msg)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_worker_entry_ships_regular_exception_as_evidence() -> None:
+    """A regular Exception in the worker is caught and shipped as ('err', ...) — preserved."""
+
+    def boom() -> None:
+        raise ValueError("kaboom")
+
+    conn = _FakeConn()
+    harness._worker_entry(conn, boom, (), {})
+    assert conn.sent and conn.sent[0][0] == "err"
+    assert "ValueError: kaboom" in conn.sent[0][1]
+    assert conn.closed
+
+
+@pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit])
+def test_worker_entry_propagates_interrupts(interrupt: type[BaseException]) -> None:
+    """Narrowing regression (epic ring-gun-jot): the worker boundary was narrowed from
+    `except BaseException` (an inert `# noqa: BLE0001` typo) to `except Exception`, so a
+    KeyboardInterrupt / SystemExit now PROPAGATES (the parent maps signal-death to a
+    fail-open abstain) instead of being swallowed and shipped as 'err'. The pipe is still
+    closed by the `finally`."""
+
+    def raise_interrupt() -> None:
+        raise interrupt()
+
+    conn = _FakeConn()
+    with pytest.raises(interrupt):
+        harness._worker_entry(conn, raise_interrupt, (), {})
+    assert not any(msg[0] == "err" for msg in conn.sent), "interrupt must not ship as evidence"
+    assert conn.closed, "the finally must still close the pipe"
+
+
 def test_worker_hang_is_reaped_and_maps_to_timeout() -> None:
     r = harness.run_in_worker(wp.hangs_forever, backend="ts", timeout=0.5)
     assert r.abstained and r.abstain_reason == "timeout"

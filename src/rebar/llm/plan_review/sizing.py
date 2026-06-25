@@ -133,7 +133,7 @@ def pass1_with_ladder(
     accumulates a human-readable ladder trace for the coverage record."""
     try:
         return passes.pass1_chunk(runner, cfg, plan=plan, chunk=chunk, agentic=agentic)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — broad to inspect is_context_limit_error(exc); a non-context failure drops findings, a context error falls through to the size-ladder
         if not is_context_limit_error(exc):
             return []  # unrelated failure → drop this unit's findings (never abort)
 
@@ -153,7 +153,7 @@ def pass1_with_ladder(
                     events.append(f"{crit['id']}: escalated to {model}")
                 produced = True
                 break
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 — broad to inspect is_context_limit_error(exc); a non-size failure drops, a context error escalates to the next model
                 if not is_context_limit_error(exc):
                     produced = True  # non-size failure → drop, don't escalate
                     break
@@ -260,7 +260,7 @@ def load_checkpoint(
         path = d / f"{_checkpoint_key(material, chunk, model, agentic)}.json"
         if path.is_file():
             return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — checkpoint read is a best-effort resume optimization; any failure ⇒ no cached result (recompute)
         return None
     return None
 
@@ -286,7 +286,7 @@ def save_checkpoint(
         tmp.write_text(json.dumps(findings, ensure_ascii=False), encoding="utf-8")
         tmp.replace(path)
         return True
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — checkpoint write is a best-effort resume optimization; any failure ⇒ not cached (the review still proceeds)
         return False
 
 

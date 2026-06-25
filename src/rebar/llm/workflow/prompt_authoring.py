@@ -228,7 +228,7 @@ def _atomic_write(path: Path, text: str) -> None:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
             fh.write(text)
         os.replace(tmp, path)  # atomic on POSIX/Windows (same dir = same filesystem)
-    except BaseException:
+    except BaseException:  # noqa: BLE001 — atomic-write cleanup on ANY exit (incl. KeyboardInterrupt/SystemExit): unlink the temp file, then re-raise — never swallowed
         try:
             os.unlink(tmp)
         except OSError:

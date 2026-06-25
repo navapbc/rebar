@@ -46,7 +46,7 @@ def _read_json(path: Path) -> dict | None:
     """Read a JSON file, returning None on any parse or IO error."""
     try:
         return json.loads(path.read_text())
-    except Exception:
+    except Exception:  # noqa: BLE001 — helper fail-open: any parse/IO error yields None (documented contract)
         return None
 
 
@@ -297,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
                 check=True,
             )
             repo_root = Path(result.stdout.strip())
-        except Exception:
+        except Exception:  # noqa: BLE001 — git rev-parse fallback: an unresolvable repo root defaults to cwd
             repo_root = Path.cwd()
         # fsck walks the tracker directly by design.
         tracker_path = repo_root / ".tickets-tracker"  # tickets-boundary-ok

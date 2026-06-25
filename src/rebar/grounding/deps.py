@@ -550,7 +550,7 @@ def enumerate_dependencies(root: str | Path) -> dict[str, Any]:
             continue
         try:
             deps, mem = parser(path)
-        except Exception as exc:  # fail-open: never let one bad manifest abort enumeration
+        except Exception as exc:  # noqa: BLE001 — per-manifest fail-open: the error is recorded in-band (errors) and the manifest skipped, never aborting enumeration
             errors.append({"file": filename, "reason": f"{type(exc).__name__}: {exc}"})
             continue
         for eco, name in deps:
@@ -563,7 +563,7 @@ def enumerate_dependencies(root: str | Path) -> dict[str, Any]:
             continue
         try:
             deps, _ = _parse_requirements(extra)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — per-manifest fail-open: the error is recorded in-band (errors) and the file skipped, never aborting enumeration
             errors.append({"file": extra.name, "reason": f"{type(exc).__name__}: {exc}"})
             continue
         for eco, name in deps:

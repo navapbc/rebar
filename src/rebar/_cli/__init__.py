@@ -322,6 +322,13 @@ def main(argv: list[str] | None = None) -> int:
     order so no command is executed on a help request and the streams/exit codes
     match the pinned goldens.
     """
+    # Observability floor: install a stderr handler on the ``rebar`` root logger so
+    # swallowed failures surface as diagnostics. Never stdout — CLI *data*
+    # ``print(json.dumps(...))`` is a machine contract. See ``rebar._logging``.
+    from rebar._logging import install_stderr_handler
+
+    install_stderr_handler("rebar")
+
     argv = list(sys.argv[1:] if argv is None else argv)
 
     # Global config overrides (git -c style): `rebar -c section.key=value [...] <cmd>`,

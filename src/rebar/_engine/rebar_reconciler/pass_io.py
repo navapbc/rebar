@@ -128,7 +128,7 @@ def _write_mapping_json_atomic(mapping_path: Path, data: dict) -> None:
         with os.fdopen(tmp_fd, "w") as fh:
             json.dump(data, fh, indent=2)
         os.replace(tmp_path, mapping_path)
-    except Exception:
+    except Exception:  # noqa: BLE001 — atomic-write cleanup: unlink the temp file then re-raise the original write error (never swallowed)
         try:
             os.unlink(tmp_path)
         except OSError:

@@ -125,7 +125,7 @@ def count_open_by_type(repo_root: Path | None = None) -> dict:
         for ef in event_files:
             try:
                 event = json.loads(ef.read_text(encoding="utf-8"))
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001 — fail-open: skip unparseable event file
                 continue
             # Real events nest payload under "data"; read from there, not the
             # top-level event dict (canonical shape per ticket-create.sh /
@@ -194,7 +194,7 @@ def capture_baseline(pass_id: str, repo_root: Path | None = None) -> Path:
             for ef in event_files:
                 try:
                     event = json.loads(ef.read_text(encoding="utf-8"))
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001 — fail-open: skip unparseable event file
                     continue
                 if not isinstance(event, dict):
                     continue

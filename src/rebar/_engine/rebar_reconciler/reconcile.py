@@ -281,7 +281,7 @@ def _commit_binding_store_snapshot(
             text=True,
         )
         return True
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — fail-open: return False, log + alert, FS copy persists
         print(  # noqa: T201
             f"reconcile: binding-store commit to tickets branch failed "
             f"({exc!r}); bindings saved to filesystem only — "
@@ -310,7 +310,7 @@ def _commit_binding_store_snapshot(
                     },
                     repo_root,
                 )
-        except Exception as _alert_exc:  # noqa: BLE001
+        except Exception as _alert_exc:  # noqa: BLE001 — best-effort alert write; must not mask commit failure
             print(  # noqa: T201
                 f"ERROR: alert_store write also failed ({_alert_exc}); "
                 f"binding-commit failure not persisted to bridge_alerts.",
@@ -464,7 +464,7 @@ def _read_local_tickets(repo_root: Path, *, no_sync: bool = False) -> list[dict]
             )
             return []
         return json.loads(result.stdout)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — fail-open: log and return empty local_tickets list
         print(  # noqa: T201
             f"reconcile: ticket CLI failed ({exc}) — local_tickets=[]",
             file=sys.stderr,
@@ -706,7 +706,7 @@ def reconcile_once(
                     },
                     repo_root,
                 )
-            except Exception as _alert_exc:  # noqa: BLE001
+            except Exception as _alert_exc:  # noqa: BLE001 — best-effort alert; original corruption still raises
                 print(  # noqa: T201
                     f"ERROR: alert_store write also failed ({_alert_exc}); "
                     f"corruption event not persisted to bridge_alerts.",
@@ -871,7 +871,7 @@ def reconcile_once(
     if not filter_local_ids:
         try:
             binding_store.recover_pending_bindings(applier)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — fail-open: recovery non-fatal, log and continue
             # Recovery failure is non-fatal — log and continue.
             print(  # noqa: T201
                 f"reconcile: binding recovery failed ({exc}), continuing",
@@ -1222,7 +1222,7 @@ def reconcile_once(
                     "bindings before the next reconciler pass.",
                     file=sys.stderr,
                 )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — fail-open: save failure must never break sync, log only
             print(  # noqa: T201
                 f"reconcile: binding store save failed ({exc})",
                 file=sys.stderr,
@@ -1276,7 +1276,7 @@ def reconcile_once(
                 outcomes = manifest_data.get("mutations", []) or []
                 mutations_applied = sum(1 for o in outcomes if not o.get("error"))
                 mutation_failures = sum(1 for o in outcomes if o.get("error"))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — fail-open: fall back to computed count, log only
             print(  # noqa: T201
                 f"reconcile: manifest tally read failed ({exc}) — falling back to computed count",
                 file=sys.stderr,

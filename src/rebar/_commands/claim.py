@@ -11,6 +11,7 @@ claim core call, and the dispatcher-identical CLAIMED / error-envelope output.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 
@@ -19,6 +20,8 @@ from rebar._commands import txn
 from rebar._commands._seam import CommandError
 from rebar._commands.txn import ConcurrencyMismatch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
+
+logger = logging.getLogger(__name__)
 
 _CLAIM_USAGE = (
     "Usage: ticket claim <ticket_id> [--assignee=<name>] [--force[=<reason>]]\n"
@@ -101,8 +104,12 @@ def _plan_review_precheck(
                 f'attestation was verified. Reason: "{force_plan_review}".',
                 repo_root=repo_root,
             )
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001 — best-effort force-claim audit comment; broad-but-logged, claim proceeds
+            logger.warning(
+                "could not write FORCE_CLAIM audit comment on %s; continuing",
+                ticket_id,
+                exc_info=True,
+            )
         return None
     from rebar import llm  # LAZY — preserves optionality (claim_gate_check is stdlib-only though)
 

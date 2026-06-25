@@ -113,7 +113,7 @@ def resolve_prompts(doc: dict[str, Any], path: str | Path) -> dict[str, str]:
                 pf = Path(repo_root) / ".rebar" / "prompts" / f"{pid}.md"
                 if pf.is_file():
                     _meta, text = parse_front_matter(pf.read_text(encoding="utf-8"))
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001 — fail-open: user prompt-file read fails → empty text
                 text = ""
         out[pid] = text or f"(prompt {pid!r} not found under .rebar/prompts/)"
     return out

@@ -42,9 +42,12 @@ blocks only on sound, unambiguous checks and fails open on everything else".
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # ── token budgeting ───────────────────────────────────────────────────────────
 # Cheap char/4 heuristic (matches the experiment harness `est_tokens`); the gate
@@ -229,7 +232,7 @@ def p2_resolution(ctx: PlanContext) -> DetResult:
         )
     try:
         from rebar import grounding
-    except Exception as exc:  # oracle unavailable → fail-open
+    except Exception as exc:  # noqa: BLE001 — grounding oracle is optional; any import failure ⇒ fail-open abstain (reason recorded)
         return DetResult(
             "P2", "resolution", "abstain", coverage={"ran": False, "reason": f"oracle:{exc}"}
         )
@@ -241,7 +244,7 @@ def p2_resolution(ctx: PlanContext) -> DetResult:
                 resolved += 1
             else:
                 abstained += 1
-        except Exception:
+        except Exception:  # noqa: BLE001 — per-reference best-effort probe; an unprobeable ref abstains, never blocks
             abstained += 1
     return DetResult(
         "P2",
@@ -273,7 +276,7 @@ def p3_package_existence(ctx: PlanContext) -> DetResult:
         return DetResult("P3", "package-existence", "pass", coverage={"ran": True, "packages": 0})
     try:
         from rebar import grounding
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — grounding oracle is optional; any import failure ⇒ fail-open abstain (reason recorded)
         return DetResult(
             "P3",
             "package-existence",
@@ -290,7 +293,7 @@ def p3_package_existence(ctx: PlanContext) -> DetResult:
                 existing += 1
             else:
                 abstained += 1
-        except Exception:
+        except Exception:  # noqa: BLE001 — per-package best-effort probe; an unprobeable dep abstains, never blocks
             abstained += 1
     return DetResult(
         "P3",
@@ -647,7 +650,11 @@ def run_det_floor(ctx: PlanContext) -> list[DetResult]:
     for check in DET_CHECKS:
         try:
             results.append(check(ctx))
-        except Exception as exc:  # fail-open: a broken check abstains, never blocks
+        except Exception as exc:  # noqa: BLE001 — fail-open: a broken check abstains, never blocks; broad-but-logged with the traceback
+            # A DET check raising is an internal bug (not an expected fail-open like an
+            # absent oracle): record the abstain in-band AND log it with the traceback so
+            # the broken check is observable, not silently swallowed.
+            logger.warning("DET check %s raised; abstaining", check.__name__, exc_info=True)
             results.append(
                 DetResult(
                     check.__name__.split("_")[0].upper(),

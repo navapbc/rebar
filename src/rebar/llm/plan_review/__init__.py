@@ -22,6 +22,7 @@ a model key only to run the LLM tiers; the DET floor + attestation work without 
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from rebar.llm.config import LLMConfig
@@ -29,6 +30,8 @@ from rebar.llm.runner import Runner
 
 from . import attest, orchestrator, sidecar
 from .attest import claim_gate_check
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["review_plan", "claim_gate_check", "registry_coverage"]
 
@@ -80,7 +83,10 @@ def review_plan(
                 "key_id": sig.get("key_id"),
                 "head_sha": sig.get("head_sha"),
             }
-        except Exception as exc:  # surface, don't crash: a missing key is a real signal
+        except Exception as exc:  # noqa: BLE001 — surface, don't crash: a missing key is a real signal; broad-but-logged + recorded in-band
+            # Don't crash the review on a signing failure, but record it in-band AND on
+            # the logger (a missing/broken signing key is operator-actionable).
+            logger.warning("attestation signing failed; verdict unsigned", exc_info=True)
             verdict["signature"] = {"signed": False, "error": str(exc)}
     else:
         verdict.setdefault("signature", {"signed": False, "reason": verdict.get("verdict")})

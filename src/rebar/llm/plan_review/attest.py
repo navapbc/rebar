@@ -18,7 +18,10 @@ exists. ``--force`` (with a justification) bypasses it and is audit-logged.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _MANIFEST_PREFIX = "plan-review"
 
@@ -76,7 +79,10 @@ def claim_gate_check(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
 
     try:
         result = signing.verify_signature(ticket_id, repo_root=repo_root)
-    except Exception as exc:  # signing subsystem unavailable → fail-closed at the gate
+    except Exception as exc:  # noqa: BLE001 — signing subsystem unavailable → fail-closed at the gate; broad-but-logged
+        # Fail closed (the gate denies the claim) but log: a broken signing subsystem
+        # is an operator-actionable failure, not a routine denial.
+        logger.warning("signing unavailable; failing the claim gate closed", exc_info=True)
         return {"ok": False, "reason": f"signing-unavailable: {exc}", "verdict": "error"}
 
     if not result.get("verified"):
@@ -140,7 +146,7 @@ def current_material_fingerprint(ticket_id: str, *, repo_root=None) -> str | Non
         canonical = state.get("ticket_id", ticket_id)
         try:
             kids = rebar.list_tickets(parent=canonical, repo_root=repo_root) or []
-        except Exception:
+        except Exception:  # noqa: BLE001 — children enumeration is best-effort for the fingerprint
             kids = []
         ctx = PlanContext(
             ticket_id=canonical,
@@ -151,5 +157,8 @@ def current_material_fingerprint(ticket_id: str, *, repo_root=None) -> str | Non
             children=[{"ticket_id": k.get("ticket_id")} for k in kids],
         )
         return material_fingerprint(ctx)
-    except Exception:
+    except Exception:  # noqa: BLE001 — fingerprint computation best-effort; broad-but-logged below, caller treats material as unknown
+        # Cannot compute the current fingerprint → caller treats material as unknown
+        # (the gate fails closed / re-review). Log so the cause is observable.
+        logger.warning("could not compute material fingerprint for %s", ticket_id, exc_info=True)
         return None

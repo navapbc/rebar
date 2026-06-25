@@ -116,7 +116,7 @@ def _is_retired(binding_store: Any, jira_key: str) -> bool:
         return False
     try:
         return bool(fn(jira_key))
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — fail-open: legacy-stub fallback returns False
         return False
 
 
@@ -127,7 +127,7 @@ def _last_get_pass(binding_store: Any, jira_key: str) -> str:
         return ""
     try:
         return fn(jira_key) or ""
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — fail-open: legacy-stub fallback returns "" sentinel
         return ""
 
 
@@ -137,7 +137,7 @@ def _set_last_get(binding_store: Any, jira_key: str, pass_id: str) -> None:
     if fn is not None:
         try:
             fn(jira_key, pass_id)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — fail-open: best-effort set_last_get no-op on failure
             pass
 
 
@@ -147,7 +147,7 @@ def _note_absent(binding_store: Any, jira_key: str) -> None:
     if fn is not None:
         try:
             fn(jira_key)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — fail-open: best-effort note_absent no-op on failure
             pass
 
 
@@ -157,7 +157,7 @@ def _clear_absent(binding_store: Any, jira_key: str) -> None:
     if fn is not None:
         try:
             fn(jira_key)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — fail-open: best-effort clear_absent no-op on failure
             pass
 
 
@@ -744,7 +744,7 @@ def _diff_comments(
             jira_comments = client.get_comments(jira_key)
             if not isinstance(jira_comments, list):
                 jira_comments = []
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — fail-open: skip comment mutations, warn (bug 4292)
             # Live fetch failed. Skip comment mutations entirely for this ticket.
             # Never emit blind adds when comment state is unknown (bug 4292 safety
             # invariant). Emit a loud warning + log to stderr.

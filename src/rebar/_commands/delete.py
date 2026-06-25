@@ -17,6 +17,7 @@ Event bytes go through the single canonical serializer
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -34,6 +35,8 @@ from rebar._store.canonical import canonical_str
 from rebar.graph._unblock import batch_close_operations
 from rebar.reducer import reduce_all_tickets
 from rebar.reducer.marker import write_marker
+
+logger = logging.getLogger(__name__)
 
 
 # ── UNLINK scan (port of ticket-delete-unlink-scan.py) ───────────────────────
@@ -62,7 +65,7 @@ def _has_any_link_refs(tracker_path: Path, deleted_id: str) -> bool:
     search_terms = [deleted_id]
     try:
         alias = compute_alias(deleted_id)
-    except Exception:
+    except Exception:  # noqa: BLE001 — alias is an extra search term; fall open to id-only matching
         alias = None
     if alias:
         search_terms.append(alias)
@@ -178,8 +181,8 @@ def _children(tracker: str, parent_id: str) -> list[str]:
             continue
         try:
             state = reduce_ticket(str(entry))
-        except Exception:
-            continue  # unreadable/corrupt ticket — fsck's job, don't block delete here
+        except Exception:  # noqa: BLE001 — unreadable/corrupt ticket — fsck's job, don't block delete here
+            continue
         if state and state.get("status") not in ("error", "fsck_needed"):
             if state.get("parent_id") == parent_id:
                 children.append(tid)
@@ -328,8 +331,10 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
 
     try:
         write_marker(ticket_dir)
-    except Exception:
-        pass
+    except Exception:  # noqa: BLE001 — best-effort tombstone marker write; broad-but-logged, delete still proceeds
+        logger.warning(
+            "could not write tombstone marker for %s; continuing", ticket_id, exc_info=True
+        )
 
     scratch.cleanup_for_ticket(os.path.dirname(tracker), ticket_id)
 

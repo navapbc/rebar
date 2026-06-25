@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import fcntl
+import logging
 import os
-import sys
+
+logger = logging.getLogger(__name__)
 
 
 def write_marker(ticket_dir: str) -> None:
@@ -27,11 +29,8 @@ def write_marker(ticket_dir: str) -> None:
                     pass
             finally:
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
-    except OSError as exc:
-        print(
-            f"WARNING: failed to write .archived marker for {ticket_dir}: {exc}",
-            file=sys.stderr,
-        )
+    except OSError:
+        logger.warning("failed to write .archived marker for %s", ticket_dir, exc_info=True)
 
 
 def remove_marker(ticket_dir: str) -> None:
@@ -54,11 +53,8 @@ def remove_marker(ticket_dir: str) -> None:
                     pass  # Idempotent: no error if already absent
             finally:
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
-    except OSError as exc:
-        print(
-            f"WARNING: failed to remove .archived marker for {ticket_dir}: {exc}",
-            file=sys.stderr,
-        )
+    except OSError:
+        logger.warning("failed to remove .archived marker for %s", ticket_dir, exc_info=True)
 
 
 def check_marker(ticket_dir: str) -> bool:

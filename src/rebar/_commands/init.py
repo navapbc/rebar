@@ -177,7 +177,7 @@ def init_core(repo_root=None, *, silent: bool = False) -> int:
                     try:
                         cp = _git(tracker, "-c", "rebase.autostash=true", "rebase", "--continue")
                         rc = cp.returncode
-                    except Exception:
+                    except Exception:  # noqa: BLE001 — rebase --continue failure surfaced as a WARNING + abort below
                         rc = 1
                     if rc != 0:
                         _emit(

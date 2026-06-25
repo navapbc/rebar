@@ -13,6 +13,7 @@ the shared reducer, ``rebar._engine_support.output``) so behaviour matches.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 import uuid as _uuid
@@ -27,6 +28,8 @@ from rebar._commands._seam import (
 )
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
+
+logger = logging.getLogger(__name__)
 
 _TYPES = ("bug", "epic", "story", "task", "session_log")
 
@@ -664,8 +667,12 @@ def revert_core(ticket_id: str, target_uuid: str, reason: str = "", *, repo_root
     if target_type == "ARCHIVED":
         try:
             remove_marker(str(ticket_dir))
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001 — best-effort .archived marker clear on REVERT-of-ARCHIVED; broad-but-logged
+            logger.warning(
+                "could not clear .archived marker for %s after REVERT; continuing",
+                resolved,
+                exc_info=True,
+            )
     return resolved
 
 

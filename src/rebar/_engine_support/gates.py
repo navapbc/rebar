@@ -397,7 +397,7 @@ def summary_compute(ticket_id: str, tracker: str) -> dict:
         deps = deps_state(ticket_id, tracker)
         blockers = deps.get("blockers") or []
         ready = bool(deps.get("ready_to_work", True))
-    except Exception:
+    except Exception:  # noqa: BLE001 — safe broad catch (story lean-sloth-ham verified): feeds only the cosmetic blocking_summary, never a gating decision
         # Safe broad catch (story lean-sloth-ham verified): this feeds only the
         # cosmetic ``blocking_summary`` string below, never a gating/lifecycle
         # decision. A degraded dep computation falls back to the "ready" summary — a

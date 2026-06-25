@@ -40,7 +40,7 @@ def _get_ancestors(ticket_id: str, tracker_dir: str, max_hops: int = 2) -> list[
             break
         try:
             state = reduce_ticket(ticket_dir)
-        except Exception:
+        except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible ancestor stops the hierarchy walk
             state = None
         if state is None:
             break
@@ -59,7 +59,7 @@ def _tier_of_ticket(ticket_id: str, tracker_dir: str) -> int:
         return 0
     try:
         state = reduce_ticket(ticket_dir)
-    except Exception:
+    except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible ticket counts as zero children
         state = None
     if state is None:
         return 0
@@ -134,7 +134,7 @@ def resolve_hierarchy_link(
 
     try:
         source_state = reduce_ticket(source_dir)
-    except Exception:
+    except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible source is reported as not-reducible
         source_state = None
     if source_state is None:
         return {
@@ -144,7 +144,7 @@ def resolve_hierarchy_link(
 
     try:
         target_state = reduce_ticket(target_dir)
-    except Exception:
+    except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible target is reported as not-reducible
         target_state = None
     if target_state is None:
         return {

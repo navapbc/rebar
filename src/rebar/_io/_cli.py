@@ -69,8 +69,8 @@ def export_cli(argv: list[str], *, repo_root=None) -> int:
             include_deleted = True
             i += 1
         else:
-            print(f"Error: unknown option '{a}'", file=sys.stderr)
-            print(_EXPORT_USAGE, file=sys.stderr)
+            print(f"Error: unknown option '{a}'", file=sys.stderr)  # noqa: T201 — CLI presentation: export/import command status/usage output
+            print(_EXPORT_USAGE, file=sys.stderr)  # noqa: T201 — CLI presentation: export/import command status/usage output
             return 2
 
     meta = export_tickets(
@@ -84,7 +84,7 @@ def export_cli(argv: list[str], *, repo_root=None) -> int:
         include_deleted=include_deleted,
         repo_root=repo_root,
     )
-    print(
+    print(  # noqa: T201 — CLI presentation: export/import command status/usage output
         f"exported {meta['exported']} ticket(s) "
         f"(schema_version={meta['schema_version']}, source_env={meta['source_env']})",
         file=sys.stderr,
@@ -107,23 +107,23 @@ def import_cli(argv: list[str], *, repo_root=None) -> int:
             dry_run = True
             i += 1
         elif a.startswith("-") and a != "-":
-            print(f"Error: unknown option '{a}'", file=sys.stderr)
-            print(_IMPORT_USAGE, file=sys.stderr)
+            print(f"Error: unknown option '{a}'", file=sys.stderr)  # noqa: T201 — CLI presentation: export/import command status/usage output
+            print(_IMPORT_USAGE, file=sys.stderr)  # noqa: T201 — CLI presentation: export/import command status/usage output
             return 2
         elif in_file is None:
             in_file = a
             i += 1
         else:
-            print(f"Error: unexpected argument '{a}'", file=sys.stderr)
-            print(_IMPORT_USAGE, file=sys.stderr)
+            print(f"Error: unexpected argument '{a}'", file=sys.stderr)  # noqa: T201 — CLI presentation: export/import command status/usage output
+            print(_IMPORT_USAGE, file=sys.stderr)  # noqa: T201 — CLI presentation: export/import command status/usage output
             return 2
 
     source = in_file if in_file is not None else sys.stdin
     meta = import_tickets(source, dry_run=dry_run, repo_root=repo_root)
     if dry_run:
-        print(f"[dry-run] would create {meta['would_create']} ticket(s)", file=sys.stderr)
+        print(f"[dry-run] would create {meta['would_create']} ticket(s)", file=sys.stderr)  # noqa: T201 — CLI presentation: export/import command status/usage output
     else:
-        print(
+        print(  # noqa: T201 — CLI presentation: export/import command status/usage output
             f"imported {meta['created']} ticket(s), {meta['links']} link(s), "
             f"{meta['comments']} comment(s); {len(meta['warnings'])} warning(s)",
             file=sys.stderr,
