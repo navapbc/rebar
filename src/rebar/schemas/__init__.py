@@ -190,12 +190,18 @@ CONTRACT_SCHEMAS: frozenset[str] = frozenset(
         "comment_verdict",
         "tag",
         "set_fields",
+        # epic B: the completion-gate precheck op (input + output pair).
+        "completion_precheck",
     )
     for io in ("input", "output")
 ) | {
     # The shared INPUT contract for the built-in reviewer PROMPTS (their `outputs` are
     # the existing review_result / completion_verdict schemas). Permissive by design.
     "reviewer_input",
+    # epic B gate ops whose OUTPUT is the existing completion_verdict schema (not an
+    # <op>_output pair): only their INPUT contracts are authored here.
+    "completion_reconcile_input",
+    "completion_passthrough_input",
 }
 
 # The authoritative map of every structured (--output json / always-JSON) output
