@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/completion_reconcile_input.schema.json",
+  "title": "CompletionReconcileInput",
+  "description": "INPUT of `completion_reconcile`: the raw agent verdict fields to normalize/reconcile into a completion_verdict (FAIL<->findings invariant + citation downgrade).",
+  "type": "object",
+  "properties": {
+    "ticket_id": { "type": "string", "description": "The canonical ticket id (for the verdict target)." },
+    "raw_verdict": { "type": "string", "description": "The agent's raw verdict string." },
+    "raw_findings": { "type": "array", "description": "The agent's raw findings list." },
+    "summary": { "type": ["string", "null"], "description": "Optional agent summary." },
+    "runner": { "type": ["string", "null"], "description": "Runner id from the agent run." },
+    "model": { "type": ["string", "null"], "description": "Model id from the agent run." },
+    "trace_id": { "type": ["string", "null"], "description": "Trace id from the agent run." }
+  },
+  "required": ["ticket_id", "raw_verdict", "raw_findings"],
+  "additionalProperties": false
+}

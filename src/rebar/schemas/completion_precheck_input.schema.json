@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/completion_precheck_input.schema.json",
+  "title": "CompletionPrecheckInput",
+  "description": "INPUT contract of the `completion_precheck` step: the ticket to verify.",
+  "type": "object",
+  "properties": {
+    "ticket_id": { "type": "string", "description": "The ticket id/alias to verify." }
+  },
+  "required": ["ticket_id"],
+  "additionalProperties": false
+}
