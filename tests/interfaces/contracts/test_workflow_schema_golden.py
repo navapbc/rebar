@@ -10,8 +10,8 @@ shim, never an edit to v1. Nothing enforced that. This test freezes:
   * the ``workflow_run`` schema's *contract invariants* (required floor +
     permissive ``additionalProperties``) — that schema is meant to gain optional
     fields, so we pin the invariants, not the bytes;
-  * the packaged ``code_review`` example's version + step shape, and that it still
-    parses + lints clean.
+  * the retained packaged ``review_skeleton`` example's version + step shape, and that
+    it still parses + lints clean.
 
 If you intentionally change v1, the failure message tells you to bump to v2.
 """
@@ -74,12 +74,12 @@ def test_workflow_run_schema_contract_invariants() -> None:
     assert obj["additionalProperties"] is True
 
 
-def test_code_review_example_shape_frozen() -> None:
-    example = Path(S.__file__).resolve().parent / "examples" / "code_review.yaml"
+def test_review_skeleton_example_shape_frozen() -> None:
+    example = Path(S.__file__).resolve().parent / "examples" / "review_skeleton.yaml"
     text = example.read_text(encoding="utf-8")
     doc = S.parse_workflow(text)
-    assert doc["schema_version"] == "1"
-    assert [s["id"] for s in doc["steps"]] == ["fetch", "review", "gate", "comment"]
+    assert doc["schema_version"] == "3"
+    assert [s["id"] for s in doc["steps"]] == ["triggers", "finders", "verify", "decide"]
     # The shipped example must always validate + lint clean (it is the demonstrator).
     assert [e for e in S.validate_document(doc) if not e.startswith("note:")] == []
     assert [str(f) for f in L.lint_workflow(text) if f.severity != "warning"] == []

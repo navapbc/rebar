@@ -64,7 +64,6 @@ from .schema import (
     validate_document,
 )
 from .snapshot import SnapshotError, resolve_sha, snapshot_at_ref
-from .templates import SCAFFOLD_V1, scaffold
 
 __all__ = [
     "WorkflowError",
@@ -90,8 +89,6 @@ __all__ = [
     "lint_document",
     "lint_passes",
     "secret_scan",
-    "scaffold",
-    "SCAFFOLD_V1",
     "ir_to_bpmn",
     "bpmn_to_ir",
     "REBAR_MODDLE_DESCRIPTOR",

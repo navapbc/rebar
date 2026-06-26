@@ -2,9 +2,9 @@
 
 The hermetic tier runs workflows with the offline FakeRunner (dry_run) — strong on
 control flow + persistence, but it never exercises the real agent leg of a
-workflow. This is the external counterpart: the packaged ``code_review`` workflow
-run against a LIVE model, so the full scripted→agent→gate→comment path is proven
-on the real runner (the RunnerAgentStep bridge), not just the fake.
+workflow. This is the external counterpart: the retained ``review_skeleton`` sample
+run against a LIVE model, so the full overlay→batch-finder→verify→decide path is
+proven on the real runner (the RunnerAgentStep bridge), not just the fake.
 
 Marked ``external`` (excluded from the default run; needs REBAR_RUN_EXTERNAL=1) and
 skips unless an API key + the ``agents`` extra are present. Run locally::
@@ -42,7 +42,10 @@ _skip = pytest.mark.skipif(not _have_live_model(), reason="no ANTHROPIC_API_KEY 
 
 
 @_skip
-def test_live_code_review_workflow_end_to_end(rebar_repo: Path) -> None:
+def test_live_review_skeleton_workflow_end_to_end(rebar_repo: Path) -> None:
+    # Run the RETAINED visual-editing sample (`review_skeleton`) on a LIVE model so the
+    # real agent leg (the RunnerAgentStep bridge) is proven end-to-end on the v3 engine:
+    # overlay precompute -> `batch` finder -> aggregate verify -> deterministic decide.
     tid = rebar.create_ticket(
         "task",
         "Harden auth token check",
@@ -57,10 +60,12 @@ def test_live_code_review_workflow_end_to_end(rebar_repo: Path) -> None:
         "def check(token):\n    return True  # TODO: actually verify\n", encoding="utf-8"
     )
 
+    # `review_skeleton` takes a `plan` string input; the `token` keyword fires the security
+    # overlay so the conditionally-included `security` criterion participates in the batch.
     result = rebar.run_workflow(
-        "code_review",  # the packaged example
-        {"ticket_id": tid},
-        ticket_id=tid,
+        "review_skeleton",  # the retained packaged sample
+        {"plan": "Harden the auth token check in auth.py — tokens must be verified."},
+        ticket_id=tid,  # persist run-state on the ticket so status/result can replay it
         repo_root=str(rebar_repo),
     )
 
@@ -70,22 +75,18 @@ def test_live_code_review_workflow_end_to_end(rebar_repo: Path) -> None:
     assert result["status"] == "succeeded", result.get("error")
     assert result["dry_run"] is False  # the REAL agent leg ran (tokens spent)
 
-    # 2. Every step reached a terminal status and the agent step produced findings.
+    # 2. Every step reached a terminal status (overlay -> batch finders -> verify -> decide).
     steps = result.get("steps", {})
-    assert steps.get("fetch") == "succeeded"
-    assert steps.get("review") == "succeeded"
-    assert steps.get("gate") == "succeeded"
-    assert steps.get("comment") == "succeeded"
+    assert steps.get("triggers") == "succeeded"
+    assert steps.get("finders") == "succeeded"
+    assert steps.get("verify") == "succeeded"
+    assert steps.get("decide") == "succeeded"
 
-    # 3. The status/result reads replay the same run from the ticket's events.
+    # 3. The status/result reads replay the same run from the ticket's events, and the
+    #    Pass-1 finder batch produced a findings list (the real agent leg ran).
     status = rebar.get_workflow_status(result["run_id"], tid, repo_root=str(rebar_repo))
     schemas.validator(schemas.WORKFLOW_RUN).validate(status)
     full = rebar.get_workflow_result(result["run_id"], tid, repo_root=str(rebar_repo))
     schemas.validator(schemas.WORKFLOW_RUN).validate(full)
-    review_out = full.get("outputs", {}).get("review", {})
-    assert isinstance(review_out.get("findings"), list)
-
-    # 4. The comment_verdict step recorded the verdict back on the ticket.
-    shown = rebar.show_ticket(tid, repo_root=str(rebar_repo))
-    blob = str(shown)
-    assert result["run_id"] in blob  # the idempotency marker [rebar-run <run_id>/comment]
+    finders_out = full.get("outputs", {}).get("finders", {})
+    assert isinstance(finders_out.get("findings"), list)

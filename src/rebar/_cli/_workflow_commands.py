@@ -8,9 +8,76 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 
 from rebar._cli._init import ensure_initialized
+
+# --- `rebar workflow new` scaffold (inline; a CLI concern, not a library export) ---
+#
+# Ships ONE schema-valid 3-step skeleton (scripted fetch -> agent review -> scripted
+# gate) that ``rebar workflow new`` writes. It opens with a ``$schema`` modeline so
+# editors with the YAML language server give inline completion/validation. The literal
+# carries a ``__NAME__`` token (not a ``str.format`` field) so the ``${{ … }}``
+# expressions in the body are left untouched. It is parsed + linted by
+# tests/unit/workflow/test_cli.py so it can never drift invalid.
+_SCAFFOLD_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
+
+_SCAFFOLD_V1 = """\
+# yaml-language-server: $schema=https://github.com/navapbc/rebar/schemas/workflow.v1.schema.json
+schema_version: "1"
+name: __NAME__
+description: TODO — describe what this workflow does.
+
+# Workflow inputs, referenced as ${{ inputs.<name> }}.
+inputs:
+  ticket_id:
+    type: string
+    required: true
+
+# Steps form a DAG via `needs`; array order is for humans, execution order is the
+# topological order. A step is EITHER scripted (`uses:` a built-in) or agentic
+# (`prompt:` an .rebar/prompts/<id>.md). Pass values through `with:` and reference
+# them by name — never inline ${{ }} into a prompt body.
+steps:
+  - id: fetch
+    uses: fetch_ticket
+    with:
+      ticket_id: ${{ inputs.ticket_id }}
+
+  - id: review
+    prompt: code-quality
+    needs: [fetch]
+    with:
+      context: ${{ steps.fetch.outputs.description }}
+    output_schema: review_result
+    mode: findings
+
+  - id: gate
+    uses: gate
+    needs: [review]
+    with:
+      findings: ${{ steps.review.outputs.findings }}
+      policy: default
+"""
+
+
+def _scaffold(name: str) -> str:
+    """Return a valid skeleton workflow document for ``name``.
+
+    Raises :class:`rebar.llm.errors.WorkflowParseError` if ``name`` is not a valid
+    workflow id (the same lowercase pattern the schema enforces), so the failure is
+    caught at authoring time rather than on the first validate.
+    """
+    from rebar.llm.errors import WorkflowParseError
+
+    if not _SCAFFOLD_NAME_RE.match(name):
+        raise WorkflowParseError(
+            f"invalid workflow name {name!r}: use lowercase letters, digits, '-' and "
+            f"'_' (must start with a letter)",
+            source=name,
+        )
+    return _SCAFFOLD_V1.replace("__NAME__", name)
 
 
 def _workflow(argv: list[str]) -> int:
@@ -218,10 +285,9 @@ def _workflow_new(args) -> int:
     from rebar import config
     from rebar.llm import errors as _werr
     from rebar.llm.workflow import lint as _lint
-    from rebar.llm.workflow import templates as _templates
 
     try:
-        content = _templates.scaffold(args.name)
+        content = _scaffold(args.name)
     except _werr.WorkflowError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1

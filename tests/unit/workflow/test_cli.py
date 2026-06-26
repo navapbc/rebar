@@ -12,8 +12,8 @@ import json
 import pytest
 
 from rebar._cli import main
+from rebar._cli._workflow_commands import _scaffold as scaffold
 from rebar.llm.workflow import lint as L
-from rebar.llm.workflow import scaffold
 
 
 def test_scaffold_is_valid() -> None:

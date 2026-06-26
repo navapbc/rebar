@@ -394,8 +394,8 @@ def test_moddle_descriptor_file_matches_constant():
 
 
 def test_packaged_example_round_trips():
-    # The shipped code_review example (v1) -> migrate to v2 -> BPMN -> IR is lossless.
-    example = Path(S.__file__).resolve().parent / "examples" / "code_review.yaml"
+    # The shipped review_skeleton example -> migrate to current -> BPMN -> IR is lossless.
+    example = Path(S.__file__).resolve().parent / "examples" / "review_skeleton.yaml"
     doc = S.parse_workflow(example.read_text(encoding="utf-8"))
     from rebar.llm.workflow.migrate import migrate_to_current
 

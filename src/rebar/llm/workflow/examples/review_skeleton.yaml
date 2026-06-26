@@ -1,19 +1,18 @@
 # yaml-language-server: $schema=https://github.com/navapbc/rebar/schemas/workflow.v3.schema.json
 #
-# DISPOSABLE de-risking skeleton (epic A / story A3 — sage-votary-logic). It proves the
-# 4-pass review SHAPE that epic B migrates plan-review onto runs end-to-end on the v3
-# engine, OFFLINE (--dry-run / FakeAgentRunner, no tokens): an overlay precompute ->
-# a `batch` finder over an authored, prompt-library-backed `criteria` list (one criterion
-# conditionally included via `when`) -> one aggregate verify -> a deterministic decide.
+# RETAINED visual-editing sample (epic A / story A3 — sage-votary-logic; KEPT by Joe's
+# selection in epic B / story B6). It proves the 4-pass review SHAPE that epic B migrated
+# plan-review onto, runs end-to-end on the v3 engine OFFLINE (--dry-run / FakeAgentRunner,
+# no tokens): an overlay precompute -> a `batch` finder over an authored, prompt-library-
+# backed `criteria` list (one criterion conditionally included via `when`) -> one aggregate
+# verify -> a deterministic decide.
 #
-# It uses catalog prompt-ids (code-quality/security/tests/ticket-quality/completion-verifier)
-# because the plan-review criterion prompts are NOT yet in the workflow prompt catalog — a
-# de-risking finding recorded for epic B (the criteria-library<->prompt-library wiring).
-#
-# Epic B REMOVES this file after the migration; meanwhile it is the visual-editing sample.
+# It uses catalog prompt-ids (code-quality/security/tests/ticket-quality/completion-verifier).
+# This is the ONE retained sample (the throwaway examples/code_review.yaml + the templates.py
+# scaffold were removed in B6); the two REAL gate workflows live in workflow/gates/.
 schema_version: "3"
 name: review_skeleton
-description: Disposable 4-pass review skeleton proving overlay + batch + verify + decide on the v3 engine.
+description: Retained 4-pass review sample proving overlay + batch + verify + decide on the v3 engine.
 
 inputs:
   plan:
