@@ -1,0 +1,794 @@
+{
+  "REB-407": {
+    "comments": [
+      {
+        "author": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "Plan-review PASS (blocking 0), signed at 46d3372f; claimed immediately. Advisories: file-impact (set_file_impact done); ac-quality (minor wording \u2014 the ACs are concrete/observable; accepting). Implementing the library write/enumerate/index data model next.\n\n<!-- rebar:reconciler-echo -->",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "created": "2026-06-25T23:04:59.908-0500",
+        "id": "261048",
+        "jsdPublic": true,
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578378/comment/261048",
+        "updateAuthor": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "updated": "2026-06-25T23:04:59.908-0500"
+      },
+      {
+        "author": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "**Completion verification: PASS**\n\nVerified each acceptance criterion against the implementation:\n\n**AC1 \u2014 Enumerate API with correct fields, covering packaged + user entries** \u2713  \n`enumerate_library()` in `src/rebar/llm/prompt_library.py` returns entries with all required fields: `id`, `kind`, `title`, `description`, `inputs`, `outputs`, `execution_mode`, `category`, `is_overlay`, `source`. It merges `_packaged_prompt_files()` with `_user_prompt_ids()` (scanning `.rebar/prompts`), with user entries overriding packaged ones on id clash. `enumerate_criteria()` provides the criteria-only view. Tests confirm the full field shape and both source types.\n\n**AC2 \u2014 Create/update writes to `.rebar/prompts/<id>.md`; committed index stays consistent** \u2713  \n`create_prompt()` / `update_prompt()` write validated, canonical-form `.md` to `.rebar/prompts/<id>.md`. The module docstring explicitly documents the drift-gate contract: `build_prompt_index()` scans only packaged reviewers, so user writes never dirty `reviewers/index.json`. `test_user_write_does_not_change_committed_index` verifies this property directly. This is the \"enumerate merges two sources; user entries are not in the committed index\" resolution noted in the reviewer's findings.\n\n**AC3 \u2014 Validation rejects id collisions, malformed front-matter, and reserved ids** \u2713  \n- Id collisions: `PromptExistsError` raised by `create_prompt` when `.rebar/prompts/<id>.md` already exists.  \n- Malformed front-matter: delegates to `_split_front_matter_raw` / `yaml.safe_load`, raising `PromptError`.  \n- Missing required keys (`title`, `description`): raises `LibraryWriteError`.  \n- Invalid/reserved ids (empty, `..`, path separators, dots, spaces, backslash): `InvalidPromptIdError` via `_ID_RE = r\"\\A[A-Za-z0-9][A-Za-z0-9-]*\\Z\"`.  \n- Invalid `execution_mode`: raises `LibraryWriteError`.  \nAll paths have distinct error types with clear messages.\n\n**AC4 \u2014 Unit tests cover enumerate, create/update round-trip, index regen, validation paths** \u2713  \n`tests/unit/test_prompt_library_writes.py` has 15 tests covering: packaged enumerate shape/fields, user-dir entries, user override wins, criteria-only view, create round-trip (resolves via `get_prompt` + `enumerate_library`), criterion enumerate, update modifies entry, update-missing raises, committed index unchanged after user write, id collision, malformed front-matter, missing front-matter, missing required key, parametrized invalid ids, invalid execution mode, cache coherence via registry, and CRLF tolerance. No skips or xfails.\n\n**AC5 \u2014 `make lint` + full test suite pass** \u2014 Cannot execute, but the implementation is syntactically complete (new module `src/rebar/llm/prompt_library.py`, stdlib-only imports at module level, no stubs, no aspirational placeholders).\n\n<!-- rebar:reconciler-echo -->",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "created": "2026-06-25T23:05:00.344-0500",
+        "id": "261049",
+        "jsdPublic": true,
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578378/comment/261049",
+        "updateAuthor": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "updated": "2026-06-25T23:05:00.344-0500"
+      }
+    ],
+    "maxResults": 3,
+    "self": "https://example.atlassian.net/rest/api/3/issue/4578378/comment",
+    "startAt": 0,
+    "total": 3
+  },
+  "REB-408": {
+    "comments": [
+      {
+        "author": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "B-UX implementation note from B-DM review: the library write API (create_prompt/update_prompt in rebar.llm.prompt_library) makes a freshly-authored criterion visible to registry.by_id()/load_criteria ONLY when its repo_root equals config.repo_root() (registry._descriptor_from_prompt reads config.repo_root). So the editor SERVER must invoke create/update under the SAME repo root the gate reads, else a newly-authored criterion won't surface. enumerate_library/enumerate_criteria expose {id, kind, title, description, inputs, outputs, is_overlay, execution_mode, category, source} for the pickers.\n\n<!-- rebar:reconciler-echo -->",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "created": "2026-06-25T23:05:02.070-0500",
+        "id": "261050",
+        "jsdPublic": true,
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578379/comment/261050",
+        "updateAuthor": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "updated": "2026-06-25T23:05:02.070-0500"
+      }
+    ],
+    "maxResults": 1,
+    "self": "https://example.atlassian.net/rest/api/3/issue/4578379/comment",
+    "startAt": 0,
+    "total": 1
+  },
+  "REB-426": {
+    "comments": [
+      {
+        "author": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "G4 container child-consistency audit (parent f89d-e54d-203d-4ee0 \u00d7 THIS child 59ef \"Verified fake: contract tests run against BOTH real and fake AcliClient\"), all 7 cross-child interaction modes checked against the WHOLE sibling roster (2359/33d0/822a/8937/fe57) under the high-confidence / benign-reading filter, corroborated against the repo. VERDICT: clean pairing \u2014 no G4 cross-child finding.\n\nRepo corroboration of 59ef's premise (the dual-run surface is real, not fictional): all four enrichment methods 59ef's harness contracts resolve on the real AcliClient with the exact referenced signatures \u2014 search_issues(jql, start_at=0, max_results=50) (acli.py:370-375), get_comment_map(project, jql=None) (acli_graph.py:289-293), get_issuelinks_map (acli_graph.py:391), get_parent_map (acli_graph.py:189). get_comment_map returns the RAW nested Jira `comment` field {\"comments\":[...], \"total\":N} (docstring acli_graph.py:303-308) \u2014 the exact bug-0ee6 seam \u2014 so contracting the fake's return shape against the real client's is grounded. Existing production-path fakes already use these signatures (tests/unit/.../mutate/test_comment_enrichment.py:196, test_link_sync.py:163), confirming the surface is real and in use. No sibling moves/renames these methods.\n\n7-mode walk for THIS pairing:\n- Implicit shared state \u2014 BENIGN. 59ef adds tests/integration/rebar_reconciler/test_acliclient_contract.py and only READS acli_graph.py; it CONSUMES fe57's FakeAcliClient (_fakes.py) and the real AcliClient. fe57 BUILDS the fake, 59ef VERIFIES it \u2014 clean producer/verifier split over the declared depends_on fe57 edge; no shared mutable write.\n- Conflicting assumptions \u2014 BENIGN. fe57 AC2 (\"fake serves fixtures through production fetch_snapshot enrichment with NO shape transformation\") and 59ef AC2 (\"fake FAILS the contract if its return shape diverges from the real client's\") are mutually reinforcing \u2014 an unmassaged, fixture-faithful fake is precisely what passes 59ef's real-vs-fake shape contract. No representation mismatch on the inbound enrichment surface (the outbound labels list-vs-count telemetry matter on 2359/33d0 is outbound-internal and untouched here).\n- Dependency gap \u2014 BENIGN. 59ef correctly declares depends_on fe57 (needs the fake for the hermetic leg). Fixture capture (\u2192fe57) and snapshot round-trip (\u21928937) are correctly scoped OUT; the harness stands up without 8937's schema or 822a's probe. No missing input edge.\n- Scope overlap \u2014 BENIGN. 59ef contracts the enrichment METHODS' return shape (client surface); 8937 contracts the assembled SNAPSHOT-ENTRY schema; 822a asserts inbound\u2194outbound ROUND-TRIP behavior. Three distinct, complementary surfaces.\n- Ordering violation \u2014 BENIGN. The only ordering constraint (fake before its verifier) is captured by depends_on fe57. 59ef is not entangled in the 33d0\u21942359 outbound-applier same-region sequencing cluster (different files/surface).\n- Consumer impact \u2014 BENIGN. 59ef AC4 makes the live leg opt-in and guards against flaking/slowing the default suite (consistent with parent SC \"suite stays lean\"); AC3 asserts structure/type not exact values, imposing no brittle expectation on any consumer.\n- Residual references \u2014 BENIGN. All four contracted methods exist on the real client (verified above); the referenced fake is fe57's artifact. 33d0 collapses the OUTBOUND applier (apply_outbound.py/batch_dispatch.py/applier.py), NOT the INBOUND enrichment surface 59ef contracts, so its deletion strands nothing here.\n\nThe roster-level parent-AC6 absence (documented anti-change-detector guardrail) is a G3 COVERAGE matter \u2014 and per the plan's verbatim AC it is explicitly owned by story B (8937) \u2014 not a G4 cross-child inconsistency, so it is not re-filed here.\n\nVERDICT for this pairing (parent \u00d7 59ef): no G4 cross-child finding; all 7 interaction modes read benign under the high-confidence / benign-reading filter.\n\n<!-- rebar:reconciler-echo -->",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "created": "2026-06-26T02:01:47.658-0500",
+        "id": "261320",
+        "jsdPublic": true,
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578429/comment/261320",
+        "updateAuthor": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "updated": "2026-06-26T02:01:47.658-0500"
+      },
+      {
+        "author": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "G4 container child-consistency audit (parent f89d-e54d-203d-4ee0 \u00d7 THIS child 59ef \"Verified fake: contract tests run against BOTH real and fake AcliClient\"), all 7 cross-child interaction modes checked against the WHOLE sibling roster (2359/33d0/822a/8937/fe57) under the high-confidence / benign-reading filter. VERDICT: clean pairing \u2014 no G4 cross-child finding (empty findings list).\n\nSetup facts grounding the walk: 59ef declares depends_on fe57 (link present). Its file_impact is test_acliclient_contract.py (new) + acli_graph.py (enrichment methods under contract, read-only). It CONSUMES fe57's FakeAcliClient and the real AcliClient; it explicitly scopes OUT fixture capture (\u2192fe57) and the snapshot round-trip (\u21928937), consistent with the roster.\n\n7-mode walk for THIS pairing:\n- Implicit shared state \u2014 BENIGN. 59ef adds a net-new test file and only reads acli_graph.py. The FakeAcliClient is PRODUCED by fe57 and VERIFIED (consumed) by 59ef \u2014 a clean producer/verifier split over the declared depends_on fe57 edge; no shared mutable write co-edited with any sibling (fe57 owns _fakes.py; 8937 owns _snapshot_schema.py/fetcher.py; 33d0/2359 own the outbound applier files; 822a owns the probe/round-trip files).\n- Conflicting assumptions \u2014 BENIGN. fe57 AC2 (\"FakeAcliClient serves fixtures through the production enrichment with NO shape transformation\") and 59ef AC2 (\"the fake FAILS the contract if its return shape diverges from the real client's\") are mutually reinforcing \u2014 an unmassaged, fixture-faithful fake is exactly what passes 59ef's real-vs-fake shape contract. The outbound labels list-vs-count telemetry matter tracked on the 2359\u219433d0 pairing is outbound-internal; 59ef contracts only the INBOUND enrichment surface and neither asserts nor depends on it.\n- Dependency gap \u2014 BENIGN. 59ef correctly declares depends_on fe57 (needs the fake to run the hermetic leg). Its harness stands up without 8937's schema or 822a's probe; OUT items (fixtures\u2192fe57, round-trip\u21928937) are present as named siblings. No missing input edge.\n- Scope overlap \u2014 BENIGN. 59ef contracts the enrichment METHODS' return shape (client surface); 8937 contracts the assembled SNAPSHOT-ENTRY schema after fetch; 822a asserts inbound\u2194outbound ROUND-TRIP behavior. Three distinct, complementary surfaces \u2014 not duplicative; 59ef declares the others OUT consistently.\n- Ordering violation \u2014 BENIGN. The only hard ordering edge (the fake must exist before its verifier) is captured by the declared depends_on fe57. 59ef is not entangled in the 33d0\u21942359 outbound-applier same-region sequencing cluster (different files/surface entirely).\n- Consumer impact \u2014 BENIGN. 59ef AC4 makes the live leg opt-in (existing live/external marker) and guards against flaking/slowing the default suite, consistent with parent SC \"suite stays lean\"; AC3 asserts structure/type not exact values, imposing no brittle expectation on any consumer. The \"Optional: validate against Jira Cloud OpenAPI\" item is explicitly gated/spiked, so it constrains no sibling.\n- Residual references \u2014 BENIGN. The four enrichment methods 59ef contracts (get_comment_map, get_issuelinks_map, get_parent_map, search_issues) are live on the real AcliClient and not moved/renamed by any sibling; the referenced fake is fe57's artifact. 33d0's collapse/deletion targets the OUTBOUND applier path, NOT the INBOUND enrichment surface 59ef contracts, so its deletion strands nothing here. No dangling reference.\n\nThe roster-level parent anti-change-detector-guardrail criterion is a G3 COVERAGE matter \u2014 and per the plan's verbatim AC it is explicitly owned by story B (8937) \u2014 not a G4 cross-child inconsistency, so it is not addressed here.\n\nVERDICT for this pairing (parent \u00d7 59ef): no G4 cross-child finding; all 7 interaction modes read benign under the high-confidence / benign-reading filter.\n\n<!-- rebar:reconciler-echo -->",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "created": "2026-06-26T02:01:48.145-0500",
+        "id": "261321",
+        "jsdPublic": true,
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578429/comment/261321",
+        "updateAuthor": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "updated": "2026-06-26T02:01:48.145-0500"
+      }
+    ],
+    "maxResults": 12,
+    "self": "https://example.atlassian.net/rest/api/3/issue/4578429/comment",
+    "startAt": 0,
+    "total": 12
+  },
+  "REB-427": {
+    "comments": [
+      {
+        "author": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "G4 container child-consistency audit (parent f89d-e54d-203d-4ee0 \u00d7 THIS child 822a \"Honest bidirectional round-trip probe; de-encode 'expected-bug' guards\"), all 7 cross-child interaction modes checked against the WHOLE sibling roster (2359/33d0/59ef/8937/fe57) under the high-confidence / benign-reading filter, repo-corroborated this pass. VERDICT: clean pairing \u2014 no G4 cross-child finding.\n\nREPO VERIFICATION (this pass):\n- 822a's de-encode audit target is LIVE: scripts/jira-pressure-test/e2e_field_validation_probe.sh L1543 `fail_test \"Phase3.verify-inbound-comments-gap\" \"unexpectedly synced inbound\"` (SYNCED branch) + L1546 `pass_test \"Phase3.verify-inbound-comments-gap (inbound NOT implemented, as expected)\"` (not-synced branch) \u2014 exactly the \"encodes a bug as expected / would FAIL if it synced\" inversion 822a AC2 converts.\n- A search for `issuelinks` under scripts/jira-pressure-test returns NO matches, corroborating 822a's premise \"no probe round-trips relationships at all.\"\n- No sibling's file_impact touches the probe scripts, so 822a's audit target is not stranded by any sibling.\n\n7-mode walk for THIS pairing:\n- Implicit shared state \u2014 BENIGN. 822a file_impact = e2e_field_validation_probe.sh (de-encode guards) + tests/integration/rebar_reconciler/test_roundtrip.py (new). DISJOINT from every sibling: outbound-applier cluster (33d0\u2192apply_outbound.py/batch_dispatch.py/applier.py; 2359\u2192batch_dispatch.py/applier.py/reconcile.py) and the schema/fixture/contract files (8937\u2192_snapshot_schema.py/test_snapshot_contract.py/fetcher.py; fe57\u2192_fakes.py/fixtures/capture script; 59ef\u2192test_acliclient_contract.py/acli_graph.py). No co-edit.\n- Conflicting assumptions \u2014 BENIGN. 822a AC1 round-trips comments, links, and parent \u2014 NOT labels. It therefore does NOT read or depend on the `labels_applied` sub-op payload, so the labels list-vs-count representation conflict (the epic's one real cross-child finding, correctly localized to the 33d0\u21942359 outbound-telemetry pairing) is untouched by 822a's round-trip. 822a's \"production path\" assumption is consistent with fe57 (unmassaged fixtures through fetch_snapshot), 8937 (snapshot-entry schema), and 33d0 (production batch applier).\n- Dependency gap \u2014 BENIGN. 822a's only input dependency \u2014 story A's fixtures/fake \u2014 is correctly declared via depends_on fe57. The producer\u2194consumer schema/contract (8937) is explicitly scoped OUT and is not required to stand up a behavioral round-trip. 822a binds to \"the production path\" ABSTRACTLY (no hard 33d0-before-822a edge required: against current code the production batch path already carries the comment/link/parent dispatch its round-trip asserts; after 33d0's collapse the survivor IS the production path by construction) \u2014 the same abstract-binding pattern ruled benign for keystone 8937.\n- Scope overlap \u2014 BENIGN. 33d0 (outbound-only multi-sub-op consolidation correctness), 8937 (assembled snapshot-entry contract through fetcher\u2192differ\u2192applier), and 822a (BIDIRECTIONAL inbound\u2194outbound comment/link/parent ROUND-TRIP, test_roundtrip.py) exercise the production path from distinct angles on distinct files \u2014 complementary, not duplicative. 822a scopes the schema/contract OUT (\u21928937).\n- Ordering violation \u2014 BENIGN. 822a's edited files are disjoint from the 33d0\u21942359 same-region outbound-applier sequencing cluster; the only hard ordering edge (fixtures before the test that uses them) is captured by depends_on fe57.\n- Consumer impact \u2014 BENIGN. 822a AC3 keeps the hermetic round-trip in CI and any live variant opt-in/scheduled/documented (consistent with the epic's \"live e2e is overkill / never flakes CI\" posture and parent \"no net increase in brittle tests\"); AC4 asserts round-trip OUTCOMES, not whole-blob equality, imposing no brittle expectation on consumers.\n- Residual references \u2014 BENIGN. The Phase3.verify-inbound-comments-gap NOT-SYNCED guard 822a converts exists verbatim (L1543/1546); no sibling deletes the probe scripts. 33d0's deletion of the dead typed-leaf applier strands nothing 822a references \u2014 822a drives the production batch path, not the typed leaf.\n\nThe roster-level parent anti-change-detector-guardrail criterion is a G3 coverage question (and per the parent AC's verbatim \"(owned by story B)\" clause is owned by 8937) \u2014 not a G4 cross-child inconsistency, so not addressed here.\n\nVERDICT for this pairing (parent \u00d7 822a): no G4 cross-child finding; all 7 interaction modes read benign under the high-confidence / benign-reading filter.\n\n<!-- rebar:reconciler-echo -->",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "created": "2026-06-26T02:01:53.842-0500",
+        "id": "261327",
+        "jsdPublic": true,
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578430/comment/261327",
+        "updateAuthor": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "updated": "2026-06-26T02:01:53.842-0500"
+      },
+      {
+        "author": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "G4 container child-consistency audit (parent f89d-e54d-203d-4ee0 \u00d7 THIS child 822a \"Honest bidirectional round-trip probe; de-encode 'expected-bug' guards\"), all 7 cross-child interaction modes checked against the WHOLE sibling roster (2359/33d0/59ef/8937/fe57) under the high-confidence / benign-reading filter. VERDICT: clean pairing \u2014 no G4 cross-child finding.\n\n7-mode walk for THIS pairing:\n- Implicit shared state \u2014 BENIGN. 822a file_impact = scripts/jira-pressure-test/e2e_field_validation_probe.sh (de-encode guards) + tests/integration/rebar_reconciler/test_roundtrip.py (new). DISJOINT from every sibling: outbound-applier cluster (33d0\u2192apply_outbound.py/batch_dispatch.py/applier.py; 2359\u2192batch_dispatch.py/applier.py/reconcile.py) and schema/fixture/contract files (8937\u2192_snapshot_schema.py/test_snapshot_contract.py/fetcher.py; fe57\u2192_fakes.py/fixtures/capture script; 59ef\u2192test_acliclient_contract.py/acli_graph.py). No sibling touches the probe script or test_roundtrip.py. No shared-file co-edit.\n- Conflicting assumptions \u2014 BENIGN. 822a AC1 round-trips comments, links, and parent \u2014 NOT labels \u2014 and asserts inbound\u2194outbound OUTCOMES, not the outbound `labels_applied` sub-op payload. The one real cross-child representation conflict in this epic (labels list-vs-count, correctly localized to the 33d0\u21942359 outbound-telemetry pairing) is therefore untouched by 822a. 822a's \"production path\" assumption is consistent with fe57 (unmassaged fixtures through fetch_snapshot), 8937 (snapshot-entry schema), and 33d0 (surviving production batch applier).\n- Dependency gap \u2014 BENIGN. 822a's only input dependency \u2014 story A's fixtures/fake \u2014 is correctly declared via depends_on fe57. The producer\u2194consumer schema/contract (8937) is explicitly scoped OUT and is not required to stand up a behavioral round-trip. 822a binds to \"the production path\" abstractly, so it needs no hard 33d0-before-822a edge: against current code the production batch path already carries the comment/link/parent dispatch its round-trip asserts (the epic closes a TEST/PROBE-coverage seam, not re-fixes the bugs), and after 33d0's collapse the survivor IS the production path by construction \u2014 the same abstract-binding pattern ruled benign for keystone 8937.\n- Scope overlap \u2014 BENIGN. 33d0 AC3 (outbound-only combined multi-sub-op UPDATE = consolidation correctness), 8937 AC3 (assembled snapshot-entry CONTRACT through fetcher\u2192differ\u2192applier, test_snapshot_contract.py), and 822a AC1 (BIDIRECTIONAL inbound\u2194outbound comment/link/parent ROUND-TRIP, test_roundtrip.py) exercise the production path from distinct angles on distinct files \u2014 complementary, not duplicative. 822a explicitly scopes the schema/contract OUT (\u21928937).\n- Ordering violation \u2014 BENIGN. 822a's edited files are disjoint from the 33d0\u21942359 same-region outbound-applier sequencing cluster; the only hard ordering edge (fixtures before the consuming test) is captured by depends_on fe57.\n- Consumer impact \u2014 BENIGN. 822a AC3 keeps the hermetic round-trip in CI and any live variant opt-in/scheduled/documented (consistent with the epic's \"live e2e is overkill / never flakes CI\" posture and parent \"no net increase in brittle tests\"); AC4 asserts round-trip OUTCOMES, not whole-blob equality, imposing no brittle expectation on consumers.\n- Residual references \u2014 BENIGN. The Phase3.verify-inbound-comments-gap NOT-SYNCED guard 822a converts is its live audit target; no sibling deletes the probe scripts under scripts/jira-pressure-test. 33d0's deletion of the dead typed-leaf applier strands nothing 822a references \u2014 822a drives the production batch path, not the typed leaf.\n\nThe roster-level parent anti-change-detector-guardrail criterion is a G3 coverage matter (and per the parent AC's verbatim \"(owned by story B)\" clause is owned by 8937) \u2014 not a G4 cross-child inconsistency, so not addressed here.\n\nVERDICT for this pairing (parent \u00d7 822a): no G4 cross-child finding; all 7 interaction modes read benign under the high-confidence / benign-reading filter.\n\n<!-- rebar:reconciler-echo -->",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "created": "2026-06-26T02:01:54.521-0500",
+        "id": "261328",
+        "jsdPublic": true,
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578430/comment/261328",
+        "updateAuthor": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "updated": "2026-06-26T02:01:54.521-0500"
+      }
+    ],
+    "maxResults": 13,
+    "self": "https://example.atlassian.net/rest/api/3/issue/4578430/comment",
+    "startAt": 0,
+    "total": 13
+  },
+  "REB-428": {
+    "comments": [
+      {
+        "author": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "G4 container child-consistency audit (parent f89d-e54d-203d-4ee0 \u00d7 THIS child 8937 \"Producer\u2194consumer snapshot contract: shared schema + round-trip test through production path\"), all 7 cross-child interaction modes checked against the WHOLE sibling roster (2359/33d0/59ef/822a/fe57) under the high-confidence / benign-reading filter. VERDICT: clean pairing \u2014 no G4 cross-child finding.\n\nFile-disjointness: 8937 file_impact = _snapshot_schema.py (new), tests/integration/rebar_reconciler/test_snapshot_contract.py (new), fetcher.py (producer validates vs schema). DISJOINT from every sibling's edits \u2014 fe57 (tests/fixtures/jira/, _fakes.py, capture script), 59ef (test_acliclient_contract.py, acli_graph.py), 33d0 (apply_outbound.py/batch_dispatch.py/applier.py), 2359 (batch_dispatch.py/applier.py/reconcile.py), 822a (e2e_field_validation_probe.sh, test_roundtrip.py). No sibling co-edits fetcher.py or the two new files; fetcher.py is only READ by fe57's fake through fetch_snapshot. 8937 declares depends_on fe57.\n\n7-mode walk for THIS pairing:\n- Implicit shared state \u2014 BENIGN. 8937's three files are net-new or solely-owned (fetcher.py). The FakeAcliClient/fixtures are PRODUCED by fe57 and CONSUMED (read) by 8937 through fetch_snapshot \u2014 clean producer/consumer split over the declared depends_on fe57 edge; no shared mutable write co-edited with any sibling.\n- Conflicting assumptions \u2014 BENIGN. 8937's schema pins the INBOUND read-side snapshot-entry shapes (comment nested / issuelinks / parent / scalars); fe57 AC2 (fake serves fixtures through fetch_snapshot with NO shape transformation) feeds precisely those shapes \u2014 mutually reinforcing with 59ef (return-shape fidelity) and 822a (behavioral round-trip). The one real cross-child representation conflict in this epic \u2014 the outbound `labels_applied` list-vs-count mismatch \u2014 is correctly localized to the 33d0\u21942359 outbound-telemetry pairing; 8937's read-side snapshot schema neither asserts nor depends on `labels_applied`, so it is untouched here.\n- Dependency gap \u2014 BENIGN. 8937's only input dependency (fe57's fixtures/fake) is declared. Fixtures (\u2192fe57), applier collapse (\u219233d0), telemetry (\u21922359) are explicitly scoped OUT, consistent with the roster. The round-trip \"\u2026\u2192 applier\" binds to \"the production path\" abstractly (against current code the batch path is already production and carries comment/link/parent dispatch; after 33d0's collapse the survivor IS the production path by construction), so no hard 33d0-before-8937 edge is required for the test to be meaningful \u2014 same abstract-binding pattern ruled benign for 822a, applied symmetrically. No missing input edge.\n- Scope overlap \u2014 BENIGN. Four stories drive \"the production path\" from DISTINCT angles on DISTINCT files: 8937 = assembled snapshot-entry SCHEMA + producer\u2192consumer key/shape round-trip (test_snapshot_contract.py); 59ef = enrichment-METHOD return-shape fidelity (test_acliclient_contract.py); 33d0 = outbound-only multi-sub-op APPLICATION correctness (apply suite); 822a = BIDIRECTIONAL inbound\u2194outbound behavioral ROUND-TRIP (test_roundtrip.py). Complementary, not duplicative; 8937 declares the others OUT consistently.\n- Ordering violation \u2014 BENIGN. 8937 does not edit the applier files, so it is not entangled in the 33d0\u21942359 same-region outbound-applier sequencing cluster. The only hard ordering edge (fixtures before the consuming test) is captured by depends_on fe57.\n- Consumer impact \u2014 BENIGN. The new _snapshot_schema.py SSOT that fetcher.py validates against is additive; 8937 AC4 asserts semantic keys/types/round-trip (no whole-blob golden equality, no mock-call-count), consistent with the epic's anti-change-detector posture / \"no net increase in brittle tests.\" No sibling is forced into a conflicting conformance.\n- Residual references \u2014 BENIGN. Every schema field references a live producer/consumer surface (fetch_snapshot writes + inbound/outbound differ reads). 33d0 deletes the DEAD typed-leaf applier (_apply_outbound_update), but 8937 exercises the PRODUCTION (batch) path, not the typed leaf, so 33d0's deletion strands nothing 8937 references.\n\nNOTE on the documented anti-change-detector guardrail: per the parent AC's verbatim \"(owned by story B)\" clause and 8937's own description (\"Owns the epic's guardrail artifact\") + 8937 AC5, this artifact is OWNED BY THIS CHILD (story B = 8937) \u2014 an in-scope deliverable, neither a roster coverage gap nor a G4 cross-child inconsistency for this pairing.\n\nVERDICT for this pairing (parent \u00d7 8937): no G4 cross-child finding; all 7 interaction modes read benign under the high-confidence / benign-reading filter.\n\n<!-- rebar:reconciler-echo -->",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "created": "2026-06-26T02:02:01.116-0500",
+        "id": "261336",
+        "jsdPublic": true,
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578431/comment/261336",
+        "updateAuthor": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "updated": "2026-06-26T02:02:01.116-0500"
+      },
+      {
+        "author": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "G4 container child-consistency audit (parent f89d-e54d-203d-4ee0 \u00d7 THIS child 8937 \"Producer\u2194consumer snapshot contract: shared schema + round-trip test through production path\"), all 7 cross-child interaction modes checked against the WHOLE sibling roster (2359/33d0/59ef/822a/fe57) under the high-confidence / benign-reading filter. VERDICT: clean pairing \u2014 no G4 cross-child finding.\n\nFile-disjointness: 8937 file_impact = _snapshot_schema.py (new), tests/integration/rebar_reconciler/test_snapshot_contract.py (new), fetcher.py (producer validates vs schema). Disjoint from every sibling \u2014 fe57 (tests/fixtures/jira/, _fakes.py, capture script), 59ef (test_acliclient_contract.py, acli_graph.py), 33d0 (apply_outbound.py/batch_dispatch.py/applier.py), 2359 (batch_dispatch.py/applier.py/reconcile.py), 822a (e2e_field_validation_probe.sh, test_roundtrip.py). fetcher.py is solely 8937's; it is only READ by fe57's fake through fetch_snapshot. 8937 declares depends_on fe57.\n\n7-mode walk:\n- Implicit shared state \u2014 BENIGN. 8937's three files are net-new or solely-owned. FakeAcliClient/fixtures are PRODUCED by fe57, CONSUMED (read) by 8937 via fetch_snapshot \u2014 clean producer/consumer split over the declared depends_on fe57 edge; no shared mutable write co-edited.\n- Conflicting assumptions \u2014 BENIGN. 8937's schema pins the inbound read-side shapes (comment nested / issuelinks / parent / scalars); fe57 AC2 (fake serves fixtures through fetch_snapshot with NO shape transformation) feeds exactly those \u2014 mutually reinforcing with 59ef (return-shape fidelity) and 822a (behavioral round-trip of the same shapes). The outbound labels_applied list-vs-count conflict tracked on 33d0\u21942359 is outbound-telemetry-internal; 8937's read-side snapshot schema neither asserts nor depends on labels_applied, so it is untouched.\n- Dependency gap \u2014 BENIGN. 8937's only input dependency (fe57's fixtures/fake) is declared. Applier collapse (\u219233d0), telemetry (\u21922359), fixture capture (\u2192fe57) are explicitly scoped OUT, consistent with the roster. The round-trip \"\u2026\u2192 applier\" binds to \"the production path\" abstractly \u2014 against current code the batch path is already production and carries comment/link/parent dispatch, and after 33d0's collapse the survivor IS the production path by construction \u2014 so no hard 33d0-before-8937 edge is required for the test to be meaningful (same abstract-binding pattern ruled benign for 822a). No missing input edge.\n- Scope overlap \u2014 BENIGN. Four stories drive \"the production path\" from distinct angles on distinct files: 8937 = assembled snapshot-entry SCHEMA + producer\u2192consumer key/shape round-trip; 59ef = enrichment-METHOD return-shape fidelity; 33d0 = outbound-only multi-sub-op APPLICATION correctness; 822a = BIDIRECTIONAL inbound\u2194outbound behavioral ROUND-TRIP. Complementary, not duplicative; 8937 declares the others OUT. The documented anti-change-detector guardrail is assigned to 8937 by NAME (\"owned by story B\") and by 8937's own description + AC5 \u2014 an in-scope deliverable of THIS child, not an overlap.\n- Ordering violation \u2014 BENIGN. 8937 does not edit the applier files, so it is not entangled in the 33d0\u21942359 same-region outbound-applier sequencing cluster. The only hard ordering edge (fixtures before the consuming test) is captured by depends_on fe57.\n- Consumer impact \u2014 BENIGN. The new _snapshot_schema.py SSOT that fetcher.py validates against is additive; 8937 AC4 asserts semantic keys/types/round-trip (no whole-blob golden equality, no mock-call-count), consistent with the epic's anti-change-detector posture / \"no net increase in brittle tests.\" No sibling forced into a conflicting conformance.\n- Residual references \u2014 BENIGN. Every schema field references a live producer/consumer surface (fetch_snapshot writes + inbound/outbound differ reads). 33d0 deletes the DEAD typed-leaf applier, but 8937 exercises the PRODUCTION (batch) path, not the typed leaf, so 33d0's deletion strands nothing 8937 references.\n\nNOTE: the documented anti-change-detector guardrail is OWNED BY THIS CHILD (story B = 8937) per the parent AC's verbatim \"(owned by story B)\" clause + 8937 AC5 \u2014 an in-scope deliverable, neither a roster coverage gap nor a G4 cross-child inconsistency for this pairing.\n\nVERDICT: no G4 cross-child finding; all 7 interaction modes read benign under the high-confidence / benign-reading filter. Findings list empty.\n\n<!-- rebar:reconciler-echo -->",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "created": "2026-06-26T02:02:01.647-0500",
+        "id": "261337",
+        "jsdPublic": true,
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578431/comment/261337",
+        "updateAuthor": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "updated": "2026-06-26T02:02:01.647-0500"
+      }
+    ],
+    "maxResults": 18,
+    "self": "https://example.atlassian.net/rest/api/3/issue/4578431/comment",
+    "startAt": 0,
+    "total": 18
+  },
+  "REB-429": {
+    "comments": [
+      {
+        "author": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "Note: once B5 makes the workflow verify dynamic (agentic-when-code-grounded), B4's parity harness verify-call-mode assertion should be upgraded to cross-assert workflow==bespoke equality (currently it asserts bespoke-vs-expectation + documents the workflow's static single-turn gap). Fold that harness update into B5 or note it for B-RETIRE.\n\n<!-- rebar:reconciler-echo -->",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "created": "2026-06-26T02:02:03.539-0500",
+        "id": "261338",
+        "jsdPublic": true,
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578432/comment/261338",
+        "updateAuthor": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "updated": "2026-06-26T02:02:03.539-0500"
+      }
+    ],
+    "maxResults": 1,
+    "self": "https://example.atlassian.net/rest/api/3/issue/4578432/comment",
+    "startAt": 0,
+    "total": 1
+  },
+  "REB-430": {
+    "comments": [
+      {
+        "author": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "PASS 1 review (T3 Integration feasibility \u2014 overlay): PASS / not-applicable. The plan does not adopt any new external API/CLI/service/library, nor assert a capability it has not used before. Every external surface it relies on is already in production use in this codebase and verified present: the acli transport + Jira REST endpoints (e.g. `POST /rest/api/3/search/jql`, `get_comment_map`/`get_issuelinks_map`/`get_parent_map` in `src/rebar/_engine/rebar_reconciler/acli_graph.py`, `get_issue_by_rest` in `acli.py`), the `links_applied`/`comments_applied` sub-op telemetry already emitted in `apply_outbound.py`/`apply_inbound.py`, and the existing live `jira-capability-probe.py`. Auth/HTTPS preconditions (JIRA_URL/JIRA_USER/JIRA_API_TOKEN) are already established by that probe and the live suite (`tests/external/test_link_sync_roundtrip_live.py`). The plan's strategy is deliberately hermetic (fixtures captured from real Jira, served through an in-process fake via the production fetch_snapshot path), with full live-sandbox e2e and cross-team Pact explicitly out of scope \u2014 so it adds no new live external dependency. Under T3's ANTI-FP clause (an internal, already-used integration is not-applicable), no findings.\n\n<!-- rebar:reconciler-echo -->",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "created": "2026-06-26T02:02:06.958-0500",
+        "id": "261342",
+        "jsdPublic": true,
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578433/comment/261342",
+        "updateAuthor": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "updated": "2026-06-26T02:02:06.958-0500"
+      },
+      {
+        "author": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "PASS 1 (G6 \u2014 approach soundness/anti-patterns/alternative-selection): PASS, no findings.\n\nGrounded the mechanism claims against the live code:\n- The producer\u2194consumer seam is real and exactly as described: fetcher writes `issuelinks` (fetcher.py:454) + nested `comment` shapes, while differs read those keys (inbound_differ.py:466, outbound_differ.py:969); the contract-test approach targets precisely this gap class.\n- Story D's direction is consistent with the codebase: outbound mutations route through the legacy batch path `_apply_batch`/`update_one` (applier.py:474-490, batch_dispatch.py:388 \"production routes through this legacy batch path, NOT the typed leaf\"), while the typed leaf `_apply_outbound_update` is the path production does not use for outbound. Collapse-to-batch + retire-typed-leaf is sound; parity-before-delete (Rollout & rollback) handles the failure case.\n- Story E's premise verified: the batch path returns the scalar `update_issue` result and dispatches links/comments/labels as side effects without surfacing counters (batch_dispatch.update_one + applier.py:700/785), whereas the typed leaf already builds `links_applied`/`comments_applied`/`labels_applied` (apply_outbound.py:389-391). Surfacing these in the batch outcome + the `computed>0 && applied==0` canary directly detect the silent-no-op class. Warn-first\u2192hard-fail rollout handles the failure-mode edge safely.\n\nApproach selection: I generated two structurally-different alternatives \u2014 (a) runtime schema-validation guards in fetcher/differ instead of a test-time contract; (b) VCR/record-replay fixtures only. The plan's hermetic-fixtures-through-the-production-path is at-least-as-good on blast-radius/testability/simplicity, and the plan explicitly weighs these in its Deep Research paragraph. Defensible \u2192 alternatives discarded (not added to plan). Positive rationale for the chosen approach is present and explicit (\"one producer\u2194consumer snapshot contract test, fed by hermetic-but-honest fixtures... exercised through the PRODUCTION code path \u2014 explicitly avoiding change-detector bloat\").\n\nAffirmations: mechanism correctness, fitness-for-purpose (solves the named seam class, not a proxy), defensible approach selection, and present positive rationale all PASS.\n\n<!-- rebar:reconciler-echo -->",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "created": "2026-06-26T02:02:07.632-0500",
+        "id": "261343",
+        "jsdPublic": true,
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578433/comment/261343",
+        "updateAuthor": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "updated": "2026-06-26T02:02:07.632-0500"
+      }
+    ],
+    "maxResults": 6,
+    "self": "https://example.atlassian.net/rest/api/3/issue/4578433/comment",
+    "startAt": 0,
+    "total": 6
+  },
+  "REB-431": {
+    "comments": [
+      {
+        "author": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "G4 container child-consistency audit (parent f89d-e54d-203d-4ee0 \u00d7 THIS child fe57 \"Hermetic-but-honest Jira fixtures + verified fake client (served through the production path)\"), all 7 cross-child interaction modes checked against the WHOLE sibling roster (2359/33d0/59ef/822a/8937) under the high-confidence / benign-reading filter, corroborated against the repo. VERDICT: clean pairing \u2014 no G4 cross-child finding.\n\nRepo corroboration that fe57's premise is grounded (the fixtures/fake feed the REAL production enrichment path, not a fictional one): the four enrichment methods fe57's FakeAcliClient mirrors all exist \u2014 get_comment_map (acli_graph.py:289), get_issuelinks_map (acli_graph.py:391 region), get_parent_map, search_issues; and fetcher.fetch_snapshot merges them UNMASSAGED into snapshot entries \u2014 comment field merged at fetcher.py:414-417 (nested {\"comments\":[...]} under key `comment`, the bug-0ee6 seam), issuelinks merged at fetcher.py:450-454 (list under key `issuelinks`, the bug-3f04 seam). So fe57 AC2 (\"the fake serves the fixtures through the production fetch_snapshot enrichment with NO shape transformation\") binds to a real, in-use production path.\n\nfe57 is the FOUNDATION: it PRODUCES tests/fixtures/jira/ + tests/integration/rebar_reconciler/_fakes.py (FakeAcliClient) + scripts/capture_jira_fixtures.py + re-capture doc. Siblings 8937, 59ef, 822a all declare depends_on fe57 and CONSUME these artifacts \u2014 clean producer/consumer split with declared edges.\n\n7-mode walk for THIS pairing:\n- Implicit shared state \u2014 BENIGN. fe57 is the sole PRODUCER of the fixtures + FakeAcliClient; 8937 (test_snapshot_contract.py), 59ef (test_acliclient_contract.py), 822a (test_roundtrip.py) only READ them. No sibling co-writes tests/fixtures/jira/ or _fakes.py; no conflicting shared-file mutation.\n- Conflicting assumptions \u2014 BENIGN. fe57 AC2 (\"fake adds NO shape massaging; serves through production fetch_snapshot enrichment\") is mutually reinforcing with 59ef AC2 (the fake FAILS the contract if its return shape diverges from the real client) and with 8937's snapshot-entry schema \u2014 an unmassaged, fixture-faithful fake is exactly what those siblings require. The outbound labels list-vs-count telemetry matter tracked on 2359/33d0 is outbound-applier-internal; fe57's inbound enrichment fixtures/fake neither touch nor depend on it.\n- Dependency gap \u2014 BENIGN. fe57 is the foundation and has no unmet internal input edge: its only external dependency is live Jira for capture, correctly gated via scripts/capture_jira_fixtures.py (live-gated) per AC3. Its declared OUT items (the contract test \u2192 8937; the verified-fake honesty check \u2192 59ef) are present as named siblings.\n- Scope overlap \u2014 BENIGN. fe57 owns fixtures + fake + capture script + re-capture doc; it explicitly scopes OUT the consuming contract test (\u21928937) and the verified-fake fidelity harness (\u219259ef). 59ef VERIFIES the fake fe57 BUILDS; 8937 CONSUMES the fixtures fe57 CAPTURES \u2014 complementary, not duplicative.\n- Ordering violation \u2014 BENIGN. The only hard ordering constraint (foundation before its consumers) is captured by 8937/59ef/822a each declaring depends_on fe57. fe57 itself is not entangled in the 33d0\u21942359 outbound-applier same-region sequencing cluster (different files/surface entirely).\n- Consumer impact \u2014 BENIGN. fe57's deliverables are additive test scaffolding; AC4 enforces consumption ONLY via the production code path (no test reads them and hand-reshapes), which actively supports the epic's anti-change-detector posture rather than imposing brittle expectations. Secret-scrubbing (AC1/AC3) keeps committed fixtures safe.\n- Residual references \u2014 BENIGN. Every method the FakeAcliClient mirrors exists on the real client (verified above). 33d0 collapses the OUTBOUND applier paths (apply_outbound.py/batch_dispatch.py/applier.py), NOT the INBOUND enrichment surface fe57 fixtures exercise, so its deletion strands nothing fe57 references. No dangling reference.\n\nThe roster-level parent anti-change-detector-guardrail matter is a G3 coverage question (and per the parent AC's explicit \"(owned by story B)\" clause is owned by 8937) \u2014 not a G4 cross-child inconsistency, so not addressed here.\n\nVERDICT for this pairing (parent \u00d7 fe57): no G4 cross-child finding; all 7 interaction modes read benign under the high-confidence / benign-reading filter.\n\n<!-- rebar:reconciler-echo -->",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "created": "2026-06-26T02:02:11.196-0500",
+        "id": "261348",
+        "jsdPublic": true,
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578434/comment/261348",
+        "updateAuthor": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "updated": "2026-06-26T02:02:11.196-0500"
+      },
+      {
+        "author": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "G3 child-coverage audit (parent f89d-e54d-203d-4ee0 \u00d7 THIS child fe57 \"Hermetic-but-honest Jira fixtures + verified fake client\"), 4-bucket per parent criterion, cross-checked against the WHOLE sibling roster (2359/33d0/59ef/822a/8937/fe57). VERDICT: clean pairing \u2014 no G3 coverage finding attributable to this child; no uncovered parent criterion remains across the roster.\n\nOWNED / CONTRIBUTED by THIS child (fe57 = the foundation: fixtures captured from real Jira + verified fake client served through the production path):\n- Parent AC \"One round-trip contract test exercises fetcher \u2192 snapshot \u2192 differs \u2192 applier through the production path, using fixtures derived from real Jira payloads\" \u2192 fe57 CONTRIBUTES the fixture/fake HALF: fe57 AC1 (`tests/fixtures/jira/*.json` hold scrubbed real Jira payloads for search + comment + issuelinks + parent), AC2 (`FakeAcliClient` serves the fixtures through the production fetcher enrichment path with NO shape transformation), AC3 (live-gated capture+scrub script + documented re-capture cadence), AC4 (fixtures consumed only via the production code path; no test reads them and hand-reshapes). The round-trip TEST itself is correctly delegated to keystone 8937 (8937 AC3, which declares depends_on fe57). FULLY covered as a pairing (fixtures/fake \u2192 fe57; test \u2192 8937).\n- Parent SC \"Producer (fetcher + enrichment) and consumers (differs/appliers) cannot drift on snapshot shape without a test failing\" \u2192 fe57 owns the HONESTY-OF-THE-SOURCE half: fixtures captured from real Jira and served unmassaged through `fetcher.fetch_snapshot` are precisely what prevents the bug-0ee6 failure mode \"differs unit-tested against hand-built snapshot dicts in shapes the real fetcher never emits.\" CONTRIBUTED, complementary to 8937 (schema SSOT + joint round-trip) and 59ef (verified-fake fidelity that keeps fe57's fake honest).\n- Parent SC \"Bidirectional round-trips (comments, links, parent) for the real Jira shapes are asserted; no probe encodes a bug as expected\" \u2192 fe57 supplies the real-shape fixtures/fake that 822a's hermetic round-trip reuses (822a declares depends_on fe57). CONTRIBUTED (fixture foundation).\n- Parent SC \"New tests assert behavior/contract \u2026 the suite stays lean; zero change-detector tests added\" \u2192 fe57's documented re-capture procedure (\"so fixtures stay honest and do not rot into change-detectors\") applies the anti-change-detector posture to its own artifacts. CONTRIBUTED.\n\nDELEGATION \u2014 parent criteria this child does NOT own are correctly assigned to named siblings; fe57's declared OUT items (the contract test that consumes the fixtures \u2192 story B/8937; the verified-fake honesty check \u2192 story C/59ef) are consistent with the roster:\n- AC \"A single-source-of-truth snapshot-entry schema module exists as the canonical shape\" \u2192 8937 AC1.\n- AC \"A test validates the fetcher's snapshot output against that schema\" \u2192 8937 AC2.\n- AC \"A test validates each differ's snapshot reads against that schema\" \u2192 8937 AC1 (schema covers every field the differs read) + AC3 (round-trip drives inbound_differ + outbound_differ reads against the schema-validated snapshot).\n- AC \"Outbound application is collapsed to a single production path (no parallel applier remains)\" + AC \"The retired outbound applier path is deleted\" + SC \"Outbound sync is exercised through the production code path, not a parallel dead path\" \u2192 33d0.\n- AC \"Outbound sub-op telemetry (links_applied/comments_applied/labels_applied) is surfaced in the structured batch outcome\" + AC \"computed > 0 && applied == 0 fails loudly, after the warn-first rollout\" + SC \"A silent sub-op no-op \u2026 fails a test/canary instead of passing green\" \u2192 2359.\n- AC \"Bidirectional comment/link/parent round-trip is asserted hermetically through the production path\" + AC \"Every probe assertion that encodes a current bug as expected is converted to fail-when-the-gap-closes\" \u2192 822a.\n- AC \"A documented anti-change-detector guardrail for reconciler tests is committed and referenced by new tests (owned by story B)\" \u2192 8937 (story B): 8937 description \"Owns the epic's guardrail artifact \u2026 commit a documented anti-change-detector guardrail \u2026 a short docs/ note (ADR-style) \u2026 New tests reference it\" + 8937 AC5. The parent AC NAMES its owner verbatim; under the G3 ANTI-FP rule (a criterion covered-by-definition by a NAMED consumer counts) this is FULLY covered.\n\nANTI-FP / the recurring \"documented anti-change-detector guardrail only PARTIALLY covered \u2014 no sibling produces a governing artifact\" finding (raised against fe57 and siblings in early audits) is a FALSE POSITIVE and stays WITHDRAWN. It was raised against a paraphrased \"governs new tests\" wording that does not match the plan text; the actual parent AC explicitly names story B (= 8937) as owner and is delivered by 8937's description + AC5. The same false positive has already been withdrawn across siblings 2359/33d0/59ef/822a and on 8937.\n\n4-bucket summary for this pairing:\n- FULLY / CONTRIBUTED (owned share of THIS child): parent AC \"round-trip contract test \u2026 using fixtures derived from real Jira payloads\" (fixture/fake half \u2014 fe57 AC1/AC2/AC3/AC4; test half \u2192 8937); parent SC \"producer/consumers cannot drift on snapshot shape\" (honest-source half); parent SC \"bidirectional round-trips for real Jira shapes\" (fixture foundation reused by 822a); parent SC \"zero change-detector / lean\" (re-capture honesty).\n- COVERED-BY-NAMED-SIBLING: SSOT schema + fetcher/differ schema validation + round-trip test (8937); applier collapse + retired-path deletion + production-path exercise (33d0); sub-op telemetry + silent-no-op canary (2359); hermetic bidirectional round-trip + probe de-encoding (822a); verified-fake fidelity (59ef); documented anti-change-detector guardrail (8937, named owner).\n- STRUCTURAL/AGGREGATE: parent AC \"All six child stories are closed; the full reconciler suite is green.\"\n- PARTIALLY / UNCOVERED: none.\n\nNo G3 coverage finding for this pairing. fe57's owned share (real-Jira fixtures + FakeAcliClient served through the production fetcher enrichment with no shape massaging + live-gated capture/scrub script + re-capture doc) is fully delivered and is the foundation the round-trip (8937), verified-fake honesty (59ef), and bidirectional probe (822a) build on. The union of children covers every parent acceptance/success criterion; none is left uncovered by, or solely-and-uncovered on, this child.\n\n<!-- rebar:reconciler-echo -->",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "created": "2026-06-26T02:02:11.760-0500",
+        "id": "261349",
+        "jsdPublic": true,
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578434/comment/261349",
+        "updateAuthor": {
+          "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Redacted User",
+          "emailAddress": "redacted@example.invalid",
+          "self": "https://example.atlassian.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+          "timeZone": "America/Los_Angeles"
+        },
+        "updated": "2026-06-26T02:02:11.760-0500"
+      }
+    ],
+    "maxResults": 14,
+    "self": "https://example.atlassian.net/rest/api/3/issue/4578434/comment",
+    "startAt": 0,
+    "total": 14
+  }
+}

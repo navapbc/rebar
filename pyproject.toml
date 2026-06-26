@@ -242,6 +242,14 @@ select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201"]
 # close-out reconciles the inline `# noqa: T201` sites against this per-file-ignore.
 "src/rebar/_engine/rebar_reconciler/*" = ["T201"]
 "src/rebar/_engine/jira-capability-probe.py" = ["T201"]
+# Live, human-run Jira capture CLI (epic f89d, story A) — same legitimate-print
+# operational surface as jira-capability-probe.py above: it streams capture
+# progress to stderr. KEEPS T201.
+"scripts/capture_jira_fixtures.py" = ["T201"]
+# Human-run bind-state retarget CLI — a one-shot operational tool that prints its
+# dry-run/apply report to stdout (the data surface) + errors to stderr. Same
+# legitimate-print category as the capture CLI above. KEEPS T201.
+"scripts/retarget_jira_project.py" = ["T201"]
 
 [tool.mypy]
 # Scoped, opt-in type checking. The pure in-process library core

@@ -26,12 +26,14 @@ def _sandbox_repo_root(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _default_jira_project(monkeypatch):
-    """Pin ``JIRA_PROJECT=DIG`` for these reconciler integration tests (overridable).
+    """Pin ``JIRA_PROJECT=REB`` for these reconciler integration tests (overridable).
 
     Bug 626d made the configured project load-bearing: the inbound fetch is scoped to
     ``jira.project`` and fails closed on an empty key (it must not silently search the
-    wrong project). These tests use DIG-keyed mock data and don't configure a project,
-    so pin DIG here just as the unit conftest does.
+    wrong project). These tests don't configure a project of their own, so pin the
+    real project key here. ``REB`` matches the hermetic Jira fixtures under
+    ``tests/fixtures/jira/`` (epic f89d, story A); the mock/fake clients ignore the
+    project argument, so key-matching mock data of any project prefix still merges.
     """
-    monkeypatch.setenv("JIRA_PROJECT", "DIG")
+    monkeypatch.setenv("JIRA_PROJECT", "REB")
     yield

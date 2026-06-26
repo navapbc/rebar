@@ -2,7 +2,8 @@
 
 Historical bug (bug 85a1 / Gap 8): the outbound status push was gated behind
 ``REBAR_RECONCILER_STATUS_GATING=1`` AND routed through
-``_route_status_via_draft5`` which was a literal no-op stub. Even with the
+``_route_status_via_draft5`` which was a literal no-op stub (both since removed —
+epic f89d story D deleted that dead typed-leaf code). Even with the
 gate set, nothing was pushed. The legacy ``transition_issue`` used ACLI,
 which silently returns exit 0 on bogus transitions (Gap 5).
 

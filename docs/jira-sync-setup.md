@@ -292,6 +292,34 @@ ticket re-creates fresh in the new project. **A live pass after this bulk-create
 one new issue per active local ticket**, so run it deliberately (off-cadence; pause
 the schedule), and commit the cleared bind-state back to the `tickets` branch.
 
+## Verifying sync — round-trip tests (hermetic + live)
+
+The producer↔consumer sync contract (epic f89d) is guarded at two tiers:
+
+- **Hermetic (default CI, no live Jira).** `tests/integration/rebar_reconciler/jira_contract/`
+  drives **scrubbed real Jira fixtures** (`tests/fixtures/jira/`, see
+  [jira-fixtures.md](jira-fixtures.md)) through the PRODUCTION fetch + differ +
+  applier path: the snapshot contract (`test_snapshot_contract.py`), the verified
+  fake (`test_verified_fake_contract.py`), and the **bidirectional round-trip**
+  (`test_roundtrip.py` — comments, issue-links both directions, and parent reach a
+  convergent fixed point with no spurious mutation). These run on every PR and never
+  touch Jira, so they cannot flake on network/credentials.
+
+- **Live (opt-in / scheduled, OFF the default suite).** Two variants exercise the
+  same contract against REAL Jira and must never run in the default CI lane:
+  - `tests/external/test_verified_fake_contract_live.py` — the verified-fake shape
+    contract against the live `AcliClient`; gated by `REBAR_RUN_EXTERNAL=1` + Jira
+    creds (the `external` marker). Run it (or schedule it) to detect a Jira REST
+    shape drift → the signal to **re-capture** the fixtures.
+  - `scripts/jira-pressure-test/e2e_field_validation_probe.sh` — the full field
+    CRUD + round-trip probe against a live project; opt-in via
+    `REBAR_FIELD_VALIDATION_PROBE=1`. Its assertions are positive (a fix is
+    detected, a regression fails) — no assertion encodes a current gap as
+    "expected" (epic f89d de-encoded the historical inbound-comment guard).
+
+  A natural home for the live variants is a **scheduled** workflow (e.g. weekly
+  `cron`) against a throwaway project, kept separate from the per-PR lane.
+
 ## Optional hardening
 
 DSO also ships a **weekly bridge-fsck audit**. rebar exposes the same check as

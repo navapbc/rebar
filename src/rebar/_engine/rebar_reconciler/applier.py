@@ -718,8 +718,14 @@ def _apply_batch(
                 # swallowed comment sub-mutation surfaces in the batch outcome
                 # rather than reporting a clean error=None.
                 _comment_errors: list[str] = []
+                _subop: dict[str, int] = {}
                 try:
-                    result = update_one(mutation, client, comment_errors=_comment_errors)
+                    result = update_one(
+                        mutation,
+                        client,
+                        comment_errors=_comment_errors,
+                        subop_applied=_subop,
+                    )
                 except urllib.error.HTTPError as exc:
                     # Bug tan-coin-atone (6614-43cd-3a48-4f63): an outbound
                     # update against a DELETED Jira issue (stale binding, 1e08
@@ -790,6 +796,44 @@ def _apply_batch(
                 # stale-binding-404 / assignee-unresolved handlers.
                 if _comment_errors:
                     outcome["comment_errors"] = list(_comment_errors)
+                # Story E (2359): sub-op telemetry — surface per-kind APPLIED counts
+                # on the structured outcome (parity with apply_inbound's
+                # links_applied), so a link/comment/label that silently no-ops is
+                # queryable, not only logged to stderr.
+                outcome["labels_applied"] = _subop.get("labels_applied", 0)
+                outcome["comments_applied"] = _subop.get("comments_applied", 0)
+                outcome["links_applied"] = _subop.get("links_applied", 0)
+                # Silent-no-op canary: a kind with sub-ops COMPUTED (post-dedup) but
+                # ZERO applied is exactly the bug-3f04 link-drop failure mode — it
+                # would otherwise pass green with error=None. computed is counted
+                # post-dedup, so an idempotent re-sync (everything deduped) is
+                # computed==0 and does NOT fire. NOTE: this is a TOTAL-no-op detector
+                # (applied==0) per the AC's `computed > 0 && applied == 0` invariant —
+                # a PARTIAL drop (e.g. 2 links computed, 1 applied) does not fire; a
+                # finer per-sub-op threshold is deliberately out of scope (YAGNI).
+                _silent = [
+                    kind
+                    for kind in ("labels", "comments", "links")
+                    if _subop.get(f"{kind}_computed", 0) > 0
+                    and _subop.get(f"{kind}_applied", 0) == 0
+                ]
+                if _silent:
+                    _noop_key = mutation.get("key") or mutation.get("local_id") or "<unknown>"
+                    _detail = ", ".join(
+                        f"{k}: computed={_subop.get(f'{k}_computed', 0)} applied=0" for k in _silent
+                    )
+                    outcome["silent_noop"] = _silent
+                    logger.warning(
+                        "outbound update silent no-op for %s — %s; sub-ops were "
+                        "computed but NONE applied (the bug-3f04 failure mode)",
+                        _noop_key,
+                        _detail,
+                    )
+                    # Warn-first rollout: hard-fail (record a per-mutation failure)
+                    # ONLY behind the flag — promotion to hard-fail and reversion to
+                    # warn are a flag flip with no other code change.
+                    if _rebar_env("RECONCILER_FAIL_SILENT_NOOP", "0") == "1":
+                        outcome["error"] = f"silent-noop: {_detail}"
                 # Persist provenance for set-valued fields after update
                 jira_key = mutation.get("key", "")
                 if jira_key:
@@ -815,8 +859,20 @@ def _apply_batch(
             # mutation lives in the manifest for forensic dives.
             _outcome_key = mutation.get("key") or mutation.get("local_id") or "<unknown>"
             _outcome_err = outcome.get("error")
+            # Story E (2359): surface the sub-op applied counts on the RECON line so
+            # operators see links/comments/labels applied without parsing the
+            # manifest (0 for non-update actions, which carry no sub-ops).
+            _recon_subops = (
+                f" links_applied={outcome.get('links_applied', 0)}"
+                f" comments_applied={outcome.get('comments_applied', 0)}"
+                f" labels_applied={outcome.get('labels_applied', 0)}"
+                f" silent_noop={outcome.get('silent_noop', [])!r}"
+                if action == "update"
+                else ""
+            )
             print(  # noqa: T201
-                f"RECON: batch_outcome action={action} key={_outcome_key} error={_outcome_err!r}",
+                f"RECON: batch_outcome action={action} key={_outcome_key} "
+                f"error={_outcome_err!r}{_recon_subops}",
                 file=sys.stderr,
             )
 

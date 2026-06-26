@@ -1,0 +1,2570 @@
+[
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "assignee": {
+        "accountId": "redacted:00000000-0000-0000-0000-000000000000",
+        "accountType": "atlassian",
+        "active": true,
+        "avatarUrls": {
+          "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+          "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+          "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+          "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/REDACTED-ACCOUNTID/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+        },
+        "displayName": "Redacted User",
+        "emailAddress": "redacted@example.invalid",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=REDACTED-ACCOUNTID",
+        "timeZone": "America/Los_Angeles"
+      },
+      "description": {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "## Why",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "The visual editor's batch-criteria work (story B-UX) must let a user SELECT criteria and prompts",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "from the library AND CREATE new ones (\"full in-editor authoring\"). The prompt/criteria library",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "today supports enumerate (`load_catalog`/`registry.load_criteria`), read (`get_prompt`), and a",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "committed derived index (`regenerate-index`) \u2014 but has NO programmatic WRITE path. In-editor",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "authoring needs to create/update a prompt-library entry (front-matter + rubric body) and keep the",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "committed prompt index + the drift CI gate green. This is the data-model layer the editor sits on;",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "per the epic's sequencing it lands BEFORE the UX.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## What",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "Add a library WRITE + structured-enumerate data model for prompts and criteria (criteria are",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "prompt-library entries; D5 \u2014 a criterion's id IS its prompt-library id):",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- An enumerate API returning the authorable list (id, kind=prompt|criterion, description, inputs/",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  outputs, is-overlay) for the editor's pickers \u2014 a superset of the read-only inspector data.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- A create/update API that writes a prompt-library `.md` (front-matter + body) to the correct home",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  (`.rebar/prompts/<id>.md` for user prompts; the packaged reviewers dir is read-only at runtime),",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  validates the front-matter, and regenerates the committed reviewers index so the drift gate stays",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  green.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Validation + conflict handling (id collision, malformed front-matter, reserved ids).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Scope",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- New library write/enumerate functions (likely in `rebar.llm.prompts` + a thin criteria view over",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  `plan_review.registry`), stdlib-only at import.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Index regeneration wired so a create/update leaves `reviewers/index.json` consistent.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Unit tests for enumerate shape, create/update round-trip, index regen, and validation/conflict.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- NO editor/frontend code here (that is B-UX); this is the backend data model only.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Acceptance Criteria",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] An enumerate API lists authorable prompts + criteria with the fields the editor pickers need",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "      (id, kind, description, inputs/outputs, is-overlay), covering both packaged and `.rebar/prompts` entries.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] A create/update API writes a validated prompt-library `.md` to `.rebar/prompts/<id>.md` and",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "      regenerates the committed index so the prompt-drift CI gate stays green.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] Validation rejects id collisions, malformed front-matter, and reserved ids with clear errors.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] Unit tests cover enumerate, create/update round-trip, index regen, and the validation paths.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] `make lint` + the full test suite pass.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "type": "doc",
+        "version": 1
+      },
+      "issuetype": {
+        "avatarId": 10315,
+        "description": "Stories track functionality or features expressed as user goals.",
+        "entityId": "a982ed43-d853-43df-8602-042066c8ebe3",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10315?size=medium",
+        "id": "18614",
+        "name": "Story",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/issuetype/18614",
+        "subtask": false
+      },
+      "labels": [
+        "rebar-id:5506-0850-6e71-4dd2"
+      ],
+      "priority": {
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
+        "id": "3",
+        "name": "Medium",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
+      },
+      "status": {
+        "description": "",
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
+        "id": "24028",
+        "name": "Done",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
+        "statusCategory": {
+          "colorName": "green",
+          "id": 3,
+          "key": "done",
+          "name": "Done",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
+        }
+      },
+      "summary": "B-DM: Prompt + criteria library write/enumerate/index data model (the editor's backend)"
+    },
+    "fieldsToInclude": null,
+    "id": "4578378",
+    "key": "REB-407",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/issue/4578378",
+    "transitions": null,
+    "versionedRepresentations": null
+  },
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "assignee": null,
+      "description": {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "## Why",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "Epic A shipped a basic batch-criteria editor where the user TYPES prompt-ids and overlay",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "predicates as free text \u2014 error-prone and undiscoverable. The plan-review migration (B2) makes the",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "batch's criteria list the primary thing a human edits, so the editor must let the user SELECT",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "criteria, prompts, and overlay triggers from lists and CREATE new ones, not hand-type ids/expressions.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## What",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "Upgrade the workflow visual editor's batch step (and prompt/agent steps) so editing is selection-",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "and form-driven, for both CRITERIA and PROMPTS:",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- **Criterion / prompt fields \u2192 dropdowns** sourced from the library enumerate API (B-DM), each",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  option showing its description (no free-text id typing).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- **Overlay trigger (`when`) \u2192 dropdown** of THIS workflow's available triggers (the",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  `overlay_triggers` step's keyword + structural outputs), rendered as the correct",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  `${{ steps.<triggers>.outputs.<name> }}` expression, plus an \"(always include)\" option.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- **Create new overlay trigger** \u2014 inline: adds a `{name: [keywords]}` entry to the",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  `overlay_triggers` step config; it then appears in the dropdown.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- **Create new criterion / prompt \u2014 full in-editor authoring**: a form to enter the name + rubric/",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  body; on save the editor calls the B-DM write API to create the prompt-library `.md` + regen the",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  index, and references the new id in the step. Must keep the prompt-drift CI gate green.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Scope",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Editor front-end (`editor_assets/src/`) changes: replace the text fields with library-backed",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  selects + the authoring form; inject the enumerate data + per-workflow trigger list.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- A small editor-server endpoint to invoke the B-DM create/update API (the editor writes files via",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  the server, not the browser).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Real-browser E2E (Playwright) covering: pick-existing criterion/prompt, pick + create overlay",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  trigger, author a new criterion/prompt end-to-end, and persistence to the IR + library.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Depends on B-DM (the library write/enumerate data model) and the v3 batch schema (on main).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Acceptance Criteria",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] The batch step's criterion/prompt fields are dropdowns sourced from the library (with",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "      descriptions); the overlay `when` is a dropdown of the workflow's overlay-trigger outputs + \"(always)\".",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] A user can create a new overlay trigger inline (adds it to the `overlay_triggers` step) and",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "      immediately select it.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] A user can author a new criterion AND a new prompt in-editor (name + rubric/body); on save it",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "      is written to the library via the B-DM API, the index is regenerated, and the new id is referenced",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "      in the step.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] A real-browser E2E proves pick-existing, create-trigger, and author-new-criterion/prompt end",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "      to end with persistence to the IR + library; the prompt-drift gate stays green.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] `make lint` + the full test suite pass.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "type": "doc",
+        "version": 1
+      },
+      "issuetype": {
+        "avatarId": 10315,
+        "description": "Stories track functionality or features expressed as user goals.",
+        "entityId": "a982ed43-d853-43df-8602-042066c8ebe3",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10315?size=medium",
+        "id": "18614",
+        "name": "Story",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/issuetype/18614",
+        "subtask": false
+      },
+      "labels": [
+        "rebar-id:92fa-6657-3579-4043"
+      ],
+      "priority": {
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
+        "id": "3",
+        "name": "Medium",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
+      },
+      "status": {
+        "description": "",
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
+        "id": "24029",
+        "name": "To Do",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24029",
+        "statusCategory": {
+          "colorName": "blue-gray",
+          "id": 2,
+          "key": "new",
+          "name": "To Do",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/2"
+        }
+      },
+      "summary": "B-UX: Visual editor \u2014 select/create criteria, prompts & overlay triggers (pickers + in-editor authoring)"
+    },
+    "fieldsToInclude": null,
+    "id": "4578379",
+    "key": "REB-408",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/issue/4578379",
+    "transitions": null,
+    "versionedRepresentations": null
+  },
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "assignee": null,
+      "description": {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "## Why",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "A fake is only as good as its fidelity to the real client. If `FakeAcliClient` (story A) drifts from the real `AcliClient`, we reintroduce bug 0ee6's failure mode \u2014 tests pass against fictional shapes. Google's \"Software Engineering at Google\" prescribes the **verified fake**: the fake carries contract tests written against the API's public interface, and those same tests run against BOTH the real implementation and the fake.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## What",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- **Shape-contract tests** for the `AcliClient` enrichment surface (`get_comment_map`, `get_issuelinks_map`, `get_parent_map`, `search_issues`) asserting the RETURN SHAPE (keys present, JSON primitive types) \u2014 not exact values.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- A parametrized harness that runs the identical contract tests against (a) the `FakeAcliClient` (always, hermetic) and (b) the real `AcliClient` against live Jira (behind the existing live/external pytest marker, opt-in).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- The fake FAILS the contract if its return shape diverges from the real client's, so a future real-API change surfaces as a fake-drift failure.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Optional: validate the real client's responses against Jira Cloud's published OpenAPI where the spec covers the field (investigate spec completeness first \u2014 see epic open question).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Scope",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- In: the dual-run (real + fake) shape-contract harness for the enrichment methods.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Out: capturing the fixtures (story A); the snapshot round-trip (story B).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Acceptance Criteria",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] Shape-contract tests for the enrichment methods run against the fake (always) and the real client (live-gated marker).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] The fake fails the contract test if its return shape diverges from the real client's return shape.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] Assertions check structure/type (keys + JSON primitive types), not exact values (anti-change-detector).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] Running against live is opt-in (does not flake or slow the default suite).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "type": "doc",
+        "version": 1
+      },
+      "issuetype": {
+        "avatarId": 10315,
+        "description": "Stories track functionality or features expressed as user goals.",
+        "entityId": "a982ed43-d853-43df-8602-042066c8ebe3",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10315?size=medium",
+        "id": "18614",
+        "name": "Story",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/issuetype/18614",
+        "subtask": false
+      },
+      "labels": [
+        "jira-sync",
+        "rebar-id:59ef-ff3e-5aea-47b1",
+        "reconciler",
+        "testing"
+      ],
+      "priority": {
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
+        "id": "3",
+        "name": "Medium",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
+      },
+      "status": {
+        "description": "",
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
+        "id": "24029",
+        "name": "To Do",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24029",
+        "statusCategory": {
+          "colorName": "blue-gray",
+          "id": 2,
+          "key": "new",
+          "name": "To Do",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/2"
+        }
+      },
+      "summary": "Verified fake: contract tests run against BOTH real and fake AcliClient"
+    },
+    "fieldsToInclude": null,
+    "id": "4578429",
+    "key": "REB-426",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/issue/4578429",
+    "transitions": null,
+    "versionedRepresentations": null
+  },
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "assignee": null,
+      "description": {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "## Why",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "The live e2e probe encoded the inbound-comment bug as EXPECTED behavior (`Phase3.verify-inbound-comments-gap \u2026 NOT-SYNCED`, and would have FAILED if comments synced), so the defect was undetectable; no probe round-trips relationships at all; and the probes are manual, not in CI. A probe that locks a bug in as \"expected\" is worse than no probe.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## What",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- A **hermetic bidirectional round-trip assertion** \u2014 using story A's fixtures/fake through the production path \u2014 for comments, issue-links (both directions), and parent, runnable in CI without live Jira.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- **De-encode the \"expected-bug\" guards**: convert probe assertions that lock in a current gap (e.g. `Phase3.verify-inbound-comments-gap NOT-SYNCED`) into `xfail`/fail-when-the-gap-closes, so a fix is detected rather than rejected. Audit `scripts/jira-pressure-test/*.sh` for every `NOT-SYNCED`/\"as expected\" guard.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- A documented (optionally scheduled) live round-trip variant for the directions that truly need real Jira, kept off the default suite so it never flakes CI.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Scope",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- In: the hermetic round-trip test; the probe de-encoding audit; the live-variant doc.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Out: the producer\u2194consumer schema/contract (story B).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Acceptance Criteria",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] A hermetic test asserts bidirectional round-trip of comments, links, and parent through the production path (no live Jira needed).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] Every probe assertion that encodes a current bug as \"expected/NOT-SYNCED\" is converted to fail-when-the-gap-closes (xfail) or removed; none silently passes on a defect.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] The hermetic round-trip runs in CI; any live variant is opt-in/scheduled and documented.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] Assertions check round-trip outcomes, not whole-blob equality (anti-change-detector).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "type": "doc",
+        "version": 1
+      },
+      "issuetype": {
+        "avatarId": 10315,
+        "description": "Stories track functionality or features expressed as user goals.",
+        "entityId": "a982ed43-d853-43df-8602-042066c8ebe3",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10315?size=medium",
+        "id": "18614",
+        "name": "Story",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/issuetype/18614",
+        "subtask": false
+      },
+      "labels": [
+        "jira-sync",
+        "rebar-id:822a-2bad-fe48-43e0",
+        "reconciler",
+        "testing"
+      ],
+      "priority": {
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
+        "id": "3",
+        "name": "Medium",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
+      },
+      "status": {
+        "description": "",
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
+        "id": "24029",
+        "name": "To Do",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24029",
+        "statusCategory": {
+          "colorName": "blue-gray",
+          "id": 2,
+          "key": "new",
+          "name": "To Do",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/2"
+        }
+      },
+      "summary": "Honest bidirectional round-trip probe; de-encode 'expected-bug' guards"
+    },
+    "fieldsToInclude": null,
+    "id": "4578430",
+    "key": "REB-427",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/issue/4578430",
+    "transitions": null,
+    "versionedRepresentations": null
+  },
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "assignee": null,
+      "description": {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "## Why",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "This is the keystone that closes the bug class. The fetcher (producer) and the differs/appliers (consumers) share an implicit contract \u2014 the snapshot-entry dict shape \u2014 that nothing pins or jointly exercises. Pin it once, and exercise producer\u2192consumer together through the production path, so a key/shape divergence (the exact failure in bugs 0ee6 and 3f04) fails a test immediately.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## What",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- A single source-of-truth **snapshot-entry schema** (TypedDict + JSON Schema) in `src/rebar/_engine/rebar_reconciler/_snapshot_schema.py`, covering every field the differs read: `summary`, `description` (ADF), `status`, `priority`, `assignee`, `labels`, `comment` (nested), `issuelinks`, `parent`. Documented as the canonical shape both sides target.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- A **producer\u2192consumer round-trip contract test** (`tests/integration/rebar_reconciler/test_snapshot_contract.py`): the `FakeAcliClient` (story A) \u2192 `fetcher.fetch_snapshot` \u2192 `inbound_differ` + `outbound_differ` \u2192 applier, through the PRODUCTION path. It asserts each consumer-depended key/shape is actually produced and read correctly (comment, issuelinks, parent + scalars). Per the epic sequencing, land it FIRST on the `comment`/`issuelinks` seam, then broaden.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Validation asserts **structure/type, not exact values** (Dredd/Gavel posture): `fetch_snapshot` output conforms to the schema; the differs emit the expected mutations for the captured payloads. No whole-blob golden equality; no mock-call-count.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- **Owns the epic's guardrail artifact (resolves the roster-level gap):** commit a documented **anti-change-detector guardrail** for reconciler tests \u2014 a short `docs/` note (ADR-style) that records the testing-strategy decision (why one producer\u2194consumer contract test through the production path, rather than Pact or a live sandbox), where the snapshot schema lives, and the rules new tests must follow (assert semantic round-trip + structure/type; no mock-call-count; no whole-blob golden equality). New tests reference it.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Scope",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- In: the schema module, the joint round-trip contract test, and the documented guardrail/ADR note.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Out: capturing fixtures (story A), collapsing appliers (story D), telemetry (story E).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Acceptance Criteria",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] `_snapshot_schema.py` defines the snapshot-entry shape (TypedDict + JSON Schema) as the single source of truth.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] A test validates `fetcher.fetch_snapshot` output against the schema, and would FAIL on the pre-fix conditions (issuelinks absent; comment under the wrong key).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] A round-trip test runs fetcher \u2192 differs \u2192 applier through the production path and asserts comment/issuelinks/parent plus scalar fields read correctly; it fails if a producer key/shape diverges from a consumer read.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] All assertions are semantic (keys/types/round-trip), never whole-blob golden equality or interaction/mock-call-count.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] A documented anti-change-detector guardrail (ADR-style note recording the testing-strategy decision + the schema location + the rules) is committed and referenced by the new tests.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "type": "doc",
+        "version": 1
+      },
+      "issuetype": {
+        "avatarId": 10315,
+        "description": "Stories track functionality or features expressed as user goals.",
+        "entityId": "a982ed43-d853-43df-8602-042066c8ebe3",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10315?size=medium",
+        "id": "18614",
+        "name": "Story",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/issuetype/18614",
+        "subtask": false
+      },
+      "labels": [
+        "jira-sync",
+        "rebar-id:8937-eed3-c881-4ea1",
+        "reconciler",
+        "testing"
+      ],
+      "priority": {
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
+        "id": "3",
+        "name": "Medium",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
+      },
+      "status": {
+        "description": "",
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
+        "id": "24029",
+        "name": "To Do",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24029",
+        "statusCategory": {
+          "colorName": "blue-gray",
+          "id": 2,
+          "key": "new",
+          "name": "To Do",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/2"
+        }
+      },
+      "summary": "Producer<->consumer snapshot contract: shared schema + round-trip test through production path"
+    },
+    "fieldsToInclude": null,
+    "id": "4578431",
+    "key": "REB-428",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/issue/4578431",
+    "transitions": null,
+    "versionedRepresentations": null
+  },
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "assignee": null,
+      "description": {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "## Why",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "The migration deliberately runs the bespoke plan-review gate and the new workflow gate in",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "parallel, validated by the B4 planned-trace parity harness, and B5 cuts the live gate over to",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "the workflow while keeping the bespoke path reachable behind a flag as a fallback. Once parity",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "is EXHAUSTIVELY validated and the workflow gate has run as the sole live gate without regression,",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "the scaffolding should come down \u2014 both the parity harness (a migration-validation tool) and the",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "bespoke `orchestrator.run_review` path (now dead weight). Convergence: only what earns its keep",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "remains. Without this story the epic leaves two parallel gate implementations + a harness in the",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "tree indefinitely.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## What",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "Retire the migration scaffolding once the workflow gate is proven:",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Remove the B4 **parity harness** (`tests/unit/workflow/test_plan_review_parity.py`,",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  `_parity_corpus.py`, and the `TracingFakeRunner` scaffolding in `trace.py` if unused elsewhere).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Retire the **bespoke plan-review path**: `orchestrator.run_review` + the bespoke-only fan-out",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  (the `ThreadPoolExecutor` Pass-1 driver) + the B5 fallback flag, so the engine workflow is the",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  SOLE plan-review gate. Keep the SHARED machinery the workflow still uses (`pass1.run_pass1`,",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  `det_floor`, `registry`, `passes`, `sizing`, `attest`, `ProductionBatchRunner`).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Preserve forwarding shims / public API for anything still referenced (`review_plan` library/CLI/",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  MCP entrypoints keep working, now backed only by the workflow path).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Scope",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- This is the FINAL convergence step; it must come AFTER B5 (cutover) and after parity is",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  exhaustively validated (the corpus is comprehensive AND a soak period with the workflow as the",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  sole live gate showed no regression \u2014 record the evidence on this ticket before deleting).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Delete dead bespoke code + the harness; update tests/docs; ensure the close/claim gates keep",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "  working through the workflow path with signatures intact.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Acceptance Criteria",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] Parity is recorded as exhaustively validated (comprehensive corpus + a documented soak with",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "      the workflow as the sole live gate, no regression) BEFORE any deletion.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] The B4 parity harness + its corpus + the unused tracing scaffolding are removed.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] The bespoke `orchestrator.run_review` path + its `ThreadPoolExecutor` fan-out + the B5",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "      fallback flag are removed; the engine workflow is the sole plan-review gate; `review_plan`",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "      library/CLI/MCP entrypoints still work (forwarding shims preserved).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] No orphaned references to the removed code; `make lint` + the full test suite pass.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "type": "doc",
+        "version": 1
+      },
+      "issuetype": {
+        "avatarId": 10315,
+        "description": "Stories track functionality or features expressed as user goals.",
+        "entityId": "a982ed43-d853-43df-8602-042066c8ebe3",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10315?size=medium",
+        "id": "18614",
+        "name": "Story",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/issuetype/18614",
+        "subtask": false
+      },
+      "labels": [
+        "rebar-id:961b-a3ff-63e4-465f"
+      ],
+      "priority": {
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
+        "id": "3",
+        "name": "Medium",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
+      },
+      "status": {
+        "description": "",
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
+        "id": "24029",
+        "name": "To Do",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24029",
+        "statusCategory": {
+          "colorName": "blue-gray",
+          "id": 2,
+          "key": "new",
+          "name": "To Do",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/2"
+        }
+      },
+      "summary": "B-RETIRE: retire the parity harness + the bespoke plan-review path once parity is exhaustively validated"
+    },
+    "fieldsToInclude": null,
+    "id": "4578432",
+    "key": "REB-429",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/issue/4578432",
+    "transitions": null,
+    "versionedRepresentations": null
+  },
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "assignee": null,
+      "description": {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "## Context",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "Three production Jira-sync bugs escaped our tests this cycle, all the same CLASS \u2014 a gap at a *seam* that no test or probe spanned:",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- **Inbound comments (bug 0ee6):** the inbound differ read snapshot key `comments`, but the fetcher writes the nested Jira-REST key `comment` \u2014 producer and consumer were unit-tested in isolation, so their shared shape was never jointly exercised.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- **Issue-links both directions (bug 3f04):** outbound link dispatch existed only in a *typed-leaf* applier that production does not use (production routes through the *batch* applier, which dropped links); inbound links were invisible because the snapshot never carried `issuelinks`.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- **A live e2e probe encoded the inbound-comment bug as EXPECTED** (`Phase3.verify-inbound-comments-gap \u2026 NOT-SYNCED`), so the defect could never be detected.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "Root causes: (1) no producer\u2194consumer contract \u2014 differs are unit-tested against hand-built snapshot dicts in shapes the real fetcher never emits; (2) two outbound applier paths drift (tests cover the dead typed leaf; production uses the batch path; capabilities were re-added one bug at a time \u2014 parent 8b25, comments 87e4, links 3f04); (3) sub-op success is silent (the batch outcome reports mutation-level `error=None`, never `links_applied`/`comments_applied`); (4) live probes are manual, not in CI, do not round-trip relationships, and can encode bugs as expected.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "Deep research (Pact consumer-driven contracts; vcrpy semantic matchers; Schemathesis + Dredd/Gavel structure-not-value validation; Google SWE-book \"verified fakes\" and its change-detector warning; and how real Jira clients test \u2014 `jira-python` uses a live Dockerized/Cloud sandbox, while `jira-cli` serves on-disk fixtures *captured from real Jira* THROUGH its production serialization via an in-process mock) converges on a layered strategy right-sized for a single team: **one producer\u2194consumer snapshot contract test, fed by hermetic-but-honest fixtures derived from real Jira payloads, exercised through the PRODUCTION code path** \u2014 explicitly avoiding change-detector bloat. Full live-sandbox e2e and cross-team Pact are out of scope (overkill for a single team).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Child stories",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "This epic decomposes into six stories (sized for one PR each):",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- **A \u2014 Hermetic-but-honest Jira fixtures + verified fake client** (`fe57-7712-1e3f-45f4`): the foundation \u2014 fixtures captured from real Jira, served through the production path.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- **B \u2014 Producer\u2194consumer snapshot contract: shared schema + round-trip test** (`8937-eed3-c881-4ea1`): the keystone; also owns the documented anti-change-detector guardrail artifact.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- **C \u2014 Verified fake: contract tests against BOTH real and fake client** (`59ef-ff3e-5aea-47b1`): keeps the fake honest.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- **D \u2014 Collapse the dual outbound applier paths to one** (`33d0-1e2c-e059-4181`).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- **E \u2014 Sub-op telemetry + silent-no-op canary** (`2359-ac1a-7c76-4f56`): depends on D.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- **F \u2014 Honest bidirectional round-trip probe; de-encode \"expected-bug\" guards** (`822a-2bad-fe48-43e0`).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Sequencing (MVP-first thin vertical slice)",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "The epic ships incrementally, not as a big-bang:",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "1. **A \u2192 B scoped FIRST to the known seam** \u2014 capture the inbound-comment (`comment`) and `issuelinks` shapes (bugs 0ee6/3f04) and land the single round-trip contract test on exactly those, before broadening the schema to all fields. This thin vertical slice de-risks the whole contract approach against the canonical failure.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "2. **C** once the fake exists (keep it honest).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "3. **D then E** \u2014 telemetry builds on the single consolidated applier.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "4. **F** reuses A's fixtures for the hermetic round-trip and de-encodes the probe guards.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "Each story is independently shippable behind its own PR.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Rollout & rollback",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- The **fail-loud sub-op invariant** (story E) lands **warn-first** (telemetry + `WARNING`) behind a flag/canary, and is promoted to hard-fail only after a baseline pass that emits zero such warnings; revert = drop back to warn (no other code change).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- The **applier collapse** (story D) verifies behavioral parity \u2014 the surviving path applies every sub-op the retired path did \u2014 **before** the retired path is deleted.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Success Criteria",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Producer (fetcher + enrichment) and consumers (differs/appliers) cannot drift on snapshot shape without a test failing.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Outbound sync is exercised through the production code path, not a parallel dead path.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- A silent sub-op no-op (e.g. links computed but never applied) fails a test/canary instead of passing green.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Bidirectional round-trips (comments, links, parent) for the real Jira shapes are asserted; no probe encodes a bug as expected.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- New tests assert behavior/contract (semantic round-trip, structure/type); the suite stays lean; zero change-detector tests added.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Acceptance Criteria",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] A single-source-of-truth snapshot-entry schema module exists as the canonical shape.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] A test validates the fetcher's snapshot output against that schema.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] A test validates each differ's snapshot reads against that schema.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] One round-trip contract test exercises fetcher \u2192 snapshot \u2192 differs \u2192 applier through the production path, using fixtures derived from real Jira payloads.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] Outbound application is collapsed to a single production path (no parallel applier remains).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] The retired outbound applier path is deleted.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] Outbound sub-op telemetry (`links_applied`/`comments_applied`/`labels_applied`) is surfaced in the structured batch outcome.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] A `computed > 0 && applied == 0` sub-op condition fails loudly, after the warn-first rollout in Rollout & rollback.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] Bidirectional comment/link/parent round-trip is asserted hermetically through the production path.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] Every probe assertion that encodes a current bug as expected is converted to fail-when-the-gap-closes.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] A documented anti-change-detector guardrail for reconciler tests is committed and referenced by new tests (owned by story B).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] All six child stories are closed; the full reconciler suite is green.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "type": "doc",
+        "version": 1
+      },
+      "issuetype": {
+        "avatarId": 10307,
+        "description": "Workstreams track a set of related work and activities that work towards a larger deliverable.",
+        "entityId": "87c9bbb2-6dde-4aa1-b3e9-93c1d8f993e4",
+        "hierarchyLevel": 1,
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10307?size=medium",
+        "id": "18611",
+        "name": "Epic",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/issuetype/18611",
+        "subtask": false
+      },
+      "labels": [
+        "jira-sync",
+        "rebar-id:f89d-e54d-203d-4ee0",
+        "reconciler",
+        "tech-debt",
+        "testing"
+      ],
+      "priority": {
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
+        "id": "3",
+        "name": "Medium",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
+      },
+      "status": {
+        "description": "",
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
+        "id": "24029",
+        "name": "To Do",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24029",
+        "statusCategory": {
+          "colorName": "blue-gray",
+          "id": 2,
+          "key": "new",
+          "name": "To Do",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/2"
+        }
+      },
+      "summary": "Close the Jira-sync producer<->consumer & tested-vs-shipped test-coverage gap class"
+    },
+    "fieldsToInclude": null,
+    "id": "4578433",
+    "key": "REB-430",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/issue/4578433",
+    "transitions": null,
+    "versionedRepresentations": null
+  },
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "assignee": null,
+      "description": {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "## Why",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "The escaped bugs all began with unit tests feeding the differs hand-built `jira_snapshot` dicts in shapes the real fetcher never produces (flat `comments` instead of nested `comment`; `issuelinks` the snapshot never carried). The converged fix (per `jira-cli`'s pattern) is **fixtures captured from real Jira payloads, served through the production serialization path** \u2014 never hand-massaged. This is the foundation every other story in the epic builds on.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## What",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Capture **scrubbed real Jira REST payloads** for the exact responses the fetcher consumes: the paged `POST /rest/api/3/search/jql`, plus the enrichment maps `get_comment_map` (`{\"comment\":{\"comments\":[\u2026]}}`), `get_issuelinks_map` (`{\"issuelinks\":[\u2026]}`), and `get_parent_map` (`{\"parent\":{\"key\":\u2026}}`). Store under `tests/fixtures/jira/`.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- A `FakeAcliClient` (in `tests/integration/rebar_reconciler/_fakes.py`) that returns those fixtures from the real method signatures (`search_issues`, `get_comment_map`, `get_issuelinks_map`, `get_parent_map`) so they flow through the production `fetcher.fetch_snapshot` enrichment \u2014 the fake adds NO shape massaging.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Secret-scrubbing on capture (strip API tokens, emails, accountIds) via layered redaction (vcrpy-style), so committed fixtures carry no secrets.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- A `scripts/capture_jira_fixtures.py` (live-gated) + documented re-capture procedure so fixtures stay honest and do not rot into change-detectors.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Scope",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- In: captured fixtures + the fake client + capture/scrub script + re-capture doc.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- Out: the contract test that consumes them (separate story), the verified-fake honesty check (separate story).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "## Acceptance Criteria",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] `tests/fixtures/jira/*.json` hold scrubbed real Jira payloads for search + comment + issuelinks + parent (verified: no tokens/emails/accountIds present).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] `FakeAcliClient` serves the fixtures through the production fetcher enrichment path with no shape transformation.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] `scripts/capture_jira_fixtures.py` captures + scrubs from a live Jira (gated) and the re-capture cadence is documented.",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "text": "- [ ] Fixtures are consumed only via the production code path (no test reads them and hand-reshapes).",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "type": "doc",
+        "version": 1
+      },
+      "issuetype": {
+        "avatarId": 10315,
+        "description": "Stories track functionality or features expressed as user goals.",
+        "entityId": "a982ed43-d853-43df-8602-042066c8ebe3",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10315?size=medium",
+        "id": "18614",
+        "name": "Story",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/issuetype/18614",
+        "subtask": false
+      },
+      "labels": [
+        "jira-sync",
+        "rebar-id:fe57-7712-1e3f-45f4",
+        "reconciler",
+        "testing"
+      ],
+      "priority": {
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
+        "id": "3",
+        "name": "Medium",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
+      },
+      "status": {
+        "description": "",
+        "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
+        "id": "24029",
+        "name": "To Do",
+        "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24029",
+        "statusCategory": {
+          "colorName": "blue-gray",
+          "id": 2,
+          "key": "new",
+          "name": "To Do",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/2"
+        }
+      },
+      "summary": "Hermetic-but-honest Jira fixtures + verified fake client (served through the production path)"
+    },
+    "fieldsToInclude": null,
+    "id": "4578434",
+    "key": "REB-431",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/issue/4578434",
+    "transitions": null,
+    "versionedRepresentations": null
+  }
+]
