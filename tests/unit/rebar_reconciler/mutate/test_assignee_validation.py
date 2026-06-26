@@ -119,6 +119,45 @@ def test_validate_assignee_rejects_fuzzy_only_match(acli):
         client.validate_assignee_exists("loop-agent", issue_key="REB-136")
 
 
+# Three "Joe"s are assignable; only one is "Joe Oakhart".
+_THREE_JOES = [
+    {
+        "accountId": "joe-oakhart-acct",
+        "emailAddress": "joeoakhart@navapbc.com",
+        "displayName": "Joe Oakhart",
+    },
+    {
+        "accountId": "joe-stepp-acct",
+        "emailAddress": "joe.stepp@example.com",
+        "displayName": "Joe Stepp",
+    },
+    {
+        "accountId": "joe-robinson-acct",
+        "emailAddress": "joe.robinson@example.com",
+        "displayName": "Joe Robinson",
+    },
+]
+
+
+def test_validate_assignee_resolves_normalized_variant(acli):
+    """A local assignee that is a normalized variant of EXACTLY ONE user's identity
+    (e.g. ``joe-oakhart`` for ``Joe Oakhart`` — case/separator-insensitive) resolves
+    to that user, instead of being dropped as unresolvable (which would unassign the
+    ticket). Bug 9b94 follow-up: this is what makes ``joe-oakhart`` sync to Joe and
+    converge, rather than the exact-only match unassigning it."""
+    client = _make_client(acli, _THREE_JOES)
+    assert client.validate_assignee_exists("joe-oakhart", issue_key="REB-9") == "joe-oakhart-acct"
+
+
+def test_validate_assignee_ambiguous_partial_stays_unresolvable(acli):
+    """A partial/ambiguous local assignee (``joe``) that does NOT uniquely normalize
+    to a single user's full identity must stay unresolvable — never guess among the
+    three Joes."""
+    client = _make_client(acli, _THREE_JOES)
+    with pytest.raises(acli.AssigneeNotFoundError):
+        client.validate_assignee_exists("joe", issue_key="REB-9")
+
+
 def test_validate_assignee_accepts_project_scope(acli):
     """CREATE path has no issue_key — must accept project_key instead."""
     client = _make_client(
