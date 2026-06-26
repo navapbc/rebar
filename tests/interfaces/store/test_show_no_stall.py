@@ -12,8 +12,11 @@ briefly for the lock and otherwise proceeds with local state.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import shutil
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -27,6 +30,17 @@ from rebar._store import lock as _lock
 
 def _git(*args: str, cwd: Path) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+
+
+def _rebar_cli(*args: str, repo: Path, push: str) -> subprocess.CompletedProcess:
+    """Invoke the real `rebar` CLI in a subprocess (the consumer-facing path), with
+    REBAR_SYNC_PUSH set so background pushes contend exactly as the bug describes."""
+    env = dict(os.environ)
+    env["REBAR_ROOT"] = str(repo)
+    env["REBAR_SYNC_PUSH"] = push
+    rebar_bin = shutil.which("rebar")
+    cmd = [rebar_bin, *args] if rebar_bin else [sys.executable, "-m", "rebar", *args]
+    return subprocess.run(cmd, cwd=str(repo), env=env, capture_output=True, text=True, timeout=60)
 
 
 @pytest.fixture
@@ -93,3 +107,36 @@ def test_ensure_fresh_does_not_stall_on_held_write_lock(repo_with_origin_tickets
     # And the record reads back complete (a read is always consistent locally).
     state = reads.show_state(tid, str(tracker))
     assert state["title"] == "no-stall target"
+
+
+def test_cli_show_complete_or_erroring_under_write_burst(repo_with_origin_tickets, monkeypatch):
+    """AC regression (slim-fetch-ledge): the burst-of-writes-then-`show` pattern via
+    the real CLI under REBAR_SYNC_PUSH=always (background pushes contend) — every
+    `rebar show` must be COMPLETE-or-ERRORING: never empty stdout with a zero exit.
+    Exercises the consumer-facing path the bug broke (pipe `show` into a parser)."""
+    repo, tracker, tid = repo_with_origin_tickets
+    monkeypatch.delenv("REBAR_SYNC_PUSH", raising=False)  # let the CLI helper set =always
+
+    # A few more tickets so the burst is real.
+    ids = [tid] + [
+        rebar.create_ticket("task", f"burst target {i}", repo_root=str(repo)) for i in range(3)
+    ]
+
+    for round_no in range(6):
+        # Burst of writes (each spawns a background push to origin under =always).
+        for i, t in enumerate(ids):
+            _rebar_cli(
+                "edit", t, "--description", f"round {round_no} edit {i}", repo=repo, push="always"
+            )
+        # Immediately read each back through the CLI — the contention window.
+        for t in ids:
+            cp = _rebar_cli("show", t, repo=repo, push="always")
+            empty_and_ok = cp.stdout.strip() == "" and cp.returncode == 0
+            assert not empty_and_ok, (
+                f"`rebar show {t}` returned EMPTY stdout with exit 0 "
+                f"(round {round_no}); stderr={cp.stderr!r}"
+            )
+            if cp.returncode == 0:
+                # A success exit must carry the complete record (parseable JSON).
+                doc = json.loads(cp.stdout)
+                assert doc.get("ticket_id"), f"incomplete show payload: {cp.stdout[:200]!r}"
