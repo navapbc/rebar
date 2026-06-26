@@ -267,13 +267,20 @@ class VerifyConfig:
 
     # Which engine PRODUCES the gate verdicts — the plan-review verdict (the
     # `rebar review-plan` attestation) and the completion verdict (the close gate).
-    # "workflow" (default) routes verdict production through the v3 engine workflows
-    # (gates/plan-review.yaml + gates/completion-verification.yaml); "bespoke" uses the
-    # original orchestrator.run_review / completion.verify_completion path. The SIGNING
-    # wrappers are identical on both paths, so the signed attestations stay byte-compatible
-    # (epic B / story B5 cutover). The "bespoke" value is a fallback kept reachable until
-    # story B-RETIRE (chip-rib-gong) removes the bespoke path and this flag entirely.
-    gate_engine: str = "workflow"
+    # "workflow" routes verdict production through the v3 engine workflows
+    # (gates/plan-review.yaml + gates/completion-verification.yaml); "bespoke" (DEFAULT)
+    # uses the original orchestrator.run_review / completion.verify_completion path. The
+    # SIGNING wrappers are identical on both paths, so the signed attestations stay
+    # byte-compatible (epic B / story B5 cutover).
+    #
+    # DEFAULT IS "bespoke" until the workflow PLAN-REVIEW verify/coach steps supply the
+    # prompts' `{{plan}}` + findings/surviving on the LIVE path (today the generic
+    # RunnerAgentStep supplies only ticket_id/ticket_context/repo_path, so the workflow
+    # plan-review verify degrades to INDETERMINATE live — a B2 offline blind spot the B5
+    # cutover surfaced). The completion workflow gate IS live-correct; flipping the default
+    # to "workflow" is gated on the plan-review plumbing fix (follow-up). Opt in per repo
+    # with verify.gate_engine = "workflow" once that lands.
+    gate_engine: str = "bespoke"
 
 
 @dataclass

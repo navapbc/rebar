@@ -24,8 +24,10 @@ pytestmark = pytest.mark.unit
 
 
 # ── config flag ───────────────────────────────────────────────────────────────────
-def test_gate_engine_defaults_to_workflow() -> None:
-    assert Config.from_mapping(None).verify.gate_engine == "workflow"
+def test_gate_engine_defaults_to_bespoke() -> None:
+    # DEFAULT is bespoke until the workflow plan-review verify/coach live-plumbing lands
+    # (the workflow completion gate is live-correct; plan-review verify needs {{plan}}).
+    assert Config.from_mapping(None).verify.gate_engine == "bespoke"
 
 
 def test_gate_engine_accepts_bespoke_and_workflow() -> None:

@@ -82,13 +82,16 @@ def review_plan(
     session_logs are exempt (PASS, runner=exempt). Raises only on a hard
     context-assembly failure; an unavailable LLM degrades to a DET-only review.
 
-    Under ``verify.gate_engine="workflow"`` (the default) the verdict is PRODUCED by the
-    engine workflow and SIGNED by this unchanged wrapper, so the signed attestation is
-    byte-compatible with the bespoke path for the production ``config=None`` case. NOTE: a
-    library caller passing an explicit non-default ``config`` is honored for the LLM CALLS,
-    but the workflow verdict's ``model``/``runner`` FIELDS still reflect the environment
-    config (the coach op resolves them from ``from_env``); for byte-identical cross-engine
-    manifests with a custom model, pin ``gate_engine="bespoke"``.
+    Verdict production is engine-selectable via ``verify.gate_engine`` (DEFAULT
+    ``"bespoke"``). Under ``"workflow"`` (opt-in) the verdict is PRODUCED by the engine
+    workflow and SIGNED by this unchanged wrapper, so the signed attestation is
+    byte-compatible with the bespoke path for the production ``config=None`` case. (The
+    workflow plan-review verify/coach steps still need their live ``{{plan}}``/findings
+    plumbing completed before ``"workflow"`` becomes the default — the completion gate is
+    already live-correct.) NOTE: a library caller passing an explicit non-default
+    ``config`` is honored for the LLM CALLS, but the workflow verdict's ``model``/``runner``
+    FIELDS still reflect the environment config; for byte-identical cross-engine manifests
+    with a custom model, pin ``gate_engine="bespoke"``.
     """
     cfg = config or LLMConfig.from_env(repo_root=repo_root)
     ctx = orchestrator.assemble_context(ticket_id, repo_root=repo_root, cfg=cfg)
