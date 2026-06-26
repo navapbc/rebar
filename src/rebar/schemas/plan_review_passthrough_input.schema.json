@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_passthrough_input.schema.json",
+  "title": "PlanReviewPassthroughInput",
+  "description": "INPUT of `plan_review_passthrough`: the deterministic short-circuit plan_review_verdict from the precheck, emitted verbatim on the branch ELSE arm.",
+  "type": "object",
+  "properties": {
+    "verdict": { "type": "object", "additionalProperties": true, "description": "The precheck's terminal plan_review_verdict." }
+  },
+  "required": ["verdict"],
+  "additionalProperties": false
+}

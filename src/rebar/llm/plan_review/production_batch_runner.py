@@ -48,6 +48,7 @@ from rebar.llm.workflow.runners import (
 from . import registry
 from .orchestrator import assemble_context
 from .pass1 import run_pass1
+from .registry import _PROMPT_ID_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +157,12 @@ def _resolve_criteria(
     seen: set[str] = set()
     for entry in criteria:
         cid = entry.get("prompt")
+        # A batch criterion's `prompt` is the prompt-library id (`plan-review-E1`) — the
+        # lint-resolvable form the v3 workflow authors and the form the reference
+        # DefaultBatchRunner uses — OR the bare registry id (`E1`). Normalize to the bare
+        # registry id (the `registry.by_id()` key) by stripping the `plan-review-` prefix.
+        if isinstance(cid, str) and cid.startswith(_PROMPT_ID_PREFIX):
+            cid = cid[len(_PROMPT_ID_PREFIX) :]
         if not isinstance(cid, str) or not cid or cid in seen:
             # missing/empty/non-str id, or a duplicate — skip (duplicates would
             # double-evaluate; a missing id is a malformed criterion).

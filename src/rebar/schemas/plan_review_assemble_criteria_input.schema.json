@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_assemble_criteria_input.schema.json",
+  "title": "PlanReviewAssembleCriteriaInput",
+  "description": "INPUT of `plan_review_assemble_criteria`: the ticket to route criteria for.",
+  "type": "object",
+  "properties": {
+    "ticket_id": { "type": "string", "description": "The ticket id/alias (falls back to the workflow target)." }
+  },
+  "required": ["ticket_id"],
+  "additionalProperties": false
+}

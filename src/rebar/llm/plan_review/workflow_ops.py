@@ -1,0 +1,283 @@
+"""Scripted ``uses`` ops that express the plan-review gate AS a v3 engine workflow (epic B,
+story B2).
+
+These are THIN adapters over the already-correct, already-tested bespoke pipeline in
+:mod:`rebar.llm.plan_review` — each op delegates to the shared units
+(:mod:`.det_floor`, :mod:`.registry`, :func:`.orchestrator.route_criteria` /
+``partition_findings`` / ``pass3_over_findings`` / ``finalize_verdict``,
+:func:`.passes.render_coach_notes`) rather than re-implementing the gate. So the
+workflow path is structurally equivalent to ``orchestrator.run_review`` (exact
+behavioural PARITY is a separate story, B4). The workflow shape (mirrors the B3
+completion gate):
+
+    plan_review_precheck (uses)            # DET floor P1-P9
+      └─ branch on `run_llm`:
+           then: plan_review_assemble_criteria (uses)   # route_criteria → inclusion booleans
+                 → batch <plan-review-finder>           # Pass-1 (ProductionBatchRunner)
+                 → verify  <prompt: plan-review-verifier># Pass-2 (one aggregate call)
+                 → plan_review_decide (uses)            # too_big/shed routing + Pass-3
+                 → coach   <prompt: plan-review-coach>   # Pass-4 LLM move picks
+                 → plan_review_coach (uses)             # render + assemble the verdict
+           else: plan_review_passthrough (uses)         # the deterministic short-circuit verdict
+
+Like B3 the short-circuit is a `branch` (an `if:`-skipped step's outputs cannot be
+referenced): a DET block / an exempt type / a too-big plan reaches the ELSE arm and the
+(billable) LLM steps NEVER run. Signing is NOT done here (deferred to B5).
+
+The op bodies lazy-import the plan-review units so importing this module only runs the
+registration decorators (import-light, no heavy LLM deps, no import cycle).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from rebar.llm.workflow.executor import StepContext, register_step
+
+_OUTPUT_SCHEMA = "plan_review_verdict"
+
+
+def _ticket_id(ctx: StepContext) -> str:
+    tid = ctx.inputs.get("ticket_id") or ctx.target_ticket
+    if not tid:
+        raise ValueError(
+            f"step {ctx.step_id!r} needs a ticket: pass `with: {{ticket_id: ...}}` or run "
+            f"the workflow against a target ticket"
+        )
+    return str(tid)
+
+
+@register_step(
+    "plan_review_precheck",
+    input_schema="plan_review_precheck_input",
+    output_schema="plan_review_precheck_output",
+    description=(
+        "The deterministic Layer-1 floor (P1-P9) of the plan-review gate. Emits `run_llm` "
+        "(true → the four-pass LLM review should run) and, when it should NOT (an exempt "
+        "ticket type, or a P1/P5/P8 DET block), the terminal short-circuit plan_review_verdict "
+        "so the billable LLM passes never run. Wraps rebar.llm.plan_review without duplicating it."
+    ),
+)
+def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
+    """Run the DET floor; short-circuit to a deterministic verdict on exempt/blocking."""
+    from . import det_floor, orchestrator
+
+    tid = _ticket_id(ctx)
+    pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
+    base = {
+        "canonical_id": pctx.ticket_id,
+        "ticket_type": pctx.ticket_type,
+        "det_blocking": [],
+        "det_advisory": [],
+        "det_coverage": {},
+    }
+
+    # Exempt types short-circuit to a PASS (no review runs) — mirrors run_review.
+    if pctx.ticket_type in ("bug", "session_log"):
+        reason = (
+            "bug tickets are exempt from the plan-review gate"
+            if pctx.ticket_type == "bug"
+            else "session_log tickets are gate-exempt"
+        )
+        return {
+            **base,
+            "run_llm": False,
+            "verdict": orchestrator._exempt_verdict(pctx, reason=reason),
+        }
+
+    det_results = det_floor.run_det_floor(pctx)
+    det_blocks = det_floor.det_blocking_findings(det_results)
+    det_advisories = det_floor.det_advisory_findings(det_results)
+    det_cov = det_floor.det_coverage(det_results)
+    base = {
+        **base,
+        "det_blocking": det_blocks,
+        "det_advisory": det_advisories,
+        "det_coverage": det_cov,
+    }
+
+    # A P1/P5/P8 DET block short-circuits to a BLOCK verdict WITHOUT the LLM (mirrors B3's
+    # precheck short-circuit; the bespoke run_review still merges an LLM pass — that nuance
+    # is the B4 parity concern, not B2's "runs end-to-end + right shape").
+    if det_blocks:
+        parts = orchestrator.partition_findings(
+            det_blocks, det_advisories, [], advisory_cap=orchestrator.DEFAULT_ADVISORY_CAP
+        )
+        verdict = orchestrator.finalize_verdict(
+            pctx,
+            parts,
+            coaching=[],
+            coverage={"det": det_cov, "llm_ran": False},
+            runner_name="deterministic",
+            model=None,
+        )
+        return {**base, "run_llm": False, "verdict": verdict}
+    return {**base, "run_llm": True, "verdict": None}
+
+
+@register_step(
+    "plan_review_assemble_criteria",
+    input_schema="plan_review_assemble_criteria_input",
+    output_schema="plan_review_assemble_criteria_output",
+    description=(
+        "Route the LLM criteria for the ticket (proportionate scrutiny + overlay triggering) "
+        "via route_criteria, and emit a per-criterion `include_<ID>` boolean the batch step's "
+        "`when` reads (the INCLUDED set drives the Pass-1 finder batch). Plus the routing record "
+        "(single-turn vs agent-tier) for coverage. The single source of routing truth is "
+        "route_criteria — this op never re-implements applies()/overlay filtering."
+    ),
+)
+def plan_review_assemble_criteria(ctx: StepContext) -> dict[str, Any]:
+    """route_criteria(ctx) → {include_<ID>: bool, ..., routing}. The included criteria are
+    gated INTO the batch by their `when: ${{ steps.assemble.outputs.include_<ID> }}`."""
+    from . import orchestrator, registry
+
+    tid = _ticket_id(ctx)
+    pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
+    single, agent = orchestrator.route_criteria(pctx)
+    included = {c["id"] for c in single + agent}
+    # ISF is fed the linked session log by the finder itself (never a rubric chunk), so it is
+    # never a batch criterion — excluded from the inclusion vocabulary here.
+    canonical = sorted(set(registry.CANONICAL_LLM) - {"ISF"})
+    out: dict[str, Any] = {f"include_{cid}": (cid in included) for cid in canonical}
+    out["routing"] = {
+        "single_turn": [c["id"] for c in single],
+        "agent_tier": [c["id"] for c in agent],
+    }
+    return out
+
+
+@register_step(
+    "plan_review_decide",
+    input_schema="plan_review_decide_input",
+    output_schema="plan_review_decide_output",
+    description=(
+        "Pass-3 of the gate: route the size-ladder's too_big findings (DET-style BLOCKS) and "
+        "budget-shed findings (INDETERMINATE), run the deterministic pass3_decide over the rest "
+        "(Pass-1 findings + the Pass-2 verifier's verifications), then merge the DET-floor "
+        "findings and apply the advisory cap. Emits the verdict partition the coach assembles. "
+        "Reuses orchestrator.pass3_over_findings + partition_findings (no duplicated decision)."
+    ),
+)
+def plan_review_decide(ctx: StepContext) -> dict[str, Any]:
+    """too_big/shed routing + Pass-3 over (batch findings, verifier verifications) →
+    merge DET findings → cap → the verdict partition (blocking/surfaced/overflow/...)."""
+    from . import orchestrator
+
+    findings = list(ctx.inputs.get("findings") or [])
+    raw_verifs = list(ctx.inputs.get("verifications") or [])
+    det_blocks = list(ctx.inputs.get("det_blocking") or [])
+    det_advisories = list(ctx.inputs.get("det_advisory") or [])
+
+    # The Pass-2 verifier (the workflow's `verify` prompt step) emits a flat list of
+    # `{index, severity_attributes, binary}`; reshape it to the `{index: {...}}` map Pass-3
+    # consumes (the same shape passes.pass2_verify returns in the bespoke path).
+    verifs: dict[int, dict[str, Any]] = {}
+    for v in raw_verifs:
+        idx = v.get("index") if isinstance(v, dict) else None
+        if isinstance(idx, int):
+            verifs[idx] = {
+                "severity_attributes": v.get("severity_attributes", {}) or {},
+                "binary": v.get("binary", {}) or {},
+            }
+
+    # The size-ladder's "too big at the largest model" findings are DET-style BLOCKS;
+    # budget-shed findings are pre-decided INDETERMINATE. Both bypass Pass-2/3. The rest are
+    # decided by pass3_over_findings with verifications re-keyed to the rest's 0-based index
+    # (the verifier ran over the full batch list; we pick the matching verifications).
+    too_big = [
+        {
+            **f,
+            "decision": "block",
+            "severity": "critical",
+            "priority": 1.0,
+            "validity": 1.0,
+            "impact": 1.0,
+        }
+        for f in findings
+        if f.get("_too_big")
+    ]
+    shed = [f for f in findings if f.get("_shed")]
+    rest: list[dict[str, Any]] = []
+    rest_verifs: dict[int, dict[str, Any]] = {}
+    for i, f in enumerate(findings):
+        if f.get("_too_big") or f.get("_shed"):
+            continue
+        rest_verifs[len(rest)] = verifs.get(i)
+        rest.append(f)
+    decided = [*too_big, *shed, *orchestrator.pass3_over_findings(rest, rest_verifs)]
+
+    parts = orchestrator.partition_findings(
+        det_blocks, det_advisories, decided, advisory_cap=orchestrator.DEFAULT_ADVISORY_CAP
+    )
+    return dict(parts)
+
+
+@register_step(
+    "plan_review_coach",
+    input_schema="plan_review_coach_input",
+    output_schema=_OUTPUT_SCHEMA,
+    description=(
+        "Pass-4 + verdict assembly: render the coach prompt's raw move picks into deterministic "
+        "affirmative coaching (locked move templates; the LLM never authors prose), then assemble "
+        "the terminal plan_review_verdict (verdict + findings + coaching + coverage) via shared "
+        "finalize_verdict. NO signing (B5). Reuses passes.render_coach_notes + finalize_verdict."
+    ),
+)
+def plan_review_coach(ctx: StepContext) -> dict[str, Any]:
+    """Render coaching from the coach step's raw notes + assemble the plan_review_verdict."""
+    from rebar.llm import findings as _findings
+    from rebar.llm.config import LLMConfig
+
+    from . import orchestrator, passes
+    from .det_floor import PlanContext
+
+    cfg = LLMConfig.from_env(repo_root=ctx.repo_root)
+    parts = {
+        "blocking": list(ctx.inputs.get("blocking") or []),
+        "surfaced": list(ctx.inputs.get("surfaced") or []),
+        "overflow": list(ctx.inputs.get("overflow") or []),
+        "indeterminate": list(ctx.inputs.get("indeterminate") or []),
+        "dropped": list(ctx.inputs.get("dropped") or []),
+    }
+    moves = passes.load_move_registry(ctx.repo_root)
+    coaching = passes.render_coach_notes(list(ctx.inputs.get("notes") or []), moves)
+
+    # finalize_verdict needs only ctx.ticket_id + ctx.ticket_type — a minimal context (no
+    # rebar read) suffices here (the precheck already canonicalized the id/type).
+    pctx = PlanContext(
+        ticket_id=str(ctx.inputs.get("canonical_id") or _ticket_id(ctx)),
+        ticket_type=str(ctx.inputs.get("ticket_type") or ""),
+        title="",
+        description="",
+    )
+    coverage = {
+        "det": ctx.inputs.get("det_coverage") or {},
+        "routing": ctx.inputs.get("routing") or {},
+        "llm_ran": True,
+    }
+    verdict = orchestrator.finalize_verdict(
+        pctx, parts, coaching=coaching, coverage=coverage, runner_name=cfg.runner, model=cfg.model
+    )
+    return _findings.validate_structured(verdict, _OUTPUT_SCHEMA)
+
+
+@register_step(
+    "plan_review_passthrough",
+    input_schema="plan_review_passthrough_input",
+    output_schema=_OUTPUT_SCHEMA,
+    description=(
+        "Emit the precheck's deterministic short-circuit plan_review_verdict verbatim — the "
+        "branch ELSE arm taken when the LLM review is skipped (an exempt type, or a P1/P5/P8 DET "
+        "block). Keeps the workflow's terminal output a plan_review_verdict on both arms."
+    ),
+)
+def plan_review_passthrough(ctx: StepContext) -> dict[str, Any]:
+    """Pass the precheck's deterministic verdict through as the terminal output."""
+    verdict = ctx.inputs.get("verdict")
+    if not isinstance(verdict, dict):
+        raise ValueError(
+            f"step {ctx.step_id!r} expects a `verdict` object from the precheck; "
+            f"got {type(verdict)}"
+        )
+    return dict(verdict)

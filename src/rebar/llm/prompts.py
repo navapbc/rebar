@@ -585,8 +585,13 @@ def check_prompt_parity(
 
 def prompt_ref_exists(prompt_id: str, *, repo_root=None) -> bool:
     """True if a workflow ``prompt:`` ref resolves to a real prompt (WS-F2): a known
-    catalog reviewer, or a user ``.rebar/prompts/<id>.md`` file. Stdlib-only."""
+    catalog reviewer, a PACKAGED prompt-library file (e.g. the ``plan-review-*`` pass +
+    criterion prompts, which are not reviewer-catalog entries but ARE first-class
+    workflow prompts — the criteria-library↔prompt-library wiring, story B2), or a user
+    ``.rebar/prompts/<id>.md`` file. Stdlib-only."""
     if prompt_id in load_catalog():
+        return True
+    if prompt_id in _packaged_prompt_files():
         return True
     if repo_root:
         f = Path(repo_root) / ".rebar" / "prompts" / f"{prompt_id}.md"

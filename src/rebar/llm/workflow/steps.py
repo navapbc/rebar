@@ -324,4 +324,11 @@ def set_fields(ctx: StepContext) -> dict[str, Any]:
 # wherever the scripted-step registry is populated (every site does `from . import steps`), so
 # the completion-verification workflow's ops resolve without a separate import dance. The op
 # bodies lazy-import rebar.llm.completion, so this stays import-light (no heavy LLM deps).
+# Likewise register the plan-review gate `uses` ops (story B2). They live under
+# rebar.llm.plan_review (beside the bespoke pipeline they adapt) but register into the same
+# scripted-step registry, so the plan-review workflow resolves them wherever
+# `from . import steps` runs. The op bodies lazy-import the plan-review units, so this import
+# stays light and cycle-free (plan_review does not import the workflow package).
+from rebar.llm.plan_review import workflow_ops  # noqa: E402,F401
+
 from . import gate_ops  # noqa: E402,F401

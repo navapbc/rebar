@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_precheck_input.schema.json",
+  "title": "PlanReviewPrecheckInput",
+  "description": "INPUT contract of the `plan_review_precheck` step: the ticket whose plan is reviewed.",
+  "type": "object",
+  "properties": {
+    "ticket_id": { "type": "string", "description": "The ticket id/alias to review (falls back to the workflow target)." }
+  },
+  "required": ["ticket_id"],
+  "additionalProperties": false
+}

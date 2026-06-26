@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_decide_input.schema.json",
+  "title": "PlanReviewDecideInput",
+  "description": "INPUT of `plan_review_decide`: the Pass-1 finder findings (from the batch step), the Pass-2 verifier verifications, and the DET-floor findings to merge.",
+  "type": "object",
+  "properties": {
+    "findings": { "type": "array", "description": "Pass-1 finder findings (the batch step's `findings` output)." },
+    "verifications": { "type": "array", "description": "Pass-2 verifier verifications: [{index, severity_attributes, binary}]." },
+    "det_blocking": { "type": "array", "description": "DET-floor blocking findings to merge (from the precheck)." },
+    "det_advisory": { "type": "array", "description": "DET-floor advisory findings to merge (from the precheck)." }
+  },
+  "required": ["findings"],
+  "additionalProperties": true
+}
