@@ -61,6 +61,30 @@ lock** and reject on mismatch with **exit 10**, surfaced uniformly as
 (`ticket-transition.sh:397` `sys.exit(10)` / `:558` `exit 10`;
 `src/rebar/__init__.py:110` maps `returncode == 10` → `ConcurrencyError`).
 
+### I4a — Parent-first claim/transition cascade (`open → in_progress`)
+Grabbing a child grabs its **open** parent first. `claim`, and the
+`open → in_progress` `transition`, run the same operation on the ticket's parent
+**before** the child whenever that parent is itself `open` — recursively up the
+chain (top-most open ancestor first), so a descendant is never moved into progress
+while an ancestor is left merely `open`. A `claim` cascade carries the same assignee
+up the chain. A parent that is already `in_progress`/`closed`/`blocked` (or absent)
+is **not** cascaded — only the requested ticket moves.
+
+The cascade is **sequential and fail-fast, not transactional:** the parent op runs
+to completion (its own commit + push) first; **if it fails the child op is not
+attempted**, and the failure is re-raised with a message naming the parent as the
+cause (`cannot claim <child>: claiming its parent <parent> failed first …`) while
+**preserving the parent failure's exit code** — so a parent concurrency conflict is
+still **exit 10 / `ConcurrencyError`** at the leaf call. (There is intentionally no
+rollback if the parent succeeds and the child then fails: an ancestor sitting in
+`in_progress` is the conservative, harmless direction.) Recursion is cycle-guarded
+(an id already on the cascade stack, including a self-parent, is skipped). Only the
+`open → in_progress` direction cascades — `close`/`reopen`/`blocked` never do
+(closing has its own separate open-children guard). Implemented in
+`src/rebar/_commands/claim.py` (`claim_compute`) and
+`src/rebar/_commands/transition.py` (`transition_compute`), via the shared
+`_resolve_open_parent` helper.
+
 ### I5 — Single locked write path
 All writes go through the flock-guarded append+commit path: atomic
 tmp-then-rename + `git add <event>` + `git commit`, all under
