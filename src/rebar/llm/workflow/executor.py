@@ -494,6 +494,27 @@ def _guard_passes(step: Mapping[str, Any], state: RunState, secrets: Mapping[str
 # avoid an import cycle (interpreter imports the step interfaces from here).
 
 
+def _resolve_terminal_output(rc, steps: list, terminal_sid: str | None, prefix: str = "") -> Any:
+    """Resolve the executed terminal LEAF's output, descending through any terminal
+    ``branch`` into its taken arm (recursively). For a non-branch terminal this returns
+    that step's own output (the historical behaviour). ``rc.outputs`` is keyed by full
+    frame-key, so a nested arm's leaf is found at ``<branch-fk>@<arm>/<leaf-id>``."""
+    if not terminal_sid:
+        return None
+    step = next((s for s in steps if isinstance(s, dict) and s.get("id") == terminal_sid), None)
+    fk = f"{prefix}{terminal_sid}"
+    if step and "branch" in step:
+        taken = (rc.outputs.get(fk) or {}).get("taken")
+        arm = (step.get("branch") or {}).get(taken) if taken else None
+        if isinstance(arm, list) and arm:
+            # Arms are authored linearly, so the last step is the arm's terminal.
+            arm_terminal = next(
+                (s.get("id") for s in reversed(arm) if isinstance(s, dict) and s.get("id")), None
+            )
+            return _resolve_terminal_output(rc, arm, arm_terminal, f"{fk}@{taken}/")
+    return rc.outputs.get(fk)
+
+
 def run_workflow(
     doc: Mapping[str, Any],
     inputs: Mapping[str, Any] | None = None,
@@ -571,7 +592,14 @@ def run_workflow(
 
     run_status = "failed" if rc.failed else "succeeded"
     run_error = rc.error
-    terminal_output = rc.outputs.get(terminal) if terminal else None
+    # The terminal step may be a `branch` (the gate workflows end in one), whose own
+    # output is just the routing marker ``{taken: arm}`` — NOT the verdict the executed
+    # arm produced. Descend through the taken arm(s) to the real terminal LEAF so
+    # ``terminal_output`` carries the verdict regardless of branching (epic B / story B5;
+    # backward-compatible — a plain terminal still returns its own output).
+    terminal_output = (
+        _resolve_terminal_output(rc, list(doc.get("steps", [])), terminal) if terminal else None
+    )
     rec.run_finished(
         {
             "run_id": run_id,

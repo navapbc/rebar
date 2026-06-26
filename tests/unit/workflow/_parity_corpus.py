@@ -7,13 +7,14 @@ store, no LLM, no network.
 
 Each :class:`Scenario` declares its ``kind``:
 
-* ``parity`` — the precheck passes, BOTH paths run the four-pass LLM review, and their
-  PRE-ESCALATION planned traces must be EQUAL (the safety net).
-* ``block_divergent`` — a P1/P5 DET block. The WORKFLOW short-circuits with NO LLM call,
-  whereas the bespoke ``run_review`` still runs the LLM pass before merging the DET block
-  (the documented B2 divergence). The harness asserts EXACTLY that divergence.
+* ``parity`` — BOTH paths run the four-pass LLM review and their PRE-ESCALATION planned
+  traces must be EQUAL (the safety net). This INCLUDES P1/P5 DET-block scenarios: story B5
+  reconciled the precheck so the workflow, like bespoke ``run_review``, only short-circuits
+  the LLM on a P8-too-big plan — a P1/P5 block runs the full review and merges the DET block
+  at decide-time. So those scenarios are full-parity (the verdict is BLOCK, but the planned
+  trace matches), no longer the documented-divergence case the B4 harness carried.
 * ``block_shared`` — a P8 too-big block or a bug-exempt type. BOTH paths skip the LLM, so
-  their traces match (empty finder trace) — the block case that does NOT diverge.
+  their traces match (empty finder trace) — the block case where neither path runs the LLM.
 """
 
 from __future__ import annotations
@@ -44,7 +45,7 @@ _EPIC_BODY = (
 @dataclass
 class Scenario:
     name: str
-    kind: str  # "parity" | "block_divergent" | "block_shared"
+    kind: str  # "parity" | "block_shared"
     ticket_id: str
     state: dict[str, Any]
     children: list[dict[str, Any]] = field(default_factory=list)
@@ -56,10 +57,11 @@ class Scenario:
     # cfg-sensitive `sizing.shed_to_budget` branch is exercised (it is otherwise never
     # tripped by the corpus, and the two paths construct `cfg` differently).
     env: dict[str, str] = field(default_factory=dict)
-    # The EXPECTED Pass-2 verify call-mode for the BESPOKE path: True iff verify should be
-    # agentic (any code-grounded finding survives routing/shed; pass2_verify(agentic=...)).
-    # None ⇒ no assertion. The WORKFLOW verify step is statically single_turn (a documented
-    # seam limitation — see test_plan_review_parity), so this pins the DYNAMIC bespoke side.
+    # The EXPECTED Pass-2 verify call-mode: True iff verify should be agentic (any
+    # code-grounded finding survives routing/shed). None ⇒ no explicit assertion. Story B5
+    # made the WORKFLOW verify step DYNAMIC too (a `code_grounded` branch picks the agentic
+    # vs single-turn verifier prompt), so the harness now CROSS-ASSERTS the two paths' verify
+    # call-mode are EQUAL; this field additionally pins the expected value where known.
     expected_verify_agentic: bool | None = None
 
     def install(self, monkeypatch) -> None:
@@ -190,17 +192,18 @@ def corpus() -> list[Scenario]:
             env={"REBAR_PLAN_REVIEW_BUDGET": "0.01"},
             expected_verify_agentic=False,
         ),
-        # ── block_divergent: P1 / P5 — workflow skips LLM, bespoke runs it ──
+        # ── P1 / P5 DET blocks: reconciled to full PARITY (B5) — both paths run the LLM
+        #    and merge the DET block at decide-time → BLOCK verdict, matching planned trace ──
         Scenario(
             "missing_ac",
-            "block_divergent",
+            "parity",
             "T-noac",
             _story("T-noac", description="A body with no acceptance criteria block at all here."),
             expected_verdict="BLOCK",
         ),
         Scenario(
             "child_cycle",
-            "block_divergent",
+            "parity",
             "T-cycle",
             {
                 "ticket_id": "T-cycle",

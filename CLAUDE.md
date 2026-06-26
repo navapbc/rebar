@@ -61,15 +61,18 @@ advisory findings** before continuing (triage each: fix the valid ones; a findin
 you judge invalid must be justified, not silently ignored). The coaching notes tell
 you the productive next move per finding.
 
-> **Claim immediately after a passing `review-plan`, before committing other work**
-> (stopgap until bug `worm-folly-barge` is fixed). The attestation is bound to the
-> current code **HEAD**, so *any* intervening commit — even one in an unrelated file —
-> staleness-invalidates it and you get a `attestation is stale (signed at X, HEAD is Y)`
-> block at claim, forcing a slow re-review for no semantic reason. Corollary: don't run
-> `review-plan` concurrently with anything that can move HEAD (a background test suite,
-> another commit, or subagents whose worktree isolation can flip the checkout) — it may
-> sign against the wrong commit. Keep `review-plan → claim` adjacent and serial; commit
-> the ticket's own work *after* claiming.
+> **Attestation freshness is now SCOPED to the reviewed code** (ADR 0002 /
+> `boil-golem-veto`). The `worm-folly-barge` blanket stopgap — "claim immediately,
+> because *any* intervening commit staleness-invalidates the attestation" — is
+> **obsolete for a properly-formed ticket**: the attestation binds a per-path
+> `{file: hash}` map (the ticket's `file_impact` + the verdict's code citations), so an
+> unrelated commit no longer invalidates it. **Declare `set_file_impact` before you
+> `review-plan`** (the gate protocol requires it anyway) and the claim gate re-checks
+> only those files, not whole-HEAD. The whole-HEAD `attestation is stale (signed at X,
+> HEAD is Y)` block now fires in just ONE residual case: an **unscoped** attestation —
+> a ticket with **no `file_impact` and no code citations** — which falls back to
+> conservative whole-HEAD freshness. For that degenerate case only, keep
+> `review-plan → claim` adjacent (or just declare `file_impact` to scope it).
 
 **Completion-verifier protocol (to close).** Closing a work ticket runs the
 completion verifier. If it **fails**, you must **remediate the failure and try to

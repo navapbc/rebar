@@ -28,6 +28,10 @@ steps:
       prompt: completion-verifier
       mode: structured
       output_schema: completion_verdict
+      with:
+        # The graph-aware, fenced ticket context the precheck assembled (epics carry their
+        # descendants) — so the verify step's context matches bespoke verify_completion.
+        context: ${{ steps.precheck.outputs.context }}
     - id: reconcile
       needs:
       - verify

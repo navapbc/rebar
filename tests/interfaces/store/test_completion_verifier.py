@@ -19,6 +19,22 @@ from rebar.llm import contracts, findings
 from rebar.llm.runner import FakeRunner
 
 
+@pytest.fixture(autouse=True)
+def _pin_bespoke_gate_engine(monkeypatch):
+    """Pin the BESPOKE gate engine for this module (story B5 cutover).
+
+    These tests drive `verify_completion` with a fixed-payload `FakeRunner`/`_BoomRunner` and
+    assert the bespoke path's DETERMINISTIC surface + runner-call MECHANICS — the child-closure
+    short-circuit reaching/NOT reaching the runner, the reconcile/citation layer — which couple
+    to a raw `rebar.llm.Runner.run` call (the workflow path wraps it in an AgentStepRunner and the
+    interpreter catches a runner-raised exception). The default engine is now "workflow" (B5);
+    pinning bespoke keeps these validating the still-present bespoke FALLBACK (kept until
+    B-RETIRE). The workflow completion path is covered by
+    tests/unit/workflow/test_completion_verification_workflow + tests/unit/test_gate_engine_cutover.
+    """
+    monkeypatch.setenv("REBAR_VERIFY_GATE_ENGINE", "bespoke")
+
+
 def _seed(repo: Path, ttype: str = "task", desc: str | None = None) -> str:
     desc = desc or ("A task with criteria.\n\n## Acceptance Criteria\n- [ ] the thing exists\n")
     return rebar.create_ticket(ttype, f"verify {ttype}", description=desc, repo_root=str(repo))

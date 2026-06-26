@@ -64,12 +64,23 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
             "precheck_failed": True,
             "canonical_id": canonical,
             "verdict": verdict,
+            "context": "",  # short-circuit: no verify runs, so no context is needed
         }
+    # Assemble the verifier's ticket context HONORING graph (epics verify across their
+    # descendants) and FENCE it (the prompt-injection delimiter) — exactly as bespoke
+    # verify_completion does (completion.py) — so the workflow verify step gets the same
+    # graph-aware context instead of relying only on the agent's read tools.
+    from rebar.llm import operations
+
+    graph = root.get("ticket_type") == "epic"
+    context, _ids = operations._assemble_context(str(tid), graph=graph, repo_root=ctx.repo_root)
+    fenced = f"<untrusted_ticket_context>\n{context}\n</untrusted_ticket_context>"
     return {
         "run_verify": True,
         "precheck_failed": False,
         "canonical_id": canonical,
         "verdict": None,
+        "context": fenced,
     }
 
 

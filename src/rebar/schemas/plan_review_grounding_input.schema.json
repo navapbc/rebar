@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_grounding_input.schema.json",
+  "title": "PlanReviewGroundingInput",
+  "description": "INPUT of `plan_review_grounding`: the Pass-1 finder findings to test for code-grounding (does any finding cite a CODEBASE_GROUNDED criterion).",
+  "type": "object",
+  "properties": {
+    "findings": { "type": "array", "description": "The Pass-1 finder findings (each may carry a `criteria` id list)." }
+  },
+  "required": ["findings"],
+  "additionalProperties": false
+}

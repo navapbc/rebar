@@ -27,22 +27,27 @@ The batch's `finders` step is driven by `ProductionBatchRunner`'s OWN injected
 The BESPOKE path drives finders + verify + coach through ONE `rebar.llm.Runner`, so a
 single `TracingFakeRunner` captures it whole — the SHARED seam that makes parity meaningful.
 
-The known divergence (reconciled, NOT silently introduced)
-----------------------------------------------------------
-B2 noted: a P1/P5 DET block short-circuits the WORKFLOW with NO LLM call, whereas bespoke
-`run_review` still runs a full LLM pass before merging the DET block. So on P1/P5 block
-scenarios the traces deliberately DIVERGE. This is handled explicitly: full parity is
-asserted on the non-block (`parity`) scenarios; on `block_divergent` scenarios the harness
-asserts EXACTLY the documented divergence (the workflow issues zero LLM events; bespoke
-issues finder events) — it is never silently tolerated. P8 (too-big) and bug-exempt are
-`block_shared`: BOTH paths skip the LLM, so their traces match (empty finder trace).
+P1/P5 DET blocks — now full PARITY (B5 reconciled the divergence)
+-----------------------------------------------------------------
+B2/B4 noted a divergence: a P1/P5 DET block short-circuited the WORKFLOW with NO LLM call,
+whereas bespoke `run_review` ran a full LLM pass before merging the DET block. Story B5
+RECONCILED this — the workflow precheck now only short-circuits the LLM on an exempt type or
+a P8-too-big plan (matching bespoke), so a P1/P5 block runs the full review and merges the
+DET block at decide-time. The `missing_ac` (P1) and `child_cycle` (P5) scenarios are
+therefore `parity` (their verdict is BLOCK, but the planned trace MATCHES). P8 (too-big) and
+bug-exempt stay `block_shared`: BOTH paths skip the LLM, so their traces match (empty).
 
-A second, smaller seam difference is documented rather than over-asserted: the verify/coach
-prompt steps carry NO `model:` override in the workflow YAML (the engine resolves the
-model), while the bespoke path threads `cfg`/`verifier_cfg`. The non-laddered aggregate
-verify/coach model is therefore NOT part of the pinned planned-trace guarantee — the harness
-pins the verify/coach ROLE + presence + call-mode-bearing LADDERED FINDER model, which is
-where all the routing/chunking/ladder/shed complexity (the actual safety-net surface) lives.
+Verify call-mode is now CROSS-ASSERTED for equality (B5): the workflow verify step became
+dynamic (a `code_grounded` branch picks the agentic vs single-turn verifier prompt), so the
+harness asserts both paths choose the SAME call-mode — no longer the B4 document-the-static-
+divergence stance.
+
+A smaller seam difference is documented rather than over-asserted: the verify/coach prompt
+steps carry NO `model:` override in the workflow YAML (the engine resolves the model), while
+the bespoke path threads `cfg`/`verifier_cfg`. The non-laddered aggregate verify/coach model
+is therefore NOT part of the pinned planned-trace guarantee — the harness pins the
+verify/coach ROLE + presence + call-mode + the call-mode-bearing LADDERED FINDER model, which
+is where all the routing/chunking/ladder/shed complexity (the actual safety-net surface) lives.
 See the report on ticket `key-gun-morph`.
 """
 
@@ -91,7 +96,7 @@ class _CannedAgent(AgentStepRunner):
 
     def run(self, ctx) -> StepResult:
         prompt = ctx.step.get("prompt")
-        if prompt == "plan-review-verifier":
+        if prompt in ("plan-review-verifier", "plan-review-verifier-agentic"):
             from rebar.llm.workflow.trace import _canned_verification
 
             findings = ctx.inputs.get("findings") or []
@@ -170,16 +175,18 @@ def _canonical(
             if e["role"] in _FINDER_ROLES
         )
     )
+    _VERIFIER_PROMPTS = ("plan-review-verifier", "plan-review-verifier-agentic")
     roles = {e.get("role") for e in runner_trace}
     prompts = {e.get("prompt") for e in agent_trace}
-    verify_present = "verify" in roles or "plan-review-verifier" in prompts
+    verify_present = "verify" in roles or any(p in prompts for p in _VERIFIER_PROMPTS)
     coach_present = "coach" in roles or "plan-review-coach" in prompts
     det_map = ((verdict or {}).get("coverage") or {}).get("det") or {}
     det = tuple(sorted((k, v.get("status")) for k, v in det_map.items()))
     # The verify step's call-mode, captured from whichever seam carried it (bespoke runner
-    # role "verify", or the workflow verifier PROMPT step) and canonicalized.
+    # role "verify", or the workflow verifier PROMPT step — either the single-turn OR the
+    # agentic variant the B5 dynamic-verify branch selected) and canonicalized.
     verify_raw = [e["call_mode"] for e in runner_trace if e.get("role") == "verify"] + [
-        e["call_mode"] for e in agent_trace if e.get("prompt") == "plan-review-verifier"
+        e["call_mode"] for e in agent_trace if e.get("prompt") in _VERIFIER_PROMPTS
     ]
     verify_modes = tuple(
         sorted({_VERIFY_MODE_CANON.get(m, m) for m in verify_raw if m is not None})
@@ -261,33 +268,21 @@ def test_planned_trace_parity(scn: Scenario, monkeypatch):
         assert b_trace.verify_present and w_trace.verify_present, scn.name
         assert b_trace.coach_present and w_trace.coach_present, scn.name
 
-        # Pin the Pass-2 verify CALL-MODE (close the presence-only blind spot). The bespoke
-        # path chooses it DYNAMICALLY — `pass2_verify(..., agentic=grounded)` is agentic iff a
-        # code-grounded finding survives routing/shed — so assert it matches the scenario's
-        # expectation (a regression flipping that flag would fail here). The WORKFLOW verify
-        # step is a plain prompt step whose `execution_mode` is STATIC front-matter
-        # (single_turn); the engine resolves it from the prompt, so it CANNOT reflect the
-        # dynamic grounding decision without a production change. We therefore DOCUMENT the
-        # divergence: assert the workflow side equals its declared static mode rather than
-        # cross-asserting equality with the bespoke (dynamic) side.
+        # Pin the Pass-2 verify CALL-MODE (close the presence-only blind spot). BOTH paths now
+        # choose it DYNAMICALLY: bespoke via `pass2_verify(..., agentic=grounded)`, and the
+        # WORKFLOW (story B5) via a `code_grounded` branch picking the agentic vs single-turn
+        # verifier PROMPT. So CROSS-ASSERT EQUALITY — a regression on EITHER side that flips
+        # the call-mode fails here (the B5 upgrade over B4's document-the-divergence stance).
+        assert b_trace.verify_modes == w_trace.verify_modes, (
+            f"{scn.name}: verify call-mode diverged between paths\n"
+            f"  bespoke ={b_trace.verify_modes}\n  workflow={w_trace.verify_modes}"
+        )
+        # …and where the scenario pins an expected value, both must match it.
         if scn.expected_verify_agentic is not None:
             assert ("agentic" in b_trace.verify_modes) == scn.expected_verify_agentic, (
-                f"{scn.name}: bespoke verify call-mode {b_trace.verify_modes} disagrees with "
+                f"{scn.name}: verify call-mode {b_trace.verify_modes} disagrees with "
                 f"expected agentic={scn.expected_verify_agentic}"
             )
-        assert w_trace.verify_modes == ("single_turn",), (
-            f"{scn.name}: workflow verify step is statically single_turn (prompt front-matter); "
-            f"got {w_trace.verify_modes}"
-        )
-
-    elif scn.kind == "block_divergent":
-        # The documented B2 divergence: the WORKFLOW short-circuits with NO LLM call;
-        # bespoke `run_review` still runs the LLM pass before merging the DET block.
-        assert w_trace.finders == (), f"{scn.name}: workflow must NOT call the LLM on a DET block"
-        assert not w_trace.verify_present and not w_trace.coach_present, scn.name
-        assert b_trace.finders, (
-            f"{scn.name}: bespoke run_review DOES run the LLM pass on a P1/P5 block"
-        )
 
     elif scn.kind == "block_shared":
         # P8 too-big / bug-exempt: BOTH paths skip the LLM, so the traces match (empty).
@@ -429,5 +424,8 @@ def test_corpus_covers_required_shapes():
         "bug_exempt",
     }
     assert required <= set(kinds), required - set(kinds)
-    assert "parity" in kinds.values() and "block_divergent" in kinds.values()
+    assert "parity" in kinds.values()
     assert "block_shared" in kinds.values()
+    # B5 reconciled the P1/P5 divergence — those scenarios are now full-parity, so the
+    # `block_divergent` kind no longer exists in the corpus.
+    assert "block_divergent" not in kinds.values()

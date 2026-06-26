@@ -211,6 +211,19 @@ def verify_completion(
     if graph is None:
         graph = root.get("ticket_type") == "epic"
 
+    # Verdict PRODUCTION is engine-selectable (story B5 cutover). The workflow path
+    # (default) runs gates/completion-verification.yaml — which owns its OWN deterministic
+    # child-closure precheck → agentic verify → reconcile — and returns the reconciled
+    # completion_verdict. The close gate's signing wrapper (_commands.transition) is
+    # unchanged, so the signed attestation stays byte-compatible. cfg is already tuned
+    # (verifier model + step floor) above, so both paths run the same model/budget.
+    from rebar.llm.workflow import gate_dispatch
+
+    if gate_dispatch.gate_engine(repo_root) == "workflow":
+        return gate_dispatch.produce_completion_verdict(
+            ticket_id, graph=graph, repo_root=repo_root, cfg=cfg, runner=runner
+        )
+
     # ── Deterministic child-closure gate (runs BEFORE any LLM call) ─────────────────────
     # A parent (epic/story) is incomplete unless every DIRECT child is closed WITH a
     # certified completion signature — a graph+signature invariant, checked deterministically
