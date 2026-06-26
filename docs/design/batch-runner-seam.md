@@ -132,3 +132,57 @@ construction, asserted offline with a fake `rebar.llm.Runner`.
 4. Confirm the orchestrator refactor (D2) is acceptable to land on its own behaviour-preserving
    PR *before* the runner, so the risky live-gate change is isolated and reviewed independently
    of the new runner + B2 wiring.
+
+---
+
+# Post-brainstorm decisions (joe-brainstorm, grounded in prior art + original-intent logs + adversarial critique)
+
+**Chosen: Option A — the batch is an engine-opaque, sealed adaptive unit** (two-level
+observability), confirmed against the original `woody-meat-seize`/epic-A intent ("adaptive
+batching is a recorded decision-tree, not replayable IR") and the industry mainline
+(claim-check + decide-once-journal-the-result; Temporal/SFN/Airflow/Argo).
+
+- **D1–D2, D4–D5 stand.** D2 extraction home: a new sibling **`plan_review/pass1.py`** (keeps
+  `sizing.py` cohesive + under the module-size cap), holding `build_plan_context` + the Pass-1
+  loop; `orchestrator.py` is refactored to call it. **Land that extraction as its own
+  behaviour-preserving PR first** (it touches the live claim gate), then the runner.
+- **D3 reframed (resolves the BLOCKER the critique found).** The planned-trace capturer
+  `PlannedTraceRunner` is an `AgentStepRunner`, but plan-review's Pass-1 drives a
+  `rebar.llm.Runner` directly — in BOTH the bespoke and workflow paths. So the production runner
+  **owns an injectable `rebar.llm.Runner`**, and the planned trace is captured **at that seam**
+  (a tracing/Fake `rebar.llm.Runner`), which both paths share via the extracted `pass1.py`. The
+  engine's dry-run path injects the Fake `rebar.llm.Runner` into the production runner (parallel to
+  `FakeAgentRunner`). Consequence (consistent with "opaque batch"): the batch's internal finder
+  calls are not visible to the engine's generic `PlannedTraceRunner`/dry-run — they're traced one
+  level down.
+
+## Critique findings — resolutions
+- **Resume / context-divergence / checkpoint coherence:** the live orchestrator ALREADY
+  reconstructs `PlanContext` + checkpoints by a `material_fingerprint` that excludes deps. A
+  faithful migration *preserves* this; it is not a new risk. Capturing a content-hash in the plan
+  (prior art's reproducible-resume fix) is a noted FUTURE enhancement, out of scope for B1.
+- **Concurrency:** the Pass-1 thread pool lives INSIDE the sealed runner — exactly where the
+  original design put adaptive work. The interpreter stays single-threaded; the Burr invariant
+  holds. Constraint: do NOT `map` over batch steps (nested pools).
+- **`target_ticket` required:** lint/guard that a production-runner batch step runs against a
+  target ticket (the claim gate always has one).
+- **Parity scope (the critique's MAJOR 4):** "same function" only proves Pass-1. The full planned
+  trace is assembled from **two offline-fakeable capture points** — the batch's `rebar.llm.Runner`
+  (finders) and the engine's `AgentStepRunner` (the Pass-2 verify step) — and parity (B4) is
+  asserted at the BOUNDARIES (criteria inclusion/order, intended model, call-mode, det steps),
+  pre-escalation, not as "I wired the same function."
+
+## Editor scope (now its own stories)
+In-editor editing covers **criteria AND prompts** (not just criteria), selection-driven not
+free-text. Split into:
+- **B-DM (`dark-tempo-rug`)** — the underlying DATA MODEL: a library enumerate + create/update +
+  index-regen API for prompts + criteria (the backend the editor sits on). **Do this first** (per
+  the epic sequencing); it is independent of the runner.
+- **B-UX (`lanky-turret-worry`)** — the visual editor: criterion/prompt **dropdowns** from the
+  library; overlay-`when` dropdown from the workflow's `overlay_triggers` outputs; inline
+  create-new-trigger (step config); **full in-editor authoring** of new criteria AND prompts (write
+  the `.md` via B-DM + regen the index, keeping the drift gate green). Blocked by B-DM.
+
+## Sequencing
+Underlying data model FIRST: **B1** (the runner — extraction PR, then the thin runner) and **B-DM**
+(library write/enumerate model) — both data-model, both before **B-UX**. Then B2 → B4 → B5 → B6.
