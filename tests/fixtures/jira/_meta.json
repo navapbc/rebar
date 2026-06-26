@@ -1,0 +1,16 @@
+{
+  "_comment": "Scrubbed real Jira REST payloads captured via the production AcliClient methods. Regenerate with scripts/capture_jira_fixtures.py (REBAR_CAPTURE_JIRA_FIXTURES=1). DO NOT hand-edit \u2014 fixtures must stay an honest mirror of real Jira shapes (see docs/jira-fixtures.md).",
+  "jql": "key in (REB-407,REB-408,REB-426,REB-427,REB-428,REB-429,REB-430,REB-431) ORDER BY key ASC",
+  "keys": [
+    "REB-407",
+    "REB-408",
+    "REB-426",
+    "REB-427",
+    "REB-428",
+    "REB-429",
+    "REB-430",
+    "REB-431"
+  ],
+  "project": "REB",
+  "scrubbed": true
+}

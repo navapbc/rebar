@@ -74,12 +74,26 @@ def _scan_id_tags(tracker_dir: Path) -> dict[str, list[str]]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--tracker-dir", default=".tickets-tracker", help="path to the ticket store worktree")
-    ap.add_argument("--apply", action="store_true", help="actually write changes (default: dry-run report)")
-    ap.add_argument("--strip-tags", action="store_true", help="also remove residual dso-id:jira-* id tags via `rebar untag`")
-    ap.add_argument("--no-backup", action="store_true", help="skip backing up .bridge_state before clearing")
-    ap.add_argument("--backup-label", default="retarget", help="suffix for the .bridge_state backup dir")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--tracker-dir", default=".tickets-tracker", help="path to the ticket store worktree"
+    )
+    ap.add_argument(
+        "--apply", action="store_true", help="actually write changes (default: dry-run report)"
+    )
+    ap.add_argument(
+        "--strip-tags",
+        action="store_true",
+        help="also remove residual dso-id:jira-* id tags via `rebar untag`",
+    )
+    ap.add_argument(
+        "--no-backup", action="store_true", help="skip backing up .bridge_state before clearing"
+    )
+    ap.add_argument(
+        "--backup-label", default="retarget", help="suffix for the .bridge_state backup dir"
+    )
     args = ap.parse_args(argv)
 
     tracker = Path(args.tracker_dir).resolve()
@@ -100,8 +114,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Bindings:       {len(binds)} (-> cleared)")
     print(f"prev_snapshot:  {'present -> cleared' if prev_path.exists() else 'absent'}")
     print(f"retired binds:  {'present -> removed' if retired_path.exists() else 'absent'}")
-    print(f"id tags:        {tag_count} across {len(id_tags)} tickets"
-          f"{' (-> stripped)' if args.strip_tags else ' (use --strip-tags to remove)'}")
+    print(
+        f"id tags:        {tag_count} across {len(id_tags)} tickets"
+        f"{' (-> stripped)' if args.strip_tags else ' (use --strip-tags to remove)'}"
+    )
 
     if not args.apply:
         print("\nDRY RUN — no changes written. Re-run with --apply to clear bind-state.")
@@ -133,8 +149,10 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"  WARN: untag {ticket_id} {tag} exited {rc}", file=sys.stderr)
         print(f"Stripped {stripped}/{tag_count} id tags.")
 
-    print("\nDone. Now run `rebar reconcile --mode dry-run` and confirm 0 mutations "
-          "target the old project before enabling live sync.")
+    print(
+        "\nDone. Now run `rebar reconcile --mode dry-run` and confirm 0 mutations "
+        "target the old project before enabling live sync."
+    )
     return 0
 
 

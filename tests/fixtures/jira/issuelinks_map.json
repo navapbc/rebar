@@ -1,0 +1,517 @@
+{
+  "REB-407": [
+    {
+      "id": "44588",
+      "inwardIssue": {
+        "fields": {
+          "issuetype": {
+            "avatarId": 10315,
+            "description": "Stories track functionality or features expressed as user goals.",
+            "entityId": "a982ed43-d853-43df-8602-042066c8ebe3",
+            "hierarchyLevel": 0,
+            "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10315?size=medium",
+            "id": "18614",
+            "name": "Story",
+            "self": "https://example.atlassian.net/rest/api/3/issuetype/18614",
+            "subtask": false
+          },
+          "priority": {
+            "iconUrl": "https://example.atlassian.net/images/icons/priorities/medium_new.svg",
+            "id": "3",
+            "name": "Medium",
+            "self": "https://example.atlassian.net/rest/api/3/priority/3"
+          },
+          "status": {
+            "description": "",
+            "iconUrl": "https://example.atlassian.net/images/icons/statuses/generic.png",
+            "id": "24029",
+            "name": "To Do",
+            "self": "https://example.atlassian.net/rest/api/3/status/24029",
+            "statusCategory": {
+              "colorName": "blue-gray",
+              "id": 2,
+              "key": "new",
+              "name": "To Do",
+              "self": "https://example.atlassian.net/rest/api/3/statuscategory/2"
+            }
+          },
+          "summary": "B-UX: Visual editor \u2014 select/create criteria, prompts & overlay triggers (pickers + in-editor authoring)"
+        },
+        "id": "4578379",
+        "key": "REB-408",
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578379"
+      },
+      "self": "https://example.atlassian.net/rest/api/3/issueLink/44588",
+      "type": {
+        "id": "10000",
+        "inward": "is blocked by",
+        "name": "Blocks",
+        "outward": "blocks",
+        "self": "https://example.atlassian.net/rest/api/3/issueLinkType/10000"
+      }
+    }
+  ],
+  "REB-408": [
+    {
+      "id": "44588",
+      "outwardIssue": {
+        "fields": {
+          "issuetype": {
+            "avatarId": 10315,
+            "description": "Stories track functionality or features expressed as user goals.",
+            "entityId": "a982ed43-d853-43df-8602-042066c8ebe3",
+            "hierarchyLevel": 0,
+            "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10315?size=medium",
+            "id": "18614",
+            "name": "Story",
+            "self": "https://example.atlassian.net/rest/api/3/issuetype/18614",
+            "subtask": false
+          },
+          "priority": {
+            "iconUrl": "https://example.atlassian.net/images/icons/priorities/medium_new.svg",
+            "id": "3",
+            "name": "Medium",
+            "self": "https://example.atlassian.net/rest/api/3/priority/3"
+          },
+          "status": {
+            "description": "",
+            "iconUrl": "https://example.atlassian.net/images/icons/statuses/generic.png",
+            "id": "24028",
+            "name": "Done",
+            "self": "https://example.atlassian.net/rest/api/3/status/24028",
+            "statusCategory": {
+              "colorName": "green",
+              "id": 3,
+              "key": "done",
+              "name": "Done",
+              "self": "https://example.atlassian.net/rest/api/3/statuscategory/3"
+            }
+          },
+          "summary": "B-DM: Prompt + criteria library write/enumerate/index data model (the editor's backend)"
+        },
+        "id": "4578378",
+        "key": "REB-407",
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578378"
+      },
+      "self": "https://example.atlassian.net/rest/api/3/issueLink/44588",
+      "type": {
+        "id": "10000",
+        "inward": "is blocked by",
+        "name": "Blocks",
+        "outward": "blocks",
+        "self": "https://example.atlassian.net/rest/api/3/issueLinkType/10000"
+      }
+    }
+  ],
+  "REB-426": [
+    {
+      "id": "44657",
+      "inwardIssue": {
+        "fields": {
+          "issuetype": {
+            "avatarId": 10315,
+            "description": "Stories track functionality or features expressed as user goals.",
+            "entityId": "a982ed43-d853-43df-8602-042066c8ebe3",
+            "hierarchyLevel": 0,
+            "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10315?size=medium",
+            "id": "18614",
+            "name": "Story",
+            "self": "https://example.atlassian.net/rest/api/3/issuetype/18614",
+            "subtask": false
+          },
+          "priority": {
+            "iconUrl": "https://example.atlassian.net/images/icons/priorities/medium_new.svg",
+            "id": "3",
+            "name": "Medium",
+            "self": "https://example.atlassian.net/rest/api/3/priority/3"
+          },
+          "status": {
+            "description": "",
+            "iconUrl": "https://example.atlassian.net/images/icons/statuses/generic.png",
+            "id": "24029",
+            "name": "To Do",
+            "self": "https://example.atlassian.net/rest/api/3/status/24029",
+            "statusCategory": {
+              "colorName": "blue-gray",
+              "id": 2,
+              "key": "new",
+              "name": "To Do",
+              "self": "https://example.atlassian.net/rest/api/3/statuscategory/2"
+            }
+          },
+          "summary": "Hermetic-but-honest Jira fixtures + verified fake client (served through the production path)"
+        },
+        "id": "4578434",
+        "key": "REB-431",
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578434"
+      },
+      "self": "https://example.atlassian.net/rest/api/3/issueLink/44657",
+      "type": {
+        "id": "10000",
+        "inward": "is blocked by",
+        "name": "Blocks",
+        "outward": "blocks",
+        "self": "https://example.atlassian.net/rest/api/3/issueLinkType/10000"
+      }
+    }
+  ],
+  "REB-427": [
+    {
+      "id": "44658",
+      "inwardIssue": {
+        "fields": {
+          "issuetype": {
+            "avatarId": 10315,
+            "description": "Stories track functionality or features expressed as user goals.",
+            "entityId": "a982ed43-d853-43df-8602-042066c8ebe3",
+            "hierarchyLevel": 0,
+            "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10315?size=medium",
+            "id": "18614",
+            "name": "Story",
+            "self": "https://example.atlassian.net/rest/api/3/issuetype/18614",
+            "subtask": false
+          },
+          "priority": {
+            "iconUrl": "https://example.atlassian.net/images/icons/priorities/medium_new.svg",
+            "id": "3",
+            "name": "Medium",
+            "self": "https://example.atlassian.net/rest/api/3/priority/3"
+          },
+          "status": {
+            "description": "",
+            "iconUrl": "https://example.atlassian.net/images/icons/statuses/generic.png",
+            "id": "24029",
+            "name": "To Do",
+            "self": "https://example.atlassian.net/rest/api/3/status/24029",
+            "statusCategory": {
+              "colorName": "blue-gray",
+              "id": 2,
+              "key": "new",
+              "name": "To Do",
+              "self": "https://example.atlassian.net/rest/api/3/statuscategory/2"
+            }
+          },
+          "summary": "Hermetic-but-honest Jira fixtures + verified fake client (served through the production path)"
+        },
+        "id": "4578434",
+        "key": "REB-431",
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578434"
+      },
+      "self": "https://example.atlassian.net/rest/api/3/issueLink/44658",
+      "type": {
+        "id": "10000",
+        "inward": "is blocked by",
+        "name": "Blocks",
+        "outward": "blocks",
+        "self": "https://example.atlassian.net/rest/api/3/issueLinkType/10000"
+      }
+    }
+  ],
+  "REB-428": [
+    {
+      "id": "44659",
+      "inwardIssue": {
+        "fields": {
+          "issuetype": {
+            "avatarId": 10315,
+            "description": "Stories track functionality or features expressed as user goals.",
+            "entityId": "a982ed43-d853-43df-8602-042066c8ebe3",
+            "hierarchyLevel": 0,
+            "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10315?size=medium",
+            "id": "18614",
+            "name": "Story",
+            "self": "https://example.atlassian.net/rest/api/3/issuetype/18614",
+            "subtask": false
+          },
+          "priority": {
+            "iconUrl": "https://example.atlassian.net/images/icons/priorities/medium_new.svg",
+            "id": "3",
+            "name": "Medium",
+            "self": "https://example.atlassian.net/rest/api/3/priority/3"
+          },
+          "status": {
+            "description": "",
+            "iconUrl": "https://example.atlassian.net/images/icons/statuses/generic.png",
+            "id": "24029",
+            "name": "To Do",
+            "self": "https://example.atlassian.net/rest/api/3/status/24029",
+            "statusCategory": {
+              "colorName": "blue-gray",
+              "id": 2,
+              "key": "new",
+              "name": "To Do",
+              "self": "https://example.atlassian.net/rest/api/3/statuscategory/2"
+            }
+          },
+          "summary": "Hermetic-but-honest Jira fixtures + verified fake client (served through the production path)"
+        },
+        "id": "4578434",
+        "key": "REB-431",
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578434"
+      },
+      "self": "https://example.atlassian.net/rest/api/3/issueLink/44659",
+      "type": {
+        "id": "10000",
+        "inward": "is blocked by",
+        "name": "Blocks",
+        "outward": "blocks",
+        "self": "https://example.atlassian.net/rest/api/3/issueLinkType/10000"
+      }
+    }
+  ],
+  "REB-429": [
+    {
+      "id": "44654",
+      "outwardIssue": {
+        "fields": {
+          "issuetype": {
+            "avatarId": 10315,
+            "description": "Stories track functionality or features expressed as user goals.",
+            "entityId": "a982ed43-d853-43df-8602-042066c8ebe3",
+            "hierarchyLevel": 0,
+            "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10315?size=medium",
+            "id": "18614",
+            "name": "Story",
+            "self": "https://example.atlassian.net/rest/api/3/issuetype/18614",
+            "subtask": false
+          },
+          "priority": {
+            "iconUrl": "https://example.atlassian.net/images/icons/priorities/medium_new.svg",
+            "id": "3",
+            "name": "Medium",
+            "self": "https://example.atlassian.net/rest/api/3/priority/3"
+          },
+          "status": {
+            "description": "",
+            "iconUrl": "https://example.atlassian.net/images/icons/statuses/generic.png",
+            "id": "24029",
+            "name": "To Do",
+            "self": "https://example.atlassian.net/rest/api/3/status/24029",
+            "statusCategory": {
+              "colorName": "blue-gray",
+              "id": 2,
+              "key": "new",
+              "name": "To Do",
+              "self": "https://example.atlassian.net/rest/api/3/statuscategory/2"
+            }
+          },
+          "summary": "B6: Remove throwaway sample workflows; confirm two-real-workflow end state"
+        },
+        "id": "4578176",
+        "key": "REB-207",
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578176"
+      },
+      "self": "https://example.atlassian.net/rest/api/3/issueLink/44654",
+      "type": {
+        "id": "10000",
+        "inward": "is blocked by",
+        "name": "Blocks",
+        "outward": "blocks",
+        "self": "https://example.atlassian.net/rest/api/3/issueLinkType/10000"
+      }
+    },
+    {
+      "id": "44655",
+      "outwardIssue": {
+        "fields": {
+          "issuetype": {
+            "avatarId": 10315,
+            "description": "Stories track functionality or features expressed as user goals.",
+            "entityId": "a982ed43-d853-43df-8602-042066c8ebe3",
+            "hierarchyLevel": 0,
+            "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10315?size=medium",
+            "id": "18614",
+            "name": "Story",
+            "self": "https://example.atlassian.net/rest/api/3/issuetype/18614",
+            "subtask": false
+          },
+          "priority": {
+            "iconUrl": "https://example.atlassian.net/images/icons/priorities/medium_new.svg",
+            "id": "3",
+            "name": "Medium",
+            "self": "https://example.atlassian.net/rest/api/3/priority/3"
+          },
+          "status": {
+            "description": "",
+            "iconUrl": "https://example.atlassian.net/images/icons/statuses/generic.png",
+            "id": "24029",
+            "name": "To Do",
+            "self": "https://example.atlassian.net/rest/api/3/status/24029",
+            "statusCategory": {
+              "colorName": "blue-gray",
+              "id": 2,
+              "key": "new",
+              "name": "To Do",
+              "self": "https://example.atlassian.net/rest/api/3/statuscategory/2"
+            }
+          },
+          "summary": "B5: Cut the claim/close gates over to the workflow path (signing intact)"
+        },
+        "id": "4578354",
+        "key": "REB-385",
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578354"
+      },
+      "self": "https://example.atlassian.net/rest/api/3/issueLink/44655",
+      "type": {
+        "id": "10000",
+        "inward": "is blocked by",
+        "name": "Blocks",
+        "outward": "blocks",
+        "self": "https://example.atlassian.net/rest/api/3/issueLinkType/10000"
+      }
+    }
+  ],
+  "REB-430": [],
+  "REB-431": [
+    {
+      "id": "44657",
+      "outwardIssue": {
+        "fields": {
+          "issuetype": {
+            "avatarId": 10315,
+            "description": "Stories track functionality or features expressed as user goals.",
+            "entityId": "a982ed43-d853-43df-8602-042066c8ebe3",
+            "hierarchyLevel": 0,
+            "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10315?size=medium",
+            "id": "18614",
+            "name": "Story",
+            "self": "https://example.atlassian.net/rest/api/3/issuetype/18614",
+            "subtask": false
+          },
+          "priority": {
+            "iconUrl": "https://example.atlassian.net/images/icons/priorities/medium_new.svg",
+            "id": "3",
+            "name": "Medium",
+            "self": "https://example.atlassian.net/rest/api/3/priority/3"
+          },
+          "status": {
+            "description": "",
+            "iconUrl": "https://example.atlassian.net/images/icons/statuses/generic.png",
+            "id": "24029",
+            "name": "To Do",
+            "self": "https://example.atlassian.net/rest/api/3/status/24029",
+            "statusCategory": {
+              "colorName": "blue-gray",
+              "id": 2,
+              "key": "new",
+              "name": "To Do",
+              "self": "https://example.atlassian.net/rest/api/3/statuscategory/2"
+            }
+          },
+          "summary": "Verified fake: contract tests run against BOTH real and fake AcliClient"
+        },
+        "id": "4578429",
+        "key": "REB-426",
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578429"
+      },
+      "self": "https://example.atlassian.net/rest/api/3/issueLink/44657",
+      "type": {
+        "id": "10000",
+        "inward": "is blocked by",
+        "name": "Blocks",
+        "outward": "blocks",
+        "self": "https://example.atlassian.net/rest/api/3/issueLinkType/10000"
+      }
+    },
+    {
+      "id": "44658",
+      "outwardIssue": {
+        "fields": {
+          "issuetype": {
+            "avatarId": 10315,
+            "description": "Stories track functionality or features expressed as user goals.",
+            "entityId": "a982ed43-d853-43df-8602-042066c8ebe3",
+            "hierarchyLevel": 0,
+            "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10315?size=medium",
+            "id": "18614",
+            "name": "Story",
+            "self": "https://example.atlassian.net/rest/api/3/issuetype/18614",
+            "subtask": false
+          },
+          "priority": {
+            "iconUrl": "https://example.atlassian.net/images/icons/priorities/medium_new.svg",
+            "id": "3",
+            "name": "Medium",
+            "self": "https://example.atlassian.net/rest/api/3/priority/3"
+          },
+          "status": {
+            "description": "",
+            "iconUrl": "https://example.atlassian.net/images/icons/statuses/generic.png",
+            "id": "24029",
+            "name": "To Do",
+            "self": "https://example.atlassian.net/rest/api/3/status/24029",
+            "statusCategory": {
+              "colorName": "blue-gray",
+              "id": 2,
+              "key": "new",
+              "name": "To Do",
+              "self": "https://example.atlassian.net/rest/api/3/statuscategory/2"
+            }
+          },
+          "summary": "Honest bidirectional round-trip probe; de-encode 'expected-bug' guards"
+        },
+        "id": "4578430",
+        "key": "REB-427",
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578430"
+      },
+      "self": "https://example.atlassian.net/rest/api/3/issueLink/44658",
+      "type": {
+        "id": "10000",
+        "inward": "is blocked by",
+        "name": "Blocks",
+        "outward": "blocks",
+        "self": "https://example.atlassian.net/rest/api/3/issueLinkType/10000"
+      }
+    },
+    {
+      "id": "44659",
+      "outwardIssue": {
+        "fields": {
+          "issuetype": {
+            "avatarId": 10315,
+            "description": "Stories track functionality or features expressed as user goals.",
+            "entityId": "a982ed43-d853-43df-8602-042066c8ebe3",
+            "hierarchyLevel": 0,
+            "iconUrl": "https://example.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10315?size=medium",
+            "id": "18614",
+            "name": "Story",
+            "self": "https://example.atlassian.net/rest/api/3/issuetype/18614",
+            "subtask": false
+          },
+          "priority": {
+            "iconUrl": "https://example.atlassian.net/images/icons/priorities/medium_new.svg",
+            "id": "3",
+            "name": "Medium",
+            "self": "https://example.atlassian.net/rest/api/3/priority/3"
+          },
+          "status": {
+            "description": "",
+            "iconUrl": "https://example.atlassian.net/images/icons/statuses/generic.png",
+            "id": "24029",
+            "name": "To Do",
+            "self": "https://example.atlassian.net/rest/api/3/status/24029",
+            "statusCategory": {
+              "colorName": "blue-gray",
+              "id": 2,
+              "key": "new",
+              "name": "To Do",
+              "self": "https://example.atlassian.net/rest/api/3/statuscategory/2"
+            }
+          },
+          "summary": "Producer<->consumer snapshot contract: shared schema + round-trip test through production path"
+        },
+        "id": "4578431",
+        "key": "REB-428",
+        "self": "https://example.atlassian.net/rest/api/3/issue/4578431"
+      },
+      "self": "https://example.atlassian.net/rest/api/3/issueLink/44659",
+      "type": {
+        "id": "10000",
+        "inward": "is blocked by",
+        "name": "Blocks",
+        "outward": "blocks",
+        "self": "https://example.atlassian.net/rest/api/3/issueLinkType/10000"
+      }
+    }
+  ]
+}
