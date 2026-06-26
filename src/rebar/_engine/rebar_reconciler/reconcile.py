@@ -932,6 +932,7 @@ def reconcile_once(
         client=outbound_diff_client,
         pass_id=pass_id,
         absent_alive_fields=absent_alive_fields,
+        prev_snapshot=prev_snapshot,
     )
     sync_logger.log(
         "outbound_differ_complete",
