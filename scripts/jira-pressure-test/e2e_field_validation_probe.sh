@@ -1528,9 +1528,12 @@ else
     matrix_set "issuetype" "inbound" "update" "FAIL"
 fi
 
-# Comments (ticket 8) — additive class, but INBOUND comment sync is NOT
-# implemented (Jira-side comments do not flow to local; documented gap). Verify
-# the Jira-side comment did NOT appear locally.
+# Comments (ticket 8) — additive class. INBOUND comment sync IS implemented
+# (epic f89d closed bug 0ee6 — the inbound differ now reads the nested `comment`
+# field): a Jira-side comment MUST flow to local. This guard was previously
+# INVERTED — it FAILED when comments synced and PASSED on the gap (matrix
+# NOT-SYNCED), locking the bug in as "expected". De-encoded here so the fix is
+# detected and a regression FAILS the probe (story 822a).
 local_comments=$("$TICKET_CLI" show "${LOCAL_IDS[7]}" 2>/dev/null | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
@@ -1540,11 +1543,11 @@ for c in comments:
     print(body)
 " 2>/dev/null) || true
 if echo "$local_comments" | grep -q "Jira-side comment"; then
-    fail_test "Phase3.verify-inbound-comments-gap" "unexpectedly synced inbound"
-    matrix_set "comments" "inbound" "update" "UNEXPECTED_PASS"
+    pass_test "Phase3.verify-inbound-comments (inbound comment synced — bug 0ee6 closed)"
+    matrix_set "comments" "inbound" "update" "SYNCED"
 else
-    pass_test "Phase3.verify-inbound-comments-gap (inbound NOT implemented, as expected)"
-    matrix_set "comments" "inbound" "update" "NOT-SYNCED"
+    fail_test "Phase3.verify-inbound-comments" "inbound comment did NOT sync to local — bug 0ee6 regressed"
+    matrix_set "comments" "inbound" "update" "FAIL"
 fi
 
 # Status (ticket 9) — STATE → local-wins. Ticket 9 was NOT locally edited, yet a
@@ -1911,7 +1914,7 @@ cat <<'LEGEND'
 Legend — Class is the conflict_resolver.py FIELD_CLASSES sync rule:
   state    → SYNCED outbound; inbound = LOCAL-WINS (Jira edits never overwrite local).
   additive → SYNCED outbound; inbound merges (local content never dropped). (comments:
-             inbound NOT implemented — known gap, shown as NOT-SYNCED.)
+             inbound SYNCED both ways — bug 0ee6 closed, epic f89d.)
   set      → SYNCED outbound; inbound = UNION-ADD (Jira ADDs land locally; Jira
              REMOVEs do NOT propagate).
   hier     → parent/epic hierarchy links (outbound).
