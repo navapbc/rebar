@@ -18,14 +18,42 @@ working tree in two ways that matter:
 ```sh
 # from the repo root
 uv venv .venv && source .venv/bin/activate     # or: python -m venv .venv && source .venv/bin/activate
-uv pip install -e '.[dev]'                      # or: make install   (also installs the pre-commit hook)
+make install                                    # editable '.[dev]' install + the pre-commit hook (the commit gate)
 export ANTHROPIC_API_KEY=sk-ant-...             # required for the LLM ops (review-plan, verify-completion)
 ```
 
-`.[dev]` pulls `nava-rebar[agents]` plus the lint/type/test tooling, so the editable
-install is a complete env for everything below. `make install` runs the same `pip install
--e '.[dev]'` and additionally installs the pre-commit hook (the Makefile is the single
-source of truth for lint/format/type/test — see `make help`).
+**Use `make install` — it is the one canonical setup path.** It runs `pip install -e
+'.[dev]'` (which pulls `nava-rebar[agents]` plus the lint/type/test tooling, so the
+editable install is a complete env for everything below) **and** wires the pre-commit hook
+via `make hooks`, which is what makes lint/format run on every `git commit`. The Makefile
+is the single source of truth for lint/format/type/test — see `make help`.
+
+> **Why not just `pip install -e '.[dev]'`?** A bare editable install does **not** wire the
+> commit hook — `git` hooks are opt-in per clone and no `pip`/`uv` install step runs
+> `pre-commit install`. Skip the hook and lint/format errors sail through `git commit` and
+> are only caught later by CI (the slow gate). If you must run the install step by hand,
+> follow it with the hook step and verify it:
+>
+> ```sh
+> pip install -e '.[dev]'     # or: uv pip install -e '.[dev]'
+> make hooks                   # installs + VERIFIES the pre-commit hook; re-runnable anytime
+> ```
+>
+> `make hooks` also handles the common `core.hooksPath` snag: `pre-commit install` fails
+> with `Cowardly refusing to install hooks with core.hooksPath set` when that config is
+> present. The target unsets it automatically when it is the redundant default
+> (`.git/hooks`), and otherwise stops with the exact `git config --unset-all
+> core.hooksPath` command (note: it may be set **globally** — unset at that scope).
+
+### Verify the commit gate is active
+
+```sh
+test -f "$(git rev-parse --git-common-dir)/hooks/pre-commit" \
+  && echo "commit gate: ON" || echo "commit gate: OFF — run 'make hooks'"
+```
+
+`make hooks` prints `✓ commit gate active: …` on success and exits non-zero (loudly) if the
+hook did not land — so the gate is never silently absent.
 
 ## Verify you're on the repo build
 
@@ -72,7 +100,9 @@ This executes the **working-tree** `src/rebar` (so it reflects un-committed edit
 reinstall). The interpreter just needs the deps importable — point at a venv that has the
 `[agents]` + core deps installed (`pydantic-ai-slim[anthropic]`, `json-repair`, `pydantic`,
 `pyyaml`, `jsonschema`, `referencing`). This is handy for one-off runs; the editable venv
-above remains the recommended day-to-day setup.
+above remains the recommended day-to-day setup. Note this path installs nothing, so it does
+**not** wire the commit gate — if you intend to commit from this checkout, run `make hooks`
+once (see above).
 
 ## Day-to-day gates
 

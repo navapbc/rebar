@@ -10,15 +10,45 @@
 .DEFAULT_GOAL := help
 sources = src tests
 
-.PHONY: help install format lint typecheck check test
+.PHONY: help install hooks format lint typecheck check test
 
 help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-install:  ## Install rebar (editable) + dev deps + the pre-commit hook.
+install:  ## Install rebar (editable) + dev deps + the pre-commit hook (the commit gate).
 	python -m pip install -e '.[dev]'
-	pre-commit install
+	$(MAKE) hooks
+
+hooks:  ## (Re)install the pre-commit git hook and VERIFY it landed (the commit gate).
+	@# pre-commit refuses to install when core.hooksPath is set (it fails loudly with
+	@# "Cowardly refusing..."). A value pointing at the DEFAULT hooks dir is redundant and
+	@# safe to unset; any OTHER value is a deliberate setup we must not clobber — guide and
+	@# stop. Then install and VERIFY the hook file exists, so the gate is never silently
+	@# absent (the failure mode that let a format error reach CI).
+	@hp="$$(git config --get core.hooksPath || true)"; \
+	common="$$(git rev-parse --git-common-dir)"; \
+	if [ -n "$$hp" ]; then \
+		if [ "$$hp" = "$$common/hooks" ] || [ "$$hp" = ".git/hooks" ]; then \
+			echo "note: unsetting redundant local core.hooksPath ($$hp = git default)"; \
+			git config --unset-all core.hooksPath || true; \
+		else \
+			echo "ERROR: core.hooksPath is set to '$$hp' — pre-commit cannot install the hook."; \
+			echo "       It looks deliberate, so 'make hooks' will not change it. To use the"; \
+			echo "       pre-commit gate, unset it (scope-appropriately) then re-run 'make hooks':"; \
+			echo "         git config --unset-all core.hooksPath          # if set locally"; \
+			echo "         git config --global --unset-all core.hooksPath  # if set globally"; \
+			exit 1; \
+		fi; \
+	fi; \
+	pre-commit install; \
+	hook="$$common/hooks/pre-commit"; \
+	if [ -f "$$hook" ]; then \
+		echo "✓ commit gate active: pre-commit hook installed at $$hook"; \
+	else \
+		echo "ERROR: pre-commit hook NOT found at $$hook after install — the commit gate is NOT active."; \
+		exit 1; \
+	fi
 
 format:  ## MUTATES: auto-fix lint + format the code (the ONLY rewriting target).
 	ruff check --fix $(sources)

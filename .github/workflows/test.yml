@@ -50,6 +50,14 @@ jobs:
       - name: lint (ruff check + format --check, gating)
         run: make lint
 
+      # GATING: parity between the local pre-commit gate and CI. Runs the EXACT hooks
+      # in .pre-commit-config.yaml across all files (check-yaml/toml/merge-conflict/
+      # added-large-files + the `make lint` hook), so the hook set a contributor commits
+      # through is also enforced server-side — not just `make lint`. This is the
+      # belt-and-suspenders that guarantees a green commit hook == green CI.
+      - name: pre-commit (all hooks, all files, gating)
+        run: pre-commit run --all-files --show-diff-on-failure
+
       # ADVISORY: the broader stylistic set (unused imports, etc.). Reported into
       # the job summary as a ratchet view; the step always SUCCEEDS (green) so the
       # pre-existing nits don't show as a perpetual red ✗ that erodes signal —

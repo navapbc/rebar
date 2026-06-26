@@ -10,7 +10,11 @@ prompt/contract + output-schema seams), and the plan-review gate
 `docs/plan-review-gate.md`. When developing rebar itself — running the gates/LLM
 ops or testing config behavior — run the **repo checkout's** build, not a global
 install (a stale global build silently ignores newer config keys and may lack the
-`[agents]` extra): see `docs/local-dev-env.md`.
+`[agents]` extra): see `docs/local-dev-env.md`. **Bootstrap the env with `make install`
+(not a bare `pip`/`uv pip install`)** so the pre-commit hook is wired — that is the commit
+gate that runs `make lint` (ruff check + format-check) on every `git commit`. A bare
+editable install skips it, and lint/format errors then slip through to CI; if you are in a
+checkout set up that way, run `make hooks` once to (re)install and verify the hook.
 
 > **Record your work in rebar, not in scratch notes.** Before starting, `search`/
 > `list` for an existing ticket; if none fits, `create` one and capture the plan
