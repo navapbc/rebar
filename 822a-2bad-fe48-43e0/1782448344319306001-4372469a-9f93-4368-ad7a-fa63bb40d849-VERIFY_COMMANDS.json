@@ -1,1 +1,0 @@
-{"author":"Iso Tester","data":{"verify_commands":[{"command":"python -m pytest tests/integration/rebar_reconciler/test_roundtrip.py -q","dd_id":"DD1","dd_text":"hermetic bidirectional round-trip passes"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1782448344319306001,"uuid":"4372469a-9f93-4368-ad7a-fa63bb40d849"}
