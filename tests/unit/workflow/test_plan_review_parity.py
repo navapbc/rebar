@@ -135,12 +135,25 @@ def _terminal_verdict(rec: _Rec) -> dict | None:
 
 
 # ── the canonical (normalized) planned trace ──────────────────────────────────────
+# Both capture seams name the verify call-mode in different vocabularies (the bespoke
+# `rebar.llm.Runner` echoes "agent"/"1-shot"; the engine `AgentStepRunner` reads the
+# prompt's raw `execution_mode` "agentic"/"single_turn"). Normalize both to one canon so
+# the captured call-mode is comparable.
+_VERIFY_MODE_CANON = {
+    "agent": "agentic",
+    "agentic": "agentic",
+    "1-shot": "single_turn",
+    "single_turn": "single_turn",
+}
+
+
 @dataclass(frozen=True)
 class PlannedTrace:
     finders: tuple  # sorted (role, criteria, call_mode, intended_model)
     verify_present: bool
     coach_present: bool
     det: tuple  # sorted (det_check_id, status) — the DET-floor coverage
+    verify_modes: tuple  # sorted unique canonical verify call-modes ("agentic"/"single_turn")
 
 
 def _canonical(
@@ -163,7 +176,15 @@ def _canonical(
     coach_present = "coach" in roles or "plan-review-coach" in prompts
     det_map = ((verdict or {}).get("coverage") or {}).get("det") or {}
     det = tuple(sorted((k, v.get("status")) for k, v in det_map.items()))
-    return PlannedTrace(finders, verify_present, coach_present, det)
+    # The verify step's call-mode, captured from whichever seam carried it (bespoke runner
+    # role "verify", or the workflow verifier PROMPT step) and canonicalized.
+    verify_raw = [e["call_mode"] for e in runner_trace if e.get("role") == "verify"] + [
+        e["call_mode"] for e in agent_trace if e.get("prompt") == "plan-review-verifier"
+    ]
+    verify_modes = tuple(
+        sorted({_VERIFY_MODE_CANON.get(m, m) for m in verify_raw if m is not None})
+    )
+    return PlannedTrace(finders, verify_present, coach_present, det, verify_modes)
 
 
 # ── the two offline runs ───────────────────────────────────────────────────────────
@@ -178,10 +199,11 @@ def _run_bespoke(scn: Scenario, monkeypatch) -> tuple[PlannedTrace, dict]:
     return _canonical(tracer.trace, [], verdict), verdict
 
 
-def _run_workflow(scn: Scenario, monkeypatch) -> tuple[PlannedTrace, dict]:
+def _run_workflow(scn: Scenario, monkeypatch) -> tuple[PlannedTrace, dict, _Rec]:
     """The B2 workflow path: a tracing `rebar.llm.Runner` injected into the
     `ProductionBatchRunner` (finders) + a `PlannedTraceRunner` at the engine
-    `AgentStepRunner` seam (verify/coach)."""
+    `AgentStepRunner` seam (verify/coach). Returns the recorder too, so the journaled
+    finders `batch_plan` (which carries the budget/shed coverage) can be inspected."""
     scn.install(monkeypatch)
     finder = TracingFakeRunner()
     agent = PlannedTraceRunner(inner=_CannedAgent())
@@ -197,7 +219,17 @@ def _run_workflow(scn: Scenario, monkeypatch) -> tuple[PlannedTrace, dict]:
     )
     assert res.status == "succeeded", res.error
     verdict = _terminal_verdict(rec)
-    return _canonical(finder.trace, agent.trace, verdict), verdict
+    return _canonical(finder.trace, agent.trace, verdict), verdict, rec
+
+
+def _workflow_batch_plan(rec: _Rec) -> dict | None:
+    """The journaled finders `batch_plan` (the opaque budget/shed/ladder coverage the
+    `ProductionBatchRunner` produced) from the recorder, or None if absent."""
+    for v in rec.store.values():
+        out = v.get("outputs") or {}
+        if isinstance(out.get("batch_plan"), dict):
+            return out["batch_plan"]
+    return None
 
 
 _CORPUS = corpus()
@@ -207,7 +239,7 @@ _IDS = [s.name for s in _CORPUS]
 @pytest.mark.parametrize("scn", _CORPUS, ids=_IDS)
 def test_planned_trace_parity(scn: Scenario, monkeypatch):
     b_trace, b_verdict = _run_bespoke(scn, monkeypatch)
-    w_trace, w_verdict = _run_workflow(scn, monkeypatch)
+    w_trace, w_verdict, _ = _run_workflow(scn, monkeypatch)
 
     # The verdict string agrees on every scenario (a sanity floor under the trace parity).
     assert b_verdict["verdict"] == scn.expected_verdict, b_verdict
@@ -228,6 +260,25 @@ def test_planned_trace_parity(scn: Scenario, monkeypatch):
         # verify/coach MODEL is a documented seam difference, not pinned here).
         assert b_trace.verify_present and w_trace.verify_present, scn.name
         assert b_trace.coach_present and w_trace.coach_present, scn.name
+
+        # Pin the Pass-2 verify CALL-MODE (close the presence-only blind spot). The bespoke
+        # path chooses it DYNAMICALLY — `pass2_verify(..., agentic=grounded)` is agentic iff a
+        # code-grounded finding survives routing/shed — so assert it matches the scenario's
+        # expectation (a regression flipping that flag would fail here). The WORKFLOW verify
+        # step is a plain prompt step whose `execution_mode` is STATIC front-matter
+        # (single_turn); the engine resolves it from the prompt, so it CANNOT reflect the
+        # dynamic grounding decision without a production change. We therefore DOCUMENT the
+        # divergence: assert the workflow side equals its declared static mode rather than
+        # cross-asserting equality with the bespoke (dynamic) side.
+        if scn.expected_verify_agentic is not None:
+            assert ("agentic" in b_trace.verify_modes) == scn.expected_verify_agentic, (
+                f"{scn.name}: bespoke verify call-mode {b_trace.verify_modes} disagrees with "
+                f"expected agentic={scn.expected_verify_agentic}"
+            )
+        assert w_trace.verify_modes == ("single_turn",), (
+            f"{scn.name}: workflow verify step is statically single_turn (prompt front-matter); "
+            f"got {w_trace.verify_modes}"
+        )
 
     elif scn.kind == "block_divergent":
         # The documented B2 divergence: the WORKFLOW short-circuits with NO LLM call;
@@ -258,6 +309,92 @@ def _finder_diff(scn: Scenario, b: PlannedTrace, w: PlannedTrace) -> str:
     )
 
 
+# ── corpus DIVERSITY: the scenarios route to genuinely DIFFERENT criteria sets ────
+# Goldens captured from `orchestrator.route_criteria` over the production routing index.
+# They are intentionally FULL sets (the strongest anti-homogenization assertion): a
+# `route_criteria` regression that collapses ticket shapes to one criteria set fails here.
+# If the production routing legitimately changes, update these goldens.
+_GOLDEN_LEAF = frozenset(
+    {"COH", "E1", "E2", "E3", "E5", "F1", "F4", "G5", "G6",
+     "T1", "T10", "T11", "T2", "T3", "T4", "T5e", "T6", "T8", "T9"}
+)  # fmt: skip
+_GOLDEN_OVERLAY_OFF = frozenset(
+    {"A1", "COH", "E1", "E2", "E3", "E4", "E5", "E6", "F1", "F4", "G1G2", "G5", "G6",
+     "T1", "T10", "T11", "T2", "T3", "T4", "T5b", "T5c", "T5e", "T6", "T8", "T9"}
+)  # fmt: skip
+
+
+def _routed_ids(scn: Scenario, monkeypatch) -> frozenset[str]:
+    """The finder-criteria set `route_criteria` selects for a scenario (single + agent
+    tiers, ISF excluded as it is fed the linked session log, not a rubric chunk)."""
+    scn.install(monkeypatch)
+    ctx = orchestrator.assemble_context(scn.ticket_id, repo_root=None)
+    single, agent = orchestrator.route_criteria(ctx)
+    return frozenset(c["id"] for c in single + agent)
+
+
+def test_corpus_routes_diverse_criteria(monkeypatch):
+    """Parity is only meaningful if the corpus genuinely SPANS distinct routing. Without
+    this, a `route_criteria` regression that homogenized every ticket to ONE criteria set
+    would keep the equality-based parity assertions green (both paths would simply agree on
+    the wrong, collapsed set). These assertions FAIL on such a regression."""
+    routes = {}
+    for scn in _CORPUS:
+        if scn.kind != "parity":
+            continue
+        with monkeypatch.context() as m:
+            routes[scn.name] = _routed_ids(scn, m)
+
+    # (1) The corpus produces at least THREE distinct finder-criteria sets.
+    distinct = set(routes.values())
+    assert len(distinct) >= 3, f"corpus routing collapsed to {len(distinct)} set(s): {routes}"
+
+    # (2) The overlay is ADDITIVE: overlay_on (a perf task that fires the T5a overlay) routes
+    # a STRICT SUPERSET of overlay_off (an otherwise-identical clean task) — exactly +T5a.
+    assert routes["overlay_off"] < routes["overlay_on"], (
+        f"overlay_on must strictly contain overlay_off\n  on ={sorted(routes['overlay_on'])}"
+        f"\n  off={sorted(routes['overlay_off'])}"
+    )
+    assert routes["overlay_on"] - routes["overlay_off"] == {"T5a"}, (
+        routes["overlay_on"] - routes["overlay_off"]
+    )
+
+    # (3) Per-scenario GOLDENS (spot-check 2 scenarios) — the exact expected criteria sets.
+    assert routes["leaf_story"] == _GOLDEN_LEAF, sorted(routes["leaf_story"] ^ _GOLDEN_LEAF)
+    assert routes["overlay_off"] == _GOLDEN_OVERLAY_OFF, sorted(
+        routes["overlay_off"] ^ _GOLDEN_OVERLAY_OFF
+    )
+
+    # (4) Container criteria (G3/G4) route ONLY where there are children — present for the
+    # epic, absent for a leaf story (a second axis of routing diversity).
+    assert {"G3", "G4"} <= routes["container_epic"], sorted(routes["container_epic"])
+    assert not ({"G3", "G4"} & routes["leaf_story"]), sorted(routes["leaf_story"])
+
+
+# ── budget shed: the cfg-sensitive `shed_to_budget` path sheds IDENTICALLY on both paths ──
+def test_budget_shed_parity(monkeypatch):
+    """The corpus tickets never trip `sizing.shed_to_budget` (the cap is never exceeded), and
+    the two paths construct `cfg` differently (bespoke: the test `LLMConfig`; workflow: the
+    `ProductionBatchRunner`'s `LLMConfig.from_env()` then model override). The `budget_shed`
+    scenario forces a shed (a tiny `REBAR_PLAN_REVIEW_BUDGET`); assert BOTH differently-built
+    paths shed the SAME criteria set on that cfg-sensitive branch."""
+    scn = next(s for s in _CORPUS if s.name == "budget_shed")
+
+    _, b_verdict = _run_bespoke(scn, monkeypatch)
+    _, _, w_rec = _run_workflow(scn, monkeypatch)
+
+    b_shed = frozenset((b_verdict["coverage"].get("budget") or {}).get("shed") or [])
+    batch_plan = _workflow_batch_plan(w_rec)
+    assert batch_plan is not None, "workflow finders step did not journal a batch_plan"
+    w_shed = frozenset((batch_plan.get("budget") or {}).get("shed") or [])
+
+    assert b_shed, f"the budget_shed scenario did not actually shed anything (bespoke): {b_verdict}"
+    assert b_shed == w_shed, (
+        f"budget shed diverged between paths\n"
+        f"  bespoke ={sorted(b_shed)}\n  workflow={sorted(w_shed)}"
+    )
+
+
 # ── the harness is genuinely OFFLINE: zero real model calls ──────────────────────
 def test_corpus_is_offline_no_real_model_calls(monkeypatch):
     """Belt-and-braces: forbid the real `get_runner` / pydantic_ai path. If any scenario
@@ -285,6 +422,7 @@ def test_corpus_covers_required_shapes():
         "overlay_off",
         "code_grounded",
         "isf_linked",
+        "budget_shed",
         "missing_ac",
         "child_cycle",
         "oversize_p8",

@@ -51,10 +51,23 @@ class Scenario:
     extra_tickets: dict[str, dict[str, Any]] = field(default_factory=dict)
     window_tokens: int | None = None
     expected_verdict: str = "PASS"
+    # Env overrides installed (and auto-undone) for THIS scenario only — used by the
+    # budget-shed scenario to set a tiny REBAR_PLAN_REVIEW_BUDGET on BOTH paths so the
+    # cfg-sensitive `sizing.shed_to_budget` branch is exercised (it is otherwise never
+    # tripped by the corpus, and the two paths construct `cfg` differently).
+    env: dict[str, str] = field(default_factory=dict)
+    # The EXPECTED Pass-2 verify call-mode for the BESPOKE path: True iff verify should be
+    # agentic (any code-grounded finding survives routing/shed; pass2_verify(agentic=...)).
+    # None ⇒ no assertion. The WORKFLOW verify step is statically single_turn (a documented
+    # seam limitation — see test_plan_review_parity), so this pins the DYNAMIC bespoke side.
+    expected_verify_agentic: bool | None = None
 
     def install(self, monkeypatch) -> None:
         """Monkeypatch rebar's reads so both paths see this ticket graph (offline)."""
         import rebar
+
+        for key, val in self.env.items():
+            monkeypatch.setenv(key, val)
 
         table: dict[str, dict[str, Any]] = {
             self.ticket_id: self.state,
@@ -147,6 +160,8 @@ def corpus() -> list[Scenario]:
                 description=_GOOD_STORY
                 + "\nGround against `src/rebar/store.py` and `src/rebar/api.py`.\n",
             ),
+            # A code-grounded criterion (G6) survives routing → Pass-2 verify is AGENTIC.
+            expected_verify_agentic=True,
         ),
         Scenario(
             "isf_linked",
@@ -162,6 +177,18 @@ def corpus() -> list[Scenario]:
                     "deps": [],
                 }
             },
+        ),
+        # A leaf story under a TINY per-plan budget cap: every AGENT/overlay criterion is
+        # shed by `sizing.shed_to_budget` (exercising the cfg-sensitive shed branch the rest
+        # of the corpus never trips). Both paths must shed the SAME set; with all grounding
+        # criteria shed, the surviving findings are code-blind → bespoke verify is 1-shot.
+        Scenario(
+            "budget_shed",
+            "parity",
+            "T-budget",
+            _story("T-budget"),
+            env={"REBAR_PLAN_REVIEW_BUDGET": "0.01"},
+            expected_verify_agentic=False,
         ),
         # ── block_divergent: P1 / P5 — workflow skips LLM, bespoke runs it ──
         Scenario(
