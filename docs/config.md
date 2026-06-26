@@ -159,6 +159,17 @@ project = ""   # env JIRA_PROJECT  (the reconciler substitutes "DIG" when empty 
 
 The SECRET `JIRA_API_TOKEN` stays env-only — never a config key (see Secrets).
 
+**Env-only reconciler flag — silent-no-op canary** (not a config-file key; epic
+f89d, story 2359). `REBAR_RECONCILER_FAIL_SILENT_NOOP` (default off ⇒ **warn-first**):
+an outbound update whose sub-ops are *computed but none applied*
+(`computed > 0 && applied == 0` — the bug-3f04 link-drop mode; `computed` is counted
+**post-dedup** so an idempotent re-sync never trips it) is always surfaced on the batch
+outcome (`silent_noop` + `links_applied`/`comments_applied`/`labels_applied`) and
+`WARNING`-logged. Set to `1` to **promote** it to a hard per-mutation failure;
+promotion and reversion are a pure flag flip — no other code change. (It is a
+*total* per-kind no-op detector: a partial drop — e.g. 1 of 2 links applied — does
+not fire; the simple `applied == 0` invariant is the contract.)
+
 ### LLM framework (`llm.*`) — optional `[agents]` extra, `[tool.rebar.llm]`
 
 `llm.*` is resolved by the optional `rebar.llm` layer (`LLMConfig.from_env`), NOT

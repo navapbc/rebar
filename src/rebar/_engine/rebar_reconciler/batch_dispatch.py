@@ -335,7 +335,12 @@ def _is_illegal_transition_400(exc: Exception) -> bool:
     return "illegal" in msg or "transition" in msg
 
 
-def update_one(mutation: dict, client, comment_errors: list[str] | None = None) -> dict | None:
+def update_one(
+    mutation: dict,
+    client,
+    comment_errors: list[str] | None = None,
+    subop_applied: dict[str, int] | None = None,
+) -> dict | None:
     """Update an existing Jira issue from the mutation's key and fields.
 
     Bug 6afc-20ee-84e5-4dd5: comment sub-mutations (the ``comments`` payload)
@@ -346,6 +351,12 @@ def update_one(mutation: dict, client, comment_errors: list[str] | None = None) 
     caller can surface it in the batch outcome instead of reporting error=None.
     Passing ``None`` (the default) preserves the legacy log-only behaviour for
     callers that do not collect comment errors.
+
+    Story E (2359): when ``subop_applied`` (a dict) is provided, it is filled with
+    per-sub-op ``{labels,comments,links}_computed`` and ``..._applied`` counts so
+    the caller can surface telemetry and run the silent-no-op canary. For links,
+    ``links_computed`` counts only adds ATTEMPTED after the already-present dedup
+    skip, so an idempotent re-sync reports ``links_computed == 0`` (no false canary).
 
     F3: AcliClient.update_issue's real signature is ``update_issue(jira_key, **kwargs)``;
     the field dict must be unpacked into keyword arguments rather than passed
@@ -477,6 +488,15 @@ def update_one(mutation: dict, client, comment_errors: list[str] | None = None) 
     # doesn't accept label or comment kwargs), so they need separate
     # add_label / remove_label / add_comment calls. Failures here are
     # logged but non-fatal — the scalar update already succeeded.
+    # Story E (2359): track per-sub-op COMPUTED (what we attempt) vs APPLIED (what
+    # succeeded). "computed" for links is counted POST-DEDUP — only the adds we
+    # actually attempt after the already-present skip — so an idempotent re-sync
+    # (all links deduped) has links_computed==0 and does NOT trip the silent-no-op
+    # canary. labels/comments have no dedup, so computed == count of valid entries.
+    _labels_computed = _labels_applied = 0
+    _comments_computed = _comments_applied = 0
+    _links_computed = _links_applied = 0
+
     labels = mutation.get("labels", []) or []
     if isinstance(labels, list):
         for entry in labels:
@@ -484,13 +504,15 @@ def update_one(mutation: dict, client, comment_errors: list[str] | None = None) 
                 continue
             action = entry.get("action")
             label_name = entry.get("label", "")
-            if not label_name:
+            if not label_name or action not in ("add", "remove"):
                 continue
+            _labels_computed += 1
             try:
                 if action == "add":
                     _call_with_retry(client.add_label, issue_key, label_name)
                 elif action == "remove":
                     _call_with_retry(client.remove_label, issue_key, label_name)
+                _labels_applied += 1
             except Exception as exc:  # noqa: BLE001 — best-effort label op; non-fatal, logged to stderr
                 print(  # noqa: T201
                     f"update_one: label {action} failed for {issue_key} "
@@ -506,8 +528,10 @@ def update_one(mutation: dict, client, comment_errors: list[str] | None = None) 
             body = entry.get("body", "")
             if not body:
                 continue
+            _comments_computed += 1
             try:
                 _call_with_retry(client.add_comment, issue_key, body)
+                _comments_applied += 1
             except Exception as exc:  # noqa: BLE001 — in-band capture into comment_errors; non-fatal
                 # Bug 6afc-20ee-84e5-4dd5: non-fatal, but surface it so the batch
                 # outcome no longer reports error=None for a mutation whose
@@ -549,14 +573,30 @@ def update_one(mutation: dict, client, comment_errors: list[str] | None = None) 
                 continue
             if existing_links is not None and (link_type, to_key) in existing_links:
                 continue  # already present (either direction) — no duplicate add
+            # Counted only here — AFTER the dedup skip — so a fully-deduped mutation
+            # is computed==0 (no canary), but a genuine drop is computed>0 applied==0.
+            _links_computed += 1
             try:
                 _call_with_retry(client.set_relationship, issue_key, to_key, link_type)
+                _links_applied += 1
             except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, logged
                 print(  # noqa: T201
                     f"update_one: set_relationship failed for {issue_key} -> "
                     f"{to_key} ({link_type}): {exc!r}",
                     file=sys.stderr,
                 )
+
+    if subop_applied is not None:
+        subop_applied.update(
+            {
+                "labels_computed": _labels_computed,
+                "labels_applied": _labels_applied,
+                "comments_computed": _comments_computed,
+                "comments_applied": _comments_applied,
+                "links_computed": _links_computed,
+                "links_applied": _links_applied,
+            }
+        )
 
     return result
 
