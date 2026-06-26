@@ -601,8 +601,21 @@ def pass4_coach(
         execution_mode="single_turn",
     )
     result = runner.run(req)
+    return render_coach_notes(result.get("notes", []) or [], move_registry)
+
+
+def render_coach_notes(
+    raw_notes: list[dict[str, Any]], move_registry: dict[str, dict[str, str]]
+) -> list[dict[str, Any]]:
+    """Render the Pass-4 LLM's raw move picks ``{move_id, subject, finding_refs}`` into
+    deterministic coaching prose from each move's LOCKED template. The C1 subject
+    validator gates every note (an invalid/imperative/code-bearing subject ⇒ no
+    coaching for that finding); the LLM never authors prose. Extracted so BOTH
+    ``pass4_coach`` (its own LLM call) and the v3 workflow's ``plan_review_coach`` op
+    (the coach is the workflow's prompt step) render identically — no duplicated
+    rendering (story B2)."""
     notes: list[dict[str, Any]] = []
-    for n in result.get("notes", []) or []:
+    for n in raw_notes:
         move = move_registry.get(n.get("move_id", ""))
         subject = _validate_subject(n.get("subject", ""))
         if not move or subject is None:

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_coach_input.schema.json",
+  "title": "PlanReviewCoachInput",
+  "description": "INPUT of `plan_review_coach`: the decide op's verdict partition, the coach prompt's raw move picks (`notes`), and the coverage pieces (DET coverage + routing) + ticket id/type for the assembled plan_review_verdict.",
+  "type": "object",
+  "properties": {
+    "blocking": { "type": "array" },
+    "surfaced": { "type": "array" },
+    "overflow": { "type": "array" },
+    "indeterminate": { "type": "array" },
+    "dropped": { "type": "array" },
+    "notes": { "type": "array", "description": "The Pass-4 coach prompt's raw notes: [{move_id, subject, finding_refs}]." },
+    "det_coverage": { "type": "object", "additionalProperties": true },
+    "routing": { "type": "object", "additionalProperties": true },
+    "canonical_id": { "type": "string" },
+    "ticket_type": { "type": "string" },
+    "ticket_id": { "type": "string" }
+  },
+  "required": [],
+  "additionalProperties": true
+}

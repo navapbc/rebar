@@ -1,0 +1,150 @@
+schema_version: '3'
+name: plan-review
+description: >-
+  The plan-review gate expressed as a v3 engine workflow (epic B, story B2). It mirrors
+  rebar.llm.plan_review.orchestrator.run_review's real control flow — a deterministic
+  Layer-1 floor (P1-P9) that SHORT-CIRCUITS (an exempt ticket type, or a P1/P5/P8 DET
+  block, yields a terminal verdict with NO LLM call), then the four-pass review:
+  route_criteria assembles the INCLUDED criteria (proportionate scrutiny + overlay
+  triggering) that gate the Pass-1 finder `batch` (driven by the B1 ProductionBatchRunner),
+  one aggregate Pass-2 verify, the deterministic Pass-3 decide, and the Pass-4 affirmative
+  coach (LLM move picks rendered from locked templates). The short-circuit is a `branch`
+  (an if:-skipped step's outputs cannot be referenced), so the billable LLM steps run ONLY
+  on the precheck-passed arm. It produces a plan_review_verdict; signing is deferred to B5.
+inputs:
+  ticket_id:
+    description: The ticket whose plan is reviewed.
+    type: string
+    required: true
+steps:
+- id: precheck
+  uses: plan_review_precheck
+  with:
+    ticket_id: ${{ inputs.ticket_id }}
+- id: review
+  needs:
+  - precheck
+  branch:
+    when: ${{ steps.precheck.outputs.run_llm }}
+    then:
+    - id: assemble
+      uses: plan_review_assemble_criteria
+      with:
+        ticket_id: ${{ inputs.ticket_id }}
+    - id: finders
+      needs:
+      - assemble
+      batch:
+        prompt: plan-review-finder
+        model_ladder:
+        - claude-haiku-4-5
+        - claude-sonnet-4-6
+        - claude-opus-4-8
+        criteria:
+        - prompt: plan-review-A1
+          when: '${{ steps.assemble.outputs.include_A1 }}'
+        - prompt: plan-review-COH
+          when: '${{ steps.assemble.outputs.include_COH }}'
+        - prompt: plan-review-E1
+          when: '${{ steps.assemble.outputs.include_E1 }}'
+        - prompt: plan-review-E2
+          when: '${{ steps.assemble.outputs.include_E2 }}'
+        - prompt: plan-review-E3
+          when: '${{ steps.assemble.outputs.include_E3 }}'
+        - prompt: plan-review-E4
+          when: '${{ steps.assemble.outputs.include_E4 }}'
+        - prompt: plan-review-E5
+          when: '${{ steps.assemble.outputs.include_E5 }}'
+        - prompt: plan-review-E6
+          when: '${{ steps.assemble.outputs.include_E6 }}'
+        - prompt: plan-review-F1
+          when: '${{ steps.assemble.outputs.include_F1 }}'
+        - prompt: plan-review-F4
+          when: '${{ steps.assemble.outputs.include_F4 }}'
+        - prompt: plan-review-G1G2
+          when: '${{ steps.assemble.outputs.include_G1G2 }}'
+        - prompt: plan-review-G3
+          when: '${{ steps.assemble.outputs.include_G3 }}'
+        - prompt: plan-review-G4
+          when: '${{ steps.assemble.outputs.include_G4 }}'
+        - prompt: plan-review-G5
+          when: '${{ steps.assemble.outputs.include_G5 }}'
+        - prompt: plan-review-G6
+          when: '${{ steps.assemble.outputs.include_G6 }}'
+        - prompt: plan-review-T1
+          when: '${{ steps.assemble.outputs.include_T1 }}'
+        - prompt: plan-review-T10
+          when: '${{ steps.assemble.outputs.include_T10 }}'
+        - prompt: plan-review-T11
+          when: '${{ steps.assemble.outputs.include_T11 }}'
+        - prompt: plan-review-T12
+          when: '${{ steps.assemble.outputs.include_T12 }}'
+        - prompt: plan-review-T2
+          when: '${{ steps.assemble.outputs.include_T2 }}'
+        - prompt: plan-review-T3
+          when: '${{ steps.assemble.outputs.include_T3 }}'
+        - prompt: plan-review-T4
+          when: '${{ steps.assemble.outputs.include_T4 }}'
+        - prompt: plan-review-T5a
+          when: '${{ steps.assemble.outputs.include_T5a }}'
+        - prompt: plan-review-T5b
+          when: '${{ steps.assemble.outputs.include_T5b }}'
+        - prompt: plan-review-T5c
+          when: '${{ steps.assemble.outputs.include_T5c }}'
+        - prompt: plan-review-T5d
+          when: '${{ steps.assemble.outputs.include_T5d }}'
+        - prompt: plan-review-T5e
+          when: '${{ steps.assemble.outputs.include_T5e }}'
+        - prompt: plan-review-T6
+          when: '${{ steps.assemble.outputs.include_T6 }}'
+        - prompt: plan-review-T7
+          when: '${{ steps.assemble.outputs.include_T7 }}'
+        - prompt: plan-review-T8
+          when: '${{ steps.assemble.outputs.include_T8 }}'
+        - prompt: plan-review-T9
+          when: '${{ steps.assemble.outputs.include_T9 }}'
+    - id: verify
+      needs:
+      - finders
+      prompt: plan-review-verifier
+      mode: structured
+      output_schema: plan_review_verification
+      with:
+        findings: ${{ steps.finders.outputs.findings }}
+    - id: decide
+      needs:
+      - verify
+      uses: plan_review_decide
+      with:
+        findings: ${{ steps.finders.outputs.findings }}
+        verifications: ${{ steps.verify.outputs.verifications }}
+        det_blocking: ${{ steps.precheck.outputs.det_blocking }}
+        det_advisory: ${{ steps.precheck.outputs.det_advisory }}
+    - id: coach_notes
+      needs:
+      - decide
+      prompt: plan-review-coach
+      mode: structured
+      output_schema: plan_review_coach
+      with:
+        surviving: ${{ steps.decide.outputs.surfaced }}
+    - id: coach
+      needs:
+      - coach_notes
+      uses: plan_review_coach
+      with:
+        blocking: ${{ steps.decide.outputs.blocking }}
+        surfaced: ${{ steps.decide.outputs.surfaced }}
+        overflow: ${{ steps.decide.outputs.overflow }}
+        indeterminate: ${{ steps.decide.outputs.indeterminate }}
+        dropped: ${{ steps.decide.outputs.dropped }}
+        notes: ${{ steps.coach_notes.outputs.notes }}
+        det_coverage: ${{ steps.precheck.outputs.det_coverage }}
+        routing: ${{ steps.assemble.outputs.routing }}
+        canonical_id: ${{ steps.precheck.outputs.canonical_id }}
+        ticket_type: ${{ steps.precheck.outputs.ticket_type }}
+    else:
+    - id: passthrough
+      uses: plan_review_passthrough
+      with:
+        verdict: ${{ steps.precheck.outputs.verdict }}

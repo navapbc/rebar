@@ -192,6 +192,10 @@ CONTRACT_SCHEMAS: frozenset[str] = frozenset(
         "set_fields",
         # epic B: the completion-gate precheck op (input + output pair).
         "completion_precheck",
+        # epic B / story B2: the plan-review gate ops with an <op>_input + <op>_output pair.
+        "plan_review_precheck",
+        "plan_review_assemble_criteria",
+        "plan_review_decide",
     )
     for io in ("input", "output")
 ) | {
@@ -202,6 +206,10 @@ CONTRACT_SCHEMAS: frozenset[str] = frozenset(
     # <op>_output pair): only their INPUT contracts are authored here.
     "completion_reconcile_input",
     "completion_passthrough_input",
+    # story B2: the plan-review ops whose OUTPUT is the existing plan_review_verdict schema
+    # (not an <op>_output pair): only their INPUT contracts are authored here.
+    "plan_review_coach_input",
+    "plan_review_passthrough_input",
 }
 
 # The authoritative map of every structured (--output json / always-JSON) output

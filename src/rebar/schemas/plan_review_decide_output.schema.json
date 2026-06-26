@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_decide_output.schema.json",
+  "title": "PlanReviewDecideOutput",
+  "description": "OUTPUT of `plan_review_decide`: the verdict partition after Pass-3 + DET merge + advisory cap. The blocking set is exempt from the cap; advisory is split at the cap into surfaced/overflow.",
+  "type": "object",
+  "properties": {
+    "blocking": { "type": "array", "description": "Blocking findings (cap-exempt)." },
+    "surfaced": { "type": "array", "description": "Surfaced advisory findings (top-N by priority) — coached by Pass-4." },
+    "overflow": { "type": "array", "description": "Advisory findings beyond the cap (sidecar-only)." },
+    "indeterminate": { "type": "array", "description": "Unresolved findings (budget-shed / no verification)." },
+    "dropped": { "type": "array", "description": "Pass-3 dropped findings (low validity / citation veto)." }
+  },
+  "required": ["blocking", "surfaced", "overflow", "indeterminate", "dropped"],
+  "additionalProperties": true
+}

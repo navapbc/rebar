@@ -223,59 +223,10 @@ def run_review(
             coverage["llm_unavailable"] = True
     coverage.setdefault("llm_ran", llm_ran)
 
-    # ── assemble: ids, decisions already attached; merge DET findings ─────────────
-    blocking: list[dict[str, Any]] = []
-    advisory: list[dict[str, Any]] = []
-    dropped: list[dict[str, Any]] = []
-    indeterminate: list[dict[str, Any]] = []
-
-    for f in det_blocks:
-        f = {
-            **f,
-            "id": mint_finding_id(f),
-            "decision": "block",
-            "severity": "critical",
-            "priority": 1.0,
-            "validity": 1.0,
-            "impact": 1.0,
-            "tier": "DET",
-        }
-        blocking.append(f)
-    for f in det_advisories:
-        f = {
-            **f,
-            "id": mint_finding_id(f),
-            "decision": "advisory",
-            "severity": "minor",
-            "priority": 0.4,
-            "validity": 1.0,
-            "impact": 0.4,
-            "tier": "DET",
-        }
-        advisory.append(f)
-
-    for f in findings:
-        f = {**f, "id": mint_finding_id(f)}
-        d = f.get("decision")
-        if d == "block":
-            blocking.append(f)
-        elif d == "advisory":
-            advisory.append(f)
-        elif d == "indeterminate":
-            indeterminate.append(f)
-        else:
-            dropped.append(f)
-
-    # ── cap (advisory only; blocking EXEMPT) ──────────────────────────────────────
-    # Guard the load-bearing invariant: the cap must NEVER see a blocking finding
-    # (all blocking findings are returned regardless of N). A refactor that leaked
-    # one into `advisory` would otherwise silently drop a block — fail loud instead.
-    assert not any(f.get("decision") == "block" for f in advisory), (
-        "blocking finding leaked into the advisory cap"
-    )
-    advisory.sort(key=lambda f: -float(f.get("priority", 0.0)))
-    surfaced = advisory[:advisory_cap]
-    overflow = advisory[advisory_cap:]
+    # ── assemble: ids, decisions already attached; merge DET findings + cap ────────
+    parts = partition_findings(det_blocks, det_advisories, findings, advisory_cap=advisory_cap)
+    surfaced = parts["surfaced"]
+    overflow = parts["overflow"]
 
     # ── Pass 4 coach over the surviving advisory findings ─────────────────────────
     coaching: list[dict[str, Any]] = []
@@ -294,6 +245,118 @@ def run_review(
             logger.warning("pass-4 coaching failed; verdict emitted without it", exc_info=True)
             coverage["coach_error"] = str(exc)
 
+    # Per-pass latency + a cost proxy (LLM-call count) for passive refinement (db7b AC5).
+    coverage["metrics"] = {
+        "det_ms": det_ms,
+        "llm_ms": llm_ms,
+        "total_ms": round((time.monotonic() - _t_total) * 1000, 1),
+        "llm_calls": int(coverage.get("chunks", 0))
+        + len(coverage.get("routing", {}).get("agent_tier", []))
+        + (1 if llm_ran and (surfaced or overflow) else 0),
+        "claim_path": "no-llm/no-network (structural; the fast claim check is a local HMAC verify)",
+    }
+    return finalize_verdict(
+        ctx,
+        parts,
+        coaching=coaching,
+        coverage=coverage,
+        runner_name=(runner.name if runner else cfg.runner),
+        model=cfg.model,
+    )
+
+
+# ── verdict assembly (the SINGLE source of truth, shared by run_review + the v3 ───
+#    plan-review workflow's `uses` ops — story B2; NO duplicated assembly logic) ───
+def partition_findings(
+    det_blocks: list[dict[str, Any]],
+    det_advisories: list[dict[str, Any]],
+    llm_findings: list[dict[str, Any]],
+    *,
+    advisory_cap: int = DEFAULT_ADVISORY_CAP,
+) -> dict[str, list[dict[str, Any]]]:
+    """Merge DET-floor + decided-LLM findings into the verdict partition and apply the
+    advisory cap. Mints each finding's stable ``id``. Returns
+    ``{blocking, surfaced, overflow, indeterminate, dropped}`` — blocking findings are
+    EXEMPT from the cap (all returned); advisory is sorted by priority then split at the
+    cap. The deterministic core both the bespoke ``run_review`` and the workflow's
+    ``plan_review_decide`` op call (no duplicated partition logic)."""
+    blocking: list[dict[str, Any]] = []
+    advisory: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    indeterminate: list[dict[str, Any]] = []
+
+    for f in det_blocks:
+        blocking.append(
+            {
+                **f,
+                "id": mint_finding_id(f),
+                "decision": "block",
+                "severity": "critical",
+                "priority": 1.0,
+                "validity": 1.0,
+                "impact": 1.0,
+                "tier": "DET",
+            }
+        )
+    for f in det_advisories:
+        advisory.append(
+            {
+                **f,
+                "id": mint_finding_id(f),
+                "decision": "advisory",
+                "severity": "minor",
+                "priority": 0.4,
+                "validity": 1.0,
+                "impact": 0.4,
+                "tier": "DET",
+            }
+        )
+    for f in llm_findings:
+        f = {**f, "id": mint_finding_id(f)}
+        d = f.get("decision")
+        if d == "block":
+            blocking.append(f)
+        elif d == "advisory":
+            advisory.append(f)
+        elif d == "indeterminate":
+            indeterminate.append(f)
+        else:
+            dropped.append(f)
+
+    # Guard the load-bearing invariant: the cap must NEVER see a blocking finding
+    # (all blocking findings are returned regardless of N). A refactor that leaked
+    # one into `advisory` would otherwise silently drop a block — fail loud instead.
+    assert not any(f.get("decision") == "block" for f in advisory), (
+        "blocking finding leaked into the advisory cap"
+    )
+    advisory.sort(key=lambda f: -float(f.get("priority", 0.0)))
+    return {
+        "blocking": blocking,
+        "surfaced": advisory[:advisory_cap],
+        "overflow": advisory[advisory_cap:],
+        "indeterminate": indeterminate,
+        "dropped": dropped,
+    }
+
+
+def finalize_verdict(
+    ctx: PlanContext,
+    parts: dict[str, list[dict[str, Any]]],
+    *,
+    coaching: list[dict[str, Any]],
+    coverage: dict[str, Any],
+    runner_name: str | None,
+    model: str | None,
+) -> dict[str, Any]:
+    """Assemble the terminal ``plan_review_verdict`` from a partition + coaching +
+    coverage. Computes the verdict string (a DET block ⇒ BLOCK; an unavailable/
+    unresolved LLM tier ⇒ INDETERMINATE; else PASS), records the counts on coverage,
+    and returns the verdict dict. Shared by ``run_review`` and the workflow ops."""
+    blocking = parts["blocking"]
+    surfaced = parts["surfaced"]
+    overflow = parts["overflow"]
+    indeterminate = parts["indeterminate"]
+    dropped = parts["dropped"]
     # A DET block is still an actionable BLOCK even with no LLM. Otherwise, a SYSTEMIC
     # LLM-tier failure (llm_unavailable) makes the review INDETERMINATE — never a hollow
     # PASS — so it is not signed (fuel-posse-ball). A genuine unsupported-stack abstain
@@ -311,16 +374,6 @@ def run_review(
         "dropped": len(dropped),
         "indeterminate": len(indeterminate),
     }
-    # Per-pass latency + a cost proxy (LLM-call count) for passive refinement (db7b AC5).
-    coverage["metrics"] = {
-        "det_ms": det_ms,
-        "llm_ms": llm_ms,
-        "total_ms": round((time.monotonic() - _t_total) * 1000, 1),
-        "llm_calls": int(coverage.get("chunks", 0))
-        + len(coverage.get("routing", {}).get("agent_tier", []))
-        + (1 if llm_ran and (surfaced or overflow) else 0),
-        "claim_path": "no-llm/no-network (structural; the fast claim check is a local HMAC verify)",
-    }
     return {
         "verdict": verdict,
         "ticket_id": ctx.ticket_id,
@@ -332,8 +385,8 @@ def run_review(
         "indeterminate": indeterminate,
         "dropped": dropped,  # sidecar-only
         "coverage": coverage,
-        "runner": (runner.name if runner else cfg.runner),
-        "model": cfg.model,
+        "runner": runner_name,
+        "model": model,
     }
 
 
@@ -454,9 +507,20 @@ def _run_passes(
     v_cfg = passes.verifier_cfg(cfg)
     verifs = passes.pass2_verify(runner, v_cfg, plan=plan, findings=findings, agentic=grounded)
 
-    # Pass 3: deterministic decision + thresholds per criterion.
+    # Pass 3: deterministic decision per finding (shared with the workflow's decide op).
+    return [*too_big, *shed_indeterminate, *pass3_over_findings(findings, verifs)]
+
+
+def pass3_over_findings(
+    findings: list[dict[str, Any]], verifs: dict[int, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Deterministic Pass-3 over the verifiable findings: per-criterion thresholds +
+    ``pass3_decide`` keyed by each finding's index into ``findings`` (matching the
+    ``{index: verification}`` map Pass-2 produced). The shared decision core both the
+    bespoke ``_run_passes`` and the workflow's ``plan_review_decide`` op call — the
+    too_big/shed routing is the caller's (it differs by index-domain)."""
     crit_by_id = registry.by_id()
-    decided: list[dict[str, Any]] = [*too_big, *shed_indeterminate]
+    decided: list[dict[str, Any]] = []
     for i, f in enumerate(findings):
         thresholds = [
             float(crit_by_id.get(c, {}).get("block_threshold", passes.DEFAULT_BLOCK_THRESHOLD))
