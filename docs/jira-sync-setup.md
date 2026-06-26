@@ -196,6 +196,60 @@ without breaking durable sync) and **sufficient** (nothing else is required).
 
 ---
 
+## Sync semantics & limitations
+
+What round-trips, and where Jira's data model bounds it.
+
+| Relationship / field | Local → Jira | Jira → Local |
+|----------------------|:-:|:-:|
+| Title, description, status, priority, assignee | ✓ | ✓ |
+| Comments | ✓ | ✓ |
+| Labels ↔ tags | ✓ | ✓ |
+| Issue links (`blocks`/`depends_on` ↔ Blocks, `relates_to` ↔ Relates) | ✓ | ✓ |
+| Parent — **only when the parent is an Epic** | ✓ | ✓ |
+| Parent — when the parent is a non-Epic (Story/Task/Bug) | **excluded** | n/a |
+
+### The parent-hierarchy limitation (multi-level trees do not fully round-trip)
+
+rebar's local hierarchy (`parent_id`) supports **arbitrary depth** —
+`epic → story → task → …`. Jira's hierarchy does **not**: on a standard project
+the only parent edge between issue types is **Epic → (Story/Task/Bug)**, with
+sub-tasks as the one level below. A Story (or Task) **cannot** be the parent of a
+Task — Jira rejects it with `HTTP 400`.
+
+Because of this, the reconciler **only syncs a parent edge whose parent is an
+Epic** (ticket `8b25`; `outbound_differ._map_local_to_jira_fields` suppresses a
+parent diff when the resolved parent's `ticket_type != "epic"`, and logs the
+exclusion). Concretely, for a local chain `epic E → story M → task L`:
+
+- `M.parent = E` (parent is an Epic) **syncs** in both directions.
+- `L.parent = M` (parent is a Story) is **not synced** — it is suppressed
+  outbound (and Jira would reject it anyway). In Jira, `L` appears **unparented**.
+- The **full chain is always preserved in the local store** — only the Jira
+  projection is flattened to its Epic-parent edges.
+
+So a deep local tree shows up in Jira as a set of Epic→child edges, with the
+deeper (non-Epic-parented) levels simply absent on the Jira side. This is
+consistent and non-destructive: no churn, and the local hierarchy is never
+altered by the exclusion.
+
+### Why the deeper edge is dropped, not "promoted to the nearest Epic"
+
+A tempting fix is to promote `L`'s parent to its nearest **Epic** ancestor (`E`)
+on outbound, so `L` at least rolls up under the Epic in Jira. We deliberately do
+**not** do this, because it breaks the inbound direction: once Jira shows
+`L.parent = E`, the next inbound pass would mirror that back and **overwrite the
+real local parent** `L.parent = M` with `E` — silently corrupting the local
+hierarchy (and then oscillating against the outbound exclusion every pass). Since
+parent sync is bidirectional, any outbound parent we write must be a parent we are
+willing to accept back inbound — and `E` is not the true local parent of `L`.
+Dropping the un-representable edge keeps the two directions consistent; promoting
+it would not. (If Jira-side roll-up is ever needed, it must be carried by a
+mechanism that is **not** mirrored back as `parent_id` — e.g. a separate label or
+a one-way projection — not by writing a false parent.)
+
+---
+
 ## Rollback / disable
 
 - **Pause sync:** disable *Reconcile Bridge* in the Actions UI (or delete its
