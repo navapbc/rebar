@@ -84,7 +84,7 @@ const selectAndExpand = async (id, groupRe) => {
 };
 
 // ── 1. RENDER ──────────────────────────────────────────────────────────────────
-await selectAndExpand(ids.batch, "rebar|batch criteria");
+await selectAndExpand(ids.batch, "step behavior|rebar|batch criteria");
 await page.waitForSelector("#bio-properties-panel-rebar-batch-finder", {
   state: "visible",
   timeout: 5000,
@@ -92,9 +92,8 @@ await page.waitForSelector("#bio-properties-panel-rebar-batch-finder", {
 const finderValue = await page.inputValue(
   "#bio-properties-panel-rebar-batch-finder",
 );
-const ladderVisible = !!(await page.$(
-  "#bio-properties-panel-rebar-batch-ladder",
-));
+// model_ladder is now an add/remove LIST group (B-UX item 18), not a single comma field.
+const ladderVisible = !!(await page.$('[data-group-id="group-rebar-ladder"]'));
 const budgetVisible = !!(await page.$(
   "#bio-properties-panel-rebar-batch-budget",
 ));
@@ -118,14 +117,13 @@ const whenValue = await page.inputValue(
 );
 
 // ── 2. EDIT criterion-0's prompt ─────────────────────────────────────────────────
+// The prompt field is now a library-backed SELECT (B-UX): pick an existing library id.
 await page.click(
   '[data-entry-id="criterion-0"] .bio-properties-panel-collapsible-entry-header',
 );
 await page.waitForTimeout(200);
 const PROMPT0 = "#bio-properties-panel-criterion-0-prompt";
-await page.fill(PROMPT0, "ticket-quality");
-await page.dispatchEvent(PROMPT0, "input");
-await page.locator(PROMPT0).blur();
+await page.selectOption(PROMPT0, "ticket-quality");
 await page.waitForTimeout(300);
 const configAfterEdit = await readConfig(ids.batch);
 
@@ -149,7 +147,7 @@ const configAfterRemove = await readConfig(ids.batch);
 const itemCountAfterRemove = await criteriaItemCount();
 
 // ── 5. OVERLAY `if:` on a prompt step + CONVERT agent → batch ─────────────────────
-await selectAndExpand(ids.overlay, "rebar");
+await selectAndExpand(ids.overlay, "step behavior|rebar");
 await page.waitForTimeout(200);
 const ifFieldPresent = !!(await page.$("#bio-properties-panel-rebar-if"));
 const ifValue = ifFieldPresent
@@ -170,7 +168,7 @@ await page.waitForTimeout(300);
 const overlayConfigAfterRevert = await readConfig(ids.overlay);
 
 // Re-select the batch step before saving (so the SAVE persists the batch criterion edit).
-await selectAndExpand(ids.batch, "rebar");
+await selectAndExpand(ids.batch, "step behavior|rebar");
 
 // ── 6. SAVE the edited batch to the IR ───────────────────────────────────────────
 await page.click("#save");
