@@ -65,9 +65,15 @@ def test_enumerate_packaged_includes_reviewers_and_criteria() -> None:
             "description",
             "inputs",
             "outputs",
+            "execution_mode",
+            "category",
             "is_overlay",
             "source",
         }
+    # the new authoring/round-trip fields B-UX needs
+    assert g6["category"] == "plan-review-criterion"
+    assert g6["execution_mode"] in {"single_turn", "agentic"}
+    assert by_id["ticket-quality"]["category"] == "review"
 
 
 def test_enumerate_covers_user_dir_entries(tmp_path: Path) -> None:
@@ -195,3 +201,51 @@ def test_create_invalid_execution_mode_raises(tmp_path: Path) -> None:
     bad = "---\ntitle: T\ndescription: d\nexecution_mode: turbo\n---\nbody\n"
     with pytest.raises(LibraryWriteError):
         create_prompt("badmode", bad, repo_root=str(tmp_path))
+
+
+# ── cache coherence: a user override is visible through the registry after write ──
+
+
+def test_user_override_visible_through_registry_after_create(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The registry's `load_criteria()` reads each criterion's prompt from
+    # `config.repo_root()` (NOT the `repo_root=` passed to create_prompt), so point
+    # both at tmp_path via REBAR_ROOT and prime the lru_cache before authoring.
+    monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
+    # Defensive: drop any cache another test warmed, then prime fresh under tmp_path.
+    registry.load_criteria.cache_clear()
+    registry._routing_index.cache_clear()
+    baseline = registry.by_id()
+    assert baseline["G6"]["name"] != "DISTINCTIVE OVERRIDE NAME"  # packaged default
+
+    override = (
+        "---\ntitle: DISTINCTIVE OVERRIDE NAME\n"
+        "description: A user override of canonical G6.\n"
+        "execution_mode: agentic\ncategory: plan-review-criterion\n"
+        "dimension: approach-soundness\n"
+        "---\nDISTINCTIVE OVERRIDE SCENARIO: judge the bespoke thing.\n"
+    )
+    create_prompt("plan-review-G6", override, repo_root=str(tmp_path))
+
+    # create_prompt's _invalidate_caches() cleared the registry caches; by_id() now
+    # re-reads the override from config.repo_root() == tmp_path.
+    after = registry.by_id()
+    assert after["G6"]["name"] == "DISTINCTIVE OVERRIDE NAME"
+    assert "DISTINCTIVE OVERRIDE SCENARIO" in after["G6"]["scenario"]
+
+
+# ── CRLF tolerance on the write path ─────────────────────────────────────────────
+
+
+def test_create_tolerates_crlf_input(tmp_path: Path) -> None:
+    crlf = (
+        "---\r\ntitle: CRLF Prompt\r\ndescription: authored on Windows.\r\n"
+        "category: transform\r\n---\r\nBody line one.\r\nBody line two.\r\n"
+    )
+    path = create_prompt("crlf-prompt", crlf, repo_root=str(tmp_path))
+    stored = path.read_text(encoding="utf-8")
+    assert "\r" not in stored  # body re-emitted LF-canonical
+    p = prompts.get_prompt("crlf-prompt", repo_root=str(tmp_path))
+    assert p.description == "authored on Windows."
+    assert p.text == "Body line one.\nBody line two.\n"

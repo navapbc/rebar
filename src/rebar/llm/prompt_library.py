@@ -132,6 +132,8 @@ def _entry_view(prompt_id: str, prompt, *, source: str) -> dict:
         "description": prompt.description,
         "inputs": prompt.inputs,
         "outputs": prompt.outputs,
+        "execution_mode": prompt.execution_mode,
+        "category": prompt.category,
         "is_overlay": _is_overlay_criterion(prompt_id) if is_criterion else False,
         "source": source,
     }
@@ -140,8 +142,9 @@ def _entry_view(prompt_id: str, prompt, *, source: str) -> dict:
 def enumerate_library(*, repo_root=None) -> list[dict]:
     """The authorable list of prompts + criteria for the editor's pickers.
 
-    Returns one ``{id, kind, title, description, inputs, outputs, is_overlay,
-    source}`` entry per BASE prompt across BOTH the packaged reviewers and (when
+    Returns one ``{id, kind, title, description, inputs, outputs, execution_mode,
+    category, is_overlay, source}`` entry per BASE prompt across BOTH the packaged
+    reviewers and (when
     ``repo_root`` is given) the ``.rebar/prompts`` user entries. A user entry that
     shares an id with a packaged one wins (``source == "user"``), mirroring
     :func:`get_prompt` resolution. ``kind`` is ``"criterion"`` for
@@ -165,7 +168,11 @@ def enumerate_library(*, repo_root=None) -> list[dict]:
 
 def enumerate_criteria(*, repo_root=None) -> list[dict]:
     """The criteria-only view over :func:`enumerate_library` (a thin convenience for
-    the editor's criteria picker)."""
+    the editor's criteria picker).
+
+    Caveat: a user-authored criterion is ENUMERABLE here but is NOT executed by the
+    plan-review gate unless it is in the canonical registry AND ``criteria_routing.json``
+    (routing derivation is out of scope for this write/enumerate layer)."""
     return [e for e in enumerate_library(repo_root=repo_root) if e["kind"] == "criterion"]
 
 
@@ -187,6 +194,12 @@ def _validate_and_canonicalize(text: str) -> str:
     or a newer ``schema_version`` — via :func:`_split_front_matter_raw`) and
     :class:`LibraryWriteError` for missing required front-matter keys or an invalid
     ``execution_mode``."""
+    # Fold CRLF/CR → LF before the front-matter check, matching `parse_front_matter`'s
+    # normalization. `_split_front_matter_raw` (byte-preserving) does NOT fold, so a
+    # CRLF-authored `.md` would otherwise fail the `\n`-anchored fence as "missing
+    # front-matter"; `write_front_matter` re-emits the body LF-canonical regardless.
+    if "\r" in text:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
     meta, body = _split_front_matter_raw(text)
     if not meta:
         raise LibraryWriteError(

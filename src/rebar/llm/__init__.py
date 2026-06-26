@@ -43,6 +43,15 @@ from rebar.llm.errors import (
 from rebar.llm.findings import build_result, normalize_finding, validate_result
 from rebar.llm.operations import review_ticket, select_reviewers
 from rebar.llm.plan_review import claim_gate_check, review_plan
+from rebar.llm.prompt_library import (
+    InvalidPromptIdError,
+    LibraryWriteError,
+    PromptExistsError,
+    create_prompt,
+    enumerate_criteria,
+    enumerate_library,
+    update_prompt,
+)
 from rebar.llm.prompts import Prompt, Reviewer, get_prompt, load_catalog
 from rebar.llm.runner import (
     FakeRunner,
@@ -81,6 +90,14 @@ __all__ = [
     "Reviewer",
     "get_prompt",
     "load_catalog",
+    # prompt-library authoring (write + structured enumerate; story B-DM)
+    "enumerate_library",
+    "enumerate_criteria",
+    "create_prompt",
+    "update_prompt",
+    "LibraryWriteError",
+    "InvalidPromptIdError",
+    "PromptExistsError",
     # exceptions
     "LLMError",
     "LLMConfigError",
