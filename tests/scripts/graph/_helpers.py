@@ -43,6 +43,14 @@ def _write_ticket(
     ticket_dir = tracker_dir / ticket_id
     ticket_dir.mkdir(parents=True, exist_ok=True)
 
+    # A real initialized tracker always carries an .env-id; seed it (idempotently)
+    # so the canonical write seam's init gate — which refuses to append an
+    # env-id-less event (bug roar-nurse-stomp) — is satisfied for these
+    # synthetic-tracker tests that exercise add_dependency's LINK writes.
+    env_id_file = tracker_dir / ".env-id"
+    if not env_id_file.exists():
+        env_id_file.write_text("00000000-0000-4000-8000-000000000001\n", encoding="utf-8")
+
     create_event = {
         "event_type": "CREATE",
         "uuid": f"create-{ticket_id}",

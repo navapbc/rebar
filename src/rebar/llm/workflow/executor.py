@@ -334,89 +334,12 @@ def shallow_contract_check(source: dict, target: dict) -> str:
 
 
 # ── Run recorder seam (WS-C3 supplies the event-backed, idempotent one) ───────
+# The recorder classes live in recorder.py (extracted along this call-graph seam to
+# keep executor.py under the module-size cap); re-exported here so existing
+# executor.RunRecorder / MemoryRecorder / TicketEventRecorder references keep working.
+from .recorder import MemoryRecorder, RunRecorder, TicketEventRecorder  # noqa: E402
 
-
-class RunRecorder:
-    """Persistence seam for run-state. The default is in-memory; WS-C3 adds the
-    WORKFLOW_RUN/WORKFLOW_STEP event-backed recorder with marker-after-effect
-    idempotency."""
-
-    def run_started(self, record: dict[str, Any]) -> None: ...
-    def run_finished(self, record: dict[str, Any]) -> None: ...
-    def step_recorded(self, record: dict[str, Any]) -> None: ...
-
-    def completed_step(self, run_id: str, frame_key: str) -> dict[str, Any] | None:
-        """Return a prior SUCCEEDED record for this FRAME KEY (idempotent skip), or
-        None. ``frame_key`` is the bare ``step_id`` at the top frame or an
-        iteration-embedding path inside a loop/map body.
-
-        The in-memory default never skips (no prior runs); WS-C3's event recorder
-        returns the persisted marker so a resumed run does not re-run a committed
-        effect.
-        """
-        return None
-
-
-class MemoryRecorder(RunRecorder):
-    """Collects run/step records in memory (default; keeps the executor testable)."""
-
-    def __init__(self) -> None:
-        self.runs: list[dict[str, Any]] = []
-        self.steps: list[dict[str, Any]] = []
-
-    def run_started(self, record: dict[str, Any]) -> None:
-        self.runs.append(record)
-
-    def run_finished(self, record: dict[str, Any]) -> None:
-        self.runs.append(record)
-
-    def step_recorded(self, record: dict[str, Any]) -> None:
-        self.steps.append(record)
-
-
-class TicketEventRecorder(RunRecorder):
-    """Durable run-state on the target ticket's event log (WS-C3).
-
-    Each call appends a WORKFLOW_RUN/WORKFLOW_STEP event (per-key LWW, WS-C1) to the
-    target ticket. The executor calls ``step_recorded`` AFTER a step's effect
-    commits — the marker-after-effect rule: a crash between effect and marker leaves
-    the effect *applied but unmarked*, so forward-only recovery re-runs the step,
-    which is safe because side-effecting steps are idempotent on (run_id, step_id).
-    ``completed_step`` reads the persisted marker so a resumed run skips steps that
-    DID get marked. All store imports are lazy so the module stays import-light.
-    """
-
-    def __init__(self, target_ticket: str, repo_root: str | None = None) -> None:
-        self.ticket = target_ticket
-        self.repo_root = repo_root
-
-    def _append(self, event_type: str, data: dict[str, Any]) -> None:
-        from rebar._commands import _seam
-
-        tracker = _seam.tracker_dir(self.repo_root)
-        _seam.append_event(self.ticket, event_type, data, tracker, repo_root=self.repo_root)
-
-    def run_started(self, record: dict[str, Any]) -> None:
-        self._append("WORKFLOW_RUN", record)
-
-    def run_finished(self, record: dict[str, Any]) -> None:
-        self._append("WORKFLOW_RUN", record)
-
-    def step_recorded(self, record: dict[str, Any]) -> None:
-        self._append("WORKFLOW_STEP", record)
-
-    def completed_step(self, run_id: str, frame_key: str) -> dict[str, Any] | None:
-        from rebar._commands import _seam
-        from rebar.reducer import reduce_ticket
-
-        tracker = _seam.tracker_dir(self.repo_root)
-        try:
-            state = reduce_ticket(str(Path(tracker) / self.ticket))
-        except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible ticket yields no state (None)
-            return None
-        if not state:
-            return None
-        return state.get("workflow_steps", {}).get(run_id, {}).get(frame_key)
+__all_recorders__ = ("RunRecorder", "MemoryRecorder", "TicketEventRecorder")
 
 
 # ── Burr-style immutable run state ────────────────────────────────────────────

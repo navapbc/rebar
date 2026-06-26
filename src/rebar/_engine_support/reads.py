@@ -158,6 +158,13 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
 
 
 # ───────────────────────────── freshness policy ──────────────────────────────
+# Read-path reconverge waits only briefly for the write lock before skipping this
+# round (bug slim-fetch-ledge). Freshness is an optimization; a read must prefer
+# its consistent local snapshot over stalling ~15s while a concurrent background
+# push holds the lock. Writers reconverge with the longer default.
+_RECONVERGE_LOCK_TIMEOUT = 2
+
+
 def _sync_disabled(root: str | None = None) -> bool:
     """Whether inbound freshness (fetch/reconverge) is turned off — the ``sync.pull``
     policy resolved via the typed config (env ``REBAR_SYNC_PULL=off``, deprecated
@@ -214,19 +221,27 @@ def ensure_fresh(tracker: str, *, no_sync: bool = False) -> None:
             marker_age = 9999
         if marker_age < 60:
             return
-        # Reconverge in-process (Tier D retired the bash helper; rebar._store.sync is
-        # the sole impl). The throttle/marker above is the single owner — reconverge
-        # itself is throttle-free.
-        from rebar._store import sync as _store_sync
-
-        try:
-            _store_sync.reconverge(tracker_abs)
-        except Exception:  # noqa: BLE001 — best-effort reconverge: a sync failure never breaks a read (fsck surfaces PUSH_PENDING)
-            pass
+        # Claim the throttle window BEFORE reconverging (bug slim-fetch-ledge): a
+        # rapid burst of reads (the scripted read→transform→write loops that hit this
+        # bug) would otherwise ALL enter reconverge before any marker was written and
+        # ALL stall on the same contended lock. Writing the marker first means only
+        # the first read in the window reconverges; the rest skip and return their
+        # consistent local snapshot immediately.
         try:
             with open(marker, "w") as fh:
                 fh.write(str(now))
         except OSError:
+            pass
+        # Reconverge in-process (Tier D retired the bash helper; rebar._store.sync is
+        # the sole impl). The throttle/marker above is the single owner — reconverge
+        # itself is throttle-free. Use a SHORT lock timeout: a read must prefer its
+        # local snapshot over stalling many seconds while a concurrent background push
+        # holds the write lock (the empty-stdout-under-contention symptom).
+        from rebar._store import sync as _store_sync
+
+        try:
+            _store_sync.reconverge(tracker_abs, lock_timeout=_RECONVERGE_LOCK_TIMEOUT)
+        except Exception:  # noqa: BLE001 — best-effort reconverge: a sync failure never breaks a read (fsck surfaces PUSH_PENDING)
             pass
     except Exception:  # noqa: BLE001 — freshness is best-effort; never let it break a read
         # Freshness is best-effort; never let it break a read.

@@ -71,6 +71,42 @@ def test_library_python_path_rejects_bad_file_impact(
         rebar.set_file_impact(tid, [{"path": "x"}], repo_root=str(rebar_repo))
 
 
+def test_leaf_writes_enforce_env_id_gate_like_create(rebar_repo: Path):
+    """Regression for roar-nurse-stomp: with the tracker worktree present but no
+    `.env-id`, the leaf-append writes (comment/tag) must fail the SAME init gate
+    that create/transition enforce — rather than silently committing an event with
+    an empty `env_id` provenance stamp."""
+    tid = _new_ticket(rebar_repo)
+    tracker = rebar_repo / ".tickets-tracker"
+    env_id_file = tracker / ".env-id"
+    assert env_id_file.is_file()
+
+    # Count COMMENT events before, then drop .env-id (the half-initialized state).
+    ticket_dir = tracker / tid
+    comments_before = len(list(ticket_dir.glob("*-COMMENT.json")))
+    env_id_file.unlink()
+
+    # create already enforces the gate (the asymmetry the bug is about)...
+    with pytest.raises(rebar.RebarError):
+        rebar.create_ticket("task", "blocked", repo_root=str(rebar_repo))
+    # ...and now the leaf-append writes must enforce it identically.
+    with pytest.raises(rebar.RebarError):
+        rebar.comment(tid, "should be rejected", repo_root=str(rebar_repo))
+    with pytest.raises(rebar.RebarError):
+        rebar.tag(tid, "should:reject", repo_root=str(rebar_repo))
+
+    # No env-id-less event may have been appended.
+    comments_after = len(list(ticket_dir.glob("*-COMMENT.json")))
+    assert comments_after == comments_before, "a COMMENT was committed without .env-id"
+
+    # Restoring .env-id makes the same writes succeed again.
+    env_id_file.write_text("00000000-0000-4000-8000-000000000000", encoding="utf-8")
+    rebar.comment(tid, "now allowed", repo_root=str(rebar_repo))
+    assert "now allowed" in [
+        c["body"] for c in rebar.show_ticket(tid, repo_root=str(rebar_repo))["comments"]
+    ]
+
+
 def test_library_tag_roundtrip_python_path(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch):
     tid = _new_ticket(rebar_repo)
     monkeypatch.setenv("REBAR_LEAF_WRITES", "python")

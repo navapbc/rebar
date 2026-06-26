@@ -64,6 +64,26 @@ def test_porcelain_reports_a_new_working_tree_file(tmp_path):
     assert any("stray.txt" in line for line in after - base)
 
 
+def test_leak_snapshot_catches_new_top_level_entry(tmp_path):
+    before = _isolation.repo_leak_snapshot(tmp_path)
+    (tmp_path / "depends_on").mkdir()  # the classic relative-path leak shape
+    leaked = _isolation.repo_leak_snapshot(tmp_path) - before
+    assert "depends_on" in leaked, leaked
+
+
+def test_leak_snapshot_catches_write_into_preexisting_state_dir(tmp_path):
+    """Regression for hurt-brow-swan: a leak INTO a pre-existing watched dir
+    (``.rebar/``) must be detected locally, even though it adds no new top-level
+    entry — the exact blind spot of a top-level-only ``os.listdir`` diff."""
+    rebar_dir = tmp_path / ".rebar"
+    rebar_dir.mkdir()
+    (rebar_dir / "current_session_log").write_text("pre-existing")  # dir pre-exists
+    before = _isolation.repo_leak_snapshot(tmp_path)
+    (rebar_dir / "run_snapshots").mkdir()  # the leak — inside the pre-existing dir
+    leaked = _isolation.repo_leak_snapshot(tmp_path) - before
+    assert ".rebar/run_snapshots" in leaked, leaked
+
+
 # ── end-to-end wiring (pytester) ──────────────────────────────────────────────
 
 # An inline conftest that installs the same guard pattern as the real one, but
@@ -89,6 +109,15 @@ def _no_repo_commits() -> Iterator[None]:
     after = _isolation.head(_ROOT)
     if before is not None and after is not None and before != after:
         pytest.fail(f"Test moved the repo HEAD ({{before[:10]}} -> {{after[:10]}})")
+
+
+@pytest.fixture(autouse=True)
+def _no_repo_root_leaks() -> Iterator[None]:
+    before = _isolation.repo_leak_snapshot(_ROOT)
+    yield
+    leaked = _isolation.repo_leak_snapshot(_ROOT) - before
+    if leaked:
+        pytest.fail(f"Test leaked into REPO_ROOT: {{sorted(leaked)}}")
 
 
 def pytest_sessionstart(session):
@@ -166,3 +195,25 @@ def test_session_backstop_flags_a_working_tree_write(pytester, tmp_path):
     # The test itself passes, but the session is escalated to a failure.
     assert result.ret != 0
     result.stdout.fnmatch_lines(["*REPO ISOLATION FAILURE*"])
+
+
+def test_leak_guard_fails_a_test_that_writes_into_preexisting_state_dir(pytester, tmp_path):
+    """End-to-end (hurt-brow-swan): the per-test leak guard must fail a test that
+    writes INTO a pre-existing ``.rebar/`` — locally, with no fresh CI checkout."""
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / ".rebar").mkdir()  # pre-exists, as it always does in a dogfooding checkout
+    (repo / ".rebar" / "current_session_log").write_text("pre-existing")
+    _write_inline_conftest(pytester, repo)
+    pytester.makepyfile(
+        f"""
+        def test_leaks_into_rebar():
+            import pathlib
+            (pathlib.Path({str(repo)!r}) / ".rebar" / "leaked.txt").write_text("oops")
+        """
+    )
+    result = pytester.runpytest()
+    # Call phase passes; the post-yield teardown fails -> reported as an ERROR.
+    result.assert_outcomes(passed=1, errors=1)
+    assert result.ret != 0
+    result.stdout.fnmatch_lines(["*leaked into REPO_ROOT*.rebar/leaked.txt*"])

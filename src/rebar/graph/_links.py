@@ -179,6 +179,13 @@ def add_dependency(
     resolved_target = str(hierarchy_result["resolved_target"])
     was_redirected = bool(hierarchy_result.get("was_redirected"))
 
+    # Compose the machine-readable REDIRECT record now, but DEFER emitting it to
+    # stdout until AFTER the durable LINK commit below (bug hulky-bag-aisle). The
+    # emit previously ran here, before the write \u2014 so a reader closing the pipe
+    # early (`rebar link ... | head`) raised BrokenPipeError and aborted the
+    # function before it committed, silently losing the link (exit status masked
+    # by the pipe). Durable data first, user-facing chatter second.
+    redirect_record = None
     if was_redirected:
         logger.warning(
             "REDIRECT: %s\u2192%s promoted to %s\u2192%s",
@@ -187,15 +194,17 @@ def add_dependency(
             resolved_source,
             resolved_target,
         )
-        print(  # noqa: T201 \u2014 stdout data: machine-readable redirect record (CLI contract)
-            json.dumps(
-                {
-                    "redirected": True,
-                    "original": {"source": source_id, "target": target_id},
-                    "resolved": {"source": resolved_source, "target": resolved_target},
-                }
+        redirect_record = {
+            "redirected": True,
+            "original": {"source": source_id, "target": target_id},
+            "resolved": {"source": resolved_source, "target": resolved_target},
+        }
+
+    def _emit_redirect() -> None:
+        if redirect_record is not None:
+            print(  # noqa: T201 \u2014 stdout data: machine-readable redirect record (CLI contract)
+                json.dumps(redirect_record)
             )
-        )
 
     source_id = resolved_source
     target_id = resolved_target
@@ -245,6 +254,9 @@ def add_dependency(
             )
 
     if _is_active_link(source_id, target_id, relation, tracker_dir):
+        # Idempotent no-op: the link already exists. Nothing durable to protect, so
+        # surface the redirect record (parity with the pre-fix behavior) and return.
+        _emit_redirect()
         return
 
     _write_link_event(source_id, target_id, relation, tracker_dir)
@@ -253,3 +265,8 @@ def add_dependency(
         target_id, source_id, relation, tracker_dir
     ):
         _write_link_event(target_id, source_id, relation, tracker_dir)
+
+    # Durable write(s) committed — now it is safe to emit the redirect record to
+    # stdout. A BrokenPipeError here propagates loudly (exit non-zero) but the link
+    # is already persisted, satisfying the write-or-fail-loudly invariant.
+    _emit_redirect()
