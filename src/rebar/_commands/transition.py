@@ -283,6 +283,7 @@ def transition_compute(
     verdict_hash: str = "",
     force_close: str = "",
     repo_root=None,
+    cascade: bool = True,
     _cascade_seen: frozenset[str] | None = None,
 ) -> dict:
     """Validate, guard, write, and post-process a transition for an ALREADY-RESOLVED
@@ -292,9 +293,11 @@ def transition_compute(
 
     Parent-first cascade: on an ``open -> in_progress`` transition, if the ticket has
     an OPEN parent the parent is transitioned first (recursively up the chain) before
-    the child; a parent failure aborts the child with an error naming the parent.
-    ``_cascade_seen`` is the internal recursion guard (the ids already on the cascade
-    stack) — callers leave it ``None``."""
+    the child; a parent failure aborts the child with an error naming the parent. Pass
+    ``cascade=False`` to suppress this for callers that replay an exact recorded state
+    per-ticket (e.g. NDJSON import) where pre-moving a parent would conflict with that
+    parent's own explicit transition. ``_cascade_seen`` is the internal recursion guard
+    (the ids already on the cascade stack) — callers leave it ``None``."""
     tracker = str(config.tracker_dir(repo_root))
     repo_root_str = os.path.dirname(tracker)
 
@@ -350,7 +353,7 @@ def transition_compute(
     # never moved to in_progress while its parent is still open. If the parent
     # transition fails, the child is NOT transitioned and the error names the parent.
     # _cascade_seen breaks any malformed parent cycle.
-    if current_status == "open" and target_status == "in_progress":
+    if cascade and current_status == "open" and target_status == "in_progress":
         seen = _cascade_seen or frozenset()
         parent_id = _resolve_open_parent(tracker, ticket_id)
         if parent_id is not None and parent_id != ticket_id and parent_id not in seen:

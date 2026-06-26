@@ -253,3 +253,17 @@ def test_cli_claim_cascade_smoke(rebar_repo: Path, capsys: pytest.CaptureFixture
     assert rc == 0
     assert _status(child, rebar_repo) == "in_progress"
     assert _status(parent, rebar_repo) == "in_progress"
+
+
+def test_transition_cascade_false_suppresses_cascade(rebar_repo: Path) -> None:
+    """`cascade=False` opts a caller out of the parent-first cascade — the seam used
+    by per-ticket state replay (NDJSON import) so it never pre-moves an open parent."""
+    from rebar._commands.transition import transition_compute
+
+    parent = rebar.create_ticket("epic", "parent", repo_root=str(rebar_repo))
+    child = rebar.create_ticket("task", "child", parent=parent, repo_root=str(rebar_repo))
+
+    transition_compute(child, "open", "in_progress", cascade=False, repo_root=str(rebar_repo))
+
+    assert _status(child, rebar_repo) == "in_progress"
+    assert _status(parent, rebar_repo) == "open"  # NOT cascaded
