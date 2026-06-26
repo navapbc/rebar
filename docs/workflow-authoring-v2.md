@@ -117,8 +117,48 @@ def fetch_ticket(ctx): ...
 
 `contract_for(name)` returns the `StepContract {input_schema, output_schema,
 description}`. A registry-coverage test asserts **every** registered op carries a
-contract. All eight built-ins (`fetch_ticket`, `fetch_commits`, `fetch_epic_graph`,
-`render_context`, `gate`, `comment_verdict`, `tag`, `set_fields`) are annotated.
+contract. All nine built-ins (`fetch_ticket`, `fetch_commits`, `fetch_epic_graph`,
+`overlay_triggers`, `render_context`, `gate`, `comment_verdict`, `tag`, `set_fields`)
+are annotated.
+
+### 2.1 Overlays: conditional criterion inclusion via `if:`
+
+A review pipeline includes a criterion (prompt) step only when the input warrants it
+(a security criterion only when the plan mentions secrets; an intent-fidelity criterion
+only when a session log is linked; container criteria only for parents with children).
+This needs **no new construct** — the engine's existing per-step **`if:` skip-guard**
+already does conditional inclusion, evaluated over run-start-journaled inputs + recorded
+prior outputs, replay-deterministically (a skipped step records a durable `skipped`
+event). The deliberately-tiny expression grammar (`${{ … }}` variable references, no
+operators/regex) is preserved by **computing the boolean elsewhere**: the
+**`overlay_triggers`** scripted step turns each trigger into a boolean output, and the
+criterion branches on it:
+
+```yaml
+steps:
+  - id: triggers
+    uses: overlay_triggers
+    with:
+      text: ${{ inputs.plan }}
+      keyword_triggers: { security: [secret, password, token] }
+      linked_types: [session_log]          # → has_linked_session_log; also has_children
+  - id: security_review
+    prompt: plan-review-T5c
+    needs: [triggers]
+    if: ${{ steps.triggers.outputs.security }}   # included iff the trigger is truthy
+```
+
+**Why precompute rather than grow the grammar:** the expression allow-list is a closed,
+injection-safe vocabulary pinned by the schema. Keeping the *computation* in a
+deterministic scripted step keeps the predicate language tiny and the trigger logic
+recorded (so replay reuses it). Add new trigger kinds by extending `overlay_triggers`,
+never the grammar.
+
+**Observing the included-set (for coverage).** Inclusion is recoverable without a new
+event vocabulary: `overlay_triggers`' booleans are journaled as its step output, and
+every criterion's `succeeded` vs `skipped` status is a durable `WORKFLOW_STEP` marker.
+Together they say *which* criteria ran and *why* — so coverage accounting reads the
+recorded outputs + per-step statuses rather than a separate "resolved-set" event.
 
 The engine seeds a small **injected `${{ inputs.* }}` namespace** —
 `ENGINE_INJECTED_INPUTS = {ticket_id, ticket_context, repo_path}` — valid to reference

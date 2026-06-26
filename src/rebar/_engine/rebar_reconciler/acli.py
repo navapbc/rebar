@@ -70,6 +70,7 @@ from rebar_reconciler.jira_fields import (
     _LOCAL_STATUS_TO_JIRA,
     InvalidLabelError,
     _sanitize_comment,
+    _sanitize_description,
     _sanitize_label,
     _sanitize_summary,
 )
@@ -199,8 +200,10 @@ def update_issue(
     for field, value in kwargs.items():
         if field == "description":
             # Convert description to ADF (same as create_issue) — Jira REST API
-            # v3 requires ADF format for description fields.
-            cmd.extend([f"--{field}", json.dumps(_text_to_adf(str(value)))])
+            # v3 requires ADF format for description fields. Truncate first to
+            # Jira's 32,767-char limit so an over-length description does not abort
+            # the pass (bug 626d follow-up).
+            cmd.extend([f"--{field}", json.dumps(_text_to_adf(_sanitize_description(str(value))))])
         else:
             cmd.extend([f"--{field}", str(value)])
 
@@ -285,7 +288,9 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         summary = _sanitize_summary(raw_summary)
         optional_fields: dict[str, Any] = {}
         if ticket_data.get("description"):
-            optional_fields["description"] = ticket_data["description"]
+            # Truncate to Jira's 32,767-char limit so an over-length description
+            # does not abort the create (bug 626d follow-up).
+            optional_fields["description"] = _sanitize_description(str(ticket_data["description"]))
         if ticket_data.get("priority") is not None:
             optional_fields["priority"] = ticket_data["priority"]
         if ticket_data.get("assignee"):

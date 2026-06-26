@@ -148,4 +148,12 @@ def _contracts_in(step: Any, *, repo_root: Any = None) -> dict[str, dict[str, An
             for key in keys:
                 for child in blk.get(key) or []:
                     out.update(_contracts_in(child, repo_root=repo_root))
+    # A `batch` step's finder + each criterion are prompt-library entries; surface their
+    # contract views so the inspector can present the criteria list (add/remove/edit).
+    batch = step.get("batch")
+    if isinstance(batch, dict):
+        ids = [batch.get("prompt"), *[(c or {}).get("prompt") for c in batch.get("criteria") or []]]
+        for pid in ids:
+            if isinstance(pid, str) and pid and pid not in out:
+                out[pid] = prompt_contract_view(pid, repo_root=repo_root)
     return out

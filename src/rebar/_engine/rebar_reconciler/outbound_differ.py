@@ -534,6 +534,14 @@ def _diff_fields(
                     )
             continue
         jira_val = _extract_jira_field(jira_fields, field_name)
+        # Convergence (bug 626d follow-up): the send path truncates an over-length
+        # description so its ADF representation fits Jira's limit, so the refetched
+        # Jira value is the truncated form. Apply the IDENTICAL shared ADF-aware fit
+        # to the local value before comparing; otherwise an oversized local
+        # description never matches the landed Jira body and the differ re-emits an
+        # update every pass.
+        if field_name == "description" and isinstance(local_val, str):
+            local_val = _load_adf().fit_text_to_adf_limit(local_val)
         # Bug (plateau): Jira's ADF normalization strips trailing
         # whitespace from descriptions (and titles) on every write. If
         # local carries trailing ``\n\n`` (or any trailing whitespace),

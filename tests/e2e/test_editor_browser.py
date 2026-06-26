@@ -94,6 +94,72 @@ def test_editor_structured_fields_roundtrip_error_and_no_raw_editor(browser_runn
     ), "the structured edit did not round-trip into the reloaded IR"
 
 
+def test_editor_batch_criteria_render_add_remove_edit(browser_runner, editor_server_batch):
+    # Story A4: the v3 `batch` step is visually editable. In a real browser, select the batch
+    # ServiceTask and assert the editor (1) RENDERS the finder + criteria list (incl. a `when`
+    # overlay), (2) EDITs a criterion's prompt into rebar:Config, (3) ADDs a criterion, (4)
+    # REMOVEs one, (5) shows the `if:` overlay field on a prompt step, and (6) persists to IR.
+    import json
+
+    url, ir = editor_server_batch
+    report = browser_runner("browser_batch.mjs", url)
+    assert report["errors"] == [], f"console/page errors in the editor: {report['errors']}"
+    assert report["ids"]["batch"], "no batch ServiceTask found in the editor"
+
+    # (1) RENDER: finder + budget + ladder fields, and one criteria item per criterion, with
+    # the security criterion's `when` overlay visible.
+    assert report["finderValue"] == "code-quality", f"finder not rendered: {report['finderValue']}"
+    assert report["budgetVisible"] and report["ladderVisible"], "batch param fields missing"
+    assert report["itemCountBefore"] == 2, (
+        f"expected 2 criteria items, got {report['itemCountBefore']}"
+    )
+    assert "${{ steps.triggers.outputs.security }}" in report["whenValue"], (
+        f"criterion `when` overlay not rendered: {report['whenValue']!r}"
+    )
+
+    # (2) EDIT: criterion-0's prompt was changed in the rebar:Config blob (the serializer's source).
+    edited = json.loads(report["configAfterEdit"])
+    assert edited["batch"]["criteria"][0]["prompt"] == "ticket-quality", (
+        f"criterion edit did not write back: {edited['batch']['criteria']}"
+    )
+
+    # (3) ADD: a new (empty) criterion appears in both the config and the rendered list.
+    added = json.loads(report["configAfterAdd"])
+    assert len(added["batch"]["criteria"]) == 3, (
+        f"add did not grow the list: {added['batch']['criteria']}"
+    )
+    assert report["itemCountAfterAdd"] == 3
+
+    # (4) REMOVE: the list shrinks back by one in both config and UI.
+    removed = json.loads(report["configAfterRemove"])
+    assert len(removed["batch"]["criteria"]) == 2, (
+        f"remove did not shrink the list: {removed['batch']['criteria']}"
+    )
+    assert report["itemCountAfterRemove"] == 2
+
+    # (5) OVERLAY: the `if:` predicate field renders + reads for a prompt (agent) step.
+    assert report["ifFieldPresent"], "no if: overlay field on the prompt step"
+    assert "${{ inputs.notify_enabled }}" in report["ifValue"], (
+        f"if value wrong: {report['ifValue']!r}"
+    )
+
+    # (5b) CREATE: the ServiceTask kind toggle converts an agent step INTO a batch step
+    # (seeds cfg.batch) and back (drops it), so a batch can be authored from scratch.
+    assert report["kindTogglePresent"], "no ServiceTask kind (agent/batch) toggle"
+    converted = json.loads(report["overlayConfigAfterConvert"])
+    assert isinstance(converted.get("batch"), dict), (
+        f"convert→batch did not seed cfg.batch: {converted}"
+    )
+    reverted = json.loads(report["overlayConfigAfterRevert"])
+    assert "batch" not in reverted, f"convert→agent did not drop cfg.batch: {reverted}"
+
+    # (6) SAVE persisted to the IR — the criterion edit round-trips through the reloaded file.
+    assert report["status"] == "saved to IR", f"save failed: {report['status']}"
+    assert "ticket-quality" in ir.read_text(encoding="utf-8"), (
+        "the criterion edit did not reach the IR"
+    )
+
+
 def test_editor_live_validation_error_clear_and_unavailable(browser_runner, editor_server):
     # Story 998e: live config validation drives a red inline error region, a valid config
     # CLEARS it, and a 500 from /validate surfaces the DISTINCT "validation unavailable"

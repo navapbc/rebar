@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/overlay_triggers_output.schema.json",
+  "title": "OverlayTriggersOutput",
+  "description": "OUTPUT contract of the `overlay_triggers` step: a flat map of trigger name -> boolean. Keys are dynamic (the configured keyword-trigger names plus `has_children` / `has_linked_<type>` for structural triggers), so the contract pins only that every value is a boolean. A downstream criterion references one as `if: ${{ steps.<id>.outputs.<name> }}`.",
+  "type": "object",
+  "additionalProperties": { "type": "boolean" }
+}
