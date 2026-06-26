@@ -67,7 +67,9 @@ That single decision pays off across the board:
 On top of that foundation, rebar adds what parallel agent work actually needs:
 
 - **Bidirectional Jira sync** — agents work in rebar, teammates work in Jira, and
-  a level-triggered reconciler keeps the two in step.
+  a level-triggered reconciler keeps the two in step. To run it **automatically** in
+  CI, see [docs/jira-sync-setup.md](docs/jira-sync-setup.md) (the GitHub Actions
+  reconcile-bridge + heartbeat-canary setup).
 - **Conflict-aware scheduling** — tickets record their file impact, so
   `next-batch` hands parallel agents work that won't collide on the same files.
 - **Scratch space** — an invisible per-ticket channel for subagents to pass notes

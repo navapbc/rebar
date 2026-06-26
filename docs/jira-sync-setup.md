@@ -62,7 +62,7 @@ gh variable set JIRA_PROJECT    --body "REB"
 
 # Pin acli + verify its digest. Download once, compute the sha, then pin both:
 #   curl -sSL "https://acli.atlassian.com/linux/<VER>/acli_<VER>_linux_amd64.tar.gz" | sha256sum
-gh variable set ACLI_VERSION    --body "1.3.14-stable"
+gh variable set ACLI_VERSION    --body "1.3.19-stable"
 gh variable set ACLI_SHA256     --body "<sha256-of-that-tarball>"
 
 # Optional — the bridge bot's git commit identity (defaults shown):
@@ -120,9 +120,22 @@ no-write modes for exactly this:
 2. **`dry-run`** — computes the full mutation plan and applies nothing. Review the
    plan in the run log.
 3. **`live`** — enable the schedule. The first live run may be large (it reconciles
-   the whole backlog); subsequent runs are incremental.
+   the whole backlog): it creates one Jira issue per local ticket **serially** via
+   acli (~4 s each), so the job's `timeout-minutes` must cover the full initial
+   pass — commit-back only persists on a **completed** pass, so a pass that times
+   out makes no durable progress and the next pass re-does the work. The shipped
+   `reconcile-bridge.yml` sets `timeout-minutes: 60` (a ceiling for the one-time
+   bulk sync; steady-state incremental passes finish in minutes). Raise it if your
+   backlog is larger than a few hundred tickets.
 4. Watch the **canary**: dispatch it with `dry_run = true` to see the staleness
    readout without filing a ticket.
+
+> **What to expect on the first bulk sync.** The reconciler creates issues first,
+> then later passes sync mutable fields (status, parent, links). Over-length
+> **descriptions** are truncated automatically to fit Jira's limit (the limit is on
+> the ADF representation, not the plain text) with a `[truncated by reconciler]`
+> marker — the local store keeps the full text. A local **assignee** that is not a
+> Jira user cannot be set and is skipped (soft-fail); the pass still succeeds.
 
 ---
 
@@ -143,6 +156,7 @@ without breaking durable sync) and **sufficient** (nothing else is required).
 | **Fetch-rebase-push retry loop** | Multiple writers (this bridge, the canary, interactive `rebar` clients) push to the same orphan branch. The event log is union-mergeable, so a rejected push is resolved by fetch→rebase→retry with backoff. |
 | **`concurrency: reconcile-bridge` (cancel-in-progress: false)** | A second guard atop the reconciler's own pass-lock; ensures an in-flight pass finishes before the next scheduled one starts rather than racing it. |
 | **acli download + sha256 verify + auth** | The reconciler shells out to `acli` for all Jira I/O. Pinning + checksum-verifying the binary keeps CI reproducible and supply-chain-safe. |
+| **`timeout-minutes: 60`** | The one-time initial sync creates issues serially via acli (~4 s each), and commit-back persists only on a **completed** pass — so the budget must cover a full bulk pass or progress never converges. 60 is a ceiling, not a duration; steady-state passes finish in minutes. |
 | **`permissions: contents: write`** | The minimum to push to `origin/tickets`. The default `GITHUB_TOKEN` suffices — no PAT. |
 
 ### Reconciler Heartbeat Canary — why each step exists
