@@ -146,13 +146,28 @@ def _resolve_criteria(
 
     NOTE: this does NOT re-apply ``route_criteria``'s ``applies()``/overlay filtering —
     ``req.criteria`` is the already-INCLUDED set (the interpreter resolved each ``when``
-    before building the request)."""
+    before building the request). It DOES mirror ``route_criteria``'s ISF exclusion (ISF
+    is fed the linked session log by ``run_pass1`` itself, never a rubric chunk — listing
+    it as a batch criterion would double-evaluate it) and dedupes repeated ids."""
     by_id = registry.by_id()
     single: list[dict] = []
     agent: list[dict] = []
     skipped: list[str] = []
+    seen: set[str] = set()
     for entry in criteria:
         cid = entry.get("prompt")
+        if not isinstance(cid, str) or not cid or cid in seen:
+            # missing/empty/non-str id, or a duplicate — skip (duplicates would
+            # double-evaluate; a missing id is a malformed criterion).
+            if isinstance(cid, str) and cid:
+                continue  # benign duplicate, already routed
+            logger.warning("ProductionBatchRunner: criterion has no usable `prompt` id; skipping")
+            continue
+        seen.add(cid)
+        # ISF is fed the linked session log via run_pass1's own path (mirrors
+        # route_criteria:136-137); routing it as a rubric chunk would evaluate it twice.
+        if cid == "ISF":
+            continue
         desc = by_id.get(cid)
         if desc is None:
             skipped.append(cid)

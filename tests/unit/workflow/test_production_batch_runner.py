@@ -184,3 +184,24 @@ def test_budget_override_is_journaled_but_not_yet_applied(_stub_reads):
     assert plan["requested_usd_budget"] == 0.01
     assert plan["budget_override_applied"] is False
     assert plan["budget"]["cap_usd"] == expected_cap  # computed cap, not the override
+
+
+def test_resolve_criteria_excludes_isf_and_dedupes():
+    # ISF is fed the linked session log by run_pass1 itself (mirrors route_criteria), so it
+    # must NOT enter the rubric-chunk routing — else it would be evaluated twice. Duplicates
+    # are collapsed, and missing/unknown ids are dropped (skipped/ignored), never fatal.
+    from rebar.llm.plan_review.production_batch_runner import _resolve_criteria
+
+    single, agent, skipped = _resolve_criteria(
+        (
+            {"prompt": "E2"},
+            {"prompt": "E2"},  # duplicate → collapsed
+            {"prompt": "ISF"},  # excluded (handled by run_pass1's session-log path)
+            {"prompt": "NOPE-not-a-criterion"},  # unknown → skipped
+            {"with": {}},  # malformed (no prompt id) → ignored
+        )
+    )
+    routed_ids = [d["id"] for d in single + agent]
+    assert "ISF" not in routed_ids, "ISF must not be routed as a rubric chunk"
+    assert routed_ids.count("E2") == 1, "duplicate criterion ids must be collapsed"
+    assert "NOPE-not-a-criterion" in skipped
