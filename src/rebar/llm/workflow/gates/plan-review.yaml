@@ -125,12 +125,21 @@ steps:
       branch:
         when: ${{ steps.grounding.outputs.code_grounded }}
         then:
+        - id: verify_inputs
+          uses: plan_review_verify_inputs
+          with:
+            ticket_id: ${{ inputs.ticket_id }}
+            findings: ${{ steps.finders.outputs.findings }}
         - id: verify
+          needs:
+          - verify_inputs
           prompt: plan-review-verifier-agentic
           mode: structured
           output_schema: plan_review_verification
           with:
             findings: ${{ steps.finders.outputs.findings }}
+            plan: ${{ steps.verify_inputs.outputs.plan }}
+            instructions: ${{ steps.verify_inputs.outputs.instructions }}
         - id: decide
           needs:
           - verify
@@ -140,14 +149,23 @@ steps:
             verifications: ${{ steps.verify.outputs.verifications }}
             det_blocking: ${{ steps.precheck.outputs.det_blocking }}
             det_advisory: ${{ steps.precheck.outputs.det_advisory }}
-        - id: coach_notes
+        - id: coach_inputs
           needs:
           - decide
+          uses: plan_review_coach_inputs
+          with:
+            ticket_id: ${{ inputs.ticket_id }}
+            surviving: ${{ steps.decide.outputs.surfaced }}
+        - id: coach_notes
+          needs:
+          - coach_inputs
           prompt: plan-review-coach
           mode: structured
           output_schema: plan_review_coach
           with:
             surviving: ${{ steps.decide.outputs.surfaced }}
+            plan: ${{ steps.coach_inputs.outputs.plan }}
+            instructions: ${{ steps.coach_inputs.outputs.instructions }}
         - id: coach
           needs:
           - coach_notes
@@ -164,12 +182,21 @@ steps:
             canonical_id: ${{ steps.precheck.outputs.canonical_id }}
             ticket_type: ${{ steps.precheck.outputs.ticket_type }}
         else:
+        - id: verify_inputs
+          uses: plan_review_verify_inputs
+          with:
+            ticket_id: ${{ inputs.ticket_id }}
+            findings: ${{ steps.finders.outputs.findings }}
         - id: verify
+          needs:
+          - verify_inputs
           prompt: plan-review-verifier
           mode: structured
           output_schema: plan_review_verification
           with:
             findings: ${{ steps.finders.outputs.findings }}
+            plan: ${{ steps.verify_inputs.outputs.plan }}
+            instructions: ${{ steps.verify_inputs.outputs.instructions }}
         - id: decide
           needs:
           - verify
@@ -179,14 +206,23 @@ steps:
             verifications: ${{ steps.verify.outputs.verifications }}
             det_blocking: ${{ steps.precheck.outputs.det_blocking }}
             det_advisory: ${{ steps.precheck.outputs.det_advisory }}
-        - id: coach_notes
+        - id: coach_inputs
           needs:
           - decide
+          uses: plan_review_coach_inputs
+          with:
+            ticket_id: ${{ inputs.ticket_id }}
+            surviving: ${{ steps.decide.outputs.surfaced }}
+        - id: coach_notes
+          needs:
+          - coach_inputs
           prompt: plan-review-coach
           mode: structured
           output_schema: plan_review_coach
           with:
             surviving: ${{ steps.decide.outputs.surfaced }}
+            plan: ${{ steps.coach_inputs.outputs.plan }}
+            instructions: ${{ steps.coach_inputs.outputs.instructions }}
         - id: coach
           needs:
           - coach_notes

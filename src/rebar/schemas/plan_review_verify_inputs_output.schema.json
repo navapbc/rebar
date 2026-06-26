@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_verify_inputs_output.schema.json",
+  "title": "PlanReviewVerifyInputsOutput",
+  "description": "OUTPUT of `plan_review_verify_inputs`: the prompt-template `plan` text and the Pass-2 verifier `instructions` (header + per-finding listing) fed into the workflow's verify prompt step (its `with: {plan, instructions}`).",
+  "type": "object",
+  "properties": {
+    "plan": { "type": "string", "description": "The assembled plan text (PlanContext.plan_text) — resolves the verifier prompt's {{plan}}." },
+    "instructions": { "type": "string", "description": "The Pass-2 verifier instructions: the same per-finding listing the bespoke pass2_verify builds." }
+  },
+  "required": ["plan", "instructions"],
+  "additionalProperties": false
+}

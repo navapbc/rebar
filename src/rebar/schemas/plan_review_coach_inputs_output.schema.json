@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_coach_inputs_output.schema.json",
+  "title": "PlanReviewCoachInputsOutput",
+  "description": "OUTPUT of `plan_review_coach_inputs`: the prompt-template `plan` text and the Pass-4 coach `instructions` (move registry + surviving-findings listing) fed into the workflow's coach_notes prompt step (its `with: {plan, instructions}`).",
+  "type": "object",
+  "properties": {
+    "plan": { "type": "string", "description": "The assembled plan text (PlanContext.plan_text) — resolves the coach prompt's {{plan}}." },
+    "instructions": { "type": "string", "description": "The Pass-4 coach instructions: the same move-registry + surviving-findings listing the bespoke pass4_coach builds." }
+  },
+  "required": ["plan", "instructions"],
+  "additionalProperties": false
+}

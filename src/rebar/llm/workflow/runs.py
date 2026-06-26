@@ -135,6 +135,14 @@ class RunnerAgentStep(_ex.AgentStepRunner):
             ),
             "repo_path": cfg.repo_path or "",
         }
+        # A prompt step may declare the template variables it needs via `with:` — e.g. the
+        # plan-review verify/coach prompts reference `{{plan}}`, supplied as `with: {plan: …}`
+        # (tepid-bus-pomp: the generic bridge previously supplied only the base three, so the
+        # workflow plan-review degraded to INDETERMINATE live). Merge string-valued `with:`
+        # inputs over the base defaults so any prompt step can resolve its own variables.
+        for key, val in ctx.inputs.items():
+            if isinstance(val, str):
+                variables[key] = val
         system_prompt, langfuse_prompt = prompts.resolve_prompt(prompt, variables, cfg.langfuse)
         instructions = str(
             ctx.inputs.get("instructions")
