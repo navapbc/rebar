@@ -5,7 +5,7 @@ The MCP status/result tools already advertise + validate ``WORKFLOW_RUN`` via
 ``outputSchema`` (test_workflow_mcp_schema.py), but the CLI's ``--output json`` was
 never pinned to the same schema — so a CLI/MCP shape drift could pass unnoticed.
 This closes that: the SAME schema validates all three CLI JSON emissions, over a
-real (dry-run, no-token) end-to-end run of the packaged ``code_review`` workflow.
+real (dry-run, no-token) end-to-end run of the packaged ``review_skeleton`` workflow.
 """
 
 from __future__ import annotations
@@ -41,9 +41,9 @@ def test_cli_workflow_run_status_result_conform_to_schema(rebar_repo: Path, caps
         [
             "workflow",
             "run",
-            "code_review",  # resolves from the packaged examples
+            "review_skeleton",  # resolves from the packaged examples (the retained sample)
             "--input",
-            f"ticket_id={tid}",
+            "plan=Harden the auth token check; tokens must be verified.",
             "--ticket",
             tid,
             "--dry-run",
