@@ -360,6 +360,17 @@ Only the `open → in_progress` direction cascades. `close`, `reopen`, and a mov
 `blocked` are **never** cascaded to the parent (closing a parent has its own,
 separate open-children guard — see the completion gate).
 
+**Gate interaction (read this if the plan-review claim gate is enabled).** The
+cascaded parent claim is a *full* claim — so it runs the parent's **own**
+plan-review claim gate (`verify.require_plan_review_for_claim`). Epics/stories are
+**not** gate-exempt (only `bug`/`session_log` are), so when the gate is on,
+claiming a leaf task can be **blocked by the parent's missing/stale attestation**,
+and the error will name the parent. Earn the parent's attestation
+(`rebar review-plan <parent>`) — or claim the parent yourself first — before
+claiming the child, or pass `--force` (which propagates up the cascade and bypasses
+the gate at each level with an audit note). The same "operation = full operation"
+rule means the cascade also sets your `--assignee` on the ancestors it claims.
+
 ## Linking (relations + hierarchy promotion)
 
 - `link <id1> <id2> <relation>` **requires** a relation. The six relations:

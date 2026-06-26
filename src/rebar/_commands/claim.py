@@ -189,11 +189,16 @@ def claim_compute(
                 _cascade_seen=seen | {ticket_id},
             )
         except CommandError as exc:
-            raise CommandError(
+            msg = (
                 f"Error: cannot claim {ticket_id}: claiming its parent {parent_id} failed "
-                f"first, so the child was not claimed.\n  Parent error: {exc.message}",
-                returncode=exc.returncode,
-            ) from None
+                f"first, so the child was not claimed.\n  Parent error: {exc.message}"
+            )
+            # Preserve the concurrency identity: a parent that raced surfaces as
+            # exit-10 / ConcurrencyError at the leaf too (so the "pick another" retry
+            # path still fires). ConcurrencyMismatch hardcodes returncode=10.
+            if isinstance(exc, ConcurrencyMismatch):
+                raise ConcurrencyMismatch(msg) from None
+            raise CommandError(msg, returncode=exc.returncode) from None
 
     from rebar._commands import _seam
 

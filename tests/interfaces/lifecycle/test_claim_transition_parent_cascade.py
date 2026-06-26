@@ -87,15 +87,76 @@ def test_claim_parent_failure_aborts_child_with_attributed_error(
 
     monkeypatch.setattr(txn, "claim_core", fake_claim_core)
 
-    with pytest.raises(rebar.RebarError) as ei:
+    # A parent concurrency conflict must keep the concurrency identity at the leaf
+    # (exit-10 / ConcurrencyError), so the "pick another" retry path still fires.
+    with pytest.raises(rebar.ConcurrencyError) as ei:
         rebar.claim(child, assignee="alice", repo_root=str(rebar_repo))
 
+    assert ei.value.returncode == 10
     msg = str(ei.value)
     assert parent in msg, f"error must name the parent: {msg}"
     assert child in msg
     assert "parent" in msg.lower()
     # Child was NOT claimed.
     assert _status(child, rebar_repo) == "open"
+
+
+def test_claim_parent_succeeds_then_child_fails_is_not_rolled_back(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No rollback: if the parent claim succeeds and the CHILD then races, the parent
+    stays in_progress (documented, conservative direction) and the child stays open."""
+    parent = rebar.create_ticket("epic", "parent", repo_root=str(rebar_repo))
+    child = rebar.create_ticket("task", "child", parent=parent, repo_root=str(rebar_repo))
+
+    orig = txn.claim_core
+
+    def fake_claim_core(tracker, ticket_id, **kw):  # type: ignore[no-untyped-def]
+        if ticket_id == child:
+            raise ConcurrencyMismatch("simulated child race")
+        return orig(tracker, ticket_id, **kw)
+
+    monkeypatch.setattr(txn, "claim_core", fake_claim_core)
+
+    with pytest.raises(rebar.ConcurrencyError):
+        rebar.claim(child, assignee="alice", repo_root=str(rebar_repo))
+
+    assert _status(parent, rebar_repo) == "in_progress"  # NOT rolled back
+    assert _status(child, rebar_repo) == "open"
+
+
+def test_cli_claim_parent_failure_propagates_exit_10(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The CLI returns exit 10 (not 1) when the cascade fails on a raced parent."""
+    parent = rebar.create_ticket("epic", "parent", repo_root=str(rebar_repo))
+    child = rebar.create_ticket("task", "child", parent=parent, repo_root=str(rebar_repo))
+
+    orig = txn.claim_core
+
+    def fake_claim_core(tracker, ticket_id, **kw):  # type: ignore[no-untyped-def]
+        if ticket_id == parent:
+            raise ConcurrencyMismatch("simulated parent claim failure")
+        return orig(tracker, ticket_id, **kw)
+
+    monkeypatch.setattr(txn, "claim_core", fake_claim_core)
+
+    rc = _cli.main(["claim", child, "--assignee", "alice"])
+    out = capsys.readouterr()
+    assert rc == 10
+    assert parent in (out.out + out.err)
+    assert _status(child, rebar_repo) == "open"
+
+
+def test_claim_does_not_cascade_when_parent_blocked(rebar_repo: Path) -> None:
+    parent = rebar.create_ticket("epic", "parent", repo_root=str(rebar_repo))
+    child = rebar.create_ticket("task", "child", parent=parent, repo_root=str(rebar_repo))
+    rebar.transition(parent, "open", "blocked", repo_root=str(rebar_repo))
+
+    rebar.claim(child, assignee="alice", repo_root=str(rebar_repo))
+
+    assert _status(child, rebar_repo) == "in_progress"
+    assert _status(parent, rebar_repo) == "blocked"  # not cascaded
 
 
 # ----------------------------------------------------------------------- transition
@@ -156,25 +217,39 @@ def test_transition_parent_failure_aborts_child_with_attributed_error(
 
     monkeypatch.setattr(txn, "transition_core", fake_transition_core)
 
-    with pytest.raises(rebar.RebarError) as ei:
+    with pytest.raises(rebar.ConcurrencyError) as ei:
         rebar.transition(child, "open", "in_progress", repo_root=str(rebar_repo))
 
+    assert ei.value.returncode == 10
     msg = str(ei.value)
     assert parent in msg, f"error must name the parent: {msg}"
     assert child in msg
     assert _status(child, rebar_repo) == "open"  # child NOT transitioned
 
 
-def test_cli_claim_cascade_and_self_parent_is_safe(
+def test_claim_with_parent_cycle_terminates(
     rebar_repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """CLI parity + self-parent cycle guard: a ticket pointed at itself does not
-    recurse (the ``parent != self`` guard), and the claim still succeeds."""
-    tid = rebar.create_ticket("task", "selfparent", repo_root=str(rebar_repo))
-    rc = _cli.main(["edit", tid, "--parent", tid])
+    """Cycle guard: a malformed A<->B parent cycle must not recurse forever. The
+    claim terminates (a broken guard would hang / RecursionError) and succeeds."""
+    a = rebar.create_ticket("task", "A", repo_root=str(rebar_repo))
+    b = rebar.create_ticket("task", "B", parent=a, repo_root=str(rebar_repo))
+    # Close the loop: A's parent becomes B (B's parent is already A) -> A<->B cycle.
+    _cli.main(["edit", a, "--parent", b])
     capsys.readouterr()
-    # Some configs reject a self-parent edit; only assert the guard when it took.
-    if rc == 0 and rebar.show_ticket(tid, repo_root=str(rebar_repo)).get("parent_id") == tid:
-        rc2 = _cli.main(["claim", tid, "--assignee", "alice"])
-        assert rc2 == 0
-        assert _status(tid, rebar_repo) == "in_progress"
+
+    rc = _cli.main(["claim", a, "--assignee", "alice"])
+    capsys.readouterr()
+    assert rc == 0
+    assert _status(a, rebar_repo) == "in_progress"
+
+
+def test_cli_claim_cascade_smoke(rebar_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CLI parity: claiming a leaf via the CLI cascades to its open parent."""
+    parent = rebar.create_ticket("epic", "parent", repo_root=str(rebar_repo))
+    child = rebar.create_ticket("task", "child", parent=parent, repo_root=str(rebar_repo))
+    rc = _cli.main(["claim", child, "--assignee", "alice"])
+    capsys.readouterr()
+    assert rc == 0
+    assert _status(child, rebar_repo) == "in_progress"
+    assert _status(parent, rebar_repo) == "in_progress"

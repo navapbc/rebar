@@ -363,12 +363,17 @@ def transition_compute(
                     _cascade_seen=seen | {ticket_id},
                 )
             except CommandError as exc:
-                raise CommandError(
+                msg = (
                     f"Error: cannot move {ticket_id} to in_progress: transitioning its "
                     f"parent {parent_id} to in_progress failed first, so the child was not "
-                    f"transitioned.\n  Parent error: {exc.message}",
-                    returncode=exc.returncode,
-                ) from None
+                    f"transitioned.\n  Parent error: {exc.message}"
+                )
+                # Preserve the concurrency identity: a parent that raced surfaces as
+                # exit-10 / ConcurrencyError at the leaf too. ConcurrencyMismatch
+                # hardcodes returncode=10.
+                if isinstance(exc, ConcurrencyMismatch):
+                    raise ConcurrencyMismatch(msg) from None
+                raise CommandError(msg, returncode=exc.returncode) from None
 
     # Open-children guard + newly_unblocked (one batch pass), only on close.
     newly_unblocked: list[str] = []
