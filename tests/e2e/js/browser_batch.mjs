@@ -118,14 +118,13 @@ const whenValue = await page.inputValue(
 );
 
 // ── 2. EDIT criterion-0's prompt ─────────────────────────────────────────────────
+// The prompt field is now a library-backed SELECT (B-UX): pick an existing library id.
 await page.click(
   '[data-entry-id="criterion-0"] .bio-properties-panel-collapsible-entry-header',
 );
 await page.waitForTimeout(200);
 const PROMPT0 = "#bio-properties-panel-criterion-0-prompt";
-await page.fill(PROMPT0, "ticket-quality");
-await page.dispatchEvent(PROMPT0, "input");
-await page.locator(PROMPT0).blur();
+await page.selectOption(PROMPT0, "ticket-quality");
 await page.waitForTimeout(300);
 const configAfterEdit = await readConfig(ids.batch);
 

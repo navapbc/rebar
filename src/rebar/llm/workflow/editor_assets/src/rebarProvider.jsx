@@ -27,6 +27,7 @@ import {
   isTextFieldEntryEdited,
 } from "@bpmn-io/properties-panel";
 import { useService } from "bpmn-js-properties-panel";
+import { useEffect, useState } from "preact/hooks";
 
 const LOW_PRIORITY = 500;
 const REBAR_KINDS = [
@@ -625,52 +626,206 @@ function BatchLadderEntry(props) {
   );
 }
 
-// One field (prompt / when) of the criterion at cfg.batch.criteria[index]. Each criterion
-// is a prompt-library-backed entry with an optional `when` overlay predicate.
-function CriterionFieldEntry(props) {
-  const { element, id, index, ckey, label, required } = props;
+// ── Library-backed criterion pickers + in-editor authoring (story B-UX) ───────────
+// A batch criterion's `prompt` and `when` are SELECTED from library-/IR-backed dropdowns
+// (no free-text typing) and new criteria/prompts + overlay triggers can be CREATED in the
+// panel. The picker sources are injected by editor.py: window.REBAR_LIBRARY (the authorable
+// prompt+criterion list from enumerate_library) and window.REBAR_OVERLAY_TRIGGERS (this
+// workflow's overlay_triggers outputs, as {stepId,name,expr,label}); the client maintains
+// the latter as triggers are added.
+
+const SENTINEL_CREATE = "__rebar_create__"; // "➕ Create new criterion/prompt…" in the prompt select
+const SENTINEL_NEW_TRIGGER = "__rebar_new_trigger__"; // "➕ New trigger…" in the when select
+const WHEN_ALWAYS = "__rebar_always__"; // "(always include)" → clears `when`
+
+// A tiny module-level store for the transient AUTHORING forms (create criterion/prompt, and
+// create overlay trigger). It is NOT persisted to rebar:Config — it only drives which form
+// fields are visible and remembers which criterion opened the form. Components subscribe via
+// useAuthoring() and force a re-render through notifyAuthoring() (the properties-panel does
+// not re-run getGroups on a non-model event, so the form's visibility is store-driven).
+const authoring = {
+  open: false,
+  kind: "criterion",
+  id: "",
+  body: "",
+  targetIndex: null,
+  // The bpmn id of the element whose criterion opened a form. Used to detect a selection
+  // change so a form is never applied to the wrong element/index (see resetAuthoring +
+  // authoringGroup): the store is module-global, so without this guard a form opened on
+  // batch step A would write its new id/trigger to whatever element B is selected next.
+  targetElementId: "",
+  status: "",
+  triggerOpen: false,
+  triggerName: "",
+  triggerKeywords: "",
+  triggerTargetIndex: null,
+  _subs: new Set(),
+};
+
+// Close both authoring forms and clear their transient state (id/body/trigger fields,
+// remembered target index + element). Leaves `status` for the caller to set/clear.
+function resetAuthoring() {
+  authoring.open = false;
+  authoring.kind = "criterion";
+  authoring.id = "";
+  authoring.body = "";
+  authoring.targetIndex = null;
+  authoring.targetElementId = "";
+  authoring.triggerOpen = false;
+  authoring.triggerName = "";
+  authoring.triggerKeywords = "";
+  authoring.triggerTargetIndex = null;
+}
+
+function notifyAuthoring() {
+  authoring._subs.forEach((fn) => fn());
+}
+
+function useAuthoring() {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const fn = () => bump((n) => n + 1);
+    authoring._subs.add(fn);
+    return () => authoring._subs.delete(fn);
+  }, []);
+  return authoring;
+}
+
+// Read the criterion at cfg.batch.criteria[index] (defensively, never throwing).
+function criterionAt(element, index) {
+  return (
+    ((parseConfig(element.businessObject).batch || {}).criteria || [])[index] ||
+    {}
+  );
+}
+
+// Write one key of the criterion at cfg.batch.criteria[index] (empty/null deletes it).
+function setCriterionKey(element, modeling, bpmnFactory, index, key, value) {
+  mutateConfig(element, modeling, bpmnFactory, (cfg) => {
+    const batch = cfg.batch && typeof cfg.batch === "object" ? cfg.batch : {};
+    const crit = Array.isArray(batch.criteria) ? batch.criteria : [];
+    const c = crit[index] && typeof crit[index] === "object" ? crit[index] : {};
+    if (value === "" || value == null) delete c[key];
+    else c[key] = String(value);
+    crit[index] = c;
+    batch.criteria = crit;
+    cfg.batch = batch;
+  });
+}
+
+// The criterion `prompt` SELECT options: every window.REBAR_LIBRARY entry (value=id,
+// label=`<id> — <description>`), the current value (so a hand-authored id still shows), and a
+// "➕ Create new…" sentinel that opens the authoring form.
+function libraryOptions(current) {
+  const lib = Array.isArray(window.REBAR_LIBRARY) ? window.REBAR_LIBRARY : [];
+  const opts = [{ value: "", label: "(none)" }];
+  const seen = new Set([""]);
+  for (const e of lib) {
+    if (!e || seen.has(e.id)) continue;
+    seen.add(e.id);
+    const desc = e.description ? ` — ${e.description}` : "";
+    const tag = e.kind === "criterion" ? "[criterion] " : "";
+    opts.push({ value: e.id, label: `${tag}${e.id}${desc}` });
+  }
+  if (current && !seen.has(current)) {
+    opts.push({ value: current, label: `${current} (custom)` });
+  }
+  opts.push({ value: SENTINEL_CREATE, label: "➕ Create new criterion/prompt…" });
+  return opts;
+}
+
+// The criterion `prompt` field, as a library-backed SELECT (B-UX): no free-text typing.
+function CriterionPromptEntry(props) {
+  const { element, id, index } = props;
   const modeling = useService("modeling");
   const bpmnFactory = useService("bpmnFactory");
-  const debounce = useService("debounceInput");
   const getValue = () => {
-    const crit =
-      ((parseConfig(element.businessObject).batch || {}).criteria || [])[
-        index
-      ] || {};
-    return crit[ckey] == null ? "" : String(crit[ckey]);
+    const v = criterionAt(element, index).prompt;
+    return v == null ? "" : String(v);
   };
-  const validate = (v) =>
-    (v === "" || v == null) && required ? "Required" : null;
-  const setValue = (v, err) => {
-    if (err) return;
-    mutateConfig(element, modeling, bpmnFactory, (cfg) => {
-      const batch = cfg.batch && typeof cfg.batch === "object" ? cfg.batch : {};
-      const crit = Array.isArray(batch.criteria) ? batch.criteria : [];
-      const c =
-        crit[index] && typeof crit[index] === "object" ? crit[index] : {};
-      if (v === "" || v == null) delete c[ckey];
-      else c[ckey] = String(v);
-      crit[index] = c;
-      batch.criteria = crit;
-      cfg.batch = batch;
-    });
+  const setValue = (v) => {
+    if (v === SENTINEL_CREATE) {
+      // Open the authoring form targeting THIS criterion; do NOT write the sentinel.
+      authoring.open = true;
+      authoring.targetIndex = index;
+      authoring.targetElementId = element.businessObject.id || element.id;
+      authoring.status = "";
+      notifyAuthoring();
+      return;
+    }
+    setCriterionKey(element, modeling, bpmnFactory, index, "prompt", v);
   };
   return (
-    <TextFieldEntry
+    <SelectEntry
       id={id}
       element={element}
-      label={label}
+      label="prompt id *"
       getValue={getValue}
       setValue={setValue}
-      validate={validate}
-      debounce={debounce}
+      getOptions={() => libraryOptions(getValue())}
     />
   );
 }
 
-// The "Batch criteria" ListGroup: a per-criterion collapsible (prompt id + `when`) with the
-// stock add (+) / remove (×) affordances. add/remove edit cfg.batch.criteria via mutateConfig
-// (no hooks — they fire on click, so they take modeling/bpmnFactory captured by the provider).
+// The criterion `when` SELECT options: this workflow's overlay-trigger outputs (value=the full
+// `${{ steps.<id>.outputs.<name> }}` expression), an "(always include)" option that clears
+// `when`, the current value (if hand-authored), and a "➕ New trigger…" sentinel.
+function overlayWhenOptions(current) {
+  const trigs = Array.isArray(window.REBAR_OVERLAY_TRIGGERS)
+    ? window.REBAR_OVERLAY_TRIGGERS
+    : [];
+  const opts = [{ value: WHEN_ALWAYS, label: "(always include)" }];
+  const seen = new Set();
+  for (const t of trigs) {
+    if (!t || seen.has(t.expr)) continue;
+    seen.add(t.expr);
+    opts.push({ value: t.expr, label: t.label || t.expr });
+  }
+  if (current && !seen.has(current)) {
+    opts.push({ value: current, label: `${current} (custom)` });
+  }
+  opts.push({ value: SENTINEL_NEW_TRIGGER, label: "➕ New trigger…" });
+  return opts;
+}
+
+// The criterion `when` overlay predicate, as a SELECT over this workflow's overlay triggers.
+function CriterionWhenEntry(props) {
+  const { element, id, index } = props;
+  const modeling = useService("modeling");
+  const bpmnFactory = useService("bpmnFactory");
+  const getStored = () => {
+    const v = criterionAt(element, index).when;
+    return v == null ? "" : String(v);
+  };
+  const getValue = () => getStored() || WHEN_ALWAYS;
+  const setValue = (v) => {
+    if (v === SENTINEL_NEW_TRIGGER) {
+      authoring.triggerOpen = true;
+      authoring.triggerTargetIndex = index;
+      authoring.targetElementId = element.businessObject.id || element.id;
+      authoring.status = "";
+      notifyAuthoring();
+      return;
+    }
+    const stored = v === WHEN_ALWAYS ? "" : v;
+    setCriterionKey(element, modeling, bpmnFactory, index, "when", stored);
+  };
+  return (
+    <SelectEntry
+      id={id}
+      element={element}
+      label="when (overlay predicate)"
+      getValue={getValue}
+      setValue={setValue}
+      getOptions={() => overlayWhenOptions(getStored())}
+    />
+  );
+}
+
+// The "Batch criteria" ListGroup: a per-criterion collapsible (prompt SELECT + `when` SELECT)
+// with the stock add (+) / remove (×) affordances. add/remove edit cfg.batch.criteria via
+// mutateConfig (no hooks — they fire on click, so they take modeling/bpmnFactory captured by
+// the provider).
 function batchCriteriaGroup(element, modeling, bpmnFactory) {
   const criteria =
     (parseConfig(element.businessObject).batch || {}).criteria || [];
@@ -681,28 +836,13 @@ function batchCriteriaGroup(element, modeling, bpmnFactory) {
     entries: [
       {
         id: `criterion-${i}-prompt`,
-        component: (p) => (
-          <CriterionFieldEntry
-            {...p}
-            index={i}
-            ckey="prompt"
-            label="prompt id *"
-            required
-          />
-        ),
-        isEdited: isTextFieldEntryEdited,
+        component: (p) => <CriterionPromptEntry {...p} index={i} />,
+        isEdited: isSelectEntryEdited,
       },
       {
         id: `criterion-${i}-when`,
-        component: (p) => (
-          <CriterionFieldEntry
-            {...p}
-            index={i}
-            ckey="when"
-            label="when (overlay predicate)"
-          />
-        ),
-        isEdited: isTextFieldEntryEdited,
+        component: (p) => <CriterionWhenEntry {...p} index={i} />,
+        isEdited: isSelectEntryEdited,
       },
     ],
     remove: () =>
@@ -732,6 +872,334 @@ function batchCriteriaGroup(element, modeling, bpmnFactory) {
         cfg.batch = batch;
       });
     },
+  };
+}
+
+// ── Authoring forms (create criterion/prompt + create overlay trigger) ────────────
+// These render INTO a dedicated "Authoring" group on a batch step. Each field component is
+// store-driven (useAuthoring) and renders null until its form is opened by the matching
+// sentinel, so the panel stays uncluttered until the author asks to create something.
+
+// Always-visible info + status line (keeps the group non-empty and surfaces the last result).
+function AuthoringInfoEntry(props) {
+  const { id } = props;
+  const a = useAuthoring();
+  const hint = a.open
+    ? "Authoring a new entry — set an id + body, then Create & use."
+    : a.triggerOpen
+      ? "Adding a new overlay trigger — set a name + keywords, then Add & use."
+      : "Pick “➕ Create new…” in a criterion's prompt, or “➕ New trigger…” in its when, to author here.";
+  return (
+    <div class="bio-properties-panel-entry" data-entry-id={id}>
+      <div style="font-size:11px;color:#555;padding:2px 0;">{hint}</div>
+      {a.status ? (
+        <div
+          id="bio-properties-panel-rebar-author-status"
+          class={/^error/.test(a.status) ? "err" : "ok"}
+          style="font-size:11px;margin-top:2px;"
+        >
+          {a.status}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AuthoringKindEntry(props) {
+  const { element, id } = props;
+  const a = useAuthoring();
+  if (!a.open) return null;
+  return (
+    <SelectEntry
+      id={id}
+      element={element}
+      label="new entry kind"
+      getValue={() => a.kind}
+      setValue={(v) => {
+        a.kind = v || "criterion";
+        notifyAuthoring();
+      }}
+      getOptions={() => [
+        { value: "criterion", label: "criterion (plan-review)" },
+        { value: "prompt", label: "prompt" },
+      ]}
+    />
+  );
+}
+
+function AuthoringIdEntry(props) {
+  const { element, id } = props;
+  const a = useAuthoring();
+  const debounce = useService("debounceInput");
+  if (!a.open) return null;
+  return (
+    <TextFieldEntry
+      id={id}
+      element={element}
+      label="new id (letters/digits/dashes)"
+      getValue={() => a.id}
+      setValue={(v) => {
+        a.id = v || "";
+      }}
+      debounce={debounce}
+    />
+  );
+}
+
+function AuthoringBodyEntry(props) {
+  const { element, id } = props;
+  const a = useAuthoring();
+  const debounce = useService("debounceInput");
+  if (!a.open) return null;
+  return (
+    <TextAreaEntry
+      id={id}
+      element={element}
+      label="body / rubric (markdown)"
+      rows={6}
+      getValue={() => a.body}
+      setValue={(v) => {
+        a.body = v || "";
+      }}
+      debounce={debounce}
+    />
+  );
+}
+
+// Save button: POST /library/create (create_prompt under config.repo_root()), refresh
+// window.REBAR_LIBRARY, then assign the new id to the criterion that opened the form.
+function AuthoringSaveEntry(props) {
+  const { element, id } = props;
+  const a = useAuthoring();
+  const modeling = useService("modeling");
+  const bpmnFactory = useService("bpmnFactory");
+  if (!a.open) return null;
+  const onSave = async () => {
+    const newId = (a.id || "").trim();
+    if (!newId) {
+      a.status = "error: enter an id";
+      notifyAuthoring();
+      return;
+    }
+    a.status = "saving…";
+    notifyAuthoring();
+    try {
+      const r = await fetch("/library/create", {
+        method: "POST",
+        headers: {
+          "X-Rebar-Token": window.REBAR_TOKEN,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: newId,
+          kind: a.kind,
+          title: newId,
+          body: a.body || "",
+        }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok || !body.ok) {
+        a.status = "error: " + (body.errors || ["save failed"]).join("; ");
+        notifyAuthoring();
+        return;
+      }
+      // Refresh the library so the new id is an option everywhere.
+      try {
+        const lr = await fetch("/library", {
+          headers: { "X-Rebar-Token": window.REBAR_TOKEN },
+        });
+        if (lr.ok) window.REBAR_LIBRARY = await lr.json();
+      } catch (e) {
+        /* keep the prior library on a refresh failure (the new id still shows as current) */
+      }
+      const idx = a.targetIndex;
+      a.open = false;
+      a.status = "created " + newId;
+      a.id = "";
+      a.body = "";
+      if (idx != null) {
+        setCriterionKey(element, modeling, bpmnFactory, idx, "prompt", newId);
+      }
+      notifyAuthoring();
+    } catch (e) {
+      a.status = "error: " + e.message;
+      notifyAuthoring();
+    }
+  };
+  return (
+    <div class="bio-properties-panel-entry" data-entry-id={id}>
+      <button
+        type="button"
+        id={"bio-properties-panel-" + id}
+        class="bio-properties-panel-add-entry"
+        onClick={onSave}
+      >
+        Create &amp; use
+      </button>
+    </div>
+  );
+}
+
+// Find this workflow's overlay_triggers step element (its NAME is the op id "overlay_triggers";
+// its bpmn id IS the IR step id). Returns null when the workflow has no such step.
+function findTriggersElement(elementRegistry) {
+  const all = elementRegistry.filter(
+    (e) => e.businessObject && e.businessObject.name === "overlay_triggers",
+  );
+  return all && all.length ? all[0] : null;
+}
+
+function TriggerNameEntry(props) {
+  const { element, id } = props;
+  const a = useAuthoring();
+  const debounce = useService("debounceInput");
+  if (!a.triggerOpen) return null;
+  return (
+    <TextFieldEntry
+      id={id}
+      element={element}
+      label="trigger name"
+      getValue={() => a.triggerName}
+      setValue={(v) => {
+        a.triggerName = v || "";
+      }}
+      debounce={debounce}
+    />
+  );
+}
+
+function TriggerKeywordsEntry(props) {
+  const { element, id } = props;
+  const a = useAuthoring();
+  const debounce = useService("debounceInput");
+  if (!a.triggerOpen) return null;
+  return (
+    <TextFieldEntry
+      id={id}
+      element={element}
+      label="keywords (comma-separated)"
+      getValue={() => a.triggerKeywords}
+      setValue={(v) => {
+        a.triggerKeywords = v || "";
+      }}
+      debounce={debounce}
+    />
+  );
+}
+
+// Add button: write {name: [keywords]} to the overlay_triggers step's with.keyword_triggers,
+// push the new {stepId,name,expr,label} into window.REBAR_OVERLAY_TRIGGERS, and select the new
+// trigger's expression on the criterion that opened the form.
+function TriggerSaveEntry(props) {
+  const { element, id } = props;
+  const a = useAuthoring();
+  const modeling = useService("modeling");
+  const bpmnFactory = useService("bpmnFactory");
+  const elementRegistry = useService("elementRegistry");
+  if (!a.triggerOpen) return null;
+  const onAdd = () => {
+    const name = (a.triggerName || "").trim();
+    if (!name) {
+      a.status = "error: enter a trigger name";
+      notifyAuthoring();
+      return;
+    }
+    const trig = findTriggersElement(elementRegistry);
+    if (!trig) {
+      a.status = "error: no overlay_triggers step in this workflow";
+      notifyAuthoring();
+      return;
+    }
+    const keywords = String(a.triggerKeywords || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    mutateConfig(trig, modeling, bpmnFactory, (cfg) => {
+      const w = cfg.with && typeof cfg.with === "object" ? cfg.with : {};
+      const kt =
+        w.keyword_triggers && typeof w.keyword_triggers === "object"
+          ? w.keyword_triggers
+          : {};
+      kt[name] = keywords;
+      w.keyword_triggers = kt;
+      cfg.with = w;
+    });
+    const stepId = trig.businessObject.id || trig.id;
+    const expr = "${{ steps." + stepId + ".outputs." + name + " }}";
+    const list = Array.isArray(window.REBAR_OVERLAY_TRIGGERS)
+      ? window.REBAR_OVERLAY_TRIGGERS
+      : [];
+    if (!list.some((t) => t.expr === expr)) {
+      list.push({ stepId, name, expr, label: stepId + "." + name });
+      window.REBAR_OVERLAY_TRIGGERS = list;
+    }
+    const idx = a.triggerTargetIndex;
+    a.triggerOpen = false;
+    a.status = "added trigger " + name;
+    a.triggerName = "";
+    a.triggerKeywords = "";
+    if (idx != null) {
+      setCriterionKey(element, modeling, bpmnFactory, idx, "when", expr);
+    }
+    notifyAuthoring();
+  };
+  return (
+    <div class="bio-properties-panel-entry" data-entry-id={id}>
+      <button
+        type="button"
+        id={"bio-properties-panel-" + id}
+        class="bio-properties-panel-add-entry"
+        onClick={onAdd}
+      >
+        Add &amp; use
+      </button>
+    </div>
+  );
+}
+
+// The "Authoring" group on a batch step: the create-criterion/prompt form and the
+// create-overlay-trigger form, each store-driven (visible only once its sentinel is picked).
+function authoringGroup(element) {
+  // The store is module-global, so a form left open on a previously-selected batch step
+  // would otherwise apply its new id/trigger to THIS element's criterion at the remembered
+  // index (wrong element). If a form is open for a DIFFERENT element, close it on render so
+  // the create form never targets the wrong element/index.
+  const elId = element.businessObject.id || element.id;
+  if (
+    (authoring.open || authoring.triggerOpen) &&
+    authoring.targetElementId !== elId
+  ) {
+    resetAuthoring();
+  }
+  return {
+    id: "rebar-authoring",
+    label: "New criterion / prompt / trigger",
+    entries: [
+      { id: "rebar-author-info", component: AuthoringInfoEntry },
+      {
+        id: "rebar-author-kind",
+        component: AuthoringKindEntry,
+        isEdited: isSelectEntryEdited,
+      },
+      {
+        id: "rebar-author-id",
+        component: AuthoringIdEntry,
+        isEdited: isTextFieldEntryEdited,
+      },
+      { id: "rebar-author-body", component: AuthoringBodyEntry },
+      { id: "rebar-author-save", component: AuthoringSaveEntry },
+      {
+        id: "rebar-trigger-name",
+        component: TriggerNameEntry,
+        isEdited: isTextFieldEntryEdited,
+      },
+      {
+        id: "rebar-trigger-keywords",
+        component: TriggerKeywordsEntry,
+        isEdited: isTextFieldEntryEdited,
+      },
+      { id: "rebar-trigger-save", component: TriggerSaveEntry },
+    ],
   };
 }
 
@@ -922,11 +1390,13 @@ class RebarPropertiesProvider {
       const bo = element.businessObject;
       if (bo && REBAR_KINDS.includes(bo.$type)) {
         groups.push(rebarGroup(element));
-        // A batch step gets a second group: its editable, add/remove criteria LIST.
+        // A batch step gets two more groups: its editable, add/remove criteria LIST, and the
+        // in-panel authoring forms (create criterion/prompt + create overlay trigger).
         if (rebarKind(bo) === "batch") {
           groups.push(
             batchCriteriaGroup(element, this._modeling, this._bpmnFactory),
           );
+          groups.push(authoringGroup(element));
         }
       }
       return groups;

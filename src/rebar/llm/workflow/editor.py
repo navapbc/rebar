@@ -31,6 +31,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+# The library WRITE + ENUMERATE data model (story B-DM) backs the editor's "select /
+# create criteria & prompts" pickers (story B-UX). Imported lazily-by-module here so the
+# editor's library globals + /library endpoints stay thin.
+from rebar.llm.prompt_library import create_prompt, enumerate_library
+
 from .bpmn import REBAR_MODDLE_DESCRIPTOR, bpmn_to_ir, ir_to_bpmn
 
 # Inspector contract-views live in their own module; re-exported (explicit `as` form)
@@ -83,6 +88,46 @@ def _collect_prompt_ids(steps: list[Any]) -> set[str]:
                 for key in keys:
                     if isinstance(blk.get(key), list):
                         out |= _collect_prompt_ids(blk[key])
+    return out
+
+
+def _collect_overlay_triggers(steps: list[Any]) -> list[dict[str, Any]]:
+    """Every overlay-trigger OUTPUT a workflow's ``overlay_triggers`` steps emit, as a flat
+    list of ``{stepId, name, expr, label}`` (recursing into control bodies).
+
+    Each ``overlay_triggers`` step yields one boolean output per ``with.keyword_triggers``
+    name, plus ``has_children`` when ``structural`` is set, plus ``has_linked_<type>`` per
+    ``with.linked_types`` entry. ``expr`` is the full ``${{ steps.<id>.outputs.<name> }}``
+    reference a batch criterion's ``when`` overlay predicate stores — so the editor's
+    ``when`` picker offers these as ready-to-use options (story B-UX)."""
+    out: list[dict[str, Any]] = []
+    for s in steps:
+        if not isinstance(s, dict):
+            continue
+        if s.get("uses") == "overlay_triggers":
+            step_id = str(s.get("id") or "")
+            with_ = s.get("with") if isinstance(s.get("with"), dict) else {}
+            kw = with_.get("keyword_triggers")
+            names: list[str] = list(kw.keys()) if isinstance(kw, dict) else []
+            if with_.get("structural"):
+                names.append("has_children")
+            for t in with_.get("linked_types") or []:
+                names.append(f"has_linked_{t}")
+            for name in names:
+                out.append(
+                    {
+                        "stepId": step_id,
+                        "name": str(name),
+                        "expr": f"${{{{ steps.{step_id}.outputs.{name} }}}}",
+                        "label": f"{step_id}.{name}",
+                    }
+                )
+        for block, *keys in (("loop", "body"), ("map", "body"), ("branch", "then", "else")):
+            blk = s.get(block)
+            if isinstance(blk, dict):
+                for key in keys:
+                    if isinstance(blk.get(key), list):
+                        out.extend(_collect_overlay_triggers(blk[key]))
     return out
 
 
@@ -253,6 +298,8 @@ def build_host_html(
     descriptor: dict[str, Any] | None = None,
     prompts: dict[str, str] | None = None,
     contracts: dict[str, dict[str, Any]] | None = None,
+    library: list[dict[str, Any]] | None = None,
+    overlay_triggers: list[dict[str, Any]] | None = None,
 ) -> str:
     """The editor host page: a thin shell that loads the vendored bundle (``/assets/…``)
     and hands it three globals — the BPMN to edit, the ``rebar`` moddle descriptor (so
@@ -267,6 +314,8 @@ def build_host_html(
     tok = json.dumps(token)
     prompt_map = json.dumps(prompts or {})
     contract_map = json.dumps(contracts or {})
+    library_list = json.dumps(library or [])
+    overlay_trigger_list = json.dumps(overlay_triggers or [])
     help_map = json.dumps(node_kind_help())
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -325,6 +374,8 @@ def build_host_html(
     window.REBAR_TOKEN = {tok};
     window.REBAR_PROMPTS = {prompt_map};
     window.REBAR_CONTRACTS = {contract_map};
+    window.REBAR_LIBRARY = {library_list};
+    window.REBAR_OVERLAY_TRIGGERS = {overlay_trigger_list};
     window.REBAR_KIND_HELP = {help_map};
   </script>
   <script src="/assets/editor.js"></script>
@@ -492,7 +543,15 @@ def edit_workflow(
                 self._send(
                     200,
                     build_host_html(
-                        bpmn_holder["xml"], token=token, prompts=prompts, contracts=contracts
+                        bpmn_holder["xml"],
+                        token=token,
+                        prompts=prompts,
+                        contracts=contracts,
+                        # Re-enumerate the library on each host load so a just-authored
+                        # criterion/prompt is offered on reload; the overlay-trigger seed is
+                        # static for the session (the client maintains it as triggers are added).
+                        library=enumerate_library(repo_root=_repo_root),
+                        overlay_triggers=_collect_overlay_triggers(doc.get("steps", []) or []),
                     ),
                 )
             elif self.path == "/workflow.bpmn":
@@ -506,6 +565,18 @@ def edit_workflow(
                     )
                     return
                 self._send(200, json.dumps(list_prompts(_repo_root)), "application/json")
+            elif self.path == "/library":
+                # The authorable prompt + criterion LIBRARY (story B-DM/B-UX): the editor's
+                # criterion-prompt picker re-fetches this after authoring a new entry so the
+                # new id is immediately selectable. Same token+Host guard as /prompts.
+                if not self._authed():
+                    self._send(
+                        403, '{"errors":["forbidden (bad token/origin)"]}', "application/json"
+                    )
+                    return
+                self._send(
+                    200, json.dumps(enumerate_library(repo_root=_repo_root)), "application/json"
+                )
             elif self.path == "/help":
                 # The per-kind help DATA (story 998e): element kinds + expected JSON
                 # shape per kind. Host-guarded (read-only, no token needed — it is the
@@ -524,7 +595,7 @@ def edit_workflow(
                 self._send(404, "not found", "text/plain")
 
         def do_POST(self):  # noqa: N802 - stdlib handler name
-            if self.path not in ("/save", "/prompt/save", "/validate"):
+            if self.path not in ("/save", "/prompt/save", "/validate", "/library/create"):
                 self._send(404, '{"errors":["unknown endpoint"]}', "application/json")
                 return
             # CSRF / DNS-rebinding guard: require the per-session token (a cross-origin
@@ -543,6 +614,9 @@ def edit_workflow(
                 return
             if self.path == "/validate":
                 self._validate(payload)
+                return
+            if self.path == "/library/create":
+                self._library_create(payload)
                 return
             xml = payload.decode("utf-8")
             errors = save_bpmn_to_ir(xml, target)
@@ -584,6 +658,56 @@ def edit_workflow(
             self._send(
                 200,
                 json.dumps({"ok": True, "path": result["path"], "kind": result["kind"]}),
+                "application/json",
+            )
+
+        def _library_create(self, raw: bytes):
+            # POST /library/create body {id, title, description, body, kind} → author a NEW
+            # prompt-library entry under config.repo_root()'s .rebar/prompts/<id>.md via
+            # prompt_library.create_prompt (story B-UX). create_prompt always writes the user
+            # OVERRIDE home (never the packaged dir / committed index), so the drift gate stays
+            # green; it canonicalizes the front-matter and invalidates the registry caches so
+            # the entry is immediately enumerable. 200 {ok:true, id, path} or 4xx {ok:false,
+            # errors:[...]}. Token+Host guarded above.
+            from rebar.llm.prompt_library import (
+                CRITERION_CATEGORY,
+                LibraryWriteError,
+                PromptError,
+            )
+            from rebar.llm.prompts import write_front_matter
+
+            try:
+                data = json.loads(raw.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as exc:
+                self._send(
+                    400,
+                    json.dumps({"ok": False, "errors": [f"bad JSON body: {exc}"]}),
+                    "application/json",
+                )
+                return
+            pid = str(data.get("id", "")).strip()
+            kind = str(data.get("kind", "prompt"))
+            meta: dict[str, Any] = {
+                "title": str(data.get("title") or pid),
+                # description is a REQUIRED front-matter key (create_prompt rejects an empty
+                # one); fall back to the title/id so a minimal name+body form still validates.
+                "description": str(data.get("description") or data.get("title") or pid),
+            }
+            if kind == "criterion":
+                meta["category"] = CRITERION_CATEGORY
+            text = write_front_matter(meta, str(data.get("body") or ""))
+            try:
+                path = create_prompt(pid, text, repo_root=_repo_root)
+            except (LibraryWriteError, PromptError) as exc:
+                self._send(
+                    400,
+                    json.dumps({"ok": False, "id": pid, "errors": [str(exc)]}),
+                    "application/json",
+                )
+                return
+            self._send(
+                200,
+                json.dumps({"ok": True, "id": pid, "path": str(path)}),
                 "application/json",
             )
 
