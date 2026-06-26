@@ -1,0 +1,1 @@
+{"author":"Iso Tester","data":{"verify_commands":[{"command":"python -m pytest tests/integration/rebar_reconciler/test_snapshot_contract.py -q","dd_id":"DD1","dd_text":"snapshot round-trip contract passes"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1782448338864296001,"uuid":"ad9c3cf8-8a55-462e-99cc-027d14a3bee9"}
