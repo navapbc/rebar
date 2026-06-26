@@ -354,6 +354,16 @@ def _diff_comments_inbound(
 ) -> list[dict[str, Any]]:
     """Detect Jira-side comments not yet mirrored locally (bug 85a1, Gap 1).
 
+    Snapshot lookup: the Jira REST API nests comments at
+    ``fields["comment"]["comments"]`` (outer key is the SINGULAR ``"comment"``,
+    not ``"comments"``). The fetcher enriches each snapshot entry with this
+    nested ``comment`` field verbatim, so we read
+    ``jira_fields["comment"]["comments"]`` — mirroring the outbound differ
+    (:func:`outbound_differ._diff_comments`). When the ``comment`` key is
+    absent (no comment data this pass — e.g. the live-search snapshot shape),
+    there are no inbound comment mutations; when present but malformed, we
+    treat it as no comments.
+
     Strategy (validated against live Jira during development):
       1. Read each Jira comment's id + body.
       2. Loop-breaker: skip any comment whose body contains
@@ -368,7 +378,12 @@ def _diff_comments_inbound(
     The applier consumes this list when writing inbound updates to the
     local tickets-tracker.
     """
-    jira_comments = jira_fields.get("comments") or []
+    # Jira REST nests comments under the singular "comment" key as
+    # {"comments": [...], "total": N}. Key absent → no comment data this pass.
+    comment_field = jira_fields.get("comment")
+    if not isinstance(comment_field, dict):
+        return []
+    jira_comments = comment_field.get("comments") or []
     if not isinstance(jira_comments, list):
         return []
 
