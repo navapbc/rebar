@@ -66,7 +66,7 @@ async function inspect(id) {
     const titles = Array.from(
       document.querySelectorAll(".bio-properties-panel-group-header-title")
     ).map((e) => e.textContent.trim());
-    return { selected: id, type: el && el.businessObject && el.businessObject.$type, groups: titles, rebarGroup: titles.some((t) => /rebar/i.test(t)) };
+    return { selected: id, type: el && el.businessObject && el.businessObject.$type, groups: titles, rebarGroup: titles.some((t) => /rebar|step behavior/i.test(t)) };
   }, id);
 }
 

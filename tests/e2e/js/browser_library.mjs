@@ -34,7 +34,10 @@ const inserted = await page.evaluate((promptId) => {
   };
 }, prompts[0].id);
 
-// Create a brand-new prompt via the form and Save (POSTs /prompt/save).
+// Create a brand-new prompt via the form and Save (POSTs /prompt/save). The create/edit
+// form is now on-demand (B-UX item 11): click "New prompt" to reveal it first.
+await page.click("#rebar-prompt-new");
+await page.waitForTimeout(150);
 await page.fill("#rebar-prompt-id", "e2e-created");
 await page.fill("#rebar-prompt-body", "created from the browser e2e");
 await page.selectOption("#rebar-prompt-category", "transform");

@@ -144,7 +144,7 @@ function KindEntry(props) {
     <TextFieldEntry
       id={id}
       element={element}
-      label="Rebar kind"
+      label="Step type"
       getValue={() => kindOf(element.businessObject)}
       setValue={() => {}}
       debounce={debounce}
@@ -377,7 +377,7 @@ function WithFieldEntry(props) {
 // A plain text slice of the config (e.g. loop `var`/`while`/`until`, map `over`/`as`).
 // Empty clears the key. `required` makes empty an error.
 function ConfigTextEntry(props) {
-  const { element, id, ckey, label, required, description } = props;
+  const { element, id, ckey, label, required, description, placeholder } = props;
   const modeling = useService("modeling");
   const bpmnFactory = useService("bpmnFactory");
   const debounce = useService("debounceInput");
@@ -401,6 +401,7 @@ function ConfigTextEntry(props) {
       element={element}
       label={label}
       description={description || undefined}
+      placeholder={placeholder || undefined}
       getValue={getValue}
       setValue={setValue}
       validate={validate}
@@ -464,16 +465,17 @@ function ModeEntry(props) {
       else cfg.mode = v;
     });
   const getOptions = () => [
-    { value: "", label: "(default)" },
-    { value: "findings", label: "findings" },
-    { value: "structured", label: "structured" },
-    { value: "text", label: "text" },
+    { value: "", label: "(default — findings for a reviewer prompt)" },
+    { value: "findings", label: "findings — structured findings list (default)" },
+    { value: "structured", label: "structured — JSON matching the output schema" },
+    { value: "text", label: "text — raw freeform text" },
   ];
   return (
     <SelectEntry
       id={id}
       element={element}
-      label="mode"
+      label="Output mode"
+      description="How the agent's response is parsed: findings (a list of findings; the default for reviewer prompts), structured (JSON against the output schema), or text (raw text). Leave blank to use the prompt's default."
       getValue={getValue}
       setValue={setValue}
       getOptions={getOptions}
@@ -591,39 +593,80 @@ function BatchNumberEntry(props) {
   );
 }
 
-// The model_ladder (cfg.batch.model_ladder) — an ordered escalation list, edited as a
-// comma-separated field and stored as a string array (empty clears it).
-function BatchLadderEntry(props) {
-  const { element, id } = props;
+// model_ladder (cfg.batch.model_ladder) is an ordered escalation list of model ids, edited as
+// an add/remove LIST of rows (story B-UX item 18) rather than a comma string. Each row is one
+// model id at its index; add appends an empty id, remove drops the row. Reads/writes the same
+// cfg.batch.model_ladder array slice, so the round-trip is unchanged.
+function readLadder(element) {
+  const v = (parseConfig(element.businessObject).batch || {}).model_ladder;
+  return Array.isArray(v) ? v : [];
+}
+
+function writeLadder(element, modeling, bpmnFactory, list) {
+  mutateConfig(element, modeling, bpmnFactory, (cfg) => {
+    const batch = cfg.batch && typeof cfg.batch === "object" ? cfg.batch : {};
+    const clean = list.map((s) => String(s)).filter((s) => s.length);
+    if (clean.length) batch.model_ladder = clean;
+    else delete batch.model_ladder;
+    cfg.batch = batch;
+  });
+}
+
+// One model-id row of the ladder.
+function LadderRowEntry(props) {
+  const { element, id, index } = props;
   const modeling = useService("modeling");
   const bpmnFactory = useService("bpmnFactory");
   const debounce = useService("debounceInput");
-  const getValue = () => {
-    const v = (parseConfig(element.businessObject).batch || {}).model_ladder;
-    return Array.isArray(v) ? v.join(", ") : "";
-  };
+  const getValue = () => readLadder(element)[index] || "";
   const setValue = (v) => {
-    mutateConfig(element, modeling, bpmnFactory, (cfg) => {
-      const batch = cfg.batch && typeof cfg.batch === "object" ? cfg.batch : {};
-      const list = String(v || "")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      if (list.length) batch.model_ladder = list;
-      else delete batch.model_ladder;
-      cfg.batch = batch;
-    });
+    const list = readLadder(element).slice();
+    list[index] = String(v || "");
+    writeLadder(element, modeling, bpmnFactory, list);
   };
   return (
     <TextFieldEntry
       id={id}
       element={element}
-      label="model_ladder (comma-separated)"
+      label={`model ${index + 1}`}
+      placeholder="claude-sonnet-4-6"
       getValue={getValue}
       setValue={setValue}
       debounce={debounce}
     />
   );
+}
+
+// The "Model ladder" ListGroup (add/remove ordered model ids) for a batch step.
+function modelLadderGroup(element, modeling, bpmnFactory) {
+  const list = readLadder(element);
+  const items = list.map((m, i) => ({
+    id: `ladder-${i}`,
+    label: m || `model ${i + 1}`,
+    entries: [
+      {
+        id: `ladder-${i}-id`,
+        component: (p) => <LadderRowEntry {...p} index={i} />,
+        isEdited: isTextFieldEntryEdited,
+      },
+    ],
+    remove: () => {
+      const next = readLadder(element).slice();
+      next.splice(i, 1);
+      writeLadder(element, modeling, bpmnFactory, next);
+    },
+  }));
+  return {
+    id: "rebar-ladder",
+    label: "Model ladder",
+    component: ListGroup,
+    element,
+    items,
+    add: (event) => {
+      if (event && event.stopPropagation) event.stopPropagation();
+      writeLadder(element, modeling, bpmnFactory, [...readLadder(element), ""]);
+    },
+  };
 }
 
 // ── Library-backed criterion pickers + in-editor authoring (story B-UX) ───────────
@@ -649,6 +692,14 @@ const authoring = {
   id: "",
   body: "",
   targetIndex: null,
+  // What the create-prompt save assigns the new id to: "criterion" (a batch criterion's
+  // prompt at targetIndex) or "name" (the selected step's NAME == its prompt/uses action,
+  // for an agent step's library-backed prompt picker — story B-UX item 7).
+  targetKind: "criterion",
+  // What a newly-added overlay trigger's expression is assigned to: "criterion" (a batch
+  // criterion's `when` at triggerTargetIndex) or "if" (the selected step's `if` overlay
+  // predicate — story B-UX item 9, the agent/scripted step-level inclusion select).
+  triggerTargetKind: "criterion",
   // The bpmn id of the element whose criterion opened a form. Used to detect a selection
   // change so a form is never applied to the wrong element/index (see resetAuthoring +
   // authoringGroup): the store is module-global, so without this guard a form opened on
@@ -670,11 +721,13 @@ function resetAuthoring() {
   authoring.id = "";
   authoring.body = "";
   authoring.targetIndex = null;
+  authoring.targetKind = "criterion";
   authoring.targetElementId = "";
   authoring.triggerOpen = false;
   authoring.triggerName = "";
   authoring.triggerKeywords = "";
   authoring.triggerTargetIndex = null;
+  authoring.triggerTargetKind = "criterion";
 }
 
 function notifyAuthoring() {
@@ -723,7 +776,11 @@ function libraryOptions(current) {
   for (const e of lib) {
     if (!e || seen.has(e.id)) continue;
     seen.add(e.id);
-    const desc = e.description ? ` — ${e.description}` : "";
+    // Keep the id readable; truncate a long description so it doesn't overflow the
+    // dropdown (story B-UX item 2). The full description still resolves Python-side.
+    const full = e.description ? String(e.description) : "";
+    const short = full.length > 60 ? `${full.slice(0, 60)}…` : full;
+    const desc = short ? ` — ${short}` : "";
     const tag = e.kind === "criterion" ? "[criterion] " : "";
     opts.push({ value: e.id, label: `${tag}${e.id}${desc}` });
   }
@@ -747,6 +804,8 @@ function CriterionPromptEntry(props) {
     if (v === SENTINEL_CREATE) {
       // Open the authoring form targeting THIS criterion; do NOT write the sentinel.
       authoring.open = true;
+      authoring.kind = "criterion";
+      authoring.targetKind = "criterion";
       authoring.targetIndex = index;
       authoring.targetElementId = element.businessObject.id || element.id;
       authoring.status = "";
@@ -801,6 +860,7 @@ function CriterionWhenEntry(props) {
   const setValue = (v) => {
     if (v === SENTINEL_NEW_TRIGGER) {
       authoring.triggerOpen = true;
+      authoring.triggerTargetKind = "criterion";
       authoring.triggerTargetIndex = index;
       authoring.targetElementId = element.businessObject.id || element.id;
       authoring.status = "";
@@ -814,10 +874,88 @@ function CriterionWhenEntry(props) {
     <SelectEntry
       id={id}
       element={element}
-      label="when (overlay predicate)"
+      label="Include this criterion when"
+      description="The criterion is applied only when this overlay trigger fires (else skipped). Pick (always include) to apply it unconditionally."
       getValue={getValue}
       setValue={setValue}
       getOptions={() => overlayWhenOptions(getStored())}
+    />
+  );
+}
+
+// The step-level `if` overlay predicate, as a SELECT over this workflow's overlay triggers —
+// the SAME picker the batch criterion `when` uses (story B-UX item 9), so a step's conditional
+// inclusion is chosen, not free-typed. Writes/reads the cfg.if slice; "(always include)" clears
+// it; "➕ New trigger…" opens the trigger authoring form targeting this step's `if`.
+function IfPredicateSelectEntry(props) {
+  const { element, id } = props;
+  const modeling = useService("modeling");
+  const bpmnFactory = useService("bpmnFactory");
+  const getStored = () => {
+    const v = parseConfig(element.businessObject).if;
+    return v == null ? "" : String(v);
+  };
+  const getValue = () => getStored() || WHEN_ALWAYS;
+  const setValue = (v) => {
+    if (v === SENTINEL_NEW_TRIGGER) {
+      authoring.triggerOpen = true;
+      authoring.triggerTargetKind = "if";
+      authoring.triggerTargetIndex = null;
+      authoring.targetElementId = element.businessObject.id || element.id;
+      authoring.status = "";
+      notifyAuthoring();
+      return;
+    }
+    const stored = v === WHEN_ALWAYS ? "" : v;
+    mutateConfig(element, modeling, bpmnFactory, (cfg) => {
+      if (stored) cfg.if = stored;
+      else delete cfg.if;
+    });
+  };
+  return (
+    <SelectEntry
+      id={id}
+      element={element}
+      label="Include this step when"
+      description="The step runs only when this overlay trigger fires (else skipped). Pick (always include) to run it unconditionally."
+      getValue={getValue}
+      setValue={setValue}
+      getOptions={() => overlayWhenOptions(getStored())}
+    />
+  );
+}
+
+// The agent step's `prompt` id (round-tripped through the element NAME), as a library-backed
+// SELECT (story B-UX item 7) — the same affordance the batch criterion prompt uses, instead of
+// a free-text field. Picks a window.REBAR_LIBRARY entry; a hand-authored id not in the list is
+// preserved as a "(custom)" option; "➕ Create new…" opens the prompt authoring form.
+function PromptIdSelectEntry(props) {
+  const { element, id } = props;
+  const modeling = useService("modeling");
+  const bo = element.businessObject;
+  const getValue = () => bo.name || "";
+  const setValue = (v) => {
+    if (v === SENTINEL_CREATE) {
+      authoring.open = true;
+      authoring.kind = "prompt";
+      authoring.targetKind = "name";
+      authoring.targetIndex = null;
+      authoring.targetElementId = bo.id || element.id;
+      authoring.status = "";
+      notifyAuthoring();
+      return;
+    }
+    modeling.updateProperties(element, { name: v || "" });
+  };
+  return (
+    <SelectEntry
+      id={id}
+      element={element}
+      label="Prompt id"
+      description="The prompt this agent step runs (from the prompt/criterion library). Pick ➕ Create new… to author one in place."
+      getValue={getValue}
+      setValue={setValue}
+      getOptions={() => libraryOptions(getValue())}
     />
   );
 }
@@ -888,7 +1026,7 @@ function AuthoringInfoEntry(props) {
     ? "Authoring a new entry — set an id + body, then Create & use."
     : a.triggerOpen
       ? "Adding a new overlay trigger — set a name + keywords, then Add & use."
-      : "Pick “➕ Create new…” in a criterion's prompt, or “➕ New trigger…” in its when, to author here.";
+      : "Pick “➕ Create new…” in a prompt/criterion picker, or “➕ New trigger…” in an inclusion picker, to author here.";
   return (
     <div class="bio-properties-panel-entry" data-entry-id={id}>
       <div style="font-size:11px;color:#555;padding:2px 0;">{hint}</div>
@@ -1013,11 +1151,15 @@ function AuthoringSaveEntry(props) {
         /* keep the prior library on a refresh failure (the new id still shows as current) */
       }
       const idx = a.targetIndex;
+      const targetKind = a.targetKind;
       a.open = false;
       a.status = "created " + newId;
       a.id = "";
       a.body = "";
-      if (idx != null) {
+      if (targetKind === "name") {
+        // Agent-step prompt picker (item 7): the new id IS the step's prompt action.
+        modeling.updateProperties(element, { name: newId });
+      } else if (idx != null) {
         setCriterionKey(element, modeling, bpmnFactory, idx, "prompt", newId);
       }
       notifyAuthoring();
@@ -1134,11 +1276,18 @@ function TriggerSaveEntry(props) {
       window.REBAR_OVERLAY_TRIGGERS = list;
     }
     const idx = a.triggerTargetIndex;
+    const targetKind = a.triggerTargetKind;
     a.triggerOpen = false;
     a.status = "added trigger " + name;
     a.triggerName = "";
     a.triggerKeywords = "";
-    if (idx != null) {
+    if (targetKind === "if") {
+      // Step-level `if` overlay select (item 9): assign the new trigger expr to cfg.if.
+      mutateConfig(element, modeling, bpmnFactory, (cfg) => {
+        if (expr) cfg.if = expr;
+        else delete cfg.if;
+      });
+    } else if (idx != null) {
       setCriterionKey(element, modeling, bpmnFactory, idx, "when", expr);
     }
     notifyAuthoring();
@@ -1225,15 +1374,8 @@ function structuredEntries(element, kind) {
   // leaf steps (scripted/agent) so a step can be conditionally INCLUDED from the editor.
   const ifEntry = {
     id: "rebar-if",
-    component: (p) => (
-      <ConfigTextEntry
-        {...p}
-        ckey="if"
-        label="if (overlay predicate)"
-        description="Step is included only when this expression is truthy (else skipped)."
-      />
-    ),
-    isEdited: isTextFieldEntryEdited,
+    component: IfPredicateSelectEntry,
+    isEdited: isSelectEntryEdited,
   };
   if (kind === "scripted") {
     entries.push({ id: "rebar-action", component: ActionEntry });
@@ -1246,7 +1388,11 @@ function structuredEntries(element, kind) {
       component: ServiceKindEntry,
       isEdited: isSelectEntryEdited,
     });
-    entries.push({ id: "rebar-action", component: ActionEntry });
+    entries.push({
+      id: "rebar-action",
+      component: PromptIdSelectEntry,
+      isEdited: isSelectEntryEdited,
+    });
     entries.push({ id: "rebar-contract", component: ContractEntry });
     entries.push({ id: "rebar-prompt-text", component: PromptTextEntry });
     entries.push({
@@ -1256,7 +1402,15 @@ function structuredEntries(element, kind) {
     });
     entries.push({
       id: "rebar-model",
-      component: (p) => <ConfigTextEntry {...p} ckey="model" label="model" />,
+      component: (p) => (
+        <ConfigTextEntry
+          {...p}
+          ckey="model"
+          label="Model"
+          placeholder="claude-sonnet-4-6"
+          description="Optional model id (e.g. claude-sonnet-4-6). Leave blank to use the workflow/config/env default (claude-opus-4-8)."
+        />
+      ),
       isEdited: isTextFieldEntryEdited,
     });
     entries.push(ifEntry);
@@ -1281,11 +1435,8 @@ function structuredEntries(element, kind) {
       ),
       isEdited: isTextFieldEntryEdited,
     });
-    entries.push({
-      id: "rebar-batch-ladder",
-      component: BatchLadderEntry,
-      isEdited: isTextFieldEntryEdited,
-    });
+    // model_ladder is edited as an add/remove LIST (see modelLadderGroup), not a comma
+    // string (story B-UX item 18), so it is NOT pushed here as a single field.
     entries.push(ifEntry);
   } else if (kind === "loop") {
     entries.push({
@@ -1363,7 +1514,7 @@ function rebarGroup(element) {
     // (a83a). The deeper branch UX — arm add/remove + connection routing — is deferred
     // S9 scope. No raw JSON editor: any non-`when` keys round-trip via the slice-write.
     entries.push({ id: "rebar-when", component: WhenEntry });
-    return { id: "rebar", label: "Rebar", entries };
+    return { id: "rebar", label: "Step behavior", entries };
   }
 
   if (STRUCTURED_KINDS.includes(kind)) {
@@ -1371,7 +1522,7 @@ function rebarGroup(element) {
     // are not shown but are preserved verbatim by the slice-write (mutateConfig), so no
     // raw JSON fallback is needed and none is offered.
     entries.push(...structuredEntries(element, kind));
-    return { id: "rebar", label: "Rebar", entries };
+    return { id: "rebar", label: "Step behavior", entries };
   }
 
   // A bare sub-process (or any other rebar element with no structured step config) shows
@@ -1390,12 +1541,22 @@ class RebarPropertiesProvider {
       const bo = element.businessObject;
       if (bo && REBAR_KINDS.includes(bo.$type)) {
         groups.push(rebarGroup(element));
-        // A batch step gets two more groups: its editable, add/remove criteria LIST, and the
-        // in-panel authoring forms (create criterion/prompt + create overlay trigger).
-        if (rebarKind(bo) === "batch") {
+        const k = rebarKind(bo);
+        // A batch step gets two more groups: its editable, add/remove criteria LIST and the
+        // model-ladder LIST (story B-UX item 18).
+        if (k === "batch") {
           groups.push(
             batchCriteriaGroup(element, this._modeling, this._bpmnFactory),
           );
+          groups.push(
+            modelLadderGroup(element, this._modeling, this._bpmnFactory),
+          );
+        }
+        // The in-panel authoring forms (create criterion/prompt + create overlay trigger) are
+        // reachable from a batch criterion's pickers AND from an agent step's prompt/`if`
+        // pickers and a scripted step's `if` picker (story B-UX items 7 + 9), so the group is
+        // rendered for all of those kinds.
+        if (k === "batch" || k === "agent" || k === "scripted") {
           groups.push(authoringGroup(element));
         }
       }

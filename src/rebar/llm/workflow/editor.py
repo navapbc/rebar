@@ -334,6 +334,9 @@ def build_host_html(
     #canvas {{ flex: 1 1 auto; height: 100%; }}
     #properties {{ flex: 0 0 320px; height: 100%; overflow: auto;
                    border-left: 1px solid #ccc; background: #fafafa; }}
+    /* B-UX item 16: make every edit-panel field LABEL bold so it is visually separated
+       from its help/description text (which run together otherwise). */
+    #properties .bio-properties-panel-label {{ font-weight: 600; }}
     #rebar-library {{ flex: 0 0 300px; height: 100%; overflow: auto; padding: 8px;
                       border-left: 1px solid #ccc; background: #f4f6fa;
                       box-sizing: border-box; font-size: 13px; }}
@@ -341,6 +344,17 @@ def build_host_html(
     #rebar-library select, #rebar-library input, #rebar-library textarea, #rebar-library button
       {{ display: block; width: 100%; margin: 3px 0; box-sizing: border-box; }}
     #rebar-library label {{ display: block; margin: 4px 0; }}
+    /* B-UX item 12: the "overwrite if exists" checkbox was full-width + block (stacked above
+       its text, misaligned). Lay the row out as a flex line and let the checkbox size itself. */
+    #rebar-library .rebar-overwrite-label {{ display: flex; align-items: center; gap: 6px; }}
+    #rebar-library #rebar-prompt-overwrite {{ display: inline-block; width: auto; margin: 0;
+                                              flex: 0 0 auto; }}
+    /* B-UX item 13: inline id-collision notice under the id field. */
+    #rebar-library .rebar-lib-idcheck {{ font-size: 11px; margin: 2px 0 4px; }}
+    #rebar-library .rebar-lib-idcheck.err {{ color: #cf222e; }}
+    #rebar-library .rebar-lib-idcheck.ok {{ color: #1a7f37; }}
+    /* B-UX item 5: the on-demand insert panel revealed by the "Add step" button. */
+    #rebar-library .rebar-insert-panel {{ padding: 4px 0; }}
     #rebar-library .rebar-lib-target {{ font-family: monospace; font-size: 11px; color: #555;
                                         margin-top: 6px; word-break: break-all; }}
     #rebar-library .ok {{ color: #1a7f37; }} #rebar-library .err {{ color: #cf222e; }}
@@ -360,7 +374,7 @@ def build_host_html(
 <body>
   <div id="bar">
     <strong>rebar</strong> visual workflow editor
-    <button id="save">Save to IR</button>
+    <button id="save">Save to Rebar</button>
     <span id="status">loading…</span>
   </div>
   <div id="main">

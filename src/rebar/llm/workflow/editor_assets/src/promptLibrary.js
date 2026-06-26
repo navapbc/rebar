@@ -58,16 +58,44 @@ export function mountPromptLibrary(modeler, container) {
   const status = el("div", { class: "rebar-lib-status", id: "rebar-lib-status" });
   const targetLine = el("div", { class: "rebar-lib-target", id: "rebar-lib-target" });
 
-  // ── INSERTION chooser ──────────────────────────────────────────────────────
+  // The create/edit form is on-demand (item 11): hidden until "New prompt" or loading a
+  // library prompt reveals it, so it isn't shown persistently next to the "New prompt" button.
+  const editForm = el("div", { class: "rebar-edit-form", id: "rebar-edit-form" });
+  editForm.style.display = "none";
+  function showEditForm(show) {
+    editForm.style.display = show ? "" : "none";
+  }
+
+  // ── INSERTION chooser (on-demand: revealed by the "Add step" button) ─────────
+  // The structural kinds (branch/loop/map/batch) carry no action name — their config is
+  // edited in the panel after insert — so the "choice" dropdown only applies to the leaf
+  // kinds (prompt/scripted op). NAMELESS_KINDS drives hiding the choice select for them.
+  const NAMELESS_KINDS = new Set(["branch", "loop", "map", "batch"]);
   const insertKind = el("select", { id: "rebar-insert-kind" });
   insertKind.appendChild(el("option", { value: "service" }, "prompt (prompt:)"));
   insertKind.appendChild(el("option", { value: "script" }, "scripted op (uses:)"));
+  insertKind.appendChild(el("option", { value: "batch" }, "batch (finder + criteria)"));
+  insertKind.appendChild(el("option", { value: "branch" }, "branch (conditional)"));
+  insertKind.appendChild(el("option", { value: "loop" }, "loop"));
+  insertKind.appendChild(el("option", { value: "map" }, "map (fan-out)"));
   const insertChoice = el("select", { id: "rebar-insert-choice" });
   const insertBtn = el("button", { id: "rebar-insert-btn", type: "button" }, "Insert step");
+  const insertStatus = el("div", { class: "rebar-lib-status", id: "rebar-insert-status" });
+
+  function setInsertStatus(msg, cls) {
+    insertStatus.textContent = msg;
+    insertStatus.className = "rebar-lib-status " + (cls || "");
+  }
 
   function refreshInsertChoices() {
     insertChoice.textContent = "";
     const kind = insertKind.value;
+    // Structural kinds need no op/prompt choice — hide the choice select for them.
+    if (NAMELESS_KINDS.has(kind)) {
+      insertChoice.style.display = "none";
+      return;
+    }
+    insertChoice.style.display = "";
     const promptIds = new Set(prompts.map((p) => p.id));
     if (kind === "service") {
       // prompts grouped by category
@@ -87,16 +115,41 @@ export function mountPromptLibrary(modeler, container) {
   }
   insertKind.addEventListener("change", refreshInsertChoices);
   insertBtn.addEventListener("click", () => {
-    const name = insertChoice.value;
-    if (!name) return;
-    insertTypedStep(modeler, insertKind.value, name);
-    setStatus(`inserted ${insertKind.value === "service" ? "prompt" : "op"} step "${name}"`, "ok");
+    const kind = insertKind.value;
+    const structural = NAMELESS_KINDS.has(kind);
+    const name = structural ? "" : insertChoice.value;
+    if (!structural && !name) return;
+    // insertTypedStep selects the new element, so its edit panel opens for further fields.
+    insertTypedStep(modeler, kind, name);
+    const label = name ? ` "${name}"` : "";
+    setInsertStatus(`inserted ${kind} step${label} — edit it in the panel`, "ok");
   });
+
+  // ── "Add step" toggle: the insert chooser is on-demand, not persistently shown ───
+  const addStepBtn = el("button", { id: "rebar-add-step", type: "button" }, "➕ Add step");
+  const insertPanel = el("div", { class: "rebar-insert-panel", id: "rebar-insert-panel" });
+  insertPanel.style.display = "none";
+  function showInsert(show) {
+    insertPanel.style.display = show ? "" : "none";
+    addStepBtn.textContent = show ? "✕ Cancel add step" : "➕ Add step";
+    if (show) refreshInsertChoices();
+  }
+  addStepBtn.addEventListener("click", () =>
+    showInsert(insertPanel.style.display === "none"),
+  );
+  // Selecting an element on the canvas reverts to the normal edit panel (hide insert).
+  try {
+    modeler.get("eventBus").on("selection.changed", (e) => {
+      if (e && e.newSelection && e.newSelection.length) showInsert(false);
+    });
+  } catch (err) {
+    /* eventBus unavailable in a degraded mount — the toggle still works manually */
+  }
 
   // A canvas affordance (context-pad/palette) calls this to open insert mode.
   window.__rebarOpenInsert = (kind) => {
     insertKind.value = kind === "service" ? "service" : "script";
-    refreshInsertChoices();
+    showInsert(true);
     panel.scrollIntoView({ block: "start" });
   };
 
@@ -111,8 +164,47 @@ export function mountPromptLibrary(modeler, container) {
   const overwriteBox = el("input", { id: "rebar-prompt-overwrite", type: "checkbox" });
   const newBtn = el("button", { id: "rebar-prompt-new", type: "button" }, "New prompt");
   const saveBtn = el("button", { id: "rebar-prompt-save", type: "button" }, "Save prompt");
+  // Inline live id-collision notice (story B-UX item 13): shown when the typed id already
+  // exists in the library, BEFORE save, so the author isn't surprised by a save rejection.
+  const idCheck = el("div", { class: "rebar-lib-idcheck", id: "rebar-prompt-idcheck" });
 
   for (const n of [idInput, titleInput, descInput, bodyArea]) n.addEventListener("input", () => (dirty = true));
+
+  // The set of existing library/prompt ids, for the live collision check. Prefer the freshest
+  // source: window.REBAR_LIBRARY (re-fetched after authoring) unioned with the listed prompts.
+  function knownIds() {
+    const ids = new Set();
+    const lib = Array.isArray(window.REBAR_LIBRARY) ? window.REBAR_LIBRARY : [];
+    for (const e of lib) if (e && e.id) ids.add(e.id);
+    for (const p of prompts) if (p && p.id) ids.add(p.id);
+    return ids;
+  }
+
+  // Re-evaluate the id-collision notice. A collision with "overwrite" OFF is flagged as an
+  // error (save would be rejected); with "overwrite" ON it's a neutral "will update" note.
+  function refreshIdCheck() {
+    const id = idInput.value.trim();
+    if (!id) return (idCheck.textContent = "");
+    if (!ID_RE.test(id)) {
+      idCheck.textContent = "invalid id: lowercase letters/digits/dashes, not starting with a dash";
+      idCheck.className = "rebar-lib-idcheck err";
+      return;
+    }
+    if (knownIds().has(id)) {
+      if (overwriteBox.checked) {
+        idCheck.textContent = `“${id}” already exists — saving will UPDATE it`;
+        idCheck.className = "rebar-lib-idcheck";
+      } else {
+        idCheck.textContent = `“${id}” already exists — enable “overwrite if exists” to update`;
+        idCheck.className = "rebar-lib-idcheck err";
+      }
+    } else {
+      idCheck.textContent = `“${id}” is available`;
+      idCheck.className = "rebar-lib-idcheck ok";
+    }
+  }
+  idInput.addEventListener("input", refreshIdCheck);
+  overwriteBox.addEventListener("change", refreshIdCheck);
 
   function setStatus(msg, cls) {
     status.textContent = msg;
@@ -147,6 +239,8 @@ export function mountPromptLibrary(modeler, container) {
     overwriteBox.checked = true; // editing an existing prompt → overwrite
     targetLine.textContent = body.target ? `→ writes to: ${body.target.path} [${body.target.kind}]` : "";
     dirty = false;
+    showEditForm(true); // loading a prompt reveals the (otherwise hidden) edit form
+    refreshIdCheck();
     setStatus(`loaded "${id}"`, "ok");
   }
   libSelect.addEventListener("change", () => libSelect.value && loadInto(libSelect.value));
@@ -160,7 +254,9 @@ export function mountPromptLibrary(modeler, container) {
     bodyArea.value = "";
     overwriteBox.checked = false;
     targetLine.textContent = "";
+    idCheck.textContent = "";
     dirty = false;
+    showEditForm(true); // "New prompt" reveals the form (it is not persistently shown)
     setStatus("new prompt — fill in id + body", "");
   });
 
@@ -203,29 +299,50 @@ export function mountPromptLibrary(modeler, container) {
     refreshInsertChoices();
   }
 
-  // Layout
-  panel.appendChild(el("h3", {}, "Insert step"));
-  panel.appendChild(insertKind);
-  panel.appendChild(insertChoice);
-  panel.appendChild(insertBtn);
+  // ── Layout ───────────────────────────────────────────────────────────────────
+  // INSERT: an on-demand panel (item 5). The "Add step" button toggles it; selecting an
+  // element on the canvas reverts to the normal edit panel (handled by selection.changed).
+  insertPanel.appendChild(insertKind);
+  insertPanel.appendChild(insertChoice);
+  insertPanel.appendChild(insertBtn);
+  panel.appendChild(addStepBtn);
+  panel.appendChild(insertPanel);
+  // The insert status sits with the insert control (item 17) — OUTSIDE the insert panel, so
+  // it survives the panel auto-hiding when inserting selects the new element (item 5).
+  panel.appendChild(insertStatus);
   panel.appendChild(el("hr"));
+
+  // LIBRARY: pick a prompt (loads it into the edit form) or start a new one.
   panel.appendChild(el("h3", {}, "Prompt library"));
   panel.appendChild(libSelect);
   panel.appendChild(newBtn);
-  panel.appendChild(el("hr"));
-  panel.appendChild(el("h3", {}, "Create / edit prompt"));
-  panel.appendChild(el("label", {}, "id ", idInput));
-  panel.appendChild(el("label", {}, "title ", titleInput));
-  panel.appendChild(el("label", {}, "category ", catSelect));
-  panel.appendChild(el("label", {}, "description ", descInput));
-  panel.appendChild(bodyArea);
-  panel.appendChild(el("label", {}, overwriteBox, " overwrite if exists"));
-  panel.appendChild(saveBtn);
-  panel.appendChild(targetLine);
+
+  // CREATE / EDIT: a single on-demand form (item 11) revealed by "New prompt" or by loading a
+  // library prompt — not persistently shown alongside the "New prompt" button.
+  editForm.appendChild(el("hr"));
+  editForm.appendChild(el("h3", {}, "Create / edit prompt"));
+  editForm.appendChild(el("label", {}, "id ", idInput));
+  editForm.appendChild(idCheck);
+  editForm.appendChild(el("label", {}, "title ", titleInput));
+  editForm.appendChild(el("label", {}, "category ", catSelect));
+  editForm.appendChild(el("label", {}, "description ", descInput));
+  editForm.appendChild(bodyArea);
+  editForm.appendChild(
+    el("label", { class: "rebar-overwrite-label" }, overwriteBox, " overwrite if exists"),
+  );
+  editForm.appendChild(saveBtn);
+  editForm.appendChild(targetLine);
+  panel.appendChild(editForm);
   panel.appendChild(status);
 
   // Test hook: expose the panel API so the e2e/Node check can drive it deterministically.
-  window.__rebarPromptLibrary = { refresh, insert: (k, n) => insertTypedStep(modeler, k, n), getPrompts: () => prompts };
+  window.__rebarPromptLibrary = {
+    refresh,
+    insert: (k, n) => insertTypedStep(modeler, k, n),
+    getPrompts: () => prompts,
+    showInsert,
+    showEditForm,
+  };
 
   refresh();
   return panel;
