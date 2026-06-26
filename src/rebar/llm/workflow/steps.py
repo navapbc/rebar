@@ -318,3 +318,10 @@ def set_fields(ctx: StepContext) -> dict[str, Any]:
         raise ValueError(f"step {ctx.step_id!r} (set_fields) needs `with: {{fields: {{...}}}}`")
     rebar.edit_ticket(tid, repo_root=ctx.repo_root, **fields)
     return {"updated": sorted(fields.keys())}
+
+
+# Importing here registers the LLM-gate `uses` ops (completion_precheck/reconcile/passthrough)
+# wherever the scripted-step registry is populated (every site does `from . import steps`), so
+# the completion-verification workflow's ops resolve without a separate import dance. The op
+# bodies lazy-import rebar.llm.completion, so this stays import-light (no heavy LLM deps).
+from . import gate_ops  # noqa: E402,F401

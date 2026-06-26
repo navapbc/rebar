@@ -1,0 +1,52 @@
+schema_version: '3'
+name: completion-verification
+description: >-
+  The completion-verification gate expressed as an engine workflow (epic B, story B3). It mirrors
+  rebar.llm.completion.verify_completion's real control flow — a deterministic child-closure precheck
+  that SHORT-CIRCUITS (a parent with an unclosed/uncertified child fails without any LLM call), then
+  the agentic completion-verifier over the ticket's own criteria, then a deterministic reconcile
+  (FAIL<->findings invariant + citation downgrade). The short-circuit is a branch (an if:-skipped
+  step's outputs cannot be referenced), so the prompt runs ONLY on the precheck-passed arm. It
+  produces a completion_verdict; signing is the close-gate's job (deferred to B5).
+inputs:
+  ticket_id:
+    description: The ticket whose completion requirements are verified.
+    type: string
+    required: true
+steps:
+- id: precheck
+  uses: completion_precheck
+  with:
+    ticket_id: ${{ inputs.ticket_id }}
+- id: decide
+  needs:
+  - precheck
+  branch:
+    when: ${{ steps.precheck.outputs.run_verify }}
+    then:
+    - id: verify
+      prompt: completion-verifier
+      mode: structured
+      output_schema: completion_verdict
+    - id: reconcile
+      needs:
+      - verify
+      uses: completion_reconcile
+      # Only ALWAYS-present agent outputs are wired: the structured runner
+      # (findings.finalize_outcome) drops None payload fields via exclude_none, so `summary`
+      # is ABSENT whenever the verifier omits it (the common case) and referencing a missing
+      # step output raises. verdict/findings are required; runner/model/trace_id are added
+      # unconditionally after exclude_none. Carrying an agent-supplied summary (and the
+      # epic-graph target) is a known parity gap deferred to B4 (planned-trace parity).
+      with:
+        ticket_id: ${{ steps.precheck.outputs.canonical_id }}
+        raw_verdict: ${{ steps.verify.outputs.verdict }}
+        raw_findings: ${{ steps.verify.outputs.findings }}
+        runner: ${{ steps.verify.outputs.runner }}
+        model: ${{ steps.verify.outputs.model }}
+        trace_id: ${{ steps.verify.outputs.trace_id }}
+    else:
+    - id: passthrough
+      uses: completion_passthrough
+      with:
+        verdict: ${{ steps.precheck.outputs.verdict }}
