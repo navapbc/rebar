@@ -834,6 +834,12 @@
       "state": "confirmed",
       "updated_at": "2026-06-25T22:59:43Z"
     },
+    "5506-0850-6e71-4dd2": {
+      "created_at": "2026-06-26T01:28:47Z",
+      "jira_key": "REB-407",
+      "state": "confirmed",
+      "updated_at": "2026-06-26T01:28:47Z"
+    },
     "55db-45da-49d2-4580": {
       "created_at": "2026-06-25T22:59:43Z",
       "jira_key": "REB-140",
@@ -1427,6 +1433,12 @@
       "jira_key": "REB-237",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:08:15Z"
+    },
+    "92fa-6657-3579-4043": {
+      "created_at": "2026-06-26T01:28:51Z",
+      "jira_key": "REB-408",
+      "state": "confirmed",
+      "updated_at": "2026-06-26T01:28:51Z"
     },
     "944c-374d-c3aa-47c2": {
       "created_at": "2026-06-25T23:08:19Z",
@@ -2780,6 +2792,8 @@
     "REB-404": "ff72-5af3-cd06-43ca",
     "REB-405": "ffc4-6f8a-4a3a-4625",
     "REB-406": "9b94-af9e-4acf-4dff",
+    "REB-407": "5506-0850-6e71-4dd2",
+    "REB-408": "92fa-6657-3579-4043",
     "REB-41": "1c9d-f503-d695-42af",
     "REB-42": "1d76-b6d1-4c35-4707",
     "REB-43": "1e0b-b28a-303f-4818",
