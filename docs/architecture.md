@@ -159,6 +159,20 @@ that and the other workflow-engine-v2 de-risk POCs are indexed in
   the main store: the write lock resolves the symlink via `realpath` so the
   symlinked and real-path callers contend on the same lock file.
 
+- **Attaching to an existing `origin/tickets` (non-interactive bootstrap).** A third
+  case behaves like symlinking, not first-time init: when a `tickets` branch already
+  exists **locally or on `origin`**, materializing the tracker only *mounts* that
+  pre-existing shared state (a linked worktree via
+  `rebar._commands.init._mount_or_create_branch`'s local/remote arms) — it fabricates
+  no new orphan history. So the auto-init gate does it **automatically, without a
+  prompt, even with no TTY** (discriminator
+  `rebar._commands.init.pending_init_attaches_to_existing`). This is what makes rebar
+  usable out-of-the-box for **CI / agent / headless environments**: a fresh clone
+  whose remote already carries `tickets` runs `rebar search`/`show`/etc. with no
+  interactive terminal and no manual `git worktree add` + `.env-id` seeding. Only a
+  *genuine* first-time init (no local or remote `tickets` branch to attach to) still
+  requires consent, since that one mutates the host repo.
+
 ## Concurrency model (summary)
 
 Every mutation is a new globally-unique append-only event; state is pure replay;
