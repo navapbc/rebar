@@ -1,9 +1,10 @@
 """RED tests for the legacy update_one outbound field filter.
 
 Historical bug (bug 85a1-f581-2252-4a21): the typed leaf ``_apply_outbound_update``
-filters outbound update fields through ``_OUTBOUND_UPDATE_ALLOWLIST``, but
-the actual production path on the outbound batch dispatcher routes through
-``update_one`` (applier.py:1744), which was unfiltered. A local issuetype
+filtered outbound update fields through ``_OUTBOUND_UPDATE_ALLOWLIST`` (since
+removed — epic f89d story D collapsed that dead typed leaf to delegate to
+``update_one``), but the actual production path on the outbound batch dispatcher
+routes through ``update_one``, which was unfiltered. A local issuetype
 change (probe Phase 2 ticket_type=task→bug) consequently flowed through as
 ``--issuetype Bug`` to ACLI's ``jira workitem edit``, which rejects the
 flag with non-zero exit. ``_apply_batch`` had no try/except around this and

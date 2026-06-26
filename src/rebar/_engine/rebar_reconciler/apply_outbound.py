@@ -13,7 +13,6 @@ Imports downward only (apply_base, batch_dispatch); never imports applier.
 from __future__ import annotations
 
 import logging
-import urllib.error
 from typing import Any
 
 from rebar_reconciler._errors import is_not_found
@@ -22,7 +21,12 @@ from rebar_reconciler.apply_base import (
     _direction_guard,
     _load_mutation_module,
 )
-from rebar_reconciler.batch_dispatch import JiraAPIError, _call_with_retry
+from rebar_reconciler.batch_dispatch import (
+    JiraAPIError,
+    _call_with_retry,
+    _mutation_to_batch_dict,
+    update_one,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,29 +37,6 @@ _BENIGN_DRIFT_PREFIXES: tuple[str, ...] = (
     "acquire lock",
     "release lock",
 )
-
-
-def _index_existing_links(issuelinks) -> set[tuple[str, str]]:
-    """Index a ``get_issue_links`` result as a ``{(type_name, other_key)}`` set.
-
-    Mirrors the differ's ``outbound_differ._existing_jira_links``: an entry's
-    ``type.name`` plus the OTHER issue's key on EITHER side (``inwardIssue`` or
-    ``outwardIssue``) is recorded, so the membership test is direction-agnostic —
-    a ``Blocks`` link to B is "present" whether B is the inward or outward side.
-    """
-    existing: set[tuple[str, str]] = set()
-    for link in issuelinks or []:
-        if not isinstance(link, dict):
-            continue
-        link_type = link.get("type") or {}
-        type_name = link_type.get("name") if isinstance(link_type, dict) else None
-        if not type_name:
-            continue
-        for side_key in ("inwardIssue", "outwardIssue"):
-            side = link.get(side_key)
-            if isinstance(side, dict) and side.get("key"):
-                existing.add((type_name, side.get("key")))
-    return existing
 
 
 def _drift_is_benign(subject: str) -> bool:
@@ -141,263 +122,43 @@ def _apply_outbound_create(mutation, *, client=None, repo_root=None) -> ApplyRes
 # (REST PUT /rest/api/3/issue/{key} {"fields":{"parent":{"key":K}}}) rather
 # than client.update_issue — ACLI edit does not support reparenting
 # (ticket 8b25-ae7a-efc3-47f6).
-_OUTBOUND_UPDATE_ALLOWLIST = frozenset(
-    {"summary", "description", "assignee", "priority", "status", "parent"}
-)
-
-
-def _route_status_via_draft5(mutation, *, client=None):
-    """Stub for status routing via draft5 protocol.
-
-    The final implementation of outbound status push (transition mapping,
-    workflow-state lookup, etc.) lands in a later epic. v1 just acknowledges
-    the dispatch so the gating contract is exercised end-to-end.
-    """
-    # Intentionally a no-op stub. Real impl arrives with the status-push story.
-    return None
-
-
 def _apply_outbound_update(mutation, *, client=None, repo_root=None) -> ApplyResult:
-    """v1 outbound update — push allowlisted fields, labels, and comments.
+    """Outbound update — delegate to the ONE production applier (batch update_one).
 
-    Behavior:
-      - Reads ``mutation.payload['changed_fields']`` (falls back to
-        ``mutation.payload`` itself for callers that pass a flat dict).
-      - Filters the field set to ``_OUTBOUND_UPDATE_ALLOWLIST``; non-allowlisted
-        fields are silently dropped (no side-effects on those fields).
-      - Pushes the allowlisted fields via ``client.update_issue``
-        using the F3-pinned ``update_issue(jira_key, **fields)`` signature,
-        routed through ``_call_with_retry``.
-      - Dispatches ``payload['labels']`` (list of {action, label} dicts) via
-        ``client.add_label`` / ``client.remove_label``, matching update_one.
-        Label failures are logged but non-fatal (scalar update already succeeded).
-      - Dispatches ``payload['comments']`` (list of {body} dicts) via
-        ``client.add_comment``, matching update_one. Comment failures are logged
-        but non-fatal.
-      - Emits a WARNING when the effective work set (allowed fields + labels +
-        comments) is empty — prevents a silent no-op masquerading as success
-        when the mutation carries only non-allowlisted fields.
+    Story D (33d0) of epic f89d. Production applies every outbound update via
+    ``batch_dispatch.update_one`` (the legacy batch path). This typed leaf used to
+    carry a SECOND, parallel implementation of the same sub-ops (fields, labels,
+    comments, links, parent) that production NEVER executed — and the two drifted:
+    bug 3f04 dropped outbound links because the capability was re-added to the batch
+    path while the differ/tests exercised only this leaf. That parallel logic is
+    gone. The leaf now converts the Mutation to the batch dict and delegates to
+    ``update_one``, so outbound-update application has a SINGLE source of truth. It
+    stays a DISTINCT dispatch leaf (the typed registry requires one per valid
+    direction x action) and mirrors ``_apply_outbound_delete``'s delegation pattern.
+
+    Sub-op telemetry (``links_applied`` / ``comments_applied`` / ``labels_applied``)
+    and the silent-no-op canary are intentionally NOT re-implemented here — surfacing
+    them on the batch outcome is story E (2359). This leaf returns the raw
+    ``update_one`` result plus any collected comment errors.
     """
     mut_mod = _load_mutation_module()
     _direction_guard(mutation, mut_mod.MutationDirection.outbound)
 
     if client is None:
-        # Stub path: preserved for tests that don't exercise the I/O leaf.
+        # Stub path: preserved for typed-dispatch coverage / tests that don't
+        # exercise the I/O leaf.
         return ApplyResult(mutation.direction, mutation.action, {})
 
-    payload = dict(mutation.payload or {})
-    changed_fields = payload.get("changed_fields")
-    if changed_fields is None:
-        changed_fields = payload
-
-    # Bug 85a1 (Gap 8): status outbound is now first-class. The previous
-    # REBAR_RECONCILER_STATUS_GATING gate has been removed — status flows
-    # through ``client.update_issue`` which routes status to
-    # ``transition_issue`` (REST POST /transitions). The legacy
-    # ``_route_status_via_draft5`` no-op stub is unused.
-    # status stays in changed_fields and is forwarded below.
-
-    # Filter to allowlist. Non-allowlisted fields are silently dropped.
-    # "parent" is extracted before forwarding to update_issue — ACLI edit
-    # does not support reparenting; route via client.set_parent (REST PUT).
-    allowed = {k: v for k, v in changed_fields.items() if k in _OUTBOUND_UPDATE_ALLOWLIST}
-    # Route parent reparent via client.set_parent (ticket 8b25).
-    parent_key = allowed.pop("parent", None)
-    if parent_key is not None:
-        try:
-            _call_with_retry(client.set_parent, mutation.target, parent_key)
-        except urllib.error.HTTPError as exc:
-            # Hierarchy guard (ticket 8b25): on this next-gen project only an
-            # Epic may be a parent; a Task→Task reparent (and any other unmet
-            # hierarchy constraint) is rejected by Jira with HTTP 400 carrying
-            # a misleading "same project" message. Treat any 400 as a
-            # hierarchy rejection: WARN + continue the pass. Non-400 errors
-            # keep the legacy generic-warning behaviour (still non-fatal).
-            if exc.code == 400:
-                logger.warning(
-                    "parent sync skipped: Jira hierarchy rejected %s→%s",
-                    mutation.target,
-                    parent_key,
-                )
-            else:
-                logger.warning(
-                    "_apply_outbound_update: set_parent failed for %s parent=%r: %r",
-                    mutation.target,
-                    parent_key,
-                    exc,
-                )
-        except Exception as exc:  # noqa: BLE001 — fail-open: set_parent non-fatal, logged
-            logger.warning(
-                "_apply_outbound_update: set_parent failed for %s parent=%r: %r",
-                mutation.target,
-                parent_key,
-                exc,
-            )
-    if allowed:
-        _call_with_retry(client.update_issue, mutation.target, **allowed)
-
-    # Dispatch label mutations: add_label / remove_label per entry.
-    # Mirrors update_one's label-dispatch logic (bug 87e4) for the typed-leaf path.
-    # Gap fix (bugs 3b5f / 85a1): _apply_outbound_update previously ignored
-    # payload['labels'] entirely, causing label changes to silently no-op when
-    # this leaf was invoked directly (single typed-mutation dispatch path).
-    labels = payload.get("labels") or []
-    labels_applied: list[str] = []
-    if isinstance(labels, list):
-        for entry in labels:
-            if not isinstance(entry, dict):
-                continue
-            action = entry.get("action")
-            label_name = entry.get("label", "")
-            if not label_name:
-                continue
-            try:
-                if action == "add":
-                    _call_with_retry(client.add_label, mutation.target, label_name)
-                    labels_applied.append(f"+{label_name}")
-                elif action == "remove":
-                    _call_with_retry(client.remove_label, mutation.target, label_name)
-                    labels_applied.append(f"-{label_name}")
-            except Exception as exc:  # noqa: BLE001 — fail-open: per-label failure non-fatal, logged
-                logger.warning(
-                    "_apply_outbound_update: label %s failed for %s label=%r: %r",
-                    action,
-                    mutation.target,
-                    label_name,
-                    exc,
-                )
-
-    # Dispatch comment mutations: add_comment per entry.
-    # Mirrors update_one's comment-dispatch logic (bug 87e4) for the typed-leaf path.
-    # Gap fix (bugs 3b5f / 85a1): payload['comments'] was also silently dropped.
-    # Note: outbound comment bodies are pre-decorated with RECONCILER_MARKER by
-    # the outbound differ (_diff_comments → _decorate_outbound_comment) before
-    # being placed in the mutation payload. The applier emits them as-is — no
-    # decoration happens here to avoid double-decoration.
-    comments = payload.get("comments") or []
-    comments_applied: int = 0
+    # batch_dispatch is a one-way dependency (it never imports the applier), so a
+    # plain module-level import is safe — no cycle.
+    batch = _mutation_to_batch_dict(mutation)
     comment_errors: list[str] = []
-    if isinstance(comments, list):
-        for entry in comments:
-            if not isinstance(entry, dict):
-                continue
-            body = entry.get("body", "")
-            if not body:
-                continue
-            try:
-                _call_with_retry(client.add_comment, mutation.target, body)
-                comments_applied += 1
-            except Exception as exc:  # noqa: BLE001 — in-band capture into comment_errors (non-fatal)
-                # Bug 6afc-20ee-84e5-4dd5: non-fatal, but surface in the result
-                # payload so a swallowed comment failure is observable in the
-                # outcome instead of vanishing into the log.
-                comment_errors.append(f"add_comment failed: {exc!s}")
-                logger.warning(
-                    "_apply_outbound_update: add_comment failed for %s: %r",
-                    mutation.target,
-                    exc,
-                )
+    update_result = update_one(batch, client, comment_errors=comment_errors)
 
-    # Dispatch link mutations: add a Jira issue link per entry (Cycle 3).
-    # Mirrors the label/comment dispatch pattern. The outbound differ dedups
-    # against the (possibly stale) snapshot; the LIVE pre-create check below is
-    # the convergent defense. ADD-only — removes are out of scope for this cycle.
-    #
-    # Write-safety (bug d843): Jira's POST issueLink is non-idempotent (no
-    # idempotency key, no server-side dedup). The differ dedups against the
-    # snapshot, but that snapshot is stale across a retry window — if a
-    # set_relationship POST commits server-side and then the response
-    # times out / 5xxs and is re-issued, Jira stores a duplicate link. To close
-    # this residual window we do a LIVE re-check here: probe the issue's current
-    # links ONCE (cached for the whole loop — one call, not per-entry) via
-    # client.get_issue_links and SKIP any add whose (link_type, to_key) already
-    # exists in EITHER direction (same direction-agnostic match the differ's
-    # _existing_jira_links uses). This closes the CROSS-PASS / cross-agent
-    # staleness window (a link created since the snapshot was fetched), and —
-    # with Pass-1's write-not-retried-on-timeout — the timeout-then-retry window.
-    # It does NOT close the intra-call window: _run_acli still retries a write on
-    # a non-timeout CalledProcessError (_MAX_ATTEMPTS), so a write that commits
-    # server-side but returns a non-zero exit can still be re-issued before
-    # control returns here — a narrow, pre-existing residual (Jira links are not
-    # made idempotent). The probe is best-effort: a get_issue_links failure is
-    # non-fatal — we log and fall back to attempting the add (snapshot-only dedup).
-    links = payload.get("links") or []
-    links_applied: int = 0
-    link_errors: list[str] = []
-    if isinstance(links, list):
-        existing_links: set[tuple[str, str]] | None = None
-        # Only probe once, and only when there is at least one add to apply.
-        if any(isinstance(e, dict) and e.get("action") == "add" for e in links):
-            try:
-                existing_links = _index_existing_links(client.get_issue_links(mutation.target))
-            except Exception as exc:  # noqa: BLE001 — fail-open: probe non-fatal, fall back to add
-                # Non-fatal probe failure: fall back to attempting the add(s).
-                existing_links = None
-                logger.warning(
-                    "_apply_outbound_update: get_issue_links probe failed for %s "
-                    "(falling back to snapshot-only dedup): %r",
-                    mutation.target,
-                    exc,
-                )
-        for entry in links:
-            if not isinstance(entry, dict):
-                continue
-            if entry.get("action") != "add":
-                continue
-            link_type = entry.get("type")
-            to_key = entry.get("to_key")
-            if not link_type or not to_key:
-                continue
-            if existing_links is not None and (link_type, to_key) in existing_links:
-                # Live re-check: this link already exists on the issue (either
-                # direction). Skip the add to avoid a duplicate-on-retry.
-                continue
-            try:
-                _call_with_retry(client.set_relationship, mutation.target, to_key, link_type)
-                links_applied += 1
-            except Exception as exc:  # noqa: BLE001 — in-band capture into link_errors (non-fatal)
-                link_errors.append(f"set_relationship failed ({to_key}/{link_type}): {exc!s}")
-                logger.warning(
-                    "_apply_outbound_update: set_relationship failed for %s -> %s (%s): %r",
-                    mutation.target,
-                    to_key,
-                    link_type,
-                    exc,
-                )
-
-    # Loud skip guard: warn when the effective work set is entirely empty so
-    # callers can distinguish a genuine no-op (no diff) from a misconfigured
-    # mutation that carried only non-allowlisted fields.
-    # parent_key is counted as work even when popped from allowed (ticket 8b25).
-    if (
-        not allowed
-        and not labels_applied
-        and not comments_applied
-        and not links_applied
-        and parent_key is None
-    ):
-        logger.warning(
-            "_apply_outbound_update: no-op for %s — changed_fields %r "
-            "produced zero allowlisted fields and no labels/comments/links; "
-            "verify mutation payload is not empty or mis-keyed",
-            mutation.target,
-            list(changed_fields.keys()) if changed_fields else [],
-        )
-
-    result_payload: dict[str, Any] = {
-        "fields_pushed": sorted(allowed.keys()),
-        "labels_applied": labels_applied,
-        "comments_applied": comments_applied,
-        "links_applied": links_applied,
-    }
+    payload: dict[str, Any] = {"update_result": update_result}
     if comment_errors:
-        result_payload["comment_errors"] = comment_errors
-    if link_errors:
-        result_payload["link_errors"] = link_errors
-    if parent_key is not None:
-        result_payload["parent_set"] = parent_key
-
-    return ApplyResult(mutation.direction, mutation.action, result_payload)
+        payload["comment_errors"] = comment_errors
+    return ApplyResult(mutation.direction, mutation.action, payload)
 
 
 def _apply_outbound_delete(mutation, *, client=None, repo_root=None) -> ApplyResult:
