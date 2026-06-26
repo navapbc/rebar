@@ -19,9 +19,9 @@ through the PRODUCTION ``AcliClient`` methods — no parallel serialization):
 
 Secret-scrubbing (layered, vcrpy-style redaction) runs on every captured payload so
 the committed fixtures carry NO tokens/emails/accountIds. ``FakeAcliClient``
-(tests/integration/rebar_reconciler/_fakes.py) replays these verbatim through the
-production fetcher; ``test_fixtures_no_secrets.py`` independently re-asserts the
-scrub held.
+(tests/integration/rebar_reconciler/jira_contract/_fakes.py) replays these verbatim through the
+production fetcher; ``jira_contract/test_jira_fixtures.py`` independently re-asserts
+the scrub held.
 
 Usage (LIVE — opt-in, reads real Jira, never writes to Jira):
 
@@ -31,7 +31,7 @@ Usage (LIVE — opt-in, reads real Jira, never writes to Jira):
 Re-capture cadence: refresh whenever the Jira REST shape the fetcher consumes may
 have changed (a Jira Cloud API change, or a new enrichment field added to
 ``_build_snapshot``). The capture is read-only; commit the regenerated fixtures and
-let ``test_snapshot_contract.py`` (story B) + ``test_fixtures_no_secrets.py`` gate
+let ``test_snapshot_contract.py`` (story B) + ``test_jira_fixtures.py`` gate
 the refresh. See docs/jira-fixtures.md.
 """
 

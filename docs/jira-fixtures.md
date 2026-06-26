@@ -51,7 +51,7 @@ links (including REB-430's **top-level `None`**), and a non-null assignee
 
 ## How the fixtures reach production code
 
-`tests/integration/rebar_reconciler/_fakes.py` provides `FakeAcliClient`, which
+`tests/integration/rebar_reconciler/jira_contract/_fakes.py` provides `FakeAcliClient`, which
 returns the fixtures **verbatim** from the production method signatures. It is
 installed via the established seam — patching `fetcher._load_acli` to return a
 stub module whose `AcliClient(**kwargs)` factory yields the fake:
@@ -81,7 +81,7 @@ Capture runs a **layered redaction** (vcrpy-style) over every payload:
    org-identifying and keep the fixtures shape-honest.
 
 Both layers **preserve the JSON shape** (keys + value types) — only secret
-*values* change. `tests/integration/rebar_reconciler/test_jira_fixtures.py`
+*values* change. `tests/integration/rebar_reconciler/jira_contract/test_jira_fixtures.py`
 re-asserts the scrub held with **complementary, broader** detectors (not copies of
 the scrubber's regexes), so a narrowed scrubber regression surfaces in the test
 instead of sharing the scrubber's blind spot.

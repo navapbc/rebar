@@ -24,7 +24,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-FIXTURE_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "jira"
+# tests/integration/rebar_reconciler/jira_contract/_fakes.py -> parents[3] == tests/
+FIXTURE_DIR = Path(__file__).resolve().parents[3] / "fixtures" / "jira"
 
 
 class FakeAcliClient:

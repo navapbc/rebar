@@ -32,7 +32,7 @@ path** — exactly what story A built.
 ## Decision
 
 1. **One producer↔consumer contract test, through the PRODUCTION path.** A single
-   schema + round-trip test (`tests/integration/rebar_reconciler/test_snapshot_contract.py`)
+   schema + round-trip test (`tests/integration/rebar_reconciler/jira_contract/test_snapshot_contract.py`)
    drives the story-A `FakeAcliClient` fixtures → `fetcher.fetch_snapshot` → the real
    differs. No parallel serialization, no hand-built snapshot dicts. This is the
    *keystone*: a key/shape divergence between the fetcher and a differ fails it.
