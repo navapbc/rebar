@@ -77,9 +77,12 @@ def _adf_with_marker(text: str, marker: str) -> dict:
 def test_inbound_emits_new_jira_comment(inbound):
     """A Jira comment whose id is not known locally is emitted as add."""
     jira_fields = {
-        "comments": [
-            {"id": "10001", "body": _adf("Human-written comment from Jira")},
-        ]
+        "comment": {
+            "comments": [
+                {"id": "10001", "body": _adf("Human-written comment from Jira")},
+            ],
+            "total": 1,
+        }
     }
     local_ticket = {"comments": []}
     out = inbound._diff_comments_inbound(jira_fields, local_ticket)
@@ -92,12 +95,15 @@ def test_inbound_emits_new_jira_comment(inbound):
 def test_inbound_filters_outbound_echo_by_marker(inbound):
     """A Jira comment containing the reconciler marker is OUR echo — skip."""
     jira_fields = {
-        "comments": [
-            {
-                "id": "10002",
-                "body": _adf_with_marker("Probe outbound comment", inbound.RECONCILER_MARKER),
-            },
-        ]
+        "comment": {
+            "comments": [
+                {
+                    "id": "10002",
+                    "body": _adf_with_marker("Probe outbound comment", inbound.RECONCILER_MARKER),
+                },
+            ],
+            "total": 1,
+        }
     }
     local_ticket = {"comments": [{"body": "Probe outbound comment"}]}  # no jira_comment_id yet
     out = inbound._diff_comments_inbound(jira_fields, local_ticket)
@@ -110,9 +116,12 @@ def test_inbound_filters_outbound_echo_by_marker(inbound):
 def test_inbound_skips_already_mirrored_by_id(inbound):
     """A Jira comment whose id is in local ticket's jira_comment_id set is skipped."""
     jira_fields = {
-        "comments": [
-            {"id": "10003", "body": _adf("This was already mirrored")},
-        ]
+        "comment": {
+            "comments": [
+                {"id": "10003", "body": _adf("This was already mirrored")},
+            ],
+            "total": 1,
+        }
     }
     local_ticket = {
         "comments": [
@@ -126,14 +135,17 @@ def test_inbound_skips_already_mirrored_by_id(inbound):
 def test_inbound_emits_only_genuinely_new(inbound):
     """Mixed jira comments: 1 known + 1 echo + 1 truly new → emit only the new one."""
     jira_fields = {
-        "comments": [
-            {"id": "10010", "body": _adf("Already mirrored body")},
-            {
-                "id": "10011",
-                "body": _adf_with_marker("Our outbound", inbound.RECONCILER_MARKER),
-            },
-            {"id": "10012", "body": _adf("Fresh Jira comment")},
-        ]
+        "comment": {
+            "comments": [
+                {"id": "10010", "body": _adf("Already mirrored body")},
+                {
+                    "id": "10011",
+                    "body": _adf_with_marker("Our outbound", inbound.RECONCILER_MARKER),
+                },
+                {"id": "10012", "body": _adf("Fresh Jira comment")},
+            ],
+            "total": 3,
+        }
     }
     local_ticket = {
         "comments": [
@@ -149,9 +161,12 @@ def test_inbound_emits_only_genuinely_new(inbound):
 def test_inbound_handles_string_body_legacy(inbound):
     """Legacy Jira snapshots may carry comment body as plain string (not ADF)."""
     jira_fields = {
-        "comments": [
-            {"id": "20001", "body": "Plain string body"},
-        ]
+        "comment": {
+            "comments": [
+                {"id": "20001", "body": "Plain string body"},
+            ],
+            "total": 1,
+        }
     }
     local_ticket = {"comments": []}
     out = inbound._diff_comments_inbound(jira_fields, local_ticket)
@@ -161,10 +176,13 @@ def test_inbound_handles_string_body_legacy(inbound):
 def test_inbound_skips_blank_bodies(inbound):
     """Empty/whitespace-only Jira comments are skipped (no signal)."""
     jira_fields = {
-        "comments": [
-            {"id": "30001", "body": _adf("")},
-            {"id": "30002", "body": _adf("   ")},
-        ]
+        "comment": {
+            "comments": [
+                {"id": "30001", "body": _adf("")},
+                {"id": "30002", "body": _adf("   ")},
+            ],
+            "total": 2,
+        }
     }
     out = inbound._diff_comments_inbound(jira_fields, {"comments": []})
     assert out == []
