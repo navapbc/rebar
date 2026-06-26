@@ -103,6 +103,22 @@ def test_validate_assignee_raises_on_empty_user_list(acli):
     assert "bogus@example.com" in msg
 
 
+def test_validate_assignee_rejects_fuzzy_only_match(acli):
+    """A non-exact (substring/relevance) search result must NOT be accepted.
+
+    Bug 9b94 follow-up: an agent identity like ``loop-agent`` fuzzily matches an
+    unrelated account (``Jira Triage Agent``) via Jira's substring search. Falling
+    back to that first result would mis-assign the ticket; a non-exact result must
+    be treated as no match so the caller leaves the issue unassigned.
+    """
+    client = _make_client(
+        acli,
+        [{"accountId": "712020:abc", "emailAddress": "", "displayName": "Jira Triage Agent"}],
+    )
+    with pytest.raises(acli.AssigneeNotFoundError):
+        client.validate_assignee_exists("loop-agent", issue_key="REB-136")
+
+
 def test_validate_assignee_accepts_project_scope(acli):
     """CREATE path has no issue_key — must accept project_key instead."""
     client = _make_client(
