@@ -12,6 +12,15 @@
 # pass-lock (.reconciler-pass-lock on the tickets branch) is a second guard
 # (exit 3 == "another pass already running", treated as benign here).
 #
+# Continuous loop (OPT-IN, default OFF): set repo Variable RECONCILE_CONTINUOUS=true
+# to have each run re-dispatch the next via workflow_dispatch (the documented
+# exception where the default GITHUB_TOKEN *does* create a new run), giving
+# ~pass-duration cadence instead of the */20 floor — without shrinking pass scope.
+# The */20 schedule stays as a backstop that re-seeds the chain if it ever stops.
+# Leave the Variable unset (the TEMPLATE default) and the bridge behaves exactly as
+# before: a plain */20 schedule. Enable it ONLY on a public repo or a self-hosted
+# runner — hosted runners bill wall-clock for the near-continuous chain.
+#
 # rebar divergences from DSO's reconcile-bridge (see docs/jira-sync-setup.md
 # "Necessary & sufficient"):
 #   * invocation is `rebar reconcile --mode <mode>` (== python -m rebar_reconciler)
@@ -45,6 +54,7 @@ concurrency:
 
 permissions:
   contents: write   # push reconciler events back to the tickets orphan branch
+  actions: write    # re-dispatch this workflow to sustain the continuous loop (opt-in; see RECONCILE_CONTINUOUS)
 
 jobs:
   reconcile:
@@ -276,3 +286,25 @@ jobs:
             echo "The Reconciler Heartbeat Canary will open a bug ticket if this stays stale."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "::error title=Reconcile Bridge failed::See run summary — $GH_RUN_URL"
+
+      - name: Re-dispatch to sustain the continuous loop (opt-in)
+        # Self-rescheduling chain: queue the next run via workflow_dispatch, which
+        # is the documented exception where the default GITHUB_TOKEN *does* create a
+        # new run (GitHub changelog 2022-09-08). Needs `actions: write` (declared
+        # above). The concurrency group + the reconciler pass-lock keep at most one
+        # pass running and one queued, so a long full pass is never interrupted and
+        # the chain cannot fan out.
+        #
+        # Gated on RECONCILE_CONTINUOUS so the template default (Variable unset) keeps
+        # the plain */20 schedule — clients on private repos are unaffected.
+        #
+        # if: !cancelled() — a FAILED pass still re-seeds the chain (resilience),
+        # while CANCELLING a run is a clean kill switch. Flipping the Variable off
+        # also stops the chain after the next run completes.
+        if: ${{ !cancelled() && vars.RECONCILE_CONTINUOUS == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "RECONCILE_CONTINUOUS=true — re-dispatching to sustain the loop (mode=${MODE})."
+          gh workflow run reconcile-bridge.yml --ref "${{ github.ref_name }}" --field mode="${MODE}"

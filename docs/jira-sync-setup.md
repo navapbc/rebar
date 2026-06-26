@@ -92,7 +92,8 @@ gh secret set JIRA_API_TOKEN   # paste the token when prompted
 | `BRIDGE_BOT_NAME` | Variable | ❌ | `rebar-bridge[bot]` | both (commit identity) |
 | `BRIDGE_BOT_EMAIL` | Variable | ❌ | `rebar-bridge@users.noreply.github.com` | both |
 | `REBAR_ENV_ID` | Variable | ❌ | `reconciler` | reconcile (event author stamp) |
-| `GITHUB_TOKEN` | (auto) | ✅ | provided | canary (Actions API), both (push) |
+| `RECONCILE_CONTINUOUS` | Variable | ❌ | unset (off) | bridge — opt into the continuous loop ([§ Continuous loop](#continuous-loop--running-more-often-than-the-20-minute-floor)) |
+| `GITHUB_TOKEN` | (auto) | ✅ | provided | canary (Actions API), both (push + self-dispatch) |
 
 ## 4. Copy the workflows
 
@@ -137,6 +138,42 @@ no-write modes for exactly this:
 > marker — the local store keeps the full text. A local **assignee** that is not a
 > Jira user cannot be set and is skipped (soft-fail); the pass still succeeds.
 
+## Continuous loop — running more often than the 20-minute floor
+
+GitHub's `schedule` trigger has a 5-minute floor and is best-effort (runs are
+delayed/dropped under load). To sync **more frequently** than the default `*/20`,
+the bridge supports an **opt-in self-rescheduling loop**: each run queues the next
+via `workflow_dispatch` — the [documented exception](https://github.blog/changelog/2022-09-08-github-actions-use-github_token-with-workflow_dispatch-and-repository_dispatch/)
+where the default `GITHUB_TOKEN` *does* create a new run — giving a cadence of
+roughly one pass-duration instead of the 20-minute floor. Passes stay **full**
+(no narrowing of scope), so this does not trade away completeness for frequency.
+
+Enable it by setting one repo Variable:
+
+```sh
+gh variable set RECONCILE_CONTINUOUS --body "true"
+```
+
+- **Default is OFF.** With the Variable unset (the shipped template default), the
+  bridge runs exactly as before — a plain `*/20` schedule. Clients who copy the
+  workflow verbatim are unaffected unless they explicitly opt in.
+- **The `*/20` schedule stays as a backstop.** If the chain ever stops (a run is
+  cancelled, or a failure occurs before the re-dispatch step), the next scheduled
+  run re-seeds it.
+- **No fan-out, no interruption.** The `concurrency` group + the reconciler's
+  pass-lock keep at most one pass running and one queued, so a long full pass is
+  never interrupted and the chain cannot multiply. Cancelling a run is a clean
+  kill switch; flipping the Variable off stops the chain after the next run.
+- **Enable only where minutes are free.** GitHub-hosted runners bill wall-clock for
+  the near-continuous chain, so turn this on **only on a public repo** (Actions is
+  free) **or a self-hosted runner** (you own the machine — and the warm toolchain
+  also removes the per-run cold-start). On a private repo with hosted runners it
+  will burn the included-minutes budget quickly; leave it off there.
+
+It requires `permissions: actions: write` (already declared in the shipped
+workflow) so the run can dispatch its successor; the default `GITHUB_TOKEN`
+suffices — no PAT.
+
 ---
 
 ## Necessary & sufficient
@@ -158,6 +195,7 @@ without breaking durable sync) and **sufficient** (nothing else is required).
 | **acli download + sha256 verify + auth** | The reconciler shells out to `acli` for all Jira I/O. Pinning + checksum-verifying the binary keeps CI reproducible and supply-chain-safe. |
 | **`timeout-minutes: 60`** | The one-time initial sync creates issues serially via acli (~4 s each), and commit-back persists only on a **completed** pass — so the budget must cover a full bulk pass or progress never converges. 60 is a ceiling, not a duration; steady-state passes finish in minutes. |
 | **`permissions: contents: write`** | The minimum to push to `origin/tickets`. The default `GITHUB_TOKEN` suffices — no PAT. |
+| **`permissions: actions: write`** | Lets a run dispatch its successor for the opt-in continuous loop ([§ Continuous loop](#continuous-loop--running-more-often-than-the-20-minute-floor)). Inert when `RECONCILE_CONTINUOUS` is unset; the default `GITHUB_TOKEN` suffices — no PAT. |
 
 ### Reconciler Heartbeat Canary — why each step exists
 
