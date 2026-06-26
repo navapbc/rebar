@@ -1,1 +1,0 @@
-{"author":"Iso Tester","data":{"verify_commands":[{"command":"python -m pytest tests/unit/rebar_reconciler/ -k telemetry -q","dd_id":"DD1","dd_text":"silent-no-op canary + telemetry test passes"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1782448342528996001,"uuid":"098728aa-9065-4a17-8d2e-188e7080bc74"}
