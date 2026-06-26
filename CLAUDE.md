@@ -24,6 +24,18 @@ checkout set up that way, run `make hooks` once to (re)install and verify the ho
 > live in the store — durable, shared on every write, and visible to other agents
 > — rather than in ephemeral TODOs or commit messages alone. Close with
 > `transition <id> in_progress closed` when the acceptance criteria are met.
+>
+> **CLAIM BEFORE YOU WORK — always.** Every unit of work must have a ticket that YOU
+> hold in `in_progress` *before* you touch code, run gates, or open a PR for it. Run
+> `claim <id> --assignee <you>` (which atomically moves `open → in_progress` and sets the
+> assignee) as the FIRST step of working a ticket — never start editing against an `open`
+> (unclaimed) ticket, and never leave active work running under a ticket still marked
+> `open`. This applies at the level you are actually working: claim the **story/task/bug**
+> you are implementing, and when you begin executing an **epic**, move the epic itself to
+> `in_progress` too (claim it, or `transition <epic> open in_progress`) so the board
+> reflects that work is live under it. If you cannot claim (a `ConcurrencyError`/exit 10
+> means someone else holds it, or a gate blocks the claim), resolve that FIRST — pick
+> another ticket, or earn the required attestation — rather than working unclaimed.
 
 ## The parallel-agent workflow
 
