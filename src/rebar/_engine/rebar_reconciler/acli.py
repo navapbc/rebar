@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 import subprocess
 import sys
 import urllib.error
@@ -530,7 +531,15 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         forward this resolved accountId to ACLI rather than the raw input to
         eliminate display-name/email ambiguity at the API boundary.
 
-        Raises ``AssigneeNotFoundError`` when no user matches. Raises
+        Requires an EXACT identity match (emailAddress / accountId / displayName).
+        Jira's assignable/search does substring/relevance matching, so a local
+        assignee that is not a Jira user (e.g. an agent identity like
+        ``"loop-agent"``) can fuzzily match an unrelated account (``"Jira Triage
+        Agent"``). Returning that first result would MIS-ASSIGN the ticket, so a
+        non-exact result is treated as no match (bug 9b94 follow-up) — the caller
+        then leaves the issue unassigned rather than guessing.
+
+        Raises ``AssigneeNotFoundError`` when no user EXACTLY matches. Raises
         ``ValueError`` when neither scope arg is supplied.
         """
         if not (issue_key or project_key):
@@ -549,8 +558,7 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
                 f"validate_assignee_exists: no assignable user matches "
                 f"{assignee!r} for {scope_label}"
             )
-        # Prefer exact match on emailAddress / accountId / displayName;
-        # fall back to the first result (Jira's relevance ordering).
+        # 1) EXACT match on emailAddress / accountId / displayName.
         for u in users:
             if not isinstance(u, dict):
                 continue
@@ -562,12 +570,39 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
                 acct = u.get("accountId")
                 if acct:
                     return acct
-        first = users[0]
-        if isinstance(first, dict) and first.get("accountId"):
-            return first["accountId"]
+
+        # 2) NORMALIZED match (bug 9b94): a local assignee is often a case/separator
+        # variant of a real identity — "joe-oakhart" for "Joe Oakhart". Compare the
+        # normalized (lowercased, alphanumerics-only) assignee against each user's
+        # normalized displayName / email local-part / accountId, and accept ONLY a
+        # UNIQUE match. This resolves clear variants while still rejecting BOTH
+        # coincidental substring matches ("loop-agent" !-> "jiratriageagent") and
+        # ambiguous partials ("joe" -> 3 Joes, no unique full-identity match).
+        def _norm(s: str | None) -> str:
+            return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+        target = _norm(assignee)
+        if target:
+            matched: set[str] = set()
+            for u in users:
+                if not isinstance(u, dict):
+                    continue
+                acct = u.get("accountId")
+                if not acct:
+                    continue
+                candidates = {
+                    _norm(u.get("displayName")),
+                    _norm((u.get("emailAddress") or "").split("@")[0]),
+                    _norm(acct),
+                }
+                candidates.discard("")
+                if target in candidates:
+                    matched.add(acct)
+            if len(matched) == 1:
+                return next(iter(matched))
         raise AssigneeNotFoundError(
-            f"validate_assignee_exists: assignable search returned results "
-            f"with no accountId for {assignee!r}"
+            f"validate_assignee_exists: no exact or unique-normalized match for {assignee!r} "
+            f"({len(users)} non-exact assignable-search result(s) ignored)"
         )
 
     def unassign_issue(self, jira_key: str) -> None:

@@ -462,11 +462,40 @@ def _assignee_matches(local_val: str, jira_raw: Any) -> bool:
     return (local_val or "").strip() in candidates
 
 
+# Fields the INBOUND differ mirrors Jira→local (inbound_differ.py field_map). A
+# Jira-side change to one of these, when local is unchanged since the last sync,
+# should flow inbound rather than be reverted by local-wins (inbound field-sync
+# fix). Parent/issuetype/links are NOT inbound-mirrored and keep local-wins.
+_INBOUND_MIRRORED_FIELDS = frozenset({"title", "description", "priority", "status", "assignee"})
+
+
+def _local_matches_prev(field_name: str, local_val: Any, prev_jira_fields: dict[str, Any]) -> bool:
+    """True when the local value equals the LAST-SYNCED Jira value (prev_snapshot).
+
+    If local equals what Jira had at the previous pass, local has NOT changed since
+    the last sync — so any difference from *current* Jira is a Jira-side edit, which
+    must be mirrored inbound, not reverted. Uses the same shape-tolerant comparisons
+    as the current-Jira diff (assignee dict-vs-string; rstrip for text). Returns
+    False when there is no prev entry (degrade to local-wins — no regression).
+    """
+    if not prev_jira_fields:
+        return False
+    if field_name == "assignee":
+        return _assignee_matches(local_val, prev_jira_fields.get("assignee"))
+    prev_val = _extract_jira_field(prev_jira_fields, field_name)
+    if isinstance(local_val, str) and isinstance(prev_val, str):
+        return local_val.rstrip() == prev_val.rstrip()
+    return local_val == prev_val
+
+
 def _diff_fields(
     ticket: dict[str, Any],
     jira_fields: dict[str, Any],
     binding_store: Any = None,
     local_ticket_types: dict[str, str] | None = None,
+    assignee_resolver: Any = None,
+    jira_key: str = "",
+    prev_jira_fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compare local ticket to Jira fields. Return only changed fields.
 
@@ -505,16 +534,56 @@ def _diff_fields(
         # so excluding the field here only affects updates.
         if field_name == "issuetype":
             continue
+        # Inbound-sync directionality (Jira-side edits were reverted). For a field
+        # the inbound differ can mirror, if local is UNCHANGED since the last sync
+        # (matches prev_snapshot) then any difference from current Jira is a
+        # Jira-side edit — suppress the outbound here so the inbound differ mirrors
+        # it to local instead of local-wins clobbering it. When local has changed
+        # (local != prev), fall through to the normal local-wins emit. Degrades to
+        # local-wins when there is no prev entry, so it never regresses.
+        if field_name in _INBOUND_MIRRORED_FIELDS and _local_matches_prev(
+            field_name, local_val, prev_jira_fields or {}
+        ):
+            continue
         if field_name == "assignee":
-            if not _assignee_matches(local_val, jira_fields.get("assignee")):
-                changed[field_name] = local_val
-                if verbose:
-                    print(  # noqa: T201
-                        f"RECON: field_diff ticket={ticket_id} "
-                        f"field=assignee local={local_val!r:.80} "
-                        f"jira={jira_fields.get('assignee')!r:.80}",
-                        file=sys.stderr,
+            jira_assignee = jira_fields.get("assignee")
+            if _assignee_matches(local_val, jira_assignee):
+                continue  # equivalent identity (or both unassigned) — no churn
+            # The differ would otherwise emit an assignee update. Bug 9b94: if the
+            # local assignee maps to NO assignable Jira user (e.g. an agent identity
+            # like "claude"), the desired state is "unassigned" — so converge to
+            # unassigned instead of re-emitting an unsatisfiable assign every pass.
+            # Resolution runs ONLY on this would-emit path (rare after pass 1) and
+            # only when a resolver is supplied (the live pass); the no-resolver
+            # fixture path keeps the legacy permissive string-match behavior.
+            if local_val and assignee_resolver is not None:
+                acct, authoritative = assignee_resolver(local_val, jira_key)
+                if authoritative:
+                    current_acct = (
+                        jira_assignee.get("accountId") if isinstance(jira_assignee, dict) else None
                     )
+                    if (acct or None) == (current_acct or None):
+                        continue  # resolved identity already correct — converged
+                    if acct is None:
+                        # Unmappable local assignee → desired unassigned. Jira has
+                        # someone (else we'd have converged above) — clear it.
+                        changed[field_name] = ""
+                        if verbose:
+                            print(  # noqa: T201
+                                f"RECON: field_diff ticket={ticket_id} field=assignee "
+                                f"local={local_val!r:.80} -> unassign (unmappable)",
+                                file=sys.stderr,
+                            )
+                        continue
+                    # Resolvable but mismatched → assign (applier re-resolves the string).
+            changed[field_name] = local_val
+            if verbose:
+                print(  # noqa: T201
+                    f"RECON: field_diff ticket={ticket_id} "
+                    f"field=assignee local={local_val!r:.80} "
+                    f"jira={jira_assignee!r:.80}",
+                    file=sys.stderr,
+                )
             continue
         if field_name == "parent":
             # Jira returns parent as {"key": "DIG-N"}; local_val is the resolved
@@ -1017,6 +1086,7 @@ def compute_outbound_mutations(
     client: Any = None,
     pass_id: str = "",
     absent_alive_fields: dict[str, dict[str, Any]] | None = None,
+    prev_snapshot: dict[str, Any] | None = None,
 ) -> list[OutboundMutation]:
     """Diff local tickets against Jira snapshot and return outbound mutations.
 
@@ -1118,6 +1188,47 @@ def compute_outbound_mutations(
     local_ticket_types: dict[str, str] = {
         t["ticket_id"]: t.get("ticket_type", "") for t in local_tickets if t.get("ticket_id")
     }
+
+    # Assignee resolution cache (bug 9b94). A local assignee that maps to NO
+    # assignable Jira user means "desired = unassigned": the differ must stop
+    # re-emitting an assignee update once Jira is unassigned, instead of churning
+    # forever on an unmappable agent identity (e.g. "claude"). Resolution is via
+    # the client's user search, cached per pass by assignee string (a handful of
+    # distinct assignees → a handful of lookups). With no client (unit/fixture
+    # path) resolution is non-authoritative and the differ falls back to the
+    # permissive string match.
+    _assignee_cache: dict[str, tuple[str | None, bool]] = {}
+
+    def _assignee_resolver(assignee: str, jira_key: str) -> tuple[str | None, bool]:
+        """Resolve a local assignee to a Jira accountId.
+
+        Returns ``(account_id_or_None, authoritative)``. ``authoritative`` is
+        ``True`` when the result is trustworthy: an empty local assignee
+        (→ unassigned), a successful resolution (→ accountId), or a definitive
+        "no assignable user" (→ ``None`` = unassigned). It is ``False`` when we
+        could not determine the mapping (no client, or a transient lookup
+        error) — the caller then preserves the legacy string-match behavior.
+        """
+        if not assignee:
+            return ("", True)
+        if assignee in _assignee_cache:
+            return _assignee_cache[assignee]
+        if client is None or not jira_key:
+            result: tuple[str | None, bool] = (None, False)
+        else:
+            try:
+                acct = client.validate_assignee_exists(assignee, issue_key=jira_key)
+                result = (acct or None, True)
+            except Exception as exc:  # noqa: BLE001 — classify the resolution outcome
+                # AssigneeNotFoundError ⇒ definitively unassignable (→ unassigned).
+                # Any other (transient/transport) error ⇒ unknown → string-match
+                # fallback, so a Jira blip never spuriously unassigns a ticket.
+                if type(exc).__name__ == "AssigneeNotFoundError":
+                    result = (None, True)
+                else:
+                    result = (None, False)
+        _assignee_cache[assignee] = result
+        return result
 
     for ticket in local_tickets:
         status = ticket.get("status", "")
@@ -1224,6 +1335,9 @@ def compute_outbound_mutations(
                 jira_fields,
                 binding_store=binding_store,
                 local_ticket_types=local_ticket_types,
+                assignee_resolver=_assignee_resolver,
+                jira_key=jira_key,
+                prev_jira_fields=(prev_snapshot or {}).get(jira_key),
             )
             # Comments use the resolved snapshot (the one-key overlay for the
             # bounded-GET path) so the GET's native fields.comment.comments is
