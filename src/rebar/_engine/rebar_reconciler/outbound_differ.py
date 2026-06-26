@@ -462,6 +462,32 @@ def _assignee_matches(local_val: str, jira_raw: Any) -> bool:
     return (local_val or "").strip() in candidates
 
 
+# Fields the INBOUND differ mirrors Jira→local (inbound_differ.py field_map). A
+# Jira-side change to one of these, when local is unchanged since the last sync,
+# should flow inbound rather than be reverted by local-wins (inbound field-sync
+# fix). Parent/issuetype/links are NOT inbound-mirrored and keep local-wins.
+_INBOUND_MIRRORED_FIELDS = frozenset({"title", "description", "priority", "status", "assignee"})
+
+
+def _local_matches_prev(field_name: str, local_val: Any, prev_jira_fields: dict[str, Any]) -> bool:
+    """True when the local value equals the LAST-SYNCED Jira value (prev_snapshot).
+
+    If local equals what Jira had at the previous pass, local has NOT changed since
+    the last sync — so any difference from *current* Jira is a Jira-side edit, which
+    must be mirrored inbound, not reverted. Uses the same shape-tolerant comparisons
+    as the current-Jira diff (assignee dict-vs-string; rstrip for text). Returns
+    False when there is no prev entry (degrade to local-wins — no regression).
+    """
+    if not prev_jira_fields:
+        return False
+    if field_name == "assignee":
+        return _assignee_matches(local_val, prev_jira_fields.get("assignee"))
+    prev_val = _extract_jira_field(prev_jira_fields, field_name)
+    if isinstance(local_val, str) and isinstance(prev_val, str):
+        return local_val.rstrip() == prev_val.rstrip()
+    return local_val == prev_val
+
+
 def _diff_fields(
     ticket: dict[str, Any],
     jira_fields: dict[str, Any],
@@ -469,6 +495,7 @@ def _diff_fields(
     local_ticket_types: dict[str, str] | None = None,
     assignee_resolver: Any = None,
     jira_key: str = "",
+    prev_jira_fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compare local ticket to Jira fields. Return only changed fields.
 
@@ -506,6 +533,17 @@ def _diff_fields(
         # but the diff loop here only runs for bound update mutations,
         # so excluding the field here only affects updates.
         if field_name == "issuetype":
+            continue
+        # Inbound-sync directionality (Jira-side edits were reverted). For a field
+        # the inbound differ can mirror, if local is UNCHANGED since the last sync
+        # (matches prev_snapshot) then any difference from current Jira is a
+        # Jira-side edit — suppress the outbound here so the inbound differ mirrors
+        # it to local instead of local-wins clobbering it. When local has changed
+        # (local != prev), fall through to the normal local-wins emit. Degrades to
+        # local-wins when there is no prev entry, so it never regresses.
+        if field_name in _INBOUND_MIRRORED_FIELDS and _local_matches_prev(
+            field_name, local_val, prev_jira_fields or {}
+        ):
             continue
         if field_name == "assignee":
             jira_assignee = jira_fields.get("assignee")
@@ -1048,6 +1086,7 @@ def compute_outbound_mutations(
     client: Any = None,
     pass_id: str = "",
     absent_alive_fields: dict[str, dict[str, Any]] | None = None,
+    prev_snapshot: dict[str, Any] | None = None,
 ) -> list[OutboundMutation]:
     """Diff local tickets against Jira snapshot and return outbound mutations.
 
@@ -1298,6 +1337,7 @@ def compute_outbound_mutations(
                 local_ticket_types=local_ticket_types,
                 assignee_resolver=_assignee_resolver,
                 jira_key=jira_key,
+                prev_jira_fields=(prev_snapshot or {}).get(jira_key),
             )
             # Comments use the resolved snapshot (the one-key overlay for the
             # bounded-GET path) so the GET's native fields.comment.comments is
