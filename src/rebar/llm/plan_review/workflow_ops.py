@@ -96,10 +96,21 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
         "det_coverage": det_cov,
     }
 
-    # A P1/P5/P8 DET block short-circuits to a BLOCK verdict WITHOUT the LLM (mirrors B3's
-    # precheck short-circuit; the bespoke run_review still merges an LLM pass — that nuance
-    # is the B4 parity concern, not B2's "runs end-to-end + right shape").
-    if det_blocks:
+    # P1/P5/P8 reconcile with bespoke run_review (story B5): the bespoke gate STOPS before
+    # the LLM tier ONLY when P8 says the plan is too big to review at all (any LLM review
+    # would see a plan that doesn't fit). A P1/P5 DET block does NOT stop the LLM — bespoke
+    # still runs the four-pass review and MERGES the DET blocks at decide-time. So:
+    #   * P8-too-big  → short-circuit (ELSE arm): a BLOCK verdict from the DET blocks, no LLM.
+    #   * any other DET block (P1/P5) → run the LLM (THEN arm); det_blocking flows into
+    #     plan_review_decide, which merges it via partition_findings → a BLOCK verdict that
+    #     ALSO carries the LLM advisories + coaching (matching run_review).
+    p8_too_big = any(
+        getattr(r, "id", None) == "P8" and getattr(r, "blocked", False) for r in det_results
+    )
+    if p8_too_big:
+        from rebar.llm.config import LLMConfig
+
+        cfg = LLMConfig.from_env(repo_root=ctx.repo_root)
         parts = orchestrator.partition_findings(
             det_blocks, det_advisories, [], advisory_cap=orchestrator.DEFAULT_ADVISORY_CAP
         )
@@ -108,8 +119,8 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
             parts,
             coaching=[],
             coverage={"det": det_cov, "llm_ran": False},
-            runner_name="deterministic",
-            model=None,
+            runner_name=cfg.runner,
+            model=cfg.model,
         )
         return {**base, "run_llm": False, "verdict": verdict}
     return {**base, "run_llm": True, "verdict": None}
@@ -145,6 +156,39 @@ def plan_review_assemble_criteria(ctx: StepContext) -> dict[str, Any]:
         "agent_tier": [c["id"] for c in agent],
     }
     return out
+
+
+@register_step(
+    "plan_review_grounding",
+    input_schema="plan_review_grounding_input",
+    output_schema="plan_review_grounding_output",
+    description=(
+        "Emit `code_grounded` = does ANY Pass-1 finding cite a CODEBASE_GROUNDED criterion "
+        "(E4/G1G2/A1/G6)? This is the boolean the dynamic Pass-2 verify branch reads: when "
+        "true the workflow runs the AGENTIC verifier (tools, re-grounds against real code), "
+        "matching bespoke run_review's pass2_verify(agentic=grounded); when false the cheaper "
+        "single-turn verifier. Mirrors the bespoke grounding test EXACTLY (findings-based, not "
+        "inclusion-based) so the agentic-vs-single-turn call-mode is parity-faithful."
+    ),
+)
+def plan_review_grounding(ctx: StepContext) -> dict[str, Any]:
+    """code_grounded = any finding cites a CODEBASE_GROUNDED criterion (E4/G1G2/A1/G6).
+
+    Mirrors orchestrator.run_review (passes.pass3 site) EXACTLY: the size-ladder's `_too_big`
+    findings and budget-`_shed` findings are EXCLUDED first (bespoke filters them out before
+    computing `grounded`), so a code-grounded criterion that was SHED does NOT make verify
+    agentic — the verifier only re-grounds findings that actually ran."""
+    from . import registry
+
+    findings = [
+        f
+        for f in (ctx.inputs.get("findings") or [])
+        if isinstance(f, dict) and not f.get("_too_big") and not f.get("_shed")
+    ]
+    grounded = any(
+        any(c in registry.CODEBASE_GROUNDED for c in (f.get("criteria") or [])) for f in findings
+    )
+    return {"code_grounded": bool(grounded)}
 
 
 @register_step(

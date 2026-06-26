@@ -29,6 +29,24 @@ import rebar.llm
 from rebar import config as _config
 from rebar.llm.runner import FakeRunner
 
+
+@pytest.fixture(autouse=True)
+def _pin_bespoke_gate_engine(monkeypatch):
+    """Pin the BESPOKE gate engine for this module (story B5 cutover).
+
+    These tests drive `review_plan` with a minimal `FakeRunner` and assert the gate's
+    DETERMINISTIC, path-independent surface (DET floor, attestation signing, code-drift +
+    material-edit invalidation, progressive drift-refresh) — the signing wrapper B5 left
+    UNCHANGED, so this behaviour is identical on both engines. The default engine is now
+    "workflow", whose verify/coach prompt steps need a real (schema-shaped) runner output a
+    fixed-payload `FakeRunner` can't produce. Pinning bespoke keeps these validating the
+    still-present bespoke FALLBACK (kept until B-RETIRE); the workflow path is covered by
+    tests/unit/workflow/{test_plan_review_workflow,test_plan_review_parity} +
+    tests/unit/test_gate_engine_cutover.
+    """
+    monkeypatch.setenv("REBAR_VERIFY_GATE_ENGINE", "bespoke")
+
+
 _CLEAN = FakeRunner(structured={"analysis": "", "findings": []})
 
 _DESC = (

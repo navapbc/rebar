@@ -102,9 +102,14 @@ class RunnerAgentStep(_ex.AgentStepRunner):
     (e.g. FakeRunner) is the offline/parallel-diff seam; otherwise the config-selected
     runner is used (pydantic_ai; a missing extra/key fails cleanly via get_runner)."""
 
-    def __init__(self, *, runner=None, repo_root: str | None = None) -> None:
+    def __init__(self, *, runner=None, repo_root: str | None = None, config=None) -> None:
         self._runner = runner
         self._repo_root = repo_root
+        # An optional pre-tuned LLMConfig base (the gate-cutover seam, story B5): the
+        # close gate tunes cfg (verifier model + step-budget floor) before running the
+        # completion workflow, and threads it here so RunRequest.config carries that
+        # tuning instead of a fresh `from_env` that would drop it. None → from_env.
+        self._config = config
 
     def run(self, ctx: _ex.StepContext) -> _ex.StepResult:
         from dataclasses import replace as _replace
@@ -113,7 +118,7 @@ class RunnerAgentStep(_ex.AgentStepRunner):
         from rebar.llm.config import LLMConfig, resolve_model
         from rebar.llm.runner import get_runner
 
-        cfg = LLMConfig.from_env(repo_root=self._repo_root)
+        cfg = self._config or LLMConfig.from_env(repo_root=self._repo_root)
         cfg = _replace(
             cfg,
             model=resolve_model(

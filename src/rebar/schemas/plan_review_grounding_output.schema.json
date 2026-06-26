@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_grounding_output.schema.json",
+  "title": "PlanReviewGroundingOutput",
+  "description": "OUTPUT of `plan_review_grounding`: `code_grounded` is true iff ANY Pass-1 finding cites a CODEBASE_GROUNDED criterion (E4/G1G2/A1/G6) — the boolean the dynamic Pass-2 verify branch reads to pick the agentic vs single-turn verifier (parity with bespoke pass2_verify(agentic=grounded)).",
+  "type": "object",
+  "properties": {
+    "code_grounded": { "type": "boolean", "description": "True iff any finding cites a code-grounded criterion → run the agentic verifier." }
+  },
+  "required": ["code_grounded"],
+  "additionalProperties": false
+}

@@ -425,7 +425,10 @@ def test_run_result_exposes_terminal_step_and_output():
     rec = _ReplayRecorder(sink=_CURRENT_SINK[0])
     res = _run(_branch_wf(True), recorder=rec, registry=_registry(), inputs={"flag": True})
     assert res.terminal_step == "gate"
-    assert res.terminal_output == {"taken": "then"}
+    # The terminal step is a `branch`; terminal_output DESCENDS through the taken arm to its
+    # real terminal LEAF (story B5) — NOT the branch's own `{taken: arm}` routing marker — so
+    # a gate workflow's verdict (the executed arm's output) is on RunResult.terminal_output.
+    assert res.terminal_output == {"i": None, "msg": "emit:gate@then/yes"}
 
 
 def test_while_is_a_pre_check_vs_until_do_while():

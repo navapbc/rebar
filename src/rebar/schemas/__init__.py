@@ -196,6 +196,8 @@ CONTRACT_SCHEMAS: frozenset[str] = frozenset(
         "plan_review_precheck",
         "plan_review_assemble_criteria",
         "plan_review_decide",
+        # epic B / story B5: the dynamic-verify grounding op (code_grounded boolean).
+        "plan_review_grounding",
     )
     for io in ("input", "output")
 ) | {

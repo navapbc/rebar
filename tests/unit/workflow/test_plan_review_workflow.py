@@ -86,11 +86,15 @@ class _CannedAgent(AgentStepRunner):
 
     def __init__(self):
         self.calls = 0
+        # Which verifier prompt id the dynamic Pass-2 branch selected (B5): the agentic
+        # variant when any finding is code-grounded, else the single-turn one.
+        self.verifier_prompts: list[str] = []
 
     def run(self, ctx) -> StepResult:
         self.calls += 1
         prompt = ctx.step.get("prompt")
-        if prompt == "plan-review-verifier":
+        if prompt in ("plan-review-verifier", "plan-review-verifier-agentic"):
+            self.verifier_prompts.append(prompt)
             findings = ctx.inputs.get("findings") or []
             verifs = [
                 {
@@ -263,25 +267,25 @@ def test_e2e_offline_produces_verdict(monkeypatch):
     assert verdict["coverage"]["counts"]["blocking"] == 0
 
 
-# ── DET-block short-circuit: no LLM call, a blocking verdict ──────────────────
-def test_det_block_short_circuits_without_llm(monkeypatch):
-    # A story with NO `## Acceptance Criteria` → P1 BLOCKS → run_llm=False → the ELSE
-    # passthrough arm yields the deterministic BLOCK verdict, and the finder/verify/coach
-    # are NEVER reached (no billable call), mirroring the B3 completion-gate short-circuit.
+# ── P1/P5 DET block does NOT short-circuit: LLM runs, DET block merged → BLOCK ─
+def test_p1_det_block_still_runs_llm_and_blocks(monkeypatch):
+    # Reconciled with bespoke run_review (story B5): a P1 DET block (here, NO
+    # `## Acceptance Criteria`) does NOT short-circuit the LLM — bespoke run_review only
+    # stops before the LLM on a P8-too-big plan. So the four-pass review RUNS and the DET
+    # block is merged at decide-time → a BLOCK verdict carrying the P1 block (+ any LLM
+    # advisories), NOT a no-LLM deterministic short-circuit.
     state = _state(description="Just a body, no acceptance criteria at all here.")
     finder = _CountingFinder(structured={"analysis": "", "findings": []})
     canned = _CannedAgent()
     rec, res = _run(monkeypatch, state, finder=finder, agent=canned)
 
     assert res.status == "succeeded", res.error
-    assert finder.calls == 0, "the Pass-1 finder must NOT run when a DET check blocks"
-    assert canned.calls == 0, "no verify/coach prompt step runs on the short-circuit arm"
+    assert finder.calls > 0, "a P1 block does NOT short-circuit — the LLM still runs (parity)"
     verdict = _terminal_verdict(rec)
     assert verdict is not None
     assert verdict["verdict"] == "BLOCK"
     assert verdict["blocking"], "a DET block must itemize the failing check"
     assert any("P1" in (f.get("criteria") or []) for f in verdict["blocking"])
-    assert verdict["runner"] == "deterministic"  # no model ran
 
 
 # ── exempt type short-circuits to PASS (no LLM) ──────────────────────────────

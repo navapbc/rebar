@@ -47,6 +47,18 @@ def _progressive_enabled(repo_root) -> bool:
         return False
 
 
+def _gate_engine(repo_root) -> str:
+    """Which engine produces the gate verdict — ``verify.gate_engine`` (default
+    ``"workflow"``). On an unreadable config, fall back to the proven ``"bespoke"``
+    path (conservative)."""
+    from rebar import config as _config
+
+    try:
+        return str(_config.load_config(repo_root).verify.gate_engine)
+    except Exception:  # noqa: BLE001 — config unreadable → proven bespoke path
+        return "bespoke"
+
+
 def review_plan(
     ticket_id: str,
     *,
@@ -69,6 +81,14 @@ def review_plan(
     advisory[], coaching[], indeterminate[], coverage, signature?, ...}``. Bugs and
     session_logs are exempt (PASS, runner=exempt). Raises only on a hard
     context-assembly failure; an unavailable LLM degrades to a DET-only review.
+
+    Under ``verify.gate_engine="workflow"`` (the default) the verdict is PRODUCED by the
+    engine workflow and SIGNED by this unchanged wrapper, so the signed attestation is
+    byte-compatible with the bespoke path for the production ``config=None`` case. NOTE: a
+    library caller passing an explicit non-default ``config`` is honored for the LLM CALLS,
+    but the workflow verdict's ``model``/``runner`` FIELDS still reflect the environment
+    config (the coach op resolves them from ``from_env``); for byte-identical cross-engine
+    manifests with a custom model, pin ``gate_engine="bespoke"``.
     """
     cfg = config or LLMConfig.from_env(repo_root=repo_root)
     ctx = orchestrator.assemble_context(ticket_id, repo_root=repo_root, cfg=cfg)
@@ -83,7 +103,18 @@ def review_plan(
 
             return findings.validate_structured(refreshed, "plan_review_verdict")
     cap = advisory_cap if advisory_cap is not None else orchestrator.DEFAULT_ADVISORY_CAP
-    verdict = orchestrator.run_review(ctx, cfg, runner=runner, advisory_cap=cap)
+    # Verdict PRODUCTION is engine-selectable (story B5 cutover): the workflow path
+    # (default) runs gates/plan-review.yaml; the bespoke path runs orchestrator.run_review.
+    # Only production swaps — the signing/sidecar wrapper below is identical on both paths,
+    # so the signed attestation stays byte-compatible.
+    if _gate_engine(repo_root) == "workflow":
+        from rebar.llm.workflow import gate_dispatch
+
+        verdict = gate_dispatch.produce_plan_review_verdict(
+            ctx, cfg, runner=runner, advisory_cap=cap, repo_root=repo_root
+        )
+    else:
+        verdict = orchestrator.run_review(ctx, cfg, runner=runner, advisory_cap=cap)
 
     material = orchestrator.material_fingerprint(ctx)
     verdict["material_fingerprint"] = material
