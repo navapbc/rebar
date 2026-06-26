@@ -605,8 +605,13 @@ function readLadder(element) {
 function writeLadder(element, modeling, bpmnFactory, list) {
   mutateConfig(element, modeling, bpmnFactory, (cfg) => {
     const batch = cfg.batch && typeof cfg.batch === "object" ? cfg.batch : {};
-    const clean = list.map((s) => String(s)).filter((s) => s.length);
-    if (clean.length) batch.model_ladder = clean;
+    // Keep rows verbatim (trimmed) — a freshly-ADDED empty row must survive so it renders
+    // for editing (filtering empties here would silently drop the add, like the criteria
+    // list keeps an empty {prompt:""}). An empty/whitespace id is a transient editing state
+    // the user fills in; lint catches a still-empty entry on save. Drop the key only when the
+    // whole list is gone (last row removed).
+    const rows = list.map((s) => String(s).trim());
+    if (rows.length) batch.model_ladder = rows;
     else delete batch.model_ladder;
     cfg.batch = batch;
   });
