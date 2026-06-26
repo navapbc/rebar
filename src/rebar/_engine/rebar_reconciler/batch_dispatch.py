@@ -39,6 +39,30 @@ class RetryExhaustedError(Exception):
     """Raised when _call_with_retry exhausts all retry attempts."""
 
 
+def _index_existing_links(issuelinks) -> set[tuple[str, str]]:
+    """Index a ``get_issue_links`` result as a ``{(type_name, other_key)}`` set.
+
+    Bug 3f04: local copy of ``apply_outbound._index_existing_links`` — this module
+    deliberately never imports the applier (cycle avoidance), so the helper is
+    duplicated. Records ``type.name`` plus the OTHER issue's key on EITHER side
+    (``inwardIssue``/``outwardIssue``), so the membership test is direction-agnostic
+    (a ``Blocks`` link to B is "present" whether B is the inward or outward side).
+    """
+    existing: set[tuple[str, str]] = set()
+    for link in issuelinks or []:
+        if not isinstance(link, dict):
+            continue
+        link_type = link.get("type") or {}
+        type_name = link_type.get("name") if isinstance(link_type, dict) else None
+        if not type_name:
+            continue
+        for side_key in ("inwardIssue", "outwardIssue"):
+            side = link.get(side_key)
+            if isinstance(side, dict) and side.get("key"):
+                existing.add((type_name, side.get("key")))
+    return existing
+
+
 # Per-pass REST-call budget: once create_one has issued this many REST calls in a
 # pass it defers further creates (back-pressure against Jira rate limits). Named here
 # so the threshold has one source instead of a bare literal in the guard + docstring.
@@ -495,6 +519,45 @@ def update_one(mutation: dict, client, comment_errors: list[str] | None = None) 
                     file=sys.stderr,
                 )
 
+    # Bug 3f04: dispatch link adds (blocks/relates) via client.set_relationship.
+    # The outbound differ emits these alongside changed scalar fields, but the
+    # batch path never applied them (the link entry was dropped + no dispatch
+    # here) — so outbound link sync was a silent no-op. Mirror the typed leaf
+    # ``_apply_outbound_update``: probe the issue's existing links ONCE and skip
+    # any add already present (either direction) so a re-issued POST after a
+    # timed-out-but-committed create does not duplicate the link. Failures are
+    # best-effort + logged (non-fatal — the scalar update already succeeded).
+    links = mutation.get("links", []) or []
+    if isinstance(links, list) and any(
+        isinstance(e, dict) and e.get("action") == "add" for e in links
+    ):
+        existing_links: set[tuple[str, str]] | None = None
+        try:
+            existing_links = _index_existing_links(client.get_issue_links(issue_key))
+        except Exception as exc:  # noqa: BLE001 — dedup probe is best-effort; proceed without it
+            existing_links = None
+            print(  # noqa: T201
+                f"update_one: get_issue_links probe failed for {issue_key}: {exc!r}",
+                file=sys.stderr,
+            )
+        for entry in links:
+            if not isinstance(entry, dict) or entry.get("action") != "add":
+                continue
+            link_type = entry.get("type")
+            to_key = entry.get("to_key")
+            if not link_type or not to_key:
+                continue
+            if existing_links is not None and (link_type, to_key) in existing_links:
+                continue  # already present (either direction) — no duplicate add
+            try:
+                _call_with_retry(client.set_relationship, issue_key, to_key, link_type)
+            except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, logged
+                print(  # noqa: T201
+                    f"update_one: set_relationship failed for {issue_key} -> "
+                    f"{to_key} ({link_type}): {exc!r}",
+                    file=sys.stderr,
+                )
+
     return result
 
 
@@ -587,4 +650,9 @@ def _mutation_to_batch_dict(mutation) -> dict:
         # add_comment / add_label / remove_label respectively (bug 87e4).
         "comments": payload.get("comments", []),
         "labels": payload.get("labels", []),
+        # Surface links so update_one can dispatch them via set_relationship
+        # (bug 3f04). Previously omitted here, so the production batch path
+        # silently dropped every outbound blocks/relates link — the link was
+        # reported "applied" (the mutation succeeded) but never created in Jira.
+        "links": payload.get("links", []),
     }

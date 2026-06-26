@@ -388,6 +388,99 @@ class AcliGraphMixin:
 
         return result
 
+    def get_issuelinks_map(
+        self,
+        project: str,
+        jql: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a ``{jira_key → issuelinks list}`` map via ONE paged REST search.
+
+        Bug 3f04: the snapshot previously carried NO ``issuelinks`` — the fetcher
+        enriched ``parent`` and ``comment`` but not links — so BOTH the inbound
+        link differ (``inbound_differ._diff_links_inbound``) and the outbound
+        differ's dedup (``outbound_differ._existing_jira_links``) read
+        ``jira_fields.get("issuelinks")`` and always saw nothing. Inbound link
+        sync was structurally dead and outbound re-emitted every link each pass.
+
+        Amortises what would otherwise be a per-ticket ``get_issue_links`` REST
+        round-trip into a SINGLE paged ``POST /rest/api/3/search/jql`` with
+        ``fields=["issuelinks"]``. Returns ``{jira_key: [<issuelink>, ...]}`` in
+        the exact REST-nested shape the differs read (``type.name`` +
+        ``inwardIssue``/``outwardIssue`` keys). Mirrors ``get_comment_map``'s
+        pagination + fail-open degradation contract (410 → ERROR, other faults →
+        WARNING, empty dict on failure so the pass still completes).
+        """
+        import logging as _logging
+
+        _log = _logging.getLogger(__name__)
+
+        effective_jql = jql or f"project = {project}"
+        result: dict[str, Any] = {}
+        page_size = 100
+        next_page_token: str | None = None
+
+        while True:
+            body: dict[str, Any] = {
+                "jql": effective_jql,
+                "maxResults": page_size,
+                "fields": ["issuelinks"],
+            }
+            if next_page_token is not None:
+                body["nextPageToken"] = next_page_token
+            try:
+                resp = self._direct_rest_post_json("/rest/api/3/search/jql", body)
+            except urllib.error.HTTPError as exc:
+                if exc.code == 410:
+                    _log.error(
+                        "get_issuelinks_map: endpoint POST /rest/api/3/search/jql "
+                        "returned HTTP 410 GONE — the Jira search endpoint has been "
+                        "RETIRED; issuelink enrichment is unavailable this pass. "
+                        "API retirement, not a transient fault: %r",
+                        exc,
+                    )
+                else:
+                    _log.warning(
+                        "get_issuelinks_map: REST search failed (HTTP %s): %r; "
+                        "degrading gracefully (no issuelink enrichment this pass)",
+                        exc.code,
+                        exc,
+                    )
+                break
+            except Exception as exc:  # noqa: BLE001 — fail-open: degrade to no enrichment
+                _log.warning(
+                    "get_issuelinks_map: REST search failed: %r; "
+                    "degrading gracefully (no issuelink enrichment this pass)",
+                    exc,
+                )
+                break
+
+            if not isinstance(resp, dict):
+                break
+            issues = resp.get("issues") or []
+            if not isinstance(issues, list):
+                break
+            for issue in issues:
+                if not isinstance(issue, dict):
+                    continue
+                key = issue.get("key")
+                if not key:
+                    continue
+                fields = issue.get("fields") or {}
+                links = fields.get("issuelinks")
+                # Record any issue the search returned an issuelinks list for
+                # (including the empty list — an authoritative "no links" that
+                # lets the outbound differ's dedup treat the issue as known).
+                if isinstance(links, list):
+                    result[key] = links
+
+            if resp.get("isLast"):
+                break
+            next_page_token = resp.get("nextPageToken")
+            if not next_page_token:
+                break
+
+        return result
+
     def update_priority(self, jira_key: str, priority_name: str) -> None:
         """Update priority on a Jira issue via REST PUT.
 
