@@ -13,9 +13,12 @@ Behaviours under test:
   - compute_alias returns adj-noun (2 words) for legacy 8-hex IDs
   - process_create populates state['alias'] from data.alias when present
   - process_create backfills state['alias'] from ticket_id when data.alias missing
-  - resolve_ticket_id resolves by stored/backfilled alias and jira_key, skips
-    dotfile dirs and malformed CREATE events, and fails loud (returns None +
-    stderr diagnostic) on an unreadable tracker directory
+  - resolve_ticket_id resolves by stored/backfilled alias, skips dotfile dirs and
+    malformed CREATE events, and fails loud (returns None + stderr diagnostic) on
+    an unreadable tracker directory
+  - resolve_ticket_id resolves a Jira issue key (REB-NNN) via the binding store
+    reverse index, degrading to None (never raising) when the store is
+    missing/corrupt or the binding is stale; the dead data.jira_key scan is gone
 """
 
 import json
@@ -24,7 +27,11 @@ import uuid
 from pathlib import Path
 
 from rebar._alias import compute_alias
-from rebar._engine_support.resolver import _scan_alias_jira, resolve_ticket_id
+from rebar._engine_support.resolver import (
+    _resolve_via_binding_store,
+    _scan_alias,
+    resolve_ticket_id,
+)
 from rebar.reducer import reduce_ticket
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -106,15 +113,14 @@ def test_process_create_backfills_when_alias_missing(tmp_path):
     assert state["alias"] is not None
 
 
-# ── Edge-case coverage for resolve_ticket_id alias/jira_key resolution ────────
+# ── Edge-case coverage for resolve_ticket_id alias resolution ─────────────────
 #
 # Tier E E7d: ticket-alias-resolve.py was a thin CLI over
-# rebar._engine_support.resolver. The CLI printed "alias\t<id>" / "jira\t<id>" on
-# a match and exited non-zero on a hard tracker-listing failure. In-process,
-# resolve_ticket_id returns the resolved ticket-dir name (or None on no-match /
-# hard failure) and prints diagnostics to stderr; _scan_alias_jira exposes the
-# jira-vs-alias bucketing the CLI's output prefix encoded. We assert on those
-# return values + captured stderr (via capsys) instead of subprocess streams.
+# rebar._engine_support.resolver. In-process, resolve_ticket_id returns the
+# resolved ticket-dir name (or None on no-match / hard failure) and prints
+# diagnostics to stderr; _scan_alias returns the alias matches (or None on a hard
+# tracker-listing failure). We assert on those return values + captured stderr
+# (via capsys) instead of subprocess streams.
 
 
 def test_resolver_missing_tracker_dir_fails_loud(tmp_path, capsys):
@@ -157,27 +163,82 @@ def test_resolver_backfilled_alias_matches_legacy_ticket(tmp_path):
     assert resolve_ticket_id(expected, str(tmp_path)) == td.name
 
 
-def test_resolver_jira_key_takes_precedence_over_alias_collision(tmp_path):
-    """If a single ticket's CREATE event has both a matching jira_key and a
-    matching alias for the same input string (pathological), jira wins —
-    matches the resolver's documented precedence order. _scan_alias_jira returns
-    (jira_matches, alias_matches); the colliding input must land in jira_matches
-    (the bucket the CLI's "jira\\t" prefix encoded), not alias_matches."""
+def _write_bindings(tracker: Path, reverse: dict) -> None:
+    """Plant a binding-store reverse index at <tracker>/.bridge_state/bindings.json."""
+    bs = tracker / ".bridge_state"
+    bs.mkdir(parents=True, exist_ok=True)
+    (bs / "bindings.json").write_text(json.dumps({"version": 1, "reverse": reverse}))
+
+
+# ── Jira-key resolution via the binding store ─────────────────────────────────
+#
+# The authoritative Jira↔rebar mapping is the reconciler's binding store reverse
+# index (.bridge_state/bindings.json), NOT a data.jira_key field on CREATE events
+# (that field is never written — the old scan for it was dead code, now removed).
+# resolve_ticket_id resolves a Jira-key-shaped input via _resolve_via_binding_store.
+
+
+def test_resolver_jira_key_resolves_via_binding_store(tmp_path):
+    """A Jira key bound in the binding store resolves to its local ticket dir."""
+    td = _plant_ticket(tmp_path, "abcd-efab-1234-5678", alias_in_data="some-alias")
+    _write_bindings(tmp_path, {"REB-310": td.name})
+    assert _resolve_via_binding_store("REB-310", str(tmp_path)) == td.name
+    assert resolve_ticket_id("REB-310", str(tmp_path)) == td.name
+
+
+def test_resolver_jira_key_lowercase_input_uppercased(tmp_path):
+    """Jira project keys are canonically upper-case; a lower-case input resolves
+    via the upper-cased fallback lookup."""
+    td = _plant_ticket(tmp_path, "abcd-efab-1234-5678", alias_in_data="some-alias")
+    _write_bindings(tmp_path, {"REB-310": td.name})
+    assert resolve_ticket_id("reb-310", str(tmp_path)) == td.name
+
+
+def test_resolver_unbound_jira_key_returns_none(tmp_path):
+    """A Jira-shaped input with no binding resolves to None (no false alias/prefix
+    match)."""
+    _plant_ticket(tmp_path, "abcd-efab-1234-5678", alias_in_data="some-alias")
+    _write_bindings(tmp_path, {"REB-1": "0000-0000-0000-0000"})
+    assert resolve_ticket_id("REB-999", str(tmp_path)) is None
+
+
+def test_resolver_jira_key_missing_bindings_file_returns_none(tmp_path):
+    """No binding store at all → Jira resolution unavailable → None, never raises."""
+    _plant_ticket(tmp_path, "abcd-efab-1234-5678", alias_in_data="some-alias")
+    assert _resolve_via_binding_store("REB-310", str(tmp_path)) is None
+    assert resolve_ticket_id("REB-310", str(tmp_path)) is None
+
+
+def test_resolver_jira_key_corrupt_bindings_file_returns_none(tmp_path):
+    """A corrupt/garbage bindings.json must degrade to None, not raise."""
+    _plant_ticket(tmp_path, "abcd-efab-1234-5678", alias_in_data="some-alias")
+    bs = tmp_path / ".bridge_state"
+    bs.mkdir()
+    (bs / "bindings.json").write_text("{ not valid json")
+    assert _resolve_via_binding_store("REB-310", str(tmp_path)) is None
+    assert resolve_ticket_id("REB-310", str(tmp_path)) is None
+
+
+def test_resolver_jira_key_binding_to_missing_dir_returns_none(tmp_path):
+    """A binding that points at a ticket dir that no longer exists resolves to
+    None — the mapping is stale, not a resolvable ticket."""
+    _write_bindings(tmp_path, {"REB-310": "dead-beef-dead-beef"})
+    assert _resolve_via_binding_store("REB-310", str(tmp_path)) is None
+    assert resolve_ticket_id("REB-310", str(tmp_path)) is None
+
+
+def test_scan_alias_no_longer_buckets_jira_keys(tmp_path):
+    """Regression: _scan_alias is alias-only. A data.jira_key on a CREATE event is
+    NOT a resolution source any more (only data.alias / computed alias is)."""
     td = tmp_path / "abcd-efab-1234-5678"
     td.mkdir()
     ts = time.time_ns()
     (td / f"{ts}-x-CREATE.json").write_text(
-        json.dumps(
-            {
-                "data": {"alias": "COLLIDE-99", "jira_key": "COLLIDE-99"},
-            }
-        )
+        json.dumps({"data": {"alias": "real-alias", "jira_key": "REB-777"}})
     )
-    jira_matches, alias_matches = _scan_alias_jira("COLLIDE-99", str(tmp_path))
-    assert jira_matches == [td.name]
-    assert alias_matches == []
-    # And the public resolver still returns the ticket (jira precedence).
-    assert resolve_ticket_id("COLLIDE-99", str(tmp_path)) == td.name
+    # The alias still resolves; the jira_key field does not.
+    assert _scan_alias("real-alias", str(tmp_path)) == [td.name]
+    assert _scan_alias("REB-777", str(tmp_path)) == []
 
 
 def test_resolver_nonzero_exit_propagates_to_resolve_ticket_id(tmp_path, capsys):
@@ -188,10 +249,10 @@ def test_resolver_nonzero_exit_propagates_to_resolve_ticket_id(tmp_path, capsys)
 
     The former bash-CLI variant of this test (sourcing ticket-lib.sh and shelling
     out to the alias resolver) checked the same intent across the deleted
-    subprocess boundary; in-process the diagnostic is _scan_alias_jira's
+    subprocess boundary; in-process the diagnostic is _scan_alias's
     "cannot list" stderr line, surfaced by resolve_ticket_id."""
     # A tracker path that is a FILE not a dir → os.listdir raises OSError →
-    # _scan_alias_jira prints "cannot list ..." and returns None → resolve
+    # _scan_alias prints "cannot list ..." and returns None → resolve
     # returns None.
     bad_tracker = tmp_path / ".tickets-tracker"
     bad_tracker.write_text("not a directory")

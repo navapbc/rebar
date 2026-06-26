@@ -1,15 +1,22 @@
 """Shared Python ticket-ID resolver.
 
-Mirrors ``ticket-lib.sh::resolve_ticket_id`` so Python
-CLIs accept the same ID forms (full 16-hex, 8-hex short, alias, jira_key,
-unique prefix >= 4 chars) as the bash dispatcher does.
+The single resolution seam Python CLIs and the library use, so every surface
+accepts the same ID forms: full 16-hex, 8-hex short, alias, Jira issue key
+(e.g. ``REB-310``), and unique prefix >= 4 chars.
 
-Alias/jira_key lookup is done IN-PROCESS (Tier E E6.5a — replacing the
-``ticket-alias-resolve.py`` subprocess): the alias-mode scan reads each ticket's
+Alias lookup is done IN-PROCESS (Tier E E6.5a — replacing the
+``ticket-alias-resolve.py`` subprocess): the alias scan reads each ticket's
 CREATE event (and the latest SNAPSHOT, for compacted tickets) and matches a
-stored ``data.alias``/``data.jira_key`` or a backfilled ``compute_alias`` — the
-same single-source alias helper (``rebar._alias``) the create path uses, so
-stored-at-create and backfilled-at-resolve aliases stay in lock-step.
+stored ``data.alias`` or a backfilled ``compute_alias`` — the same single-source
+alias helper (``rebar._alias``) the create path uses, so stored-at-create and
+backfilled-at-resolve aliases stay in lock-step.
+
+Jira-key lookup consults the reconciler's **binding store** reverse index
+(``.tickets-tracker/.bridge_state/bindings.json`` → ``reverse: {jira_key →
+local_id}``), which is the authoritative Jira↔rebar mapping. (Historically the
+resolver scanned ``data.jira_key`` on CREATE/SNAPSHOT events, but that field is
+never written — the live mapping is the binding store — so that path was dead and
+has been replaced.)
 """
 
 from __future__ import annotations
@@ -23,14 +30,49 @@ from rebar._alias import compute_alias
 
 _FULL_ID_RE = re.compile(r"^[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$")
 _SHORT_ID_RE = re.compile(r"^[a-z0-9]{4}-[a-z0-9]{4}$")
+# Jira issue key shape: project key (>=2 alnum, leading letter) + "-" + number,
+# e.g. ``REB-310``. Disjoint from lowercase-hex full/short IDs and lowercase-word
+# aliases, so a Jira-key match never collides with the other forms.
+_JIRA_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]+-[0-9]+$")
 
 
-def _scan_alias_jira(target: str, tracker_dir: str) -> tuple[list[str], list[str]] | None:
-    """In-process port of ``ticket-alias-resolve.py`` (alias mode).
+def _resolve_via_binding_store(target: str, tracker_dir: str) -> str | None:
+    """Resolve a Jira issue key to its bound local ticket-dir name, or None.
 
-    Returns ``(jira_matches, alias_matches)`` (ticket-dir names), or ``None`` on a
-    hard failure listing the tracker (mirrors the helper's exit 1 — a hard failure
-    must not masquerade as "no match"). Per-ticket I/O errors skip that ticket.
+    Consults the reconciler's binding store reverse index
+    (``<tracker_dir>/.bridge_state/bindings.json`` → ``reverse: {jira_key →
+    local_id}``) — the authoritative Jira↔rebar mapping. Best-effort: a missing or
+    corrupt store, a non-dict ``reverse``, an unbound key, or a binding that points
+    at a ticket dir that no longer exists all yield None (Jira resolution simply
+    unavailable — this never raises). The lookup tries the key verbatim then
+    upper-cased, since Jira project keys are canonically upper-case.
+    """
+    bindings_path = os.path.join(tracker_dir, ".bridge_state", "bindings.json")
+    try:
+        with open(bindings_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    reverse = data.get("reverse")
+    if not isinstance(reverse, dict):
+        return None
+    local_id = reverse.get(target) or reverse.get(target.upper())
+    if not isinstance(local_id, str) or not local_id:
+        return None
+    if os.path.isdir(os.path.join(tracker_dir, local_id)):
+        return local_id
+    return None
+
+
+def _scan_alias(target: str, tracker_dir: str) -> list[str] | None:
+    """Scan tickets for an alias matching ``target`` (in-process alias resolution).
+
+    Returns the list of matching ticket-dir names, or ``None`` on a hard failure
+    listing the tracker (a hard failure must not masquerade as "no match").
+    Per-ticket I/O errors skip that ticket. Each ticket's effective alias is its
+    stored ``data.alias`` (CREATE event, or the latest non-PRECONDITIONS SNAPSHOT
+    ``compiled_state`` for compacted tickets) or a backfilled ``compute_alias`` —
+    keeping stored-at-create and backfilled-at-resolve aliases in lock-step.
     """
     try:
         entries = sorted(os.listdir(tracker_dir))
@@ -38,7 +80,6 @@ def _scan_alias_jira(target: str, tracker_dir: str) -> tuple[list[str], list[str
         print(f"Error: cannot list {tracker_dir!r}: {exc}", file=sys.stderr)
         return None
 
-    jira_matches: list[str] = []
     alias_matches: list[str] = []
     for name in entries:
         if name.startswith("."):
@@ -61,36 +102,28 @@ def _scan_alias_jira(target: str, tracker_dir: str) -> tuple[list[str], list[str
         except OSError:
             continue
         stored_alias = ""
-        jira_key = ""
         if create_path:
             try:
                 with open(create_path, encoding="utf-8") as f:
                     data = json.load(f).get("data", {}) or {}
                 stored_alias = data.get("alias") or ""
-                jira_key = data.get("jira_key") or ""
             except (OSError, json.JSONDecodeError):
                 pass
-        # SNAPSHOT compiled_state is authoritative for compacted tickets; fill only
-        # the missing values, BEFORE the compute_alias backfill (wordlist drift).
-        if snapshot_path and (not stored_alias or not jira_key):
+        # SNAPSHOT compiled_state is authoritative for compacted tickets; fill the
+        # missing alias BEFORE the compute_alias backfill (wordlist drift).
+        if snapshot_path and not stored_alias:
             try:
                 with open(snapshot_path, encoding="utf-8") as f:
                     snap_state = (json.load(f).get("data", {}) or {}).get(
                         "compiled_state", {}
                     ) or {}
-                if not stored_alias:
-                    stored_alias = snap_state.get("alias") or ""
-                if not jira_key:
-                    jira_key = snap_state.get("jira_key") or ""
+                stored_alias = snap_state.get("alias") or ""
             except (OSError, json.JSONDecodeError):
                 pass
-        if jira_key and jira_key == target:
-            jira_matches.append(name)
-            continue
         effective_alias = stored_alias or compute_alias(name) or ""
         if effective_alias and effective_alias == target:
             alias_matches.append(name)
-    return jira_matches, alias_matches
+    return alias_matches
 
 
 def resolve_ticket_id(ticket_id: str, tracker_dir: str) -> str | None:
@@ -133,18 +166,16 @@ def resolve_ticket_id(ticket_id: str, tracker_dir: str) -> str | None:
             )
         return None
 
-    scanned = _scan_alias_jira(ticket_id, tracker_dir)
-    if scanned is not None:
-        jira_matches, alias_matches = scanned
-        if len(jira_matches) == 1:
-            return jira_matches[0]
-        if len(jira_matches) > 1:
-            print(
-                f"Error: Ambiguous jira_key '{ticket_id}' matches multiple tickets: "
-                f"{' '.join(sorted(jira_matches))}",
-                file=sys.stderr,
-            )
-            return None
+    # Jira issue key (e.g. REB-310) → bound local ticket via the binding store.
+    # Checked before the alias scan; the shapes are disjoint, so this only matches
+    # genuine Jira keys.
+    if _JIRA_KEY_RE.match(ticket_id):
+        bound = _resolve_via_binding_store(ticket_id, tracker_dir)
+        if bound is not None:
+            return bound
+
+    alias_matches = _scan_alias(ticket_id, tracker_dir)
+    if alias_matches is not None:
         if len(alias_matches) == 1:
             return alias_matches[0]
         if len(alias_matches) > 1:
