@@ -39,6 +39,9 @@ _USAGE = (
     "       ticket transition <ticket_id> <target_status> [--reason=<text>] [--force] "
     "[--force-close=<reason>]  (auto-detects current status)\n"
     "  current_status / target_status: open | in_progress | closed | blocked\n"
+    "  Parent-first (open -> in_progress only): if the ticket has an OPEN parent, the\n"
+    "  parent is transitioned first (recursively); a parent failure aborts the child\n"
+    "  and the error names the parent. close/reopen/blocked never cascade.\n"
     "  --reason=<text>          Required when closing bug tickets. Must start with "
     "'Fixed:' or 'Escalated to user:'.\n"
     "  --force                  Skip the unresolved-children guard when closing. "
@@ -68,6 +71,28 @@ def _read_status(tracker: str, ticket_id: str) -> str | None:
     if status in (None, "error", "fsck_needed"):
         return None
     return status
+
+
+def _resolve_open_parent(tracker: str, ticket_id: str) -> str | None:
+    """Return the resolved id of ``ticket_id``'s parent IFF the parent exists and is
+    currently ``open`` — else ``None``.
+
+    The parent-first cascade in :func:`claim_compute` / :func:`transition_compute`
+    uses this: grabbing a child (claim, or transition ``open -> in_progress``) first
+    grabs its OPEN parent. A parent that is already ``in_progress`` / ``closed`` /
+    ``blocked`` (or absent / unreadable) yields ``None`` — no cascade, the child op
+    proceeds alone."""
+    state = reduce_ticket(os.path.join(tracker, ticket_id))
+    if state is None:
+        return None
+    raw_parent = state.get("parent_id")
+    if not raw_parent:
+        return None
+    parent_id = resolve_ticket_id(raw_parent, tracker) or raw_parent
+    parent_state = reduce_ticket(os.path.join(tracker, parent_id))
+    if parent_state is None or parent_state.get("status") != "open":
+        return None
+    return parent_id
 
 
 def _parse_flags(args: list[str]) -> tuple[str, bool, str, str]:
@@ -258,11 +283,18 @@ def transition_compute(
     verdict_hash: str = "",
     force_close: str = "",
     repo_root=None,
+    _cascade_seen: frozenset[str] | None = None,
 ) -> dict:
     """Validate, guard, write, and post-process a transition for an ALREADY-RESOLVED
     ticket id. Returns ``{ticket_id, from, to, newly_unblocked, noop}``. Raises
     :class:`ConcurrencyMismatch` (exit 10) / :class:`CommandError`. Does NOT parse
-    ``--output`` or autodetect current — that is the CLI wrapper's job."""
+    ``--output`` or autodetect current — that is the CLI wrapper's job.
+
+    Parent-first cascade: on an ``open -> in_progress`` transition, if the ticket has
+    an OPEN parent the parent is transitioned first (recursively up the chain) before
+    the child; a parent failure aborts the child with an error naming the parent.
+    ``_cascade_seen`` is the internal recursion guard (the ids already on the cascade
+    stack) — callers leave it ``None``."""
     tracker = str(config.tracker_dir(repo_root))
     repo_root_str = os.path.dirname(tracker)
 
@@ -312,6 +344,31 @@ def transition_compute(
         raise CommandError(
             "Error: ticket system not initialized. Run 'ticket init' first.", returncode=1
         )
+
+    # Parent-first cascade (open -> in_progress only): if this ticket has an OPEN
+    # parent, transition the parent first (recursively up the chain) so a child is
+    # never moved to in_progress while its parent is still open. If the parent
+    # transition fails, the child is NOT transitioned and the error names the parent.
+    # _cascade_seen breaks any malformed parent cycle.
+    if current_status == "open" and target_status == "in_progress":
+        seen = _cascade_seen or frozenset()
+        parent_id = _resolve_open_parent(tracker, ticket_id)
+        if parent_id is not None and parent_id != ticket_id and parent_id not in seen:
+            try:
+                transition_compute(
+                    parent_id,
+                    "open",
+                    "in_progress",
+                    repo_root=repo_root,
+                    _cascade_seen=seen | {ticket_id},
+                )
+            except CommandError as exc:
+                raise CommandError(
+                    f"Error: cannot move {ticket_id} to in_progress: transitioning its "
+                    f"parent {parent_id} to in_progress failed first, so the child was not "
+                    f"transitioned.\n  Parent error: {exc.message}",
+                    returncode=exc.returncode,
+                ) from None
 
     # Open-children guard + newly_unblocked (one batch pass), only on close.
     newly_unblocked: list[str] = []

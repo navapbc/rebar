@@ -27,6 +27,9 @@ _CLAIM_USAGE = (
     "Usage: ticket claim <ticket_id> [--assignee=<name>] [--force[=<reason>]]\n"
     "  Claims an OPEN ticket (-> in_progress) and sets its assignee atomically.\n"
     "  Exits 10 if the ticket is not open (someone else already claimed it).\n"
+    "  Parent-first: if the ticket has an OPEN parent, the parent is claimed first\n"
+    "  (recursively, same assignee); a parent failure aborts the child and the\n"
+    "  error names the parent.\n"
     "  --force bypasses the plan-review claim gate (when enabled) with an audit note.\n"
 )
 
@@ -128,11 +131,21 @@ def _plan_review_precheck(
 
 
 def claim_compute(
-    ticket_id: str, *, assignee: str = "", force_plan_review: str = "", repo_root=None
+    ticket_id: str,
+    *,
+    assignee: str = "",
+    force_plan_review: str = "",
+    repo_root=None,
+    _cascade_seen: frozenset[str] | None = None,
 ) -> dict:
     """Claim an ALREADY-RESOLVED ticket (ghost/init checks + the locked claim core).
     Returns ``{ticket_id, status, assignee}``; raises :class:`ConcurrencyMismatch`
-    (exit 10) / :class:`CommandError`."""
+    (exit 10) / :class:`CommandError`.
+
+    Parent-first cascade: if the ticket has an OPEN parent the parent is claimed first
+    (recursively up the chain, with the same assignee) before the child; a parent
+    failure aborts the child with an error naming the parent. ``_cascade_seen`` is the
+    internal recursion guard — callers leave it ``None``."""
     tracker = str(config.tracker_dir(repo_root))
     ticket_dir = os.path.join(tracker, ticket_id)
     if not os.path.isdir(ticket_dir):
@@ -156,6 +169,31 @@ def claim_compute(
     _plan_review_precheck(
         ticket_id, os.path.dirname(tracker), repo_root, force_plan_review=force_plan_review
     )
+
+    # Parent-first cascade: if this ticket has an OPEN parent, claim the parent first
+    # (recursively up the chain) so a child is never claimed while its parent is still
+    # open. If the parent claim fails, the child is NOT claimed and the error names the
+    # parent as the cause. _cascade_seen breaks any malformed parent cycle. The helper
+    # lives in .transition (claim re-exports through it); import lazily to avoid a cycle.
+    from rebar._commands.transition import _resolve_open_parent
+
+    seen = _cascade_seen or frozenset()
+    parent_id = _resolve_open_parent(tracker, ticket_id)
+    if parent_id is not None and parent_id != ticket_id and parent_id not in seen:
+        try:
+            claim_compute(
+                parent_id,
+                assignee=assignee,
+                force_plan_review=force_plan_review,
+                repo_root=repo_root,
+                _cascade_seen=seen | {ticket_id},
+            )
+        except CommandError as exc:
+            raise CommandError(
+                f"Error: cannot claim {ticket_id}: claiming its parent {parent_id} failed "
+                f"first, so the child was not claimed.\n  Parent error: {exc.message}",
+                returncode=exc.returncode,
+            ) from None
 
     from rebar._commands import _seam
 
@@ -224,12 +262,15 @@ def claim_cli(argv: list[str], *, repo_root=None) -> int:
             sys.stdout.write(
                 json.dumps(
                     error_envelope(
-                        "claim_failed", raw_id, f"Failed to claim ticket '{ticket_id}'", 1
+                        "claim_failed",
+                        raw_id,
+                        f"Failed to claim ticket '{ticket_id}'",
+                        exc.returncode,
                     )
                 )
                 + "\n"
             )
-        return 1
+        return exc.returncode
 
     if fmt == "json":
         sys.stdout.write(

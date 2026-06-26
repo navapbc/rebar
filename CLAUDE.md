@@ -54,6 +54,13 @@ list / search ──▶ ready ──▶ next-batch ──▶ claim ──▶ (wo
    assignee in one atomic step. If another agent already claimed it you get a
    **ConcurrencyError / exit 10** — do not retry the same ticket; pick another.
    Never hand-roll claim as `transition`+`edit` (that races).
+   **Parent-first cascade:** if the ticket has a parent that is still **`open`**,
+   the claim first claims the parent (recursively up the chain, with the same
+   assignee) **before** the child — you can't be working a child while its parent
+   is still merely open. A parent already `in_progress`/`closed`/`blocked` is left
+   as-is. If the parent claim fails, the **child is not claimed** and the error
+   names the **parent** as the cause. The same cascade applies to a bare
+   `transition <id> open in_progress`. See "Parent-first claim/transition cascade".
 3. **Record provenance** — when work surfaces new work, `create` the ticket and
    `link <new> <parent> discovered_from` so the emergent-work trail is captured.
 4. **Finish** — `transition <id> in_progress closed` (optimistic-concurrency:
@@ -327,6 +334,31 @@ parent work to the epic/story it belongs to with `create --parent <id>` or `edit
 (see `rebar create --help`). Don't attach an epic's workstreams with a `depends_on`/
 `discovered_from` link — **parent** them, or they aren't its children (the hierarchy is what
 `ready`/`next-batch`/`validate`/the completion gate's child-closure check operate on).
+
+### Parent-first claim/transition cascade
+
+Starting work on a child **pulls its open parent into progress first.** When you
+`claim <id>` (or run the equivalent `transition <id> open in_progress`), rebar
+checks the ticket's `parent_id`:
+
+- **Parent is `open`** → the same operation runs on the **parent first**, then the
+  child. This walks **up the whole chain** (grandparent before parent before child),
+  so claiming a leaf task moves its open story and its open epic to `in_progress`
+  too. A `claim` cascade carries the **same `--assignee`** up the chain.
+- **Parent is `in_progress` / `closed` / `blocked`** (or there is no parent) → **no
+  cascade**; only the requested ticket moves. (The cascade triggers on an `open`
+  parent only — the goal is just to ensure ancestors aren't left merely `open` while
+  you work a descendant.)
+- **Parent operation fails** → the **child is left untouched** (not claimed / not
+  transitioned), and the error message names the **parent** as the cause, e.g.
+  `cannot claim <child>: claiming its parent <parent> failed first …`. The exit code
+  is propagated from the parent failure (a parent concurrency conflict still surfaces
+  as **exit 10 / `ConcurrencyError`** so you re-read and retry). The cascade is
+  cycle-safe (a malformed parent cycle can't recurse forever).
+
+Only the `open → in_progress` direction cascades. `close`, `reopen`, and a move to
+`blocked` are **never** cascaded to the parent (closing a parent has its own,
+separate open-children guard — see the completion gate).
 
 ## Linking (relations + hierarchy promotion)
 
