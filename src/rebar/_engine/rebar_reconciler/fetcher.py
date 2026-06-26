@@ -438,6 +438,42 @@ def _build_snapshot(
             exc,
         )
 
+    # Issuelink enrichment (bug 3f04): the base search omits issuelinks, so the
+    # inbound link differ (_diff_links_inbound) and the outbound dedup
+    # (_existing_jira_links) both saw zero Jira links — inbound link sync was
+    # dead and outbound re-emitted every link each pass. Amortise into ONE paged
+    # REST search via client.get_issuelinks_map() and merge the issuelinks array
+    # into each snapshot entry. Only entries the search returned a list for are
+    # enriched; on any failure the enrichment is skipped (differs degrade to
+    # "no Jira links" — additive ADD-only sync stays safe) and the pass completes.
+    try:
+        if project_key and hasattr(client, "get_issuelinks_map"):
+            issuelinks_map = client.get_issuelinks_map(project_key)
+            for snap_key, links in issuelinks_map.items():
+                if snap_key in snapshot and isinstance(links, list):
+                    snapshot[snap_key]["issuelinks"] = links
+    except urllib.error.HTTPError as exc:
+        if exc.code == 410:
+            _fetcher_log.error(
+                "fetch_snapshot: issuelink enrichment hit HTTP 410 GONE — the Jira "
+                "search endpoint has been RETIRED; snapshot written without "
+                "issuelink data (degraded). API retirement, not a transient fault: %r",
+                exc,
+            )
+        else:
+            _fetcher_log.warning(
+                "fetch_snapshot: issuelink enrichment failed (HTTP %s: %r); "
+                "snapshot written without issuelink data (degraded)",
+                exc.code,
+                exc,
+            )
+    except Exception as exc:  # noqa: BLE001 — fail-open: skip issuelink enrichment, write degraded snapshot
+        _fetcher_log.warning(
+            "fetch_snapshot: issuelink enrichment failed (%r); "
+            "snapshot written without issuelink data (degraded)",
+            exc,
+        )
+
     return snapshot
 
 
