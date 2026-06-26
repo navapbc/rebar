@@ -467,6 +467,8 @@ def _diff_fields(
     jira_fields: dict[str, Any],
     binding_store: Any = None,
     local_ticket_types: dict[str, str] | None = None,
+    assignee_resolver: Any = None,
+    jira_key: str = "",
 ) -> dict[str, Any]:
     """Compare local ticket to Jira fields. Return only changed fields.
 
@@ -506,15 +508,44 @@ def _diff_fields(
         if field_name == "issuetype":
             continue
         if field_name == "assignee":
-            if not _assignee_matches(local_val, jira_fields.get("assignee")):
-                changed[field_name] = local_val
-                if verbose:
-                    print(  # noqa: T201
-                        f"RECON: field_diff ticket={ticket_id} "
-                        f"field=assignee local={local_val!r:.80} "
-                        f"jira={jira_fields.get('assignee')!r:.80}",
-                        file=sys.stderr,
+            jira_assignee = jira_fields.get("assignee")
+            if _assignee_matches(local_val, jira_assignee):
+                continue  # equivalent identity (or both unassigned) — no churn
+            # The differ would otherwise emit an assignee update. Bug 9b94: if the
+            # local assignee maps to NO assignable Jira user (e.g. an agent identity
+            # like "claude"), the desired state is "unassigned" — so converge to
+            # unassigned instead of re-emitting an unsatisfiable assign every pass.
+            # Resolution runs ONLY on this would-emit path (rare after pass 1) and
+            # only when a resolver is supplied (the live pass); the no-resolver
+            # fixture path keeps the legacy permissive string-match behavior.
+            if local_val and assignee_resolver is not None:
+                acct, authoritative = assignee_resolver(local_val, jira_key)
+                if authoritative:
+                    current_acct = (
+                        jira_assignee.get("accountId") if isinstance(jira_assignee, dict) else None
                     )
+                    if (acct or None) == (current_acct or None):
+                        continue  # resolved identity already correct — converged
+                    if acct is None:
+                        # Unmappable local assignee → desired unassigned. Jira has
+                        # someone (else we'd have converged above) — clear it.
+                        changed[field_name] = ""
+                        if verbose:
+                            print(  # noqa: T201
+                                f"RECON: field_diff ticket={ticket_id} field=assignee "
+                                f"local={local_val!r:.80} -> unassign (unmappable)",
+                                file=sys.stderr,
+                            )
+                        continue
+                    # Resolvable but mismatched → assign (applier re-resolves the string).
+            changed[field_name] = local_val
+            if verbose:
+                print(  # noqa: T201
+                    f"RECON: field_diff ticket={ticket_id} "
+                    f"field=assignee local={local_val!r:.80} "
+                    f"jira={jira_assignee!r:.80}",
+                    file=sys.stderr,
+                )
             continue
         if field_name == "parent":
             # Jira returns parent as {"key": "DIG-N"}; local_val is the resolved
@@ -1119,6 +1150,47 @@ def compute_outbound_mutations(
         t["ticket_id"]: t.get("ticket_type", "") for t in local_tickets if t.get("ticket_id")
     }
 
+    # Assignee resolution cache (bug 9b94). A local assignee that maps to NO
+    # assignable Jira user means "desired = unassigned": the differ must stop
+    # re-emitting an assignee update once Jira is unassigned, instead of churning
+    # forever on an unmappable agent identity (e.g. "claude"). Resolution is via
+    # the client's user search, cached per pass by assignee string (a handful of
+    # distinct assignees → a handful of lookups). With no client (unit/fixture
+    # path) resolution is non-authoritative and the differ falls back to the
+    # permissive string match.
+    _assignee_cache: dict[str, tuple[str | None, bool]] = {}
+
+    def _assignee_resolver(assignee: str, jira_key: str) -> tuple[str | None, bool]:
+        """Resolve a local assignee to a Jira accountId.
+
+        Returns ``(account_id_or_None, authoritative)``. ``authoritative`` is
+        ``True`` when the result is trustworthy: an empty local assignee
+        (→ unassigned), a successful resolution (→ accountId), or a definitive
+        "no assignable user" (→ ``None`` = unassigned). It is ``False`` when we
+        could not determine the mapping (no client, or a transient lookup
+        error) — the caller then preserves the legacy string-match behavior.
+        """
+        if not assignee:
+            return ("", True)
+        if assignee in _assignee_cache:
+            return _assignee_cache[assignee]
+        if client is None or not jira_key:
+            result: tuple[str | None, bool] = (None, False)
+        else:
+            try:
+                acct = client.validate_assignee_exists(assignee, issue_key=jira_key)
+                result = (acct or None, True)
+            except Exception as exc:  # noqa: BLE001 — classify the resolution outcome
+                # AssigneeNotFoundError ⇒ definitively unassignable (→ unassigned).
+                # Any other (transient/transport) error ⇒ unknown → string-match
+                # fallback, so a Jira blip never spuriously unassigns a ticket.
+                if type(exc).__name__ == "AssigneeNotFoundError":
+                    result = (None, True)
+                else:
+                    result = (None, False)
+        _assignee_cache[assignee] = result
+        return result
+
     for ticket in local_tickets:
         status = ticket.get("status", "")
         if status in excluded_statuses:
@@ -1224,6 +1296,8 @@ def compute_outbound_mutations(
                 jira_fields,
                 binding_store=binding_store,
                 local_ticket_types=local_ticket_types,
+                assignee_resolver=_assignee_resolver,
+                jira_key=jira_key,
             )
             # Comments use the resolved snapshot (the one-key overlay for the
             # bounded-GET path) so the GET's native fields.comment.comments is
