@@ -90,3 +90,42 @@ def test_live_review_skeleton_workflow_end_to_end(rebar_repo: Path) -> None:
     schemas.validator(schemas.WORKFLOW_RUN).validate(full)
     finders_out = full.get("outputs", {}).get("finders", {})
     assert isinstance(finders_out.get("findings"), list)
+
+
+@_skip
+def test_live_plan_review_workflow_engine_produces_real_verdict(
+    rebar_repo: Path, monkeypatch
+) -> None:
+    """The blind-spot GUARD (tepid-bus-pomp): run the plan-review gate through the WORKFLOW
+    ENGINE against a LIVE model and assert it produces a real PASS/BLOCK verdict — NOT the
+    INDETERMINATE the B5 cutover degraded to when the verify/coach steps lacked ``{{plan}}``.
+
+    The offline parity harness uses canned agents that never call ``resolve_prompt``, so it
+    cannot catch a missing prompt variable on the live path. This live test exercises the real
+    ``RunnerAgentStep`` end-to-end (finders → verify → coach) so the regression can't recur.
+    """
+    import rebar.llm as llm
+
+    monkeypatch.setenv("REBAR_VERIFY_GATE_ENGINE", "workflow")  # force the engine under test
+    tid = rebar.create_ticket(
+        "story",
+        "Persist the review cache to disk",
+        description=(
+            "## Why\nThe in-memory review cache is lost on restart.\n\n"
+            "## What\nPersist it under `src/rebar/cache.py` behind the existing seam.\n\n"
+            "## Scope\nJust persistence; eviction is out of scope.\n\n"
+            "## Acceptance Criteria\n- [ ] the cache survives a restart\n"
+            "- [ ] the seam writes through to disk\n"
+        ),
+        repo_root=str(rebar_repo),
+    )
+
+    verdict = llm.review_plan(tid, repo_root=str(rebar_repo), sign=False, emit_sidecar=False)
+
+    # The fix's core guarantee: the workflow engine returns a REAL verdict, not INDETERMINATE
+    # (which is what an unresolved `{{plan}}` / a failed verify step degrades to).
+    assert verdict["verdict"] in ("PASS", "BLOCK"), verdict.get("coverage")
+    assert verdict["coverage"].get("llm_ran") is True
+    assert verdict["coverage"].get("llm_unavailable") is not True
+    # The plan-review verdict conforms to its canonical schema on the workflow path.
+    schemas.validator(schemas.PLAN_REVIEW_VERDICT).validate(verdict)
