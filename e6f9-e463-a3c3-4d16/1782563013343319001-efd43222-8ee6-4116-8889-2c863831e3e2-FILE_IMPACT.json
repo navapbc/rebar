@@ -1,1 +1,0 @@
-{"author":"Iso Tester","data":{"file_impact":[{"path":"docs/config.md","reason":"[snapshot] section + REBAR_GATE_* flags"},{"path":"tests/unit/test_snapshot_docs.py","reason":"config.md coverage test"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782563013343319001,"uuid":"efd43222-8ee6-4116-8889-2c863831e3e2"}
