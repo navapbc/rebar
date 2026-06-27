@@ -34,6 +34,13 @@ project-specific lives in GitHub repo Variables/Secrets, not in the files:
   confirm `git ls-remote origin tickets` returns a sha. The workflows mount this
   branch — they do not create it.
 - **A pinned `acli` version + its sha256** (see step 3). Never run `latest` in CI.
+- **Private-repo fetch credentials (only if you run the LLM code-reading gates on a
+  private repo).** The gates default to *attested* mode and `git fetch` the verified ref
+  from `origin` to materialize a pinned-SHA snapshot, so the host needs read credentials
+  (a git credential helper / deploy key / token). Missing credentials make attested mode
+  **fail closed** with an actionable error; `source=local` reads the in-place checkout and
+  needs no fetch. See [repo-snapshot-gates.md](repo-snapshot-gates.md). (Jira reconcile
+  itself does not need this — it is only for the optional code-reading gates.)
 
 ## 2. Configure the sync target in `rebar.toml`
 

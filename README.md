@@ -203,6 +203,20 @@ instead.) Server flags: `REBAR_MCP_READONLY=1` exposes only read tools;
 accept any case-insensitive truthy value — `1`, `true`, or `yes` (surrounding
 whitespace tolerated); anything else (incl. unset) is off.
 
+#### Private-repo fetch credentials (code-reading gates)
+
+The LLM code-reading gates (`review_plan`, `verify_completion`, `review_ticket`,
+`review_code`, `scan_spec`) default to **attested** mode: they `git fetch` the verified
+ref from `origin` and read an immutable snapshot at the pinned SHA — never the server's
+mutable checkout. So a server pointed (`REBAR_ROOT`) at a **private** repository needs
+**read credentials to fetch**: a git credential helper, a deploy key, or a token in the
+server's clone. With no credentials, attested mode **fails closed** with a descriptive,
+actionable error (it never hangs on a prompt — `GIT_TERMINAL_PROMPT=0`); `source=local`
+(read the in-place checkout, never signed) is the back-out that needs no fetch. Full
+semantics, the HMAC trust model, and the snapshot env knobs (`REBAR_GATE_TMPDIR`, the
+disk-space watermark, the EFS/NFS `flock` caveat) are in
+[docs/repo-snapshot-gates.md](docs/repo-snapshot-gates.md).
+
 ### From source
 
 ```bash
