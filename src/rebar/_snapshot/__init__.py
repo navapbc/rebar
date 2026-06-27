@@ -44,6 +44,9 @@ from rebar._snapshot.janitor import (
     startup_sweep,
 )
 from rebar._snapshot.repo_snapshot import (
+    DEFAULT_REF,
+    SOURCE_ATTESTED,
+    SOURCE_LOCAL,
     SnapshotError,
     SnapshotFetchError,
     SnapshotHandle,
@@ -56,6 +59,9 @@ from rebar._snapshot.repo_snapshot import (
 )
 
 __all__ = [
+    "DEFAULT_REF",
+    "SOURCE_ATTESTED",
+    "SOURCE_LOCAL",
     "CacheMiss",
     "JanitorConfig",
     "SnapshotError",

@@ -22,14 +22,52 @@ Environment variables (all optional; sensible defaults):
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import os
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from importlib.util import find_spec
 
 from rebar import config as _root_config
 
 DEFAULT_MODEL = "claude-opus-4-8"
+
+# The active code read-root for the running gate (epic raze-vet-ditch S3). When a gate
+# runs in `attested` mode it materializes a snapshot at the client-pinned SHA and sets
+# this for the duration of the run; `LLMConfig.from_env` then resolves `repo_path` to the
+# snapshot, so EVERY config built deep in the gate (citation resolution, reconcile, the
+# agent itself) reads the pinned snapshot rather than the server's mutable checkout. A
+# ContextVar is thread- and asyncio-task-safe (no global env mutation across concurrent
+# gates). Unset (the default) preserves the prior in-place behavior — exactly `local` mode.
+_active_code_root: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "rebar_llm_code_root", default=None
+)
+
+
+def current_code_root() -> str | None:
+    """The active gate's code read-root (an attested snapshot dir), or ``None``."""
+    return _active_code_root.get()
+
+
+@contextlib.contextmanager
+def use_code_root(path: str | None) -> Iterator[None]:
+    """Bind the gate's code read-root for the duration of the block (``None`` = no override,
+    i.e. read the in-place checkout — local mode).
+
+    Caveat: a ``ContextVar`` is inherited by asyncio tasks but NOT by raw threads — code that
+    rebuilds an :class:`LLMConfig` on a worker thread (e.g. a future ``map`` workflow step's
+    fan-out) must propagate context via ``contextvars.copy_context().run`` or it will fall
+    through to the checkout. The current gate workflows rebuild config only on the calling
+    thread, so the snapshot is honored everywhere they read it."""
+    token = _active_code_root.set(path)
+    try:
+        yield
+    finally:
+        _active_code_root.reset(token)
+
+
 # Single source of truth for the per-call output-token cap default. Referenced by
 # both the LLMConfig field default and the env/table resolution fallback so the
 # default lives in ONE place (docs/config.md documents the same value).
@@ -269,8 +307,15 @@ class LLMConfig:
                         mcp_servers = parsed
                 except json.JSONDecodeError:
                     mcp_servers = {}
-        # repo_path is a RUNTIME-only override (env only) — not a [tool.rebar.llm] key.
-        repo_path = os.environ.get("REBAR_LLM_REPO_PATH") or str(_root_config.repo_root(repo_root))
+        # repo_path is a RUNTIME-only override — not a [tool.rebar.llm] key. Precedence:
+        #   active gate code root (an attested snapshot — wins so EVERY from_env-built
+        #   config deep in a gate run reads the pinned snapshot, never the mutable checkout)
+        #   > REBAR_LLM_REPO_PATH env > the resolved repo root (the in-place checkout).
+        repo_path = (
+            current_code_root()
+            or os.environ.get("REBAR_LLM_REPO_PATH")
+            or str(_root_config.repo_root(repo_root))
+        )
         return cls(
             runner=runner,
             model=_llm_str(table, cli, "REBAR_LLM_MODEL", "model", DEFAULT_MODEL),

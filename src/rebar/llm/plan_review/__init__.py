@@ -50,6 +50,8 @@ def _progressive_enabled(repo_root) -> bool:
 def review_plan(
     ticket_id: str,
     *,
+    ref: str | None = None,
+    source: str | None = None,
     repo_root=None,
     config: LLMConfig | None = None,
     runner: Runner | None = None,
@@ -70,13 +72,39 @@ def review_plan(
     session_logs are exempt (PASS, runner=exempt). Raises only on a hard
     context-assembly failure; an unavailable LLM degrades to a DET-only review.
 
-    Verdict production runs through the v3 engine workflow (``gates/plan-review.yaml``) and
-    is SIGNED by this unchanged wrapper. (The workflow plan-review verify/coach steps supply
-    the prompts' live ``{{plan}}`` + findings/surviving listings.) NOTE: a library caller
-    passing an explicit non-default ``config`` is honored for the LLM CALLS, but the workflow
-    verdict's ``model``/``runner`` FIELDS still reflect the environment config.
+    ``ref``/``source`` select the code read-root (attested snapshot at the pinned SHA by
+    default; ``local`` reads the in-place checkout). Verdict production runs through the v3
+    engine workflow (``gates/plan-review.yaml``) and is SIGNED by this unchanged wrapper.
+    NOTE: a library caller passing an explicit non-default ``config`` is honored for the LLM
+    CALLS, but the workflow verdict's ``model``/``runner`` FIELDS still reflect the env config.
     """
-    cfg = config or LLMConfig.from_env(repo_root=repo_root)
+    from rebar.llm import gate_source
+
+    handle = gate_source.resolve_gate_handle(ref, source, repo_root)
+    with gate_source.gate_read_root(handle):
+        cfg = gate_source.apply_handle(config or LLMConfig.from_env(repo_root=repo_root), handle)
+        verdict = _run_plan_review(
+            ticket_id,
+            cfg=cfg,
+            runner=runner,
+            sign=sign,
+            emit_sidecar=emit_sidecar,
+            advisory_cap=advisory_cap,
+            repo_root=repo_root,
+        )
+    return gate_source.annotate_result(verdict, handle)
+
+
+def _run_plan_review(
+    ticket_id: str,
+    *,
+    cfg: LLMConfig,
+    runner: Runner | None,
+    sign: bool,
+    emit_sidecar: bool,
+    advisory_cap: int | None,
+    repo_root,
+) -> dict[str, Any]:
     ctx = orchestrator.assemble_context(ticket_id, repo_root=repo_root, cfg=cfg)
     # Progressive drift-refresh (Story 2): when the attestation is stale ONLY because
     # reviewed code drifted (material + registry unchanged) and a cheap probe confirms the

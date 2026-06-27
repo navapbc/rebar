@@ -232,7 +232,13 @@ def _completion_precheck(
         # graph=True would only bloat the context and make an epic close re-verify the entire
         # feature in one run (impractical — it blows the step budget). The standalone
         # `rebar verify-completion <id> --graph` remains available for a deep human review.
-        result = llm.verify_completion(ticket_id, graph=False, repo_root=repo_root)
+        # source="local": the CLI close gate is the single-developer VERIFY-BEFORE-PUSH flow
+        # (epic raze-vet-ditch AC3) — it verifies the work in THIS checkout that is about to be
+        # pushed, not a pinned origin/main snapshot (which would not yet contain the unmerged
+        # change). Distributed/attested completion verification is the MCP `verify_completion`
+        # tool (source=attested, default). `local` reads the in-place tree and is never signed
+        # by S4's attestation pin; the close gate's own completion-verifier manifest is unchanged.
+        result = llm.verify_completion(ticket_id, graph=False, source="local", repo_root=repo_root)
     except Exception as exc:  # noqa: BLE001 — missing extra/key OR any verifier failure -> fail-closed (re-raise CommandError)
         raise CommandError(
             f"Error: cannot close {ticket_id}: completion verification could not run ({exc}). "

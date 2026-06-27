@@ -47,6 +47,8 @@ def scan_epics_for_spec(
     epics: list[str] | None = None,
     batch_size: int = 5,
     reviewer_id: str = "spec-alignment",
+    ref: str | None = None,
+    source: str | None = None,
     repo_root=None,
     config: LLMConfig | None = None,
     runner: Runner | None = None,
@@ -56,9 +58,38 @@ def scan_epics_for_spec(
 
     Epics default to the store's open/in-progress epics (or pass explicit ids).
     They are evaluated in batches of ``batch_size`` (one runner pass each), and the
-    findings are concatenated + ranked by severity.
+    findings are concatenated + ranked by severity. ``ref``/``source`` select the code
+    read-root (attested snapshot at the pinned SHA by default; ``local`` reads the checkout).
     """
-    cfg = config or LLMConfig.from_env(repo_root=repo_root)
+    from rebar.llm import gate_source
+
+    handle = gate_source.resolve_gate_handle(ref, source, repo_root)
+    with gate_source.gate_read_root(handle):
+        cfg = gate_source.apply_handle(config or LLMConfig.from_env(repo_root=repo_root), handle)
+        return gate_source.annotate_result(
+            _scan_epics_inner(
+                spec_text,
+                epics=epics,
+                batch_size=batch_size,
+                reviewer_id=reviewer_id,
+                repo_root=repo_root,
+                cfg=cfg,
+                runner=runner,
+            ),
+            handle,
+        )
+
+
+def _scan_epics_inner(
+    spec_text: str,
+    *,
+    epics: list[str] | None,
+    batch_size: int,
+    reviewer_id: str,
+    repo_root,
+    cfg: LLMConfig,
+    runner: Runner | None,
+) -> dict:
     tickets = _fetch_epics(epics, repo_root)
     reviewer = prompts.get_prompt(reviewer_id, repo_root=repo_root)
     selected = get_runner(cfg, override=runner)
