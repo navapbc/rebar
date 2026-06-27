@@ -1,0 +1,1 @@
+{"author":"Iso Tester","data":{"file_impact":[{"path":"src/rebar/llm/eval_specs","reason":"semantic container-fidelity eval corpus + harness"},{"path":"tests/unit","reason":"baseline fixtures + recall/attribution metric"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782544897340547001,"uuid":"d652f9a5-e31a-46f6-9fe2-ae487b12e8f3"}
