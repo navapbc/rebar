@@ -47,10 +47,10 @@ GRADED_BINARY = (
     "severity_claim_justified",
 )
 _GRADE = {"yes": 1.0, "insufficient": 0.5, "no": 0.0}
-_SEV01 = {"none": 0.0, "low": 0.33, "medium": 0.67, "high": 1.0}
-_BLAST01 = {"local": 0.33, "module": 0.67, "system": 1.0}
-_LIKE01 = {"low": 0.33, "medium": 0.67, "high": 1.0}
-_REV01 = {"easy": 0.33, "moderate": 0.67, "hard": 1.0}
+_SEV01: dict[str | None, float] = {"none": 0.0, "low": 0.33, "medium": 0.67, "high": 1.0}
+_BLAST01: dict[str | None, float] = {"local": 0.33, "module": 0.67, "system": 1.0}
+_LIKE01: dict[str | None, float] = {"low": 0.33, "medium": 0.67, "high": 1.0}
+_REV01: dict[str | None, float] = {"easy": 0.33, "moderate": 0.67, "hard": 1.0}
 
 DEFAULT_BLOCK_THRESHOLD = 0.95  # near-certain AND high-impact ⇒ v1 is almost all advisory
 

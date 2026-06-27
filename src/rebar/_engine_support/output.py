@@ -134,7 +134,7 @@ def error_envelope(error: str, input_str: str, message: str, exit_code=None) -> 
     error_envelope). ``exit_code`` is optional (see docs/exit-codes.md). Single
     source of truth for the failure shape every ``--output json`` command emits on
     stdout, so agents never have to parse stderr prose."""
-    env = {"error": error, "input": input_str, "message": message}
+    env: dict[str, str | int] = {"error": error, "input": input_str, "message": message}
     if exit_code is not None and exit_code != "":
         env["exit_code"] = int(exit_code)
     return env

@@ -26,6 +26,12 @@ from typing import Any
 class AcliRestMixin:
     """REST transport helpers + issue-property accessors for AcliClient."""
 
+    # Credential attributes set in ``AcliClient.__init__`` (acli.py); declared
+    # here type-only so mypy sees the surface this transport mixin depends on.
+    jira_url: str
+    user: str
+    api_token: str
+
     def _rest_urlopen_with_retry(
         self,
         req: urllib.request.Request,

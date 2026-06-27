@@ -64,7 +64,7 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
 
     tid = _ticket_id(ctx)
     pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
-    base = {
+    base: dict[str, Any] = {
         "canonical_id": pctx.ticket_id,
         "ticket_type": pctx.ticket_type,
         "det_blocking": [],
@@ -295,7 +295,9 @@ def plan_review_decide(ctx: StepContext) -> dict[str, Any]:
     for i, f in enumerate(findings):
         if f.get("_too_big") or f.get("_shed"):
             continue
-        rest_verifs[len(rest)] = verifs.get(i)
+        verif = verifs.get(i)
+        if verif is not None:  # absent == None to the consumer's verifs.get(i)
+            rest_verifs[len(rest)] = verif
         rest.append(f)
     decided = [*too_big, *shed, *orchestrator.pass3_over_findings(rest, rest_verifs)]
 

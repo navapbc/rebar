@@ -37,7 +37,7 @@ _SONNET = "claude-sonnet-4-6"
 def _have_live() -> bool:
     try:
         import rebar.llm as llm
-    except Exception:
+    except ImportError:
         return False
     return llm.agents_extra_installed() and bool(os.environ.get("ANTHROPIC_API_KEY"))
 

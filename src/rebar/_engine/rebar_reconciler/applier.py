@@ -717,7 +717,7 @@ def _apply_batch(
                 # Bug 6afc-20ee-84e5-4dd5: collect any add_comment failures so a
                 # swallowed comment sub-mutation surfaces in the batch outcome
                 # rather than reporting a clean error=None.
-                _comment_errors: list[str] = []
+                _comment_errors = []
                 _subop: dict[str, int] = {}
                 try:
                     result = update_one(

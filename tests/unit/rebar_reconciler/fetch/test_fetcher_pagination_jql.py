@@ -132,7 +132,7 @@ def test_fetcher_calls_acli_with_split_jqls_verbatim(tmp_path, fetcher):
     with patch.object(fetcher, "_load_acli", return_value=mock_acli):
         try:
             fetcher.fetch_snapshot("d3b8-jql-verbatim", repo_root=tmp_path)
-        except Exception:
+        except fetcher.SilentTruncationError:
             # Truncation gate may raise mid-loop. Calls captured up to the
             # raise remain assertable.
             pass
@@ -164,7 +164,7 @@ def test_fetcher_paginates_through_1500_issues_in_100_step_increments(tmp_path, 
     with patch.object(fetcher, "_load_acli", return_value=mock_acli):
         try:
             fetcher.fetch_snapshot("d3b8-paginate-1500", repo_root=tmp_path)
-        except Exception:
+        except fetcher.SilentTruncationError:
             # cbd6 truncation may raise; partial call-sequence remains valid.
             pass
 

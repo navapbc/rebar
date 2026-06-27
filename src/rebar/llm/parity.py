@@ -21,9 +21,11 @@ but the GATE logic is exercised offline so the bar itself can't silently drift.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
+
+_T = TypeVar("_T")
 
 # A decision is the load-bearing, coarse outcome a verdict resolves to; a FLIP between
 # these on the gold set is never acceptable (it changes what ships).
@@ -59,7 +61,7 @@ class ParityReport:
     metrics: dict[str, Any] = field(default_factory=dict)
 
 
-def _rate(records: Sequence[ItemRecord], pred) -> float:
+def _rate(records: Sequence[_T], pred: Callable[[_T], bool]) -> float:
     return (sum(1 for r in records if pred(r)) / len(records)) if records else 0.0
 
 

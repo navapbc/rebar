@@ -97,6 +97,8 @@ def review_ticket(
     reviewer_id: str | None = None,
     *,
     graph: bool = False,
+    ref: str | None = None,
+    source: str | None = None,
     repo_root=None,
     config: LLMConfig | None = None,
     runner: Runner | None = None,
@@ -116,47 +118,53 @@ def review_ticket(
     runner, model, trace_id, summary}). Raises :class:`LLMError` subclasses on
     missing deps/credentials or a failed/empty structured review.
     """
-    cfg = config or LLMConfig.from_env(repo_root=repo_root)
-    if cfg.max_iterations < _REVIEW_MIN_STEPS:
-        cfg = replace(cfg, max_iterations=_REVIEW_MIN_STEPS)
-    rid = reviewer_id or _default_reviewer_id()
-    reviewer = prompts.get_prompt(rid, repo_root=repo_root)
+    from rebar.llm import gate_source
 
-    context, ids = _assemble_context(ticket_id, graph=graph, repo_root=repo_root)
-    variables = {
-        "ticket_id": ids[0],
-        "ticket_context": context,
-        "repo_path": cfg.repo_path or "",
-    }
-    # Tool-awareness steering: name the tools, tell the agent to USE them (not
-    # guess), how to page large files, and to ground every claim in tool output —
-    # the prompt-level reliability technique used by Claude Code / SWE-agent.
-    base_instructions = (
-        f"Review ticket {ids[0]}"
-        + (" together with its child tickets, as a unit," if graph else "")
-        + f", along the '{reviewer.dimension}' dimension.\n\n"
-        "You have read-only repository tools — USE them, do not rely on memory or "
-        "guess at the code:\n"
-        "- list_directory(path): explore structure (generated/ignored files are hidden)\n"
-        "- search_files(regex, path): locate code; returns `path:line` matches\n"
-        "- read_file(path, line_start, line_end): read exact lines; PAGE large "
-        "files with the line range instead of assuming their contents.\n\n"
-        "Ground EVERY finding in what the tools actually return — cite real "
-        "`path:line` from read_file output and never invent paths, line numbers, "
-        "or file contents. Then report your findings via the structured output."
-    )
-    # Engine-wide caching (story c6e5): cache the byte-stable reviewer rubric and route
-    # the volatile per-run ticket context to the user message. Unmarked → pre-S2 behavior.
-    system_prompt, instructions, langfuse_prompt = prompts.resolve_prompt_cached(
-        reviewer, variables, base_instructions=base_instructions, langfuse_cfg=cfg.langfuse
-    )
+    handle = gate_source.resolve_gate_handle(ref, source, repo_root)
+    with gate_source.gate_read_root(handle):
+        cfg = config or LLMConfig.from_env(repo_root=repo_root)
+        cfg = gate_source.apply_handle(cfg, handle)
+        if cfg.max_iterations < _REVIEW_MIN_STEPS:
+            cfg = replace(cfg, max_iterations=_REVIEW_MIN_STEPS)
+        rid = reviewer_id or _default_reviewer_id()
+        reviewer = prompts.get_prompt(rid, repo_root=repo_root)
 
-    req = RunRequest(
-        system_prompt=system_prompt,
-        instructions=instructions,
-        config=cfg,
-        reviewers=[rid],
-        target={"kind": "ticket_graph" if graph else "ticket", "ticket_ids": ids},
-        langfuse_prompt=langfuse_prompt,
-    )
-    return get_runner(cfg, override=runner).run(req)
+        context, ids = _assemble_context(ticket_id, graph=graph, repo_root=repo_root)
+        variables = {
+            "ticket_id": ids[0],
+            "ticket_context": context,
+            "repo_path": cfg.repo_path or "",
+        }
+        # Tool-awareness steering: name the tools, tell the agent to USE them (not
+        # guess), how to page large files, and to ground every claim in tool output —
+        # the prompt-level reliability technique used by Claude Code / SWE-agent.
+        base_instructions = (
+            f"Review ticket {ids[0]}"
+            + (" together with its child tickets, as a unit," if graph else "")
+            + f", along the '{reviewer.dimension}' dimension.\n\n"
+            "You have read-only repository tools — USE them, do not rely on memory or "
+            "guess at the code:\n"
+            "- list_directory(path): explore structure (generated/ignored files are hidden)\n"
+            "- search_files(regex, path): locate code; returns `path:line` matches\n"
+            "- read_file(path, line_start, line_end): read exact lines; PAGE large "
+            "files with the line range instead of assuming their contents.\n\n"
+            "Ground EVERY finding in what the tools actually return — cite real "
+            "`path:line` from read_file output and never invent paths, line numbers, "
+            "or file contents. Then report your findings via the structured output."
+        )
+        # Engine-wide caching (story c6e5): cache the byte-stable reviewer rubric and route
+        # the volatile per-run ticket context to the user message. Unmarked → pre-S2 behavior.
+        system_prompt, instructions, langfuse_prompt = prompts.resolve_prompt_cached(
+            reviewer, variables, base_instructions=base_instructions, langfuse_cfg=cfg.langfuse
+        )
+
+        req = RunRequest(
+            system_prompt=system_prompt,
+            instructions=instructions,
+            config=cfg,
+            reviewers=[rid],
+            target={"kind": "ticket_graph" if graph else "ticket", "ticket_ids": ids},
+            langfuse_prompt=langfuse_prompt,
+        )
+        result = get_runner(cfg, override=runner).run(req)
+    return gate_source.annotate_result(result, handle)

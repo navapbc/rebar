@@ -160,7 +160,7 @@ class TestBindingStoreCorrupt:
             # If no exception, verify that it didn't silently return empty
             # (this branch should not be reachable after the fix)
             raised = False
-        except Exception:
+        except Exception:  # noqa: BLE001 — asserts BindingStore raises *something* on corrupt JSON rather than silently returning empty; any exception is the correct outcome
             raised = True
 
         assert raised, (

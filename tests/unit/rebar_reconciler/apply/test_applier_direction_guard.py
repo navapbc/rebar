@@ -104,7 +104,7 @@ def test_every_leaf_raises_direction_mismatch_when_direction_flipped(applier):
                 },
                 provenance={"source": "test"},
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — assertion that valid Mutation construction raises nothing; any error is recorded as a failure
             failures.append(
                 f"({direction.value},{action.value}): "
                 f"valid Mutation construction failed: {type(e).__name__}: {e}"
@@ -123,7 +123,7 @@ def test_every_leaf_raises_direction_mismatch_when_direction_flipped(applier):
             )
         except errs.DirectionMismatchError:
             pass  # expected
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — asserts the leaf raises DirectionMismatchError; any other exception type is recorded as a failure
             failures.append(
                 f"({direction.value},{action.value}): "
                 f"leaf raised {type(e).__name__} instead of "

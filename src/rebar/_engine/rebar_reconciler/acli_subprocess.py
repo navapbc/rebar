@@ -447,17 +447,17 @@ def _run_acli(
         result = subprocess.CompletedProcess(full_cmd, p.returncode, out, err)
         if p.returncode != 0:
             # Preserve the previous check=True semantics.
-            exc = subprocess.CalledProcessError(p.returncode, full_cmd, out, err)
-            last_error = exc
+            cpe = subprocess.CalledProcessError(p.returncode, full_cmd, out, err)
+            last_error = cpe
             # Fast-abort on auth failure
-            if exc.returncode == _AUTH_FAILURE_CODE:
-                raise exc
+            if cpe.returncode == _AUTH_FAILURE_CODE:
+                raise cpe
             # Fast-abort on deterministic assignee errors — retrying is pointless.
             # Callers print a contextual warning; no stderr print here to avoid duplication.
-            if exc.stderr and (
-                _ASSIGNEE_PERMISSION_ERROR in exc.stderr or _ASSIGNEE_NOT_FOUND_ERROR in exc.stderr
+            if cpe.stderr and (
+                _ASSIGNEE_PERMISSION_ERROR in cpe.stderr or _ASSIGNEE_NOT_FOUND_ERROR in cpe.stderr
             ):
-                raise exc
+                raise cpe
             # If more retries remain, sleep with exponential backoff
             if attempt < _MAX_ATTEMPTS - 1:
                 time.sleep(2 ** (attempt + 1))  # 2s, 4s

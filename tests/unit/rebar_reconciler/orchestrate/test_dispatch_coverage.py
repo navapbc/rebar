@@ -190,7 +190,7 @@ class TestAllDirectionActionPairsCovered:
                 dispatched.add((d_val, a_val))
             except NotImplementedError:
                 dispatch_errors.append(f"({d_val!r}, {a_val!r})")
-            except Exception:
+            except Exception:  # noqa: BLE001 — any non-NotImplementedError means routing reached the leaf, which counts as dispatched
                 # Any other exception from a stub leaf counts as dispatched —
                 # the routing reached the leaf; the leaf may raise for other
                 # reasons (missing client, etc.).
@@ -223,7 +223,7 @@ class TestEachLeafRoutesToDistinctApplier:
         first_a = list(A)[0].value
         try:
             reconcile_mod._dispatch_mutation(_make_mutation(first_d, first_a))
-        except Exception:
+        except Exception:  # noqa: BLE001 — intentionally broad: sole purpose is to populate the lazy _DISPATCH_TABLE as a side effect; any raise is acceptable
             # Intentionally broad: this call's ONLY purpose is to populate the
             # lazy-built _DISPATCH_TABLE as a side effect. The first
             # (direction, action) pair may legitimately raise any of:

@@ -362,7 +362,7 @@ def test_acquire_pass_lock_when_tickets_checked_out_in_sibling_worktree(
                 check=False,
                 capture_output=True,
             )
-        except Exception:
+        except OSError:
             pass
         shutil.rmtree(sibling_wt_parent, ignore_errors=True)
 
@@ -418,7 +418,7 @@ def test_release_pass_lock_when_tickets_checked_out_in_sibling_worktree(
                 check=False,
                 capture_output=True,
             )
-        except Exception:
+        except OSError:
             pass
         shutil.rmtree(sibling_wt_parent, ignore_errors=True)
 

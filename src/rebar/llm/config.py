@@ -22,14 +22,120 @@ Environment variables (all optional; sensible defaults):
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import os
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from importlib.util import find_spec
 
 from rebar import config as _root_config
 
 DEFAULT_MODEL = "claude-opus-4-8"
+
+# The active code read-root for the running gate (epic raze-vet-ditch S3). When a gate
+# runs in `attested` mode it materializes a snapshot at the client-pinned SHA and sets
+# this for the duration of the run; `LLMConfig.from_env` then resolves `repo_path` to the
+# snapshot, so EVERY config built deep in the gate (citation resolution, reconcile, the
+# agent itself) reads the pinned snapshot rather than the server's mutable checkout. A
+# ContextVar is thread- and asyncio-task-safe (no global env mutation across concurrent
+# gates). Unset (the default) preserves the prior in-place behavior — exactly `local` mode.
+_active_code_root: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "rebar_llm_code_root", default=None
+)
+
+
+def current_code_root() -> str | None:
+    """The active gate's code read-root (an attested snapshot dir), or ``None``."""
+    return _active_code_root.get()
+
+
+def current_code_sha() -> str | None:
+    """The pinned SHA of the active attested snapshot, or ``None`` (local / no gate).
+
+    Derived from the content-addressed snapshot layout: an attested code root is
+    ``<store>/<sha>`` (``rebar._snapshot`` keys entries by full commit SHA), so the dir
+    name IS the SHA. A local read root (the checkout) is not SHA-named → ``None``."""
+    root = current_code_root()
+    if not root:
+        return None
+    name = os.path.basename(root.rstrip(os.sep))
+    if len(name) == 40 and all(c in "0123456789abcdef" for c in name):
+        return name
+    return None
+
+
+# Whether we are inside a code-reading gate's snapshot session (epic raze-vet-ditch S-RETRO
+# safeguard). Set by `gate_source.gate_read_root` for BOTH attested AND local runs — so it
+# marks "a gate deliberately chose this read root", distinct from `current_code_root` (which
+# is only set for attested). The runtime guard `assert_gated` uses it to FAIL CLOSED when a
+# tool-using agent's file tools are built outside any gate session — catching a new agentic
+# op (e.g. a generic run_workflow agent step) added without following the snapshot process.
+_in_gate_session: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "rebar_llm_in_gate_session", default=False
+)
+
+
+def in_gate_session() -> bool:
+    """True iff execution is inside a code-reading gate's snapshot session."""
+    return _in_gate_session.get()
+
+
+@contextlib.contextmanager
+def gate_session() -> Iterator[None]:
+    """Mark the block as running inside a gate's snapshot session (attested OR local)."""
+    token = _in_gate_session.set(True)
+    try:
+        yield
+    finally:
+        _in_gate_session.reset(token)
+
+
+def assert_gated(context: str = "agentic file access") -> None:
+    """Fail closed when a tool-using agent reads files OUTSIDE the snapshot gate process.
+
+    The safeguard (epic raze-vet-ditch) against a NEW agentic operation being added without
+    routing through ``rebar.llm.gate_source`` (which pins an attested snapshot or an explicit
+    local read). Any agent that wires read-only file tools MUST run inside ``gate_read_root``;
+    otherwise it would silently read the server's mutable checkout — the exact class of bug
+    this epic exists to prevent. ``REBAR_GATE_ALLOW_UNGATED=1`` is a logged escape hatch for a
+    deliberate, audited exception."""
+    if _in_gate_session.get():
+        return
+    if os.environ.get("REBAR_GATE_ALLOW_UNGATED", "").strip().lower() in ("1", "true", "yes"):
+        import logging
+
+        logging.getLogger("rebar.llm.config").warning(
+            "%s ran OUTSIDE a snapshot gate session (REBAR_GATE_ALLOW_UNGATED override)", context
+        )
+        return
+    raise RuntimeError(
+        f"{context} was attempted OUTSIDE the repo-snapshot gate process (epic "
+        "raze-vet-ditch): a tool-using agent must run inside rebar.llm.gate_source."
+        "gate_read_root (attested snapshot or explicit local), never against the server's "
+        "mutable checkout. Route the operation through gate_source, or set "
+        "REBAR_GATE_ALLOW_UNGATED=1 to override (audited)."
+    )
+
+
+@contextlib.contextmanager
+def use_code_root(path: str | None) -> Iterator[None]:
+    """Bind the gate's code read-root for the duration of the block (``None`` = no override,
+    i.e. read the in-place checkout — local mode).
+
+    Caveat: a ``ContextVar`` is inherited by asyncio tasks but NOT by raw threads — code that
+    rebuilds an :class:`LLMConfig` on a worker thread (e.g. a future ``map`` workflow step's
+    fan-out) must propagate context via ``contextvars.copy_context().run`` or it will fall
+    through to the checkout. The current gate workflows rebuild config only on the calling
+    thread, so the snapshot is honored everywhere they read it."""
+    token = _active_code_root.set(path)
+    try:
+        yield
+    finally:
+        _active_code_root.reset(token)
+
+
 # Single source of truth for the per-call output-token cap default. Referenced by
 # both the LLMConfig field default and the env/table resolution fallback so the
 # default lives in ONE place (docs/config.md documents the same value).
@@ -269,8 +375,15 @@ class LLMConfig:
                         mcp_servers = parsed
                 except json.JSONDecodeError:
                     mcp_servers = {}
-        # repo_path is a RUNTIME-only override (env only) — not a [tool.rebar.llm] key.
-        repo_path = os.environ.get("REBAR_LLM_REPO_PATH") or str(_root_config.repo_root(repo_root))
+        # repo_path is a RUNTIME-only override — not a [tool.rebar.llm] key. Precedence:
+        #   active gate code root (an attested snapshot — wins so EVERY from_env-built
+        #   config deep in a gate run reads the pinned snapshot, never the mutable checkout)
+        #   > REBAR_LLM_REPO_PATH env > the resolved repo root (the in-place checkout).
+        repo_path = (
+            current_code_root()
+            or os.environ.get("REBAR_LLM_REPO_PATH")
+            or str(_root_config.repo_root(repo_root))
+        )
         return cls(
             runner=runner,
             model=_llm_str(table, cli, "REBAR_LLM_MODEL", "model", DEFAULT_MODEL),

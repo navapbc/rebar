@@ -97,7 +97,7 @@ def _build_loader():
                 )
             return super().compose_node(parent, index)
 
-        def construct_mapping(self, node, deep=False):  # type: ignore[override]
+        def construct_mapping(self, node: Any, deep: bool = False) -> Any:  # type: ignore[override]
             # YAML 1.2 Core errors on duplicate mapping keys; PyYAML's SafeLoader
             # silently keeps the last. A duplicate `uses:`/`if:` silently shadowing
             # an earlier one is a real footgun (both Argo and GHA reject it), so we

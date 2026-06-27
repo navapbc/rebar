@@ -61,7 +61,7 @@ def test_all_leaves_invocable_without_import_error(applier):
             leaf(mutation, client=client)
         except ModuleNotFoundError as e:
             pytest.fail(f"Leaf ({direction.value}, {action.value}) raised ModuleNotFoundError: {e}")
-        except Exception:
+        except Exception:  # noqa: BLE001 — smoke test only asserts no import-level regression; any other leaf error is deliberately tolerated
             # Other exceptions are tolerated — the smoke test only catches
             # import-level regressions. Stubs may legitimately raise on
             # missing payload fields, etc.

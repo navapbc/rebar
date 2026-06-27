@@ -572,9 +572,21 @@ def build_server():
         return render.render_workflow(workflow)
 
     @mcp.tool()
-    def review_ticket(ticket_id: str, reviewer_id: str | None = None, graph: bool = False) -> dict:
+    def review_ticket(
+        ticket_id: str,
+        reviewer_id: str | None = None,
+        graph: bool = False,
+        ref: str | None = None,
+        source: str | None = None,
+    ) -> dict:
         """Run an LLM review of a ticket (or its graph) -> a review_result dict
-        {findings[], target, reviewers, runner, model, trace_id, summary}.
+        {findings[], target, reviewers, runner, model, trace_id, summary, source,
+        verified_at_sha, signable}.
+
+        ``ref``/``source`` select the verified code: ``source=attested`` (default) reads a
+        snapshot pinned at ``ref`` (default ``origin/main``) — NEVER the server's checked-out
+        branch — and records ``verified_at_sha``; ``source=local`` reads the in-place checkout
+        (unsigned). ``REBAR_ROOT`` only locates the object DB to fetch from.
 
         DISABLED unless REBAR_MCP_ALLOW_LLM=1: this makes a live, billable LLM call
         and reaches the network + filesystem (it is not a plain store read). It
@@ -589,16 +601,23 @@ def build_server():
             )
         import rebar.llm
 
-        return rebar.llm.review_ticket(ticket_id, reviewer_id, graph=graph)
+        return rebar.llm.review_ticket(ticket_id, reviewer_id, graph=graph, ref=ref, source=source)
 
     @mcp.tool()
     def review_code(
         base: str = "HEAD~1",
         head: str = "HEAD",
         reviewers: list[str] | None = None,
+        ref: str | None = None,
+        source: str | None = None,
     ) -> dict:
         """Run a multi-reviewer LLM code review of a git range (base..head) ->
         an aggregated review_result dict (findings carry agreement + reviewers).
+
+        ``source=attested`` (default) reads file context from a snapshot pinned at ``ref``
+        (default: the reviewed ``head``), a single ref/snapshot (no base+head snapshot pair);
+        ``source=local`` reads the checkout. The diff is computed from ``REBAR_ROOT``'s object
+        DB. Results carry ``source``/``verified_at_sha``/``signable``.
 
         DISABLED unless REBAR_MCP_ALLOW_LLM=1 (live, billable LLM call(s); reaches
         network + filesystem + git). Needs the 'agents' extra + an API key. Returns
@@ -612,12 +631,22 @@ def build_server():
             )
         import rebar.llm
 
-        return rebar.llm.review_code(base=base, head=head, reviewers=reviewers)
+        return rebar.llm.review_code(
+            base=base, head=head, reviewers=reviewers, ref=ref, source=source
+        )
 
     @mcp.tool()
-    def scan_spec(spec_text: str, batch_size: int = 5) -> dict:
+    def scan_spec(
+        spec_text: str,
+        batch_size: int = 5,
+        ref: str | None = None,
+        source: str | None = None,
+    ) -> dict:
         """Batch-scan the store's open epics against a specification -> a
         review_result dict (gaps/conflicts/overlaps), epics evaluated in batches.
+
+        ``ref``/``source`` select the verified code (``attested`` snapshot at ``ref`` default
+        ``origin/main``, else ``local`` checkout); results carry ``source``/``verified_at_sha``.
 
         DISABLED unless REBAR_MCP_ALLOW_LLM=1 (live, billable LLM call(s)). Needs
         the 'agents' extra + an API key. Returns a plain dict and advertises NO
@@ -629,15 +658,29 @@ def build_server():
             )
         import rebar.llm
 
-        return rebar.llm.scan_epics_for_spec(spec_text, batch_size=batch_size)
+        return rebar.llm.scan_epics_for_spec(
+            spec_text, batch_size=batch_size, ref=ref, source=source
+        )
 
     @mcp.tool()
-    def verify_completion(ticket_id: str, graph: bool = False) -> dict:
+    def verify_completion(
+        ticket_id: str,
+        graph: bool = False,
+        ref: str | None = None,
+        source: str | None = None,
+    ) -> dict:
         """Verify a ticket's completion requirements are met -> a completion_verdict dict
         {verdict: "PASS"|"FAIL", findings[], summary?, target, reviewers, runner, model,
-        trace_id}. Checks every acceptance/success/close criterion + definition of done (for
-        bugs, that the bug is resolved) against the implementation; on FAIL, each finding
-        carries the failing criterion, an explanation, and a source-code citation. Read-only.
+        trace_id, source, verified_at_sha, signable}. Checks every acceptance/success/close
+        criterion + definition of done (for bugs, that the bug is resolved) against the
+        implementation; on FAIL, each finding carries the failing criterion, an explanation,
+        and a source-code citation. Read-only.
+
+        ``source=attested`` (default) verifies a snapshot pinned at ``ref`` (default
+        ``origin/main``) — reproducible, branch-independent — and records ``verified_at_sha``;
+        ``source=local`` verifies the in-place checkout (never signed). ``REBAR_ROOT`` only
+        locates the object DB. (The CLI close gate verifies attested HEAD; this tool defaults
+        to origin/main for distributed verification of merged code.)
 
         DISABLED unless REBAR_MCP_ALLOW_LLM=1: this makes a live, billable LLM call and reaches
         the network + filesystem. Needs the 'agents' extra + a model API key. Returns a plain
@@ -650,17 +693,24 @@ def build_server():
             )
         import rebar.llm
 
-        return rebar.llm.verify_completion(ticket_id, graph=True if graph else None)
+        return rebar.llm.verify_completion(
+            ticket_id, graph=True if graph else None, ref=ref, source=source
+        )
 
     @mcp.tool()
-    def review_plan(ticket_id: str) -> dict:
+    def review_plan(ticket_id: str, ref: str | None = None, source: str | None = None) -> dict:
         """Run the plan-review gate on a ticket -> a plan_review_verdict dict
         {verdict: "PASS"|"BLOCK"|"INDETERMINATE", blocking[], advisory[], coaching[],
-        indeterminate[], coverage, signature?, ...}. A deterministic Layer-1 floor (P1-P9)
-        plus a four-pass (find -> verify -> decide -> coach) review of the ticket's
-        whole plan — the inverse of verify_completion. On a non-blocking PASS it signs a
+        indeterminate[], coverage, signature?, source, verified_at_sha, ...}. A deterministic
+        Layer-1 floor (P1-P9) plus a four-pass (find -> verify -> decide -> coach) review of the
+        ticket's whole plan — the inverse of verify_completion. On a non-blocking PASS it signs a
         plan-review attestation (so a subsequent claim passes the gate when enabled) and emits
         the REVIEW_RESULT sidecar; in READONLY mode it runs a pure read (no sign, no sidecar).
+
+        ``source=attested`` (default) reviews a snapshot pinned at ``ref`` (default
+        ``origin/main``) and binds that SHA into the attestation so the claim gate re-hashes the
+        SAME basis; ``source=local`` reviews the in-place checkout. ``REBAR_ROOT`` only locates
+        the object DB.
 
         DISABLED unless REBAR_MCP_ALLOW_LLM=1: this makes live, billable LLM calls and reaches
         the network + filesystem. Needs the 'agents' extra + a model API key. Returns a plain
@@ -673,7 +723,9 @@ def build_server():
         import rebar.llm
 
         ro = _readonly()
-        return rebar.llm.review_plan(ticket_id, sign=not ro, emit_sidecar=not ro)
+        return rebar.llm.review_plan(
+            ticket_id, ref=ref, source=source, sign=not ro, emit_sidecar=not ro
+        )
 
     # ── Write tools (gated by REBAR_MCP_READONLY) ──────────────────────────────
     if not _readonly():
@@ -857,6 +909,8 @@ def build_server():
             ticket_id: str,
             inputs: dict | None = None,
             dry_run: bool = False,
+            ref: str | None = None,
+            source: str | None = None,
         ) -> dict:
             """Start a workflow run; returns {run_id, ticket_id, status:'running'}
             IMMEDIATELY (async — the run executes in the background so it survives
@@ -864,11 +918,31 @@ def build_server():
             its outcome. Run-state persists durably to ``ticket_id``'s event log
             (resumable on crash). ``workflow`` is a .rebar/workflows/<name> name or a
             file path; ``dry_run`` executes agent steps with the offline FakeRunner
-            (no tokens). Write tool (gated by REBAR_MCP_READONLY)."""
+            (no tokens). Write tool (gated by REBAR_MCP_READONLY).
+
+            A workflow with LLM/agent steps reads a snapshot pinned at ``ref`` (default
+            ``origin/main``) in ``source=attested`` (default) mode — never the server's
+            mutable checkout — and is DISABLED unless REBAR_MCP_ALLOW_LLM=1 (it makes
+            live, billable LLM calls), exactly like the other agentic tools. A
+            deterministic-only workflow needs neither."""
             import threading
 
             from rebar.llm.workflow import executor as _wf_exec
             from rebar.llm.workflow import runs as _wf_runs
+
+            # A workflow that runs tool-using agents is a live, billable LLM op — fence it
+            # behind the SAME gate as review_*/verify_* (dry_run is offline, so exempt).
+            if not dry_run:
+                try:
+                    _doc = _wf_runs.load_workflow_doc(workflow, None)
+                except Exception:  # noqa: BLE001 — a load error surfaces in the run record below
+                    _doc = None
+                if _doc is not None and _wf_runs.has_llm_steps(_doc) and not _allow_llm():
+                    raise ValueError(
+                        f"run_workflow on {workflow!r} is disabled: it runs tool-using LLM "
+                        "agent steps (a live, billable LLM call). Set REBAR_MCP_ALLOW_LLM=1 "
+                        "to enable it, or pass dry_run=true for the offline runner."
+                    )
 
             run_id = _wf_exec.new_run_id()
             # Record the index AND an initial 'running' marker BEFORE returning, so an
@@ -892,6 +966,8 @@ def build_server():
                         ticket_id=ticket_id,
                         run_id=run_id,
                         dry_run=dry_run,
+                        ref=ref,
+                        source_mode=source,
                     )
                 except Exception as exc:  # noqa: BLE001 — background run failure is reflected in run-state, not raised
                     try:

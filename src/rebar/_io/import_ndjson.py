@@ -30,7 +30,7 @@ import json
 import logging
 import os
 from collections.abc import Iterable, Iterator
-from typing import Any
+from typing import Any, cast
 
 from . import _provenance
 
@@ -89,6 +89,16 @@ def _scan_existing_source_ids(tracker: str) -> dict[str, str]:
         if state and state.get("source_id"):
             out[str(state["source_id"])] = state.get("ticket_id") or name
     return out
+
+
+def _rec_sid(rec: dict) -> str:
+    """Return a record's source ``ticket_id`` as ``str``.
+
+    ``ticket_id`` is JSON-sourced (statically ``Any | None``); every record that
+    reaches pass 2 (``created_records``) was validated to carry a truthy
+    ``ticket_id`` in pass 1, so the narrowing cast is honest, not a silence.
+    """
+    return cast(str, rec.get("ticket_id"))
 
 
 def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dict:
@@ -186,7 +196,7 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
 
         # ── Pass 2a: set parents while every new ticket is still open ──────────
         for rec in created_records:
-            local = id_map.get(rec.get("ticket_id"))
+            local = id_map.get(_rec_sid(rec))
             if local is None:
                 continue
             psid = rec.get("parent_id")
@@ -202,7 +212,7 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
         # ── Pass 2b: links (dedup by local (source,target,relation)) ───────────
         seen_links: set[tuple[str, str, str]] = set()
         for rec in created_records:
-            local = id_map.get(rec.get("ticket_id"))
+            local = id_map.get(_rec_sid(rec))
             if local is None:
                 continue
             for dep in rec.get("deps") or []:
@@ -229,7 +239,7 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
 
         # ── Pass 2c: file-impact / verify-commands ─────────────────────────────
         for rec in created_records:
-            local = id_map.get(rec.get("ticket_id"))
+            local = id_map.get(_rec_sid(rec))
             if local is None:
                 continue
             fi = rec.get("file_impact")
@@ -247,7 +257,7 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
 
         # ── Pass 2d: comments (with provenance) ────────────────────────────────
         for rec in created_records:
-            local = id_map.get(rec.get("ticket_id"))
+            local = id_map.get(_rec_sid(rec))
             if local is None:
                 continue
             for entry in rec.get("comments") or []:
@@ -263,7 +273,7 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
         # ── Pass 2e: statuses last (children before parents; archived via archive)
         closes: list[tuple[str, str]] = []  # (local_id, source_id)
         for rec in created_records:
-            local = id_map.get(rec.get("ticket_id"))
+            local = id_map.get(_rec_sid(rec))
             if local is None:
                 continue
             status = rec.get("status")
@@ -282,7 +292,7 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
                 except Exception as exc:  # noqa: BLE001 — per-row fail-open: one bad archive never aborts the import run; collected via warn()
                     warn(f"could not archive {local}: {exc}")
             elif status == "closed":
-                closes.append((local, rec.get("ticket_id")))
+                closes.append((local, _rec_sid(rec)))
 
         # Close children before parents so the open-children guard is satisfied;
         # force=True is a safety net for a genuinely-non-closed child in the source.

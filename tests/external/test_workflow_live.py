@@ -28,7 +28,7 @@ pytestmark = pytest.mark.external
 def _have_live_model() -> bool:
     try:
         import rebar.llm as llm
-    except Exception:
+    except ImportError:
         return False
     if not llm.agents_extra_installed():
         return False

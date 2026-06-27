@@ -323,7 +323,7 @@ def test_lock_released_on_exception_variants(main_mod, tmp_path, exc_factory, ex
     ):
         try:
             main_mod.main(["--mode=dry-run", "--repo-root", str(tmp_path)])
-        except BaseException as e:
+        except BaseException as e:  # noqa: BLE001 — deliberately catches SystemExit (a BaseException) from main(); asserts the finally-block lock release ran regardless of exit class
             # SystemExit may propagate out of main() — that's an acceptable
             # outcome; we only require that release_pass_lock ran.
             raised = e

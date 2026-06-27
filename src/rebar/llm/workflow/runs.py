@@ -224,17 +224,60 @@ def build_agent_request(
     )
 
 
+_LLM_STEP_KINDS = frozenset({"agent", "batch"})  # the billable, file-reading tool tiers
+
+
+def has_llm_steps(doc: dict[str, Any]) -> bool:
+    """True iff the workflow has any LLM/agent step (kind ``agent`` or ``batch``) — i.e. a
+    step that runs a tool-using agent and reads project files. Used to (a) decide whether a
+    run needs the snapshot gate, and (b) fence the MCP tool behind the LLM gate.
+
+    Resolves each step's kind via the canonical :func:`schema.step_kind` (so a ``prompt:``
+    agent step with no explicit ``kind`` is still detected); also recurses into the v2
+    control constructs (branch/loop/map) so an agent nested inside one isn't missed."""
+    from rebar.llm.workflow import schema as _schema
+
+    def _scan(steps: object) -> bool:
+        if isinstance(steps, dict):
+            steps = list(steps.values())
+        if not isinstance(steps, list):
+            return False
+        for s in steps:
+            if not isinstance(s, dict):
+                continue
+            kind: str | None
+            try:
+                kind = _schema.step_kind(s)
+            except Exception:  # noqa: BLE001 — a malformed step can't be classified; ignore for detection
+                kind = s.get("kind") or s.get("type")
+            if kind in _LLM_STEP_KINDS:
+                return True
+            # Recurse into nested control-construct bodies (branch arms, loop/map body).
+            for key in ("then", "else", "body", "branch", "loop", "map", "steps"):
+                nested = s.get(key)
+                if isinstance(nested, dict) and "steps" in nested:
+                    if _scan(nested.get("steps")):
+                        return True
+                elif _scan(nested):
+                    return True
+        return False
+
+    return _scan(doc.get("steps") or doc.get("jobs") or [])
+
+
 def _agent_runner(
-    dry_run: bool, *, repo_root: str | None = None, review_runner=None
+    dry_run: bool, *, repo_root: str | None = None, review_runner=None, config=None
 ) -> _ex.AgentStepRunner:
     """Select the agent-step runner: an injected review runner (parallel-diff /
     tests), the offline FakeAgentRunner for ``dry_run``, else the real
-    RunnerAgentStep bridge (config-selected review runner)."""
+    RunnerAgentStep bridge (config-selected review runner). ``config`` (a gate-re-rooted
+    LLMConfig) is threaded into the real bridge so agent steps read the pinned snapshot even
+    on a worker thread (robust against the ContextVar-not-inherited-by-threads caveat)."""
     if review_runner is not None:
-        return RunnerAgentStep(runner=review_runner, repo_root=repo_root)
+        return RunnerAgentStep(runner=review_runner, repo_root=repo_root, config=config)
     if dry_run:
         return _ex.FakeAgentRunner()
-    return RunnerAgentStep(repo_root=repo_root)
+    return RunnerAgentStep(repo_root=repo_root, config=config)
 
 
 def run(
@@ -244,6 +287,8 @@ def run(
     ticket_id: str | None = None,
     run_id: str | None = None,
     dry_run: bool = False,
+    ref: str | None = None,
+    source_mode: str | None = None,
     repo_root: str | None = None,
     secrets: dict[str, str] | None = None,
     review_runner=None,
@@ -254,21 +299,46 @@ def run(
     the run_id→ticket index so status/result resolve by run_id. Sweeps orphaned
     snapshots first (WS-C3 backstop). Synchronous — the MCP layer wraps this for its
     async, return-run_id-immediately contract. ``review_runner`` injects a specific
-    rebar.llm Runner into agent steps (the offline/parallel-diff seam)."""
+    rebar.llm Runner into agent steps (the offline/parallel-diff seam).
+
+    If the workflow has LLM/agent steps, the run executes inside the repo-snapshot gate
+    (epic raze-vet-ditch): ``ref``/``source_mode`` select a pinned snapshot (attested,
+    default) or the in-place checkout (local), and agent steps read THAT — never the
+    server's mutable checkout. A deterministic-only workflow skips the snapshot (nothing
+    reads code)."""
+    import contextlib
+
+    from rebar.llm import gate_source
+    from rebar.llm.config import LLMConfig
+
     doc = load_workflow_doc(source, repo_root)
     run_id = run_id or _ex.new_run_id()
     _ex.sweep_orphan_snapshots(repo_root)
     if ticket_id:
         record_run_location(run_id, ticket_id, repo_root)
-    res = _ex.run_workflow(
-        doc,
-        inputs,
-        run_id=run_id,
-        target_ticket=ticket_id,
-        repo_root=repo_root,
-        agent_runner=_agent_runner(dry_run, repo_root=repo_root, review_runner=review_runner),
-        secrets=secrets,
+
+    # Snapshot-gate the run iff it can run a tool-using agent (and isn't a dry/offline run,
+    # which never reads real files). dry_run uses the offline FakeAgentRunner.
+    gate = has_llm_steps(doc) and not dry_run
+    handle = gate_source.resolve_gate_handle(ref, source_mode, repo_root) if gate else None
+    cfg = (
+        gate_source.apply_handle(LLMConfig.from_env(repo_root=repo_root), handle)
+        if handle is not None
+        else None
     )
+    ctx = gate_source.gate_read_root(handle) if handle is not None else contextlib.nullcontext()
+    with ctx:
+        res = _ex.run_workflow(
+            doc,
+            inputs,
+            run_id=run_id,
+            target_ticket=ticket_id,
+            repo_root=repo_root,
+            agent_runner=_agent_runner(
+                dry_run, repo_root=repo_root, review_runner=review_runner, config=cfg
+            ),
+            secrets=secrets,
+        )
     return _result_dict(res, ticket_id, dry_run)
 
 

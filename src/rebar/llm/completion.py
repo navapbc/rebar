@@ -69,6 +69,8 @@ def _child_closure_findings(ticket_id: str, repo_root) -> list[dict]:
     out: list[dict] = []
     for c in children:
         cid = c.get("ticket_id")
+        if cid is None:
+            continue
         title = (c.get("title") or "")[:50]
         status = c.get("status")
         if status != "closed":
@@ -170,6 +172,9 @@ def verify_completion(
     ticket_id: str,
     *,
     graph: bool | None = None,
+    ref: str | None = None,
+    source: str | None = None,
+    fetch: bool = True,
     repo_root=None,
     config: LLMConfig | None = None,
     runner: Runner | None = None,
@@ -190,9 +195,35 @@ def verify_completion(
     and ``citations`` resolved against the real repo. Raises :class:`LLMError` subclasses on
     missing deps/credentials or a failed/empty structured run.
     """
+    from rebar.llm import gate_source
+
+    handle = gate_source.resolve_gate_handle(ref, source, repo_root, fetch=fetch)
+    with gate_source.gate_read_root(handle):
+        return gate_source.annotate_result(
+            _verify_completion_inner(
+                ticket_id,
+                graph=graph,
+                repo_root=repo_root,
+                config=gate_source.apply_handle(
+                    config or LLMConfig.from_env(repo_root=repo_root), handle
+                ),
+                runner=runner,
+            ),
+            handle,
+        )
+
+
+def _verify_completion_inner(
+    ticket_id: str,
+    *,
+    graph: bool | None,
+    repo_root,
+    config: LLMConfig,
+    runner: Runner | None,
+) -> dict:
     import rebar
 
-    cfg = config or LLMConfig.from_env(repo_root=repo_root)
+    cfg = config
     # Default to a decisive verifier model unless the operator EXPLICITLY chose a non-default
     # one (cfg.model == DEFAULT_MODEL means REBAR_LLM_MODEL/[tool.rebar.llm].model was unset or
     # left at the framework default → use the verifier default; any other value is an explicit

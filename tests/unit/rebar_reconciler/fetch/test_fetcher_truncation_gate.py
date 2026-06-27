@@ -44,7 +44,7 @@ try:
         "SilentTruncationError",
         type("SilentTruncationError", (Exception,), {}),
     )
-except Exception:  # pragma: no cover — defensive only
+except Exception:  # noqa: BLE001 — best-effort dynamic import with placeholder fallback; must tolerate any load failure in the RED state  # pragma: no cover — defensive only
     SilentTruncationError = type("SilentTruncationError", (Exception,), {})
 
 

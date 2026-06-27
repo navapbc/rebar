@@ -204,6 +204,8 @@ def check_cross_epic_child_deps(issues: list[dict]) -> list[Finding]:
     parent_map: dict[str, str] = {}
     for issue in issues:
         iid = issue.get("id")
+        if not isinstance(iid, str):
+            continue
         parent = issue.get("parent", issue.get("parent_id", None))
         if parent:
             parent_map[iid] = parent
@@ -215,6 +217,8 @@ def check_cross_epic_child_deps(issues: list[dict]) -> list[Finding]:
     errors = 0
     for issue in issues:
         iid = issue.get("id")
+        if not isinstance(iid, str):
+            continue
         my_parent = parent_map.get(iid)
         if not my_parent:
             continue

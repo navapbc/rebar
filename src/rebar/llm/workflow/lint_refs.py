@@ -152,7 +152,7 @@ def _validate_expression(inner: str, *, step_id: str, scope: _Scope) -> str | No
         if match:
             kind = k
             break
-    if kind is None:
+    if kind is None or match is None:
         return (
             f"disallowed expression {expr!r} (the closed allow-list is "
             f"inputs.<name>, steps.<id>.outputs.<name>, secrets.<name>, "
@@ -456,7 +456,8 @@ def _lint_control(
                 )
     elif kind == "loop":
         loop = step.get("loop") or {}
-        var = loop.get("var") if isinstance(loop.get("var"), str) else "index"
+        _loop_var = loop.get("var")
+        var = _loop_var if isinstance(_loop_var, str) else "index"
         body = loop.get("body")
         body_ids = _frame_ids(body)
         # The loop condition may reference its OWN body's outputs (the prev-iteration

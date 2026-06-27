@@ -19,6 +19,7 @@ these tiers) may opt out via ``@pytest.mark.allow_network``.
 
 from __future__ import annotations
 
+import os
 import shutil
 import socket
 import sys
@@ -79,7 +80,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     for item in items:
         try:
             test_path = Path(item.fspath).resolve()
-        except Exception:
+        except (AttributeError, OSError, ValueError):
             continue
         under_external = test_path.is_relative_to(_EXTERNAL_DIR)
         if under_external:
@@ -109,7 +110,7 @@ def _in_guarded_tier(item: pytest.Item) -> bool:
     """Return True if *item* lives under one of the network-guarded test dirs."""
     try:
         test_path = Path(item.fspath).resolve()
-    except Exception:
+    except (AttributeError, OSError, ValueError):
         return False
     return any(test_path.is_relative_to(tier) for tier in _NETWORK_GUARDED_TIERS)
 
@@ -195,6 +196,23 @@ def _isolate_user_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     themselves; this only removes host leakage."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
     monkeypatch.delenv("REBAR_CONFIG", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _gate_source_local_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default the code-reading gates to ``source=local`` for the offline test suite
+    (epic raze-vet-ditch).
+
+    In production the gates default to ``source=attested``/``ref=origin/main`` — they
+    fetch + materialize a snapshot at the pinned SHA. The test suite runs OFFLINE on
+    disposable ``tmp_path`` repos that have no ``origin`` remote, so attested would
+    (correctly) fail closed resolving ``origin/main``. ``local`` reads the in-place
+    checkout — the faithful continuation of the pre-snapshot behavior these gate-logic
+    tests assert. A test that specifically exercises the attested path sets
+    ``REBAR_GATE_SOURCE`` / passes ``source="attested"`` explicitly (an explicit arg
+    wins over this default), so the attested path is still covered."""
+    if "REBAR_GATE_SOURCE" not in os.environ:
+        monkeypatch.setenv("REBAR_GATE_SOURCE", "local")
 
 
 @pytest.fixture(autouse=True)
