@@ -1,0 +1,1 @@
+{"author":"Iso Tester","data":{"file_impact":[{"path":"src/rebar/llm/workflow/gates/plan-review.yaml","reason":"when: surviving>0 on coach_notes step"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782581468165281001,"uuid":"966b76a8-45ef-4651-8fbc-caa6729a45a6"}
