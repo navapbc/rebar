@@ -623,6 +623,161 @@ def test_container_loop_per_child_and_too_big_pairing() -> None:
     assert cov["container"]["children"] == 2
 
 
+def test_container_system_prompt_is_byte_stable_across_children() -> None:
+    # Story 0250: the cached prefix is the container SYSTEM PROMPT (the whole parent
+    # plan). For caching to read (not re-write) across the per-child fan-out, that
+    # system prompt MUST be byte-identical for every child of the same parent — only
+    # the per-child `instructions` (the user message) vary. Capture the RunRequest the
+    # finder builds for two different children and assert the system prompts match.
+    class _CapturingRunner:
+        name = "capture"
+
+        def __init__(self):
+            self.system_prompts: list[str] = []
+
+        def preflight(self):
+            pass
+
+        def run(self, req):
+            self.system_prompts.append(req.system_prompt)
+            return {"findings": []}
+
+    cap = _CapturingRunner()
+    g3 = registry.by_id()["G3"]
+    parent_plan = _GOOD_AC + "\n## Context\nA parent plan with stable bytes.\n"
+    for child in (
+        {"ticket_id": "c1", "title": "C1", "description": "first child body"},
+        {"ticket_id": "c2", "title": "C2", "description": "an entirely different body"},
+    ):
+        passes.pass1_container(
+            cap,
+            _fake_cfg(),
+            parent_plan=parent_plan,
+            child=child,
+            criterion=g3,
+            sibling_roster="- c1\n- c2",
+        )
+    assert len(cap.system_prompts) == 2
+    assert cap.system_prompts[0] == cap.system_prompts[1]  # byte-stable ⇒ cacheable prefix
+
+
+class _PairingRunner:
+    """A thread-safe container runner that counts calls and can fail the FIRST call
+    (story ba7e warm-then-fan-out tests). Returns one canned G3 finding per call so the
+    aggregate finding count proves every in-budget pairing ran exactly once."""
+
+    name = "pairing"
+
+    def __init__(self, fail_first: str | None = None):
+        import threading
+
+        self.fail_first = fail_first  # None | "systemic" | "nonsystemic"
+        self.calls = 0
+        self._lock = threading.Lock()
+
+    def preflight(self):
+        pass
+
+    def run(self, req):
+        from rebar.llm.errors import LLMUnavailableError
+
+        with self._lock:
+            i = self.calls
+            self.calls += 1
+        if i == 0 and self.fail_first == "systemic":
+            raise LLMUnavailableError("provider down")
+        if i == 0 and self.fail_first == "nonsystemic":
+            raise RuntimeError("transient non-systemic failure")
+        return {"findings": [{"finding": f"f{i}", "criteria": ["G3"]}]}
+
+
+def _big_epic_ctx(n_children: int, *, big_plan: bool):
+    # A parent plan over (big_plan) / under the 4096-token cache floor, with n_children
+    # small children — all pairings in-budget (huge window).
+    desc = ("padding word " * 5000) if big_plan else _GOOD_AC
+    children = [
+        {"ticket_id": f"c{i}", "title": f"C{i}", "description": "small child"}
+        for i in range(n_children)
+    ]
+    return _ctx(desc, ttype="epic", children=children, largest_window_tokens=1_000_000)
+
+
+def test_container_warm_then_fan_out_runs_each_pairing_once() -> None:
+    # A cacheable parent (>4096 tokens) + 3 children ⇒ warm ONE pairing, then fan out the
+    # remaining 2. Every pairing runs exactly once (no dup/drop); coverage records warmed.
+    ctx = _big_epic_ctx(3, big_plan=True)
+    g3 = registry.by_id()["G3"]
+    runner = _PairingRunner()
+    cov: dict = {}
+    out = orchestrator._run_container(ctx, _fake_cfg(), runner, [g3], cov)
+    assert runner.calls == 3  # 1 warm + 2 fanned-out, each pairing once
+    assert len([f for f in out if f.get("_container_child")]) == 3
+    assert cov["container"]["warmed"] is True
+    assert cov["container"]["parallel"] is True
+    assert cov["container"]["pairings_evaluated"] == 3
+
+
+def test_container_skips_warm_below_cache_floor() -> None:
+    # A sub-floor parent plan never caches ⇒ warming would just serialize a call for no
+    # read benefit, so fan out directly (warmed=False) — still every pairing once.
+    ctx = _big_epic_ctx(3, big_plan=False)
+    g3 = registry.by_id()["G3"]
+    runner = _PairingRunner()
+    cov: dict = {}
+    out = orchestrator._run_container(ctx, _fake_cfg(), runner, [g3], cov)
+    assert runner.calls == 3
+    assert cov["container"]["warmed"] is False
+    assert len([f for f in out if f.get("_container_child")]) == 3
+
+
+def test_container_warm_systemic_failure_aborts() -> None:
+    # A SYSTEMIC failure (LLMUnavailableError) on the warming call aborts the whole
+    # fan-out — never fan out N-1 doomed calls.
+    from rebar.llm.errors import LLMUnavailableError
+
+    ctx = _big_epic_ctx(4, big_plan=True)
+    g3 = registry.by_id()["G3"]
+    runner = _PairingRunner(fail_first="systemic")
+    with pytest.raises(LLMUnavailableError):
+        orchestrator._run_container(ctx, _fake_cfg(), runner, [g3], {})
+    assert runner.calls == 1  # aborted at the warm call; no fan-out
+
+
+def test_container_warm_nonsystemic_failure_degrades_to_direct_fan_out() -> None:
+    # A NON-systemic warm failure degrades to a direct fan-out of ALL pairings — the
+    # failed pairing re-runs in the pool (not silently dropped), never hangs.
+    ctx = _big_epic_ctx(3, big_plan=True)
+    g3 = registry.by_id()["G3"]
+    runner = _PairingRunner(fail_first="nonsystemic")
+    cov: dict = {}
+    out = orchestrator._run_container(ctx, _fake_cfg(), runner, [g3], cov)
+    assert runner.calls == 4  # 1 failed warm + 3 in the pool (the failed pairing re-runs)
+    assert cov["container"]["warmed"] is False
+    assert len([f for f in out if f.get("_container_child")]) == 3  # no pairing dropped
+
+
+def test_budget_cap_never_sheds_container_criteria() -> None:
+    # With a tiny cap, AGENT/overlay criteria shed but G3/G4 are NEVER shed (shedding
+    # them would drop child-coverage/consistency — the fidelity regression the epic
+    # forbids). The cap bounds only the sheddable single-turn + agent spend.
+    import os
+
+    os.environ["REBAR_PLAN_REVIEW_BUDGET"] = "0.0"
+    try:
+        ctx = _ctx(_GOOD_AC, ttype="epic", children=[{"ticket_id": "c1"}, {"ticket_id": "c2"}])
+        chunks = [[{"id": "E2"}]]
+        agent = [{"id": "T8"}, {"id": "G6"}]  # an overlay + a core agent criterion
+        container = [{"id": "G3"}, {"id": "G4"}]
+        cov: dict = {}
+        kept_agent, kept_container, shed = sizing.shed_to_budget(ctx, chunks, agent, container, cov)
+        assert {c["id"] for c in kept_container} == {"G3", "G4"}  # container survives
+        assert {c["id"] for c in shed}.isdisjoint({"G3", "G4"})  # nothing container shed
+        assert cov["budget"]["container_never_shed"] is True
+        assert kept_agent == [] and {c["id"] for c in shed} == {"T8", "G6"}  # agent fully shed
+    finally:
+        del os.environ["REBAR_PLAN_REVIEW_BUDGET"]
+
+
 def test_isf_excluded_from_normal_routing() -> None:
     # ISF is fed the session log separately; it must never enter the rubric chunks.
     single, agent = orchestrator.route_criteria(_ctx(_GOOD_AC, ttype="story"))

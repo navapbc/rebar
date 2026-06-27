@@ -193,44 +193,50 @@ def shed_to_budget(
     coverage: dict[str, Any],
 ) -> tuple[list[dict], list[dict], list[dict]]:
     """Shed the lowest-priority AGENT/overlay criteria first when projected spend
-    exceeds the per-plan budget cap. Returns (kept_agent, kept_container, shed). The
-    cheap single-turn chunks + the DET floor always run; we shed only the 85× AGENT
-    criteria — overlays (T*) before the core code-grounding set, then container."""
+    exceeds the per-plan budget cap. Returns (kept_agent, kept_container, shed).
+
+    CONTAINER CRITERIA (G3/G4) ARE NEVER SHED (story ba7e). Shedding a container
+    criterion marks it INDETERMINATE — i.e. it DROPS child-coverage/consistency on
+    exactly the large, central epics where those cross-child audits matter most, the
+    fidelity regression the epic AC forbids. So the budget cap bounds ONLY the
+    sheddable single-turn + AGENT/overlay spend; the container fan-out is a FIXED cost
+    floor recorded for observability but never traded away. (This is the correct fix —
+    correcting the COST MODEL — rather than inverting the centrality scaling of the cap,
+    which would have shed G3/G4 first.) Within the sheddable set we still shed overlays
+    (T*) before the core code-grounding set."""
     cap = plan_budget_cap(ctx)
     n_children = max(1, len(ctx.children))
 
-    def project(ag: list[dict], cont: list[dict]) -> float:
-        return round(
-            len(chunks) * COST_SINGLE_TURN_USD
-            + len(ag) * COST_AGENT_USD
-            + len(cont) * n_children * COST_AGENT_USD,
-            4,
-        )
+    def project_sheddable(ag: list[dict]) -> float:
+        """Projected SHEDDABLE spend (the single-turn chunks + AGENT/overlay criteria)
+        — the only spend the cap governs. The container fan-out is excluded: it is never
+        shed, so including it would only force over-aggressive shedding of agent criteria
+        for a cost we always pay regardless."""
+        return round(len(chunks) * COST_SINGLE_TURN_USD + len(ag) * COST_AGENT_USD, 4)
 
-    projected_initial = project(agent, container)
+    projected_initial = project_sheddable(agent)
     agent = list(agent)
-    container = list(container)
+    container = list(container)  # never shed — returned unchanged
     shed: list[dict] = []
     overlay_agent = [c for c in agent if registry.is_overlay(c["id"])]
     core_agent = [c for c in agent if not registry.is_overlay(c["id"])]
-    shed_queue = (
-        [("agent", c) for c in overlay_agent]
-        + [("container", c) for c in container]
-        + [("agent", c) for c in core_agent]
-    )
-    while project(agent, container) > cap and shed_queue:
-        kind, c = shed_queue.pop(0)
+    shed_queue = [("agent", c) for c in overlay_agent] + [("agent", c) for c in core_agent]
+    while project_sheddable(agent) > cap and shed_queue:
+        _kind, c = shed_queue.pop(0)
         c = {**c, "_tier": "AGENT"}
         shed.append(c)
-        if kind == "container":
-            container = [x for x in container if x["id"] != c["id"]]
-        else:
-            agent = [x for x in agent if x["id"] != c["id"]]
+        agent = [x for x in agent if x["id"] != c["id"]]
+    # The container fan-out is a fixed floor (n_children calls per container criterion),
+    # never shed — recorded so the cap's "bounds only overlay/agent spend" posture, and
+    # the unavoidable container cost, are both observable.
+    container_floor_usd = round(len(container) * n_children * COST_AGENT_USD, 4)
     coverage["budget"] = {
         "cap_usd": cap,
         "centrality": ctx.centrality,
         "projected_usd_initial": projected_initial,
-        "projected_usd_final": project(agent, container),
+        "projected_usd_final": project_sheddable(agent),
+        "container_floor_usd": container_floor_usd,
+        "container_never_shed": True,
         "shed": [c["id"] for c in shed],
     }
     return agent, container, shed
