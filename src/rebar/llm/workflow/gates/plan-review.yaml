@@ -164,31 +164,52 @@ steps:
           with:
             ticket_id: ${{ inputs.ticket_id }}
             surviving: ${{ steps.decide.outputs.surfaced }}
-        - id: coach_notes
+        # Pass-4 coach is gated on there being a surviving advisory: a clean PASS (0
+        # surviving) takes the else arm — coach renders with notes:[] and makes NO coach
+        # LLM call, matching the bespoke pass4_coach early-return (WS4 crimp-polar-jag).
+        - id: coach_gate
           needs:
           - coach_inputs
-          prompt: plan-review-coach
-          mode: structured
-          output_schema: plan_review_coach
-          with:
-            surviving: ${{ steps.decide.outputs.surfaced }}
-            plan: ${{ steps.coach_inputs.outputs.plan }}
-            instructions: ${{ steps.coach_inputs.outputs.instructions }}
-        - id: coach
-          needs:
-          - coach_notes
-          uses: plan_review_coach
-          with:
-            blocking: ${{ steps.decide.outputs.blocking }}
-            surfaced: ${{ steps.decide.outputs.surfaced }}
-            overflow: ${{ steps.decide.outputs.overflow }}
-            indeterminate: ${{ steps.decide.outputs.indeterminate }}
-            dropped: ${{ steps.decide.outputs.dropped }}
-            notes: ${{ steps.coach_notes.outputs.notes }}
-            det_coverage: ${{ steps.precheck.outputs.det_coverage }}
-            routing: ${{ steps.assemble.outputs.routing }}
-            canonical_id: ${{ steps.precheck.outputs.canonical_id }}
-            ticket_type: ${{ steps.precheck.outputs.ticket_type }}
+          branch:
+            when: ${{ steps.decide.outputs.surfaced }}
+            then:
+            - id: coach_notes
+              prompt: plan-review-coach
+              mode: structured
+              output_schema: plan_review_coach
+              with:
+                surviving: ${{ steps.decide.outputs.surfaced }}
+                plan: ${{ steps.coach_inputs.outputs.plan }}
+                instructions: ${{ steps.coach_inputs.outputs.instructions }}
+            - id: coach
+              needs:
+              - coach_notes
+              uses: plan_review_coach
+              with:
+                blocking: ${{ steps.decide.outputs.blocking }}
+                surfaced: ${{ steps.decide.outputs.surfaced }}
+                overflow: ${{ steps.decide.outputs.overflow }}
+                indeterminate: ${{ steps.decide.outputs.indeterminate }}
+                dropped: ${{ steps.decide.outputs.dropped }}
+                notes: ${{ steps.coach_notes.outputs.notes }}
+                det_coverage: ${{ steps.precheck.outputs.det_coverage }}
+                routing: ${{ steps.assemble.outputs.routing }}
+                canonical_id: ${{ steps.precheck.outputs.canonical_id }}
+                ticket_type: ${{ steps.precheck.outputs.ticket_type }}
+            else:
+            - id: coach
+              uses: plan_review_coach
+              with:
+                blocking: ${{ steps.decide.outputs.blocking }}
+                surfaced: ${{ steps.decide.outputs.surfaced }}
+                overflow: ${{ steps.decide.outputs.overflow }}
+                indeterminate: ${{ steps.decide.outputs.indeterminate }}
+                dropped: ${{ steps.decide.outputs.dropped }}
+                notes: []
+                det_coverage: ${{ steps.precheck.outputs.det_coverage }}
+                routing: ${{ steps.assemble.outputs.routing }}
+                canonical_id: ${{ steps.precheck.outputs.canonical_id }}
+                ticket_type: ${{ steps.precheck.outputs.ticket_type }}
         else:
         - id: verify_inputs
           uses: plan_review_verify_inputs
@@ -221,31 +242,52 @@ steps:
           with:
             ticket_id: ${{ inputs.ticket_id }}
             surviving: ${{ steps.decide.outputs.surfaced }}
-        - id: coach_notes
+        # Pass-4 coach is gated on there being a surviving advisory: a clean PASS (0
+        # surviving) takes the else arm — coach renders with notes:[] and makes NO coach
+        # LLM call, matching the bespoke pass4_coach early-return (WS4 crimp-polar-jag).
+        - id: coach_gate
           needs:
           - coach_inputs
-          prompt: plan-review-coach
-          mode: structured
-          output_schema: plan_review_coach
-          with:
-            surviving: ${{ steps.decide.outputs.surfaced }}
-            plan: ${{ steps.coach_inputs.outputs.plan }}
-            instructions: ${{ steps.coach_inputs.outputs.instructions }}
-        - id: coach
-          needs:
-          - coach_notes
-          uses: plan_review_coach
-          with:
-            blocking: ${{ steps.decide.outputs.blocking }}
-            surfaced: ${{ steps.decide.outputs.surfaced }}
-            overflow: ${{ steps.decide.outputs.overflow }}
-            indeterminate: ${{ steps.decide.outputs.indeterminate }}
-            dropped: ${{ steps.decide.outputs.dropped }}
-            notes: ${{ steps.coach_notes.outputs.notes }}
-            det_coverage: ${{ steps.precheck.outputs.det_coverage }}
-            routing: ${{ steps.assemble.outputs.routing }}
-            canonical_id: ${{ steps.precheck.outputs.canonical_id }}
-            ticket_type: ${{ steps.precheck.outputs.ticket_type }}
+          branch:
+            when: ${{ steps.decide.outputs.surfaced }}
+            then:
+            - id: coach_notes
+              prompt: plan-review-coach
+              mode: structured
+              output_schema: plan_review_coach
+              with:
+                surviving: ${{ steps.decide.outputs.surfaced }}
+                plan: ${{ steps.coach_inputs.outputs.plan }}
+                instructions: ${{ steps.coach_inputs.outputs.instructions }}
+            - id: coach
+              needs:
+              - coach_notes
+              uses: plan_review_coach
+              with:
+                blocking: ${{ steps.decide.outputs.blocking }}
+                surfaced: ${{ steps.decide.outputs.surfaced }}
+                overflow: ${{ steps.decide.outputs.overflow }}
+                indeterminate: ${{ steps.decide.outputs.indeterminate }}
+                dropped: ${{ steps.decide.outputs.dropped }}
+                notes: ${{ steps.coach_notes.outputs.notes }}
+                det_coverage: ${{ steps.precheck.outputs.det_coverage }}
+                routing: ${{ steps.assemble.outputs.routing }}
+                canonical_id: ${{ steps.precheck.outputs.canonical_id }}
+                ticket_type: ${{ steps.precheck.outputs.ticket_type }}
+            else:
+            - id: coach
+              uses: plan_review_coach
+              with:
+                blocking: ${{ steps.decide.outputs.blocking }}
+                surfaced: ${{ steps.decide.outputs.surfaced }}
+                overflow: ${{ steps.decide.outputs.overflow }}
+                indeterminate: ${{ steps.decide.outputs.indeterminate }}
+                dropped: ${{ steps.decide.outputs.dropped }}
+                notes: []
+                det_coverage: ${{ steps.precheck.outputs.det_coverage }}
+                routing: ${{ steps.assemble.outputs.routing }}
+                canonical_id: ${{ steps.precheck.outputs.canonical_id }}
+                ticket_type: ${{ steps.precheck.outputs.ticket_type }}
     else:
     - id: passthrough
       uses: plan_review_passthrough

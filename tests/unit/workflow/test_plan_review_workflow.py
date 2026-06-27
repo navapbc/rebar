@@ -89,10 +89,14 @@ class _CannedAgent(AgentStepRunner):
         # Which verifier prompt id the dynamic Pass-2 branch selected (B5): the agentic
         # variant when any finding is code-grounded, else the single-turn one.
         self.verifier_prompts: list[str] = []
+        # Every prompt id this runner was asked to run (WS4: assert the coach prompt is
+        # NOT invoked on a 0-surviving PASS).
+        self.prompts_seen: list[str] = []
 
     def run(self, ctx) -> StepResult:
         self.calls += 1
         prompt = ctx.step.get("prompt")
+        self.prompts_seen.append(prompt)
         if prompt in ("plan-review-verifier", "plan-review-verifier-agentic"):
             self.verifier_prompts.append(prompt)
             findings = ctx.inputs.get("findings") or []
@@ -321,6 +325,44 @@ def test_e2e_offline_produces_verdict(monkeypatch):
     assert verdict["coaching"][0]["move_id"] == "1"
     assert "the X design" in verdict["coaching"][0]["coaching"]
     assert verdict["coverage"]["counts"]["blocking"] == 0
+    # The then-arm ran: the coach prompt WAS invoked (there were surviving advisories).
+    assert "plan-review-coach" in canned.prompts_seen
+
+
+# A clean, well-formed plan that triggers NO DET advisory (P6 ac-quality passes: no
+# compound-`and` criteria, no vague lexicon, mentions a test) → with no LLM findings the
+# surfaced set is empty → a true 0-surviving PASS.
+_CLEAN_DESC = (
+    "## Why\nThe get endpoint returns the wrong status code for a missing record.\n\n"
+    "## What\nReturn HTTP 404 from `src/api/get.py` when the record id is absent.\n\n"
+    "## Scope\nThe single get handler.\n\n"
+    "## Acceptance Criteria\n"
+    "- [ ] A request for a missing id returns HTTP 404\n"
+    "- [ ] A request for an existing id returns HTTP 200\n"
+    "- [ ] A unit test covers the missing-id path\n\n"
+    "## Verification\nRun the api test module.\n"
+)
+
+
+def test_clean_pass_makes_no_coach_llm_call(monkeypatch):
+    """WS4 (crimp-polar-jag): a PASS with 0 SURVIVING advisories takes the coach_gate else
+    arm — coach renders with notes:[] and the `plan-review-coach` prompt step is NEVER run
+    (no wasted coach LLM call), matching the bespoke pass4_coach early-return."""
+    state = _state(description=_CLEAN_DESC)
+    state["file_impact"] = [{"path": "src/api/get.py", "reason": "return 404 on missing id"}]
+    # The finder surfaces NOTHING → 0 LLM findings; the clean plan raises no DET advisory
+    # either → 0 surviving → clean PASS.
+    finder = _CountingFinder(structured={"analysis": "", "findings": []})
+    canned = _CannedAgent()
+    rec, res = _run(monkeypatch, state, finder=finder, agent=canned)
+
+    assert res.status == "succeeded", res.error
+    verdict = _terminal_verdict(rec)
+    assert verdict is not None and verdict["verdict"] == "PASS"
+    assert verdict["advisory"] == [], verdict["advisory"]
+    assert verdict["coaching"] == []
+    # The coach prompt step made NO LLM call (the gate took the else arm).
+    assert canned.prompts_seen.count("plan-review-coach") == 0
 
 
 # ── P1/P5 DET block does NOT short-circuit: LLM runs, DET block merged → BLOCK ─
