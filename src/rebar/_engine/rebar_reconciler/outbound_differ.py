@@ -330,6 +330,7 @@ def _map_local_to_jira_fields(
     ticket: dict[str, Any],
     binding_store: Any = None,
     local_ticket_types: dict[str, str] | None = None,
+    emit_detach_clear: bool = False,
 ) -> dict[str, Any]:
     """Map local ticket fields to Jira field names/values.
 
@@ -396,6 +397,21 @@ def _map_local_to_jira_fields(
                 local_parent_id,
                 ticket.get("ticket_id"),
             )
+    elif binding_store is not None and emit_detach_clear:
+        # Symmetric parent CLEAR (parent-detach churn fix): the ticket has been
+        # DETACHED locally (parent_id is falsy). Emit an explicit ``None``
+        # sentinel into the mapped dict so the field-diff loop's ``parent``
+        # branch runs and compares None against the Jira-side parent key:
+        # it emits a CLEAR only when Jira still carries a parent (stale epic-
+        # link) and nothing when both sides are already parent-less (so a
+        # never-parented ticket does not churn a clear every pass).
+        # Gated on binding_store (the parent-sync feature seam) AND on
+        # ``emit_detach_clear`` — only the UPDATE diff path (``_diff_fields``)
+        # opts in; the CREATE path leaves the key ABSENT so an orphan create
+        # never carries a spurious ``parent: None`` payload. The hierarchy
+        # pre-check above is intentionally skipped for a clear — there is no
+        # parent type to validate.
+        result["parent"] = None
     return result
 
 
@@ -520,7 +536,10 @@ def _diff_fields(
     ticket_id = ticket.get("ticket_id") or ticket.get("id") or "<no-id>"
 
     local_mapped = _map_local_to_jira_fields(
-        ticket, binding_store=binding_store, local_ticket_types=local_ticket_types
+        ticket,
+        binding_store=binding_store,
+        local_ticket_types=local_ticket_types,
+        emit_detach_clear=True,
     )
     changed: dict[str, Any] = {}
     for field_name, local_val in local_mapped.items():

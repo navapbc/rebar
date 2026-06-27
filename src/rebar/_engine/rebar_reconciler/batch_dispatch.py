@@ -408,8 +408,16 @@ def update_one(
     # FAIL in the e2e field-validation probe. Mirror the typed leaf: pop parent
     # BEFORE the allowlist filter and route it through set_parent, guarding
     # HTTP 400 hierarchy rejections as non-fatal warnings.
+    # Parent-detach churn fix: distinguish a parent CLEAR (the "parent" key is
+    # PRESENT with a falsy value — emitted when a ticket is detached locally but
+    # Jira still carries the stale epic-link) from "no parent op this mutation"
+    # (the key is ABSENT). ``fields.pop("parent", None)`` collapses both to None,
+    # so key out the *presence* first. ``client.set_parent`` already clears when
+    # passed a falsy key (PUT {"fields":{"parent":None}}), so a CLEAR routes
+    # through the identical call path as a SET.
+    _has_parent_op = "parent" in fields
     parent_key = fields.pop("parent", None)
-    if parent_key is not None:
+    if _has_parent_op:
         try:
             _call_with_retry(client.set_parent, issue_key, parent_key)
         except urllib.error.HTTPError as exc:
@@ -456,7 +464,7 @@ def update_one(
     # update_issue is skipped here ONLY when a parent op was the reason the
     # field set is empty (label/comment dispatch below still runs).
     result: dict | None = None
-    _skip_empty_update = parent_key is not None and not fields
+    _skip_empty_update = _has_parent_op and not fields
     if _skip_empty_update:
         pass  # parent handled via set_parent; no scalar fields to edit
     else:
