@@ -2118,6 +2118,12 @@
       "state": "confirmed",
       "updated_at": "2026-06-27T04:48:46Z"
     },
+    "c87e-3a18-490e-4431": {
+      "created_at": "2026-06-27T12:04:27Z",
+      "jira_key": "REB-472",
+      "state": "confirmed",
+      "updated_at": "2026-06-27T12:04:27Z"
+    },
     "c8cc-68b8-a51c-47cd": {
       "created_at": "2026-06-25T23:15:11Z",
       "jira_key": "REB-310",
@@ -3164,6 +3170,7 @@
     "REB-47": "1ff3-a12e-f99a-4b07",
     "REB-470": "e95a-ccb9-743e-4d2c",
     "REB-471": "efd0-2553-1a0e-456a",
+    "REB-472": "c87e-3a18-490e-4431",
     "REB-48": "20b4-46e1-2bbb-4647",
     "REB-49": "22bf-6af2-a9e8-4e3d",
     "REB-5": "0241-c6c1-0a20-491b",
