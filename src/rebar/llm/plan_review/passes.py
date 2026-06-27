@@ -692,9 +692,13 @@ def _validate_subject(subject: str) -> str | None:
 
 def verifier_cfg(cfg: LLMConfig) -> LLMConfig:
     """The Pass-2 verifier uses a decisive non-frontier model (Sonnet) unless the
-    operator explicitly chose a model — mirrors the completion-verifier default."""
-    from rebar.llm.config import DEFAULT_MODEL
+    operator explicitly chose a model — mirrors the completion-verifier default.
+
+    NOTE: this is the BESPOKE drift-refresh probe's downgrade; the workflow path uses
+    ``plan_review._verifier_cfg``. Both share ``VERIFIER_DEFAULT_MODEL`` (one literal).
+    WS1 (odd-cocoa-chase) retires this bespoke path entirely."""
+    from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL
 
     if cfg.model == DEFAULT_MODEL:
-        return replace(cfg, model="claude-sonnet-4-6")
+        return replace(cfg, model=VERIFIER_DEFAULT_MODEL)
     return cfg

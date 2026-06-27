@@ -33,6 +33,12 @@ from importlib.util import find_spec
 from rebar import config as _root_config
 
 DEFAULT_MODEL = "claude-opus-4-8"
+# The decisive non-frontier model used by the gate VERIFIERS (plan-review Pass-2 verify and
+# the completion verifier) when the operator has NOT explicitly chosen a model (i.e.
+# cfg.model == DEFAULT_MODEL). A focused yes/no verification is a decisive, non-open-ended
+# judgement, so a cheaper/faster model is sufficient; an explicit operator model still wins.
+# Single source of truth — imported by both completion.py and plan_review (no duplication).
+VERIFIER_DEFAULT_MODEL = "claude-sonnet-4-6"
 
 # The active code read-root for the running gate (epic raze-vet-ditch S3). When a gate
 # runs in `attested` mode it materializes a snapshot at the client-pinned SHA and sets

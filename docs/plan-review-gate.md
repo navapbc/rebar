@@ -91,6 +91,16 @@ model emits **no** holistic severity/confidence anywhere in the decision path:
 | **3 — decide** | **Deterministic.** validity = graded fraction of the binary answers; impact = mean of the ordinal-mapped severity attributes; **priority = validity × impact**; decision = `block \| advisory \| dropped`. | `passes.pass3_decide` |
 | **4 — coach** | A single-turn call over the *surviving advisory* findings maps each to a move from a locked registry; the coaching prose is rendered **deterministically** from the move's template (the LLM only picks the move + names a bounded noun-phrase subject — validated). | `passes.pass4_coach` |
 
+**Verifier model.** Pass-2 verify (and the Pass-4 coach, which share the verify cfg) run on
+the decisive non-frontier `VERIFIER_DEFAULT_MODEL` (`claude-sonnet-4-6`) **unless the operator
+explicitly chose a model** (`REBAR_LLM_MODEL` / `[tool.rebar.llm].model` set to a non-default).
+A focused yes/no verification is a decisive, non-open-ended judgement, so a cheaper model
+suffices — the same trade-off the completion verifier makes. The downgrade is applied on the
+**config** at `review_plan`'s entry (`_verifier_cfg`), *not* as a static step `model:` in
+`gates/plan-review.yaml`, because step-level model precedence (step > workflow > config) would
+override the operator's choice. The Pass-1 finder is unaffected — it runs the workflow's own
+`model_ladder` (Haiku → Sonnet → Opus).
+
 ### Pass-3 math (authoritative)
 
 ```

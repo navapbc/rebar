@@ -11,8 +11,17 @@ from __future__ import annotations
 
 import pytest
 
-from rebar.llm.config import LLMConfig
-from rebar.llm.plan_review import attest, det_floor, orchestrator, passes, registry, sidecar, sizing
+from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, LLMConfig
+from rebar.llm.plan_review import (
+    _verifier_cfg,
+    attest,
+    det_floor,
+    orchestrator,
+    passes,
+    registry,
+    sidecar,
+    sizing,
+)
 from rebar.llm.plan_review.det_floor import PlanContext
 
 
@@ -27,6 +36,26 @@ def _ctx(description: str, *, ttype: str = "task", title: str = "T", **kw) -> Pl
 
 
 _GOOD_AC = "## Acceptance Criteria\n- [ ] a thing is observably true\n- [ ] another check\n"
+
+
+# ── verifier model downgrade (WS2 — gawky-koi-grain) ─────────────────────────
+def test_verifier_cfg_downgrades_to_sonnet_by_default() -> None:
+    """With no explicit operator model (cfg.model == DEFAULT_MODEL), the Pass-2 verify/coach
+    cfg resolves to the non-frontier verifier model (Sonnet) — the verifier_cfg downgrade,
+    now in the workflow path instead of the retired bespoke pass2_verify."""
+    cfg = LLMConfig(model=DEFAULT_MODEL)
+    assert _verifier_cfg(cfg).model == VERIFIER_DEFAULT_MODEL == "claude-sonnet-4-6"
+
+
+def test_verifier_cfg_honors_explicit_operator_override() -> None:
+    """An operator who explicitly chose a non-default model keeps it — the downgrade yields
+    to the override (parity with the old passes.verifier_cfg), which a static per-step
+    `model:` could not do (resolve_model precedence is step > workflow > cfg)."""
+    cfg = LLMConfig(model="claude-opus-4-8-custom")
+    assert _verifier_cfg(cfg).model == "claude-opus-4-8-custom"
+    # Other config fields are preserved (only model is tuned).
+    cfg2 = LLMConfig(model=DEFAULT_MODEL, max_iterations=99)
+    assert _verifier_cfg(cfg2).max_iterations == 99
 
 
 # ── DET floor ────────────────────────────────────────────────────────────────

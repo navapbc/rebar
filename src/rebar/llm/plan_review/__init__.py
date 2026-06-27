@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from rebar.llm.config import LLMConfig
+from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, LLMConfig
 from rebar.llm.runner import Runner
 
 from . import attest, orchestrator, sidecar
@@ -34,6 +34,25 @@ from .attest import claim_gate_check
 logger = logging.getLogger(__name__)
 
 __all__ = ["review_plan", "claim_gate_check", "registry_coverage"]
+
+
+def _verifier_cfg(cfg: LLMConfig) -> LLMConfig:
+    """The cfg the Pass-2 verify (and Pass-4 coach) steps run under: the decisive non-frontier
+    verifier model (``VERIFIER_DEFAULT_MODEL``) UNLESS the operator EXPLICITLY chose a model
+    (``cfg.model != DEFAULT_MODEL`` — i.e. ``REBAR_LLM_MODEL`` / ``[tool.rebar.llm].model`` was
+    set to a non-default; any other value is an explicit choice and wins). Mirrors
+    :func:`rebar.llm.completion.verify_completion`'s tuning.
+
+    This downgrade lives here (on cfg) rather than as a static per-step ``model:`` in
+    ``gates/plan-review.yaml`` because ``resolve_model`` precedence is ``step > workflow >
+    cfg`` — a literal step model would ALWAYS beat the operator's cfg/env model and so could
+    not honor an override. The Pass-1 finder is unaffected: it runs the YAML ``model_ladder``
+    via the ProductionBatchRunner, not ``cfg.model``."""
+    from dataclasses import replace
+
+    if cfg.model == DEFAULT_MODEL:
+        return replace(cfg, model=VERIFIER_DEFAULT_MODEL)
+    return cfg
 
 
 def _progressive_enabled(repo_root) -> bool:
@@ -118,11 +137,12 @@ def _run_plan_review(
             return findings.validate_structured(refreshed, "plan_review_verdict")
     cap = advisory_cap if advisory_cap is not None else orchestrator.DEFAULT_ADVISORY_CAP
     # Verdict PRODUCTION runs through the v3 engine workflow (gates/plan-review.yaml); the
-    # signing/sidecar wrapper below is unchanged, so the signed attestation is stable.
+    # signing/sidecar wrapper below is unchanged, so the signed attestation is stable. The
+    # verify/coach steps run under the verifier cfg (non-frontier model unless overridden).
     from rebar.llm.workflow import gate_dispatch
 
     verdict = gate_dispatch.produce_plan_review_verdict(
-        ctx, cfg, runner=runner, advisory_cap=cap, repo_root=repo_root
+        ctx, _verifier_cfg(cfg), runner=runner, advisory_cap=cap, repo_root=repo_root
     )
 
     material = orchestrator.material_fingerprint(ctx)

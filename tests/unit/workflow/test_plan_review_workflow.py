@@ -189,6 +189,35 @@ def test_workflow_validates_and_lints():
     assert findings == [], findings
 
 
+def _all_steps(steps):
+    """Flatten every step in a workflow doc, recursing into branch/loop/map bodies."""
+    for s in steps:
+        if not isinstance(s, dict):
+            continue
+        yield s
+        for block, *keys in (("branch", "then", "else"), ("loop", "body"), ("map", "body")):
+            blk = s.get(block)
+            if isinstance(blk, dict):
+                for k in keys:
+                    if isinstance(blk.get(k), list):
+                        yield from _all_steps(blk[k])
+
+
+def test_verify_step_carries_no_static_model_so_operator_override_is_honored():
+    """WS2 (gawky-koi-grain): the verify steps must NOT pin a static `model:` in the YAML —
+    the Sonnet downgrade is applied on cfg (`plan_review._verifier_cfg`) so an operator's
+    explicit model wins. A static step `model:` would always beat cfg (resolve_model: step >
+    workflow > cfg), silently breaking the override. This guards that invariant."""
+    verify_steps = [
+        s
+        for s in _all_steps(_doc()["steps"])
+        if str(s.get("prompt", "")).startswith("plan-review-verifier")
+    ]
+    assert verify_steps, "expected at least one plan-review-verifier step"
+    offenders = [s["id"] for s in verify_steps if "model" in s]
+    assert offenders == [], f"verify steps must not pin a static model: {offenders}"
+
+
 # ── assemble_criteria routing + overlay inclusion (the E5 advisory) ───────────
 def test_assemble_criteria_overlay_inclusion(monkeypatch):
     from rebar.llm.workflow.executor import STEP_REGISTRY, StepContext

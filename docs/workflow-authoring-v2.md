@@ -121,7 +121,38 @@ contract. All nine built-ins (`fetch_ticket`, `fetch_commits`, `fetch_epic_graph
 `overlay_triggers`, `render_context`, `gate`, `comment_verdict`, `tag`, `set_fields`)
 are annotated.
 
-### 2.1 Overlays: conditional criterion inclusion via `if:`
+### 2.1 Per-step `model:` override
+
+An agent/prompt step may carry a `model:` field to pin which model that step runs on,
+independent of the rest of the workflow:
+
+```yaml
+- id: verify
+  prompt: plan-review-verifier
+  mode: structured
+  model: claude-sonnet-4-6      # this step runs on Sonnet regardless of the workflow default
+```
+
+The value is any runner-consumable model id (`provider:model`, e.g.
+`anthropic:claude-opus-4-8` / `openai:gpt-4o`, or a bare id whose provider is inferred).
+Resolution follows the **WS-D3 precedence** (`resolve_model`):
+
+> **step `model:` > workflow `model:` > config (`REBAR_LLM_MODEL` / `[tool.rebar.llm].model`) > `DEFAULT_MODEL`**
+
+The visual editor exposes this as the per-step **Model** field (a free-text entry, so
+custom/non-ladder models are allowed); it round-trips losslessly through BPMN
+export/import via the step's `<rebar:Config>` extension, and a legacy document that lacks
+the attribute imports cleanly (no per-step override → the step falls back to the
+workflow/config model).
+
+> **Note — gate verifier default.** Because step precedence beats config, a *static* step
+> `model:` can never *yield* to an operator override. So gates that want a model default
+> that an operator can still override (the plan-review Pass-2 verify + the completion
+> verifier both default to the non-frontier `VERIFIER_DEFAULT_MODEL`) apply that downgrade
+> on the **config** at the gate's library entry — not as a static step `model:`. See
+> [plan-review-gate.md](plan-review-gate.md).
+
+### 2.2 Overlays: conditional criterion inclusion via `if:`
 
 A review pipeline includes a criterion (prompt) step only when the input warrants it
 (a security criterion only when the plan mentions secrets; an intent-fidelity criterion
