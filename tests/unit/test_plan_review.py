@@ -654,7 +654,7 @@ def test_container_system_prompt_is_byte_stable_across_children() -> None:
             _fake_cfg(),
             parent_plan=parent_plan,
             child=child,
-            criterion=g3,
+            criteria=[g3],
             sibling_roster="- c1\n- c2",
         )
     assert len(cap.system_prompts) == 2
@@ -754,6 +754,50 @@ def test_container_warm_nonsystemic_failure_degrades_to_direct_fan_out() -> None
     assert runner.calls == 4  # 1 failed warm + 3 in the pool (the failed pairing re-runs)
     assert cov["container"]["warmed"] is False
     assert len([f for f in out if f.get("_container_child")]) == 3  # no pairing dropped
+
+
+def test_container_merges_g3_g4_into_one_call_per_child() -> None:
+    # Story 98c6: G3+G4 are evaluated in ONE merged call per child (2N->N). With 3
+    # children and 2 container criteria, the runner is called 3 times (not 6).
+    ctx = _big_epic_ctx(3, big_plan=True)
+    container = [registry.by_id()["G3"], registry.by_id()["G4"]]
+    runner = _PairingRunner()
+    cov: dict = {}
+    orchestrator._run_container(ctx, _fake_cfg(), runner, container, cov)
+    assert runner.calls == 3  # one merged call per child, NOT 2 per child (would be 6)
+    assert cov["container"]["pairings_evaluated"] == 3
+
+
+def test_container_attribution_is_self_reported_and_validated() -> None:
+    # The merged call's attribution is MODEL-self-reported, validated against {G3,G4}:
+    # in-set tags kept, OUT-of-set tags dropped, a finding mapping to no in-set criterion
+    # dropped (not mis-tagged); _container_child provenance preserved.
+    from rebar.llm.runner import FakeRunner
+
+    fr = FakeRunner(
+        structured={
+            "analysis": "",
+            "findings": [
+                {"finding": "coverage gap", "criteria": ["G3"]},
+                {"finding": "consistency + coverage", "criteria": ["G3", "G4"]},
+                {"finding": "bogus tag", "criteria": ["G7"]},  # out of {G3,G4} -> dropped
+                {"finding": "no tag", "criteria": []},  # no in-set criterion -> dropped
+            ],
+        }
+    )
+    g3, g4 = registry.by_id()["G3"], registry.by_id()["G4"]
+    out = passes.pass1_container(
+        fr,
+        _fake_cfg(),
+        parent_plan="PARENT",
+        child={"ticket_id": "c1", "title": "C1", "description": "body"},
+        criteria=[g3, g4],
+        sibling_roster="- c1",
+    )
+    assert [f["finding"] for f in out] == ["coverage gap", "consistency + coverage"]
+    assert out[0]["criteria"] == ["G3"]
+    assert out[1]["criteria"] == ["G3", "G4"]  # multi-criterion attribution preserved
+    assert all(f["_container_child"] == "c1" for f in out)  # provenance preserved
 
 
 def test_budget_cap_never_sheds_container_criteria() -> None:

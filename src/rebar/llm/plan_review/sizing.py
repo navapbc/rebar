@@ -226,10 +226,13 @@ def shed_to_budget(
         c = {**c, "_tier": "AGENT"}
         shed.append(c)
         agent = [x for x in agent if x["id"] != c["id"]]
-    # The container fan-out is a fixed floor (n_children calls per container criterion),
-    # never shed — recorded so the cap's "bounds only overlay/agent spend" posture, and
-    # the unavoidable container cost, are both observable.
-    container_floor_usd = round(len(container) * n_children * COST_AGENT_USD, 4)
+    # The container fan-out is a fixed floor, never shed — recorded so the cap's "bounds
+    # only overlay/agent spend" posture, and the unavoidable container cost, are both
+    # observable. Story 98c6 MERGED all container criteria into ONE call per child (was
+    # one per criterion per child), so the floor is N (one call/child), not 2N — and only
+    # when there is at least one container criterion to evaluate.
+    container_calls = n_children if container else 0
+    container_floor_usd = round(container_calls * COST_AGENT_USD, 4)
     coverage["budget"] = {
         "cap_usd": cap,
         "centrality": ctx.centrality,

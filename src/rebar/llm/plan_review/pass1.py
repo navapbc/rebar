@@ -50,16 +50,20 @@ CACHE_MIN_PREFIX_TOKENS = 4096
 _CONTAINER_MAX_WORKERS = 6
 
 
-def _too_big_finding(crit: dict, child: dict, pair_tokens: int, budget: int) -> dict[str, Any]:
+def _too_big_finding(
+    criteria: list[dict], child: dict, pair_tokens: int, budget: int
+) -> dict[str, Any]:
     """The DET failure finding for a (parent + child) pairing that cannot fit the
     largest window together — 'reduce the ticket', not a silent skip. Emitted WITHOUT an
-    LLM call, so it stays out of the fan-out."""
+    LLM call, so it stays out of the fan-out. Tags ALL container criteria (the merged call
+    that would have evaluated them can't run at this size)."""
+    ids = [c["id"] for c in criteria]
     return {
         "finding": (
             f"The (parent + child {child.get('ticket_id')}) pairing is too big to "
-            f"review together for {crit['id']} (~{pair_tokens} tokens > budget)."
+            f"review together for {'/'.join(ids)} (~{pair_tokens} tokens > budget)."
         ),
-        "criteria": [crit["id"]],
+        "criteria": list(ids),
         "location": f"child {child.get('ticket_id')}",
         "evidence": [f"parent+child ~{pair_tokens} tokens exceeds ~{budget}"],
         "scenarios": [],
@@ -77,15 +81,16 @@ def _timed_pairing(
     cfg: LLMConfig,
     ctx: PlanContext,
     roster: str,
-    crit: dict,
+    criteria: list[dict],
     child: dict,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], Exception | None]:
-    """Run ONE container (parent + child) pairing, timed, NEVER raising — returns
-    ``(findings, pairing_record, exc)``. A failed pairing yields empty findings + the
-    exception (the caller decides: a SYSTEMIC failure on the warming call aborts; every
-    other failure just drops that pairing's findings, matching the sequential baseline).
-    Safe to run in the fan-out pool — each call builds its own agent + event loop (the
-    Pass-1 pool already drives ``runner.run`` concurrently across threads)."""
+    """Run ONE container pairing — the parent + a single child evaluated against ALL
+    container criteria (G3+G4) in ONE merged call (story 98c6) — timed, NEVER raising;
+    returns ``(findings, pairing_record, exc)``. A failed pairing yields empty findings +
+    the exception (the caller decides: a SYSTEMIC failure on the warming call aborts;
+    every other failure just drops that pairing's findings, matching the sequential
+    baseline). Safe to run in the fan-out pool — each call builds its own agent + event
+    loop (the Pass-1 pool already drives ``runner.run`` concurrently across threads)."""
     t0 = time.monotonic()
     exc: Exception | None = None
     findings: list[dict[str, Any]] = []
@@ -95,14 +100,14 @@ def _timed_pairing(
             cfg,
             parent_plan=ctx.plan_text,
             child=child,
-            criterion=crit,
+            criteria=criteria,
             sibling_roster=roster,
         )
     except Exception as e:  # noqa: BLE001 — capture; the caller classifies systemic vs not
         exc = e
     dt = time.monotonic() - t0
     record = {
-        "criterion": crit["id"],
+        "criteria": [c["id"] for c in criteria],
         "child": child.get("ticket_id"),
         "seconds": round(dt, 1),
         "findings": len(findings),
@@ -138,22 +143,24 @@ def _run_container(
     pairing_records: list[dict[str, Any]] = []
     container_t0 = time.monotonic()
 
-    # Partition pairings: a too-big (parent+child) pairing is a DET failure finding with
-    # NO LLM call (kept out of the fan-out); the rest are the in-budget pairings to run.
-    pairings: list[tuple[dict, dict]] = []
-    for crit in container:
-        for child in ctx.children:
-            pair_tokens = parent_tokens + det_floor.est_tokens(
-                f"{child.get('title', '')}\n{child.get('description', '')}"
-            )
-            if pair_tokens > budget:
-                out.append(_too_big_finding(crit, child, pair_tokens, budget))
-            else:
-                pairings.append((crit, child))
+    # Partition pairings: ONE merged pairing PER CHILD (story 98c6 — all container
+    # criteria G3+G4 evaluated in a single call per child, 2N→N). A too-big (parent+child)
+    # pairing is a DET failure finding with NO LLM call (kept out of the fan-out); the
+    # rest are the in-budget per-child pairings to run.
+    pairings: list[dict] = []
+    for child in ctx.children:
+        pair_tokens = parent_tokens + det_floor.est_tokens(
+            f"{child.get('title', '')}\n{child.get('description', '')}"
+        )
+        if pair_tokens > budget:
+            out.append(_too_big_finding(container, child, pair_tokens, budget))
+        else:
+            pairings.append(child)
 
     logger.info(
-        "plan-review container fan-out: criteria %s × %d child(ren) = %d in-budget "
-        "agentic pairing(s), parallel warm-then-fan-out (parent ~%d tokens)",
+        "plan-review container fan-out: criteria %s merged over %d child(ren) = %d "
+        "in-budget agentic pairing(s) (one call/child), parallel warm-then-fan-out "
+        "(parent ~%d tokens)",
         [c["id"] for c in container],
         len(ctx.children),
         len(pairings),
@@ -166,16 +173,15 @@ def _run_container(
     warmed = False
     to_pool = pairings
     if warm:
-        crit, child = pairings[0]
-        findings, record, exc = _timed_pairing(runner, cfg, ctx, roster, crit, child)
+        child = pairings[0]
+        findings, record, exc = _timed_pairing(runner, cfg, ctx, roster, container, child)
         if isinstance(exc, LLMUnavailableError):
             # SYSTEMIC failure (auth / key / connection / rate-limit) on the warming
             # call: the whole tier is down — abort rather than fan out N-1 doomed calls
             # (mirrors the Pass-1 tier). run_review turns this into an INDETERMINATE,
             # unsigned verdict.
             logger.warning(
-                "container warm pairing %s/%s SYSTEMIC failure (%s); aborting fan-out",
-                crit["id"],
+                "container warm pairing %s SYSTEMIC failure (%s); aborting fan-out",
                 child.get("ticket_id"),
                 record["error"],
             )
@@ -186,8 +192,7 @@ def _run_container(
             # than serialize on a broken warm — never hang. The failed pairing re-runs in
             # the pool (so it is not silently dropped here).
             logger.warning(
-                "container warm pairing %s/%s failed (%s); degrading to direct fan-out",
-                crit["id"],
+                "container warm pairing %s failed (%s); degrading to direct fan-out",
                 child.get("ticket_id"),
                 record["error"],
             )
@@ -196,8 +201,7 @@ def _run_container(
             out.extend(findings)
             pairing_records.append(record)
             logger.info(
-                "container warm pairing %s/%s: %d finding(s) in %.1fs (cache warmed)",
-                crit["id"],
+                "container warm pairing %s: %d finding(s) in %.1fs (cache warmed)",
                 child.get("ticket_id"),
                 record["findings"],
                 record["seconds"],
@@ -216,8 +220,8 @@ def _run_container(
     if to_pool:
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
             futs = [
-                ex.submit(_timed_pairing, runner, cfg, ctx, roster, crit, child)
-                for crit, child in to_pool
+                ex.submit(_timed_pairing, runner, cfg, ctx, roster, container, child)
+                for child in to_pool
             ]
             for fu in futs:
                 findings, record, exc = fu.result()
@@ -225,16 +229,14 @@ def _run_container(
                 pairing_records.append(record)
                 if exc is not None:
                     logger.warning(
-                        "container pairing %s/%s FAILED in %.1fs (%s)",
-                        record["criterion"],
+                        "container pairing %s FAILED in %.1fs (%s)",
                         record["child"],
                         record["seconds"],
                         record["error"],
                     )
                 else:
                     logger.info(
-                        "container pairing %s/%s: %d finding(s) in %.1fs",
-                        record["criterion"],
+                        "container pairing %s: %d finding(s) in %.1fs",
                         record["child"],
                         record["findings"],
                         record["seconds"],

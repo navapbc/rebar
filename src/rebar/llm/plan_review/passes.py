@@ -249,23 +249,33 @@ def pass1_container(
     *,
     parent_plan: str,
     child: dict[str, Any],
-    criterion: dict[str, Any],
+    criteria: list[dict[str, Any]],
     sibling_roster: str,
 ) -> list[dict[str, Any]]:
-    """Run a container criterion (G3/G4) for ONE (parent + single child) pairing,
-    agentic (it reads the live graph). The complete sibling roster is supplied so an
-    absence finding can be cross-checked against ALL siblings before it stands."""
-    cid = criterion["id"]
+    """Run ALL container criteria (G3+G4) for ONE (parent + single child) pairing in a
+    SINGLE agentic call (story 98c6 — merges the former 2 calls/child into 1, 2N→N). The
+    container prompt already describes both audits over the shared (parent, child, roster)
+    context; presenting both rubrics in one turn keeps per-criterion attribution while
+    halving calls. The complete sibling roster is supplied so an absence finding can be
+    cross-checked against ALL siblings before it stands.
+
+    Attribution is MODEL-SELF-REPORTED, then VALIDATED against the container id set
+    ({G3,G4}) and out-of-set tags DROPPED (mirrors ``pass1_chunk`` — never fabricate an
+    attribution); a finding mapping to no in-set criterion is dropped, not mis-tagged."""
+    valid_ids = [c["id"] for c in criteria]
     child_id = child.get("ticket_id", "?")
     child_whole = f"### child {child_id}: {child.get('title', '')}\n{child.get('description', '')}"
+    rubric = "\n\n".join(_criterion_block(c) for c in criteria)
     req = RunRequest(
         system_prompt=_resolve_system(PASS_CONTAINER, parent_plan, cfg),
         instructions=(
-            f"## Criterion {cid}\n{_criterion_block(criterion)}\n\n"
+            f"## Container criteria for this pass (ids: {', '.join(valid_ids)})\n{rubric}\n\n"
             f"## The one child under review (whole)\n{child_whole}\n\n"
             f"## Complete sibling roster (for absence cross-check)\n{sibling_roster}\n\n"
-            f"Evaluate the parent + THIS child for {cid}. An absence is a finding only if NO "
-            "sibling in the roster covers it. A clean pairing returns an empty findings list."
+            f"Evaluate the parent + THIS child for ALL of {', '.join(valid_ids)} in this one "
+            "pass, and TAG each finding with the criterion id(s) it addresses (from this id "
+            "set). An absence is a finding only if NO sibling in the roster covers it. A clean "
+            "pairing returns an empty findings list."
         ),
         config=cfg,
         reviewers=["plan-container"],
@@ -276,10 +286,16 @@ def pass1_container(
     result = runner.run(req)
     out: list[dict[str, Any]] = []
     for f in result.get("findings", []) or []:
+        # Self-reported attribution, validated against the container id set; drop
+        # out-of-set tags. A finding mapping to no in-set criterion is the model
+        # violating the instruction — DROP it rather than mis-tag it (mirrors pass1_chunk).
+        crit = [c for c in (f.get("criteria") or []) if c in valid_ids]
+        if not crit:
+            continue
         out.append(
             {
                 "finding": f.get("finding", ""),
-                "criteria": [cid],
+                "criteria": crit,
                 "location": f.get("location", "") or f"child {child_id}",
                 "evidence": [
                     *(f.get("evidence", []) or []),
