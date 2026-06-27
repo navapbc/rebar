@@ -162,14 +162,31 @@ def test_to_junit() -> None:
     assert "<failure" in xml and "bad" in xml
 
 
-def test_run_eval_guarded_without_extra() -> None:
-    # Without inspect_ai, run_eval surfaces a clear, actionable error (not a crash).
-    import importlib.util
+def test_run_eval_runs_offline_with_injected_solve() -> None:
+    # The full aggregation/gate/coverage/JUnit path runs offline when `solve` is
+    # injected — a fake that fires on should-fire cases and stays silent on good ones.
+    def solve(_prompt, case):
+        if case["expect"] == "finding":
+            return {"findings": [{"severity": "high", "dimension": "x", "detail": "d"}]}
+        return {"findings": []}
 
-    if importlib.util.find_spec("inspect_ai") is not None:
-        pytest.skip("inspect_ai installed — guard path not exercised")
-    with pytest.raises(EvalError):
-        ev.run_eval("code-quality")
+    res = ev.run_eval("plan-review-finder", solve=solve)
+    assert res["prompt"] == "plan-review-finder"
+    assert res["passed"] is True
+    assert "<testsuites" in res["junit"]
+    assert res["coverage"] == 1.0
+
+
+def test_run_eval_gate_fails_when_recall_missing() -> None:
+    # A solver that never fires misses every seeded defect → recall fails → gate fails.
+    res = ev.run_eval("plan-review-finder", solve=lambda _p, _c: {"findings": []})
+    assert res["passed"] is False
+
+
+def test_run_eval_errors_on_spec_without_dataset() -> None:
+    # code-quality ships gold-only (no dataset) — run_eval has nothing to run.
+    with pytest.raises(EvalError, match="no `dataset`"):
+        ev.run_eval("code-quality", solve=lambda _p, _c: {"findings": []})
 
 
 def test_cli_prompt_eval(capsys) -> None:
@@ -259,12 +276,16 @@ def test_gate_k_greater_than_epochs_is_unsatisfiable() -> None:
     assert any("unsatisfiable" in e for e in errs), errs
 
 
-def test_run_eval_not_wired_raises_notimplemented_when_extra_present() -> None:
-    # When the eval extra IS installed, the missing live harness is NOT a config
-    # error — it must surface as NotImplementedError, not EvalError.
-    import importlib.util
+def test_run_eval_live_solver_without_agents_extra_raises_evalerror(monkeypatch) -> None:
+    # With no `solve` injected, run_eval builds the live solver, which needs the
+    # `agents` extra; a missing runner backend is a clean EvalError, not a crash.
+    import rebar.llm.runner as runner_mod
 
-    if importlib.util.find_spec("inspect_ai") is None:
-        pytest.skip("inspect_ai not installed — the EvalError guard path is exercised instead")
-    with pytest.raises(NotImplementedError):
-        ev.run_eval("code-quality")
+    def _boom(*_a, **_k):
+        from rebar._optional import OptionalDependencyError
+
+        raise OptionalDependencyError("install nava-rebar[agents]")
+
+    monkeypatch.setattr(runner_mod, "get_runner", _boom)
+    with pytest.raises(EvalError):
+        ev.run_eval("plan-review-finder")

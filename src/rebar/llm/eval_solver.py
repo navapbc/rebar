@@ -70,6 +70,9 @@ def run_case(prompt_id: str, case: dict, *, runner: Runner, graph: bool = False)
     ``ValueError`` for an unknown ``prompt_id``."""
     from rebar.llm import completion, operations, spec_scan
 
+    # The code-reading gates snapshot a ref (default origin/main) unless source=local;
+    # the disposable fixture store has no origin, so always read its in-place checkout.
+    src = "local"
     with case_store(case) as root:
         if prompt_id == "completion-verifier":
             desc = case.get("ticket_context") or ""
@@ -77,14 +80,18 @@ def run_case(prompt_id: str, case: dict, *, runner: Runner, graph: bool = False)
             tid = rebar.create_ticket(
                 tt, _title(desc, "Eval ticket"), description=desc, repo_root=root, return_alias=True
             )["id"]
-            return completion.verify_completion(tid, repo_root=root, runner=runner, graph=graph)
+            return completion.verify_completion(
+                tid, repo_root=root, runner=runner, graph=graph, source=src
+            )
         if prompt_id == "ticket-quality":
             desc = case.get("ticket_context") or ""
             tt = case.get("ticket_type") or "task"
             tid = rebar.create_ticket(
                 tt, _title(desc, "Eval ticket"), description=desc, repo_root=root, return_alias=True
             )["id"]
-            return operations.review_ticket(tid, repo_root=root, runner=runner, graph=graph)
+            return operations.review_ticket(
+                tid, repo_root=root, runner=runner, graph=graph, source=src
+            )
         if prompt_id == "spec-alignment":
             ids: list[str] = []
             for i, epic in enumerate(case.get("epics") or []):
@@ -100,6 +107,6 @@ def run_case(prompt_id: str, case: dict, *, runner: Runner, graph: bool = False)
                     )["id"]
                 )
             return spec_scan.scan_epics_for_spec(
-                case.get("spec") or "", epics=ids, repo_root=root, runner=runner
+                case.get("spec") or "", epics=ids, repo_root=root, runner=runner, source=src
             )
         raise ValueError(f"no eval solver for prompt {prompt_id!r}")

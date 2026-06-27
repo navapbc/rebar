@@ -1,30 +1,42 @@
 name: prompt-eval
 
-# Prompt evaluation gating (epic a88f / WS-G). Two tiers:
-#   * OFFLINE (every PR) — the eval DISCIPLINE is enforced with no model/credentials:
-#     spec validity, grader discipline (pinned cross-family judge, temp 0, seed,
-#     snapshot), at_least(k) over explicit epochs, coverage threshold, and the
-#     Cohen's-kappa / JUnit logic — via the unit tests.
-#   * LIVE (gated; needs the [eval] extra + provider credentials) — Inspect AI runs
-#     the eval, promptfoo consumes the JUnit and enforces its gated llm-rubric with
-#     an explicit threshold (CI checks the promptfoo exit code 100 = assertions
-#     failed), and the judge is admitted only if its Cohen's-kappa alignment to the
-#     frozen human-gold set clears the threshold. The live job is intentionally
-#     manual/credentialed (mirrors the external-integration tier) so PRs never spend
-#     tokens.
+# Prompt evaluation gating (epic a88f / WS-G; live tier wired by epic 6f2d / WS-EVAL).
+# Two tiers, the community-standard split:
+#   * OFFLINE (every PR/push) — the eval DISCIPLINE is enforced with NO model/credentials:
+#     spec validity (incl. STRICT: registered scorers + balanced dataset + gold_set for
+#     specs that ship a dataset), grader discipline (pinned cross-family judge, temp 0,
+#     seed, snapshot), at_least(k) over explicit epochs, coverage, kappa/JUnit, the
+#     scorer registry, and the eval solver/run_eval aggregation — all via the unit tests.
+#     This is the only REQUIRED check and costs nothing.
+#   * LIVE (gated; needs the [agents,eval] extras + credentials) — actually runs each
+#     dataset-bearing spec through run_eval (the reviewer's real op via the eval solver),
+#     emits JUnit, and reports pass/coverage. Deliberately OFF the PR critical path
+#     (manual dispatch + a weekly schedule), NON-BLOCKING (continue-on-error), and
+#     fork-safe (same-repo only) so PRs/forks/Dependabot never spend tokens. Provider
+#     spend caps belong at the Anthropic/OpenAI dashboard (CI has no native $ cap).
 
 on:
   push:
-    branches: ["**"]  # run on every branch, not just main (pre-PR CI feedback)
+    branches: ["**"]  # run the offline tier on every branch (pre-PR feedback)
   pull_request: {}
   workflow_dispatch: {}
+  schedule:
+    - cron: "0 7 * * 1"  # Mondays 07:00 UTC — weekly drift detector for the live tier
 
 permissions:
   contents: read
 
+# Rapid pushes shouldn't fan out concurrent (paid, on the live tier) runs.
+concurrency:
+  group: prompt-eval-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   eval-discipline:
     name: eval discipline (offline — no model)
+    # Skip the redundant push run for PR branches (pull_request already covers them);
+    # schedule has nothing to add to the offline tier.
+    if: ${{ github.event_name != 'schedule' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -35,47 +47,79 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e '.[dev]'
-      - name: Enforce eval-spec + grader discipline (offline)
+      - name: Enforce eval discipline (offline)
         run: |
-          python -m pytest -q tests/unit/test_eval.py
-      - name: Validate every packaged eval spec
+          python -m pytest -q \
+            tests/unit/test_eval.py \
+            tests/unit/test_eval_scorers.py \
+            tests/unit/test_new_eval_specs.py \
+            tests/unit/test_eval_solver.py
+      - name: Validate every packaged eval spec (lenient always; strict when it has a dataset)
         run: |
           python - <<'PY'
           from pathlib import Path
-          from rebar.llm import eval as ev
           import yaml
+          from rebar.llm import eval as ev
           specs = list(Path("src/rebar/llm/eval_specs").glob("*.eval.yaml"))
           assert specs, "no packaged eval specs found"
           for p in specs:
-              errs = ev.validate_eval_spec(yaml.safe_load(p.read_text()))
+              spec = yaml.safe_load(p.read_text())
+              errs = ev.validate_eval_spec(spec)
               assert not errs, f"{p}: {errs}"
+              if spec.get("dataset"):  # dataset-bearing specs must clear the STRICT gate
+                  serrs = ev.validate_eval_spec(spec, strict=True)
+                  assert not serrs, f"{p} (strict): {serrs}"
           print(f"validated {len(specs)} eval spec(s)")
           PY
 
   eval-live:
-    name: eval live (gated — needs [eval] + credentials)
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    name: eval live (gated — needs [agents,eval] + credentials)
+    # Manual dispatch or the weekly schedule ONLY, and only on the canonical repo —
+    # forks/Dependabot get no secrets and must never reach this job.
+    if: >-
+      ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+          && github.repository == 'navapbc/rebar' }}
     runs-on: ubuntu-latest
+    continue-on-error: true  # advisory: a live regression reports, it does not block
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install with the eval extra
+      - name: Install with the agents + eval extras
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e '.[agents,eval]'
-      - name: Run prompt evals (Inspect AI) → JUnit
+      - name: Run dataset-bearing prompt evals (live) → JUnit
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          # Inspect AI runs each spec; the disciplined gate (at_least(k)/coverage) is
-          # applied in-process and the result is emitted as JUnit for promptfoo.
-          rebar prompt eval code-quality --output json
-      # promptfoo consumes the JUnit + enforces its gated llm-rubric (explicit
-      # threshold); exit code 100 means assertions failed → fail the build.
-      - name: promptfoo gate (exit 100 = fail)
-        run: |
-          echo "promptfoo eval --output junit.xml; rc=100 → assertions failed (gate)."
-          echo "(wired here when promptfoo configs land beside the specs)"
+          python - <<'PY'
+          import glob
+          from pathlib import Path
+          import yaml
+          from rebar.llm import eval as ev
+          out = Path("eval-junit"); out.mkdir(exist_ok=True)
+          summary, failed = [], []
+          for p in sorted(glob.glob("src/rebar/llm/eval_specs/*.eval.yaml")):
+              spec = yaml.safe_load(Path(p).read_text())
+              if not spec.get("dataset"):
+                  continue  # gold-only spec — nothing to run live
+              pid = spec["prompt"]
+              res = ev.run_eval(pid)
+              (out / f"{pid}.xml").write_text(res["junit"])
+              summary.append(f"{pid}: {'PASS' if res['passed'] else 'FAIL'} (coverage {res['coverage']:.2f})")
+              if not res["passed"]:
+                  failed.append(pid)
+          print("\n".join(summary) or "no dataset-bearing specs")
+          if failed:
+              print(f"::warning::live eval regressions (advisory): {failed}")
+          PY
+      - name: Upload eval JUnit
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-junit
+          path: eval-junit/
+          if-no-files-found: ignore

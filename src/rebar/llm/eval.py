@@ -400,39 +400,135 @@ def to_junit(eval_name: str, cases: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
-# ── the Inspect AI run seam (WS-G1) ───────────────────────────────────────────
+# ── the live eval run (WS-EVAL-EXISTING / 6f2d) ───────────────────────────────
+# A native loop over the reviewer's REAL op (via eval_solver), reusing the
+# offline-tested discipline primitives (validate / at_least(k) / coverage / to_junit /
+# the eval_scorers registry). NOT routed through Inspect AI: our "model call" is a
+# whole tool-using agentic op (verify_completion / review_ticket / scan_spec), which
+# does not fit Inspect's single-completion solver/scorer model — wrapping it would add
+# a dependency and an impedance mismatch for no gain. JUnit is emitted for promptfoo /
+# CI ingestion. ``solve`` is injectable so the entire aggregation/gate/coverage/JUnit
+# path is offline-testable with a fake (no model, no tokens).
 
 
-def run_eval(prompt_id: str, *, repo_root=None, dirty: bool = True) -> dict[str, Any]:
-    """Run a prompt's eval through Inspect AI (needs the ``eval`` extra).
+def _live_solver(*, repo_root, runner):
+    """Default solver: run each case's reviewer through its REAL op (eval_solver) with
+    the config/live runner. Needs the ``agents`` extra (pydantic_ai); a missing one is
+    a user-actionable config error (``EvalError``), not a crash."""
+    from rebar._optional import OptionalDependencyError
+    from rebar.llm import eval_solver
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.runner import get_runner
 
-    Loads + validates the git-tracked spec, then evaluates the prompt — reading the
-    DIRTY working-tree prompt text (so you iterate before committing). Returns a
-    result dict ``{prompt, epochs, gate, passed, coverage, scores[], junit}``.
-
-    Two distinct failure modes, deliberately different exception types:
-      * ``EvalError`` — the spec is invalid, or the ``eval`` extra (``inspect_ai``)
-        is not installed. Both are user-actionable config errors.
-      * ``NotImplementedError`` — the extra IS present but the concrete live-model
-        Inspect harness is not wired into this build. This is NOT a config error,
-        so it must not masquerade as one; the offline-testable discipline
-        (validate_eval_spec/at_least_passes/coverage/cohens_kappa/to_junit) is what
-        gates locally, and the live run is exercised by the eval CI."""
-    from rebar._optional import OptionalDependencyError, guard_import
-
-    spec = load_eval_spec(prompt_id, repo_root=repo_root)
     try:
-        guard_import("inspect_ai", extra="eval")  # the heavy import lives behind the extra
+        cfg = LLMConfig.from_env(repo_root=repo_root)
+        live = get_runner(cfg, override=runner)
+        live.preflight()  # surface a missing extra/credentials up front, before any case
     except OptionalDependencyError as exc:
         raise EvalError(str(exc)) from None
-    _ = spec  # the Inspect Task is assembled from this in the live harness
-    # The concrete Inspect Task wiring (dataset → solver(prompt) → scorers → epochs)
-    # is assembled here from `spec`; kept thin so the disciplined pieces above
-    # (grader checks, at_least(k), coverage, kappa) are what the tests pin. The live
-    # model run is exercised by the external/eval CI with credentials, not offline.
-    raise NotImplementedError(
-        "run_eval's live-model Inspect harness is not wired into this build; the "
-        "offline-testable discipline (validate_eval_spec/validate_scorer/"
-        "at_least_passes/coverage/cohens_kappa/to_junit) gates locally. Run the "
-        "full evaluation via the eval CI workflow (needs credentials)."
-    )
+
+    def solve(prompt_id: str, case: dict) -> dict:
+        return eval_solver.run_case(prompt_id, case, runner=live)
+
+    return solve
+
+
+def _gating_results(
+    name: str, outputs: list[tuple[dict, dict | None]], epoch: int
+) -> tuple[bool, list[dict]]:
+    """Apply one gating scorer across an epoch's case outputs. The scorer PASSES the
+    epoch iff every APPLICABLE case passes it (a scorer with no applicable cases — e.g.
+    recall on a spec with no fire cases — is vacuously satisfied). Returns
+    ``(passed, junit_cases)``."""
+    from rebar.llm.eval_scorers import score
+
+    failed = 0
+    junit: list[dict] = []
+    for case, out in outputs:
+        if out is None:
+            continue
+        res = score(name, case, out)
+        if not res.applicable:
+            continue
+        if not res.passed:
+            failed += 1
+        junit.append(
+            {
+                "name": f"{case.get('id', '?')}::{name}::e{epoch}",
+                "scorer": name,
+                "passed": res.passed,
+                "message": res.detail or "",
+            }
+        )
+    return failed == 0, junit
+
+
+def run_eval(
+    prompt_id: str, *, repo_root=None, dirty: bool = True, solve=None, runner=None
+) -> dict[str, Any]:
+    """Run a prompt's eval LIVE and return the scored result + the release gate.
+
+    Loads + validates the git-tracked spec, then for each of ``epochs`` runs every
+    dataset case through ``solve`` and applies the registered DETERMINISTIC gating
+    scorers. The reviewer's prompt is resolved by its op from the DIRTY working tree
+    (so a pre-commit edit is what's evaluated). The build gate is ``at_least(k)`` over
+    the epochs — an epoch passes iff coverage clears the threshold AND every gating
+    scorer passes. A deterministic scorer gates; llm-judge scorers only report (the
+    gate never depends on a model judge), so the gate is reproducible.
+
+    ``solve(prompt_id, case) -> output`` defaults to :func:`_live_solver` (the real op
+    via :mod:`rebar.llm.eval_solver`, needing the ``agents`` extra); it is injectable
+    so the whole aggregation path is offline-testable. Returns ``{prompt, epochs,
+    gate, passed, coverage, epoch_pass, junit}``. Raises :class:`EvalError` if the spec
+    is invalid or has no dataset to run."""
+    spec = load_eval_spec(prompt_id, repo_root=repo_root)
+    dataset = spec.get("dataset") or []
+    if not dataset:
+        raise EvalError(f"eval spec for {prompt_id!r} has no `dataset` to run")
+    epochs = int(spec["epochs"])
+    k = parse_gate(spec["gate"])
+    gating = [
+        s["name"]
+        for s in spec["scorers"]
+        if isinstance(s, dict) and s.get("type") == "deterministic"
+    ]
+    if solve is None:
+        solve = _live_solver(repo_root=repo_root, runner=runner)
+
+    epoch_pass: list[bool] = []
+    junit_cases: list[dict] = []
+    coverages: list[float] = []
+    for e in range(epochs):
+        outputs: list[tuple[dict, dict | None]] = []
+        for case in dataset:
+            try:
+                out: dict | None = solve(prompt_id, case)
+            except Exception as exc:  # noqa: BLE001 — a failed run is an UNSCORED case, not a crash
+                out = None
+                junit_cases.append(
+                    {
+                        "name": f"{case.get('id', '?')}::run::e{e}",
+                        "scorer": "run",
+                        "passed": False,
+                        "message": f"run error: {exc}",
+                    }
+                )
+            outputs.append((case, out))
+        scored = sum(1 for _, o in outputs if o is not None)
+        coverages.append(coverage(scored, len(dataset)))
+        epoch_ok = coverage_ok(spec, scored, len(dataset))
+        for name in gating:
+            passed, jcases = _gating_results(name, outputs, e)
+            junit_cases.extend(jcases)
+            epoch_ok = epoch_ok and passed
+        epoch_pass.append(epoch_ok)
+
+    return {
+        "prompt": prompt_id,
+        "epochs": epochs,
+        "gate": spec.get("gate"),
+        "passed": at_least_passes(epoch_pass, k),
+        "coverage": min(coverages) if coverages else 0.0,
+        "epoch_pass": epoch_pass,
+        "junit": to_junit(prompt_id, junit_cases),
+    }
