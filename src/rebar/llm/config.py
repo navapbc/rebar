@@ -34,6 +34,10 @@ DEFAULT_MODEL = "claude-opus-4-8"
 # both the LLMConfig field default and the env/table resolution fallback so the
 # default lives in ONE place (docs/config.md documents the same value).
 DEFAULT_MAX_TOKENS = 16000
+# Same single-source-of-truth pattern for the agent step cap + per-call wall-clock
+# timeout (each previously duplicated the literal across field default + resolution).
+DEFAULT_MAX_ITERATIONS = 25
+DEFAULT_TIMEOUT_S = 600
 # Execution backends. `pydantic_ai` is THE runtime (story d6d1 cutover dropped the
 # in-process graph stack). `fake` is the offline test seam.
 RUNNERS = ("pydantic_ai", "fake")
@@ -225,8 +229,8 @@ class LLMConfig:
     base_url: str | None = None  # OpenAI-compatible endpoint (local models)
     api_key: str | None = None  # explicit key (e.g. a dummy key for local servers)
     max_tokens: int = DEFAULT_MAX_TOKENS
-    max_iterations: int = 25
-    timeout_s: int = 600
+    max_iterations: int = DEFAULT_MAX_ITERATIONS
+    timeout_s: int = DEFAULT_TIMEOUT_S
     repo_path: str | None = None
     mcp_servers: dict = field(default_factory=dict)
     langfuse: LangfuseConfig = field(default_factory=LangfuseConfig)
@@ -277,9 +281,14 @@ class LLMConfig:
                 table, cli, "REBAR_LLM_MAX_TOKENS", "max_tokens", DEFAULT_MAX_TOKENS
             ),
             max_iterations=_llm_int(
-                table, cli, "REBAR_LLM_MAX_STEPS", "max_steps", 25, legacy="REBAR_LLM_MAX_ITERS"
+                table,
+                cli,
+                "REBAR_LLM_MAX_STEPS",
+                "max_steps",
+                DEFAULT_MAX_ITERATIONS,
+                legacy="REBAR_LLM_MAX_ITERS",
             ),
-            timeout_s=_llm_int(table, cli, "REBAR_LLM_TIMEOUT", "timeout", 600),
+            timeout_s=_llm_int(table, cli, "REBAR_LLM_TIMEOUT", "timeout", DEFAULT_TIMEOUT_S),
             repo_path=repo_path,
             mcp_servers=mcp_servers,
             langfuse=LangfuseConfig.from_env(),
