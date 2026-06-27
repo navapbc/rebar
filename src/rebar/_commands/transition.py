@@ -240,8 +240,11 @@ def _completion_precheck(
         # with a certified signature). HEAD resolves offline (no origin needed) and is "the state
         # about to be pushed" for the single-dev flow. `source=local` (opt-in) is the read-only
         # verify-before-push back-out that never signs.
+        # fetch=False: ref="HEAD" always resolves from the LOCAL object DB, so there is no
+        # reason to hit the network — and fetching the real origin on every close would add
+        # latency and a failure surface (a slow/unreachable remote) to a purely local verify.
         result = llm.verify_completion(
-            ticket_id, graph=False, source="attested", ref="HEAD", repo_root=repo_root
+            ticket_id, graph=False, source="attested", ref="HEAD", fetch=False, repo_root=repo_root
         )
     except Exception as exc:  # noqa: BLE001 — missing extra/key OR any verifier failure -> fail-closed (re-raise CommandError)
         raise CommandError(

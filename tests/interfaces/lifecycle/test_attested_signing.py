@@ -121,6 +121,33 @@ def test_reverify_different_sha_overwrites_no_stale_pin(rebar_repo: Path):
     assert v["verified_at_sha"] == "sha2"
 
 
+def test_concurrent_writers_no_stale_or_double_pin(rebar_repo: Path):
+    """AC3 (concurrency, NOT inspection): two writers race to pin DIFFERENT SHAs. The pin
+    write is serialized through the ticket's locked event-append boundary, so the outcome is
+    consistent — exactly ONE verified-at-sha step survives (no double pin), it certifies, and
+    the pin is one of the racers' SHAs (last-writer-wins, never an interleaved/corrupt value)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    tid = rebar.create_ticket("task", "t", repo_root=str(rebar_repo))
+    shas = [f"racesha{i:02d}" for i in range(12)]
+
+    def _sign(sha: str):
+        signing.sign_manifest(
+            tid,
+            ["completion-verifier: PASS", f"ticket: {tid}", signing.verified_at_sha_step(sha)],
+            repo_root=str(rebar_repo),
+        )
+
+    with ThreadPoolExecutor(max_workers=12) as ex:
+        list(ex.map(_sign, shas))
+
+    v = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    assert v["verdict"] == "certified"  # not corrupted by interleaving
+    pins = [s for s in v["manifest"] if s.startswith(signing.VERIFIED_AT_SHA_PREFIX)]
+    assert len(pins) == 1, f"exactly one pin must survive, got {pins}"  # no double pin
+    assert v["verified_at_sha"] in shas  # a real racer's SHA, not a torn value
+
+
 # --------------------------------------------------------------------------------------
 # AC4 — reopen retires the pin; local never signs
 # --------------------------------------------------------------------------------------

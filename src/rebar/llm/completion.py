@@ -172,6 +172,7 @@ def verify_completion(
     graph: bool | None = None,
     ref: str | None = None,
     source: str | None = None,
+    fetch: bool = True,
     repo_root=None,
     config: LLMConfig | None = None,
     runner: Runner | None = None,
@@ -194,7 +195,7 @@ def verify_completion(
     """
     from rebar.llm import gate_source
 
-    handle = gate_source.resolve_gate_handle(ref, source, repo_root)
+    handle = gate_source.resolve_gate_handle(ref, source, repo_root, fetch=fetch)
     with gate_source.gate_read_root(handle):
         return gate_source.annotate_result(
             _verify_completion_inner(
