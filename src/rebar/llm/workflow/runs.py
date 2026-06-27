@@ -143,13 +143,20 @@ class RunnerAgentStep(_ex.AgentStepRunner):
         for key, val in ctx.inputs.items():
             if isinstance(val, str):
                 variables[key] = val
-        system_prompt, langfuse_prompt = prompts.resolve_prompt(prompt, variables, cfg.langfuse)
-        instructions = str(
+        base_instructions = str(
             ctx.inputs.get("instructions")
             # `dimension` is optional on a prompt (None for a non-reviewer); fall back
             # to the prompt id so the default instructions never read "the 'None' …".
             or f"Review along the '{prompt.dimension or prompt.id}' dimension using the "
             "read-only repository tools; ground every finding in tool output."
+        )
+        # Engine-wide caching (story c6e5): split the byte-stable system prefix (the
+        # cacheable role/rules/how-to) from the volatile per-run body (ticket/plan data,
+        # marked with `<!--volatile-->`), routing the volatile body into the USER message
+        # so the cached system prefix stays byte-identical across runs. Unmarked prompts
+        # → whole text in system_prompt + base_instructions unchanged (pre-S2 behavior).
+        system_prompt, instructions, langfuse_prompt = prompts.resolve_prompt_cached(
+            prompt, variables, base_instructions=base_instructions, langfuse_cfg=cfg.langfuse
         )
         req = build_agent_request(
             prompt,

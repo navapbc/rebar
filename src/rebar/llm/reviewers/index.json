@@ -7,6 +7,7 @@
     "langfuse_prompt": "rebar-code-quality",
     "fallback_file": "code_quality.md",
     "applies_to": [],
+    "file_impact": [],
     "category": "review",
     "execution_mode": "agentic",
     "is_reviewer": true
@@ -19,6 +20,10 @@
     "langfuse_prompt": "rebar-completion-verifier",
     "fallback_file": "completion_verifier.md",
     "applies_to": [],
+    "file_impact": [
+      "src/rebar/llm/workflow/runs.py",
+      "src/rebar/llm/prompts.py"
+    ],
     "category": "review",
     "execution_mode": "agentic",
     "is_reviewer": true
@@ -36,6 +41,7 @@
       "**/security/**",
       "**/signing*"
     ],
+    "file_impact": [],
     "category": "review",
     "execution_mode": "agentic",
     "is_reviewer": true
@@ -48,6 +54,7 @@
     "langfuse_prompt": "rebar-spec-alignment",
     "fallback_file": "spec_alignment.md",
     "applies_to": [],
+    "file_impact": [],
     "category": "review",
     "execution_mode": "agentic",
     "is_reviewer": true
@@ -64,6 +71,7 @@
       "**/*_test.py",
       "tests/**"
     ],
+    "file_impact": [],
     "category": "review",
     "execution_mode": "agentic",
     "is_reviewer": true
@@ -76,6 +84,7 @@
     "langfuse_prompt": "rebar-ticket-quality",
     "fallback_file": "ticket_quality.md",
     "applies_to": [],
+    "file_impact": [],
     "category": "review",
     "execution_mode": "agentic",
     "is_reviewer": true

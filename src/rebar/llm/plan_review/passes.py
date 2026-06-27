@@ -179,7 +179,12 @@ def _resolve_system(prompt_id: str, plan: str, cfg: LLMConfig) -> str:
 
     prompt = prompts.get_prompt(prompt_id, repo_root=cfg.repo_path)
     system, _meta = prompts.resolve_prompt(prompt, {"plan": plan}, repo_root=cfg.repo_path)
-    return system
+    # The plan-review Pass-1 batch/bespoke path sends the WHOLE prompt as the system
+    # prompt (the plan stays in system, byte-stable per ticket → S1 caches it). A prompt
+    # that also carries the S2 `<!--volatile-->` cache-split marker (for the workflow
+    # RunnerAgentStep path) must read here as if the marker were absent — strip it,
+    # keeping all content in place, so adding the marker is fidelity-neutral for us.
+    return prompts.strip_volatile_marker(system)
 
 
 # ── Pass 1: find ─────────────────────────────────────────────────────────────────
