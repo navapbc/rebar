@@ -175,7 +175,13 @@ def _review_code_inner(
     # compute it from repo_root (the checkout) when a base..head range is given. (This epic
     # reviews a single ref/snapshot; a base+head snapshot pair is explicitly out of scope.)
     if diff_text is None:
-        diff_repo = str(repo_root) if repo_root else "."
+        # Resolve the object DB to diff against via the standard config precedence
+        # (repo_root arg > REBAR_ROOT env > git toplevel) — NOT the raw repo_root arg, which
+        # is None on the MCP path; and NOT cfg.repo_path, which is the .git-less snapshot in
+        # attested mode. The snapshot has no history, so the diff comes from the real checkout.
+        from rebar import config as _config
+
+        diff_repo = str(_config.repo_root(repo_root))
         diff_text = _git(diff_repo, ["diff", f"{base}..{head}"])
         changed_files = _git(diff_repo, ["diff", "--name-only", f"{base}..{head}"]).split()
     elif changed_files is None:
