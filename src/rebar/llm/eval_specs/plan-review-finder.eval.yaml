@@ -62,6 +62,29 @@ dataset:
     input: >
       A Rails story adding a payments webhook with acceptance criteria but no testing
       plan at all (no request specs, no idempotency test).
+  - id: R-E5-proxy-validation-cutover
+    corpus: rebar
+    criterion: E5
+    expect: finding
+    input: >
+      A rebar STORY that CUTS OVER the plan-review gate to a new "workflow" engine path
+      and DEFAULTS to it. AC: "Integration tests cover claim+close pass/fail through the
+      workflow path with intact signing." Those tests use canned/fake agents that never
+      invoke the real prompt-resolution boundary, so the suite passes OFFLINE without the
+      new live path ever running. No acceptance criterion exercises the defaulted workflow
+      path end-to-end against a live model. E5 SHOULD fire (recall): the PROXY-VALIDATION
+      anti-pattern — the AC is satisfiable without the changed, defaulted risky path ever
+      executing (the B5/super-plant-liver root cause).
+  - id: R-E6-cutover-no-live-ac
+    corpus: rebar
+    criterion: E6
+    expect: finding
+    input: >
+      A rebar TASK that flips a gate's default engine to a new code path. Its only proving
+      command is an offline unit test with a mocked dependency that short-circuits the new
+      path; no acceptance criterion exercises the defaulted path end-to-end (live). E6
+      SHOULD fire (recall): a cutover/defaulted path with no criterion that exercises it
+      end-to-end — green offline tests + a signed verdict are necessary but not sufficient.
   - id: R-G5-dso
     corpus: dso
     criterion: G5
@@ -141,6 +164,17 @@ dataset:
       (designated experimental validation). A1 must not flag NIH/rebuild — rebuilding a
       designated probe for production is the intended lifecycle (coach to confirm framing
       when production-vs-reference is ambiguous from location).
+  - id: FP8-E5-cutover-has-live-ac
+    corpus: rebar
+    criterion: E5
+    expect: pass
+    mode: cutover-has-live-e2e-acceptance-criterion
+    input: >
+      A rebar story that cuts over a gate to a new default engine path AND includes an
+      acceptance criterion that exercises the new path end-to-end against a LIVE model
+      (plus the offline suite). E5 must NOT fire proxy-validation: the defaulted path IS
+      exercised live — the anti-FP pair for R-E5-proxy-validation-cutover (discrimination,
+      not blanket firing on every cutover).
 
 # Frozen human-gold subset (kappa alignment for the llm-judge). SEED labels — pending
 # human adjudication (the gating gold subset; auto-labels seed the bulk corpus).

@@ -231,6 +231,10 @@
       {
         "key": "changed_behavior_tests",
         "check": "Changed/deleted behaviors get corresponding modify/remove-test work."
+      },
+      {
+        "key": "no_proxy_validation",
+        "check": "No proxy-validation: a changed or newly-DEFAULTED risky path is not validated SOLELY through a mock/offline substitute that bypasses the new behavior (canned/fake agents that never hit the real boundary). For a cutover that defaults to a new path, offline-green coverage that never exercises that path end-to-end (live) = MAJOR; add a live/end-to-end acceptance criterion for the defaulted path."
       }
     ]
   },
@@ -269,6 +273,10 @@
       {
         "key": "e2e_for_user_flows",
         "check": "User-facing flows have an end-to-end check or a documented rationale for its absence."
+      },
+      {
+        "key": "cutover_exercised_e2e",
+        "check": "A cutover/default-flip to a new code path has an acceptance criterion that EXERCISES that path end-to-end as in production (e.g. against the live model/dependency), not only offline/mocked proxies that bypass the new behavior; green offline tests + a signed completion verdict are necessary but not sufficient."
       }
     ]
   },
