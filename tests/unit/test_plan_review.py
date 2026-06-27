@@ -12,7 +12,6 @@ from __future__ import annotations
 import pytest
 
 from rebar.llm.config import LLMConfig
-from rebar.llm.errors import LLMConfigError, LLMUnavailableError
 from rebar.llm.plan_review import attest, det_floor, orchestrator, passes, registry, sidecar, sizing
 from rebar.llm.plan_review.det_floor import PlanContext
 
@@ -394,63 +393,18 @@ def test_p9_not_applicable_for_container() -> None:
     assert r.status == "pass" and r.coverage["applicable"] is False
 
 
-# ── LLM-unavailable: INDETERMINATE, never a hollow PASS (fuel-posse-ball) ────────
-class _NoDepsRunner:
-    """preflight raises (missing agents extra) — the LLM tier cannot run at all."""
-
-    name = "no-deps"
-
-    def preflight(self) -> None:
-        raise LLMConfigError("the 'agents' extra is missing")
-
-    def run(self, req):  # noqa: ANN001
-        raise AssertionError("run must not be reached when preflight fails")
-
-
-class _NoKeyRunner:
-    """preflight ok (deps present) but the provider call fails (missing/invalid key) —
-    surfaces as LLMUnavailableError, provider-agnostic."""
-
-    name = "no-key"
-
-    def preflight(self) -> None:
-        return None
-
-    def run(self, req):  # noqa: ANN001
-        raise LLMUnavailableError("the LLM provider call failed: OPENAI_API_KEY not set")
-
-
-class _FlakyRunner:
-    """preflight ok; a finder call raises a NON-systemic error — a per-criterion hiccup,
-    not a tier outage."""
-
-    name = "flaky"
-
-    def preflight(self) -> None:
-        return None
-
-    def run(self, req):  # noqa: ANN001
-        raise ValueError("transient parse hiccup for one criterion")
-
-
-def test_run_review_indeterminate_when_deps_unavailable() -> None:
-    v = orchestrator.run_review(_ctx(_GOOD_AC), LLMConfig(), runner=_NoDepsRunner())
-    assert v["verdict"] == "INDETERMINATE"  # NOT a DET-only PASS
-    assert v["coverage"]["llm_ran"] is False and v["coverage"].get("llm_unavailable") is True
-
-
-def test_run_review_indeterminate_when_key_unavailable_at_runtime() -> None:
-    v = orchestrator.run_review(_ctx(_GOOD_AC), LLMConfig(), runner=_NoKeyRunner())
-    assert v["verdict"] == "INDETERMINATE"
-    assert v["coverage"].get("llm_unavailable") is True
-
-
-def test_run_review_pass_on_per_criterion_failure_when_tier_ran() -> None:
-    # Fail-open PRESERVED: a non-systemic per-criterion failure (tier available) drops that
-    # unit's findings but the tier RAN → PASS, never INDETERMINATE.
-    v = orchestrator.run_review(_ctx(_GOOD_AC), LLMConfig(), runner=_FlakyRunner())
-    assert v["verdict"] == "PASS"
-    assert v["coverage"]["llm_ran"] is True and v["coverage"].get("llm_unavailable") is not True
+# NOTE: the bespoke `orchestrator.run_review` path was retired (story B-RETIRE). Its
+# INDETERMINATE-on-outage / per-criterion fail-open / bug-exempt / budget-shed behaviours are
+# now produced + asserted on the workflow gate path:
+#   - tests/unit/test_gate_engine_cutover.py (outage degradation, coach-failure recovery);
+#   - tests/interfaces/lifecycle/test_plan_review_gate.py (deps/key outage, fail-open,
+#     bug-exempt, cap-hit INDETERMINATE — all via review_plan on the workflow engine);
+#   - tests/unit/workflow/test_plan_review_workflow.py (exempt short-circuit, decide partition).
+# The per-pass LATENCY/COST metrics (db7b AC5: coverage["metrics"] det_ms/llm_ms/total_ms/
+# llm_calls) were bespoke-ONLY (computed inside run_review) and were RETIRED with it — the
+# workflow path does not yet emit them, so `coverage["metrics"]` is absent there. Reinstating
+# passive latency/cost telemetry on the workflow gate is a documented follow-up (tracked
+# separately), NOT covered above.
 
 
 def test_material_fingerprint_changes_on_material_edit() -> None:
@@ -500,14 +454,8 @@ def test_sidecar_payload_is_offline_reconstructable() -> None:
 
 # ── orchestrator routing + exempt verdicts ────────────────────────────────────
 def _fake_cfg():
-    from rebar.llm.config import LLMConfig
 
     return LLMConfig(runner="fake")
-
-
-def test_bug_is_exempt() -> None:
-    v = orchestrator.run_review(_ctx(_GOOD_AC, ttype="bug"), _fake_cfg())
-    assert v["verdict"] == "PASS" and v["runner"] == "exempt"
 
 
 def test_checkpoint_save_resume_and_material_invalidation(tmp_path) -> None:
@@ -540,33 +488,6 @@ def test_budget_cap_scales_with_centrality(monkeypatch) -> None:
     low = sizing.plan_budget_cap(_ctx(_GOOD_AC))  # centrality 0 → 1.0
     high = sizing.plan_budget_cap(_ctx(_GOOD_AC, centrality=1.0))  # → 2.0
     assert low == 1.0 and high == 2.0
-
-
-def test_budget_cap_sheds_agent_overlay_first_and_marks_indeterminate(monkeypatch) -> None:
-    # A near-zero cap sheds every AGENT/overlay criterion (the 85x calls); the cheap
-    # single-turn chunks still run. Shed criteria are recorded + emitted INDETERMINATE.
-    from rebar.llm.runner import FakeRunner
-
-    monkeypatch.setenv("REBAR_PLAN_REVIEW_BUDGET", "0")
-    fr = FakeRunner(structured={"analysis": "", "findings": []})
-    v = orchestrator.run_review(_ctx(_GOOD_AC, ttype="story"), _fake_cfg(), runner=fr)
-    budget = v["coverage"]["budget"]
-    assert budget["cap_usd"] == 0.0 and budget["shed"], "expected agent/overlay criteria shed"
-    assert any(f.get("reason") == "budget-cap-shed" for f in v["indeterminate"])
-    # No shed criterion ever blocks (INDETERMINATE is non-blocking).
-    assert all(f["decision"] != "block" for f in v["indeterminate"])
-
-
-def test_review_records_latency_metrics() -> None:
-    from rebar.llm.runner import FakeRunner
-
-    fr = FakeRunner(structured={"analysis": "", "findings": []})
-    v = orchestrator.run_review(_ctx(_GOOD_AC, ttype="task"), _fake_cfg(), runner=fr)
-    m = v["coverage"]["metrics"]
-    assert "det_ms" in m and "llm_ms" in m and "total_ms" in m and "llm_calls" in m
-    assert m["total_ms"] >= 0 and "no-llm/no-network" in m["claim_path"]
-    # The sidecar payload lifts metrics to the top level for offline join.
-    assert sidecar.build_payload(v, material="x")["metrics"] == m
 
 
 class _SeqRunner:
@@ -639,13 +560,17 @@ def test_largest_window_uses_configured_model_window() -> None:
 
 
 def test_advisory_cap_assertion_guards_blocking_leak() -> None:
-
-    # A blocking finding must never reach the advisory cap — the guard fails loud.
-    bad = det_floor.PlanContext(ticket_id="x", ticket_type="task", title="t", description=_GOOD_AC)
-    # Directly exercise the invariant via a crafted advisory list is internal; instead
-    # confirm a clean run keeps blocking out of advisory (no assertion fires).
-    v = orchestrator.run_review(bad, _fake_cfg(), runner=None)
-    assert isinstance(v.get("advisory"), list)
+    # A blocking finding must never reach the advisory cap — partition_findings asserts loud.
+    # Feed a DET block + a DET advisory through the shared partition core and confirm the
+    # block lands in `blocking` (never `surfaced`/`overflow`) with no AssertionError.
+    parts = orchestrator.partition_findings(
+        [{"finding": "no AC", "criteria": ["P1"]}],
+        [{"finding": "minor", "criteria": ["E2"]}],
+        [],
+        advisory_cap=10,
+    )
+    assert len(parts["blocking"]) == 1 and parts["blocking"][0]["decision"] == "block"
+    assert all(f.get("decision") != "block" for f in parts["surfaced"] + parts["overflow"])
 
 
 def test_route_criteria_splits_agent_and_single() -> None:

@@ -23,9 +23,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from rebar.llm import findings, operations, prompts
+from rebar.llm import findings
 from rebar.llm.config import DEFAULT_MODEL, LLMConfig
-from rebar.llm.runner import Runner, RunRequest, get_runner
+from rebar.llm.runner import Runner
 
 __all__ = ["verify_completion"]
 
@@ -204,105 +204,22 @@ def verify_completion(
     # recursion cap mid-run.
     if cfg.max_iterations < _VERIFY_MIN_STEPS:
         cfg = replace(cfg, max_iterations=_VERIFY_MIN_STEPS)
-    # Resolve the canonical id + ticket type once (one local read; no network). graph
-    # default depends on ticket type (epics verify across children).
+    # Resolve the ticket type once (one local read; no network). graph default depends on
+    # ticket type (epics verify across children).
     root = rebar.show_ticket(ticket_id, repo_root=repo_root)
-    canonical_id = root.get("ticket_id", ticket_id)
     if graph is None:
         graph = root.get("ticket_type") == "epic"
 
-    # Verdict PRODUCTION is engine-selectable (story B5 cutover). The workflow path
-    # (default) runs gates/completion-verification.yaml — which owns its OWN deterministic
-    # child-closure precheck → agentic verify → reconcile — and returns the reconciled
-    # completion_verdict. The close gate's signing wrapper (_commands.transition) is
-    # unchanged, so the signed attestation stays byte-compatible. cfg is already tuned
-    # (verifier model + step floor) above, so both paths run the same model/budget.
+    # Verdict PRODUCTION runs through the v3 engine workflow
+    # (gates/completion-verification.yaml) — which owns its OWN deterministic child-closure
+    # precheck → agentic verify → reconcile — and returns the reconciled completion_verdict.
+    # (The child-closure precheck is the workflow's `completion_precheck` op, which reuses
+    # `_child_closure_findings` / `_deterministic_child_failure` from this module, so there is
+    # exactly ONE child-closure implementation and no double check.) The close gate's signing
+    # wrapper (_commands.transition) is unchanged, so the signed attestation stays
+    # byte-compatible. cfg is already tuned (verifier model + step floor) above.
     from rebar.llm.workflow import gate_dispatch
 
-    if gate_dispatch.gate_engine(repo_root) == "workflow":
-        return gate_dispatch.produce_completion_verdict(
-            ticket_id, graph=graph, repo_root=repo_root, cfg=cfg, runner=runner
-        )
-
-    # ── Deterministic child-closure gate (runs BEFORE any LLM call) ─────────────────────
-    # A parent (epic/story) is incomplete unless every DIRECT child is closed WITH a
-    # certified completion signature — a graph+signature invariant, checked deterministically
-    # here, NOT by the LLM. If any child fails it, return a FAIL verdict immediately and DO
-    # NOT call the (billable, slow, step-bounded) evaluator. Consequence: the LLM is only ever
-    # reached once children are all closed+signed, so it never has to reason about child
-    # closure — which was the source of the count-dependent false-negatives and step-budget
-    # blowups (bug a254). Childless tickets yield no findings → natural pass-through to the
-    # own-criteria check below.
-    child_findings = _child_closure_findings(canonical_id, repo_root)
-    if child_findings:
-        return _deterministic_child_failure(canonical_id, child_findings, cfg)
-
-    reviewer = prompts.get_prompt(_REVIEWER_ID, repo_root=repo_root)
-    context, ids = operations._assemble_context(ticket_id, graph=graph, repo_root=repo_root)
-    # Fence the UNTRUSTED context so the prompt's instruction-hierarchy clause can refer to it
-    # unambiguously (the delimiting half of the OWASP/Anthropic prompt-injection mitigation).
-    fenced = f"<untrusted_ticket_context>\n{context}\n</untrusted_ticket_context>"
-    variables = {
-        "ticket_id": ids[0],
-        "ticket_context": fenced,
-        "repo_path": cfg.repo_path or "",
-    }
-    system_prompt, langfuse_prompt = prompts.resolve_prompt(reviewer, variables, cfg.langfuse)
-    instructions = (
-        f"Verify whether ticket {ids[0]} has met every completion requirement it states.\n\n"
-        "You have read-only repository tools and a read-only ticket tool — USE them, do not "
-        "rely on memory or guess at the code:\n"
-        "- list_directory(path): explore structure (generated/ignored files are hidden)\n"
-        "- search_files(regex, path): locate code; returns `path:line` matches\n"
-        "- read_file(path, line_start, line_end): read exact lines; PAGE large files\n"
-        "- show_ticket(ticket_id): read this ticket or a ticket it references (JSON)\n\n"
-        "Ground EVERY finding in what the tools actually return — cite real `path:line` from "
-        "read_file output and never invent paths, line numbers, or file contents. Be DECISIVE: "
-        "spend a few targeted searches/reads per criterion, then judge it and move on (don't "
-        "exhaustively trace wiring or re-read files) — you have a limited step budget. Emit one "
-        "finding per FAILING requirement only, then report the verdict (PASS/FAIL) and findings "
-        "via the structured output as soon as every criterion is judged.\n\n"
-        "NOTHING TO VERIFY: first read the ticket and decide whether it states any CONCRETE, "
-        "checkable completion requirement at all. If it does not — it is empty, a placeholder "
-        "or junk (e.g. just 'test'), or vague prose with no verifiable criteria — then there is "
-        "nothing to refute: do a brief look (a read or two at most), do NOT invent criteria and "
-        "do NOT explore the codebase further, and return verdict PASS with a single informational "
-        "finding noting there were no concrete completion requirements to verify. Reserve the "
-        "tool-heavy criterion-by-criterion check for tickets that actually state requirements."
+    return gate_dispatch.produce_completion_verdict(
+        ticket_id, graph=graph, repo_root=repo_root, cfg=cfg, runner=runner
     )
-
-    runner_sel = get_runner(cfg, override=runner)
-    # Probe runner readiness up front (import-only, no model call) so a missing `agents`
-    # extra / misconfig degrades cleanly BEFORE any billable call — this is what makes the
-    # close gate's fail-closed path fire on missing infra.
-    runner_sel.preflight()
-
-    req = RunRequest(
-        system_prompt=system_prompt,
-        instructions=instructions,
-        config=cfg,
-        reviewers=[_REVIEWER_ID],
-        target={"kind": "ticket", "ticket_ids": ids},
-        langfuse_prompt=langfuse_prompt,
-        mode="structured",
-        output_schema=_OUTPUT_SCHEMA,
-        # No injected ticket tools: the pydantic_ai runner (the only non-fake runner
-        # post-cutover) provides `show_ticket` natively via pai_tools.rebar_tools.
-        extra_tools=None,
-    )
-    result = runner_sel.run(req)  # {verdict, findings, summary?, runner, model, trace_id}
-
-    result["target"] = {"kind": "ticket", "ticket_ids": ids}
-    result["reviewers"] = [_REVIEWER_ID]
-    # The deterministic child-closure gate already ran (and PASSED — else we returned a
-    # _deterministic_child_failure above), so this verdict is purely the LLM's own-criteria
-    # judgment. The structured path skips normalize_finding (unlike the findings path), so
-    # normalize here (clamp severity, coerce citations, strip nulls); it KEEPS `criterion`.
-    result["findings"] = [
-        findings.normalize_finding(f, reviewer_id=_REVIEWER_ID) for f in result.get("findings", [])
-    ]
-    findings.resolve_citations(result, cfg.repo_path)  # downgrade hallucinated file: citations
-    _reconcile(result)  # normalize verdict; enforce FAIL⇔findings
-    # Double validation is intentional: the runner validated the raw payload once; this checks
-    # the op's own normalize/reconcile mutations stay in-shape. Both are shape-only (no conflict).
-    return findings.validate_structured(result, _OUTPUT_SCHEMA)

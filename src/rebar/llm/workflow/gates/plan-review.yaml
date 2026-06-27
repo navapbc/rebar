@@ -1,9 +1,9 @@
 schema_version: '3'
 name: plan-review
 description: >-
-  The plan-review gate expressed as a v3 engine workflow (epic B, stories B2 + B5). It
-  mirrors rebar.llm.plan_review.orchestrator.run_review's real control flow — a deterministic
-  Layer-1 floor (P1-P9) that SHORT-CIRCUITS (an exempt ticket type, or a P8-too-big plan,
+  The plan-review gate expressed as a v3 engine workflow (epic B, stories B2 + B5; the SOLE
+  plan-review gate since the bespoke driver was retired in B-RETIRE). Its control flow is a
+  deterministic Layer-1 floor (P1-P9) that SHORT-CIRCUITS (an exempt ticket type, or a P8-too-big plan,
   yields a terminal verdict with NO LLM call; a P1/P5 DET block does NOT short-circuit — the
   LLM runs and the DET blocks are merged at decide-time), then the four-pass review:
   route_criteria assembles the INCLUDED criteria (proportionate scrutiny + overlay

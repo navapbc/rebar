@@ -12,8 +12,8 @@ Proves `src/rebar/llm/workflow/gates/plan-review.yaml` + its `uses` ops:
    the blocking verdict, mirroring the B3 completion-gate short-circuit;
  * decide/coach produce the expected verdict shape.
 
-Exact behavioural PARITY with orchestrator.run_review is a SEPARATE story (B4); this proves the
-workflow RUNS and produces the right shape.
+This proves the workflow RUNS and produces the right verdict shape (the workflow is now the
+sole plan-review gate; the bespoke path it once mirrored was retired in story B-RETIRE).
 """
 
 from __future__ import annotations

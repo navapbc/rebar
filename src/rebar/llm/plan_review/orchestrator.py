@@ -27,14 +27,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import time
 from typing import Any
 
 from rebar.llm.config import LLMConfig
-from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.runner import Runner, get_runner
 
-from . import det_floor, passes, registry
+from . import passes, registry
 from .det_floor import PlanContext
 
 # The Pass-1 finder machinery lives in :mod:`.pass1` (module-size seam, epic B /
@@ -155,118 +153,8 @@ def route_criteria(ctx: PlanContext) -> tuple[list[dict], list[dict]]:
     return single, agent
 
 
-# ── the review ───────────────────────────────────────────────────────────────────
-def run_review(
-    ctx: PlanContext,
-    cfg: LLMConfig,
-    *,
-    runner: Runner | None = None,
-    advisory_cap: int = DEFAULT_ADVISORY_CAP,
-    run_coach: bool = True,
-) -> dict[str, Any]:
-    """Run the full gate on an assembled context and return a ``plan_review_verdict``."""
-    # Bugs are exempt from this gate (different shape; follow-on 3e50).
-    if ctx.ticket_type == "bug":
-        return _exempt_verdict(ctx, reason="bug tickets are exempt from the plan-review gate")
-    if ctx.ticket_type == "session_log":
-        return _exempt_verdict(ctx, reason="session_log tickets are gate-exempt")
-
-    # Per-pass LATENCY capture (child db7b AC5): wall-clock timing for the DET tier,
-    # the out-of-band LLM review, and the total — recorded on the sidecar so
-    # latency/cost targets are refined PASSIVELY from dogfood data (no upfront
-    # benchmark). The CLAIM-path check is structurally LLM/network-free (092b), so its
-    # cost is recorded as a constant marker, not timed here.
-    _t_total = time.monotonic()
-
-    # ── DET tier (exec=DET) ──────────────────────────────────────────────────────
-    _t_det = time.monotonic()
-    det_results = det_floor.run_det_floor(ctx)
-    det_ms = round((time.monotonic() - _t_det) * 1000, 1)
-    det_blocks = det_floor.det_blocking_findings(det_results)
-    det_advisories = det_floor.det_advisory_findings(det_results)
-    coverage: dict[str, Any] = {"det": det_floor.det_coverage(det_results)}
-
-    # If P8 says the ticket is too big to review at all, STOP before the LLM tiers —
-    # any LLM review would see a plan that doesn't fit (the size ladder's terminal).
-    p8_too_big = any(r.id == "P8" and r.blocked for r in det_results)
-
-    findings: list[dict[str, Any]] = []
-    llm_ran = False
-    llm_ms = 0.0
-    if not p8_too_big:
-        single, agent = route_criteria(ctx)
-        coverage["routing"] = {
-            "single_turn": [c["id"] for c in single],
-            "agent_tier": [c["id"] for c in agent],
-        }
-        runner_sel = runner or get_runner(cfg)
-        try:
-            runner_sel.preflight()
-            _t_llm = time.monotonic()
-            findings = _run_passes(ctx, cfg, runner_sel, single, agent, coverage)
-            llm_ms = round((time.monotonic() - _t_llm) * 1000, 1)
-            llm_ran = True
-        except LLMUnavailableError as exc:
-            # SYSTEMIC failure — the LLM tier could not run at all (missing agents extra,
-            # missing/invalid key, provider auth/connection/rate-limit). This must NOT
-            # degrade to a hollow DET-only PASS (fuel-posse-ball): mark the tier
-            # unavailable so the verdict becomes INDETERMINATE and is never signed.
-            logger.warning("plan-review LLM tier unavailable: %s", exc)
-            coverage["llm_error"] = str(exc)
-            coverage["llm_ran"] = False
-            coverage["llm_unavailable"] = True
-        except Exception as exc:  # noqa: BLE001 — an UNEXPECTED tier failure: also never a silent
-            # pass. Treat as unavailable (INDETERMINATE, unsigned) + record in-band/logger.
-            logger.warning("plan-review LLM tier failed unexpectedly", exc_info=True)
-            coverage["llm_error"] = str(exc)
-            coverage["llm_ran"] = False
-            coverage["llm_unavailable"] = True
-    coverage.setdefault("llm_ran", llm_ran)
-
-    # ── assemble: ids, decisions already attached; merge DET findings + cap ────────
-    parts = partition_findings(det_blocks, det_advisories, findings, advisory_cap=advisory_cap)
-    surfaced = parts["surfaced"]
-    overflow = parts["overflow"]
-
-    # ── Pass 4 coach over the surviving advisory findings ─────────────────────────
-    coaching: list[dict[str, Any]] = []
-    if run_coach and surfaced and llm_ran:
-        try:
-            coaching = passes.pass4_coach(
-                runner or get_runner(cfg),
-                cfg,
-                plan=ctx.plan_text,
-                surviving=surfaced,
-                move_registry=load_move_registry(ctx.repo_root),
-            )
-        except Exception as exc:  # noqa: BLE001 — coaching is advisory polish; broad-but-logged + recorded in coverage, never blocks the verdict
-            # Coaching is advisory polish — its failure never blocks the verdict, but
-            # record it in-band and on the logger (floor).
-            logger.warning("pass-4 coaching failed; verdict emitted without it", exc_info=True)
-            coverage["coach_error"] = str(exc)
-
-    # Per-pass latency + a cost proxy (LLM-call count) for passive refinement (db7b AC5).
-    coverage["metrics"] = {
-        "det_ms": det_ms,
-        "llm_ms": llm_ms,
-        "total_ms": round((time.monotonic() - _t_total) * 1000, 1),
-        "llm_calls": int(coverage.get("chunks", 0))
-        + len(coverage.get("routing", {}).get("agent_tier", []))
-        + (1 if llm_ran and (surfaced or overflow) else 0),
-        "claim_path": "no-llm/no-network (structural; the fast claim check is a local HMAC verify)",
-    }
-    return finalize_verdict(
-        ctx,
-        parts,
-        coaching=coaching,
-        coverage=coverage,
-        runner_name=(runner.name if runner else cfg.runner),
-        model=cfg.model,
-    )
-
-
-# ── verdict assembly (the SINGLE source of truth, shared by run_review + the v3 ───
-#    plan-review workflow's `uses` ops — story B2; NO duplicated assembly logic) ───
+# ── verdict assembly (the SINGLE source of truth, shared by the v3 plan-review ────
+#    workflow's `uses` ops — story B2; NO duplicated assembly logic) ──────────────
 def partition_findings(
     det_blocks: list[dict[str, Any]],
     det_advisories: list[dict[str, Any]],
@@ -278,8 +166,8 @@ def partition_findings(
     advisory cap. Mints each finding's stable ``id``. Returns
     ``{blocking, surfaced, overflow, indeterminate, dropped}`` — blocking findings are
     EXEMPT from the cap (all returned); advisory is sorted by priority then split at the
-    cap. The deterministic core both the bespoke ``run_review`` and the workflow's
-    ``plan_review_decide`` op call (no duplicated partition logic)."""
+    cap. The deterministic core the workflow's ``plan_review_decide`` op calls (no
+    duplicated partition logic)."""
     blocking: list[dict[str, Any]] = []
     advisory: list[dict[str, Any]] = []
     dropped: list[dict[str, Any]] = []
@@ -351,7 +239,7 @@ def finalize_verdict(
     """Assemble the terminal ``plan_review_verdict`` from a partition + coaching +
     coverage. Computes the verdict string (a DET block ⇒ BLOCK; an unavailable/
     unresolved LLM tier ⇒ INDETERMINATE; else PASS), records the counts on coverage,
-    and returns the verdict dict. Shared by ``run_review`` and the workflow ops."""
+    and returns the verdict dict. Shared by ``drift_refresh`` and the workflow ops."""
     blocking = parts["blocking"]
     surfaced = parts["surfaced"]
     overflow = parts["overflow"]

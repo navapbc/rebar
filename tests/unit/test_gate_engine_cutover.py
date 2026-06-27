@@ -1,10 +1,9 @@
-"""B5: the gate-engine cutover — config flag, byte-compatible signing, and the faithful
-degradation semantics (INDETERMINATE-on-outage for plan-review; fail-closed for completion).
+"""The workflow gate path — byte-compatible signing and the faithful degradation
+semantics (INDETERMINATE-on-outage for plan-review; fail-closed for completion).
 
-These are the production-path guarantees the cutover must keep: the `verify.gate_engine`
-flag selects which engine PRODUCES the verdict (default workflow), the SIGNING is untouched
-(so attestations stay byte-compatible), and a systemic LLM outage degrades exactly as the
-bespoke paths do.
+These are the production-path guarantees the workflow gate must keep: the SIGNING is
+untouched (so attestations stay byte-compatible across verdict-state-equivalent runs) and
+a systemic LLM outage degrades cleanly (never a hollow PASS / silent close).
 """
 
 from __future__ import annotations
@@ -13,7 +12,6 @@ import dataclasses
 
 import pytest
 
-from rebar.config import Config, ConfigError
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.plan_review import attest
@@ -23,25 +21,7 @@ from rebar.llm.runner import FakeRunner
 pytestmark = pytest.mark.unit
 
 
-# ── config flag ───────────────────────────────────────────────────────────────────
-def test_gate_engine_defaults_to_workflow() -> None:
-    # DEFAULT is workflow — tepid-bus-pomp completed the plan-review verify/coach live
-    # plumbing ({{plan}} + findings/surviving), so the workflow gate is live-correct.
-    assert Config.from_mapping(None).verify.gate_engine == "workflow"
-
-
-def test_gate_engine_accepts_bespoke_and_workflow() -> None:
-    for choice in ("bespoke", "workflow"):
-        cfg = Config.from_mapping({"verify": {"gate_engine": choice}})
-        assert cfg.verify.gate_engine == choice
-
-
-def test_gate_engine_rejects_unknown_choice() -> None:
-    with pytest.raises(ConfigError):
-        Config.from_mapping({"verify": {"gate_engine": "magic"}})
-
-
-# ── byte-compatible signing (the cutover's load-bearing guarantee) ──────────────────
+# ── byte-compatible signing (the load-bearing guarantee) ────────────────────────────
 def _passing_verdict() -> dict:
     return {
         "verdict": "PASS",
@@ -75,7 +55,7 @@ def test_manifest_is_deterministic_and_path_independent() -> None:
     assert m3 == m1
 
 
-# ── plan-review INDETERMINATE-on-outage (faithful to run_review) ────────────────────
+# ── plan-review INDETERMINATE-on-outage ────────────────────────────────────────────
 class _OutageRunner(FakeRunner):
     """A runner whose preflight reports the LLM tier unavailable (a systemic outage)."""
 
@@ -112,9 +92,9 @@ def test_plan_review_workflow_outage_degrades_to_unsigned_indeterminate() -> Non
     assert verdict["verdict"] != "PASS"
 
 
-# ── plan-review coach failure is NON-fatal (faithful to run_review) ─────────────────
+# ── plan-review coach failure is NON-fatal ──────────────────────────────────────────
 def test_plan_review_coach_failure_recovers_verdict_without_coaching() -> None:
-    # Pass-4 coach is advisory polish — bespoke run_review emits the verdict even when coach
+    # Pass-4 coach is advisory polish — the verdict is emitted even when the coach
     # fails. The workflow path reconstructs the verdict from the recorded Pass-3 `decide`
     # partition with EMPTY coaching, rather than degrading a valid PASS to INDETERMINATE.
     from rebar.llm.workflow import gate_dispatch
@@ -152,7 +132,7 @@ def test_plan_review_coach_failure_recovers_verdict_without_coaching() -> None:
     cfg = dataclasses.replace(LLMConfig(runner="fake"), model="claude-haiku-4-5")
     verdict = gate_dispatch._recover_plan_review_coach_failure(rec, cfg, error="coach boom")
     assert verdict is not None
-    assert verdict["verdict"] == "PASS"  # no blocking → PASS (faithful to coach-failed run_review)
+    assert verdict["verdict"] == "PASS"  # no blocking → PASS even though the coach failed
     assert verdict["coaching"] == []  # coaching dropped, not the whole verdict
     assert verdict["advisory"], "the real Pass-1/2 findings survive the coach failure"
     assert verdict["coverage"].get("coach_error")

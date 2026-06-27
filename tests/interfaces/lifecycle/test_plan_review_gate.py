@@ -20,6 +20,7 @@ a FakeRunner, so still no model/network). These tests assert the deterministic b
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -32,24 +33,68 @@ from rebar import config as _config
 from rebar.llm.runner import FakeRunner
 
 
-@pytest.fixture(autouse=True)
-def _pin_bespoke_gate_engine(monkeypatch):
-    """Pin the BESPOKE gate engine for this module (story B5 cutover).
+def _canned_verification(index: int) -> dict:
+    """A high-validity verification (so a finder finding SURVIVES Pass-3 as an advisory)."""
+    return {
+        "index": index,
+        "severity_attributes": {
+            "prod_impact": "medium",
+            "debt_impact": "medium",
+            "blast_radius": "module",
+            "likelihood": "medium",
+            "reversibility": "moderate",
+        },
+        "binary": {
+            "cited_reference_accurate": "na",
+            "is_verifiable": "yes",
+            "evidence_entails_finding": "yes",
+            "path_reachable": "yes",
+            "impact_follows_necessarily": "yes",
+            "no_viable_alternative_explanation": "yes",
+            "no_existing_mitigation": "yes",
+            "severity_claim_justified": "yes",
+        },
+    }
 
-    These tests drive `review_plan` with a minimal `FakeRunner` and assert the gate's
-    DETERMINISTIC, path-independent surface (DET floor, attestation signing, code-drift +
-    material-edit invalidation, progressive drift-refresh) — the signing wrapper B5 left
-    UNCHANGED, so this behaviour is identical on both engines. The default engine is now
-    "workflow", whose verify/coach prompt steps need a real (schema-shaped) runner output a
-    fixed-payload `FakeRunner` can't produce. Pinning bespoke keeps these validating the
-    still-present bespoke FALLBACK (kept until B-RETIRE); the workflow path is covered by
-    tests/unit/workflow/{test_plan_review_workflow,test_plan_review_parity} +
-    tests/unit/test_gate_engine_cutover.
-    """
-    monkeypatch.setenv("REBAR_VERIFY_GATE_ENGINE", "bespoke")
+
+class _GateFake(FakeRunner):
+    """A schema-aware OFFLINE runner that returns shape-valid output for each plan-review
+    pass (finders → verify → coach), so ``review_plan`` runs to a real verdict on the
+    workflow engine. The bespoke fixed-payload ``FakeRunner`` could not satisfy the
+    verify/coach schemas (B-RETIRE made the workflow the sole gate); this small fake does.
+
+    ``finder_error`` (a per-finder hiccup) raises ONLY on finder calls, exercising the
+    tier-ran fail-open path while verify/coach still resolve."""
+
+    name = "fake"
+
+    def __init__(self, *, finder_findings=None, finder_error=None):
+        super().__init__()
+        self._finder_findings = finder_findings or []
+        self._finder_error = finder_error
+
+    def run(self, req) -> dict:  # type: ignore[override]
+        from rebar.llm import findings as _f
+
+        schema = req.output_schema
+        if req.mode == "text":
+            return {"text": "[fake summary]", "runner": self.name, "model": None, "trace_id": None}
+        if schema == "plan_review_findings":
+            if self._finder_error is not None:
+                raise self._finder_error
+            payload = {"analysis": "", "findings": list(self._finder_findings)}
+        elif schema == "plan_review_verification":
+            idxs = [int(x) for x in re.findall(r"finding index (\d+)", req.instructions or "")]
+            payload = {"verifications": [_canned_verification(i) for i in idxs]}
+        elif schema == "plan_review_coach":
+            payload = {"notes": []}
+        else:
+            payload = {"analysis": "", "findings": []}
+        payload = _f.validate_structured(dict(payload), schema)
+        return {**payload, "runner": self.name, "model": None, "trace_id": None}
 
 
-_CLEAN = FakeRunner(structured={"analysis": "", "findings": []})
+_CLEAN = _GateFake()
 
 _DESC = (
     "Body with enough length to be a real plan, describing the change in detail so the gate has "
@@ -597,19 +642,14 @@ def test_per_criterion_failure_is_fail_open_when_tier_ran(rebar_repo: Path) -> N
     # RAN; a finder raised an ordinary error, not LLMUnavailableError) drops that unit's
     # findings but does NOT mark the tier unavailable → still PASS + signed, claim succeeds.
     # (Distinguishes a systemic outage, which is INDETERMINATE, from a one-off hiccup.)
-    class _FlakyFinder:
-        name = "flaky"
-
-        def preflight(self):
-            return None  # tier IS available
-
-        def run(self, req):  # noqa: ANN001
-            raise ValueError("transient parse hiccup for one criterion")  # non-systemic
+    # The hiccup is per-FINDER (verify/coach still resolve), so the tier RAN — the runner is
+    # available and only the finder calls raise a non-systemic error.
+    flaky = _GateFake(finder_error=ValueError("transient parse hiccup for one criterion"))
 
     _commit(rebar_repo)
     _enable(rebar_repo)
     tid = _make(rebar_repo)
-    v = rebar.llm.review_plan(tid, runner=_FlakyFinder(), repo_root=str(rebar_repo))
+    v = rebar.llm.review_plan(tid, runner=flaky, repo_root=str(rebar_repo))
     assert v["verdict"] == "PASS"  # tier ran (no systemic failure) → NOT INDETERMINATE
     assert v["coverage"]["llm_ran"] is True
     assert v["coverage"].get("llm_unavailable") is not True
@@ -624,8 +664,12 @@ def test_review_cap_hit_indeterminate(rebar_repo: Path, monkeypatch) -> None:
     _commit(rebar_repo)
     tid = _make(rebar_repo, "story")
     v = rebar.llm.review_plan(tid, runner=_CLEAN, repo_root=str(rebar_repo), sign=False)
-    assert v["coverage"]["budget"]["shed"], "expected agent/overlay criteria shed at cap 0"
-    assert any(f.get("reason") == "budget-cap-shed" for f in v["indeterminate"])
+    # The shared shed_to_budget (run by the workflow's ProductionBatchRunner via run_pass1)
+    # sheds the lowest-priority AGENT/overlay criteria at cap 0; each shed criterion is
+    # emitted as a non-blocking INDETERMINATE finding (the OBSERVABLE budget-shed behaviour).
+    shed = [f for f in v["indeterminate"] if f.get("reason") == "budget-cap-shed"]
+    assert shed, "expected agent/overlay criteria shed at cap 0"
+    assert all(f.get("decision") != "block" for f in shed)  # shedding never blocks
 
 
 # ── code-drift invalidation (epic boil-golem-veto / ADR 0002) ───────────────────

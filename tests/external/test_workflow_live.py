@@ -94,7 +94,7 @@ def test_live_review_skeleton_workflow_end_to_end(rebar_repo: Path) -> None:
 
 @_skip
 def test_live_plan_review_workflow_engine_produces_real_verdict(
-    rebar_repo: Path, monkeypatch
+    rebar_repo: Path,
 ) -> None:
     """The blind-spot GUARD (tepid-bus-pomp): run the plan-review gate through the WORKFLOW
     ENGINE against a LIVE model and assert it produces a real PASS/BLOCK verdict — NOT the
@@ -106,7 +106,6 @@ def test_live_plan_review_workflow_engine_produces_real_verdict(
     """
     import rebar.llm as llm
 
-    monkeypatch.setenv("REBAR_VERIFY_GATE_ENGINE", "workflow")  # force the engine under test
     tid = rebar.create_ticket(
         "story",
         "Persist the review cache to disk",
