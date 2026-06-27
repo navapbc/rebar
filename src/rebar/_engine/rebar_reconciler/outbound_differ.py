@@ -330,6 +330,7 @@ def _map_local_to_jira_fields(
     ticket: dict[str, Any],
     binding_store: Any = None,
     local_ticket_types: dict[str, str] | None = None,
+    emit_detach_clear: bool = False,
 ) -> dict[str, Any]:
     """Map local ticket fields to Jira field names/values.
 
@@ -396,6 +397,21 @@ def _map_local_to_jira_fields(
                 local_parent_id,
                 ticket.get("ticket_id"),
             )
+    elif binding_store is not None and emit_detach_clear:
+        # Symmetric parent CLEAR (parent-detach churn fix): the ticket has been
+        # DETACHED locally (parent_id is falsy). Emit an explicit ``None``
+        # sentinel into the mapped dict so the field-diff loop's ``parent``
+        # branch runs and compares None against the Jira-side parent key:
+        # it emits a CLEAR only when Jira still carries a parent (stale epic-
+        # link) and nothing when both sides are already parent-less (so a
+        # never-parented ticket does not churn a clear every pass).
+        # Gated on binding_store (the parent-sync feature seam) AND on
+        # ``emit_detach_clear`` — only the UPDATE diff path (``_diff_fields``)
+        # opts in; the CREATE path leaves the key ABSENT so an orphan create
+        # never carries a spurious ``parent: None`` payload. The hierarchy
+        # pre-check above is intentionally skipped for a clear — there is no
+        # parent type to validate.
+        result["parent"] = None
     return result
 
 
@@ -488,6 +504,28 @@ def _local_matches_prev(field_name: str, local_val: Any, prev_jira_fields: dict[
     return local_val == prev_val
 
 
+def _parent_clear_is_managed(
+    jira_parent_key: str, ticket: dict[str, Any], binding_store: Any
+) -> bool:
+    """Whether a detached-locally Jira parent is one we MANAGED (so its CLEAR may propagate).
+
+    The parent half of the shared managed-ref removal gate (story safe-luge-nog). Maps the
+    Jira parent key back to a local id and asks the provider-agnostic gate whether that
+    ``parent`` ref is in the ticket's ``managed_refs``. Fail-open toward NOT clobbering: if
+    the local id can't be resolved (no ``get_local_id`` / unbound), treat as unmanaged so a
+    human-set Jira parent is left for inbound ADOPT rather than cleared. Local import keeps
+    the differ free of module-scope heavy imports (it is loaded standalone in tests)."""
+    from rebar.reducer._managed_refs import should_propagate_removal
+
+    get_local_id = getattr(binding_store, "get_local_id", None)
+    if get_local_id is None:
+        return False
+    parent_local_id = get_local_id(jira_parent_key)
+    if not parent_local_id:
+        return False
+    return should_propagate_removal("parent", parent_local_id, ticket)
+
+
 def _diff_fields(
     ticket: dict[str, Any],
     jira_fields: dict[str, Any],
@@ -520,7 +558,10 @@ def _diff_fields(
     ticket_id = ticket.get("ticket_id") or ticket.get("id") or "<no-id>"
 
     local_mapped = _map_local_to_jira_fields(
-        ticket, binding_store=binding_store, local_ticket_types=local_ticket_types
+        ticket,
+        binding_store=binding_store,
+        local_ticket_types=local_ticket_types,
+        emit_detach_clear=True,
     )
     changed: dict[str, Any] = {}
     for field_name, local_val in local_mapped.items():
@@ -593,6 +634,17 @@ def _diff_fields(
                 jira_parent_raw.get("key") if isinstance(jira_parent_raw, dict) else None
             )
             if local_val != jira_parent_key:
+                # Managed-ref gate (tan-elbow-mica): a parent CLEAR (local detached,
+                # ``local_val`` falsy) must only propagate when we MANAGED that parent —
+                # otherwise a parent a human set directly in Jira (one local never had)
+                # would be clobbered instead of ADOPTED inbound. A parent SET (re-parent,
+                # ``local_val`` truthy) is always local-authoritative and not gated.
+                if (
+                    not local_val
+                    and jira_parent_key
+                    and not _parent_clear_is_managed(jira_parent_key, ticket, binding_store)
+                ):
+                    continue  # never managed this Jira parent -> adopt inbound, don't clear
                 changed[field_name] = local_val
                 if verbose:
                     print(  # noqa: T201
@@ -953,6 +1005,15 @@ _RELATION_TO_JIRA_LINK: dict[str, tuple[str, bool]] = {
     "relates_to": ("Relates", False),
 }
 
+# Reverse of the above for the REMOVE pass (wake-inn-parse): a Jira link type maps
+# to a base rebar relation; the inward/outward direction disambiguates Blocks into
+# blocks vs depends_on (mirrors inbound_differ._JIRA_LINK_TO_RELATION). Re-declared
+# locally for the same standalone-load reason as _RELATION_TO_JIRA_LINK above.
+_JIRA_LINK_TO_RELATION: dict[str, str] = {
+    "Blocks": "blocks",
+    "Relates": "relates_to",
+}
+
 
 def _existing_jira_links(jira_fields: dict[str, Any]) -> set[tuple[str, str]]:
     """Index a Jira issue's ``issuelinks`` as a ``{(type_name, target_key)}`` set.
@@ -985,9 +1046,9 @@ def _diff_links(
     jira_fields: dict[str, Any],
     binding_store: Any,
 ) -> list[dict[str, Any]]:
-    """Compare a local ticket's ``deps`` to its Jira issuelinks. ADD-only.
+    """Compare a local ticket's ``deps`` to its Jira issuelinks. Emits ADDs and REMOVEs.
 
-    For each local dep ``{target_id, relation, link_uuid}``:
+    ADD pass — for each local dep ``{target_id, relation, link_uuid}``:
       - resolve ``target_id`` -> Jira key (skip unbound, mirroring the
         parent-unbound skip in ``_map_local_to_jira_fields``);
       - map ``relation`` -> Jira link type via ``_RELATION_TO_JIRA_LINK``
@@ -998,14 +1059,17 @@ def _diff_links(
       - emit ``{"action":"add","type":...,"to_key":...,"relation":...,
         "link_uuid":...}``.
 
-    No REMOVE mutations are emitted (additive-only, mirroring the create-time
-    label behaviour). The applier (Cycle 3) consumes ``to_key`` as the link
-    target. The recorded ``relation`` is the rebar relation; ``swap_endpoints``
-    is handled by the applier when issuing the directional Jira call.
+    REMOVE pass (wake-inn-parse) — see :func:`_diff_link_removals`: a Jira link of a
+    mapped type, absent locally, that we MANAGED (in ``managed_refs``) emits
+    ``{"action":"remove","type":...,"to_key":...,"relation":...}`` so a deliberate local
+    unlink propagates instead of being re-added inbound every pass. A never-managed Jira
+    link is left for inbound ADOPT, never clobbered.
+
+    The applier consumes ``to_key`` as the link target (resolving the concrete link id
+    for a REMOVE at apply time). The recorded ``relation`` is the rebar relation;
+    ``swap_endpoints`` is handled by the applier when issuing the directional Jira call.
     """
     deps = ticket.get("deps") or []
-    if not deps:
-        return []
     existing = _existing_jira_links(jira_fields)
 
     mutations: list[dict[str, Any]] = []
@@ -1037,7 +1101,78 @@ def _diff_links(
                 "link_uuid": dep.get("link_uuid"),
             }
         )
+    # Symmetric REMOVE pass (wake-inn-parse): a Jira link of a mapped type, absent
+    # locally, that we MANAGED is a deliberate local unlink — propagate the delete so
+    # the inbound differ stops re-adding it (the churn). A never-managed Jira link is
+    # left for inbound ADOPT, never clobbered. The applier resolves the link id at
+    # apply time (mirrors the ADD dedup probe), so we emit only (type, to_key).
+    mutations.extend(_diff_link_removals(ticket, jira_fields, binding_store))
     return mutations
+
+
+def _diff_link_removals(
+    ticket: dict[str, Any],
+    jira_fields: dict[str, Any],
+    binding_store: Any,
+) -> list[dict[str, Any]]:
+    """Emit managed-ref-gated link REMOVE mutations (the symmetric half of _diff_links).
+
+    For each Jira issuelink of a mapped type whose ``(relation, local_target)`` is NOT in
+    the local deps but IS in the ticket's ``managed_refs``, emit
+    ``{"action":"remove","type":...,"to_key":...,"relation":...}``. Direction (inward vs
+    outward) disambiguates Blocks into blocks/depends_on, mirroring the inbound differ.
+    Local import keeps the differ free of module-scope heavy imports (standalone-loaded in
+    tests)."""
+    from rebar.reducer._managed_refs import should_propagate_removal
+
+    issuelinks = jira_fields.get("issuelinks") or []
+    if not isinstance(issuelinks, list) or not issuelinks:
+        return []
+    get_local_id = getattr(binding_store, "get_local_id", None)
+    if get_local_id is None:
+        return []  # cannot resolve targets -> fail-open (no removal, additive-only)
+
+    local_deps: set[tuple[str, str]] = {
+        (d.get("relation"), d.get("target_id"))
+        for d in ticket.get("deps") or []
+        if isinstance(d, dict) and d.get("relation") and d.get("target_id")
+    }
+
+    removals: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for link in issuelinks:
+        if not isinstance(link, dict):
+            continue
+        link_type = link.get("type") or {}
+        type_name = link_type.get("name") if isinstance(link_type, dict) else None
+        base_relation = _JIRA_LINK_TO_RELATION.get(type_name) if type_name else None
+        if base_relation is None:
+            continue  # link type with no rebar relation mapping — never managed by us
+        inward = link.get("inwardIssue")
+        outward = link.get("outwardIssue")
+        if isinstance(inward, dict) and inward.get("key"):
+            other_key = inward.get("key")
+            relation = base_relation
+        elif isinstance(outward, dict) and outward.get("key"):
+            other_key = outward.get("key")
+            relation = "depends_on" if base_relation == "blocks" else base_relation
+        else:
+            continue
+        local_target = get_local_id(other_key)
+        if not local_target:
+            continue  # unbound — retry next pass
+        if (relation, local_target) in local_deps:
+            continue  # still linked locally — not a removal
+        if not should_propagate_removal(relation, local_target, ticket):
+            continue  # never managed this link — adopt inbound, do not clobber
+        dedup_key = (type_name, other_key)
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+        removals.append(
+            {"action": "remove", "type": type_name, "to_key": other_key, "relation": relation}
+        )
+    return removals
 
 
 def _diff_status_annotation_labels(
