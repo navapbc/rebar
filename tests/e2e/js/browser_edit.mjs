@@ -22,7 +22,7 @@ await page.evaluate(() => {
 await page.waitForTimeout(300);
 await page.evaluate(() => {
   const hdr = Array.from(document.querySelectorAll(".bio-properties-panel-group-header")).find(
-    (h) => /rebar/i.test(h.textContent)
+    (h) => /rebar|step behavior/i.test(h.textContent)
   );
   if (hdr) hdr.click();
 });

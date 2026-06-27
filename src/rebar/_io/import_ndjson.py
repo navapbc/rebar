@@ -269,7 +269,11 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
             status = rec.get("status")
             if status in ("in_progress", "blocked"):
                 try:
-                    transition_compute(local, "open", status, repo_root=rr)
+                    # cascade=False: import replays each ticket's recorded status
+                    # explicitly; the parent-first claim/transition cascade would
+                    # pre-move an open parent and then conflict with that parent's
+                    # own in_progress transition in this same pass.
+                    transition_compute(local, "open", status, cascade=False, repo_root=rr)
                 except Exception as exc:  # noqa: BLE001 — per-row fail-open: one bad status transition never aborts the import run; collected via warn()
                     warn(f"could not set {local} to {status}: {exc}")
             elif status == "archived" or rec.get("archived"):
