@@ -25,6 +25,16 @@ reclamation janitor are layered on top in sibling modules.
 
 from __future__ import annotations
 
+from rebar._snapshot.cache import (
+    CacheMiss,
+    acquire,
+    add_bytes,
+    byte_total,
+    entry_mtime,
+    entry_size,
+    open_in_snapshot,
+    touch_entry,
+)
 from rebar._snapshot.repo_snapshot import (
     SnapshotError,
     SnapshotFetchError,
@@ -38,13 +48,21 @@ from rebar._snapshot.repo_snapshot import (
 )
 
 __all__ = [
+    "CacheMiss",
     "SnapshotError",
     "SnapshotFetchError",
     "SnapshotHandle",
     "SnapshotRefError",
+    "acquire",
+    "add_bytes",
+    "byte_total",
+    "entry_mtime",
+    "entry_size",
     "is_lfs_pointer",
     "materialize",
+    "open_in_snapshot",
     "resolve_ref",
     "store_root",
     "sweep_tmp",
+    "touch_entry",
 ]
