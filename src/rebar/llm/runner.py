@@ -15,8 +15,10 @@ clear, actionable error.
 
 from __future__ import annotations
 
+import logging
 import math
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
@@ -29,6 +31,8 @@ from rebar.llm.errors import (
     LLMUnavailableError,
     StructuredOutputError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -208,6 +212,14 @@ class PydanticAIRunner:
         # so a given cfg.max_iterations allows the intended number of tool-call cycles
         # (and so we DON'T silently inherit pydantic-ai's default request_limit=50).
         usage_limits = UsageLimits(request_limit=max(1, math.ceil(cfg.max_iterations / 2)))
+        # Observability (one structured record per LLM call): which reviewer/criterion,
+        # execution mode, model, and wall-clock — so a slow/serial fan-out (e.g. the
+        # container per-child loop) is visible without a debugger. Quiet by default;
+        # enable with REBAR_LOG_LEVEL=INFO. Failures log at WARNING.
+        _call_label = (
+            ",".join(req.reviewers) if req.reviewers else (req.target.get("ticket_id") or "?")
+        )
+        _t0 = time.monotonic()
         try:
             if req.mode == "text":
                 agent = Agent(model, **kwargs)
@@ -220,6 +232,13 @@ class PydanticAIRunner:
                     )
                 }
         except UsageLimitExceeded as exc:
+            logger.warning(
+                "llm call [%s] mode=%s model=%s hit step budget in %.1fs",
+                _call_label,
+                req.execution_mode,
+                ran_model,
+                time.monotonic() - _t0,
+            )
             raise LLMRunnerError(
                 f"agent exceeded its step budget (max_iterations={cfg.max_iterations}; "
                 "~1 model request per tool call). Raise REBAR_LLM_MAX_STEPS or narrow "
@@ -231,7 +250,22 @@ class PydanticAIRunner:
             # key / connection / rate-limit). Unify into the provider-agnostic
             # LLMUnavailableError so every prompt-using client gets ONE recognizable
             # "LLM couldn't run" signal — never a swallowed empty result (fuel-posse-ball).
+            logger.warning(
+                "llm call [%s] mode=%s model=%s FAILED in %.1fs: %s",
+                _call_label,
+                req.execution_mode,
+                ran_model,
+                time.monotonic() - _t0,
+                exc,
+            )
             raise LLMUnavailableError(f"the LLM provider call failed: {exc}") from exc
+        logger.info(
+            "llm call [%s] mode=%s model=%s ok in %.1fs",
+            _call_label,
+            req.execution_mode,
+            ran_model,
+            time.monotonic() - _t0,
+        )
         return _findings.finalize_outcome(
             outcome,
             mode=req.mode,
