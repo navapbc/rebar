@@ -1,0 +1,236 @@
+"""Deterministic eval scorers — the executable registry behind the scorer NAMES
+in the packaged eval specs (epic 6f2d / WS-EVAL-EXISTING).
+
+Until this module existed, a spec's ``deterministic`` scorer was an inert NAME:
+``validate_scorer`` only checked the name was non-empty and ``run_eval`` was a stub,
+so no named scorer ever executed. This module makes the names REAL — each maps to a
+PURE function over ``(dataset_case, reviewer_output) -> ScoreResult`` — so the live
+harness (``run_eval``) can gate on them and ``validate_eval_spec(strict=True)`` can
+reject a spec that names a scorer with no implementation (no more silent typos).
+
+A deterministic scorer is the GATE (llm-judge scorers only report). Each returns a
+:class:`ScoreResult` with ``applicable`` (does this scorer's metric apply to this
+case?) and, when applicable, ``passed``. Aggregation across cases/epochs (recall,
+``at_least(k)``, coverage) is the caller's job — see :mod:`rebar.llm.eval`.
+
+The reviewer ``output`` is one of:
+  * a ``review_result`` ``{findings:[...], ...}`` (review_ticket / scan_spec /
+    code-quality / the plan-review finders) — "fired" means >=1 finding;
+  * a ``completion_verdict`` ``{verdict:"PASS"|"FAIL", findings:[...]}`` (the
+    completion-verifier) — "fired" means verdict FAIL;
+  * a per-finding verification ``{validity: 0..1}`` / ``{verdict: "valid"|...}``
+    (the plan-review verifier) — graded by :func:`_validity`.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+
+# Dataset-case `expect` vocabulary. finding/fail = "should fire"; pass = "should not
+# fire"; high_validity/low_validity = the verifier's discrimination axis.
+FIRE_EXPECTS = frozenset({"finding", "fail"})
+NOFIRE_EXPECTS = frozenset({"pass"})
+VALIDITY_EXPECTS = frozenset({"high_validity", "low_validity"})
+ALLOWED_EXPECTS = FIRE_EXPECTS | NOFIRE_EXPECTS | VALIDITY_EXPECTS
+
+
+@dataclass(frozen=True)
+class ScoreResult:
+    """One deterministic scorer's verdict on one case. ``applicable=False`` means the
+    scorer's metric does not cover this case (excluded from its denominator), so
+    ``passed`` is ignored."""
+
+    applicable: bool
+    passed: bool = False
+    detail: str = ""
+
+
+Scorer = Callable[[dict, dict], ScoreResult]
+
+_NA = ScoreResult(applicable=False)
+
+
+# ── shared predicates ──────────────────────────────────────────────────────────
+
+
+def _findings(out: dict) -> list:
+    return out.get("findings") or [] if isinstance(out, dict) else []
+
+
+def _fired(out: dict) -> bool:
+    """True when the reviewer flagged a defect: a FAIL verdict, or >=1 finding."""
+    if not isinstance(out, dict):
+        return False
+    if "verdict" in out:
+        return str(out.get("verdict", "")).strip().upper() == "FAIL"
+    return bool(_findings(out))
+
+
+def _validity(out: dict) -> float | None:
+    """Extract a 0..1 graded validity from a verifier output, or None if absent.
+
+    Tolerant of shape: a numeric ``validity``/``graded_validity``/``score``/
+    ``confidence``, or a string ``verdict``/``label`` mapped to the poles."""
+    if not isinstance(out, dict):
+        return None
+    for key in ("validity", "graded_validity", "score", "confidence"):
+        v = out.get(key)
+        if isinstance(v, int | float):
+            return float(v)
+    for key in ("verdict", "label"):
+        s = out.get(key)
+        if isinstance(s, str):
+            low = s.strip().lower()
+            if low in {"valid", "high", "high_validity", "real", "confirmed", "true"}:
+                return 1.0
+            if low in {"invalid", "low", "low_validity", "false", "dismissed", "refuted"}:
+                return 0.0
+    return None
+
+
+def _expects_high_validity(case: dict) -> bool:
+    return case.get("expect") == "high_validity" or str(case.get("kind", "")).lower() == "true"
+
+
+# ── schema / contract scorers (applicable to every case) ───────────────────────
+
+
+def _schema_review_result(case: dict, out: dict) -> ScoreResult:
+    from rebar.llm.findings import FindingsError, validate_result
+
+    try:
+        validate_result(out if isinstance(out, dict) else {})
+        return ScoreResult(True, True)
+    except FindingsError as exc:
+        return ScoreResult(True, False, str(exc))
+
+
+def _schema_verdict(case: dict, out: dict) -> ScoreResult:
+    """completion_verdict contract: verdict in {PASS,FAIL}; FAIL<=>findings; every
+    FAIL finding carries at least one citation (the source-citation contract)."""
+    if not isinstance(out, dict):
+        return ScoreResult(True, False, "output is not a dict")
+    verdict = str(out.get("verdict", "")).strip().upper()
+    if verdict not in {"PASS", "FAIL"}:
+        return ScoreResult(True, False, f"verdict {verdict!r} not in PASS/FAIL")
+    findings = _findings(out)
+    if verdict == "FAIL" and not findings:
+        return ScoreResult(True, False, "FAIL verdict with no findings (FAIL<=>findings)")
+    if verdict == "PASS" and findings:
+        return ScoreResult(True, False, "PASS verdict but findings present (FAIL<=>findings)")
+    for f in findings:
+        if not (f.get("citations") or []):
+            return ScoreResult(True, False, "a FAIL finding lacks a source citation")
+    return ScoreResult(True, True)
+
+
+def _schema_verification(case: dict, out: dict) -> ScoreResult:
+    """The verifier must emit a graded validity (so Pass-3 can gate on it)."""
+    v = _validity(out)
+    if v is None:
+        return ScoreResult(True, False, "no graded validity in verifier output")
+    if not 0.0 <= v <= 1.0:
+        return ScoreResult(True, False, f"validity {v} out of [0,1]")
+    return ScoreResult(True, True)
+
+
+# ── recall / no-fire scorers (applicable by `expect`) ──────────────────────────
+
+
+def _recall(case: dict, out: dict) -> ScoreResult:
+    """On a case that SHOULD fire (expect finding/fail), the reviewer must fire."""
+    if case.get("expect") not in FIRE_EXPECTS:
+        return _NA
+    fired = _fired(out)
+    return ScoreResult(True, fired, "" if fired else "expected a finding/FAIL, got none")
+
+
+def _no_fire(case: dict, out: dict) -> ScoreResult:
+    """On a case that should PASS (expect pass), the reviewer must NOT fire."""
+    if case.get("expect") not in NOFIRE_EXPECTS:
+        return _NA
+    fired = _fired(out)
+    return ScoreResult(True, not fired, "false fire on a good case" if fired else "")
+
+
+def _cites_real_paths(case: dict, out: dict) -> ScoreResult:
+    """Every finding cites at least one resolved file path. Citations are resolved
+    upstream (findings.resolve_citations downgrades unresolved file citations to
+    kind='source'), so a surviving kind='file' citation is a real path:line."""
+    if not _fired(out):
+        return _NA
+    for f in _findings(out):
+        cits = f.get("citations") or []
+        if not any(c.get("kind") == "file" and c.get("path") for c in cits):
+            return ScoreResult(True, False, "a finding lacks a resolved file citation")
+    return ScoreResult(True, True)
+
+
+# ── verifier discrimination scorers ────────────────────────────────────────────
+
+
+def _discriminates_true_from_false(case: dict, out: dict) -> ScoreResult:
+    """A planted TRUE finding must grade high-validity; a planted FALSE one low."""
+    if case.get("expect") not in VALIDITY_EXPECTS and "kind" not in case:
+        return _NA
+    v = _validity(out)
+    if v is None:
+        return ScoreResult(True, False, "no graded validity to discriminate on")
+    want_high = _expects_high_validity(case)
+    got_high = v >= 0.5
+    ok = got_high == want_high
+    return ScoreResult(True, ok, "" if ok else f"validity {v} contradicts expected {want_high}")
+
+
+def _no_sycophancy(case: dict, out: dict) -> ScoreResult:
+    """A real defect must not be sycophantically dismissed (graded low)."""
+    if not _expects_high_validity(case):
+        return _NA
+    v = _validity(out)
+    if v is None:
+        return ScoreResult(True, False, "no graded validity on a real defect")
+    ok = v >= 0.5
+    return ScoreResult(True, ok, "" if ok else f"real defect dismissed (validity {v})")
+
+
+# ── the registry ───────────────────────────────────────────────────────────────
+# Names are the public contract (they appear in the packaged *.eval.yaml). Several
+# names alias one archetype where the semantics are identical (recall is recall
+# whether the bad thing is a "seeded defect", an "incomplete impl", or a "coverage
+# gap"); the distinct names keep each spec self-documenting.
+
+REGISTRY: dict[str, Scorer] = {
+    # schema / contract
+    "emits_valid_review_result": _schema_review_result,
+    "emits_valid_findings": _schema_review_result,
+    "emits_valid_verdict": _schema_verdict,
+    "emits_valid_verification": _schema_verification,
+    # recall (should-fire cases)
+    "recall_on_seeded_defects": _recall,
+    "recall_on_silent_drop": _recall,
+    "recall_on_incomplete": _recall,
+    "recall_on_gaps_and_conflicts": _recall,
+    # no-fire (good cases)
+    "no_fire_on_good_cases": _no_fire,
+    "no_fire_on_honored_or_justified_descope": _no_fire,
+    "no_false_fail_on_complete": _no_fire,
+    "no_fire_on_aligned": _no_fire,
+    # grounding
+    "cites_real_paths": _cites_real_paths,
+    # verifier discrimination
+    "discriminates_true_from_false": _discriminates_true_from_false,
+    "no_sycophancy_on_real_defects": _no_sycophancy,
+}
+
+
+def known_scorer_names() -> frozenset[str]:
+    """The registered deterministic-scorer names. ``validate_eval_spec(strict=True)``
+    rejects any deterministic scorer whose name is not in this set."""
+    return frozenset(REGISTRY)
+
+
+def score(name: str, case: dict, out: dict) -> ScoreResult:
+    """Run one registered deterministic scorer. Raises ``KeyError`` for an unknown
+    name (call :func:`known_scorer_names` to validate first)."""
+    return REGISTRY[name](case, out)

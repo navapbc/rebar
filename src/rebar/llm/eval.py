@@ -104,14 +104,18 @@ def _family(model: str | None) -> str | None:
     return None
 
 
-def validate_scorer(scorer: dict, *, generator_model: str | None = None) -> list[str]:
+def validate_scorer(
+    scorer: dict, *, generator_model: str | None = None, known: frozenset[str] | None = None
+) -> list[str]:
     """Validate ONE scorer against the grader-discipline rules (WS-G2).
 
-    A deterministic scorer gates and needs only a name. An ``llm-judge`` scorer
-    MUST carry a pinned grader (model + temperature 0 + integer seed + dated
-    snapshot), a model family different from the generator (no self-grading), an
-    explicit threshold, and must NOT gate (``gates: true`` is rejected — judges
-    report)."""
+    A deterministic scorer gates and needs a name. When ``known`` is provided (the
+    registry of implemented scorers — see :mod:`rebar.llm.eval_scorers`), the name
+    must also be REGISTERED, so a typo'd or unimplemented scorer fails the offline
+    gate instead of silently no-opping at run time. An ``llm-judge`` scorer MUST
+    carry a pinned grader (model + temperature 0 + integer seed + dated snapshot), a
+    model family different from the generator (no self-grading), an explicit
+    threshold, and must NOT gate (``gates: true`` is rejected — judges report)."""
     errs: list[str] = []
     if not isinstance(scorer, dict):
         return ["scorer must be a mapping"]
@@ -120,6 +124,11 @@ def validate_scorer(scorer: dict, *, generator_model: str | None = None) -> list
     if stype == "deterministic":
         if not scorer.get("name"):
             errs.append("deterministic scorer needs a `name`")
+        elif known is not None and scorer["name"] not in known:
+            errs.append(
+                f"deterministic scorer {scorer['name']!r} is not a registered scorer "
+                "(rebar.llm.eval_scorers.REGISTRY) — implement it or fix the name"
+            )
         return errs
     if stype == "llm-judge":
         if scorer.get("gates"):
@@ -188,10 +197,81 @@ def parse_gate(gate: str) -> int:
     return int(m.group(1))
 
 
-def validate_eval_spec(spec: dict) -> list[str]:
+def validate_dataset_and_gold(spec: dict) -> list[str]:
+    """STRICT dataset + gold_set checks (not enforced by the lenient
+    :func:`validate_eval_spec` default, since the schema treats both as optional and
+    some specs — e.g. code-quality — ship gold-only). Used by the CI discipline gate
+    over the PACKAGED specs: a non-empty, balanced, well-shaped dataset and a
+    non-empty gold_set. Each case needs a unique ``id``, an ``expect`` in the known
+    vocabulary, and a payload (``input`` for single-doc reviewers, or ``spec`` +
+    ``epics`` for the scan_spec BATCH unit). 'Balanced' = at least one should-fire
+    case AND at least one good (pass) case, so the spec measures both recall and
+    false-fire."""
+    from rebar.llm.eval_scorers import (
+        ALLOWED_EXPECTS,
+        FIRE_EXPECTS,
+        NOFIRE_EXPECTS,
+        VALIDITY_EXPECTS,
+    )
+
+    # Keys that are case METADATA, not reviewer input — a case must carry at least one
+    # key OUTSIDE this set (the payload the reviewer actually consumes).
+    metadata_keys = {"id", "corpus", "expect", "criterion", "kind", "pair", "mode", "note", "label"}
+    errs: list[str] = []
+    dataset = spec.get("dataset")
+    if not isinstance(dataset, list) or not dataset:
+        errs.append("strict: eval spec needs a non-empty `dataset`")
+        dataset = []
+    seen: set[str] = set()
+    expects_used: set[str] = set()
+    for i, case in enumerate(dataset):
+        if not isinstance(case, dict):
+            errs.append(f"strict: dataset[{i}] must be a mapping")
+            continue
+        cid = case.get("id")
+        if not cid:
+            errs.append(f"strict: dataset[{i}] needs an `id`")
+        elif cid in seen:
+            errs.append(f"strict: duplicate dataset id {cid!r}")
+        else:
+            seen.add(cid)
+        expect = case.get("expect")
+        if expect not in ALLOWED_EXPECTS:
+            errs.append(
+                f"strict: dataset[{i}] `expect`={expect!r} not in {sorted(ALLOWED_EXPECTS)}"
+            )
+        else:
+            expects_used.add(expect)
+        if not any(k not in metadata_keys and case.get(k) for k in case):
+            errs.append(f"strict: dataset[{i}] needs a payload field (input/plan/finding/spec)")
+    if dataset:
+        if expects_used & (FIRE_EXPECTS | NOFIRE_EXPECTS) and not (
+            expects_used & FIRE_EXPECTS and expects_used & NOFIRE_EXPECTS
+        ):
+            errs.append("strict: dataset must be balanced (>=1 should-fire AND >=1 pass case)")
+        validity_axis = expects_used & VALIDITY_EXPECTS
+        if validity_axis and not {"high_validity", "low_validity"} <= expects_used:
+            errs.append("strict: verifier dataset needs both high_validity and low_validity")
+    gold = spec.get("gold_set")
+    if not isinstance(gold, list) or not gold:
+        errs.append("strict: eval spec needs a non-empty `gold_set` (judge kappa alignment)")
+    else:
+        for i, g in enumerate(gold):
+            if not isinstance(g, dict) or not g.get("input") or not g.get("label"):
+                errs.append(f"strict: gold_set[{i}] needs an `input` and a `label`")
+    return errs
+
+
+def validate_eval_spec(spec: dict, *, strict: bool = False) -> list[str]:
     """Validate an eval spec: explicit epochs, an at_least(k) gate, a coverage
     threshold, ≥1 scorer, at least one DETERMINISTIC (gating) scorer, and every
-    scorer disciplined (WS-G2)."""
+    scorer disciplined (WS-G2).
+
+    ``strict=True`` additionally enforces that every deterministic scorer name is
+    REGISTERED (implemented in :mod:`rebar.llm.eval_scorers`) and that the dataset +
+    gold_set are present, balanced, and well-shaped. Strict mode is what the CI
+    discipline gate runs over the packaged specs; the lenient default keeps
+    ``load_eval_spec`` / user `.rebar/evals` specs and unit fixtures working."""
     errs: list[str] = []
     if not isinstance(spec, dict):
         return ["eval spec must be a mapping"]
@@ -218,8 +298,15 @@ def validate_eval_spec(spec: dict) -> list[str]:
     gen_model = spec.get("model")
     if not any(isinstance(s, dict) and s.get("type") == "deterministic" for s in scorers):
         errs.append("at least one DETERMINISTIC scorer is required to gate (judges only report)")
+    known = None
+    if strict:
+        from rebar.llm.eval_scorers import known_scorer_names
+
+        known = known_scorer_names()
     for s in scorers:
-        errs.extend(validate_scorer(s, generator_model=gen_model))
+        errs.extend(validate_scorer(s, generator_model=gen_model, known=known))
+    if strict:
+        errs.extend(validate_dataset_and_gold(spec))
     return errs
 
 
