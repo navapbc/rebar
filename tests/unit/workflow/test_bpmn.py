@@ -318,6 +318,25 @@ def test_agent_metadata_survives_as_typed_extension():
     assert agent.get("provider") and agent.get("tools")
 
 
+def test_per_step_model_survives_round_trip_and_legacy_imports_cleanly():
+    """WS2 (gawky-koi-grain): a per-step ``model:`` (the editor's Model field) round-trips
+    through BPMN losslessly via ``<rebar:Config>``, and a legacy doc that lacks the attribute
+    imports cleanly with NO ``model`` key (so resolve_model falls back to workflow/cfg)."""
+    doc = {
+        "schema_version": "3",
+        "name": "m",
+        "steps": [{"id": "verify", "prompt": "plan-review-verifier", "model": "claude-sonnet-4-6"}],
+    }
+    back = bpmn.bpmn_to_ir(bpmn.ir_to_bpmn(doc))
+    step = next(s for s in back["steps"] if s.get("id") == "verify")
+    assert step.get("model") == "claude-sonnet-4-6"
+
+    legacy = {"schema_version": "3", "name": "m", "steps": [{"id": "v2", "prompt": "p"}]}
+    back2 = bpmn.bpmn_to_ir(bpmn.ir_to_bpmn(legacy))
+    step2 = next(s for s in back2["steps"] if s.get("id") == "v2")
+    assert "model" not in step2  # graceful: no attribute → no per-step override
+
+
 def test_serial_map_is_sequential_multiinstance():
     doc = {
         "schema_version": "2",

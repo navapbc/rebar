@@ -44,13 +44,18 @@ def _gate_doc(name: str, repo_root) -> dict[str, Any]:
 
 # ── plan-review ───────────────────────────────────────────────────────────────────
 def produce_plan_review_verdict(
-    ctx, cfg, *, runner=None, advisory_cap: int, repo_root=None
+    ctx, cfg, *, runner=None, advisory_cap: int, repo_root=None, probe_criteria=None
 ) -> dict[str, Any]:
     """Produce a ``plan_review_verdict`` by running ``gates/plan-review.yaml`` in-memory.
 
     The verdict-production half of ``review_plan``. Preflights the runner so a systemic
     outage degrades to INDETERMINATE (unsigned) before any billable call; a mid-run
-    LLM-tier failure degrades the same way (never a hollow PASS)."""
+    LLM-tier failure degrades the same way (never a hollow PASS).
+
+    ``probe_criteria`` (PROBE MODE, drift-refresh tripwire): when a non-empty id list, the
+    finder runs ONLY those criteria (the cheap E4+G1G2 probe) instead of the full routed set.
+    Always threaded as a workflow input (``[]`` = normal full review) so the gate's
+    ``${{ inputs.probe_criteria }}`` reference always resolves."""
     import time
 
     from rebar.llm.plan_review.production_batch_runner import ProductionBatchRunner
@@ -74,7 +79,7 @@ def produce_plan_review_verdict(
     try:
         res = _ex.run_workflow(
             doc,
-            {"ticket_id": ctx.ticket_id},
+            {"ticket_id": ctx.ticket_id, "probe_criteria": list(probe_criteria or [])},
             target_ticket=ctx.ticket_id,
             repo_root=repo_root,
             agent_runner=RunnerAgentStep(runner=runner_sel, repo_root=repo_root, config=cfg),

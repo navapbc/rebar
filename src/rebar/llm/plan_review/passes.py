@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -157,6 +156,9 @@ register_contracts()
 # (prompts.get_prompt / resolve_prompt) with `.rebar/prompts/<id>.md` project
 # overrides — never inline string constants. Prompt ids:
 PASS_FINDER = "plan-review-finder"  # Pass-1
+# Pass-2 verify runs via the workflow gate's `plan-review-verifier` prompt step (the bespoke
+# pass2_verify that once resolved it here was retired in epic solid-timer-unison, WS1). The id
+# constant is retained as the canonical reference to that prompt (used by the prompt-cache split).
 PASS_VERIFIER = "plan-review-verifier"  # Pass-2
 PASS_COACH = "plan-review-coach"  # Pass-4
 PASS_ISF = "plan-review-isf-finder"  # ISF finder
@@ -442,41 +444,10 @@ def verify_instructions(batch: list[tuple[int, dict[str, Any]]]) -> str:
     )
 
 
-def pass2_verify(
-    runner: Runner,
-    cfg: LLMConfig,
-    *,
-    plan: str,
-    findings: list[dict[str, Any]],
-    agentic: bool = False,
-    batch_size: int = 12,
-) -> dict[int, dict[str, Any]]:
-    """One aggregate verification pass over ALL findings (batched, NOT per-finding).
-    Returns ``{finding_index: {severity_attributes, binary}}``. Agentic (tool-using)
-    when any code-grounded finding is present; single-turn otherwise."""
-    if not findings:
-        return {}
-    out: dict[int, dict[str, Any]] = {}
-    for start in range(0, len(findings), batch_size):
-        batch = list(enumerate(findings))[start : start + batch_size]
-        req = RunRequest(
-            system_prompt=_resolve_system(PASS_VERIFIER, plan, cfg),
-            instructions=verify_instructions(batch),
-            config=cfg,
-            reviewers=["plan-verifier"],
-            mode="structured",
-            output_schema="plan_review_verification",
-            execution_mode="agentic" if agentic else "single_turn",
-        )
-        result = runner.run(req)
-        for v in result.get("verifications", []) or []:
-            idx = v.get("index")
-            if isinstance(idx, int):
-                out[idx] = {
-                    "severity_attributes": v.get("severity_attributes", {}) or {},
-                    "binary": v.get("binary", {}) or {},
-                }
-    return out
+# NOTE: the bespoke `pass2_verify` (the count-batched aggregate verifier) was retired in
+# epic solid-timer-unison (WS1). The Pass-2 verify now runs ONLY through the workflow gate's
+# `plan-review-verifier` prompt step; `verify_instructions` / `verify_finding_listing` above
+# remain as the shared listing builders that step consumes.
 
 
 # ── Pass 3: decide (DETERMINISTIC — no model in this path) ────────────────────────
@@ -740,13 +711,3 @@ def _validate_subject(subject: str) -> str | None:
     if s.split()[0].lower().rstrip(":,.") in _IMPERATIVE_STARTS:
         return None
     return s
-
-
-def verifier_cfg(cfg: LLMConfig) -> LLMConfig:
-    """The Pass-2 verifier uses a decisive non-frontier model (Sonnet) unless the
-    operator explicitly chose a model — mirrors the completion-verifier default."""
-    from rebar.llm.config import DEFAULT_MODEL
-
-    if cfg.model == DEFAULT_MODEL:
-        return replace(cfg, model="claude-sonnet-4-6")
-    return cfg

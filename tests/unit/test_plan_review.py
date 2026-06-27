@@ -11,8 +11,17 @@ from __future__ import annotations
 
 import pytest
 
-from rebar.llm.config import LLMConfig
-from rebar.llm.plan_review import attest, det_floor, orchestrator, passes, registry, sidecar, sizing
+from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, LLMConfig
+from rebar.llm.plan_review import (
+    _verifier_cfg,
+    attest,
+    det_floor,
+    orchestrator,
+    passes,
+    registry,
+    sidecar,
+    sizing,
+)
 from rebar.llm.plan_review.det_floor import PlanContext
 
 
@@ -27,6 +36,103 @@ def _ctx(description: str, *, ttype: str = "task", title: str = "T", **kw) -> Pl
 
 
 _GOOD_AC = "## Acceptance Criteria\n- [ ] a thing is observably true\n- [ ] another check\n"
+
+
+# ── verifier model downgrade (WS2 — gawky-koi-grain) ─────────────────────────
+def test_verifier_cfg_downgrades_to_sonnet_by_default() -> None:
+    """With no explicit operator model (cfg.model == DEFAULT_MODEL), the Pass-2 verify/coach
+    cfg resolves to the non-frontier verifier model (Sonnet) — the verifier_cfg downgrade,
+    now in the workflow path instead of the retired bespoke pass2_verify."""
+    cfg = LLMConfig(model=DEFAULT_MODEL)
+    assert _verifier_cfg(cfg).model == VERIFIER_DEFAULT_MODEL == "claude-sonnet-4-6"
+
+
+def test_verifier_cfg_honors_explicit_operator_override() -> None:
+    """An operator who explicitly chose a non-default model keeps it — the downgrade yields
+    to the override (parity with the old passes.verifier_cfg), which a static per-step
+    `model:` could not do (resolve_model precedence is step > workflow > cfg)."""
+    cfg = LLMConfig(model="claude-opus-4-8-custom")
+    assert _verifier_cfg(cfg).model == "claude-opus-4-8-custom"
+    # Other config fields are preserved (only model is tuned).
+    cfg2 = LLMConfig(model=DEFAULT_MODEL, max_iterations=99)
+    assert _verifier_cfg(cfg2).max_iterations == 99
+
+
+# ── Pass-2 verify token-budget chunking (WS3 — tangly-shunt-scoop) ───────────
+def _finding(i: int, *, big: bool = False) -> dict:
+    return {"finding": ("X" * 20_000) if big else f"finding number {i}", "criteria": ["E1"]}
+
+
+def test_verify_chunks_single_call_for_small_sets() -> None:
+    """Common case: the whole verify request fits the window → ONE chunk covering all
+    findings with their global indices (byte-identical to the prior single aggregate call)."""
+    findings = [_finding(i) for i in range(5)]
+    chunks, omitted = sizing.verify_request_chunks(findings, model="claude-sonnet-4-6")
+    assert len(chunks) == 1
+    assert [idx for idx, _ in chunks[0]] == [0, 1, 2, 3, 4]
+    assert omitted == []
+
+
+def test_verify_chunks_splits_over_budget_preserving_global_indices(monkeypatch) -> None:
+    """A deterministic window-shrink seam forces a small budget so a small findings set
+    EXCEEDS it → principled token-based splitting into multiple calls (NOT a magic count),
+    preserving GLOBAL indices, and every emitted chunk's estimated request fits the budget
+    (the chars/4 estimate + headroom keeps each call under the window)."""
+    # Shrink the window so ~one finding fits per chunk (budget just above the system reserve).
+    budget = sizing.VERIFY_SYSTEM_RESERVE_TOKENS + sizing.PER_FINDING_VERIFY_TOKENS + 50
+    monkeypatch.setattr(sizing, "largest_window_tokens", lambda model: budget)
+    findings = [_finding(i) for i in range(6)]
+    chunks, omitted = sizing.verify_request_chunks(
+        findings, model="claude-sonnet-4-6", headroom=1.0
+    )
+    assert len(chunks) > 1, "a >budget set must split into multiple verify calls"
+    assert omitted == []
+    # Global indices are contiguous + complete across the chunks (re-merge by index works).
+    flat = [idx for chunk in chunks for idx, _ in chunk]
+    assert flat == list(range(6))
+    # Every chunk's estimated request is within budget (the safety margin is grounded).
+    from rebar.llm.plan_review import passes as _passes
+    from rebar.llm.plan_review.det_floor import est_tokens
+
+    for chunk in chunks:
+        req = (
+            est_tokens(_passes.verify_instructions(chunk))
+            + sizing.VERIFY_SYSTEM_RESERVE_TOKENS
+            + len(chunk) * sizing.PER_FINDING_VERIFY_TOKENS
+        )
+        assert req <= budget, (req, budget)
+
+
+def test_verify_chunks_omits_finding_too_big_to_verify(monkeypatch) -> None:
+    """A single finding whose own request exceeds the budget at the largest reachable model
+    is OMITTED from every chunk (its index returned in `omitted`) — left unverified so pass3
+    routes it to INDETERMINATE, never silently dropped."""
+    budget = sizing.VERIFY_SYSTEM_RESERVE_TOKENS + sizing.PER_FINDING_VERIFY_TOKENS + 50
+    monkeypatch.setattr(sizing, "largest_window_tokens", lambda model: budget)
+    findings = [_finding(0), _finding(1, big=True), _finding(2)]  # index 1 is oversized
+    chunks, omitted = sizing.verify_request_chunks(
+        findings, model="claude-sonnet-4-6", headroom=1.0
+    )
+    assert omitted == [1]
+    flat = [idx for chunk in chunks for idx, _ in chunk]
+    assert 1 not in flat and set(flat) == {0, 2}
+
+
+def test_merge_chunked_outputs_concatenates_verifications() -> None:
+    """RunnerAgentStep merges per-chunk verify outputs by concatenating list fields
+    (verifications) in order; a single chunk passes through unchanged."""
+    from rebar.llm.workflow.runs import _merge_chunked_outputs
+
+    one = {"verifications": [{"index": 0}], "runner": "fake", "model": None}
+    assert _merge_chunked_outputs([one]) is one  # single chunk: unchanged
+    merged = _merge_chunked_outputs(
+        [
+            {"verifications": [{"index": 0}], "runner": "fake", "model": "m"},
+            {"verifications": [{"index": 1}, {"index": 2}], "runner": "fake", "model": "m"},
+        ]
+    )
+    assert [v["index"] for v in merged["verifications"]] == [0, 1, 2]
+    assert merged["runner"] == "fake" and merged["model"] == "m"  # scalars stable
 
 
 # ── DET floor ────────────────────────────────────────────────────────────────

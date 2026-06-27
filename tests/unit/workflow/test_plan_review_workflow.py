@@ -89,10 +89,14 @@ class _CannedAgent(AgentStepRunner):
         # Which verifier prompt id the dynamic Pass-2 branch selected (B5): the agentic
         # variant when any finding is code-grounded, else the single-turn one.
         self.verifier_prompts: list[str] = []
+        # Every prompt id this runner was asked to run (WS4: assert the coach prompt is
+        # NOT invoked on a 0-surviving PASS).
+        self.prompts_seen: list[str] = []
 
     def run(self, ctx) -> StepResult:
         self.calls += 1
         prompt = ctx.step.get("prompt")
+        self.prompts_seen.append(prompt)
         if prompt in ("plan-review-verifier", "plan-review-verifier-agentic"):
             self.verifier_prompts.append(prompt)
             findings = ctx.inputs.get("findings") or []
@@ -159,14 +163,14 @@ def _terminal_verdict(rec) -> dict | None:
     return None
 
 
-def _run(monkeypatch, state, *, finder, agent):
+def _run(monkeypatch, state, *, finder, agent, probe_criteria=None):
     _patch_reads(monkeypatch, state)
     from rebar.llm.plan_review.production_batch_runner import ProductionBatchRunner
 
     rec = _Rec()
     res = _ex.run_workflow(
         _doc(),
-        {"ticket_id": _TARGET},
+        {"ticket_id": _TARGET, "probe_criteria": list(probe_criteria or [])},
         recorder=rec,
         target_ticket=_TARGET,
         scripted_registry=dict(_ex.STEP_REGISTRY),
@@ -187,6 +191,35 @@ def test_workflow_validates_and_lints():
         if f.severity != "warning"
     ]
     assert findings == [], findings
+
+
+def _all_steps(steps):
+    """Flatten every step in a workflow doc, recursing into branch/loop/map bodies."""
+    for s in steps:
+        if not isinstance(s, dict):
+            continue
+        yield s
+        for block, *keys in (("branch", "then", "else"), ("loop", "body"), ("map", "body")):
+            blk = s.get(block)
+            if isinstance(blk, dict):
+                for k in keys:
+                    if isinstance(blk.get(k), list):
+                        yield from _all_steps(blk[k])
+
+
+def test_verify_step_carries_no_static_model_so_operator_override_is_honored():
+    """WS2 (gawky-koi-grain): the verify steps must NOT pin a static `model:` in the YAML —
+    the Sonnet downgrade is applied on cfg (`plan_review._verifier_cfg`) so an operator's
+    explicit model wins. A static step `model:` would always beat cfg (resolve_model: step >
+    workflow > cfg), silently breaking the override. This guards that invariant."""
+    verify_steps = [
+        s
+        for s in _all_steps(_doc()["steps"])
+        if str(s.get("prompt", "")).startswith("plan-review-verifier")
+    ]
+    assert verify_steps, "expected at least one plan-review-verifier step"
+    offenders = [s["id"] for s in verify_steps if "model" in s]
+    assert offenders == [], f"verify steps must not pin a static model: {offenders}"
 
 
 # ── assemble_criteria routing + overlay inclusion (the E5 advisory) ───────────
@@ -223,6 +256,33 @@ def test_assemble_criteria_overlay_inclusion(monkeypatch):
     # A non-overlay mandatory criterion (E1) is always routed; ISF is never a batch criterion.
     assert out_perf["include_E1"] is True
     assert "include_ISF" not in out_perf
+
+
+def test_assemble_criteria_probe_mode_restricts_to_allowlist(monkeypatch):
+    """WS1 (odd-cocoa-chase): PROBE MODE — when `probe_criteria` is set, assemble FORCES
+    exactly that allowlist (the cheap E4+G1G2 drift probe) and excludes everything else, so
+    the finder batch runs only those criteria. Mirrors the retired bespoke drift probe."""
+    from rebar.llm.workflow.executor import STEP_REGISTRY, StepContext
+
+    op = STEP_REGISTRY["plan_review_assemble_criteria"]
+    state = _state(ttype="task", description=_PERF_AC)  # would normally route many criteria
+    _patch_reads(monkeypatch, state)
+    ctx = StepContext(
+        run_id="r",
+        step_id="assemble",
+        kind="scripted",
+        step={},
+        inputs={"ticket_id": _TARGET, "probe_criteria": ["E4", "G1G2"]},
+        workflow={},
+        target_ticket=_TARGET,
+        repo_root=None,
+    )
+    out = op(ctx)
+    included = {cid for cid, on in out.items() if cid.startswith("include_") and on}
+    assert included == {"include_E4", "include_G1G2"}, included
+    # Even the otherwise-mandatory E1 and the fired T5a overlay are EXCLUDED in probe mode.
+    assert out["include_E1"] is False and out["include_T5a"] is False
+    assert out["routing"]["probe_criteria"] == ["E4", "G1G2"]
 
 
 # ── end-to-end OFFLINE run → a plan_review_verdict-shaped PASS ────────────────
@@ -265,6 +325,44 @@ def test_e2e_offline_produces_verdict(monkeypatch):
     assert verdict["coaching"][0]["move_id"] == "1"
     assert "the X design" in verdict["coaching"][0]["coaching"]
     assert verdict["coverage"]["counts"]["blocking"] == 0
+    # The then-arm ran: the coach prompt WAS invoked (there were surviving advisories).
+    assert "plan-review-coach" in canned.prompts_seen
+
+
+# A clean, well-formed plan that triggers NO DET advisory (P6 ac-quality passes: no
+# compound-`and` criteria, no vague lexicon, mentions a test) → with no LLM findings the
+# surfaced set is empty → a true 0-surviving PASS.
+_CLEAN_DESC = (
+    "## Why\nThe get endpoint returns the wrong status code for a missing record.\n\n"
+    "## What\nReturn HTTP 404 from `src/api/get.py` when the record id is absent.\n\n"
+    "## Scope\nThe single get handler.\n\n"
+    "## Acceptance Criteria\n"
+    "- [ ] A request for a missing id returns HTTP 404\n"
+    "- [ ] A request for an existing id returns HTTP 200\n"
+    "- [ ] A unit test covers the missing-id path\n\n"
+    "## Verification\nRun the api test module.\n"
+)
+
+
+def test_clean_pass_makes_no_coach_llm_call(monkeypatch):
+    """WS4 (crimp-polar-jag): a PASS with 0 SURVIVING advisories takes the coach_gate else
+    arm — coach renders with notes:[] and the `plan-review-coach` prompt step is NEVER run
+    (no wasted coach LLM call), matching the bespoke pass4_coach early-return."""
+    state = _state(description=_CLEAN_DESC)
+    state["file_impact"] = [{"path": "src/api/get.py", "reason": "return 404 on missing id"}]
+    # The finder surfaces NOTHING → 0 LLM findings; the clean plan raises no DET advisory
+    # either → 0 surviving → clean PASS.
+    finder = _CountingFinder(structured={"analysis": "", "findings": []})
+    canned = _CannedAgent()
+    rec, res = _run(monkeypatch, state, finder=finder, agent=canned)
+
+    assert res.status == "succeeded", res.error
+    verdict = _terminal_verdict(rec)
+    assert verdict is not None and verdict["verdict"] == "PASS"
+    assert verdict["advisory"] == [], verdict["advisory"]
+    assert verdict["coaching"] == []
+    # The coach prompt step made NO LLM call (the gate took the else arm).
+    assert canned.prompts_seen.count("plan-review-coach") == 0
 
 
 # ── P1/P5 DET block does NOT short-circuit: LLM runs, DET block merged → BLOCK ─

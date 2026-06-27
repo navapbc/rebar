@@ -160,6 +160,22 @@ def _as_int(v: Any, key: str, *, minimum: int | None = None) -> int:
     return i
 
 
+def _as_float(
+    v: Any, key: str, *, minimum: float | None = None, maximum: float | None = None
+) -> float:
+    if isinstance(v, bool):
+        raise ConfigError(f"{key}: expected a number, got boolean {v!r}")
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise ConfigError(f"{key}: expected a number, got {v!r}") from None
+    if minimum is not None and f < minimum:
+        raise ConfigError(f"{key}: must be >= {minimum}, got {f}")
+    if maximum is not None and f > maximum:
+        raise ConfigError(f"{key}: must be <= {maximum}, got {f}")
+    return f
+
+
 def _as_str(v: Any, key: str) -> str:
     if isinstance(v, (dict, list)):
         raise ConfigError(f"{key}: expected a string, got {type(v).__name__}")
@@ -264,6 +280,13 @@ class VerifyConfig:
     # REFRESH the attestation instead of a full re-review. OFF by default — opt-in until the
     # token/latency saving is measured on a representative ticket.
     progressive_drift_refresh: bool = False
+
+    # Token-budget headroom for the Pass-2 verify chunker (epic solid-timer-unison WS3): the
+    # fraction of the verifier model's context window a single verify request may use before
+    # the findings are split into multiple calls. Default 0.8 leaves room for the system
+    # prompt + the per-finding structured output. The common case (whole request fits) is one
+    # aggregate call; this only triggers on a pathological huge-findings ticket.
+    verify_window_headroom: float = 0.8
 
 
 @dataclass
@@ -372,6 +395,7 @@ _SECTIONS: dict[str, dict] = {
         "require_completion_verification_for_close": lambda v, k: _as_bool(v, k),
         "require_plan_review_for_claim": lambda v, k: _as_bool(v, k),
         "progressive_drift_refresh": lambda v, k: _as_bool(v, k),
+        "verify_window_headroom": lambda v, k: _as_float(v, k, minimum=0.1, maximum=1.0),
     },
     "ticket": {"display_mode": lambda v, k: _as_str(v, k) or "auto"},
     "ticket_clarity": {"threshold": lambda v, k: _as_int(v, k, minimum=1)},

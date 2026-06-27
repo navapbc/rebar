@@ -6,7 +6,11 @@
   "type": "object",
   "properties": {
     "plan": { "type": "string", "description": "The assembled plan text (PlanContext.plan_text) — resolves the verifier prompt's {{plan}}." },
-    "instructions": { "type": "string", "description": "The Pass-2 verifier instructions: the same per-finding listing the bespoke pass2_verify builds." }
+    "instructions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "The Pass-2 verifier instructions as a LIST of per-chunk per-finding listings (global indices preserved). ONE element in the common case (whole request fits the window); token-budgeted splits only when it would exceed the window. The verify prompt step runs once per element and merges verifications by index."
+    }
   },
   "required": ["plan", "instructions"],
   "additionalProperties": false

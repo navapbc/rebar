@@ -24,7 +24,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from rebar.llm import findings
-from rebar.llm.config import DEFAULT_MODEL, LLMConfig
+from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, LLMConfig
 from rebar.llm.runner import Runner
 
 __all__ = ["verify_completion"]
@@ -36,8 +36,9 @@ _OUTPUT_SCHEMA = "completion_verdict"
 # blowing the step budget even on a 2-criterion ticket (it tripped recursion_limit=300 / 385s
 # in testing) — whereas sonnet converges in ~12s. So default the verifier to sonnet (matching
 # the DSO completion-verifier's `model: sonnet`). An operator who EXPLICITLY sets
-# REBAR_LLM_MODEL to a non-default still wins (below).
-_VERIFIER_DEFAULT_MODEL = "claude-sonnet-4-6"
+# REBAR_LLM_MODEL to a non-default still wins (below). The literal lives in config.py
+# (VERIFIER_DEFAULT_MODEL) as the single source shared with the plan-review verifier.
+_VERIFIER_DEFAULT_MODEL = VERIFIER_DEFAULT_MODEL
 # Completion verification is inherently more tool-heavy than a single-dimension review: it
 # must check potentially many criteria, each against several files. The framework review
 # default (REBAR_LLM_MAX_STEPS=25 ≈ 12 tool calls) is far too low and trips the recursion cap

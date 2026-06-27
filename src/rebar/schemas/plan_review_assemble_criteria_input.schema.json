@@ -5,7 +5,12 @@
   "description": "INPUT of `plan_review_assemble_criteria`: the ticket to route criteria for.",
   "type": "object",
   "properties": {
-    "ticket_id": { "type": "string", "description": "The ticket id/alias (falls back to the workflow target)." }
+    "ticket_id": { "type": "string", "description": "The ticket id/alias (falls back to the workflow target)." },
+    "probe_criteria": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "PROBE MODE (drift-refresh tripwire): when non-empty, restrict the included criteria to EXACTLY these ids (forced, bypassing applies()/overlay routing) — the cheap E4+G1G2 probe. Empty/absent → the full routed criteria set (normal review)."
+    }
   },
   "required": ["ticket_id"],
   "additionalProperties": false
