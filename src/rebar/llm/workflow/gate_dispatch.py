@@ -51,6 +51,8 @@ def produce_plan_review_verdict(
     The verdict-production half of ``review_plan``. Preflights the runner so a systemic
     outage degrades to INDETERMINATE (unsigned) before any billable call; a mid-run
     LLM-tier failure degrades the same way (never a hollow PASS)."""
+    import time
+
     from rebar.llm.plan_review.production_batch_runner import ProductionBatchRunner
     from rebar.llm.runner import get_runner
 
@@ -68,6 +70,7 @@ def produce_plan_review_verdict(
 
     doc = _gate_doc("plan-review", repo_root)
     rec = MemoryRecorder()
+    _t_total = time.monotonic()
     try:
         res = _ex.run_workflow(
             doc,
@@ -82,9 +85,11 @@ def produce_plan_review_verdict(
         return _degraded_plan_review_verdict(
             ctx, cfg, error=exc, advisory_cap=advisory_cap, runner_name=runner_sel.name
         )
+    total_ms = round((time.monotonic() - _t_total) * 1000, 1)
 
     verdict = res.terminal_output
     if res.status == "succeeded" and isinstance(verdict, dict) and "verdict" in verdict:
+        _attach_plan_review_metrics(verdict, rec, total_ms)
         return verdict
 
     # The run failed mid-tail. Pass-4 coach is advisory POLISH — bespoke run_review treats a
@@ -94,6 +99,7 @@ def produce_plan_review_verdict(
     # real findings and wrongly block the claim.
     recovered = _recover_plan_review_coach_failure(rec, cfg, error=res.error)
     if recovered is not None:
+        _attach_plan_review_metrics(recovered, rec, total_ms)
         return recovered
 
     # finders/verify failed (the LLM tier did not produce findings) — degrade to INDETERMINATE,
@@ -105,6 +111,70 @@ def produce_plan_review_verdict(
         advisory_cap=advisory_cap,
         runner_name=runner_sel.name,
     )
+
+
+# Step ids/kinds that partition a plan-review run into its latency tiers (toy-kink-ire).
+_DET_STEP_IDS = frozenset({"precheck"})  # the deterministic floor tier
+_LLM_STEP_KINDS = frozenset({"agent", "batch"})  # the billable LLM tier (finders/verify/coach)
+
+
+def _attach_plan_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -> None:
+    """Reinstate ``coverage['metrics']`` on the WORKFLOW plan-review path (toy-kink-ire).
+
+    B-RETIRE removed bespoke ``run_review``, the only producer of the per-pass latency/cost
+    metrics (db7b AC5). This reconstructs the equivalent from the workflow run's recorder
+    step timings (added by the interpreter) so the sidecar carries them again for passive
+    latency/cost-target refinement:
+
+    - ``det_ms``    — wall-clock of the deterministic floor (the ``precheck`` step).
+    - ``llm_ms``    — wall-clock of the billable LLM tier (the ``agent``/``batch`` steps:
+                      Pass-1 ``finders``, Pass-2 ``verify``, Pass-4 ``coach_notes``).
+    - ``total_ms``  — the whole run's wall-clock (measured around ``run_workflow``).
+    - ``llm_calls`` — a cost proxy: the Pass-1 finder ``criteria_count`` + one per succeeded
+                      agent step (``verify`` / ``coach_notes``). Mirrors run_review's proxy.
+    - ``claim_path``— the structural marker (the fast claim check is a local HMAC verify,
+                      LLM/network-free).
+
+    ``det_ms + llm_ms`` deliberately does NOT equal ``total_ms``: the scripted prep/decision
+    steps (``assemble`` / ``grounding`` / ``verify_inputs`` / ``decide`` / ``coach_inputs`` /
+    ``coach``) are non-LLM overhead, counted into neither tier — absorbed only into ``total_ms``
+    (the same split the bespoke ``run_review`` reported).
+
+    Mutates ``verdict['coverage']['metrics']`` in place (only that key; existing coverage is
+    preserved). Tolerant of untimed/partial records (a missing ``duration_ms`` contributes 0)
+    so it never raises inside the gate.
+    """
+    det_ms = 0.0
+    llm_ms = 0.0
+    finder_criteria = 0
+    agent_calls = 0
+    for s in rec.steps:
+        if not isinstance(s, dict) or s.get("status") != "succeeded":
+            continue
+        step_id = s.get("step_id")
+        kind = s.get("kind")
+        dur = s.get("duration_ms")
+        if isinstance(dur, (int, float)):
+            if step_id in _DET_STEP_IDS:
+                det_ms += dur
+            elif kind in _LLM_STEP_KINDS:
+                llm_ms += dur
+        if kind == "batch":
+            finder_criteria += int((s.get("outputs") or {}).get("criteria_count") or 0)
+        elif kind == "agent":
+            agent_calls += 1
+    metrics = {
+        "det_ms": round(det_ms, 1),
+        "llm_ms": round(llm_ms, 1),
+        "total_ms": round(total_ms, 1),
+        "llm_calls": finder_criteria + agent_calls,
+        "claim_path": "no-llm/no-network (structural; the fast claim check is a local HMAC verify)",
+    }
+    coverage = verdict.get("coverage")
+    if not isinstance(coverage, dict):
+        coverage = {}
+        verdict["coverage"] = coverage
+    coverage["metrics"] = metrics
 
 
 def _recover_plan_review_coach_failure(rec, cfg, *, error) -> dict[str, Any] | None:
