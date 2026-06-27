@@ -110,6 +110,28 @@ def test_cli_defaults_are_none_so_config_resolves(rebar_repo, monkeypatch):
 # --------------------------------------------------------------------------------------
 # failure paths
 # --------------------------------------------------------------------------------------
+def test_adr_records_cli_mcp_mapping_and_cwd_decoupling():
+    """The architecture ADR records the pinned one-to-one CLI<->MCP mapping AND the
+    cwd/branch decoupling (so neither surface drifts nor re-couples to the checkout)."""
+    from pathlib import Path
+
+    adr = (
+        (
+            Path(__file__).resolve().parents[3]
+            / "docs"
+            / "adr"
+            / "0005-snapshot-cache-architecture.md"
+        )
+        .read_text()
+        .lower()
+    )
+    assert "one-to-one" in adr and "cli" in adr
+    for op in ("review_plan", "verify_completion", "review_ticket", "review_code", "scan_spec"):
+        assert op in adr
+    assert "cwd/branch decoupling" in adr
+    assert "only locates the object db" in adr  # REBAR_ROOT only locates the object DB
+
+
 def test_invalid_source_is_rejected(rebar_repo, monkeypatch):
     monkeypatch.chdir(rebar_repo)
     tid = rebar.create_ticket("task", "t", repo_root=str(rebar_repo))

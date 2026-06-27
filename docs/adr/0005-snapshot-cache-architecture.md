@@ -89,6 +89,27 @@ field** for the SHA: it would bump `PAYLOAD_VERSION` and invalidate every existi
 signature. The pin is shaped as an in-toto-style statement so a future move to
 DSSE/asymmetric/transparency-log is an envelope swap, not a rewrite.
 
+### D7 — Surfaces: a pinned one-to-one CLI↔MCP mapping + cwd/branch decoupling (S5)
+
+The `ref`/`source` controls are exposed on BOTH the CLI and the MCP tools over exactly the
+five code-reading operations, pinned one-to-one so the two surfaces never drift:
+
+| CLI command            | MCP tool            |
+|------------------------|---------------------|
+| `rebar review-plan`    | `review_plan`       |
+| `rebar verify-completion` | `verify_completion` |
+| `rebar review` (review-ticket) | `review_ticket` |
+| `rebar review-code`    | `review_code`       |
+| `rebar scan-spec`      | `scan_spec`         |
+
+`--source`/`source` is `{attested|local}` (default `attested`); `--ref`/`ref` defaults to
+`origin/main` (review-code: the reviewed `head`), configurable via `REBAR_GATE_REF` /
+`REBAR_GATE_SOURCE` / `[snapshot]`. **cwd/branch decoupling (recorded so it is not
+re-coupled):** the verified-code path does NOT depend on the MCP server's checked-out branch —
+in attested mode `REBAR_ROOT` only locates the object DB to fetch from, and the snapshot at the
+pinned SHA is the read root. Future maintainers must keep both surfaces in lockstep over these
+five ops and must not re-root the verified-code path back onto the server's working tree.
+
 ## Consequences
 
 - Code-reading gates verify a client-pinned, immutable, reproducible snapshot — never the
