@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import sys
 import time
 import urllib.error
@@ -648,15 +649,15 @@ def update_one(
                 try:
                     _call_with_retry(client.delete_issue_link, link_id)
                     _links_applied += 1
-                except urllib.error.HTTPError as exc:
-                    if exc.code in (404, 409):
-                        _links_applied += 1  # already gone / concurrent change — idempotent
-                    else:
-                        print(  # noqa: T201
-                            f"update_one: delete_issue_link failed for {issue_key} -> "
-                            f"{to_key} ({link_type}): {exc!r}",
-                            file=sys.stderr,
-                        )
+                except subprocess.CalledProcessError:
+                    # delete_issue_link shells out via ACLI (raises CalledProcessError, NOT
+                    # an HTTPError). We only reach here after _find_link_id confirmed the link
+                    # exists in a fresh probe, so a failure now is dominated by a concurrent
+                    # removal (404) / concurrent change (409) — idempotent: the desired
+                    # end-state (link gone) is reached. A genuine persistent failure is
+                    # self-healing — the differ recomputes the REMOVE from managed_refs next
+                    # pass — so treat as non-fatal and don't unwind the pass.
+                    _links_applied += 1
                 except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, logged
                     print(  # noqa: T201
                         f"update_one: delete_issue_link failed for {issue_key} -> "

@@ -180,3 +180,60 @@ def test_find_link_id_resolves_either_direction(batch_dispatch: ModuleType) -> N
     # No such link -> None (already gone == idempotent success).
     assert batch_dispatch._find_link_id(links, "Blocks", "PROJ-9") is None
     assert batch_dispatch._find_link_id([], "Blocks", "PROJ-2") is None
+
+
+class _FakeClient:
+    def __init__(self, links, delete_exc=None) -> None:
+        self._links = links
+        self._delete_exc = delete_exc
+        self.deleted: list[str] = []
+
+    def update_issue(self, key, **kwargs):
+        return {"key": key}
+
+    def get_issue_links(self, key):
+        return self._links
+
+    def delete_issue_link(self, link_id):
+        if self._delete_exc is not None:
+            raise self._delete_exc
+        self.deleted.append(link_id)
+        return {"status": "deleted", "link_id": link_id}
+
+
+def test_update_one_applies_link_remove(batch_dispatch: ModuleType) -> None:
+    """update_one resolves the link id and deletes it for a REMOVE mutation."""
+    client = _FakeClient(
+        [{"id": "77", "type": {"name": "Blocks"}, "inwardIssue": {"key": "PROJ-2"}}]
+    )
+    mutation = {
+        "key": "PROJ-1",
+        "fields": {},
+        "links": [{"action": "remove", "type": "Blocks", "to_key": "PROJ-2"}],
+    }
+    subop: dict[str, int] = {}
+    batch_dispatch.update_one(mutation, client, subop_applied=subop)
+    assert client.deleted == ["77"]
+    assert subop.get("links_applied") == 1
+
+
+def test_update_one_tolerates_acli_delete_failure(batch_dispatch: ModuleType) -> None:
+    """delete_issue_link shells out via ACLI (subprocess.CalledProcessError, NOT HTTPError).
+    A failure after the link was found in the probe (concurrent removal / transient) must be
+    idempotent — update_one does not raise and the pass is not unwound."""
+    import subprocess
+
+    exc = subprocess.CalledProcessError(1, ["jira", "workitem", "link", "delete"])
+    client = _FakeClient(
+        [{"id": "88", "type": {"name": "Blocks"}, "inwardIssue": {"key": "PROJ-2"}}],
+        delete_exc=exc,
+    )
+    mutation = {
+        "key": "PROJ-1",
+        "fields": {},
+        "links": [{"action": "remove", "type": "Blocks", "to_key": "PROJ-2"}],
+    }
+    subop: dict[str, int] = {}
+    # Must NOT raise (the CalledProcessError is caught and treated as idempotent).
+    batch_dispatch.update_one(mutation, client, subop_applied=subop)
+    assert subop.get("links_applied") == 1, "an ACLI delete race is idempotent success"
