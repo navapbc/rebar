@@ -1,0 +1,1 @@
+{"author":"Iso Tester","data":{"file_impact":[{"path":"tests/interfaces/store/test_snapshot_environments.py","reason":"non-rebar sample-repo attested gate test"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782563013642106001,"uuid":"05b816c6-1916-4a91-94ec-2e64b33801cd"}
