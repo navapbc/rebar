@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -59,6 +60,19 @@ def _run_container(
     parent_tokens = det_floor.est_tokens(ctx.plan_text)
     out: list[dict[str, Any]] = []
     pairings = 0
+    pairing_records: list[dict[str, Any]] = []
+    container_t0 = time.monotonic()
+    # Observability: this is a SEQUENTIAL fan-out — len(container) × N_children agentic
+    # LLM calls, one per (parent, child) pairing — so wall-time grows with child count.
+    # Log the plan up front and each pairing's outcome+timing (the previously-invisible
+    # cost that makes a large epic look like a hang). Quiet by default; REBAR_LOG_LEVEL=INFO.
+    logger.info(
+        "plan-review container fan-out: criteria %s × %d child(ren) = %d SEQUENTIAL "
+        "agentic pairing(s), one LLM call each",
+        [c["id"] for c in container],
+        len(ctx.children),
+        len(container) * len(ctx.children),
+    )
     for crit in container:
         for child in ctx.children:
             pair_tokens = parent_tokens + det_floor.est_tokens(
@@ -85,6 +99,9 @@ def _run_container(
                     }
                 )
                 continue
+            _pair_t0 = time.monotonic()
+            _pair_err = None
+            _n_before = len(out)
             try:
                 out.extend(
                     passes.pass1_container(
@@ -96,14 +113,48 @@ def _run_container(
                         sibling_roster=roster,
                     )
                 )
-            except Exception:  # noqa: BLE001 — a failed P5 pairing drops its findings, never aborts the review
-                pass
+            except Exception as exc:  # noqa: BLE001 — a failed P5 pairing drops its findings, never aborts the review
+                _pair_err = type(exc).__name__
+            _pair_dt = time.monotonic() - _pair_t0
             pairings += 1
+            pairing_records.append(
+                {
+                    "criterion": crit["id"],
+                    "child": child.get("ticket_id"),
+                    "seconds": round(_pair_dt, 1),
+                    "findings": len(out) - _n_before,
+                    "error": _pair_err,
+                }
+            )
+            if _pair_err:
+                logger.warning(
+                    "container pairing %s/%s FAILED in %.1fs (%s)",
+                    crit["id"],
+                    child.get("ticket_id"),
+                    _pair_dt,
+                    _pair_err,
+                )
+            else:
+                logger.info(
+                    "container pairing %s/%s: %d finding(s) in %.1fs",
+                    crit["id"],
+                    child.get("ticket_id"),
+                    len(out) - _n_before,
+                    _pair_dt,
+                )
+    container_dt = time.monotonic() - container_t0
     coverage["container"] = {
         "criteria": [c["id"] for c in container],
         "children": len(ctx.children),
         "pairings_evaluated": pairings,
+        "pairings": pairing_records,
+        "total_seconds": round(container_dt, 1),
     }
+    logger.info(
+        "plan-review container fan-out done: %d pairing(s) in %.1fs total (sequential)",
+        pairings,
+        container_dt,
+    )
     return out
 
 
@@ -244,6 +295,29 @@ def run_pass1(
         return out
 
     max_workers = max(1, min(6, len(chunks) + len(agent)))
+    # Observability: record + log how Pass-1 criteria were batched across the tiers
+    # (single-turn chunks + agent criteria run CONCURRENTLY in the pool; container
+    # criteria run SEQUENTIALLY afterward — see _run_container). Quiet by default;
+    # enable with REBAR_LOG_LEVEL=INFO. Always recorded into the returned coverage.
+    coverage["batch_plan"] = {
+        "single_turn_chunks": len(chunks),
+        "agent_criteria": [c["id"] for c in agent],
+        "container_criteria": [c["id"] for c in container] if container else [],
+        "shed_criteria": [c["id"] for c in shed] if shed else [],
+        "children": len(ctx.children) if ctx.has_children else 0,
+        "max_workers": max_workers,
+    }
+    logger.info(
+        "plan-review pass1 batch: %d single-turn chunk(s) + %d agent criterion(s) "
+        "concurrently (max_workers=%d); %d container criterion(s) sequential over "
+        "%d child(ren); %d criterion(s) shed to budget",
+        len(chunks),
+        len(agent),
+        max_workers,
+        len(container) if container else 0,
+        len(ctx.children) if ctx.has_children else 0,
+        len(shed) if shed else 0,
+    )
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         st_futs = [ex.submit(_chunk, ch, False) for ch in chunks]
         ag_futs = [ex.submit(_chunk, [c], True) for c in agent]

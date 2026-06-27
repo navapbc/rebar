@@ -652,10 +652,11 @@ def _step_record(
     *,
     frame_key: str | None = None,
     iteration: int | None = None,
+    duration_ms: float | None = None,
 ) -> dict[str, Any]:
     # ``frame_key`` defaults to ``step_id`` (the top frame), so the reducer keys a
     # leaf-only run exactly as v1 did; nested executions pass the full path.
-    return {
+    record = {
         "run_id": run_id,
         "step_id": step_id,
         "frame_key": frame_key or step_id,
@@ -666,6 +667,11 @@ def _step_record(
         "error": result.error,
         "captured": dict(captured or {}),
     }
+    # Per-step wall-clock (toy-kink-ire): present only for leaf steps the interpreter
+    # timed; control-frame markers omit it. Additive — absent on a record means "untimed".
+    if duration_ms is not None:
+        record["duration_ms"] = duration_ms
+    return record
 
 
 # ── Snapshot TTL sweep (WS-C3 owns the sweep; WS-D owns create + teardown) ─────

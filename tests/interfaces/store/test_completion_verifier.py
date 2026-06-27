@@ -407,13 +407,19 @@ def test_child_closure_does_not_recurse_grandchildren(rebar_repo: Path) -> None:
         description="Body.\n\n## Acceptance Criteria\n- [ ] z\n",
         repo_root=str(rebar_repo),
     )
-    rebar.transition(child, "open", "in_progress", repo_root=str(rebar_repo))
-    # Force past the open-grandchild guard so the child closes while the grandchild stays open.
-    _t.transition_compute(
-        rid(child), "in_progress", "closed", force=True, repo_root=str(rebar_repo)
-    )
+    # Reach the "closed+certified direct child with an OPEN grandchild" state legitimately:
+    # the open-children guard cannot be bypassed (not even with --force, warty-karma-matte) and
+    # a closed parent can't gain new children — so close the grandchild, then the child (each
+    # passes the guard with NO force), then REOPEN the grandchild. (A grandchild reopened after
+    # its ancestors closed is exactly the case the verifier must not recurse into.)
+    # Starting work on the grandchild cascades its ancestors (child, epic) to in_progress too
+    # (the parent-first cascade), so the child is already in_progress when we close it.
+    rebar.transition(grandchild, "open", "in_progress", repo_root=str(rebar_repo))
+    _t.transition_compute(rid(grandchild), "in_progress", "closed", repo_root=str(rebar_repo))
+    _t.transition_compute(rid(child), "in_progress", "closed", repo_root=str(rebar_repo))
     rebar.sign_manifest(child, ["completion-verifier: PASS"], repo_root=str(rebar_repo))
     assert rebar.verify_signature(child, repo_root=str(rebar_repo))["verdict"] == "certified"
+    _t.transition_compute(rid(grandchild), "closed", "open", repo_root=str(rebar_repo))  # reopen
     assert rebar.show_ticket(grandchild, repo_root=str(rebar_repo))["status"] == "open"
 
     r = rebar.llm.verify_completion(
