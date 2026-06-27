@@ -11,6 +11,7 @@ import json
 import logging
 import os
 
+from ._managed_refs import add_managed_ref, seed_managed_refs_from_current
 from ._version import KNOWN_EVENT_TYPES, TAG_DELTA
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,9 @@ def process_create(
     state["created_at"] = event.get("timestamp")
     state["env_id"] = event.get("env_id")
     state["parent_id"] = data.get("parent_id") or None
+    # Managed-ref provenance (safe-luge-nog): a parent set at creation is a
+    # reference we manage from birth — fold it so a later detach can propagate.
+    add_managed_ref(state, "parent", state["parent_id"])
     state["priority"] = data.get("priority")
     state["assignee"] = data.get("assignee")
     # Adjective-noun-noun alias (3363-fa8b): ticket_create computes this and
@@ -231,13 +235,17 @@ def process_link(state: dict, event: dict, data: dict, tracker_dir: str | None =
                 resolved_target = canonical
         except Exception:  # noqa: BLE001 — resolver is best-effort; never crash the reducer
             pass
+    relation = data.get("relation", "")
     state["deps"].append(
         {
             "target_id": resolved_target,
-            "relation": data.get("relation", ""),
+            "relation": relation,
             "link_uuid": event["uuid"],
         }
     )
+    # Managed-ref provenance (safe-luge-nog): record the logical reference so a
+    # later UNLINK can propagate a peer delete (process_unlink never removes it).
+    add_managed_ref(state, relation, resolved_target)
 
 
 def process_unlink(state: dict, data: dict) -> None:
@@ -336,6 +344,12 @@ def process_edit(state: dict, data: dict) -> None:
                 state["tags"] = []
         else:
             state[field_name] = new_value
+            # Managed-ref provenance (safe-luge-nog): re-parenting via EDIT (incl. an
+            # inbound-ADOPTED parent the reconciler applies) makes the new parent a
+            # reference we manage — fold it so a later detach can propagate. A detach
+            # (parent_id -> None) folds nothing and never removes (monotonic).
+            if field_name == "parent_id":
+                add_managed_ref(state, "parent", new_value)
 
 
 def process_file_impact(state: dict, event: dict, data: dict) -> None:
@@ -517,6 +531,16 @@ def process_snapshot(state: dict, data: dict) -> None:
     compiled_state = data.get("compiled_state", {})
     for key, value in compiled_state.items():
         state[key] = value
+    # Managed-ref provenance migration (safe-luge-nog): a SNAPSHOT written before
+    # this field existed carries no ``managed_refs``, so restoring it would leave the
+    # projection empty and silently disable removal-propagation for the ticket's
+    # existing refs (the compaction durability hole). Seed it from the restored
+    # current parent_id + deps so those refs are treated as managed. Post-feature
+    # SNAPSHOTs DO carry managed_refs and are restored verbatim above (this is a
+    # no-op for them). Post-snapshot LINK/UNLINK/EDIT events replay afterwards and
+    # fold in normally.
+    if "managed_refs" not in compiled_state:
+        state["managed_refs"] = seed_managed_refs_from_current(state)
 
 
 def scan_for_latest_snapshot(

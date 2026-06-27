@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import sys
 import time
 import urllib.error
@@ -61,6 +62,29 @@ def _index_existing_links(issuelinks) -> set[tuple[str, str]]:
             if isinstance(side, dict) and side.get("key"):
                 existing.add((type_name, side.get("key")))
     return existing
+
+
+def _find_link_id(issuelinks, link_type: str, to_key: str) -> str | None:
+    """Return the id of the issuelink of ``link_type`` to ``to_key`` (either direction).
+
+    The REMOVE counterpart of :func:`_index_existing_links` (wake-inn-parse): the differ
+    emits only (type, to_key) for a managed link to delete; the applier resolves the
+    concrete link id from a fresh ``get_issue_links`` probe. Direction-agnostic (matches
+    whether ``to_key`` is the inward or outward side). Returns None when no such link
+    exists (already removed — idempotent success)."""
+    for link in issuelinks or []:
+        if not isinstance(link, dict):
+            continue
+        link_t = link.get("type") or {}
+        type_name = link_t.get("name") if isinstance(link_t, dict) else None
+        if type_name != link_type:
+            continue
+        for side_key in ("inwardIssue", "outwardIssue"):
+            side = link.get(side_key)
+            if isinstance(side, dict) and side.get("key") == to_key:
+                link_id = link.get("id")
+                return str(link_id) if link_id is not None else None
+    return None
 
 
 # Per-pass REST-call budget: once create_one has issued this many REST calls in a
@@ -408,8 +432,16 @@ def update_one(
     # FAIL in the e2e field-validation probe. Mirror the typed leaf: pop parent
     # BEFORE the allowlist filter and route it through set_parent, guarding
     # HTTP 400 hierarchy rejections as non-fatal warnings.
+    # Parent-detach churn fix: distinguish a parent CLEAR (the "parent" key is
+    # PRESENT with a falsy value — emitted when a ticket is detached locally but
+    # Jira still carries the stale epic-link) from "no parent op this mutation"
+    # (the key is ABSENT). ``fields.pop("parent", None)`` collapses both to None,
+    # so key out the *presence* first. ``client.set_parent`` already clears when
+    # passed a falsy key (PUT {"fields":{"parent":None}}), so a CLEAR routes
+    # through the identical call path as a SET.
+    _has_parent_op = "parent" in fields
     parent_key = fields.pop("parent", None)
-    if parent_key is not None:
+    if _has_parent_op:
         try:
             _call_with_retry(client.set_parent, issue_key, parent_key)
         except urllib.error.HTTPError as exc:
@@ -456,7 +488,7 @@ def update_one(
     # update_issue is skipped here ONLY when a parent op was the reason the
     # field set is empty (label/comment dispatch below still runs).
     result: dict | None = None
-    _skip_empty_update = parent_key is not None and not fields
+    _skip_empty_update = _has_parent_op and not fields
     if _skip_empty_update:
         pass  # parent handled via set_parent; no scalar fields to edit
     else:
@@ -585,6 +617,53 @@ def update_one(
                     f"{to_key} ({link_type}): {exc!r}",
                     file=sys.stderr,
                 )
+
+    # Symmetric link REMOVE dispatch (wake-inn-parse): a managed link the differ
+    # marked for removal (a deliberate local unlink) is deleted on Jira so the inbound
+    # differ stops re-adding it. The differ emits only (type, to_key); resolve the link
+    # id here by probing the issue's current links (mirrors the ADD dedup probe). A link
+    # already gone (no match / 404 / 409) is idempotent success. Best-effort + logged.
+    if isinstance(links, list) and any(
+        isinstance(e, dict) and e.get("action") == "remove" for e in links
+    ):
+        try:
+            link_objs = client.get_issue_links(issue_key)
+        except Exception as exc:  # noqa: BLE001 — probe is best-effort; skip removals this pass
+            link_objs = None
+            print(  # noqa: T201
+                f"update_one: get_issue_links probe (remove) failed for {issue_key}: {exc!r}",
+                file=sys.stderr,
+            )
+        if link_objs is not None:
+            for entry in links:
+                if not isinstance(entry, dict) or entry.get("action") != "remove":
+                    continue
+                link_type = entry.get("type")
+                to_key = entry.get("to_key")
+                if not link_type or not to_key:
+                    continue
+                link_id = _find_link_id(link_objs, link_type, to_key)
+                if link_id is None:
+                    continue  # already absent in Jira — idempotent success, nothing to do
+                _links_computed += 1
+                try:
+                    _call_with_retry(client.delete_issue_link, link_id)
+                    _links_applied += 1
+                except subprocess.CalledProcessError:
+                    # delete_issue_link shells out via ACLI (raises CalledProcessError, NOT
+                    # an HTTPError). We only reach here after _find_link_id confirmed the link
+                    # exists in a fresh probe, so a failure now is dominated by a concurrent
+                    # removal (404) / concurrent change (409) — idempotent: the desired
+                    # end-state (link gone) is reached. A genuine persistent failure is
+                    # self-healing — the differ recomputes the REMOVE from managed_refs next
+                    # pass — so treat as non-fatal and don't unwind the pass.
+                    _links_applied += 1
+                except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, logged
+                    print(  # noqa: T201
+                        f"update_one: delete_issue_link failed for {issue_key} -> "
+                        f"{to_key} ({link_type}): {exc!r}",
+                        file=sys.stderr,
+                    )
 
     if subop_applied is not None:
         subop_applied.update(
