@@ -1,0 +1,97 @@
+# Built-in prompt eval spec (epic 6f2d / WS-EVAL-EXISTING) for the `completion-verifier`.
+# Measures recall on INCOMPLETE work (verdict must be FAIL), no false-fail on COMPLETE
+# work (must PASS), and the completion_verdict contract (PASS/FAIL; FAIL<=>findings;
+# each FAIL finding cites a source). Offline: validate_eval_spec(strict=True). Live: the
+# eval CI ([eval] extra + credentials) runs it through the context-injection solver — the
+# verifier reads the ticket + repo via tools, so each case is backed by injected
+# `ticket_context` + a fixture repo described in `note` (see the WS-EVAL solver task).
+prompt: completion-verifier
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  - type: deterministic
+    name: emits_valid_verdict
+    description: A completion_verdict — verdict in {PASS,FAIL}, FAIL<=>findings, each FAIL finding cites a source.
+  - type: deterministic
+    name: recall_on_incomplete
+    description: On a ticket with an unmet requirement, the verdict is FAIL.
+  - type: deterministic
+    name: no_false_fail_on_complete
+    description: On a ticket whose requirements are all demonstrably met, the verdict is PASS.
+  - type: llm-judge
+    name: finding_cites_criterion_and_is_grounded
+    gates: false
+    threshold: 0.7
+    pointwise: true
+    rubric: >
+      Score 0..1 whether each FAIL finding names the specific unmet completion
+      requirement AND grounds it in the implementation (a real file/symbol), rather
+      than asserting incompleteness vaguely. Judge substance, not length.
+    grader:
+      model: openai:gpt-4o-2024-08-06
+      temperature: 0
+      seed: 7
+      snapshot: "2024-08-06"
+
+dataset:
+  - id: CV-missing-ac-item
+    corpus: rebar
+    expect: fail
+    note: "Fixture repo implements `rebar foo` but NO --json flag exists anywhere."
+    ticket_context: |
+      ## Acceptance Criteria
+      - [ ] add a `rebar foo` subcommand
+      - [ ] support `--json` output on `rebar foo`
+  - id: CV-bug-unfixed
+    corpus: snap
+    expect: fail
+    note: "Fixture: the discount code path is unchanged; total still ignores the code."
+    ticket_context: |
+      Bug: checkout total ignores discount codes.
+      ## Acceptance Criteria
+      - [ ] applying a valid discount code reduces the order total
+  - id: CV-partial-graph
+    corpus: dso
+    expect: fail
+    note: "Fixture: parent epic has a child story whose AC (audit log) is unimplemented."
+    ticket_context: |
+      ## Acceptance Criteria
+      - [ ] all child stories are implemented and their AC met
+      - [ ] an audit-log entry is written on every state change
+  - id: CV-complete-feature
+    corpus: rebar
+    expect: pass
+    note: "Fixture: `rebar bar --json` is fully implemented + tested."
+    ticket_context: |
+      ## Acceptance Criteria
+      - [ ] add a `rebar bar` subcommand
+      - [ ] support `--json` output on `rebar bar`
+  - id: CV-complete-bugfix
+    corpus: snap
+    expect: pass
+    note: "Fixture: the null-guard is added at the cited path; reproduction no longer fails."
+    ticket_context: |
+      Bug: profile page 500s when the user has no avatar.
+      ## Acceptance Criteria
+      - [ ] the profile page renders for a user with no avatar
+  - id: CV-complete-refactor
+    corpus: rebar
+    expect: pass
+    note: "Fixture: the helper is extracted and all call sites updated, as the AC asks."
+    ticket_context: |
+      ## Acceptance Criteria
+      - [ ] extract the duplicated parsing logic into one helper
+      - [ ] update all call sites to use the helper
+
+gold_set:
+  - input: "A FAIL finding: 'AC item `--json` unmet — no --json flag in src/rebar/_cli/foo.py.'"
+    label: useful
+  - input: "A FAIL finding with no cited file: 'the work seems incomplete.'"
+    label: not_useful
+  - input: "A PASS verdict on a ticket whose every AC item maps to a cited implementation."
+    label: useful
+  - input: "A FAIL finding objecting to code style (out of completion scope)."
+    label: not_useful
