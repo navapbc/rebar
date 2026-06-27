@@ -28,8 +28,53 @@ from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.runner import Runner
 
-from . import passes, registry
+from . import det_floor, passes, registry
 from .det_floor import PlanContext
+
+
+def _child_tokens(child: dict[str, Any]) -> int:
+    """Estimated tokens for one WHOLE child (title + description) — the unit the
+    container bin-packer sums (a child is NEVER chunked; ca03)."""
+    return det_floor.est_tokens(f"{child.get('title', '')}\n{child.get('description', '')}")
+
+
+def container_budget(largest_window_tokens: int) -> int:
+    """The per-call token budget the container bin-packer fits (parent + all packed
+    children) under — the SAME P8 window budget used elsewhere (model window × headroom
+    − output reserve)."""
+    return int(largest_window_tokens * det_floor.P8_HEADROOM) - det_floor.P8_OUTPUT_RESERVE_TOKENS
+
+
+def pack_container_bins(
+    children: list[dict[str, Any]], parent_tokens: int, budget: int
+) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
+    """Greedily bin-pack WHOLE children for the container fan-out (story 1762).
+
+    Each bin is ONE merged container call: ``parent_tokens + Σ(child tokens in the bin)``
+    must stay ≤ ``budget`` (so the parent + every packed child fit the window together,
+    each WHOLE — never chunked, ca03). Returns ``(bins, oversized)`` where ``bins`` is a
+    list of child-lists (small children packed together; a large parent+child pairing
+    keeps its own single-child bin), and ``oversized`` is the children whose
+    ``parent + that child ALONE`` already exceeds ``budget`` — the single-child fallback
+    that becomes the existing 'too big → reduce the ticket' failure finding."""
+    bins: list[list[dict[str, Any]]] = []
+    oversized: list[dict[str, Any]] = []
+    cur: list[dict[str, Any]] = []
+    cur_tokens = parent_tokens
+    for child in children:
+        ct = _child_tokens(child)
+        if parent_tokens + ct > budget:
+            oversized.append(child)  # too big even alone → single-child too-big finding
+            continue
+        if cur and cur_tokens + ct > budget:
+            bins.append(cur)
+            cur, cur_tokens = [], parent_tokens
+        cur.append(child)
+        cur_tokens += ct
+    if cur:
+        bins.append(cur)
+    return bins, oversized
+
 
 # Model-by-window escalation ladder (estimated tokens → the smallest model whose
 # window fits; escalate up on a context-limit signal).
@@ -205,7 +250,6 @@ def shed_to_budget(
     which would have shed G3/G4 first.) Within the sheddable set we still shed overlays
     (T*) before the core code-grounding set."""
     cap = plan_budget_cap(ctx)
-    n_children = max(1, len(ctx.children))
 
     def project_sheddable(ag: list[dict]) -> float:
         """Projected SHEDDABLE spend (the single-turn chunks + AGENT/overlay criteria)
@@ -228,10 +272,18 @@ def shed_to_budget(
         agent = [x for x in agent if x["id"] != c["id"]]
     # The container fan-out is a fixed floor, never shed — recorded so the cap's "bounds
     # only overlay/agent spend" posture, and the unavoidable container cost, are both
-    # observable. Story 98c6 MERGED all container criteria into ONE call per child (was
-    # one per criterion per child), so the floor is N (one call/child), not 2N — and only
-    # when there is at least one container criterion to evaluate.
-    container_calls = n_children if container else 0
+    # observable. Story 98c6 MERGED all container criteria into ONE call per child (not 2N);
+    # story 1762 then BIN-PACKS small children, so the real floor is the number of PACKED
+    # BINS (< N when children pack), computed with the same packer the fan-out uses.
+    if container and ctx.children:
+        bins, _oversized = pack_container_bins(
+            ctx.children,
+            det_floor.est_tokens(ctx.plan_text),
+            container_budget(ctx.largest_window_tokens),
+        )
+        container_calls = len(bins)
+    else:
+        container_calls = 0
     container_floor_usd = round(container_calls * COST_AGENT_USD, 4)
     coverage["budget"] = {
         "cap_usd": cap,
@@ -311,6 +363,8 @@ __all__ = [
     "DEFAULT_BUDGET_CAP_USD",
     "centrality",
     "plan_budget_cap",
+    "container_budget",
+    "pack_container_bins",
     "largest_window_tokens",
     "is_context_limit_error",
     "models_at_or_above",

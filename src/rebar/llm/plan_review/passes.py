@@ -27,6 +27,7 @@ arithmetic — no model, fully unit-testable.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -248,34 +249,54 @@ def pass1_container(
     cfg: LLMConfig,
     *,
     parent_plan: str,
-    child: dict[str, Any],
+    children: list[dict[str, Any]],
     criteria: list[dict[str, Any]],
     sibling_roster: str,
 ) -> list[dict[str, Any]]:
-    """Run ALL container criteria (G3+G4) for ONE (parent + single child) pairing in a
-    SINGLE agentic call (story 98c6 — merges the former 2 calls/child into 1, 2N→N). The
-    container prompt already describes both audits over the shared (parent, child, roster)
-    context; presenting both rubrics in one turn keeps per-criterion attribution while
-    halving calls. The complete sibling roster is supplied so an absence finding can be
-    cross-checked against ALL siblings before it stands.
+    """Run ALL container criteria (G3+G4) for a parent + a BIN of one-or-more WHOLE
+    children in a SINGLE agentic call (stories 98c6 merge + 1762 bin-packing). The
+    container prompt describes both audits over the shared (parent, children, roster)
+    context; presenting both rubrics + every child in one turn halves calls (merge) and
+    packs small children together (bin-pack) while keeping per-criterion AND per-child
+    attribution. The complete sibling roster lets an absence finding be cross-checked
+    against ALL siblings before it stands.
 
-    Attribution is MODEL-SELF-REPORTED, then VALIDATED against the container id set
-    ({G3,G4}) and out-of-set tags DROPPED (mirrors ``pass1_chunk`` — never fabricate an
-    attribution); a finding mapping to no in-set criterion is dropped, not mis-tagged."""
+    Criterion attribution is MODEL-SELF-REPORTED then VALIDATED against the container id
+    set ({G3,G4}) — out-of-set tags DROPPED, a finding mapping to no in-set criterion
+    dropped (mirrors ``pass1_chunk``; never fabricate an attribution). CHILD attribution
+    is parsed from the model's ``location`` ('child <id>') and validated against the bin's
+    children: a single-child bin falls back to its sole child; a multi-child finding the
+    model left unattributed is kept as bin-level (``_container_child=None``) rather than
+    mis-assigned. Per-child sections + the required per-child output preserve per-child
+    attention so packing does not dilute it."""
     valid_ids = [c["id"] for c in criteria]
-    child_id = child.get("ticket_id", "?")
-    child_whole = f"### child {child_id}: {child.get('title', '')}\n{child.get('description', '')}"
+    bin_ids = [c.get("ticket_id", "?") for c in children]
+    multi = len(children) > 1
+    children_block = "\n\n".join(
+        f"### child {c.get('ticket_id', '?')}: {c.get('title', '')}\n{c.get('description', '')}"
+        for c in children
+    )
     rubric = "\n\n".join(_criterion_block(c) for c in criteria)
+    if multi:
+        attribution = (
+            f"The {len(children)} children are EACH in their own '### child <id>' section. "
+            "Evaluate EVERY child against ALL of these criteria — do not skip any child. For "
+            "EACH finding, set `location` to 'child <id>' naming the SPECIFIC child it "
+            "concerns, and tag `criteria` with the container id(s) it addresses."
+        )
+    else:
+        attribution = (
+            f"Set `location` to 'child {bin_ids[0]}' and tag `criteria` with the container "
+            "id(s) the finding addresses."
+        )
     req = RunRequest(
         system_prompt=_resolve_system(PASS_CONTAINER, parent_plan, cfg),
         instructions=(
             f"## Container criteria for this pass (ids: {', '.join(valid_ids)})\n{rubric}\n\n"
-            f"## The one child under review (whole)\n{child_whole}\n\n"
+            f"## Child/children under review (whole)\n{children_block}\n\n"
             f"## Complete sibling roster (for absence cross-check)\n{sibling_roster}\n\n"
-            f"Evaluate the parent + THIS child for ALL of {', '.join(valid_ids)} in this one "
-            "pass, and TAG each finding with the criterion id(s) it addresses (from this id "
-            "set). An absence is a finding only if NO sibling in the roster covers it. A clean "
-            "pairing returns an empty findings list."
+            f"{attribution} An absence is a finding only if NO sibling in the roster covers "
+            "it. A clean pairing returns an empty findings list."
         ),
         config=cfg,
         reviewers=["plan-container"],
@@ -286,20 +307,29 @@ def pass1_container(
     result = runner.run(req)
     out: list[dict[str, Any]] = []
     for f in result.get("findings", []) or []:
-        # Self-reported attribution, validated against the container id set; drop
-        # out-of-set tags. A finding mapping to no in-set criterion is the model
-        # violating the instruction — DROP it rather than mis-tag it (mirrors pass1_chunk).
         crit = [c for c in (f.get("criteria") or []) if c in valid_ids]
         if not crit:
             continue
+        loc = f.get("location", "") or ""
+        # Attribute to the SPECIFIC bin child the model named in `location` as 'child <id>'.
+        # Match the id as a WHOLE token after 'child ' (word-boundary anchored) — NOT a bare
+        # substring — so a child id that is a prefix of another (e.g. 'c1' vs 'c12') is never
+        # mis-attributed to the shorter id. A single-child bin falls back to its sole child;
+        # a multi-child finding left unattributed stays bin-level (None), not mis-assigned.
+        child_id = next(
+            (cid for cid in bin_ids if cid and re.search(rf"child\s+{re.escape(cid)}\b", loc)),
+            None,
+        )
+        if child_id is None and not multi:
+            child_id = bin_ids[0]
         out.append(
             {
                 "finding": f.get("finding", ""),
                 "criteria": crit,
-                "location": f.get("location", "") or f"child {child_id}",
+                "location": loc or (f"child {child_id}" if child_id else "container bin"),
                 "evidence": [
                     *(f.get("evidence", []) or []),
-                    f"per-child pairing: parent + {child_id}",
+                    f"container pairing: parent + {'/'.join(bin_ids)}",
                 ],
                 "scenarios": f.get("scenarios", []) or [],
                 "impact": f.get("impact", ""),
@@ -307,6 +337,7 @@ def pass1_container(
                 "suggested_fix": f.get("suggested_fix", ""),
                 "_agentic": True,
                 "_container_child": child_id,
+                "_container_bin": list(bin_ids),
             }
         )
     return out

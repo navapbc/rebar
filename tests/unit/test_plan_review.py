@@ -653,7 +653,7 @@ def test_container_system_prompt_is_byte_stable_across_children() -> None:
             cap,
             _fake_cfg(),
             parent_plan=parent_plan,
-            child=child,
+            children=[child],
             criteria=[g3],
             sibling_roster="- c1\n- c2",
         )
@@ -692,14 +692,17 @@ class _PairingRunner:
 
 
 def _big_epic_ctx(n_children: int, *, big_plan: bool):
-    # A parent plan over (big_plan) / under the 4096-token cache floor, with n_children
-    # small children — all pairings in-budget (huge window).
+    # Children sized + the window tightened so parent + ONE child fits a bin but parent +
+    # TWO do not -> exactly one bin PER child (the fan-out granularity the warm-then-fan-out
+    # tests exercise, after S5 bin-packing). Each child ~20000 tokens (larger than even the
+    # big parent), with a window whose P8 budget is ~38000, so two children never co-pack
+    # regardless of parent size. big_plan keeps the parent over the 4096-token cache floor.
     desc = ("padding word " * 5000) if big_plan else _GOOD_AC
     children = [
-        {"ticket_id": f"c{i}", "title": f"C{i}", "description": "small child"}
+        {"ticket_id": f"c{i}", "title": f"C{i}", "description": "x " * 40000}
         for i in range(n_children)
     ]
-    return _ctx(desc, ttype="epic", children=children, largest_window_tokens=1_000_000)
+    return _ctx(desc, ttype="epic", children=children, largest_window_tokens=77_778)
 
 
 def test_container_warm_then_fan_out_runs_each_pairing_once() -> None:
@@ -790,14 +793,131 @@ def test_container_attribution_is_self_reported_and_validated() -> None:
         fr,
         _fake_cfg(),
         parent_plan="PARENT",
-        child={"ticket_id": "c1", "title": "C1", "description": "body"},
+        children=[{"ticket_id": "c1", "title": "C1", "description": "body"}],
         criteria=[g3, g4],
         sibling_roster="- c1",
     )
     assert [f["finding"] for f in out] == ["coverage gap", "consistency + coverage"]
     assert out[0]["criteria"] == ["G3"]
     assert out[1]["criteria"] == ["G3", "G4"]  # multi-criterion attribution preserved
-    assert all(f["_container_child"] == "c1" for f in out)  # provenance preserved
+    assert all(f["_container_child"] == "c1" for f in out)  # single-child bin -> sole child
+
+
+def test_container_bin_packs_small_children_into_fewer_calls() -> None:
+    # Story 1762: small children + a huge window pack into ONE merged bin -> ONE call (< N).
+    ctx = _ctx(
+        "padding word " * 5000,
+        ttype="epic",
+        children=[
+            {"ticket_id": f"c{i}", "title": f"C{i}", "description": "tiny"} for i in range(4)
+        ],
+        largest_window_tokens=1_000_000,
+    )
+    container = [registry.by_id()["G3"], registry.by_id()["G4"]]
+    runner = _PairingRunner()
+    cov: dict = {}
+    orchestrator._run_container(ctx, _fake_cfg(), runner, container, cov)
+    assert cov["container"]["bins"] == 1  # 4 small children packed into a single bin
+    assert runner.calls == 1  # ONE call for the whole bin (< 4)
+    assert cov["container"]["pairings_evaluated"] == 1
+
+
+def test_container_attributes_findings_per_child_in_a_packed_bin() -> None:
+    # In a multi-child bin the model self-reports the child via `location` ('child <id>');
+    # it is validated against the bin's children and preserved as _container_child.
+    from rebar.llm.runner import FakeRunner
+
+    fr = FakeRunner(
+        structured={
+            "analysis": "",
+            "findings": [
+                {"finding": "gap in a", "criteria": ["G3"], "location": "child a"},
+                {"finding": "overlap in b", "criteria": ["G4"], "location": "child b"},
+                {"finding": "bin-level", "criteria": ["G3"], "location": "somewhere"},
+            ],
+        }
+    )
+    g3, g4 = registry.by_id()["G3"], registry.by_id()["G4"]
+    out = passes.pass1_container(
+        fr,
+        _fake_cfg(),
+        parent_plan="PARENT",
+        children=[
+            {"ticket_id": "a", "title": "A", "description": "x"},
+            {"ticket_id": "b", "title": "B", "description": "y"},
+        ],
+        criteria=[g3, g4],
+        sibling_roster="- a\n- b",
+    )
+    by_finding = {f["finding"]: f for f in out}
+    assert by_finding["gap in a"]["_container_child"] == "a"
+    assert by_finding["overlap in b"]["_container_child"] == "b"
+    # An unattributed multi-child finding stays bin-level (None), not mis-assigned.
+    assert by_finding["bin-level"]["_container_child"] is None
+
+
+def test_container_attribution_is_prefix_collision_safe() -> None:
+    # A child id that is a PREFIX of another in the same bin ('c1' vs 'c12') must not be
+    # mis-attributed: 'child c12' attributes to c12 (whole-token match), not c1.
+    from rebar.llm.runner import FakeRunner
+
+    fr = FakeRunner(
+        structured={
+            "analysis": "",
+            "findings": [
+                {"finding": "about c12", "criteria": ["G3"], "location": "child c12"},
+                {"finding": "about c1", "criteria": ["G4"], "location": "child c1"},
+            ],
+        }
+    )
+    g3, g4 = registry.by_id()["G3"], registry.by_id()["G4"]
+    out = passes.pass1_container(
+        fr,
+        _fake_cfg(),
+        parent_plan="PARENT",
+        children=[
+            {"ticket_id": "c1", "title": "C1", "description": "x"},
+            {"ticket_id": "c12", "title": "C12", "description": "y"},
+        ],
+        criteria=[g3, g4],
+        sibling_roster="- c1\n- c12",
+    )
+    by_finding = {f["finding"]: f for f in out}
+    assert by_finding["about c12"]["_container_child"] == "c12"  # NOT mis-matched to c1
+    assert by_finding["about c1"]["_container_child"] == "c1"
+
+
+def test_container_oversized_child_keeps_too_big_finding() -> None:
+    # A child whose parent+child ALONE exceeds budget stays the single-child fallback ->
+    # the existing too-big failure finding; the small child still packs + runs.
+    ctx = _ctx(
+        _GOOD_AC,
+        ttype="epic",
+        children=[
+            {"ticket_id": "sm", "title": "S", "description": "tiny"},
+            {"ticket_id": "big", "title": "B", "description": "x " * 200_000},  # ~100k tokens
+        ],
+        largest_window_tokens=50_000,
+    )
+    container = [registry.by_id()["G3"], registry.by_id()["G4"]]
+    cov: dict = {}
+    out = orchestrator._run_container(ctx, _fake_cfg(), _PairingRunner(), container, cov)
+    assert any("too big" in f["finding"].lower() and "big" in f["finding"] for f in out)
+    assert cov["container"]["bins"] == 1  # only the small child's bin runs
+
+
+def test_container_floor_reflects_packed_bins_and_zero_without_container() -> None:
+    # Story 1762: the budget container floor = packed BIN count * COST_AGENT (< N), and 0
+    # when there is no container criterion (S4 cost-model assertion).
+    children = [{"ticket_id": f"c{i}", "title": f"C{i}", "description": "tiny"} for i in range(4)]
+    ctx = _ctx(_GOOD_AC, ttype="epic", children=children, largest_window_tokens=1_000_000)
+    chunks = [[{"id": "E2"}]]
+    cov: dict = {}
+    sizing.shed_to_budget(ctx, chunks, [], [{"id": "G3"}, {"id": "G4"}], cov)
+    assert cov["budget"]["container_floor_usd"] == round(1 * sizing.COST_AGENT_USD, 4)  # 1 bin
+    cov2: dict = {}
+    sizing.shed_to_budget(ctx, chunks, [], [], cov2)  # no container criteria
+    assert cov2["budget"]["container_floor_usd"] == 0.0
 
 
 def test_budget_cap_never_sheds_container_criteria() -> None:
