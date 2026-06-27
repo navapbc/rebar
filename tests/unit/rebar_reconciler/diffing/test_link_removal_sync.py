@@ -237,3 +237,70 @@ def test_update_one_tolerates_acli_delete_failure(batch_dispatch: ModuleType) ->
     # Must NOT raise (the CalledProcessError is caught and treated as idempotent).
     batch_dispatch.update_one(mutation, client, subop_applied=subop)
     assert subop.get("links_applied") == 1, "an ACLI delete race is idempotent success"
+
+
+class _MutableJira:
+    """A minimal mutable Jira that reflects link deletes on subsequent reads — enough to
+    drive TWO reconcile passes over the differ + applier and prove the unlink converges."""
+
+    def __init__(self, links_by_key: dict[str, list[dict]]) -> None:
+        self._links = {k: list(v) for k, v in links_by_key.items()}
+
+    def issuelinks(self, key: str) -> list[dict]:
+        return list(self._links.get(key, []))
+
+    def update_issue(self, key, **kwargs):
+        return {"key": key}
+
+    def get_issue_links(self, key):
+        return list(self._links.get(key, []))
+
+    def delete_issue_link(self, link_id):
+        for key, links in self._links.items():
+            self._links[key] = [lk for lk in links if lk.get("id") != link_id]
+        return {"status": "deleted", "link_id": link_id}
+
+
+def test_two_passes_managed_unlink_stays_removed(
+    outbound_differ: ModuleType, inbound_differ: ModuleType, batch_dispatch: ModuleType
+) -> None:
+    """Operator-facing churn proof (story safe-luge-nog AC): a user unlinks a MANAGED
+    dependency locally; running TWO reconcile passes must leave it removed — pass 1 deletes the
+    Jira link (inbound re-add suppressed), and pass 2 over the refreshed snapshot neither
+    re-adds it locally nor re-emits anything. This is the regression the whole gate exists for."""
+    store = StubBindingStore({"local-1": "PROJ-1", "local-2": "PROJ-2"})
+    # Locally DETACHED a managed link: deps empty, managed_refs still records it.
+    child = _child(managed_refs=[["blocks", "local-2"]], deps=[])
+    jira = _MutableJira(
+        {"PROJ-1": [{"id": "L1", "type": {"name": "Blocks"}, "inwardIssue": {"key": "PROJ-2"}}]}
+    )
+
+    def _run_pass() -> tuple[list, int]:
+        snapshot = _snapshot(jira.issuelinks("PROJ-1"))
+        outs = outbound_differ.compute_outbound_mutations(
+            local_tickets=[child], jira_snapshot=snapshot, binding_store=store
+        )
+        # Apply outbound to the mutable Jira (pass-1 deletes the link; later passes no-op).
+        for m in outs:
+            batch_dispatch.update_one(
+                {"key": m.jira_key, "fields": dict(m.fields or {}), "links": list(m.links or [])},
+                jira,
+            )
+        inbound, suppressed = inbound_differ.compute_inbound_mutations(
+            snapshot, store, {"local-1": child}, outs
+        )
+        inbound_link_adds = [lk for im in inbound for lk in (getattr(im, "links", []) or [])]
+        return inbound_link_adds, suppressed
+
+    # PASS 1: the managed unlink is propagated (Jira link deleted) and the inbound re-add is
+    # suppressed this pass.
+    adds_1, suppressed_1 = _run_pass()
+    assert not adds_1, "pass 1: inbound link re-add must be suppressed (remove-wins)"
+    assert suppressed_1 >= 1
+    assert jira.issuelinks("PROJ-1") == [], "pass 1: the Jira link is deleted"
+
+    # PASS 2: over the REFRESHED snapshot (link gone) nothing re-adds it; the unlink stuck.
+    adds_2, _ = _run_pass()
+    assert not adds_2, "pass 2: a removed managed link is NOT resurrected inbound"
+    assert jira.issuelinks("PROJ-1") == [], "pass 2: the unlink stays removed (no churn)"
+    assert child["deps"] == [], "local stays unlinked across both passes"
