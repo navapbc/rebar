@@ -265,23 +265,6 @@ class VerifyConfig:
     # token/latency saving is measured on a representative ticket.
     progressive_drift_refresh: bool = False
 
-    # Which engine PRODUCES the gate verdicts — the plan-review verdict (the
-    # `rebar review-plan` attestation) and the completion verdict (the close gate).
-    # "workflow" (DEFAULT) routes verdict production through the v3 engine workflows
-    # (gates/plan-review.yaml + gates/completion-verification.yaml); "bespoke" uses the
-    # original orchestrator.run_review / completion.verify_completion path. The SIGNING
-    # wrappers are identical on both paths, so the signed attestations stay byte-compatible
-    # (epic B / story B5 cutover).
-    #
-    # DEFAULT IS "workflow" — the workflow plan-review verify/coach steps now supply the
-    # prompts' `{{plan}}` + findings/surviving on the LIVE path (tepid-bus-pomp completed the
-    # plumbing the B5 cutover exposed as missing; the earlier default-to-bespoke hotfix is
-    # superseded). Live trace-parity (criteria/prompts/models/call-modes/inputs) holds vs
-    # bespoke on a task/story/bug; the only intended difference is the aggregate verify being
-    # one call (epic AC) vs bespoke's count-12 chunking (principled token-based chunking is a
-    # separate future feature, solid-timer-unison). "bespoke" stays reachable until B-RETIRE.
-    gate_engine: str = "workflow"
-
 
 @dataclass
 class TicketConfig:
@@ -389,7 +372,6 @@ _SECTIONS: dict[str, dict] = {
         "require_completion_verification_for_close": lambda v, k: _as_bool(v, k),
         "require_plan_review_for_claim": lambda v, k: _as_bool(v, k),
         "progressive_drift_refresh": lambda v, k: _as_bool(v, k),
-        "gate_engine": lambda v, k: _as_choice(v, k, {"bespoke", "workflow"}),
     },
     "ticket": {"display_mode": lambda v, k: _as_str(v, k) or "auto"},
     "ticket_clarity": {"threshold": lambda v, k: _as_int(v, k, minimum=1)},

@@ -1,14 +1,14 @@
 """Scripted ``uses`` ops that express the plan-review gate AS a v3 engine workflow (epic B,
 story B2).
 
-These are THIN adapters over the already-correct, already-tested bespoke pipeline in
-:mod:`rebar.llm.plan_review` — each op delegates to the shared units
+These are THIN adapters over the shared, already-tested plan-review units in
+:mod:`rebar.llm.plan_review` — each op delegates to those units
 (:mod:`.det_floor`, :mod:`.registry`, :func:`.orchestrator.route_criteria` /
 ``partition_findings`` / ``pass3_over_findings`` / ``finalize_verdict``,
-:func:`.passes.render_coach_notes`) rather than re-implementing the gate. So the
-workflow path is structurally equivalent to ``orchestrator.run_review`` (exact
-behavioural PARITY is a separate story, B4). The workflow shape (mirrors the B3
-completion gate):
+:func:`.passes.render_coach_notes`) rather than re-implementing the gate. This workflow
+is now the SOLE plan-review gate (the bespoke ``orchestrator.run_review`` driver it once
+mirrored was retired in story B-RETIRE). The workflow shape (mirrors the B3 completion
+gate):
 
     plan_review_precheck (uses)            # DET floor P1-P9
       └─ branch on `run_llm`:
@@ -174,10 +174,10 @@ def plan_review_assemble_criteria(ctx: StepContext) -> dict[str, Any]:
 def plan_review_grounding(ctx: StepContext) -> dict[str, Any]:
     """code_grounded = any finding cites a CODEBASE_GROUNDED criterion (E4/G1G2/A1/G6).
 
-    Mirrors orchestrator.run_review (passes.pass3 site) EXACTLY: the size-ladder's `_too_big`
-    findings and budget-`_shed` findings are EXCLUDED first (bespoke filters them out before
-    computing `grounded`), so a code-grounded criterion that was SHED does NOT make verify
-    agentic — the verifier only re-grounds findings that actually ran."""
+    The size-ladder's `_too_big` findings and budget-`_shed` findings are EXCLUDED first
+    (they are filtered out before computing `grounded`), so a code-grounded criterion that was
+    SHED does NOT make verify agentic — the verifier only re-grounds findings that actually
+    ran (the same rule the shared `pass3_over_findings` site applies)."""
     from . import registry
 
     findings = [

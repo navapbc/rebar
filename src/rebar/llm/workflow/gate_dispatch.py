@@ -8,20 +8,19 @@ the SIGNING wrappers (``review_plan`` / ``_commands.transition``) are left untou
 the signed attestations stay byte-compatible regardless of which engine produced the
 verdict (the cutover requirement).
 
-Faithfulness to the bespoke paths (``orchestrator.run_review`` /
-``completion.verify_completion``) it preserves:
+Degradation semantics it guarantees:
 
 * **Plan-review INDETERMINATE-on-outage.** A systemic LLM outage (preflight raises
   :class:`LLMUnavailableError`) — or any mid-run LLM-tier failure — degrades to an
   unsigned INDETERMINATE verdict, never a hollow PASS (bug ``fuel-posse-ball``).
 * **Completion fail-closed-on-outage.** The completion verifier preflights and lets
   :class:`LLMUnavailableError` PROPAGATE (the close gate catches it and fail-closes),
-  and tunes cfg (verifier model + step-budget floor) exactly as the bespoke path does.
+  and consumes the cfg the caller already tuned (verifier model + step-budget floor).
 
 The workflow runs IN-MEMORY (``MemoryRecorder``) so a gate run writes NO workflow-run
-events to the gated ticket — matching the bespoke paths, which only emit a sidecar /
-sign. The plan-review batch is driven by the B1 ``ProductionBatchRunner``; agent steps
-(verify/coach) run through the ``RunnerAgentStep`` bridge.
+events to the gated ticket — it only emits a sidecar / signs. The plan-review batch is
+driven by the B1 ``ProductionBatchRunner``; agent steps (verify/coach) run through the
+``RunnerAgentStep`` bridge.
 """
 
 from __future__ import annotations
@@ -30,18 +29,6 @@ from pathlib import Path
 from typing import Any
 
 from rebar.llm.errors import LLMUnavailableError
-
-
-def gate_engine(repo_root) -> str:
-    """Which engine produces the gate verdicts — ``verify.gate_engine`` (default
-    ``"workflow"``). On an unreadable config, fall back to the proven ``"bespoke"``
-    path (conservative). The single source both gate entrypoints read."""
-    from rebar import config as _config
-
-    try:
-        return str(_config.load_config(repo_root).verify.gate_engine)
-    except Exception:  # noqa: BLE001 — config unreadable → proven bespoke path
-        return "bespoke"
 
 
 def _gate_doc(name: str, repo_root) -> dict[str, Any]:
@@ -61,10 +48,9 @@ def produce_plan_review_verdict(
 ) -> dict[str, Any]:
     """Produce a ``plan_review_verdict`` by running ``gates/plan-review.yaml`` in-memory.
 
-    A drop-in for ``orchestrator.run_review(ctx, cfg, runner=runner, advisory_cap=…)``
-    used by ``review_plan`` when ``verify.gate_engine == "workflow"``. Preflights the
-    runner so a systemic outage degrades to INDETERMINATE (unsigned) before any billable
-    call; a mid-run LLM-tier failure degrades the same way (never a hollow PASS)."""
+    The verdict-production half of ``review_plan``. Preflights the runner so a systemic
+    outage degrades to INDETERMINATE (unsigned) before any billable call; a mid-run
+    LLM-tier failure degrades the same way (never a hollow PASS)."""
     from rebar.llm.plan_review.production_batch_runner import ProductionBatchRunner
     from rebar.llm.runner import get_runner
 
@@ -197,12 +183,11 @@ def produce_completion_verdict(
 ) -> dict[str, Any]:
     """Produce a ``completion_verdict`` by running ``gates/completion-verification.yaml``.
 
-    A drop-in for the LLM half of ``completion.verify_completion`` used by the close gate
-    when ``verify.gate_engine == "workflow"``. The caller (``verify_completion``) has
-    already tuned ``cfg`` (verifier model + step floor), run the deterministic
-    child-closure precheck, and resolved ``graph``; this runs the engine workflow and
-    returns its reconciled terminal verdict. Preflights and lets
-    :class:`LLMUnavailableError` PROPAGATE so the close gate fail-closes (unchanged)."""
+    The verdict-production half of ``completion.verify_completion``. The caller has already
+    tuned ``cfg`` (verifier model + step floor) and resolved ``graph``; the workflow's own
+    ``completion_precheck`` op runs the deterministic child-closure check, then the agentic
+    verify + reconcile produce the terminal verdict. Preflights and lets
+    :class:`LLMUnavailableError` PROPAGATE so the close gate fail-closes."""
     from rebar.llm.runner import get_runner
 
     from . import executor as _ex

@@ -19,22 +19,6 @@ from rebar.llm import contracts, findings
 from rebar.llm.runner import FakeRunner
 
 
-@pytest.fixture(autouse=True)
-def _pin_bespoke_gate_engine(monkeypatch):
-    """Pin the BESPOKE gate engine for this module (story B5 cutover).
-
-    These tests drive `verify_completion` with a fixed-payload `FakeRunner`/`_BoomRunner` and
-    assert the bespoke path's DETERMINISTIC surface + runner-call MECHANICS — the child-closure
-    short-circuit reaching/NOT reaching the runner, the reconcile/citation layer — which couple
-    to a raw `rebar.llm.Runner.run` call (the workflow path wraps it in an AgentStepRunner and the
-    interpreter catches a runner-raised exception). The default engine is now "workflow" (B5);
-    pinning bespoke keeps these validating the still-present bespoke FALLBACK (kept until
-    B-RETIRE). The workflow completion path is covered by
-    tests/unit/workflow/test_completion_verification_workflow + tests/unit/test_gate_engine_cutover.
-    """
-    monkeypatch.setenv("REBAR_VERIFY_GATE_ENGINE", "bespoke")
-
-
 def _seed(repo: Path, ttype: str = "task", desc: str | None = None) -> str:
     desc = desc or ("A task with criteria.\n\n## Acceptance Criteria\n- [ ] the thing exists\n")
     return rebar.create_ticket(ttype, f"verify {ttype}", description=desc, repo_root=str(repo))
@@ -222,6 +206,19 @@ def test_child_closure_gate_short_circuits_before_llm(rebar_repo: Path) -> None:
         def run(self, req):
             raise AssertionError("LLM evaluator was called despite a failing child-closure gate")
 
+    class _CountingRunner(FakeRunner):
+        """A canned runner that records whether the model run was reached (call count)."""
+
+        name = "counting"
+
+        def __init__(self) -> None:
+            super().__init__(structured={"verdict": "PASS", "findings": []})
+            self.calls = 0
+
+        def run(self, req):  # type: ignore[override]
+            self.calls += 1
+            return super().run(req)
+
     parent = rebar.create_ticket(
         "epic",
         "parent",
@@ -240,16 +237,22 @@ def test_child_closure_gate_short_circuits_before_llm(rebar_repo: Path) -> None:
     )
 
     # child OPEN -> deterministic FAIL; the runner is NEVER reached (no AssertionError raised).
+    # (_BoomRunner.run raising is the path-independent proof the model was not called: the
+    # precheck short-circuits before the agentic verify step.)
     r = rebar.llm.verify_completion(parent, repo_root=str(rebar_repo), runner=_BoomRunner())
     assert r["verdict"] == "FAIL"
     assert r["runner"] == "deterministic"  # proves no model ran
     assert any("is closed" in f["criterion"] for f in r["findings"])
 
-    # close + sign the child -> the gate clears -> the LLM IS reached (BoomRunner now raises).
+    # close + sign the child -> the gate clears -> the LLM IS reached. (Asserted via a counting
+    # runner rather than a raise: on the workflow gate a runner-raised exception is wrapped by
+    # the interpreter into a failed run, so we observe the call count, not the exception type.)
     rebar.transition(child, "open", "closed", repo_root=str(rebar_repo))
     rebar.sign_manifest(child, ["completion-verifier: PASS"], repo_root=str(rebar_repo))
-    with pytest.raises(AssertionError, match="LLM evaluator was called"):
-        rebar.llm.verify_completion(parent, repo_root=str(rebar_repo), runner=_BoomRunner())
+    counting = _CountingRunner()
+    r2 = rebar.llm.verify_completion(parent, repo_root=str(rebar_repo), runner=counting)
+    assert counting.calls == 1, "the LLM verify step must be reached once the child gate clears"
+    assert r2["runner"] != "deterministic"  # a real model verdict, not the short-circuit
 
 
 def test_op_downgrades_hallucinated_file_citation(rebar_repo: Path) -> None:
