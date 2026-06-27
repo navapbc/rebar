@@ -115,6 +115,8 @@ def review_code(
     diff_text: str | None = None,
     changed_files: list[str] | None = None,
     reviewers: list[str] | None = None,
+    ref: str | None = None,
+    source: str | None = None,
     repo_root=None,
     config: LLMConfig | None = None,
     runner: Runner | None = None,
@@ -128,13 +130,60 @@ def review_code(
     selection. Findings from all reviewers are merged (cluster → consensus → rank);
     each carries ``agreement`` + ``reviewers``.
     """
-    cfg = config or LLMConfig.from_env(repo_root=repo_root)
+    from rebar.llm import gate_source
+
+    # Coherence: the agent reads file context at the SAME commit as the reviewed diff. When
+    # the caller doesn't pin `ref`, default it to `head` (the reviewed commit) rather than
+    # the cross-gate `origin/main` default — otherwise an attested snapshot at origin/main
+    # would not contain files the diff adds/changes, and `read_file` would miss them.
+    effective_ref = ref if ref is not None else head
+    handle = gate_source.resolve_gate_handle(effective_ref, source, repo_root)
+    with gate_source.gate_read_root(handle):
+        return gate_source.annotate_result(
+            _review_code_inner(
+                base=base,
+                head=head,
+                diff_text=diff_text,
+                changed_files=changed_files,
+                reviewers=reviewers,
+                repo_root=repo_root,
+                config=gate_source.apply_handle(
+                    config or LLMConfig.from_env(repo_root=repo_root), handle
+                ),
+                runner=runner,
+            ),
+            handle,
+        )
+
+
+def _review_code_inner(
+    *,
+    base: str,
+    head: str,
+    diff_text: str | None,
+    changed_files: list[str] | None,
+    reviewers: list[str] | None,
+    repo_root,
+    config: LLMConfig,
+    runner: Runner | None,
+) -> dict:
+    cfg = config
     if cfg.max_iterations < _REVIEW_MIN_STEPS:
         cfg = replace(cfg, max_iterations=_REVIEW_MIN_STEPS)
-    repo = cfg.repo_path or "."
+    # The agent reads file context from cfg.repo_path (the pinned snapshot in attested
+    # mode). The git diff, however, needs a real object DB, which a snapshot tree lacks —
+    # compute it from repo_root (the checkout) when a base..head range is given. (This epic
+    # reviews a single ref/snapshot; a base+head snapshot pair is explicitly out of scope.)
     if diff_text is None:
-        diff_text = _git(repo, ["diff", f"{base}..{head}"])
-        changed_files = _git(repo, ["diff", "--name-only", f"{base}..{head}"]).split()
+        # Resolve the object DB to diff against via the standard config precedence
+        # (repo_root arg > REBAR_ROOT env > git toplevel) — NOT the raw repo_root arg, which
+        # is None on the MCP path; and NOT cfg.repo_path, which is the .git-less snapshot in
+        # attested mode. The snapshot has no history, so the diff comes from the real checkout.
+        from rebar import config as _config
+
+        diff_repo = str(_config.repo_root(repo_root))
+        diff_text = _git(diff_repo, ["diff", f"{base}..{head}"])
+        changed_files = _git(diff_repo, ["diff", "--name-only", f"{base}..{head}"]).split()
     elif changed_files is None:
         changed_files = _changed_from_diff(diff_text)
 

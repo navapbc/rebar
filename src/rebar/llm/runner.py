@@ -192,6 +192,16 @@ class PydanticAIRunner:
             tools: list = []
             toolsets: list = []
         else:
+            # SAFEGUARD (epic raze-vet-ditch): a tool-using agent gets read-only file tools
+            # over cfg.repo_path — which MUST be a gate-chosen read root (attested snapshot or
+            # explicit local), never the server's mutable checkout reached by an op that
+            # skipped the snapshot process. Fail closed here if no gate session is active.
+            # Exempt a model_override run: that is the offline TestModel harness (it reads a
+            # disposable tmp dir, never a production checkout), not a real agent operation.
+            if self._model_override is None:
+                from rebar.llm.config import assert_gated
+
+                assert_gated("agentic filesystem tools")
             tools = pai_tools.filesystem_tools(cfg.repo_path) + pai_tools.rebar_tools(
                 cfg.repo_path, allow_comment=not _readonly_gate()
             )
