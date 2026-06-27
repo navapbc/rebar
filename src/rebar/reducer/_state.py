@@ -21,6 +21,11 @@ def make_initial_state() -> dict:
         "tags": [],
         "comments": [],
         "deps": [],
+        # Managed-reference provenance (story safe-luge-nog): a strictly-monotonic,
+        # compaction-surviving projection of every logical reference this ticket has
+        # ever managed (parent / link relations), as sorted [kind, target] pairs.
+        # Drives the shared removal-sync gate (see reducer._managed_refs).
+        "managed_refs": [],
         "bridge_alerts": [],
         "reverts": [],
         "file_impact": [],

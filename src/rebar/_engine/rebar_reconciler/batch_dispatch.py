@@ -63,6 +63,29 @@ def _index_existing_links(issuelinks) -> set[tuple[str, str]]:
     return existing
 
 
+def _find_link_id(issuelinks, link_type: str, to_key: str) -> str | None:
+    """Return the id of the issuelink of ``link_type`` to ``to_key`` (either direction).
+
+    The REMOVE counterpart of :func:`_index_existing_links` (wake-inn-parse): the differ
+    emits only (type, to_key) for a managed link to delete; the applier resolves the
+    concrete link id from a fresh ``get_issue_links`` probe. Direction-agnostic (matches
+    whether ``to_key`` is the inward or outward side). Returns None when no such link
+    exists (already removed — idempotent success)."""
+    for link in issuelinks or []:
+        if not isinstance(link, dict):
+            continue
+        link_t = link.get("type") or {}
+        type_name = link_t.get("name") if isinstance(link_t, dict) else None
+        if type_name != link_type:
+            continue
+        for side_key in ("inwardIssue", "outwardIssue"):
+            side = link.get(side_key)
+            if isinstance(side, dict) and side.get("key") == to_key:
+                link_id = link.get("id")
+                return str(link_id) if link_id is not None else None
+    return None
+
+
 # Per-pass REST-call budget: once create_one has issued this many REST calls in a
 # pass it defers further creates (back-pressure against Jira rate limits). Named here
 # so the threshold has one source instead of a bare literal in the guard + docstring.
@@ -593,6 +616,53 @@ def update_one(
                     f"{to_key} ({link_type}): {exc!r}",
                     file=sys.stderr,
                 )
+
+    # Symmetric link REMOVE dispatch (wake-inn-parse): a managed link the differ
+    # marked for removal (a deliberate local unlink) is deleted on Jira so the inbound
+    # differ stops re-adding it. The differ emits only (type, to_key); resolve the link
+    # id here by probing the issue's current links (mirrors the ADD dedup probe). A link
+    # already gone (no match / 404 / 409) is idempotent success. Best-effort + logged.
+    if isinstance(links, list) and any(
+        isinstance(e, dict) and e.get("action") == "remove" for e in links
+    ):
+        try:
+            link_objs = client.get_issue_links(issue_key)
+        except Exception as exc:  # noqa: BLE001 — probe is best-effort; skip removals this pass
+            link_objs = None
+            print(  # noqa: T201
+                f"update_one: get_issue_links probe (remove) failed for {issue_key}: {exc!r}",
+                file=sys.stderr,
+            )
+        if link_objs is not None:
+            for entry in links:
+                if not isinstance(entry, dict) or entry.get("action") != "remove":
+                    continue
+                link_type = entry.get("type")
+                to_key = entry.get("to_key")
+                if not link_type or not to_key:
+                    continue
+                link_id = _find_link_id(link_objs, link_type, to_key)
+                if link_id is None:
+                    continue  # already absent in Jira — idempotent success, nothing to do
+                _links_computed += 1
+                try:
+                    _call_with_retry(client.delete_issue_link, link_id)
+                    _links_applied += 1
+                except urllib.error.HTTPError as exc:
+                    if exc.code in (404, 409):
+                        _links_applied += 1  # already gone / concurrent change — idempotent
+                    else:
+                        print(  # noqa: T201
+                            f"update_one: delete_issue_link failed for {issue_key} -> "
+                            f"{to_key} ({link_type}): {exc!r}",
+                            file=sys.stderr,
+                        )
+                except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, logged
+                    print(  # noqa: T201
+                        f"update_one: delete_issue_link failed for {issue_key} -> "
+                        f"{to_key} ({link_type}): {exc!r}",
+                        file=sys.stderr,
+                    )
 
     if subop_applied is not None:
         subop_applied.update(

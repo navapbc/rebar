@@ -614,13 +614,21 @@ def _build_outbound_context(
                 "label_removes": set(),
                 "fields": set(),
                 "link_add_keys": set(),
+                "link_remove_keys": set(),
             },
         )
         for lk in getattr(om, "links", []) or []:
             if not isinstance(lk, dict):
                 continue
-            if lk.get("action") == "add" and lk.get("to_key"):
-                entry["link_add_keys"].add(lk.get("to_key"))
+            action = lk.get("action")
+            to_key = lk.get("to_key")
+            if action == "add" and to_key:
+                entry["link_add_keys"].add(to_key)
+            elif action == "remove" and to_key:
+                # wake-inn-parse: an outbound link REMOVE (a deliberate local unlink) must
+                # suppress the inbound link ADD that would re-reflect the still-present Jira
+                # link this pass — remove-wins, so local wins and the unlink converges.
+                entry["link_remove_keys"].add(to_key)
         for lm in getattr(om, "labels", []) or []:
             action = lm.get("action") if isinstance(lm, dict) else None
             label = lm.get("label") if isinstance(lm, dict) else None
@@ -740,14 +748,18 @@ def compute_inbound_mutations(
             # link-ADDING to the same target key (echo of our own push). The
             # inbound link mutation carries the LOCAL target_id; map it back to
             # the target Jira key to compare against the outbound link_add_keys.
-            if link_mutations and ob_entry["link_add_keys"]:
+            if link_mutations and (ob_entry["link_add_keys"] or ob_entry["link_remove_keys"]):
                 _get_jira_key = getattr(binding_store, "get_jira_key", None)
+                _suppress_keys = ob_entry["link_add_keys"] | ob_entry["link_remove_keys"]
                 filtered_links: list[dict[str, Any]] = []
                 for lk in link_mutations:
                     target_key = (
                         _get_jira_key(lk.get("target_id")) if _get_jira_key is not None else None
                     )
-                    if target_key and target_key in ob_entry["link_add_keys"]:
+                    # Drop an inbound link-ADD when the same pass's outbound is link-ADDING
+                    # (echo of our own push) OR link-REMOVING (a deliberate unlink — local
+                    # wins) to the same target key.
+                    if target_key and target_key in _suppress_keys:
                         suppression_count += 1
                         continue
                     filtered_links.append(lk)
