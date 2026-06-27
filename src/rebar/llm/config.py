@@ -30,6 +30,10 @@ from importlib.util import find_spec
 from rebar import config as _root_config
 
 DEFAULT_MODEL = "claude-opus-4-8"
+# Single source of truth for the per-call output-token cap default. Referenced by
+# both the LLMConfig field default and the env/table resolution fallback so the
+# default lives in ONE place (docs/config.md documents the same value).
+DEFAULT_MAX_TOKENS = 16000
 # Execution backends. `pydantic_ai` is THE runtime (story d6d1 cutover dropped the
 # in-process graph stack). `fake` is the offline test seam.
 RUNNERS = ("pydantic_ai", "fake")
@@ -220,7 +224,7 @@ class LLMConfig:
     model_provider: str | None = None
     base_url: str | None = None  # OpenAI-compatible endpoint (local models)
     api_key: str | None = None  # explicit key (e.g. a dummy key for local servers)
-    max_tokens: int = 8000
+    max_tokens: int = DEFAULT_MAX_TOKENS
     max_iterations: int = 25
     timeout_s: int = 600
     repo_path: str | None = None
@@ -269,7 +273,9 @@ class LLMConfig:
             model_provider=_llm_str(table, cli, "REBAR_LLM_MODEL_PROVIDER", "model_provider", None),
             base_url=_llm_str(table, cli, "REBAR_LLM_BASE_URL", "base_url", None),
             api_key=os.environ.get("REBAR_LLM_API_KEY") or None,
-            max_tokens=_llm_int(table, cli, "REBAR_LLM_MAX_TOKENS", "max_tokens", 8000),
+            max_tokens=_llm_int(
+                table, cli, "REBAR_LLM_MAX_TOKENS", "max_tokens", DEFAULT_MAX_TOKENS
+            ),
             max_iterations=_llm_int(
                 table, cli, "REBAR_LLM_MAX_STEPS", "max_steps", 25, legacy="REBAR_LLM_MAX_ITERS"
             ),
