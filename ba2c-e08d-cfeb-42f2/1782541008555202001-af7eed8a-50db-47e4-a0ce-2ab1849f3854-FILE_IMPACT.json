@@ -1,0 +1,1 @@
+{"author":"Iso Tester","data":{"file_impact":[{"path":"src/rebar/_engine/rebar_reconciler/outbound_differ.py","reason":"gate parent CLEAR via managed-ref"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782541008555202001,"uuid":"af7eed8a-50db-47e4-a0ce-2ab1849f3854"}
