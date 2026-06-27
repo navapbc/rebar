@@ -1,0 +1,98 @@
+# Built-in prompt eval spec (epic 6f2d / WS-EVAL-EXISTING) for the `ticket-quality`
+# reviewer (the default `review` reviewer). Measures recall on weak tickets (must fire a
+# finding) and no false-fire on well-formed tickets (must stay silent), plus the
+# review_result contract. Offline: validate_eval_spec(strict=True). Live: the eval CI runs
+# it through the context-injection solver (the reviewer reads the ticket + repo via tools);
+# `ticket_context` is the injected ticket, `note` guides the fixture repo.
+prompt: ticket-quality
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  - type: deterministic
+    name: emits_valid_review_result
+    description: Output validates against the review_result JSON Schema.
+  - type: deterministic
+    name: recall_on_seeded_defects
+    description: On a ticket with a planted quality defect, at least one finding fires.
+  - type: deterministic
+    name: no_fire_on_good_cases
+    description: On a well-formed, dispatchable ticket, no finding fires.
+  - type: llm-judge
+    name: finding_is_useful_and_actionable
+    gates: false
+    threshold: 0.7
+    pointwise: true
+    rubric: >
+      Score 0..1 how actionable and correct each finding is on its own merits — it
+      identifies a real readiness defect (missing/ambiguous AC, unscoped work, bad
+      dependency) a strong reviewer would flag. Length-neutral.
+    grader:
+      model: openai:gpt-4o-2024-08-06
+      temperature: 0
+      seed: 7
+      snapshot: "2024-08-06"
+
+dataset:
+  - id: TQ-no-ac
+    corpus: rebar
+    expect: finding
+    ticket_context: |
+      Title: Improve the reconciler
+      Make the reconciler more robust and faster. It should handle edge cases better.
+  - id: TQ-ambiguous-scope
+    corpus: snap
+    expect: finding
+    ticket_context: |
+      Title: Add notifications
+      ## Acceptance Criteria
+      - [ ] users get notifications
+      (No channel, trigger, or delivery semantics specified.)
+  - id: TQ-contradictory-dep
+    corpus: dso
+    expect: finding
+    note: "Fixture: ticket depends on a sibling that itself depends on this ticket (cycle)."
+    ticket_context: |
+      Title: Wire the export job
+      ## Acceptance Criteria
+      - [ ] nightly export runs after the import job
+      Depends on: the import job (which is blocked on THIS ticket).
+  - id: TQ-well-formed
+    corpus: rebar
+    expect: pass
+    ticket_context: |
+      Title: Add `--since` filter to `rebar list`
+      ## Acceptance Criteria
+      - [ ] `rebar list --since=<iso8601>` returns only tickets updated at/after the timestamp
+      - [ ] an invalid timestamp exits non-zero with a clear message
+      - [ ] unit tests cover both paths in tests/unit/test_cli_list.py
+  - id: TQ-well-formed-bug
+    corpus: snap
+    expect: pass
+    ticket_context: |
+      Title: Fix N+1 on the orders index
+      ## Reproduction Steps
+      - load /orders with 50 orders; observe 51 queries in the log
+      ## Acceptance Criteria
+      - [ ] /orders issues a constant number of queries regardless of order count
+      - [ ] a bullet/regression test asserts the query count
+  - id: TQ-well-formed-task
+    corpus: rebar
+    expect: pass
+    ticket_context: |
+      Title: Cache the prompt index
+      ## Acceptance Criteria
+      - [ ] `get_prompt` reads the parsed index at most once per process
+      - [ ] a test in tests/unit/test_prompts.py asserts a single parse
+
+gold_set:
+  - input: "A finding: 'No ## Acceptance Criteria block — ticket is not dispatchable.'"
+    label: useful
+  - input: "A finding nitpicking the title's capitalization."
+    label: not_useful
+  - input: "A finding: 'Dependency cycle: this ticket and the import job block each other.'"
+    label: useful
+  - input: "No findings on a ticket with clear, testable AC and sound scope."
+    label: useful

@@ -28,8 +28,53 @@ from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.runner import Runner
 
-from . import passes, registry
+from . import det_floor, passes, registry
 from .det_floor import PlanContext
+
+
+def _child_tokens(child: dict[str, Any]) -> int:
+    """Estimated tokens for one WHOLE child (title + description) — the unit the
+    container bin-packer sums (a child is NEVER chunked; ca03)."""
+    return det_floor.est_tokens(f"{child.get('title', '')}\n{child.get('description', '')}")
+
+
+def container_budget(largest_window_tokens: int) -> int:
+    """The per-call token budget the container bin-packer fits (parent + all packed
+    children) under — the SAME P8 window budget used elsewhere (model window × headroom
+    − output reserve)."""
+    return int(largest_window_tokens * det_floor.P8_HEADROOM) - det_floor.P8_OUTPUT_RESERVE_TOKENS
+
+
+def pack_container_bins(
+    children: list[dict[str, Any]], parent_tokens: int, budget: int
+) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
+    """Greedily bin-pack WHOLE children for the container fan-out (story 1762).
+
+    Each bin is ONE merged container call: ``parent_tokens + Σ(child tokens in the bin)``
+    must stay ≤ ``budget`` (so the parent + every packed child fit the window together,
+    each WHOLE — never chunked, ca03). Returns ``(bins, oversized)`` where ``bins`` is a
+    list of child-lists (small children packed together; a large parent+child pairing
+    keeps its own single-child bin), and ``oversized`` is the children whose
+    ``parent + that child ALONE`` already exceeds ``budget`` — the single-child fallback
+    that becomes the existing 'too big → reduce the ticket' failure finding."""
+    bins: list[list[dict[str, Any]]] = []
+    oversized: list[dict[str, Any]] = []
+    cur: list[dict[str, Any]] = []
+    cur_tokens = parent_tokens
+    for child in children:
+        ct = _child_tokens(child)
+        if parent_tokens + ct > budget:
+            oversized.append(child)  # too big even alone → single-child too-big finding
+            continue
+        if cur and cur_tokens + ct > budget:
+            bins.append(cur)
+            cur, cur_tokens = [], parent_tokens
+        cur.append(child)
+        cur_tokens += ct
+    if cur:
+        bins.append(cur)
+    return bins, oversized
+
 
 # Model-by-window escalation ladder (estimated tokens → the smallest model whose
 # window fits; escalate up on a context-limit signal).
@@ -262,44 +307,60 @@ def shed_to_budget(
     coverage: dict[str, Any],
 ) -> tuple[list[dict], list[dict], list[dict]]:
     """Shed the lowest-priority AGENT/overlay criteria first when projected spend
-    exceeds the per-plan budget cap. Returns (kept_agent, kept_container, shed). The
-    cheap single-turn chunks + the DET floor always run; we shed only the 85× AGENT
-    criteria — overlays (T*) before the core code-grounding set, then container."""
+    exceeds the per-plan budget cap. Returns (kept_agent, kept_container, shed).
+
+    CONTAINER CRITERIA (G3/G4) ARE NEVER SHED (story ba7e). Shedding a container
+    criterion marks it INDETERMINATE — i.e. it DROPS child-coverage/consistency on
+    exactly the large, central epics where those cross-child audits matter most, the
+    fidelity regression the epic AC forbids. So the budget cap bounds ONLY the
+    sheddable single-turn + AGENT/overlay spend; the container fan-out is a FIXED cost
+    floor recorded for observability but never traded away. (This is the correct fix —
+    correcting the COST MODEL — rather than inverting the centrality scaling of the cap,
+    which would have shed G3/G4 first.) Within the sheddable set we still shed overlays
+    (T*) before the core code-grounding set."""
     cap = plan_budget_cap(ctx)
-    n_children = max(1, len(ctx.children))
 
-    def project(ag: list[dict], cont: list[dict]) -> float:
-        return round(
-            len(chunks) * COST_SINGLE_TURN_USD
-            + len(ag) * COST_AGENT_USD
-            + len(cont) * n_children * COST_AGENT_USD,
-            4,
-        )
+    def project_sheddable(ag: list[dict]) -> float:
+        """Projected SHEDDABLE spend (the single-turn chunks + AGENT/overlay criteria)
+        — the only spend the cap governs. The container fan-out is excluded: it is never
+        shed, so including it would only force over-aggressive shedding of agent criteria
+        for a cost we always pay regardless."""
+        return round(len(chunks) * COST_SINGLE_TURN_USD + len(ag) * COST_AGENT_USD, 4)
 
-    projected_initial = project(agent, container)
+    projected_initial = project_sheddable(agent)
     agent = list(agent)
-    container = list(container)
+    container = list(container)  # never shed — returned unchanged
     shed: list[dict] = []
     overlay_agent = [c for c in agent if registry.is_overlay(c["id"])]
     core_agent = [c for c in agent if not registry.is_overlay(c["id"])]
-    shed_queue = (
-        [("agent", c) for c in overlay_agent]
-        + [("container", c) for c in container]
-        + [("agent", c) for c in core_agent]
-    )
-    while project(agent, container) > cap and shed_queue:
-        kind, c = shed_queue.pop(0)
+    shed_queue = [("agent", c) for c in overlay_agent] + [("agent", c) for c in core_agent]
+    while project_sheddable(agent) > cap and shed_queue:
+        _kind, c = shed_queue.pop(0)
         c = {**c, "_tier": "AGENT"}
         shed.append(c)
-        if kind == "container":
-            container = [x for x in container if x["id"] != c["id"]]
-        else:
-            agent = [x for x in agent if x["id"] != c["id"]]
+        agent = [x for x in agent if x["id"] != c["id"]]
+    # The container fan-out is a fixed floor, never shed — recorded so the cap's "bounds
+    # only overlay/agent spend" posture, and the unavoidable container cost, are both
+    # observable. Story 98c6 MERGED all container criteria into ONE call per child (not 2N);
+    # story 1762 then BIN-PACKS small children, so the real floor is the number of PACKED
+    # BINS (< N when children pack), computed with the same packer the fan-out uses.
+    if container and ctx.children:
+        bins, _oversized = pack_container_bins(
+            ctx.children,
+            det_floor.est_tokens(ctx.plan_text),
+            container_budget(ctx.largest_window_tokens),
+        )
+        container_calls = len(bins)
+    else:
+        container_calls = 0
+    container_floor_usd = round(container_calls * COST_AGENT_USD, 4)
     coverage["budget"] = {
         "cap_usd": cap,
         "centrality": ctx.centrality,
         "projected_usd_initial": projected_initial,
-        "projected_usd_final": project(agent, container),
+        "projected_usd_final": project_sheddable(agent),
+        "container_floor_usd": container_floor_usd,
+        "container_never_shed": True,
         "shed": [c["id"] for c in shed],
     }
     return agent, container, shed
@@ -371,6 +432,8 @@ __all__ = [
     "DEFAULT_BUDGET_CAP_USD",
     "centrality",
     "plan_budget_cap",
+    "container_budget",
+    "pack_container_bins",
     "largest_window_tokens",
     "is_context_limit_error",
     "models_at_or_above",

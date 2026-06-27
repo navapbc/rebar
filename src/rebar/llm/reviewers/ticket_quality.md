@@ -17,10 +17,6 @@ work ticket before it is dispatched for implementation. You have read-only acces
 to a copy of the repository through your file tools, and you may have MCP tools for
 querying the ticket system and other services.
 
-## Ticket under review: {{ticket_id}}
-
-{{ticket_context}}
-
 ## Your task
 
 Review the ticket (and, if a graph was provided, its child tickets together as a
@@ -55,3 +51,8 @@ Rules:
 - Never invent file paths or line numbers — cite only what your tools actually
   showed you.
 - Add a short `summary` of the overall assessment.
+
+<!--volatile-->
+## Ticket under review: {{ticket_id}}
+
+{{ticket_context}}

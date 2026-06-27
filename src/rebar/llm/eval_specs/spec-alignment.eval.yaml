@@ -1,0 +1,95 @@
+# Built-in prompt eval spec (epic 6f2d / WS-EVAL-EXISTING) for the `spec-alignment`
+# reviewer (the batch spec-scan op). A dataset case is the BATCH unit: one `spec` + a list
+# of `epics`. Measures recall on gaps/conflicts/overlaps (must fire) and no false-fire on
+# an aligned batch (must stay silent), plus the review_result contract. Offline:
+# validate_eval_spec(strict=True). Live: the eval CI runs it through the solver; `spec` and
+# `epics` are injected, `note` guides any fixture repo state.
+prompt: spec-alignment
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  - type: deterministic
+    name: emits_valid_review_result
+    description: Output validates against the review_result JSON Schema.
+  - type: deterministic
+    name: recall_on_gaps_and_conflicts
+    description: On a batch with a coverage gap, conflict, or overlap, at least one finding fires.
+  - type: deterministic
+    name: no_fire_on_aligned
+    description: On a batch that fully and consistently covers the spec, no finding fires.
+  - type: llm-judge
+    name: gap_is_real_and_actionable
+    gates: false
+    threshold: 0.7
+    pointwise: true
+    rubric: >
+      Score 0..1 whether each finding names a real spec point and the specific epic
+      (or absence) that creates the gap/conflict/overlap, rather than a vague
+      misalignment claim. Length-neutral.
+    grader:
+      model: openai:gpt-4o-2024-08-06
+      temperature: 0
+      seed: 7
+      snapshot: "2024-08-06"
+
+dataset:
+  - id: SA-coverage-gap
+    corpus: rebar
+    expect: finding
+    spec: |
+      The system MUST (1) ingest events, (2) reconcile to Jira, and (3) emit an audit log.
+    epics:
+      - "Epic A: event ingestion pipeline"
+      - "Epic B: Jira reconciler"
+  - id: SA-conflict
+    corpus: dso
+    expect: finding
+    spec: |
+      All writes MUST be append-only; no destructive deletes.
+    epics:
+      - "Epic A: append-only event store"
+      - "Epic B: hard-delete API to purge records on request"
+  - id: SA-overlap
+    corpus: snap
+    expect: finding
+    spec: |
+      Provide a single notifications service.
+    epics:
+      - "Epic A: notifications service (email + SMS)"
+      - "Epic B: messaging service that also sends email + SMS notifications"
+  - id: SA-aligned
+    corpus: rebar
+    expect: pass
+    spec: |
+      The system MUST (1) ingest events and (2) reconcile to Jira.
+    epics:
+      - "Epic A: event ingestion pipeline covering requirement (1)"
+      - "Epic B: Jira reconciler covering requirement (2)"
+  - id: SA-aligned-singleton
+    corpus: snap
+    expect: pass
+    spec: |
+      Provide a CSV export of orders.
+    epics:
+      - "Epic A: orders CSV export (columns, streaming, auth) — fully covers the spec"
+  - id: SA-aligned-decomposed
+    corpus: dso
+    expect: pass
+    spec: |
+      Support SSO login via SAML and OIDC.
+    epics:
+      - "Epic A: SAML SSO login"
+      - "Epic B: OIDC SSO login"
+
+gold_set:
+  - input: "A finding: 'Spec requirement (3) audit log is covered by no epic in the batch.'"
+    label: useful
+  - input: "A finding: 'Epic B hard-delete contradicts the append-only spec invariant.'"
+    label: useful
+  - input: "A finding asserting vague 'misalignment' with no spec point or epic named."
+    label: not_useful
+  - input: "No findings on a batch whose epics each map cleanly to a distinct spec requirement."
+    label: useful

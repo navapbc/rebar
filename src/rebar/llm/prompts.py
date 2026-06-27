@@ -111,6 +111,11 @@ class Prompt:
     title: str = ""
     description: str = ""
     fallback_file: str | None = None
+    # Front-matter file-impact globs (story c6e5): the source files this prompt's
+    # behavior is coupled to (e.g. the runner/relocation seam for a cache-split prompt),
+    # so a change there flags the prompt for re-verification — the prompt-model analogue
+    # of a ticket's set_file_impact, consumed by conflict-aware scheduling/CI.
+    file_impact: list[str] = field(default_factory=list)
 
     @property
     def is_reviewer(self) -> bool:
@@ -222,6 +227,7 @@ def get_prompt(prompt_id: str, *, repo_root=None) -> Prompt:
         title=meta.get("title", ""),
         description=meta.get("description", ""),
         fallback_file=fallback_file,
+        file_impact=list(meta.get("file_impact") or []),
     )
 
 
@@ -262,6 +268,7 @@ def build_prompt_index(repo_root=None) -> dict[str, dict]:
             "langfuse_prompt": prompt.langfuse_prompt,
             "fallback_file": prompt.fallback_file,
             "applies_to": list(prompt.applies_to),
+            "file_impact": list(prompt.file_impact),
             "category": prompt.category,
             "execution_mode": prompt.execution_mode,
             "is_reviewer": prompt.is_reviewer,
@@ -316,6 +323,75 @@ _FRONT_MATTER = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
 # HTML comment so it never collides with {{var}} rendering.
 _BASE_MARKER = "<!--base-->"
 
+# Cache-prefix split sentinel (story c6e5 / S2). A prompt body may place a
+# `<!--volatile-->` line to mark the boundary between the STABLE system prefix
+# (everything before — byte-identical across runs, so anthropic prompt caching reads it)
+# and the VOLATILE per-run body (everything after — the ticket/plan/diff data). The
+# cache-splitting RunRequest builders (RunnerAgentStep, code_review, review ops) route
+# the volatile body to the USER message via :func:`resolve_prompt_cached`, so the cached
+# system prefix is never broken by per-run data; non-splitting renderers strip the marker
+# with :func:`strip_volatile_marker` and keep the whole prompt in the system slot. Chosen
+# as an HTML comment so it never collides with {{var}} rendering and is invisible to any
+# model that does see it.
+VOLATILE_MARKER = "<!--volatile-->"
+
+
+def split_volatile(text: str) -> tuple[str, str]:
+    """Split a (rendered) prompt on the FIRST :data:`VOLATILE_MARKER` →
+    ``(stable_prefix, volatile_body)``. No marker → ``(text, "")`` (the whole prompt is
+    the stable system prompt — the historical, pre-S2 behavior, so an UNMARKED prompt is
+    unchanged). The marker line itself is dropped; the prefix is right-trimmed and the
+    volatile body is left-trimmed of the blank lines that surrounded the marker. A marker
+    at the very START yields an empty stable prefix (the whole body is volatile) — a
+    degenerate authoring choice (nothing to cache), so place the marker AFTER the stable
+    role/rules."""
+    idx = text.find(VOLATILE_MARKER)
+    if idx == -1:
+        return text, ""
+    stable = text[:idx].rstrip()
+    volatile = text[idx + len(VOLATILE_MARKER) :].lstrip("\n")
+    return stable, volatile
+
+
+def strip_volatile_marker(text: str) -> str:
+    """Remove the :data:`VOLATILE_MARKER` line, keeping ALL content in place — for the
+    NON-splitting renderers (e.g. the plan-review batch / bespoke ``_resolve_system``)
+    that send the whole prompt as the system prompt. The result is content-identical to
+    the same prompt with the marker simply absent, so adding a marker to a prompt is
+    fidelity-neutral for these callers (no reorder on their path)."""
+    if VOLATILE_MARKER not in text:
+        return text
+    return text.replace(VOLATILE_MARKER + "\n", "").replace(VOLATILE_MARKER, "")
+
+
+def resolve_prompt_cached(
+    reviewer: Reviewer | Prompt,
+    variables: dict,
+    *,
+    base_instructions: str,
+    langfuse_cfg=None,
+    repo_root=None,
+    variant: str | None = None,
+) -> tuple[str, str, dict]:
+    """Resolve a prompt and SPLIT it for prompt caching (story c6e5) → ``(system_prefix,
+    instructions, prompt_meta)``.
+
+    The byte-stable prefix (everything before the ``<!--volatile-->`` marker — the role,
+    rules, and how-to, with NO per-run variables) is the cacheable system prompt; the
+    volatile per-run body (after the marker — the rendered ticket/plan/diff data) is
+    folded into the user-message ``instructions`` AHEAD of ``base_instructions`` (data
+    first, then the task). A prompt with NO marker yields ``(whole_text,
+    base_instructions, meta)`` — exactly the pre-S2 behavior, so unmarked prompts are
+    unchanged. This is the single shared seam every cache-aware RunRequest builder uses
+    (RunnerAgentStep, code_review, the review op), so the split is defined once."""
+    compiled, meta = resolve_prompt(
+        reviewer, variables, langfuse_cfg, repo_root=repo_root, variant=variant
+    )
+    stable, volatile = split_volatile(compiled)
+    instructions = "\n\n".join(p for p in (volatile, base_instructions) if p)
+    return stable, instructions, meta
+
+
 # ── Prompt front-matter format (workflow authoring v2, d25d) ───────────────────
 #
 # The current front-matter schema version this binary understands. A file declaring
@@ -340,6 +416,7 @@ FRONT_MATTER_KEYS: tuple[str, ...] = (
     "tags",
     "dimension",
     "applies_to",
+    "file_impact",
     "langfuse_prompt",
     "default",
 )

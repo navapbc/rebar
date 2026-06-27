@@ -27,5 +27,6 @@ code that isn't ours). EXCEPTION: a SPECIFIC, newer, or not-yet-GA FEATURE of th
 whose support is genuinely uncertain IS a legitimate gap — keep it (library-CONTRACT → drop;
 library-FEATURE-MATURITY → keep).
 
+<!--volatile-->
 # Plan under review (verbatim, whole)
 {{plan}}

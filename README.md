@@ -165,7 +165,10 @@ The base install runs **scripted** workflows (`rebar workflow new/validate/show/
 with no extra; **agentic** workflow steps and `rebar review` need `[agents]`. Authoring
 a workflow **visually** — `rebar workflow edit <file>`, a local bpmn-js editor that
 round-trips the diagram back to the IR — also needs no extra and no Node/npm: the editor
-front-end ships pre-built in the wheel and is served locally (no CDN). See
+front-end ships pre-built in the wheel and is served locally (no CDN). For what the
+engine is *for* — when to author a workflow vs a bespoke op, the YAML DSL, the
+three-pass review pattern, and the prompt-library + eval seam — see
+[docs/workflow-engine.md](docs/workflow-engine.md); for visual editing specifically see
 [docs/workflow-editor.md](docs/workflow-editor.md).
 
 The `[agents]` extra adds the optional **LLM agent-operations framework**

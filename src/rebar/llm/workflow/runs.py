@@ -164,7 +164,6 @@ class RunnerAgentStep(_ex.AgentStepRunner):
         for key, val in ctx.inputs.items():
             if isinstance(val, str):
                 variables[key] = val
-        system_prompt, langfuse_prompt = prompts.resolve_prompt(prompt, variables, cfg.langfuse)
         # `dimension` is optional on a prompt (None for a non-reviewer); fall back to the
         # prompt id so the default instructions never read "the 'None' …".
         default_instructions = (
@@ -174,20 +173,29 @@ class RunnerAgentStep(_ex.AgentStepRunner):
         # A LIST-valued `instructions` is a CHUNKED structured prompt (epic solid-timer-unison
         # WS3): run the prompt once per chunk and MERGE the structured outputs (concatenate
         # list-valued fields, e.g. `verifications`; scalars take the first). A string/None is a
-        # single call whose merged output is byte-identical to the prior behavior. This keeps
-        # token-budget chunking ENCAPSULATED in the step (the LangChain MapReduce pattern),
-        # not exposed as a workflow-level fan-out.
+        # single call whose merged output is byte-identical to the prior behavior. Token-budget
+        # chunking stays ENCAPSULATED in the step (the LangChain MapReduce pattern), not exposed
+        # as a workflow-level fan-out.
         raw_instructions = ctx.inputs.get("instructions")
         chunks = raw_instructions if isinstance(raw_instructions, list) else [raw_instructions]
         runner = get_runner(cfg, override=self._runner)
         outs: list[dict] = []
         for chunk in chunks:
+            base_instructions = str(chunk) if chunk else default_instructions
+            # Engine-wide caching (story c6e5): split the byte-stable system prefix (the
+            # cacheable role/rules/how-to) from the volatile per-run body (ticket/plan data,
+            # marked with `<!--volatile-->`), routing the volatile body into the USER message
+            # so the cached system prefix stays byte-identical across runs. The system prefix
+            # is identical across chunks; only the per-chunk base_instructions differ.
+            system_prompt, instructions, langfuse_prompt = prompts.resolve_prompt_cached(
+                prompt, variables, base_instructions=base_instructions, langfuse_cfg=cfg.langfuse
+            )
             req = build_agent_request(
                 prompt,
                 ctx,
                 cfg,
                 system_prompt=system_prompt,
-                instructions=str(chunk) if chunk else default_instructions,
+                instructions=instructions,
                 langfuse_prompt=langfuse_prompt,
                 ticket_id=ticket_id,
             )
