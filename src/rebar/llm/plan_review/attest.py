@@ -86,13 +86,50 @@ def _cited_paths(verdict: dict[str, Any]) -> set[str]:
     return out
 
 
+def _hash_basis(repo_root=None, *, pinned_sha: str | None = None) -> str:
+    """The ONE shared ref-resolution boundary (epic raze-vet-ditch S4b) that BOTH the
+    plan-review signing-time hashing AND the claim-gate freshness re-check resolve through,
+    so they cannot diverge (whole-HEAD vs pinned-SHA) and re-introduce the staleness
+    false-positive ADR 0002 prevents.
+
+    Resolution (single source):
+      * ``pinned_sha`` given (the claim gate, reading the signature's ``verified_at_sha``) →
+        the materialized snapshot at that SHA (a cache hit when the review's snapshot is
+        still warm; a local ``read-tree`` otherwise — no network when the objects are
+        present). If it cannot be materialized, degrade to the working tree (the gate then
+        fails CLOSED on any drift — the conservative direction).
+      * else the active attested gate snapshot (``current_code_root``, set during an attested
+        ``review_plan``) → the same snapshot the signature was produced against.
+      * else the in-place checkout (``_config.repo_root``) — the local / back-out basis.
+
+    BACK-OUT: a plan-review signed in local mode (or pre-S4b) carries no ``verified_at_sha``;
+    both sides then resolve to the working tree exactly as before this consolidation."""
+    from rebar import config as _config
+
+    if pinned_sha:
+        try:
+            from rebar._snapshot import cache as _cache
+
+            handle = _cache.acquire(
+                pinned_sha, source_mode="attested", repo_root=repo_root, fetch=False
+            )
+            return str(handle.path)
+        except Exception:  # noqa: BLE001 — snapshot unavailable → degrade to the working tree (never crash the gate)
+            logger.warning(
+                "snapshot for pinned sha %s unavailable; hashing the working tree", pinned_sha
+            )
+    from rebar.llm.config import current_code_root
+
+    active = current_code_root()
+    return active if active else str(_config.repo_root(repo_root))
+
+
 def dependency_hashes(verdict: dict[str, Any], *, repo_root=None) -> dict[str, str]:
     """The signed dependency set: ``{path: sha256}`` for the union of the ticket's
     declared ``file_impact`` and the files the review CITED (``kind=file``), hashed
     from the working tree. Sorted for reproducible signing. Empty when nothing is
     declared/cited — the claim gate then falls back to whole-HEAD freshness."""
     import rebar
-    from rebar import config as _config
 
     ticket_id = verdict.get("ticket_id", "")
     paths: set[str] = set(_cited_paths(verdict))
@@ -103,7 +140,9 @@ def dependency_hashes(verdict: dict[str, Any], *, repo_root=None) -> dict[str, s
                 paths.add(str(p))
     except Exception:  # noqa: BLE001 — file_impact read is best-effort; broad-but-logged below
         logger.warning("file_impact read failed for %s; scoping to citations only", ticket_id)
-    base = str(_config.repo_root(repo_root))
+    # Hash through the shared boundary: during an attested review this is the pinned-SHA
+    # snapshot (the claim gate re-hashes the SAME basis); in local mode it is the checkout.
+    base = _hash_basis(repo_root)
     return {p: _hash_file(p, base=base) for p in sorted(paths)}
 
 
@@ -115,6 +154,7 @@ def build_manifest(
     deps: dict[str, str] | None = None,
     regver: str | None = None,
     refreshed_from: str | None = None,
+    verified_at_sha: str | None = None,
 ) -> list[str]:
     """The deterministic manifest signed for a passing plan-review verdict. The
     signature binds ``(ticket_id, manifest)``; the manifest records the verdict, the
@@ -136,6 +176,13 @@ def build_manifest(
         lines.append(f"{_REGVER_PREFIX} {regver}")
     if refreshed_from:
         lines.append(f"{_REFRESHED_PREFIX} {refreshed_from}")
+    # Pin the snapshot SHA the dep hashes were computed against (epic raze-vet-ditch S4b),
+    # so the claim gate re-hashes at the SAME basis via the shared boundary. Only present
+    # for an attested review; a local review omits it (both sides then use the checkout).
+    if verified_at_sha:
+        from rebar import signing as _signing
+
+        lines.append(_signing.verified_at_sha_step(verified_at_sha))
     # Per-path dependency hashes (sorted), one line each: ``dep <sha256> <path>``.
     # The hash is fixed-width so the path (which may contain spaces) is an unambiguous
     # remainder. A per-path map (not a rolled-up root) is the contract Story 2 builds on.
@@ -182,17 +229,25 @@ def sign_plan_review(verdict: dict[str, Any], *, material: str, repo_root=None) 
     """Sign a passing plan-review verdict (append a ``SIGNATURE`` event). Returns the
     signature record. Raises if signing fails (the caller decides how to surface it)."""
     from rebar import signing
+    from rebar.llm.config import current_code_sha
 
     deps = dependency_hashes(verdict, repo_root=repo_root)
-    manifest = build_manifest(verdict, material=material, deps=deps, regver=registry_version())
+    # Pin the snapshot SHA the deps were hashed at (attested review only — current_code_sha
+    # is None in local mode), so the claim gate re-hashes the SAME basis (shared boundary).
+    manifest = build_manifest(
+        verdict,
+        material=material,
+        deps=deps,
+        regver=registry_version(),
+        verified_at_sha=current_code_sha(),
+    )
     return signing.sign_manifest(verdict["ticket_id"], manifest, repo_root=repo_root)
 
 
-def _rehash(paths, *, repo_root=None) -> dict[str, str]:
-    """Re-hash the given dependency paths at CURRENT working-tree content."""
-    from rebar import config as _config
-
-    base = str(_config.repo_root(repo_root))
+def _rehash(paths, *, repo_root=None, pinned_sha: str | None = None) -> dict[str, str]:
+    """Re-hash the given dependency paths through the shared :func:`_hash_basis` boundary
+    (the pinned-SHA snapshot when given, else the active snapshot / working tree)."""
+    base = _hash_basis(repo_root, pinned_sha=pinned_sha)
     return {p: _hash_file(p, base=base) for p in sorted(paths)}
 
 
@@ -322,7 +377,12 @@ def claim_gate_check(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     # 0002) we cannot scope, so fall back to conservative whole-HEAD freshness.
     deps = manifest_deps(manifest)
     if deps:
-        base = str(_config.repo_root(repo_root))
+        # Re-hash through the SHARED boundary at the SAME pinned-SHA basis the attestation
+        # signed against (the signature's verified_at_sha), so the claim gate and plan-review
+        # cannot diverge (whole-HEAD vs pinned-SHA) — epic raze-vet-ditch S4b. A local/legacy
+        # attestation has no pin → both resolve to the working tree (the back-out).
+        pinned = signing.verified_at_sha_from_manifest(manifest)
+        base = _hash_basis(repo_root, pinned_sha=pinned)
         drifted = [p for p, digest in sorted(deps.items()) if _hash_file(p, base=base) != digest]
         if drifted:
             shown = ", ".join(drifted[:5]) + (" …" if len(drifted) > 5 else "")

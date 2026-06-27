@@ -82,3 +82,30 @@ latency — so the probe is ≈ **1/3 of the full-review LLM calls** and a small
 saving is real but bounded (the 2 probe criteria are themselves agent-tier), the path ships **opt-in**
 until a project confirms the per-token saving on its own representative tickets, at which point the
 default can be flipped on in a follow-up.
+
+## Shared ref-resolution boundary (epic `raze-vet-ditch`, S4b `piney-gold-day`)
+
+ADR 0005 makes the code-reading gates verify a *pinned-SHA snapshot* (attested mode) instead of
+the server's mutable checkout. That re-opens a divergence hazard *inside* this drift mechanism:
+plan-review computes the signed `{path:hash}` map at one ref basis, and the claim-gate freshness
+re-check (this ADR) re-hashes those paths at another. If the two resolved the ref independently —
+plan-review at the pinned-SHA snapshot, the claim gate at whole-HEAD / the working tree — they
+would disagree and re-introduce the staleness false-positive this ADR exists to prevent.
+
+**Consolidation.** There is now exactly ONE shared ref-resolution boundary,
+`rebar.llm.plan_review.attest._hash_basis(repo_root, *, pinned_sha=None)`, that BOTH consumers
+resolve through (the Rule-of-Three is satisfied by the two consumers + the concrete divergence
+risk, not speculative generality):
+
+- **plan-review signing** (`dependency_hashes` / `_rehash`) hashes at the active attested snapshot
+  (S3's context-local code root) and records the snapshot SHA in the signed manifest as a
+  `verified-at-sha:<sha>` step (the same channel S4 uses — no payload/version change).
+- **the claim gate** (`claim_gate_check`) reads that pinned `verified_at_sha` back out of the
+  signed manifest and re-hashes the dependency paths at the SAME SHA's snapshot — so the two
+  bases are identical by construction.
+
+**Back-out.** A plan-review signed in `local` mode (or any pre-S4b attestation) carries no
+`verified-at-sha` step; `_hash_basis` then resolves BOTH sides to the in-place checkout, exactly
+the per-site working-tree behavior that predated this consolidation. Reverting is therefore a
+no-op rollback (drop the pin → both fall back to the working tree); the per-path map contract and
+the material-fingerprint binding are untouched.

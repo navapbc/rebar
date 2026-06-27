@@ -51,6 +51,21 @@ def current_code_root() -> str | None:
     return _active_code_root.get()
 
 
+def current_code_sha() -> str | None:
+    """The pinned SHA of the active attested snapshot, or ``None`` (local / no gate).
+
+    Derived from the content-addressed snapshot layout: an attested code root is
+    ``<store>/<sha>`` (``rebar._snapshot`` keys entries by full commit SHA), so the dir
+    name IS the SHA. A local read root (the checkout) is not SHA-named → ``None``."""
+    root = current_code_root()
+    if not root:
+        return None
+    name = os.path.basename(root.rstrip(os.sep))
+    if len(name) == 40 and all(c in "0123456789abcdef" for c in name):
+        return name
+    return None
+
+
 @contextlib.contextmanager
 def use_code_root(path: str | None) -> Iterator[None]:
     """Bind the gate's code read-root for the duration of the block (``None`` = no override,
