@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_verify_inputs_input.schema.json",
+  "title": "PlanReviewVerifyInputsInput",
+  "description": "INPUT of `plan_review_verify_inputs`: the ticket whose plan text is assembled plus the Pass-1 finder findings the verifier INSTRUCTIONS are listed from.",
+  "type": "object",
+  "properties": {
+    "ticket_id": { "type": "string", "description": "The ticket under review (its plan_text becomes {{plan}})." },
+    "findings": { "type": "array", "description": "The Pass-1 finder findings (each with finding/criteria/evidence/impact) listed into the verifier instructions." }
+  },
+  "required": ["findings"],
+  "additionalProperties": true
+}

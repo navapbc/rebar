@@ -267,20 +267,20 @@ class VerifyConfig:
 
     # Which engine PRODUCES the gate verdicts — the plan-review verdict (the
     # `rebar review-plan` attestation) and the completion verdict (the close gate).
-    # "workflow" routes verdict production through the v3 engine workflows
-    # (gates/plan-review.yaml + gates/completion-verification.yaml); "bespoke" (DEFAULT)
-    # uses the original orchestrator.run_review / completion.verify_completion path. The
-    # SIGNING wrappers are identical on both paths, so the signed attestations stay
-    # byte-compatible (epic B / story B5 cutover).
+    # "workflow" (DEFAULT) routes verdict production through the v3 engine workflows
+    # (gates/plan-review.yaml + gates/completion-verification.yaml); "bespoke" uses the
+    # original orchestrator.run_review / completion.verify_completion path. The SIGNING
+    # wrappers are identical on both paths, so the signed attestations stay byte-compatible
+    # (epic B / story B5 cutover).
     #
-    # DEFAULT IS "bespoke" until the workflow PLAN-REVIEW verify/coach steps supply the
-    # prompts' `{{plan}}` + findings/surviving on the LIVE path (today the generic
-    # RunnerAgentStep supplies only ticket_id/ticket_context/repo_path, so the workflow
-    # plan-review verify degrades to INDETERMINATE live — a B2 offline blind spot the B5
-    # cutover surfaced). The completion workflow gate IS live-correct; flipping the default
-    # to "workflow" is gated on the plan-review plumbing fix (follow-up). Opt in per repo
-    # with verify.gate_engine = "workflow" once that lands.
-    gate_engine: str = "bespoke"
+    # DEFAULT IS "workflow" — the workflow plan-review verify/coach steps now supply the
+    # prompts' `{{plan}}` + findings/surviving on the LIVE path (tepid-bus-pomp completed the
+    # plumbing the B5 cutover exposed as missing; the earlier default-to-bespoke hotfix is
+    # superseded). Live trace-parity (criteria/prompts/models/call-modes/inputs) holds vs
+    # bespoke on a task/story/bug; the only intended difference is the aggregate verify being
+    # one call (epic AC) vs bespoke's count-12 chunking (principled token-based chunking is a
+    # separate future feature, solid-timer-unison). "bespoke" stays reachable until B-RETIRE.
+    gate_engine: str = "workflow"
 
 
 @dataclass

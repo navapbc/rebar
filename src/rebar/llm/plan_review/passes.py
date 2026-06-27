@@ -367,6 +367,29 @@ def summarize_for_isf(runner: Runner, cfg: LLMConfig, *, log_text: str) -> str:
 
 
 # ── Pass 2: verify ───────────────────────────────────────────────────────────────
+def verify_finding_listing(batch: list[tuple[int, dict[str, Any]]]) -> str:
+    """The Pass-2 verifier per-finding listing for a batch of ``(index, finding)`` pairs
+    (``### finding index {i}`` blocks with claim / criteria / evidence / impact). The ONE
+    canonical format — shared by the bespoke :func:`pass2_verify` and the v3 workflow's
+    verify-inputs op so the listing never diverges between the two paths."""
+    return "\n\n".join(
+        f"### finding index {i}\nclaim: {f['finding']}\ncriteria: {', '.join(f['criteria'])}\n"
+        f"evidence: {' | '.join(f.get('evidence', []))}\nimpact: {f.get('impact', '')}"
+        for i, f in batch
+    )
+
+
+def verify_instructions(batch: list[tuple[int, dict[str, Any]]]) -> str:
+    """The full Pass-2 verifier INSTRUCTIONS (header + :func:`verify_finding_listing`) over
+    one batch of ``(index, finding)`` pairs. An empty batch yields a benign header only."""
+    if not batch:
+        return "Verify each finding below by its index. Emit one verification per finding."
+    return (
+        "Verify each finding below by its index. Emit one verification per finding "
+        f"(indices {batch[0][0]}–{batch[-1][0]}).\n\n{verify_finding_listing(batch)}"
+    )
+
+
 def pass2_verify(
     runner: Runner,
     cfg: LLMConfig,
@@ -384,17 +407,9 @@ def pass2_verify(
     out: dict[int, dict[str, Any]] = {}
     for start in range(0, len(findings), batch_size):
         batch = list(enumerate(findings))[start : start + batch_size]
-        listing = "\n\n".join(
-            f"### finding index {i}\nclaim: {f['finding']}\ncriteria: {', '.join(f['criteria'])}\n"
-            f"evidence: {' | '.join(f.get('evidence', []))}\nimpact: {f.get('impact', '')}"
-            for i, f in batch
-        )
         req = RunRequest(
             system_prompt=_resolve_system(PASS_VERIFIER, plan, cfg),
-            instructions=(
-                "Verify each finding below by its index. Emit one verification per finding "
-                f"(indices {batch[0][0]}–{batch[-1][0]}).\n\n{listing}"
-            ),
+            instructions=verify_instructions(batch),
             config=cfg,
             reviewers=["plan-verifier"],
             mode="structured",
@@ -573,6 +588,20 @@ def load_move_registry(repo_root=None) -> dict[str, dict[str, str]]:
     return moves
 
 
+def coach_instructions(
+    surviving: list[dict[str, Any]], move_registry: dict[str, dict[str, str]]
+) -> str:
+    """The Pass-4 coach INSTRUCTIONS (move registry + the surviving-findings listing). The
+    ONE canonical format — shared by the bespoke :func:`pass4_coach` and the v3 workflow's
+    coach-inputs op so the listing never diverges between the two paths."""
+    listing = "\n".join(f"- id={f['id']} :: {f['finding'][:200]}" for f in surviving)
+    moves = "\n".join(f"  {mid}: {m['name']}" for mid, m in sorted(move_registry.items()))
+    return (
+        f"## Move registry\n{moves}\n\n## Surviving advisory findings (by id)\n{listing}\n\n"
+        "Emit one note per finding you can map to a useful move (skip findings no move fits)."
+    )
+
+
 def pass4_coach(
     runner: Runner,
     cfg: LLMConfig,
@@ -586,14 +615,9 @@ def pass4_coach(
     and names a bounded noun-phrase subject (validated); it never authors prose."""
     if not surviving:
         return []
-    listing = "\n".join(f"- id={f['id']} :: {f['finding'][:200]}" for f in surviving)
-    moves = "\n".join(f"  {mid}: {m['name']}" for mid, m in sorted(move_registry.items()))
     req = RunRequest(
         system_prompt=_resolve_system(PASS_COACH, plan, cfg),
-        instructions=(
-            f"## Move registry\n{moves}\n\n## Surviving advisory findings (by id)\n{listing}\n\n"
-            "Emit one note per finding you can map to a useful move (skip findings no move fits)."
-        ),
+        instructions=coach_instructions(surviving, move_registry),
         config=cfg,
         reviewers=["plan-coach"],
         mode="structured",

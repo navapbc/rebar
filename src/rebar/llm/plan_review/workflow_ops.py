@@ -192,6 +192,54 @@ def plan_review_grounding(ctx: StepContext) -> dict[str, Any]:
 
 
 @register_step(
+    "plan_review_verify_inputs",
+    input_schema="plan_review_verify_inputs_input",
+    output_schema="plan_review_verify_inputs_output",
+    description=(
+        "Emit the {{plan}} text + the Pass-2 verifier INSTRUCTIONS for the verify prompt step "
+        "on the LIVE path: `plan` = assemble_context(ticket_id).plan_text and `instructions` = "
+        "the SAME per-finding listing the bespoke pass2_verify builds (passes.verify_instructions) "
+        "over ALL Pass-1 findings — one aggregate call (a >12-finding plan is a single workflow "
+        "verify, not bespoke's batches-of-12; a documented divergence). Reuses passes.verify_"
+        "instructions so the listing format never diverges from the bespoke gate."
+    ),
+)
+def plan_review_verify_inputs(ctx: StepContext) -> dict[str, Any]:
+    """Emit {plan, instructions} feeding the workflow's Pass-2 verify prompt step."""
+    from . import orchestrator, passes
+
+    tid = _ticket_id(ctx)
+    pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
+    findings = list(ctx.inputs.get("findings") or [])
+    instructions = passes.verify_instructions(list(enumerate(findings)))
+    return {"plan": pctx.plan_text, "instructions": instructions}
+
+
+@register_step(
+    "plan_review_coach_inputs",
+    input_schema="plan_review_coach_inputs_input",
+    output_schema="plan_review_coach_inputs_output",
+    description=(
+        "Emit the {{plan}} text + the Pass-4 coach INSTRUCTIONS for the coach_notes prompt step "
+        "on the LIVE path: `plan` = assemble_context(ticket_id).plan_text and `instructions` = "
+        "the SAME move-registry + surviving-findings listing the bespoke pass4_coach builds "
+        "(passes.coach_instructions) over the surviving advisory findings. Reuses passes.coach_"
+        "instructions + passes.load_move_registry so the format never diverges from bespoke."
+    ),
+)
+def plan_review_coach_inputs(ctx: StepContext) -> dict[str, Any]:
+    """Emit {plan, instructions} feeding the workflow's Pass-4 coach prompt step."""
+    from . import orchestrator, passes
+
+    tid = _ticket_id(ctx)
+    pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
+    surviving = list(ctx.inputs.get("surviving") or [])
+    moves = passes.load_move_registry(ctx.repo_root)
+    instructions = passes.coach_instructions(surviving, moves)
+    return {"plan": pctx.plan_text, "instructions": instructions}
+
+
+@register_step(
     "plan_review_decide",
     input_schema="plan_review_decide_input",
     output_schema="plan_review_decide_output",
