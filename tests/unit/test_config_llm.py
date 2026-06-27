@@ -68,7 +68,7 @@ def _cfg(root: Path) -> LLMConfig:
 def test_defaults(tmp_path: Path) -> None:
     o = _cfg(_proj(tmp_path))
     assert o.model == DEFAULT_MODEL
-    assert (o.max_tokens, o.max_iterations, o.timeout_s) == (8000, 25, 600)
+    assert (o.max_tokens, o.max_iterations, o.timeout_s) == (16000, 25, 600)
     assert o.model_provider is None and o.base_url is None and o.mcp_servers == {}
 
 

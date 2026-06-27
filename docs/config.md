@@ -185,7 +185,7 @@ it into `Config`. The non-secret knobs are settable in the file and resolved
 model          = "claude-opus-4-8"   # env REBAR_LLM_MODEL
 model_provider = ""                  # env REBAR_LLM_MODEL_PROVIDER (inferred from the model name when empty)
 base_url       = ""                  # env REBAR_LLM_BASE_URL (OpenAI-compatible endpoint)
-max_tokens     = 8000                # env REBAR_LLM_MAX_TOKENS
+max_tokens     = 16000               # env REBAR_LLM_MAX_TOKENS
 max_steps      = 25                  # env REBAR_LLM_MAX_STEPS (alias REBAR_LLM_MAX_ITERS); ~2 steps per tool call
 timeout        = 600                 # env REBAR_LLM_TIMEOUT (wall-clock s)
 mcp_servers    = {}                  # env REBAR_LLM_MCP_SERVERS (JSON); a TOML inline table in-file
