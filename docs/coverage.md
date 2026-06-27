@@ -18,9 +18,11 @@ This is the same test selection CI's coverage step uses.
 
 | Date       | Scope                                   | In-process total |
 |------------|-----------------------------------------|------------------|
-| 2026-06-14 | `-m "not integration and not external"` | **61%**          |
+| 2026-06-27 | `-m "not integration and not external"` | **77%**          |
+| 2026-06-14 | `-m "not integration and not external"` | 61%              |
 
-(1758 passed, 7 skipped at the time of measurement.)
+(2026-06-27: 3540 passed, 38 skipped — the in-process total rose from 61% to 77%
+as the suite grew. 2026-06-14: 1758 passed, 7 skipped.)
 
 ## Subprocess caveat
 
@@ -28,16 +30,33 @@ The measured number **understates** the code actually exercised. Many tests driv
 rebar as a subprocess — the CLI adapter shells out to `python -m rebar.cli`, and
 several CLI/exit-code tests do the same — so the work those subprocesses do is not
 attributed to the parent process's in-process coverage. The real exercised fraction
-is higher than 61%; treat 61% as a floor on what the in-process measurement can
+is higher than 77%; treat 77% as a floor on what the in-process measurement can
 see, not a ceiling on what the suite covers.
+
+To make the subprocess work *count* (and measure the true number), the standard
+coverage.py recipe is `[tool.coverage.run] patch = ["subprocess"]` (coverage ≥ 7.10,
+auto-enables `parallel = true`) plus a `coverage combine` step before the report.
+It is deliberately NOT enabled today — see "Future: subprocess coverage" below.
 
 ## Recorded target
 
-A conservative floor of **`fail_under = 50`** is recorded in
-`[tool.coverage.report]` — comfortably below the measured in-process 61% so it
-documents a minimum without failing the existing report-only CI coverage step
-(which runs the identical selection). Raise the floor deliberately as in-process
-coverage climbs; do not ratchet it above the measured number.
+A floor of **`fail_under = 70`** is recorded in `[tool.coverage.report]` — below the
+measured in-process **77%** (7-pt headroom) so it guards against a large regression
+without failing the report-only CI coverage step (which runs the identical
+selection). Raise the floor deliberately as in-process coverage climbs; do not
+ratchet it above the measured number.
+
+## Future: subprocess coverage
+
+Capturing child-process coverage (the CLI shells out to `python -m rebar.cli`) would
+let the floor track the *true* exercised fraction rather than the in-process
+undercount. The modern recipe is small — `[tool.coverage.run] patch = ["subprocess"]`
++ a `coverage combine` step — and since rebar's subprocesses run in the **same**
+environment as the tests (no throwaway venvs), it needs no `[tool.coverage.paths]`
+remapping. It is a deliberate, optional follow-up: measuring subprocess coverage is
+standard for process-spawning tools (pip, tox, nox, virtualenv) but many mature CLIs
+(pdm, hatch, pipx, pre-commit) accept the in-process undercount with a conservative
+floor — which is the documented stance here until the recipe is adopted.
 
 ## Behavior × interface matrix
 
