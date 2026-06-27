@@ -93,6 +93,9 @@ def assemble_context(
         listed = []
     for c in listed:
         cid = c.get("ticket_id")
+        if cid is None:
+            children.append(c)
+            continue
         try:  # fetch full child state (deps + file_impact) for P5/P8
             children.append(rebar.show_ticket(cid, repo_root=repo_root))
         except Exception:  # noqa: BLE001 — per-child best-effort full-state fetch; fall back to the summary

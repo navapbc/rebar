@@ -1036,8 +1036,10 @@ def _existing_jira_links(jira_fields: dict[str, Any]) -> set[tuple[str, str]]:
             continue
         for side_key in ("inwardIssue", "outwardIssue"):
             side = link.get(side_key)
-            if isinstance(side, dict) and side.get("key"):
-                existing.add((type_name, side.get("key")))
+            if isinstance(side, dict):
+                side_key_val = side.get("key")
+                if side_key_val:
+                    existing.add((type_name, side_key_val))
     return existing
 
 
@@ -1078,6 +1080,8 @@ def _diff_links(
         if not isinstance(dep, dict):
             continue
         relation = dep.get("relation")
+        if not isinstance(relation, str):
+            continue  # malformed dep — no relation to map
         mapped = _RELATION_TO_JIRA_LINK.get(relation)
         if mapped is None:
             continue  # no reliable Jira link type — skip (no-op)
@@ -1132,11 +1136,14 @@ def _diff_link_removals(
     if get_local_id is None:
         return []  # cannot resolve targets -> fail-open (no removal, additive-only)
 
-    local_deps: set[tuple[str, str]] = {
-        (d.get("relation"), d.get("target_id"))
-        for d in ticket.get("deps") or []
-        if isinstance(d, dict) and d.get("relation") and d.get("target_id")
-    }
+    local_deps: set[tuple[str, str]] = set()
+    for d in ticket.get("deps") or []:
+        if not isinstance(d, dict):
+            continue
+        d_relation = d.get("relation")
+        d_target = d.get("target_id")
+        if d_relation and d_target:
+            local_deps.add((d_relation, d_target))
 
     removals: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
@@ -1145,16 +1152,20 @@ def _diff_link_removals(
             continue
         link_type = link.get("type") or {}
         type_name = link_type.get("name") if isinstance(link_type, dict) else None
-        base_relation = _JIRA_LINK_TO_RELATION.get(type_name) if type_name else None
+        if not type_name:
+            continue  # no link-type name — never managed by us
+        base_relation = _JIRA_LINK_TO_RELATION.get(type_name)
         if base_relation is None:
             continue  # link type with no rebar relation mapping — never managed by us
         inward = link.get("inwardIssue")
         outward = link.get("outwardIssue")
-        if isinstance(inward, dict) and inward.get("key"):
-            other_key = inward.get("key")
+        inward_key = inward.get("key") if isinstance(inward, dict) else None
+        outward_key = outward.get("key") if isinstance(outward, dict) else None
+        if inward_key:
+            other_key = inward_key
             relation = base_relation
-        elif isinstance(outward, dict) and outward.get("key"):
-            other_key = outward.get("key")
+        elif outward_key:
+            other_key = outward_key
             relation = "depends_on" if base_relation == "blocks" else base_relation
         else:
             continue

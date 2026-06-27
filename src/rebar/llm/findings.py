@@ -334,7 +334,7 @@ def finalize_outcome(
     )
 
 
-def citation_model():
+def citation_model() -> type[Any]:
     """Lazily build the ``Citation`` structured-output model, mirroring
     ``common.schema.json#/$defs/citation``. Factored out (not nested) so OTHER output
     contracts (e.g. ``completion_verdict``) reuse the SAME citation shape — one source
@@ -366,7 +366,7 @@ def citation_model():
     return Citation
 
 
-def finding_model():
+def finding_model() -> type[Any]:
     """Lazily build the ``Finding`` structured-output model, mirroring
     ``common.schema.json#/$defs/finding`` (with ``citations: list[Citation]``). The
     schema-pin test reaches ``Citation`` through ``Finding.model_fields['citations']``,
@@ -382,7 +382,10 @@ def finding_model():
         )
         detail: str = Field(description="Human-readable description of the finding.")
         title: str | None = Field(default=None, description="Optional short headline.")
-        citations: list[Citation] = Field(
+        # reason: Citation is a runtime-built pydantic model (a value, not a static type);
+        # pydantic needs the real class in the annotation to validate, and the schema-pin
+        # test reads it back off model_fields — so the annotation must stay as-is.
+        citations: list[Citation] = Field(  # type: ignore[valid-type]
             default_factory=list, description="Evidence: file+line / url / freeform."
         )
         confidence: float | None = Field(default=None, description="Optional confidence 0..1.")
@@ -401,7 +404,7 @@ def finding_model():
     return Finding
 
 
-def findings_response_model():
+def findings_response_model() -> type[Any]:
     """Build (lazily) the Pydantic model the runner binds as its structured-output
     contract. Mirrors ``common.schema.json#/$defs/finding``;
     pinned against the JSON Schema by a test so the two never drift. Requires
@@ -413,7 +416,11 @@ def findings_response_model():
     class ReviewFindings(BaseModel):
         """Structured output of an LLM review: the findings and an optional summary."""
 
-        findings: list[Finding] = Field(description="All findings; [] if none.")
+        # reason: Finding is a runtime-built pydantic model (a value, not a static type);
+        # the real class must stay in the annotation for pydantic validation.
+        findings: list[Finding] = Field(  # type: ignore[valid-type]
+            description="All findings; [] if none."
+        )
         summary: str | None = Field(default=None, description="Optional reviewer summary.")
 
     return ReviewFindings

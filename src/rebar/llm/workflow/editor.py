@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 # The library WRITE + ENUMERATE data model (story B-DM) backs the editor's "select /
 # create criteria & prompts" pickers (story B-UX). Imported lazily-by-module here so the
@@ -106,7 +106,8 @@ def _collect_overlay_triggers(steps: list[Any]) -> list[dict[str, Any]]:
             continue
         if s.get("uses") == "overlay_triggers":
             step_id = str(s.get("id") or "")
-            with_ = s.get("with") if isinstance(s.get("with"), dict) else {}
+            _with = s.get("with")
+            with_ = _with if isinstance(_with, dict) else {}
             kw = with_.get("keyword_triggers")
             names: list[str] = list(kw.keys()) if isinstance(kw, dict) else []
             if with_.get("structural"):
@@ -756,7 +757,10 @@ def edit_workflow(
                 )
 
     server = http.server.ThreadingHTTPServer((host, port), _Handler)
-    bound_host, bound_port = server.server_address[0], server.server_address[1]
+    # server_address is typed as a broad union (str | bytes | tuple | …); for an AF_INET
+    # HTTP server it is always (host: str, port: int), so narrow with a cast.
+    bound_host = cast(str, server.server_address[0])
+    bound_port = cast(int, server.server_address[1])
     url = f"http://{bound_host}:{bound_port}/"
     if open_browser:
         threading.Thread(target=lambda: webbrowser.open(url), daemon=True).start()

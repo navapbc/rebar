@@ -392,7 +392,8 @@ def summary_compute(ticket_id: str, tracker: str) -> dict:
         }
     title = state.get("title") or "untitled"
     status = state.get("status") or "unknown"
-    blockers, ready = [], True
+    blockers: list[str] = []
+    ready = True
     try:
         deps = deps_state(ticket_id, tracker)
         blockers = deps.get("blockers") or []

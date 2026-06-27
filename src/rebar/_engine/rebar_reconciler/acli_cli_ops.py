@@ -344,10 +344,13 @@ def _create_issue_from_json(
             jira_priority_name = str(_name)
         else:
             _id = priority.get("id")
-            try:
-                jira_priority_name = _LOCAL_PRIORITY_TO_JIRA[int(_id) - 1]
-            except (TypeError, ValueError, KeyError, IndexError):
+            if _id is None:
                 jira_priority_name = "Medium"
+            else:
+                try:
+                    jira_priority_name = _LOCAL_PRIORITY_TO_JIRA[int(_id) - 1]
+                except (TypeError, ValueError, KeyError, IndexError):
+                    jira_priority_name = "Medium"
     else:
         jira_priority_name = str(priority)
 

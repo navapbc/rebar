@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from typing import Any
+from typing import Any, cast
 
 from rebar._engine_support.output import error_envelope
 from rebar._engine_support.resolver import resolve_ticket_id
@@ -80,6 +80,17 @@ class NextBatchResult:
         "skipped_in_progress",
         "skipped_needs_planning",
     )
+
+    epic_id: str
+    epic_title: str
+    batch: list[_Candidate]
+    candidates: list[_Candidate]
+    skipped_overlap: list[tuple[str, str, str, str]]
+    skipped_blocked_story: list[tuple[str, str, str]]
+    skipped_design_awaiting: list[tuple[str, str, str]]
+    skipped_manual_awaiting: list[tuple[str, str, str]]
+    skipped_in_progress: list[tuple[str, str]]
+    skipped_needs_planning: list[tuple[str, str]]
 
 
 # ───────────────────────────── core computation ──────────────────────────────
@@ -260,7 +271,7 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
     # ── Greedy selection with file-overlap ────────────────────────────────────
     claimed_files: dict[str, str] = {}
     batch: list[_Candidate] = []
-    skipped_overlap = []
+    skipped_overlap: list[tuple[str, str, str, str]] = []
     for c in candidates:
         if limit > 0 and len(batch) >= limit:
             break
@@ -281,7 +292,8 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
                 conflict_task = claimed_files[f]
                 break
         if conflict_file:
-            skipped_overlap.append((c.id, c.title, conflict_file, conflict_task))
+            # conflict_task is always set together with conflict_file above.
+            skipped_overlap.append((c.id, c.title, conflict_file, cast(str, conflict_task)))
             continue
         batch.append(c)
         for f in c.files:

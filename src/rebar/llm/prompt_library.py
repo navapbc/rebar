@@ -206,9 +206,7 @@ def _validate_and_canonicalize(text: str) -> str:
             "missing required front-matter: an authored prompt must begin with a "
             f"'---' YAML block declaring at least {list(_REQUIRED_KEYS)}"
         )
-    missing = [
-        k for k in _REQUIRED_KEYS if not (isinstance(meta.get(k), str) and meta.get(k).strip())
-    ]
+    missing = [k for k in _REQUIRED_KEYS if not (isinstance(v := meta.get(k), str) and v.strip())]
     if missing:
         raise LibraryWriteError(
             f"missing required front-matter key(s) {missing} (each must be a non-empty string)"

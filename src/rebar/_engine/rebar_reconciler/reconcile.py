@@ -13,7 +13,7 @@ import json
 import os
 import shutil
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -47,10 +47,10 @@ here so the enumerative coverage test can verify completeness of the dispatch ta
 over the full {inbound, outbound} × MutationAction cartesian product.
 """
 
-_DISPATCH_TABLE: dict[tuple[str, str], object] | None = None
+_DISPATCH_TABLE: dict[tuple[str, str], Callable[..., Any]] | None = None
 
 
-def _build_dispatch_table() -> dict[tuple[str, str], object]:
+def _build_dispatch_table() -> dict[tuple[str, str], Callable[..., Any]]:
     """Build and return the (direction_str, action_str) → leaf callable mapping.
 
     Loads the applier module via ``_load()`` (the same lazy-loader used by
@@ -330,6 +330,8 @@ def _load(name: str, relpath: str):
         return sys.modules[name]
     path = Path(__file__).parent / relpath
     spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None:
+        raise ImportError(f"cannot create module spec for {name} at {path}")
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
     spec.loader.exec_module(mod)  # type: ignore[union-attr]

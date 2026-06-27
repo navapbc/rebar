@@ -555,8 +555,9 @@ def run_workflow(
 
     # Block only on real errors: the informational "note:" line (degraded
     # jsonschema-absent path) and lint warnings never stop a run.
-    schema_errors = [e for e in validate_document(doc) if not e.startswith("note:")]
-    lint_errors = [str(f) for f in lint_document(doc) if f.severity != "warning"]
+    doc_dict = dict(doc)
+    schema_errors = [e for e in validate_document(doc_dict) if not e.startswith("note:")]
+    lint_errors = [str(f) for f in lint_document(doc_dict) if f.severity != "warning"]
     errors = schema_errors + lint_errors
     if errors:
         raise WorkflowValidationError(errors, source=str(doc.get("name", "<workflow>")))
@@ -634,7 +635,7 @@ def _dispatch(
         result = runner.run(ctx)
         return result if isinstance(result, StepResult) else StepResult(outputs=dict(result))
     name = ctx.step.get("uses")
-    handler = registry.get(name)
+    handler = registry.get(name) if name is not None else None
     if handler is None:
         raise WorkflowError(f"unknown scripted step {name!r} (not in the step registry)")
     out = handler(ctx)
@@ -656,7 +657,7 @@ def _step_record(
 ) -> dict[str, Any]:
     # ``frame_key`` defaults to ``step_id`` (the top frame), so the reducer keys a
     # leaf-only run exactly as v1 did; nested executions pass the full path.
-    record = {
+    record: dict[str, Any] = {
         "run_id": run_id,
         "step_id": step_id,
         "frame_key": frame_key or step_id,

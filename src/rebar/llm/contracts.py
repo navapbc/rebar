@@ -55,7 +55,9 @@ def completion_verdict_response_model() -> type:
         detail: str = Field(description="Explanation of why the criterion is not met.")
         severity: str = Field(default="high", description="critical | high | medium | low | info.")
         dimension: str = Field(default="completion", description="Finding dimension.")
-        citations: list[Citation] = Field(
+        # reason: Citation is a runtime-built pydantic model (a value, not a static type);
+        # pydantic needs the real class in the annotation to validate citations.
+        citations: list[Citation] = Field(  # type: ignore[valid-type]
             default_factory=list, description="Evidence: file+line / url / freeform source."
         )
         title: str | None = Field(default=None, description="Optional short headline.")

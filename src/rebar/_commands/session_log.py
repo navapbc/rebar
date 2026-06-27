@@ -116,7 +116,7 @@ def append(entry, *, summary=None, relates_to=None, discovered_from=None, repo_r
     if not entry:
         raise CommandError("Error: session-log entry must be non-empty")
     tracker = tracker_dir(repo_root)
-    current = _resolve_current(tracker, repo_root)
+    current = _resolve_current(str(tracker), repo_root)
     created = False
     alias = None
     if current is None:

@@ -69,6 +69,8 @@ def _child_closure_findings(ticket_id: str, repo_root) -> list[dict]:
     out: list[dict] = []
     for c in children:
         cid = c.get("ticket_id")
+        if cid is None:
+            continue
         title = (c.get("title") or "")[:50]
         status = c.get("status")
         if status != "closed":

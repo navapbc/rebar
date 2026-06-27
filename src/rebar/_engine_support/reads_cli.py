@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from typing import Any
 
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.reads import (
@@ -115,7 +116,7 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
     except OutputFormatError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
-    opts = {
+    opts: dict[str, Any] = {
         "include_archived": False,
         "exclude_deleted": False,
         "ticket_type": "",
