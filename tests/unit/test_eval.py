@@ -183,6 +183,23 @@ def test_run_eval_gate_fails_when_recall_missing() -> None:
     assert res["passed"] is False
 
 
+def test_run_eval_max_cases_caps_the_run() -> None:
+    # The per-run cost ceiling limits how many dataset cases are scored.
+    seen = []
+
+    def solve(_p, case):
+        seen.append(case["id"])
+        return {
+            "findings": []
+            if case["expect"] == "pass"
+            else [{"severity": "high", "dimension": "x", "detail": "d"}]
+        }
+
+    ev.run_eval("plan-review-finder", solve=solve, max_cases=2)
+    # epochs * 2 cases — never the whole dataset
+    assert len(set(seen)) == 2
+
+
 def test_run_eval_errors_on_spec_without_dataset() -> None:
     # code-quality ships gold-only (no dataset) — run_eval has nothing to run.
     with pytest.raises(EvalError, match="no `dataset`"):

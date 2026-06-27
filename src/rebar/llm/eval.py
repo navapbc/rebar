@@ -464,7 +464,13 @@ def _gating_results(
 
 
 def run_eval(
-    prompt_id: str, *, repo_root=None, dirty: bool = True, solve=None, runner=None
+    prompt_id: str,
+    *,
+    repo_root=None,
+    dirty: bool = True,
+    solve=None,
+    runner=None,
+    max_cases: int | None = None,
 ) -> dict[str, Any]:
     """Run a prompt's eval LIVE and return the scored result + the release gate.
 
@@ -476,6 +482,10 @@ def run_eval(
     scorer passes. A deterministic scorer gates; llm-judge scorers only report (the
     gate never depends on a model judge), so the gate is reproducible.
 
+    Cases run SEQUENTIALLY (concurrency 1 — no model fan-out). ``max_cases`` caps the
+    number of dataset cases evaluated (a per-run cost ceiling; the CI live job sets it
+    via ``REBAR_EVAL_MAX_CASES``); ``None`` runs the whole dataset.
+
     ``solve(prompt_id, case) -> output`` defaults to :func:`_live_solver` (the real op
     via :mod:`rebar.llm.eval_solver`, needing the ``agents`` extra); it is injectable
     so the whole aggregation path is offline-testable. Returns ``{prompt, epochs,
@@ -485,6 +495,8 @@ def run_eval(
     dataset = spec.get("dataset") or []
     if not dataset:
         raise EvalError(f"eval spec for {prompt_id!r} has no `dataset` to run")
+    if max_cases is not None and max_cases >= 0:
+        dataset = dataset[:max_cases]  # per-run cost ceiling
     epochs = int(spec["epochs"])
     k = parse_gate(spec["gate"])
     gating = [

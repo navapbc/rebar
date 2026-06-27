@@ -86,20 +86,31 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - name: Cache pip wheels  # cuts install cost/time on repeated scheduled runs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-eval-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: pip-eval-${{ runner.os }}-
       - name: Install with the agents + eval extras
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e '.[agents,eval]'
       - name: Run dataset-bearing prompt evals (live) → JUnit
+        # Cost rails: cases run SEQUENTIALLY (run_eval has no model fan-out) under the
+        # workflow-level concurrency cap, and REBAR_EVAL_MAX_CASES caps cases per spec
+        # per run. Hard dollar caps live at the provider dashboard (CI has none).
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          REBAR_EVAL_MAX_CASES: "12"
         run: |
           python - <<'PY'
-          import glob
+          import glob, os
           from pathlib import Path
           import yaml
           from rebar.llm import eval as ev
+          cap = int(os.environ.get("REBAR_EVAL_MAX_CASES", "0")) or None
           out = Path("eval-junit"); out.mkdir(exist_ok=True)
           summary, failed = [], []
           for p in sorted(glob.glob("src/rebar/llm/eval_specs/*.eval.yaml")):
@@ -107,7 +118,7 @@ jobs:
               if not spec.get("dataset"):
                   continue  # gold-only spec — nothing to run live
               pid = spec["prompt"]
-              res = ev.run_eval(pid)
+              res = ev.run_eval(pid, max_cases=cap)
               (out / f"{pid}.xml").write_text(res["junit"])
               summary.append(f"{pid}: {'PASS' if res['passed'] else 'FAIL'} (coverage {res['coverage']:.2f})")
               if not res["passed"]:
