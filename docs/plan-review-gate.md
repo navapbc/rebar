@@ -1,10 +1,11 @@
 # The plan-review gate
 
 The plan-review gate is the **inverse of the completion-verification close gate**:
-where completion verification checks at *close* that a ticket's work was actually
-done, the plan-review gate checks at *claim* (open→in_progress) that a ticket's
-**plan is sound before an agent executes it**. Early plan defects compound over an
-autonomous agent's trajectory, so catching them at the start is high-leverage.
+done, the plan-review gate checks when work **starts** (on **any** entry into
+`in_progress` — via `claim`, a plain `transition`, a `blocked` resume, or
+reactivating a `closed` ticket) that a ticket's **plan is sound before an agent
+executes it**. Early plan defects compound over an autonomous agent's trajectory, so
+catching them at the start is high-leverage.
 
 Its posture is to **coach, not roadblock**: it surfaces grounded, actionable
 findings the author can address, and emits a signed **attestation** that a review
@@ -35,12 +36,21 @@ stays fast — target p95 < ~50 ms, no LLM, no network):
    plan-review attestation. This is where the cost + latency live; run it on a
    claim-block or from CI.
 
-2. **The claim gate** — when `verify.require_plan_review_for_claim` is on, `claim`
-   (open→in_progress) does a **fast, local** check for a fresh, certified
-   plan-review attestation and blocks if it is absent/stale. No LLM, no network —
-   a pure HMAC verify + a light fingerprint recompute. `--force="<reason>"`
-   bypasses it (audit-logged). It reuses rebar's existing atomic `claim` primitive,
-   so two agents still cannot both claim a ticket.
+2. **The start-work gate** — when `verify.require_plan_review_for_claim` is on,
+   starting work on a ticket (**any** entry into `in_progress` — via `claim`, a plain
+   `transition <id> open in_progress`, a `blocked` resume, or reactivating a `closed`
+   ticket) does a **fast, local** check for a fresh, certified plan-review attestation
+   and blocks if it is absent/stale. Gating *entry into `in_progress`* (keyed on the
+   target status, not only the `open` edge) means no side-door —
+   `open → blocked → in_progress` or `open → closed → in_progress` — can start
+   un-reviewed work past the gate; a legitimately-reviewed ticket keeps a valid
+   attestation, so a normal block/resume passes. All entry points run the **same**
+   consolidated check (`rebar._commands.gates.plan_review_precheck`), so they cannot
+   diverge. No LLM, no
+   network — a pure HMAC verify + a light fingerprint recompute. Bugs and session_logs
+   are exempt. `--force="<reason>"` bypasses it (audit-logged; on the `transition` path
+   pass `--force` and the `--reason` text becomes the audit note). `claim` additionally
+   reuses rebar's atomic claim primitive, so two agents still cannot both claim a ticket.
 
 A review is a **process, not a dialog**: when a finding blocks (or you want to
 clear advisories), revise the ticket and re-run `review-plan` to earn a fresh
@@ -159,7 +169,8 @@ machinery (`rebar.signing.sign_manifest`; HMAC-SHA256 under the environment key;
 `SIGNATURE` event — see [reuse-surface.md](reuse-surface.md)). The manifest's first
 line is `plan-review: PASS` (distinguishing it from a completion signature) and it
 binds a **material fingerprint** (a hash of description / acceptance-criteria /
-file-impact / decomposition). The claim gate verifies, in order:
+file-impact / decomposition). The start-work gate (`claim` / `transition
+open→in_progress`) verifies, in order:
 
 1. the signature is **certified** under the environment key;
 2. it is a **plan-review** manifest (not a completion one);
@@ -178,7 +189,7 @@ coverage.
 
 | Key | Default | Effect |
 |-----|---------|--------|
-| `verify.require_plan_review_for_claim` | `false` | When true, claiming a work ticket requires a fresh certified plan-review attestation. **Turning it off is the rollback** — an ordinary preference, no kill-switch needed. |
+| `verify.require_plan_review_for_claim` | `false` | When true, starting work on a work ticket (`claim`, or `transition open→in_progress`) requires a fresh certified plan-review attestation. **Turning it off is the rollback** — an ordinary preference, no kill-switch needed. |
 
 Enable it in `.rebar/config.conf` (dotted legacy form) or a `[verify]` table in
 `rebar.toml` / `pyproject.toml`:

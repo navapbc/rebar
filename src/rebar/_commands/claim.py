@@ -11,17 +11,14 @@ claim core call, and the dispatcher-identical CLAIMED / error-envelope output.
 from __future__ import annotations
 
 import json
-import logging
 import os
 import sys
 
 from rebar import config
-from rebar._commands import txn
+from rebar._commands import gates, txn
 from rebar._commands._seam import CommandError
 from rebar._commands.txn import ConcurrencyMismatch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
-
-logger = logging.getLogger(__name__)
 
 _CLAIM_USAGE = (
     "Usage: ticket claim <ticket_id> [--assignee=<name>] [--force[=<reason>]]\n"
@@ -30,7 +27,7 @@ _CLAIM_USAGE = (
     "  Parent-first: if the ticket has an OPEN parent, the parent is claimed first\n"
     "  (recursively, same assignee); a parent failure aborts the child and the\n"
     "  error names the parent.\n"
-    "  --force bypasses the plan-review claim gate (when enabled) with an audit note.\n"
+    "  --force bypasses the plan-review start-work gate (when enabled) with an audit note.\n"
 )
 
 
@@ -66,70 +63,6 @@ def _parse_assignee(args: list[str]) -> str:
     return assignee
 
 
-def _plan_review_precheck(
-    ticket_id: str, cfg_root: str, repo_root, *, force_plan_review: str
-) -> None:
-    """The plan-review CLAIM gate (epic 5fd2; runs BEFORE the locked claim core).
-
-    When ``verify.require_plan_review_for_claim`` is on, claiming a work ticket
-    requires a fresh, certified plan-review attestation (earn one with
-    ``rebar review-plan <id>``). This is a FAST, LOCAL HMAC verify + freshness/
-    material binding — NO LLM and NO network call (the heavy review is out-of-band).
-    Bugs and session_logs are EXEMPT. ``--force`` bypasses with an audit comment.
-    Raises :class:`CommandError` (block) when the attestation is absent/stale/wrong.
-    Returns ``None`` (allow) when the gate is off, the ticket is exempt, or the
-    attestation is valid."""
-    from rebar._commands import gates
-    from rebar.reducer import reduce_ticket as _reduce
-
-    # Shared resolution + fail-OPEN-on-unreadable-config posture (see _commands/gates.py),
-    # mirroring the completion close gate so the two can't drift.
-    if not gates.gate_enabled(
-        cfg_root,
-        "require_plan_review_for_claim",
-        ticket_id=ticket_id,
-        gate_label="the plan-review claim gate",
-    ):
-        return None
-    ticket_type = (_reduce(os.path.join(str(config.tracker_dir(repo_root)), ticket_id)) or {}).get(
-        "ticket_type", ""
-    )
-    if ticket_type in ("bug", "session_log"):
-        return None  # exempt from the plan-review gate
-    if force_plan_review:
-        # Audit the bypass (best-effort) so a forced claim is a durable signal.
-        try:
-            from rebar._commands import leaf
-
-            leaf.comment(
-                ticket_id,
-                "FORCE_CLAIM: plan-review gate bypassed by user approval — no plan-review "
-                f'attestation was verified. Reason: "{force_plan_review}".',
-                repo_root=repo_root,
-            )
-        except Exception:  # noqa: BLE001 — best-effort force-claim audit comment; broad-but-logged, claim proceeds
-            logger.warning(
-                "could not write FORCE_CLAIM audit comment on %s; continuing",
-                ticket_id,
-                exc_info=True,
-            )
-        return None
-    from rebar import llm  # LAZY — preserves optionality (claim_gate_check is stdlib-only though)
-
-    check = llm.claim_gate_check(ticket_id, repo_root=repo_root)
-    if check.get("ok"):
-        return None
-    raise CommandError(
-        f"Error: cannot claim {ticket_id}: {check.get('reason')}.\n"
-        "  The plan-review claim gate is enabled (verify.require_plan_review_for_claim).\n"
-        "  Recovery: run the plan review to earn an attestation, then claim:\n"
-        f"    rebar review-plan {ticket_id}\n"
-        f"    rebar claim {ticket_id}\n"
-        '  Override: use --force="<reason>" to bypass (requires user approval).',
-        returncode=1,
-    )
-
-
 def claim_compute(
     ticket_id: str,
     *,
@@ -162,12 +95,14 @@ def claim_compute(
             "Error: ticket system not initialized. Run 'ticket init' first.", returncode=1
         )
 
-    # Plan-review claim gate (opt-in; runs OUTSIDE the lock — a fast LOCAL HMAC
+    # Plan-review start-work gate (opt-in; runs OUTSIDE the lock — a fast LOCAL HMAC
     # verify, no LLM/network). Blocks (fail-closed) on a missing/stale/wrong
-    # attestation when enabled; --force bypasses with an audit comment. cfg_root is
-    # the REPO root (parent of the tracker), where .rebar/config.conf lives.
-    _plan_review_precheck(
-        ticket_id, os.path.dirname(tracker), repo_root, force_plan_review=force_plan_review
+    # attestation when enabled; --force bypasses with an audit comment. The same
+    # consolidated check guards `transition open -> in_progress` (see _commands/gates.py),
+    # so the two start-work paths can't diverge. cfg_root is the REPO root (parent of
+    # the tracker), where .rebar/config.conf lives.
+    gates.plan_review_precheck(
+        ticket_id, os.path.dirname(tracker), repo_root, force_reason=force_plan_review
     )
 
     # Parent-first cascade: if this ticket has an OPEN parent, claim the parent first

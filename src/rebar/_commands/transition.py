@@ -44,8 +44,9 @@ _USAGE = (
     "  and the error names the parent. close/reopen/blocked never cascade.\n"
     "  --reason=<text>          Required when closing bug tickets. Must start with "
     "'Fixed:' or 'Escalated to user:'.\n"
-    "  --force                  Skip the unresolved-children guard when closing. "
-    "Non-closed children remain unresolved.\n"
+    "  --force                  Skip the unresolved-children guard when closing "
+    "(non-closed children remain unresolved), and bypass the plan-review gate when "
+    "starting work (open->in_progress); the --reason text becomes the audit note.\n"
     "  --verdict-hash=<hash>    DEPRECATED (ignored): the story/epic close gate now "
     "requires a certified signature ('rebar sign'), not a verdict hash.\n"
     "  --force-close=<reason>   Bypass the signature requirement for story/epic "
@@ -348,11 +349,33 @@ def transition_compute(
             "Error: ticket system not initialized. Run 'ticket init' first.", returncode=1
         )
 
-    # Parent-first cascade (open -> in_progress only): if this ticket has an OPEN
-    # parent, transition the parent first (recursively up the chain) so a child is
-    # never moved to in_progress while its parent is still open. If the parent
-    # transition fails, the child is NOT transitioned and the error names the parent.
-    # _cascade_seen breaks any malformed parent cycle.
+    # Plan-review START-WORK gate. ANY entry into `in_progress` starts work on the
+    # ticket's plan, so it goes through the SAME consolidated gate as `claim` (see
+    # _commands/gates.py): blocks (fail-closed) on a missing/stale attestation when
+    # enabled, exempts bug/session_log, and --force bypasses with an audit note (the
+    # bypass reason is the --reason text). Keying on the TARGET (not `current=="open"`)
+    # closes every side-door into in_progress — `open`, a `blocked` resume, or a
+    # `closed`-then-reactivate — so un-reviewed work can't slip past via an alternate
+    # edge. A same-status no-op was already short-circuited above, so reaching here with
+    # target in_progress means current is open/blocked/closed. A legitimately-reviewed
+    # ticket keeps a valid attestation and passes (including a normal block/resume).
+    # cascade=False (replay/import re-materializing a recorded status verbatim) skips it.
+    if cascade and target_status == "in_progress":
+        from rebar._commands import gates
+
+        # Gate THIS ticket first (mirrors claim_compute's order); the recursive parent
+        # transition below gates the parent in turn, so every ticket in the chain that
+        # starts work is gated. The --force bypass propagates up the cascade so a forced
+        # start does not stall on an un-reviewed ancestor (claim/transition parity).
+        force_reason = (reason or "(no reason given)") if force else ""
+        gates.plan_review_precheck(ticket_id, repo_root_str, repo_root, force_reason=force_reason)
+
+    # Parent-first cascade (open -> in_progress only): if this ticket has an OPEN parent,
+    # transition the parent first (recursively up the chain) so a child is never moved to
+    # in_progress while its parent is still open. If the parent transition fails, the child
+    # is NOT transitioned and the error names the parent. _cascade_seen breaks any malformed
+    # parent cycle. (Keyed on `open` only — the cascade pulls an OPEN parent into progress;
+    # a blocked-ticket resume has no such parent semantics.)
     if cascade and current_status == "open" and target_status == "in_progress":
         seen = _cascade_seen or frozenset()
         parent_id = _resolve_open_parent(tracker, ticket_id)
@@ -362,6 +385,8 @@ def transition_compute(
                     parent_id,
                     "open",
                     "in_progress",
+                    reason=reason,
+                    force=force,
                     repo_root=repo_root,
                     _cascade_seen=seen | {ticket_id},
                 )

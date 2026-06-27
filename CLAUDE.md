@@ -80,36 +80,10 @@ advisory findings** before continuing (triage each: fix the valid ones; a findin
 you judge invalid must be justified, not silently ignored). The coaching notes tell
 you the productive next move per finding.
 
-> **Attestation freshness is now SCOPED to the reviewed code** (ADR 0002 /
-> `boil-golem-veto`). The `worm-folly-barge` blanket stopgap — "claim immediately,
-> because *any* intervening commit staleness-invalidates the attestation" — is
-> **obsolete for a properly-formed ticket**: the attestation binds a per-path
-> `{file: hash}` map (the ticket's `file_impact` + the verdict's code citations), so an
-> unrelated commit no longer invalidates it. **Declare `set_file_impact` before you
-> `review-plan`** (the gate protocol requires it anyway) and the claim gate re-checks
-> only those files, not whole-HEAD. The whole-HEAD `attestation is stale (signed at X,
-> HEAD is Y)` block now fires in just ONE residual case: an **unscoped** attestation —
-> a ticket with **no `file_impact` and no code citations** — which falls back to
-> conservative whole-HEAD freshness. For that degenerate case only, keep
-> `review-plan → claim` adjacent (or just declare `file_impact` to scope it).
-
 **Completion-verifier protocol (to close).** Closing a work ticket runs the
 completion verifier. If it **fails**, you must **remediate the failure and try to
 close the ticket again** — repeat until it passes (the signed verdict is the proof
-the criteria are met). Do **not** reach for `--force-close` to paper over a real
-failure; `--force` is for genuine emergencies under user direction and leaves a
-durable closed-without-signature signal.
-
-## Optimistic concurrency (read this)
-
-State-dependent ops (`transition`, `claim`, `reopen`) re-read the ticket under a
-lock and **reject with exit 10 / `ConcurrencyError`** if the actual status no
-longer matches your expectation. That is normal under parallelism — it means
-someone else moved the ticket. Re-read (`show`) and decide; never force.
-
-Cross-machine double-claims cannot be *prevented* (there is no cross-client lock
-by design) but they *converge*: the event log merges as a union and replay
-resolves the STATUS fork deterministically by UUID, so every clone agrees.
+the criteria are met).
 
 ## MCP tool set
 
@@ -128,11 +102,6 @@ detected versions; a fast, repo-independent read — see
 typed read tools advertise an `outputSchema` (a documented, validated return
 shape) drawn from the canonical JSON Schemas — see
 [docs/output-schemas.md](docs/output-schemas.md).
-
-> `list_epics` is **deprecated** — it is now a thin wrapper over `list_tickets`.
-> Use `list_tickets(ticket_type="epic", status="open,in_progress",
-> blocking_state="unblocked", min_children=N, with_children_count=True)` for epics
-> and `list_tickets(ticket_type="bug", priority=0)` for P0 bugs.
 
 **Writes (gated by `REBAR_MCP_READONLY=1`):** `create_ticket`,
 `transition_ticket`, `claim_ticket`, `reopen_ticket`, `comment_ticket`,
@@ -276,39 +245,6 @@ over-cap offenders and their planned remedies are tabulated in
 **fails the build** when a *new* file exceeds the soft cap and is not in
 `.github/module-size-allowlist.txt` (the grandfathered set), so the over-cap set
 cannot silently grow.
-
-## Error-handling convention (when editing rebar itself)
-
-One observable, lint-enforced way to handle errors across rebar's library / CLI / MCP
-surfaces (epic `ring-gun-jot`). The canonical reference is the **`src/rebar/_logging.py`
-module docstring** — read it before adding a broad `except` or a diagnostic `print`. The
-essentials:
-
-- **Named loggers, quiet by default.** Modules log via `logger = logging.getLogger(__name__)`
-  (records resolve under the `rebar` root, or the sibling `rebar_reconciler` root for the
-  reconciler subprocess). `__init__.py` attaches a `NullHandler`; the three entrypoints —
-  CLI, MCP, and the reconciler `__main__` — install a **stderr** `StreamHandler` via
-  `rebar._logging.install_stderr_handler`. Importing rebar as a library never emits output.
-- **stdout is sacred.** CLI *data* `print(json.dumps(...))` is a machine contract (the
-  reconciler `json.loads` a subprocess' stdout) and MCP-over-stdio reserves stdout for
-  JSON-RPC framing. Only **stderr diagnostics** flow through the logger; stdout data prints
-  stay. A stdout-purity contract test guards this.
-- **MCP surface: raise, don't catch-and-return.** Tool handlers `raise` (the framework turns
-  the exception into an `isError` result); use `ToolError` for clean client-facing messages.
-  Don't catch-and-return error dicts; never let a failure-reporting path mask the original error.
-- **The observability floor (lint-enforced).** ruff **BLE001** (blind-except) and **T201**
-  (print) are enabled tree-wide. Every broad `except Exception` / `except BaseException` must
-  carry a justified **`# noqa: BLE001 — <reason>`** (reason required); when the catch swallows
-  something operator-actionable, also `logger.warning(..., exc_info=True)`. `KeyboardInterrupt` /
-  `SystemExit` are never swallowed — a broad catch that must run on *any* exit (cleanup) keeps
-  `except BaseException` **only if it re-raises**. Narrowing is opportunistic and **test-backed**;
-  fail-open / body-inspecting / public-API sites stay broad-but-justified. There is intentionally
-  **no shared swallow helper** (peers don't have one).
-- **T201 scope.** print is banned in the library/core/MCP; it is allowed on the genuine
-  presentation surfaces — the CLI layer (`_cli`/`_commands`), the read-CLIs (`_engine_support`),
-  and the reconciler subprocess's own operational stderr (`_engine/rebar_reconciler`) — which
-  keep a scoped `per-file-ignores` T201 entry in `pyproject.toml`. The **BLE001** allowlist is
-  empty: a new unguarded blind-except fails CI everywhere.
 
 ## Navigating the codebase (when editing rebar itself)
 

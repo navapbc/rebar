@@ -706,7 +706,13 @@ def build_server():
         @mcp.tool()
         def transition_ticket(ticket_id: str, current_status: str, target_status: str) -> dict:
             """Transition a ticket's status (optimistic concurrency). Returns the
-            engine result {ticket_id, from, to, newly_unblocked}."""
+            engine result {ticket_id, from, to, newly_unblocked}.
+
+            ``open -> in_progress`` starts work and is gated by the plan-review gate
+            (``verify.require_plan_review_for_claim``) exactly like ``claim_ticket``.
+            As with ``claim_ticket``, there is intentionally NO ``force`` bypass over
+            MCP — an agent that hits the gate must earn an attestation
+            (``review_plan``); the audited ``--force`` override is CLI/library-only."""
             return rebar.transition(ticket_id, current_status, target_status)
 
         @mcp.tool()
