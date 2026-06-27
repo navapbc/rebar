@@ -19,6 +19,7 @@ PLAN_REVIEW_SPECS = (
     "plan-review-finder",
     "plan-review-verifier",
     "plan-review-isf-finder",
+    "plan-review-container",  # G3/G4 container fidelity (story da34)
 )
 
 
@@ -105,3 +106,47 @@ def test_isf_has_recall_and_justified_descope_cases() -> None:
 def test_gold_subset_present_for_judge_alignment(prompt_id: str) -> None:
     # The human-adjudicated gold subset the llm-judge is kappa-aligned to.
     assert E.load_eval_spec(prompt_id).get("gold_set"), f"{prompt_id} needs a gold_set"
+
+
+def test_container_covers_both_g3_and_g4() -> None:
+    # da34 AC: the container spec covers G3 (child coverage) AND G4 (child consistency),
+    # each with a recall (fire) case AND a false-fire (suppression) case — discrimination,
+    # not blanket firing. The ANTI-FP modes from the G3/G4 rubrics are encoded explicitly.
+    ds = E.load_eval_spec("plan-review-container").get("dataset", [])
+    for crit in ("G3", "G4"):
+        cases = [c for c in ds if c.get("criterion") == crit]
+        assert any(c.get("expect") == "finding" for c in cases), f"{crit} needs a recall case"
+        assert any(c.get("expect") == "pass" for c in cases), f"{crit} needs a suppression case"
+    modes = {c.get("mode") for c in ds if c.get("expect") == "pass"}
+    # G3 ANTI-FP (covered-by-named-consumer) + G4 ANTI-FP (benign reading) are present.
+    assert "covered-by-named-consumer" in modes
+    assert "benign-reading" in modes
+
+
+def test_container_documents_numeric_tolerance() -> None:
+    # da34 AC: an EXPLICIT, documented numeric tolerance for the candidate-vs-baseline
+    # diff. It must be present in the spec AND agree with the parity.py constants (the
+    # canonical source the S4/S5 gate enforces) so the two cannot drift.
+    from rebar.llm import parity
+
+    tol = E.load_eval_spec("plan-review-container").get("tolerance", {})
+    assert tol.get("finding_recall_margin") == parity.NONINFERIORITY_MARGIN
+    assert tol.get("false_accept_margin") == parity.NONINFERIORITY_MARGIN
+    assert tol.get("attribution_accuracy_floor") == parity.ATTRIBUTION_ACCURACY_FLOOR
+    assert tol.get("min_gold") == parity.CONTAINER_MIN_GOLD
+
+
+def test_container_corpus_meets_its_own_min_gold_floor() -> None:
+    # The container spec gates on min_gold=CONTAINER_MIN_GOLD; its SHIPPED labelled corpus
+    # must satisfy that floor, else container_fidelity_report would FAIL on its own dataset
+    # ("gold set too small to certify"). Guards the corpus from silently dropping below the
+    # floor it gates on — keep the documented floor honest, not the corpus shrinking under it.
+    from rebar.llm import parity
+
+    gold = E.load_eval_spec("plan-review-container").get("gold_set", [])
+    assert len(gold) >= parity.CONTAINER_MIN_GOLD, (
+        f"container gold_set has {len(gold)} items < CONTAINER_MIN_GOLD "
+        f"({parity.CONTAINER_MIN_GOLD}) — the gate would fail on its own corpus"
+    )
+    # Balanced + discriminating: both finding (recall) and pass (false-fire) labels present.
+    assert {"finding", "pass"} <= {g.get("label") for g in gold}

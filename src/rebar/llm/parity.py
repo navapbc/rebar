@@ -45,6 +45,11 @@ class ItemRecord:
     label: str | None = None  # the gold decision for this item (if it is a gold item)
     cost: float = 0.0  # informational
     latency_s: float = 0.0  # informational
+    # Container fidelity (G3/G4) attribution, consumed by `container_fidelity_report`:
+    # the GOLD criterion this item's finding belongs to, and the one the runner
+    # ATTRIBUTED it to. Both None on non-container records (ignored by the parity gate).
+    gold_criterion: str | None = None  # "G3" | "G4" | None
+    pred_criterion: str | None = None  # the criterion the runner attributed the finding to
 
 
 @dataclass
@@ -143,6 +148,74 @@ def parity_report(
             "n": len(v1),
         },
     )
+
+
+# ── container fidelity (G3/G4) — the S4/S5 candidate-vs-baseline gate ───────────
+#
+# Story da34: S4 (merge G3+G4 into one call) and S5 (bin-pack children per call) must
+# clear a SEMANTIC fidelity bar before they ship — the CANDIDATE container path may not
+# lose findings or mis-attribute them vs the BASELINE (separate-call G3,G4 /
+# one-child-per-call). This reuses :func:`parity_report` (recall + false-accept +
+# min_gold) and adds a G3/G4 ATTRIBUTION-accuracy check. The tolerance constants below
+# are the canonical, documented numbers (mirrored in
+# eval_specs/plan-review-container.eval.yaml `tolerance:` and README.plan-review.md).
+
+# Container criteria whose attribution we score (G3 = child coverage, G4 = child
+# consistency). A merged/packed candidate must still route each finding to the right one.
+CONTAINER_CRITERIA = ("G3", "G4")
+# >= 90% of correctly-caught container findings must be attributed to the right criterion.
+ATTRIBUTION_ACCURACY_FLOOR = 0.90
+# Container gold sets are smaller than the cutover corpus; the certifying floor is lower.
+CONTAINER_MIN_GOLD = 12
+
+
+def attribution_accuracy(records: Sequence[ItemRecord]) -> float:
+    """Fraction of caught container findings attributed to the RIGHT G3/G4 criterion.
+
+    Scored only over records that (a) carry a gold container criterion, (b) the runner
+    actually flagged (``decision == 'block'`` — a missed finding is a recall miss, not an
+    attribution error), and (c) attributed to some criterion. Returns 1.0 when there is
+    nothing to score (no caught container findings)."""
+    scored = [
+        r
+        for r in records
+        if r.gold_criterion in CONTAINER_CRITERIA and r.decision == "block" and r.pred_criterion
+    ]
+    if not scored:
+        return 1.0
+    return sum(1 for r in scored if r.pred_criterion == r.gold_criterion) / len(scored)
+
+
+def container_fidelity_report(
+    baseline: Sequence[ItemRecord],
+    candidate: Sequence[ItemRecord],
+    *,
+    min_gold: int = CONTAINER_MIN_GOLD,
+    attribution_floor: float = ATTRIBUTION_ACCURACY_FLOOR,
+) -> ParityReport:
+    """The S4/S5 fidelity gate: diff a CANDIDATE container path against the BASELINE.
+
+    Reuses :func:`parity_report` for finding-recall + false-accept non-inferiority and
+    the ``min_gold`` certification floor (``baseline`` = v1, ``candidate`` = v2), then
+    layers the G3/G4 ATTRIBUTION-accuracy floor on the candidate. ``passed`` is True only
+    if the parity bar holds AND the candidate's attribution clears ``attribution_floor``.
+
+    The attribution floor is deliberately ABSOLUTE on the candidate (not a
+    non-inferiority margin vs the baseline): the candidate is what SHIPS, so a
+    correct-routing bar of 90% must hold regardless of whether the baseline happened to
+    route worse. The baseline's accuracy is still computed + reported (``acc_base``) for
+    visibility/diagnosis — it informs the human review, it does not relax the gate. The
+    extra ``attribution_accuracy`` figures are merged into ``metrics``."""
+    report = parity_report(baseline, candidate, min_gold=min_gold)
+    acc_base = attribution_accuracy(baseline)
+    acc_cand = attribution_accuracy(candidate)
+    failures = list(report.gating_failures)
+    if acc_cand + 1e-9 < attribution_floor:
+        failures.append(
+            f"G3/G4 attribution accuracy {acc_cand:.3f} below floor {attribution_floor}"
+        )
+    report.metrics["attribution_accuracy"] = {"baseline": acc_base, "candidate": acc_cand}
+    return ParityReport(passed=not failures, gating_failures=failures, metrics=report.metrics)
 
 
 def parallel_run_and_diff(corpus, run_v1, run_v2, *, to_record) -> ParityReport:
