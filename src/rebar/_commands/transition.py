@@ -232,13 +232,17 @@ def _completion_precheck(
         # graph=True would only bloat the context and make an epic close re-verify the entire
         # feature in one run (impractical — it blows the step budget). The standalone
         # `rebar verify-completion <id> --graph` remains available for a deep human review.
-        # source="local": the CLI close gate is the single-developer VERIFY-BEFORE-PUSH flow
-        # (epic raze-vet-ditch AC3) — it verifies the work in THIS checkout that is about to be
-        # pushed, not a pinned origin/main snapshot (which would not yet contain the unmerged
-        # change). Distributed/attested completion verification is the MCP `verify_completion`
-        # tool (source=attested, default). `local` reads the in-place tree and is never signed
-        # by S4's attestation pin; the close gate's own completion-verifier manifest is unchanged.
-        result = llm.verify_completion(ticket_id, graph=False, source="local", repo_root=repo_root)
+        # source="attested", ref="HEAD" (epic raze-vet-ditch S4): the close gate verifies an
+        # IMMUTABLE snapshot of the committed tree being closed (HEAD), not the live mutable
+        # checkout — the fix for the motivating wrong-branch false-negative (the verdict is
+        # reproducible + branch-independent) AND it makes the verdict SIGNABLE so the close signs
+        # a `verified-at-sha` attestation (the child-closure gate trusts only children closed
+        # with a certified signature). HEAD resolves offline (no origin needed) and is "the state
+        # about to be pushed" for the single-dev flow. `source=local` (opt-in) is the read-only
+        # verify-before-push back-out that never signs.
+        result = llm.verify_completion(
+            ticket_id, graph=False, source="attested", ref="HEAD", repo_root=repo_root
+        )
     except Exception as exc:  # noqa: BLE001 — missing extra/key OR any verifier failure -> fail-closed (re-raise CommandError)
         raise CommandError(
             f"Error: cannot close {ticket_id}: completion verification could not run ({exc}). "
@@ -262,6 +266,13 @@ def _completion_precheck(
             "(closes without a completion signature).",
             returncode=1,
         )
+    # local source (opt-in back-out) verified + passed but is NEVER signed (epic
+    # raze-vet-ditch S4: an unattested run produces no signature). Only an EXPLICIT local
+    # verdict suppresses signing; the default close path is attested and signs (a verdict with
+    # no source — e.g. a legacy caller — keeps the prior sign-on-PASS behavior). A local close
+    # yields a closed-without-signature ticket (the documented "not attested" signal).
+    if result.get("source") == "local":
+        return None
     return _verdict_manifest(result, ticket_id)
 
 
@@ -271,13 +282,24 @@ def _verdict_manifest(result: dict, ticket_id: str) -> list[str]:
     The signature binds ``(ticket_id, manifest)``; the key fingerprint + head_sha on the record
     provide attribution + freshness. Findings are failures-only, so a PASS has no per-criterion
     list to itemize — the minimal core IS the attestation. Deterministic (no timestamps) so
-    re-signing the same verified state is reproducible."""
-    return [
+    re-signing the same verified state is reproducible.
+
+    On an attested verdict the manifest carries a ``verified-at-sha:<sha>`` step (epic
+    raze-vet-ditch S4) binding WHICH immutable commit was verified into the signed bytes —
+    via the manifest channel, so no ``_canonical_payload``/``PAYLOAD_VERSION`` change and no
+    prior signature is invalidated."""
+    from rebar import signing as _signing
+
+    manifest = [
         "completion-verifier: PASS",
         f"ticket: {ticket_id}",
         f"model: {result.get('model') or 'n/a'}",
         f"runner: {result.get('runner') or 'n/a'}",
     ]
+    sha = result.get("verified_at_sha")
+    if sha:
+        manifest.append(_signing.verified_at_sha_step(sha))
+    return manifest
 
 
 def transition_compute(
@@ -472,6 +494,14 @@ def transition_compute(
         from rebar import signing as _signing
 
         _signing.sign_manifest(ticket_id, verified_manifest, repo_root=repo_root)
+
+    # Reopen retires the attested verified_at_sha pin (epic raze-vet-ditch S4): a SHA bound to
+    # a now-undone closure must not outlive it. Best-effort + guarded (only acts on an attested
+    # signature), so legacy reopen behavior is otherwise unchanged.
+    if target_status == "open" and current_status == "closed":
+        from rebar import signing as _signing
+
+        _signing.retire_attested_pin(ticket_id, repo_root=repo_root)
 
     # Force-close audit comment (best-effort, silenced — matches bash || true).
     if target_status == "closed" and force_close:

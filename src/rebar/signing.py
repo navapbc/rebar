@@ -206,6 +206,40 @@ def compute_signature(ticket_id: str, manifest: list[str], key: bytes) -> str:
     return hmac.new(key, _canonical_payload(ticket_id, manifest), hashlib.sha256).hexdigest()
 
 
+# ── attested verified_at_sha pin (epic raze-vet-ditch S4) ─────────────────────
+# The SHA a gate verified is bound through the EXISTING manifest channel as a manifest
+# STEP, NOT a new signed-payload field: the step enters the signed bytes (compute_signature
+# signs the whole manifest list) WITHOUT touching `_canonical_payload` or bumping
+# PAYLOAD_VERSION — so no prior certified closure is invalidated. The step is shaped as an
+# in-toto-style subject so a future move to a DSSE/asymmetric envelope is an envelope swap,
+# not a data-shape rewrite (see :func:`verified_at_sha_subject`).
+VERIFIED_AT_SHA_PREFIX = "verified-at-sha:"
+
+
+def verified_at_sha_step(sha: str) -> str:
+    """The signed manifest step that pins the verified SHA (``verified-at-sha:<sha>``)."""
+    return f"{VERIFIED_AT_SHA_PREFIX}{sha}"
+
+
+def verified_at_sha_from_manifest(manifest: list[str] | None) -> str | None:
+    """Extract the pinned ``verified_at_sha`` from a signed manifest, or ``None``."""
+    for step in manifest or []:
+        if isinstance(step, str) and step.startswith(VERIFIED_AT_SHA_PREFIX):
+            return step[len(VERIFIED_AT_SHA_PREFIX) :] or None
+    return None
+
+
+def verified_at_sha_subject(sha: str, ticket_id: str, predicate_type: str) -> dict:
+    """Map the pin to an in-toto v1 Statement subject/predicate shape — the contract that
+    makes a future DSSE/asymmetric/transparency-log migration an envelope swap (the same
+    ``{name, digest, predicateType}`` data), not a rewrite. The HMAC manifest step
+    (:func:`verified_at_sha_step`) is the current trust anchor; this is its in-toto image."""
+    return {
+        "subject": [{"name": ticket_id, "digest": {"sha1": sha}}],
+        "predicateType": predicate_type,
+    }
+
+
 # ── Verification (pure; no I/O) ───────────────────────────────────────────────
 def verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict:
     """Certify a stored signature ``record`` against a freshly recomputed HMAC.
@@ -241,6 +275,9 @@ def verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict:
         "key_id": stored_fp or None,
         "signed_at": record.get("signed_at"),
         "head_sha": record.get("head_sha"),
+        # The attested SHA the verdict was computed against (from the signed manifest step;
+        # falls back to the record field). None for legacy/non-attested signatures.
+        "verified_at_sha": verified_at_sha_from_manifest(manifest) or record.get("verified_at_sha"),
     }
 
     if not stored_sig:
@@ -352,6 +389,11 @@ def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> dict:
         "signature": signature,
         "key_id": key_fingerprint(key),
         "head_sha": head_sha(config.repo_root(repo_root)),
+        # Returned for convenience on this in-memory record. The PERSISTED + queryable value
+        # is the signed `verified-at-sha:` manifest step itself: the reducer keeps only the
+        # signed fields, and `verify_signature` derives `verified_at_sha` from the manifest —
+        # so the trust anchor is always the signed step, never this unsigned echo.
+        "verified_at_sha": verified_at_sha_from_manifest(steps),
         "signed_at": time.time_ns(),
     }
     try:
@@ -359,6 +401,43 @@ def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> dict:
     except CommandError as exc:
         raise SigningError(exc.message, exc.returncode) from None
     return {**record, "ticket_id": resolved}
+
+
+def retire_attested_pin(ticket_id: str, *, repo_root=None) -> bool:
+    """Retire a ticket's attested ``verified_at_sha`` pin (epic raze-vet-ditch S4).
+
+    Called on reopen/abandon: a SHA pinned to a now-undone closure must not outlive it.
+    Only acts when the current signature actually carries a ``verified-at-sha:`` step
+    (an attested close) — a legacy/non-attested signature is left untouched, so reopen
+    behavior is unchanged for everything except attested closures. Retires by appending a
+    cleared SIGNATURE event (verify then reports ``unsigned``). Returns True if it retired
+    a pin. Best-effort: never raises (reopen must not fail on a signing hiccup)."""
+    from rebar.reducer import reduce_ticket
+
+    tracker = config.tracker_dir(repo_root)
+    try:
+        from rebar._engine_support.resolver import resolve_ticket_id
+
+        resolved = resolve_ticket_id(ticket_id, str(tracker)) or ticket_id
+        state = reduce_ticket(os.path.join(str(tracker), resolved)) or {}
+        sig = state.get("signature")
+        sig = sig if isinstance(sig, dict) else {}
+        if not verified_at_sha_from_manifest(sig.get("manifest")) and not sig.get(
+            "verified_at_sha"
+        ):
+            return False  # no attested pin — leave the signature as-is
+        from rebar._commands._seam import append_event
+
+        append_event(
+            resolved,
+            "SIGNATURE",
+            {"manifest": [], "signature": "", "retired": True, "signed_at": time.time_ns()},
+            tracker,
+            repo_root=repo_root,
+        )
+        return True
+    except Exception:  # noqa: BLE001 — best-effort retirement; never break reopen
+        return False
 
 
 def verify_signature(ticket_id: str, *, repo_root=None) -> dict:
