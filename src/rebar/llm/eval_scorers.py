@@ -183,6 +183,22 @@ def _discriminates_true_from_false(case: dict, out: dict) -> ScoreResult:
     return ScoreResult(True, ok, "" if ok else f"validity {v} contradicts expected {want_high}")
 
 
+def _attributes_criterion(case: dict, out: dict) -> ScoreResult:
+    """A fire case tagged with a `criterion` (e.g. the container finder's G3 coverage
+    vs G4 interaction) must be attributed to THAT criterion by at least one finding —
+    so attribution accuracy can be diffed (the S4/S5 fidelity metric). Applicable only
+    to should-fire cases that name a criterion."""
+    crit = case.get("criterion")
+    if case.get("expect") not in FIRE_EXPECTS or not crit:
+        return _NA
+    needle = str(crit).lower()
+    for f in _findings(out):
+        hay = " ".join(str(f.get(k, "")) for k in ("criterion", "dimension", "title", "detail"))
+        if needle in hay.lower():
+            return ScoreResult(True, True)
+    return ScoreResult(True, False, f"no finding attributed to criterion {crit!r}")
+
+
 def _no_sycophancy(case: dict, out: dict) -> ScoreResult:
     """A real defect must not be sycophantically dismissed (graded low)."""
     if not _expects_high_validity(case):
@@ -211,13 +227,16 @@ REGISTRY: dict[str, Scorer] = {
     "recall_on_silent_drop": _recall,
     "recall_on_incomplete": _recall,
     "recall_on_gaps_and_conflicts": _recall,
+    "recall_on_uncovered_or_inconsistent": _recall,
     # no-fire (good cases)
     "no_fire_on_good_cases": _no_fire,
     "no_fire_on_honored_or_justified_descope": _no_fire,
     "no_false_fail_on_complete": _no_fire,
     "no_fire_on_aligned": _no_fire,
-    # grounding
+    "no_fire_on_covered_or_consistent": _no_fire,
+    # grounding / attribution
     "cites_real_paths": _cites_real_paths,
+    "attributes_g3_vs_g4": _attributes_criterion,
     # verifier discrimination
     "discriminates_true_from_false": _discriminates_true_from_false,
     "no_sycophancy_on_real_defects": _no_sycophancy,
