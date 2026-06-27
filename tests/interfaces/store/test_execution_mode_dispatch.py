@@ -66,12 +66,16 @@ def test_single_turn_runner_builds_agent_with_no_tools(rebar_repo: Path, monkeyp
     captured: dict = {}
 
     # Stub the structured path to capture kwargs without a real model/network call.
+    # Returns (payload, usage) — the story-0250 contract.
     def _fake_structured(Agent, model, resolved, req, kwargs, usage_limits):
         captured["tools"] = kwargs.get("tools")
         captured["toolsets"] = kwargs.get("toolsets")
-        return {"verdict": "PASS", "findings": [], "summary": "s"}
+        return {"verdict": "PASS", "findings": [], "summary": "s"}, {}
 
     monkeypatch.setattr(runner_mod, "_pai_structured", _fake_structured)
+    # Caching is orthogonal here; stub it off so we don't import the real anthropic
+    # settings module (pydantic_ai is stubbed empty below).
+    monkeypatch.setattr(runner_mod, "_anthropic_cache_settings", lambda resolved: None)
     monkeypatch.setattr(runner_mod, "_import_pydantic_ai", lambda: object)
     monkeypatch.setattr(runner_mod, "_pai_model", lambda cfg: "anthropic:fake")
     # finalize_outcome only needs to pass the payload through for this assertion.

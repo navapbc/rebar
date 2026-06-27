@@ -17,5 +17,6 @@ what to investigate (e.g. 'the retry/timeout policy'), NOT code, NOT an imperati
 solution. The coaching prose is rendered deterministically from the move template — you only
 pick the move and name the subject.
 
+<!--volatile-->
 # Plan under review (verbatim, whole)
 {{plan}}

@@ -10,6 +10,44 @@ The standing per-criterion eval set for the plan-review gate (epic `5fd2`, child
 | `plan-review-finder.eval.yaml` | `plan-review-finder` | Per-criterion **recall** (bad→finding), **false-accept** (bad→pass), **false-fire** (good→finding), seeded from the real observed-FP taxonomy. | `7284` |
 | `plan-review-verifier.eval.yaml` | `plan-review-verifier` | Pass-2 **discrimination**: planted `{true, false}` finding pairs — the false ones must get LOWER graded validity; plus the **sycophancy** (false-negative) axis. | `acc1`, `7284` |
 | `plan-review-isf-finder.eval.yaml` | `plan-review-isf-finder` | ISF **recall** (silent drop/narrow/contradict) + no false-fire on a **justified descope**. | `681b`, `7284` |
+| `plan-review-container.eval.yaml` | `plan-review-container` | **G3** (child coverage) + **G4** (child consistency) **recall** + **false-fire** (the covered-by-named-consumer / benign-reading ANTI-FPs); the **semantic fidelity** gate for the S4 merge + S5 bin-pack. | `da34` |
+
+## Container fidelity (G3/G4) — candidate-vs-baseline tolerance
+
+`plan-review-container.eval.yaml` is the SEMANTIC gate the in-flight container changes
+diff against: **S4** merges the separate G3 + G4 calls into one, and **S5** bin-packs
+several children per call. Each runs the **candidate** container path against the
+**baseline** (separate-call G3,G4 / one-child-per-call) over this labelled corpus and
+diffs with `rebar.llm.parity` — **reused, not re-built**:
+`parity.container_fidelity_report(baseline, candidate)` layers a G3/G4 **attribution**
+check on top of `parity_report`'s recall + false-accept + `min_gold` floor.
+
+**The explicit, documented numeric tolerance** (canonical in `rebar.llm.parity` as the
+`NONINFERIORITY_MARGIN` / `ATTRIBUTION_ACCURACY_FLOOR` / `CONTAINER_MIN_GOLD` constants,
+mirrored in the spec's `tolerance:` block, and pinned identical by
+`tests/unit/test_plan_review_evals.py::test_container_documents_numeric_tolerance`):
+
+| Metric | Tolerance |
+|--------|-----------|
+| finding-recall | candidate within **2pp** of baseline (non-inferiority) |
+| false-accept | candidate rises by **≤ 2pp** vs baseline |
+| G3/G4 attribution accuracy | **≥ 90%** of caught container findings routed to the right criterion |
+| gold floor | **≥ 12** labelled G3/G4 gold items (else recall/false-accept is uncertifiable → FAIL) |
+
+### CI posture (cautious — evals are non-deterministic + cost live $)
+
+- **Offline discipline (every PR, REQUIRED).** The container spec joins the existing
+  offline check unchanged: `eval.yml`'s `eval-discipline` job validates *every* packaged
+  `eval_specs/*.eval.yaml` (`validate_eval_spec`), and the parity gate logic is unit-tested
+  with synthetic records. Deterministic, no model, no credentials — cheap and safe to block.
+- **Live semantic eval (OPT-IN, path-scoped, NON-BLOCKING).** The billable, non-deterministic
+  model run lives in `.github/workflows/eval-plan-review-container.yml`: triggered by
+  `workflow_dispatch` (opt-in) and a `pull_request` **path filter** scoped to
+  `src/rebar/llm/reviewers/**` + `src/rebar/llm/eval_specs/**` + the plan-review code
+  (`src/rebar/llm/plan_review/**`), so it **never runs on unrelated PRs** (no live $). It is a
+  separate workflow and **not a required status check** — a flaky run can't block the build.
+  For S4/S5 it is a **human-reviewed development gate**: dispatch it, review the
+  recall / attribution-accuracy report, and require a pass before merging the candidate.
 
 ## Run
 

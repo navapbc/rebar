@@ -14,6 +14,8 @@ from rebar.llm.runner import (
     FakeRunner,
     PydanticAIRunner,
     RunRequest,
+    _anthropic_cache_settings,
+    _extract_usage,
     _pai_model,
     get_runner,
 )
@@ -300,3 +302,118 @@ def test_mcp_toolsets_builds_stdio_and_http():
 
 def test_preflight_ok_with_extra_installed():
     PydanticAIRunner(_cfg()).preflight()  # pydantic-ai-slim is installed in the test env
+
+
+# ── Prompt caching: anthropic gating + usage capture (story 0250) ───────────────
+
+
+def test_cache_settings_enabled_only_for_anthropic():
+    # Anthropic-qualified resolved strings get BOTH cache flags; every other provider
+    # gets None (the keys error on openai/gemini), so the call is unchanged there.
+    s = _anthropic_cache_settings("anthropic:claude-opus-4-8")
+    assert s is not None
+    assert s["anthropic_cache_instructions"] is True
+    assert s["anthropic_cache_tool_definitions"] is True
+    assert _anthropic_cache_settings("openai:gpt-4o") is None
+    assert _anthropic_cache_settings("google-gla:gemini-2.5-flash") is None
+    assert _anthropic_cache_settings("") is None  # the model_override (test) sentinel
+
+
+def test_extract_usage_reads_normalized_cache_tokens():
+    # pydantic-ai 1.107.0 normalizes Anthropic's raw cache_*_input_tokens to
+    # cache_read_tokens / cache_write_tokens on RunUsage.
+    class _U:
+        input_tokens = 1200
+        output_tokens = 50
+        cache_read_tokens = 900
+        cache_write_tokens = 300
+
+    class _Res:
+        def usage(self):
+            return _U()
+
+    u = _extract_usage(_Res())
+    assert u == {
+        "input_tokens": 1200,
+        "output_tokens": 50,
+        "cache_read_tokens": 900,
+        "cache_write_tokens": 300,
+    }
+
+
+def test_extract_usage_is_defensive_on_missing_usage():
+    class _NoUsage:
+        def usage(self):
+            raise RuntimeError("no usage available")
+
+    assert _extract_usage(_NoUsage()) == {}
+
+
+@pytest.mark.parametrize(
+    "resolved,expect_cache",
+    [("anthropic:claude-opus-4-8", True), ("openai:gpt-4o", False)],
+)
+def test_cache_model_settings_attached_only_for_anthropic(monkeypatch, resolved, expect_cache):
+    # The wiring proof: run() must attach the cache model_settings to the Agent kwargs
+    # ONLY when the resolved provider is anthropic. We stub the structured path to
+    # capture the kwargs run() assembled — pydantic-ai's own request mapper then places
+    # the cache_control breakpoint on the system-prompt block (anthropic.py:1611-1616).
+    from rebar.llm import runner as runner_mod
+
+    captured: dict = {}
+
+    def _fake_structured(Agent, model, resolved_, req, kwargs, usage_limits):
+        captured["model_settings"] = kwargs.get("model_settings")
+        return {"verdict": "PASS", "findings": [], "summary": "s"}, {}
+
+    monkeypatch.setattr(runner_mod, "_pai_structured", _fake_structured)
+    monkeypatch.setattr(runner_mod, "_import_pydantic_ai", lambda: object)
+    monkeypatch.setattr(runner_mod, "_pai_model", lambda cfg: resolved)
+    monkeypatch.setattr(
+        runner_mod._findings,
+        "finalize_outcome",
+        lambda outcome, **kw: {**outcome["structured_response"]},
+    )
+
+    runner = PydanticAIRunner(_cfg())
+    runner.run(
+        RunRequest(
+            system_prompt="sys",
+            instructions="ins",
+            config=runner._config,
+            execution_mode="single_turn",
+            mode="structured",
+            output_schema="completion_verdict",
+        )
+    )
+    if expect_cache:
+        assert captured["model_settings"]["anthropic_cache_instructions"] is True
+        assert captured["model_settings"]["anthropic_cache_tool_definitions"] is True
+    else:
+        assert captured["model_settings"] is None
+
+
+def test_usage_is_surfaced_on_the_result_dict():
+    # An end-to-end (offline) run threads result.usage() onto the returned dict under
+    # the private _usage key — the per-run observability hook callers read.
+    runner = PydanticAIRunner(
+        _cfg(),
+        model_override=_function_model('{"verdict": "PASS", "findings": [], "summary": "ok"}'),
+    )
+    out = runner.run(
+        RunRequest(
+            system_prompt="x",
+            instructions="y",
+            config=runner._config,
+            reviewers=["v"],
+            mode="structured",
+            output_schema="completion_verdict",
+        )
+    )
+    assert "_usage" in out
+    assert set(out["_usage"]) >= {
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_write_tokens",
+    }
