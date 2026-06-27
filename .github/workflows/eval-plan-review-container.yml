@@ -1,0 +1,86 @@
+name: eval plan-review container (G3/G4 — semantic, opt-in)
+
+# Story da34: the SEMANTIC fidelity gate for the in-flight container changes — S4 (merge
+# the separate G3 + G4 calls into one) and S5 (bin-pack several children per call). It
+# diffs the CANDIDATE container path against the BASELINE (separate-call G3,G4 /
+# one-child-per-call) over `eval_specs/plan-review-container.eval.yaml`, reusing
+# `rebar.llm.parity.container_fidelity_report` (finding-recall + false-accept + G3/G4
+# attribution accuracy, with the documented tolerance).
+#
+# CI POSTURE (deliberately cautious — live evals are non-deterministic + cost $):
+#   * OPT-IN — `workflow_dispatch` is the primary trigger.
+#   * PATH-SCOPED — the `pull_request` trigger only fires when a PR touches the plan-review
+#     reviewers / eval specs / plan_review code, so it NEVER spends tokens on unrelated PRs.
+#   * NON-BLOCKING — this is a SEPARATE workflow, NOT a required status check. A flaky live
+#     run cannot block the build. For S4/S5 it is a HUMAN-REVIEWED development gate: dispatch
+#     it, review the recall / attribution-accuracy report, require a pass before merging.
+#   * The billable MODEL run is `workflow_dispatch`-only; the path-scoped PR trigger runs the
+#     OFFLINE validation + the parity tolerance self-check (no model, no credentials, no $).
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - "src/rebar/llm/reviewers/**"
+      - "src/rebar/llm/eval_specs/**"
+      - "src/rebar/llm/plan_review/**"
+
+permissions:
+  contents: read
+
+jobs:
+  # Cheap, no-model job: runs on the path-scoped PR (and on dispatch). Validates the
+  # container spec offline and exercises the reused parity tolerance gate. Never blocks
+  # (this workflow is not a required check) and never spends tokens.
+  container-fidelity-offline:
+    name: container fidelity (offline — no model)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install (dev)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+      - name: Validate the container eval spec + parity tolerance (offline)
+        run: |
+          python -m pytest -q \
+            tests/unit/test_plan_review_evals.py \
+            tests/unit/test_parity_bar.py
+      - name: Confirm the container spec is discipline-clean
+        run: |
+          python - <<'PY'
+          from rebar.llm import eval as ev
+          spec = ev.load_eval_spec("plan-review-container")
+          errs = ev.validate_eval_spec(spec)
+          assert not errs, errs
+          print("plan-review-container spec is discipline-clean:", spec["prompt"])
+          PY
+
+  # The billable, non-deterministic LIVE model run. Opt-in only (workflow_dispatch) so a
+  # path-scoped PR never spends tokens. NON-BLOCKING: not a required status check.
+  container-fidelity-live:
+    name: container fidelity (live — gated; needs [eval] + credentials)
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install with the agents + eval extras
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[agents,eval]'
+      - name: Run the G3/G4 container eval (Inspect AI) → JUnit
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          # Inspect AI runs the container spec; `parity.container_fidelity_report` diffs the
+          # candidate container path vs the baseline (recall + false-accept + G3/G4
+          # attribution accuracy, at the documented tolerance). The result is a
+          # HUMAN-REVIEWED development gate for S4/S5 — reviewed, not auto-blocking.
+          rebar prompt eval plan-review-container --output json

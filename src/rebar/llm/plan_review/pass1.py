@@ -41,6 +41,81 @@ _shed_to_budget = sizing.shed_to_budget
 # per-child loop, never the normal agent path.
 CONTAINER_CRITERIA = ("G3", "G4")
 
+# The minimum prompt-prefix the anthropic cache will write/read (Opus 4.8 floor).
+# Below this the parent-plan system prefix never caches, so WARMING would just add a
+# serialized call for no read benefit — fan out directly instead (story ba7e).
+CACHE_MIN_PREFIX_TOKENS = 4096
+# Concurrency cap for the container fan-out pool (a NEW pool — the Pass-1 pool is closed
+# by the time the container criteria run).
+_CONTAINER_MAX_WORKERS = 6
+
+
+def _too_big_finding(
+    criteria: list[dict], child: dict, pair_tokens: int, budget: int
+) -> dict[str, Any]:
+    """The DET failure finding for a (parent + child) pairing that cannot fit the
+    largest window together — 'reduce the ticket', not a silent skip. Emitted WITHOUT an
+    LLM call, so it stays out of the fan-out. Tags ALL container criteria (the merged call
+    that would have evaluated them can't run at this size)."""
+    ids = [c["id"] for c in criteria]
+    return {
+        "finding": (
+            f"The (parent + child {child.get('ticket_id')}) pairing is too big to "
+            f"review together for {'/'.join(ids)} (~{pair_tokens} tokens > budget)."
+        ),
+        "criteria": list(ids),
+        "location": f"child {child.get('ticket_id')}",
+        "evidence": [f"parent+child ~{pair_tokens} tokens exceeds ~{budget}"],
+        "scenarios": [],
+        "impact": "Container coverage/consistency cannot be checked at this size.",
+        "checklist_item": (
+            f"- [ ] Reduce the parent or child {child.get('ticket_id')} so they review together."
+        ),
+        "suggested_fix": "Decompose the oversized ticket(s).",
+        "tier": "DET",
+    }
+
+
+def _timed_pairing(
+    runner: Runner,
+    cfg: LLMConfig,
+    ctx: PlanContext,
+    roster: str,
+    criteria: list[dict],
+    bin_children: list[dict],
+) -> tuple[list[dict[str, Any]], dict[str, Any], Exception | None]:
+    """Run ONE container pairing — the parent + a BIN of one-or-more whole children
+    evaluated against ALL container criteria (G3+G4) in ONE merged+packed call (stories
+    98c6 + 1762) — timed, NEVER raising; returns ``(findings, pairing_record, exc)``. A
+    failed pairing yields empty findings + the exception (the caller decides: a SYSTEMIC
+    failure on the warming call aborts; every other failure just drops that pairing's
+    findings, matching the sequential baseline). Safe to run in the fan-out pool — each
+    call builds its own agent + event loop (the Pass-1 pool already drives ``runner.run``
+    concurrently across threads)."""
+    t0 = time.monotonic()
+    exc: Exception | None = None
+    findings: list[dict[str, Any]] = []
+    try:
+        findings = passes.pass1_container(
+            runner,
+            cfg,
+            parent_plan=ctx.plan_text,
+            children=bin_children,
+            criteria=criteria,
+            sibling_roster=roster,
+        )
+    except Exception as e:  # noqa: BLE001 — capture; the caller classifies systemic vs not
+        exc = e
+    dt = time.monotonic() - t0
+    record = {
+        "criteria": [c["id"] for c in criteria],
+        "children": [c.get("ticket_id") for c in bin_children],
+        "seconds": round(dt, 1),
+        "findings": len(findings),
+        "error": type(exc).__name__ if exc else None,
+    }
+    return findings, record, exc
+
 
 def _run_container(
     ctx: PlanContext,
@@ -49,111 +124,140 @@ def _run_container(
     container: list[dict],
     coverage: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Run the container criteria (G3/G4) as (parent + ONE child) pairings, both
-    whole, and aggregate. A pairing too big for the largest window is a failure
+    """Run the container criteria (G3/G4) as (parent + ONE child) pairings, both whole,
+    CONCURRENTLY, and aggregate. A pairing too big for the largest window is a failure
     finding (reduce the ticket), not a skip. The complete sibling roster is fed so
-    absence findings can be cross-checked against ALL siblings before they stand."""
+    absence findings can be cross-checked against ALL siblings before they stand.
+
+    WARM-THEN-FAN-OUT (story ba7e): with S1's anthropic prompt caching, a NAIVE
+    concurrent fan-out makes every pairing MISS+WRITE the (whole parent plan) cache
+    prefix (~20× input cost, no read benefit). So when the parent prefix is large enough
+    to cache, run ONE pairing to completion FIRST to warm the cache, then fan the rest
+    out so they READ the warmed prefix. The aggregate finding set equals the sequential
+    baseline — each in-budget pairing runs exactly once (no dup/drop)."""
     roster = "\n".join(f"- {c.get('ticket_id')}: {c.get('title', '')}" for c in ctx.children)
-    budget = (
-        int(ctx.largest_window_tokens * det_floor.P8_HEADROOM) - det_floor.P8_OUTPUT_RESERVE_TOKENS
-    )
+    budget = sizing.container_budget(ctx.largest_window_tokens)
     parent_tokens = det_floor.est_tokens(ctx.plan_text)
     out: list[dict[str, Any]] = []
-    pairings = 0
     pairing_records: list[dict[str, Any]] = []
     container_t0 = time.monotonic()
-    # Observability: this is a SEQUENTIAL fan-out — len(container) × N_children agentic
-    # LLM calls, one per (parent, child) pairing — so wall-time grows with child count.
-    # Log the plan up front and each pairing's outcome+timing (the previously-invisible
-    # cost that makes a large epic look like a hang). Quiet by default; REBAR_LOG_LEVEL=INFO.
+
+    # BIN-PACK the children into merged pairings (stories 98c6 merge + 1762 bin-pack): all
+    # container criteria (G3+G4) run in ONE call per BIN, and small children pack together
+    # up to the window budget (parent + all packed children, each WHOLE — never chunked).
+    # A child whose parent+child ALONE exceeds budget is oversized → the single-child
+    # too-big failure finding (NO LLM call, kept out of the fan-out).
+    pairings, oversized = sizing.pack_container_bins(ctx.children, parent_tokens, budget)
+    for child in oversized:
+        pair_tokens = parent_tokens + det_floor.est_tokens(
+            f"{child.get('title', '')}\n{child.get('description', '')}"
+        )
+        out.append(_too_big_finding(container, child, pair_tokens, budget))
+
     logger.info(
-        "plan-review container fan-out: criteria %s × %d child(ren) = %d SEQUENTIAL "
-        "agentic pairing(s), one LLM call each",
+        "plan-review container fan-out: criteria %s over %d child(ren) packed into %d "
+        "merged bin(s) (+%d oversized) = %d in-budget agentic pairing(s), parallel "
+        "warm-then-fan-out (parent ~%d tokens)",
         [c["id"] for c in container],
         len(ctx.children),
-        len(container) * len(ctx.children),
+        len(pairings),
+        len(oversized),
+        len(pairings),
+        parent_tokens,
     )
-    for crit in container:
-        for child in ctx.children:
-            pair_tokens = parent_tokens + det_floor.est_tokens(
-                f"{child.get('title', '')}\n{child.get('description', '')}"
+
+    # WARM-THEN-FAN-OUT gate: only worth warming when the parent prefix actually caches
+    # (>= the cache floor) AND there is more than one pairing to amortize it over.
+    warm = parent_tokens >= CACHE_MIN_PREFIX_TOKENS and len(pairings) >= 2
+    warmed = False
+    to_pool = pairings
+    if warm:
+        bin_children = pairings[0]
+        findings, record, exc = _timed_pairing(runner, cfg, ctx, roster, container, bin_children)
+        if isinstance(exc, LLMUnavailableError):
+            # SYSTEMIC failure (auth / key / connection / rate-limit) on the warming
+            # call: the whole tier is down — abort rather than fan out N-1 doomed calls
+            # (mirrors the Pass-1 tier). run_review turns this into an INDETERMINATE,
+            # unsigned verdict.
+            logger.warning(
+                "container warm bin %s SYSTEMIC failure (%s); aborting fan-out",
+                record["children"],
+                record["error"],
             )
-            if pair_tokens > budget:
-                out.append(
-                    {
-                        "finding": (
-                            f"The (parent + child {child.get('ticket_id')}) pairing is too big to "
-                            f"review together for {crit['id']} (~{pair_tokens} tokens > budget)."
-                        ),
-                        "criteria": [crit["id"]],
-                        "location": f"child {child.get('ticket_id')}",
-                        "evidence": [f"parent+child ~{pair_tokens} tokens exceeds ~{budget}"],
-                        "scenarios": [],
-                        "impact": "Container coverage/consistency cannot be checked at this size.",
-                        "checklist_item": (
-                            f"- [ ] Reduce the parent or child {child.get('ticket_id')} so they "
-                            "review together."
-                        ),
-                        "suggested_fix": "Decompose the oversized ticket(s).",
-                        "tier": "DET",
-                    }
-                )
-                continue
-            _pair_t0 = time.monotonic()
-            _pair_err = None
-            _n_before = len(out)
-            try:
-                out.extend(
-                    passes.pass1_container(
-                        runner,
-                        cfg,
-                        parent_plan=ctx.plan_text,
-                        child=child,
-                        criterion=crit,
-                        sibling_roster=roster,
+            raise exc
+        if exc is not None:
+            # NON-systemic warm failure: the cache prefix may not be written, so degrade
+            # to a direct fan-out of ALL pairings (accept the possible all-miss) rather
+            # than serialize on a broken warm — never hang. The failed pairing re-runs in
+            # the pool (so it is not silently dropped here).
+            logger.warning(
+                "container warm bin %s failed (%s); degrading to direct fan-out",
+                record["children"],
+                record["error"],
+            )
+        else:
+            warmed = True
+            out.extend(findings)
+            pairing_records.append(record)
+            logger.info(
+                "container warm bin %s: %d finding(s) in %.1fs (cache warmed)",
+                record["children"],
+                record["findings"],
+                record["seconds"],
+            )
+            to_pool = pairings[1:]
+
+    # Fan out the remaining (warmed) — or all (not warmed) — pairings CONCURRENTLY in a
+    # NEW pool. Per-pairing failures drop only that pairing's findings (recorded), never
+    # aborting the aggregate — exactly the sequential baseline's behaviour. NOTE: unlike
+    # the WARM call (which aborts on a SYSTEMIC LLMUnavailableError), a systemic failure
+    # that strikes a fanned-out pairing here intentionally DEGRADES (drops that pairing)
+    # rather than aborts — matching the pre-S3 per-pairing `except Exception`. In a real
+    # outage the earlier Pass-1 chunk pool re-raises LLMUnavailableError before the
+    # container stage is ever reached, so this path is not the outage signal.
+    max_workers = max(1, min(_CONTAINER_MAX_WORKERS, len(to_pool))) if to_pool else 0
+    if to_pool:
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futs = [
+                ex.submit(_timed_pairing, runner, cfg, ctx, roster, container, bin_children)
+                for bin_children in to_pool
+            ]
+            for fu in futs:
+                findings, record, exc = fu.result()
+                out.extend(findings)
+                pairing_records.append(record)
+                if exc is not None:
+                    logger.warning(
+                        "container bin %s FAILED in %.1fs (%s)",
+                        record["children"],
+                        record["seconds"],
+                        record["error"],
                     )
-                )
-            except Exception as exc:  # noqa: BLE001 — a failed P5 pairing drops its findings, never aborts the review
-                _pair_err = type(exc).__name__
-            _pair_dt = time.monotonic() - _pair_t0
-            pairings += 1
-            pairing_records.append(
-                {
-                    "criterion": crit["id"],
-                    "child": child.get("ticket_id"),
-                    "seconds": round(_pair_dt, 1),
-                    "findings": len(out) - _n_before,
-                    "error": _pair_err,
-                }
-            )
-            if _pair_err:
-                logger.warning(
-                    "container pairing %s/%s FAILED in %.1fs (%s)",
-                    crit["id"],
-                    child.get("ticket_id"),
-                    _pair_dt,
-                    _pair_err,
-                )
-            else:
-                logger.info(
-                    "container pairing %s/%s: %d finding(s) in %.1fs",
-                    crit["id"],
-                    child.get("ticket_id"),
-                    len(out) - _n_before,
-                    _pair_dt,
-                )
+                else:
+                    logger.info(
+                        "container bin %s: %d finding(s) in %.1fs",
+                        record["children"],
+                        record["findings"],
+                        record["seconds"],
+                    )
+
     container_dt = time.monotonic() - container_t0
     coverage["container"] = {
         "criteria": [c["id"] for c in container],
         "children": len(ctx.children),
-        "pairings_evaluated": pairings,
+        "bins": len(pairings),
+        "pairings_evaluated": len(pairing_records),
         "pairings": pairing_records,
+        "parallel": True,
+        "warmed": warmed,
+        "max_workers": max_workers,
         "total_seconds": round(container_dt, 1),
     }
     logger.info(
-        "plan-review container fan-out done: %d pairing(s) in %.1fs total (sequential)",
-        pairings,
+        "plan-review container fan-out done: %d pairing(s) in %.1fs total (parallel, warmed=%s)",
+        len(pairing_records),
         container_dt,
+        warmed,
     )
     return out
 
@@ -297,8 +401,8 @@ def run_pass1(
     max_workers = max(1, min(6, len(chunks) + len(agent)))
     # Observability: record + log how Pass-1 criteria were batched across the tiers
     # (single-turn chunks + agent criteria run CONCURRENTLY in the pool; container
-    # criteria run SEQUENTIALLY afterward — see _run_container). Quiet by default;
-    # enable with REBAR_LOG_LEVEL=INFO. Always recorded into the returned coverage.
+    # criteria then run as a PARALLEL warm-then-fan-out afterward — see _run_container).
+    # Quiet by default; enable with REBAR_LOG_LEVEL=INFO. Always recorded into coverage.
     coverage["batch_plan"] = {
         "single_turn_chunks": len(chunks),
         "agent_criteria": [c["id"] for c in agent],
@@ -309,8 +413,8 @@ def run_pass1(
     }
     logger.info(
         "plan-review pass1 batch: %d single-turn chunk(s) + %d agent criterion(s) "
-        "concurrently (max_workers=%d); %d container criterion(s) sequential over "
-        "%d child(ren); %d criterion(s) shed to budget",
+        "concurrently (max_workers=%d); %d container criterion(s) parallel "
+        "(warm-then-fan-out) over %d child(ren); %d criterion(s) shed to budget",
         len(chunks),
         len(agent),
         max_workers,

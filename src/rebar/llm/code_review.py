@@ -204,12 +204,17 @@ def _review_code_inner(
             "ticket_context": context,
             "repo_path": cfg.repo_path or "",
         }
-        system_prompt, lf_prompt = prompts.resolve_prompt(reviewer, variables, cfg.langfuse)
-        instructions = (
+        base_instructions = (
             f"Review the code change above along the '{reviewer.dimension}' dimension. "
             "USE your read-only file tools to read the changed files and their context "
             "(don't review the diff in isolation); cite real `path:line` from read_file "
             "output and never invent locations. Return findings via the structured output."
+        )
+        # Engine-wide caching (story c6e5): cache the byte-stable reviewer rubric (system
+        # prefix) and route the volatile per-change context (after `<!--volatile-->`) to
+        # the user message. Unmarked reviewer prompts are unchanged (pre-S2 behavior).
+        system_prompt, instructions, lf_prompt = prompts.resolve_prompt_cached(
+            reviewer, variables, base_instructions=base_instructions, langfuse_cfg=cfg.langfuse
         )
         req = RunRequest(
             system_prompt=system_prompt,

@@ -135,11 +135,10 @@ def review_ticket(
             "ticket_context": context,
             "repo_path": cfg.repo_path or "",
         }
-        system_prompt, langfuse_prompt = prompts.resolve_prompt(reviewer, variables, cfg.langfuse)
         # Tool-awareness steering: name the tools, tell the agent to USE them (not
         # guess), how to page large files, and to ground every claim in tool output —
         # the prompt-level reliability technique used by Claude Code / SWE-agent.
-        instructions = (
+        base_instructions = (
             f"Review ticket {ids[0]}"
             + (" together with its child tickets, as a unit," if graph else "")
             + f", along the '{reviewer.dimension}' dimension.\n\n"
@@ -152,6 +151,11 @@ def review_ticket(
             "Ground EVERY finding in what the tools actually return — cite real "
             "`path:line` from read_file output and never invent paths, line numbers, "
             "or file contents. Then report your findings via the structured output."
+        )
+        # Engine-wide caching (story c6e5): cache the byte-stable reviewer rubric and route
+        # the volatile per-run ticket context to the user message. Unmarked → pre-S2 behavior.
+        system_prompt, instructions, langfuse_prompt = prompts.resolve_prompt_cached(
+            reviewer, variables, base_instructions=base_instructions, langfuse_cfg=cfg.langfuse
         )
 
         req = RunRequest(

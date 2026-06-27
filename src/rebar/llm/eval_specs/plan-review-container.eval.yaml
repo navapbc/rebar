@@ -1,0 +1,228 @@
+# Standing eval spec for the plan-review CONTAINER finder — G3 (child coverage) and
+# G4 (child consistency) (story da34 / epic c81c; relates_to 6f2d WS-EVAL-EXISTING).
+#
+# The container criteria evaluate a (parent + single child) pairing against the WHOLE
+# sibling roster:
+#   * G3 = does the union of children COVER the parent's acceptance/success criteria?
+#     An uncovered parent criterion is a finding. ANTI-FP: a criterion covered-by-
+#     definition by a named consumer counts as covered (no finding).
+#   * G4 = is the child CONSISTENT with the parent + siblings across the 7 interaction
+#     modes (shared state, conflicting assumptions, dependency gap, scope overlap,
+#     ordering violation, consumer impact, residual references)? Each detected mode is
+#     a finding. ANTI-FP: high-confidence only; a benign reading suppresses.
+#
+# This is the SEMANTIC fidelity gate S4 (merge G3+G4 into one call) and S5 (bin-pack
+# children per call) diff their CANDIDATE container path against the BASELINE
+# (separate per-criterion / one-child-per-call) path with — see `tolerance:` below and
+# `parity.container_fidelity_report` (recall + false-accept + G3/G4-attribution).
+# Validate offline: `rebar prompt eval plan-review-container`. The live model run needs
+# the [eval] extra + credentials (the gated, path-scoped, NON-BLOCKING semantic eval CI;
+# a human-reviewed development gate for S4/S5 — see eval_specs/README.plan-review.md).
+prompt: plan-review-container
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  # Deterministic scorers GATE the build.
+  - type: deterministic
+    name: emits_valid_findings
+    description: The output validates against the plan_review_findings contract (criteria ['G3','G4']).
+  - type: deterministic
+    name: recall_on_uncovered_or_inconsistent
+    description: >
+      A parent criterion no child covers fires G3; a real cross-child interaction
+      (scope overlap / ordering violation / dependency gap) fires G4.
+  - type: deterministic
+    name: no_fire_on_covered_or_consistent
+    description: >
+      No G3 finding when a named consumer covers the parent criterion by definition
+      (the ANTI-FP), and no G4 finding on a benign sibling reading (high-confidence only).
+  - type: deterministic
+    name: attributes_g3_vs_g4
+    description: >
+      Each container finding is attributed to the RIGHT criterion — a coverage gap to G3,
+      a cross-child interaction to G4 — so the merged/packed candidate's attribution
+      accuracy can be diffed against the baseline (the S4/S5 fidelity metric).
+
+  # LLM-judge REPORTS only (cross-family grader; no self-grading).
+  - type: llm-judge
+    name: container_finding_grounded_against_roster
+    gates: false
+    threshold: 0.7
+    pointwise: true
+    rubric: >
+      Score 0..1 whether each container finding is grounded against the COMPLETE sibling
+      roster: a G3 absence finding is checked against every sibling (only flagged if NO
+      sibling covers it), and a G4 interaction finding cites the two children + the
+      concrete interaction mode. Length-neutral; a finding manufactured from a benign
+      reading, or an "uncovered" claim a sibling actually covers, scores low.
+    grader:
+      model: openai:gpt-4o-2024-08-06
+      temperature: 0
+      seed: 21
+      snapshot: "2024-08-06"
+
+# ── candidate-vs-baseline fidelity tolerance (story da34 AC: explicit + documented) ──
+# S4/S5 run the CANDIDATE container path (merged G3+G4 call / bin-packed children) vs the
+# BASELINE (separate-call G3,G4 / one-child-per-call) over this corpus and diff with
+# `rebar.llm.parity` (reused, not re-built). The candidate clears the gate ONLY if EVERY
+# margin below holds. Mirrored in code as parity.CONTAINER_* constants + enforced by
+# parity.container_fidelity_report; documented in eval_specs/README.plan-review.md.
+tolerance:
+  finding_recall_margin: 0.02          # candidate finding-recall within 2pp of baseline (non-inferiority)
+  false_accept_margin: 0.02            # candidate false-accept rises by <= 2pp vs baseline
+  attribution_accuracy_floor: 0.90     # >= 90% of caught container findings attributed to the right G3/G4 criterion
+  min_gold: 12                         # >= 12 labelled G3/G4 gold items required to certify recall/false-accept
+
+# The labeled case set: G3/G4 recall (bad → finding) + false-fire (good → pass), drawn
+# from the 3 corpuses (DSO read-only · snap-oakhart-manual · rebar's own tickets).
+# `expect: finding` = the criterion SHOULD fire (recall); `expect: pass` = a GOOD case the
+# criterion must NOT fire on (false-fire). `criterion` carries the gold G3/G4 attribution.
+dataset:
+  # ── G3 recall (a parent criterion no child covers → finding) ──────────────────
+  - id: G3-R-uncovered-ac-rebar
+    corpus: rebar
+    criterion: G3
+    expect: finding
+    note: silent-coverage-gap
+    input: >
+      An epic whose success criteria include "the reconciler is idempotent under retried
+      webhooks". Its children cover the importer, the API, and the UI — but NO child
+      addresses idempotency. G3 SHOULD fire: a parent success criterion left uncovered by
+      the whole child set (checked against the complete roster, not one child).
+  - id: G3-R-uncovered-rollback-snap
+    corpus: snap
+    criterion: G3
+    expect: finding
+    note: silent-coverage-gap
+    input: >
+      A Rails epic requiring "a rollback path for the payments-provider cutover". The
+      children add the new provider adapter, the feature flag, and request specs — none
+      delivers the rollback path the parent's AC names. G3 SHOULD fire (coverage gap).
+  - id: G3-R-partial-coverage-dso
+    corpus: dso
+    criterion: G3
+    expect: finding
+    note: partial-coverage
+    input: >
+      An epic whose AC is "export supports CSV AND Parquet". One child implements CSV
+      export; no child (and no named consumer) covers Parquet. G3 SHOULD fire: the parent
+      criterion is only PARTIALLY covered by the child set.
+  # ── G4 recall (a real cross-child interaction → finding) ──────────────────────
+  - id: G4-R-scope-overlap-rebar
+    corpus: rebar
+    criterion: G4
+    expect: finding
+    note: scope-overlap
+    input: >
+      Two sibling tasks under one epic BOTH rewrite the same signing-manifest module with
+      different, contradictory field orders. G4 SHOULD fire: scope overlap + conflicting
+      assumptions between siblings (a real cross-child interaction, high confidence).
+  - id: G4-R-ordering-violation-snap
+    corpus: snap
+    criterion: G4
+    expect: finding
+    note: ordering-violation
+    input: >
+      Child A deletes the legacy payments column; child B still reads it, and nothing
+      orders B's migration before A's drop. G4 SHOULD fire: an ordering violation /
+      dependency gap between siblings (a residual-reference + ordering interaction).
+  - id: G4-R-dependency-gap-dso
+    corpus: dso
+    criterion: G4
+    expect: finding
+    note: dependency-gap
+    input: >
+      Child A produces the Parquet schema that child B's exporter consumes, but B assumes
+      a column A never emits. G4 SHOULD fire: a dependency gap / conflicting assumption
+      across the (parent + child) pairing, surfaced against the sibling roster.
+  # ── G3 false-fire GOOD cases (covered → NO finding), the documented ANTI-FP ────
+  - id: G3-FP-covered-by-named-consumer-rebar
+    corpus: rebar
+    criterion: G3
+    expect: pass
+    mode: covered-by-named-consumer
+    input: >
+      An epic AC "the gate is enforced on claim". No child is literally titled "enforce on
+      claim", but a NAMED child consumer ("claim/transition gate consolidation") covers it
+      by definition. G3 must NOT fire — a criterion covered-by-definition by a named
+      consumer counts as covered (the ANTI-FP that pairs with G3-R-uncovered-ac-rebar).
+  - id: G3-FP-fully-covered-roster-snap
+    corpus: snap
+    criterion: G3
+    expect: pass
+    mode: fully-covered-by-roster
+    input: >
+      A Rails epic whose three AC lines each map onto exactly one child (adapter, flag,
+      rollback). The union of children FULLY covers the parent. G3 must NOT fire: checked
+      against the WHOLE roster, nothing is uncovered (discrimination, not blanket firing).
+  # ── G4 false-fire GOOD cases (consistent → NO finding), benign-reading filter ──
+  - id: G4-FP-benign-shared-read-rebar
+    corpus: rebar
+    criterion: G4
+    expect: pass
+    mode: benign-reading
+    input: >
+      Two siblings both READ the same immutable config module (no writer, no contradiction,
+      no ordering coupling). G4 must NOT fire: a benign shared read is not "implicit shared
+      state" — high-confidence-only, the benign-reading filter suppresses it.
+  - id: G4-FP-disjoint-scope-dso
+    corpus: dso
+    criterion: G4
+    expect: pass
+    mode: disjoint-scope
+    input: >
+      Two children touch entirely disjoint files (CSV exporter vs the auth middleware) with
+      no shared state, no ordering edge, and no consumer impact between them. G4 must NOT
+      fire: there is no cross-child interaction to flag (the anti-FP for the overlap cases).
+  - id: G3-FP-covered-by-external-consumer-dso
+    corpus: dso
+    criterion: G3
+    expect: pass
+    mode: covered-by-named-consumer
+    input: >
+      An epic AC "the export is consumable by the analytics pipeline". No child re-implements
+      analytics, but a NAMED external consumer (the existing analytics-pipeline service) reads
+      the export by contract. G3 must NOT fire: covered-by-definition by a named consumer (the
+      cross-cutting variant of G3-FP-covered-by-named-consumer-rebar).
+  - id: G4-FP-declared-ordered-dependency-snap
+    corpus: snap
+    criterion: G4
+    expect: pass
+    mode: declared-ordered-dependency
+    input: >
+      Child B consumes the schema child A produces, AND B explicitly `depends_on` A so the
+      migrations are correctly ordered (A before B). G4 must NOT fire: the producer/consumer
+      dependency is declared + correctly sequenced (the anti-FP for G4-R-ordering-violation-snap
+      and G4-R-dependency-gap-dso — a real dependency that is properly ordered is consistent).
+
+# Frozen human-gold subset (kappa alignment for the llm-judge). SEED labels — pending
+# human adjudication (the gating gold subset; auto-labels seed the bulk corpus). Also the
+# labelled set parity.container_fidelity_report diffs candidate vs baseline over.
+gold_set:
+  - input: "A parent idempotency success criterion no child covers (G3-R-uncovered-ac-rebar)."
+    label: finding
+  - input: "A required rollback path the child set omits (G3-R-uncovered-rollback-snap)."
+    label: finding
+  - input: "A Parquet AC only partially covered by the children (G3-R-partial-coverage-dso)."
+    label: finding
+  - input: "Two siblings rewriting the same module with conflicting field orders (G4-R-scope-overlap-rebar)."
+    label: finding
+  - input: "A drop-before-read ordering violation across siblings (G4-R-ordering-violation-snap)."
+    label: finding
+  - input: "A producer/consumer column dependency gap across children (G4-R-dependency-gap-dso)."
+    label: finding
+  - input: "A parent criterion covered-by-definition by a NAMED child consumer (G3-FP-covered-by-named-consumer-rebar)."
+    label: pass
+  - input: "Three AC lines each fully covered by one child (G3-FP-fully-covered-roster-snap)."
+    label: pass
+  - input: "Two siblings benignly READING the same immutable config (G4-FP-benign-shared-read-rebar)."
+    label: pass
+  - input: "Two children with entirely disjoint file scope (G4-FP-disjoint-scope-dso)."
+    label: pass
+  - input: "A parent criterion covered by a NAMED external consumer service (G3-FP-covered-by-external-consumer-dso)."
+    label: pass
+  - input: "A declared, correctly-ordered producer/consumer dependency across siblings (G4-FP-declared-ordered-dependency-snap)."
+    label: pass

@@ -6,7 +6,15 @@ pass.
 
 from __future__ import annotations
 
-from rebar.llm.parity import ItemRecord, parallel_run_and_diff, parity_report
+from rebar.llm.parity import (
+    ATTRIBUTION_ACCURACY_FLOOR,
+    CONTAINER_MIN_GOLD,
+    ItemRecord,
+    attribution_accuracy,
+    container_fidelity_report,
+    parallel_run_and_diff,
+    parity_report,
+)
 
 
 def _rec(valid=True, decision="advisory", errored=False, label=None):
@@ -125,6 +133,86 @@ def test_min_gold_override_relaxes_the_coverage_guard():
     report = parity_report(v1, v2, min_gold=0)
     assert report.passed, report.gating_failures
     assert report.metrics["n_gold"] == 0
+
+
+# ── container fidelity (G3/G4) — the S4/S5 candidate-vs-baseline gate (da34) ─────
+
+
+def _container_rec(crit, pred, *, decision="block"):
+    """A container gold record: gold criterion `crit`, runner attributed `pred`, with the
+    gold label so parity's recall/false-accept counts it."""
+    return ItemRecord(
+        valid=True,
+        decision=decision,
+        label="block" if decision == "block" else "advisory",
+        gold_criterion=crit,
+        pred_criterion=pred,
+    )
+
+
+def _container_corpus(n_each=8):
+    """A balanced G3/G4 gold corpus (>= CONTAINER_MIN_GOLD), each finding caught and
+    attributed correctly — the baseline a faithful candidate must match."""
+    recs = []
+    for _ in range(n_each):
+        recs.append(_container_rec("G3", "G3"))
+        recs.append(_container_rec("G4", "G4"))
+    return recs
+
+
+def test_attribution_accuracy_perfect_and_partial():
+    recs = _container_corpus(4)  # 8 caught, all attributed right
+    assert attribution_accuracy(recs) == 1.0
+    recs[0] = _container_rec("G3", "G4")  # one coverage gap mis-routed to G4
+    assert attribution_accuracy(recs) == 7 / 8
+    # A MISSED finding (not blocked) is a recall miss, not an attribution error.
+    assert attribution_accuracy([_container_rec("G3", "G3", decision="dropped")]) == 1.0
+
+
+def test_container_fidelity_faithful_candidate_passes():
+    baseline = _container_corpus()
+    candidate = _container_corpus()  # identical, faithful merged/packed path
+    report = container_fidelity_report(baseline, candidate)
+    assert report.passed, report.gating_failures
+    assert report.metrics["attribution_accuracy"] == {"baseline": 1.0, "candidate": 1.0}
+    assert report.metrics["n_gold"] >= CONTAINER_MIN_GOLD
+
+
+def test_container_fidelity_misattribution_fails():
+    baseline = _container_corpus()
+    candidate = _container_corpus()
+    # The merged candidate routes 3 of the G3 coverage gaps to G4 — recall is intact
+    # (still blocked) but attribution drops below the floor.
+    for i in range(0, 6, 2):
+        candidate[i] = _container_rec("G3", "G4")
+    report = container_fidelity_report(baseline, candidate)
+    assert not report.passed
+    assert any("attribution" in f for f in report.gating_failures)
+    assert report.metrics["attribution_accuracy"]["candidate"] < ATTRIBUTION_ACCURACY_FLOOR
+
+
+def test_container_fidelity_recall_drop_fails():
+    baseline = _container_corpus()
+    candidate = _container_corpus()
+    # The packed candidate DROPS 3 findings (block -> dropped) — a recall regression the
+    # reused parity bar (not the attribution layer) catches.
+    for i in range(3):
+        candidate[i] = ItemRecord(
+            valid=True, decision="dropped", label="block", gold_criterion="G3", pred_criterion=None
+        )
+    report = container_fidelity_report(baseline, candidate)
+    assert not report.passed
+    assert any("recall" in f or "flip" in f for f in report.gating_failures)
+
+
+def test_container_fidelity_min_gold_floor_enforced():
+    # Too few labelled G3/G4 items -> recall/false-accept cannot be certified -> FAIL,
+    # reusing parity's min_gold guard at the container-specific floor.
+    baseline = [_container_rec("G3", "G3"), _container_rec("G4", "G4")]
+    candidate = [_container_rec("G3", "G3"), _container_rec("G4", "G4")]
+    report = container_fidelity_report(baseline, candidate)
+    assert not report.passed
+    assert any("gold set too small" in f for f in report.gating_failures)
 
 
 def test_parallel_run_and_diff_maps_a_raising_runner_to_errored():
