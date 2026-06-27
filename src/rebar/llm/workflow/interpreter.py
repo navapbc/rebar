@@ -31,6 +31,7 @@ from __future__ import annotations
 import graphlib
 import os
 import re
+import time
 from collections.abc import Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -380,7 +381,11 @@ def _run_batch(rc, step, sid, frame_key, prefixes, bindings, iteration) -> None:
         step_id=sid,
     )
     runner = rc.batch_runner if rc.batch_runner is not None else DefaultBatchRunner()
+    _t_batch = time.monotonic()
     result = runner.run(req, rc.runner)
+    # Per-step wall-clock (toy-kink-ire): the batch finder is the dominant LLM-tier cost
+    # (Pass-1 fan-out), so its duration must feed coverage["metrics"].llm_ms.
+    duration_ms = round((time.monotonic() - _t_batch) * 1000, 1)
 
     # The runner's outputs (findings + the OPAQUE batch_plan) plus the inclusion record.
     # The interpreter copies the dict wholesale and never inspects batch_plan internals.
@@ -388,7 +393,7 @@ def _run_batch(rc, step, sid, frame_key, prefixes, bindings, iteration) -> None:
     outputs["included"] = [c.get("prompt") for c in included]
     outputs["skipped"] = [c.get("prompt") for c in all_criteria if c not in included]
     _commit_state(rc, frame_key, outputs, "succeeded")
-    _maybe_record_control(rc, sid, frame_key, iteration, "batch", outputs)
+    _maybe_record_control(rc, sid, frame_key, iteration, "batch", outputs, duration_ms=duration_ms)
 
 
 def _run_leaf(rc, step, sid, frame_key, kind, prefixes, bindings, iteration) -> None:
@@ -432,6 +437,7 @@ def _run_leaf(rc, step, sid, frame_key, kind, prefixes, bindings, iteration) -> 
             resolve_error: Exception | None = None
         except ExpressionError as exc:
             resolved_input, resolve_error = {}, exc
+    duration_ms: float | None = None  # set on the dispatch path; None on early input-failure paths
     if resolve_error is not None:
         result = StepResult(outputs={}, status="failed", error=str(resolve_error))
     else:
@@ -460,6 +466,7 @@ def _run_leaf(rc, step, sid, frame_key, kind, prefixes, bindings, iteration) -> 
                 rc.failed = True
                 rc.error = f"step {frame_key!r} failed: {result.error}"
             return
+        _t_step = time.monotonic()
         try:
             ctx = StepContext(
                 run_id=rc.run_id,
@@ -477,12 +484,26 @@ def _run_leaf(rc, step, sid, frame_key, kind, prefixes, bindings, iteration) -> 
             result = _dispatch(ctx, rc.registry, rc.runner)
         except Exception as exc:  # noqa: BLE001 — a step failure is data, not a crash: captured as a failed StepResult (error in-band), the workflow continues
             result = StepResult(outputs={}, status="failed", error=str(exc))
+        # Per-step wall-clock (toy-kink-ire): drives the workflow plan-review gate's
+        # coverage["metrics"] latency split (det vs llm tier) reconstructed in gate_dispatch.
+        # It is observational only — recorded then read back verbatim on replay (never
+        # re-derived), so it stays outside the `captured` non-determinism seam without
+        # affecting replay decisions; it does mean a persisted step event is not byte-
+        # reproducible run-to-run (no event-log byte-parity invariant relies on it).
+        duration_ms = round((time.monotonic() - _t_step) * 1000, 1)
     with _guard(rc):
         rc.outputs[frame_key] = dict(result.outputs)
         rc.statuses[frame_key] = result.status
         rc.rec.step_recorded(
             _step_record(
-                rc.run_id, sid, kind, result, captured, frame_key=frame_key, iteration=iteration
+                rc.run_id,
+                sid,
+                kind,
+                result,
+                captured,
+                frame_key=frame_key,
+                iteration=iteration,
+                duration_ms=duration_ms,
             )
         )
         if result.status == "failed":
@@ -490,10 +511,14 @@ def _run_leaf(rc, step, sid, frame_key, kind, prefixes, bindings, iteration) -> 
             rc.error = f"step {frame_key!r} failed: {result.error}"
 
 
-def _maybe_record_control(rc, sid, frame_key, iteration, kind, outputs) -> None:
+def _maybe_record_control(
+    rc, sid, frame_key, iteration, kind, outputs, *, duration_ms=None
+) -> None:
     """Record a control step's completion marker AFTER its body ran, unless already
     committed (so replay doesn't re-append). A control step has no side effect; the
-    marker exists for status visibility + so replay knows the frame fully completed."""
+    marker exists for status visibility + so replay knows the frame fully completed.
+    ``duration_ms`` is set for a ``batch`` step (its finder fan-out is timed for the
+    plan-review latency metrics); pure control frames leave it None."""
     with _guard(rc):
         prior = rc.rec.completed_step(rc.run_id, frame_key)
         if prior is not None and prior.get("status") == "succeeded":
@@ -506,6 +531,7 @@ def _maybe_record_control(rc, sid, frame_key, iteration, kind, outputs) -> None:
                 StepResult(outputs=outputs),
                 frame_key=frame_key,
                 iteration=iteration,
+                duration_ms=duration_ms,
             )
         )
 
