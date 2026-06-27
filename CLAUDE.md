@@ -5,8 +5,10 @@ library (`import rebar`), a CLI (`rebar`), and an MCP server (`rebar-mcp`), all
 over one git-backed store. This guide is for **agents** driving rebar (especially
 over MCP). For internals see `docs/architecture.md`, `docs/event-schema.md`, and
 `docs/concurrency.md`. For the LLM/agent surfaces see `docs/llm-framework.md`, the
-reusable-machinery API reference `docs/reuse-surface.md` (signing + LLM runtime +
-prompt/contract + output-schema seams), and the plan-review gate
+workflow-engine usage guide `docs/workflow-engine.md` (when to author a workflow vs a
+bespoke op, the YAML DSL, the three-pass review pattern, the prompt-library + eval
+seam), the reusable-machinery API reference `docs/reuse-surface.md` (signing + LLM
+runtime + prompt/contract + output-schema seams), and the plan-review gate
 `docs/plan-review-gate.md`. When developing rebar itself — running the gates/LLM
 ops or testing config behavior — run the **repo checkout's** build, not a global
 install (a stale global build silently ignores newer config keys and may lack the
