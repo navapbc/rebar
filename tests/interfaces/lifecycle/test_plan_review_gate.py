@@ -1,7 +1,8 @@
 """Claim-gate coverage for the plan-review gate (epic 5fd2).
 
-The gate (rebar._commands.transition._plan_review_precheck, wired into claim_compute) is
-opt-in via ``verify.require_plan_review_for_claim``. Unlike the completion CLOSE gate (which
+The gate (rebar._commands.gates.plan_review_precheck, wired into BOTH claim_compute and
+transition_compute's open->in_progress arm) is opt-in via
+``verify.require_plan_review_for_claim``. Unlike the completion CLOSE gate (which
 runs the LLM at close time), the CLAIM gate is a FAST, LOCAL signature check — no LLM, no
 network — and the heavy three-pass review runs OUT-OF-BAND via ``review_plan`` (driven here with
 a FakeRunner, so still no model/network). These tests assert the deterministic behavior:
@@ -27,6 +28,7 @@ import pytest
 
 import rebar
 import rebar.llm
+from rebar import _cli
 from rebar import config as _config
 from rebar.llm.runner import FakeRunner
 
@@ -173,6 +175,284 @@ def test_force_bypasses_gate_with_audit(rebar_repo: Path) -> None:
         for c in rebar.show_ticket(tid, repo_root=str(rebar_repo)).get("comments", [])
     )
     assert "FORCE_CLAIM" in comments and "urgent hotfix" in comments
+
+
+# ── transition open->in_progress goes through the SAME gate as claim ────────────
+def test_transition_to_in_progress_blocked_without_attestation(rebar_repo: Path) -> None:
+    # Starting work via a plain `transition open in_progress` is gated identically to
+    # claim: with the gate on and no attestation, it is BLOCKED and the ticket stays open.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "open", "in_progress", repo_root=str(rebar_repo))
+    assert ei.value.returncode == 1
+    assert "review-plan" in ei.value.stderr  # same recovery hint as the claim path
+    assert _status(tid, rebar_repo) == "open"  # never started
+
+
+def test_transition_to_in_progress_succeeds_after_review(rebar_repo: Path) -> None:
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    assert _review(tid, rebar_repo)["signature"]["signed"]
+    rebar.transition(tid, "open", "in_progress", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "in_progress"
+
+
+def test_transition_to_in_progress_force_bypasses_with_audit(rebar_repo: Path) -> None:
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    rebar.transition(
+        tid, "open", "in_progress", force=True, reason="urgent hotfix", repo_root=str(rebar_repo)
+    )
+    assert _status(tid, rebar_repo) == "in_progress"
+    comments = " ".join(
+        c.get("body", "")
+        for c in rebar.show_ticket(tid, repo_root=str(rebar_repo)).get("comments", [])
+    )
+    assert "FORCE_CLAIM" in comments and "urgent hotfix" in comments
+
+
+def test_transition_to_in_progress_bug_is_exempt(rebar_repo: Path) -> None:
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    bug_desc = (
+        "A real bug body of sufficient length.\n\n## Reproduction Steps\n1. do x\n\n"
+        "Expected: a; Actual: b\n\n## Acceptance Criteria\n- [ ] fixed\n"
+    )
+    tid = _make(rebar_repo, "bug", desc=bug_desc)
+    rebar.transition(tid, "open", "in_progress", repo_root=str(rebar_repo))  # exempt
+    assert _status(tid, rebar_repo) == "in_progress"
+
+
+def test_transition_to_in_progress_stale_attestation_blocks(rebar_repo: Path) -> None:
+    # Staleness (an unscoped attestation invalidated by a later code commit) blocks the
+    # transition start-work edge exactly as it blocks claim.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    assert _review(tid, rebar_repo)["signature"]["signed"]
+    _commit(rebar_repo)  # HEAD advances; nothing scoped → whole-HEAD freshness fails
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "open", "in_progress", repo_root=str(rebar_repo))
+    assert "stale" in ei.value.stderr.lower()
+    assert _status(tid, rebar_repo) == "open"
+
+
+def test_import_preserves_in_progress_under_gate(rebar_repo: Path) -> None:
+    # An NDJSON import re-materializes an already-existing in_progress status via
+    # transition_compute with cascade=False (replay). The new start-work gate must NOT
+    # block that replay (it is gated on `cascade`) — the imported ticket lands in_progress.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    record = {
+        "ticket_id": "src-in-progress-0001",  # source id; idempotency key
+        "ticket_type": "task",
+        "title": "imported in-progress task",
+        "description": _DESC,
+        "status": "in_progress",
+    }
+    res = rebar.import_tickets([record], repo_root=str(rebar_repo))
+    assert res["created"] == 1
+    imported = [
+        t for t in rebar.list_tickets(repo_root=str(rebar_repo)) if t["status"] == "in_progress"
+    ]
+    assert imported, "imported in_progress ticket was downgraded to open by the gate"
+
+
+def test_transition_gate_off_by_default(rebar_repo: Path) -> None:
+    # With the gate off (default), transition open->in_progress needs no attestation.
+    tid = _make(rebar_repo)
+    rebar.transition(tid, "open", "in_progress", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "in_progress"
+
+
+def test_non_startwork_transition_is_not_gated(rebar_repo: Path) -> None:
+    # The gate guards only the open->in_progress start-work edge: closing an already
+    # in_progress ticket (force-started here) is unaffected by the plan-review gate.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    rebar.transition(tid, "open", "in_progress", force=True, repo_root=str(rebar_repo))
+    # Closing is unaffected by the plan-review (start-work) gate; the completion-close
+    # gate is not enabled in this repo, so a plain close succeeds.
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "closed"
+
+
+# ── gate × parent-first cascade (the #47 cascade is preserved under the gate) ────
+def test_transition_cascade_gates_child_before_reaching_parent(rebar_repo: Path) -> None:
+    # The child's OWN gate fires FIRST — before the cascade reaches the parent. With the
+    # gate on and the child un-reviewed, the block is the child's own gate error (it names
+    # the child, NOT the parent), proving the parent cascade was never attempted; neither
+    # ticket moves.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    parent = rebar.create_ticket(
+        "epic", "parent epic", description=_DESC, repo_root=str(rebar_repo)
+    )
+    child = rebar.create_ticket(
+        "task", "child task", description=_DESC, parent=parent, repo_root=str(rebar_repo)
+    )
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(child, "open", "in_progress", repo_root=str(rebar_repo))
+    assert f"cannot start work on {child}" in ei.value.stderr  # the CHILD's own gate
+    assert parent not in ei.value.stderr  # cascade never reached the parent
+    assert _status(child, rebar_repo) == "open"
+    assert _status(parent, rebar_repo) == "open"  # cascade never ran; parent untouched
+
+
+def test_transition_cascade_parent_gate_blocks_and_names_parent(rebar_repo: Path) -> None:
+    # The gate applies to the cascaded PARENT too: a child with a valid attestation whose
+    # parent is un-reviewed is blocked by the PARENT's gate during the cascade; the error
+    # names the parent and neither ticket moves.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    parent = rebar.create_ticket(
+        "epic", "parent epic", description=_DESC, repo_root=str(rebar_repo)
+    )
+    child = rebar.create_ticket(
+        "task", "child task", description=_DESC, parent=parent, repo_root=str(rebar_repo)
+    )
+    assert _review(child, rebar_repo)["signature"]["signed"]  # only the child is reviewed
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(child, "open", "in_progress", repo_root=str(rebar_repo))
+    assert parent in ei.value.stderr  # the cascade hit the parent's gate, named the parent
+    assert _status(child, rebar_repo) == "open"  # child not moved when its parent is blocked
+    assert _status(parent, rebar_repo) == "open"
+
+
+def test_transition_cascade_force_propagates_up_the_chain(rebar_repo: Path) -> None:
+    # The cascade is preserved AND the --force bypass propagates up it: force-starting a
+    # child whose parent is also un-reviewed moves BOTH to in_progress (claim/transition
+    # parity — claim already propagates its force up the chain).
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    parent = rebar.create_ticket(
+        "epic", "parent epic", description=_DESC, repo_root=str(rebar_repo)
+    )
+    child = rebar.create_ticket(
+        "task", "child task", description=_DESC, parent=parent, repo_root=str(rebar_repo)
+    )
+    rebar.transition(
+        child, "open", "in_progress", force=True, reason="urgent", repo_root=str(rebar_repo)
+    )
+    assert _status(child, rebar_repo) == "in_progress"
+    assert _status(parent, rebar_repo) == "in_progress"  # cascade preserved + force propagated
+
+
+# ── claim ≡ transition parity (one shared gate, behaviorally identical) ──────────
+@pytest.mark.parametrize("start", ["claim", "transition"])
+def test_claim_and_transition_enforce_the_same_gate(rebar_repo: Path, start: str) -> None:
+    # claim and transition open->in_progress are consolidated onto ONE gate method, so they
+    # MUST behave identically: same block-without-attestation, same recovery hint, same
+    # success after earning the attestation. Running the full sequence through each entry
+    # point guards against the two paths silently diverging again.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+
+    def _start() -> None:
+        if start == "claim":
+            rebar.claim(tid, repo_root=str(rebar_repo))
+        else:
+            rebar.transition(tid, "open", "in_progress", repo_root=str(rebar_repo))
+
+    with pytest.raises(rebar.RebarError) as ei:
+        _start()
+    assert ei.value.returncode == 1
+    assert "review-plan" in ei.value.stderr
+    assert _status(tid, rebar_repo) == "open"
+
+    assert _review(tid, rebar_repo)["signature"]["signed"]
+    _start()
+    assert _status(tid, rebar_repo) == "in_progress"
+
+
+# ── CLI end-to-end (the start-work gate over the real CLI entry point) ───────────
+def test_transition_cli_start_work_gate_blocks_exit_1(rebar_repo: Path, capsys) -> None:
+    # The CLI `transition` maps a gate block to exit 1 and prints the review-plan recovery
+    # hint to stderr; the ticket stays open (no mutation).
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    rc = _cli.main(["transition", tid, "open", "in_progress"])
+    assert rc == 1
+    assert "review-plan" in capsys.readouterr().err
+    assert _status(tid, rebar_repo) == "open"
+
+
+def test_transition_cli_force_reason_bypasses_exit_0_with_audit(rebar_repo: Path) -> None:
+    # Over the CLI, `--force` bypasses the gate (exit 0) and the `--reason` text becomes the
+    # FORCE_CLAIM audit note — the full flag→force_reason conversion exercised end-to-end.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    rc = _cli.main(["transition", tid, "open", "in_progress", "--force", "--reason=urgent cli"])
+    assert rc == 0
+    assert _status(tid, rebar_repo) == "in_progress"
+    comments = " ".join(
+        c.get("body", "")
+        for c in rebar.show_ticket(tid, repo_root=str(rebar_repo)).get("comments", [])
+    )
+    assert "FORCE_CLAIM" in comments and "urgent cli" in comments
+
+
+# ── invalidation + lifecycle boundaries on the transition edge ───────────────────
+def test_transition_material_edit_invalidates_attestation(rebar_repo: Path) -> None:
+    # The transition edge honors material-edit invalidation exactly like claim: editing the
+    # plan's description after review invalidates the attestation and re-blocks the start.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    _review(tid, rebar_repo)
+    rebar.edit_ticket(
+        tid,
+        description=_DESC + "\nNEW materially-different requirement.",
+        repo_root=str(rebar_repo),
+    )
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "open", "in_progress", repo_root=str(rebar_repo))
+    assert "materially edited" in ei.value.stderr
+    assert _status(tid, rebar_repo) == "open"
+
+
+@pytest.mark.parametrize("intermediate", ["blocked", "closed"])
+def test_side_door_into_in_progress_is_gated(rebar_repo: Path, intermediate: str) -> None:
+    # NO alternate edge into in_progress can start un-reviewed work past the gate: routing
+    # through `blocked` OR `closed` first and then into in_progress is gated exactly like a
+    # direct open->in_progress start. Keying the gate on the TARGET (not current=="open")
+    # closes every side-door — both are reachable over MCP via plain transition calls, with
+    # no force needed, so an `open->{blocked|closed}->in_progress` bypass would otherwise
+    # let an agent start un-reviewed work.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    rebar.transition(
+        tid, "open", intermediate, repo_root=str(rebar_repo)
+    )  # ungated (target≠in_prog)
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, intermediate, "in_progress", repo_root=str(rebar_repo))
+    assert "review-plan" in ei.value.stderr
+    assert _status(tid, rebar_repo) == intermediate  # not started
+
+
+def test_resume_from_blocked_passes_with_valid_attestation(rebar_repo: Path) -> None:
+    # Entering in_progress is gated even from `blocked`, but a legitimately-reviewed ticket
+    # keeps a VALID attestation, so the normal in_progress->blocked->in_progress resume
+    # cycle passes cleanly (no material edit / code drift ⇒ the signature still certifies).
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    assert _review(tid, rebar_repo)["signature"]["signed"]
+    rebar.transition(tid, "open", "in_progress", repo_root=str(rebar_repo))  # gated; attest valid
+    rebar.transition(tid, "in_progress", "blocked", repo_root=str(rebar_repo))
+    rebar.transition(
+        tid, "blocked", "in_progress", repo_root=str(rebar_repo)
+    )  # resume; still valid
+    assert _status(tid, rebar_repo) == "in_progress"
 
 
 # ── material-edit invalidation ─────────────────────────────────────────────────

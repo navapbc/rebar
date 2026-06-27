@@ -122,12 +122,26 @@ def create_ticket(
     return {"id": res["id"], "alias": res["alias"] or ""}
 
 
-def transition(ticket_id: str, current_status: str, target_status: str, *, repo_root=None) -> dict:
+def transition(
+    ticket_id: str,
+    current_status: str,
+    target_status: str,
+    *,
+    force: bool = False,
+    reason: str = "",
+    repo_root=None,
+) -> dict:
     """Transition a ticket's status with optimistic concurrency.
 
     Raises :class:`ConcurrencyError` if the ticket's actual status no longer
     matches ``current_status`` (engine exit code 10), and :class:`RebarError`
     for other failures.
+
+    ``open -> in_progress`` is a start-work transition gated by the plan-review
+    gate (``verify.require_plan_review_for_claim``) exactly like :func:`claim`;
+    pass ``force=True`` (optionally with a ``reason`` recorded in the audit
+    comment) to bypass it. ``force`` also waives the unresolved-children guard
+    when closing.
     """
     # In-process (Tier E E3): resolve the id, then run the shared transition core
     # (ticket-transition.sh was retired from this path). The structured result
@@ -147,7 +161,12 @@ def transition(ticket_id: str, current_status: str, target_status: str, *, repo_
         )
     try:
         result = _transition.transition_compute(
-            resolved, current_status, target_status, repo_root=repo_root
+            resolved,
+            current_status,
+            target_status,
+            force=force,
+            reason=reason,
+            repo_root=repo_root,
         )
     except ConcurrencyMismatch as exc:
         raise ConcurrencyError(
