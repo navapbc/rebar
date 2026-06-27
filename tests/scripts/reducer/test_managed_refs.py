@@ -13,6 +13,8 @@ processors in isolation) so the dispatch wiring + snapshot interaction is exerci
 
 from __future__ import annotations
 
+import importlib.util
+import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -25,6 +27,39 @@ from rebar.reducer._managed_refs import (
 )
 
 pytestmark = [pytest.mark.unit, pytest.mark.scripts]
+
+_OUTBOUND_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "src"
+    / "rebar"
+    / "_engine"
+    / "rebar_reconciler"
+    / "outbound_differ.py"
+)
+
+
+@pytest.fixture(scope="module")
+def outbound_differ() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("outbound_differ_mr", _OUTBOUND_PATH)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("outbound_differ_mr", mod)
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+class _Store:
+    def __init__(self, bindings: dict[str, str]) -> None:
+        self._b = bindings  # {local_id: jira_key}
+
+    def get_jira_key(self, local_id: str) -> str | None:
+        return self._b.get(local_id)
+
+    def get_local_id(self, jira_key: str) -> str | None:
+        return next((lid for lid, k in self._b.items() if k == jira_key), None)
+
+    def is_bound(self, local_id: str) -> bool:
+        return local_id in self._b
 
 
 def _refs(state: dict) -> set[tuple[str, str]]:
@@ -165,3 +200,65 @@ def test_gate_defaults_missing_managed_refs_to_no_removal() -> None:
     assert should_propagate_removal("blocks", "tgt-1", {}) is False
     assert should_propagate_removal("parent", "epic-1", {"managed_refs": []}) is False
     assert should_propagate_removal("blocks", "tgt-1", {"managed_refs": "garbage"}) is False
+
+
+# ── compaction-boundary end-to-end: compact → post-compaction UNLINK → differ removes ──
+def test_unlink_after_compaction_still_propagates_removal(
+    tmp_path: Path, reducer: ModuleType, outbound_differ: ModuleType
+) -> None:
+    """The durability hole closed (story safe-luge-nog AC3): a removal performed AFTER a
+    compaction boundary still propagates. Chain it end-to-end — reduce a CREATE+LINK, COMPACT
+    to a SNAPSHOT (managed_refs lives in compiled_state), then a POST-compaction UNLINK, reduce
+    again (deps empty, managed_refs survives), and feed the reduced ticket to the outbound
+    differ: it must emit the link REMOVE. A raw-event ever-seen projection would fail closed
+    here (the compacted log no longer proves we managed the link) and re-resurrect it."""
+    # 1) reduce a real CREATE + LINK to get the pre-compaction compiled_state.
+    d1 = tmp_path / "local-1"
+    d1.mkdir()
+    _write_event(d1, 1, _UUID, "CREATE", {"ticket_type": "task", "title": "T"})
+    _write_event(d1, 2, _UUID2, "LINK", {"target_id": "local-2", "relation": "blocks"})
+    pre = reducer.reduce_ticket(d1)
+    assert ("blocks", "local-2") in {(k, t) for k, t in pre["managed_refs"]}
+
+    # 2) COMPACT: a fresh dir whose only history is a SNAPSHOT of that compiled_state, then a
+    #    POST-compaction UNLINK of the link (by its link_uuid == the LINK event uuid).
+    d2 = tmp_path / "local-1b"
+    d2.mkdir()
+    _write_event(d2, 10, _UUID3, "SNAPSHOT", {"compiled_state": dict(pre)})
+    _write_event(d2, 11, "u4444444-0000-0000-0000-000000000004", "UNLINK", {"link_uuid": _UUID2})
+    post = reducer.reduce_ticket(d2)
+    assert post["deps"] == [], "the post-compaction UNLINK removed the dep"
+    assert ("blocks", "local-2") in {(k, t) for k, t in post["managed_refs"]}, (
+        "managed_refs survived compaction (monotonic) — the durability hole is closed"
+    )
+
+    # 3) RECONCILE: the outbound differ over a Jira snapshot still carrying the link must emit
+    #    the REMOVE, driven by the compaction-surviving managed_refs.
+    store = _Store({"local-1": "PROJ-1", "local-2": "PROJ-2"})
+    snapshot = {
+        "PROJ-1": {
+            "summary": "T",
+            "description": "",
+            "issuetype": "Task",
+            "priority": "Medium",
+            "status": "To Do",
+            "assignee": "",
+            "labels": [],
+            "issuelinks": [
+                {"id": "L1", "type": {"name": "Blocks"}, "inwardIssue": {"key": "PROJ-2"}}
+            ],
+        }
+    }
+    outs = outbound_differ.compute_outbound_mutations(
+        local_tickets=[post], jira_snapshot=snapshot, binding_store=store
+    )
+    removes = [
+        lk
+        for m in outs
+        for lk in (m.links or [])
+        if lk.get("action") == "remove" and lk.get("to_key") == "PROJ-2"
+    ]
+    assert removes, (
+        "a managed link unlinked AFTER compaction must still emit an outbound REMOVE — "
+        f"the removal propagates across the compaction boundary; got {outs}"
+    )
