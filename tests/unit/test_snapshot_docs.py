@@ -50,6 +50,24 @@ def test_hmac_trust_model_documented():
     assert "in-toto" in text and "dsse" in text
 
 
+# The canonical config doc (docs/config.md) documents the [snapshot] section + flags
+def test_config_md_documents_snapshot_section_and_flags():
+    text = _read("docs/config.md")
+    assert "[snapshot]" in text
+    for env in (
+        "rebar_gate_ref",
+        "rebar_gate_source",
+        "rebar_gate_tmpdir",
+        "rebar_gate_free_watermark_bytes",
+        "rebar_gate_grace_seconds",
+        "rebar_gate_max_age_seconds",
+        "rebar_gate_reverify_seconds",
+        "rebar_gate_janitor_interval_seconds",
+    ):
+        assert env in text, f"docs/config.md missing {env}"
+    assert "--ref" in text and "--source" in text
+
+
 # AC5 — REBAR_GATE_TMPDIR, disk-cap behavior, EFS/NFS flock caveat (xref alto-fruit-punch)
 def test_env_knobs_and_flock_caveat_documented():
     text = _read("docs/repo-snapshot-gates.md")

@@ -84,6 +84,22 @@ non-repudiation, no public verifiability, and no transparency log**. The pin is 
 *envelope swap*, not a data-shape rewrite. A ticket **closed without a signature** is the
 durable signal that validation was not attested (a `--force-close`, or a `local`-mode verify).
 
+## Adding a new agentic operation (the safeguard)
+
+Anything that runs a TOOL-USING agent (file-reading tools) MUST follow this process — it is
+enforced at runtime, not by convention. When the runner wires an agent's read-only file
+tools, `rebar.llm.config.assert_gated()` fails closed unless execution is inside a gate
+**session** (`gate_source.gate_read_root`, which both the five gates and `run_workflow` enter).
+So a new agent op that forgets to route through `gate_source` raises immediately rather than
+silently reading the server's mutable checkout.
+
+To add a new agentic operation: resolve a handle with
+`gate_source.resolve_gate_handle(ref, source, repo_root)`, run the agent inside
+`with gate_source.gate_read_root(handle):`, and re-root any explicit `LLMConfig` with
+`gate_source.apply_handle(cfg, handle)`. `run_workflow` does this automatically for workflows
+that contain `agent`/`batch` steps. The offline `TestModel` runner (`model_override`) and the
+`REBAR_GATE_ALLOW_UNGATED=1` env (audited) are the only exemptions.
+
 ## Snapshot store env knobs + disk reclamation
 
 The content-addressed snapshot store lives **outside** the repo so a gate's read-only/no-git

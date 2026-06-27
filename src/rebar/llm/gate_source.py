@@ -31,7 +31,7 @@ from rebar._snapshot import (
     acquire,
 )
 from rebar._snapshot.repo_snapshot import DEFAULT_REF
-from rebar.llm.config import LLMConfig, use_code_root
+from rebar.llm.config import LLMConfig, gate_session, use_code_root
 
 __all__ = [
     "SOURCE_ATTESTED",
@@ -94,13 +94,16 @@ def resolve_gate_handle(
 
 @contextlib.contextmanager
 def gate_read_root(handle: SnapshotHandle) -> Iterator[None]:
-    """Activate the snapshot as the context-local code root for the gate run (attested
-    only). Local mode leaves the context unset → configs read the in-place checkout."""
-    if handle.source == SOURCE_ATTESTED:
-        with use_code_root(str(handle.path)):
+    """Run the block inside the gate's snapshot session (the safeguard marker, set for BOTH
+    modes) and, in attested mode, activate the snapshot as the context-local code root.
+    Local mode leaves the code root unset → configs read the in-place checkout, but the run
+    is still marked as a deliberate gate session so :func:`config.assert_gated` passes."""
+    with gate_session():
+        if handle.source == SOURCE_ATTESTED:
+            with use_code_root(str(handle.path)):
+                yield
+        else:
             yield
-    else:
-        yield
 
 
 def apply_handle(cfg: LLMConfig, handle: SnapshotHandle) -> LLMConfig:

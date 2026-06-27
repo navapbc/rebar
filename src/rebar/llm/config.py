@@ -66,6 +66,59 @@ def current_code_sha() -> str | None:
     return None
 
 
+# Whether we are inside a code-reading gate's snapshot session (epic raze-vet-ditch S-RETRO
+# safeguard). Set by `gate_source.gate_read_root` for BOTH attested AND local runs — so it
+# marks "a gate deliberately chose this read root", distinct from `current_code_root` (which
+# is only set for attested). The runtime guard `assert_gated` uses it to FAIL CLOSED when a
+# tool-using agent's file tools are built outside any gate session — catching a new agentic
+# op (e.g. a generic run_workflow agent step) added without following the snapshot process.
+_in_gate_session: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "rebar_llm_in_gate_session", default=False
+)
+
+
+def in_gate_session() -> bool:
+    """True iff execution is inside a code-reading gate's snapshot session."""
+    return _in_gate_session.get()
+
+
+@contextlib.contextmanager
+def gate_session() -> Iterator[None]:
+    """Mark the block as running inside a gate's snapshot session (attested OR local)."""
+    token = _in_gate_session.set(True)
+    try:
+        yield
+    finally:
+        _in_gate_session.reset(token)
+
+
+def assert_gated(context: str = "agentic file access") -> None:
+    """Fail closed when a tool-using agent reads files OUTSIDE the snapshot gate process.
+
+    The safeguard (epic raze-vet-ditch) against a NEW agentic operation being added without
+    routing through ``rebar.llm.gate_source`` (which pins an attested snapshot or an explicit
+    local read). Any agent that wires read-only file tools MUST run inside ``gate_read_root``;
+    otherwise it would silently read the server's mutable checkout — the exact class of bug
+    this epic exists to prevent. ``REBAR_GATE_ALLOW_UNGATED=1`` is a logged escape hatch for a
+    deliberate, audited exception."""
+    if _in_gate_session.get():
+        return
+    if os.environ.get("REBAR_GATE_ALLOW_UNGATED", "").strip().lower() in ("1", "true", "yes"):
+        import logging
+
+        logging.getLogger("rebar.llm.config").warning(
+            "%s ran OUTSIDE a snapshot gate session (REBAR_GATE_ALLOW_UNGATED override)", context
+        )
+        return
+    raise RuntimeError(
+        f"{context} was attempted OUTSIDE the repo-snapshot gate process (epic "
+        "raze-vet-ditch): a tool-using agent must run inside rebar.llm.gate_source."
+        "gate_read_root (attested snapshot or explicit local), never against the server's "
+        "mutable checkout. Route the operation through gate_source, or set "
+        "REBAR_GATE_ALLOW_UNGATED=1 to override (audited)."
+    )
+
+
 @contextlib.contextmanager
 def use_code_root(path: str | None) -> Iterator[None]:
     """Bind the gate's code read-root for the duration of the block (``None`` = no override,

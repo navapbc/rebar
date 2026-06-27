@@ -909,6 +909,8 @@ def build_server():
             ticket_id: str,
             inputs: dict | None = None,
             dry_run: bool = False,
+            ref: str | None = None,
+            source: str | None = None,
         ) -> dict:
             """Start a workflow run; returns {run_id, ticket_id, status:'running'}
             IMMEDIATELY (async — the run executes in the background so it survives
@@ -916,11 +918,31 @@ def build_server():
             its outcome. Run-state persists durably to ``ticket_id``'s event log
             (resumable on crash). ``workflow`` is a .rebar/workflows/<name> name or a
             file path; ``dry_run`` executes agent steps with the offline FakeRunner
-            (no tokens). Write tool (gated by REBAR_MCP_READONLY)."""
+            (no tokens). Write tool (gated by REBAR_MCP_READONLY).
+
+            A workflow with LLM/agent steps reads a snapshot pinned at ``ref`` (default
+            ``origin/main``) in ``source=attested`` (default) mode — never the server's
+            mutable checkout — and is DISABLED unless REBAR_MCP_ALLOW_LLM=1 (it makes
+            live, billable LLM calls), exactly like the other agentic tools. A
+            deterministic-only workflow needs neither."""
             import threading
 
             from rebar.llm.workflow import executor as _wf_exec
             from rebar.llm.workflow import runs as _wf_runs
+
+            # A workflow that runs tool-using agents is a live, billable LLM op — fence it
+            # behind the SAME gate as review_*/verify_* (dry_run is offline, so exempt).
+            if not dry_run:
+                try:
+                    _doc = _wf_runs.load_workflow_doc(workflow, None)
+                except Exception:  # noqa: BLE001 — a load error surfaces in the run record below
+                    _doc = None
+                if _doc is not None and _wf_runs.has_llm_steps(_doc) and not _allow_llm():
+                    raise ValueError(
+                        f"run_workflow on {workflow!r} is disabled: it runs tool-using LLM "
+                        "agent steps (a live, billable LLM call). Set REBAR_MCP_ALLOW_LLM=1 "
+                        "to enable it, or pass dry_run=true for the offline runner."
+                    )
 
             run_id = _wf_exec.new_run_id()
             # Record the index AND an initial 'running' marker BEFORE returning, so an
@@ -944,6 +966,8 @@ def build_server():
                         ticket_id=ticket_id,
                         run_id=run_id,
                         dry_run=dry_run,
+                        ref=ref,
+                        source_mode=source,
                     )
                 except Exception as exc:  # noqa: BLE001 — background run failure is reflected in run-state, not raised
                     try:

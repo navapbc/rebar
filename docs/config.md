@@ -197,6 +197,38 @@ tools see — an invocation-specific override, default the repo root); and the
 DERIVED runner — the in-process, provider-agnostic `pydantic_ai` runtime (`fake` is
 a library-arg-only test seam).
 
+> **`REBAR_LLM_REPO_PATH` precedence vs. the gate code root.** When a code-reading gate
+> runs in `attested` mode it sets a context-local snapshot read root (see `[snapshot]`
+> below) that takes precedence over `REBAR_LLM_REPO_PATH`, so the gate reads the pinned
+> snapshot, not whatever `REBAR_LLM_REPO_PATH`/the checkout points at. With no gate active,
+> resolution is unchanged: `REBAR_LLM_REPO_PATH` env > the resolved repo root.
+
+### Repo-snapshot gates (`[snapshot]`) — optional, env-first; see `repo-snapshot-gates.md`
+
+The code-reading gates (`review_plan` / `verify_completion` / `review` / `review-code` /
+`scan-spec`, and `run_workflow` agent steps) read a **pinned-SHA snapshot** of the repo
+(attested), not the server's mutable checkout. `snapshot` is a *reserved* section (the core
+loader recognises `[snapshot]`/`[tool.rebar.snapshot]` and never warns/rejects it) resolved
+**env-first** by `rebar._snapshot`: `REBAR_GATE_*` env > the `[snapshot]` table > built-in
+default. Full behavior, the HMAC trust model, and the EFS/NFS `flock` caveat are in
+[repo-snapshot-gates.md](repo-snapshot-gates.md).
+
+```toml
+[snapshot]
+ref                  = "origin/main"  # default ref to verify   (env REBAR_GATE_REF)
+source               = "attested"     # attested | local        (env REBAR_GATE_SOURCE)
+free_watermark_bytes = 2147483648     # reclaim when free disk < this (2 GiB; env REBAR_GATE_FREE_WATERMARK_BYTES)
+grace_seconds        = 120            # never evict an entry used within this window (env REBAR_GATE_GRACE_SECONDS)
+max_age_seconds      = 604800         # cold-trim entries older than this (7 days; env REBAR_GATE_MAX_AGE_SECONDS)
+reverify_seconds     = 0              # periodic integrity reverify period; 0 = off (env REBAR_GATE_REVERIFY_SECONDS)
+interval_seconds     = 300            # janitor background pass cadence (env REBAR_GATE_JANITOR_INTERVAL_SECONDS)
+```
+
+Env-only (NOT `[snapshot]` keys): `REBAR_GATE_TMPDIR` (the snapshot store's base directory;
+default the system temp dir — never a hardcoded `/tmp`) and `REBAR_GATE_ALLOW_UNGATED`
+(audited escape hatch for the agentic-op safeguard). CLI surfaces: `--ref` / `--source` on
+each of the five code-reading commands (one-to-one with the MCP tools' `ref`/`source` args).
+
 ### Secrets — environment / `.env` only (never the config file)
 
 `REBAR_SIGNING_KEY`, `REBAR_LLM_API_KEY`, `JIRA_API_TOKEN`,
