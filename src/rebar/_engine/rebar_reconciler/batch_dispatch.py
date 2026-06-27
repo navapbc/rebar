@@ -59,8 +59,10 @@ def _index_existing_links(issuelinks) -> set[tuple[str, str]]:
             continue
         for side_key in ("inwardIssue", "outwardIssue"):
             side = link.get(side_key)
-            if isinstance(side, dict) and side.get("key"):
-                existing.add((type_name, side.get("key")))
+            if isinstance(side, dict):
+                side_key_val = side.get("key")
+                if side_key_val:
+                    existing.add((type_name, side_key_val))
     return existing
 
 

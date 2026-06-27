@@ -94,7 +94,7 @@ def check_at_most_one_local_id(
         ticket_cli = _default_ticket_cli()
 
     alert_store = _load_alert_store()
-    violations_filed = []
+    violations_filed: list[dict] = []
 
     for jira_key, fields in snapshot.items():
         # Check if this issue has multiple local_id values (duplicates)

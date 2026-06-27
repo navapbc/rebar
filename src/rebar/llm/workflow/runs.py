@@ -238,6 +238,7 @@ def has_llm_steps(doc: dict[str, Any]) -> bool:
         for s in steps:
             if not isinstance(s, dict):
                 continue
+            kind: str | None
             try:
                 kind = _schema.step_kind(s)
             except Exception:  # noqa: BLE001 — a malformed step can't be classified; ignore for detection

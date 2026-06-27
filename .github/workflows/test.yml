@@ -58,27 +58,16 @@ jobs:
       - name: pre-commit (all hooks, all files, gating)
         run: pre-commit run --all-files --show-diff-on-failure
 
-      # ADVISORY: the broader stylistic set (unused imports, etc.). Reported into
-      # the job summary as a ratchet view; the step always SUCCEEDS (green) so the
-      # pre-existing nits don't show as a perpetual red ✗ that erodes signal —
-      # promote a rule to the gating set above once its count reaches zero.
-      - name: ruff — full set (advisory, non-gating)
-        run: |
-          echo "### Advisory ruff (full set) — non-gating ratchet" >> "$GITHUB_STEP_SUMMARY"
-          ruff check --select E,F,W,I,UP,B --statistics src tests \
-            | tee -a "$GITHUB_STEP_SUMMARY" || true
-
-      # GATING: the pure in-process library core is kept type-clean. Via `make
-      # typecheck` (same command as local).
-      - name: mypy — library core (gating)
+      # GATING: mypy over the WHOLE library. Previously core-only (reducer/graph/
+      # _store) with the rest tracked as an advisory "full tree" ratchet — that debt
+      # was driven to zero (story urge-abbey-goal), so `make typecheck` now covers all
+      # of src/rebar and gates. Same command local + the pre-commit hook run.
+      #
+      # The former "advisory ruff (full set)" ratchet step is also removed: `make lint`
+      # (above) already gates the full ruff select set (E,F,W,I,UP,B + BLE001/T201)
+      # across src+tests, so a separate advisory ruff view was redundant.
+      - name: mypy — full library (gating)
         run: make typecheck
-
-      # ADVISORY: the rest of the tree (engine helpers, reconciler) — same
-      # green-with-summary treatment as the advisory ruff step above.
-      - name: mypy — full tree (advisory, non-gating)
-        run: |
-          echo "### Advisory mypy (full tree) — non-gating ratchet" >> "$GITHUB_STEP_SUMMARY"
-          mypy src/rebar 2>&1 | tail -1 | tee -a "$GITHUB_STEP_SUMMARY" || true
 
   test:
     name: pytest (${{ matrix.os }}, py${{ matrix.python-version }})

@@ -202,10 +202,11 @@ class SnapshotHandle:
     def __enter__(self) -> SnapshotHandle:
         return self
 
-    def __exit__(self, *_exc: object) -> bool:
+    def __exit__(self, *_exc: object) -> None:
+        # Returns None (falsy) — never swallows the in-flight exception. (mypy rejects a
+        # `-> bool` that only ever returns False as a context-manager footgun.)
         if self._cleanup is not None:
             self._cleanup()
-        return False
 
 
 # --------------------------------------------------------------------------------------

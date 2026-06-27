@@ -80,7 +80,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     for item in items:
         try:
             test_path = Path(item.fspath).resolve()
-        except Exception:
+        except (AttributeError, OSError, ValueError):
             continue
         under_external = test_path.is_relative_to(_EXTERNAL_DIR)
         if under_external:
@@ -110,7 +110,7 @@ def _in_guarded_tier(item: pytest.Item) -> bool:
     """Return True if *item* lives under one of the network-guarded test dirs."""
     try:
         test_path = Path(item.fspath).resolve()
-    except Exception:
+    except (AttributeError, OSError, ValueError):
         return False
     return any(test_path.is_relative_to(tier) for tier in _NETWORK_GUARDED_TIERS)
 

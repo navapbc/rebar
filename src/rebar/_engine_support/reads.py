@@ -35,7 +35,7 @@ import os
 import subprocess
 import sys
 import time
-from typing import Any
+from typing import Any, cast
 
 from rebar._engine import engine_dir as _engine_dir
 from rebar._engine_support.resolver import resolve_ticket_id
@@ -88,7 +88,9 @@ def sort_states(states: list[dict], sort: str) -> list[dict]:
     missing = [t for t in states if t.get(field) is None]
     # Stable: ticket_id-ascending first pass is preserved within equal primary keys.
     present.sort(key=lambda t: t.get("ticket_id") or "")
-    present.sort(key=lambda t: t.get(field), reverse=desc)
+    # ``present`` already excludes rows whose ``field`` is None (filtered above),
+    # so the key is always a comparable value; cast documents that for the checker.
+    present.sort(key=lambda t: cast(Any, t.get(field)), reverse=desc)
     missing.sort(key=lambda t: t.get("ticket_id") or "")
     return present + missing
 
@@ -395,7 +397,7 @@ def list_states(
             ]
     out = []
     for t in results:
-        cc = child_counts.get(t.get("ticket_id"), 0)
+        cc = child_counts.get(t.get("ticket_id", ""), 0)
         if min_children is not None and cc < min_children:
             continue
         ps = public_state(t)

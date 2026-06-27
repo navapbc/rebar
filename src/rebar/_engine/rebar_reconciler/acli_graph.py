@@ -17,9 +17,12 @@ import json
 import os
 import tempfile
 import urllib.error
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rebar_reconciler.jira_fields import _sanitize_label
+
+if TYPE_CHECKING:
+    import subprocess
 
 # ---------------------------------------------------------------------------
 # Relation <-> Jira link-type mapping (story 25ae-92e6-2927-49b6, Cycle 1)
@@ -55,6 +58,25 @@ _JIRA_LINK_TO_RELATION: dict[str, str] = {
 
 class AcliGraphMixin:
     """Labels, links, parent/comment maps, and field-edit ops for AcliClient."""
+
+    if TYPE_CHECKING:
+        # Transport helpers provided by the composed ``AcliClient`` (``_run``
+        # from acli.py; ``_direct_rest_*`` from AcliRestMixin), resolved via the
+        # MRO at runtime. Declared type-only so mypy sees this mixin's surface.
+        def _run(
+            self,
+            cmd: list[str],
+            *,
+            retry_on_timeout: bool = ...,
+        ) -> subprocess.CompletedProcess[str]: ...
+
+        def _direct_rest_get(self, path: str) -> Any: ...
+
+        def _direct_rest_put_raw(self, path: str, body: Any) -> None: ...
+
+        def _direct_rest_post_json(self, path: str, body: Any) -> Any: ...
+
+        def _direct_rest_delete(self, path: str) -> None: ...
 
     def get_issue_link_types(self) -> list[dict[str, Any]]:
         """Return all available Jira issue link types via ACLI.

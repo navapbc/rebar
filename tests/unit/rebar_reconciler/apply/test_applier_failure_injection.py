@@ -96,7 +96,7 @@ def test_runtime_error_type_preserved_when_set_entity_property_raises(applier, t
     exc_info = None
     try:
         applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — must capture whatever propagates to assert its exact type is RuntimeError (not a wrapper/subclass)
         exc_info = exc
 
     assert exc_info is not None, "expected an exception to be raised"

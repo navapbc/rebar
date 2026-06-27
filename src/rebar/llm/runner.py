@@ -371,6 +371,7 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
                 f"({exc}). Reply with ONLY the JSON object matching the schema — no prose, "
                 f"no code fence."
             )
+    assert last is not None  # the loop only exits here after a failed parse set `last`
     raise last  # exhausted the bounded retry; surface the last validation error
 
 

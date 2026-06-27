@@ -31,3 +31,15 @@ repos:
         language: system
         pass_filenames: false
         types_or: [python, pyi]
+
+      # The type gate — runs `make typecheck` (mypy over the full src/rebar). CHECK-ONLY
+      # (mypy never mutates). Fast enough for a commit hook (~0.1s warm, <0.5s cold over
+      # the gated scope). Catches the class of error the ruff-only hook used to let slip
+      # to CI (story urge-abbey-goal). Routed through the Makefile so the hook, `make
+      # typecheck`, and CI all run the identical command + pinned mypy.
+      - id: typecheck
+        name: typecheck (mypy — full library; never mutates)
+        entry: make typecheck
+        language: system
+        pass_filenames: false
+        types_or: [python, pyi]

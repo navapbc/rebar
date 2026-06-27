@@ -488,7 +488,7 @@ def pending_init_is_symlink(repo_root=None) -> bool:
     if not os.path.isfile(os.path.join(repo, ".git")):
         return False
     main_tracker = _main_worktree_tracker(repo)
-    return bool(main_tracker) and os.path.isdir(main_tracker)
+    return main_tracker is not None and os.path.isdir(main_tracker)
 
 
 def pending_init_attaches_to_existing(repo_root=None) -> bool:

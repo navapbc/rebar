@@ -361,6 +361,8 @@ def p5_task_dag(ctx: PlanContext) -> DetResult:
     edges: dict[str, set[str]] = {cid: set() for cid in child_ids if cid}
     for c in ctx.children:
         cid = c.get("ticket_id")
+        if cid is None:
+            continue
         for dep in c.get("deps", []) or []:
             tgt = dep.get("target_id")
             rel = dep.get("relation")
@@ -442,6 +444,8 @@ def _file_interference(children: list[dict], edges: dict[str, set[str]]) -> list
     paths: dict[str, list[str]] = {}
     for c in children:
         cid = c.get("ticket_id")
+        if cid is None:
+            continue
         for fi in c.get("file_impact", []) or []:
             p = fi.get("path") if isinstance(fi, dict) else fi
             if p:

@@ -35,7 +35,7 @@ import time
 from collections.abc import Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from .executor import (
     _ENV_RE,
@@ -183,7 +183,9 @@ def _resolve_scoped(
 ) -> Any:
     """Frame-scoped sibling of :func:`resolve_value` (recursive over dict/list); a
     string that is EXACTLY one expression resolves to the raw referenced value."""
-    kw = dict(inputs=inputs, outputs=outputs, prefixes=prefixes, bindings=bindings, secrets=secrets)
+    kw: dict[str, Any] = dict(
+        inputs=inputs, outputs=outputs, prefixes=prefixes, bindings=bindings, secrets=secrets
+    )
     if isinstance(value, dict):
         return {k: _resolve_scoped(v, **kw) for k, v in value.items()}
     if isinstance(value, list):
@@ -370,7 +372,8 @@ def _run_batch(rc, step, sid, frame_key, prefixes, bindings, iteration) -> None:
     ]
 
     req = BatchRunRequest(
-        finder=batch.get("prompt"),
+        # the batch schema requires `prompt`, so it is always present on a valid document
+        finder=cast(str, batch.get("prompt")),
         criteria=tuple(included),
         usd_budget=batch.get("usd_budget"),
         model_ladder=tuple(batch.get("model_ladder") or []),

@@ -215,7 +215,9 @@ def _prompt_exists(prompt_id: str, repo_root: Any, target: dict[str, Any]) -> bo
     if prompt_id in _project_prompts(repo_root):
         return True
     tpath = target.get("path")
-    return bool(tpath) and Path(tpath).exists()
+    if not tpath:
+        return False
+    return Path(tpath).exists()
 
 
 def _atomic_write(path: Path, text: str) -> None:

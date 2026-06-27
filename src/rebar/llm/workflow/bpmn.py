@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import xml.etree.ElementTree as ET
+from collections.abc import Collection
 from typing import Any
 
 from .schema import step_kind
@@ -529,9 +530,12 @@ def _read_ext_json(el: ET.Element, kind: str) -> dict[str, Any] | None:
     if holder is None:
         return None
     node = holder.find(_q("rebar", kind))
-    if node is None or node.get("value") is None:
+    if node is None:
         return None
-    return json.loads(node.get("value"))
+    value = node.get("value")
+    if value is None:
+        return None
+    return json.loads(value)
 
 
 def _arm_ids(container: ET.Element) -> set[str]:
@@ -540,15 +544,15 @@ def _arm_ids(container: ET.Element) -> set[str]:
     aware test :func:`_gateway_arms` uses) — so a gateway's flow to an ordinary downstream
     step (a real ``needs`` edge, e.g. ``decide -> notify``) is NOT mistaken for an arm."""
     gw_ids = [
-        el.get("id")
+        gid
         for el in container
-        if el.tag.split("}")[-1] == "exclusiveGateway" and el.get("id")
+        if el.tag.split("}")[-1] == "exclusiveGateway" and (gid := el.get("id"))
     ]
     arms: set[str] = set()
     for gw_id in gw_ids:
         for arm_el, _role in _gateway_arms(container, gw_id):
-            if arm_el.get("id"):
-                arms.add(arm_el.get("id"))
+            if aid := arm_el.get("id"):
+                arms.add(aid)
     return arms
 
 
@@ -680,14 +684,14 @@ def _read_step(container: ET.Element, el: ET.Element, tag: str) -> dict[str, Any
         return step
     if tag == "exclusiveGateway":
         branch: dict[str, Any] = dict(cfg)
-        for arm_el, role in _gateway_arms(container, eid):
+        for arm_el, role in _gateway_arms(container, eid or ""):
             branch[role] = _read_frame(arm_el)
         step["branch"] = branch
         return step
     return None
 
 
-def _merge_cfg(step: dict[str, Any], cfg: dict[str, Any], skip: set[str] = frozenset()) -> None:
+def _merge_cfg(step: dict[str, Any], cfg: dict[str, Any], skip: Collection[str] = ()) -> None:
     for k, v in cfg.items():
         if k not in skip and k != "uses":
             step[k] = v

@@ -214,7 +214,9 @@ def manifest_regver(manifest: list[str] | None) -> str | None:
 
 
 def is_plan_review_manifest(manifest: list[str] | None) -> bool:
-    return bool(manifest) and str(manifest[0]).startswith(_MANIFEST_PREFIX + ":")
+    if not manifest:
+        return False
+    return str(manifest[0]).startswith(_MANIFEST_PREFIX + ":")
 
 
 def manifest_material(manifest: list[str] | None) -> str | None:

@@ -19,7 +19,15 @@ import importlib.util
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
+
+
+@overload
+def _rebar_env(name: str, default: str) -> str: ...
+
+
+@overload
+def _rebar_env(name: str, default: None = None) -> str | None: ...
 
 
 def _rebar_env(name: str, default: str | None = None) -> str | None:

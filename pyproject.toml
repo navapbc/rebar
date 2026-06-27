@@ -214,7 +214,7 @@ select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201"]
 # Test code is out of the convention's scope: tests legitimately catch broadly (to
 # assert on failures) and print (debug/diagnostic output). PERMANENT, not part of
 # the shrinking allowlist.
-"tests/**" = ["BLE001", "T201"]
+"tests/**" = ["T201"]
 # core leaves (__init__, reducer, graph, _store, _io) — SWEPT by 8d01 (crow-aeon-muck);
 # removed from the allowlist. Inline `# noqa` carry the justifications; _io/_cli.py keeps
 # inline `# noqa: T201` (CLI presentation), graph/_links.py keeps one inline T201 (stdout

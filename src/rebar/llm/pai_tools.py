@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from typing import Any
 
 from rebar.llm.config import denied_paths as _denied_realpaths
 from rebar.llm.config import is_denied as _is_denied
@@ -191,7 +192,7 @@ def mcp_toolsets(servers: dict) -> list:
             "the pydantic_ai runner needs the 'agents' extra for MCP. "
             "Install it with: pip install 'nava-rebar[agents]'"
         ) from exc
-    toolsets = []
+    toolsets: list[Any] = []
     for name, cfg in servers.items():
         if not isinstance(cfg, dict):
             raise LLMRunnerError(f"MCP server {name!r} config must be a mapping")
