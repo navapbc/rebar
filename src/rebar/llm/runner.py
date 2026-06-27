@@ -207,6 +207,19 @@ class PydanticAIRunner:
             f"test:{type(self._model_override).__name__}" if self._model_override else resolved
         )
         kwargs = {"system_prompt": req.system_prompt, "tools": tools, "toolsets": toolsets}
+        # Prompt caching (story 0250) — anthropic-GATED. The stable bytes re-sent across
+        # the container fan-out (the WHOLE parent plan) live in `system_prompt`;
+        # `anthropic_cache_instructions` puts a `cache_control` breakpoint on that block
+        # (anthropic.py:1611-1616, the no-instruction-parts branch caches the system
+        # prompt block directly), and `anthropic_cache_tool_definitions` caches the tool
+        # surface on agentic calls (a no-op on single_turn `tools=[]`). These keys are
+        # anthropic-only and would error on openai/gemini, so they are gated to the
+        # resolved anthropic provider and applied at THIS shared seam only — no
+        # RunRequest content-list change, so the structured-output retry path is
+        # untouched. A test model_override is non-anthropic, so caching is off there.
+        cache_settings = _anthropic_cache_settings(resolved if not self._model_override else "")
+        if cache_settings is not None:
+            kwargs["model_settings"] = cache_settings
         # pydantic-ai's request_limit counts MODEL REQUESTS (~1 per tool-call cycle).
         # Halve cfg.max_iterations (which is authored as ~2 steps per tool-call cycle)
         # so a given cfg.max_iterations allows the intended number of tool-call cycles
@@ -220,17 +233,18 @@ class PydanticAIRunner:
             ",".join(req.reviewers) if req.reviewers else (req.target.get("ticket_id") or "?")
         )
         _t0 = time.monotonic()
+        usage: dict[str, int] = {}
         try:
             if req.mode == "text":
                 agent = Agent(model, **kwargs)
-                output = agent.run_sync(req.instructions, usage_limits=usage_limits).output
-                outcome = {"messages": [SimpleNamespace(content=str(output))]}
+                run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
+                outcome = {"messages": [SimpleNamespace(content=str(run_result.output))]}
+                usage = _extract_usage(run_result)
             else:
-                outcome = {
-                    "structured_response": _pai_structured(
-                        Agent, model, resolved, req, kwargs, usage_limits
-                    )
-                }
+                structured, usage = _pai_structured(
+                    Agent, model, resolved, req, kwargs, usage_limits
+                )
+                outcome = {"structured_response": structured}
         except UsageLimitExceeded as exc:
             logger.warning(
                 "llm call [%s] mode=%s model=%s hit step budget in %.1fs",
@@ -260,13 +274,18 @@ class PydanticAIRunner:
             )
             raise LLMUnavailableError(f"the LLM provider call failed: {exc}") from exc
         logger.info(
-            "llm call [%s] mode=%s model=%s ok in %.1fs",
+            "llm call [%s] mode=%s model=%s ok in %.1fs "
+            "(in=%d out=%d cache_read=%d cache_write=%d)",
             _call_label,
             req.execution_mode,
             ran_model,
             time.monotonic() - _t0,
+            usage.get("input_tokens", 0),
+            usage.get("output_tokens", 0),
+            usage.get("cache_read_tokens", 0),
+            usage.get("cache_write_tokens", 0),
         )
-        return _findings.finalize_outcome(
+        result = _findings.finalize_outcome(
             outcome,
             mode=req.mode,
             output_schema=req.output_schema,
@@ -278,6 +297,11 @@ class PydanticAIRunner:
             repo_path=cfg.repo_path,
             reviewer_id=req.reviewers[0] if len(req.reviewers) == 1 else None,
         )
+        # Surface per-run token usage (incl. anthropic cache read/write) so callers can
+        # record cache efficacy into coverage/observability. Private key — non-breaking
+        # for every existing consumer of the review_result/structured dict.
+        result["_usage"] = usage
+        return result
 
 
 def get_runner(config: LLMConfig, *, override: Runner | None = None) -> Runner:
@@ -328,8 +352,9 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
     retry — no json-repair needed. PROMPTED path (everyone else, incl. Anthropic):
     generate FREE TEXT, then run the DETERMINISTIC tolerant parse (json-repair) +
     Pydantic validators, with a single bounded retry that feeds the validation error
-    back to the SAME model (NOT a second interpreter LLM). Returns the validated
-    Pydantic model instance."""
+    back to the SAME model (NOT a second interpreter LLM). Returns
+    ``(validated_model_instance, usage_dict)`` — the usage of the run that produced the
+    accepted output (story 0250 cache-token observability)."""
     from pydantic_ai import NativeOutput
 
     from rebar.llm import contracts, structured
@@ -340,7 +365,8 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
         agent = Agent(
             model, output_type=mode_obj, retries={"output": structured.OUTPUT_RETRIES}, **kwargs
         )
-        return agent.run_sync(req.instructions, usage_limits=usage_limits).output
+        run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
+        return run_result.output, _extract_usage(run_result)
 
     # PromptedOutput case: free-text + deterministic parse/validate + bounded retry.
     agent = Agent(model, **kwargs)  # free text (output_type defaults to str)
@@ -353,7 +379,8 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
             # parse — else json-repair would "fix" a truncated fragment into a
             # plausible-but-wrong object (the false-accept the stop-reason guard prevents).
             structured.check_stop_reason(getattr(result.response, "finish_reason", None))
-            return structured.parse_structured(str(result.output), model_cls)
+            parsed = structured.parse_structured(str(result.output), model_cls)
+            return parsed, _extract_usage(result)
         except StructuredOutputError as exc:
             last = exc
             prompt = (
@@ -362,6 +389,50 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
                 f"no code fence."
             )
     raise last  # exhausted the bounded retry; surface the last validation error
+
+
+def _extract_usage(run_result) -> dict[str, int]:
+    """Pull the per-run token usage off a pydantic-ai ``AgentRunResult`` (story 0250).
+
+    Pins the pydantic-ai 1.107.0 ``RunUsage`` field names — note the library NORMALIZES
+    Anthropic's raw ``cache_read_input_tokens`` / ``cache_creation_input_tokens`` to
+    ``cache_read_tokens`` / ``cache_write_tokens`` (usage.py:194-200). Defensive: a
+    missing ``.usage()`` (e.g. an injected test model) yields an empty dict, never an
+    error — usage is observability, never load-bearing."""
+    try:
+        # pydantic-ai 1.107.0 deprecates the ``.usage()`` METHOD in favour of the
+        # ``.usage`` PROPERTY (which exposes the token attrs directly). Read the
+        # property's attrs — only fall back to CALLING it for a legacy build where
+        # ``.usage`` is still a bare method (no attrs), so we never trip the
+        # call-the-property deprecation warning on the supported version.
+        u = run_result.usage
+        if not hasattr(u, "input_tokens") and callable(u):
+            u = u()
+    except Exception:  # noqa: BLE001 — usage is best-effort observability, never fails a run
+        return {}
+    return {
+        "input_tokens": int(getattr(u, "input_tokens", 0) or 0),
+        "output_tokens": int(getattr(u, "output_tokens", 0) or 0),
+        "cache_read_tokens": int(getattr(u, "cache_read_tokens", 0) or 0),
+        "cache_write_tokens": int(getattr(u, "cache_write_tokens", 0) or 0),
+    }
+
+
+def _anthropic_cache_settings(resolved: str):
+    """Anthropic-GATED prompt-cache model settings, or ``None`` for any other provider
+    (story 0250). ``anthropic_cache_instructions`` puts a ``cache_control`` breakpoint on
+    the system-prompt block (the byte-stable parent plan); ``anthropic_cache_tool_definitions``
+    caches the tool surface on agentic calls. Both keys live on ``AnthropicModelSettings``
+    and error on openai/gemini, so they are emitted ONLY when the resolved model string is
+    anthropic-qualified — on every other provider the call is unchanged (no cache_* sent)."""
+    if not resolved.startswith("anthropic"):
+        return None
+    from pydantic_ai.models.anthropic import AnthropicModelSettings
+
+    return AnthropicModelSettings(
+        anthropic_cache_instructions=True,
+        anthropic_cache_tool_definitions=True,
+    )
 
 
 def _pai_check_config(cfg: LLMConfig) -> None:
