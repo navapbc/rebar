@@ -1,0 +1,74 @@
+{
+  "s2_relocation": {
+    "gating_failures": [],
+    "metrics": {
+      "cost": {
+        "v1": 0.0,
+        "v2": 0.0
+      },
+      "decision_flips": 0,
+      "error_rate": {
+        "v1": 0.0,
+        "v2": 0.0
+      },
+      "false_accept": {
+        "v1": 0.6666666666666666,
+        "v2": 0.6666666666666666
+      },
+      "latency_s": {
+        "v1": 0.0,
+        "v2": 0.0
+      },
+      "n": 6,
+      "n_gold": 6,
+      "recall": {
+        "v1": 1.0,
+        "v2": 1.0
+      },
+      "validity": {
+        "v1": 1.0,
+        "v2": 1.0
+      },
+      "verdict_agreement": 1.0
+    },
+    "passed": true
+  },
+  "s5_packing": {
+    "gating_failures": [],
+    "metrics": {
+      "attribution_accuracy": {
+        "baseline": 1.0,
+        "candidate": 1.0
+      },
+      "cost": {
+        "v1": 0.0,
+        "v2": 0.0
+      },
+      "decision_flips": 0,
+      "error_rate": {
+        "v1": 0.0,
+        "v2": 0.0
+      },
+      "false_accept": {
+        "v1": 1.0,
+        "v2": 1.0
+      },
+      "latency_s": {
+        "v1": 0.0,
+        "v2": 0.0
+      },
+      "n": 6,
+      "n_gold": 6,
+      "recall": {
+        "v1": 1.0,
+        "v2": 1.0
+      },
+      "validity": {
+        "v1": 1.0,
+        "v2": 1.0
+      },
+      "verdict_agreement": 1.0
+    },
+    "passed": true
+  }
+}

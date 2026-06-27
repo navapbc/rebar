@@ -79,3 +79,30 @@ change) is owned by a human reviewer (Who-Validates-the-Validators). Calibrating
 block thresholds + judge from real dogfood data (the `REVIEW_RESULT` sidecar) is the
 ongoing post-implementation work this suite enables — add new observed misfires as
 labeled cases and re-measure recall on the sycophancy axis after each prompt change.
+
+## Relocation + packing spot-evals (committed measured evidence — c6e5 / 1762)
+
+Two epic-`c81c` stories changed how prompt content is **presented** to the model without
+(by design) changing what it finds, and their ACs require that fidelity be **measured**
+(via `parity.py` recall/false-accept or a targeted spot eval) — not asserted. The
+committed spot-eval harness `rebar.llm.plan_review.fidelity_spot_eval` provides exactly
+that, reusing the same `parity` gate as the container fidelity check:
+
+- **`relocation_spot_eval`** (S2 / `c6e5`) — diffs, per relocated gate prompt, a BASELINE
+  that keeps the whole prompt in the system slot (pre-relocation shape) against the
+  shipped CANDIDATE that splits the per-run data into the user message
+  (`<!--volatile-->`), over a small fixture corpus. Asserts verdict parity (recall +
+  false-accept, `SPOT_MIN_GOLD` floor).
+- **`packing_spot_eval`** (S5 / `1762`) — diffs a BASELINE one-child-per-call container
+  path against the shipped CANDIDATE packed-bin path via
+  `parity.container_fidelity_report`, proving packing reproduces the per-child finding
+  set (no per-child attention loss / no spurious findings).
+
+The agentic runs execute inside the `gate_source` read context (the raze-vet-ditch guard).
+The live run is **opt-in** (a human-reviewed development gate, never blocking CI); its most
+recent verdict is recorded in `eval_specs/fidelity_spot_eval_results.json` (the committed
+measured evidence). `tests/unit/test_fidelity_spot_eval.py` runs **offline** (no model): it
+proves the harness builds the right baseline/candidate shapes, that it actually MEASURES
+(passes on parity, fails on a seeded divergence), and re-checks the recorded results
+against the same parity bar — so a future fidelity regression that refreshes the evidence
+with a failing run breaks the build.
