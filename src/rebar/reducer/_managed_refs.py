@@ -40,7 +40,7 @@ a practical one at this scale.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypeGuard
 
 # The closed, provider-agnostic kind vocabulary. ``parent`` is the single-valued
 # containment reference; the rest are the link relations that map to a peer
@@ -53,7 +53,9 @@ MANAGED_REF_KINDS: tuple[str, ...] = ("parent", "blocks", "depends_on", "relates
 Ref = tuple[str, str]
 
 
-def _is_kind(kind: Any) -> bool:
+def _is_kind(kind: Any) -> TypeGuard[str]:
+    """True iff ``kind`` is one of the managed-ref kinds. A ``TypeGuard`` so callers narrow
+    the value to ``str`` — e.g. ``(kind, target)`` types as ``tuple[str, str]`` (the ``Ref``)."""
     return isinstance(kind, str) and kind in MANAGED_REF_KINDS
 
 
