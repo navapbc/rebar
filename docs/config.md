@@ -91,6 +91,9 @@ by `rebar -c SECTION.KEY=VALUE`. Each is consumed by routing through `load_confi
 [tool.rebar]
 # verification gate
 verify.require_signature_for_close = false   # alias: verify.require_verdict_for_close
+verify.verify_window_headroom      = 0.8     # plan-review Pass-2 verify: fraction of the verifier
+                                             # model window a single verify request may use before
+                                             # the findings are split into multiple calls (0.1–1.0)
 
 # tickets / display / maintenance
 ticket.display_mode      = "auto"

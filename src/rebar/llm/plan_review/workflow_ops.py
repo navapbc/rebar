@@ -207,22 +207,43 @@ def plan_review_grounding(ctx: StepContext) -> dict[str, Any]:
     input_schema="plan_review_verify_inputs_input",
     output_schema="plan_review_verify_inputs_output",
     description=(
-        "Emit the {{plan}} text + the Pass-2 verifier INSTRUCTIONS for the verify prompt step "
-        "on the LIVE path: `plan` = assemble_context(ticket_id).plan_text and `instructions` = "
-        "the SAME per-finding listing the bespoke pass2_verify builds (passes.verify_instructions) "
-        "over ALL Pass-1 findings — one aggregate call (a >12-finding plan is a single workflow "
-        "verify, not bespoke's batches-of-12; a documented divergence). Reuses passes.verify_"
-        "instructions so the listing format never diverges from the bespoke gate."
+        "Emit the {{plan}} text + the Pass-2 verifier INSTRUCTIONS for the verify prompt step. "
+        "`plan` = assemble_context(ticket_id).plan_text. `instructions` is a LIST of per-chunk "
+        "listings (passes.verify_instructions, global indices preserved): ONE element in the "
+        "common case (the whole request fits the verifier model window) — byte-identical to a "
+        "single aggregate verify — and TOKEN-BUDGETED splits (sizing.verify_request_chunks, no "
+        "magic count) only when the request would exceed the window. The verify prompt step runs "
+        "once per element and merges the verifications by index; a finding too big to verify at "
+        "the largest model is omitted → pass3 routes it to INDETERMINATE."
     ),
 )
 def plan_review_verify_inputs(ctx: StepContext) -> dict[str, Any]:
-    """Emit {plan, instructions} feeding the workflow's Pass-2 verify prompt step."""
-    from . import orchestrator, passes
+    """Emit {plan, instructions[]} feeding the workflow's Pass-2 verify prompt step. The
+    `instructions` list has ONE element for the common (fits-the-window) case and is split into
+    token-budgeted chunks (global indices preserved) when the request would exceed the verifier
+    model's window — encapsulated chunking, not a workflow fan-out (epic solid-timer-unison WS3)."""
+    from rebar import config as _config
+    from rebar.llm.config import LLMConfig
+
+    from . import _verifier_cfg, orchestrator, passes, sizing
 
     tid = _ticket_id(ctx)
     pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
     findings = list(ctx.inputs.get("findings") or [])
-    instructions = passes.verify_instructions(list(enumerate(findings)))
+    # Size against the RESOLVED verifier model (the Sonnet downgrade, operator override honored)
+    # — the same model the verify prompt step runs under (gate_dispatch passes _verifier_cfg(cfg)).
+    verify_model = _verifier_cfg(LLMConfig.from_env(repo_root=ctx.repo_root)).model
+    try:
+        headroom = float(_config.load_config(ctx.repo_root).verify.verify_window_headroom)
+    except Exception:  # noqa: BLE001 — config unreadable → the documented default
+        headroom = sizing.DEFAULT_VERIFY_WINDOW_HEADROOM
+    chunks, _omitted = sizing.verify_request_chunks(findings, model=verify_model, headroom=headroom)
+    # `_omitted` indices are intentionally left out of every chunk → no verification for them →
+    # pass3_decide(None) marks them INDETERMINATE (never silently dropped). When there are no
+    # findings (or all were omitted), still emit ONE (empty) chunk so the verify step makes its
+    # single aggregate call returning an empty `verifications` list — the prior behavior the
+    # decide step depends on.
+    instructions = [passes.verify_instructions(chunk) for chunk in (chunks or [[]])]
     return {"plan": pctx.plan_text, "instructions": instructions}
 
 

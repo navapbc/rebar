@@ -58,6 +58,83 @@ def test_verifier_cfg_honors_explicit_operator_override() -> None:
     assert _verifier_cfg(cfg2).max_iterations == 99
 
 
+# ── Pass-2 verify token-budget chunking (WS3 — tangly-shunt-scoop) ───────────
+def _finding(i: int, *, big: bool = False) -> dict:
+    return {"finding": ("X" * 20_000) if big else f"finding number {i}", "criteria": ["E1"]}
+
+
+def test_verify_chunks_single_call_for_small_sets() -> None:
+    """Common case: the whole verify request fits the window → ONE chunk covering all
+    findings with their global indices (byte-identical to the prior single aggregate call)."""
+    findings = [_finding(i) for i in range(5)]
+    chunks, omitted = sizing.verify_request_chunks(findings, model="claude-sonnet-4-6")
+    assert len(chunks) == 1
+    assert [idx for idx, _ in chunks[0]] == [0, 1, 2, 3, 4]
+    assert omitted == []
+
+
+def test_verify_chunks_splits_over_budget_preserving_global_indices(monkeypatch) -> None:
+    """A deterministic window-shrink seam forces a small budget so a small findings set
+    EXCEEDS it → principled token-based splitting into multiple calls (NOT a magic count),
+    preserving GLOBAL indices, and every emitted chunk's estimated request fits the budget
+    (the chars/4 estimate + headroom keeps each call under the window)."""
+    # Shrink the window so ~one finding fits per chunk (budget just above the system reserve).
+    budget = sizing.VERIFY_SYSTEM_RESERVE_TOKENS + sizing.PER_FINDING_VERIFY_TOKENS + 50
+    monkeypatch.setattr(sizing, "largest_window_tokens", lambda model: budget)
+    findings = [_finding(i) for i in range(6)]
+    chunks, omitted = sizing.verify_request_chunks(
+        findings, model="claude-sonnet-4-6", headroom=1.0
+    )
+    assert len(chunks) > 1, "a >budget set must split into multiple verify calls"
+    assert omitted == []
+    # Global indices are contiguous + complete across the chunks (re-merge by index works).
+    flat = [idx for chunk in chunks for idx, _ in chunk]
+    assert flat == list(range(6))
+    # Every chunk's estimated request is within budget (the safety margin is grounded).
+    from rebar.llm.plan_review import passes as _passes
+    from rebar.llm.plan_review.det_floor import est_tokens
+
+    for chunk in chunks:
+        req = (
+            est_tokens(_passes.verify_instructions(chunk))
+            + sizing.VERIFY_SYSTEM_RESERVE_TOKENS
+            + len(chunk) * sizing.PER_FINDING_VERIFY_TOKENS
+        )
+        assert req <= budget, (req, budget)
+
+
+def test_verify_chunks_omits_finding_too_big_to_verify(monkeypatch) -> None:
+    """A single finding whose own request exceeds the budget at the largest reachable model
+    is OMITTED from every chunk (its index returned in `omitted`) — left unverified so pass3
+    routes it to INDETERMINATE, never silently dropped."""
+    budget = sizing.VERIFY_SYSTEM_RESERVE_TOKENS + sizing.PER_FINDING_VERIFY_TOKENS + 50
+    monkeypatch.setattr(sizing, "largest_window_tokens", lambda model: budget)
+    findings = [_finding(0), _finding(1, big=True), _finding(2)]  # index 1 is oversized
+    chunks, omitted = sizing.verify_request_chunks(
+        findings, model="claude-sonnet-4-6", headroom=1.0
+    )
+    assert omitted == [1]
+    flat = [idx for chunk in chunks for idx, _ in chunk]
+    assert 1 not in flat and set(flat) == {0, 2}
+
+
+def test_merge_chunked_outputs_concatenates_verifications() -> None:
+    """RunnerAgentStep merges per-chunk verify outputs by concatenating list fields
+    (verifications) in order; a single chunk passes through unchanged."""
+    from rebar.llm.workflow.runs import _merge_chunked_outputs
+
+    one = {"verifications": [{"index": 0}], "runner": "fake", "model": None}
+    assert _merge_chunked_outputs([one]) is one  # single chunk: unchanged
+    merged = _merge_chunked_outputs(
+        [
+            {"verifications": [{"index": 0}], "runner": "fake", "model": "m"},
+            {"verifications": [{"index": 1}, {"index": 2}], "runner": "fake", "model": "m"},
+        ]
+    )
+    assert [v["index"] for v in merged["verifications"]] == [0, 1, 2]
+    assert merged["runner"] == "fake" and merged["model"] == "m"  # scalars stable
+
+
 # ── DET floor ────────────────────────────────────────────────────────────────
 def test_p1_blocks_without_acceptance_criteria() -> None:
     r = det_floor.p1_readiness_shape(_ctx("Some description with no AC block."))

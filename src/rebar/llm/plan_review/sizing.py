@@ -83,6 +83,75 @@ def largest_window_tokens(model: str | None) -> int:
     return MODEL_LADDER[-1][1]
 
 
+# ── Pass-2 verify token-budget chunking (epic solid-timer-unison WS3) ──────────────
+# The principled replacement for the bespoke magic count-batch (passes.pass2_verify's
+# batch_size=12, retired in WS1): split the verify request by TOKEN budget vs the model
+# window, not an arbitrary count. The common case (the whole request fits) is ONE chunk —
+# byte-identical to the current single aggregate verify call. Chunking is a rare safety
+# valve for a pathological huge-findings ticket (with 1M-token windows it almost never
+# triggers). Encapsulated inside the verify step (the LangChain MapReduce / LlamaIndex
+# map_reduce pattern), not exposed as a workflow fan-out.
+DEFAULT_VERIFY_WINDOW_HEADROOM = 0.8  # config-overridable: verify.verify_window_headroom
+# Per-finding OUTPUT reserve: the verify response carries one plan_review_verification object
+# per finding (severity_attributes + the binary sub-answers), so output scales with the
+# finding count and must be reserved. A documented, adjustable constant (NOT a derived value).
+PER_FINDING_VERIFY_TOKENS = 256
+# A documented approximation of the verifier SYSTEM prompt's size, reserved on top of the
+# rendered per-finding instructions (the system prompt is ~constant, so it is a flat reserve
+# rather than re-estimated per chunk).
+VERIFY_SYSTEM_RESERVE_TOKENS = 2_000
+
+
+def verify_request_chunks(
+    findings: list[dict[str, Any]],
+    *,
+    model: str | None,
+    headroom: float = DEFAULT_VERIFY_WINDOW_HEADROOM,
+    per_finding_out_tokens: int = PER_FINDING_VERIFY_TOKENS,
+) -> tuple[list[list[tuple[int, dict[str, Any]]]], list[int]]:
+    """Split ``findings`` into token-budgeted Pass-2 verify chunks, preserving GLOBAL
+    indices so the per-chunk verifications re-merge by ``index``.
+
+    Returns ``(chunks, omitted_indices)`` where each chunk is a list of
+    ``(global_index, finding)`` pairs. The fit test for a chunk ``C`` is::
+
+        est_tokens(verify_instructions(C)) + VERIFY_SYSTEM_RESERVE_TOKENS
+            + len(C) * per_finding_out_tokens  <=  floor(window * headroom)
+
+    with ``window = largest_window_tokens(model)`` (model escalation is BAKED IN — it is the
+    largest window at-or-above ``model``). The common case returns ONE chunk == the whole
+    enumerated list (no behavior change). A single finding whose own request still exceeds
+    the budget at the largest reachable model is OMITTED from every chunk (its index is
+    returned in ``omitted_indices``) so it is left UNVERIFIED — ``pass3_decide(None)`` then
+    routes it to INDETERMINATE (non-blocking, surfaced) rather than silently dropping it.
+    """
+    from .det_floor import est_tokens
+
+    budget = int(largest_window_tokens(model) * headroom)
+
+    def request_tokens(chunk: list[tuple[int, dict[str, Any]]]) -> int:
+        return (
+            est_tokens(passes.verify_instructions(chunk))
+            + VERIFY_SYSTEM_RESERVE_TOKENS
+            + len(chunk) * per_finding_out_tokens
+        )
+
+    chunks: list[list[tuple[int, dict[str, Any]]]] = []
+    omitted: list[int] = []
+    cur: list[tuple[int, dict[str, Any]]] = []
+    for item in list(enumerate(findings)):
+        if request_tokens([item]) > budget:
+            omitted.append(item[0])  # too big even alone → unverifiable at any model
+            continue
+        if cur and request_tokens(cur + [item]) > budget:
+            chunks.append(cur)
+            cur = []
+        cur.append(item)
+    if cur:
+        chunks.append(cur)
+    return chunks, omitted
+
+
 def is_context_limit_error(exc: Exception) -> bool:
     """Heuristic: does ``exc`` look like a provider context-window/too-many-tokens
     error (vs an unrelated failure)? Matches common phrasings across providers."""

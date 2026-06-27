@@ -91,6 +91,27 @@ def load_workflow_doc(source: str | Path | dict, repo_root: str | None = None) -
     return migrate_to_current(doc, source=str(source))
 
 
+def _merge_chunked_outputs(outs: list[dict]) -> dict:
+    """Merge a chunked structured prompt's per-chunk outputs (WS3). A single chunk returns its
+    output UNCHANGED (the common case is byte-identical to a non-chunked run). For >1 chunk,
+    list-valued fields are CONCATENATED in chunk order (e.g. the verifier's `verifications`,
+    re-merged by their global `index`) and scalar fields take the first chunk's value (runner /
+    model / trace_id are stable across chunks)."""
+    if len(outs) == 1:
+        return outs[0]
+    merged: dict = {}
+    for out in outs:
+        for key, val in (out or {}).items():
+            if key not in merged:
+                # First occurrence fixes the field's kind: a copied list (to concatenate into)
+                # or a scalar that subsequent chunks leave untouched (first-wins).
+                merged[key] = list(val) if isinstance(val, list) else val
+            elif isinstance(merged[key], list) and isinstance(val, list):
+                merged[key] = merged[key] + val
+            # else: keep the first value — never coerce a scalar↔list type mismatch.
+    return merged
+
+
 class RunnerAgentStep(_ex.AgentStepRunner):
     """Bridge an executor AGENT step to the rebar.llm review Runner stack (WS-K2).
 
@@ -144,23 +165,34 @@ class RunnerAgentStep(_ex.AgentStepRunner):
             if isinstance(val, str):
                 variables[key] = val
         system_prompt, langfuse_prompt = prompts.resolve_prompt(prompt, variables, cfg.langfuse)
-        instructions = str(
-            ctx.inputs.get("instructions")
-            # `dimension` is optional on a prompt (None for a non-reviewer); fall back
-            # to the prompt id so the default instructions never read "the 'None' …".
-            or f"Review along the '{prompt.dimension or prompt.id}' dimension using the "
+        # `dimension` is optional on a prompt (None for a non-reviewer); fall back to the
+        # prompt id so the default instructions never read "the 'None' …".
+        default_instructions = (
+            f"Review along the '{prompt.dimension or prompt.id}' dimension using the "
             "read-only repository tools; ground every finding in tool output."
         )
-        req = build_agent_request(
-            prompt,
-            ctx,
-            cfg,
-            system_prompt=system_prompt,
-            instructions=instructions,
-            langfuse_prompt=langfuse_prompt,
-            ticket_id=ticket_id,
-        )
-        return _ex.StepResult(outputs=get_runner(cfg, override=self._runner).run(req))
+        # A LIST-valued `instructions` is a CHUNKED structured prompt (epic solid-timer-unison
+        # WS3): run the prompt once per chunk and MERGE the structured outputs (concatenate
+        # list-valued fields, e.g. `verifications`; scalars take the first). A string/None is a
+        # single call whose merged output is byte-identical to the prior behavior. This keeps
+        # token-budget chunking ENCAPSULATED in the step (the LangChain MapReduce pattern),
+        # not exposed as a workflow-level fan-out.
+        raw_instructions = ctx.inputs.get("instructions")
+        chunks = raw_instructions if isinstance(raw_instructions, list) else [raw_instructions]
+        runner = get_runner(cfg, override=self._runner)
+        outs: list[dict] = []
+        for chunk in chunks:
+            req = build_agent_request(
+                prompt,
+                ctx,
+                cfg,
+                system_prompt=system_prompt,
+                instructions=str(chunk) if chunk else default_instructions,
+                langfuse_prompt=langfuse_prompt,
+                ticket_id=ticket_id,
+            )
+            outs.append(runner.run(req))
+        return _ex.StepResult(outputs=_merge_chunked_outputs(outs))
 
 
 def build_agent_request(
