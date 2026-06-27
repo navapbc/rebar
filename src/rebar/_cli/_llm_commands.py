@@ -14,6 +14,50 @@ import sys
 from rebar._cli._init import ensure_initialized
 
 
+def _add_ref_source(
+    parser: argparse.ArgumentParser,
+    *,
+    ref_default: str = "origin/main",
+    ref_configurable: bool = True,
+) -> None:
+    """Add the shared ``--ref`` / ``--source`` controls (epic raze-vet-ditch S5) to a
+    code-reading CLI command, mirroring the MCP tools' ``ref``/``source`` args one-to-one.
+    Both default to ``None`` so the configured default resolves (``REBAR_GATE_SOURCE`` /
+    ``[snapshot]`` > built-in default). ``ref_configurable=False`` (review-code, whose ref
+    defaults to the reviewed ``head``, not the cross-gate ``origin/main``) drops the
+    config-override note so the help text matches the actual resolution."""
+    ref_help = f"branch | tag | SHA to verify against (default: {ref_default}"
+    ref_help += "; configurable via REBAR_GATE_REF / [snapshot].ref)" if ref_configurable else ")"
+    parser.add_argument("--ref", default=None, help=ref_help)
+    parser.add_argument(
+        "--source",
+        choices=["attested", "local"],
+        default=None,
+        help="attested (default): verify a snapshot pinned at --ref (signs, records "
+        "verified_at_sha); local: read the in-place checkout (dirty allowed, never signs)",
+    )
+
+
+def _gate_source_error() -> type[Exception]:
+    """The snapshot/ref-resolution error class to catch at the CLI boundary so an
+    unresolvable/absent ref, a missing-credential fetch, or an unreachable object DB at
+    REBAR_ROOT surfaces as a clean, actionable ``Error:`` line (attested fails closed) rather
+    than a traceback. (An invalid ``--source`` is rejected earlier by argparse's choices.)"""
+    from rebar._snapshot import SnapshotError
+
+    return SnapshotError
+
+
+def _render_source_line(result: dict) -> None:
+    """Surface the source provenance (``source`` + ``verified_at_sha``) on a gate result."""
+    src = result.get("source")
+    if not src:
+        return
+    sha = result.get("verified_at_sha")
+    tail = f" @ verified-at-sha {sha}" if sha else " (unsigned — in-place checkout)"
+    sys.stdout.write(f"source: {src}{tail}\n")
+
+
 def _review(argv: list[str]) -> int:
     """``rebar review`` → rebar.llm.review_ticket (native; not a dispatcher arm).
 
@@ -46,6 +90,7 @@ def _review(argv: list[str]) -> int:
         action="store_true",
         help="print backend/credential availability and exit",
     )
+    _add_ref_source(parser)
     args = parser.parse_args(argv)
 
     from rebar import llm
@@ -57,14 +102,20 @@ def _review(argv: list[str]) -> int:
         parser.error("ticket_id is required")
     ensure_initialized(init_only=True)
     try:
-        result = llm.review_ticket(args.ticket_id, args.reviewer_id, graph=args.graph)
+        result = llm.review_ticket(
+            args.ticket_id, args.reviewer_id, graph=args.graph, ref=args.ref, source=args.source
+        )
     except llm.LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    except _gate_source_error() as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
     if args.output == "json":
         sys.stdout.write(_json.dumps(result) + "\n")
     else:
         _render_review_text(result)
+        _render_source_line(result)
     return 0
 
 
@@ -90,6 +141,7 @@ def _review_code(argv: list[str]) -> int:
         help="reviewer id (repeatable; default: deterministic selection)",
     )
     parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
+    _add_ref_source(parser, ref_default="the reviewed --head", ref_configurable=False)
     args = parser.parse_args(argv)
 
     from rebar import llm
@@ -104,15 +156,24 @@ def _review_code(argv: list[str]) -> int:
             return 1
     try:
         result = llm.review_code(
-            base=args.base, head=args.head, diff_text=diff_text, reviewers=args.reviewers
+            base=args.base,
+            head=args.head,
+            diff_text=diff_text,
+            reviewers=args.reviewers,
+            ref=args.ref,
+            source=args.source,
         )
     except llm.LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    except _gate_source_error() as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
     if args.output == "json":
         sys.stdout.write(_json.dumps(result) + "\n")
     else:
         _render_review_text(result)
+        _render_source_line(result)
     return 0
 
 
@@ -137,6 +198,7 @@ def _scan_spec(argv: list[str]) -> int:
         help="restrict to these epic ids (repeatable; default: all open epics)",
     )
     parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
+    _add_ref_source(parser)
     args = parser.parse_args(argv)
 
     try:
@@ -149,14 +211,24 @@ def _scan_spec(argv: list[str]) -> int:
     from rebar import llm
 
     try:
-        result = llm.scan_epics_for_spec(spec_text, epics=args.epics, batch_size=args.batch_size)
+        result = llm.scan_epics_for_spec(
+            spec_text,
+            epics=args.epics,
+            batch_size=args.batch_size,
+            ref=args.ref,
+            source=args.source,
+        )
     except llm.LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    except _gate_source_error() as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
     if args.output == "json":
         sys.stdout.write(_json.dumps(result) + "\n")
     else:
         _render_review_text(result)
+        _render_source_line(result)
     return 0
 
 
@@ -187,6 +259,7 @@ def _verify_completion(argv: list[str]) -> int:
     parser.add_argument(
         "--check", action="store_true", help="print backend/credential availability and exit"
     )
+    _add_ref_source(parser)
     args = parser.parse_args(argv)
 
     from rebar import llm
@@ -198,14 +271,20 @@ def _verify_completion(argv: list[str]) -> int:
         parser.error("ticket_id is required")
     ensure_initialized(init_only=True)
     try:
-        result = llm.verify_completion(args.ticket_id, graph=True if args.graph else None)
+        result = llm.verify_completion(
+            args.ticket_id, graph=True if args.graph else None, ref=args.ref, source=args.source
+        )
     except llm.LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    except _gate_source_error() as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
     if args.output == "json":
         sys.stdout.write(_json.dumps(result) + "\n")
     else:
         _render_verdict_text(result)
+        _render_source_line(result)
     return 0 if result.get("verdict") == "PASS" else 1
 
 
@@ -233,6 +312,7 @@ def _review_plan(argv: list[str]) -> int:
     parser.add_argument(
         "--check", action="store_true", help="print backend/credential availability and exit"
     )
+    _add_ref_source(parser)
     args = parser.parse_args(argv)
 
     from rebar import llm
@@ -244,14 +324,20 @@ def _review_plan(argv: list[str]) -> int:
         parser.error("ticket_id is required")
     ensure_initialized(init_only=True)
     try:
-        result = llm.review_plan(args.ticket_id, sign=not args.no_sign)
+        result = llm.review_plan(
+            args.ticket_id, ref=args.ref, source=args.source, sign=not args.no_sign
+        )
     except llm.LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    except _gate_source_error() as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
     if args.output == "json":
         sys.stdout.write(_json.dumps(result) + "\n")
     else:
         _render_plan_review_text(result)
+        _render_source_line(result)
     verdict = result.get("verdict")
     return 0 if verdict == "PASS" else (2 if verdict == "INDETERMINATE" else 1)
 
