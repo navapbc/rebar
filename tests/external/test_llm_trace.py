@@ -37,7 +37,7 @@ _READ_INTERVAL_S = 1.0
 def _live_model() -> str | None:
     try:
         import rebar.llm as llm
-    except Exception:
+    except ImportError:
         return None
     if not llm.agents_extra_installed():
         return None

@@ -58,8 +58,8 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check. The gate CI run
 	ruff check $(sources)
 	ruff format --check $(sources)
 
-typecheck:  ## ERRORS ONLY: mypy over the gated library core.
-	mypy src/rebar/reducer src/rebar/graph src/rebar/_store
+typecheck:  ## ERRORS ONLY: mypy over the whole library (gating; full src/rebar).
+	mypy src/rebar
 
 check: lint typecheck  ## Run every check-only gate (no mutation).
 

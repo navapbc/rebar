@@ -321,14 +321,14 @@ class McpAdapter(Adapter):
                 target_status=target,
             )
             return OK
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — parity adapter: any tool failure is uniformly mapped to a structured Outcome via _reject
             return self._reject(exc)
 
     def claim(self, tid: str, assignee: str | None = None) -> Outcome:
         try:
             self._call("claim_ticket", ticket_id=tid, assignee=assignee)
             return OK
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — parity adapter: any tool failure is uniformly mapped to a structured Outcome via _reject
             return self._reject(exc)
 
     @staticmethod
