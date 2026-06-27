@@ -159,14 +159,14 @@ def _terminal_verdict(rec) -> dict | None:
     return None
 
 
-def _run(monkeypatch, state, *, finder, agent):
+def _run(monkeypatch, state, *, finder, agent, probe_criteria=None):
     _patch_reads(monkeypatch, state)
     from rebar.llm.plan_review.production_batch_runner import ProductionBatchRunner
 
     rec = _Rec()
     res = _ex.run_workflow(
         _doc(),
-        {"ticket_id": _TARGET},
+        {"ticket_id": _TARGET, "probe_criteria": list(probe_criteria or [])},
         recorder=rec,
         target_ticket=_TARGET,
         scripted_registry=dict(_ex.STEP_REGISTRY),
@@ -252,6 +252,33 @@ def test_assemble_criteria_overlay_inclusion(monkeypatch):
     # A non-overlay mandatory criterion (E1) is always routed; ISF is never a batch criterion.
     assert out_perf["include_E1"] is True
     assert "include_ISF" not in out_perf
+
+
+def test_assemble_criteria_probe_mode_restricts_to_allowlist(monkeypatch):
+    """WS1 (odd-cocoa-chase): PROBE MODE — when `probe_criteria` is set, assemble FORCES
+    exactly that allowlist (the cheap E4+G1G2 drift probe) and excludes everything else, so
+    the finder batch runs only those criteria. Mirrors the retired bespoke drift probe."""
+    from rebar.llm.workflow.executor import STEP_REGISTRY, StepContext
+
+    op = STEP_REGISTRY["plan_review_assemble_criteria"]
+    state = _state(ttype="task", description=_PERF_AC)  # would normally route many criteria
+    _patch_reads(monkeypatch, state)
+    ctx = StepContext(
+        run_id="r",
+        step_id="assemble",
+        kind="scripted",
+        step={},
+        inputs={"ticket_id": _TARGET, "probe_criteria": ["E4", "G1G2"]},
+        workflow={},
+        target_ticket=_TARGET,
+        repo_root=None,
+    )
+    out = op(ctx)
+    included = {cid for cid, on in out.items() if cid.startswith("include_") and on}
+    assert included == {"include_E4", "include_G1G2"}, included
+    # Even the otherwise-mandatory E1 and the fired T5a overlay are EXCLUDED in probe mode.
+    assert out["include_E1"] is False and out["include_T5a"] is False
+    assert out["routing"]["probe_criteria"] == ["E4", "G1G2"]
 
 
 # ── end-to-end OFFLINE run → a plan_review_verdict-shaped PASS ────────────────

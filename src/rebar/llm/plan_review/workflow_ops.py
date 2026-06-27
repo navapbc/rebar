@@ -146,15 +146,26 @@ def plan_review_assemble_criteria(ctx: StepContext) -> dict[str, Any]:
     tid = _ticket_id(ctx)
     pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
     single, agent = orchestrator.route_criteria(pctx)
-    included = {c["id"] for c in single + agent}
     # ISF is fed the linked session log by the finder itself (never a rubric chunk), so it is
     # never a batch criterion — excluded from the inclusion vocabulary here.
     canonical = sorted(set(registry.CANONICAL_LLM) - {"ISF"})
+    # PROBE MODE (drift-refresh tripwire): when `probe_criteria` is set, FORCE exactly that
+    # allowlist (the cheap E4+G1G2 probe), bypassing applies()/overlay routing — mirroring the
+    # bespoke drift probe, which ran its probe criteria directly as finders regardless of
+    # routing. Empty/absent → the full routed set (normal review). Restricted to canonical ids
+    # that own an include slot.
+    probe = {str(c) for c in (ctx.inputs.get("probe_criteria") or [])}
+    if probe:
+        included = {cid for cid in canonical if cid in probe}
+    else:
+        included = {c["id"] for c in single + agent}
     out: dict[str, Any] = {f"include_{cid}": (cid in included) for cid in canonical}
     out["routing"] = {
-        "single_turn": [c["id"] for c in single],
-        "agent_tier": [c["id"] for c in agent],
+        "single_turn": [c["id"] for c in single if c["id"] in included],
+        "agent_tier": [c["id"] for c in agent if c["id"] in included],
     }
+    if probe:
+        out["routing"]["probe_criteria"] = sorted(included)
     return out
 
 

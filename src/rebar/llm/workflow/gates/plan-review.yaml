@@ -20,6 +20,13 @@ inputs:
     description: The ticket whose plan is reviewed.
     type: string
     required: true
+  probe_criteria:
+    description: >-
+      PROBE MODE (drift-refresh tripwire): when a non-empty id list, the Pass-1 finder runs
+      ONLY these criteria (the cheap E4+G1G2 probe) instead of the full routed set. Always
+      supplied by the gate dispatcher (``[]`` = normal full review).
+    type: array
+    required: false
 steps:
 - id: precheck
   uses: plan_review_precheck
@@ -35,6 +42,7 @@ steps:
       uses: plan_review_assemble_criteria
       with:
         ticket_id: ${{ inputs.ticket_id }}
+        probe_criteria: ${{ inputs.probe_criteria }}
     - id: finders
       needs:
       - assemble

@@ -37,13 +37,14 @@ from .det_floor import PlanContext
 
 # The Pass-1 finder machinery lives in :mod:`.pass1` (module-size seam, epic B /
 # story B1). Re-exported here for the historical ``orchestrator.<name>`` call sites
-# (attest.py + the test suite); ``run_pass1`` is invoked by ``_run_passes`` below.
+# (attest.py + the test suite). The Pass-1 finder itself now runs only via the workflow's
+# ProductionBatchRunner (which imports run_pass1 from .pass1 directly) — the bespoke
+# _run_passes that invoked it here was retired in epic solid-timer-unison (WS1).
 from .pass1 import (  # noqa: F401
     CONTAINER_CRITERIA,
     _run_container,
     _ticket_graph_blob,
     material_fingerprint,
-    run_pass1,
 )
 
 logger = logging.getLogger(__name__)
@@ -132,8 +133,8 @@ def route_criteria(ctx: PlanContext) -> tuple[list[dict], list[dict]]:
     for c in registry.load_criteria():
         cid = c["id"]
         # ISF is special: it is fed the linked SESSION LOG (not the rubric chunk) and
-        # fires only when a session log is linked — handled separately in _run_passes,
-        # so it never enters the normal single/agent routing.
+        # fires only when a session log is linked — handled separately by the Pass-1
+        # finder (run_pass1), so it never enters the normal single/agent routing.
         if cid == "ISF":
             continue
         if not registry.applies(
@@ -309,20 +310,44 @@ def drift_refresh(
     runner_sel = runner or get_runner(cfg)
     try:
         runner_sel.preflight()
-        probe_crits = [c for c in (registry.by_id().get(cid) for cid in _PROBE_CRITERIA) if c]
-        findings = _run_passes(ctx, cfg, runner_sel, [], probe_crits, {})
+        # The probe runs the SOLE plan-review gate workflow restricted to the cheap
+        # E4+G1G2 criteria (PROBE MODE), not a bespoke pass pipeline (epic solid-timer-unison
+        # WS1: the bespoke _run_passes/pass2_verify path was retired). The verify cfg is tuned
+        # to the non-frontier verifier model the same way review_plan does (_verifier_cfg) so
+        # the probe's verify is parity-faithful with the prior bespoke verifier_cfg.
+        from rebar.llm.plan_review import _verifier_cfg
+        from rebar.llm.workflow import gate_dispatch
+
+        probe_verdict = gate_dispatch.produce_plan_review_verdict(
+            ctx,
+            _verifier_cfg(cfg),
+            runner=runner_sel,
+            advisory_cap=DEFAULT_ADVISORY_CAP,
+            repo_root=repo_root,
+            probe_criteria=list(_PROBE_CRITERIA),
+        )
     except Exception:  # noqa: BLE001 — probe unavailable → FULL re-review (fail-safe)
         logger.warning("drift-probe failed; falling back to a full re-review", exc_info=True)
         return None
 
-    # Escalate iff any blocking finding, or any block/advisory finding citing a drifted file.
-    for f in findings:
-        if f.get("decision") == "block":
+    # A non-PASS probe (a BLOCK, or an INDETERMINATE from a degraded/unavailable LLM tier)
+    # is inconclusive → escalate to a FULL re-review; never refresh on a hollow probe.
+    if probe_verdict.get("verdict") != "PASS" or not probe_verdict.get("coverage", {}).get(
+        "llm_ran"
+    ):
+        return None
+    # Escalate iff any surfaced finding cites a drifted file (a blocking finding already made
+    # the verdict non-PASS above). Mirrors the prior bespoke decision/citations check, now over
+    # the verdict's surfaced partitions (blocking + advisory + overflow).
+    surfaced = [
+        *(probe_verdict.get("blocking") or []),
+        *(probe_verdict.get("advisory") or []),
+        *(probe_verdict.get("overflow") or []),
+    ]
+    for f in surfaced:
+        cited = {c.get("path") for c in (f.get("citations") or []) if isinstance(c, dict)}
+        if cited & drifted:
             return None
-        if f.get("decision") in ("block", "advisory"):
-            cited = {c.get("path") for c in (f.get("citations") or []) if isinstance(c, dict)}
-            if cited & drifted:
-                return None
 
     # Clean probe → the drift was immaterial → refresh the attestation wholesale.
     sig = attest.refresh_attestation(
@@ -356,50 +381,6 @@ def drift_refresh(
             "refreshed": True,
         },
     }
-
-
-def _run_passes(
-    ctx: PlanContext,
-    cfg: LLMConfig,
-    runner: Runner,
-    single: list[dict],
-    agent: list[dict],
-    coverage: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """Pass-1 (parallel single-turn chunks + per-criterion agent finders) → Pass-2
-    aggregate verify → Pass-3 deterministic decide. Returns findings with decisions."""
-    plan = ctx.plan_text
-    findings = run_pass1(ctx, cfg, runner, single, agent, coverage)
-
-    # The size-ladder's "too big even at the largest model" findings are DET-style
-    # BLOCKS (the P8 outcome discovered at runtime) — route them straight to the
-    # blocking set with a fixed verdict; they do NOT go through Pass-2/3.
-    too_big = [
-        {
-            **f,
-            "decision": "block",
-            "severity": "critical",
-            "priority": 1.0,
-            "validity": 1.0,
-            "impact": 1.0,
-        }
-        for f in findings
-        if f.get("_too_big")
-    ]
-    # Budget-shed criteria are pre-decided INDETERMINATE (non-blocking) and bypass
-    # Pass-2/3 — there is nothing to verify (they did not run).
-    shed_indeterminate = [f for f in findings if f.get("_shed")]
-    findings = [f for f in findings if not f.get("_too_big") and not f.get("_shed")]
-
-    # Pass 2: one aggregate verification pass (agentic if any code-grounded finding).
-    grounded = any(
-        any(c in registry.CODEBASE_GROUNDED for c in f.get("criteria", [])) for f in findings
-    )
-    v_cfg = passes.verifier_cfg(cfg)
-    verifs = passes.pass2_verify(runner, v_cfg, plan=plan, findings=findings, agentic=grounded)
-
-    # Pass 3: deterministic decision per finding (shared with the workflow's decide op).
-    return [*too_big, *shed_indeterminate, *pass3_over_findings(findings, verifs)]
 
 
 def pass3_over_findings(

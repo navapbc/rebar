@@ -832,29 +832,64 @@ def test_drift_refresh_skips_on_registry_skew(rebar_repo: Path, monkeypatch) -> 
 
 
 def test_drift_refresh_escalates_on_probe_finding(rebar_repo: Path, monkeypatch) -> None:
-    # A probe finding citing a drifted file means the plan may no longer hold →
-    # drift_refresh escalates (returns None) so the caller runs the full review.
+    # A probe that BLOCKS, or surfaces an advisory CITING a drifted file, means the plan may
+    # no longer hold → drift_refresh escalates (returns None) so the caller runs the full
+    # review. Drives the migrated seam: the probe now runs the workflow gate (PROBE MODE) via
+    # gate_dispatch.produce_plan_review_verdict, not the retired bespoke _run_passes (WS1).
+    # This is the parity corpus for the escalate decision (the refresh decision is pinned by
+    # test_drift_refresh_reuses_on_immaterial_drift, which runs the real probe end-to-end).
     from rebar.llm.config import LLMConfig
     from rebar.llm.plan_review import orchestrator
+    from rebar.llm.workflow import gate_dispatch
 
     _commit(rebar_repo)
     _enable(rebar_repo)
     tid = _scoped(rebar_repo)
-    (rebar_repo / "dep.py").write_text("v = 42  # material change\n")
-
-    def _block(*a, **k):
-        return [
-            {
-                "decision": "block",
-                "criteria": ["E4"],
-                "citations": [{"kind": "file", "path": "dep.py"}],
-            }
-        ]
-
-    monkeypatch.setattr(orchestrator, "_run_passes", _block)
+    (rebar_repo / "dep.py").write_text("v = 42  # material change\n")  # dep.py now drifted
     cfg = LLMConfig.from_env(repo_root=str(rebar_repo))
     ctx = orchestrator.assemble_context(tid, repo_root=str(rebar_repo), cfg=cfg)
+
+    def _verdict(*, blocking, advisory):
+        return {
+            "verdict": "BLOCK" if blocking else "PASS",
+            "blocking": blocking,
+            "advisory": advisory,
+            "overflow": [],
+            "coverage": {"llm_ran": True},
+        }
+
+    # (a) a blocking probe finding → escalate (verdict is BLOCK, not PASS).
+    monkeypatch.setattr(
+        gate_dispatch,
+        "produce_plan_review_verdict",
+        lambda *a, **k: _verdict(blocking=[{"decision": "block", "criteria": ["E4"]}], advisory=[]),
+    )
     assert orchestrator.drift_refresh(ctx, cfg, runner=_CLEAN, repo_root=str(rebar_repo)) is None
+
+    # (b) a PASS probe whose surfaced advisory CITES the drifted dep.py → escalate.
+    monkeypatch.setattr(
+        gate_dispatch,
+        "produce_plan_review_verdict",
+        lambda *a, **k: _verdict(
+            blocking=[],
+            advisory=[{"decision": "advisory", "citations": [{"kind": "file", "path": "dep.py"}]}],
+        ),
+    )
+    assert orchestrator.drift_refresh(ctx, cfg, runner=_CLEAN, repo_root=str(rebar_repo)) is None
+
+    # (c) a PASS probe whose advisory cites an UNDRIFTED file → NO escalation (refreshes).
+    monkeypatch.setattr(
+        gate_dispatch,
+        "produce_plan_review_verdict",
+        lambda *a, **k: _verdict(
+            blocking=[],
+            advisory=[
+                {"decision": "advisory", "citations": [{"kind": "file", "path": "other.py"}]}
+            ],
+        ),
+    )
+    refreshed = orchestrator.drift_refresh(ctx, cfg, runner=_CLEAN, repo_root=str(rebar_repo))
+    assert refreshed is not None and refreshed["coverage"].get("drift_refresh") is True
 
 
 def test_drift_refresh_skips_when_no_prior_verdict(rebar_repo: Path) -> None:

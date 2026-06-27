@@ -87,7 +87,7 @@ model emits **no** holistic severity/confidence anywhere in the decision path:
 | Pass | What | Where |
 |------|------|-------|
 | **1 — find** | Surfaces grounded findings `{finding, criteria[], evidence[], scenarios[], impact}` — no severity/confidence. Facet-chunked single-turn finders + one agent per code-grounding criterion. | `passes.pass1_chunk` |
-| **2 — verify** | A *separate* verifier re-grounds each finding and emits coarse severity **attributes** + a typed **binary** sub-answer set `{yes\|no\|insufficient}`. One aggregate pass over all findings. | `passes.pass2_verify` |
+| **2 — verify** | A *separate* verifier re-grounds each finding and emits coarse severity **attributes** + a typed **binary** sub-answer set `{yes\|no\|insufficient}`. One aggregate pass over all findings. | workflow `plan-review-verifier` step |
 | **3 — decide** | **Deterministic.** validity = graded fraction of the binary answers; impact = mean of the ordinal-mapped severity attributes; **priority = validity × impact**; decision = `block \| advisory \| dropped`. | `passes.pass3_decide` |
 | **4 — coach** | A single-turn call over the *surviving advisory* findings maps each to a move from a locked registry; the coaching prose is rendered **deterministically** from the move's template (the LLM only picks the move + names a bounded noun-phrase subject — validated). | `passes.pass4_coach` |
 
