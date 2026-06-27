@@ -258,3 +258,21 @@ re-validation are explicitly post-implementation** (calibration is only meaningf
 against the running system — the eval suite + sidecar collect the real data to tune
 later). Bugs are exempt (a dedicated follow-on). See the epic for the full criteria
 registry and the experiment-grounded defaults.
+
+## Definition-of-done for a cutover/engine swap (live exercise required)
+
+When a plan **cuts over or defaults to a new code path** (an engine/gate swap, a
+default-flag flip), its definition-of-done **must include exercising that new path
+end-to-end as it runs in production** — e.g. against a live model/dependency — not
+only offline/mocked tests. **Green offline tests and a passing completion verdict are
+necessary but NOT sufficient**: an acceptance criterion satisfiable by canned/fake
+substitutes that bypass the new behavior can close green while the live path is broken
+(the `super-plant-liver` root cause — B5 shipped with the live plan-review gate broken
+because its AC was satisfiable offline-only). The plan-review gate enforces this at
+review time: **E5** (testing) flags the *proxy-validation* anti-pattern — a
+changed/defaulted risky path validated solely through a mock that never runs it live —
+and **E6** (ac-text-quality) flags a cutover/defaulted path with no criterion that
+exercises it end-to-end. The coaching move is **add a live/end-to-end acceptance
+criterion for the path you are defaulting to** (Pass-4 moves 7 *thin vertical slice* /
+9 *plan the verification*). The honest discriminator: *could this AC be marked done
+without the changed risky path ever executing?* If yes, add the live DoD.

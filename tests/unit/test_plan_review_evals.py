@@ -77,6 +77,23 @@ def test_verifier_has_discrimination_pairs() -> None:
     assert "no_sycophancy_on_real_defects" in names
 
 
+def test_finder_has_proxy_validation_cutover_cases() -> None:
+    # super-plant-liver AC: the B5-shaped scenario (a cutover that DEFAULTS to a new path
+    # whose AC is satisfiable by offline/mocked tests that never exercise the live path)
+    # is encoded as a recall case for E5 (runs on stories) and E6 (the ac-text-quality
+    # proving-command angle), each paired with a good case so the new flag discriminates
+    # rather than firing on every cutover. (The fire/no-fire assertion itself runs in the
+    # gated live-model eval CI; this offline test pins the cases' presence.)
+    ds = E.load_eval_spec("plan-review-finder").get("dataset", [])
+    recall = {(c.get("criterion"), c.get("id")) for c in ds if c.get("expect") == "finding"}
+    assert ("E5", "R-E5-proxy-validation-cutover") in recall
+    assert ("E6", "R-E6-cutover-no-live-ac") in recall
+    # The anti-over-fire pair: a cutover that DOES exercise the defaulted path live → PASS.
+    assert any(
+        c.get("id") == "FP8-E5-cutover-has-live-ac" and c.get("expect") == "pass" for c in ds
+    )
+
+
 def test_isf_has_recall_and_justified_descope_cases() -> None:
     # 681b AC: ISF recall (silent drop) + no false-fire on a justified descope.
     ds = E.load_eval_spec("plan-review-isf-finder").get("dataset", [])
