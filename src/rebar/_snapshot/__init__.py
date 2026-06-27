@@ -35,6 +35,14 @@ from rebar._snapshot.cache import (
     open_in_snapshot,
     touch_entry,
 )
+from rebar._snapshot.janitor import (
+    JanitorConfig,
+    drain_trash,
+    reverify_entry,
+    run_gc,
+    start_background_janitor,
+    startup_sweep,
+)
 from rebar._snapshot.repo_snapshot import (
     SnapshotError,
     SnapshotFetchError,
@@ -49,6 +57,7 @@ from rebar._snapshot.repo_snapshot import (
 
 __all__ = [
     "CacheMiss",
+    "JanitorConfig",
     "SnapshotError",
     "SnapshotFetchError",
     "SnapshotHandle",
@@ -56,12 +65,17 @@ __all__ = [
     "acquire",
     "add_bytes",
     "byte_total",
+    "drain_trash",
     "entry_mtime",
     "entry_size",
     "is_lfs_pointer",
     "materialize",
     "open_in_snapshot",
     "resolve_ref",
+    "reverify_entry",
+    "run_gc",
+    "start_background_janitor",
+    "startup_sweep",
     "store_root",
     "sweep_tmp",
     "touch_entry",

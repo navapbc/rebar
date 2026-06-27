@@ -413,7 +413,9 @@ _ALIASES: dict[str, dict[str, str]] = {
 # ``rebar.llm.LLMConfig.from_env`` so the stdlib core never imports the agents
 # stack). They are RECOGNISED by the core parser — neither warned as unknown nor
 # coerced into :class:`Config` — and read raw via :func:`read_reserved_section`.
-_RESERVED_SECTIONS: frozenset[str] = frozenset({"llm"})
+# ``snapshot`` is the repo-snapshot-isolation gate cache/janitor tunables layer
+# (``rebar._snapshot``), resolved env-first by :class:`rebar._snapshot.JanitorConfig`.
+_RESERVED_SECTIONS: frozenset[str] = frozenset({"llm", "snapshot"})
 
 
 def coerce_sparse(raw: dict | None, *, source: str = "", strict: bool = False) -> dict:
