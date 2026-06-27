@@ -44,9 +44,9 @@ _USAGE = (
     "  and the error names the parent. close/reopen/blocked never cascade.\n"
     "  --reason=<text>          Required when closing bug tickets. Must start with "
     "'Fixed:' or 'Escalated to user:'.\n"
-    "  --force                  Skip the unresolved-children guard when closing "
-    "(non-closed children remain unresolved), and bypass the plan-review gate when "
-    "starting work (open->in_progress); the --reason text becomes the audit note.\n"
+    "  --force                  Bypass the plan-review gate when starting work "
+    "(open->in_progress); the --reason text becomes the audit note. Does NOT bypass the "
+    "unresolved-children close guard (a structural invariant — close/detach children first).\n"
     "  --verdict-hash=<hash>    DEPRECATED (ignored): the story/epic close gate now "
     "requires a certified signature ('rebar sign'), not a verdict hash.\n"
     "  --force-close=<reason>   Bypass the signature requirement for story/epic "
@@ -442,20 +442,19 @@ def transition_compute(
         newly_unblocked = batch["newly_unblocked"]
         if open_children:
             count = len(open_children)
-            if force:
-                sys.stderr.write(
-                    f"Warning: closing ticket '{ticket_id}' with {count} unresolved "
-                    "(non-closed) child ticket(s) (--force).\n"
-                    "The following children are not yet closed:\n" + "\n".join(open_children) + "\n"
-                )
-            else:
-                raise CommandError(
-                    f"Error: cannot close ticket '{ticket_id}' while it has {count} "
-                    "unresolved (non-closed) child ticket(s).\n"
-                    "Close the following children first, or use --force to close the "
-                    "parent with children unresolved:\n" + "\n".join(open_children),
-                    returncode=1,
-                )
+            # The child-closure relationship is a STRUCTURAL INTEGRITY invariant (a parent is
+            # not complete while its children are open), NOT a quality gate — so it is enforced
+            # UNCONDITIONALLY: neither --force (which bypasses the plan-review gate) nor
+            # --force-close (which bypasses the signature/completion-verifier requirement) can
+            # close a parent over open children. Resolve/close the children first, or detach
+            # (re-home) them, then close the parent.
+            raise CommandError(
+                f"Error: cannot close ticket '{ticket_id}' while it has {count} unresolved "
+                "(non-closed) child ticket(s) — the child-closure invariant cannot be bypassed "
+                "(not with --force or --force-close). Close or resolve these children first, or "
+                "detach them (re-home), then close:\n" + "\n".join(open_children),
+                returncode=1,
+            )
 
     # Completion-verification close gate (opt-in; runs OUTSIDE the write lock since an LLM
     # call must not serialize all writes). Ordering is verify -> close -> sign: the precheck
