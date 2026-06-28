@@ -1,1 +1,0 @@
-{"author":"Iso Tester","data":{"file_impact":[{"path":"docs/reuse-surface.md","reason":"kernel seam + enforcement doc"},{"path":"src/rebar/llm/review_kernel/__init__.py","reason":"public kernel API surface"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782607442791878001,"uuid":"b0ada078-6860-4d24-a963-23bf95769559"}
