@@ -141,13 +141,18 @@ def _gc_lock_path(root: Path) -> Path:
 
 
 def _is_entry(p: Path) -> bool:
-    """A content-addressed snapshot entry: a hex-named directory (not tmp/trash/gc/locks)."""
+    """A content-addressed snapshot entry: a hex-named directory (not tmp/trash/gc/locks).
+
+    Includes the pinned ticket-store entries (``tickets-<sha>``, PR #67): the ``tickets-``
+    prefix is non-hex, so strip it before the hex check — otherwise those entries are
+    invisible to GC + the byte total and leak unboundedly as the tickets branch changes."""
     if not p.is_dir():
         return False
     name = p.name
-    return name not in {"tmp", "trash", "gc", "locks"} and all(
-        c in "0123456789abcdef" for c in name
-    )
+    if name in {"tmp", "trash", "gc", "locks"}:
+        return False
+    core = name[len("tickets-") :] if name.startswith("tickets-") else name
+    return bool(core) and all(c in "0123456789abcdef" for c in core)
 
 
 def _entries(root: Path) -> list[Path]:
