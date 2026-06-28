@@ -185,6 +185,54 @@ def test_force_close_skips_verify_and_sign(rebar_repo: Path, monkeypatch) -> Non
     assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "unsigned"
 
 
+def test_library_force_close_matches_cli(rebar_repo: Path, monkeypatch) -> None:
+    """clay-cake-act: the library ``rebar.transition(..., force_close=...)`` reaches the SAME
+    completion-gate-bypass seam as the CLI ``--force-close`` — both close the ticket WITHOUT
+    running the verifier and leave it closed-WITHOUT-signature, identically. (Before the fix
+    the library wrapper exposed only ``force``, so a library consumer had no in-process bypass
+    and had to shell out to the CLI — the parity gap.)"""
+    import sys
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", _never)  # neither path may verify
+
+    # Library path: the new force_close= parameter.
+    tid_lib = _make(rebar_repo)
+    out = rebar.transition(
+        tid_lib, "in_progress", "closed", force_close="lib override", repo_root=str(rebar_repo)
+    )
+    assert out["to"] == "closed"
+
+    # CLI path: the --force-close flag the wrapper threads to.
+    tid_cli = _make(rebar_repo)
+    cp = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "rebar.cli",
+            "transition",
+            tid_cli,
+            "in_progress",
+            "closed",
+            "--force-close=cli override",
+        ],
+        cwd=str(rebar_repo),
+        capture_output=True,
+        text=True,
+    )
+    assert cp.returncode == 0, cp.stderr
+
+    # PARITY: both closed, and both closed-without-signature (the durable "unverified" signal).
+    assert _status(tid_lib, rebar_repo) == "closed"
+    assert _status(tid_cli, rebar_repo) == "closed"
+    assert (
+        rebar.verify_signature(tid_lib, repo_root=str(rebar_repo))["verdict"]
+        == rebar.verify_signature(tid_cli, repo_root=str(rebar_repo))["verdict"]
+        == "unsigned"
+    )
+
+
 def test_bug_without_reason_rejected_before_verifier(rebar_repo: Path, monkeypatch) -> None:
     _enable(rebar_repo)
     monkeypatch.setattr(rebar.llm, "verify_completion", _never)  # the precheck must short-circuit
