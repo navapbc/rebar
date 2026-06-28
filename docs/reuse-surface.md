@@ -385,3 +385,21 @@ Related helpers: `findings.finalize_outcome(outcome, mode=…, output_schema=…
   replay order; **reducer-ignored sidecars** (`REVIEW_RESULT`) stay out of compiled
   state and the hot paths (add them to the write allow-list +
   `_NON_REPLAY_KNOWN_TYPES`, NOT `KNOWN_EVENT_TYPES`).
+
+---
+
+## The review kernel (the shared four-pass framework)
+
+`rebar.llm.review_kernel` is the shared kernel every multi-pass review gate consumes:
+**Pass-2** the finding-verifier + the single registered `verification` contract +
+the verify orchestration (chunking, merge-by-global-index, the verifier-model
+default); **Pass-3** the deterministic decision core (`pass3_decide` /
+`pass3_over_findings`, per-criterion thresholds parameterized); **Pass-4** the
+affirmative-coach mechanism + the pluggable move-registry schema (the applicability
+filter + the subject validator + the deterministic render). The plan-review gate is
+the worked reference consumer; the code-review gate (`b744`) builds on the same seam
+without copying the passes. The consumer plug-points (criteria + routing, finder
+prompts, the domain-context assembler, the verify-prompt preamble, the move-catalog),
+the public entry points, the verifier-rules scaffold, and the enforcement rationale
+(structure mechanically + behavior via evals; **no** prompt-text lint) are in
+[review-kernel.md](review-kernel.md).

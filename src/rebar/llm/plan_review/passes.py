@@ -26,6 +26,13 @@ arithmetic — no model, fully unit-testable.
 
 from __future__ import annotations
 
+# ── Pass-4 coach MECHANISM: the shared review KERNEL owns it (epic vivid-gang-day WS3). These
+#    module-level re-exports keep the historical `passes.<name>` call sites (workflow_ops + the
+#    test suite) — thin aliases, NOT a second copy. `MOVE_REGISTRY` below stays as plan-review's
+#    catalog INSTANCE. (Module assignments, not `import X as Y`, so isort never drops them.) The
+#    submodule is resolved via importlib because the kernel package re-exports a `coach` FUNCTION
+#    that shadows the `coach` submodule attribute on the package.
+import importlib  # noqa: E402
 import json
 import re
 from pathlib import Path
@@ -33,25 +40,36 @@ from typing import Any
 
 from rebar.llm import contracts
 from rebar.llm.config import LLMConfig
+
+# ── Pass-2 + Pass-3: the shared review KERNEL owns the verification contract, the verify
+#    listing builders, and the decision math now (epic vivid-gang-day WS1+WS2). Re-exported
+#    here so the plan-review pass modules + the test suite keep their historical
+#    `passes.<name>` call sites — thin re-exports, NOT a second copy (AC: "no second copy
+#    remains"). `verify_instructions`/`verify_finding_listing` are the kernel listing builders;
+#    `verification_model` backs `plan_review_verification` (the same kernel model). ───────────
+from rebar.llm.review_kernel.decide import (  # noqa: F401
+    DEFAULT_BLOCK_THRESHOLD,
+    GRADED_BINARY,
+    impact,
+    pass3_decide,
+    severity_label,
+    validity,
+)
+from rebar.llm.review_kernel.verify import (  # noqa: F401
+    finding_listing as verify_finding_listing,
+)
+from rebar.llm.review_kernel.verify import (  # noqa: F401
+    verification_model,
+    verify_instructions,
+)
 from rebar.llm.runner import Runner, RunRequest
 
-# ── Pass-2 vocabulary (validated against criteria_v8) ──────────────────────────
-GRADED_BINARY = (
-    "is_verifiable",
-    "evidence_entails_finding",
-    "path_reachable",
-    "impact_follows_necessarily",
-    "no_viable_alternative_explanation",
-    "no_existing_mitigation",
-    "severity_claim_justified",
-)
-_GRADE = {"yes": 1.0, "insufficient": 0.5, "no": 0.0}
-_SEV01: dict[str | None, float] = {"none": 0.0, "low": 0.33, "medium": 0.67, "high": 1.0}
-_BLAST01: dict[str | None, float] = {"local": 0.33, "module": 0.67, "system": 1.0}
-_LIKE01: dict[str | None, float] = {"low": 0.33, "medium": 0.67, "high": 1.0}
-_REV01: dict[str | None, float] = {"easy": 0.33, "moderate": 0.67, "hard": 1.0}
-
-DEFAULT_BLOCK_THRESHOLD = 0.95  # near-certain AND high-impact ⇒ v1 is almost all advisory
+_coach = importlib.import_module("rebar.llm.review_kernel.coach")
+coach_instructions = _coach.coach_listing
+render_coach_notes = _coach.render_coach_notes
+applicable_moves = _coach.applicable_moves
+validate_move_registry = _coach.validate_move_registry
+_validate_subject = _coach.validate_subject
 
 
 # ── structured-output contracts (registered once on import) ────────────────────
@@ -91,35 +109,11 @@ def _pass1_model() -> type:
     return P1Output
 
 
-def _pass2_model() -> type:
-    from pydantic import BaseModel, Field
-
-    class SeverityAttrs(BaseModel):
-        prod_impact: str = Field(default="none", description="none|low|medium|high")
-        debt_impact: str = Field(default="none", description="none|low|medium|high")
-        blast_radius: str = Field(default="local", description="local|module|system")
-        likelihood: str = Field(default="low", description="low|medium|high")
-        reversibility: str = Field(default="easy", description="easy|moderate|hard")
-
-    class Binary(BaseModel):
-        cited_reference_accurate: str = Field(default="na", description="yes|no|insufficient|na")
-        is_verifiable: str = Field(default="insufficient")
-        evidence_entails_finding: str = Field(default="insufficient")
-        path_reachable: str = Field(default="insufficient")
-        impact_follows_necessarily: str = Field(default="insufficient")
-        no_viable_alternative_explanation: str = Field(default="insufficient")
-        no_existing_mitigation: str = Field(default="insufficient")
-        severity_claim_justified: str = Field(default="insufficient")
-
-    class Verification(BaseModel):
-        index: int = Field(description="The 0-based index of the finding being verified.")
-        severity_attributes: SeverityAttrs = Field(default_factory=SeverityAttrs)
-        binary: Binary = Field(default_factory=Binary)
-
-    class P2Output(BaseModel):
-        verifications: list[Verification] = Field(default_factory=list)
-
-    return P2Output
+# Pass-2's `verification` contract (the binary sub-question vocabulary + the severity-attribute
+# enums) is owned by the shared review KERNEL (epic vivid-gang-day WS2) as the SINGLE source —
+# plan-review's `plan_review_verification` registers the SAME kernel model factory (an alias, NOT
+# a second copy of the shape). The kernel registers it under the canonical name `verification`.
+_pass2_model = verification_model
 
 
 def _pass4_model() -> type:
@@ -421,121 +415,21 @@ def summarize_for_isf(runner: Runner, cfg: LLMConfig, *, log_text: str) -> str:
 
 
 # ── Pass 2: verify ───────────────────────────────────────────────────────────────
-def verify_finding_listing(batch: list[tuple[int, dict[str, Any]]]) -> str:
-    """The Pass-2 verifier per-finding listing for a batch of ``(index, finding)`` pairs
-    (``### finding index {i}`` blocks with claim / criteria / evidence / impact). The ONE
-    canonical format — shared by the bespoke :func:`pass2_verify` and the v3 workflow's
-    verify-inputs op so the listing never diverges between the two paths."""
-    return "\n\n".join(
-        f"### finding index {i}\nclaim: {f['finding']}\ncriteria: {', '.join(f['criteria'])}\n"
-        f"evidence: {' | '.join(f.get('evidence', []))}\nimpact: {f.get('impact', '')}"
-        for i, f in batch
-    )
-
-
-def verify_instructions(batch: list[tuple[int, dict[str, Any]]]) -> str:
-    """The full Pass-2 verifier INSTRUCTIONS (header + :func:`verify_finding_listing`) over
-    one batch of ``(index, finding)`` pairs. An empty batch yields a benign header only."""
-    if not batch:
-        return "Verify each finding below by its index. Emit one verification per finding."
-    return (
-        "Verify each finding below by its index. Emit one verification per finding "
-        f"(indices {batch[0][0]}–{batch[-1][0]}).\n\n{verify_finding_listing(batch)}"
-    )
-
-
-# NOTE: the bespoke `pass2_verify` (the count-batched aggregate verifier) was retired in
-# epic solid-timer-unison (WS1). The Pass-2 verify now runs ONLY through the workflow gate's
-# `plan-review-verifier` prompt step; `verify_instructions` / `verify_finding_listing` above
-# remain as the shared listing builders that step consumes.
+# The Pass-2 verifier mechanism — the `verification` contract, the per-finding listing
+# builders (`verify_instructions` / `verify_finding_listing`), the token-budget chunking, the
+# merge-by-global-index, and `verify_findings` — is owned by the shared review kernel
+# (`rebar.llm.review_kernel.verify`) as the single source (epic vivid-gang-day WS2). The
+# listing builders are re-exported at the top of this module; the chunker lives in `.sizing`
+# (a thin wrapper over the kernel chunker). The Pass-2 verify itself runs through the workflow
+# gate's `plan-review-verifier` prompt step (the bespoke `pass2_verify` was retired in epic
+# solid-timer-unison WS1).
 
 
 # ── Pass 3: decide (DETERMINISTIC — no model in this path) ────────────────────────
-def validity(binary: dict[str, Any]) -> float:
-    """The graded fraction of the binary sub-answers (yes=1, insufficient=.5,
-    no=0) over the answerable graded set (excluding any 'na'). The cited-reference
-    veto is handled separately. Empty ⇒ 0.0."""
-    scores = [
-        _GRADE[binary[q]] for q in GRADED_BINARY if binary.get(q) in ("yes", "no", "insufficient")
-    ]
-    return round(sum(scores) / len(scores), 4) if scores else 0.0
-
-
-def impact(attrs: dict[str, Any]) -> float:
-    """IMPACT ∈ [0,1] = mean of the ordinal-mapped severity attributes:
-    max(prod_impact, debt_impact), blast_radius, likelihood, reversibility."""
-    sev = max(_SEV01.get(attrs.get("prod_impact"), 0.0), _SEV01.get(attrs.get("debt_impact"), 0.0))
-    blast = _BLAST01.get(attrs.get("blast_radius"), 0.33)
-    like = _LIKE01.get(attrs.get("likelihood"), 0.33)
-    rev = _REV01.get(attrs.get("reversibility"), 0.33)
-    return round((sev + blast + like + rev) / 4.0, 4)
-
-
-def severity_label(imp: float) -> str:
-    if imp >= 0.75:
-        return "critical"
-    if imp >= 0.5:
-        return "major"
-    if imp >= 0.25:
-        return "minor"
-    return "none"
-
-
-def pass3_decide(
-    verification: dict[str, Any] | None,
-    *,
-    block_threshold: float = DEFAULT_BLOCK_THRESHOLD,
-    blocking_enabled: bool = False,
-) -> dict[str, Any]:
-    """The deterministic decision. Returns
-    ``{decision, reason, validity, impact, priority, severity}``.
-
-    Rules (the v1 authoritative shape):
-      * no verification → INDETERMINATE (verifier produced nothing for this finding);
-      * cited_reference_accurate == "no" → DROPPED (the only veto, fires only when a
-        code citation is present);
-      * validity < 0.5 → DROPPED (low validity);
-      * else BLOCK iff (not vetoed) AND blocking_enabled AND priority ≥ block_threshold;
-      * else ADVISORY.
-    """
-    if not verification:
-        return {
-            "decision": "indeterminate",
-            "reason": "no-verification",
-            "validity": 0.0,
-            "impact": 0.0,
-            "priority": 0.0,
-            "severity": "none",
-        }
-    binary = verification.get("binary", {}) or {}
-    attrs = verification.get("severity_attributes", {}) or {}
-    val = validity(binary)
-    imp = impact(attrs)
-    priority = round(val * imp, 4)
-    sev = severity_label(imp)
-    if binary.get("cited_reference_accurate") == "no":
-        return {
-            "decision": "dropped",
-            "reason": "veto:cited-reference-inaccurate",
-            "validity": val,
-            "impact": imp,
-            "priority": priority,
-            "severity": sev,
-        }
-    if val < 0.5:
-        decision, reason = "dropped", "low-validity"
-    elif blocking_enabled and priority >= block_threshold:
-        decision, reason = "block", "high-priority+criterion-opted-in"
-    else:
-        decision, reason = "advisory", "default-advisory"
-    return {
-        "decision": decision,
-        "reason": reason,
-        "validity": val,
-        "impact": imp,
-        "priority": priority,
-        "severity": sev,
-    }
+# The Pass-3 decision core (`validity` / `impact` / `severity_label` / `pass3_decide`
+# + the grade/severity maps + `DEFAULT_BLOCK_THRESHOLD` / `GRADED_BINARY`) lives in the
+# shared review kernel (`rebar.llm.review_kernel.decide`) and is re-exported at the top
+# of this module — there is no second copy here (epic vivid-gang-day WS1).
 
 
 # ── Pass 4: move registry + coach (rendered deterministically from a locked template) ──
@@ -590,39 +484,32 @@ MOVE_REGISTRY: dict[str, dict[str, str]] = {
 }
 
 
-def load_move_registry(repo_root=None) -> dict[str, dict[str, str]]:
-    """The Pass-4 move registry: the built-in moves PLUS project extensions from
-    ``.rebar/plan_review_moves.json`` (a ``{move_id: {name, template}}`` map; a
-    project entry adds a new move or overrides a built-in by id). The template must
-    contain a single ``{subject}`` placeholder — the LLM never authors prose.
-    Best-effort: a missing/malformed file → built-ins only (never crashes the review)."""
-    moves = {mid: dict(m) for mid, m in MOVE_REGISTRY.items()}
+def load_move_registry(repo_root=None) -> dict[str, dict[str, Any]]:
+    """The Pass-4 move registry INSTANCE plan-review supplies to the shared coach mechanism:
+    the built-in :data:`MOVE_REGISTRY` PLUS project extensions from
+    ``.rebar/plan_review_moves.json`` (a ``{move_id: {name, template, applies_when?}}`` map; a
+    project entry adds a new move or overrides a built-in by id). Validated through the kernel
+    move-registry schema (:func:`rebar.llm.review_kernel.validate_move_registry`): the built-ins
+    strictly, the project file best-effort (``strict=False`` — a malformed entry is DROPPED, the
+    review never crashes). Existing moves declare no ``applies_when`` ⇒ always-applicable."""
+    moves = validate_move_registry({mid: dict(m) for mid, m in MOVE_REGISTRY.items()})
     if not repo_root:
         return moves
     try:
         path = Path(repo_root) / ".rebar" / "plan_review_moves.json"
         if path.is_file():
             extra = json.loads(path.read_text(encoding="utf-8"))
-            for mid, m in (extra or {}).items():
-                if isinstance(m, dict) and m.get("name") and "{subject}" in str(m.get("template")):
-                    moves[str(mid)] = {"name": m["name"], "template": m["template"]}
+            moves.update(validate_move_registry(extra or {}, strict=False))
     except Exception:  # noqa: BLE001 — project move file is best-effort
         pass
     return moves
 
 
-def coach_instructions(
-    surviving: list[dict[str, Any]], move_registry: dict[str, dict[str, str]]
-) -> str:
-    """The Pass-4 coach INSTRUCTIONS (move registry + the surviving-findings listing). The
-    ONE canonical format — shared by the bespoke :func:`pass4_coach` and the v3 workflow's
-    coach-inputs op so the listing never diverges between the two paths."""
-    listing = "\n".join(f"- id={f['id']} :: {f['finding'][:200]}" for f in surviving)
-    moves = "\n".join(f"  {mid}: {m['name']}" for mid, m in sorted(move_registry.items()))
-    return (
-        f"## Move registry\n{moves}\n\n## Surviving advisory findings (by id)\n{listing}\n\n"
-        "Emit one note per finding you can map to a useful move (skip findings no move fits)."
-    )
+# The Pass-4 coach MECHANISM — the surviving-findings listing (`coach_instructions`, an alias of
+# the kernel `coach_listing`), the deterministic render (`render_coach_notes`), the subject
+# validator (`_validate_subject`), and the applicability filter — lives in the shared review
+# kernel (`rebar.llm.review_kernel.coach`) as the single source (epic vivid-gang-day WS3) and is
+# re-exported at the top of this module. `MOVE_REGISTRY` above is plan-review's catalog INSTANCE.
 
 
 def pass4_coach(
@@ -631,83 +518,27 @@ def pass4_coach(
     *,
     plan: str,
     surviving: list[dict[str, Any]],
-    move_registry: dict[str, dict[str, str]],
+    move_registry: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Map each surviving advisory finding to a move and render coaching prose
-    DETERMINISTICALLY from the move's locked template. The LLM only picks the move
-    and names a bounded noun-phrase subject (validated); it never authors prose."""
-    if not surviving:
-        return []
-    req = RunRequest(
-        system_prompt=_resolve_system(PASS_COACH, plan, cfg),
-        instructions=coach_instructions(surviving, move_registry),
-        config=cfg,
-        reviewers=["plan-coach"],
-        mode="structured",
-        output_schema="plan_review_coach",
-        execution_mode="single_turn",
-    )
-    result = runner.run(req)
-    return render_coach_notes(result.get("notes", []) or [], move_registry)
+    """Map each surviving advisory finding to a move and render coaching prose DETERMINISTICALLY
+    from the move's locked template, via the shared kernel coach mechanism
+    (:func:`rebar.llm.review_kernel.coach`). The LLM only picks the move + names a bounded
+    noun-phrase subject (validated); it never authors prose. plan-review's active triggers are the
+    criteria carried by the surviving findings (existing always-applicable moves ignore them)."""
+    from rebar.llm import review_kernel
 
+    triggers = {c for f in surviving for c in f.get("criteria", []) or []}
 
-def render_coach_notes(
-    raw_notes: list[dict[str, Any]], move_registry: dict[str, dict[str, str]]
-) -> list[dict[str, Any]]:
-    """Render the Pass-4 LLM's raw move picks ``{move_id, subject, finding_refs}`` into
-    deterministic coaching prose from each move's LOCKED template. The C1 subject
-    validator gates every note (an invalid/imperative/code-bearing subject ⇒ no
-    coaching for that finding); the LLM never authors prose. Extracted so BOTH
-    ``pass4_coach`` (its own LLM call) and the v3 workflow's ``plan_review_coach`` op
-    (the coach is the workflow's prompt step) render identically — no duplicated
-    rendering (story B2)."""
-    notes: list[dict[str, Any]] = []
-    for n in raw_notes:
-        move = move_registry.get(n.get("move_id", ""))
-        subject = _validate_subject(n.get("subject", ""))
-        if not move or subject is None:
-            continue  # C1 fallback: no valid subject ⇒ emit no coaching for it
-        notes.append(
-            {
-                "move_id": n["move_id"],
-                "move_name": move["name"],
-                "subject": subject,
-                "finding_refs": n.get("finding_refs", []) or [],
-                "coaching": move["template"].format(subject=subject),
-            }
+    def _pick(instructions: str, applicable: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+        req = RunRequest(
+            system_prompt=_resolve_system(PASS_COACH, plan, cfg),
+            instructions=instructions,
+            config=cfg,
+            reviewers=["plan-coach"],
+            mode="structured",
+            output_schema="plan_review_coach",
+            execution_mode="single_turn",
         )
-    return notes
+        return runner.run(req).get("notes", []) or []
 
-
-_IMPERATIVE_STARTS = (
-    "add",
-    "remove",
-    "use",
-    "create",
-    "run",
-    "implement",
-    "write",
-    "fix",
-    "change",
-    "delete",
-    "refactor",
-    "call",
-    "set",
-    "make",
-    "update",
-    "replace",
-)
-
-
-def _validate_subject(subject: str) -> str | None:
-    """The SUBJECT VALIDATOR (the load-bearing C1 enforcement): a bounded
-    noun-phrase — ≤8 words / ≤60 chars, no code tokens, not a leading imperative.
-    Returns the cleaned subject or None (reject → no coaching for that finding)."""
-    s = (subject or "").strip()
-    if not s or len(s) > 60 or len(s.split()) > 8:
-        return None
-    if any(tok in s for tok in ("(", ")", "{", "}", ";", "=", "`", "()", "import ")):
-        return None
-    if s.split()[0].lower().rstrip(":,.") in _IMPERATIVE_STARTS:
-        return None
-    return s
+    return review_kernel.coach(surviving, move_registry, pick=_pick, active_triggers=triggers)
