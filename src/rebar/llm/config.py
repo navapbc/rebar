@@ -57,6 +57,44 @@ def current_code_root() -> str | None:
     return _active_code_root.get()
 
 
+def resolve_code_root(
+    repo_root: str | os.PathLike[str] | None = None,
+    *,
+    cfg_repo_path: str | None = None,
+    allow_checkout_fallback: bool = True,
+) -> str | None:
+    """The single authoritative code read-root resolver for the LLM gates.
+
+    Cascade (first truthy wins):
+
+      1. an explicit ``repo_root`` (a caller override),
+      2. ``cfg_repo_path`` (a pinned snapshot already resolved onto an explicit ``LLMConfig``),
+      3. the ACTIVE attested-gate snapshot (:func:`current_code_root`) — a gate pins this to
+         ``[snapshot].ref`` (``origin/main`` HEAD by default), so an in-gate caller that
+         threads nothing still grounds against the pinned snapshot,
+      4. the live checkout root (:func:`rebar.config.repo_root`, which itself falls back to
+         the cwd and so never returns ``None``) — UNLESS ``allow_checkout_fallback`` is False.
+
+    Centralizing this is what kills the *class* of bug where a gate consumer handed
+    ``repo_root=None`` (because the value was dropped on one of the threading hops) silently
+    degrades — e.g. the det-floor P2 'resolution' check abstaining ``no_repo_root``, or an
+    agentic verifier reading the server's mutable checkout instead of the pinned snapshot.
+
+    The default (``allow_checkout_fallback=True``) NEVER returns ``None`` and is for the gate
+    BOUNDARY (a workflow run needs a concrete root; in non-attested local mode the checkout IS
+    the correct root). Lightweight context builders that must NOT force a checkout default
+    (where ``None`` legitimately means "no code to ground against", and a forced checkout root
+    would induce writes) pass ``allow_checkout_fallback=False`` to get snapshot-or-``None``."""
+    if repo_root:
+        return str(repo_root)
+    if cfg_repo_path:
+        return cfg_repo_path
+    snapshot = current_code_root()
+    if snapshot:
+        return snapshot
+    return str(_root_config.repo_root()) if allow_checkout_fallback else None
+
+
 # The active TICKET-store read-root for the running gate. The agent's rebar ticket tools
 # resolve the store under `cfg.repo_path` (the code snapshot) — but the ticket store lives
 # on the orphan `tickets` branch (gitignored `.tickets-tracker/`) and is ABSENT from the

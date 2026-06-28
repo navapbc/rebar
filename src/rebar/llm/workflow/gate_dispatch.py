@@ -73,6 +73,13 @@ def produce_plan_review_verdict(
             ctx, cfg, error=exc, advisory_cap=advisory_cap, runner_name=runner_sel.name
         )
 
+    # NOTE: the workflow's `repo_root` is the TICKET-store read-root (it reaches
+    # assemble_context's `rebar.show_ticket(repo_root=...)` via StepContext) — NOT the code
+    # read-root, which is a SEPARATE snapshot (cfg.repo_path/current_code_root). The det-floor
+    # / grounding ops resolve the code root themselves via `resolve_code_root`
+    # (assemble_context's `repo_root` FIELD), and the agentic verifier reads code via
+    # cfg.repo_path; so we must NOT thread the code snapshot here, or ticket reads would look
+    # for the store under the .git-less code snapshot and miss it.
     doc = _gate_doc("plan-review", repo_root)
     rec = MemoryRecorder()
     _t_total = time.monotonic()

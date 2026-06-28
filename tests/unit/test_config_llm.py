@@ -190,3 +190,29 @@ def test_llm_table_absent_from_show_config_sources(tmp_path: Path) -> None:
     cfg.reset_config_cache()
     _, sources, _ = cfg.resolve_with_sources(root=p)
     assert "llm" not in sources  # reserved section is not part of core provenance
+
+
+# ── the single code-read-root resolver (epic 5ca8 / no_repo_root class) ────────
+def test_resolve_code_root_cascade(tmp_path: Path) -> None:
+    """The authoritative code-read-root resolver: explicit > cfg.repo_path > active gate
+    snapshot > live checkout, and NEVER None — the contract that kills the no_repo_root
+    class of bug (a gate consumer handed None silently degrading)."""
+    from rebar.llm import config as llm_config
+
+    # 1. An explicit repo_root wins over everything.
+    assert llm_config.resolve_code_root("/explicit", cfg_repo_path="/snap") == "/explicit"
+    # 2. A pinned cfg.repo_path is next.
+    assert llm_config.resolve_code_root(None, cfg_repo_path="/snap") == "/snap"
+    # 3. The ACTIVE attested-gate snapshot (origin/main HEAD by default) is next.
+    token = llm_config._active_code_root.set(str(tmp_path))
+    try:
+        assert llm_config.resolve_code_root() == str(tmp_path)
+        assert llm_config.resolve_code_root(cfg_repo_path="/snap") == "/snap"  # still below cfg
+    finally:
+        llm_config._active_code_root.reset(token)
+    # 4. Nothing specified, no gate active → the live checkout, a real path string, NEVER None.
+    fallback = llm_config.resolve_code_root()
+    assert isinstance(fallback, str) and fallback
+    # 5. With the checkout fallback OPTED OUT (the lightweight-builder mode), the same
+    #    no-context call returns None instead of forcing a checkout root.
+    assert llm_config.resolve_code_root(allow_checkout_fallback=False) is None
