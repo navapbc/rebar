@@ -1,7 +1,7 @@
 """Python-surface env reads — REBAR_* only (DSO_* support removed).
 
 The reconciler reads several env vars directly from ``os.environ`` via a local
-``_rebar_env`` helper (applier.py / outbound_differ.py). This asserts the
+``_rebar_env`` helper (apply_handlers.py / outbound_differ.py). This asserts the
 resolution contract: ``REBAR_<NAME>`` is honored; the legacy ``DSO_<NAME>`` is
 IGNORED; otherwise the default.
 """
@@ -31,7 +31,7 @@ def _load(modname: str, filename: str):
 @pytest.mark.parametrize(
     "modname,filename",
     [
-        ("applier", "applier.py"),
+        ("apply_handlers", "apply_handlers.py"),
         ("outbound_differ", "outbound_differ.py"),
     ],
 )

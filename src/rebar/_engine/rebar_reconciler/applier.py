@@ -1,16 +1,25 @@
 #!/usr/bin/env python3
-"""Applier: dispatches mutations to AcliClient and writes per-pass flat-JSON manifest.
+"""Applier: the outbound-batch *sequencer* + polymorphic ``apply()`` entry point.
 
-TODO(follow-up): this module is 586 lines, exceeding the 500-line module-size
-threshold. The intended split is:
-    - mapping_io.py   — _load_mapping, _write_mapping_atomic, _write_mapping_json_atomic,
-                        _persist_field_provenance
-    - retry.py        — _call_with_retry, JiraAPIError, RetryExhaustedError
-    - dispatchers.py  — create_one, update_one, delete_one
-leaving applier.py with just the public apply() orchestrator + RescheduleError +
-_handle_failed_write_result. The refactor was deferred from PR #290 because the
-mechanical move + import-graph fixup is too large for the current PR. Track via
-a follow-up bug ticket before the next applier-touching change.
+``apply()`` selects between typed single-mutation dispatch (``_apply_typed``) and
+the legacy batch path (``_apply_batch``) by argument type. ``_apply_batch`` is a
+thin sequencer — resolve transport → cross-project guard → HEAD-drift recheck
+loop → per-mutation dispatch + record → manifest-write tail — over machinery that
+lives in sibling modules:
+
+    - apply_base.py      — ApplyResult / mutation / _errors loaders + _direction_guard
+    - apply_inbound.py   — inbound leaf appliers
+    - apply_outbound.py  — outbound leaf appliers + HEAD-drift helpers
+    - typed_dispatch.py  — the _LEAVES routing table + _apply_typed
+    - batch_dispatch.py  — create_one / update_one / delete_one + _call_with_retry
+                           + JiraAPIError / RetryExhaustedError
+    - apply_handlers.py  — the per-action batch handlers (create/update/delete)
+                           + BatchApplyContext + dispatch_mutation
+    - pass_io.py         — mapping/pass-record IO + the reschedule contract
+    - rebar_id_audit.py  — the rebar-id label-write authorization guard
+
+The names below are re-exported (see ``__all__``) so ``applier.<name>`` keeps
+resolving for reconcile.py's getattr dispatch table and the test suite.
 """
 
 from __future__ import annotations
@@ -21,21 +30,9 @@ import logging
 import os
 import re
 import sys
-import time
-import urllib.error
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
-
-def _rebar_env(name: str, default: str | None = None) -> str | None:
-    """Read ``REBAR_<name>`` from the environment.
-
-    Local to this module: the reconciler modules are spec-loaded under test (where
-    ``rebar_reconciler`` is the test-package shadow), so a cross-module import of a
-    shared shim would not resolve.
-    """
-    return os.environ.get(f"REBAR_{name}", default)
 
 
 # Typed-mutation dispatch layer.
@@ -162,8 +159,14 @@ def _file_conflict_bug_ticket(cli_path: Path, title: str, description: str, pare
     return lines[-1] if lines else ""
 
 
-# The typed-dispatch routing table + dispatcher live in typed_dispatch.py.
-# Re-exported so apply() (resident) + test_leaves_registry_coverage resolve.
+# Per-action batch handlers + the per-pass context live in apply_handlers.py.
+# Imported (not re-exported) — _apply_batch's per-mutation step dispatches through
+# dispatch_mutation; the handlers wrap batch_dispatch's create/update/delete_one.
+from rebar_reconciler.apply_handlers import (  # noqa: E402
+    BatchApplyContext,
+    dispatch_mutation,
+)
+
 # Outbound batch dispatch + Jira-call retry live in batch_dispatch.py.
 # Re-exported so resident _apply_batch/apply()/outbound leaves and the
 # patch.object(applier, '_call_with_retry'/'JiraAPIError') tests resolve.
@@ -184,10 +187,7 @@ from rebar_reconciler.pass_io import (  # noqa: E402
     EXIT_RESCHEDULE,
     RescheduleError,
     _handle_failed_write_result,
-    _load_alert_store,
-    _load_conflict_resolver,
     _load_mapping,
-    _persist_field_provenance,
     _write_mapping_atomic,
     _write_mapping_json_atomic,
     _write_pass_record,
@@ -208,6 +208,9 @@ from rebar_reconciler.rebar_id_audit import (  # noqa: E402
     _get_rebar_id_guard_mode_from_config,
     _is_rebar_id_label_write_mutation,
 )
+
+# The typed-dispatch routing table + dispatcher live in typed_dispatch.py.
+# Re-exported so apply() (resident) + test_leaves_registry_coverage resolve.
 from rebar_reconciler.typed_dispatch import (  # noqa: E402
     _LEAF_NAMES,
     _LEAVES,
@@ -585,10 +588,7 @@ def _apply_batch(
         jira_project=_s.project,
     )
 
-    rest_calls: int = 0
-    deferred_creates: list[dict] = []
     mutations_with_outcomes: list[dict] = []
-    events_list: list[dict] = []
 
     # Load concurrency module once (used both in the fast path and the main loop)
     concurrency = _load_concurrency()
@@ -630,254 +630,26 @@ def _apply_batch(
             f"syncing — see docs/jira-sync-setup.md."
         )
 
-    # Pin HEAD before first mutation
+    ctx = BatchApplyContext(
+        client=client,
+        acli=acli,
+        repo_root=repo_root,
+        pass_id=pass_id,
+        binding_store=binding_store,
+    )
+
+    # Pin HEAD before first mutation, then sequence — drift recheck → dispatch →
+    # record — one mutation at a time. The per-mutation step is extracted (see
+    # _apply_one) so this loop body stays shallow and the abort-on-drift contract
+    # reads at a glance.
     head_pin = concurrency.snapshot_head(repo_root)
 
     try:
         for mutation in mutations:
-            # Re-check HEAD at the start of each iteration.
-            #
-            # Bug f058: the tickets orphan branch is shared with the ticket
-            # CLI (auto-commits via rebar create / transition / etc.)
-            # and the suggestion subsystem. A parallel Claude session
-            # running `rebar transition <id> closed` triggers
-            # auto-compact, which commits `ticket: COMPACT <id>` to
-            # tickets — that doesn't conflict with the in-flight
-            # outbound mutations, but the strict-equality drift check
-            # aborts the pass. Resolution: inspect the intervening
-            # commit's subject. If it matches a benign external pattern
-            # (ticket-CLI, suggestion, pass-lock), refresh head_pin and
-            # continue. Only raise HeadDriftError when the subject
-            # indicates a competing reconciler outbound write — the
-            # original intent of the detector.
-            current_head = concurrency.snapshot_head(repo_root)
-            if current_head != head_pin:
-                drift_subject = _get_commit_subject(repo_root, current_head)
-                if _drift_is_benign(drift_subject):
-                    # Benign external writer — accept the new HEAD and
-                    # continue. Log so operators can see the writer.
-                    print(  # noqa: T201
-                        f"tolerated_drift: {head_pin[:8]}→{current_head[:8]} "
-                        f"subject={drift_subject!r}",
-                        file=sys.stderr,
-                    )
-                    head_pin = current_head
-                else:
-                    raise HeadDriftError(
-                        f"drift: {head_pin[:8]}→{current_head[:8]} subject={drift_subject!r}"
-                    )
-
-            action = mutation.get("action", "")
-            outcome = dict(mutation)
-
-            # Audit pass: extend the rebar-id label write guard to the legacy
-            # batch dispatch path. create_one/update_one/delete_one all issue
-            # outbound Jira writes, so each batch mutation maps to an
-            # outbound_<action> leaf for guard-name purposes. Without this
-            # call, _audit_rebar_id_label_writes was bypassed for every legacy
-            # dict-shaped mutation — only _apply_typed enforced the contract.
-            _audit_rebar_id_label_writes(f"outbound_{action}", [_BatchAuditView(mutation)])
-
-            if action == "create":
-                # Bug ea6d-e4b2-a316-45ec: collect any add_comment failures so a
-                # swallowed comment sub-mutation during an outbound CREATE surfaces
-                # in the batch outcome rather than reporting a clean error=None,
-                # mirroring the update-path handling below (bug 6afc).
-                _comment_errors: list[str] = []
-                result = create_one(
-                    mutation,
-                    client,
-                    rest_calls=rest_calls,
-                    deferred_creates=deferred_creates,
-                    events_list=events_list,
-                    repo_root=repo_root,
-                    binding_store=binding_store,
-                    comment_errors=_comment_errors,
-                )
-                # Only count REST call on actual create (not dedup-skipped, not deferred)
-                if result is not None and result.get("status") != "dedup-create-skipped":
-                    rest_calls += 1
-                outcome["result"] = result
-                # Surface swallowed comment failures. NON-fatal — the issue create
-                # above genuinely succeeded — so we record them in a dedicated
-                # field rather than overwriting outcome["error"], mirroring the
-                # update-path soft-fail style.
-                if _comment_errors:
-                    outcome["comment_errors"] = list(_comment_errors)
-            elif action == "update":
-                # Bug 17b5-dda4-6662-4616: AssigneeNotFoundError (raised by
-                # client.update_issue's Phase A pre-validation when the
-                # local assignee doesn't map to a real Jira account, e.g.
-                # 'Worktree' git-config default) was killing the entire
-                # batch because the surrounding try-block only handles
-                # HeadDriftError. Soft-fail this mutation: record an
-                # alert, mark outcome error, and continue with the rest.
-                # Mirrors the existing 400-illegal-transition fallback
-                # in update_one and the BRIDGE_ALERT pattern in create_one.
-                # Bug 6afc-20ee-84e5-4dd5: collect any add_comment failures so a
-                # swallowed comment sub-mutation surfaces in the batch outcome
-                # rather than reporting a clean error=None.
-                _comment_errors = []
-                _subop: dict[str, int] = {}
-                try:
-                    result = update_one(
-                        mutation,
-                        client,
-                        comment_errors=_comment_errors,
-                        subop_applied=_subop,
-                    )
-                except urllib.error.HTTPError as exc:
-                    # Bug tan-coin-atone (6614-43cd-3a48-4f63): an outbound
-                    # update against a DELETED Jira issue (stale binding, 1e08
-                    # class) routes status/priority through REST sub-calls
-                    # (transition_issue / update_priority) that raise a RAW
-                    # urllib.error.HTTPError 404 — NOT a JiraAPIError — so the
-                    # update_one comment-fallback try/except (which only handles
-                    # JiraAPIError) misses it and the 404 escapes reconcile_once,
-                    # aborting the whole pass (GHA run 27023829257). A 404 on a
-                    # single mutation's target means the issue is gone: this is a
-                    # PER-MUTATION failure, never pass-fatal. Soft-fail ONLY 404 —
-                    # other HTTP errors (e.g. 5xx) keep current behavior and
-                    # propagate (matching delete_one's already-gone tolerance and
-                    # the AssigneeNotFoundError soft-fail below). Positive-404
-                    # evidence feeds the binding-GC design in
-                    # docs/designs/sync-hardening-proposal.md Item 4b.
-                    if exc.code != 404:
-                        raise
-                    _outcome_key = mutation.get("key") or mutation.get("local_id") or "<unknown>"
-                    logger.warning(
-                        "outbound update skipped: Jira issue %s gone (HTTP 404) "
-                        "— stale binding (1e08); recording per-mutation failure "
-                        "and continuing the pass",
-                        _outcome_key,
-                    )
-                    outcome["result"] = None
-                    outcome["error"] = f"stale-binding-404: {exc!s}"
-                    mutations_with_outcomes.append(outcome)
-                    # Per-mutation RECON line matches the regular path.
-                    print(  # noqa: T201
-                        f"RECON: batch_outcome action={action} "
-                        f"key={_outcome_key} "
-                        f"error={outcome['error']!r}",
-                        file=sys.stderr,
-                    )
-                    continue
-                except acli.AssigneeNotFoundError as exc:
-                    alert_store = _load_alert_store()
-                    alert_store.append(
-                        {
-                            "kind": "outbound-update-assignee-unresolved",
-                            "key": mutation.get("key"),
-                            "local_id": mutation.get("local_id"),
-                            "assignee": ((mutation.get("fields") or {}).get("assignee")),
-                            "pass_id": pass_id,
-                            "timestamp_ns": time.time_ns(),
-                            "reason": str(exc),
-                        },
-                        repo_root=repo_root,
-                    )
-                    outcome["result"] = None
-                    outcome["error"] = f"assignee-unresolved: {exc!s}"
-                    mutations_with_outcomes.append(outcome)
-                    # Per-mutation RECON line matches the regular path.
-                    _outcome_key = mutation.get("key") or mutation.get("local_id") or "<unknown>"
-                    print(  # noqa: T201
-                        f"RECON: batch_outcome action={action} "
-                        f"key={_outcome_key} "
-                        f"error={outcome['error']!r}",
-                        file=sys.stderr,
-                    )
-                    continue
-                outcome["result"] = result
-                # Bug 6afc-20ee-84e5-4dd5: surface swallowed comment failures.
-                # NON-fatal — the scalar update above genuinely succeeded — so we
-                # record them in a dedicated field rather than overwriting
-                # outcome["error"], mirroring the soft-fail style of the
-                # stale-binding-404 / assignee-unresolved handlers.
-                if _comment_errors:
-                    outcome["comment_errors"] = list(_comment_errors)
-                # Story E (2359): sub-op telemetry — surface per-kind APPLIED counts
-                # on the structured outcome (parity with apply_inbound's
-                # links_applied), so a link/comment/label that silently no-ops is
-                # queryable, not only logged to stderr.
-                outcome["labels_applied"] = _subop.get("labels_applied", 0)
-                outcome["comments_applied"] = _subop.get("comments_applied", 0)
-                outcome["links_applied"] = _subop.get("links_applied", 0)
-                # Silent-no-op canary: a kind with sub-ops COMPUTED (post-dedup) but
-                # ZERO applied is exactly the bug-3f04 link-drop failure mode — it
-                # would otherwise pass green with error=None. computed is counted
-                # post-dedup, so an idempotent re-sync (everything deduped) is
-                # computed==0 and does NOT fire. NOTE: this is a TOTAL-no-op detector
-                # (applied==0) per the AC's `computed > 0 && applied == 0` invariant —
-                # a PARTIAL drop (e.g. 2 links computed, 1 applied) does not fire; a
-                # finer per-sub-op threshold is deliberately out of scope (YAGNI).
-                _silent = [
-                    kind
-                    for kind in ("labels", "comments", "links")
-                    if _subop.get(f"{kind}_computed", 0) > 0
-                    and _subop.get(f"{kind}_applied", 0) == 0
-                ]
-                if _silent:
-                    _noop_key = mutation.get("key") or mutation.get("local_id") or "<unknown>"
-                    _detail = ", ".join(
-                        f"{k}: computed={_subop.get(f'{k}_computed', 0)} applied=0" for k in _silent
-                    )
-                    outcome["silent_noop"] = _silent
-                    logger.warning(
-                        "outbound update silent no-op for %s — %s; sub-ops were "
-                        "computed but NONE applied (the bug-3f04 failure mode)",
-                        _noop_key,
-                        _detail,
-                    )
-                    # Warn-first rollout: hard-fail (record a per-mutation failure)
-                    # ONLY behind the flag — promotion to hard-fail and reversion to
-                    # warn are a flag flip with no other code change.
-                    if _rebar_env("RECONCILER_FAIL_SILENT_NOOP", "0") == "1":
-                        outcome["error"] = f"silent-noop: {_detail}"
-                # Persist provenance for set-valued fields after update
-                jira_key = mutation.get("key", "")
-                if jira_key:
-                    conflict_resolver = _load_conflict_resolver()
-                    mapping_path = repo_root / "bridge_state" / "mapping.json"
-                    for field_name, field_value in mutation.get("fields", {}).items():
-                        if conflict_resolver.FIELD_CLASSES.get(field_name) == "set":
-                            _persist_field_provenance(
-                                mapping_path, jira_key, field_name, field_value
-                            )
-            elif action == "delete":
-                delete_one(mutation, client)
-                outcome["result"] = None
-            else:
-                outcome["result"] = None
-                outcome["error"] = f"unknown action: {action!r}"
-
-            mutations_with_outcomes.append(outcome)
-            # Bug b859 (Part 0c): per-mutation RECON line so operators see
-            # which dispatch actually ran without parsing the manifest.
-            # Targets the legacy batch path (the dominant outbound CREATE +
-            # UPDATE channel today). Truncated to single-line; full
-            # mutation lives in the manifest for forensic dives.
-            _outcome_key = mutation.get("key") or mutation.get("local_id") or "<unknown>"
-            _outcome_err = outcome.get("error")
-            # Story E (2359): surface the sub-op applied counts on the RECON line so
-            # operators see links/comments/labels applied without parsing the
-            # manifest (0 for non-update actions, which carry no sub-ops).
-            _recon_subops = (
-                f" links_applied={outcome.get('links_applied', 0)}"
-                f" comments_applied={outcome.get('comments_applied', 0)}"
-                f" labels_applied={outcome.get('labels_applied', 0)}"
-                f" silent_noop={outcome.get('silent_noop', [])!r}"
-                if action == "update"
-                else ""
-            )
-            print(  # noqa: T201
-                f"RECON: batch_outcome action={action} key={_outcome_key} "
-                f"error={_outcome_err!r}{_recon_subops}",
-                file=sys.stderr,
-            )
-
+            head_pin = _recheck_drift(concurrency, repo_root, head_pin)
+            _apply_one(mutation, ctx, mutations_with_outcomes)
     except HeadDriftError:
-        # Emit abort event as structured log and re-raise for the caller
+        # Emit abort event as structured log and re-raise for the caller.
         print(
             json.dumps(
                 {
@@ -895,7 +667,7 @@ def _apply_batch(
         "pass_id": pass_id,
         "mutation_count": len(mutations),
         "mutations": mutations_with_outcomes,
-        "events": events_list,
+        "events": ctx.events_list,
     }
 
     snapshots_dir = repo_root / "bridge_state" / "snapshots"
@@ -916,3 +688,80 @@ def _apply_batch(
         _handle_failed_write_result(write_result, pass_id)
 
     return manifest_path
+
+
+def _recheck_drift(concurrency, repo_root: Path, head_pin: str) -> str:
+    """Re-check the tickets-branch HEAD before a mutation; return the (possibly
+    refreshed) pin, or raise HeadDriftError on a competing reconciler write.
+
+    Bug f058: the tickets orphan branch is shared with the ticket CLI
+    (auto-commits via rebar create / transition / etc.) and the suggestion
+    subsystem. A parallel Claude session running `rebar transition <id> closed`
+    triggers auto-compact, which commits `ticket: COMPACT <id>` to tickets — that
+    doesn't conflict with the in-flight outbound mutations, but a strict-equality
+    drift check would abort the pass. Resolution: inspect the intervening commit's
+    subject. If it matches a benign external pattern (ticket-CLI, suggestion,
+    pass-lock), refresh the pin and continue. Only raise HeadDriftError when the
+    subject indicates a competing reconciler outbound write — the original intent
+    of the detector.
+    """
+    current_head = concurrency.snapshot_head(repo_root)
+    if current_head == head_pin:
+        return head_pin
+    drift_subject = _get_commit_subject(repo_root, current_head)
+    if _drift_is_benign(drift_subject):
+        # Benign external writer — accept the new HEAD and continue. Log so
+        # operators can see the writer.
+        print(  # noqa: T201
+            f"tolerated_drift: {head_pin[:8]}→{current_head[:8]} subject={drift_subject!r}",
+            file=sys.stderr,
+        )
+        return current_head
+    raise HeadDriftError(f"drift: {head_pin[:8]}→{current_head[:8]} subject={drift_subject!r}")
+
+
+def _apply_one(mutation: dict, ctx: BatchApplyContext, mutations_with_outcomes: list[dict]) -> None:
+    """Audit-guard, dispatch, and record one mutation's outcome.
+
+    The audit guard stays resident here (not in the handlers): it is the
+    pre-dispatch authorization check, and the test suite reaches it via
+    ``applier._audit_rebar_id_label_writes`` / ``applier._BatchAuditView``.
+    """
+    action = mutation.get("action", "")
+    # Audit pass: extend the rebar-id label write guard to the legacy batch
+    # dispatch path. create_one/update_one/delete_one all issue outbound Jira
+    # writes, so each batch mutation maps to an outbound_<action> leaf for
+    # guard-name purposes. Without this call, _audit_rebar_id_label_writes was
+    # bypassed for every legacy dict-shaped mutation — only _apply_typed enforced
+    # the contract.
+    _audit_rebar_id_label_writes(f"outbound_{action}", [_BatchAuditView(mutation)])
+    result = dispatch_mutation(mutation, ctx)
+    mutations_with_outcomes.append(result.outcome)
+    _print_batch_recon(action, result.outcome, soft_failed=result.soft_failed)
+
+
+def _print_batch_recon(action: str, outcome: dict, *, soft_failed: bool) -> None:
+    """Emit the per-mutation RECON line (bug b859 Part 0c) so operators see which
+    dispatch actually ran without parsing the manifest.
+
+    Story E (2359): update outcomes carry the sub-op applied counts + silent-noop
+    flag suffix. The 404 / assignee soft-failures (soft_failed) record and return
+    before that telemetry is computed, so they omit the suffix — matching the
+    pre-split output.
+    """
+    _outcome_key = outcome.get("key") or outcome.get("local_id") or "<unknown>"
+    _outcome_err = outcome.get("error")
+    if action == "update" and not soft_failed:
+        _recon_subops = (
+            f" links_applied={outcome.get('links_applied', 0)}"
+            f" comments_applied={outcome.get('comments_applied', 0)}"
+            f" labels_applied={outcome.get('labels_applied', 0)}"
+            f" silent_noop={outcome.get('silent_noop', [])!r}"
+        )
+    else:
+        _recon_subops = ""
+    print(  # noqa: T201
+        f"RECON: batch_outcome action={action} key={_outcome_key} "
+        f"error={_outcome_err!r}{_recon_subops}",
+        file=sys.stderr,
+    )

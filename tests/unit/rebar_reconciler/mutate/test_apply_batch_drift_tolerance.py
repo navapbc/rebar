@@ -119,22 +119,27 @@ def test_drift_rejects_unknown_subjects(applier):
 
 
 def test_apply_batch_uses_drift_is_benign(applier):
-    """The drift detector inside `_apply_batch` must consult
-    `_drift_is_benign` before raising HeadDriftError. Without this, a
-    benign external `ticket: COMPACT` commit during a reconciler pass
-    aborts the pass (the bug f058 symptom).
+    """The per-mutation drift detector must consult `_drift_is_benign` before
+    raising HeadDriftError. Without this, a benign external `ticket: COMPACT`
+    commit during a reconciler pass aborts the pass (the bug f058 symptom).
 
-    This test reads the applier source to verify the structural wiring —
-    a behavioral integration test against the real `_apply_batch` loop
-    would require a full git tickets-branch repo fixture, which is
-    captured separately. The structural check ensures the helper is
+    The detector lives in the extracted `_recheck_drift` helper, which
+    `_apply_batch` calls once per mutation. This test reads the source to verify
+    the structural wiring across that seam — a behavioral integration test
+    against the real loop would require a full git tickets-branch repo fixture,
+    which is captured separately. The structural check ensures the helper is
     actually USED, not just defined.
     """
     import inspect
 
-    src = inspect.getsource(applier._apply_batch)
-    assert "_drift_is_benign" in src, (
-        "After the fix, _apply_batch must call _drift_is_benign before "
-        "raising HeadDriftError. The helper exists but isn't wired into "
-        "the drift detector — the bug is not fixed."
+    batch_src = inspect.getsource(applier._apply_batch)
+    assert "_recheck_drift" in batch_src, (
+        "_apply_batch must delegate the per-mutation HEAD-drift recheck to "
+        "_recheck_drift (the extracted per-mutation step)."
+    )
+    recheck_src = inspect.getsource(applier._recheck_drift)
+    assert "_drift_is_benign" in recheck_src, (
+        "After the fix, the drift detector (_recheck_drift) must call "
+        "_drift_is_benign before raising HeadDriftError. The helper exists but "
+        "isn't wired into the drift detector — the bug is not fixed."
     )
