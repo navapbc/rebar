@@ -106,8 +106,14 @@ def test_evicts_stale_pinned_ticket_store_entry(store):
     os.utime(entry, (old, old))
 
     res = janitor.run_gc(store, config=cfg, now=now, free_bytes=0)
+    # Eviction half:
     assert not entry.exists(), "stale tickets-<sha> entry should be evicted under pressure"
     assert res.evicted >= 1
+    # Accounting half: the entry's bytes are measured and flow through the byte total via
+    # _evict -> _cache.add_bytes(-size). This only happens because _is_entry now recognizes
+    # the tickets- prefix — without the fix the entry is invisible to _entries(), so it is
+    # neither evicted NOR counted and reclaimed_bytes stays 0.
+    assert res.reclaimed_bytes > 0, "the tickets-<sha> entry's bytes must be reclaimed/accounted"
 
 
 def test_no_eviction_when_space_ample_and_not_cold(store, repo):
