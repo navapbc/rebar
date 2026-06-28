@@ -20,6 +20,7 @@ config table > documented default), so a deployment can override them without co
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import os
 from collections.abc import Iterator
 from dataclasses import replace
@@ -30,8 +31,8 @@ from rebar._snapshot import (
     SnapshotHandle,
     acquire,
 )
-from rebar._snapshot.repo_snapshot import DEFAULT_REF
-from rebar.llm.config import LLMConfig, gate_session, use_code_root
+from rebar._snapshot.repo_snapshot import DEFAULT_REF, materialize_tickets
+from rebar.llm.config import LLMConfig, gate_session, use_code_root, use_tickets_root
 
 __all__ = [
     "SOURCE_ATTESTED",
@@ -89,7 +90,15 @@ def resolve_gate_handle(
     so an attested gate never silently reads the wrong tree."""
     resolved_ref = ref or default_ref(repo_root)
     resolved_source = source or default_source(repo_root)
-    return acquire(resolved_ref, source_mode=resolved_source, repo_root=repo_root, fetch=fetch)
+    handle = acquire(resolved_ref, source_mode=resolved_source, repo_root=repo_root, fetch=fetch)
+    if handle.source == SOURCE_ATTESTED:
+        # The ticket store lives on the orphan `tickets` branch, so it is ABSENT from the
+        # code snapshot — materialize a separate pinned copy and attach it so the agent's
+        # rebar ticket tools read it (instead of erroring on the missing `.tickets-tracker`
+        # in the code snapshot). Fail-closed errors propagate, like the code snapshot.
+        tickets_root = materialize_tickets(repo_root=repo_root, fetch=fetch)
+        handle = dataclasses.replace(handle, tickets_path=tickets_root)
+    return handle
 
 
 @contextlib.contextmanager
@@ -100,17 +109,20 @@ def gate_read_root(handle: SnapshotHandle) -> Iterator[None]:
     is still marked as a deliberate gate session so :func:`config.assert_gated` passes."""
     with gate_session():
         if handle.source == SOURCE_ATTESTED:
-            with use_code_root(str(handle.path)):
+            # Activate BOTH the code root (file tools) and the pinned ticket-store root
+            # (rebar ticket tools), so every config rebuilt deep in the gate reads each.
+            with use_code_root(str(handle.path)), use_tickets_root(handle.tickets_path):
                 yield
         else:
             yield
 
 
 def apply_handle(cfg: LLMConfig, handle: SnapshotHandle) -> LLMConfig:
-    """Re-root an explicit config's ``repo_path`` onto an attested snapshot (no-op for
-    local, which already reads the checkout)."""
+    """Re-root an explicit config's ``repo_path`` (code) and ``tickets_path`` (the pinned
+    ticket store) onto an attested snapshot (no-op for local, which already reads the
+    checkout)."""
     if handle.source == SOURCE_ATTESTED:
-        return replace(cfg, repo_path=str(handle.path))
+        return replace(cfg, repo_path=str(handle.path), tickets_path=handle.tickets_path)
     return cfg
 
 

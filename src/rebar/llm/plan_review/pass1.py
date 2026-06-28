@@ -15,6 +15,7 @@ batch-runner (epic B / story B1). It must NOT import from :mod:`.orchestrator`
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import json
 import logging
@@ -48,6 +49,17 @@ CACHE_MIN_PREFIX_TOKENS = 4096
 # Concurrency cap for the container fan-out pool (a NEW pool — the Pass-1 pool is closed
 # by the time the container criteria run).
 _CONTAINER_MAX_WORKERS = 6
+
+
+def _submit_ctx(ex: ThreadPoolExecutor, fn, *args):
+    """Submit ``fn(*args)`` to the pool carrying a COPY of the current context, so the
+    gate-session ContextVars (`_in_gate_session` / `_active_code_root`) — which raw worker
+    threads do NOT inherit — reach the worker. Without this, an agentic ``runner.run`` in a
+    worker reads `in_gate_session()` == False and `assert_gated` raises before any LLM call.
+    A FRESH copy per task: a Context cannot be entered concurrently (copy_context().run on the
+    same Context from two threads raises). Evaluated here (the submitting thread) so it captures
+    the active session."""
+    return ex.submit(contextvars.copy_context().run, fn, *args)
 
 
 def _too_big_finding(
@@ -219,7 +231,7 @@ def _run_container(
     if to_pool:
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
             futs = [
-                ex.submit(_timed_pairing, runner, cfg, ctx, roster, container, bin_children)
+                _submit_ctx(ex, _timed_pairing, runner, cfg, ctx, roster, container, bin_children)
                 for bin_children in to_pool
             ]
             for fu in futs:
@@ -423,8 +435,8 @@ def run_pass1(
         len(shed) if shed else 0,
     )
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        st_futs = [ex.submit(_chunk, ch, False) for ch in chunks]
-        ag_futs = [ex.submit(_chunk, [c], True) for c in agent]
+        st_futs = [_submit_ctx(ex, _chunk, ch, False) for ch in chunks]
+        ag_futs = [_submit_ctx(ex, _chunk, [c], True) for c in agent]
         for fu in st_futs + ag_futs:
             try:
                 findings.extend(fu.result() or [])

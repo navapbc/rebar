@@ -64,7 +64,21 @@ For each requirement:
 2. Decide what evidence would demonstrate it is met, and gather that evidence with your
    tools — `list_directory` to explore, `search_files` to locate code, `read_file` to inspect
    exact lines. Ground every conclusion in what the tools actually return.
-3. Decide MET or NOT MET.
+3. Decide MET or NOT MET — but **decompose the judgment** rather than forming a holistic
+   impression. A requirement is MET only if the evidence you gathered lets you answer YES to
+   each atomic check below (treat it as NOT MET — never guess — if a check is NO or you could
+   not verify it within a bounded search):
+   - **Concrete, not aspirational** — the evidence is real implementation, not a stub, a
+     `skip`/`xfail`, a TODO, or docs calling it planned/future.
+   - **Evidence ENTAILS the requirement** — the code you read actually *does what the
+     requirement states*, not merely adjacent or related code. "A function/file exists" is
+     NOT "it does what the criterion requires"; do not let plausibly-related code stand in
+     for the specific behavior the criterion demands.
+   - **No unmet sub-part** — if the requirement bundles several obligations, EVERY one is
+     satisfied, not just the easiest.
+   Judge each requirement **independently**: on its own gathered evidence alone — never on the
+   author's checked box, an overall positive impression of the change, or whether *other*
+   requirements passed.
 
 **Be decisive — work within a tool budget.** Spend a BOUNDED amount of effort per criterion:
 a few targeted `search_files`/`read_file` calls to confirm the relevant code exists and does
