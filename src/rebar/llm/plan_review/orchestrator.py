@@ -30,7 +30,7 @@ import logging
 from typing import Any
 
 from rebar.llm import review_kernel
-from rebar.llm.config import LLMConfig
+from rebar.llm.config import LLMConfig, resolve_code_root
 from rebar.llm.runner import Runner, get_runner
 
 from . import registry
@@ -109,7 +109,15 @@ def assemble_context(
         description=state.get("description", ""),
         state=state,
         children=children,
-        repo_root=str(repo_root) if repo_root else (cfg.repo_path if cfg else None),
+        repo_root=resolve_code_root(
+            repo_root,
+            cfg_repo_path=cfg.repo_path if cfg else None,
+            # Snapshot-or-None: inside a gate this picks up the active attested snapshot
+            # (fixing the det-floor P2 `no_repo_root` abstain); outside a gate it stays
+            # None — this lightweight builder must not force a checkout root, which would
+            # induce checkpoint/cache writes into the live checkout.
+            allow_checkout_fallback=False,
+        ),
         largest_window_tokens=largest_window_tokens(cfg.model if cfg else None),
         centrality=_centrality(state, children),
     )
