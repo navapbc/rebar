@@ -51,6 +51,23 @@ def current_code_root() -> str | None:
     return _active_code_root.get()
 
 
+# The active TICKET-store read-root for the running gate. The agent's rebar ticket tools
+# resolve the store under `cfg.repo_path` (the code snapshot) — but the ticket store lives
+# on the orphan `tickets` branch (gitignored `.tickets-tracker/`) and is ABSENT from the
+# code snapshot, so a gate sets this to a separately materialized, pinned copy of the store
+# (see `rebar._snapshot.materialize_tickets`) and `LLMConfig.from_env` resolves
+# `tickets_path` to it. Mirrors `_active_code_root`; unset (local mode) reads the live
+# checkout's store (which already has `.tickets-tracker/`).
+_active_tickets_root: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "rebar_llm_tickets_root", default=None
+)
+
+
+def current_tickets_root() -> str | None:
+    """The active gate's ticket-store read-root (a pinned snapshot of the store), or ``None``."""
+    return _active_tickets_root.get()
+
+
 def current_code_sha() -> str | None:
     """The pinned SHA of the active attested snapshot, or ``None`` (local / no gate).
 
@@ -134,6 +151,18 @@ def use_code_root(path: str | None) -> Iterator[None]:
         yield
     finally:
         _active_code_root.reset(token)
+
+
+@contextlib.contextmanager
+def use_tickets_root(path: str | None) -> Iterator[None]:
+    """Bind the gate's ticket-store read-root for the duration of the block (``None`` = no
+    override, i.e. read the in-place checkout's store — local mode). Mirrors
+    :func:`use_code_root`; the same raw-thread ContextVar caveat applies."""
+    token = _active_tickets_root.set(path)
+    try:
+        yield
+    finally:
+        _active_tickets_root.reset(token)
 
 
 # Single source of truth for the per-call output-token cap default. Referenced by
@@ -338,6 +367,11 @@ class LLMConfig:
     max_iterations: int = DEFAULT_MAX_ITERATIONS
     timeout_s: int = DEFAULT_TIMEOUT_S
     repo_path: str | None = None
+    # The read root for the agent's rebar TICKET tools — a pinned snapshot of the ticket
+    # store in attested mode (the orphan `tickets` branch is absent from the code snapshot
+    # `repo_path`), or `None` to read the in-place checkout's store (local mode). Set from
+    # `current_tickets_root()` by `from_env`.
+    tickets_path: str | None = None
     mcp_servers: dict = field(default_factory=dict)
     langfuse: LangfuseConfig = field(default_factory=LangfuseConfig)
 
@@ -384,6 +418,9 @@ class LLMConfig:
             or os.environ.get("REBAR_LLM_REPO_PATH")
             or str(_root_config.repo_root(repo_root))
         )
+        # The agent's rebar ticket tools read the PINNED ticket-store snapshot when a gate
+        # set it (None when unset -> the live checkout's store; preserves prior behavior).
+        tickets_path = current_tickets_root()
         return cls(
             runner=runner,
             model=_llm_str(table, cli, "REBAR_LLM_MODEL", "model", DEFAULT_MODEL),
@@ -403,6 +440,7 @@ class LLMConfig:
             ),
             timeout_s=_llm_int(table, cli, "REBAR_LLM_TIMEOUT", "timeout", DEFAULT_TIMEOUT_S),
             repo_path=repo_path,
+            tickets_path=tickets_path,
             mcp_servers=mcp_servers,
             langfuse=LangfuseConfig.from_env(),
         )

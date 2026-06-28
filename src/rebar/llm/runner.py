@@ -202,8 +202,19 @@ class PydanticAIRunner:
                 from rebar.llm.config import assert_gated
 
                 assert_gated("agentic filesystem tools")
+            # Read-only ticket contract (the gates): in attested mode the agent reads a
+            # PINNED snapshot copy of the ticket store, so a comment write would land in a
+            # throwaway dir and be lost — withhold it. (REBAR_MCP_READONLY also withholds it.)
+            # Local mode reads the live checkout, where a comment is a real write, so it is
+            # allowed there. `current_code_root()` is set only in attested mode.
+            from rebar.llm.config import current_code_root
+
+            allow_comment = (not _readonly_gate()) and current_code_root() is None
+            # The rebar ticket tools read the PINNED ticket-store snapshot when set (the
+            # orphan `tickets` branch is absent from the code snapshot `cfg.repo_path`),
+            # else the in-place checkout's store. The file tools stay on the code snapshot.
             tools = pai_tools.filesystem_tools(cfg.repo_path) + pai_tools.rebar_tools(
-                cfg.repo_path, allow_comment=not _readonly_gate()
+                cfg.tickets_path or cfg.repo_path, allow_comment=allow_comment
             )
             if req.extra_tools:
                 tools = [*tools, *req.extra_tools]
@@ -234,7 +245,15 @@ class PydanticAIRunner:
         # Halve cfg.max_iterations (which is authored as ~2 steps per tool-call cycle)
         # so a given cfg.max_iterations allows the intended number of tool-call cycles
         # (and so we DON'T silently inherit pydantic-ai's default request_limit=50).
-        usage_limits = UsageLimits(request_limit=max(1, math.ceil(cfg.max_iterations / 2)))
+        # request_limit bounds model TURNS, not tool calls WITHIN a turn — a tool that fails
+        # and gets re-called can spray many calls in few turns (pydantic-ai #2593). Add
+        # tool_calls_limit as the in-turn backstop so a failing/looping tool cannot burn the
+        # whole budget (the retry-to-exhaustion failure mode). Set generously above the
+        # expected ~max_iterations/2 tool calls, so it only trips on a genuine runaway.
+        usage_limits = UsageLimits(
+            request_limit=max(1, math.ceil(cfg.max_iterations / 2)),
+            tool_calls_limit=max(8, cfg.max_iterations),
+        )
         # Observability (one structured record per LLM call): which reviewer/criterion,
         # execution mode, model, and wall-clock — so a slow/serial fan-out (e.g. the
         # container per-child loop) is visible without a debugger. Quiet by default;
