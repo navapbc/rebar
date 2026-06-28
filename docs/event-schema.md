@@ -3,7 +3,7 @@
 Every ticket is a directory under the `tickets` orphan branch worktree
 (`.tickets-tracker/<ticket_id>/`); every mutation is one append-only JSON **event
 file** in it. State is computed by replaying the events (the reducer,
-`src/rebar/_engine/ticket_reducer/`). Nothing is ever stored as compiled state
+`src/rebar/reducer/`). Nothing is ever stored as compiled state
 except the local, rebuildable `.cache.json` (gitignored — see docs/concurrency.md).
 
 > This document is the **event** (write) schema. The **output** (read) contract —
@@ -39,7 +39,7 @@ excluded from replay (the reducer globs `*.json` and skips names starting with `
 
 ## Event types
 
-Replay dispatch: `ticket_reducer/_processors.py` (`process_*`).
+Replay dispatch: `reducer/_processors.py` (`process_*`).
 
 | TYPE | Written by | Effect on replayed state |
 |------|-----------|--------------------------|
@@ -48,7 +48,7 @@ Replay dispatch: `ticket_reducer/_processors.py` (`process_*`).
 | `EDIT` | `ticket-edit.sh`, `ticket_txn.py` (claim) | Merges `data.fields` (title/priority/assignee/description/parent) into state (last-writer-by-replay-order). **Tags are no longer mutated via `EDIT` (P2.3)** — historical `EDIT.fields.tags` still replays as the base, but no upgraded writer emits it; use `TAG_DELTA`. |
 | `TAG_DELTA` | `edit --add-tag/--remove-tag/--set-tags`, `tag`/`untag`, Jira inbound applier | Convergent tag add/remove deltas: `data.{added[], removed[]}` mutate the current `tags` in replay order (remove-then-add, so **add wins** on an intra-event conflict; idempotent). Replaces the whole-field `EDIT.tags` clobber so two clones adding different tags both survive. `--set-tags` is compiled to a delta vs observed tags (add-wins). The inbound reconciler marks `data.source="inbound"` so `local_label_intent` excludes it from user-intent. |
 | `COMMENT` | `ticket-comment.sh` | Appends `{body, author, timestamp}` to `comments`. |
-| `LINK` / `UNLINK` | `ticket-graph.py` / `ticket-link.sh` | Add / cancel a relation. Relations: `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`, `discovered_from` (`ticket_graph/_links.py:CANONICAL_RELATIONS`). `relates_to` is reciprocal; the rest are directional. Only `blocks`/`depends_on` can create cycles. **Hierarchy promotion:** for `blocks`/`depends_on` only, the recorded endpoints are promoted up the parent hierarchy so the dependency is between comparable levels (epic↔epic, story↔story, task/bug↔task/bug), emitting a `REDIRECT: A→B promoted to …` note; the other (non-blocking) relations are recorded exactly as given. `UNLINK` is pair-scoped (no relation arg) and cancels the most-recent link for an ordered `<source> <target>` pair, one per event — and must target the *promoted (ancestor)* endpoint to cancel a promoted blocking link. A `session_log` endpoint refuses `blocks`/`depends_on` (it never enters the dependency graph) but permits the non-blocking `relates_to`/`discovered_from`. |
+| `LINK` / `UNLINK` | `ticket-graph.py` / `ticket-link.sh` | Add / cancel a relation. Relations: `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`, `discovered_from` (`graph/_links.py:CANONICAL_RELATIONS`). `relates_to` is reciprocal; the rest are directional. Only `blocks`/`depends_on` can create cycles. **Hierarchy promotion:** for `blocks`/`depends_on` only, the recorded endpoints are promoted up the parent hierarchy so the dependency is between comparable levels (epic↔epic, story↔story, task/bug↔task/bug), emitting a `REDIRECT: A→B promoted to …` note; the other (non-blocking) relations are recorded exactly as given. `UNLINK` is pair-scoped (no relation arg) and cancels the most-recent link for an ordered `<source> <target>` pair, one per event — and must target the *promoted (ancestor)* endpoint to cancel a promoted blocking link. A `session_log` endpoint refuses `blocks`/`depends_on` (it never enters the dependency graph) but permits the non-blocking `relates_to`/`discovered_from`. |
 | `FILE_IMPACT` | `set-file-impact` | Records the `{path, reason}` array `next-batch` uses for conflict-aware scheduling. |
 | `VERIFY_COMMANDS` / `PRECONDITIONS` | `set-verify-commands` / preconditions util | Record DD-level verify commands / precondition metadata. |
 | `SIGNATURE` | `sign` (`rebar.signing`) | Records `data.{manifest, algorithm, signature, key_id, head_sha, signed_at}` — an HMAC-SHA256 attestation over a ticket's **manifest of verified steps**, computed with the **environment-specific** signing key (`REBAR_SIGNING_KEY` or the gitignored `.signing-key`). Replayed into `state['signature']` (last-writer-wins, like FILE_IMPACT/VERIFY_COMMANDS). `verify-signature` recomputes the HMAC with the local key and certifies the steps match — `key_id` (a key fingerprint, never the key) lets verification distinguish a tampered manifest from a signature made by a *different* environment. Like FILE_IMPACT/VERIFY_COMMANDS this is last-writer-wins by replay (filename) order, so concurrent signs converge deterministically to the lexicographically-last `{ts}-{uuid}-SIGNATURE.json` (the UUID breaks any timestamp tie) — not to a semantically "best" signature; re-sign to supersede. |
@@ -58,6 +58,13 @@ Replay dispatch: `ticket_reducer/_processors.py` (`process_*`).
 | `WORKFLOW_STEP` | workflow executor (`rebar.llm.workflow`) | Per-`(run_id, step_id)` last-writer-wins into `state.workflow_steps[run_id][step_id]`. A step's idempotency marker + result, committed AFTER the step's effect, carrying the full per-step record (status, outputs, error, captured non-determinism); a retry's later event supersedes the earlier one. Lazy + per-key like `WORKFLOW_RUN`. Never synced to Jira. |
 | `COMMITS` | `attach_commits` (`rebar.attach_commits`) | Unions commit records into `state.commits` (used by the code-review workflow). `data.commits` is a list of SHAs or `{sha, message?, author?}` records, deduplicated by `sha` (first-in-replay-order wins); union-add is order-insensitive, so all clones converge. Restored verbatim by `SNAPSHOT` (survives compaction). Never surfaced to Jira (the outbound differ does not read `commits`). |
 | `BRIDGE_ALERT` / `REVERT` / `SYNC` | reconciler / revert | Jira-bridge alerting, event reversal, and bridge sync bookkeeping. |
+
+*The "Written by" column names the **historical bash writers** (`ticket-create.sh`,
+`ticket-edit.sh`, `ticket-comment.sh`, `ticket-graph.py`, `ticket-link.sh`,
+`ticket-compact.sh`, `ticket-lib.sh`, …), which have since been migrated to the
+in-process Python write path (`rebar._commands` leaf/lifecycle writers +
+`rebar._store` append/commit, with `rebar.reducer`/`rebar.graph` for replay/relations).
+It identifies the originating event producer, not a current file path.*
 
 ## Schema version & forward compatibility
 

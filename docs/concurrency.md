@@ -21,7 +21,7 @@ model. Every invariant below (I1–I9) gates every change to the system.
 Tickets live on a dedicated `tickets` git **orphan branch**, checked out as a
 worktree at `<repo>/.tickets-tracker/`. Each ticket is a directory; each mutation
 is one JSON **event file** inside it. State is never stored — it is *computed* by
-replaying the events (the reducer, `ticket_reducer/`).
+replaying the events (the reducer, `reducer/`).
 
 A reconciler bidirectionally syncs tickets with Jira; it is the one component
 allowed a cross-client advisory lock (see I6).
@@ -45,7 +45,7 @@ new files as a union with no conflict. **New event kinds MUST use this scheme.**
 
 ### I3 — Reads are side-effect-free except local, rebuildable caches
 The only read-side write is the per-ticket `.cache.json`
-(content/size-keyed, written tmp-then-rename: `ticket_reducer/_cache.py:25-30`).
+(content/size-keyed, written tmp-then-rename: `reducer/_cache.py:25-30`).
 No feature may introduce a **committed** shared mutable file — it would create
 cross-client merge conflicts.
 
@@ -122,7 +122,7 @@ event log on demand or cached **local-and-rebuildable** (gitignored, uncommitted
 Replay orders events by the `${timestamp}` filename prefix. With skewed client
 clocks, COMMENT/EDIT interleaving across clients is best-effort. **STATUS forks
 are resolved deterministically and skew-independently by the event's own UUID:**
-the lexically-lower UUID wins (`ticket_reducer/_processors.py:81-115`,
+the lexically-lower UUID wins (`reducer/_processors.py:81-115`,
 `if not existing_uuid or incoming_uuid <= existing_uuid`). Any new
 state-dependent merge logic MUST resolve forks by UUID (or another
 skew-independent key), **never by timestamp alone**.
@@ -253,9 +253,9 @@ throttled (≤1/min) best-effort fetch + reconverge **before** replaying, so the
 result reflects collaborators' pushes within at most one minute. This is a single
 contract shared by all three interfaces: the CLI dispatcher's read arms, the
 library functions (`rebar.show_ticket`, `rebar.list_tickets`, …), **and** the MCP
-read tools all funnel through one implementation — `ticket_reads` in the engine
-(`src/rebar/_engine/ticket_reads.py`), with `rebar/_reads.py` as the
-library/MCP facade. `ticket_reads.ensure_fresh()` reuses the exact mechanism above:
+read tools all funnel through one implementation — `reads` in the engine-support
+layer (`src/rebar/_engine_support/reads.py`), with `rebar/_reads.py` as the
+library/MCP facade. `reads.ensure_fresh()` reuses the exact mechanism above:
 the `/tmp/.ticket-sync-<md5>` throttle marker **and** the `_reconverge_tickets`
 function in `ticket-sync.sh` (one fetch/merge implementation, no reinvention). The
 CLI and in-process reads share the same marker, so they never double-fetch within

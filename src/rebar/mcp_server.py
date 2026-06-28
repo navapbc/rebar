@@ -297,7 +297,7 @@ def build_server():
     except ImportError as exc:  # pragma: no cover - dependency guard
         raise SystemExit(
             "The rebar MCP server requires the 'mcp' extra. "
-            "Install it with: pip install 'rebar[mcp]'"
+            "Install it with: pip install 'nava-rebar[mcp]'"
         ) from exc
 
     mcp = FastMCP("rebar")
