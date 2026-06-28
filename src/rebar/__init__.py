@@ -129,6 +129,7 @@ def transition(
     *,
     force: bool = False,
     reason: str = "",
+    force_close: str | None = None,
     repo_root=None,
 ) -> dict:
     """Transition a ticket's status with optimistic concurrency.
@@ -142,6 +143,14 @@ def transition(
     pass ``force=True`` (optionally with a ``reason`` recorded in the audit
     comment) to bypass it. ``force`` also waives the unresolved-children guard
     when closing.
+
+    ``force_close="<reason>"`` is the library counterpart of the CLI
+    ``--force-close``: when closing a work ticket under the completion-verification
+    close gate (``verify.require_completion_verification_for_close``), it closes
+    WITHOUT running the verifier or signing, leaving the ticket
+    closed-without-signature (the durable "validation did not pass" signal). It is
+    threaded to the same command-layer seam the CLI uses; ``None`` means "not a
+    forced close" (the verifier runs normally).
     """
     # In-process (Tier E E3): resolve the id, then run the shared transition core
     # (ticket-transition.sh was retired from this path). The structured result
@@ -166,6 +175,7 @@ def transition(
             target_status,
             force=force,
             reason=reason,
+            force_close=force_close or "",
             repo_root=repo_root,
         )
     except ConcurrencyMismatch as exc:
