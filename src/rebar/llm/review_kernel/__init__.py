@@ -53,6 +53,8 @@ from .decide import (
 )
 from .verify import (
     DEFAULT_VERIFY_WINDOW_HEADROOM,
+    VERIFIER_RULES,
+    VERIFIER_RULES_SCAFFOLD,
     finding_listing,
     merge_verifications_by_index,
     register_verification_contract,
@@ -74,6 +76,8 @@ __all__ = [
     "validity",
     # Pass-2 — finding verifier + the verification contract
     "DEFAULT_VERIFY_WINDOW_HEADROOM",
+    "VERIFIER_RULES",
+    "VERIFIER_RULES_SCAFFOLD",
     "finding_listing",
     "merge_verifications_by_index",
     "register_verification_contract",

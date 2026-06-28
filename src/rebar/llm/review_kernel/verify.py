@@ -48,6 +48,37 @@ PER_FINDING_VERIFY_TOKENS = 256
 VERIFY_SYSTEM_RESERVE_TOKENS = 2_000
 
 
+# ── the canonical verifier-rules SCAFFOLD (the soft prompt rules, for discoverability) ──────
+# The four soft rules a Pass-2 verifier's prompt PREAMBLE should embed, recorded ONCE here as
+# the single discoverable source (epic vivid-gang-day WS4). These are NOT enforced by a
+# prompt-text lint (an anti-pattern — mature stacks enforce typed contracts + behavior, not
+# prompt-string greps); they are enforced BEHAVIORALLY by evals (deterministic FakeRunner
+# assertions on the gate path + a small gated live eval). A gate author embeds the scaffold
+# TEXT in their verify prompt; the plan-review verifier prompts are the worked reference (they
+# carry these exact rules). See docs/review-kernel.md.
+VERIFIER_RULES: tuple[tuple[str, str], ...] = (
+    (
+        "independence",
+        "Treat each finding as an unproven CLAIM TO TEST — its conclusion is NOT asserted; "
+        "do not assume it is correct. (Never show the verifier the finding's own decision.)",
+    ),
+    (
+        "atomicity",
+        "Be atomic: answer each binary sub-question on its own merits, independently.",
+    ),
+    (
+        "allow-insufficient",
+        "'insufficient' is an allowed and honest answer when the evidence does not decide it.",
+    ),
+    (
+        "verdict-with-citation-not-fix",
+        "Verdict-with-citation, never verdict-with-fix — judge the claim; do not author a fix.",
+    ),
+)
+
+VERIFIER_RULES_SCAFFOLD = "\n".join(f"- {name}: {text}" for name, text in VERIFIER_RULES)
+
+
 # ── the registered `verification` CONTRACT (the SINGLE source of the binary vocabulary +
 #    severity-attribute enums; small/flat for tolerant validation) ────────────────────────
 def verification_model() -> type:
