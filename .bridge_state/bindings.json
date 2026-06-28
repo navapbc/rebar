@@ -732,6 +732,12 @@
       "state": "confirmed",
       "updated_at": "2026-06-25T22:59:16Z"
     },
+    "4119-1a4f-19ff-4cfa": {
+      "created_at": "2026-06-28T04:25:53Z",
+      "jira_key": "REB-504",
+      "state": "confirmed",
+      "updated_at": "2026-06-28T04:25:53Z"
+    },
     "4158-eb34-870d-481c": {
       "created_at": "2026-06-25T22:59:17Z",
       "jira_key": "REB-103",
@@ -1608,6 +1614,12 @@
       "state": "confirmed",
       "updated_at": "2026-06-25T23:06:29Z"
     },
+    "8855-e5f9-05b4-4a04": {
+      "created_at": "2026-06-28T04:25:56Z",
+      "jira_key": "REB-505",
+      "state": "confirmed",
+      "updated_at": "2026-06-28T04:25:56Z"
+    },
     "8874-77bd-d01e-4dce": {
       "created_at": "2026-06-25T23:06:33Z",
       "jira_key": "REB-220",
@@ -1679,6 +1691,18 @@
       "jira_key": "REB-230",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:07:33Z"
+    },
+    "8e6f-3ad2-1f24-4b8b": {
+      "created_at": "2026-06-28T04:25:59Z",
+      "jira_key": "REB-506",
+      "state": "confirmed",
+      "updated_at": "2026-06-28T04:25:59Z"
+    },
+    "8e78-d515-3a98-4eba": {
+      "created_at": "2026-06-28T04:26:02Z",
+      "jira_key": "REB-507",
+      "state": "confirmed",
+      "updated_at": "2026-06-28T04:26:02Z"
     },
     "8f14-9ee8-0f02-4d5c": {
       "created_at": "2026-06-25T23:07:37Z",
@@ -1799,6 +1823,12 @@
       "jira_key": "REB-460",
       "state": "confirmed",
       "updated_at": "2026-06-27T07:01:45Z"
+    },
+    "98ff-d3b8-d2f7-4a86": {
+      "created_at": "2026-06-28T04:26:05Z",
+      "jira_key": "REB-508",
+      "state": "confirmed",
+      "updated_at": "2026-06-28T04:26:05Z"
     },
     "998e-b3c4-a6d4-4d14": {
       "created_at": "2026-06-25T23:09:10Z",
@@ -2159,6 +2189,12 @@
       "jira_key": "REB-294",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:13:56Z"
+    },
+    "bba6-69b9-b9d4-4ac0": {
+      "created_at": "2026-06-28T04:26:08Z",
+      "jira_key": "REB-509",
+      "state": "confirmed",
+      "updated_at": "2026-06-28T04:26:08Z"
     },
     "bbc0-1dbd-d9cb-4917": {
       "created_at": "2026-06-25T23:14:01Z",
@@ -3392,6 +3428,12 @@
     "REB-501": "cf40-f372-47a1-44a3",
     "REB-502": "615c-7646-4566-4bb8",
     "REB-503": "85b4-9850-a474-4bae",
+    "REB-504": "4119-1a4f-19ff-4cfa",
+    "REB-505": "8855-e5f9-05b4-4a04",
+    "REB-506": "8e6f-3ad2-1f24-4b8b",
+    "REB-507": "8e78-d515-3a98-4eba",
+    "REB-508": "98ff-d3b8-d2f7-4a86",
+    "REB-509": "bba6-69b9-b9d4-4ac0",
     "REB-51": "23d2-e0f3-6588-4fe9",
     "REB-52": "2529-bb55-586d-4785",
     "REB-53": "252e-49c0-7db6-4b64",
