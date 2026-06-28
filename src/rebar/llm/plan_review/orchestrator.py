@@ -29,10 +29,11 @@ import hashlib
 import logging
 from typing import Any
 
+from rebar.llm import review_kernel
 from rebar.llm.config import LLMConfig
 from rebar.llm.runner import Runner, get_runner
 
-from . import passes, registry
+from . import registry
 from .det_floor import PlanContext
 
 # The Pass-1 finder machinery lives in :mod:`.pass1` (module-size seam, epic B /
@@ -386,28 +387,28 @@ def drift_refresh(
 def pass3_over_findings(
     findings: list[dict[str, Any]], verifs: dict[int, dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Deterministic Pass-3 over the verifiable findings: per-criterion thresholds +
-    ``pass3_decide`` keyed by each finding's index into ``findings`` (matching the
-    ``{index: verification}`` map Pass-2 produced). The shared decision core both the
-    bespoke ``_run_passes`` and the workflow's ``plan_review_decide`` op call — the
-    too_big/shed routing is the caller's (it differs by index-domain)."""
+    """Deterministic Pass-3 over the verifiable findings for the PLAN-REVIEW gate: this
+    is the thin consumer wrapper that resolves plan-review's per-criterion thresholds +
+    posture from its criteria registry, then delegates the math to the shared review
+    kernel (:func:`rebar.llm.review_kernel.pass3_over_findings`). The decision core +
+    the per-finding loop live in the kernel — only the registry-driven threshold LOOKUP
+    is plan-review-specific (epic vivid-gang-day WS1). The too_big/shed routing is the
+    caller's (it differs by index-domain)."""
     crit_by_id = registry.by_id()
-    decided: list[dict[str, Any]] = []
-    for i, f in enumerate(findings):
+
+    def _threshold_for(criteria: Any) -> tuple[float, bool]:
+        default_bt = review_kernel.DEFAULT_BLOCK_THRESHOLD
         thresholds = [
-            float(crit_by_id.get(c, {}).get("block_threshold", passes.DEFAULT_BLOCK_THRESHOLD))
-            for c in f.get("criteria", [])
+            float(crit_by_id.get(c, {}).get("block_threshold", default_bt)) for c in criteria
         ]
         blocking_enabled = any(
             str(crit_by_id.get(c, {}).get("default_posture", "advisory")).lower() == "blocking"
-            for c in f.get("criteria", [])
+            for c in criteria
         )
-        bt = min(thresholds) if thresholds else passes.DEFAULT_BLOCK_THRESHOLD
-        d = passes.pass3_decide(
-            verifs.get(i), block_threshold=bt, blocking_enabled=blocking_enabled
-        )
-        decided.append({**f, **d, "verification": verifs.get(i), "tier": "LLM"})
-    return decided
+        bt = min(thresholds) if thresholds else default_bt
+        return bt, blocking_enabled
+
+    return review_kernel.pass3_over_findings(findings, verifs, threshold_for=_threshold_for)
 
 
 def _exempt_verdict(ctx: PlanContext, *, reason: str) -> dict[str, Any]:

@@ -33,25 +33,20 @@ from typing import Any
 
 from rebar.llm import contracts
 from rebar.llm.config import LLMConfig
-from rebar.llm.runner import Runner, RunRequest
 
-# ── Pass-2 vocabulary (validated against criteria_v8) ──────────────────────────
-GRADED_BINARY = (
-    "is_verifiable",
-    "evidence_entails_finding",
-    "path_reachable",
-    "impact_follows_necessarily",
-    "no_viable_alternative_explanation",
-    "no_existing_mitigation",
-    "severity_claim_justified",
+# ── Pass-2 vocabulary + Pass-3 decision math: the shared review KERNEL owns these now
+#    (epic vivid-gang-day WS1). Re-exported here so the plan-review pass modules + the
+#    test suite keep their historical `passes.<name>` call sites — thin re-exports, NOT
+#    a second copy of the decision math (AC: "no second copy remains"). ─────────────────
+from rebar.llm.review_kernel.decide import (  # noqa: F401
+    DEFAULT_BLOCK_THRESHOLD,
+    GRADED_BINARY,
+    impact,
+    pass3_decide,
+    severity_label,
+    validity,
 )
-_GRADE = {"yes": 1.0, "insufficient": 0.5, "no": 0.0}
-_SEV01: dict[str | None, float] = {"none": 0.0, "low": 0.33, "medium": 0.67, "high": 1.0}
-_BLAST01: dict[str | None, float] = {"local": 0.33, "module": 0.67, "system": 1.0}
-_LIKE01: dict[str | None, float] = {"low": 0.33, "medium": 0.67, "high": 1.0}
-_REV01: dict[str | None, float] = {"easy": 0.33, "moderate": 0.67, "hard": 1.0}
-
-DEFAULT_BLOCK_THRESHOLD = 0.95  # near-certain AND high-impact ⇒ v1 is almost all advisory
+from rebar.llm.runner import Runner, RunRequest
 
 
 # ── structured-output contracts (registered once on import) ────────────────────
@@ -451,91 +446,10 @@ def verify_instructions(batch: list[tuple[int, dict[str, Any]]]) -> str:
 
 
 # ── Pass 3: decide (DETERMINISTIC — no model in this path) ────────────────────────
-def validity(binary: dict[str, Any]) -> float:
-    """The graded fraction of the binary sub-answers (yes=1, insufficient=.5,
-    no=0) over the answerable graded set (excluding any 'na'). The cited-reference
-    veto is handled separately. Empty ⇒ 0.0."""
-    scores = [
-        _GRADE[binary[q]] for q in GRADED_BINARY if binary.get(q) in ("yes", "no", "insufficient")
-    ]
-    return round(sum(scores) / len(scores), 4) if scores else 0.0
-
-
-def impact(attrs: dict[str, Any]) -> float:
-    """IMPACT ∈ [0,1] = mean of the ordinal-mapped severity attributes:
-    max(prod_impact, debt_impact), blast_radius, likelihood, reversibility."""
-    sev = max(_SEV01.get(attrs.get("prod_impact"), 0.0), _SEV01.get(attrs.get("debt_impact"), 0.0))
-    blast = _BLAST01.get(attrs.get("blast_radius"), 0.33)
-    like = _LIKE01.get(attrs.get("likelihood"), 0.33)
-    rev = _REV01.get(attrs.get("reversibility"), 0.33)
-    return round((sev + blast + like + rev) / 4.0, 4)
-
-
-def severity_label(imp: float) -> str:
-    if imp >= 0.75:
-        return "critical"
-    if imp >= 0.5:
-        return "major"
-    if imp >= 0.25:
-        return "minor"
-    return "none"
-
-
-def pass3_decide(
-    verification: dict[str, Any] | None,
-    *,
-    block_threshold: float = DEFAULT_BLOCK_THRESHOLD,
-    blocking_enabled: bool = False,
-) -> dict[str, Any]:
-    """The deterministic decision. Returns
-    ``{decision, reason, validity, impact, priority, severity}``.
-
-    Rules (the v1 authoritative shape):
-      * no verification → INDETERMINATE (verifier produced nothing for this finding);
-      * cited_reference_accurate == "no" → DROPPED (the only veto, fires only when a
-        code citation is present);
-      * validity < 0.5 → DROPPED (low validity);
-      * else BLOCK iff (not vetoed) AND blocking_enabled AND priority ≥ block_threshold;
-      * else ADVISORY.
-    """
-    if not verification:
-        return {
-            "decision": "indeterminate",
-            "reason": "no-verification",
-            "validity": 0.0,
-            "impact": 0.0,
-            "priority": 0.0,
-            "severity": "none",
-        }
-    binary = verification.get("binary", {}) or {}
-    attrs = verification.get("severity_attributes", {}) or {}
-    val = validity(binary)
-    imp = impact(attrs)
-    priority = round(val * imp, 4)
-    sev = severity_label(imp)
-    if binary.get("cited_reference_accurate") == "no":
-        return {
-            "decision": "dropped",
-            "reason": "veto:cited-reference-inaccurate",
-            "validity": val,
-            "impact": imp,
-            "priority": priority,
-            "severity": sev,
-        }
-    if val < 0.5:
-        decision, reason = "dropped", "low-validity"
-    elif blocking_enabled and priority >= block_threshold:
-        decision, reason = "block", "high-priority+criterion-opted-in"
-    else:
-        decision, reason = "advisory", "default-advisory"
-    return {
-        "decision": decision,
-        "reason": reason,
-        "validity": val,
-        "impact": imp,
-        "priority": priority,
-        "severity": sev,
-    }
+# The Pass-3 decision core (`validity` / `impact` / `severity_label` / `pass3_decide`
+# + the grade/severity maps + `DEFAULT_BLOCK_THRESHOLD` / `GRADED_BINARY`) lives in the
+# shared review kernel (`rebar.llm.review_kernel.decide`) and is re-exported at the top
+# of this module — there is no second copy here (epic vivid-gang-day WS1).
 
 
 # ── Pass 4: move registry + coach (rendered deterministically from a locked template) ──
