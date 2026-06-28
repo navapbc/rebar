@@ -226,7 +226,7 @@ for the future code-review op's "deterministic reviewer-selection rules."
 | `REBAR_LLM_BASE_URL` | — | OpenAI-compatible endpoint (LMStudio/Ollama/vLLM) |
 | `REBAR_LLM_API_KEY` | — | explicit model key (e.g. a dummy key for a local server) |
 | `REBAR_LLM_MAX_TOKENS` | `8000` | per-response token ceiling |
-| `REBAR_LLM_MAX_ITERS` | `25` | agent-loop recursion cap |
+| `REBAR_LLM_MAX_ITERS` | `50` | agent-loop recursion cap |
 | `REBAR_LLM_TIMEOUT` | `600` | per-operation seconds |
 | `REBAR_LLM_REPO_PATH` | repo root | repo the read-only file tools see |
 | `REBAR_LLM_MCP_SERVERS` | `{}` | JSON of MCP servers (pydantic-ai MCP server / toolset shape) |

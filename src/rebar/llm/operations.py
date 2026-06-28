@@ -25,7 +25,7 @@ from rebar.llm.runner import Runner, RunRequest, get_runner
 __all__ = ["review_ticket", "select_reviewers"]
 
 # A tool-using review is inherently multi-step (explore → search → read several files →
-# report). The framework review default (REBAR_LLM_MAX_STEPS=25 ≈ 12 tool calls) is far too
+# report). The framework review default (REBAR_LLM_MAX_STEPS=50 ≈ 25 tool calls) is far too
 # low and trips the recursion cap mid-review (→ LLMRunnerError 'agent exceeded its step
 # budget'). Raise the agent step budget to a review-appropriate FLOOR; an operator who
 # explicitly sets a HIGHER REBAR_LLM_MAX_STEPS still wins. Mirrors completion.py's

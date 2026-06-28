@@ -1,8 +1,8 @@
 """B1 regression: the review operations raise the agent step budget to a floor.
 
 ``review_ticket`` / ``review_code`` build their ``LLMConfig`` via
-``LLMConfig.from_env()`` whose framework default ``max_iterations=25`` maps to a
-langgraph ``recursion_limit=25`` (~12 tool calls) — far too few for a tool-using
+``LLMConfig.from_env()`` whose framework default ``max_iterations=50`` maps to a
+langgraph ``recursion_limit=50`` (~25 tool calls) — far too few for a tool-using
 review, which trips ``LLMRunnerError('agent exceeded its step budget')``. The
 operations must apply a verification-style FLOOR (mirroring completion.py's
 ``_VERIFY_MIN_STEPS``) so a default-config review gets a workable budget; an
@@ -55,7 +55,7 @@ def test_review_ticket_applies_step_floor(rebar_repo: Path) -> None:
     r = str(rebar_repo)
     tid = rebar.create_ticket("task", "Review me", description="body", repo_root=r)
     cfg = LLMConfig.from_env(repo_root=r)
-    assert cfg.max_iterations == 25  # the framework default we are flooring above
+    assert cfg.max_iterations == 50  # the framework default we are flooring above
     fake = _RecordingRunner()
 
     rebar.llm.review_ticket(tid, "ticket-quality", config=cfg, runner=fake, repo_root=r)
@@ -68,7 +68,7 @@ def test_review_code_applies_step_floor(rebar_repo: Path) -> None:
     r = str(rebar_repo)
     diff = "--- a/x.py\n+++ b/x.py\n@@ -0,0 +1 @@\n+print(1)\n"
     cfg = LLMConfig.from_env(repo_root=r)
-    assert cfg.max_iterations == 25
+    assert cfg.max_iterations == 50
     fake = _RecordingRunner()
 
     rebar.llm.review_code(

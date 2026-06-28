@@ -41,7 +41,7 @@ _OUTPUT_SCHEMA = "completion_verdict"
 _VERIFIER_DEFAULT_MODEL = VERIFIER_DEFAULT_MODEL
 # Completion verification is inherently more tool-heavy than a single-dimension review: it
 # must check potentially many criteria, each against several files. The framework review
-# default (REBAR_LLM_MAX_STEPS=25 ≈ 12 tool calls) is far too low and trips the recursion cap
+# default (REBAR_LLM_MAX_STEPS=50 ≈ 25 tool calls) is far too low and trips the recursion cap
 # mid-verification (→ a false fail-closed block at the gate). Use a generous verification FLOOR;
 # an operator who explicitly sets a HIGHER REBAR_LLM_MAX_STEPS still wins. Very large tickets
 # (e.g. a whole framework epic) may still need it raised further, or --force-close. (Doubled
