@@ -185,6 +185,10 @@ class SnapshotHandle:
     ``sha`` is the resolved immutable commit (``None`` in local mode — the checkout may
     be dirty). ``lfs_pointers`` / ``submodules`` record the faithfulness caveats so a
     gate or signer is never silently handed pointer text / an empty submodule dir.
+    ``tickets_path`` is the read root for the agent's rebar TICKET tools — a separately
+    materialized, pinned copy of the ticket store (the ``tickets`` branch lives on an
+    orphan ref, so it is absent from the code snapshot ``path``). ``None`` = read the
+    in-place checkout's store (local mode); attested sets it via :func:`materialize_tickets`.
     """
 
     path: Path
@@ -192,6 +196,7 @@ class SnapshotHandle:
     source: str
     lfs_pointers: tuple[str, ...] = ()
     submodules: tuple[str, ...] = ()
+    tickets_path: str | None = None
     _cleanup: Callable[[], None] | None = field(default=None, repr=False)
 
     @property
@@ -573,6 +578,79 @@ def materialize(
         # tidy); re-raise so attested mode fails closed.
         shutil.rmtree(build, ignore_errors=True)
         idx = build.parent / (build.name + ".index")
+        try:
+            idx.unlink()
+        except OSError:
+            pass
+        raise
+
+
+# The directory name the materialized ticket store sits under, so a root materialized by
+# :func:`materialize_tickets` resolves through ``config.tracker_dir(<root>)`` (which defaults
+# to ``.tickets-tracker`` under the root). The ``tickets`` branch tree's top level IS the
+# tracker contents (the per-ticket event dirs), so we write that tree there verbatim.
+_TRACKER_DIRNAME = ".tickets-tracker"
+
+
+def materialize_tickets(
+    ref: str = "tickets",
+    *,
+    repo_root: str | None = None,
+    fetch: bool = True,
+) -> str:
+    """Materialize a pinned, read-only copy of the ticket store and return its ROOT path.
+
+    The code-reading gates run their agent against an attested code snapshot, but the ticket
+    store lives on the orphan ``tickets`` branch (gitignored worktree ``.tickets-tracker/``)
+    and is therefore ABSENT from that code snapshot — so the agent's rebar ticket tools would
+    error trying to read it. This mirrors :func:`materialize` for the ticket store: resolve
+    ``ref`` to an immutable SHA (preferring ``origin/tickets`` when an origin exists so it
+    pins the shared store, not a stale local copy) and materialize that tree into
+    ``<store>/tickets-<sha>/.tickets-tracker/`` via the SAME throwaway-index +
+    build-dir + atomic-``rename`` + cache-hit-by-path pattern. The returned ROOT
+    (``<store>/tickets-<sha>``) is what a gate points its rebar ticket tools at:
+    ``config.tracker_dir(<root>)`` resolves to the ``.tickets-tracker/`` subdir holding the
+    materialized event dirs. Fails closed (no path) on error, like :func:`materialize`."""
+    root_dir = str(repo_root) if repo_root else "."
+    # Prefer origin/<ref> when an origin exists (fetch first, so we pin the SHARED store, not
+    # a stale local copy — matching how the code path resolves the shared ref), else the
+    # local branch. Fall back to the local branch when origin has no such ref yet (a freshly
+    # initialized repo whose tickets branch has not been pushed): a missing origin ref must
+    # not block the gate from reading the store that DOES exist locally.
+    if fetch and _has_origin(root_dir):
+        try:
+            sha = resolve_ref(f"origin/{ref}", repo_root, fetch=fetch)
+        except SnapshotRefError:
+            sha = resolve_ref(ref, repo_root, fetch=False)
+    else:
+        sha = resolve_ref(ref, repo_root, fetch=fetch)
+    store = store_root()
+    dest = store / f"tickets-{sha}"
+    if dest.is_dir():
+        # Cache hit — immutable by SHA (same key scheme as the code entries, namespaced by
+        # the `tickets-` prefix so it never collides with a `<sha>` code entry).
+        return str(dest)
+
+    tmp_parent = _tmp_root(store)
+    build = tmp_parent / f"tickets-{sha[:12]}-{uuid.uuid4().hex}"
+    tracker = build / _TRACKER_DIRNAME
+    try:
+        _materialize_tree(root_dir, sha, tracker)
+        _fsync_dir(build)
+        try:
+            os.rename(build, dest)
+        except OSError:
+            # Another materialization won the race (same SHA == same content); keep theirs.
+            if dest.is_dir():
+                shutil.rmtree(build, ignore_errors=True)
+            else:
+                raise
+        else:
+            _fsync_dir(dest.parent)
+        return str(dest)
+    except BaseException:
+        shutil.rmtree(build, ignore_errors=True)
+        idx = tracker.parent / (tracker.name + ".index")
         try:
             idx.unlink()
         except OSError:
