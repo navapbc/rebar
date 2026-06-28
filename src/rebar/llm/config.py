@@ -12,7 +12,7 @@ Environment variables (all optional; sensible defaults):
                           reachable only via the library ``runner=`` arg).
   REBAR_LLM_MAX_TOKENS    per-response token ceiling (default 8000)
   REBAR_LLM_MAX_STEPS     Max agent loop steps before abort (~2 per tool call; default
-                          25 ~= 12 tool calls). Deprecated alias: REBAR_LLM_MAX_ITERS.
+                          50 ~= 25 tool calls). Deprecated alias: REBAR_LLM_MAX_ITERS.
   REBAR_LLM_TIMEOUT       per-operation wall-clock seconds (default 600)
   REBAR_LLM_REPO_PATH     repo root the agent's read-only file tools see (default: repo root)
   REBAR_LLM_MCP_SERVERS   JSON object of MCP servers (Pydantic AI MCP toolset shape)
@@ -234,7 +234,7 @@ def use_tickets_root(path: str | None) -> Iterator[None]:
 DEFAULT_MAX_TOKENS = 16000
 # Same single-source-of-truth pattern for the agent step cap + per-call wall-clock
 # timeout (each previously duplicated the literal across field default + resolution).
-DEFAULT_MAX_ITERATIONS = 25
+DEFAULT_MAX_ITERATIONS = 50
 DEFAULT_TIMEOUT_S = 600
 # Execution backends. `pydantic_ai` is THE runtime (story d6d1 cutover dropped the
 # in-process graph stack). `fake` is the offline test seam.

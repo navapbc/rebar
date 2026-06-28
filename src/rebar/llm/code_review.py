@@ -29,7 +29,7 @@ __all__ = ["review_code", "select_code_reviewers"]
 
 _DIFF_CHAR_CAP = 60000  # keep the inlined diff bounded; the agent reads files for more
 # A tool-using code review is inherently multi-step (read each changed file + its context,
-# per reviewer). The framework review default (REBAR_LLM_MAX_STEPS=25 ≈ 12 tool calls) is far
+# per reviewer). The framework review default (REBAR_LLM_MAX_STEPS=50 ≈ 25 tool calls) is far
 # too low and trips the recursion cap mid-review (→ LLMRunnerError 'agent exceeded its step
 # budget'). Raise the agent step budget to a review-appropriate FLOOR; an operator who
 # explicitly sets a HIGHER REBAR_LLM_MAX_STEPS still wins. Mirrors completion.py's
