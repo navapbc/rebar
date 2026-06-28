@@ -25,12 +25,20 @@ prompt/contract model) and the sibling modules (:mod:`.det_floor`, :mod:`.passes
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import logging
+from collections.abc import Iterator
 from typing import Any
 
 from rebar.llm import review_kernel
-from rebar.llm.config import LLMConfig, resolve_code_root
+from rebar.llm.config import (
+    LLMConfig,
+    current_code_root,
+    current_tickets_root,
+    resolve_code_root,
+)
 from rebar.llm.runner import Runner, get_runner
 
 from . import registry
@@ -74,14 +82,85 @@ _shed_to_budget = sizing.shed_to_budget
 # ``orchestrator.load_move_registry`` call sites (module-size seam, child 75a9).
 from .passes import MOVE_REGISTRY, load_move_registry  # noqa: E402,F401
 
-
 # ── context assembly ─────────────────────────────────────────────────────────────
+# Within ONE plan-review gate run the four-pass workflow assembles the same ticket
+# graph ~4× (precheck + assemble_criteria + verify_inputs + coach_inputs each call
+# assemble_context), an N+1 store read each time (show_ticket + list_tickets + a
+# show_ticket per child). A run-scoped memo collapses those repeated identical calls
+# to ONE read of the graph: `assemble_context_cache()` activates a per-run cache (a
+# ContextVar — thread/asyncio-task-safe, never leaking across runs), and inside it
+# `assemble_context` returns the SAME PlanContext object for the same key. OUTSIDE a
+# scope the cache is absent and every call reads fresh (byte-identical to the prior
+# behavior — no caller has to opt in). The key spans every input that changes the
+# result: the ticket id, the explicit `repo_root`, the cfg fields that flow into the
+# context (`repo_path` → the resolved code root, `model` → largest_window_tokens),
+# and the active gate read-roots (code + tickets ContextVars) so a snapshot change is
+# never served a stale entry.
+_assemble_cache: contextvars.ContextVar[dict[Any, PlanContext] | None] = contextvars.ContextVar(
+    "rebar_plan_review_assemble_cache", default=None
+)
+
+
+@contextlib.contextmanager
+def assemble_context_cache() -> Iterator[None]:
+    """Activate a run-scoped :func:`assemble_context` memo for the dynamic extent of the
+    ``with`` block (one plan-review gate run). Repeated ``assemble_context`` calls with the
+    same key inside the block return the SAME cached :class:`PlanContext` instead of
+    re-reading the ticket graph; the cache is dropped on exit, so it never leaks across runs
+    or tickets. Nesting reuses the already-active cache (idempotent)."""
+    if _assemble_cache.get() is not None:
+        # Already inside an active scope (nested) — reuse it; the outer scope owns reset.
+        yield
+        return
+    token = _assemble_cache.set({})
+    try:
+        yield
+    finally:
+        _assemble_cache.reset(token)
+
+
+def _assemble_cache_key(ticket_id: str, repo_root, cfg: LLMConfig | None) -> tuple:
+    """The memo key: every input that can change ``assemble_context``'s result. Includes the
+    active gate read-roots so a snapshot change within a process is never served a stale entry
+    (the resolved code root + the store the reads run against both feed the returned context)."""
+    return (
+        ticket_id,
+        str(repo_root) if repo_root is not None else None,
+        cfg.repo_path if cfg else None,
+        cfg.model if cfg else None,
+        current_code_root(),
+        current_tickets_root(),
+    )
+
+
 def assemble_context(
     ticket_id: str, *, repo_root=None, cfg: LLMConfig | None = None
 ) -> PlanContext:
     """Build the whole-ticket :class:`PlanContext` from rebar reads (ticket + its
     direct children, each whole). The largest context window is taken from the
-    model ladder for P8's budget."""
+    model ladder for P8's budget.
+
+    Inside an active :func:`assemble_context_cache` scope (one gate run) the result is
+    memoized by :func:`_assemble_cache_key`, so the workflow's repeated calls hit the
+    cache and the ticket graph is read ONCE. Outside a scope this reads fresh every time
+    (the historical behavior — the returned context is byte-identical either way)."""
+    cache = _assemble_cache.get()
+    if cache is not None:
+        key = _assemble_cache_key(ticket_id, repo_root, cfg)
+        hit = cache.get(key)
+        if hit is not None:
+            return hit
+        ctx = _assemble_context_uncached(ticket_id, repo_root=repo_root, cfg=cfg)
+        cache[key] = ctx
+        return ctx
+    return _assemble_context_uncached(ticket_id, repo_root=repo_root, cfg=cfg)
+
+
+def _assemble_context_uncached(
+    ticket_id: str, *, repo_root=None, cfg: LLMConfig | None = None
+) -> PlanContext:
+    """The actual N+1 store read (ticket + direct children, each whole). Always reads — the
+    run-scoped memo lives in :func:`assemble_context`, which delegates here on a cache miss."""
     import rebar
 
     state = rebar.show_ticket(ticket_id, repo_root=repo_root)
