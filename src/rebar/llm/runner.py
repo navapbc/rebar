@@ -397,9 +397,14 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
         run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
         return run_result.output, _extract_usage(run_result)
 
-    # PromptedOutput case: free-text + deterministic parse/validate + bounded retry.
+    # PromptedOutput case: free-text + deterministic parse/validate + bounded retry. The
+    # schema directive is appended so the model knows the EXACT output keys (the json-repair
+    # path generates free text, so — unlike NativeOutput/PromptedOutput-as-output_type — the
+    # schema is not otherwise conveyed; without it the model guesses keys and tolerant parsing
+    # drops them to an empty object).
     agent = Agent(model, **kwargs)  # free text (output_type defaults to str)
-    prompt = req.instructions
+    schema_hint = structured.schema_directive(model_cls)
+    prompt = f"{req.instructions}\n\n{schema_hint}"
     last: Exception | None = None
     for _ in range(structured.OUTPUT_RETRIES + 1):
         result = agent.run_sync(prompt, usage_limits=usage_limits)
@@ -413,9 +418,9 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
         except StructuredOutputError as exc:
             last = exc
             prompt = (
-                f"{req.instructions}\n\nYour previous reply could not be parsed/validated "
-                f"({exc}). Reply with ONLY the JSON object matching the schema — no prose, "
-                f"no code fence."
+                f"{req.instructions}\n\n{schema_hint}\n\nYour previous reply could not be "
+                f"parsed/validated ({exc}). Reply with ONLY the JSON object matching the "
+                f"schema above — no prose, no code fence."
             )
     assert last is not None  # the loop only exits here after a failed parse set `last`
     raise last  # exhausted the bounded retry; surface the last validation error

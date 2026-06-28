@@ -61,6 +61,27 @@ def output_mode(model_cls, model_str: str, *, thinking: bool = False):
     return PromptedOutput(model_cls)
 
 
+def schema_directive(model_cls) -> str:
+    """The JSON-schema directive appended to a PROMPTED structured call (the json-repair
+    path) so the model is TOLD the exact output shape.
+
+    The prompted path generates free text and then tolerantly parses it — but the model
+    can only emit the right shape if it knows the schema. Without this, a model that knows
+    a field only by prose (e.g. "severity ATTRIBUTES") guesses the JSON keys (``attributes``
+    instead of ``severity_attributes``, a ``findings`` wrapper instead of ``verifications``),
+    and tolerant parsing silently drops the unrecognized keys → an EMPTY validated object.
+    (NativeOutput / PromptedOutput-as-output_type inject this automatically; the manual
+    json-repair path must do it explicitly — the gap that left plan-review verifications all
+    ``no-verification``.)"""
+    import json
+
+    schema = json.dumps(model_cls.model_json_schema(), separators=(",", ":"))
+    return (
+        "Respond with ONLY a single JSON object conforming to this JSON Schema "
+        "(use these EXACT keys; no prose, no markdown fence):\n" + schema
+    )
+
+
 def _first_json_object(text: str) -> Any | None:
     """The FIRST balanced ``{…}`` object in ``text`` (string-aware brace matching),
     parsed — or None. Preferring the first complete object makes multi-object output
