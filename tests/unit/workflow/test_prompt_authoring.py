@@ -61,9 +61,29 @@ def test_save_then_get_round_trips_byte_for_byte_edit(tmp_path):
 
 def test_invalid_id_refused(tmp_path):
     repo = _project_repo(tmp_path)
-    for bad in ("", "-leading", "Has Space", "UPPER", "has/slash", "..", "a.b"):
+    # NB: uppercase is VALID under the unified case-insensitive rule (epic drag-gripe-brake)
+    # — see test_uppercase_id_accepted below. The bad ids are genuine: empty, leading-dash,
+    # whitespace, separators, traversal, and a dot (which could masquerade as a `.variant.md`).
+    for bad in ("", "-leading", "Has Space", "has/slash", "..", "a.b"):
         with pytest.raises(PromptWriteError, match="invalid prompt id"):
             save_prompt(bad, {}, "body", repo_root=str(repo))
+
+
+def test_uppercase_id_accepted(tmp_path):
+    """The unified id rule is CASE-INSENSITIVE (epic drag-gripe-brake): save_prompt accepts an
+    uppercase-bearing id — here authoring a project OVERRIDE for the packaged criterion prompt
+    `plan-review-A1` (overwrite=True since the packaged id exists) — which the old lowercase-only
+    `_SLUG` wrongly rejected outright."""
+    repo = _project_repo(tmp_path)
+    out = save_prompt(
+        "plan-review-A1",
+        {"category": "review"},
+        "override body",
+        repo_root=str(repo),
+        overwrite=True,
+    )
+    assert out["kind"] == "project"
+    assert get_prompt("plan-review-A1", repo_root=str(repo)).text == "override body"
 
 
 def test_collision_without_overwrite_refused_then_overwrite_succeeds(tmp_path):

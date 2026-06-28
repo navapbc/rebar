@@ -249,3 +249,52 @@ def test_create_tolerates_crlf_input(tmp_path: Path) -> None:
     p = prompts.get_prompt("crlf-prompt", repo_root=str(tmp_path))
     assert p.description == "authored on Windows."
     assert p.text == "Body line one.\nBody line two.\n"
+
+
+# ── atomicity: the library write now goes through prompt_authoring._atomic_write (os.replace),
+#    so a crash/interrupt before the rename cannot leave a partial file (epic drag-gripe-brake) ──
+def _boom(_src, _dst):  # stand-in for a crash/interrupt BEFORE the atomic rename
+    raise OSError("simulated crash before the atomic rename")
+
+
+def test_create_is_atomic_no_partial_on_replace_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure before the atomic ``os.replace`` leaves NO half-written
+    ``.rebar/prompts/<id>.md`` and no temp litter — the silent half-write the non-atomic
+    ``path.write_text`` path risked is gone."""
+    import os
+
+    monkeypatch.setattr(os, "replace", _boom)
+    with pytest.raises(OSError, match="simulated crash"):
+        create_prompt("my-prompt", _PROMPT_MD, repo_root=str(tmp_path))
+    pdir = tmp_path / ".rebar" / "prompts"
+    assert not (pdir / "my-prompt.md").exists()  # no partial target
+    assert list(pdir.iterdir()) == []  # temp file cleaned up (no litter)
+
+
+def test_update_is_atomic_leaves_existing_intact_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An interrupted REWRITE (update_prompt also routes through the atomic writer) leaves the
+    existing file byte-for-byte intact rather than truncating/corrupting it."""
+    import os
+
+    create_prompt("my-prompt", _PROMPT_MD, repo_root=str(tmp_path))
+    path = tmp_path / ".rebar" / "prompts" / "my-prompt.md"
+    before = path.read_text(encoding="utf-8")
+
+    monkeypatch.setattr(os, "replace", _boom)
+    edited = _PROMPT_MD.replace("Do a thing", "EDITED thing")
+    with pytest.raises(OSError, match="simulated crash"):
+        update_prompt("my-prompt", edited, repo_root=str(tmp_path))
+    assert path.read_text(encoding="utf-8") == before  # original untouched
+    assert list(path.parent.glob("*.tmp")) == []  # temp file cleaned up
+
+
+def test_create_accepts_uppercase_id(tmp_path: Path) -> None:
+    """The unified id rule (epic drag-gripe-brake) is case-insensitive at BOTH editor
+    endpoints: create_prompt accepts an uppercase-bearing id — e.g. a project override for a
+    packaged criterion prompt like ``plan-review-A1`` (the same rule save_prompt now uses)."""
+    path = create_prompt("plan-review-A1", _CRITERION_MD, repo_root=str(tmp_path))
+    assert path.name == "plan-review-A1.md" and path.is_file()

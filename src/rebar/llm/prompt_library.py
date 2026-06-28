@@ -39,7 +39,6 @@ Stdlib-only at import (PyYAML stays lazy inside the prompts helpers).
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from rebar.llm.prompts import (
@@ -59,12 +58,13 @@ from rebar.llm.prompts import (
 CRITERION_CATEGORY = "plan-review-criterion"
 _CRITERION_PREFIX = "plan-review-"
 
-# The library id rule. Mirrors the constraints the read path already enforces
-# (`get_prompt` rejects empty / separator / `..` traversal ids) and additionally
-# forbids `.` so an authored id can never masquerade as a `<id>.<variant>.md` overlay.
-# Criterion ids carry uppercase + digits (e.g. `plan-review-G1G2`, `plan-review-T5a`),
-# so the class is intentionally case-insensitive.
-_ID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9-]*\Z")
+# The id rule is the SINGLE source shared with the prompt-authoring write path
+# (`prompt_authoring._valid_id`, epic drag-gripe-brake): `[A-Za-z0-9][A-Za-z0-9-]*` —
+# alnum start then alnum/dash, forbidding `/`, `\`, `.`, `..`, and whitespace (so an
+# authored id is a safe, traversal-free `.rebar/prompts/<id>.md` stem and can never
+# masquerade as a `<id>.<variant>.md` overlay). Intentionally CASE-INSENSITIVE: criterion
+# ids carry uppercase + digits (e.g. `plan-review-G1G2`, `plan-review-T5a`). `_validate_id`
+# delegates to the shared validator so the two editor endpoints can never diverge.
 
 # Front-matter keys an authored entry MUST carry (the picker-facing surface
 # `enumerate_library` exposes). Kept minimal: the per-type richness the clarity gates
@@ -180,7 +180,11 @@ def enumerate_criteria(*, repo_root=None) -> list[dict]:
 
 
 def _validate_id(prompt_id: str) -> None:
-    if not prompt_id or not _ID_RE.match(prompt_id):
+    # Delegate to the SINGLE shared id rule (prompt_authoring._valid_id) so the
+    # /prompt/save and /library/create endpoints can never diverge (epic drag-gripe-brake).
+    from rebar.llm.workflow.prompt_authoring import _valid_id
+
+    if not _valid_id(prompt_id):
         raise InvalidPromptIdError(
             f"invalid prompt id {prompt_id!r}: a library id must match "
             r"[A-Za-z0-9][A-Za-z0-9-]* (no '/', '\\', '.', '..', whitespace)"
@@ -234,10 +238,16 @@ def _invalidate_caches() -> None:
 
 
 def _write(prompt_id: str, text: str, *, repo_root) -> Path:
+    # Persist through the SHARED atomic writer (prompt_authoring._atomic_write: a temp file
+    # in the same directory + os.replace), NOT a bare path.write_text — so a crash/interrupt
+    # mid-write can never leave a half-written `.rebar/prompts/<id>.md` (epic
+    # drag-gripe-brake). Shared by create_prompt AND update_prompt, so both are atomic.
+    # _atomic_write handles the parent mkdir + the atomic replace.
+    from rebar.llm.workflow.prompt_authoring import _atomic_write
+
     canonical = _validate_and_canonicalize(text)
     path = _user_path(repo_root, prompt_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(canonical, encoding="utf-8")
+    _atomic_write(path, canonical)
     _invalidate_caches()
     return path
 

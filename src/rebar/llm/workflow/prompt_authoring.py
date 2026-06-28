@@ -39,10 +39,15 @@ from rebar.llm.prompts import (
     write_front_matter,
 )
 
-# A safe prompt-id slug: lowercase alnum start, then alnum/dash. This is the file
-# stem used for `.rebar/prompts/<id>.md` and the packaged `<id>.md`, so it must be a
-# safe, traversal-free, lower-kebab token (matching the existing built-in ids).
-_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+# A safe prompt-id slug: alnum start, then alnum/dash. This is the file stem used for
+# `.rebar/prompts/<id>.md` and the packaged `<id>.md`, so it must be a safe,
+# traversal-free kebab token. The class is intentionally CASE-INSENSITIVE: criterion
+# prompt ids carry uppercase + digits (e.g. `plan-review-A1`, `plan-review-G1G2`), so a
+# lowercase-only rule would forbid authoring a project override for them. This is the
+# SINGLE id rule shared with the prompt-library write path (`prompt_library._validate_id`
+# delegates to `_valid_id`), so the two editor endpoints can never diverge (epic
+# drag-gripe-brake).
+_SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 
 # The CLOSED category vocabulary the palette/library groups by (mirrors the prompt
 # model). A prompt with no/unknown category is grouped under "uncategorized" by the UI.
@@ -223,7 +228,11 @@ def _prompt_exists(prompt_id: str, repo_root: Any, target: dict[str, Any]) -> bo
 def _atomic_write(path: Path, text: str) -> None:
     """Write ``text`` to ``path`` ATOMICALLY: a temp file in the SAME directory then
     ``os.replace`` (an atomic rename on the same filesystem). A failure before the
-    rename leaves the original file untouched; the temp file is cleaned up."""
+    rename leaves the original file untouched; the temp file is cleaned up.
+
+    This is the SINGLE prompt-write primitive: ``save_prompt`` (/prompt/save) AND
+    ``prompt_library._write`` (create/update_prompt, /library/create) both write through
+    it (epic drag-gripe-brake), so a future refactor here must keep both call sites in mind."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
     try:
@@ -257,13 +266,13 @@ def save_prompt(
     Returns ``{path, kind, regenerated_index}``. Raises :class:`PromptWriteError` on the
     non-happy paths (each leaves any existing file intact):
 
-      * invalid/empty id (must match ``^[a-z0-9][a-z0-9-]*$``);
+      * invalid/empty id (must match ``^[A-Za-z0-9][A-Za-z0-9-]*$``);
       * create-new id COLLISION when ``overwrite=False``;
       * NEITHER location writable (carries the ``prompt_write_target`` reason)."""
     if not _valid_id(prompt_id):
         raise PromptWriteError(
-            f"invalid prompt id {prompt_id!r}: must match ^[a-z0-9][a-z0-9-]*$ "
-            "(lowercase letters/digits/dashes, not starting with a dash)"
+            f"invalid prompt id {prompt_id!r}: must match ^[A-Za-z0-9][A-Za-z0-9-]*$ "
+            "(letters/digits/dashes, not starting with a dash)"
         )
     target = prompt_write_target(prompt_id, repo_root=repo_root)
     if not target["writable"]:
