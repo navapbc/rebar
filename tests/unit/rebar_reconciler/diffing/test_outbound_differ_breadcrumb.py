@@ -111,7 +111,7 @@ def test_outbound_update_logs_changed_field_names(
     store = StubBindingStore({"local-1": "DIG-5347"})
     snapshot = {"DIG-5347": _jira_fields(description="The stale Jira description")}
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=store,
@@ -171,7 +171,7 @@ def test_no_breadcrumb_when_fields_converge(
     store = StubBindingStore({"local-3": "DIG-5383"})
     snapshot = {"DIG-5383": _jira_fields()}
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=store,
@@ -194,7 +194,7 @@ def test_breadcrumb_reports_comment_and_label_counts(
     # Fields all match; only the label set diverges (local 'urgent' not in Jira).
     snapshot = {"DIG-5529": _jira_fields()}
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=store,

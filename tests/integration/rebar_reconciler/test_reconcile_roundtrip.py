@@ -181,7 +181,7 @@ def test_description_survives_outbound_adf_inbound_unchanged(adf, outbound, inbo
     # And the outbound differ over the round-tripped snapshot is also a no-op
     # for the description (the rstrip-tolerant compare absorbs ADF's trailing
     # newline normalisation).
-    out_muts = outbound.compute_outbound_mutations([ticket], {"DIG-1": jira_fields}, bind)
+    out_muts, _ = outbound.compute_outbound_mutations([ticket], {"DIG-1": jira_fields}, bind)
     out_changed = {f for m in out_muts for f in m.fields}
     assert "description" not in out_changed, (
         f"description re-emitted outbound after the round-trip: {[m.fields for m in out_muts]}"
@@ -202,7 +202,7 @@ def test_description_with_trailing_whitespace_does_not_churn(adf, outbound, inbo
     inbound_muts, _ = inbound.compute_inbound_mutations(
         {"DIG-2": jira_fields}, bind, {"loc-2": ticket}
     )
-    out_muts = outbound.compute_outbound_mutations([ticket], {"DIG-2": jira_fields}, bind)
+    out_muts, _ = outbound.compute_outbound_mutations([ticket], {"DIG-2": jira_fields}, bind)
     assert "description" not in {f for m in inbound_muts for f in m.fields}
     assert "description" not in {f for m in out_muts for f in m.fields}
 
@@ -228,7 +228,7 @@ def test_blocked_status_roundtrips_through_in_progress_plus_label(adf, outbound,
 
     # Outbound: status maps to In Progress, annotation label ADD is emitted.
     pre_push = _outbound_jira_shape(ticket, adf=adf, outbound=outbound, jira_status="In Progress")
-    out_muts = outbound.compute_outbound_mutations([ticket], {"DIG-3": pre_push}, bind)
+    out_muts, _ = outbound.compute_outbound_mutations([ticket], {"DIG-3": pre_push}, bind)
     (om,) = out_muts
     label_adds = {lm["label"] for lm in om.labels if lm["action"] == "add"}
     assert "rebar-status:blocked" in label_adds, (
@@ -251,7 +251,7 @@ def test_blocked_status_roundtrips_through_in_progress_plus_label(adf, outbound,
 
     # Outbound over the post-push snapshot is also stable (label already present,
     # status already In Progress): no annotation re-ADD, no status diff.
-    out2 = outbound.compute_outbound_mutations([ticket], {"DIG-3": post_push}, bind)
+    out2, _ = outbound.compute_outbound_mutations([ticket], {"DIG-3": post_push}, bind)
     out2_label_adds = {lm["label"] for m in out2 for lm in m.labels if lm["action"] == "add"}
     assert "rebar-status:blocked" not in out2_label_adds
 
@@ -261,7 +261,7 @@ def test_cancelled_status_roundtrips_through_done_plus_label(adf, outbound, inbo
     bind = StubBindingStore({"loc-4": "DIG-4"})
     ticket = _make_ticket("loc-4", status="cancelled")
     pre_push = _outbound_jira_shape(ticket, adf=adf, outbound=outbound, jira_status="Done")
-    out_muts = outbound.compute_outbound_mutations([ticket], {"DIG-4": pre_push}, bind)
+    out_muts, _ = outbound.compute_outbound_mutations([ticket], {"DIG-4": pre_push}, bind)
     (om,) = out_muts
     assert "rebar-status:cancelled" in {lm["label"] for lm in om.labels if lm["action"] == "add"}
 
@@ -289,7 +289,7 @@ def test_label_add_does_not_reecho_inbound(adf, outbound, inbound):
     ticket = _make_ticket("loc-5", tags=["frontend"])
 
     pre_push = _outbound_jira_shape(ticket, adf=adf, outbound=outbound, jira_status="To Do")
-    out_muts = outbound.compute_outbound_mutations([ticket], {"DIG-5": pre_push}, bind)
+    out_muts, _ = outbound.compute_outbound_mutations([ticket], {"DIG-5": pre_push}, bind)
     (om,) = out_muts
     assert {"action": "add", "label": "frontend"} in om.labels
 
@@ -306,7 +306,7 @@ def test_label_add_does_not_reecho_inbound(adf, outbound, inbound):
     )
 
     # Outbound is now stable too (label present on both sides → no re-ADD).
-    out2 = outbound.compute_outbound_mutations([ticket], {"DIG-5": post_push}, bind)
+    out2, _ = outbound.compute_outbound_mutations([ticket], {"DIG-5": post_push}, bind)
     assert [lm for m in out2 for lm in m.labels] == []
 
 
@@ -331,7 +331,7 @@ def test_reparent_outbound_then_inbound_converges(adf, outbound, inbound):
     # Outbound: resolve parent_id=epic-1 -> DIG-10, emit a parent field.
     child_jira = _outbound_jira_shape(child, adf=adf, outbound=outbound, jira_status="To Do")
     # No parent yet on the Jira side -> outbound emits the parent diff.
-    out_muts = outbound.compute_outbound_mutations(
+    out_muts, _ = outbound.compute_outbound_mutations(
         [parent_epic, child],
         {
             "DIG-10": _outbound_jira_shape(
@@ -361,7 +361,7 @@ def test_reparent_outbound_then_inbound_converges(adf, outbound, inbound):
     )
 
     # Outbound is now stable (Jira parent.key already == resolved local parent).
-    out2 = outbound.compute_outbound_mutations([child], {"DIG-20": child_jira_reparented}, bind)
+    out2, _ = outbound.compute_outbound_mutations([child], {"DIG-20": child_jira_reparented}, bind)
     assert "parent" not in {f for m in out2 for f in m.fields}
 
 
@@ -385,7 +385,7 @@ def test_outbound_comment_not_reimported_inbound(adf, outbound, inbound):
     pre_push = _outbound_jira_shape(ticket, adf=adf, outbound=outbound, jira_status="To Do")
     # Snapshot carries the (empty) comment field so _diff_comments uses it directly.
     pre_push["comment"] = {"comments": []}
-    out_muts = outbound.compute_outbound_mutations([ticket], {"DIG-6": pre_push}, bind)
+    out_muts, _ = outbound.compute_outbound_mutations([ticket], {"DIG-6": pre_push}, bind)
     (om,) = out_muts
     (cm,) = om.comments
     decorated_body = cm["body"]
@@ -411,7 +411,7 @@ def test_outbound_comment_not_reimported_inbound(adf, outbound, inbound):
     # present on Jira, so the marker-stripped dedup matches the local comment.
     post_for_outbound = dict(pre_push)
     post_for_outbound["comment"] = {"comments": [{"body": adf.text_to_adf(decorated_body)}]}
-    out2 = outbound.compute_outbound_mutations([ticket], {"DIG-6": post_for_outbound}, bind)
+    out2, _ = outbound.compute_outbound_mutations([ticket], {"DIG-6": post_for_outbound}, bind)
     assert [c for m in out2 for c in m.comments] == [], (
         "outbound re-emitted the comment that is already mirrored on Jira"
     )
@@ -438,7 +438,7 @@ def test_link_relationship_survives_roundtrip_without_reemit(adf, outbound, inbo
     # Outbound: no issuelinks on the Jira side yet → emit the link ADD.
     pre_blocker = _outbound_jira_shape(blocker, adf=adf, outbound=outbound, jira_status="To Do")
     pre_blocked = _outbound_jira_shape(blocked, adf=adf, outbound=outbound, jira_status="To Do")
-    out_muts = outbound.compute_outbound_mutations(
+    out_muts, _ = outbound.compute_outbound_mutations(
         [blocker, blocked], {"DIG-7": pre_blocker, "DIG-8": pre_blocked}, bind
     )
     blocker_om = next(m for m in out_muts if m.local_id == "loc-7")
@@ -456,7 +456,7 @@ def test_link_relationship_survives_roundtrip_without_reemit(adf, outbound, inbo
     post_blocker["issuelinks"] = [{"type": {"name": "Blocks"}, "inwardIssue": {"key": "DIG-8"}}]
 
     # Outbound is now stable: the link is already present → no re-ADD (no churn).
-    out2 = outbound.compute_outbound_mutations(
+    out2, _ = outbound.compute_outbound_mutations(
         [blocker, blocked], {"DIG-7": post_blocker, "DIG-8": pre_blocked}, bind
     )
     out2_links = [lm for m in out2 for lm in m.links]

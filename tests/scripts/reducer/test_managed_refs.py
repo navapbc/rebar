@@ -249,7 +249,7 @@ def test_unlink_after_compaction_still_propagates_removal(
             ],
         }
     }
-    outs = outbound_differ.compute_outbound_mutations(
+    outs, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[post], jira_snapshot=snapshot, binding_store=store
     )
     removes = [

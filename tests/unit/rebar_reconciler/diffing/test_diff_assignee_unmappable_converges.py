@@ -161,11 +161,13 @@ def test_compute_outbound_unmappable_assignee_converges(differ):
     jira_key = "REB-9"
     snapshot = {jira_key: _jira(None) | {"comment": {"comments": [], "total": 0}}}
     client = _FakeClient()
-    muts = differ.compute_outbound_mutations(
+    muts, _ = differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=_StubBindingStore({"loc-1": jira_key}),
-        client=client,
+        config=differ.OutboundDiffConfig(
+            client=client,
+        ),
     )
     assignee_updates = [m for m in muts if getattr(m, "fields", None) and "assignee" in m.fields]
     assert assignee_updates == [], (

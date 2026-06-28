@@ -280,7 +280,16 @@ class TestReconcileOnceFiltered:
 
         # Outbound differ stub — returns empty (legacy differ covers it)
         ob = types.ModuleType("reconcile_outbound_differ")
-        ob.compute_outbound_mutations = lambda *a, **kw: []
+        ob.compute_outbound_mutations = lambda *a, **kw: ([], {})
+        # reconcile.py now constructs an OutboundDiffConfig on this module before
+        # calling compute_outbound_mutations; borrow the real dataclass.
+        real_ob_path = _RECONCILER_DIR / "outbound_differ.py"
+        real_ob_name = "reconcile_outbound_differ_real"
+        real_ob_spec = importlib.util.spec_from_file_location(real_ob_name, real_ob_path)
+        real_ob = importlib.util.module_from_spec(real_ob_spec)
+        sys.modules[real_ob_name] = real_ob
+        real_ob_spec.loader.exec_module(real_ob)
+        ob.OutboundDiffConfig = real_ob.OutboundDiffConfig
         stubs["reconcile_outbound_differ"] = ob
 
         # Inbound differ stub — returns empty (legacy differ covers it)

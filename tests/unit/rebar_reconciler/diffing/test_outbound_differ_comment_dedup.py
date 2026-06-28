@@ -162,7 +162,7 @@ def test_all_local_comments_in_jira_no_mutation_emitted(
     store = StubBindingStore({"local-1": jira_key})
     snapshot = _make_jira_snapshot_with_comments(jira_key, bodies)
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=store,
@@ -195,7 +195,7 @@ def test_one_new_comment_plus_two_existing_emits_exactly_one_add(
     store = StubBindingStore({"local-2": jira_key})
     snapshot = _make_jira_snapshot_with_comments(jira_key, existing_bodies)
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=store,
@@ -228,7 +228,7 @@ def test_empty_jira_comments_emits_all_local_as_adds(
     # Snapshot has the Jira issue but with no comments
     snapshot = _make_jira_snapshot_with_comments(jira_key, [])
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=store,
@@ -267,7 +267,7 @@ def test_adf_comment_body_deduped_against_local_plain_text(
     # Jira snapshot has the body as ADF
     snapshot = _make_jira_snapshot_with_comments(jira_key, [plain_body], as_adf=True)
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=store,
@@ -299,7 +299,7 @@ def test_whitespace_normalisation_prevents_re_emit(
     store = StubBindingStore({"local-5": jira_key})
     snapshot = _make_jira_snapshot_with_comments(jira_key, [jira_body])
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=store,
@@ -345,7 +345,7 @@ def test_marker_decorated_jira_comment_deduped_against_local_plain(
     store = StubBindingStore({"local-6": jira_key})
     snapshot = _make_jira_snapshot_with_comments(jira_key, [jira_body_with_marker])
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=store,

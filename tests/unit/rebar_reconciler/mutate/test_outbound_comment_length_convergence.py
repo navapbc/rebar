@@ -120,7 +120,7 @@ def test_oversize_comment_converges_over_two_passes(
 
     # Pass 1: Jira has no comments yet.
     snapshot_1 = _make_jira_snapshot_with_comments(jira_key, [])
-    result_1 = outbound_differ.compute_outbound_mutations(
+    result_1, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot_1,
         binding_store=store,
@@ -144,7 +144,7 @@ def test_oversize_comment_converges_over_two_passes(
 
     # Pass 2: Jira now carries exactly the body that landed in pass 1.
     snapshot_2 = _make_jira_snapshot_with_comments(jira_key, [landed_body])
-    result_2 = outbound_differ.compute_outbound_mutations(
+    result_2, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot_2,
         binding_store=store,

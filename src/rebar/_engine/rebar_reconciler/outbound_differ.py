@@ -30,16 +30,44 @@ from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+# The comment-diff cluster lives in outbound_comments.py (split for module size;
+# the comment seam is self-contained and imports one-way). _diff_comments +
+# _map_comments_for_create are called by compute_outbound_mutations below;
+# _normalize_comment_body + RECONCILER_MARKER are re-exported so
+# outbound_differ.<name> keeps resolving for the comment-diff test suite.
+from rebar_reconciler.outbound_comments import (  # noqa: F401
+    RECONCILER_MARKER,
+    _decorate_outbound_comment,
+    _diff_comments,
+    _map_comments_for_create,
+    _normalize_comment_body,
+)
+
+# The field-diff cluster lives in outbound_fields.py (split for module size).
+# _map_local_to_jira_fields + _diff_fields are called by compute_outbound_mutations
+# below; _assignee_matches + _LOCAL_TO_JIRA_TYPE are re-exported so
+# outbound_differ.<name> keeps resolving for the field-diff test suite.
+from rebar_reconciler.outbound_fields import (  # noqa: F401
+    _LOCAL_TO_JIRA_TYPE,
+    _assignee_matches,
+    _diff_fields,
+    _extract_jira_field,
+    _map_local_to_jira_fields,
+)
+
+# The link-diff cluster lives in outbound_links.py (split for module size).
+# _diff_links is called by compute_outbound_mutations below; _existing_jira_links
+# is re-exported so outbound_differ.<name> keeps resolving for the link-diff tests.
+from rebar_reconciler.outbound_links import (  # noqa: F401
+    _diff_links,
+    _existing_jira_links,
+)
+
 
 def _rebar_env(name: str, default: str | None = None) -> str | None:
     """Read ``REBAR_<name>`` from the environment."""
     return os.environ.get(f"REBAR_{name}", default)
 
-
-# Sentinel: presence of the "comment" key in a snapshot entry confirms the
-# snapshot carries real comment data (fixture/synthetic path). Absence means
-# the entry came from a live Jira search result, which never includes comments.
-_COMMENT_FIELD_KEY = "comment"
 
 # ---------------------------------------------------------------------------
 # Bug 1e08-1a35-0267-4ca6 — bound-but-absent direct-GET sentinels / config
@@ -161,18 +189,12 @@ def _clear_absent(binding_store: Any, jira_key: str) -> None:
             pass
 
 
-_ADF_KEY = "rebar_reconciler.adf"
-_AdfModule = None
-
-_COMMENT_LIMITS_KEY = "rebar_reconciler.comment_limits"
-_CommentLimitsModule = None
-
 _CONFIG_KEY = "rebar_reconciler.config"
 _ConfigModule = None
 
 
 def _load_config():
-    """Lazy-load the sibling config module (same pattern as _load_comment_limits).
+    """Lazy-load the sibling config module (same lazy-by-path loader pattern).
 
     Loaded by file path (not ``from . import``) because the differ may be
     imported via ``importlib.util.spec_from_file_location`` in tests, which does
@@ -193,60 +215,6 @@ def _load_config():
     sys.modules[_CONFIG_KEY] = mod
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     _ConfigModule = mod
-    return mod
-
-
-def _load_comment_limits():
-    """Lazy-load the sibling comment_limits module (same pattern as _load_adf).
-
-    Bug 6afc-20ee-84e5-4dd5: the truncation rule MUST be identical on the send
-    path (acli.add_comment) and this differ comparison path, so both
-    import the single shared ``truncate_comment_body`` helper. Loaded by file
-    path (not ``from . import``) because the differ may be imported via
-    ``importlib.util.spec_from_file_location`` in tests, which does not establish
-    package context.
-    """
-    global _CommentLimitsModule
-    if _CommentLimitsModule is not None:
-        return _CommentLimitsModule
-    if _COMMENT_LIMITS_KEY in sys.modules:
-        _CommentLimitsModule = sys.modules[_COMMENT_LIMITS_KEY]
-        return _CommentLimitsModule
-    cl_path = Path(__file__).parent / "comment_limits.py"
-    spec = importlib.util.spec_from_file_location(_COMMENT_LIMITS_KEY, cl_path)
-    if spec is None or spec.loader is None:
-        raise FileNotFoundError(f"comment_limits.py not found at {cl_path}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[_COMMENT_LIMITS_KEY] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    _CommentLimitsModule = mod
-    return mod
-
-
-def _load_adf():
-    """Lazy-load the sibling adf module.
-
-    The differ may be imported either as a normal package module (production)
-    or via ``importlib.util.spec_from_file_location`` (tests). The latter
-    does not establish package context, so ``from . import adf`` fails. Use
-    the canonical dotted sys.modules key (same pattern as applier's
-    _load_mutation_module) so the module is loaded exactly once across all
-    callers.
-    """
-    global _AdfModule
-    if _AdfModule is not None:
-        return _AdfModule
-    if _ADF_KEY in sys.modules:
-        _AdfModule = sys.modules[_ADF_KEY]
-        return _AdfModule
-    adf_path = Path(__file__).parent / "adf.py"
-    spec = importlib.util.spec_from_file_location(_ADF_KEY, adf_path)
-    if spec is None or spec.loader is None:
-        raise FileNotFoundError(f"adf.py not found at {adf_path}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[_ADF_KEY] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    _AdfModule = mod
     return mod
 
 
@@ -281,639 +249,33 @@ class OutboundMutation:
     links: list[dict[str, Any]] = dataclass_field(default_factory=list)
 
 
-# ---------------------------------------------------------------------------
-# Field mapping constants
-# ---------------------------------------------------------------------------
+@dataclass
+class OutboundDiffConfig:
+    """Optional inputs to :func:`compute_outbound_mutations`.
 
-_LOCAL_TO_JIRA_TYPE: dict[str, str] = {
-    "bug": "Bug",
-    "story": "Story",
-    "task": "Task",
-    "epic": "Epic",
-}
+    Collapses what used to be five trailing optional parameters into one object
+    (the 9-positional-param smell). Every field is optional; the orchestrator
+    substitutes the documented defaults for any left unset.
 
-_LOCAL_TO_JIRA_PRIORITY: dict[int, str] = {
-    0: "Highest",
-    1: "High",
-    2: "Medium",
-    3: "Low",
-    4: "Lowest",
-}
-
-_LOCAL_TO_JIRA_STATUS: dict[str, str] = {
-    "open": "To Do",
-    "in_progress": "In Progress",
-    # blocked/cancelled have no direct equivalent in the live DIG workflow
-    # ({To Do, In Progress, In Review, Done} only). Map to the nearest live
-    # state; lossless information is preserved via rebar-status: annotation
-    # labels emitted/removed by status logic (see _status_annotation_labels).
-    "blocked": "In Progress",
-    "closed": "Done",
-    "cancelled": "Done",
-    "deleted": "Done",
-}
-
-# Local statuses that need an annotation label to preserve lossless intent.
-# Maps local_status -> rebar-status:<label> emitted when that status is active.
-_STATUS_ANNOTATION_LABEL: dict[str, str] = {
-    "blocked": "rebar-status:blocked",
-    "cancelled": "rebar-status:cancelled",
-}
-
-
-# ---------------------------------------------------------------------------
-# Field mapping helpers
-# ---------------------------------------------------------------------------
-
-
-def _map_local_to_jira_fields(
-    ticket: dict[str, Any],
-    binding_store: Any = None,
-    local_ticket_types: dict[str, str] | None = None,
-    emit_detach_clear: bool = False,
-) -> dict[str, Any]:
-    """Map local ticket fields to Jira field names/values.
-
-    Use ``.get(key) or default`` (not ``.get(key, default)``) for string
-    fields so an explicit ``None`` value normalises to the empty-string
-    default. ``.get(key, default)`` only falls back when the key is
-    MISSING — if the key exists with value ``None`` (e.g. unassigned
-    tickets where the ticket reducer initialises ``assignee: None``),
-    .get returns None, not the default. None then propagates through
-    ``_diff_fields`` and becomes the literal string ``"None"`` after
-    str() conversion at the ACLI boundary, causing ACLI to reject the
-    edit with exit 1.
-
-    Parent resolution (ticket 8b25): when ``binding_store`` is supplied and
-    the ticket carries a ``parent_id``, attempt to resolve it to a Jira key
-    via ``binding_store.get_jira_key(parent_id)``.  An unbound parent is
-    silently omitted from the returned dict (not ``None`` / empty-string) so
-    the diff layer can distinguish "no parent set" from "parent set but
-    unbound this pass" and skip / retry accordingly.
+    Fields:
+        excluded_statuses: Local statuses to skip (defaults to
+            ``{"archived", "deleted"}`` when None).
+        local_label_intent: ``local_id -> "ever-seen" tag set`` (bug a06c) gating
+            outbound label REMOVE emission. None retains the pre-fix behaviour.
+        client: Optional AcliClient used for live comment fetch + the bounded
+            bound-but-absent direct GETs. None disables both (the fixture path).
+        pass_id: This pass's monotonic id; the rotation bookkeeping key for the
+            bound-but-absent direct GETs (bug 1e08).
+        prev_snapshot: The previous pass's Jira snapshot, consulted by the inbound
+            directionality guard (suppress an outbound field-update when it is a
+            Jira-side edit local has not touched since the last sync).
     """
-    result: dict[str, Any] = {
-        "summary": ticket.get("title") or "",
-        "description": ticket.get("description") or "",
-        "issuetype": _LOCAL_TO_JIRA_TYPE.get(ticket.get("ticket_type", "task"), "Task"),
-        "priority": _LOCAL_TO_JIRA_PRIORITY.get(ticket.get("priority", 2), "Medium"),
-        "status": _LOCAL_TO_JIRA_STATUS.get(ticket.get("status", "open"), "To Do"),
-        "assignee": ticket.get("assignee") or "",
-    }
-    # Parent sync (ticket 8b25): resolve local parent_id → Jira key.
-    # Omit the key entirely when unbound so _diff_fields skips it (retry next pass).
-    local_parent_id = ticket.get("parent_id") or None
-    if local_parent_id and binding_store is not None:
-        import logging as _logging
 
-        # Hierarchy pre-check (ticket 8b25): on this next-gen Jira project only
-        # an Epic may be a parent. A non-epic parent (e.g. Task→Task) is
-        # rejected by Jira with HTTP 400. Suppress the parent diff entirely
-        # when the resolved local parent's ticket_type != "epic" so the differ
-        # never perpetually re-emits a parent mutation Jira will always reject.
-        # This is a sync exclusion mirroring the bug-36af issuetype pattern.
-        # When parent-type info is unavailable (map not supplied / parent
-        # absent from the map), fall through to the existing behaviour rather
-        # than guess — the applier-side 400-skip remains the backstop.
-        if local_ticket_types is not None and local_parent_id in local_ticket_types:
-            parent_type = (local_ticket_types.get(local_parent_id) or "").lower()
-            if parent_type != "epic":
-                _logging.getLogger(__name__).debug(
-                    "_map_local_to_jira_fields: parent_id=%r for ticket %r is a "
-                    "non-epic (%r); suppressing parent diff (Jira hierarchy only "
-                    "permits Epic parents — sync exclusion, ticket 8b25)",
-                    local_parent_id,
-                    ticket.get("ticket_id"),
-                    parent_type,
-                )
-                return result
-
-        jira_parent_key = binding_store.get_jira_key(local_parent_id)
-        if jira_parent_key:
-            result["parent"] = jira_parent_key
-        else:
-            _logging.getLogger(__name__).debug(
-                "_map_local_to_jira_fields: parent_id=%r for ticket %r is unbound "
-                "this pass; skipping parent field (will retry next pass)",
-                local_parent_id,
-                ticket.get("ticket_id"),
-            )
-    elif binding_store is not None and emit_detach_clear:
-        # Symmetric parent CLEAR (parent-detach churn fix): the ticket has been
-        # DETACHED locally (parent_id is falsy). Emit an explicit ``None``
-        # sentinel into the mapped dict so the field-diff loop's ``parent``
-        # branch runs and compares None against the Jira-side parent key:
-        # it emits a CLEAR only when Jira still carries a parent (stale epic-
-        # link) and nothing when both sides are already parent-less (so a
-        # never-parented ticket does not churn a clear every pass).
-        # Gated on binding_store (the parent-sync feature seam) AND on
-        # ``emit_detach_clear`` — only the UPDATE diff path (``_diff_fields``)
-        # opts in; the CREATE path leaves the key ABSENT so an orphan create
-        # never carries a spurious ``parent: None`` payload. The hierarchy
-        # pre-check above is intentionally skipped for a clear — there is no
-        # parent type to validate.
-        result["parent"] = None
-    return result
-
-
-def _extract_jira_field(jira_fields: dict[str, Any], field: str) -> Any:
-    """Extract a Jira field value, handling nested structures.
-
-    Jira API returns some fields as nested objects (priority.name,
-    issuetype.name, status.name, assignee.displayName), and description is
-    returned as an Atlassian Document Format (ADF) dict, not a plain string.
-
-    Bug 85a1: before this fix, description ADF dicts were extracted as
-    ``""`` because the generic ``raw.get("name", raw.get("displayName", ""))``
-    fallback found neither key on ADF (``{"type": "doc", "version": 1,
-    "content": [...]}``). The differ then reported description as changed on
-    every pass for every bound ticket — the 21-mutation idempotency churn
-    documented in the e2e probe Phase 6.
-
-    Fix: dispatch by field name. Description ADF dicts are decoded via
-    ``adf.adf_to_text``; assignee continues to return ``displayName`` (the
-    canonical form local probe tickets store); priority / status / issuetype
-    use the existing ``.name`` extraction. Plain string values (including
-    legacy snapshots from before ADF migration) pass through unchanged.
-    """
-    raw = jira_fields.get(field)
-    if raw is None:
-        return ""
-
-    # Description: ADF dict → plain text via the project's ADF walker.
-    if field == "description":
-        if isinstance(raw, dict):
-            return _load_adf().adf_to_text(raw)
-        return raw  # legacy plain-string snapshot
-
-    if isinstance(raw, dict):
-        # Jira nested objects: {name: ..., id: ...}
-        return raw.get("name", raw.get("displayName", ""))
-    return raw
-
-
-def _assignee_matches(local_val: str, jira_raw: Any) -> bool:
-    """Permissive assignee equality (bug 85a1, Gap 4).
-
-    Jira returns assignee as a dict with at least ``{accountId, displayName,
-    emailAddress}``; local tickets store assignee as a bare string that may
-    be an email (ticket-create.sh default), a displayName (probe), or
-    "Test" (git-config default), depending on how the ticket was made.
-    A direct ``local_val == _extract_jira_field(...)`` comparison fires on
-    every pass for any user not stored under the same identity form as
-    Jira returns — Phase 6 idempotency churn AND spurious outbound updates.
-
-    Treat ``local_val`` as matching when it equals ANY of {emailAddress,
-    accountId, displayName}. Both sides empty (unassigned) also match.
-    """
-    if jira_raw is None:
-        return local_val == ""
-    if not isinstance(jira_raw, dict):
-        return local_val == str(jira_raw)
-    candidates = {
-        (jira_raw.get("emailAddress") or "").strip(),
-        (jira_raw.get("accountId") or "").strip(),
-        (jira_raw.get("displayName") or "").strip(),
-    }
-    candidates.discard("")
-    return (local_val or "").strip() in candidates
-
-
-# Fields the INBOUND differ mirrors Jira→local (inbound_differ.py field_map). A
-# Jira-side change to one of these, when local is unchanged since the last sync,
-# should flow inbound rather than be reverted by local-wins (inbound field-sync
-# fix). Parent/issuetype/links are NOT inbound-mirrored and keep local-wins.
-_INBOUND_MIRRORED_FIELDS = frozenset({"title", "description", "priority", "status", "assignee"})
-
-
-def _local_matches_prev(field_name: str, local_val: Any, prev_jira_fields: dict[str, Any]) -> bool:
-    """True when the local value equals the LAST-SYNCED Jira value (prev_snapshot).
-
-    If local equals what Jira had at the previous pass, local has NOT changed since
-    the last sync — so any difference from *current* Jira is a Jira-side edit, which
-    must be mirrored inbound, not reverted. Uses the same shape-tolerant comparisons
-    as the current-Jira diff (assignee dict-vs-string; rstrip for text). Returns
-    False when there is no prev entry (degrade to local-wins — no regression).
-    """
-    if not prev_jira_fields:
-        return False
-    if field_name == "assignee":
-        return _assignee_matches(local_val, prev_jira_fields.get("assignee"))
-    prev_val = _extract_jira_field(prev_jira_fields, field_name)
-    if isinstance(local_val, str) and isinstance(prev_val, str):
-        return local_val.rstrip() == prev_val.rstrip()
-    return local_val == prev_val
-
-
-def _parent_clear_is_managed(
-    jira_parent_key: str, ticket: dict[str, Any], binding_store: Any
-) -> bool:
-    """Whether a detached-locally Jira parent is one we MANAGED (so its CLEAR may propagate).
-
-    The parent half of the shared managed-ref removal gate (story safe-luge-nog). Maps the
-    Jira parent key back to a local id and asks the provider-agnostic gate whether that
-    ``parent`` ref is in the ticket's ``managed_refs``. Fail-open toward NOT clobbering: if
-    the local id can't be resolved (no ``get_local_id`` / unbound), treat as unmanaged so a
-    human-set Jira parent is left for inbound ADOPT rather than cleared. Local import keeps
-    the differ free of module-scope heavy imports (it is loaded standalone in tests)."""
-    from rebar.reducer._managed_refs import should_propagate_removal
-
-    get_local_id = getattr(binding_store, "get_local_id", None)
-    if get_local_id is None:
-        return False
-    parent_local_id = get_local_id(jira_parent_key)
-    if not parent_local_id:
-        return False
-    return should_propagate_removal("parent", parent_local_id, ticket)
-
-
-def _diff_fields(
-    ticket: dict[str, Any],
-    jira_fields: dict[str, Any],
-    binding_store: Any = None,
-    local_ticket_types: dict[str, str] | None = None,
-    assignee_resolver: Any = None,
-    jira_key: str = "",
-    prev_jira_fields: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Compare local ticket to Jira fields. Return only changed fields.
-
-    Uses local-wins: if local differs, push outbound regardless of Jira state.
-    Assignee comparison is shape-tolerant via ``_assignee_matches`` so
-    Jira's ``{accountId, displayName, emailAddress}`` dict matches a local
-    string in any of those three forms (bug 85a1, Gap 4).
-
-    Bug b859 (Part 0d): when ``REBAR_RECONCILER_VERBOSE=1`` is set, emit a
-    one-line RECON record per detected field-diff with truncated local /
-    jira values so operators can debug parity issues directly from the
-    probe's side-car log. Off by default to keep production stderr quiet.
-
-    Parent diff (ticket 8b25): when ``binding_store`` is provided and the
-    ticket carries a ``parent_id``, the resolved Jira parent key is diffed
-    against ``jira_fields["parent"]["key"]``.  Unbound parents are omitted
-    from the mapped dict and therefore never emitted as changes.
-    """
-    import sys
-
-    verbose = _rebar_env("RECONCILER_VERBOSE", "0") == "1"
-    ticket_id = ticket.get("ticket_id") or ticket.get("id") or "<no-id>"
-
-    local_mapped = _map_local_to_jira_fields(
-        ticket,
-        binding_store=binding_store,
-        local_ticket_types=local_ticket_types,
-        emit_detach_clear=True,
-    )
-    changed: dict[str, Any] = {}
-    for field_name, local_val in local_mapped.items():
-        # Bug 36af: ticket_type/issuetype is governed by an approved sync
-        # exception — updates do NOT propagate in either direction once
-        # the ticket is bound. The local 'epic' type has no faithful Jira
-        # reverse-mapping and Jira workflows often reject issuetype edits
-        # cross-hierarchy (Bug<->Epic). issuetype IS still emitted at
-        # CREATE time (it's a Jira-required field for issue creation),
-        # but the diff loop here only runs for bound update mutations,
-        # so excluding the field here only affects updates.
-        if field_name == "issuetype":
-            continue
-        # Inbound-sync directionality (Jira-side edits were reverted). For a field
-        # the inbound differ can mirror, if local is UNCHANGED since the last sync
-        # (matches prev_snapshot) then any difference from current Jira is a
-        # Jira-side edit — suppress the outbound here so the inbound differ mirrors
-        # it to local instead of local-wins clobbering it. When local has changed
-        # (local != prev), fall through to the normal local-wins emit. Degrades to
-        # local-wins when there is no prev entry, so it never regresses.
-        if field_name in _INBOUND_MIRRORED_FIELDS and _local_matches_prev(
-            field_name, local_val, prev_jira_fields or {}
-        ):
-            continue
-        if field_name == "assignee":
-            jira_assignee = jira_fields.get("assignee")
-            if _assignee_matches(local_val, jira_assignee):
-                continue  # equivalent identity (or both unassigned) — no churn
-            # The differ would otherwise emit an assignee update. Bug 9b94: if the
-            # local assignee maps to NO assignable Jira user (e.g. an agent identity
-            # like "claude"), the desired state is "unassigned" — so converge to
-            # unassigned instead of re-emitting an unsatisfiable assign every pass.
-            # Resolution runs ONLY on this would-emit path (rare after pass 1) and
-            # only when a resolver is supplied (the live pass); the no-resolver
-            # fixture path keeps the legacy permissive string-match behavior.
-            if local_val and assignee_resolver is not None:
-                acct, authoritative = assignee_resolver(local_val, jira_key)
-                if authoritative:
-                    current_acct = (
-                        jira_assignee.get("accountId") if isinstance(jira_assignee, dict) else None
-                    )
-                    if (acct or None) == (current_acct or None):
-                        continue  # resolved identity already correct — converged
-                    if acct is None:
-                        # Unmappable local assignee → desired unassigned. Jira has
-                        # someone (else we'd have converged above) — clear it.
-                        changed[field_name] = ""
-                        if verbose:
-                            print(  # noqa: T201
-                                f"RECON: field_diff ticket={ticket_id} field=assignee "
-                                f"local={local_val!r:.80} -> unassign (unmappable)",
-                                file=sys.stderr,
-                            )
-                        continue
-                    # Resolvable but mismatched → assign (applier re-resolves the string).
-            changed[field_name] = local_val
-            if verbose:
-                print(  # noqa: T201
-                    f"RECON: field_diff ticket={ticket_id} "
-                    f"field=assignee local={local_val!r:.80} "
-                    f"jira={jira_assignee!r:.80}",
-                    file=sys.stderr,
-                )
-            continue
-        if field_name == "parent":
-            # Jira returns parent as {"key": "DIG-N"}; local_val is the resolved
-            # Jira key string. Extract the Jira-side parent key for comparison.
-            jira_parent_raw = jira_fields.get("parent")
-            jira_parent_key = (
-                jira_parent_raw.get("key") if isinstance(jira_parent_raw, dict) else None
-            )
-            if local_val != jira_parent_key:
-                # Managed-ref gate (tan-elbow-mica): a parent CLEAR (local detached,
-                # ``local_val`` falsy) must only propagate when we MANAGED that parent —
-                # otherwise a parent a human set directly in Jira (one local never had)
-                # would be clobbered instead of ADOPTED inbound. A parent SET (re-parent,
-                # ``local_val`` truthy) is always local-authoritative and not gated.
-                if (
-                    not local_val
-                    and jira_parent_key
-                    and not _parent_clear_is_managed(jira_parent_key, ticket, binding_store)
-                ):
-                    continue  # never managed this Jira parent -> adopt inbound, don't clear
-                changed[field_name] = local_val
-                if verbose:
-                    print(  # noqa: T201
-                        f"RECON: field_diff ticket={ticket_id} "
-                        f"field=parent local={local_val!r:.80} "
-                        f"jira={jira_parent_key!r:.80}",
-                        file=sys.stderr,
-                    )
-            continue
-        jira_val = _extract_jira_field(jira_fields, field_name)
-        # Convergence (bug 626d follow-up): the send path truncates an over-length
-        # description so its ADF representation fits Jira's limit, so the refetched
-        # Jira value is the truncated form. Apply the IDENTICAL shared ADF-aware fit
-        # to the local value before comparing; otherwise an oversized local
-        # description never matches the landed Jira body and the differ re-emits an
-        # update every pass.
-        if field_name == "description" and isinstance(local_val, str):
-            local_val = _load_adf().fit_text_to_adf_limit(local_val)
-        # Bug (plateau): Jira's ADF normalization strips trailing
-        # whitespace from descriptions (and titles) on every write. If
-        # local carries trailing ``\n\n`` (or any trailing whitespace),
-        # the next fetch returns the stripped form — diff fires again —
-        # apply pushes the original — infinite phantom-mutation loop.
-        # Discovered during 20-batch live verification (2026-05-29):
-        # DIG-4175 plateaued at 339 outbound updates for batches 7-20
-        # because local description was 3701 chars, jira-decoded was
-        # 3699 (delta = trailing ``\n\n``). Compare with rstrip() so
-        # trailing-whitespace differences don't trigger the diff.
-        if (
-            isinstance(local_val, str)
-            and isinstance(jira_val, str)
-            and local_val.rstrip() == jira_val.rstrip()
-        ):
-            continue
-        if local_val != jira_val:
-            changed[field_name] = local_val
-            if verbose:
-                # Truncate value repr to keep one-line records reasonable.
-                _l = repr(local_val)
-                _j = repr(jira_val)
-                if len(_l) > 80:
-                    _l = _l[:77] + "..."
-                if len(_j) > 80:
-                    _j = _j[:77] + "..."
-                print(  # noqa: T201
-                    f"RECON: field_diff ticket={ticket_id} field={field_name} local={_l} jira={_j}",
-                    file=sys.stderr,
-                )
-    return changed
-
-
-# ---------------------------------------------------------------------------
-# Comment diff
-# ---------------------------------------------------------------------------
-
-
-def _map_comments_for_create(ticket: dict[str, Any]) -> list[dict[str, Any]]:
-    """Map all local comments to outbound create mutations.
-
-    Every outbound body is decorated with the reconciler marker (Gap 1
-    loop-breaker) so inbound passes can identify our own echoes.
-    """
-    comments = ticket.get("comments", [])
-    return [
-        {"action": "add", "body": _decorate_outbound_comment(c.get("body", ""))} for c in comments
-    ]
-
-
-# Bug 85a1 (Gap 1): marker token embedded in every outbound comment body
-# so the inbound differ can identify and filter our own echoes when the
-# reconciler reads Jira comments back on the next pass. Without the marker
-# every outbound comment would re-appear inbound as a "new Jira comment"
-# and the bridge would loop. Kept identical here and in inbound_differ.py
-# so both directions agree on the loop-breaker pattern.
-RECONCILER_MARKER = "<!-- rebar:reconciler-echo -->"
-
-
-def _normalize_comment_body(body: Any) -> str:
-    """Coerce a comment body to a comparable plain-text string.
-
-    Jira comments are returned with ``body`` as an Atlassian Document Format
-    (ADF) dict (``{"type": "doc", ...}``). Local comments store ``body`` as a
-    plain string. Direct dict-vs-string comparison always reports them as
-    different — driving spurious duplicate pushes (Phase 2 verify-no-
-    duplicate-comments: "found 2 copies") and the dict-as-key crash in
-    ``_diff_comments`` (Phase 3+ "unhashable type: 'dict'" when an ADF body
-    flows into a ``set[str]`` insertion).
-
-    Normalize via ``adf.adf_to_text`` so the canonical comparison is on
-    text. Bug 85a1. The reconciler marker token (Gap 1) is also stripped
-    so dedup compares the *user content* on both sides — without the strip,
-    a previously-pushed Jira body ``"hello\\n\\n<marker>"`` would never match
-    a local ``"hello"`` and the diff would re-emit the same comment.
-    """
-    if isinstance(body, dict):
-        text = _load_adf().adf_to_text(body)
-    else:
-        text = str(body) if body is not None else ""
-    return text.replace(RECONCILER_MARKER, "").strip()
-
-
-def _decorate_outbound_comment(body: str) -> str:
-    """Append the reconciler marker to an outbound comment body (Gap 1).
-
-    Two paragraphs of separation keeps the marker visually below the user
-    content. The marker survives ADF round-trip (each paragraph maps to
-    its own ADF node and back).
-    """
-    return f"{body}\n\n{RECONCILER_MARKER}"
-
-
-# Reconciler-internal machine-comment exclusion.
-#
-# These prefixes mark reconciler-generated machine comments that must NEVER be
-# mirrored outbound to Jira (they are internal monitoring noise, not human Jira
-# content). Only reconciler-internal markers are listed here — a standalone
-# rebar produces no skill-to-skill payload comments, so none are listed.
-#
-# Kept here beside the comment-diff logic for locality with the only consumer
-# (_diff_comments). Human comments are never excluded.
-#
-# Prefixes:
-#   - BRIDGE_CANARY_ALERT: heartbeat-canary staleness alert. The canary appends a
-#       freshly-TIMESTAMPED "Still stale as of <ts>: ..." comment to its alert
-#       ticket every run; mirrored outbound, the volatile timestamp never matches
-#       a prior Jira body, so the comment re-adds every pass and accumulates
-#       duplicate Jira comments. Internal monitoring noise — exclude it.
-#   - "Still stale as of"  LEGACY pre-marker form of the same canary alert comment
-#       (the BRIDGE_CANARY_ALERT: marker only tags future canary comments; this
-#       excludes the existing unmarked backlog too). The canary is the only
-#       producer of this exact phrasing (a human would not write it).
-_EXCLUDED_COMMENT_PREFIXES: tuple[str, ...] = (
-    "BRIDGE_CANARY_ALERT:",
-    "Still stale as of",
-)
-
-
-def _is_machine_marker_comment(normalized_body: str) -> bool:
-    """True when a normalised comment body is a bridge-internal machine payload.
-
-    Match is prefix-based on the already-normalised (ADF→text, marker-stripped,
-    leading/trailing-whitespace-stripped) body so it is robust to ADF round-trip
-    and the RECONCILER_MARKER decoration.
-    """
-    return normalized_body.startswith(_EXCLUDED_COMMENT_PREFIXES)
-
-
-def _diff_comments(
-    ticket: dict[str, Any],
-    jira_key: str,
-    jira_snapshot: dict[str, Any],
-    client: Any = None,
-) -> list[dict[str, Any]]:
-    """Compare local comments to Jira comments. Return mutations for new comments.
-
-    Matching rule: emit a comment "add" only for local comment bodies NOT
-    already present in Jira, after normalising both sides via
-    :func:`_normalize_comment_body` (ADF→text conversion + RECONCILER_MARKER
-    strip + whitespace strip). Body equality after normalisation → skip
-    (already mirrored); otherwise emit with outbound decoration.
-
-    Snapshot lookup: the Jira REST API places comments at
-    fields["comment"]["comments"] (outer key is "comment", not "comments").
-    The fetcher writes snapshot[jira_key] = {k: fields[k] for k in fields},
-    so we read jira_issue["comment"]["comments"] (bug 4572 fix).
-
-    Live search path (bug 4292 fix): Jira search results do NOT include the
-    ``comment`` field. When the snapshot entry for *jira_key* lacks the
-    ``comment`` key, the comment state is unknown. If a ``client`` is provided,
-    fetch comments live via ``client.get_comments(jira_key)``; this is bounded
-    (one call per ticket with local comments). If the live fetch FAILS, skip
-    comment mutations for this ticket entirely and emit a loud warning —
-    never emit blind adds against unknown Jira comment state (the root cause
-    of DIG-5301 reaching 14 duplicate comments).
-
-    When the snapshot entry DOES carry a ``comment`` key (fixture/synthetic path),
-    use it directly — the client is NOT consulted (fixture path preserved).
-
-    Note: PR #402 (ADF walker + comment ID binding) will provide exact ID-
-    based binding once available; this body-equality match is the baseline.
-    """
-    local_comments = ticket.get("comments", [])
-    jira_issue = jira_snapshot.get(jira_key, {})
-
-    # Safety invariant (bug 4292): distinguish "snapshot has comment data" from
-    # "snapshot lacks comment field entirely" (live search shape).
-    #
-    # Jira search returns fields WITHOUT the comment field. The fetcher copies
-    # fields verbatim: snapshot[key] = {k: fields[k] for k in fields}. So a
-    # live snapshot entry will never have a "comment" key. A fixture/synthetic
-    # entry built for tests WILL have it. We use the key's presence as the
-    # discriminator, not the value (empty dict is a valid Jira response for an
-    # issue with no comments, and indistinguishable from an absent key if we
-    # only check truthiness).
-    if _COMMENT_FIELD_KEY in jira_issue:
-        # Snapshot-carried path (fixtures, synthetic, or snapshot enriched with
-        # comment data). Use directly — do NOT call client.
-        comment_field = jira_issue[_COMMENT_FIELD_KEY]
-        if isinstance(comment_field, dict):
-            jira_comments: list = comment_field.get("comments", [])
-        else:
-            jira_comments = []
-    else:
-        # Live search path: snapshot lacks comment field.
-        # When there are no local comments, nothing to compare — skip the
-        # live fetch (avoid an unnecessary API call).
-        if not local_comments:
-            return []
-
-        if client is None:
-            # No client provided. We cannot know the Jira comment state.
-            # Emit a warning and skip comment mutations to avoid blind duplicates.
-            print(  # noqa: T201
-                f"WARNING: outbound_differ: snapshot for {jira_key!r} lacks "
-                f"'comment' field (live search shape) and no client was provided. "
-                f"Skipping comment mutations to avoid blind duplicate adds. "
-                f"Pass a client to compute_outbound_mutations to enable live "
-                f"comment fetch.",
-                file=sys.stderr,
-            )
-            return []
-
-        # Fetch comments live. One call per ticket — bounded by the set of
-        # bound tickets with local comments.
-        try:
-            jira_comments = client.get_comments(jira_key)
-            if not isinstance(jira_comments, list):
-                jira_comments = []
-        except Exception as exc:  # noqa: BLE001 — fail-open: skip comment mutations, warn (bug 4292)
-            # Live fetch failed. Skip comment mutations entirely for this ticket.
-            # Never emit blind adds when comment state is unknown (bug 4292 safety
-            # invariant). Emit a loud warning + log to stderr.
-            print(  # noqa: T201
-                f"WARNING: outbound_differ: live comment fetch for {jira_key!r} "
-                f"failed ({exc!r}). Skipping comment mutations for this ticket "
-                f"to avoid emitting duplicate adds against unknown Jira state. "
-                f"Alert: jira_key={jira_key!r}",
-                file=sys.stderr,
-            )
-            return []
-
-    jira_bodies: set[str] = set()
-    for c in jira_comments:
-        raw = c.get("body", "") if isinstance(c, dict) else c
-        jira_bodies.add(_normalize_comment_body(raw))
-
-    mutations: list[dict[str, Any]] = []
-    for c in local_comments:
-        raw = c.get("body", "") if isinstance(c, dict) else c
-        body = _normalize_comment_body(raw)
-        # Bug 6afc-20ee-84e5-4dd5: never mirror skill-to-skill machine-marker
-        # comments (BRIDGE_CANARY_ALERT:, etc.) outbound to Jira. Symmetric with
-        # the label _EXCLUDED_PREFIXES exclusion.
-        if _is_machine_marker_comment(body):
-            continue
-        # Bug 6afc-20ee-84e5-4dd5 (convergence): the send path truncates an
-        # over-length body to Jira's 32,767-char limit before it lands, so the
-        # body that comes back in jira_bodies is the TRUNCATED form. Apply the
-        # SAME shared truncation to the expected local body before the membership
-        # test; otherwise the full local body never matches the truncated Jira
-        # body and the diff re-emits forever. The local store is NOT mutated —
-        # `body` here is an in-memory comparison key only.
-        compare_body = _load_comment_limits().truncate_comment_body(body)
-        if compare_body and compare_body not in jira_bodies:
-            # Decorate the outbound body with the reconciler marker so the
-            # inbound differ can identify (and filter) our own echoes on the
-            # next pass (Gap 1 loop-breaker).
-            mutations.append({"action": "add", "body": _decorate_outbound_comment(body)})
-    return mutations
+    excluded_statuses: set[str] | None = None
+    local_label_intent: dict[str, set[str]] | None = None
+    client: Any = None
+    pass_id: str = ""
+    prev_snapshot: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -981,209 +343,14 @@ def _diff_labels(
 # Status annotation label helpers (ticket 929a)
 # ---------------------------------------------------------------------------
 
-
-# ---------------------------------------------------------------------------
-# Link diff (story 25ae-92e6-2927-49b6, Cycle 2)
-# ---------------------------------------------------------------------------
-#
-# Relation <-> Jira link-type mapping. The canonical definition lives in
-# acli_graph._RELATION_TO_JIRA_LINK (Cycle 1), but the differ is loaded
-# standalone via spec_from_file_location in tests (no package context, so
-# ``from rebar_reconciler.acli_graph import ...`` is not reliably importable
-# and would pull the whole ACLI client import chain). We re-declare a local
-# copy here — the same single-source-of-vocabulary pattern as the local
-# _LOCAL_TO_JIRA_* constants above. Keep in sync with acli_graph.
-#
-# Each entry maps a rebar relation -> (jira_link_type, swap_endpoints).
-# ``swap_endpoints`` records that "A relation B" maps to a Jira link with the
-# endpoints reversed: "A depends_on B" == "B blocks A". Relations with no
-# reliable Jira link type (duplicates / supersedes / discovered_from) are
-# intentionally ABSENT and SKIPPED by the differ.
-_RELATION_TO_JIRA_LINK: dict[str, tuple[str, bool]] = {
-    "blocks": ("Blocks", False),
-    "depends_on": ("Blocks", True),  # A depends_on B == B blocks A
-    "relates_to": ("Relates", False),
+# Local statuses that need an annotation label to preserve lossless intent.
+# Maps local_status -> rebar-status:<label> emitted when that status is active.
+# (blocked/cancelled have no direct equivalent in the live DIG workflow, so the
+# nearest live state plus this annotation label is the lossless encoding.)
+_STATUS_ANNOTATION_LABEL: dict[str, str] = {
+    "blocked": "rebar-status:blocked",
+    "cancelled": "rebar-status:cancelled",
 }
-
-# Reverse of the above for the REMOVE pass (wake-inn-parse): a Jira link type maps
-# to a base rebar relation; the inward/outward direction disambiguates Blocks into
-# blocks vs depends_on (mirrors inbound_differ._JIRA_LINK_TO_RELATION). Re-declared
-# locally for the same standalone-load reason as _RELATION_TO_JIRA_LINK above.
-_JIRA_LINK_TO_RELATION: dict[str, str] = {
-    "Blocks": "blocks",
-    "Relates": "relates_to",
-}
-
-
-def _existing_jira_links(jira_fields: dict[str, Any]) -> set[tuple[str, str]]:
-    """Index a Jira issue's ``issuelinks`` as a ``{(type_name, target_key)}`` set.
-
-    Direction semantics (verified live): for the issue X carrying this
-    ``issuelinks`` array, an entry with ``inwardIssue.key == Y`` names X as the
-    OUTWARD (e.g. blocker) side and Y the inward side; an entry with
-    ``outwardIssue.key == Y`` names Y the outward side. The dedup key we build is
-    ``(type_name, the-other-issue-key)`` REGARDLESS of direction — an ADD-only
-    outbound diff just needs to know "does a link of this type to that key
-    already exist in either direction", which is what avoids per-pass churn.
-    """
-    existing: set[tuple[str, str]] = set()
-    for link in jira_fields.get("issuelinks") or []:
-        if not isinstance(link, dict):
-            continue
-        link_type = link.get("type") or {}
-        type_name = link_type.get("name") if isinstance(link_type, dict) else None
-        if not type_name:
-            continue
-        for side_key in ("inwardIssue", "outwardIssue"):
-            side = link.get(side_key)
-            if isinstance(side, dict):
-                side_key_val = side.get("key")
-                if side_key_val:
-                    existing.add((type_name, side_key_val))
-    return existing
-
-
-def _diff_links(
-    ticket: dict[str, Any],
-    jira_fields: dict[str, Any],
-    binding_store: Any,
-) -> list[dict[str, Any]]:
-    """Compare a local ticket's ``deps`` to its Jira issuelinks. Emits ADDs and REMOVEs.
-
-    ADD pass — for each local dep ``{target_id, relation, link_uuid}``:
-      - resolve ``target_id`` -> Jira key (skip unbound, mirroring the
-        parent-unbound skip in ``_map_local_to_jira_fields``);
-      - map ``relation`` -> Jira link type via ``_RELATION_TO_JIRA_LINK``
-        (skip unmapped relations: duplicates / supersedes / discovered_from);
-      - DEDUP against the issue's existing ``issuelinks`` by
-        ``(jira_link_type, target_key)`` so an already-present link emits
-        nothing (critical to avoid re-emitting a `set_relationship` every pass);
-      - emit ``{"action":"add","type":...,"to_key":...,"relation":...,
-        "link_uuid":...}``.
-
-    REMOVE pass (wake-inn-parse) — see :func:`_diff_link_removals`: a Jira link of a
-    mapped type, absent locally, that we MANAGED (in ``managed_refs``) emits
-    ``{"action":"remove","type":...,"to_key":...,"relation":...}`` so a deliberate local
-    unlink propagates instead of being re-added inbound every pass. A never-managed Jira
-    link is left for inbound ADOPT, never clobbered.
-
-    The applier consumes ``to_key`` as the link target (resolving the concrete link id
-    for a REMOVE at apply time). The recorded ``relation`` is the rebar relation;
-    ``swap_endpoints`` is handled by the applier when issuing the directional Jira call.
-    """
-    deps = ticket.get("deps") or []
-    existing = _existing_jira_links(jira_fields)
-
-    mutations: list[dict[str, Any]] = []
-    emitted: set[tuple[str, str]] = set()
-    for dep in deps:
-        if not isinstance(dep, dict):
-            continue
-        relation = dep.get("relation")
-        if not isinstance(relation, str):
-            continue  # malformed dep — no relation to map
-        mapped = _RELATION_TO_JIRA_LINK.get(relation)
-        if mapped is None:
-            continue  # no reliable Jira link type — skip (no-op)
-        jira_type, _swap = mapped
-        target_id = dep.get("target_id")
-        if not target_id:
-            continue
-        target_key = binding_store.get_jira_key(target_id)
-        if not target_key:
-            continue  # unbound target — skip, retry next pass
-        key = (jira_type, target_key)
-        if key in existing or key in emitted:
-            continue  # already present in Jira (either direction) or already queued
-        emitted.add(key)
-        mutations.append(
-            {
-                "action": "add",
-                "type": jira_type,
-                "to_key": target_key,
-                "relation": relation,
-                "link_uuid": dep.get("link_uuid"),
-            }
-        )
-    # Symmetric REMOVE pass (wake-inn-parse): a Jira link of a mapped type, absent
-    # locally, that we MANAGED is a deliberate local unlink — propagate the delete so
-    # the inbound differ stops re-adding it (the churn). A never-managed Jira link is
-    # left for inbound ADOPT, never clobbered. The applier resolves the link id at
-    # apply time (mirrors the ADD dedup probe), so we emit only (type, to_key).
-    mutations.extend(_diff_link_removals(ticket, jira_fields, binding_store))
-    return mutations
-
-
-def _diff_link_removals(
-    ticket: dict[str, Any],
-    jira_fields: dict[str, Any],
-    binding_store: Any,
-) -> list[dict[str, Any]]:
-    """Emit managed-ref-gated link REMOVE mutations (the symmetric half of _diff_links).
-
-    For each Jira issuelink of a mapped type whose ``(relation, local_target)`` is NOT in
-    the local deps but IS in the ticket's ``managed_refs``, emit
-    ``{"action":"remove","type":...,"to_key":...,"relation":...}``. Direction (inward vs
-    outward) disambiguates Blocks into blocks/depends_on, mirroring the inbound differ.
-    Local import keeps the differ free of module-scope heavy imports (standalone-loaded in
-    tests)."""
-    from rebar.reducer._managed_refs import should_propagate_removal
-
-    issuelinks = jira_fields.get("issuelinks") or []
-    if not isinstance(issuelinks, list) or not issuelinks:
-        return []
-    get_local_id = getattr(binding_store, "get_local_id", None)
-    if get_local_id is None:
-        return []  # cannot resolve targets -> fail-open (no removal, additive-only)
-
-    local_deps: set[tuple[str, str]] = set()
-    for d in ticket.get("deps") or []:
-        if not isinstance(d, dict):
-            continue
-        d_relation = d.get("relation")
-        d_target = d.get("target_id")
-        if d_relation and d_target:
-            local_deps.add((d_relation, d_target))
-
-    removals: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-    for link in issuelinks:
-        if not isinstance(link, dict):
-            continue
-        link_type = link.get("type") or {}
-        type_name = link_type.get("name") if isinstance(link_type, dict) else None
-        if not type_name:
-            continue  # no link-type name — never managed by us
-        base_relation = _JIRA_LINK_TO_RELATION.get(type_name)
-        if base_relation is None:
-            continue  # link type with no rebar relation mapping — never managed by us
-        inward = link.get("inwardIssue")
-        outward = link.get("outwardIssue")
-        inward_key = inward.get("key") if isinstance(inward, dict) else None
-        outward_key = outward.get("key") if isinstance(outward, dict) else None
-        if inward_key:
-            other_key = inward_key
-            relation = base_relation
-        elif outward_key:
-            other_key = outward_key
-            relation = "depends_on" if base_relation == "blocks" else base_relation
-        else:
-            continue
-        local_target = get_local_id(other_key)
-        if not local_target:
-            continue  # unbound — retry next pass
-        if (relation, local_target) in local_deps:
-            continue  # still linked locally — not a removal
-        if not should_propagate_removal(relation, local_target, ticket):
-            continue  # never managed this link — adopt inbound, do not clobber
-        dedup_key = (type_name, other_key)
-        if dedup_key in seen:
-            continue
-        seen.add(dedup_key)
-        removals.append(
-            {"action": "remove", "type": type_name, "to_key": other_key, "relation": relation}
-        )
-    return removals
 
 
 def _diff_status_annotation_labels(
@@ -1227,13 +394,8 @@ def compute_outbound_mutations(
     local_tickets: list[dict[str, Any]],
     jira_snapshot: dict[str, Any],
     binding_store: BindingStoreProtocol,
-    excluded_statuses: set[str] | None = None,
-    local_label_intent: dict[str, set[str]] | None = None,
-    client: Any = None,
-    pass_id: str = "",
-    absent_alive_fields: dict[str, dict[str, Any]] | None = None,
-    prev_snapshot: dict[str, Any] | None = None,
-) -> list[OutboundMutation]:
+    config: OutboundDiffConfig | None = None,
+) -> tuple[list[OutboundMutation], dict[str, dict[str, Any]]]:
     """Diff local tickets against Jira snapshot and return outbound mutations.
 
     Args:
@@ -1243,41 +405,37 @@ def compute_outbound_mutations(
         jira_snapshot: Dict of {jira_key: {fields...}} from the fetcher.
         binding_store: A BindingStore instance providing get_jira_key(local_id),
             is_bound(local_id).
-        excluded_statuses: Statuses to skip (default: {"archived", "deleted"}).
-        local_label_intent: Optional dict mapping local_id -> "ever-seen" tag
-            set (from ``local_label_intent.compute_label_intent_map``). When
-            provided, gates outbound label REMOVE emission to only labels
-            local user actually had at some point (bug a06c — prevents
-            spurious REMOVEs cancelling legitimate inbound ADDs under the
-            PR #457 local-wins bidir suppression contract). Tickets missing
-            from the map receive an empty intent set, which is the lazy
-            first-pass safety mode (suppress all REMOVEs for that ticket).
-            Legacy callers omit this argument and retain the pre-fix behavior.
-        client: Optional AcliClient (or compatible duck-typed object). When
-            provided, used by ``_diff_comments`` to fetch live Jira comment
-            state for tickets whose snapshot entry lacks a ``comment`` field
-            (the live Jira search shape). When None, _diff_comments skips
-            comment mutations for such tickets rather than emitting blind adds
-            (bug 4292 safety invariant).
-        pass_id: This pass's monotonic id (``%Y-%m-%dT%H-%M-%S`` timestamp).
-            Used as the rotation bookkeeping key for bound-but-absent direct
-            GETs (bug 1e08) — recorded via ``binding_store.set_last_get`` so the
-            least-recently-GET'd absent keys are serviced first next pass.
-        absent_alive_fields: Optional out-param dict. When provided, each
-            bound-but-absent jira_key that the bounded direct GET resolves as
-            ALIVE (HTTP 200) this pass is recorded as
-            ``absent_alive_fields[jira_key] = <raw fields dict>``. This is the
-            inbound-direction GET-sharing seam (bug 0702-3b6d-c1db-4ed3): the
-            reconcile orchestrator merges these entries into the snapshot it
-            hands to the inbound differ, so each out-of-window-alive key is
-            GET'd exactly ONCE per pass and BOTH directions consume the result.
-            404/deleted and transport-error keys are deliberately NOT recorded
-            (a gone issue must not be inbound-mirrored; retirement stays owned
-            by the outbound 404-counter). None → no recording (legacy callers).
+        config: Optional :class:`OutboundDiffConfig` carrying the five optional
+            inputs (excluded_statuses, local_label_intent, client, pass_id,
+            prev_snapshot). None → all defaults (see OutboundDiffConfig). The
+            former trailing ``absent_alive_fields`` out-param is GONE — its
+            value is the second element of the return tuple instead.
 
     Returns:
-        List of OutboundMutation objects describing changes to push to Jira.
+        A ``(mutations, absent_alive_fields)`` tuple:
+          * ``mutations``: the OutboundMutation objects to push to Jira.
+          * ``absent_alive_fields``: ``{jira_key: <raw fields dict>}`` for each
+            bound-but-absent key the bounded direct GET resolved as ALIVE
+            (HTTP 200) this pass — the inbound-direction GET-sharing seam (bug
+            0702-3b6d-c1db-4ed3): the reconcile orchestrator merges these into the
+            snapshot it hands to the inbound differ, so each out-of-window-alive
+            key is GET'd exactly ONCE per pass and BOTH directions consume the
+            result. 404/deleted and transport-error keys are deliberately NOT
+            recorded (a gone issue must not be inbound-mirrored; retirement stays
+            owned by the outbound 404-counter). Empty when nothing was resolved.
     """
+    if config is None:
+        config = OutboundDiffConfig()
+    # Bind the config's fields to locals so the diff body below reads unchanged.
+    excluded_statuses = config.excluded_statuses
+    local_label_intent = config.local_label_intent
+    client = config.client
+    pass_id = config.pass_id
+    prev_snapshot = config.prev_snapshot
+    # The bound-but-absent ALIVE-GET sharing seam: populated below, returned to
+    # the caller (replaces the former mutable out-param).
+    absent_alive_fields: dict[str, dict[str, Any]] = {}
+
     if excluded_statuses is None:
         excluded_statuses = {"archived", "deleted"}
 
@@ -1473,8 +631,7 @@ def compute_outbound_mutations(
                 # second GET. Only the alive (200) case is recorded — 404 and
                 # transport errors are intentionally left out so a gone issue is
                 # never inbound-mirrored (retirement stays outbound-owned).
-                if absent_alive_fields is not None:
-                    absent_alive_fields[jira_key] = fields
+                absent_alive_fields[jira_key] = fields
 
             changed = _diff_fields(
                 ticket,
@@ -1542,4 +699,4 @@ def compute_outbound_mutations(
                     )
                 )
 
-    return mutations
+    return mutations, absent_alive_fields

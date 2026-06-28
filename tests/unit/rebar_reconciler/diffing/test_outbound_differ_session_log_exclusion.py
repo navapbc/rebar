@@ -86,7 +86,7 @@ def test_unbound_session_log_produces_no_mutation(outbound_differ: ModuleType) -
     task = _ticket("local-task-1", "task")
     store = StubBindingStore()  # nothing bound → tasks would normally CREATE
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[log, task],
         jira_snapshot={},
         binding_store=store,
@@ -118,7 +118,7 @@ def test_bound_session_log_produces_no_mutation(outbound_differ: ModuleType) -> 
         }
     }
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[log],
         jira_snapshot=snapshot,
         binding_store=store,

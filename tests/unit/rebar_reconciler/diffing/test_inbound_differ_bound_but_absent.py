@@ -142,15 +142,15 @@ def _run_pass(od, ib, *, local_tickets, snapshot, store, client, pass_id, local_
 
     Returns ``(outbound_mutations, inbound_mutations, absent_alive_fields)``.
     """
-    absent_alive_fields: dict[str, dict] = {}
-    outbound = od.compute_outbound_mutations(
+    outbound, absent_alive_fields = od.compute_outbound_mutations(
         local_tickets=local_tickets,
         jira_snapshot=snapshot,
         binding_store=store,
-        client=client,
-        pass_id=pass_id,
-        absent_alive_fields=absent_alive_fields,
-        local_label_intent=local_label_intent,
+        config=od.OutboundDiffConfig(
+            client=client,
+            pass_id=pass_id,
+            local_label_intent=local_label_intent,
+        ),
     )
     # Orchestrator merge: alive bound-but-absent GETs become inbound-visible.
     inbound_snapshot = dict(snapshot)
@@ -443,11 +443,13 @@ def test_absent_alive_fields_param_is_optional(od):
     store = StubBindingStore({"loc-1": jira_key})
     client = MagicMock()
     client.get_issue_by_rest.return_value = {"fields": {"summary": "OLD", "labels": []}}
-    result = od.compute_outbound_mutations(
+    result, _ = od.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=store,
-        client=client,
-        pass_id="p1",
+        config=od.OutboundDiffConfig(
+            client=client,
+            pass_id="p1",
+        ),
     )
     assert len(result) == 1 and result[0].action == "update"

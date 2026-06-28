@@ -73,7 +73,7 @@ def test_outbound_create_batch_dict_has_local_id_end_to_end(
         "comments": [],
     }
     binding_store = StubBindingStore()
-    mutations = outbound_differ_mod.compute_outbound_mutations([ticket], {}, binding_store)
+    mutations, _ = outbound_differ_mod.compute_outbound_mutations([ticket], {}, binding_store)
     assert len(mutations) == 1
     om = mutations[0]
     assert om.action == "create"

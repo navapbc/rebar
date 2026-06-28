@@ -140,7 +140,7 @@ def _stub_modules(
 
     # Outbound differ: returns OutboundMutation objects
     outbound_differ = MagicMock()
-    outbound_differ.compute_outbound_mutations.return_value = []
+    outbound_differ.compute_outbound_mutations.return_value = ([], {})
 
     # Inbound differ
     inbound_differ = MagicMock()
@@ -224,7 +224,7 @@ class TestOutboundCreate:
             comments=[],
             labels=[{"action": "add", "label": "team-a"}],
         )
-        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = [om]
+        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = ([om], {})
 
         _patch_and_run(reconcile_mod, stubs, repo_root)
 
@@ -268,7 +268,7 @@ class TestOutboundUpdate:
             comments=[],
             labels=[],
         )
-        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = [om]
+        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = ([om], {})
 
         _patch_and_run(reconcile_mod, stubs, repo_root)
 
@@ -411,7 +411,7 @@ class TestCapCombined:
             comments=[],
             labels=[],
         )
-        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = [om]
+        stubs["reconcile_outbound_differ"].compute_outbound_mutations.return_value = ([om], {})
 
         result = _patch_and_run(reconcile_mod, stubs, repo_root)
 

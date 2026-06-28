@@ -174,7 +174,7 @@ def test_outbound_pushes_comment_link_parent_through_applier() -> None:
         "DIG-2": {"summary": "b", "issuelinks": [], _COMMENT_KEY: {"comments": []}},
         "DIG-9": {"summary": "p", "issuelinks": [], _COMMENT_KEY: {"comments": []}},
     }
-    muts = outbound_differ.compute_outbound_mutations(locals_list, jira_snapshot, bind)
+    muts, _ = outbound_differ.compute_outbound_mutations(locals_list, jira_snapshot, bind)
     a_mut = next((m for m in muts if m.local_id == "loc-a"), None)
     assert a_mut is not None, f"outbound emitted no mutation for loc-a: {muts}"
 
@@ -238,7 +238,7 @@ def test_roundtrip_converges_links_and_parent(snapshot) -> None:
     assert re_parent is None, f"inbound re-emitted a parent change after convergence: {re_parent}"
 
     # 3b. Outbound must also emit NOTHING for loc-431 (no spurious re-push).
-    out = outbound_differ.compute_outbound_mutations(list(mirrored.values()), snapshot, bind)
+    out, _ = outbound_differ.compute_outbound_mutations(list(mirrored.values()), snapshot, bind)
     out_a = next((m for m in out if m.local_id == "loc-431"), None)
     out_links = list(getattr(out_a, "links", []) or []) if out_a else []
     assert not out_links, f"outbound re-pushed links after convergence: {out_links}"

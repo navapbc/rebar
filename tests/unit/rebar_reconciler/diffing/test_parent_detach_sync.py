@@ -90,7 +90,7 @@ def test_detach_emits_outbound_parent_clear(outbound_differ: ModuleType) -> None
         }
     }
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[child],
         jira_snapshot=jira_snapshot,
         binding_store=store,
@@ -137,7 +137,7 @@ def test_never_parented_ticket_emits_no_parent_clear(outbound_differ: ModuleType
         }
     }
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[child],
         jira_snapshot=jira_snapshot,
         binding_store=store,
@@ -182,7 +182,7 @@ def test_unmanaged_jira_parent_is_not_cleared(outbound_differ: ModuleType) -> No
         }
     }
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[child],
         jira_snapshot=jira_snapshot,
         binding_store=store,

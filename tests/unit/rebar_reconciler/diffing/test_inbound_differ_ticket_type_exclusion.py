@@ -196,7 +196,7 @@ def test_outbound_excludes_issuetype_from_update_mutations(
         }
     }
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=jira_snapshot,
         binding_store=store,
@@ -229,7 +229,7 @@ def test_outbound_create_still_includes_issuetype(
         "deps": [],
     }
     store = StubOutboundBindingStore({})  # unbound -> create
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=store,
