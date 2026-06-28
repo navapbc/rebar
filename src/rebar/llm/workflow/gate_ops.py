@@ -45,7 +45,7 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
     """Run the child-closure gate; short-circuit to a deterministic FAIL verdict if it trips."""
     import rebar
     from rebar.llm.completion import _child_closure_findings, _deterministic_child_failure
-    from rebar.llm.config import LLMConfig
+    from rebar.llm.config import resolve_gate_config
 
     tid = ctx.inputs.get("ticket_id") or ctx.target_ticket
     if not tid:
@@ -57,7 +57,7 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
     canonical = root.get("ticket_id", str(tid))
     child_findings = _child_closure_findings(canonical, ctx.repo_root)
     if child_findings:
-        cfg = LLMConfig.from_env(repo_root=ctx.repo_root)
+        cfg = resolve_gate_config(ctx.repo_root)  # caller-resolved run config (veiny-trout-brink)
         verdict = _deterministic_child_failure(canonical, child_findings, cfg)
         return {
             "run_verify": False,
@@ -99,9 +99,11 @@ def completion_reconcile(ctx: StepContext) -> dict[str, Any]:
     """Reconcile the agent verdict → a validated completion_verdict (parity with completion.py)."""
     from rebar.llm import findings
     from rebar.llm.completion import _reconcile
-    from rebar.llm.config import LLMConfig
+    from rebar.llm.config import resolve_gate_config
 
-    cfg = LLMConfig.from_env(repo_root=ctx.repo_root)
+    # The caller-resolved run config (veiny-trout-brink); this op uses cfg.repo_path for citation
+    # resolution — the SAME resolved config the rest of the run uses, not a per-op from_env.
+    cfg = resolve_gate_config(ctx.repo_root)
     ticket_id = str(ctx.inputs["ticket_id"])
     result: dict[str, Any] = {
         "verdict": ctx.inputs.get("raw_verdict", ""),

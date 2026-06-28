@@ -111,9 +111,9 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
         getattr(r, "id", None) == "P8" and getattr(r, "blocked", False) for r in det_results
     )
     if p8_too_big:
-        from rebar.llm.config import LLMConfig
+        from rebar.llm.config import resolve_gate_config
 
-        cfg = LLMConfig.from_env(repo_root=ctx.repo_root)
+        cfg = resolve_gate_config(ctx.repo_root)  # caller-resolved cfg (veiny-trout-brink)
         parts = orchestrator.partition_findings(
             det_blocks, det_advisories, [], advisory_cap=orchestrator.DEFAULT_ADVISORY_CAP
         )
@@ -226,7 +226,7 @@ def plan_review_verify_inputs(ctx: StepContext) -> dict[str, Any]:
     token-budgeted chunks (global indices preserved) when the request would exceed the verifier
     model's window — encapsulated chunking, not a workflow fan-out (epic solid-timer-unison WS3)."""
     from rebar import config as _config
-    from rebar.llm.config import LLMConfig
+    from rebar.llm.config import resolve_gate_config
 
     from . import _verifier_cfg, orchestrator, passes, sizing
 
@@ -235,7 +235,9 @@ def plan_review_verify_inputs(ctx: StepContext) -> dict[str, Any]:
     findings = list(ctx.inputs.get("findings") or [])
     # Size against the RESOLVED verifier model (the Sonnet downgrade, operator override honored)
     # — the same model the verify prompt step runs under (gate_dispatch passes _verifier_cfg(cfg)).
-    verify_model = _verifier_cfg(LLMConfig.from_env(repo_root=ctx.repo_root)).model
+    # resolve_gate_config returns the caller-resolved run config, not a per-op from_env
+    # (veiny-trout-brink), so an explicit caller model sizes the verify request correctly.
+    verify_model = _verifier_cfg(resolve_gate_config(ctx.repo_root)).model
     try:
         headroom = float(_config.load_config(ctx.repo_root).verify.verify_window_headroom)
     except Exception:  # noqa: BLE001 — config unreadable → the documented default
@@ -371,12 +373,14 @@ def plan_review_decide(ctx: StepContext) -> dict[str, Any]:
 def plan_review_coach(ctx: StepContext) -> dict[str, Any]:
     """Render coaching from the coach step's raw notes + assemble the plan_review_verdict."""
     from rebar.llm import findings as _findings
-    from rebar.llm.config import LLMConfig
+    from rebar.llm.config import resolve_gate_config
 
     from . import orchestrator, passes
     from .det_floor import PlanContext
 
-    cfg = LLMConfig.from_env(repo_root=ctx.repo_root)
+    # The caller-resolved run config (veiny-trout-brink): so the verdict's model/runner FIELDS
+    # reflect an explicit caller config, not the env — the divergence this ticket removes.
+    cfg = resolve_gate_config(ctx.repo_root)
     parts = {
         "blocking": list(ctx.inputs.get("blocking") or []),
         "surfaced": list(ctx.inputs.get("surfaced") or []),
