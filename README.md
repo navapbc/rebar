@@ -250,6 +250,7 @@ rebar init                                   # create the tickets branch + workt
 rebar create story "Add login page"          # prints the ticket id
 rebar list [--status=open] [--has-tag=...]   # JSON array
 rebar show <id|alias>                         # compiled ticket state (JSON)
+rebar claim <id> --assignee <you>             # atomic open -> in_progress + assignee (the work-start primitive)
 rebar transition <id> <current> <target>      # optimistic-concurrency status change
 rebar comment <id> "<body>"
 rebar link <id1> <id2> <relation>            # relation REQUIRED (see relations below)

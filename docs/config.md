@@ -94,6 +94,11 @@ verify.require_signature_for_close = false   # alias: verify.require_verdict_for
 verify.verify_window_headroom      = 0.8     # plan-review Pass-2 verify: fraction of the verifier
                                              # model window a single verify request may use before
                                              # the findings are split into multiple calls (0.1–1.0)
+verify.progressive_drift_refresh   = false   # progressively refresh drifted findings during plan review
+verify.require_completion_verification_for_close = false  # gate work-ticket close on a PASS completion
+                                             # verdict (signed onto the ticket); fail-closed. ON for
+                                             # this project's rebar.toml. Alternative to the signature gate.
+verify.require_plan_review_for_claim = false # gate claim on a successful (non-BLOCK) plan review attestation
 
 # tickets / display / maintenance
 ticket.display_mode      = "auto"

@@ -327,8 +327,12 @@ def set_fields(ctx: StepContext) -> dict[str, Any]:
 # Likewise register the plan-review gate `uses` ops (story B2). They live under
 # rebar.llm.plan_review (beside the bespoke pipeline they adapt) but register into the same
 # scripted-step registry, so the plan-review workflow resolves them wherever
-# `from . import steps` runs. The op bodies lazy-import the plan-review units, so this import
-# stays light and cycle-free (plan_review does not import the workflow package).
+# `from . import steps` runs. `workflow_ops` DOES import the workflow package — but only the
+# executor PRIMITIVES (`StepContext`/`register_step` from `rebar.llm.workflow.executor`),
+# which import nothing back from `steps`/`gate_ops`, so this module-level import is acyclic.
+# The heavy plan-review pipeline units are lazy-imported inside the op BODIES, so this import
+# also stays light (no LLM deps pulled at registration). (The broader workflow->plan_review
+# back-edge is a structural seam left to a separate ticket.)
 from rebar.llm.plan_review import workflow_ops  # noqa: E402,F401
 
 from . import gate_ops  # noqa: E402,F401
