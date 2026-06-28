@@ -33,9 +33,9 @@ def _rebar_env(name: str, default: None = None) -> str | None: ...
 def _rebar_env(name: str, default: str | None = None) -> str | None:
     """Read ``REBAR_<name>`` from the environment.
 
-    Local to this module (mirrors applier._rebar_env): the reconciler modules
-    are spec-loaded under test where a cross-module import of a shared shim would
-    not resolve.
+    Local to this module (each reconciler module keeps its own copy): the
+    reconciler modules are spec-loaded under test where a cross-module import of a
+    shared shim would not resolve.
     """
     return os.environ.get(f"REBAR_{name}", default)
 

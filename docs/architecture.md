@@ -218,7 +218,6 @@ requires a row here.
 | `config.py` | split the dataclass/schema from the env/CLI-override + cache machinery along the existing seam |
 | `mcp_server.py` | thin FastMCP tool layer. `build_server` is ~30 `@mcp.tool()` closures over a local `mcp`; splitting needs a registrar refactor — watch, don't split preemptively |
 | `llm/workflow/lint_refs.py` | grew past cap adding the prompt/step CONTRACT awareness (workflow authoring v2, 5e78): the engine-injected-inputs allow-list + the `${{ steps.*.outputs.* }}` name-existence map. Extract a `lint_contracts.py` once stories e050 (8 op contracts) + c768 (3-state validation depth) add the related logic that clears the 100-LOC floor; today that seam alone is sub-floor |
-| `rebar_reconciler/applier.py` | split the apply-dispatch table from the per-action handlers |
 
 `src/rebar/llm/runner.py` was **decomposed** in WS-A (epic a88f): the
 filesystem/repo cluster (`_safe_path`, `_git_tracked`, `_discovery_filter`,
@@ -240,6 +239,22 @@ will land.
 call-sites (and `rebar.llm.prompts.<name>` attribute access) are unchanged. The
 cache-split helpers (`split_volatile`/`strip_volatile_marker`/`resolve_prompt_cached`)
 stay in `prompts.py` (they call `resolve_prompt`).
+
+`src/rebar/_engine/rebar_reconciler/applier.py` was **split** along its
+dispatch/handlers seam (epic 5ca8 / `self-waltz-ace`): the per-action batch
+orchestration that wraps `batch_dispatch`'s `create_one`/`update_one`/`delete_one`
+(REST-budget counting on create; the 404 / assignee soft-fails, sub-op telemetry,
+the silent-no-op canary, and set-field provenance on update) moved to a sibling
+`apply_handlers.py` as `handle_create`/`handle_update`/`handle_delete`/`handle_unknown`
+behind a `dispatch_mutation` table over a `BatchApplyContext`. `applier._apply_batch`
+is now a thin sequencer — resolve transport → cross-project guard → HEAD-drift
+recheck loop → per-mutation dispatch + record → manifest-write tail — whose
+per-mutation step is the extracted `_recheck_drift` + `_apply_one` helpers (nesting
+depth ≤ 4). The rebar-id label-write audit guard and the `_load_acli`/`_load_concurrency`
+seams stay resident in `applier` (the test suite patches them there);
+`apply_handlers` imports only downward (`batch_dispatch`/`pass_io`), so `applier`
+imports the handlers back without a cycle. This brought `applier.py` back under the
+soft cap (dropped from the allowlist).
 
 `src/rebar/_cli/__init__.py` was **split** along its command-handler seam: the
 LLM/agent-operation handlers moved to `src/rebar/_cli/_llm_commands.py` and the
