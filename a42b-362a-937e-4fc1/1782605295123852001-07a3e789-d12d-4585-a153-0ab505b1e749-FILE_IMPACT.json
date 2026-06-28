@@ -1,1 +1,0 @@
-{"author":"Iso Tester","data":{"file_impact":[{"path":"src/rebar/__init__.py","reason":"add force_close param to transition"},{"path":"src/rebar/_commands/transition.py","reason":"honor force_close on close path"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782605295123852001,"uuid":"07a3e789-d12d-4585-a153-0ab505b1e749"}
