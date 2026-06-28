@@ -47,12 +47,21 @@ def _verifier_cfg(cfg: LLMConfig) -> LLMConfig:
     ``gates/plan-review.yaml`` because ``resolve_model`` precedence is ``step > workflow >
     cfg`` — a literal step model would ALWAYS beat the operator's cfg/env model and so could
     not honor an override. The Pass-1 finder is unaffected: it runs the YAML ``model_ladder``
-    via the ProductionBatchRunner, not ``cfg.model``."""
+    via the ProductionBatchRunner, not ``cfg.model``.
+
+    The non-frontier-default RULE itself is the shared review kernel's
+    (:func:`rebar.llm.review_kernel.resolve_verifier_model`); this wrapper just applies it to
+    cfg (the kernel stays free of the LLMConfig plumbing)."""
     from dataclasses import replace
 
-    if cfg.model == DEFAULT_MODEL:
-        return replace(cfg, model=VERIFIER_DEFAULT_MODEL)
-    return cfg
+    from rebar.llm.review_kernel import resolve_verifier_model
+
+    return replace(
+        cfg,
+        model=resolve_verifier_model(
+            cfg.model, default_model=DEFAULT_MODEL, verifier_default=VERIFIER_DEFAULT_MODEL
+        ),
+    )
 
 
 def _progressive_enabled(repo_root) -> bool:

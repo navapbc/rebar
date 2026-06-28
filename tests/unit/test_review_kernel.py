@@ -140,3 +140,134 @@ def test_plan_review_reexports_are_the_kernel_objects() -> None:
     assert passes.severity_label is kdecide.severity_label
     assert passes.GRADED_BINARY is kdecide.GRADED_BINARY
     assert passes.DEFAULT_BLOCK_THRESHOLD == kdecide.DEFAULT_BLOCK_THRESHOLD
+
+
+# ── WS2: Pass-2 finding-verifier + the `verification` contract ─────────────────
+from rebar.llm.review_kernel import verify as kverify  # noqa: E402
+
+
+def _fnd(text: str, *, criteria=("E1",), evidence=(), impact_text="") -> dict:
+    return {
+        "finding": text,
+        "criteria": list(criteria),
+        "evidence": list(evidence),
+        "impact": impact_text,
+    }
+
+
+def test_verification_contract_is_the_single_registered_source() -> None:
+    """The kernel registers ``verification``; plan-review's ``plan_review_verification`` is the
+    SAME model factory (an alias, not a second shape). The Binary fields are DERIVED from the
+    single GRADED_BINARY vocabulary + the cited-reference veto."""
+    from rebar.llm.plan_review import passes
+
+    assert passes._pass2_model is kverify.verification_model
+    model = kverify.verification_model()
+    binary_fields = set(
+        model.model_fields["verifications"]
+        .annotation.__args__[0]
+        .model_fields["binary"]
+        .annotation.model_fields
+    )
+    assert binary_fields == {*review_kernel.GRADED_BINARY, "cited_reference_accurate"}
+
+
+def test_listing_preserves_global_index() -> None:
+    listing = kverify.verify_instructions([(3, _fnd("f3")), (4, _fnd("f4"))])
+    assert "indices 3–4" in listing
+    assert "### finding index 3" in listing and "### finding index 4" in listing
+    # an empty batch is a benign header (the single aggregate call with no findings)
+    assert "Emit one verification per finding" in kverify.verify_instructions([])
+
+
+def test_chunks_split_over_budget_preserving_global_indices() -> None:
+    """Over-budget findings split into >1 chunk; the GLOBAL index is preserved so the
+    per-chunk outputs re-merge by index. A tiny window forces splitting."""
+    findings = [_fnd(f"finding number {i}") for i in range(6)]
+    # window small enough that ~2 findings fit per chunk (system reserve + per-finding output).
+    window = kverify.VERIFY_SYSTEM_RESERVE_TOKENS + 4 * kverify.PER_FINDING_VERIFY_TOKENS
+    chunks, omitted = kverify.verify_request_chunks(
+        findings, window_tokens=int(window / 0.8), est_tokens=lambda s: len(s) // 4, headroom=0.8
+    )
+    assert len(chunks) > 1, "a tiny window must split the request"
+    assert omitted == []
+    flat = [gi for chunk in chunks for gi, _ in chunk]
+    assert flat == list(range(6)), "global indices preserved + complete across chunks"
+
+
+def test_chunks_omit_a_finding_too_big_to_verify_alone() -> None:
+    huge = _fnd("x" * 100_000)
+    small = _fnd("ok")
+    # budget fits the small finding's instructions (~hundreds of chars) but not the huge one.
+    window = kverify.VERIFY_SYSTEM_RESERVE_TOKENS + kverify.PER_FINDING_VERIFY_TOKENS + 2_000
+    chunks, omitted = kverify.verify_request_chunks(
+        [huge, small],
+        window_tokens=window,
+        est_tokens=lambda s: len(s),
+        headroom=1.0,
+    )
+    assert omitted == [0], "the too-big finding is omitted by its GLOBAL index"
+    assert [gi for chunk in chunks for gi, _ in chunk] == [1]
+
+
+def test_merge_by_index_keys_on_global_index() -> None:
+    out_a = [{"index": 0, "severity_attributes": {"prod_impact": "high"}, "binary": {}}]
+    out_b = [{"index": 5, "severity_attributes": {}, "binary": {"is_verifiable": "yes"}}]
+    merged = kverify.merge_verifications_by_index([out_a, out_b])
+    assert set(merged) == {0, 5}
+    assert merged[0]["severity_attributes"]["prod_impact"] == "high"
+    # a verification with no usable integer index is dropped (→ no verification → INDETERMINATE)
+    assert kverify.merge_verifications_by_index([[{"index": None, "binary": {}}]]) == {}
+
+
+def test_verify_findings_chunks_runs_and_merges() -> None:
+    findings = [_fnd(f"f{i}") for i in range(3)]
+
+    def run_chunk(instructions: str, context: str) -> list[dict]:
+        # echo a verification per finding index named in the instructions
+        import re
+
+        return [
+            {"index": int(m), "severity_attributes": {}, "binary": {"is_verifiable": "yes"}}
+            for m in re.findall(r"### finding index (\d+)", instructions)
+        ]
+
+    result = kverify.verify_findings(
+        findings,
+        context="the plan text",
+        run_chunk=run_chunk,
+        window_tokens=1_000_000,
+        est_tokens=lambda s: len(s) // 4,
+    )
+    assert set(result["verifications"]) == {0, 1, 2}
+    assert result["omitted"] == []
+
+
+def test_verify_findings_degrades_to_indeterminate_on_unparseable_turn() -> None:
+    """A chunk whose ``run_chunk`` raises (an unparseable turn surviving the tolerant
+    json-repair + bounded-retry stack) contributes NO verifications — never crashing — so those
+    findings have no verification and Pass-3 routes them to INDETERMINATE."""
+    findings = [_fnd("f0"), _fnd("f1")]
+
+    def run_chunk(instructions: str, context: str) -> list[dict]:
+        raise ValueError("model returned garbage that json-repair could not fix")
+
+    result = kverify.verify_findings(
+        findings,
+        context="ctx",
+        run_chunk=run_chunk,
+        window_tokens=1_000_000,
+        est_tokens=lambda s: len(s) // 4,
+    )
+    assert result["verifications"] == {}, "a degraded chunk yields no verifications (no crash)"
+    # downstream: no verification ⇒ pass3_decide(None) ⇒ INDETERMINATE
+    assert review_kernel.pass3_decide(result["verifications"].get(0))["decision"] == "indeterminate"
+
+
+def test_resolve_verifier_model_non_frontier_default() -> None:
+    # the default model downgrades to the non-frontier verifier default
+    assert kverify.resolve_verifier_model("D", default_model="D", verifier_default="V") == "V"
+    # an explicit operator choice wins
+    assert kverify.resolve_verifier_model("explicit", default_model="D", verifier_default="V") == (
+        "explicit"
+    )

@@ -34,10 +34,12 @@ from typing import Any
 from rebar.llm import contracts
 from rebar.llm.config import LLMConfig
 
-# ── Pass-2 vocabulary + Pass-3 decision math: the shared review KERNEL owns these now
-#    (epic vivid-gang-day WS1). Re-exported here so the plan-review pass modules + the
-#    test suite keep their historical `passes.<name>` call sites — thin re-exports, NOT
-#    a second copy of the decision math (AC: "no second copy remains"). ─────────────────
+# ── Pass-2 + Pass-3: the shared review KERNEL owns the verification contract, the verify
+#    listing builders, and the decision math now (epic vivid-gang-day WS1+WS2). Re-exported
+#    here so the plan-review pass modules + the test suite keep their historical
+#    `passes.<name>` call sites — thin re-exports, NOT a second copy (AC: "no second copy
+#    remains"). `verify_instructions`/`verify_finding_listing` are the kernel listing builders;
+#    `verification_model` backs `plan_review_verification` (the same kernel model). ───────────
 from rebar.llm.review_kernel.decide import (  # noqa: F401
     DEFAULT_BLOCK_THRESHOLD,
     GRADED_BINARY,
@@ -45,6 +47,13 @@ from rebar.llm.review_kernel.decide import (  # noqa: F401
     pass3_decide,
     severity_label,
     validity,
+)
+from rebar.llm.review_kernel.verify import (  # noqa: F401
+    finding_listing as verify_finding_listing,
+)
+from rebar.llm.review_kernel.verify import (  # noqa: F401
+    verification_model,
+    verify_instructions,
 )
 from rebar.llm.runner import Runner, RunRequest
 
@@ -86,35 +95,11 @@ def _pass1_model() -> type:
     return P1Output
 
 
-def _pass2_model() -> type:
-    from pydantic import BaseModel, Field
-
-    class SeverityAttrs(BaseModel):
-        prod_impact: str = Field(default="none", description="none|low|medium|high")
-        debt_impact: str = Field(default="none", description="none|low|medium|high")
-        blast_radius: str = Field(default="local", description="local|module|system")
-        likelihood: str = Field(default="low", description="low|medium|high")
-        reversibility: str = Field(default="easy", description="easy|moderate|hard")
-
-    class Binary(BaseModel):
-        cited_reference_accurate: str = Field(default="na", description="yes|no|insufficient|na")
-        is_verifiable: str = Field(default="insufficient")
-        evidence_entails_finding: str = Field(default="insufficient")
-        path_reachable: str = Field(default="insufficient")
-        impact_follows_necessarily: str = Field(default="insufficient")
-        no_viable_alternative_explanation: str = Field(default="insufficient")
-        no_existing_mitigation: str = Field(default="insufficient")
-        severity_claim_justified: str = Field(default="insufficient")
-
-    class Verification(BaseModel):
-        index: int = Field(description="The 0-based index of the finding being verified.")
-        severity_attributes: SeverityAttrs = Field(default_factory=SeverityAttrs)
-        binary: Binary = Field(default_factory=Binary)
-
-    class P2Output(BaseModel):
-        verifications: list[Verification] = Field(default_factory=list)
-
-    return P2Output
+# Pass-2's `verification` contract (the binary sub-question vocabulary + the severity-attribute
+# enums) is owned by the shared review KERNEL (epic vivid-gang-day WS2) as the SINGLE source —
+# plan-review's `plan_review_verification` registers the SAME kernel model factory (an alias, NOT
+# a second copy of the shape). The kernel registers it under the canonical name `verification`.
+_pass2_model = verification_model
 
 
 def _pass4_model() -> type:
@@ -416,33 +401,14 @@ def summarize_for_isf(runner: Runner, cfg: LLMConfig, *, log_text: str) -> str:
 
 
 # ── Pass 2: verify ───────────────────────────────────────────────────────────────
-def verify_finding_listing(batch: list[tuple[int, dict[str, Any]]]) -> str:
-    """The Pass-2 verifier per-finding listing for a batch of ``(index, finding)`` pairs
-    (``### finding index {i}`` blocks with claim / criteria / evidence / impact). The ONE
-    canonical format — shared by the bespoke :func:`pass2_verify` and the v3 workflow's
-    verify-inputs op so the listing never diverges between the two paths."""
-    return "\n\n".join(
-        f"### finding index {i}\nclaim: {f['finding']}\ncriteria: {', '.join(f['criteria'])}\n"
-        f"evidence: {' | '.join(f.get('evidence', []))}\nimpact: {f.get('impact', '')}"
-        for i, f in batch
-    )
-
-
-def verify_instructions(batch: list[tuple[int, dict[str, Any]]]) -> str:
-    """The full Pass-2 verifier INSTRUCTIONS (header + :func:`verify_finding_listing`) over
-    one batch of ``(index, finding)`` pairs. An empty batch yields a benign header only."""
-    if not batch:
-        return "Verify each finding below by its index. Emit one verification per finding."
-    return (
-        "Verify each finding below by its index. Emit one verification per finding "
-        f"(indices {batch[0][0]}–{batch[-1][0]}).\n\n{verify_finding_listing(batch)}"
-    )
-
-
-# NOTE: the bespoke `pass2_verify` (the count-batched aggregate verifier) was retired in
-# epic solid-timer-unison (WS1). The Pass-2 verify now runs ONLY through the workflow gate's
-# `plan-review-verifier` prompt step; `verify_instructions` / `verify_finding_listing` above
-# remain as the shared listing builders that step consumes.
+# The Pass-2 verifier mechanism — the `verification` contract, the per-finding listing
+# builders (`verify_instructions` / `verify_finding_listing`), the token-budget chunking, the
+# merge-by-global-index, and `verify_findings` — is owned by the shared review kernel
+# (`rebar.llm.review_kernel.verify`) as the single source (epic vivid-gang-day WS2). The
+# listing builders are re-exported at the top of this module; the chunker lives in `.sizing`
+# (a thin wrapper over the kernel chunker). The Pass-2 verify itself runs through the workflow
+# gate's `plan-review-verifier` prompt step (the bespoke `pass2_verify` was retired in epic
+# solid-timer-unison WS1).
 
 
 # ── Pass 3: decide (DETERMINISTIC — no model in this path) ────────────────────────

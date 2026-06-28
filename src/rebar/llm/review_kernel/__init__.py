@@ -22,9 +22,11 @@ the finder prompts, the domain-context assembler (plan text vs diff), the
 verify-prompt preamble, and the move-catalog CONTENT. The plan-review gate is the
 worked reference consumer.
 
-Subsequent workstreams add Pass-2 (the finding-verifier + the ``verification``
-contract) and the Pass-4 coach mechanism + the pluggable move-registry schema to
-this package.
+In addition to the Pass-3 decision core (:mod:`.decide`), this package owns Pass-2
+(:mod:`.verify`) — the finding-verifier + the single registered ``verification``
+contract + the verify orchestration (chunking, merge-by-global-index, the
+verifier-model default). A subsequent workstream adds the Pass-4 coach mechanism +
+the pluggable move-registry schema.
 """
 
 from __future__ import annotations
@@ -38,8 +40,20 @@ from .decide import (
     severity_label,
     validity,
 )
+from .verify import (
+    DEFAULT_VERIFY_WINDOW_HEADROOM,
+    finding_listing,
+    merge_verifications_by_index,
+    register_verification_contract,
+    resolve_verifier_model,
+    verification_model,
+    verify_findings,
+    verify_instructions,
+    verify_request_chunks,
+)
 
 __all__ = [
+    # Pass-3 — deterministic decision
     "DEFAULT_BLOCK_THRESHOLD",
     "GRADED_BINARY",
     "impact",
@@ -47,4 +61,14 @@ __all__ = [
     "pass3_over_findings",
     "severity_label",
     "validity",
+    # Pass-2 — finding verifier + the verification contract
+    "DEFAULT_VERIFY_WINDOW_HEADROOM",
+    "finding_listing",
+    "merge_verifications_by_index",
+    "register_verification_contract",
+    "resolve_verifier_model",
+    "verification_model",
+    "verify_findings",
+    "verify_instructions",
+    "verify_request_chunks",
 ]
