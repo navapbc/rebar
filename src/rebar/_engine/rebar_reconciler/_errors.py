@@ -24,6 +24,49 @@ def is_not_found(exc: BaseException) -> bool:
     return http_status(exc) == HTTPStatus.NOT_FOUND
 
 
+# ── the unified reconciler error taxonomy (epic 5ca8 / romp-swath-wince) ────────────────────
+# OSS-informed (requests RequestException / urllib3 HTTPError / tenacity RetryError + PEP 3134):
+# ONE package-level base in this dedicated errors module, raised + re-exported through both the
+# `acli` and `applier`/`batch_dispatch` surfaces, so `except RetryExhaustedError` against either
+# import catches BOTH retry loops (the two formerly-divergent bodies were `is`-distinct — a latent
+# control-flow bug).
+class ReconcilerError(Exception):
+    """Base class for rebar_reconciler domain errors — the single catch-all seam a caller can
+    ``except`` once (mirrors requests' ``RequestException`` / urllib3's ``HTTPError``)."""
+
+
+class JiraAPIError(ReconcilerError):
+    """A Jira HTTP error response, carrying the HTTP ``status_code``. The single canonical body
+    (formerly duplicated in ``batch_dispatch``), re-exported via ``applier``/``batch_dispatch``."""
+
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class RetryExhaustedError(ReconcilerError, RuntimeError):
+    """All retry attempts exhausted after transient HTTP/network errors.
+
+    The MRO ``RetryExhaustedError → ReconcilerError → RuntimeError → Exception`` is caught by
+    BOTH the acli path's ``except RuntimeError`` AND the batch path's ``except Exception`` (and by
+    ``except ReconcilerError``), so unifying the two formerly-divergent bodies breaks no call site.
+    ``message``-first keeps the existing positional ``RetryExhaustedError("…")`` calls working; the
+    optional ``last_exception`` / ``attempts`` mirror tenacity ``RetryError`` / urllib3
+    ``MaxRetryError`` for post-hoc inspection. Both raise sites chain the cause
+    (``raise … from last_error``) per PEP 3134."""
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        last_exception: BaseException | None = None,
+        attempts: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.last_exception = last_exception
+        self.attempts = attempts
+
+
 class RebarIdLabelWriteError(Exception):
     """Raised when an unauthorized leaf attempts to emit a rebar-id label mutation.
 

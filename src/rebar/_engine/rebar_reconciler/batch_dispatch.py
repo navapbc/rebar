@@ -22,22 +22,19 @@ import time
 import urllib.error
 from pathlib import Path
 
-from rebar_reconciler._errors import http_status, is_not_found
+from rebar_reconciler._errors import (
+    JiraAPIError,
+    RetryExhaustedError,
+    http_status,
+    is_not_found,
+)
 from rebar_reconciler.pass_io import _write_mapping_atomic
 
 logger = logging.getLogger(__name__)
 
-
-class JiraAPIError(Exception):
-    """Exception raised by AcliClient stubs to simulate Jira HTTP error responses."""
-
-    def __init__(self, message: str, status_code: int) -> None:
-        super().__init__(message)
-        self.status_code = status_code
-
-
-class RetryExhaustedError(Exception):
-    """Raised when _call_with_retry exhausts all retry attempts."""
+# `JiraAPIError` / `RetryExhaustedError` are the UNIFIED types from `_errors` (epic
+# romp-swath-wince); imported (not defined) here so `applier` re-exports the SAME objects the
+# `acli` surface does. The `__all__`/re-export at the bottom is unchanged.
 
 
 def _index_existing_links(issuelinks) -> set[tuple[str, str]]:
@@ -134,7 +131,12 @@ def _call_with_retry(fn, *args, timeout_s: int = 30, max_retries: int = 3, **kwa
             delay = delays[min(attempt, len(delays) - 1)]
             time.sleep(delay)
 
-    raise RetryExhaustedError(str(last_exc))
+    # CHAIN the cause (PEP 3134) — the prior `raise RetryExhaustedError(str(last_exc))` dropped
+    # __cause__, losing the underlying failure (epic romp-swath-wince). Populate last_exception /
+    # attempts for post-hoc inspection.
+    raise RetryExhaustedError(
+        str(last_exc), last_exception=last_exc, attempts=max_retries + 1
+    ) from last_exc
 
 
 def create_one(
