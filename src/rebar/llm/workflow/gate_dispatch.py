@@ -58,6 +58,7 @@ def produce_plan_review_verdict(
     ``${{ inputs.probe_criteria }}`` reference always resolves."""
     import time
 
+    from rebar.llm.plan_review.orchestrator import assemble_context_cache
     from rebar.llm.plan_review.production_batch_runner import ProductionBatchRunner
     from rebar.llm.runner import get_runner
 
@@ -83,16 +84,22 @@ def produce_plan_review_verdict(
     doc = _gate_doc("plan-review", repo_root)
     rec = MemoryRecorder()
     _t_total = time.monotonic()
+    # One run-scoped assemble_context memo for the whole workflow: the four plan-review ops
+    # (precheck / assemble_criteria / verify_inputs / coach_inputs) each call assemble_context
+    # with the SAME (ticket_id, repo_root) inside this run, so the cache collapses their N+1
+    # graph reads to a single read (and returns an identical PlanContext, so verdict bytes are
+    # unchanged). The scope is dropped on exit — it never leaks across runs/tickets.
     try:
-        res = _ex.run_workflow(
-            doc,
-            {"ticket_id": ctx.ticket_id, "probe_criteria": list(probe_criteria or [])},
-            target_ticket=ctx.ticket_id,
-            repo_root=repo_root,
-            agent_runner=RunnerAgentStep(runner=runner_sel, repo_root=repo_root, config=cfg),
-            batch_runner=ProductionBatchRunner(runner=runner_sel),
-            recorder=rec,
-        )
+        with assemble_context_cache():
+            res = _ex.run_workflow(
+                doc,
+                {"ticket_id": ctx.ticket_id, "probe_criteria": list(probe_criteria or [])},
+                target_ticket=ctx.ticket_id,
+                repo_root=repo_root,
+                agent_runner=RunnerAgentStep(runner=runner_sel, repo_root=repo_root, config=cfg),
+                batch_runner=ProductionBatchRunner(runner=runner_sel),
+                recorder=rec,
+            )
     except LLMUnavailableError as exc:
         return _degraded_plan_review_verdict(
             ctx, cfg, error=exc, advisory_cap=advisory_cap, runner_name=runner_sel.name
