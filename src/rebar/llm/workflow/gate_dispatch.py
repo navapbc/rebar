@@ -58,6 +58,7 @@ def produce_plan_review_verdict(
     ``${{ inputs.probe_criteria }}`` reference always resolves."""
     import time
 
+    from rebar.llm.config import gate_config
     from rebar.llm.plan_review.orchestrator import (
         assemble_context_cache,
         collect_contract_violations,
@@ -93,7 +94,10 @@ def produce_plan_review_verdict(
     # graph reads to a single read (and returns an identical PlanContext, so verdict bytes are
     # unchanged). The scope is dropped on exit — it never leaks across runs/tickets.
     try:
-        with assemble_context_cache(), collect_contract_violations():
+        # Resolve the caller's config ONCE for the whole run: gate_config publishes `cfg` so every
+        # op (and the non-step ProductionBatchRunner) reads the SAME resolved config via
+        # resolve_gate_config instead of re-deriving from env (epic veiny-trout-brink).
+        with assemble_context_cache(), collect_contract_violations(), gate_config(cfg):
             res = _ex.run_workflow(
                 doc,
                 {"ticket_id": ctx.ticket_id, "probe_criteria": list(probe_criteria or [])},
@@ -280,6 +284,7 @@ def produce_completion_verdict(
     ``completion_precheck`` op runs the deterministic child-closure check, then the agentic
     verify + reconcile produce the terminal verdict. Preflights and lets
     :class:`LLMUnavailableError` PROPAGATE so the close gate fail-closes."""
+    from rebar.llm.config import gate_config
     from rebar.llm.runner import get_runner
 
     from . import executor as _ex
@@ -296,14 +301,17 @@ def produce_completion_verdict(
     # same default the close gate always uses.)
     del graph
     doc = _gate_doc("completion-verification", repo_root)
-    res = _ex.run_workflow(
-        doc,
-        {"ticket_id": ticket_id},
-        target_ticket=ticket_id,
-        repo_root=repo_root,
-        agent_runner=RunnerAgentStep(runner=runner_sel, repo_root=repo_root, config=cfg),
-        recorder=MemoryRecorder(),
-    )
+    # Publish the caller-resolved cfg for the run so the completion ops (precheck child-failure,
+    # reconcile) read the SAME config via resolve_gate_config, not a per-op from_env (586c).
+    with gate_config(cfg):
+        res = _ex.run_workflow(
+            doc,
+            {"ticket_id": ticket_id},
+            target_ticket=ticket_id,
+            repo_root=repo_root,
+            agent_runner=RunnerAgentStep(runner=runner_sel, repo_root=repo_root, config=cfg),
+            recorder=MemoryRecorder(),
+        )
     verdict = res.terminal_output
     if res.status != "succeeded" or not isinstance(verdict, dict) or "verdict" not in verdict:
         # The verifier failed mid-run — fail closed (never a silent PASS). Raise so the

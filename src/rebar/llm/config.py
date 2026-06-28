@@ -146,6 +146,41 @@ def current_code_sha() -> str | None:
     return None
 
 
+# The active gate RUN config (epic veiny-trout-brink). The run boundary (`produce_*` in
+# gate_dispatch) resolves the caller's `LLMConfig` ONCE — honoring an explicit `config=` — and
+# sets this for the duration of the workflow run, so every gate op (and the non-step
+# ProductionBatchRunner) reads the SAME resolved config instead of re-deriving it from the
+# environment per op. This is the model/runner identity the verdict reports, fixing the
+# divergence where a caller's explicit model/runner was honored for the LLM calls but the
+# verdict's `model`/`runner` fields still reflected the env. Threaded as a ContextVar (NOT
+# StepContext, which stays config-agnostic; NOT workflow inputs, which the non-step batch runner
+# cannot read) — mirroring the active read-root ContextVars above.
+_active_gate_config: contextvars.ContextVar[LLMConfig | None] = contextvars.ContextVar(
+    "rebar_llm_gate_config", default=None
+)
+
+
+@contextlib.contextmanager
+def gate_config(cfg: LLMConfig) -> Iterator[None]:
+    """Set the active gate-run config for the dynamic extent of the ``with`` block (one gate
+    run), so the ops resolve the SAME caller-resolved config. Dropped on exit (never leaks)."""
+    token = _active_gate_config.set(cfg)
+    try:
+        yield
+    finally:
+        _active_gate_config.reset(token)
+
+
+def resolve_gate_config(repo_root: str | os.PathLike[str] | None = None) -> LLMConfig:
+    """The resolved config for a gate op: the run boundary's config when inside a
+    :func:`gate_config` scope (a gate run), else a fresh :meth:`LLMConfig.from_env` (the
+    standalone-op fallback). The ops call THIS, never ``from_env`` directly, so a caller's
+    explicit ``config=`` is honored uniformly across every op AND the verdict's ``model`` /
+    ``runner`` fields (epic veiny-trout-brink)."""
+    active = _active_gate_config.get()
+    return active if active is not None else LLMConfig.from_env(repo_root=repo_root)
+
+
 # Whether we are inside a code-reading gate's snapshot session (epic raze-vet-ditch S-RETRO
 # safeguard). Set by `gate_source.gate_read_root` for BOTH attested AND local runs — so it
 # marks "a gate deliberately chose this read root", distinct from `current_code_root` (which

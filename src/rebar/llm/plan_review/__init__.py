@@ -103,8 +103,9 @@ def review_plan(
     ``ref``/``source`` select the code read-root (attested snapshot at the pinned SHA by
     default; ``local`` reads the in-place checkout). Verdict production runs through the v3
     engine workflow (``gates/plan-review.yaml``) and is SIGNED by this unchanged wrapper.
-    NOTE: a library caller passing an explicit non-default ``config`` is honored for the LLM
-    CALLS, but the workflow verdict's ``model``/``runner`` FIELDS still reflect the env config.
+    An explicit non-default ``config`` is resolved ONCE at this boundary and honored uniformly
+    — both for the LLM calls AND the verdict's ``model``/``runner`` fields (epic
+    veiny-trout-brink; the gate ops read it via ``resolve_gate_config``).
     """
     from rebar.llm import gate_source
 

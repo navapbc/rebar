@@ -534,3 +534,47 @@ def test_decide_op_records_contract_violation_without_changing_outcome(monkeypat
     assert out["blocking"] == []
     # The violation was recorded DISTINCTLY (a duplicate + an out-of-range index).
     assert recorded == [{"duplicates": [0], "unexpected": [5]}]
+
+
+def test_explicit_config_reflected_in_verdict_model_runner():
+    """586c: a caller's explicit config (non-default model/runner), resolved ONCE at the run
+    boundary and published via gate_config, is reflected in the verdict's model/runner FIELDS —
+    the divergence this ticket removes. plan_review_coach reads it via resolve_gate_config, so
+    under an active scope the verdict reports the caller's identity, not the env's."""
+    import dataclasses
+
+    from rebar.llm.config import LLMConfig, gate_config
+    from rebar.llm.workflow.executor import STEP_REGISTRY, StepContext
+
+    custom = dataclasses.replace(
+        LLMConfig.from_env(), model="caller-model-xyz", runner="caller-runner"
+    )
+    ctx = StepContext(
+        run_id="r",
+        step_id="coach",
+        kind="scripted",
+        step={},
+        inputs={
+            "canonical_id": _TARGET,
+            "ticket_type": "task",
+            "blocking": [],
+            "surfaced": [],
+            "overflow": [],
+            "indeterminate": [],
+            "dropped": [],
+            "notes": [],
+            "det_coverage": {},
+            "routing": {},
+        },
+        workflow={},
+        target_ticket=_TARGET,
+        repo_root=None,
+    )
+    op = STEP_REGISTRY["plan_review_coach"]
+    with gate_config(custom):
+        out = op(ctx)
+    assert out["model"] == "caller-model-xyz"
+    assert out["runner"] == "caller-runner"
+    # Sanity: WITHOUT the scope it falls back to the env config (NOT the caller's identity).
+    out_env = op(ctx)
+    assert out_env["model"] != "caller-model-xyz"

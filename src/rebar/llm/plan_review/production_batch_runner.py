@@ -36,7 +36,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-from rebar.llm.config import LLMConfig
+from rebar.llm.config import resolve_gate_config
 from rebar.llm.runner import Runner, get_runner
 from rebar.llm.workflow.runners import (
     AgentStepRunner,
@@ -85,8 +85,10 @@ class ProductionBatchRunner(BatchRunner):
         ctx = assemble_context(req.target_ticket, repo_root=req.repo_root)
 
         # The Pass-1 ENTRY model: model_ladder[0] if supplied (run_pass1's size ladder
-        # escalates up from here). Everything else comes from the environment/config.
-        cfg = LLMConfig.from_env(repo_root=req.repo_root)
+        # escalates up from here). Everything else comes from the CALLER-RESOLVED run config
+        # (veiny-trout-brink) — resolve_gate_config returns the gate-run cfg when inside a run
+        # (this batch runner is NOT a workflow step, so it cannot read ctx.inputs), else from_env.
+        cfg = resolve_gate_config(req.repo_root)
         if req.model_ladder:
             cfg = dataclasses.replace(cfg, model=req.model_ladder[0])
 

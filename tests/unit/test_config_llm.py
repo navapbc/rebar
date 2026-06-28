@@ -245,3 +245,24 @@ def test_resolve_code_root_require_raises_on_unresolved(tmp_path: Path) -> None:
         llm_config.resolve_code_root("/explicit", allow_checkout_fallback=False, require=True)
         == "/explicit"
     )
+
+
+def test_resolve_gate_config_prefers_active_then_env(tmp_path: Path) -> None:
+    """The gate-run config resolver (epic veiny-trout-brink): inside a ``gate_config`` scope a
+    gate op gets the run-boundary's resolved config (honoring a caller's explicit config); outside
+    a scope it falls back to a fresh ``from_env`` (the standalone-op path). Resolved ONCE at the
+    boundary, read uniformly by every op."""
+    import dataclasses
+
+    from rebar.llm import config as llm_config
+
+    p = _proj(tmp_path)
+    # Outside any scope → a fresh from_env (the default model), never a stale active config.
+    assert llm_config.resolve_gate_config(repo_root=str(p)).model == DEFAULT_MODEL
+    custom = dataclasses.replace(
+        llm_config.LLMConfig.from_env(repo_root=str(p)), model="caller-model-xyz"
+    )
+    with llm_config.gate_config(custom):
+        assert llm_config.resolve_gate_config() is custom  # the boundary config wins
+    # scope exited → back to from_env (the custom config never leaks)
+    assert llm_config.resolve_gate_config(repo_root=str(p)).model == DEFAULT_MODEL
