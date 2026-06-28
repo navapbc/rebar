@@ -1,15 +1,19 @@
 """Optional-dependency guard for rebar's extras (epic a88f / WS-J1).
 
-rebar's runtime is deliberately lean: the ONLY hard dependency is ``pyyaml`` (the
-workflow DSL loader). Heavy capabilities live behind extras and are imported
-lazily, so ``import rebar`` — and even running a scripted workflow — never pulls
-the heavy stack:
+rebar's runtime is deliberately lean: the hard dependencies are ``pyyaml`` (the
+workflow DSL loader), ``jsonschema`` and ``referencing`` (the schema-registry /
+contract validator) — the three ``[project.dependencies]`` in ``pyproject.toml``.
+Heavy capabilities live behind extras and are imported lazily, so ``import rebar``
+— and even running a scripted workflow — never pulls the heavy stack:
 
   * ``[agents]``  — LLM agent steps, the review ops, the workflow agent runner
     (the provider-agnostic pydantic-ai runtime: ``pydantic-ai-slim[anthropic]`` + json-repair).
   * ``[eval]``    — prompt evals (Inspect AI + promptfoo interop).
   * ``[tracing]`` — the OTLP trace sink. WRITE-ONLY by rule: OpenTelemetry is a
     sink, never read back into a rebar decision (the oracle-discipline rule).
+  * ``[grounding]`` — the code-grounding oracle's in-process structural parsing
+    (tree-sitter); the contract + harness are stdlib-only, this extra adds only the
+    in-process binding run inside the fail-open worker boundary.
 
 ``guard_import`` is the single chokepoint that turns a missing extra into ONE
 clear, actionable error naming the exact ``pip install`` — instead of an opaque
