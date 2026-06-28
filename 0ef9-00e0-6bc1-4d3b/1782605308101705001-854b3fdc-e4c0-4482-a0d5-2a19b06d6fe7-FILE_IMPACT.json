@@ -1,0 +1,1 @@
+{"author":"Iso Tester","data":{"file_impact":[{"path":"src/rebar/llm/prompts.py","reason":"extract front-matter cluster"},{"path":"src/rebar/llm/prompts_frontmatter.py","reason":"NEW: front-matter cluster + exceptions"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782605308101705001,"uuid":"854b3fdc-e4c0-4482-a0d5-2a19b06d6fe7"}
