@@ -216,7 +216,6 @@ requires a row here.
 | `rebar_reconciler/outbound_differ.py` | extract the comment-diff cluster (`_diff_comments` + its `_normalize_comment_body`/`_decorate_outbound_comment`/`_map_comments_for_create`/`_is_machine_marker_comment`/`_load_comment_limits`/`_load_adf` satellites) to a sibling `outbound_comments.py`; keep the field/label/link differs + `compute_outbound_mutations` orchestrator |
 | `__init__.py` | library facade over the cap (also carries the workflow entrypoints `run_workflow`/`get_workflow_status`/`get_workflow_result` + `attach_commits`, epic a88f). KEEP as one surface: it is a deliberate flat public-API namespace whose functions share private helpers; a read/write split forces re-exports for no readability gain |
 | `config.py` | split the dataclass/schema from the env/CLI-override + cache machinery along the existing seam |
-| `llm/prompts.py` | crossed the cap adding the engine-wide cache split (epic c81c / S2: `VOLATILE_MARKER`/`split_volatile`/`strip_volatile_marker`/`resolve_prompt_cached` + `file_impact`). Extract the front-matter I/O cluster (`parse_front_matter`/`_split_front_matter_raw`/`write_front_matter`/`_refuse_newer_schema_version` + `FRONT_MATTER_KEYS`/`PROMPT_SCHEMA_VERSION`) to a sibling `prompts_frontmatter.py` — but MOVE `PromptError`/`PromptVersionError` with it (the version error subclasses `PromptError`, so leaving them behind makes the new module import `prompts.py` and cycles) and re-export from `prompts.py`. The cache-split helpers can't move (they call `resolve_prompt`) |
 | `mcp_server.py` | thin FastMCP tool layer. `build_server` is ~30 `@mcp.tool()` closures over a local `mcp`; splitting needs a registrar refactor — watch, don't split preemptively |
 | `llm/workflow/lint_refs.py` | grew past cap adding the prompt/step CONTRACT awareness (workflow authoring v2, 5e78): the engine-injected-inputs allow-list + the `${{ steps.*.outputs.* }}` name-existence map. Extract a `lint_contracts.py` once stories e050 (8 op contracts) + c768 (3-state validation depth) add the related logic that clears the 100-LOC floor; today that seam alone is sub-floor |
 | `rebar_reconciler/applier.py` | split the apply-dispatch table from the per-action handlers |
@@ -229,6 +228,18 @@ removed in the d6d1 cutover; the shared path-safety helpers remain and are reuse
 the pydantic-ai tools in `pai_tools.py`), bringing `runner.py` back under the soft
 cap. `fs_tools.py` is also where the workflow engine's git-ref snapshot code (WS-D)
 will land.
+
+`src/rebar/llm/prompts.py` was **split** along its front-matter seam (epic 5ca8 /
+`dazed-daisy-bur`): the front-matter I/O cluster (`parse_front_matter`,
+`_split_front_matter_raw`, `write_front_matter`, `_refuse_newer_schema_version`, the
+`_FRONT_MATTER` fence + `FRONT_MATTER_KEYS`/`PROMPT_SCHEMA_VERSION`, and the
+`PromptError`/`PromptVersionError` exceptions — moved together because
+`PromptVersionError` subclasses `PromptError`) moved to
+`src/rebar/llm/prompts_frontmatter.py`, bringing `prompts.py` back under the soft cap.
+`prompts.py` re-exports every moved name, so `from rebar.llm.prompts import …`
+call-sites (and `rebar.llm.prompts.<name>` attribute access) are unchanged. The
+cache-split helpers (`split_volatile`/`strip_volatile_marker`/`resolve_prompt_cached`)
+stay in `prompts.py` (they call `resolve_prompt`).
 
 `src/rebar/_cli/__init__.py` was **split** along its command-handler seam: the
 LLM/agent-operation handlers moved to `src/rebar/_cli/_llm_commands.py` and the
