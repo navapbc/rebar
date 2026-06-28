@@ -22,15 +22,26 @@ the finder prompts, the domain-context assembler (plan text vs diff), the
 verify-prompt preamble, and the move-catalog CONTENT. The plan-review gate is the
 worked reference consumer.
 
-In addition to the Pass-3 decision core (:mod:`.decide`), this package owns Pass-2
-(:mod:`.verify`) — the finding-verifier + the single registered ``verification``
-contract + the verify orchestration (chunking, merge-by-global-index, the
-verifier-model default). A subsequent workstream adds the Pass-4 coach mechanism +
-the pluggable move-registry schema.
+This package owns the three divergence-dangerous passes: Pass-2 (:mod:`.verify`) —
+the finding-verifier + the single registered ``verification`` contract + the verify
+orchestration (chunking, merge-by-global-index, the verifier-model default); Pass-3
+(:mod:`.decide`) — the deterministic decision core; and Pass-4 (:mod:`.coach`) — the
+affirmative-coach mechanism + the pluggable move-registry schema (the applicability
+filter + the subject validator + the deterministic render).
 """
 
 from __future__ import annotations
 
+from .coach import (
+    MOVE_REGISTRY_SCHEMA,
+    applicable_moves,
+    coach,
+    coach_listing,
+    move_applies,
+    render_coach_notes,
+    validate_move_registry,
+    validate_subject,
+)
 from .decide import (
     DEFAULT_BLOCK_THRESHOLD,
     GRADED_BINARY,
@@ -71,4 +82,13 @@ __all__ = [
     "verify_findings",
     "verify_instructions",
     "verify_request_chunks",
+    # Pass-4 — coach mechanism + move-registry schema
+    "MOVE_REGISTRY_SCHEMA",
+    "applicable_moves",
+    "coach",
+    "coach_listing",
+    "move_applies",
+    "render_coach_notes",
+    "validate_move_registry",
+    "validate_subject",
 ]

@@ -271,3 +271,119 @@ def test_resolve_verifier_model_non_frontier_default() -> None:
     assert kverify.resolve_verifier_model("explicit", default_model="D", verifier_default="V") == (
         "explicit"
     )
+
+
+# ── WS3: Pass-4 coach mechanism + the pluggable move-registry schema ───────────
+# NB: import the SUBMODULE via importlib — the package re-exports a `coach` FUNCTION that
+# shadows the `coach` submodule attribute on the package.
+import importlib  # noqa: E402
+
+kcoach = importlib.import_module("rebar.llm.review_kernel.coach")
+
+_REG = {
+    "1": {"name": "spike", "template": "Spike {subject} first."},
+    "perf": {"name": "profile", "template": "Profile {subject}.", "applies_when": ["T5a"]},
+}
+
+
+def _pick_first_move(move_id="1", subject="the X design"):
+    def pick(instructions, applicable):
+        return [{"move_id": move_id, "subject": subject, "finding_refs": ["f0"]}]
+
+    return pick
+
+
+def test_coach_gates_on_surviving_makes_no_pick_call() -> None:
+    """0 surviving advisories ⇒ no LLM pick call at all, empty coaching."""
+    calls = []
+
+    def pick(instructions, applicable):
+        calls.append(1)
+        return []
+
+    assert kcoach.coach([], _REG, pick=pick) == []
+    assert calls == [], "the pick (LLM) must NOT be called when there are 0 surviving findings"
+
+
+def test_coach_applicability_filter_excludes_unmatched_move() -> None:
+    """A move with `applies_when` is OFFERED only when its trigger is active; an always-applicable
+    move is always offered. The LLM picks among ONLY the applicable subset."""
+    surviving = [{"id": "f0", "finding": "perf regression on hot path"}]
+    seen_registries = []
+
+    def pick(instructions, applicable):
+        seen_registries.append(set(applicable))
+        return []
+
+    # no active triggers → only the always-applicable move is offered
+    kcoach.coach(surviving, _REG, pick=pick, active_triggers=[])
+    assert seen_registries[-1] == {"1"}
+    # T5a active → the perf move becomes applicable too
+    kcoach.coach(surviving, _REG, pick=pick, active_triggers=["T5a"])
+    assert seen_registries[-1] == {"1", "perf"}
+
+
+def test_coach_drops_a_pick_outside_the_applicable_set() -> None:
+    """The LLM cannot select a move outside the applicable subset: a pick of the non-applicable
+    `perf` move (no T5a trigger) is dropped at render."""
+    surviving = [{"id": "f0", "finding": "x"}]
+    notes = kcoach.coach(
+        surviving,
+        _REG,
+        pick=_pick_first_move(move_id="perf", subject="the hot path"),
+        active_triggers=[],
+    )
+    assert notes == [], "a pick outside the applicable set yields no coaching"
+    # but when T5a is active, the same pick renders
+    notes2 = kcoach.coach(
+        surviving,
+        _REG,
+        pick=_pick_first_move(move_id="perf", subject="the hot path"),
+        active_triggers=["T5a"],
+    )
+    assert len(notes2) == 1 and notes2[0]["move_id"] == "perf"
+    assert notes2[0]["coaching"] == "Profile the hot path."
+
+
+def test_coach_renders_deterministically_from_template() -> None:
+    surviving = [{"id": "f0", "finding": "x"}]
+    notes = kcoach.coach(surviving, _REG, pick=_pick_first_move(subject="the retry policy"))
+    assert notes == [
+        {
+            "move_id": "1",
+            "move_name": "spike",
+            "subject": "the retry policy",
+            "finding_refs": ["f0"],
+            "coaching": "Spike the retry policy first.",
+        }
+    ]
+
+
+def test_subject_validator_rejects_imperative_code_and_overlong() -> None:
+    assert kcoach.validate_subject("the retry/timeout policy") == "the retry/timeout policy"
+    assert kcoach.validate_subject("Add a retry policy") is None  # leading imperative
+    assert kcoach.validate_subject("call foo()") is None  # code tokens
+    assert kcoach.validate_subject("a " * 20) is None  # too long
+
+
+def test_validate_move_registry_strict_raises_lenient_drops() -> None:
+    bad = {"x": {"name": "no placeholder", "template": "missing the subject slot"}}
+    with pytest.raises(ValueError):
+        kcoach.validate_move_registry(bad, strict=True)
+    # best-effort (project files): the malformed move is DROPPED, not raised
+    assert kcoach.validate_move_registry(bad, strict=False) == {}
+    # a valid move with applies_when is normalized + kept
+    good = {"m": {"name": "n", "template": "do {subject}", "applies_when": ["T5a"]}}
+    assert kcoach.validate_move_registry(good)["m"]["applies_when"] == ["T5a"]
+
+
+def test_plan_review_coach_reexports_are_the_kernel_objects() -> None:
+    from rebar.llm.plan_review import passes
+
+    assert passes.render_coach_notes is kcoach.render_coach_notes
+    assert passes._validate_subject is kcoach.validate_subject
+    assert passes.coach_instructions is kcoach.coach_listing
+    assert passes.applicable_moves is kcoach.applicable_moves
+    # plan-review's MOVE_REGISTRY is a catalog INSTANCE whose moves are always-applicable
+    for move in passes.MOVE_REGISTRY.values():
+        assert kcoach.move_applies(move, active_triggers=[])

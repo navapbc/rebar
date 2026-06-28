@@ -26,6 +26,13 @@ arithmetic — no model, fully unit-testable.
 
 from __future__ import annotations
 
+# ── Pass-4 coach MECHANISM: the shared review KERNEL owns it (epic vivid-gang-day WS3). These
+#    module-level re-exports keep the historical `passes.<name>` call sites (workflow_ops + the
+#    test suite) — thin aliases, NOT a second copy. `MOVE_REGISTRY` below stays as plan-review's
+#    catalog INSTANCE. (Module assignments, not `import X as Y`, so isort never drops them.) The
+#    submodule is resolved via importlib because the kernel package re-exports a `coach` FUNCTION
+#    that shadows the `coach` submodule attribute on the package.
+import importlib  # noqa: E402
 import json
 import re
 from pathlib import Path
@@ -56,6 +63,13 @@ from rebar.llm.review_kernel.verify import (  # noqa: F401
     verify_instructions,
 )
 from rebar.llm.runner import Runner, RunRequest
+
+_coach = importlib.import_module("rebar.llm.review_kernel.coach")
+coach_instructions = _coach.coach_listing
+render_coach_notes = _coach.render_coach_notes
+applicable_moves = _coach.applicable_moves
+validate_move_registry = _coach.validate_move_registry
+_validate_subject = _coach.validate_subject
 
 
 # ── structured-output contracts (registered once on import) ────────────────────
@@ -470,39 +484,32 @@ MOVE_REGISTRY: dict[str, dict[str, str]] = {
 }
 
 
-def load_move_registry(repo_root=None) -> dict[str, dict[str, str]]:
-    """The Pass-4 move registry: the built-in moves PLUS project extensions from
-    ``.rebar/plan_review_moves.json`` (a ``{move_id: {name, template}}`` map; a
-    project entry adds a new move or overrides a built-in by id). The template must
-    contain a single ``{subject}`` placeholder — the LLM never authors prose.
-    Best-effort: a missing/malformed file → built-ins only (never crashes the review)."""
-    moves = {mid: dict(m) for mid, m in MOVE_REGISTRY.items()}
+def load_move_registry(repo_root=None) -> dict[str, dict[str, Any]]:
+    """The Pass-4 move registry INSTANCE plan-review supplies to the shared coach mechanism:
+    the built-in :data:`MOVE_REGISTRY` PLUS project extensions from
+    ``.rebar/plan_review_moves.json`` (a ``{move_id: {name, template, applies_when?}}`` map; a
+    project entry adds a new move or overrides a built-in by id). Validated through the kernel
+    move-registry schema (:func:`rebar.llm.review_kernel.validate_move_registry`): the built-ins
+    strictly, the project file best-effort (``strict=False`` — a malformed entry is DROPPED, the
+    review never crashes). Existing moves declare no ``applies_when`` ⇒ always-applicable."""
+    moves = validate_move_registry({mid: dict(m) for mid, m in MOVE_REGISTRY.items()})
     if not repo_root:
         return moves
     try:
         path = Path(repo_root) / ".rebar" / "plan_review_moves.json"
         if path.is_file():
             extra = json.loads(path.read_text(encoding="utf-8"))
-            for mid, m in (extra or {}).items():
-                if isinstance(m, dict) and m.get("name") and "{subject}" in str(m.get("template")):
-                    moves[str(mid)] = {"name": m["name"], "template": m["template"]}
+            moves.update(validate_move_registry(extra or {}, strict=False))
     except Exception:  # noqa: BLE001 — project move file is best-effort
         pass
     return moves
 
 
-def coach_instructions(
-    surviving: list[dict[str, Any]], move_registry: dict[str, dict[str, str]]
-) -> str:
-    """The Pass-4 coach INSTRUCTIONS (move registry + the surviving-findings listing). The
-    ONE canonical format — shared by the bespoke :func:`pass4_coach` and the v3 workflow's
-    coach-inputs op so the listing never diverges between the two paths."""
-    listing = "\n".join(f"- id={f['id']} :: {f['finding'][:200]}" for f in surviving)
-    moves = "\n".join(f"  {mid}: {m['name']}" for mid, m in sorted(move_registry.items()))
-    return (
-        f"## Move registry\n{moves}\n\n## Surviving advisory findings (by id)\n{listing}\n\n"
-        "Emit one note per finding you can map to a useful move (skip findings no move fits)."
-    )
+# The Pass-4 coach MECHANISM — the surviving-findings listing (`coach_instructions`, an alias of
+# the kernel `coach_listing`), the deterministic render (`render_coach_notes`), the subject
+# validator (`_validate_subject`), and the applicability filter — lives in the shared review
+# kernel (`rebar.llm.review_kernel.coach`) as the single source (epic vivid-gang-day WS3) and is
+# re-exported at the top of this module. `MOVE_REGISTRY` above is plan-review's catalog INSTANCE.
 
 
 def pass4_coach(
@@ -511,83 +518,27 @@ def pass4_coach(
     *,
     plan: str,
     surviving: list[dict[str, Any]],
-    move_registry: dict[str, dict[str, str]],
+    move_registry: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Map each surviving advisory finding to a move and render coaching prose
-    DETERMINISTICALLY from the move's locked template. The LLM only picks the move
-    and names a bounded noun-phrase subject (validated); it never authors prose."""
-    if not surviving:
-        return []
-    req = RunRequest(
-        system_prompt=_resolve_system(PASS_COACH, plan, cfg),
-        instructions=coach_instructions(surviving, move_registry),
-        config=cfg,
-        reviewers=["plan-coach"],
-        mode="structured",
-        output_schema="plan_review_coach",
-        execution_mode="single_turn",
-    )
-    result = runner.run(req)
-    return render_coach_notes(result.get("notes", []) or [], move_registry)
+    """Map each surviving advisory finding to a move and render coaching prose DETERMINISTICALLY
+    from the move's locked template, via the shared kernel coach mechanism
+    (:func:`rebar.llm.review_kernel.coach`). The LLM only picks the move + names a bounded
+    noun-phrase subject (validated); it never authors prose. plan-review's active triggers are the
+    criteria carried by the surviving findings (existing always-applicable moves ignore them)."""
+    from rebar.llm import review_kernel
 
+    triggers = {c for f in surviving for c in f.get("criteria", []) or []}
 
-def render_coach_notes(
-    raw_notes: list[dict[str, Any]], move_registry: dict[str, dict[str, str]]
-) -> list[dict[str, Any]]:
-    """Render the Pass-4 LLM's raw move picks ``{move_id, subject, finding_refs}`` into
-    deterministic coaching prose from each move's LOCKED template. The C1 subject
-    validator gates every note (an invalid/imperative/code-bearing subject ⇒ no
-    coaching for that finding); the LLM never authors prose. Extracted so BOTH
-    ``pass4_coach`` (its own LLM call) and the v3 workflow's ``plan_review_coach`` op
-    (the coach is the workflow's prompt step) render identically — no duplicated
-    rendering (story B2)."""
-    notes: list[dict[str, Any]] = []
-    for n in raw_notes:
-        move = move_registry.get(n.get("move_id", ""))
-        subject = _validate_subject(n.get("subject", ""))
-        if not move or subject is None:
-            continue  # C1 fallback: no valid subject ⇒ emit no coaching for it
-        notes.append(
-            {
-                "move_id": n["move_id"],
-                "move_name": move["name"],
-                "subject": subject,
-                "finding_refs": n.get("finding_refs", []) or [],
-                "coaching": move["template"].format(subject=subject),
-            }
+    def _pick(instructions: str, applicable: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+        req = RunRequest(
+            system_prompt=_resolve_system(PASS_COACH, plan, cfg),
+            instructions=instructions,
+            config=cfg,
+            reviewers=["plan-coach"],
+            mode="structured",
+            output_schema="plan_review_coach",
+            execution_mode="single_turn",
         )
-    return notes
+        return runner.run(req).get("notes", []) or []
 
-
-_IMPERATIVE_STARTS = (
-    "add",
-    "remove",
-    "use",
-    "create",
-    "run",
-    "implement",
-    "write",
-    "fix",
-    "change",
-    "delete",
-    "refactor",
-    "call",
-    "set",
-    "make",
-    "update",
-    "replace",
-)
-
-
-def _validate_subject(subject: str) -> str | None:
-    """The SUBJECT VALIDATOR (the load-bearing C1 enforcement): a bounded
-    noun-phrase — ≤8 words / ≤60 chars, no code tokens, not a leading imperative.
-    Returns the cleaned subject or None (reject → no coaching for that finding)."""
-    s = (subject or "").strip()
-    if not s or len(s) > 60 or len(s.split()) > 8:
-        return None
-    if any(tok in s for tok in ("(", ")", "{", "}", ";", "=", "`", "()", "import ")):
-        return None
-    if s.split()[0].lower().rstrip(":,.") in _IMPERATIVE_STARTS:
-        return None
-    return s
+    return review_kernel.coach(surviving, move_registry, pick=_pick, active_triggers=triggers)
