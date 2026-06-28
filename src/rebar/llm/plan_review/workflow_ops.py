@@ -30,9 +30,12 @@ registration decorators (import-light, no heavy LLM deps, no import cycle).
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from rebar.llm.workflow.executor import StepContext, register_step
+
+logger = logging.getLogger(__name__)
 
 _OUTPUT_SCHEMA = "plan_review_verdict"
 
@@ -292,6 +295,8 @@ def plan_review_coach_inputs(ctx: StepContext) -> dict[str, Any]:
 def plan_review_decide(ctx: StepContext) -> dict[str, Any]:
     """too_big/shed routing + Pass-3 over (batch findings, verifier verifications) →
     merge DET findings → cap → the verdict partition (blocking/surfaced/overflow/...)."""
+    from rebar.llm import review_kernel
+
     from . import orchestrator
 
     findings = list(ctx.inputs.get("findings") or [])
@@ -301,15 +306,22 @@ def plan_review_decide(ctx: StepContext) -> dict[str, Any]:
 
     # The Pass-2 verifier (the workflow's `verify` prompt step) emits a flat list of
     # `{index, severity_attributes, binary}`; reshape it to the `{index: {...}}` map Pass-3
-    # consumes (the same shape passes.pass2_verify returns in the bespoke path).
-    verifs: dict[int, dict[str, Any]] = {}
-    for v in raw_verifs:
-        idx = v.get("index") if isinstance(v, dict) else None
-        if isinstance(idx, int):
-            verifs[idx] = {
-                "severity_attributes": v.get("severity_attributes", {}) or {},
-                "binary": v.get("binary", {}) or {},
-            }
+    # consumes via the SHARED structural reshape seam (review_kernel.reshape_verifications) — the
+    # SINGLE place the verifier→decide keying contract lives, so this op no longer re-implements
+    # the silent-drop. `valid_indices` is the batch index domain the verifier ran over. The map is
+    # byte-identical to the prior inline reshape; what is NEW is the contract-violation REPORT
+    # (malformed / duplicate / out-of-range indices) — surfaced loudly per the expand-contract
+    # posture (ERROR log + a run-scoped record drained into verdict coverage) with NO change to
+    # the decisions/verdict (a finding with no verification still degrades to INDETERMINATE).
+    reshape = review_kernel.reshape_verifications(raw_verifs, valid_indices=range(len(findings)))
+    verifs = reshape.verifications
+    if reshape.has_violations:
+        logger.error(
+            "plan-review Pass-2 verification contract violation (findings degrade to "
+            "INDETERMINATE; verdict unchanged): %s",
+            reshape.summary(),
+        )
+        orchestrator.record_contract_violation(reshape.summary())
 
     # The size-ladder's "too big at the largest model" findings are DET-style BLOCKS;
     # budget-shed findings are pre-decided INDETERMINATE. Both bypass Pass-2/3. The rest are
@@ -394,6 +406,12 @@ def plan_review_coach(ctx: StepContext) -> dict[str, Any]:
         "routing": ctx.inputs.get("routing") or {},
         "llm_ran": True,
     }
+    # Surface any Pass-2 verification contract violations recorded by `plan_review_decide` this
+    # run (expand-contract observability). Present ONLY when non-empty, so a clean run's verdict
+    # coverage is byte-identical to before (attestation-safe); never changes the verdict string.
+    violations = orchestrator.drain_contract_violations()
+    if violations:
+        coverage["verification_contract_violations"] = violations
     verdict = orchestrator.finalize_verdict(
         pctx, parts, coaching=coaching, coverage=coverage, runner_name=cfg.runner, model=cfg.model
     )

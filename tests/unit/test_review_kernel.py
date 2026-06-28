@@ -262,6 +262,98 @@ def test_verify_findings_degrades_to_indeterminate_on_unparseable_turn() -> None
     assert result["verifications"] == {}, "a degraded chunk yields no verifications (no crash)"
     # downstream: no verification ⇒ pass3_decide(None) ⇒ INDETERMINATE
     assert review_kernel.pass3_decide(result["verifications"].get(0))["decision"] == "indeterminate"
+    # a GENERIC (non-contract) failure is an honest degrade — NOT a contract violation, so the
+    # contract-violation report stays empty (distinct from the StructuredOutputError path below).
+    assert not result["contract_violations"]
+
+
+# ── verifier→decide CONTRACT enforcement (epic drag-gripe-brake) ─────────────────────────────
+def test_strict_verification_model_rejects_divergent_shape_tolerant_drops() -> None:
+    """The REJECT-don't-ignore boundary (P1): the STRICT model raises on a divergent shape (a
+    wrong wrapper key, or a wrong per-item key), while the LIVE (tolerant) model silently drops
+    it to empty — the exact silent degrade that marked every finding `no-verification`. This pins
+    the strict contract AND documents the live behavior the expand-contract flip will change."""
+    from rebar.llm.errors import StructuredOutputError
+    from rebar.llm.structured import parse_structured
+
+    tolerant = kverify.verification_model()  # the LIVE registered contract (strict=False)
+    strict = kverify.verification_model(strict=True)  # test-pinned, flip-ready
+
+    wrong_wrapper = '{"findings": [{"index": 0, "binary": {}}]}'  # `findings` not `verifications`
+    wrong_item_key = (  # `attributes` not `severity_attributes`
+        '{"verifications": [{"index": 0, "attributes": {"prod_impact": "high"}}]}'
+    )
+
+    # LIVE tolerant path: BOTH divergences degrade SILENTLY, two different ways. A wrong wrapper
+    # key drops the whole list to empty (the #74 "all no-verification" bug); a wrong per-item key
+    # keeps the verification but discards its payload, leaving DEFAULT severity attributes.
+    assert parse_structured(wrong_wrapper, tolerant).verifications == []
+    item = parse_structured(wrong_item_key, tolerant).verifications
+    assert len(item) == 1 and item[0].severity_attributes.prod_impact == "none"  # payload lost
+
+    # STRICT path: the same divergences are REJECTED loudly instead of silently mishandled.
+    with pytest.raises(StructuredOutputError):
+        parse_structured(wrong_wrapper, strict)
+    with pytest.raises(StructuredOutputError):
+        parse_structured(wrong_item_key, strict)
+
+
+def test_reshape_classifies_contract_violations_structurally() -> None:
+    """The shared reshape seam classifies the violations the old silent-drop hid: a duplicate
+    index, an out-of-range index (outside ``valid_indices``), and a malformed (no-int-index)
+    item — while the returned map stays byte-identical to the tolerant merge. Pure structural
+    assertions on the returned dataclass — no string heuristics."""
+    raw = [
+        {"index": 0, "binary": {"is_verifiable": "yes"}},
+        {"index": 0, "binary": {}},  # duplicate
+        {"index": 9, "binary": {}},  # out of range (valid is {0, 1})
+        {"no_index": True},  # malformed (no usable integer index)
+    ]
+    reshape = kverify.reshape_verifications(raw, valid_indices=range(2))
+    assert reshape.has_violations
+    assert reshape.summary() == {"malformed": 1, "duplicates": [0], "unexpected": [9]}
+    # the MAP is unchanged from the tolerant behavior: index 0 present (last-wins), 9 excluded.
+    assert set(reshape.verifications) == {0}
+
+
+def test_reshape_clean_run_reports_no_violations() -> None:
+    """A conforming verifier output yields the map and an EMPTY (falsy) violation report — so a
+    clean run surfaces nothing (the verdict-coverage count stays absent → byte-identical)."""
+    reshape = kverify.reshape_verifications(
+        [{"index": 0, "binary": {}}, {"index": 1, "binary": {}}], valid_indices=range(2)
+    )
+    assert not reshape.has_violations
+    assert reshape.summary() == {}
+    assert set(reshape.verifications) == {0, 1}
+
+
+def test_verify_findings_surfaces_structured_contract_failure_loudly(caplog) -> None:
+    """A ``run_chunk`` that raises ``StructuredOutputError`` (the verifier's turn could not be
+    validated to the `verification` contract) is a CONTRACT violation — recorded distinctly in
+    ``contract_violations['shape_failures']`` and logged at ERROR — NOT a silent degrade. The
+    OUTCOME is unchanged: those findings still have no verification → INDETERMINATE."""
+    import logging
+
+    from rebar.llm.errors import StructuredOutputError
+
+    findings = [_fnd("f0"), _fnd("f1")]
+
+    def run_chunk(instructions: str, context: str) -> list[dict]:
+        raise StructuredOutputError("verifier emitted a shape that failed validation + retry")
+
+    with caplog.at_level(logging.ERROR, logger="rebar.llm.review_kernel.verify"):
+        result = kverify.verify_findings(
+            findings,
+            context="ctx",
+            run_chunk=run_chunk,
+            window_tokens=1_000_000,
+            est_tokens=lambda s: len(s) // 4,
+        )
+    assert result["verifications"] == {}, "outcome unchanged: a contract break still → no verifs"
+    assert result["contract_violations"].get("shape_failures") == [0, 1]
+    assert any(record.levelno == logging.ERROR for record in caplog.records), "must log LOUDLY"
+    # distinct, but still INDETERMINATE downstream (no crash, verdict-safe)
+    assert review_kernel.pass3_decide(result["verifications"].get(0))["decision"] == "indeterminate"
 
 
 def test_resolve_verifier_model_non_frontier_default() -> None:
