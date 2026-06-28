@@ -266,8 +266,14 @@ def plan_review_coach_inputs(ctx: StepContext) -> dict[str, Any]:
     tid = _ticket_id(ctx)
     pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
     surviving = list(ctx.inputs.get("surviving") or [])
+    # The deterministic applicability filter (WS3): the LLM only sees the moves that apply
+    # given the active triggers (plan-review's = the criteria the surviving findings carry).
+    # Existing plan-review moves declare no `applies_when` ⇒ always-applicable ⇒ the listing is
+    # unchanged; the field + filter are the mechanism a future gate (b744) uses.
     moves = passes.load_move_registry(ctx.repo_root)
-    instructions = passes.coach_instructions(surviving, moves)
+    triggers = {c for f in surviving for c in f.get("criteria", []) or []}
+    applicable = passes.applicable_moves(moves, triggers)
+    instructions = passes.coach_instructions(surviving, applicable)
     return {"plan": pctx.plan_text, "instructions": instructions}
 
 
@@ -366,8 +372,14 @@ def plan_review_coach(ctx: StepContext) -> dict[str, Any]:
         "indeterminate": list(ctx.inputs.get("indeterminate") or []),
         "dropped": list(ctx.inputs.get("dropped") or []),
     }
+    # Render over the SAME applicable subset the coach prompt picked among (WS3): a move_id
+    # outside the applicable set is dropped, so the LLM can never select outside it. Triggers =
+    # the criteria the surviving (surfaced) findings carry (matching coach_inputs).
     moves = passes.load_move_registry(ctx.repo_root)
-    coaching = passes.render_coach_notes(list(ctx.inputs.get("notes") or []), moves)
+    surviving = list(ctx.inputs.get("surfaced") or [])
+    triggers = {c for f in surviving for c in f.get("criteria", []) or []}
+    applicable = passes.applicable_moves(moves, triggers)
+    coaching = passes.render_coach_notes(list(ctx.inputs.get("notes") or []), applicable)
 
     # finalize_verdict needs only ctx.ticket_id + ctx.ticket_type — a minimal context (no
     # rebar read) suffices here (the precheck already canonicalized the id/type).
