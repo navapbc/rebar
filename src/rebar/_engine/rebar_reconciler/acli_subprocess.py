@@ -20,6 +20,8 @@ import time
 import urllib.error
 from typing import Any, NamedTuple
 
+from rebar_reconciler._errors import RetryExhaustedError
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -121,8 +123,9 @@ class AssigneeNotFoundError(ValueError):
     """
 
 
-class RetryExhaustedError(RuntimeError):
-    """All retry attempts exhausted after transient HTTP/network errors."""
+# `RetryExhaustedError` is the UNIFIED type from `_errors` (epic romp-swath-wince); imported at
+# the top (not defined here) so the `acli` surface re-exports the SAME object `applier` does. Its
+# MRO still subclasses RuntimeError, so this module's `except RuntimeError` sites are unaffected.
 
 
 class AcliTimeoutError(Exception):
@@ -284,7 +287,9 @@ def _call_with_backoff(
 
     assert last_error is not None
     raise RetryExhaustedError(
-        f"All {max_retries} retries exhausted after transient errors"
+        f"All {max_retries} retries exhausted after transient errors",
+        last_exception=last_error,
+        attempts=max_retries + 1,  # the loop is range(max_retries + 1): initial + retries
     ) from last_error
 
 
