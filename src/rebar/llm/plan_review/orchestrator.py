@@ -202,6 +202,56 @@ def _assemble_context_uncached(
     )
 
 
+# ── verification contract-violation collection (run-scoped) ──────────────────────
+# Pass-2's verifier→Pass-3 reshape (the `plan_review_decide` op) detects contract violations
+# (malformed / duplicate / out-of-range verification indices) via the shared
+# `review_kernel.reshape_verifications` seam. Under the expand-contract posture (epic
+# drag-gripe-brake) those NEVER change the verdict — they are surfaced as ADDITIVE observability:
+# an ERROR log + a `verification_contract_violations` entry on the verdict coverage, present ONLY
+# when non-empty (so a clean run's verdict stays byte-identical → attestation-safe). `decide` and
+# `coach` run as SEPARATE workflow steps, so the report is carried between them by a run-scoped
+# ContextVar (the same mechanism as the assemble memo above), activated once per gate run by
+# `produce_plan_review_verdict`.
+_contract_violations: contextvars.ContextVar[list[dict[str, Any]] | None] = contextvars.ContextVar(
+    "rebar_plan_review_contract_violations", default=None
+)
+
+
+@contextlib.contextmanager
+def collect_contract_violations() -> Iterator[None]:
+    """Activate a run-scoped sink for verification contract violations for the dynamic extent of
+    one plan-review gate run. Nesting reuses the active sink (idempotent); the sink is dropped on
+    exit so it never leaks across runs/tickets."""
+    if _contract_violations.get() is not None:
+        yield
+        return
+    token = _contract_violations.set([])
+    try:
+        yield
+    finally:
+        _contract_violations.reset(token)
+
+
+def record_contract_violation(summary: dict[str, Any]) -> None:
+    """Record one NON-EMPTY contract-violation summary if a sink is active; a no-op outside a
+    :func:`collect_contract_violations` scope (so unit-testing ``plan_review_decide`` in isolation
+    never raises and never leaks)."""
+    sink = _contract_violations.get()
+    if sink is not None and summary:
+        sink.append(dict(summary))
+
+
+def drain_contract_violations() -> list[dict[str, Any]]:
+    """Return + clear the violations recorded in the active sink (empty list when none recorded,
+    or when no sink is active)."""
+    sink = _contract_violations.get()
+    if not sink:
+        return []
+    drained = list(sink)
+    sink.clear()
+    return drained
+
+
 # ── finding id (content fingerprint — orchestrator is the SOLE owner) ─────────────
 def mint_finding_id(finding: dict[str, Any]) -> str:
     """A stable content fingerprint for a finding (the caller-visible ``id`` the

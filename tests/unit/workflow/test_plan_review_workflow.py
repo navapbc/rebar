@@ -454,3 +454,83 @@ def test_decide_op_partitions_findings(monkeypatch):
     assert len(out["surfaced"]) == 2
     assert all(f["decision"] == "advisory" for f in out["surfaced"])
     assert all("id" in f for f in out["surfaced"])
+
+
+def _high_validity_verif(i: int) -> dict:
+    return {
+        "index": i,
+        "severity_attributes": {
+            "prod_impact": "medium",
+            "blast_radius": "module",
+            "likelihood": "medium",
+            "reversibility": "moderate",
+        },
+        "binary": {
+            "cited_reference_accurate": "na",
+            "is_verifiable": "yes",
+            "evidence_entails_finding": "yes",
+            "path_reachable": "yes",
+            "impact_follows_necessarily": "yes",
+            "no_viable_alternative_explanation": "yes",
+            "no_existing_mitigation": "yes",
+            "severity_claim_justified": "yes",
+        },
+    }
+
+
+def test_contract_violation_sink_is_run_scoped():
+    """The run-scoped sink (epic drag-gripe-brake): record is a no-op outside a scope (no crash,
+    no leak), drains-and-clears inside one, and never leaks across scopes."""
+    from rebar.llm.plan_review import orchestrator
+
+    # Outside any scope: record is a no-op, drain is empty.
+    orchestrator.record_contract_violation({"duplicates": [0]})
+    assert orchestrator.drain_contract_violations() == []
+    with orchestrator.collect_contract_violations():
+        orchestrator.record_contract_violation({"duplicates": [1]})
+        assert orchestrator.drain_contract_violations() == [{"duplicates": [1]}]
+        assert orchestrator.drain_contract_violations() == []  # drain cleared it
+    assert orchestrator.drain_contract_violations() == []  # scope exited → empty again
+
+
+def test_decide_op_records_contract_violation_without_changing_outcome(monkeypatch):
+    """plan_review_decide routes the raw verifications through the SHARED reshape seam: a
+    duplicate / out-of-range index is RECORDED as a contract violation in the run-scoped sink
+    (→ verdict coverage) but the partition is UNCHANGED (expand-contract: observability only,
+    the conforming findings still decide normally)."""
+    from rebar.llm.plan_review import orchestrator
+    from rebar.llm.workflow.executor import STEP_REGISTRY, StepContext
+
+    _patch_reads(monkeypatch, _state())
+    op = STEP_REGISTRY["plan_review_decide"]
+    findings = [{"finding": "f0", "criteria": ["E1"]}, {"finding": "f1", "criteria": ["E1"]}]
+    # index 0 duplicated, index 5 out of range (valid is {0, 1}), index 1 conforming.
+    verifs = [
+        _high_validity_verif(0),
+        _high_validity_verif(0),
+        _high_validity_verif(5),
+        _high_validity_verif(1),
+    ]
+    ctx = StepContext(
+        run_id="r",
+        step_id="decide",
+        kind="scripted",
+        step={},
+        inputs={
+            "findings": findings,
+            "verifications": verifs,
+            "det_blocking": [],
+            "det_advisory": [],
+        },
+        workflow={},
+        target_ticket=_TARGET,
+        repo_root=None,
+    )
+    with orchestrator.collect_contract_violations():
+        out = op(ctx)
+        recorded = orchestrator.drain_contract_violations()
+    # Outcome UNCHANGED: both findings had a conforming verification (idx 0 + 1) → both advisory.
+    assert len(out["surfaced"]) == 2
+    assert out["blocking"] == []
+    # The violation was recorded DISTINCTLY (a duplicate + an out-of-range index).
+    assert recorded == [{"duplicates": [0], "unexpected": [5]}]

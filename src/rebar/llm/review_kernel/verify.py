@@ -28,12 +28,17 @@ token estimator / model window (injected, since the tokenizer is infra, not a re
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import logging
+from collections.abc import Callable, Collection
+from dataclasses import dataclass
 from typing import Any
 
 from rebar.llm import contracts
+from rebar.llm.errors import StructuredOutputError
 
 from .decide import GRADED_BINARY
+
+logger = logging.getLogger(__name__)
 
 # ── token-budget chunking constants (the principled replacement for a magic count-batch:
 #    split the verify request by TOKEN budget vs the model window, not an arbitrary count) ──
@@ -81,7 +86,7 @@ VERIFIER_RULES_SCAFFOLD = "\n".join(f"- {name}: {text}" for name, text in VERIFI
 
 # ── the registered `verification` CONTRACT (the SINGLE source of the binary vocabulary +
 #    severity-attribute enums; small/flat for tolerant validation) ────────────────────────
-def verification_model() -> type:
+def verification_model(*, strict: bool = False) -> type:
     """The Pass-2 ``verification`` structured-output model: one ``Verification`` per finding
     (by ``index``) carrying the coarse severity ATTRIBUTES + the typed BINARY sub-answers.
 
@@ -89,10 +94,23 @@ def verification_model() -> type:
     finding's *validity*, computed in :mod:`.decide`) PLUS ``cited_reference_accurate`` — the
     conditional VETO (``"na"`` when the finding cites no code reference; ``"no"`` drops the
     finding). Kept small/flat so the tolerant validation stack (json-repair + bounded retry +
-    pydantic-ai native outputs) rarely needs to degrade."""
-    from pydantic import BaseModel, Field, create_model
+    pydantic-ai native outputs) rarely needs to degrade.
+
+    ``strict`` switches the whole model tree to ``extra="forbid"`` — the REJECT-don't-ignore
+    boundary. Under the default (``strict=False``, the LIVE registered contract) Pydantic's
+    ``extra="ignore"`` silently drops unknown keys, so a divergent verifier shape (a ``findings``
+    wrapper instead of ``verifications``, or per-item ``attributes`` instead of
+    ``severity_attributes``) validates to an EMPTY object — the exact class of silent degrade
+    this contract guards against. ``strict=True`` makes that shape FAIL validation loudly; it is
+    pinned by tests and is the flip-ready future default (expand-contract: see
+    docs/adr/0006-llm-stage-seam-contracts.md). Flipping the live contract is a one-liner —
+    change the registration below to ``verification_model(strict=True)``."""
+    from pydantic import BaseModel, ConfigDict, Field, create_model
+
+    forbid = ConfigDict(extra="forbid") if strict else ConfigDict()
 
     class SeverityAttrs(BaseModel):
+        model_config = forbid
         prod_impact: str = Field(default="none", description="none|low|medium|high")
         debt_impact: str = Field(default="none", description="none|low|medium|high")
         blast_radius: str = Field(default="local", description="local|module|system")
@@ -106,14 +124,16 @@ def verification_model() -> type:
     }
     for q in GRADED_BINARY:
         binary_fields[q] = (str, Field(default="insufficient"))
-    Binary = create_model("Binary", **binary_fields)
+    Binary = create_model("Binary", __config__=forbid, **binary_fields)
 
     class Verification(BaseModel):
+        model_config = forbid
         index: int = Field(description="The 0-based index of the finding being verified.")
         severity_attributes: SeverityAttrs = Field(default_factory=SeverityAttrs)
         binary: Binary = Field(default_factory=Binary)  # type: ignore[valid-type]
 
     class VerificationOutput(BaseModel):
+        model_config = forbid
         verifications: list[Verification] = Field(default_factory=list)
 
     return VerificationOutput
@@ -203,6 +223,80 @@ def verify_request_chunks(
     return chunks, omitted
 
 
+# ── the SHARED, structural reshape seam (the SINGLE place a flat verifier output list becomes
+#    the {index: verification} map Pass-3 consumes) — classifies the contract violations the old
+#    silent-drop hid, instead of dropping them invisibly. Both the kernel `verify_findings` and
+#    plan-review's `plan_review_decide` route through this, so the verifier→decide keying contract
+#    lives in ONE place (epic drag-gripe-brake). ──────────────────────────────────────────────
+@dataclass(frozen=True)
+class VerificationReshape:
+    """The result of :func:`reshape_verifications`: the tolerant ``{index: verification}`` map
+    Pass-3 consumes (BYTE-IDENTICAL to the old silent-drop), PLUS the structurally-detected
+    contract violations the old code dropped invisibly.
+
+    ``malformed`` — items with no usable integer ``index`` (a divergent per-item shape).
+    ``duplicates`` — indices that appeared more than once (ambiguous; last-wins in the map, as
+    before). ``unexpected`` — integer indices outside the expected set (an invented/out-of-range
+    index; left out of the map, as before). These are a DISTINCT signal from a finding that
+    simply has no verification (an honest "couldn't verify" → ``no-verification`` →
+    INDETERMINATE)."""
+
+    verifications: dict[int, dict[str, Any]]
+    malformed: int = 0
+    duplicates: tuple[int, ...] = ()
+    unexpected: tuple[int, ...] = ()
+
+    @property
+    def has_violations(self) -> bool:
+        return bool(self.malformed or self.duplicates or self.unexpected)
+
+    def summary(self) -> dict[str, Any]:
+        """The non-zero violation counts/indices, for an ERROR log + a verdict-coverage count.
+        Empty (falsy) when the reshape conformed — so a clean run surfaces NOTHING."""
+        out: dict[str, Any] = {}
+        if self.malformed:
+            out["malformed"] = self.malformed
+        if self.duplicates:
+            out["duplicates"] = list(self.duplicates)
+        if self.unexpected:
+            out["unexpected"] = list(self.unexpected)
+        return out
+
+
+def reshape_verifications(
+    raw: list[dict[str, Any]] | None, *, valid_indices: Collection[int] | None = None
+) -> VerificationReshape:
+    """Reshape a FLAT verifier output list into the ``{index: {severity_attributes, binary}}``
+    map Pass-3 consumes, classifying the contract violations the old silent-drop hid.
+
+    The returned ``verifications`` map is byte-identical to the prior tolerant behavior (non-int
+    ``index`` dropped; later wins on a duplicate; out-of-range entries never read downstream), so
+    routing a consumer through this changes NO outcome — it only ADDS the violation report. When
+    ``valid_indices`` is given (the chunker's GLOBAL indices, or ``range(len(findings))``), an
+    integer index outside it is recorded as ``unexpected`` (and excluded from the map)."""
+    merged: dict[int, dict[str, Any]] = {}
+    seen: set[int] = set()
+    malformed = 0
+    duplicates: list[int] = []
+    unexpected: list[int] = []
+    for v in raw or []:
+        idx = v.get("index") if isinstance(v, dict) else None
+        if not isinstance(idx, int):
+            malformed += 1
+            continue
+        if valid_indices is not None and idx not in valid_indices:
+            unexpected.append(idx)
+            continue
+        if idx in seen:
+            duplicates.append(idx)
+        seen.add(idx)
+        merged[idx] = {
+            "severity_attributes": v.get("severity_attributes", {}) or {},
+            "binary": v.get("binary", {}) or {},
+        }
+    return VerificationReshape(merged, malformed, tuple(duplicates), tuple(unexpected))
+
+
 def merge_verifications_by_index(
     chunk_outputs: list[list[dict[str, Any]]],
 ) -> dict[int, dict[str, Any]]:
@@ -210,17 +304,10 @@ def merge_verifications_by_index(
     binary}}`` map Pass-3 consumes. Each verification carries its GLOBAL ``index`` (the chunker
     preserved it); a later chunk wins on a duplicate index (chunks are disjoint, so this is a
     no-op in practice). Verifications without a usable integer ``index`` are dropped (the
-    finding then has no verification → INDETERMINATE downstream)."""
-    merged: dict[int, dict[str, Any]] = {}
-    for out in chunk_outputs:
-        for v in out or []:
-            idx = v.get("index") if isinstance(v, dict) else None
-            if isinstance(idx, int):
-                merged[idx] = {
-                    "severity_attributes": v.get("severity_attributes", {}) or {},
-                    "binary": v.get("binary", {}) or {},
-                }
-    return merged
+    finding then has no verification → INDETERMINATE downstream). Thin wrapper over
+    :func:`reshape_verifications` (the single reshape seam) — drops the violation report; callers
+    that want the report (loud surfacing) call ``reshape_verifications`` directly."""
+    return reshape_verifications([v for out in chunk_outputs for v in (out or [])]).verifications
 
 
 # ── the non-frontier verifier-model default ────────────────────────────────────────────────
@@ -252,21 +339,55 @@ def verify_findings(
     headroom: float = DEFAULT_VERIFY_WINDOW_HEADROOM,
 ) -> dict[str, Any]:
     """Pass-2 over ``findings``: token-budget chunk → run each chunk via ``run_chunk`` (the
-    injected LLM seam) → merge by GLOBAL index. Returns
-    ``{"verifications": {index: {severity_attributes, binary}}, "omitted": [index, ...]}``.
+    injected LLM seam) → reshape by GLOBAL index. Returns ``{"verifications": {index:
+    {severity_attributes, binary}}, "omitted": [index, ...], "contract_violations": {...}}``.
 
-    DEGRADE, never crash: a chunk whose ``run_chunk`` raises (an unparseable turn surviving the
-    tolerant json-repair + bounded-retry stack) contributes no verifications, so those findings
-    have no verification and ``pass3_decide(None)`` routes them to INDETERMINATE. Findings too
-    big to verify even alone are ``omitted`` (also → INDETERMINATE). The whole-batch verifier
-    vocabulary + the merge are shared; only ``run_chunk`` + the tokenizer are the consumer's."""
+    DEGRADE, never crash: a chunk whose ``run_chunk`` raises contributes no verifications, so
+    those findings have no verification and ``pass3_decide(None)`` routes them to INDETERMINATE.
+    Findings too big to verify even alone are ``omitted`` (also → INDETERMINATE). The whole-batch
+    verifier vocabulary + the reshape are shared; only ``run_chunk`` + the tokenizer are the
+    consumer's.
+
+    LOUD on a contract break (epic drag-gripe-brake): a ``StructuredOutputError`` from
+    ``run_chunk`` (the verifier's turn could not be validated to the ``verification`` contract
+    even after json-repair + the bounded retry — a divergent SHAPE) is logged at ERROR and
+    recorded in ``contract_violations`` (distinct from a benign degrade), as are malformed /
+    duplicate / out-of-range indices the :func:`reshape_verifications` seam detects. The OUTCOME
+    is unchanged (those findings still degrade to INDETERMINATE); the report is purely additive
+    observability. ``contract_violations`` is empty/falsy on a clean run."""
     chunks, omitted = verify_request_chunks(
         findings, window_tokens=window_tokens, est_tokens=est_tokens, headroom=headroom
     )
+    sent_indices = {gi for chunk in chunks for gi, _ in chunk}
     chunk_outputs: list[list[dict[str, Any]]] = []
+    shape_failures: list[int] = []
     for chunk in chunks:
         try:
             chunk_outputs.append(list(run_chunk(verify_instructions(chunk), context) or []))
-        except Exception:  # noqa: BLE001 — degrade: an unverifiable chunk → INDETERMINATE findings
+        except StructuredOutputError:
+            # The verifier's turn could not be validated to the `verification` contract — a SHAPE
+            # contract failure, NOT a benign "couldn't verify". Surface it LOUDLY (distinct from
+            # the quiet degrade below); the chunk's findings still degrade to INDETERMINATE.
+            chunk_indices = [gi for gi, _ in chunk]
+            logger.error(
+                "verify chunk failed the structured `verification` contract; findings %s "
+                "degrade to INDETERMINATE",
+                chunk_indices,
+            )
+            shape_failures.extend(chunk_indices)
             chunk_outputs.append([])
-    return {"verifications": merge_verifications_by_index(chunk_outputs), "omitted": omitted}
+        except Exception:  # noqa: BLE001 — a non-contract failure (network/etc.) → honest degrade
+            chunk_outputs.append([])
+    reshape = reshape_verifications(
+        [v for out in chunk_outputs for v in out], valid_indices=sent_indices
+    )
+    violations = reshape.summary()
+    if shape_failures:
+        violations["shape_failures"] = sorted(shape_failures)
+    if violations:
+        logger.error("verification contract violations detected: %s", violations)
+    return {
+        "verifications": reshape.verifications,
+        "omitted": omitted,
+        "contract_violations": violations,
+    }

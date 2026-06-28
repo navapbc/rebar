@@ -58,7 +58,10 @@ def produce_plan_review_verdict(
     ``${{ inputs.probe_criteria }}`` reference always resolves."""
     import time
 
-    from rebar.llm.plan_review.orchestrator import assemble_context_cache
+    from rebar.llm.plan_review.orchestrator import (
+        assemble_context_cache,
+        collect_contract_violations,
+    )
     from rebar.llm.plan_review.production_batch_runner import ProductionBatchRunner
     from rebar.llm.runner import get_runner
 
@@ -90,7 +93,7 @@ def produce_plan_review_verdict(
     # graph reads to a single read (and returns an identical PlanContext, so verdict bytes are
     # unchanged). The scope is dropped on exit — it never leaks across runs/tickets.
     try:
-        with assemble_context_cache():
+        with assemble_context_cache(), collect_contract_violations():
             res = _ex.run_workflow(
                 doc,
                 {"ticket_id": ctx.ticket_id, "probe_criteria": list(probe_criteria or [])},

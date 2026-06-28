@@ -62,6 +62,7 @@ def resolve_code_root(
     *,
     cfg_repo_path: str | None = None,
     allow_checkout_fallback: bool = True,
+    require: bool = False,
 ) -> str | None:
     """The single authoritative code read-root resolver for the LLM gates.
 
@@ -84,7 +85,15 @@ def resolve_code_root(
     BOUNDARY (a workflow run needs a concrete root; in non-attested local mode the checkout IS
     the correct root). Lightweight context builders that must NOT force a checkout default
     (where ``None`` legitimately means "no code to ground against", and a forced checkout root
-    would induce writes) pass ``allow_checkout_fallback=False`` to get snapshot-or-``None``."""
+    would induce writes) pass ``allow_checkout_fallback=False`` to get snapshot-or-``None``.
+
+    ``require=True`` makes the read-root contract ENFORCEABLE for a stage that genuinely cannot
+    run blind: if the cascade would yield ``None`` (only reachable with
+    ``allow_checkout_fallback=False``), it raises :class:`~rebar.llm.errors.LLMConfigError`
+    (fail-closed) instead of returning ``None`` — so a stage that requires a root never silently
+    degrades against one (the #71 class of bug). It is opt-in (default ``False`` preserves the
+    snapshot-or-``None`` behavior) and composes with the cascade: a resolved snapshot/checkout
+    satisfies it without raising. See docs/adr/0006-llm-stage-seam-contracts.md."""
     if repo_root:
         return str(repo_root)
     if cfg_repo_path:
@@ -92,7 +101,17 @@ def resolve_code_root(
     snapshot = current_code_root()
     if snapshot:
         return snapshot
-    return str(_root_config.repo_root()) if allow_checkout_fallback else None
+    resolved = str(_root_config.repo_root()) if allow_checkout_fallback else None
+    if resolved is None and require:
+        from rebar.llm.errors import LLMConfigError
+
+        raise LLMConfigError(
+            "resolve_code_root: a code read-root is REQUIRED but none could be resolved "
+            "(no explicit repo_root, no cfg.repo_path, no active attested snapshot, and "
+            "allow_checkout_fallback=False). A gate stage must not run blind against a None "
+            "root — thread a root, activate a snapshot, or allow the checkout fallback."
+        )
+    return resolved
 
 
 # The active TICKET-store read-root for the running gate. The agent's rebar ticket tools

@@ -216,3 +216,32 @@ def test_resolve_code_root_cascade(tmp_path: Path) -> None:
     # 5. With the checkout fallback OPTED OUT (the lightweight-builder mode), the same
     #    no-context call returns None instead of forcing a checkout root.
     assert llm_config.resolve_code_root(allow_checkout_fallback=False) is None
+
+
+def test_resolve_code_root_require_raises_on_unresolved(tmp_path: Path) -> None:
+    """The read-root CONTRACT (epic drag-gripe-brake): a stage that REQUIRES a root must not run
+    blind against None. ``require=True`` RAISES (fail-closed) when the cascade would yield None —
+    asserted by exception TYPE (no string heuristics) — while a resolvable root (an active
+    snapshot, or an explicit root) satisfies it without raising, and ``require=False`` preserves
+    the snapshot-or-None behavior."""
+    from rebar.llm import config as llm_config
+    from rebar.llm.errors import LLMConfigError
+
+    # Unresolved + require=True (only reachable with the checkout fallback opted out) → loud.
+    with pytest.raises(LLMConfigError):
+        llm_config.resolve_code_root(allow_checkout_fallback=False, require=True)
+    # Unresolved + require=False → the prior snapshot-or-None behavior (no raise).
+    assert llm_config.resolve_code_root(allow_checkout_fallback=False, require=False) is None
+    # An ACTIVE snapshot satisfies require=True without raising (the #71 cascade grounds it).
+    token = llm_config._active_code_root.set(str(tmp_path))
+    try:
+        assert llm_config.resolve_code_root(allow_checkout_fallback=False, require=True) == str(
+            tmp_path
+        )
+    finally:
+        llm_config._active_code_root.reset(token)
+    # An explicit root also satisfies it (no raise even with the fallback opted out).
+    assert (
+        llm_config.resolve_code_root("/explicit", allow_checkout_fallback=False, require=True)
+        == "/explicit"
+    )
