@@ -90,6 +90,26 @@ def test_watermark_evicts_lru_skips_grace(store, repo):
     assert res.skipped_grace >= 1
 
 
+def test_evicts_stale_pinned_ticket_store_entry(store):
+    """The pinned ticket-store entries (``tickets-<sha>``, PR #67) must be GC'd under
+    pressure like code-snapshot ``<sha>`` entries — else they leak unboundedly as the
+    tickets branch changes. The ``tickets-`` prefix is the only difference from a code
+    entry, and it must not hide the entry from the janitor's eviction + byte accounting."""
+    now = time.time()
+    cfg = janitor.JanitorConfig(
+        free_watermark_bytes=2 * 1024**3, grace_seconds=100, max_age_seconds=10**9
+    )
+    entry = store / ("tickets-" + "a" * 40)
+    (entry / ".tickets-tracker").mkdir(parents=True)
+    (entry / ".tickets-tracker" / "events.jsonl").write_text("x" * 50)
+    old = now - 5000
+    os.utime(entry, (old, old))
+
+    res = janitor.run_gc(store, config=cfg, now=now, free_bytes=0)
+    assert not entry.exists(), "stale tickets-<sha> entry should be evicted under pressure"
+    assert res.evicted >= 1
+
+
 def test_no_eviction_when_space_ample_and_not_cold(store, repo):
     now = time.time()
     cfg = janitor.JanitorConfig(free_watermark_bytes=1, grace_seconds=100, max_age_seconds=10**9)
