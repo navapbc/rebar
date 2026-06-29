@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -283,8 +283,22 @@ class TestAcliClientCreateFieldExtraction:
     def test_acli_create_sends_assignee(
         self, acli_mod: Any, acli_capture: Any, mock_jira_verify: Any
     ) -> None:
-        """AcliClient.create_issue() should send the assignee to ACLI."""
+        """AcliClient.create_issue() should send the assignee to ACLI.
+
+        Bug 544e: CREATE now resolves the assignee through the same assignable-search
+        validator as UPDATE, so a resolvable handle is forwarded as its accountId.
+        Mock the search so 'alice' resolves uniquely.
+        """
         client, captured_cmds, fake_run_acli = acli_capture
+        client._direct_rest_get = MagicMock(
+            return_value=[
+                {
+                    "accountId": "alice-acct",
+                    "displayName": "alice",
+                    "emailAddress": "alice@example.com",
+                }
+            ]
+        )
 
         ticket_data = {
             "ticket_type": "bug",
@@ -305,6 +319,8 @@ class TestAcliClientCreateFieldExtraction:
         assert "--assignee" in create_cmd, (
             f"ACLI create command should include --assignee flag. Got: {create_cmd}"
         )
+        # The RESOLVED accountId is forwarded, not the raw handle (bug 544e).
+        assert create_cmd[create_cmd.index("--assignee") + 1] == "alice-acct"
 
 
 class TestAcliClientUpdateFieldExtraction:
