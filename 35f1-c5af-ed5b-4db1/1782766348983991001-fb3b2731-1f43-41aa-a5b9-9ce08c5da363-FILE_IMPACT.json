@@ -1,0 +1,1 @@
+{"author":"Iso Tester","data":{"file_impact":[{"path":"pyproject.toml","reason":"bump version to 0.6.0"},{"path":"server.json","reason":"bump version + packages[0].version to 0.6.0"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782766348983991001,"uuid":"fb3b2731-1f43-41aa-a5b9-9ce08c5da363"}
