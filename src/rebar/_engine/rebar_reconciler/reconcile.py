@@ -14,6 +14,7 @@ import os
 import shutil
 import sys
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -553,6 +554,51 @@ class _NoOpSyncLogger:
         return None
 
 
+@dataclass
+class _PassContext:
+    """Mutable per-pass state threaded through reconcile_once's phase helpers.
+
+    reconcile_once is a thin sequencer over _load_snapshots -> _run_differs ->
+    _apply_mutations -> _persist_and_log; each phase reads the fields it needs
+    and writes back the ones it produces. Carrying the ~30 threaded values on one
+    object (rather than as positional params) keeps each phase independently
+    callable + unit-testable while preserving the single-pass idempotent contract.
+    """
+
+    # inputs (set at construction)
+    pass_id: str
+    repo_root: Path
+    target_mode: Any = None
+    filter_local_ids: set[str] | None = None
+    # populated by _load_snapshots
+    persist: bool = True
+    fetcher: Any = None
+    differ: Any = None
+    applier: Any = None
+    health_mod: Any = None
+    invariants_mod: Any = None
+    binding_store_mod: Any = None
+    outbound_differ_mod: Any = None
+    inbound_differ_mod: Any = None
+    local_label_intent_mod: Any = None
+    sync_logger_mod: Any = None
+    mode_mod: Any = None
+    sync_logger: Any = None
+    local_tickets: list = field(default_factory=list)
+    binding_store: Any = None
+    tracker_dir: Path | None = None
+    prev_path: Path | None = None
+    prev_snapshot: dict = field(default_factory=dict)
+    curr_path: Path | None = None
+    curr_snapshot: dict = field(default_factory=dict)
+    # populated by _run_differs
+    mutations: list = field(default_factory=list)
+    # populated by _apply_mutations
+    unfiltered_count: int = 0
+    manifest_path: Any = None
+    nowrite_plan: dict | None = None
+
+
 def reconcile_once(
     pass_id: str,
     repo_root: Path | None = None,
@@ -592,7 +638,27 @@ def reconcile_once(
     """
     if repo_root is None:
         repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
+    ctx = _PassContext(
+        pass_id=pass_id,
+        repo_root=repo_root,
+        target_mode=target_mode,
+        filter_local_ids=filter_local_ids,
+    )
+    _load_snapshots(ctx)
+    _run_differs(ctx)
+    _apply_mutations(ctx)
+    return _persist_and_log(ctx)
 
+
+def _load_snapshots(ctx: _PassContext) -> None:
+    """Load phase: sibling modules + persist flag + sync logger + local tickets +
+    binding store + the prev/curr snapshots (aborting via _handle_corrupt_snapshot
+    on a corrupt prev_snapshot). Populates ctx for the diff/apply/persist phases.
+    """
+    pass_id = ctx.pass_id
+    repo_root = ctx.repo_root
+    target_mode = ctx.target_mode
+    filter_local_ids = ctx.filter_local_ids
     fetcher = _load("reconcile_fetcher", "fetcher.py")
     differ = _load("reconcile_differ", "differ.py")
     applier = _load("reconcile_applier", "applier.py")
@@ -669,57 +735,9 @@ def reconcile_once(
         try:
             prev_snapshot: dict = json.loads(prev_path.read_text())
         except (json.JSONDecodeError, ValueError, OSError) as _exc:
-            # SAFETY INVARIANT: a corrupt or conflict-marked prev_snapshot.json
-            # must NEVER cause the pass to proceed with an unknown Jira comment
-            # state.  If we continued with prev_snapshot={}, the inbound differ
-            # would re-derive all create mutations (expensive but safe).  However,
-            # the outbound differ uses curr_snapshot (the live fetch), not
-            # prev_snapshot, for comment dedup — so comment mutations would be
-            # correct IF we could reach that point.  The problem is we cannot
-            # trust that even prev_snapshot corruption is the only issue; the
-            # tickets branch may be in a partially-merged state that makes curr
-            # state unknown too.  Abort the pass with a loud ERROR and alert.
-            _alert_key = f"corrupt_prev_snapshot:{pass_id}"
-            print(  # noqa: T201
-                f"ERROR: prev_snapshot.json is corrupt or contains git conflict "
-                f"markers and cannot be parsed. Aborting reconcile pass "
-                f"'{pass_id}' to prevent emitting mutations against unknown "
-                f"Jira state. File: {prev_path}. Error: {_exc}. "
-                f"Recovery: resolve the merge conflict or delete the file to "
-                f"force a full re-fetch on the next pass.",
-                file=sys.stderr,
-            )
-            try:
-                _alert_store = _load(
-                    "rebar_reconciler.alert_store",
-                    "alert_store.py",
-                )
-                _alert_store.append(
-                    {
-                        "key": _alert_key,
-                        "severity": "critical",
-                        "reason": (
-                            f"prev_snapshot.json corrupt/unparseable at {prev_path}: {_exc}"
-                        ),
-                        "pass_id": pass_id,
-                        "file": str(prev_path),
-                        "resolved": False,
-                        "timestamp_ns": __import__("time").time_ns(),
-                    },
-                    repo_root,
-                )
-            except Exception as _alert_exc:  # noqa: BLE001 — best-effort alert; original corruption still raises
-                print(  # noqa: T201
-                    f"ERROR: alert_store write also failed ({_alert_exc}); "
-                    f"corruption event not persisted to bridge_alerts.",
-                    file=sys.stderr,
-                )
-            raise RuntimeError(
-                f"Aborting reconcile pass '{pass_id}': prev_snapshot.json "
-                f"is corrupt or contains git conflict markers at {prev_path}. "
-                f"Original parse error: {_exc}. "
-                f"Recovery: resolve the merge conflict or delete the file."
-            ) from _exc
+            # A corrupt / conflict-marked prev_snapshot must NEVER let the pass
+            # proceed with an unknown Jira state — alert + abort (see helper).
+            _handle_corrupt_snapshot(pass_id, repo_root, prev_path, _exc)
     else:
         prev_snapshot = {}
 
@@ -731,6 +749,111 @@ def reconcile_once(
     else:
         curr_path = None
         curr_snapshot = fetcher.compute_snapshot(pass_id, repo_root)
+
+    ctx.persist = persist
+    ctx.fetcher = fetcher
+    ctx.differ = differ
+    ctx.applier = applier
+    ctx.health_mod = health_mod
+    ctx.invariants_mod = invariants_mod
+    ctx.binding_store_mod = binding_store_mod
+    ctx.outbound_differ_mod = outbound_differ_mod
+    ctx.inbound_differ_mod = inbound_differ_mod
+    ctx.local_label_intent_mod = local_label_intent_mod
+    ctx.sync_logger_mod = sync_logger_mod
+    ctx.mode_mod = mode_mod
+    ctx.sync_logger = sync_logger
+    ctx.local_tickets = local_tickets
+    ctx.binding_store = binding_store
+    ctx.tracker_dir = tracker_dir
+    ctx.prev_path = prev_path
+    ctx.prev_snapshot = prev_snapshot
+    ctx.curr_path = curr_path
+    ctx.curr_snapshot = curr_snapshot
+
+
+def _handle_corrupt_snapshot(
+    pass_id: str, repo_root: Path, prev_path: Path, _exc: Exception
+) -> None:
+    """Abort the pass on a corrupt / conflict-marked ``prev_snapshot.json``.
+
+    Lifted out of the ``reconcile_once`` spine (the corrupt-snapshot abort): emit
+    a loud operator ERROR, best-effort record a critical alert, then raise
+    ``RuntimeError``. The pass must NEVER proceed with an unknown Jira state, so
+    this always raises.
+    """
+    # SAFETY INVARIANT: a corrupt or conflict-marked prev_snapshot.json
+    # must NEVER cause the pass to proceed with an unknown Jira comment
+    # state.  If we continued with prev_snapshot={}, the inbound differ
+    # would re-derive all create mutations (expensive but safe).  However,
+    # the outbound differ uses curr_snapshot (the live fetch), not
+    # prev_snapshot, for comment dedup — so comment mutations would be
+    # correct IF we could reach that point.  The problem is we cannot
+    # trust that even prev_snapshot corruption is the only issue; the
+    # tickets branch may be in a partially-merged state that makes curr
+    # state unknown too.  Abort the pass with a loud ERROR and alert.
+    _alert_key = f"corrupt_prev_snapshot:{pass_id}"
+    print(  # noqa: T201
+        f"ERROR: prev_snapshot.json is corrupt or contains git conflict "
+        f"markers and cannot be parsed. Aborting reconcile pass "
+        f"'{pass_id}' to prevent emitting mutations against unknown "
+        f"Jira state. File: {prev_path}. Error: {_exc}. "
+        f"Recovery: resolve the merge conflict or delete the file to "
+        f"force a full re-fetch on the next pass.",
+        file=sys.stderr,
+    )
+    try:
+        _alert_store = _load(
+            "rebar_reconciler.alert_store",
+            "alert_store.py",
+        )
+        _alert_store.append(
+            {
+                "key": _alert_key,
+                "severity": "critical",
+                "reason": (f"prev_snapshot.json corrupt/unparseable at {prev_path}: {_exc}"),
+                "pass_id": pass_id,
+                "file": str(prev_path),
+                "resolved": False,
+                "timestamp_ns": __import__("time").time_ns(),
+            },
+            repo_root,
+        )
+    except Exception as _alert_exc:  # noqa: BLE001 — best-effort alert; original corruption still raises
+        print(  # noqa: T201
+            f"ERROR: alert_store write also failed ({_alert_exc}); "
+            f"corruption event not persisted to bridge_alerts.",
+            file=sys.stderr,
+        )
+    raise RuntimeError(
+        f"Aborting reconcile pass '{pass_id}': prev_snapshot.json "
+        f"is corrupt or contains git conflict markers at {prev_path}. "
+        f"Original parse error: {_exc}. "
+        f"Recovery: resolve the merge conflict or delete the file."
+    ) from _exc
+
+
+def _run_differs(ctx: _PassContext) -> None:
+    """Diff phase: invariants + the legacy snapshot diff + inbound-probe dispatch +
+    the outbound differ (with OM->Mutation conversion) + the binding-aware inbound
+    differ (with IM->Mutation conversion). Accumulates the typed-Mutation list.
+    """
+    pass_id = ctx.pass_id
+    repo_root = ctx.repo_root
+    persist = ctx.persist
+    filter_local_ids = ctx.filter_local_ids
+    differ = ctx.differ
+    applier = ctx.applier
+    invariants_mod = ctx.invariants_mod
+    outbound_differ_mod = ctx.outbound_differ_mod
+    inbound_differ_mod = ctx.inbound_differ_mod
+    local_label_intent_mod = ctx.local_label_intent_mod
+    sync_logger = ctx.sync_logger
+    local_tickets = ctx.local_tickets
+    binding_store = ctx.binding_store
+    tracker_dir = ctx.tracker_dir
+    prev_snapshot = ctx.prev_snapshot
+    curr_snapshot = ctx.curr_snapshot
 
     # Check structural invariants on the post-fetch snapshot, before diffing.
     # check_at_most_one_local_id returns only the filed violations (capped
@@ -1091,6 +1214,25 @@ def reconcile_once(
         )
         mutations.append(typed)
 
+    ctx.mutations = mutations
+
+
+def _apply_mutations(ctx: _PassContext) -> None:
+    """Apply phase: optional filter-scope narrowing + status preflight + the single
+    applier.apply dispatch (wrapped so health.record_pass fires even on failure).
+    Records manifest_path / nowrite_plan / the unfiltered count back onto ctx.
+    """
+    mutations = ctx.mutations
+    filter_local_ids = ctx.filter_local_ids
+    binding_store = ctx.binding_store
+    pass_id = ctx.pass_id
+    repo_root = ctx.repo_root
+    target_mode = ctx.target_mode
+    persist = ctx.persist
+    applier = ctx.applier
+    health_mod = ctx.health_mod
+    sync_logger = ctx.sync_logger
+
     # -------------------------------------------------------------------
     # Post-filter: when filter_local_ids is set, discard mutations that
     # target tickets outside the filter scope.  All three differs ran on
@@ -1193,6 +1335,31 @@ def reconcile_once(
                     failure_kind=failure_kind,
                 )
 
+    ctx.mutations = mutations
+    ctx.unfiltered_count = unfiltered_count
+    ctx.manifest_path = manifest_path
+    ctx.nowrite_plan = nowrite_plan
+
+
+def _persist_and_log(ctx: _PassContext) -> dict:
+    """Persist phase: save+commit the binding store, advance the prev snapshot
+    (idempotency), tally the truthful applied/failure counts from the manifest,
+    close the sync logger, and assemble the result dict.
+    """
+    persist = ctx.persist
+    binding_store = ctx.binding_store
+    repo_root = ctx.repo_root
+    curr_path = ctx.curr_path
+    prev_path = ctx.prev_path
+    manifest_path = ctx.manifest_path
+    nowrite_plan = ctx.nowrite_plan
+    mutations = ctx.mutations
+    pass_id = ctx.pass_id
+    sync_logger = ctx.sync_logger
+    target_mode = ctx.target_mode
+    filter_local_ids = ctx.filter_local_ids
+    unfiltered_count = ctx.unfiltered_count
+
     # -------------------------------------------------------------------
     # Post-apply: save binding store, advance snapshot, close sync logger.
     # -------------------------------------------------------------------
@@ -1233,7 +1400,10 @@ def reconcile_once(
 
         # Advance prev snapshot so the next call converges to zero mutations.
         # Only in persist mode: curr_path is None in no-write mode and the
-        # prev_snapshot must stay untouched (no store write).
+        # prev_snapshot must stay untouched (no store write). Both paths are
+        # guaranteed set by _load_snapshots in persist mode (the invariant the
+        # surrounding ``if persist`` encodes) — assert it to narrow the Optional.
+        assert curr_path is not None and prev_path is not None
         shutil.copy2(curr_path, prev_path)
 
     # Bug 85a1: surface the truthful applied-count and failure-count by parsing
