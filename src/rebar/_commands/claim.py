@@ -43,10 +43,15 @@ def _parse_force(args: list[str]) -> str:
     return ""
 
 
-def _parse_assignee(args: list[str]) -> str:
+def _parse_assignee(args: list[str]) -> str | None:
     """Parse [--assignee[=]<name>] from claim's args (other tokens skipped),
-    mirroring ticket-claim.sh. Raises :class:`CommandError` on a value-less flag."""
-    assignee = ""
+    mirroring ticket-claim.sh. Raises :class:`CommandError` on a value-less flag.
+
+    Returns ``None`` when ``--assignee`` is ABSENT (the "unspecified" sentinel that
+    triggers the configured ``ticket.default_assignee`` fallback); returns the given
+    value — possibly an explicit empty string — when the flag IS present (an explicit
+    ``--assignee ""`` clears the assignee and never falls back). Story c36c / f.ffea27."""
+    assignee: str | None = None
     i = 0
     while i < len(args):
         a = args[i]
@@ -63,10 +68,21 @@ def _parse_assignee(args: list[str]) -> str:
     return assignee
 
 
+def _config_default_assignee(tracker: str) -> str:
+    """The configured ``ticket.default_assignee`` (env > file), or ``""`` if unset or
+    unreadable. Read from the repo root (the tracker's parent), where ``rebar.toml`` /
+    ``.rebar/`` live — the same cfg root the plan-review gate uses. A malformed config
+    must never break a claim, so any load error degrades to no default."""
+    try:
+        return config.load_config(root=os.path.dirname(tracker)).ticket.default_assignee or ""
+    except Exception:  # noqa: BLE001 — non-critical: fall back to no default, never fail the claim
+        return ""
+
+
 def claim_compute(
     ticket_id: str,
     *,
-    assignee: str = "",
+    assignee: str | None = None,
     force_plan_review: str = "",
     repo_root=None,
     _cascade_seen: frozenset[str] | None = None,
@@ -74,6 +90,11 @@ def claim_compute(
     """Claim an ALREADY-RESOLVED ticket (ghost/init checks + the locked claim core).
     Returns ``{ticket_id, status, assignee}``; raises :class:`ConcurrencyMismatch`
     (exit 10) / :class:`CommandError`.
+
+    Default-assignee fallback (story c36c): an UNSPECIFIED assignee (``None``) falls
+    back to the configured ``ticket.default_assignee``; an explicit ``""`` clears and
+    never falls back. The fallback is resolved at the TOP (before the cascade) so a
+    cascaded parent claim inherits the same resolved default.
 
     Parent-first cascade: if the ticket has an OPEN parent the parent is claimed first
     (recursively up the chain, with the same assignee) before the child; a parent
@@ -94,6 +115,13 @@ def claim_compute(
         raise CommandError(
             "Error: ticket system not initialized. Run 'ticket init' first.", returncode=1
         )
+
+    # Default-assignee fallback (story c36c): resolve an UNSPECIFIED assignee (None)
+    # to the configured ticket.default_assignee HERE — before the parent-cascade
+    # recursion below — so a cascaded parent claim inherits the same resolved default
+    # (advisory f7ca28). An explicit "" (clear) is left untouched and never falls back.
+    if assignee is None:
+        assignee = _config_default_assignee(tracker)
 
     # Plan-review start-work gate (opt-in; runs OUTSIDE the lock — a fast LOCAL HMAC
     # verify, no LLM/network). Blocks (fail-closed) on a missing/stale/wrong
@@ -178,7 +206,7 @@ def claim_cli(argv: list[str], *, repo_root=None) -> int:
         return 1
 
     try:
-        claim_compute(
+        result = claim_compute(
             ticket_id, assignee=assignee, force_plan_review=force_plan_review, repo_root=repo_root
         )
     except ConcurrencyMismatch as exc:
@@ -212,14 +240,12 @@ def claim_cli(argv: list[str], *, repo_root=None) -> int:
             )
         return exc.returncode
 
+    # Use claim_compute's RETURN (the post-fallback assignee), not the raw parsed
+    # value, so JSON + the report suffix reflect a default that was applied (f9ea30).
     if fmt == "json":
-        sys.stdout.write(
-            json.dumps(
-                {"ticket_id": ticket_id, "status": "in_progress", "assignee": assignee or None}
-            )
-            + "\n"
-        )
+        sys.stdout.write(json.dumps(result) + "\n")
     else:
-        suffix = f" (assignee: {assignee})" if assignee else ""
+        resolved = result.get("assignee")
+        suffix = f" (assignee: {resolved})" if resolved else ""
         sys.stdout.write(f"CLAIMED: {ticket_id}{suffix}\n")
     return 0

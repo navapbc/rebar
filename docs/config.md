@@ -102,6 +102,7 @@ verify.require_plan_review_for_claim = false # gate claim on a successful (non-B
 
 # tickets / display / maintenance
 ticket.display_mode      = "auto"
+ticket.default_assignee  = ""     # assignee `claim` uses when --assignee is omitted (env REBAR_DEFAULT_ASSIGNEE)
 ticket_clarity.threshold = 5      # clarity-check pass threshold (env REBAR_TICKET_CLARITY_THRESHOLD)
 compact.threshold        = 10     # env REBAR_COMPACT_THRESHOLD (alias: COMPACT_THRESHOLD)
 
@@ -254,6 +255,27 @@ standard names.)
   review agent's read-only file tools see (default: the repo root). It is an
   invocation-specific runtime override, so it stays an env var and is **not** a
   persistent `[tool.rebar]` setting.
+
+## `ticket.default_assignee` — applied at CLAIM, not at create
+
+`ticket.default_assignee` (default `""`) is the assignee `rebar claim` uses **when no
+`--assignee` is given**. It is applied at **claim time, not when a ticket is created** —
+a freshly `create`d ticket stays unassigned; the default lands only when the ticket is
+claimed (and is written into the claim's `EDIT` event, exactly as an explicit
+`--assignee` would be). Semantics:
+
+- **Omitted** `--assignee` (CLI) / `assignee=None` (library) → the configured default is used.
+- **Explicit** `--assignee X` always wins; an explicit `--assignee ""` **clears** the
+  assignee and does **not** fall back to the default.
+- The fallback is resolved before the parent-first cascade, so claiming a child also
+  applies the default to any open parent it cascades into.
+
+Set it in `[ticket]`/`[tool.rebar.ticket]` or via the env var `REBAR_DEFAULT_ASSIGNEE`
+(env > file). Use a **Jira-resolvable identity** (email or accountId) — the value is a
+local string that the reconciler resolves to a Jira user at sync time, so a bare,
+ambiguous handle (e.g. `joe`) is left unassigned rather than mis-assigned (bug 544e).
+It is distinct from `jira.user` (the reconciler's API auth user), though the two are
+commonly the same person.
 
 ## Back-compat
 

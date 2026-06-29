@@ -292,6 +292,11 @@ class VerifyConfig:
 @dataclass
 class TicketConfig:
     display_mode: str = "auto"
+    # The assignee `claim` falls back to when none is given (story c36c). A LOCAL
+    # default written into the claim's EDIT event; the reconciler resolves it to a
+    # Jira accountId at sync time, so it should be a Jira-resolvable identity (email
+    # / accountId) to survive — a bare ambiguous handle is left unassigned (bug 544e).
+    default_assignee: str = ""
 
 
 @dataclass
@@ -397,7 +402,10 @@ _SECTIONS: dict[str, dict] = {
         "progressive_drift_refresh": lambda v, k: _as_bool(v, k),
         "verify_window_headroom": lambda v, k: _as_float(v, k, minimum=0.1, maximum=1.0),
     },
-    "ticket": {"display_mode": lambda v, k: _as_str(v, k) or "auto"},
+    "ticket": {
+        "display_mode": lambda v, k: _as_str(v, k) or "auto",
+        "default_assignee": lambda v, k: _as_str(v, k),
+    },
     "ticket_clarity": {"threshold": lambda v, k: _as_int(v, k, minimum=1)},
     "compact": {"threshold": lambda v, k: _as_int(v, k, minimum=1)},
     "sync": {
@@ -740,6 +748,10 @@ _CANONICAL_ENV_NAMES: dict[tuple[str, str], str] = {
     ("jira", "url"): "JIRA_URL",
     ("jira", "user"): "JIRA_USER",
     ("jira", "project"): "JIRA_PROJECT",
+    # ticket.default_assignee uses an ergonomic top-level env name (not the
+    # auto-derived REBAR_TICKET_DEFAULT_ASSIGNEE) so a per-checkout/agent default is
+    # easy to export (story c36c).
+    ("ticket", "default_assignee"): "REBAR_DEFAULT_ASSIGNEE",
 }
 
 
