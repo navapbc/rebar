@@ -1,1 +1,0 @@
-{"author":"Iso Tester","data":{"body":"Version bump committed (ce9b836ef) + local build/twine check green. PR #92 opened against main with auto-merge (squash) enabled. Awaiting CI → merge, then will tag v0.6.0."},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"COMMENT","timestamp":1782766543034726001,"uuid":"636cd8b9-6d49-49d1-a54c-66bbde77b978"}
