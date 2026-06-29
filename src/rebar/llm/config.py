@@ -269,7 +269,14 @@ def use_tickets_root(path: str | None) -> Iterator[None]:
 DEFAULT_MAX_TOKENS = 16000
 # Same single-source-of-truth pattern for the agent step cap + per-call wall-clock
 # timeout (each previously duplicated the literal across field default + resolution).
-DEFAULT_MAX_ITERATIONS = 50
+# Raised 50 → 250 (≈125 tool-call cycles): 50 (≈25 cycles) is far too low for an agentic
+# REVIEW — a code-grounding finder or a multi-child container call exhausts it mid-work and
+# raises a step-budget LLMRunnerError. The sibling gates already floor higher per-op
+# (completion 480, review/operations 120); raising the framework default safeguards every
+# agentic caller (incl. plan-review's Pass-1, which never applied its own floor) so the
+# default behavior is "do more tool use" rather than "fail". An operator can still lower it
+# via REBAR_LLM_MAX_STEPS; a per-op floor still wins via max(floor, configured).
+DEFAULT_MAX_ITERATIONS = 250
 DEFAULT_TIMEOUT_S = 600
 # Execution backends. `pydantic_ai` is THE runtime (story d6d1 cutover dropped the
 # in-process graph stack). `fake` is the offline test seam.

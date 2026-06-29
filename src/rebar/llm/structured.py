@@ -32,7 +32,7 @@ import json
 import re
 from typing import Any
 
-from rebar.llm.errors import StructuredOutputError
+from rebar.llm.errors import StructuredOutputError, UnretryableOutputError
 
 # Providers whose Pydantic AI profile offers provider-enforced constrained decoding
 # (strict json_schema / native Structured Outputs). Anthropic shipped a strict path in
@@ -193,12 +193,26 @@ _BAD_STOP_REASONS = {
 }
 
 
+# Stop reasons whose failure re-running the SAME call reproduces deterministically — a
+# TRUNCATED turn (hit the output-token cap) or a refused / filtered turn is a complete,
+# unusable response, NOT a near-miss the model can fix when handed the validation error.
+# These raise UnretryableOutputError so the bounded retry FAST-FAILS instead of re-paying
+# the full call. ``error`` (a transient provider/run error) stays retryable.
+_UNRETRYABLE_STOP_REASONS = frozenset({"refusal", "max_tokens", "length", "content_filter"})
+
+
 def check_stop_reason(stop_reason: str | None) -> None:
     """Raise on a stop/finish reason that signals NO usable output (Anthropic
     {refusal, max_tokens} or the normalized {length, content_filter, error}). A normal
     ``stop``/``tool_call``/``end_turn``/``None`` passes. Keeps a TRUNCATED or refused
     turn from being read as a clean (empty) structured result — and from being
-    silently "repaired" into a plausible-but-wrong object by json-repair."""
+    silently "repaired" into a plausible-but-wrong object by json-repair.
+
+    A truncation (``max_tokens``/``length``), ``refusal``, or ``content_filter`` raises
+    :class:`UnretryableOutputError` (re-running reproduces it — fast-fail, don't retry);
+    a transient ``error`` raises the retryable :class:`StructuredOutputError`."""
+    if stop_reason in _UNRETRYABLE_STOP_REASONS:
+        raise UnretryableOutputError(_BAD_STOP_REASONS[stop_reason])
     if stop_reason in _BAD_STOP_REASONS:
         raise StructuredOutputError(_BAD_STOP_REASONS[stop_reason])
 

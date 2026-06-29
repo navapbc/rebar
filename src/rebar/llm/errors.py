@@ -35,6 +35,16 @@ class StructuredOutputError(LLMRunnerError):
     review must never be reported as a clean one, so this is a hard failure."""
 
 
+class UnretryableOutputError(StructuredOutputError):
+    """A structured-output failure that re-running the SAME call will reliably reproduce
+    — a TRUNCATED turn (``stop_reason`` ``max_tokens``/``length``), a ``refusal``, or a
+    ``content_filter`` block. These are complete-but-unusable turns, not a near-miss the
+    model can fix when handed the validation error, so the bounded retry must FAST-FAIL on
+    them instead of re-paying the full (often expensive, agentic) call 1+OUTPUT_RETRIES
+    times. A subclass of :class:`StructuredOutputError`, so every existing
+    ``except StructuredOutputError`` / ``except LLMError`` handler still catches it."""
+
+
 class WorkflowError(LLMError):
     """Base class for the workflow engine (DSL parse/lint/migrate/execute)."""
 

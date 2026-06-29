@@ -388,11 +388,16 @@ def test_cache_model_settings_attached_only_for_anthropic(monkeypatch, resolved,
             output_schema="completion_verdict",
         )
     )
+    # The configured output cap (cfg.max_tokens) is wired into model_settings for EVERY
+    # provider (so the provider never silently falls back to pydantic-ai's 4096 default).
+    # The anthropic cache flags, by contrast, are still anthropic-only — the invariant here.
+    assert captured["model_settings"]["max_tokens"] == _cfg().max_tokens
     if expect_cache:
         assert captured["model_settings"]["anthropic_cache_instructions"] is True
         assert captured["model_settings"]["anthropic_cache_tool_definitions"] is True
     else:
-        assert captured["model_settings"] is None
+        assert "anthropic_cache_instructions" not in captured["model_settings"]
+        assert "anthropic_cache_tool_definitions" not in captured["model_settings"]
 
 
 def test_usage_is_surfaced_on_the_result_dict():

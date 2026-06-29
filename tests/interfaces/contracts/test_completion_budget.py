@@ -1,9 +1,10 @@
 """The completion verifier raises the agent step budget to a FLOOR (``_VERIFY_MIN_STEPS``).
 
-Completion verification is tool-heavy (potentially many criteria × several files each), so the
-framework default ``max_iterations=50`` trips the recursion cap mid-run → a false fail-closed
-block at the close gate. ``verify_completion`` floors the budget to ``_VERIFY_MIN_STEPS`` (doubled
-to 480 after an 11-child framework epic tripped 240); an operator who explicitly sets a HIGHER
+Completion verification is tool-heavy (potentially many criteria × several files each), so even
+the raised framework default ``max_iterations=250`` is below its need → it would trip the
+recursion cap mid-run, a false fail-closed block at the close gate. ``verify_completion`` floors
+the budget to ``_VERIFY_MIN_STEPS`` (doubled to 480 after an 11-child framework epic tripped 240);
+since 480 > the 250 default the floor still bites. An operator who explicitly sets a HIGHER
 ``REBAR_LLM_MAX_STEPS`` still wins.
 
 Offline: spy on ``gate_dispatch.produce_completion_verdict`` (the delegate ``verify_completion``
@@ -44,7 +45,7 @@ def test_verify_completion_floors_to_doubled_budget(rebar_repo: Path, monkeypatc
     r = str(rebar_repo)
     tid = _seed(rebar_repo)
     cfg = LLMConfig.from_env(repo_root=r)
-    assert cfg.max_iterations == 50  # the framework default we floor above
+    assert cfg.max_iterations == 250  # the framework default we floor above (raised 50→250)
     assert _VERIFY_MIN_STEPS == 480  # the doubled completion-verifier floor
 
     captured: dict = {}
