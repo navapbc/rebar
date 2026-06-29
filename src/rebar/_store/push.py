@@ -68,6 +68,42 @@ def _git(base: str, *args: str, env: dict | None = None) -> subprocess.Completed
         )
 
 
+def _resolve_conflicted_pop(base: str, stash: subprocess.CompletedProcess) -> None:
+    """Repair a ``git stash pop`` that applied-with-conflict (bug 6818).
+
+    The stashed working-tree edits live on reconciler-REGENERABLE files
+    (``.bridge_state/prev_snapshot.json``, ``bindings.json`` — rebuilt on the
+    reconciler's next pass; a missing/empty prev_snapshot merely forces a full
+    re-fetch). When the post-stash merge brings the upstream copy of such a file in
+    cleanly but the stashed edit touches the same region, ``stash pop`` writes
+    conflict markers into the working tree, leaves an unmerged (UU, stages 1/2/3)
+    index entry, and KEEPS the stash — wedging the tracker (reconcile fail-closes
+    on the markers; every ``git commit`` refuses the unmerged path).
+
+    The clean-pop happy path never reaches here. On a conflicted pop we resolve
+    deterministically: restore the conflicted path(s) to the merged HEAD (discarding
+    the regenerable working-tree edit) and drop the now-applied stash so nothing
+    dangles. After this the tree + index are consistent (no markers, no UU,
+    committable)."""
+    if stash.returncode == 0:
+        # `stash pop` can still report rc 0 with no conflict — but be defensive and
+        # check the index for unmerged entries left by an apply-with-conflict.
+        if not _git(base, "ls-files", "-u").stdout.strip():
+            return  # genuinely clean pop — nothing to repair
+    unmerged = _git(base, "diff", "--name-only", "--diff-filter=U").stdout.split()
+    if unmerged:
+        # Restore each conflicted path to the merged HEAD (committed) version: drops
+        # the stashed regenerable edit AND the conflict markers. Remove the unmerged
+        # index entries (all stages) THEN restore from HEAD, so no stranded stage is
+        # left behind (a bare `checkout HEAD --` does not always clear the UU).
+        _git(base, "rm", "-q", "--cached", "--", *unmerged)
+        _git(base, "checkout", "HEAD", "--", *unmerged)
+    # The stash was KEPT because the pop conflicted; the merged HEAD now carries the
+    # upstream content we want, so drop the now-superseded stash to leave nothing
+    # dangling. Best-effort (the top stash entry is the one we just popped).
+    _git(base, "stash", "drop", "--quiet")
+
+
 def push_tickets_branch(base_path: str) -> None:
     """Push ``HEAD:tickets`` to origin per the ``sync.push`` policy (best-effort)."""
     mode = _push_mode(os.path.dirname(base_path))  # base_path is .../.tickets-tracker
@@ -171,12 +207,22 @@ def push_tickets_branch(base_path: str) -> None:
                 "-m",
                 f"Merge {remote_ref} (auto-reconcile, post-stash)",
             )
-            _git(base_path, "stash", "pop", "--quiet")  # pop unconditionally
             if merge2.returncode != 0:
+                # Merge itself conflicted: the stash is still safely on the stack —
+                # abort the merge, then restore the working-tree edits so we don't
+                # strand them.
                 _git(base_path, "merge", "--abort")
+                _git(base_path, "stash", "pop", "--quiet")
                 logger.warning(
                     "tickets branch merge failed after stash recovery (attempt %s)", attempt
                 )
+                continue
+            # Merge succeeded; pop the stashed reconciler edits back. A clean pop is
+            # the happy path; an apply-with-conflict (markers + unmerged index, stash
+            # kept) is detected and repaired deterministically (bug 6818) so the tree
+            # is left consistent (no markers, no UU, committable).
+            pop = _git(base_path, "stash", "pop", "--quiet")
+            _resolve_conflicted_pop(base_path, pop)
             continue
 
         # Real content conflict — retry won't help, but continue so _MAX_RETRIES is honored.
