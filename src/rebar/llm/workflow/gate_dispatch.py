@@ -128,7 +128,17 @@ def produce_plan_review_verdict(
         _attach_plan_review_metrics(recovered, rec, total_ms)
         return recovered
 
-    # finders/verify failed (the LLM tier did not produce findings) — degrade to INDETERMINATE,
+    # Pass-2 verify failed but Pass-1 finders SUCCEEDED (e.g. the agentic verifier exhausted its
+    # step budget on a finding-rich ticket — bug 59bc). The LLM tier WAS available and produced
+    # findings; treating that as a systemic outage discards them and (fail-closed) wrongly blocks
+    # the claim. Recover: preserve the Pass-1 findings as unverified → INDETERMINATE, and let
+    # finalize_verdict fail-OPEN unless a preserved finding is on a blocking-enabled criterion.
+    recovered = _recover_plan_review_verify_failure(rec, cfg, error=res.error)
+    if recovered is not None:
+        _attach_plan_review_metrics(recovered, rec, total_ms)
+        return recovered
+
+    # finders failed (the LLM tier did not produce findings) — degrade to INDETERMINATE,
     # never sign a hollow PASS, mirroring run_review's broad-except → llm_unavailable path.
     return _degraded_plan_review_verdict(
         ctx,
@@ -174,6 +184,7 @@ def _attach_plan_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
     llm_ms = 0.0
     finder_criteria = 0
     agent_calls = 0
+    verify_requests = 0  # Pass-2 verifier model-request count — step usage vs its budget (bug 59bc)
     for s in rec.steps:
         if not isinstance(s, dict) or s.get("status") != "succeeded":
             continue
@@ -189,11 +200,18 @@ def _attach_plan_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
             finder_criteria += int((s.get("outputs") or {}).get("criteria_count") or 0)
         elif kind == "agent":
             agent_calls += 1
+            if step_id == "verify":
+                verify_requests += int(
+                    ((s.get("outputs") or {}).get("_usage") or {}).get("requests") or 0
+                )
     metrics = {
         "det_ms": round(det_ms, 1),
         "llm_ms": round(llm_ms, 1),
         "total_ms": round(total_ms, 1),
         "llm_calls": finder_criteria + agent_calls,
+        # Pass-2 verify step usage: model requests (~tool-call cycles) the verifier actually
+        # consumed, so headroom vs the per-finding budget (`step_budget_per_item`) is observable.
+        "verify_requests": verify_requests,
         "claim_path": "no-llm/no-network (structural; the fast claim check is a local HMAC verify)",
     }
     coverage = verdict.get("coverage")
@@ -234,6 +252,66 @@ def _recover_plan_review_coach_failure(rec, cfg, *, error) -> dict[str, Any] | N
         "routing": (succeeded.get("assemble") or {}).get("routing") or {},
         "llm_ran": True,
         "coach_error": str(error) if error else "pass-4 coach failed; verdict emitted without it",
+    }
+    pctx = PlanContext(
+        ticket_id=str(precheck.get("canonical_id") or ""),
+        ticket_type=str(precheck.get("ticket_type") or ""),
+        title="",
+        description="",
+    )
+    verdict = orchestrator.finalize_verdict(
+        pctx, parts, coaching=[], coverage=coverage, runner_name=cfg.runner, model=cfg.model
+    )
+    return _findings.validate_structured(verdict, "plan_review_verdict")
+
+
+def _recover_plan_review_verify_failure(rec, cfg, *, error) -> dict[str, Any] | None:
+    """If Pass-1 ``finders`` SUCCEEDED but Pass-2/3 did not (the verify step failed — e.g. the
+    agentic verifier exhausted its step budget), reassemble the verdict from the Pass-1 findings
+    PRESERVED as unverified → INDETERMINATE, with ``coverage.verify_failed`` (NOT
+    ``llm_unavailable``). ``finalize_verdict`` then fails OPEN unless a preserved finding sits on
+    a blocking-enabled criterion (bug 59bc). Returns None if ``finders`` did not succeed (then the
+    LLM tier genuinely failed → caller degrades to INDETERMINATE)."""
+    from rebar.llm import findings as _findings
+    from rebar.llm.plan_review import orchestrator
+    from rebar.llm.plan_review.det_floor import PlanContext
+
+    succeeded: dict[str, dict] = {}
+    for s in rec.steps:
+        if s.get("status") != "succeeded":
+            continue
+        fk = s.get("frame_key") or s.get("step_id") or ""
+        succeeded[str(fk).rsplit("/", 1)[-1]] = s.get("outputs") or {}
+
+    finders = succeeded.get("finders")
+    precheck = succeeded.get("precheck")
+    if not finders or not precheck or "decide" in succeeded:
+        # finders did not run (genuine LLM-tier failure), or decide DID run (a different
+        # failure the coach-recovery handles) → not a verify-only failure.
+        return None
+    pass1 = list(finders.get("findings") or [])
+    if not pass1:
+        return None  # no findings to preserve → nothing to recover; let it degrade
+
+    # Route the preserved Pass-1 findings through Pass-3 with EMPTY verifications: each finding
+    # then takes pass3_decide(None) → the kernel's documented no-verification degrade
+    # (decision=indeterminate, validity/impact/priority=0, severity=none, verification=None). This
+    # reuses the existing decision path — the verdict stays schema-valid and NO new decision state
+    # is introduced — rather than hand-stamping a partial finding shape.
+    decided = orchestrator.pass3_over_findings(pass1, {})
+    parts = orchestrator.partition_findings(
+        list(precheck.get("det_blocking") or []),
+        list(precheck.get("det_advisory") or []),
+        decided,
+    )
+    coverage = {
+        "det": precheck.get("det_coverage") or {},
+        "routing": (succeeded.get("assemble") or {}).get("routing") or {},
+        "llm_ran": True,
+        "verify_failed": True,
+        "verify_error": str(error)
+        if error
+        else "pass-2 verify failed; findings preserved unverified",
     }
     pctx = PlanContext(
         ticket_id=str(precheck.get("canonical_id") or ""),

@@ -148,6 +148,11 @@ steps:
             findings: ${{ steps.finders.outputs.findings }}
             plan: ${{ steps.verify_inputs.outputs.plan }}
             instructions: ${{ steps.verify_inputs.outputs.instructions }}
+            # The agentic verifier makes ~1 tool-call cycle per finding; scale this step's budget
+            # with the finding count (min = the configured floor) so a finding-rich ticket does
+            # not trip the default cap and degrade the whole review (bug 59bc). A `with:` input
+            # (the v3 step schema is immutable + closed; `with` is the open extension point).
+            step_budget_per_item: 25
         - id: decide
           needs:
           - verify

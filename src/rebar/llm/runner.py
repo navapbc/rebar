@@ -250,9 +250,18 @@ class PydanticAIRunner:
         # tool_calls_limit as the in-turn backstop so a failing/looping tool cannot burn the
         # whole budget (the retry-to-exhaustion failure mode). Set generously above the
         # expected ~max_iterations/2 tool calls, so it only trips on a genuine runaway.
+        # The step budget is PER-REQUEST: a caller (e.g. the workflow agent step) may raise
+        # max_iterations for THIS call by carrying a higher value on ``req.config`` — needed so a
+        # finding-rich Pass-2 verifier gets a budget scaled to its work without a shared runner's
+        # self._config changing under other steps (bug 59bc). The request can only RAISE the floor
+        # (``max``), never lower the operator-configured budget. ``self._config`` (cfg) is the
+        # floor; req.config is the per-call override.
+        eff_max_iter = effective_max_iterations(
+            cfg.max_iterations, getattr(req.config, "max_iterations", None)
+        )
         usage_limits = UsageLimits(
-            request_limit=max(1, math.ceil(cfg.max_iterations / 2)),
-            tool_calls_limit=max(8, cfg.max_iterations),
+            request_limit=max(1, math.ceil(eff_max_iter / 2)),
+            tool_calls_limit=max(8, eff_max_iter),
         )
         # Observability (one structured record per LLM call): which reviewer/criterion,
         # execution mode, model, and wall-clock — so a slow/serial fan-out (e.g. the
@@ -283,7 +292,7 @@ class PydanticAIRunner:
                 time.monotonic() - _t0,
             )
             raise LLMRunnerError(
-                f"agent exceeded its step budget (max_iterations={cfg.max_iterations}; "
+                f"agent exceeded its step budget (max_iterations={eff_max_iter}; "
                 "~1 model request per tool call). Raise REBAR_LLM_MAX_STEPS or narrow "
                 "the task."
             ) from exc
@@ -426,6 +435,15 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
     raise last  # exhausted the bounded retry; surface the last validation error
 
 
+def effective_max_iterations(floor: int, requested: int | None) -> int:
+    """The PER-REQUEST agent step budget (bug 59bc). A caller may RAISE the budget for a single
+    call by carrying a higher ``max_iterations`` on its ``RunRequest.config`` (e.g. the Pass-2
+    verifier scaled by its finding count), without mutating a shared runner's ``self._config``
+    under other steps. The request can only raise the operator-configured floor, never lower it —
+    so ``max(floor, requested)``; a missing/None request value leaves the floor untouched."""
+    return max(floor, requested or floor)
+
+
 def _extract_usage(run_result) -> dict[str, int]:
     """Pull the per-run token usage off a pydantic-ai ``AgentRunResult`` (story 0250).
 
@@ -450,6 +468,10 @@ def _extract_usage(run_result) -> dict[str, int]:
         "output_tokens": int(getattr(u, "output_tokens", 0) or 0),
         "cache_read_tokens": int(getattr(u, "cache_read_tokens", 0) or 0),
         "cache_write_tokens": int(getattr(u, "cache_write_tokens", 0) or 0),
+        # The model-REQUEST count (~1 per agentic tool-call cycle). Surfaced so Pass-2
+        # verify step usage is observable vs its budget (the agentic verifier's
+        # step-budget headroom — bug 59bc); 0/absent for a single-turn call.
+        "requests": int(getattr(u, "requests", 0) or 0),
     }
 
 
