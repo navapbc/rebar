@@ -210,6 +210,7 @@ def validate_dataset_and_gold(spec: dict) -> list[str]:
     from rebar.llm.eval_scorers import (
         ALLOWED_EXPECTS,
         FIRE_EXPECTS,
+        IMPACT_EXPECTS,
         NOFIRE_EXPECTS,
         VALIDITY_EXPECTS,
     )
@@ -252,6 +253,9 @@ def validate_dataset_and_gold(spec: dict) -> list[str]:
         validity_axis = expects_used & VALIDITY_EXPECTS
         if validity_axis and not {"high_validity", "low_validity"} <= expects_used:
             errs.append("strict: verifier dataset needs both high_validity and low_validity")
+        impact_axis = expects_used & IMPACT_EXPECTS
+        if impact_axis and not {"high_impact", "low_impact"} <= expects_used:
+            errs.append("strict: verifier dataset needs both high_impact and low_impact")
     gold = spec.get("gold_set")
     if not isinstance(gold, list) or not gold:
         errs.append("strict: eval spec needs a non-empty `gold_set` (judge kappa alignment)")

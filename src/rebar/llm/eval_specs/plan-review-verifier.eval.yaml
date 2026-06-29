@@ -27,6 +27,14 @@ scorers:
     description: >
       A true, high-impact finding is not charitably dismissed: its graded validity stays
       >= 0.5 (the Pass-3 drop floor) so a real defect is not silently passed.
+  - type: deterministic
+    name: discriminates_impact_levels
+    description: >
+      The IMPACT axis must discriminate, not just validity: on a {high-impact,
+      low-impact} pair the verifier's severity attributes map (Pass-3 `impact`) to
+      >= 0.5 ("major"+) for the high case and < 0.5 for the low case. Guards the
+      rising-floor convergence mechanism against a verifier that rates every finding the
+      same (the severity-saturation the floor would be blind to).
 
   - type: llm-judge
     name: verification_reasoning_quality
@@ -93,6 +101,23 @@ dataset:
     note: "True (the FP6-vs-T3 boundary): a specific immature integration point IS worth flagging."
     expect: high_validity
 
+  # IMPACT-axis pairs (the `discriminates_impact_levels` scorer). Both findings are
+  # TRUE/real — they differ only in stakes, so the verifier's SEVERITY attributes (not
+  # its validity) are what's under test: the high one must map to impact >= 0.5
+  # ("major"+), the low one below it. This is the axis the Pass-3 rising-floor relies on.
+  - id: I1-high
+    criterion: T4
+    kind: "true"
+    pair: impact-dataloss
+    finding: "The migration drops the legacy `events` table before backfilling, with no rollback path — irreversible data loss on a bad deploy (system-wide, hard to reverse)."
+    expect: high_impact
+  - id: I1-low
+    criterion: E2
+    kind: "true"
+    pair: impact-dataloss
+    finding: "A scope bullet uses the word 'improve' without a metric, so the success target is slightly ambiguous (cosmetic; local; trivially fixed in the AC text)."
+    expect: low_impact
+
 gold_set:
   - input: "A planted-false 'no tests' finding when the plan specifies tests (D1-false)."
     label: should_drop
@@ -102,3 +127,7 @@ gold_set:
     label: should_drop
   - input: "A real raw-token-logged security finding with a plan citation (D2-true)."
     label: should_uphold
+  - input: "An irreversible drop-table-before-backfill data-loss finding (I1-high)."
+    label: high_impact
+  - input: "A cosmetic 'improve without a metric' AC-wording finding (I1-low)."
+    label: low_impact
