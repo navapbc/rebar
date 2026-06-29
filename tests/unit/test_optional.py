@@ -42,3 +42,18 @@ def test_extra_installed_returns_bool_and_false_for_unknown() -> None:
 def test_all_extras_have_a_probe_and_blurb() -> None:
     for extra, (probe, blurb) in _optional.EXTRAS.items():
         assert probe and blurb, f"extra {extra} missing probe/blurb"
+
+
+def test_blocked_extra_degrades_friendly(block_extra) -> None:
+    """The ``block_extra`` (sys.meta_path) fixture simulates an uninstalled extra, and the
+    optional-dependency boundary degrades with a FRIENDLY, install-naming error rather than a
+    bare ImportError — asserting the degradation path fires in-suite (OSS-standard hardening).
+    """
+    block_extra("pydantic_ai")  # the [agents] extra's probe module
+    assert _optional.extra_installed("agents") is False
+    with pytest.raises(_optional.OptionalDependencyError) as ei:
+        _optional.require_extra("agents")
+    assert "agents" in str(ei.value)
+    # guard_import (the single optional-import chokepoint) also degrades friendly.
+    with pytest.raises(_optional.OptionalDependencyError):
+        _optional.guard_import("pydantic_ai", extra="agents")
