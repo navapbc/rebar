@@ -130,7 +130,7 @@ def test_outbound_emits_link_mutation_for_local_blocks_link(outbound):
     )
     b = _make_ticket("loc-b", title="Blocked")
 
-    muts = outbound.compute_outbound_mutations([a, b], {"DIG-100": {}, "DIG-200": {}}, bind)
+    muts, _ = outbound.compute_outbound_mutations([a, b], {"DIG-100": {}, "DIG-200": {}}, bind)
 
     a_mut = next((m for m in muts if m.local_id == "loc-a"), None)
     all_links = [lk for m in muts for lk in (m.links or [])]

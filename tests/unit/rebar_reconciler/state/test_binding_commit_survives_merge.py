@@ -302,7 +302,7 @@ def test_outbound_update_generated_when_bindings_present(
         }
     }
 
-    mutations = outbound_differ_mod.compute_outbound_mutations(
+    mutations, _ = outbound_differ_mod.compute_outbound_mutations(
         [local_ticket],
         jira_snapshot,
         bs,

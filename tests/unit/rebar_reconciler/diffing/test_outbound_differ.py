@@ -100,7 +100,7 @@ def test_unbound_ticket_emits_create(outbound_differ: ModuleType) -> None:
     ticket = _make_ticket(ticket_id="local-1", title="New feature")
     store = StubBindingStore()  # no bindings
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=store,
@@ -143,7 +143,7 @@ def test_bound_ticket_no_changes_emits_nothing(
         }
     }
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=jira_snapshot,
         binding_store=store,
@@ -195,7 +195,7 @@ def test_bound_ticket_none_assignee_does_not_emit_update(
         }
     }
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=jira_snapshot,
         binding_store=store,
@@ -235,7 +235,7 @@ def test_bound_ticket_field_change_emits_update(
         }
     }
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=jira_snapshot,
         binding_store=store,
@@ -253,7 +253,7 @@ def test_archived_ticket_excluded(outbound_differ: ModuleType) -> None:
     ticket = _make_ticket(ticket_id="local-1", status="archived")
     store = StubBindingStore()
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=store,
@@ -267,7 +267,7 @@ def test_deleted_ticket_excluded(outbound_differ: ModuleType) -> None:
     ticket = _make_ticket(ticket_id="local-1", status="deleted")
     store = StubBindingStore()
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=store,
@@ -296,7 +296,7 @@ def test_label_diff_excludes_rebar_id(outbound_differ: ModuleType) -> None:
         }
     }
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=jira_snapshot,
         binding_store=store,
@@ -332,7 +332,7 @@ def test_label_add_and_remove(outbound_differ: ModuleType) -> None:
         }
     }
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=jira_snapshot,
         binding_store=store,
@@ -352,7 +352,7 @@ def test_priority_mapping(outbound_differ: ModuleType) -> None:
     ticket_lowest = _make_ticket(ticket_id="t2", priority=4)
     store = StubBindingStore()
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket_highest, ticket_lowest],
         jira_snapshot={},
         binding_store=store,
@@ -370,11 +370,13 @@ def test_status_mapping(outbound_differ: ModuleType) -> None:
     ticket_closed = _make_ticket(ticket_id="t2", status="closed")
     store = StubBindingStore()
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket_open, ticket_closed],
         jira_snapshot={},
         binding_store=store,
-        excluded_statuses={"archived", "deleted"},  # closed is NOT excluded
+        config=outbound_differ.OutboundDiffConfig(
+            excluded_statuses={"archived", "deleted"},  # closed is NOT excluded
+        ),
     )
 
     fields_by_id = {m.local_id: m.fields for m in result}

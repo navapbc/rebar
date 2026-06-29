@@ -96,7 +96,7 @@ def test_preplanning_context_comment_now_emitted(
     store = StubBindingStore({"local-mm-1": jira_key})
     snapshot = _make_jira_snapshot_with_comments(jira_key, [])
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=store,
@@ -121,7 +121,7 @@ def test_human_comment_still_emitted_alongside_excluded_marker(
     store = StubBindingStore({"local-mm-2": jira_key})
     snapshot = _make_jira_snapshot_with_comments(jira_key, [])
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=store,
@@ -151,7 +151,7 @@ def test_bridge_canary_alert_comments_not_emitted(
     store = StubBindingStore({"local-canary": jira_key})
     snapshot = _make_jira_snapshot_with_comments(jira_key, [])
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=store,
@@ -179,7 +179,7 @@ def test_legacy_unmarked_canary_comment_not_emitted(
     store = StubBindingStore({"local-legacy-canary": jira_key})
     snapshot = _make_jira_snapshot_with_comments(jira_key, [])
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=store,

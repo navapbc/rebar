@@ -918,23 +918,23 @@ def reconcile_once(
         jira_url=_s.url, user=_s.user, api_token=_s.api_token
     )
 
-    # Bug 0702-3b6d-c1db-4ed3 (inbound counterpart to 1e08): collect the
-    # bound-but-absent ALIVE direct-GET results so the inbound differ can mirror
-    # Jira-side changes for out-of-window keys WITHOUT a second GET. The
-    # outbound differ records each alive (HTTP 200) absent key's raw fields
-    # here; we merge them into the inbound snapshot below. 404/transport keys
-    # are intentionally absent from this dict (retirement stays outbound-owned).
-    absent_alive_fields: dict[str, dict] = {}
-    outbound_raw = outbound_differ_mod.compute_outbound_mutations(
+    # Bug 0702-3b6d-c1db-4ed3 (inbound counterpart to 1e08): the outbound differ
+    # RETURNS the bound-but-absent ALIVE direct-GET results (each alive HTTP-200
+    # absent key's raw fields) as the second element of its tuple, so the inbound
+    # differ can mirror Jira-side changes for out-of-window keys WITHOUT a second
+    # GET. We merge them into the inbound snapshot below. 404/transport keys are
+    # intentionally absent from this dict (retirement stays outbound-owned).
+    outbound_raw, absent_alive_fields = outbound_differ_mod.compute_outbound_mutations(
         local_tickets,
         curr_snapshot,
         binding_store,
-        excluded_statuses={"archived", "deleted"},
-        local_label_intent=local_label_intent,
-        client=outbound_diff_client,
-        pass_id=pass_id,
-        absent_alive_fields=absent_alive_fields,
-        prev_snapshot=prev_snapshot,
+        outbound_differ_mod.OutboundDiffConfig(
+            excluded_statuses={"archived", "deleted"},
+            local_label_intent=local_label_intent,
+            client=outbound_diff_client,
+            pass_id=pass_id,
+            prev_snapshot=prev_snapshot,
+        ),
     )
     sync_logger.log(
         "outbound_differ_complete",

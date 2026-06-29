@@ -104,7 +104,7 @@ def test_managed_link_absent_locally_emits_remove(outbound_differ: ModuleType) -
     deliberate unlink — emit an outbound REMOVE so the Jira link is deleted."""
     store = StubBindingStore({"local-1": "PROJ-1", "local-2": "PROJ-2"})
     child = _child(managed_refs=[["blocks", "local-2"]], deps=[])  # managed, then unlinked
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[child], jira_snapshot=_snapshot([_BLOCKS_LINK]), binding_store=store
     )
     removes = [
@@ -122,7 +122,7 @@ def test_unmanaged_jira_link_is_not_removed(outbound_differ: ModuleType) -> None
     must NOT be removed; it is adopted inbound instead."""
     store = StubBindingStore({"local-1": "PROJ-1", "local-2": "PROJ-2"})
     child = _child(managed_refs=[], deps=[])  # never managed this link
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[child], jira_snapshot=_snapshot([_BLOCKS_LINK]), binding_store=store
     )
     removes = [lk for m in result for lk in (m.links or []) if lk.get("action") == "remove"]
@@ -136,7 +136,7 @@ def test_link_still_present_locally_emits_no_remove(outbound_differ: ModuleType)
         managed_refs=[["blocks", "local-2"]],
         deps=[{"target_id": "local-2", "relation": "blocks", "link_uuid": "u1"}],
     )
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[child], jira_snapshot=_snapshot([_BLOCKS_LINK]), binding_store=store
     )
     removes = [lk for m in result for lk in (m.links or []) if lk.get("action") == "remove"]
@@ -153,7 +153,7 @@ def test_outbound_remove_suppresses_inbound_link_readd(
     child = _child(managed_refs=[["blocks", "local-2"]], deps=[])
     snapshot = _snapshot([_BLOCKS_LINK])
 
-    outs = outbound_differ.compute_outbound_mutations(
+    outs, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[child], jira_snapshot=snapshot, binding_store=store
     )
     # Without coordination the inbound differ would re-add the still-present Jira link.
@@ -277,7 +277,7 @@ def test_two_passes_managed_unlink_stays_removed(
 
     def _run_pass() -> tuple[list, int]:
         snapshot = _snapshot(jira.issuelinks("PROJ-1"))
-        outs = outbound_differ.compute_outbound_mutations(
+        outs, _ = outbound_differ.compute_outbound_mutations(
             local_tickets=[child], jira_snapshot=snapshot, binding_store=store
         )
         # Apply outbound to the mutable Jira (pass-1 deletes the link; later passes no-op).

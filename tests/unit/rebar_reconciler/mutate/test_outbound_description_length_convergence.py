@@ -137,7 +137,7 @@ def test_oversize_description_converges_over_two_passes(
 
     # Pass 1: Jira holds a different (short) description -> a description update fires.
     snap_1 = _make_jira_snapshot(jira_key, "stale short desc")
-    result_1 = outbound_differ.compute_outbound_mutations(
+    result_1, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket], jira_snapshot=snap_1, binding_store=store
     )
     assert _desc_mutations(result_1), "Pass 1 must emit a description update"
@@ -149,7 +149,7 @@ def test_oversize_description_converges_over_two_passes(
 
     # Pass 2: Jira now carries the truncated body that actually landed.
     snap_2 = _make_jira_snapshot(jira_key, landed)
-    result_2 = outbound_differ.compute_outbound_mutations(
+    result_2, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket], jira_snapshot=snap_2, binding_store=store
     )
     assert _desc_mutations(result_2) == [], (

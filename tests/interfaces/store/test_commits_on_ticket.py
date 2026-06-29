@@ -108,15 +108,17 @@ def test_fetch_commits_step_reads_it(rebar_repo: Path) -> None:
 
 def test_commits_not_a_jira_synced_field() -> None:
     # The outbound differ is field-driven; `commits` must not be in the local->Jira
-    # field map, so attaching commits never produces an outbound Jira change. The
-    # engine dir ships as package DATA (not an in-process import), so read by path.
-    differ = (
+    # field map (`_map_local_to_jira_fields`, in outbound_fields.py since the
+    # outbound_differ split), so attaching commits never produces an outbound Jira
+    # change. The engine dir ships as package DATA (not an in-process import), so
+    # read by path.
+    fields_mod = (
         Path(rebar.__file__).resolve().parent
         / "_engine"
         / "rebar_reconciler"
-        / "outbound_differ.py"
+        / "outbound_fields.py"
     )
-    src = differ.read_text(encoding="utf-8")
+    src = fields_mod.read_text(encoding="utf-8")
     assert '"commits"' not in src and "'commits'" not in src, (
         "commits leaked into the outbound differ — it must not be a Jira-synced field"
     )

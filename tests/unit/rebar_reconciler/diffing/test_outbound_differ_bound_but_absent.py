@@ -161,12 +161,14 @@ def test_absent_alive_divergent_emits_update(od):
     client = MagicMock()
     # GET returns the OLD title — divergent from local "NEW TITLE".
     client.get_issue_by_rest.return_value = {"fields": {"summary": "OLD TITLE", "labels": []}}
-    result = od.compute_outbound_mutations(
+    result, _ = od.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},  # key absent
         binding_store=store,
-        client=client,
-        pass_id="p1",
+        config=od.OutboundDiffConfig(
+            client=client,
+            pass_id="p1",
+        ),
     )
     assert len(result) == 1
     assert result[0].action == "update"
@@ -199,12 +201,14 @@ def test_absent_alive_matching_emits_nothing(od):
             "labels": [],
         }
     }
-    result = od.compute_outbound_mutations(
+    result, _ = od.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=store,
-        client=client,
-        pass_id="p1",
+        config=od.OutboundDiffConfig(
+            client=client,
+            pass_id="p1",
+        ),
     )
     assert result == [], (
         "Bound-but-absent alive key with matching fields must emit nothing — "
@@ -223,12 +227,14 @@ def test_absent_404_emits_nothing_and_notes_absent(od):
     store = StubBindingStore({"loc-1": jira_key})
     client = MagicMock()
     client.get_issue_by_rest.side_effect = _http_error(404)
-    result = od.compute_outbound_mutations(
+    result, _ = od.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=store,
-        client=client,
-        pass_id="p1",
+        config=od.OutboundDiffConfig(
+            client=client,
+            pass_id="p1",
+        ),
     )
     assert result == []
     assert store.absent_counts[jira_key] == 1
@@ -255,8 +261,10 @@ def test_absent_404_retires_after_grace_then_no_further_get(
             local_tickets=[ticket],
             jira_snapshot={},
             binding_store=bs,
-            client=client,
-            pass_id=f"p{i}",
+            config=od.OutboundDiffConfig(
+                client=client,
+                pass_id=f"p{i}",
+            ),
         )
     assert bs.is_retired(jira_key), "must retire after GRACE consecutive 404s"
     gets_at_retirement = client.get_issue_by_rest.call_count
@@ -267,8 +275,10 @@ def test_absent_404_retires_after_grace_then_no_further_get(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=bs,
-        client=client,
-        pass_id="p99",
+        config=od.OutboundDiffConfig(
+            client=client,
+            pass_id="p99",
+        ),
     )
     assert client.get_issue_by_rest.call_count == gets_at_retirement, (
         "retired key must not be GET'd again"
@@ -310,8 +320,10 @@ def test_single_200_resets_counter(od, binding_store_mod, tmp_path, monkeypatch)
             local_tickets=[ticket],
             jira_snapshot={},
             binding_store=bs,
-            client=client,
-            pass_id=f"p{i}",
+            config=od.OutboundDiffConfig(
+                client=client,
+                pass_id=f"p{i}",
+            ),
         )
     assert not bs.is_retired(jira_key), "a 200 mid-sequence must reset the consecutive-404 counter"
 
@@ -327,12 +339,14 @@ def test_present_empty_fields_still_diffs(od):
     store = StubBindingStore({"loc-1": jira_key})
     client = MagicMock()
     # Key IS present but with empty fields → membership says present → diff path.
-    result = od.compute_outbound_mutations(
+    result, _ = od.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={jira_key: {}},
         binding_store=store,
-        client=client,
-        pass_id="p1",
+        config=od.OutboundDiffConfig(
+            client=client,
+            pass_id="p1",
+        ),
     )
     assert len(result) == 1 and result[0].action == "update"
     assert result[0].fields.get("summary") == "Local title"
@@ -349,12 +363,14 @@ def test_pending_binding_routes_to_create(od):
     ticket = _ticket("loc-pending", title="New")
     store = StubBindingStore({})  # get_jira_key returns None
     client = MagicMock()
-    result = od.compute_outbound_mutations(
+    result, _ = od.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=store,
-        client=client,
-        pass_id="p1",
+        config=od.OutboundDiffConfig(
+            client=client,
+            pass_id="p1",
+        ),
     )
     assert len(result) == 1 and result[0].action == "create"
     client.get_issue_by_rest.assert_not_called()
@@ -371,12 +387,14 @@ def test_recovered_this_pass_syncs(od):
     store = StubBindingStore({"loc-1": jira_key})
     client = MagicMock()
     client.get_issue_by_rest.return_value = {"fields": {"summary": "Stale", "labels": []}}
-    result = od.compute_outbound_mutations(
+    result, _ = od.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=store,
-        client=client,
-        pass_id="p1",
+        config=od.OutboundDiffConfig(
+            client=client,
+            pass_id="p1",
+        ),
     )
     assert len(result) == 1 and result[0].fields.get("summary") == "Edited locally"
 
@@ -403,12 +421,14 @@ def test_200_path_single_network_call(od):
             "comment": {"comments": [], "total": 0},
         }
     }
-    result = od.compute_outbound_mutations(
+    result, _ = od.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=store,
-        client=client,
-        pass_id="p1",
+        config=od.OutboundDiffConfig(
+            client=client,
+            pass_id="p1",
+        ),
     )
     # Exactly ONE network call total: the direct GET.
     assert client.get_issue_by_rest.call_count == 1
@@ -447,19 +467,23 @@ def test_idempotency_two_passes(od):
             "labels": [],
         }
     }
-    r1 = od.compute_outbound_mutations(
+    r1, _ = od.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=store,
-        client=client,
-        pass_id="p1",
+        config=od.OutboundDiffConfig(
+            client=client,
+            pass_id="p1",
+        ),
     )
-    r2 = od.compute_outbound_mutations(
+    r2, _ = od.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=store,
-        client=client,
-        pass_id="p2",
+        config=od.OutboundDiffConfig(
+            client=client,
+            pass_id="p2",
+        ),
     )
     assert r1 == [], "pass 1 (matching) must already be a no-op"
     assert r2 == [], "pass 2 must be a no-op (no reintroduced churn)"
@@ -496,8 +520,10 @@ def test_rotation_services_all_within_ceil_n_over_k(od, binding_store_mod, tmp_p
             local_tickets=tickets,
             jira_snapshot={},
             binding_store=bs,
-            client=client,
-            pass_id=f"2026-06-05T09-31-{p:02d}",
+            config=od.OutboundDiffConfig(
+                client=client,
+                pass_id=f"2026-06-05T09-31-{p:02d}",
+            ),
         )
         # Capture which keys were GET'd this pass via last_get_pass.
         for jk in keys:
@@ -537,8 +563,10 @@ def test_dead_key_behind_saturated_budget_still_retires(
             local_tickets=tickets,
             jira_snapshot={},
             binding_store=bs,
-            client=client,
-            pass_id=f"2026-06-05T09-31-{p:02d}",
+            config=od.OutboundDiffConfig(
+                client=client,
+                pass_id=f"2026-06-05T09-31-{p:02d}",
+            ),
         )
         if bs.is_retired("DIG-DEAD"):
             break
@@ -592,12 +620,14 @@ def test_transport_error_defers_counter_untouched(od):
     store = StubBindingStore({"loc-1": jira_key})
     client = MagicMock()
     client.get_issue_by_rest.side_effect = _http_error(503)
-    result = od.compute_outbound_mutations(
+    result, _ = od.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=store,
-        client=client,
-        pass_id="p1",
+        config=od.OutboundDiffConfig(
+            client=client,
+            pass_id="p1",
+        ),
     )
     assert result == []
     # note_absent NOT called on transport error.

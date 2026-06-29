@@ -111,8 +111,11 @@ def test_enriched_snapshot_skips_get_comments(outbound_differ: ModuleType) -> No
         }
     }
     client = RecordingClient()
-    mutations = outbound_differ.compute_outbound_mutations(
-        [ticket], jira_snapshot=jira_snapshot, binding_store=store, client=client
+    mutations, _ = outbound_differ.compute_outbound_mutations(
+        [ticket],
+        jira_snapshot=jira_snapshot,
+        binding_store=store,
+        config=outbound_differ.OutboundDiffConfig(client=client),
     )
     assert client.get_comments_calls == [], (
         "enriched snapshot must NOT trigger a per-ticket get_comments call"
@@ -147,8 +150,11 @@ def test_unenriched_snapshot_falls_back_to_get_comments(
         }
     }
     client = RecordingClient(comments=[])  # Jira has no comments
-    mutations = outbound_differ.compute_outbound_mutations(
-        [ticket], jira_snapshot=jira_snapshot, binding_store=store, client=client
+    mutations, _ = outbound_differ.compute_outbound_mutations(
+        [ticket],
+        jira_snapshot=jira_snapshot,
+        binding_store=store,
+        config=outbound_differ.OutboundDiffConfig(client=client),
     )
     assert client.get_comments_calls == ["DIG-2"], (
         "an unenriched entry must fall back to client.get_comments"

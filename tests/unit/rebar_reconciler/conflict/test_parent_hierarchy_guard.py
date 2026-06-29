@@ -101,7 +101,7 @@ def test_non_epic_parent_suppressed_on_create(outbound_differ: ModuleType) -> No
     store = StubBindingStore({"parent-task": "DIG-10"})
     parent = _ticket("parent-task", ticket_type="task")
     child = _ticket("child-1", ticket_type="task", parent_id="parent-task")
-    mutations = outbound_differ.compute_outbound_mutations(
+    mutations, _ = outbound_differ.compute_outbound_mutations(
         [parent, child], jira_snapshot={}, binding_store=store
     )
     create = [m for m in mutations if m.local_id == "child-1"]
@@ -117,7 +117,7 @@ def test_epic_parent_still_emitted_on_create(outbound_differ: ModuleType) -> Non
     store = StubBindingStore({"parent-epic": "DIG-20"})
     parent = _ticket("parent-epic", ticket_type="epic")
     child = _ticket("child-2", ticket_type="task", parent_id="parent-epic")
-    mutations = outbound_differ.compute_outbound_mutations(
+    mutations, _ = outbound_differ.compute_outbound_mutations(
         [parent, child], jira_snapshot={}, binding_store=store
     )
     create = [m for m in mutations if m.local_id == "child-2"]
@@ -145,7 +145,7 @@ def test_non_epic_parent_suppressed_no_update_reemit(
             "labels": [],
         }
     }
-    mutations = outbound_differ.compute_outbound_mutations(
+    mutations, _ = outbound_differ.compute_outbound_mutations(
         [parent, child], jira_snapshot=jira_snapshot, binding_store=store
     )
     parent_updates = [

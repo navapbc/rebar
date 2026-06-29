@@ -147,7 +147,7 @@ def test_outbound_blocked_maps_to_in_progress(outbound_differ: ModuleType) -> No
     ticket = _make_local_ticket(ticket_id="local-1", status="blocked")
     store = StubOutboundBindingStore()  # unbound → create mutation
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=store,
@@ -166,7 +166,7 @@ def test_outbound_blocked_emits_rebar_status_blocked_label(outbound_differ: Modu
     ticket = _make_local_ticket(ticket_id="local-1", status="blocked")
     store = StubOutboundBindingStore()
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=store,
@@ -188,7 +188,7 @@ def test_outbound_blocked_update_maps_to_in_progress(outbound_differ: ModuleType
         "DIG-100": _make_jira_fields(status="In Progress", summary="Fix me", labels=[]),
     }
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=jira_snapshot,
         binding_store=store,
@@ -224,11 +224,13 @@ def test_outbound_cancelled_maps_to_done(outbound_differ: ModuleType) -> None:
     ticket = _make_local_ticket(ticket_id="local-1", status="cancelled")
     store = StubOutboundBindingStore()
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=store,
-        excluded_statuses={"archived", "deleted"},  # cancelled is NOT excluded
+        config=outbound_differ.OutboundDiffConfig(
+            excluded_statuses={"archived", "deleted"},  # cancelled is NOT excluded
+        ),
     )
 
     assert len(result) == 1, f"Expected 1 create mutation, got {result}"
@@ -244,11 +246,13 @@ def test_outbound_cancelled_emits_rebar_status_cancelled_label(outbound_differ: 
     ticket = _make_local_ticket(ticket_id="local-1", status="cancelled")
     store = StubOutboundBindingStore()
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot={},
         binding_store=store,
-        excluded_statuses={"archived", "deleted"},
+        config=outbound_differ.OutboundDiffConfig(
+            excluded_statuses={"archived", "deleted"},
+        ),
     )
 
     assert len(result) == 1
@@ -287,7 +291,7 @@ def test_outbound_blocked_to_in_progress_removes_annotation_label(
         ),
     }
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=jira_snapshot,
         binding_store=store,
@@ -320,7 +324,7 @@ def test_outbound_cancelled_to_closed_removes_annotation_label(
         ),
     }
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=jira_snapshot,
         binding_store=store,
@@ -519,7 +523,7 @@ def test_outbound_rebar_status_labels_excluded_from_tag_sync(
         ),
     }
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=jira_snapshot,
         binding_store=store,

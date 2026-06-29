@@ -213,7 +213,6 @@ requires a row here.
 | File | Remedy |
 |------|--------|
 | `rebar_reconciler/reconcile.py` | decompose the ~750-LOC `reconcile_once` into named in-place phase helpers (corrupt-snapshot abort, OM→Mutation conversion); the natural sub-blocks are below the 100-LOC file floor, so prefer in-place helpers over a sibling module |
-| `rebar_reconciler/outbound_differ.py` | extract the comment-diff cluster (`_diff_comments` + its `_normalize_comment_body`/`_decorate_outbound_comment`/`_map_comments_for_create`/`_is_machine_marker_comment`/`_load_comment_limits`/`_load_adf` satellites) to a sibling `outbound_comments.py`; keep the field/label/link differs + `compute_outbound_mutations` orchestrator |
 | `__init__.py` | library facade over the cap (also carries the workflow entrypoints `run_workflow`/`get_workflow_status`/`get_workflow_result` + `attach_commits`, epic a88f). KEEP as one surface: it is a deliberate flat public-API namespace whose functions share private helpers; a read/write split forces re-exports for no readability gain |
 | `config.py` | split the dataclass/schema from the env/CLI-override + cache machinery along the existing seam |
 | `mcp_server.py` | thin FastMCP tool layer. `build_server` is ~30 `@mcp.tool()` closures over a local `mcp`; splitting needs a registrar refactor — watch, don't split preemptively |
@@ -255,6 +254,24 @@ seams stay resident in `applier` (the test suite patches them there);
 `apply_handlers` imports only downward (`batch_dispatch`/`pass_io`), so `applier`
 imports the handlers back without a cycle. This brought `applier.py` back under the
 soft cap (dropped from the allowlist).
+
+`src/rebar/_engine/rebar_reconciler/outbound_differ.py` was **split** along its
+three differ seams (epic 5ca8 / `unfed-liner-arson`): the comment-diff cluster
+(`_diff_comments` + `_normalize_comment_body`/`_decorate_outbound_comment`/
+`_map_comments_for_create`/`_is_machine_marker_comment`) moved to
+`outbound_comments.py`; the field-mapping + field-diff cluster
+(`_map_local_to_jira_fields`/`_extract_jira_field`/`_assignee_matches`/
+`_local_matches_prev`/`_parent_clear_is_managed`/`_diff_fields` + the
+`_LOCAL_TO_JIRA_*` maps) to `outbound_fields.py`; and the link-diff cluster
+(`_existing_jira_links`/`_diff_links`/`_diff_link_removals` + the relation maps)
+to `outbound_links.py`. `outbound_differ.py` keeps the `compute_outbound_mutations`
+orchestrator + the label/status-annotation differs, and re-exports the moved
+names so `outbound_differ.<name>` keeps resolving for the test suite; each sibling
+imports one-way (its own lazy `_load_adf`/`_load_comment_limits`) so there is no
+import cycle. The orchestrator's nine positional params collapsed into an
+`OutboundDiffConfig` dataclass and the mutable `absent_alive_fields` out-param
+became the second element of its `(mutations, absent_alive_fields)` return tuple.
+This brought `outbound_differ.py` back under the soft cap (dropped from the allowlist).
 
 `src/rebar/_cli/__init__.py` was **split** along its command-handler seam: the
 LLM/agent-operation handlers moved to `src/rebar/_cli/_llm_commands.py` and the

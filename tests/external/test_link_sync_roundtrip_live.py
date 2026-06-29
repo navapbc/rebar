@@ -252,7 +252,7 @@ def test_link_sync_differ_apply_roundtrip_live() -> None:
             f"precondition: A must start with no issuelinks, got {snapshot[key_a]['issuelinks']!r}"
         )
 
-        muts = outbound.compute_outbound_mutations([loc_a, loc_b], snapshot, bind)
+        muts, _ = outbound.compute_outbound_mutations([loc_a, loc_b], snapshot, bind)
         a_mut = next((m for m in muts if m.local_id == "loc-a"), None)
         assert a_mut is not None, (
             "outbound emitted NO mutation for loc-a (expected a link ADD). "
@@ -316,7 +316,7 @@ def test_link_sync_differ_apply_roundtrip_live() -> None:
         assert snapshot2[key_a]["issuelinks"], (
             "step 2 precondition: A's live issuelinks should now be non-empty"
         )
-        muts2 = outbound.compute_outbound_mutations([loc_a, loc_b], snapshot2, bind)
+        muts2, _ = outbound.compute_outbound_mutations([loc_a, loc_b], snapshot2, bind)
         a_mut2 = next((m for m in muts2 if m.local_id == "loc-a"), None)
         a_link_adds2 = (
             [lk for lk in (a_mut2.links or []) if lk.get("action") == "add"]

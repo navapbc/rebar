@@ -163,11 +163,13 @@ def test_no_comment_field_client_returns_all_local_no_adds_emitted(
     jira_comment_dicts = [{"id": str(i), "body": body} for i, body in enumerate(local_bodies)]
     client = _make_stub_client(jira_comment_dicts)
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=store,
-        client=client,
+        config=outbound_differ.OutboundDiffConfig(
+            client=client,
+        ),
     )
 
     # client.get_comments MUST have been called since snapshot lacks 'comment'
@@ -211,11 +213,13 @@ def test_no_comment_field_client_returns_subset_emits_missing_only(
     jira_comment_dicts = [{"id": str(i), "body": body} for i, body in enumerate(existing_in_jira)]
     client = _make_stub_client(jira_comment_dicts)
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=store,
-        client=client,
+        config=outbound_differ.OutboundDiffConfig(
+            client=client,
+        ),
     )
 
     client.get_comments.assert_called_once_with(jira_key)
@@ -260,11 +264,13 @@ def test_no_comment_field_client_raises_skips_comment_mutations(
     client = MagicMock()
     client.get_comments.side_effect = RuntimeError("ACLI connection refused")
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=store,
-        client=client,
+        config=outbound_differ.OutboundDiffConfig(
+            client=client,
+        ),
     )
 
     client.get_comments.assert_called_once_with(jira_key)
@@ -309,11 +315,13 @@ def test_with_comment_field_in_snapshot_client_not_called(
 
     client = MagicMock()
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snapshot,
         binding_store=store,
-        client=client,
+        config=outbound_differ.OutboundDiffConfig(
+            client=client,
+        ),
     )
 
     # Client must NOT be called when the snapshot already has comment data

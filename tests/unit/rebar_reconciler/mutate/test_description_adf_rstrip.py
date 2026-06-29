@@ -114,7 +114,7 @@ def test_outbound_local_trailing_newlines_does_not_emit_diff(
     store = StubBindingStore({"L1": "PROJ-1"})
     snap = {"PROJ-1": _jira(jira_desc)}
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snap,
         binding_store=store,
@@ -139,7 +139,7 @@ def test_outbound_legitimate_description_change_still_emits(
     store = StubBindingStore({"L1": "PROJ-1"})
     snap = {"PROJ-1": _jira(jira_desc)}
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snap,
         binding_store=store,
@@ -161,7 +161,7 @@ def test_outbound_internal_whitespace_change_still_emits(
     store = StubBindingStore({"L1": "PROJ-1"})
     snap = {"PROJ-1": _jira(jira_desc)}
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snap,
         binding_store=store,

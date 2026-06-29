@@ -292,7 +292,7 @@ class TestPrevSnapshotCorrupt:
             }
         }
 
-        result = outbound_differ_mod.compute_outbound_mutations(
+        result, _ = outbound_differ_mod.compute_outbound_mutations(
             local_tickets=[ticket],
             jira_snapshot=jira_snapshot_with_comments,
             binding_store=StubBindingStore(),
@@ -322,7 +322,7 @@ class TestPrevSnapshotCorrupt:
         # differ is now hardened as a second layer.
         jira_snapshot_empty = {}
 
-        result_no_client = outbound_differ_mod.compute_outbound_mutations(
+        result_no_client, _ = outbound_differ_mod.compute_outbound_mutations(
             local_tickets=[ticket],
             jira_snapshot=jira_snapshot_empty,
             binding_store=StubBindingStore(),
@@ -405,7 +405,7 @@ class TestHealthyStateRegression:
             }
         }
 
-        result = outbound_differ_mod.compute_outbound_mutations(
+        result, _ = outbound_differ_mod.compute_outbound_mutations(
             local_tickets=[ticket],
             jira_snapshot=jira_snapshot,
             binding_store=StubBindingStore(),

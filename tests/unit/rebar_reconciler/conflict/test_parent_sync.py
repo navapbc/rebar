@@ -138,7 +138,7 @@ class TestOutboundParent:
         # parent local_id "parent-1" is bound to "DIG-10"
         store = StubOutboundBindingStore({"parent-1": "DIG-10"})
         ticket = _make_ticket(ticket_id="child-1", parent_id="parent-1")
-        mutations = outbound_differ.compute_outbound_mutations(
+        mutations, _ = outbound_differ.compute_outbound_mutations(
             [ticket], jira_snapshot={}, binding_store=store
         )
         assert len(mutations) == 1
@@ -156,7 +156,7 @@ class TestOutboundParent:
         # "unknown-parent" is NOT in the binding store
         store = StubOutboundBindingStore({})
         ticket = _make_ticket(ticket_id="child-2", parent_id="unknown-parent")
-        mutations = outbound_differ.compute_outbound_mutations(
+        mutations, _ = outbound_differ.compute_outbound_mutations(
             [ticket], jira_snapshot={}, binding_store=store
         )
         assert len(mutations) == 1
@@ -172,7 +172,7 @@ class TestOutboundParent:
         store = StubOutboundBindingStore({})
         ticket = _make_ticket(ticket_id="orphan-1")
         # No parent_id key at all
-        mutations = outbound_differ.compute_outbound_mutations(
+        mutations, _ = outbound_differ.compute_outbound_mutations(
             [ticket], jira_snapshot={}, binding_store=store
         )
         assert len(mutations) == 1
@@ -196,7 +196,7 @@ class TestOutboundParent:
                 # parent absent → ticket had no parent on Jira side
             }
         }
-        mutations = outbound_differ.compute_outbound_mutations(
+        mutations, _ = outbound_differ.compute_outbound_mutations(
             [ticket], jira_snapshot=jira_snapshot, binding_store=store
         )
         # An update mutation should be emitted because parent changed
@@ -225,7 +225,7 @@ class TestOutboundParent:
                 "parent": {"key": "DIG-41"},
             }
         }
-        mutations = outbound_differ.compute_outbound_mutations(
+        mutations, _ = outbound_differ.compute_outbound_mutations(
             [ticket], jira_snapshot=jira_snapshot, binding_store=store
         )
         update_muts = [m for m in mutations if m.action == "update" and m.local_id == "child-4"]

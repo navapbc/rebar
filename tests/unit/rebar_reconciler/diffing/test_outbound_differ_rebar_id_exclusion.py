@@ -99,7 +99,7 @@ def test_outbound_differ_excludes_colon_form_rebar_id_label(
         }
     }
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=jira_snapshot,
         binding_store=store,

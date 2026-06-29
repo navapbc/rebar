@@ -92,11 +92,13 @@ def test_a06c_jira_only_label_not_in_intent_suppresses_remove(
     snap = {"PROJ-1": _jira(["labelprobe", "ib-added"])}
     intent_map = {"L1": {"labelprobe"}}  # local never had ib-added
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snap,
         binding_store=store,
-        local_label_intent=intent_map,
+        config=outbound_differ.OutboundDiffConfig(
+            local_label_intent=intent_map,
+        ),
     )
 
     # The diff would normally produce an "update" with REMOVE ib-added.
@@ -122,11 +124,13 @@ def test_legitimate_removal_in_intent_emits_remove(
     # point post-bind, which proves the user explicitly removed it.
     intent_map = {"L1": {"labelprobe", "to-remove"}}
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snap,
         binding_store=store,
-        local_label_intent=intent_map,
+        config=outbound_differ.OutboundDiffConfig(
+            local_label_intent=intent_map,
+        ),
     )
 
     label_removes = [lb["label"] for m in result for lb in m.labels if lb.get("action") == "remove"]
@@ -146,7 +150,7 @@ def test_intent_none_preserves_legacy_behavior(
     store = StubBindingStore({"L1": "PROJ-1"})
     snap = {"PROJ-1": _jira(["jira-only", "shared"])}
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snap,
         binding_store=store,
@@ -171,11 +175,13 @@ def test_missing_ticket_in_intent_map_skips_removes(
     snap = {"PROJ-1": _jira(["labelprobe", "anything"])}
     intent_map: dict[str, set[str]] = {}  # L1 not present
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snap,
         binding_store=store,
-        local_label_intent=intent_map,
+        config=outbound_differ.OutboundDiffConfig(
+            local_label_intent=intent_map,
+        ),
     )
 
     label_removes = [lb["label"] for m in result for lb in m.labels if lb.get("action") == "remove"]
@@ -191,11 +197,13 @@ def test_user_added_label_in_intent_emits_add(
     snap = {"PROJ-1": _jira(["shared"])}
     intent_map = {"L1": {"local-only", "shared"}}
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snap,
         binding_store=store,
-        local_label_intent=intent_map,
+        config=outbound_differ.OutboundDiffConfig(
+            local_label_intent=intent_map,
+        ),
     )
 
     label_adds = [lb["label"] for m in result for lb in m.labels if lb.get("action") == "add"]
@@ -222,11 +230,13 @@ def test_inbound_applied_label_not_in_intent_suppresses_add(
     # Intent excludes ib-added because the original add was inbound.
     intent_map = {"L1": {"labelprobe"}}
 
-    result = outbound_differ.compute_outbound_mutations(
+    result, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[ticket],
         jira_snapshot=snap,
         binding_store=store,
-        local_label_intent=intent_map,
+        config=outbound_differ.OutboundDiffConfig(
+            local_label_intent=intent_map,
+        ),
     )
 
     label_adds = [lb["label"] for m in result for lb in m.labels if lb.get("action") == "add"]
