@@ -85,7 +85,14 @@ jobs:
         run: |
           /tmp/clean/bin/pip install pytest jsonschema mcp
           /tmp/clean/bin/python -c "from rebar.llm import agents_extra_installed; assert not agents_extra_installed(), 'agents extra must be ABSENT in the clean lane (else the degradation tests skip)'"
-          /tmp/clean/bin/python -m pytest tests/interfaces/store/test_llm_optionality.py -m "not external" -rs
+          # F2: drive the completion close-gate fail-closed path with the [agents] extra
+          # genuinely ABSENT (not just a monkeypatched error) — the lean lane is the one
+          # place it runs for real. The test monkeypatches the verifier, so it needs no
+          # extra; running it HERE proves the fail-closed close survives a real lean install.
+          /tmp/clean/bin/python -m pytest \
+            tests/interfaces/store/test_llm_optionality.py \
+            tests/interfaces/lifecycle/test_completion_gate.py::test_gate_missing_llm_fails_closed \
+            -m "not external" -rs
 
   per-extra:
     name: extra "${{ matrix.extra }}" installs
@@ -93,7 +100,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        extra: [agents, eval, tracing]
+        extra: [agents, eval, tracing, mcp, grounding]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -104,7 +111,24 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[${{ matrix.extra }}]"
       - name: import rebar with the extra present
-        run: python -c "import rebar; from rebar import _optional; print('${{ matrix.extra }}', _optional.extra_installed('${{ matrix.extra }}'))"
+        run: |
+          python - <<'PY'
+          import rebar  # installing the extra must not break the core import
+          from rebar import _optional
+
+          extra = "${{ matrix.extra }}"
+          if extra in _optional.EXTRAS:
+              assert _optional.extra_installed(extra), f"{extra}: installed but _optional did not detect it"
+              print(extra, "installed + detected")
+          else:
+              # mcp has no _optional detection probe (it is the server transport, not a
+              # lean-runtime feature gate); `import rebar` succeeding + the boot check below
+              # are its validations.
+              print(extra, "installed (no _optional probe)")
+          PY
+      - name: rebar-mcp boots (mcp extra only)
+        if: matrix.extra == 'mcp'
+        run: rebar-mcp --help >/dev/null
 
   union:
     name: union [agents,eval,tracing] resolves

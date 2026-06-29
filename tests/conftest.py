@@ -25,6 +25,7 @@ import socket
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -225,6 +226,71 @@ def _reset_config_cache() -> None:
     _cfg.reset_config_cache()
     yield
     _cfg.reset_config_cache()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_live_model_requests() -> None:
+    """CI safety net: forbid accidental live LLM calls from the test suite.
+
+    pydantic-ai exposes a global kill-switch (``models.ALLOW_MODEL_REQUESTS``); set it
+    False so any code path that reaches a real model request raises instead of billing.
+    Guarded — ``pydantic_ai`` is behind the ``[agents]`` extra and is absent in the
+    lean-install lanes, where this is simply a no-op.
+    """
+    try:
+        from pydantic_ai import models as _pai_models
+    except Exception:  # noqa: BLE001 — agents extra absent (lean lane): nothing to guard
+        return
+    _pai_models.ALLOW_MODEL_REQUESTS = False
+
+
+@pytest.fixture
+def block_extra() -> Iterator[Any]:
+    """Simulate an UNINSTALLED module/extra by blocking its import via ``sys.meta_path``.
+
+    Yields a ``block(*module_names)`` callable. The inserted finder raises
+    ``ModuleNotFoundError`` for the named modules (and their submodules), so
+    ``importlib.util.find_spec`` / ``import`` see them as absent — exercising the
+    optional-dependency degradation path in-process (precedent: kopf / linkml).
+
+    Opt-in (NOT autouse). Restores ``sys.meta_path`` + any evicted ``sys.modules``
+    entries and invalidates the import caches on teardown, so the global import state
+    never leaks across tests (incl. under pytest-xdist).
+    """
+    import importlib
+
+    inserted: list[Any] = []
+    saved_modules: dict[str, Any] = {}
+    blocked: set[str] = set()
+
+    class _Blocker:
+        def find_spec(self, fullname, path=None, target=None):  # noqa: ANN001
+            if fullname in blocked or any(fullname.startswith(b + ".") for b in blocked):
+                raise ModuleNotFoundError(f"{fullname} blocked by the block_extra fixture")
+            return None
+
+    def _block(*names: str) -> None:
+        for name in names:
+            blocked.add(name)
+            # Evict any already-imported copy (+ submodules) so find_spec is consulted.
+            for mod in list(sys.modules):
+                if mod == name or mod.startswith(name + "."):
+                    saved_modules.setdefault(mod, sys.modules[mod])
+                    del sys.modules[mod]
+        blocker = _Blocker()
+        sys.meta_path.insert(0, blocker)
+        inserted.append(blocker)
+        importlib.invalidate_caches()
+
+    yield _block
+
+    for blocker in inserted:
+        try:
+            sys.meta_path.remove(blocker)
+        except ValueError:  # pragma: no cover — defensive
+            pass
+    sys.modules.update(saved_modules)
+    importlib.invalidate_caches()
 
 
 # ── Repo-isolation guard (no test may commit to / mutate this checkout) ───────

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import sys
 
 import rebar
 
@@ -992,6 +993,19 @@ def build_server():
 
 
 def main() -> None:
+    # ``rebar-mcp`` takes no options — it speaks MCP-over-stdio. Respond to
+    # ``--help`` / ``-h`` with a short usage and exit 0 instead of starting the
+    # stdio server (so a curious `rebar-mcp --help` does not hang waiting on stdin,
+    # and a CI boot check can confirm the entry point resolves).
+    if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
+        print(  # noqa: T201 — --help output belongs on stdout (server not yet started)
+            "rebar-mcp — the rebar MCP server (FastMCP, stdio transport).\n"
+            "Usage: rebar-mcp            # serve MCP over stdio (takes no options)\n"
+            "Env:   REBAR_MCP_READONLY=1            gate write tools off\n"
+            "       REBAR_MCP_ALLOW_LLM=1           enable the billable LLM tools\n"
+            "       REBAR_MCP_ALLOW_JIRA_SYNC=1     allow reconcile live mode"
+        )
+        return
     # Observability floor: install a stderr handler on the ``rebar`` root logger so
     # swallowed failures surface. Never stdout — MCP-over-stdio reserves stdout for
     # JSON-RPC framing. See ``rebar._logging`` for the convention.

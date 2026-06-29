@@ -75,6 +75,22 @@ def _seed(repo: Path) -> str:
     )
 
 
+def _enable_close_gate(repo: Path) -> None:
+    """Turn ON the completion-verification CLOSE gate via the dotted .conf form (the
+    INI ``[section]`` form is silently dropped — see test_completion_gate BL-1)."""
+    (repo / ".rebar").mkdir(exist_ok=True)
+    (repo / ".rebar" / "config.conf").write_text(
+        "verify.require_completion_verification_for_close = true\n"
+    )
+
+
+def _seed_in_progress(repo: Path) -> str:
+    """A claimed (in_progress) work ticket ready for a close attempt."""
+    tid = _seed(repo)
+    rebar.transition(tid, "open", "in_progress", repo_root=str(repo))
+    return tid
+
+
 # ── CLI ────────────────────────────────────────────────────────────────────────
 def test_cli_check_is_offline_and_exits_zero(rebar_repo: Path, capsys) -> None:
     """``--check`` never imports the stack, exits 0, and emits a JSON backends report."""
@@ -225,3 +241,52 @@ def test_mcp_verify_completion_advertises_no_output_schema(rebar_repo: Path) -> 
     tools = {t.name: t for t in asyncio.run(srv.list_tools())}
     assert "verify_completion" in tools
     assert not tools["verify_completion"].outputSchema
+
+
+# ── completion CLOSE gate over CLI + MCP (F1) ────────────────────────────────────
+# The gate's block LOGIC (FAIL ⇒ blocked + stays in_progress + no signature) is covered
+# once, via the library, in tests/interfaces/lifecycle/test_completion_gate.py. Here we
+# assert only the SURFACE wrappers: that a blocked close maps to the right CLI exit code
+# and the MCP tool-error envelope. We reuse the canned ``_fail`` verdict — NO gate-logic
+# duplication.
+def test_cli_close_gate_fail_closed_is_exit_one(rebar_repo: Path, monkeypatch, capsys) -> None:
+    """F1 (CLI): close gate ON + FAIL ⇒ ``rebar transition … closed`` is blocked (exit 1) with
+    the failing criterion surfaced; the ticket stays in_progress."""
+    from rebar._cli import main
+
+    _enable_close_gate(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", _fail)
+    tid = _seed_in_progress(rebar_repo)
+    rc = main(["transition", tid, "in_progress", "closed"])
+    err = capsys.readouterr().err
+    assert rc == 1  # blocked close ⇒ exit 1 (scriptable)
+    assert "AC1" in err  # the failing criterion is surfaced over the CLI surface
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "in_progress"
+
+
+def test_mcp_close_gate_fail_closed_errors(rebar_repo: Path, monkeypatch) -> None:
+    """F1 (MCP): close gate ON + FAIL ⇒ the MCP ``transition_ticket`` close surfaces a tool
+    error (the close is blocked) and the ticket stays in_progress."""
+    import asyncio
+
+    from adapters import _unwrap
+
+    _enable_close_gate(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", _fail)
+    srv = _build_mcp()
+    tid = _seed_in_progress(rebar_repo)
+    with pytest.raises(Exception) as exc:  # noqa: B017 — FastMCP wraps the engine error
+        _unwrap(
+            asyncio.run(
+                srv.call_tool(
+                    "transition_ticket",
+                    {
+                        "ticket_id": tid,
+                        "current_status": "in_progress",
+                        "target_status": "closed",
+                    },
+                )
+            )
+        )
+    assert str(exc.value), "the blocked close must surface a non-empty tool-error envelope"
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "in_progress"
