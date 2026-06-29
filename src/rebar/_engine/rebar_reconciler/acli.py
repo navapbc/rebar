@@ -295,7 +295,20 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         if ticket_data.get("priority") is not None:
             optional_fields["priority"] = ticket_data["priority"]
         if ticket_data.get("assignee"):
-            optional_fields["assignee"] = ticket_data["assignee"]
+            # Bug 544e: resolve the assignee through the SAME validator the UPDATE
+            # path uses (validate_assignee_exists), so an ambiguous/unmappable handle
+            # is left UNASSIGNED — matching the update outcome — instead of being
+            # passed raw to ACLI/Jira, which fuzzy-matches or applies a project
+            # default and silently MIS-assigns. CREATE has no issue key yet, so
+            # resolution uses PROJECT scope. A definitively-unmappable assignee
+            # (AssigneeNotFoundError) is omitted (unassigned); transient resolution
+            # errors propagate so the create is retried rather than mis-assigned.
+            try:
+                optional_fields["assignee"] = self.validate_assignee_exists(
+                    str(ticket_data["assignee"]), project_key=project
+                )
+            except AssigneeNotFoundError:
+                pass  # unmappable → omit (leave unassigned), like the UPDATE path
         # Parent sync (ticket 8b25): outbound_differ emits the resolved Jira
         # parent key into the create payload. The differ writes a BARE string
         # (``_map_local_to_jira_fields`` sets ``result["parent"] = jira_key``),

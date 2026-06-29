@@ -220,3 +220,49 @@ def test_update_issue_skips_validation_when_no_assignee(acli):
         client.update_issue("DIG-500", summary="new title")
         client._direct_rest_get.assert_not_called()
         mod_update.assert_called_once()
+
+
+# ── bug 544e: the CREATE path resolves the assignee through the SAME validator as
+# the UPDATE path, so an ambiguous/unmappable assignee is left UNASSIGNED (matching
+# the update outcome) rather than passed raw to ACLI/Jira to fuzzy-match or default.
+# CREATE has no issue key yet → resolution must use PROJECT scope.
+
+
+def test_create_issue_normalizes_assignee_to_accountId(acli):
+    """CREATE must forward the RESOLVED accountId to ACLI, not the raw assignee
+    string (which Jira would fuzzy-resolve or default)."""
+    client = _make_client(
+        acli,
+        [{"accountId": "abc123", "emailAddress": "joe@example.com", "displayName": "Joe"}],
+    )
+    with patch.object(acli.acli_cli_ops, "create_issue") as mod_create:
+        mod_create.return_value = {"key": "DIG-1"}
+        client.create_issue({"ticket_type": "task", "title": "t", "assignee": "joe@example.com"})
+        _, kwargs = mod_create.call_args
+        assert kwargs.get("assignee") == "abc123"
+        # Resolution used PROJECT scope (create has no issue key yet).
+        called_path = client._direct_rest_get.call_args[0][0]
+        assert "project=DIG" in called_path
+
+
+def test_create_issue_omits_ambiguous_assignee(acli):
+    """CREATE with an ambiguous handle ('joe' → 3 Joes) must OMIT the assignee so the
+    issue is left UNASSIGNED — never forward the raw string for Jira to mis-resolve."""
+    client = _make_client(acli, _THREE_JOES)
+    with patch.object(acli.acli_cli_ops, "create_issue") as mod_create:
+        mod_create.return_value = {"key": "REB-1"}
+        client.create_issue({"ticket_type": "task", "title": "t", "assignee": "joe"})
+        _, kwargs = mod_create.call_args
+        assert kwargs.get("assignee") in (None, ""), (
+            f"ambiguous assignee should be omitted, got {kwargs.get('assignee')!r}"
+        )
+
+
+def test_create_issue_no_assignee_skips_validation(acli):
+    """No assignee on create → no /assignable/search probe, issue created unassigned."""
+    client = _make_client(acli, [])
+    with patch.object(acli.acli_cli_ops, "create_issue") as mod_create:
+        mod_create.return_value = {"key": "DIG-2"}
+        client.create_issue({"ticket_type": "task", "title": "t"})
+        client._direct_rest_get.assert_not_called()
+        mod_create.assert_called_once()
