@@ -32,7 +32,12 @@ from dataclasses import dataclass
 FIRE_EXPECTS = frozenset({"finding", "fail"})
 NOFIRE_EXPECTS = frozenset({"pass"})
 VALIDITY_EXPECTS = frozenset({"high_validity", "low_validity"})
-ALLOWED_EXPECTS = FIRE_EXPECTS | NOFIRE_EXPECTS | VALIDITY_EXPECTS
+# The verifier's IMPACT axis (distinct from the validity axis): a planted high-impact
+# finding must grade impact >= the "major" floor and a low-impact one below it, so the
+# Pass-3 rising-floor (drop NOVEL low-impact findings on a remediation re-review) rests
+# on a verifier whose severity attributes actually discriminate — not just its validity.
+IMPACT_EXPECTS = frozenset({"high_impact", "low_impact"})
+ALLOWED_EXPECTS = FIRE_EXPECTS | NOFIRE_EXPECTS | VALIDITY_EXPECTS | IMPACT_EXPECTS
 
 
 @dataclass(frozen=True)
@@ -91,6 +96,40 @@ def _validity(out: dict) -> float | None:
 
 def _expects_high_validity(case: dict) -> bool:
     return case.get("expect") == "high_validity" or str(case.get("kind", "")).lower() == "true"
+
+
+# severity_label: impact >= 0.5 is "major" or above (decide.severity_label). A planted
+# high-impact finding must clear this floor; a low-impact one must fall below it.
+_IMPACT_MAJOR_FLOOR = 0.5
+
+
+def _impact(out: dict) -> float | None:
+    """Extract a 0..1 IMPACT for the verified finding, or None if absent. Tolerant of
+    shape: a numeric ``impact``, or computed from the coarse ``severity_attributes``
+    (top-level, nested under ``verification``, or the five attribute keys at top level)
+    via the shared Pass-3 ordinal map (:func:`rebar.llm.review_kernel.decide.impact`),
+    so the verifier's raw attributes and the gate's own impact math can never diverge."""
+    if not isinstance(out, dict):
+        return None
+    v = out.get("impact")
+    if isinstance(v, int | float) and 0.0 <= float(v) <= 1.0:
+        return float(v)
+    attrs = out.get("severity_attributes")
+    if not isinstance(attrs, dict):
+        ver = out.get("verification")
+        attrs = ver.get("severity_attributes") if isinstance(ver, dict) else None
+    if not isinstance(attrs, dict):
+        keys = ("prod_impact", "debt_impact", "blast_radius", "likelihood", "reversibility")
+        attrs = {k: out[k] for k in keys if k in out} or None
+    if isinstance(attrs, dict) and attrs:
+        from rebar.llm.review_kernel.decide import impact as _impact_of
+
+        return _impact_of(attrs)
+    return None
+
+
+def _expects_high_impact(case: dict) -> bool:
+    return case.get("expect") == "high_impact"
 
 
 # ── schema / contract scorers (applicable to every case) ───────────────────────
@@ -199,6 +238,25 @@ def _attributes_criterion(case: dict, out: dict) -> ScoreResult:
     return ScoreResult(True, False, f"no finding attributed to criterion {crit!r}")
 
 
+def _discriminates_impact_levels(case: dict, out: dict) -> ScoreResult:
+    """A planted HIGH-impact finding must grade impact >= the "major" floor; a planted
+    LOW-impact one below it. This is the IMPACT analogue of
+    :func:`_discriminates_true_from_false` (validity): it guards the severity attributes
+    the Pass-3 rising-floor relies on, so the verifier cannot silently regress to rating
+    every finding the same (the saturation failure the floor would be blind to)."""
+    if case.get("expect") not in IMPACT_EXPECTS:
+        return _NA
+    imp = _impact(out)
+    if imp is None:
+        return ScoreResult(True, False, "no impact/severity_attributes to discriminate on")
+    want_high = _expects_high_impact(case)
+    got_high = imp >= _IMPACT_MAJOR_FLOOR
+    ok = got_high == want_high
+    return ScoreResult(
+        True, ok, "" if ok else f"impact {imp:.2f} contradicts expected high={want_high}"
+    )
+
+
 def _no_sycophancy(case: dict, out: dict) -> ScoreResult:
     """A real defect must not be sycophantically dismissed (graded low)."""
     if not _expects_high_validity(case):
@@ -239,6 +297,7 @@ REGISTRY: dict[str, Scorer] = {
     "attributes_g3_vs_g4": _attributes_criterion,
     # verifier discrimination
     "discriminates_true_from_false": _discriminates_true_from_false,
+    "discriminates_impact_levels": _discriminates_impact_levels,
     "no_sycophancy_on_real_defects": _no_sycophancy,
 }
 
