@@ -259,8 +259,12 @@ class PydanticAIRunner:
         eff_max_iter = effective_max_iterations(
             cfg.max_iterations, getattr(req.config, "max_iterations", None)
         )
+        # The model-REQUEST ceiling (~1 per tool-call cycle). Bound to a LOCAL so the telemetry
+        # logs report it directly instead of reading it back off the UsageLimits object (which a
+        # test may stub) — and so the step-usage line reports the EFFECTIVE per-request budget.
+        req_limit = max(1, math.ceil(eff_max_iter / 2))
         usage_limits = UsageLimits(
-            request_limit=max(1, math.ceil(eff_max_iter / 2)),
+            request_limit=req_limit,
             tool_calls_limit=max(8, eff_max_iter),
         )
         # Observability (one structured record per LLM call): which reviewer/criterion,
@@ -285,10 +289,13 @@ class PydanticAIRunner:
                 outcome = {"structured_response": structured}
         except UsageLimitExceeded as exc:
             logger.warning(
-                "llm call [%s] mode=%s model=%s hit step budget in %.1fs",
+                "llm call [%s] mode=%s model=%s hit step budget "
+                "(request_limit=%d max_iterations=%d) in %.1fs",
                 _call_label,
                 req.execution_mode,
                 ran_model,
+                req_limit,
+                eff_max_iter,
                 time.monotonic() - _t0,
             )
             raise LLMRunnerError(
@@ -313,11 +320,18 @@ class PydanticAIRunner:
             raise LLMUnavailableError(f"the LLM provider call failed: {exc}") from exc
         logger.info(
             "llm call [%s] mode=%s model=%s ok in %.1fs "
-            "(in=%d out=%d cache_read=%d cache_write=%d)",
+            "steps=%d/%d budget=%d (in=%d out=%d cache_read=%d cache_write=%d)",
             _call_label,
             req.execution_mode,
             ran_model,
             time.monotonic() - _t0,
+            # Step-usage telemetry: model requests CONSUMED vs the request ceiling
+            # (≈ max_iterations/2) and the authored step budget. One structured line per
+            # run, so the verifier/reviewer step floors can be sized from observed headroom
+            # (grep `llm call [completion-verifier]` / `[plan-reviewer]` and aggregate).
+            usage.get("requests", 0),
+            req_limit,
+            eff_max_iter,
             usage.get("input_tokens", 0),
             usage.get("output_tokens", 0),
             usage.get("cache_read_tokens", 0),
@@ -449,9 +463,12 @@ def _extract_usage(run_result) -> dict[str, int]:
 
     Pins the pydantic-ai 1.107.0 ``RunUsage`` field names — note the library NORMALIZES
     Anthropic's raw ``cache_read_input_tokens`` / ``cache_creation_input_tokens`` to
-    ``cache_read_tokens`` / ``cache_write_tokens`` (usage.py:194-200). Defensive: a
-    missing ``.usage()`` (e.g. an injected test model) yields an empty dict, never an
-    error — usage is observability, never load-bearing."""
+    ``cache_read_tokens`` / ``cache_write_tokens`` (usage.py:194-200). Also reads
+    ``requests`` — the model-REQUEST count for this run, the step-usage signal the
+    ``max_iterations`` / ``request_limit`` budget bounds (so a run's headroom against the
+    step floor is observable; used to size the verifier/reviewer floors from data rather
+    than guesswork). Defensive: a missing ``.usage()`` (e.g. an injected test model) yields
+    an empty dict, never an error — usage is observability, never load-bearing."""
     try:
         # pydantic-ai 1.107.0 deprecates the ``.usage()`` METHOD in favour of the
         # ``.usage`` PROPERTY (which exposes the token attrs directly). Read the
