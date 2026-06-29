@@ -45,9 +45,12 @@ _VERIFIER_DEFAULT_MODEL = VERIFIER_DEFAULT_MODEL
 # mid-verification (→ a false fail-closed block at the gate). Use a generous verification FLOOR;
 # an operator who explicitly sets a HIGHER REBAR_LLM_MAX_STEPS still wins. Very large tickets
 # (e.g. a whole framework epic) may still need it raised further, or --force-close. (Doubled
-# from 120 after a substantive story tripped the cap; the verifier also now short-circuits
-# tickets with nothing to verify, so this floor is the ceiling for genuinely multi-criteria work.)
-_VERIFY_MIN_STEPS = 240
+# from 120→240 after a substantive story tripped the cap, then 240→480 after an 11-child
+# framework epic tripped 240 at the close gate. Per-run step usage is now logged by the
+# runner — `llm call [completion-verifier] … steps=N/limit` — so the next resize can be sized
+# from observed headroom rather than guesswork. The verifier also short-circuits tickets with
+# nothing to verify, so this floor is the ceiling for genuinely multi-criteria work.)
+_VERIFY_MIN_STEPS = 480
 
 
 def _child_closure_findings(ticket_id: str, repo_root) -> list[dict]:
