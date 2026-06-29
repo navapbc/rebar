@@ -347,9 +347,11 @@ def _render_plan_review_text(result: dict) -> None:
     v = result.get("verdict", "?")
     sys.stdout.write(f"PLAN REVIEW: {v} for {result.get('ticket_id')}\n")
     counts = (result.get("coverage", {}) or {}).get("counts", {}) or {}
+    overflow = counts.get("advisory_overflow", 0)
     sys.stdout.write(
         f"  blocking={counts.get('blocking', 0)} "
         f"advisory={counts.get('advisory_surfaced', 0)} "
+        f"overflow={overflow} "
         f"dropped={counts.get('dropped', 0)} indeterminate={counts.get('indeterminate', 0)}\n"
     )
     for f in result.get("blocking", []):
@@ -358,6 +360,14 @@ def _render_plan_review_text(result: dict) -> None:
         sys.stdout.write(
             f"  [advisory {','.join(f.get('criteria', []))} "
             f"sev={f.get('severity')}] {f.get('finding', '')}\n"
+        )
+    if overflow:
+        # The surfaced advisory list is capped; tell the reader the tail exists (it is
+        # NOT "only N issues") and where the full set lives, so a capped list never
+        # reads as a complete count.
+        sys.stdout.write(
+            f"  (+{overflow} more advisory finding(s) beyond the surfacing cap — "
+            f"see the REVIEW_RESULT sidecar)\n"
         )
     for c in result.get("coaching", []):
         sys.stdout.write(f"  → {c.get('coaching', '')}\n")
