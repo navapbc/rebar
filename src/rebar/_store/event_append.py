@@ -134,9 +134,18 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
                 capture_output=True,
                 text=True,
             )
-            if add.returncode != 0 or commit.returncode != 0:
+            if add.returncode != 0:
                 _silent_unlink(final_path)
                 raise StoreError("Error: git commit failed while holding lock", 1)
+            if commit.returncode != 0:
+                # A pre-existing unmerged (UU) index entry — e.g. a stranded stash/merge
+                # conflict on a reconciler-regenerable .bridge_state/* file (bug 6818) —
+                # makes git refuse the commit entirely. Self-heal regenerable paths to
+                # HEAD and retry; surface an actionable error for a non-regenerable one.
+                healed, detail = _recover_from_unmerged(tracker, relative_path, commit_msg)
+                if not healed:
+                    _silent_unlink(final_path)
+                    raise StoreError(detail or "Error: git commit failed while holding lock", 1)
     except (RebaseGuard, LockTimeout):
         _silent_unlink(staging)
         raise
@@ -159,3 +168,60 @@ def _silent_unlink(path: str) -> None:
         os.unlink(path)
     except OSError:
         pass
+
+
+# Reconciler-managed bridge-state files are REGENERABLE (the reconciler rebuilds them
+# on its next pass; a missing/empty one just forces a full re-fetch), so a stranded
+# conflict on them can be safely resolved to HEAD. Other paths are real ticket data.
+_REGENERABLE_PREFIX = ".bridge_state/"
+
+
+def _recover_from_unmerged(
+    tracker: str, event_relpath: str, commit_msg: str
+) -> tuple[bool, str | None]:
+    """Recover a commit that ``git`` refused because of a PRE-EXISTING unmerged (UU)
+    index entry (bug 6818). A stranded stash/merge conflict leaves an unmerged index
+    that blocks EVERY ``git commit``, wedging all store writes.
+
+    Returns ``(healed, detail)``:
+    - ``(True, None)`` — all unmerged paths were reconciler-regenerable; they were
+      restored to HEAD and the event commit was retried successfully.
+    - ``(False, <actionable message>)`` — a NON-regenerable path is unmerged (real
+      ticket data, never auto-discarded); the caller raises with that message.
+    - ``(False, None)`` — no unmerged paths (the commit failed for another reason) or
+      the retry still failed; the caller raises the generic error.
+    """
+    unmerged = subprocess.run(
+        ["git", "-C", tracker, "diff", "--name-only", "--diff-filter=U"],
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    if not unmerged:
+        return (False, None)
+    nonregen = [p for p in unmerged if not p.startswith(_REGENERABLE_PREFIX)]
+    if nonregen:
+        return (
+            False,
+            "Error: git commit blocked by unmerged path(s) in the tracker index: "
+            f"{', '.join(nonregen)} — the tickets worktree has a stranded merge/stash "
+            "conflict. Resolve it (e.g. `git -C <tracker> checkout HEAD -- <path>`) and retry.",
+        )
+    # All unmerged paths are regenerable → restore to HEAD and retry the event commit
+    # once. Drop the unmerged index entries (all stages) THEN restore from HEAD: this
+    # reliably clears both the UU and the working-tree markers (a bare `checkout HEAD
+    # --` can leave a stranded stage behind).
+    subprocess.run(
+        ["git", "-C", tracker, "rm", "-q", "--cached", "--", *unmerged],
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "-C", tracker, "checkout", "HEAD", "--", *unmerged], capture_output=True, text=True
+    )
+    subprocess.run(["git", "-C", tracker, "add", event_relpath], capture_output=True, text=True)
+    retry = subprocess.run(
+        ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
+        capture_output=True,
+        text=True,
+    )
+    return (retry.returncode == 0, None)
