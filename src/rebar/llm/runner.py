@@ -20,7 +20,7 @@ import math
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from rebar.llm import findings as _findings
 from rebar.llm.config import LLMConfig
@@ -30,6 +30,7 @@ from rebar.llm.errors import (
     LLMRunnerError,
     LLMUnavailableError,
     StructuredOutputError,
+    UnretryableOutputError,
 )
 
 logger = logging.getLogger(__name__)
@@ -227,7 +228,11 @@ class PydanticAIRunner:
         ran_model = (
             f"test:{type(self._model_override).__name__}" if self._model_override else resolved
         )
-        kwargs = {"system_prompt": req.system_prompt, "tools": tools, "toolsets": toolsets}
+        kwargs: dict[str, Any] = {
+            "system_prompt": req.system_prompt,
+            "tools": tools,
+            "toolsets": toolsets,
+        }
         # Prompt caching (story 0250) — anthropic-GATED. The stable bytes re-sent across
         # the container fan-out (the WHOLE parent plan) live in `system_prompt`;
         # `anthropic_cache_instructions` puts a `cache_control` breakpoint on that block
@@ -239,8 +244,16 @@ class PydanticAIRunner:
         # RunRequest content-list change, so the structured-output retry path is
         # untouched. A test model_override is non-anthropic, so caching is off there.
         cache_settings = _anthropic_cache_settings(resolved if not self._model_override else "")
-        if cache_settings is not None:
-            kwargs["model_settings"] = cache_settings
+        # Wire the configured OUTPUT cap into the call. cfg.max_tokens was previously DROPPED
+        # (only the cache flags were sent as model_settings), so pydantic-ai fell back to its
+        # max_tokens=4096 default — far too small for a multi-child container review, whose
+        # output truncated (stop_reason=max_tokens) and tripped the structured-output retry.
+        # max_tokens is a base ModelSettings field, so it rides alongside the cache flags.
+        model_settings = dict(cache_settings) if cache_settings is not None else {}
+        if cfg.max_tokens:
+            model_settings["max_tokens"] = cfg.max_tokens
+        if model_settings:
+            kwargs["model_settings"] = model_settings
         # pydantic-ai's request_limit counts MODEL REQUESTS (~1 per tool-call cycle).
         # Halve cfg.max_iterations (which is authored as ~2 steps per tool-call cycle)
         # so a given cfg.max_iterations allows the intended number of tool-call cycles
@@ -438,6 +451,11 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
             structured.check_stop_reason(getattr(result.response, "finish_reason", None))
             parsed = structured.parse_structured(str(result.output), model_cls)
             return parsed, _extract_usage(result)
+        except UnretryableOutputError:
+            # A truncation (hit the output cap), refusal, or content-filter is a complete,
+            # unusable turn — re-running the same call reproduces it. FAST-FAIL instead of
+            # re-paying this (often agentic, multi-minute) call OUTPUT_RETRIES more times.
+            raise
         except StructuredOutputError as exc:
             last = exc
             prompt = (
