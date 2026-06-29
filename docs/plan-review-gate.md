@@ -128,10 +128,15 @@ priority = validity × impact                                ∈ [0, 1]
 Decision rules: the only veto is `cited_reference_accurate == "no"` (fires only
 when a finding cites a specific code reference) → **dropped**; `validity < 0.5` →
 **dropped**; else **block** iff the criterion has opted into blocking *and*
-`priority ≥ block_threshold` (default **0.95** ⇒ near-certain *and* high-impact);
-else **advisory**. v1 ships thresholds high and posture advisory, so the LLM tiers
-are almost entirely advisory during calibration — only the DET floor blocks by
-default.
+`priority ≥ block_threshold` (a criterion left at its `0.95` default ⇒ near-certain
+*and* high-impact); else **advisory**. After the first dogfood-data calibration (story
+`3d3d`; see `docs/experiments/plan-review-threshold-calibration.md`), **seven criteria
+that the verifier rarely refutes and that empirically drive plan revisions** — **G6,
+COH, T5e, E2, G5, F1, T4** — are `default_posture: blocking` at `block_threshold: 0.70`
+(a precision-first cut: only a verifier-confirmed, high-impact finding from one of these
+blocks). Every other LLM criterion stays advisory (`0.95`), including the demonstrably
+false-positive-prone set (G1G2/T6/T5b/E5/E6/F4) and the confident-but-routinely-ignored
+set (T3/T10/T8). The DET floor (P1/P5/P8) still blocks unconditionally.
 
 ### The Pass-4 move registry
 
@@ -162,12 +167,14 @@ can only ever name what to investigate, never hand over a solution.
 
 ### The advisory cap
 
-The surfaced advisory findings are capped at the top-N by priority (default **10**,
-`orchestrator.DEFAULT_ADVISORY_CAP`); overflow goes to the `REVIEW_RESULT` sidecar,
-not the agent. **Blocking findings are exempt** — all of them are always returned;
-the cap can never weaken the block decision. (Volume is the lever that preserves an
-LLM's ability to act on feedback; the cap is a tunable default, not a validated
-constant.)
+The surfaced advisory findings are capped at the top-N by priority (default **20**,
+`orchestrator.DEFAULT_ADVISORY_CAP`); the overflow goes to the `REVIEW_RESULT` sidecar,
+not the agent, and the **overflow count** is reported on the verdict
+(`coverage.counts.advisory_overflow`, shown as `overflow=N` in the CLI summary) so a
+capped list never reads as a complete count. **Blocking findings are exempt** — all of
+them are always returned; the cap can never weaken the block decision. (Volume is the
+lever that preserves an LLM's ability to act on feedback; the cap is a tunable default,
+not a validated constant.)
 
 ## Proportionate scrutiny & routing
 
@@ -237,6 +244,15 @@ fails this opt-in gate *off* with a warning (it never auto-enables across a repo
   degrades to a **DET-only** review (the floor still blocks on P1/P5/P8; advisory
   LLM findings are simply absent). The error is recorded in coverage.
 * **A broken individual check** abstains rather than aborting the floor.
+* **Pass-2 verify failed but Pass-1 ran** (e.g. the agentic verifier exhausted its step
+  budget on a finding-rich ticket — bug `59bc`): the Pass-1 findings are **preserved**
+  (un-verified → INDETERMINATE) rather than discarded, and `coverage.verify_failed` is
+  set (distinct from `llm_unavailable`). The verdict fails **open** (PASS) unless a
+  preserved finding sits on a blocking-enabled criterion — then it can't rule out a real
+  block, so it is INDETERMINATE (fail-closed). The agentic verifier's step budget also
+  scales with the finding count (`step_budget_per_item`), so the failure is rare; the
+  per-step request usage is recorded on `coverage.metrics.verify_requests` for headroom
+  observability.
 * The **claim gate** itself fails *closed* when enabled and the signing subsystem
   is unavailable (a missing key blocks the claim, consistent with the close gate);
   `--force` is the escape.
@@ -273,10 +289,14 @@ no upfront wall-clock benchmark is claimed.
 
 ## Scope (v1)
 
-Advisory-by-default with high thresholds; **threshold calibration and tier
-re-validation are explicitly post-implementation** (calibration is only meaningful
+Shipped advisory-by-default with high thresholds; **threshold calibration and tier
+re-validation were explicitly post-implementation** (calibration is only meaningful
 against the running system — the eval suite + sidecar collect the real data to tune
-later). Bugs are exempt (a dedicated follow-on). See the epic for the full criteria
+later). The **first calibration has now run** (story `3d3d`): the `REVIEW_RESULT`
+sidecar corpus was replayed to flip the seven dual-signal criteria above to blocking at
+`0.70`, validated by re-reviewing a 20-ticket high-finding/overlay sample
+(`docs/experiments/plan-review-threshold-calibration.md`). Recalibrate on a cadence as
+more sidecar data accrues. Bugs are exempt (a dedicated follow-on). See the epic for the full criteria
 registry and the experiment-grounded defaults.
 
 ## Definition-of-done for a cutover/engine swap (live exercise required)

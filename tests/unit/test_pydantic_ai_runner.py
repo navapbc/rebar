@@ -327,6 +327,7 @@ def test_extract_usage_reads_normalized_cache_tokens():
         output_tokens = 50
         cache_read_tokens = 900
         cache_write_tokens = 300
+        requests = 7  # the model-request (step) count — surfaced for Pass-2 budget observability
 
     class _Res:
         def usage(self):
@@ -338,6 +339,7 @@ def test_extract_usage_reads_normalized_cache_tokens():
         "output_tokens": 50,
         "cache_read_tokens": 900,
         "cache_write_tokens": 300,
+        "requests": 7,
     }
 
 

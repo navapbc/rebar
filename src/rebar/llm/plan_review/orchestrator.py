@@ -59,8 +59,11 @@ from .pass1 import (  # noqa: F401
 logger = logging.getLogger(__name__)
 
 # Advisory surfacing cap (config-overridable; owned by child 55de). Blocking
-# findings are EXEMPT — the cap can never weaken the block decision.
-DEFAULT_ADVISORY_CAP = 10
+# findings are EXEMPT — the cap can never weaken the block decision. Raised 10→20
+# so a thorough plan's long tail is surfaced rather than silently truncated; the
+# overflow COUNT is still reported (coverage.counts.advisory_overflow) and the full
+# overflow set persists to the REVIEW_RESULT sidecar.
+DEFAULT_ADVISORY_CAP = 20
 
 # The size/budget/ladder/checkpoint cluster lives in :mod:`.sizing`; re-export the
 # names this module + the tests use (backward-compatible public surface). Private
@@ -369,6 +372,20 @@ def partition_findings(
     }
 
 
+def _any_blocking_criterion(findings: list[dict[str, Any]]) -> bool:
+    """True if any finding maps to a criterion whose registry posture is ``blocking`` —
+    i.e. a finding that COULD block were it verified. Used by ``finalize_verdict`` to decide
+    a verify-failure verdict (bug 59bc): without Pass-2 there is no priority, so a finding on
+    a blocking-enabled criterion is treated as potentially-blocking (fail-closed); a review
+    whose preserved findings are all on advisory-only criteria can never block → fail-open."""
+    blocking_ids = {
+        cid
+        for cid, c in registry.by_id().items()
+        if str(c.get("default_posture", "advisory")).lower() == "blocking"
+    }
+    return any(set(f.get("criteria", []) or []) & blocking_ids for f in findings)
+
+
 def finalize_verdict(
     ctx: PlanContext,
     parts: dict[str, list[dict[str, Any]]],
@@ -393,7 +410,18 @@ def finalize_verdict(
     # (the tier ran, a criterion couldn't ground) is NOT llm_unavailable → still PASS.
     if blocking:
         verdict = "BLOCK"
-    elif coverage.get("llm_unavailable") or (indeterminate and not surfaced):
+    elif coverage.get("llm_unavailable"):
+        verdict = "INDETERMINATE"
+    elif coverage.get("verify_failed"):
+        # Pass-2 verify could not run (e.g. the agentic verifier exhausted its step budget),
+        # so the Pass-1 findings are PRESERVED but unverified → all INDETERMINATE (bug 59bc).
+        # Fail the claim ONLY IF a preserved finding sits on a blocking-enabled criterion: with
+        # no Pass-2 we cannot compute priority, so such a finding is "potentially blocking" and
+        # we cannot rule out a real block → INDETERMINATE (fail-closed). When no preserved
+        # finding could ever block, the review fails OPEN → PASS (matching the gate's stated
+        # fail-open posture; the un-verified findings are still surfaced for coaching).
+        verdict = "INDETERMINATE" if _any_blocking_criterion(indeterminate) else "PASS"
+    elif indeterminate and not surfaced:
         verdict = "INDETERMINATE"
     else:
         verdict = "PASS"
