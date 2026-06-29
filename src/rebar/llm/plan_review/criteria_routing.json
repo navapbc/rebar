@@ -14,8 +14,8 @@
         "bug"
       ]
     },
-    "block_threshold": 0.95,
-    "default_posture": "advisory",
+    "block_threshold": 0.7,
+    "default_posture": "blocking",
     "checklist": [
       {
         "key": "observable_outcome",
@@ -124,8 +124,8 @@
         "bug"
       ]
     },
-    "block_threshold": 0.95,
-    "default_posture": "advisory",
+    "block_threshold": 0.7,
+    "default_posture": "blocking",
     "checklist": [
       {
         "key": "scope_boundaries",
@@ -295,8 +295,8 @@
         "bug"
       ]
     },
-    "block_threshold": 0.95,
-    "default_posture": "advisory",
+    "block_threshold": 0.7,
+    "default_posture": "blocking",
     "checklist": [
       {
         "key": "sizing_signals",
@@ -444,8 +444,8 @@
         "bug"
       ]
     },
-    "block_threshold": 0.95,
-    "default_posture": "advisory",
+    "block_threshold": 0.7,
+    "default_posture": "blocking",
     "checklist": [
       {
         "key": "coupling_risk",
@@ -551,8 +551,8 @@
         "bug"
       ]
     },
-    "block_threshold": 0.95,
-    "default_posture": "advisory",
+    "block_threshold": 0.7,
+    "default_posture": "blocking",
     "checklist": [
       {
         "key": "unacknowledged_breakage",
@@ -620,8 +620,8 @@
         "bug"
       ]
     },
-    "block_threshold": 0.95,
-    "default_posture": "advisory",
+    "block_threshold": 0.7,
+    "default_posture": "blocking",
     "checklist": [
       {
         "key": "cross_section_contradiction",
@@ -989,8 +989,8 @@
         "bug"
       ]
     },
-    "block_threshold": 0.95,
-    "default_posture": "advisory",
+    "block_threshold": 0.7,
+    "default_posture": "blocking",
     "checklist": [
       {
         "key": "mechanism_correctness",

@@ -16,8 +16,10 @@ preserved-and-ignored-by-older-clones rollout (upgrade reconcile hosts first).
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -100,6 +102,31 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
         return 0
 
 
+# ── normalized finding fingerprint (OBSERVABILITY-ONLY — sidecar payload, never the
+#    surfaced verdict) ──────────────────────────────────────────────────────────────
+# The caller-visible finding ``id`` (orchestrator.mint_finding_id) hashes the EXACT
+# finding text, so the Pass-1 finder re-wording the same defect on a re-review mints a
+# DIFFERENT id — which makes "did this finding survive a revision?" unmeasurable from the
+# exact id alone (it reads as ~100% resolved for every LLM criterion, vs the deterministic
+# floor where the text is stable). ``norm_id`` is a coarser, reword-tolerant fingerprint
+# (significant-token set + criteria, order-insensitive) so offline calibration can join the
+# SAME defect across re-reviews at a granularity finer than criterion-load-delta. It is
+# additive to the sidecar event ONLY — the surfaced verdict findings are untouched, so the
+# library / MCP / CLI return shape does not change.
+_NORM_STOP_TOKENS = 3  # drop tokens this short or shorter as low-signal noise
+
+
+def norm_id(finding: dict[str, Any]) -> str:
+    """A reword-tolerant, criterion-scoped content fingerprint for a finding: the SORTED
+    SET of its significant lowercased alphanumeric tokens joined with its sorted criteria.
+    Order-insensitive and resilient to minor re-phrasing, so the same underlying defect
+    across re-reviews tends to mint the same ``norm_id`` (unlike the exact-text ``id``)."""
+    text = str(finding.get("finding", "")).lower()
+    tokens = sorted({t for t in re.findall(r"[a-z0-9]+", text) if len(t) > _NORM_STOP_TOKENS})
+    basis = " ".join(tokens) + "|" + ",".join(sorted(finding.get("criteria", []) or []))
+    return "n" + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
+
+
 def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> dict[str, Any]:
     """The sidecar payload: per-finding fingerprints + decisions + verification
     attributes (everything needed to reconstruct per-criterion FP/remediation rates
@@ -110,6 +137,11 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
     def _slim(f: dict[str, Any]) -> dict[str, Any]:
         return {
             "id": f.get("id"),
+            # OBSERVABILITY-ONLY enrichment (db7b follow-on): a reword-tolerant fingerprint
+            # + the finding's location, so the voluntary-revision signal is cleanly joinable
+            # across re-reviews offline. Not surfaced to the agent (sidecar event only).
+            "norm_id": norm_id(f),
+            "location": f.get("location", ""),
             "criteria": f.get("criteria", []),
             "tier": f.get("tier"),
             "decision": f.get("decision"),

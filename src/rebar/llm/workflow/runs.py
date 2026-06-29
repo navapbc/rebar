@@ -146,6 +146,18 @@ class RunnerAgentStep(_ex.AgentStepRunner):
                 cfg, step=ctx.step.get("model"), workflow=ctx.workflow.get("model")
             ),
         )
+        # Per-item agentic step budget (bug 59bc): an agent step that re-grounds a LIST of
+        # work items (the Pass-2 verifier: ~1 tool-call cycle per finding) needs a budget that
+        # SCALES with the item count, or it trips the default cap on a finding-rich ticket and
+        # the whole review degrades. A `with: {step_budget_per_item: <n>}` input raises this
+        # step's `max_iterations` to max(configured floor, n × len(findings)) — the floor
+        # (default 50) is the minimum, so a tiny ticket is unaffected. Carried as a `with:` input
+        # (not a step field) because the v3 step schema is closed/immutable; generic (any
+        # list-of-items agent step can opt in); no-op when absent.
+        per_item = ctx.inputs.get("step_budget_per_item")
+        items = ctx.inputs.get("findings")
+        if per_item and isinstance(items, list) and items:
+            cfg = _replace(cfg, max_iterations=max(cfg.max_iterations, int(per_item) * len(items)))
         prompt_id = ctx.step.get("prompt") or ""
         prompt = prompts.get_prompt(prompt_id, repo_root=self._repo_root)
         ticket_id = str(ctx.inputs.get("ticket_id") or ctx.target_ticket or "")

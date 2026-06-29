@@ -327,7 +327,7 @@ def test_extract_usage_reads_normalized_cache_tokens():
         output_tokens = 50
         cache_read_tokens = 900
         cache_write_tokens = 300
-        requests = 18  # model-request count ≈ agent steps consumed (step-usage telemetry)
+        requests = 7  # the model-request (step) count — surfaced for Pass-2 budget observability
 
     class _Res:
         def usage(self):
@@ -339,7 +339,7 @@ def test_extract_usage_reads_normalized_cache_tokens():
         "output_tokens": 50,
         "cache_read_tokens": 900,
         "cache_write_tokens": 300,
-        "requests": 18,
+        "requests": 7,
     }
 
 
