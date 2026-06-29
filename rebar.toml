@@ -20,6 +20,13 @@ require_completion_verification_for_close = true
 # docs/plan-review-gate.md. Turning this off is the rollback.
 require_plan_review_for_claim = true
 
+[ticket]
+# Default assignee `claim` uses when no --assignee is given (story c36c). Applied at
+# CLAIM time (not at ticket create). Use a Jira-RESOLVABLE identity (email/accountId),
+# not a bare handle, so it survives reconcile (a bare ambiguous handle is left
+# unassigned — bug 544e). Override per-checkout with the env var REBAR_DEFAULT_ASSIGNEE.
+default_assignee = "joeoakhart@navapbc.com"
+
 [mcp]
 # Enable the LLM agent operations over the MCP server (review_ticket / review_code /
 # scan_spec / verify_completion). They make live, billable LLM calls.

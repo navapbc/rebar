@@ -229,8 +229,11 @@ def claim(ticket_id: str, *, assignee=None, force=None, repo_root=None) -> dict:
             stderr=f"Error: ticket '{ticket_id}' not found\n",
         )
     try:
+        # Pass assignee THROUGH (don't coerce None→""): None is the "unspecified"
+        # sentinel that triggers the ticket.default_assignee fallback in claim_compute,
+        # while an explicit "" clears the assignee without falling back (story c36c).
         return _transition.claim_compute(
-            resolved, assignee=assignee or "", force_plan_review=force or "", repo_root=repo_root
+            resolved, assignee=assignee, force_plan_review=force or "", repo_root=repo_root
         )
     except ConcurrencyMismatch as exc:
         raise ConcurrencyError(

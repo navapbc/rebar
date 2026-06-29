@@ -220,3 +220,88 @@ def test_update_issue_skips_validation_when_no_assignee(acli):
         client.update_issue("DIG-500", summary="new title")
         client._direct_rest_get.assert_not_called()
         mod_update.assert_called_once()
+
+
+# ── bug 544e: the CREATE path resolves the assignee through the SAME validator as
+# the UPDATE path, so an ambiguous/unmappable assignee is left UNASSIGNED (matching
+# the update outcome) rather than passed raw to ACLI/Jira to fuzzy-match or default.
+# CREATE has no issue key yet → resolution must use PROJECT scope.
+
+
+def test_create_issue_normalizes_assignee_to_accountId(acli):
+    """CREATE must forward the RESOLVED accountId to ACLI, not the raw assignee
+    string (which Jira would fuzzy-resolve or default)."""
+    client = _make_client(
+        acli,
+        [{"accountId": "abc123", "emailAddress": "joe@example.com", "displayName": "Joe"}],
+    )
+    with patch.object(acli.acli_cli_ops, "create_issue") as mod_create:
+        mod_create.return_value = {"key": "DIG-1"}
+        client.create_issue({"ticket_type": "task", "title": "t", "assignee": "joe@example.com"})
+        _, kwargs = mod_create.call_args
+        assert kwargs.get("assignee") == "abc123"
+        # Resolution used PROJECT scope (create has no issue key yet).
+        called_path = client._direct_rest_get.call_args[0][0]
+        assert "project=DIG" in called_path
+
+
+def test_create_issue_omits_ambiguous_assignee(acli):
+    """CREATE with an ambiguous handle ('joe' → 3 Joes) must OMIT the assignee so the
+    issue is left UNASSIGNED — never forward the raw string for Jira to mis-resolve."""
+    client = _make_client(acli, _THREE_JOES)
+    with patch.object(acli.acli_cli_ops, "create_issue") as mod_create:
+        mod_create.return_value = {"key": "REB-1"}
+        client.create_issue({"ticket_type": "task", "title": "t", "assignee": "joe"})
+        _, kwargs = mod_create.call_args
+        assert kwargs.get("assignee") in (None, ""), (
+            f"ambiguous assignee should be omitted, got {kwargs.get('assignee')!r}"
+        )
+
+
+def test_create_issue_no_assignee_skips_validation(acli):
+    """No assignee on create → no /assignable/search probe, issue created unassigned."""
+    client = _make_client(acli, [])
+    with patch.object(acli.acli_cli_ops, "create_issue") as mod_create:
+        mod_create.return_value = {"key": "DIG-2"}
+        client.create_issue({"ticket_type": "task", "title": "t"})
+        client._direct_rest_get.assert_not_called()
+        mod_create.assert_called_once()
+
+
+def test_create_issue_resolves_unique_normalized_variant(acli):
+    """CREATE resolves a UNIQUE normalized variant ('joe-oakhart' → 'Joe Oakhart') to
+    its accountId — same normalized-match behavior as the UPDATE path."""
+    client = _make_client(acli, _THREE_JOES)
+    with patch.object(acli.acli_cli_ops, "create_issue") as mod_create:
+        mod_create.return_value = {"key": "REB-9"}
+        client.create_issue({"ticket_type": "task", "title": "t", "assignee": "joe-oakhart"})
+        _, kwargs = mod_create.call_args
+        assert kwargs.get("assignee") == "joe-oakhart-acct"
+
+
+def test_create_issue_propagates_transient_resolution_error(acli):
+    """A TRANSIENT resolution error (NOT AssigneeNotFoundError) must PROPAGATE on
+    create — never silently omit or mis-assign — so the create is retried next pass.
+    Only a definitive AssigneeNotFoundError omits the assignee."""
+    client = _make_client(acli, [])
+    client._direct_rest_get = MagicMock(side_effect=RuntimeError("transient network"))
+    with patch.object(acli.acli_cli_ops, "create_issue") as mod_create:
+        with pytest.raises(RuntimeError):
+            client.create_issue(
+                {"ticket_type": "task", "title": "t", "assignee": "joe@example.com"}
+            )
+        mod_create.assert_not_called()  # error raised before the create dispatch
+
+
+def test_update_issue_transient_error_propagates_does_not_unassign(acli):
+    """SYMMETRY with create: a TRANSIENT resolution error on UPDATE must PROPAGATE
+    (so the batch retries), NOT silently unassign — only a definitive
+    AssigneeNotFoundError would lead to unassigning."""
+    client = _make_client(acli, [])
+    client._direct_rest_get = MagicMock(side_effect=RuntimeError("transient network"))
+    client.unassign_issue = MagicMock()
+    with patch.object(acli, "update_issue") as mod_update:
+        with pytest.raises(RuntimeError):
+            client.update_issue("DIG-700", assignee="joe@example.com")
+        client.unassign_issue.assert_not_called()  # transient ≠ unassign
+        mod_update.assert_not_called()
