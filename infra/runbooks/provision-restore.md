@@ -23,6 +23,45 @@ how hard you push.
   (Measured: the d251 drill ran **well under** target — see "Record the achieved
   RTO".)
 
+## Rebuildable directories — EXCLUDE `index/` and `cache/` from restore archives
+
+The Gerrit site has two **rebuildable** subdirectories that carry NO source of truth
+and must be **excluded** from a logical restore archive (and discarded/regenerated on
+restore), so the backup is smaller and a restore is faster and consistent:
+
+- **`index/`** — the Lucene secondary index. It is derived entirely from NoteDb
+  (`git/`); Gerrit rebuilds it with `gerrit.war reindex`. Restoring a stale index can
+  even cause inconsistencies, so it is regenerated, never trusted from a backup.
+- **`cache/`** — the H2 on-disk performance caches. Purely ephemeral; Gerrit
+  repopulates them at runtime.
+
+The **source of truth** to preserve is `git/` (NoteDb: repos, accounts, groups,
+`refs/meta/config`), `db/`, and `etc/` (config + the SSH host key); `logs/` and
+`data/replication` are operational.
+
+**Logical restore archive (preferred for off-box/DR; excludes the rebuildables):**
+
+```bash
+# On the box — a lean, consistent archive that OMITS index/ and cache/.
+# (Quiesce first — see the drill below — so git/ + db/ are consistent.)
+tar -C /var/gerrit/site -czf /tmp/gerrit-site-backup.tgz \
+    --exclude=index --exclude=cache \
+    git db etc logs
+```
+
+**EBS-snapshot restores include `index/` + `cache/`** (a snapshot is whole-volume), so
+after restoring from a snapshot you MUST treat them as rebuildable: delete `index/`
+(and optionally `cache/`) on the restored site and run a reindex before/at first boot:
+
+```bash
+# After mounting/promoting the restored site (NOT during the read-only drill):
+rm -rf /var/gerrit/site/index/* /var/gerrit/site/cache/*
+docker exec compose-gerrit-1 java -jar /var/gerrit/bin/gerrit.war reindex -d /var/gerrit
+```
+
+The non-destructive drill below only READS the restored copy to confirm `git/` (the
+source of truth) is intact; it does not trust the snapshot's `index/`.
+
 ## Snapshot identification (the backup of record)
 
 S1 owns the backup: a **DLM lifecycle policy** (`infra/terraform/backup.tf`,
