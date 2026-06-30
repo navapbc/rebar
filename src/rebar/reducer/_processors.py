@@ -113,6 +113,9 @@ def process_status(state: dict, event: dict, data: dict, filepath: str) -> None:
     # Remove legacy conflicts key unconditionally — new behavior never uses it.
     state.pop("conflicts", None)
 
+    # Capture the pre-update status so we can detect a closed->open reopen below.
+    prev_status = state.get("status")
+
     current_status = data.get("current_status")
     if current_status is not None and current_status != state["status"]:
         # Fork detected: two chains have diverged.
@@ -167,6 +170,14 @@ def process_status(state: dict, event: dict, data: dict, filepath: str) -> None:
         # records the winner's own UUID.
         state["parent_status_uuid"] = event.get("uuid") or ""
         state["last_status_env_id"] = event.get("env_id") or ""
+
+    # Record the most recent closed->open (reopen) transition timestamp (epic
+    # dark-acme-lumen). Validity-on-read uses it to invalidate a completion/plan-review
+    # attestation signed BEFORE a reopen, without mutating the immutable attestation record.
+    # Set only on the closed->open edge (applies to both the fork and normal branches via the
+    # resolved status); left absent for tickets that were never reopened.
+    if prev_status == "closed" and state.get("status") == "open":
+        state["last_reopened_at"] = event.get("timestamp")
 
 
 def process_comment(state: dict, event: dict, data: dict) -> None:
@@ -373,29 +384,75 @@ def process_verify_commands(state: dict, event: dict, data: dict) -> None:
     state["verify_commands"] = data.get("verify_commands") or []
 
 
-def process_signature(state: dict, event: dict, data: dict) -> None:
-    """Apply a SIGNATURE event: replace state.signature (last-writer-wins).
+def attestation_kind(manifest: list | None, data: dict) -> str | None:
+    """Derive the attestation kind used to key ``state['attestations']``.
 
-    Stores the latest cryptographic attestation — the manifest of verified steps,
-    the HMAC signature, the environment key fingerprint, and audit metadata — so
-    ``verify-signature`` can recompute and certify it. Mirrors the FILE_IMPACT /
-    VERIFY_COMMANDS last-writer-wins shape, so the record survives compaction (the
-    compactor builds the SNAPSHOT compiled_state via this reducer). The signed-at
-    timestamp falls back to the event timestamp for forward-compat records.
+    The SIGNED ``manifest[0]`` is authoritative: the kind is the substring before the
+    first ``":"`` (e.g. ``"plan-review: PASS"`` -> ``"plan-review"``,
+    ``"completion-verifier: PASS"`` -> ``"completion-verifier"``). ``data['kind']`` is an
+    UNSIGNED routing hint — it is never allowed to override the signed manifest, so a
+    mismatched hint is ignored and the manifest-derived kind is used. Returns None for a
+    blank/retired or otherwise unkindable manifest (no first line, or no ``":"``); such an
+    event stays OUT of the map (it cannot key a kind)."""
+    if not manifest:
+        return None
+    first = str(manifest[0])
+    if ":" not in first:
+        return None
+    derived = first.split(":", 1)[0].strip() or None
+    if derived is None:
+        return None
+    # ``data['kind']`` is an UNSIGNED routing hint. The signed manifest is authoritative, so
+    # we consult the hint only to honor/validate it: a hint that disagrees with the
+    # manifest-derived kind is IGNORED (the manifest wins) — a forged/buggy envelope kind can
+    # never misroute a signed attestation. Either way the manifest-derived kind is returned.
+    hint = data.get("kind")
+    if hint is not None and str(hint).strip() != derived:
+        return derived
+    return derived
+
+
+def process_signature(state: dict, event: dict, data: dict) -> None:
+    """Apply a SIGNATURE event: maintain the most-recent ``state['signature']`` mirror
+    AND, additively, file the record under its kind in ``state['attestations']``.
+
+    The MIRROR keeps the exact prior single-slot last-writer-wins behavior — EVERY event
+    (including a blank/retired one) replaces ``state['signature']`` — so the existing
+    ``state.get('signature')`` consumers (verify, the close gate, fsck, retire_attested_pin)
+    are unchanged by this slice, and the SNAPSHOT/rollback mirror is automatic (the compactor
+    builds compiled_state via this reducer).
+
+    The MAP (``state['attestations']``, epic dark-acme-lumen) is purely additive: a kindable
+    event sets ``attestations[kind]`` (per-key last-writer-wins, so re-signing one kind
+    replaces only that kind and the others survive — fixing the cross-kind clobber). A
+    blank/retired/unkindable event is SKIPPED for the map (it cannot key a kind; its staleness
+    is handled later by validity-on-read, not by clobbering). Kind comes from the signed
+    ``manifest[0]`` (``data['kind']`` is only a validated hint). The signed-at timestamp falls
+    back to the event timestamp for forward-compat records.
     """
     _manifest = data.get("manifest")
-    state["signature"] = {
-        # Coerce to a list: never persist a non-list truthy value (e.g. a dict)
-        # into reduced state, which would leak a malformed shape into show/MCP
-        # output (security-adjacent state — fail closed, like verify_record).
-        "manifest": _manifest if isinstance(_manifest, list) else [],
+    # Coerce to a list: never persist a non-list truthy value (e.g. a dict) into reduced
+    # state, which would leak a malformed shape into show/MCP output (fail closed).
+    manifest = _manifest if isinstance(_manifest, list) else []
+    kind = attestation_kind(manifest, data)
+    record = {
+        "manifest": manifest,
         "algorithm": data.get("algorithm"),
         "signature": data.get("signature"),
         "key_id": data.get("key_id"),
         "head_sha": data.get("head_sha"),
         "signed_at": data.get("signed_at") or event.get("timestamp"),
         "author": event.get("author"),
+        # The resolved (manifest-authoritative) kind, so the record is self-describing —
+        # esp. for the legacy mirror, which has no map-key context. None for a
+        # blank/retired/unkindable event.
+        "kind": kind,
     }
+    # Mirror: unchanged single-slot semantics (back-compat for existing consumers).
+    state["signature"] = record
+    # Map: additive, kind-keyed; skip blank/retired/unkindable events (no key derivable).
+    if kind is not None:
+        state.setdefault("attestations", {})[kind] = record
 
 
 def process_workflow_run(state: dict, event: dict, data: dict) -> None:
@@ -541,6 +598,19 @@ def process_snapshot(state: dict, data: dict) -> None:
     # fold in normally.
     if "managed_refs" not in compiled_state:
         state["managed_refs"] = seed_managed_refs_from_current(state)
+
+    # Attestations fold-in (epic dark-acme-lumen): an OLD snapshot (written before the
+    # kind-keyed map existed) carries only the legacy single `signature` and no
+    # `attestations`. Fold that record into the map under its manifest-derived kind so
+    # kind-keyed consumers see it; a blank/unkindable legacy record is dropped (no sentinel).
+    # Post-snapshot SIGNATURE events replay into the map normally. A post-feature snapshot
+    # already carries `attestations` and is restored verbatim above (this is a no-op).
+    if "attestations" not in compiled_state:
+        sig = state.get("signature")
+        if isinstance(sig, dict):
+            kind = attestation_kind(sig.get("manifest"), {})
+            if kind is not None:
+                state.setdefault("attestations", {})[kind] = sig
 
 
 def scan_for_latest_snapshot(

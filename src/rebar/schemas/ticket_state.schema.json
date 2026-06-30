@@ -51,6 +51,15 @@
     },
     "bridge_alerts": { "type": "array" },
     "reverts": { "type": "array" },
+    "attestations": {
+      "type": "object",
+      "description": "Kind-keyed map of cryptographic attestation records (epic dark-acme-lumen): each key is an attestation kind (e.g. 'plan-review', 'completion-verifier') and each value is a signature record {manifest, algorithm, key_id, head_sha, signed_at, author} (the raw HMAC hex is stripped from public output). Additive across kinds, last-writer-wins within a kind, so independent gate attestations coexist instead of clobbering one slot. Omitted when the ticket has no attestations. The legacy top-level `signature` field is a back-compat mirror of the most-recent attestation.",
+      "additionalProperties": { "type": "object" }
+    },
+    "last_reopened_at": {
+      "type": ["integer", "null"],
+      "description": "ns-epoch timestamp of the most recent closed->open (reopen) transition; absent/null if the ticket was never reopened. Read by validity-on-read to invalidate an attestation signed before a reopen."
+    },
     "preconditions_summary": { "type": "object" },
     "source_id": {
       "type": ["string", "null"],

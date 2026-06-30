@@ -44,6 +44,7 @@ KEY_MAP = {
     "inbound_links": "ibl",
     "children": "ch",
     "signature": "sig",
+    "attestations": "att",
 }
 
 # Fields omitted from LLM format (verbose timestamps / system metadata)
@@ -111,6 +112,15 @@ def shorten_signature(s: object) -> object:
     return out
 
 
+def shorten_attestations(a: object) -> object:
+    """Compact the kind-keyed attestations map for the LLM view: each kind maps to the
+    same compact ``{present, steps, key}`` shape as ``shorten_signature`` (the HMAC hex is
+    already stripped by ``public_state``). Non-dicts pass through unchanged."""
+    if not isinstance(a, dict):
+        return a
+    return {kind: shorten_signature(rec) for kind, rec in a.items()}
+
+
 def shorten_inbound(d: object) -> object:
     """Shorten an inbound-link dict (from_id/relation) to abbreviated keys."""
     if not isinstance(d, dict):
@@ -142,5 +152,7 @@ def to_llm(state: dict) -> dict:
             v = [shorten_inbound(e) for e in v]
         elif k == "signature":
             v = shorten_signature(v)
+        elif k == "attestations":
+            v = shorten_attestations(v)
         out[short_k] = v
     return out
