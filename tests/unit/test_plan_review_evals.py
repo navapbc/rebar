@@ -42,6 +42,26 @@ def test_dataset_has_recall_and_negative_cases(prompt_id: str) -> None:
     assert negative, f"{prompt_id} needs false-fire/false-accept (good→pass) cases"
 
 
+def test_novelty_spec_is_strict_clean_and_balanced() -> None:
+    # child 150b: the SEPARATE novelty sub-call's eval lives in its OWN spec (keyed to the
+    # plan-review-novelty prompt, NOT the verifier spec — the discriminates_novelty scorer
+    # would otherwise score the wrong artifact). Guard it in CI: strict-clean (catches an
+    # unbalanced novelty axis, an emptied gold_set, or a renamed/unregistered scorer), the
+    # discriminator present, both novelty poles, and >= 3 carryover/novel pairs.
+    spec = E.load_eval_spec("plan-review-novelty")
+    assert E.validate_eval_spec(spec, strict=True) == []
+    names = {s["name"] for s in spec["scorers"]}
+    assert "discriminates_novelty" in names
+    ds = spec.get("dataset", [])
+    expects = {c.get("expect") for c in ds}
+    assert {"high_novelty", "low_novelty"} <= expects, "novelty axis needs both poles"
+    pairs = {c.get("pair") for c in ds if c.get("pair")}
+    assert len(pairs) >= 3, "150b AC needs >= 3 labeled carryover/novel pairs"
+    kinds = {c.get("kind") for c in ds}
+    assert {"carryover", "novel"} <= kinds
+    assert spec.get("gold_set"), "novelty spec needs a gold_set"
+
+
 def test_finder_covers_observed_false_positive_modes() -> None:
     # The finder false-fire cases are seeded from the REAL observed-FP taxonomy.
     ds = E.load_eval_spec("plan-review-finder").get("dataset", [])

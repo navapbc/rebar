@@ -17,6 +17,7 @@ preserved-and-ignored-by-older-clones rollout (upgrade reconcile hosts first).
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -102,6 +103,96 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
         return 0
 
 
+def latest_review_result(ticket_id: str, *, repo_root=None) -> dict[str, Any] | None:
+    """Return the **most-recent** ``REVIEW_RESULT`` sidecar payload for ``ticket_id``,
+    or ``None`` when none is usable.
+
+    Contract (child e344) — this is the reader a remediation re-review uses to hand the
+    Pass-2 novelty sub-call its own prior findings. It mirrors the sidecar's
+    observability-only, best-effort posture and **never raises**, so a missing/garbled
+    prior review degrades gracefully to "no prior findings":
+
+    - Return value: the deserialized ``data`` payload of the latest sidecar event (the
+      ``build_payload`` dict — ``schema``, ``findings``, ``coverage``, …), NOT the event
+      envelope. Callers read ``result["findings"]`` directly.
+    - No sidecar yet / ticket dir absent / empty dir → ``None`` (the common first-review
+      case; the caller proceeds with no prior findings).
+    - **Walk-back over unusable files:** the newest sidecar is preferred, but a single
+      malformed (mid-emit crash) or foreign-schema newest file does NOT blind the caller
+      to older valid reviews — the reader walks from newest to oldest and returns the
+      first usable ``plan_review_result_v1`` payload (a malformed file is logged, once).
+    - **Schema guard:** a payload whose ``schema`` != ``"plan_review_result_v1"`` is
+      skipped, so a future schema bump can never feed a stale shape to the novelty
+      sub-call. All files unusable → ``None``.
+    """
+    try:
+        from rebar import config as _config
+        from rebar._engine_support.resolver import resolve_ticket_id
+
+        tracker = str(_config.tracker_dir(repo_root))
+        rid = resolve_ticket_id(ticket_id, tracker) or ticket_id
+        ticket_dir = os.path.join(tracker, rid)
+        files = sorted(
+            f
+            for f in os.listdir(ticket_dir)
+            if f.endswith(f"-{EVENT_TYPE}.json") and not f.startswith(".")
+        )
+        # Filenames are timestamp-prefixed (fixed-width ns epoch), so reverse order is
+        # newest-first. Return the first USABLE v1 payload, tolerating a corrupt newest.
+        for fname in reversed(files):
+            try:
+                with open(os.path.join(ticket_dir, fname), encoding="utf-8") as fh:
+                    event = json.load(fh)
+            except (OSError, ValueError):
+                logger.warning("REVIEW_RESULT sidecar %s unreadable; trying older", fname)
+                continue
+            payload = event.get("data") if isinstance(event, dict) else None
+            if isinstance(payload, dict) and payload.get("schema") == "plan_review_result_v1":
+                return payload
+        return None
+    except FileNotFoundError:
+        return None  # ticket dir absent → no prior review (common first-review case)
+    except Exception:  # noqa: BLE001 — best-effort observability reader; broad-but-logged, never raises
+        logger.warning(
+            "REVIEW_RESULT sidecar read failed; treating as no prior review", exc_info=True
+        )
+        return None
+
+
+def latest_review_timestamp(ticket_id: str, *, repo_root=None) -> int | None:
+    """Return the nanosecond timestamp of the **most-recent** ``REVIEW_RESULT`` sidecar for
+    ``ticket_id`` (the "last review of ANY kind" marker — every review, PASS or BLOCK, emits a
+    sidecar), or ``None`` when none exists / on any error.
+
+    The remediation-mode freshness window (child ec89) measures from this. The timestamp is the
+    filename's ns prefix (``<ts_ns>-<uuid>-REVIEW_RESULT.json`` — see ``event_append``), so this
+    needs no JSON parse. Best-effort and never raises, matching the sidecar's observability
+    posture."""
+    try:
+        from rebar import config as _config
+        from rebar._engine_support.resolver import resolve_ticket_id
+
+        tracker = str(_config.tracker_dir(repo_root))
+        rid = resolve_ticket_id(ticket_id, tracker) or ticket_id
+        ticket_dir = os.path.join(tracker, rid)
+        files = sorted(
+            f
+            for f in os.listdir(ticket_dir)
+            if f.endswith(f"-{EVENT_TYPE}.json") and not f.startswith(".")
+        )
+        if not files:
+            return None
+        prefix = files[-1].split("-", 1)[0]  # the ns-epoch timestamp prefix of the newest file
+        return int(prefix)
+    except FileNotFoundError:
+        return None
+    except Exception:  # noqa: BLE001 — best-effort observability reader; broad-but-logged, never raises
+        logger.warning(
+            "REVIEW_RESULT sidecar timestamp read failed; treating as none", exc_info=True
+        )
+        return None
+
+
 # ── normalized finding fingerprint (OBSERVABILITY-ONLY — sidecar payload, never the
 #    surfaced verdict) ──────────────────────────────────────────────────────────────
 # The caller-visible finding ``id`` (orchestrator.mint_finding_id) hashes the EXACT
@@ -135,6 +226,13 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
     are retained here for analysis)."""
 
     def _slim(f: dict[str, Any]) -> dict[str, Any]:
+        # Field-selection principle (child e344): persist the PROSE a remediation
+        # re-review's Pass-2 novelty sub-call needs to re-ground itself against the
+        # prior findings (``finding`` / ``suggested_fix`` / ``checklist_item``) plus the
+        # fingerprints/decision/verification needed for offline calibration — but
+        # deliberately exclude runtime-only carriers (e.g. ``scenarios``, ``evidence``,
+        # ``_agentic``) to keep the sidecar lean. As the finding schema grows, add a key
+        # here only when an offline consumer (calibration or re-grounding) needs it.
         return {
             "id": f.get("id"),
             # OBSERVABILITY-ONLY enrichment (db7b follow-on): a reword-tolerant fingerprint
@@ -151,6 +249,13 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
             "priority": f.get("priority"),
             "reason": f.get("reason"),
             "verification": f.get("verification"),
+            # Finding PROSE (child e344): re-grounding the Pass-2 novelty sub-call on a
+            # remediation re-review needs the prior finding's actual text — not just its
+            # fingerprint — to answer the matches-prior sub-answers. Sidecar event ONLY;
+            # the surfaced verdict shape is byte-unchanged (asserted in tests).
+            "finding": f.get("finding", ""),
+            "suggested_fix": f.get("suggested_fix", ""),
+            "checklist_item": f.get("checklist_item", ""),
         }
 
     all_findings = (

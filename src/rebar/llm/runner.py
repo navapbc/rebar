@@ -70,11 +70,14 @@ class RunRequest:
     # runner behaviour.
     output_strategy: str = "tool"
     # Extended-thinking flag (1268). When set, the structured-output stack uses
-    # PromptedOutput (NOT a forced/native constraint, which Anthropic 400s when thinking
-    # is on). The RECOMMENDED authoring pattern for a step that needs deep reasoning AND
-    # structured output is to SPLIT it into two steps — a `mode="text"` reasoning step
-    # then a `mode="structured"` extraction step (both already supported by the engine) —
-    # rather than forcing one step to do both; this flag covers the single-step case.
+    # PromptedOutput rather than a provider-native/strict constraint — a CURRENT
+    # Anthropic API constraint (it 400s when extended thinking is on together with a
+    # forced/native output constraint), not a workaround for any forced-tool mechanism
+    # (none exists in the stack; output is selected by `output_mode()`). The RECOMMENDED
+    # authoring pattern for a step that needs deep reasoning AND structured output is to
+    # SPLIT it into two steps — a `mode="text"` reasoning step then a `mode="structured"`
+    # extraction step (both already supported by the engine) — rather than forcing one
+    # step to do both; this flag covers the single-step case.
     thinking: bool = False
 
 
@@ -145,10 +148,13 @@ class PydanticAIRunner:
     hump-seam-spice / 7d58) — single-turn LLM calls AND tool-using agents with a full
     capability surface (filesystem + MCP + least-priv rebar ops) and NO per-provider
     code: the provider is chosen by the model string (``anthropic:…`` / ``openai:…`` /
-    ``google-gla:…``). Structured output uses ``PromptedOutput`` (NOT the forced-tool
-    ``ToolOutput``), the provider-agnostic mode the runtime POC proved also dodges the
-    Claude extended-thinking + forced-tool 400. The reliability hardening
-    (NativeOutput/json-repair/bounded retry) is layered on in a later story (1268).
+    ``google-gla:…``). Structured output is selected by ``output_mode()`` —
+    ``NativeOutput`` for providers with strict constrained decoding, ``PromptedOutput``
+    for everyone else (including Anthropic when extended thinking is active, which
+    Anthropic 400s if combined with a forced/native output constraint); no forced-tool
+    ``ToolOutput`` is used anywhere in the stack. The structured-output reliability stack
+    (NativeOutput/json-repair/bounded retry) is implemented in the structured module
+    (story 1268).
 
     ``model_override`` injects a Pydantic AI model (e.g. ``TestModel``) for offline
     tests, exactly mirroring the ``FakeRunner`` seam without a live, billable call."""

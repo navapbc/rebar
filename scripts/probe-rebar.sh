@@ -143,7 +143,9 @@ run_rb show "${TASK:0:4}"; assert_rc 0 "show by short (4-hex) id"
 run_rb show no-such-ticket-xyz; assert_rc_ne 0 "show missing -> non-zero"; assert_contains '"error": "ticket_not_found"' "show missing JSON envelope"
 
 section "edit — each field + validation"
-run_rb edit "$BUG" --title="PROBE: edited" --priority=3 --assignee=carol --description="d" --tags=probe,edited; assert_rc 0 "edit multi-field"
+# `--tags` was removed from `edit` (it whole-field-clobbered, racing concurrent tag
+# deltas); the convergent surface is `--set-tags` (replace) / `--add-tag` / `--remove-tag`.
+run_rb edit "$BUG" --title="PROBE: edited" --priority=3 --assignee=carol --description="d" --set-tags=probe,edited; assert_rc 0 "edit multi-field"
 assert_eq 3 "$("$RB" show "$BUG" | jq .priority)" "edit priority persisted"
 run_rb edit "$BUG" --priority=99; assert_rc_ne 0 "edit rejects priority>4"
 run_rb edit "$BUG" --priority=high; assert_rc_ne 0 "edit rejects non-numeric priority"
@@ -273,7 +275,15 @@ run_rb delete "$LCID" --user-approved --output json; assert_rc 0 "delete --outpu
 section "single-reducer parity — show == list == search shape (bug f026)"
 SK="$("$RB" show "$TASK" | jq -S 'keys')"
 LK="$("$RB" list | jq -S --arg t "$TASK" '.[]|select(.ticket_id==$t)|keys')"
-assert_eq "$SK" "$LK" "show and list element have identical key sets"
+# `list` is lean BY DESIGN: it drops the bulky `comments`+`description` bodies that
+# `show` carries (opt back in with `list --full`). So the key sets are deliberately
+# NOT identical — assert the structural contract instead: `list`'s keys are a strict
+# subset of `show`'s, and the ONLY keys `show` adds are exactly comments+description.
+assert_eq '[]' "$(jq -nc --argjson s "$SK" --argjson l "$LK" '$l - $s')" \
+    "list keys are a subset of show keys"
+assert_eq '["comments","description"]' \
+    "$(jq -nc --argjson s "$SK" --argjson l "$LK" '($s - $l) | sort')" \
+    "show adds exactly comments+description over lean list"
 run_rb show "$TASK"; assert_not_contains '"parent_status_uuid"' "internal key not leaked in show"
 assert_eq '[{"command":"echo","dd_id":"D1","dd_text":"t"}]' \
     "$("$RB" list | jq -c --arg t "$TASK" '.[]|select(.ticket_id==$t)|.verify_commands')" \

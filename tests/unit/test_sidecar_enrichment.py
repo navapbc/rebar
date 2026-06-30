@@ -73,3 +73,48 @@ def test_sidecar_enrichment_is_observability_only() -> None:
     assert sf["norm_id"] == sidecar.norm_id(verdict["advisory"][0])
     assert sf["location"] == "Scope: latency"
     assert sf["id"] == "fabc"  # exact id still present + unchanged
+
+
+def test_slim_persists_finding_prose_for_re_grounding() -> None:
+    """child e344: _slim persists the finding PROSE (finding / suggested_fix /
+    checklist_item) into the SIDECAR finding so a remediation re-review can re-ground
+    its Pass-2 novelty sub-call — while leaving the surfaced verdict byte-unchanged."""
+    verdict = {
+        "verdict": "PASS",
+        "ticket_id": "T-2",
+        "ticket_type": "task",
+        "advisory": [
+            {
+                "id": "fdef",
+                "finding": "The retry budget is unbounded.",
+                "suggested_fix": "Cap retries at 3 with backoff.",
+                "checklist_item": "- [ ] Bound the retry budget.",
+                "criteria": ["T5a"],
+                "location": "Scope: retries",
+                "tier": "LLM",
+                "decision": "advisory",
+                "priority": 0.4,
+                # runtime-only carriers that _slim deliberately drops from the sidecar
+                "scenarios": ["retry storm"],
+                "evidence": ["no cap stated"],
+                "_agentic": True,
+            }
+        ],
+        "coverage": {"metrics": {}},
+        "coaching": [],
+    }
+    before = copy.deepcopy(verdict)
+    payload = sidecar.build_payload(verdict, material="m")
+
+    # surfaced verdict is byte-for-byte unchanged (no key added/removed, no mutation)
+    assert verdict == before
+
+    sf = payload["findings"][0]
+    # the three prose fields AC1 requires are persisted to the sidecar event
+    assert sf["finding"] == "The retry budget is unbounded."
+    assert sf["suggested_fix"] == "Cap retries at 3 with backoff."
+    assert sf["checklist_item"] == "- [ ] Bound the retry budget."
+    # runtime-only carriers are NOT persisted (lean-sidecar field-selection principle)
+    assert "scenarios" not in sf
+    assert "evidence" not in sf
+    assert "_agentic" not in sf

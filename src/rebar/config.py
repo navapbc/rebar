@@ -288,6 +288,31 @@ class VerifyConfig:
     # aggregate call; this only triggers on a pathological huge-findings ticket.
     verify_window_headroom: float = 0.8
 
+    # Convergent plan-edit re-review (epic 7d43, child ec89): when true, a re-review of an
+    # EDITED plan whose reviewed CODE is unchanged runs in remediation mode — the full criteria
+    # set still runs, but Pass-3 may drop only NOVEL, low-priority findings (the rising floor,
+    # child cc5b). Default OFF for v1 (expand-contract: ship off → validate on the dogfood
+    # corpus → flip in a follow-up); off/absent restores byte-identical full-review behavior.
+    remediation_mode: bool = False
+    # The freshness window (minutes) for remediation mode: a re-review is eligible only when the
+    # LAST review of any kind was within this many minutes, measured from that last review and
+    # RESET on each review (so the loop persists across a series of edits and lapses to a normal
+    # full review only after the agent goes idle). Default 60.
+    remediation_window_minutes: int = 60
+
+    # Pass-3 rising floor (epic 7d43, child cc5b). On an eligible remediation re-review, a finding
+    # is DROPPED iff its novelty >= novelty_drop_threshold AND its priority (validity × impact) <
+    # novelty_priority_floor. T_novel default 0.7 (house precision-first). The floor is a scalar at
+    # the corpus p40 impact percentile (~0.4, the "below major" band; see
+    # scripts/plan_review_impact_distribution.py). Both config-overridable.
+    novelty_drop_threshold: float = 0.7
+    novelty_priority_floor: float = 0.4
+    # The EVIDENCE GATE: the rising floor stays inert (gate runs un-floored) until this is flipped
+    # true — done MANUALLY by the operator only after 150b's `discriminates_novelty` eval has
+    # cleared its bar (`rebar prompt eval plan-review-novelty`). Default False (a third gate on top
+    # of remediation_mode + per-review eligibility), so the floor never drops a finding by default.
+    novelty_drop_active: bool = False
+
 
 @dataclass
 class TicketConfig:
@@ -401,6 +426,11 @@ _SECTIONS: dict[str, dict] = {
         "require_plan_review_for_claim": lambda v, k: _as_bool(v, k),
         "progressive_drift_refresh": lambda v, k: _as_bool(v, k),
         "verify_window_headroom": lambda v, k: _as_float(v, k, minimum=0.1, maximum=1.0),
+        "remediation_mode": lambda v, k: _as_bool(v, k),
+        "remediation_window_minutes": lambda v, k: _as_int(v, k, minimum=1),
+        "novelty_drop_threshold": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
+        "novelty_priority_floor": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
+        "novelty_drop_active": lambda v, k: _as_bool(v, k),
     },
     "ticket": {
         "display_mode": lambda v, k: _as_str(v, k) or "auto",
@@ -1023,6 +1053,146 @@ def read_config_file(path: str | os.PathLike[str]) -> Config:
     else:
         raw = _read_legacy_conf(p)
     return Config.from_mapping(raw, source=str(p), strict=_strict_unknown_keys())
+
+
+def _emit_toml(data: dict) -> str:
+    """Serialize a nested config mapping back to TOML text.
+
+    A small, self-contained emitter covering the scalar value types a rebar config
+    file legitimately holds — ``bool`` / ``int`` / ``float`` / ``str`` and a flat
+    ``list`` of those — as top-level keys, then one ``[section]`` table per nested
+    dict. It is deliberately NOT a general TOML writer (no inline tables, no nested
+    tables, no datetimes): it exists only so :func:`write_jira_config` can round-trip
+    a *rebar-owned* ``rebar.toml`` (read whole with stdlib ``tomllib`` → mutate the
+    dict → re-emit), sidestepping any surgical text-splicing.
+
+    **Fail-closed on an unsupported value type.** A full read-mutate-emit cycle would
+    otherwise silently corrupt a value the emitter does not model (e.g. a datetime, a
+    nested sub-table, or an array-of-tables). Rather than mis-emit, an unsupported
+    type raises :class:`ConfigError` — the caller aborts WITHOUT writing, so an
+    existing file is never clobbered. ``bool`` is checked before ``int`` (Python
+    ``bool`` is an ``int`` subclass). Floats are emitted via ``repr`` so the value
+    round-trips. Section/key order is preserved as given; empty tables are skipped;
+    comments are not preserved (acceptable on a rebar-owned file — we never re-emit a
+    user ``pyproject.toml``)."""
+
+    def _scalar(value: Any) -> str:
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (int, float)):
+            return repr(value)
+        if isinstance(value, str):
+            s = value.replace("\\", "\\\\").replace('"', '\\"')
+            return f'"{s}"'
+        raise ConfigError(
+            f"cannot serialize config value of type {type(value).__name__!r} "
+            f"({value!r}); rebar's config writer only supports scalars and flat lists"
+        )
+
+    def _value(value: Any) -> str:
+        if isinstance(value, list):
+            return "[" + ", ".join(_scalar(v) for v in value) + "]"
+        return _scalar(value)
+
+    top = {k: v for k, v in data.items() if not isinstance(v, dict)}
+    tables = {k: v for k, v in data.items() if isinstance(v, dict)}
+    lines: list[str] = []
+    for key, value in top.items():
+        lines.append(f"{key} = {_value(value)}")
+    for name, table in tables.items():
+        if not table:  # never emit an empty [section] header
+            continue
+        if lines:
+            lines.append("")
+        lines.append(f"[{name}]")
+        for key, value in table.items():
+            if isinstance(value, dict):
+                raise ConfigError(
+                    f"cannot serialize nested sub-table [{name}.{key}]; rebar's config "
+                    "writer supports only top-level keys and one level of [section]"
+                )
+            lines.append(f"{key} = {_value(value)}")
+    return ("\n".join(lines) + "\n") if lines else ""
+
+
+def write_jira_config(
+    url: str = "",
+    user: str = "",
+    project: str = "",
+    *,
+    root: str | os.PathLike[str] | None = None,
+    clear: bool = False,
+) -> Path:
+    """Persist the non-secret Jira settings (``url`` / ``user`` / ``project``) to a
+    rebar-owned ``rebar.toml`` ``[jira]`` section and return the file written.
+
+    The SECRET ``JIRA_API_TOKEN`` is NEVER a config key and is never written here —
+    only the three connection coordinates are. This is the write counterpart to the
+    read path in :func:`resolve_jira_settings` / :func:`load_config`.
+
+    Target selection (deterministic): :func:`_discover_project_config` →
+
+    * a ``rebar.toml`` → that file is the target.
+    * a ``pyproject.toml`` / legacy ``.rebar/config.conf`` / nothing → the target is
+      ``<repo_root>/rebar.toml`` (CREATED if absent). A user-owned ``pyproject.toml``
+      is NEVER edited; the fresh ``rebar.toml`` wins read precedence over pyproject
+      (rebar.toml is probed first by the discovery walk). A legacy conf is left
+      untouched — its values are still read, but persistence moves forward to
+      ``rebar.toml``.
+
+    Mechanism: read the target whole with stdlib ``tomllib`` (so ``[jira]`` /
+    ``jira = {…}`` inline-table / ``jira.url`` dotted-key forms all normalize to the
+    same nested dict — there is no form-specific code and no way to append a
+    duplicate section), mutate the in-memory ``jira`` table, and re-emit the whole
+    file via :func:`_emit_toml`. No text-region splicing, so no section-end-boundary
+    detection is needed. The write is atomic (temp file in the same directory +
+    ``os.replace``); a single ``write`` cannot leave a torn/partial file. The
+    read-modify-write is last-writer-wins across concurrent writers — fine for an
+    interactive single-operator onboarding tool.
+
+    With ``clear=True`` the three keys are removed (and an emptied ``jira`` table
+    dropped) rather than set — the ``--reset`` path.
+
+    Raises :class:`ConfigError` if an existing target is unreadable/malformed TOML
+    (fail-closed: nothing is written) or the write itself fails."""
+    base = repo_root(root)
+    proj = _discover_project_config(root)
+    if proj is not None and proj[1] == "toml":
+        target = proj[0]
+    else:
+        target = base / "rebar.toml"
+
+    data: dict[str, Any] = {}
+    if target.is_file():
+        try:
+            data = _parse_toml(target)
+        except ConfigError:
+            raise  # malformed existing rebar.toml → fail closed, no write
+    # tomllib returns a plain dict; ensure the jira table exists as a mutable dict.
+    jira = data.get("jira")
+    if not isinstance(jira, dict):
+        jira = {}
+    if clear:
+        for k in ("url", "user", "project"):
+            jira.pop(k, None)
+    else:
+        jira["url"] = url
+        jira["user"] = user
+        jira["project"] = project
+    if jira:
+        data["jira"] = jira
+    else:
+        data.pop("jira", None)
+
+    text = _emit_toml(data)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + ".tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, target)
+    except OSError as exc:
+        raise ConfigError(f"could not write config {target}: {exc}") from None
+    return target
 
 
 def read_reserved_section(name: str, root: str | os.PathLike[str] | None = None) -> dict:

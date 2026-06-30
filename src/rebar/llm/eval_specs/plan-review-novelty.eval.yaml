@@ -1,0 +1,84 @@
+# Standing eval spec for the plan-review Pass-2 NOVELTY sub-call (epic 7d43 / child 150b).
+# The DISCRIMINATION proving check for the SEPARATE novelty sub-call: a labeled set of
+# {carryover, novel} findings paired against a prior-review finding. The sub-call must score a
+# reworded CARRYOVER finding as low-novelty (< 0.5 — it matches a prior finding) and a genuinely
+# NEW finding as high-novelty (>= 0.5). This is the evidence gate the Pass-3 rising-floor (cc5b)
+# rests on: a novelty signal that cannot separate new from reworded-prior would make the floor
+# drop real new findings. Distinct from the verifier spec — the novelty sub-call uses its OWN
+# prompt + contract, so its cases live here, not in plan-review-verifier.eval.yaml.
+# Validate offline: `rebar prompt eval plan-review-novelty`.
+prompt: plan-review-novelty
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  - type: deterministic
+    name: discriminates_novelty
+    description: >
+      For each labeled {carryover, novel} case, the novelty score (1 − mean of the matches-prior
+      sub-answers) lands on the correct side of the 0.5 midpoint: a `kind: novel`
+      (`expect: high_novelty`) finding scores >= 0.5; a `kind: carryover` (`expect: low_novelty`)
+      finding < 0.5. The framework idiom (per-case midpoint + the spec gate), NOT an AUC literal,
+      and distinct from the runtime drop threshold T_novel=0.7 (cc5b).
+
+# Labeled novelty pairs. `kind: carryover` = the current finding RESTATES a prior finding (often
+# reworded) → low novelty; `kind: novel` = a genuinely new finding the edit introduced → high
+# novelty. `pair` links a carryover/novel case to the prior finding it is judged against
+# (`prior_finding`). Both directions present (the novelty-axis balance check requires it).
+dataset:
+  - id: N1-carryover
+    pair: idempotency
+    kind: carryover
+    expect: low_novelty
+    prior_finding: "The payments-webhook plan states no idempotency test; a retried webhook would double-charge."
+    finding: "A duplicate webhook delivery is not guarded by an idempotency check in the plan, so a retry can charge twice."
+    note: "Carryover: same defect (missing idempotency on the webhook), reworded — should match the prior finding."
+  - id: N1-novel
+    pair: idempotency
+    kind: novel
+    expect: high_novelty
+    prior_finding: "The payments-webhook plan states no idempotency test; a retried webhook would double-charge."
+    finding: "The new migration drops the legacy `events` table before the backfill completes, risking data loss on a failed deploy."
+    note: "Novel: a different defect (migration ordering) the edit introduced — matches no prior finding."
+
+  - id: N2-carryover
+    pair: oauth-logging
+    kind: carryover
+    expect: low_novelty
+    prior_finding: "The OAuth host logs the raw bearer token at debug level (plan §logging)."
+    finding: "Bearer tokens are written to the debug log by the OAuth handler, exposing credentials in plaintext."
+    note: "Carryover: same security defect (raw token logged), reworded — should match the prior finding."
+  - id: N2-novel
+    pair: oauth-logging
+    kind: novel
+    expect: high_novelty
+    prior_finding: "The OAuth host logs the raw bearer token at debug level (plan §logging)."
+    finding: "The retry-budget section names no upper bound, so a transient failure can spin an unbounded retry loop."
+    note: "Novel: a different defect (unbounded retries) — matches no prior finding."
+
+  - id: N3-carryover
+    pair: scope-metric
+    kind: carryover
+    expect: low_novelty
+    prior_finding: "A scope bullet uses the word 'improve' without a metric, so the success target is ambiguous."
+    finding: "The Scope section says it will 'improve' latency but gives no measurable target, leaving the goal ambiguous."
+    note: "Carryover: same ambiguity defect at the same location, reworded — should match the prior finding."
+  - id: N3-novel
+    pair: scope-metric
+    kind: novel
+    expect: high_novelty
+    prior_finding: "A scope bullet uses the word 'improve' without a metric, so the success target is ambiguous."
+    finding: "The plan adds a new public config key but specifies no default and no back-out path if it is set wrong."
+    note: "Novel: a different defect (config key with no default/back-out) — matches no prior finding."
+
+gold_set:
+  - input: "A reworded missing-idempotency finding that restates a prior finding (N1-carryover)."
+    label: low_novelty
+  - input: "A new migration-ordering data-loss finding absent from the prior review (N1-novel)."
+    label: high_novelty
+  - input: "A reworded raw-token-logging security finding matching a prior finding (N2-carryover)."
+    label: low_novelty
+  - input: "A new unbounded-retry finding absent from the prior review (N2-novel)."
+    label: high_novelty

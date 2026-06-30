@@ -212,11 +212,88 @@ coverage recorded"** — *not* "perfect". The rich per-criterion verdicts live i
 sidecar; a project composes any hard CI gate by checking the signed result + its
 coverage.
 
+### What the `signature` field guarantees (read this before trusting it)
+
+A signature (a real `SIGNATURE` event + a manifest whose first line is `plan-review:
+PASS`) is emitted **only** on a genuine non-blocking `PASS` where the LLM tier actually
+ran — i.e. **not** on `BLOCK`, **not** on `INDETERMINATE`, and **not** for an `exempt`
+runner (`bug` / `session_log` tickets, which are exempt from the gate). On every other
+outcome no manifest is signed and **no event is written to the ticket** (the ticket's
+own `signature` stays null), so the start-work gate has nothing to verify and the claim
+is denied.
+
+The one subtlety that has misled callers: the `review_plan` **verdict JSON** always
+carries a `signature` *object* — its shape is `{signed: bool, …}`. On a signed PASS it
+is `{signed: true, key_id, head_sha}`; on every other outcome it is `{signed: false,
+reason: "<VERDICT>"}` (e.g. `{signed: false, reason: "BLOCK"}`, or even `{signed:
+false, reason: "PASS"}` for an *exempt* runner that returned PASS but was not signed).
+
+> **Read `signature.signed` (a boolean), never the mere presence of the `signature`
+> object.** `if result["signature"]:` / `signed = bool(result.get("signature"))` is a
+> bug — the object is *always* present and truthy, so that check reports a signed BLOCK.
+> The trustworthy proof-of-PASS is the **certified `SIGNATURE` event** (`rebar
+> verify-signature <ticket>` / the claim gate's local HMAC verify), which a `BLOCK` can
+> never produce — `signature.signed == true` in the verdict JSON is only its in-band
+> echo.
+
+## The convergent remediation re-review (rising floor)
+
+A re-review of an **edited** plan used to be at risk of not converging: each remediation
+round could surface *new*, lower-stakes findings in previously-clean criteria, expanding
+scope every run and never going green. The **rising-floor remediation re-review** (epic
+`7d43`; ADR [0008](adr/0008-convergent-plan-edit-re-review.md)) makes it converge while
+preserving full recall.
+
+It runs the **full criteria set every time** (no skipping, no Pass-1 anchoring → high-stakes
+defects an edit introduces are still found), and applies a **deterministic Pass-3 floor**
+that drops only **novel, low-priority** findings:
+
+> A finding is dropped **iff** `novelty ≥ T_novel` **and** `priority < floor`
+> (`priority = validity × impact`).
+
+- **Carryover findings** (low novelty — they match a prior-review finding) are enforced at
+  the normal threshold and must still be resolved.
+- **Novel high-priority findings** are preserved (and may block) — nothing high-stakes is
+  ever frozen.
+
+**Novelty is scored in a SEPARATE Pass-2 sub-call** (its own `novelty` contract + the
+`plan-review-novelty` prompt) that ALONE receives the prior findings (read from the
+`REVIEW_RESULT` sidecar) and answers factual *matches-prior* sub-answers; `novelty = 1 −
+mean(matches-prior)`. The verification sub-call (severity + validity) and Pass-1 receive NO
+prior findings, so the independence invariant holds **by construction**. A failed/malformed
+novelty sub-call defaults novelty to `0.0` (carryover → never dropped — a broken signal can
+only make the gate stricter).
+
+**Remediation mode is gated, not the default.** The floor applies only when ALL hold:
+config `remediation_mode` on; the plan changed; the **code is unchanged** since the baseline
+(detected by `verified_at_sha` equality against the prior signed manifest — reusing the
+signed snapshot ref, no new diff machinery); the registry is unchanged; a prior sidecar with
+finding text exists; and the last review of any kind is within the freshness window
+(default 60 min, measured from the last review and **reset on each review**, so the loop
+persists across a series of edits and lapses to a normal full review only after the agent
+goes idle). Any precondition failing → a **byte-identical full review**. A separate
+**evidence-gate** flag `novelty_drop_active` (default off) keeps the floor inert until the
+`discriminates_novelty` eval has proven the novelty signal discriminates novel from
+carryover (`rebar prompt eval plan-review-novelty`).
+
+A narrowed verdict records `narrowed: true` + `floored_criteria` + `floored_finding_ids` on
+its `coverage`, and the dropped novel findings are written to the `REVIEW_RESULT` sidecar
+(joinable by `norm_id`) — so within-session suppression is always **observable**. This is
+the *complement* of the code-drift `drift_refresh` path (ADR 0002): drift-refresh is plan
+**unchanged** + code drifted; remediation is plan **changed** + code unchanged. Setting
+`remediation_mode` (or `novelty_drop_active`) off restores byte-identical full-review
+behavior — the total back-out.
+
 ## Configuration
 
 | Key | Default | Effect |
 |-----|---------|--------|
 | `verify.require_plan_review_for_claim` | `false` | When true, starting work on a work ticket (`claim`, or `transition open→in_progress`) requires a fresh certified plan-review attestation. **Turning it off is the rollback** — an ordinary preference, no kill-switch needed. |
+| `verify.remediation_mode` | `false` | Enable the rising-floor remediation re-review (above). Off/absent → byte-identical full review (the back-out). |
+| `verify.remediation_window_minutes` | `60` | Freshness window: a re-review is eligible only if the last review of any kind was within this many minutes (measured from it, reset on each review). |
+| `verify.novelty_drop_threshold` | `0.7` | `T_novel`: a finding is droppable only if its novelty ≥ this. |
+| `verify.novelty_priority_floor` | `0.4` | The rising floor: drop a novel finding only if its priority < this (a scalar ≈ the corpus p40 impact percentile; `scripts/plan_review_impact_distribution.py` prints the inputs). |
+| `verify.novelty_drop_active` | `false` | **Evidence gate.** The floor stays inert until flipped true — done manually only after the `discriminates_novelty` eval clears its bar. |
 
 Enable it in `.rebar/config.conf` (dotted legacy form) or a `[verify]` table in
 `rebar.toml` / `pyproject.toml`:
