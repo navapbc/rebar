@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/code_review_decide_input.schema.json",
+  "title": "CodeReviewDecideInput",
+  "description": "Inputs to code_review_decide: findings + Pass-2 verifications.",
+  "type": "object",
+  "additionalProperties": true
+}

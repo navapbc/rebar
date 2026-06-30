@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/assemble_diff_output.schema.json",
+  "title": "AssembleDiffOutput",
+  "description": "OUTPUT of assemble_diff: the kernel diff context + the changed-files list.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "context": {
+      "type": "string"
+    },
+    "changed_files": {
+      "type": "array"
+    }
+  }
+}

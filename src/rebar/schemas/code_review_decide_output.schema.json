@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/code_review_decide_output.schema.json",
+  "title": "CodeReviewDecideOutput",
+  "description": "OUTPUT of code_review_decide: the Pass-3 partition (decided + blocking/surfaced/dropped/indeterminate).",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "decided": {
+      "type": "array"
+    },
+    "blocking": {
+      "type": "array"
+    },
+    "surfaced": {
+      "type": "array"
+    },
+    "dropped": {
+      "type": "array"
+    },
+    "indeterminate": {
+      "type": "array"
+    }
+  }
+}

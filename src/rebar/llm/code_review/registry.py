@@ -153,6 +153,34 @@ def applies_to_globs(criterion_id: str) -> list[str]:
     return [g for g in globs if isinstance(g, str)]
 
 
+def _glob_match(path: str, pattern: str) -> bool:
+    """Match a changed-file path against an ``applies_to`` glob — same rule as
+    ``prompts._glob_match``: fnmatch over the full path, plus a ``**/`` prefix that also
+    matches the bare suffix (so ``**/auth*`` matches a top-level ``auth.py``)."""
+    from fnmatch import fnmatch
+
+    return fnmatch(path, pattern) or (pattern.startswith("**/") and fnmatch(path, pattern[3:]))
+
+
+def glob_triggered_overlays(changed_files: Sequence[str]) -> list[str]:
+    """The overlays whose ``applies_to`` globs match ANY changed file — the deterministic
+    Round-A trigger set (the ``glob`` operand of ``overlay_union``'s formula). Ordered by
+    :data:`OVERLAY_IDS`. An escalation-only overlay (empty ``applies_to``) never glob-fires."""
+    out: list[str] = []
+    for oid in OVERLAY_IDS:
+        globs = applies_to_globs(oid)
+        if globs and any(_glob_match(f, g) for f in changed_files for g in globs):
+            out.append(oid)
+    return out
+
+
+def overlay_flag_key(overlay_id: str) -> str:
+    """The workflow-output flag key for an overlay (``security`` -> ``include_security``,
+    ``db-migrations`` -> ``include_db_migrations``). Hyphens become underscores so the tiny
+    ``${{ ... }}`` expression grammar reads it as a single identifier (no ``-`` = subtraction)."""
+    return "include_" + overlay_id.replace("-", "_")
+
+
 def threshold_for(criteria: Sequence[str]) -> tuple[float, bool]:
     """Resolve ``(block_threshold, blocking_enabled)`` for a finding's criteria — the
     ``ThresholdResolver`` the kernel ``pass3_over_findings(..., threshold_for=...)`` consumes.

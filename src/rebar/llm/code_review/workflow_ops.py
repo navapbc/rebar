@@ -1,0 +1,355 @@
+"""Scripted ops for the code-review gate workflow (epic b744 / WS3).
+
+The deterministic glue between WS1's base reviewer, WS2's overlays + move-catalog, and the
+shipped review kernel (Pass-2 verify / Pass-3 decide / Pass-4 coach). Mirrors
+``plan_review/workflow_ops.py`` but for a DIFF (not a ticket plan): the two NOVEL ops are
+``overlay_union`` (the base→overlay escalation: ``(glob ∪ recommend) − already_run``, one-hop,
+capped) and ``merge_findings`` (concatenate + cluster the three finding sources). The rest are
+the standard Pass wiring (assemble_diff / verify_inputs / decide / coach_inputs / coach), each a
+thin consumer of the kernel — no forked passes.
+
+Registered into the shared workflow STEP_REGISTRY via ``@register_step`` (imported from
+``workflow/steps.py``, the same place plan_review's ops register).
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from rebar.llm.workflow.executor import StepContext, register_step
+
+logger = logging.getLogger(__name__)
+
+_LINE_BUCKET = 10  # cluster findings within ~10 lines (mirrors aggregate.py's _LINE_BUCKET)
+
+
+# ── assemble the diff context ──────────────────────────────────────────────────────────────
+@register_step(
+    "assemble_diff",
+    input_schema="assemble_diff_input",
+    output_schema="assemble_diff_output",
+    description=(
+        "Assemble the code-review kernel `context` string from the workflow's diff inputs "
+        "(base/head range or a supplied unified diff + changed_files). Emits {context, "
+        "changed_files} — the diff the base reviewer + overlays + Pass-2 verifier re-ground "
+        "against, and the changed-files list overlay_union glob-matches."
+    ),
+)
+def assemble_diff(ctx: StepContext) -> dict[str, Any]:
+    from rebar.llm.code_review import assemble
+
+    # The caller provides ALL declared inputs (the v3 engine errors on a referenced-but-unset
+    # input), passing empty values where N/A. Coerce empty -> None so the assembler picks the
+    # right mode: a non-empty diff_text is reviewed directly (changed_files derived from it when
+    # omitted); otherwise the base..head git range is read.
+    diff_text = ctx.inputs.get("diff_text") or None
+    changed_files = ctx.inputs.get("changed_files") or None
+    dc = assemble.assemble_diff_context(
+        base=str(ctx.inputs.get("base") or "HEAD~1"),
+        head=str(ctx.inputs.get("head") or "HEAD"),
+        diff_text=diff_text,
+        changed_files=changed_files,
+        repo_root=ctx.repo_root,
+    )
+    return {"context": dc.context, "changed_files": dc.changed_files}
+
+
+# ── the base→overlay escalation union (NOVEL) ───────────────────────────────────────────────
+@register_step(
+    "overlay_union",
+    input_schema="overlay_union_input",
+    output_schema="overlay_union_output",
+    description=(
+        "Compute the overlay inclusion set: (glob ∪ base.recommend) − already_run, ONE-HOP, "
+        "capped at N (configurable, default uncapped). `glob` = overlays whose applies_to globs "
+        "match the changed files (registry.glob_triggered_overlays); `recommend` = the base "
+        "reviewer's enum-validated recommend_overlays; `already_run` = the Round-A set (explicit "
+        "with: input). Emits include_<overlay> booleans (underscored ids) + to_run/glob_overlays/"
+        "recommend_overlays. Called twice: as the Round-A `triggers` step (recommend/already_run "
+        "default empty → to_run = glob) and the Round-B `union` step (recommend=base, "
+        "already_run=triggers.to_run, cap=N)."
+    ),
+)
+def overlay_union(ctx: StepContext) -> dict[str, Any]:
+    from rebar.llm.code_review import registry
+
+    changed = list(ctx.inputs.get("changed_files") or [])
+    recommend = ctx.inputs.get("recommend") or []
+    already_run = set(ctx.inputs.get("already_run") or [])
+    cap = ctx.inputs.get("cap")
+
+    glob_set = registry.glob_triggered_overlays(changed)
+    recommend_ids = registry.recommend_overlay_ids(recommend)
+    selected = set(glob_set) | set(recommend_ids)
+    # Ordered by OVERLAY_IDS (deterministic); minus the already-run set (one-hop bound: a
+    # Round-A overlay never re-runs in Round-B).
+    to_run = [o for o in registry.OVERLAY_IDS if o in selected and o not in already_run]
+    if isinstance(cap, (int, float)) and not isinstance(cap, bool) and cap >= 0:
+        to_run = to_run[: int(cap)]
+    out: dict[str, Any] = {
+        registry.overlay_flag_key(o): (o in to_run) for o in registry.OVERLAY_IDS
+    }
+    out["to_run"] = to_run
+    out["glob_overlays"] = glob_set
+    out["recommend_overlays"] = recommend_ids
+    return out
+
+
+# ── merge + cluster the three finding sources (NOVEL) ───────────────────────────────────────
+def _norm_text(s: Any) -> str:
+    return " ".join(str(s or "").lower().split())[:80]
+
+
+def _parse_location(loc: Any) -> tuple[str | None, int | None]:
+    """Best-effort (path, line) from a finding's ``location`` (e.g. ``path:line`` / ``path``)."""
+    if not isinstance(loc, str) or not loc.strip():
+        return (None, None)
+    s = loc.strip()
+    path, sep, rest = s.rpartition(":")
+    if sep and path:
+        head = rest.split("-", 1)[0].split(",", 1)[0].strip()
+        try:
+            return (path, int(head))
+        except ValueError:
+            return (s, None)
+    return (s, None)
+
+
+def _cluster_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse near-duplicate kernel findings to bound the Pass-2 budget — the aggregate.py
+    clustering idea (file-anchor + dimension + line-proximity) adapted to the kernel finding
+    shape (location/criteria, not citations/dimension). Clustering keys on (location-path,
+    primary criterion, line-proximity within ~10 lines); a finding with NO location OR NO
+    criterion is clustered by (criterion, normalized finding-text) instead, so two distinct
+    issues that merely lack a location/criterion are NOT collapsed by coincidence.
+
+    The representative is the first finding; the cluster's evidence is unioned, ``agreement`` =
+    cluster size, ``reviewers`` records the overlays that raised it, and — so collapsing is
+    NON-LOSSY for recall — the OTHER members' finding text is preserved in ``merged_from``
+    (Pass-2 verifies the representative, but the verdict/sidecar can still surface the rest)."""
+    clusters: list[dict[str, Any]] = []
+    for f in findings:
+        crit = (f.get("criteria") or [""])[0] if f.get("criteria") else ""
+        path, line = _parse_location(f.get("location"))
+        txt = _norm_text(f.get("finding"))
+        # Location-anchored clustering needs BOTH a path and a non-empty criterion; otherwise
+        # fall back to (criterion, text) so we never collapse two distinct findings that merely
+        # share a location with no criterion (or no location at all).
+        anchored = path is not None and bool(crit)
+        placed = False
+        for c in clusters:
+            if c["crit"] != crit:
+                continue
+            if anchored and c["anchored"] and c["path"] == path:
+                if line is None or c["line"] is None:
+                    match = line is None and c["line"] is None
+                else:
+                    match = abs(line - c["line"]) <= _LINE_BUCKET
+            elif not anchored and not c["anchored"]:
+                match = c["txt"] == txt
+            else:
+                match = False
+            if match:
+                c["members"].append(f)
+                placed = True
+                break
+        if not placed:
+            clusters.append(
+                {
+                    "path": path,
+                    "line": line,
+                    "crit": crit,
+                    "txt": txt,
+                    "anchored": anchored,
+                    "members": [f],
+                }
+            )
+    out: list[dict[str, Any]] = []
+    for c in clusters:
+        rep = dict(c["members"][0])
+        # Coerce the load-bearing fields to safe types: the findings-items schema is permissive
+        # (additionalProperties, no per-field type), so an LLM payload can carry `finding: null`
+        # / a non-string, or `criteria: null`. coach_listing does `f['finding'][:200]` and the
+        # kernel iterates `criteria` — both would crash. Normalize (not just default-if-missing).
+        rep["finding"] = str(rep.get("finding") or "")
+        rep["criteria"] = [c2 for c2 in (rep.get("criteria") or []) if isinstance(c2, str)]
+        evidence: list[str] = list(rep.get("evidence") or [])
+        reviewers: list[str] = []
+        merged_from: list[str] = []
+        for j, m in enumerate(c["members"]):
+            for e in m.get("evidence") or []:
+                if e not in evidence:
+                    evidence.append(e)
+            rid = m.get("reviewer_id")
+            if rid and rid not in reviewers:
+                reviewers.append(rid)
+            if j > 0 and m.get("finding"):  # preserve the collapsed members' text (non-lossy)
+                merged_from.append(str(m["finding"]))
+        rep["evidence"] = evidence
+        rep["agreement"] = len(c["members"])
+        if merged_from:
+            rep["merged_from"] = merged_from
+        if reviewers:
+            rep["reviewers"] = reviewers
+        out.append(rep)
+    return out
+
+
+@register_step(
+    "merge_findings",
+    input_schema="merge_findings_input",
+    output_schema="merge_findings_output",
+    description=(
+        "Concatenate the base + Round-A + Round-B finding lists (provenance preserved via each "
+        "finding's reviewer_id), CLUSTER near-duplicates (same location+criterion within ~10 "
+        "lines, or same criterion+text for location-less findings) so N overlays on one spot "
+        "don't inflate the Pass-2 budget, and assign a stable 0-based `id` per finding. Emits "
+        "{findings, merged_count, clustered_count}."
+    ),
+)
+def merge_findings(ctx: StepContext) -> dict[str, Any]:
+    sources = ctx.inputs.get("sources")
+    if sources is None:
+        sources = [
+            ctx.inputs.get("base_findings"),
+            ctx.inputs.get("round_a_findings"),
+            ctx.inputs.get("round_b_findings"),
+        ]
+    collected: list[dict[str, Any]] = []
+    for src in sources:
+        for f in src or []:
+            if isinstance(f, dict):
+                collected.append(dict(f))
+    clustered = _cluster_findings(collected)
+    for i, f in enumerate(clustered):
+        f["id"] = str(i)
+    return {
+        "findings": clustered,
+        "merged_count": len(collected),
+        "clustered_count": len(clustered),
+    }
+
+
+# ── Pass-2 verify inputs (the finding listing for the verify prompt) ────────────────────────
+@register_step(
+    "code_review_verify_inputs",
+    input_schema="code_review_verify_inputs_input",
+    output_schema="code_review_verify_inputs_output",
+    description=(
+        "Build the Pass-2 verifier prompt's instructions: the kernel finding-listing over the "
+        "merged findings (one aggregate pass). Emits {instructions}."
+    ),
+)
+def code_review_verify_inputs(ctx: StepContext) -> dict[str, Any]:
+    from rebar.llm import review_kernel
+
+    findings = list(ctx.inputs.get("findings") or [])
+    instructions = review_kernel.verify_instructions(list(enumerate(findings)))
+    return {"instructions": instructions}
+
+
+# ── Pass-3 decide (deterministic, kernel) ───────────────────────────────────────────────────
+@register_step(
+    "code_review_decide",
+    input_schema="code_review_decide_input",
+    output_schema="code_review_decide_output",
+    description=(
+        "Pass-3: reshape the Pass-2 verifier's flat verifications to the {index: verification} "
+        "map, run the kernel pass3_over_findings with the code-review threshold_for resolver, and "
+        "partition by decision. Emits {decided, blocking, surfaced, dropped, indeterminate}. The "
+        "decision is DETERMINISTIC — escalation (which overlays ran) can never change it."
+    ),
+)
+def code_review_decide(ctx: StepContext) -> dict[str, Any]:
+    from rebar.llm import review_kernel
+    from rebar.llm.code_review import registry
+
+    findings = list(ctx.inputs.get("findings") or [])
+    raw_verifs = list(ctx.inputs.get("verifications") or [])
+    reshape = review_kernel.reshape_verifications(raw_verifs, valid_indices=range(len(findings)))
+    if reshape.has_violations:
+        logger.error(
+            "code-review Pass-2 verification contract violation (findings degrade to "
+            "INDETERMINATE; verdict unchanged): %s",
+            reshape.summary(),
+        )
+    decided = review_kernel.pass3_over_findings(
+        findings, reshape.verifications, threshold_for=registry.threshold_for
+    )
+    buckets: dict[str, list[dict[str, Any]]] = {
+        "blocking": [],
+        "surfaced": [],
+        "dropped": [],
+        "indeterminate": [],
+    }
+    for f in decided:
+        decision = f.get("decision")
+        if decision == "block":
+            buckets["blocking"].append(f)
+        elif decision == "advisory":
+            buckets["surfaced"].append(f)
+        elif decision == "dropped":
+            buckets["dropped"].append(f)
+        else:
+            buckets["indeterminate"].append(f)
+    return {"decided": decided, **buckets}
+
+
+# ── Pass-4 coach inputs (the move-pick listing for the coach prompt) ────────────────────────
+@register_step(
+    "code_review_coach_inputs",
+    input_schema="code_review_coach_inputs_input",
+    output_schema="code_review_coach_inputs_output",
+    description=(
+        "Build the Pass-4 coach prompt's instructions: the kernel coach-listing over the "
+        "surviving (surfaced) advisory findings + the APPLICABLE code moves (those whose "
+        "applies_when overlaps the surviving findings' criteria). Emits {instructions, "
+        "has_surviving}."
+    ),
+)
+def code_review_coach_inputs(ctx: StepContext) -> dict[str, Any]:
+    from rebar.llm import review_kernel
+    from rebar.llm.code_review import moves
+
+    surfaced = list(ctx.inputs.get("surfaced") or [])
+    mr = moves.load_move_registry(ctx.repo_root)
+    triggers = {c for f in surfaced for c in f.get("criteria", []) or []}
+    applicable = review_kernel.applicable_moves(mr, triggers)
+    instructions = review_kernel.coach_listing(surfaced, applicable)
+    return {"instructions": instructions, "has_surviving": bool(surfaced)}
+
+
+# ── Pass-4 coach render + verdict assembly (terminal output) ────────────────────────────────
+@register_step(
+    "code_review_coach",
+    input_schema="code_review_coach_input",
+    output_schema="code_review_coach_output",
+    description=(
+        "Pass-4 render + verdict assembly: render the coach prompt's raw move-picks into "
+        "deterministic coaching (locked move templates; the LLM never authors prose), over the "
+        "SAME applicable-move subset the prompt picked among, then assemble the terminal "
+        "code-review verdict {verdict (BLOCK iff any blocking finding else PASS), blocking, "
+        "advisory, coaching, coverage}. NO signing/sidecar here (that is WS4's produce_"
+        "code_review_verdict)."
+    ),
+)
+def code_review_coach(ctx: StepContext) -> dict[str, Any]:
+    from rebar.llm import review_kernel
+    from rebar.llm.code_review import moves
+
+    blocking = list(ctx.inputs.get("blocking") or [])
+    surfaced = list(ctx.inputs.get("surfaced") or [])
+    raw_notes = list(ctx.inputs.get("notes") or [])
+    mr = moves.load_move_registry(ctx.repo_root)
+    triggers = {c for f in surfaced for c in f.get("criteria", []) or []}
+    applicable = review_kernel.applicable_moves(mr, triggers)
+    coaching = review_kernel.render_coach_notes(raw_notes, applicable)
+    coverage = ctx.inputs.get("coverage") or {"llm_ran": True}
+    return {
+        "verdict": "BLOCK" if blocking else "PASS",
+        "blocking": blocking,
+        "advisory": surfaced,
+        "coaching": coaching,
+        "coverage": coverage,
+    }

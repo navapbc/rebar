@@ -1,0 +1,166 @@
+# yaml-language-server: $schema=https://github.com/navapbc/rebar/schemas/workflow.v3.schema.json
+#
+# The four-pass CODE-REVIEW gate (epic b744). Consumes the shipped review kernel (Pass-2
+# verify / Pass-3 decide / Pass-4 coach) with a base->overlay two-round escalation on the
+# RECALL side; the decision side stays deterministic (escalation can never change the verdict).
+# NO core-engine change — only the code_review scripted ops + a gate-specific batch runner
+# (CodeReviewBatchRunner, injected by produce_code_review_verdict / the offline test).
+#
+# CONFIG (operator-facing, lives HERE not hard-coded): the Round-B escalation cap N is the
+# `cap` on the `union` step (default 3). Per-criterion thresholds/posture live in
+# code_review/criteria_routing.json (read by registry.threshold_for); this file holds NO
+# threshold values — it only gates WHICH overlays run, via each criterion's `when:`.
+#
+# Topology: assemble_diff -> triggers(glob) -> base -> round_a(glob overlays) -> union(escalate)
+# -> round_b(escalated overlays) -> merge -> verify(Pass-2) -> decide(Pass-3) -> coach(Pass-4).
+schema_version: "3"
+name: code-review
+description: Four-pass code-review gate — base + two-round overlay escalation into the kernel.
+
+inputs:
+  base:
+    description: The base ref of the reviewed range (default HEAD~1).
+    type: string
+    required: false
+  head:
+    description: The head ref of the reviewed range (default HEAD).
+    type: string
+    required: false
+  diff_text:
+    description: A unified diff to review instead of a git range (the offline/test seam).
+    type: string
+    required: false
+  changed_files:
+    description: The changed-file list (parsed from diff_text when omitted).
+    type: array
+    required: false
+
+steps:
+  # ── Pass 0: assemble the diff context ─────────────────────────────────────────────────────
+  - id: assemble_diff
+    uses: assemble_diff
+    with:
+      base: ${{ inputs.base }}
+      head: ${{ inputs.head }}
+      diff_text: ${{ inputs.diff_text }}
+      changed_files: ${{ inputs.changed_files }}
+
+  # ── Round-A trigger set: overlays whose applies_to globs match the diff (recommend/already
+  #    default empty → to_run == glob set). ──────────────────────────────────────────────────
+  - id: triggers
+    needs: [assemble_diff]
+    uses: overlay_union
+    with:
+      changed_files: ${{ steps.assemble_diff.outputs.changed_files }}
+
+  # ── Pass 1a: the base reviewer (ALWAYS runs; standalone so recommend_overlays survives). ────
+  - id: base
+    needs: [assemble_diff]
+    prompt: code-review-base
+    mode: structured
+    output_schema: code_review_base_output
+    with:
+      ticket_id: "(code review)"
+      ticket_context: ${{ steps.assemble_diff.outputs.context }}
+
+  # ── Pass 1b: Round-A overlays (glob-triggered). ─────────────────────────────────────────────
+  - id: round_a
+    needs: [triggers]
+    batch:
+      prompt: code-review-base
+      criteria:
+        - { prompt: code-review-security, when: "${{ steps.triggers.outputs.include_security }}" }
+        - { prompt: code-review-performance, when: "${{ steps.triggers.outputs.include_performance }}" }
+        - { prompt: code-review-i18n, when: "${{ steps.triggers.outputs.include_i18n }}" }
+        - { prompt: code-review-a11y, when: "${{ steps.triggers.outputs.include_a11y }}" }
+        - { prompt: code-review-db-migrations, when: "${{ steps.triggers.outputs.include_db_migrations }}" }
+        - { prompt: code-review-docs, when: "${{ steps.triggers.outputs.include_docs }}" }
+        - { prompt: code-review-supply-chain, when: "${{ steps.triggers.outputs.include_supply_chain }}" }
+        - { prompt: code-review-api-compat, when: "${{ steps.triggers.outputs.include_api_compat }}" }
+        - { prompt: code-review-iac, when: "${{ steps.triggers.outputs.include_iac }}" }
+        - { prompt: code-review-tests, when: "${{ steps.triggers.outputs.include_tests }}" }
+        - { prompt: code-review-llm-prompts, when: "${{ steps.triggers.outputs.include_llm_prompts }}" }
+
+  # ── Round-B membership: (glob ∪ base.recommend) − already-run(Round-A), capped at N=3. ──────
+  - id: union
+    needs: [base, triggers]
+    uses: overlay_union
+    with:
+      changed_files: ${{ steps.assemble_diff.outputs.changed_files }}
+      recommend: ${{ steps.base.outputs.recommend_overlays }}
+      already_run: ${{ steps.triggers.outputs.to_run }}
+      cap: 3
+
+  # ── Pass 1c: Round-B overlays (the ESCALATED set; one-hop — they emit findings only). ───────
+  - id: round_b
+    needs: [union]
+    batch:
+      prompt: code-review-base
+      criteria:
+        - { prompt: code-review-security, when: "${{ steps.union.outputs.include_security }}" }
+        - { prompt: code-review-performance, when: "${{ steps.union.outputs.include_performance }}" }
+        - { prompt: code-review-i18n, when: "${{ steps.union.outputs.include_i18n }}" }
+        - { prompt: code-review-a11y, when: "${{ steps.union.outputs.include_a11y }}" }
+        - { prompt: code-review-db-migrations, when: "${{ steps.union.outputs.include_db_migrations }}" }
+        - { prompt: code-review-docs, when: "${{ steps.union.outputs.include_docs }}" }
+        - { prompt: code-review-supply-chain, when: "${{ steps.union.outputs.include_supply_chain }}" }
+        - { prompt: code-review-api-compat, when: "${{ steps.union.outputs.include_api_compat }}" }
+        - { prompt: code-review-iac, when: "${{ steps.union.outputs.include_iac }}" }
+        - { prompt: code-review-tests, when: "${{ steps.union.outputs.include_tests }}" }
+        - { prompt: code-review-llm-prompts, when: "${{ steps.union.outputs.include_llm_prompts }}" }
+
+  # ── Merge + cluster the three finding sources. ──────────────────────────────────────────────
+  - id: merge
+    needs: [base, round_a, round_b]
+    uses: merge_findings
+    with:
+      base_findings: ${{ steps.base.outputs.findings }}
+      round_a_findings: ${{ steps.round_a.outputs.findings }}
+      round_b_findings: ${{ steps.round_b.outputs.findings }}
+
+  # ── Pass 2: independent verifier (one aggregate pass over the merged findings). ─────────────
+  - id: verify_inputs
+    needs: [merge]
+    uses: code_review_verify_inputs
+    with:
+      findings: ${{ steps.merge.outputs.findings }}
+  - id: verify
+    needs: [verify_inputs]
+    prompt: code-review-verify
+    mode: structured
+    output_schema: verification
+    with:
+      ticket_context: ${{ steps.assemble_diff.outputs.context }}
+      instructions: ${{ steps.verify_inputs.outputs.instructions }}
+      findings: ${{ steps.merge.outputs.findings }}
+      step_budget_per_item: 25
+
+  # ── Pass 3: deterministic decide (kernel pass3_over_findings + code-review threshold_for). ──
+  - id: decide
+    needs: [verify, merge]
+    uses: code_review_decide
+    with:
+      findings: ${{ steps.merge.outputs.findings }}
+      verifications: ${{ steps.verify.outputs.verifications }}
+
+  # ── Pass 4: affirmative coach over the surviving advisories, then the verdict. ──────────────
+  - id: coach_inputs
+    needs: [decide]
+    uses: code_review_coach_inputs
+    with:
+      surfaced: ${{ steps.decide.outputs.surfaced }}
+  - id: coach
+    needs: [coach_inputs]
+    prompt: code-review-coach
+    mode: structured
+    output_schema: code_review_coach
+    with:
+      ticket_context: ${{ steps.assemble_diff.outputs.context }}
+      instructions: ${{ steps.coach_inputs.outputs.instructions }}
+  - id: verdict
+    needs: [coach, decide]
+    uses: code_review_coach
+    with:
+      blocking: ${{ steps.decide.outputs.blocking }}
+      surfaced: ${{ steps.decide.outputs.surfaced }}
+      notes: ${{ steps.coach.outputs.notes }}

@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/assemble_diff_input.schema.json",
+  "title": "AssembleDiffInput",
+  "description": "Inputs to assemble_diff: base/head/diff_text/changed_files (the diff source).",
+  "type": "object",
+  "additionalProperties": true
+}

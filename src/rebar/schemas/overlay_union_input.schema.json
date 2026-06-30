@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/overlay_union_input.schema.json",
+  "title": "OverlayUnionInput",
+  "description": "Inputs to overlay_union: changed_files, recommend, already_run, cap.",
+  "type": "object",
+  "additionalProperties": true
+}

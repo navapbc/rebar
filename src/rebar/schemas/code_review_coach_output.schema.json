@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/code_review_coach_output.schema.json",
+  "title": "CodeReviewCoachOutput",
+  "description": "OUTPUT of code_review_coach: the terminal code-review verdict (verdict/blocking/advisory/coaching/coverage).",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "verdict": {
+      "type": "string"
+    },
+    "blocking": {
+      "type": "array"
+    },
+    "advisory": {
+      "type": "array"
+    },
+    "coaching": {
+      "type": "array"
+    },
+    "coverage": {
+      "type": "object"
+    }
+  }
+}

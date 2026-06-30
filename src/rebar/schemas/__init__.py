@@ -198,6 +198,16 @@ CONTRACT_SCHEMAS: frozenset[str] = frozenset(
         "plan_review_decide",
         # epic B / story B5: the dynamic-verify grounding op (code_grounded boolean).
         "plan_review_grounding",
+        # epic b744 / WS3: the code-review gate's scripted ops (each an <op>_input + <op>_output
+        # pair). assemble_diff (diff context), overlay_union (the escalation), merge_findings
+        # (cluster), and the Pass-2/3/4 wiring (verify_inputs / decide / coach_inputs / coach).
+        "assemble_diff",
+        "overlay_union",
+        "merge_findings",
+        "code_review_verify_inputs",
+        "code_review_decide",
+        "code_review_coach_inputs",
+        "code_review_coach",
         # plan-review LIVE plumbing: the verify/coach prompt-input ops that emit the
         # {{plan}} text + the verifier/coach INSTRUCTIONS listing for the LIVE prompt steps.
         "plan_review_verify_inputs",
