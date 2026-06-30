@@ -56,6 +56,34 @@ def validity(binary: dict[str, Any]) -> float:
     return round(sum(scores) / len(scores), 4) if scores else 0.0
 
 
+# ── novelty (the remediation re-review carryover axis — child 150b) ──────────────────────────
+# The matches-prior sub-answer field set, the analogue of GRADED_BINARY for the validity axis:
+# the SINGLE vocabulary the `novelty` contract names AND `novelty()` scores, so the two can
+# never drift. Each is a factual yes/insufficient/no question on the same ordinal `_GRADE` map.
+NOVELTY_SUBANSWERS: tuple[str, ...] = (
+    "restates_prior_defect",  # Q1: same underlying defect as a specific prior finding?
+    "cites_prior_location",  # Q2: same plan location/section as that prior finding?
+    "matches_prior_fix",  # Q3: substantively the same suggested remediation?
+)
+
+
+def novelty(matches_prior: dict[str, Any]) -> float:
+    """NOVELTY ∈ [0,1] = 1 − the graded fraction of the matches-prior sub-answers
+    (``carryover_match``). High novelty (≈1.0) = no prior match (genuinely new); low novelty
+    (≈0.0) = carryover. A sub-answer is "answerable" only when it is one of yes/insufficient/no
+    (the ``_GRADE`` map); a missing/blank/garbage one is skipped from the mean. With NO answerable
+    sub-answer, novelty defaults to **0.0** (carryover → never dropped — the safe direction the
+    fail-safe mandates)."""
+    scores = [
+        _GRADE[matches_prior[q]]
+        for q in NOVELTY_SUBANSWERS
+        if matches_prior.get(q) in ("yes", "no", "insufficient")
+    ]
+    if not scores:
+        return 0.0
+    return round(1.0 - sum(scores) / len(scores), 4)
+
+
 def impact(attrs: dict[str, Any]) -> float:
     """IMPACT ∈ [0,1] = mean of the ordinal-mapped severity attributes:
     max(prod_impact, debt_impact), blast_radius, likelihood, reversibility."""

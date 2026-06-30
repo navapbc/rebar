@@ -59,6 +59,8 @@ from rebar.llm.review_kernel.verify import (  # noqa: F401
     finding_listing as verify_finding_listing,
 )
 from rebar.llm.review_kernel.verify import (  # noqa: F401
+    novelty_model,
+    score_novelty,
     verification_model,
     verify_instructions,
 )
@@ -114,6 +116,10 @@ def _pass1_model() -> type:
 # plan-review's `plan_review_verification` registers the SAME kernel model factory (an alias, NOT
 # a second copy of the shape). The kernel registers it under the canonical name `verification`.
 _pass2_model = verification_model
+# Pass-2's SEPARATE novelty sub-call contract (child 150b) — the same kernel `novelty` model
+# factory, aliased under the plan-review name `plan_review_novelty` (mirroring the verification
+# pairing). The kernel registers it under the canonical name `novelty`.
+_pass2_novelty_model = novelty_model
 
 
 def _pass4_model() -> type:
@@ -138,6 +144,7 @@ def register_contracts() -> None:
     """Register the per-pass structured-output contracts (idempotent)."""
     contracts.register_contract("plan_review_findings", _pass1_model)
     contracts.register_contract("plan_review_verification", _pass2_model)
+    contracts.register_contract("plan_review_novelty", _pass2_novelty_model)
     contracts.register_contract("plan_review_coach", _pass4_model)
 
 
@@ -154,6 +161,7 @@ PASS_FINDER = "plan-review-finder"  # Pass-1
 # pass2_verify that once resolved it here was retired in epic solid-timer-unison, WS1). The id
 # constant is retained as the canonical reference to that prompt (used by the prompt-cache split).
 PASS_VERIFIER = "plan-review-verifier"  # Pass-2
+PASS_NOVELTY = "plan-review-novelty"  # Pass-2 SEPARATE novelty sub-call (child 150b)
 PASS_COACH = "plan-review-coach"  # Pass-4
 PASS_ISF = "plan-review-isf-finder"  # ISF finder
 PASS_CONTAINER = "plan-review-container"  # G3/G4 container finder
