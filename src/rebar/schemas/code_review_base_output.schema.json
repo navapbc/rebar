@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/code_review_base_output.schema.json",
+  "title": "CodeReviewBaseOutput",
+  "description": "Output contract of the code-review BASE reviewer (Pass-1) in the four-pass code-review gate (epic b744 / WS1). A standalone agent step run with `mode=structured` against THIS schema, so BOTH named outputs survive into the workflow: `findings` (kernel-shaped Pass-1 evidence records — claim/criteria/evidence/impact — flowing into merge -> Pass-2 verify) and `recommend_overlays` (the bounded base->overlay escalation signal flowing into WS3's overlay_union). `overlay_id` is a plain string HERE on purpose: the closed OVERLAY_IDS enum is enforced POST-HOC by `code_review.registry.filter_recommend_overlays` (an out-of-catalog id is DROPPED, not a validation error), and `reason` is truncated to its policy length by that same filter. additionalProperties:true throughout so a slightly-richer agent payload passes (the gate normalizes downstream).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["findings"],
+  "properties": {
+    "findings": {
+      "type": "array",
+      "description": "Pass-1 evidence findings in the review-kernel shape (claim/criteria/evidence/impact). Permissive items: the kernel + merge step normalize them.",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "recommend_overlays": {
+      "type": "array",
+      "description": "Bounded base->overlay escalation signal. Each entry names an overlay the base reviewer judges should ALSO run; unknown overlay_ids are dropped post-hoc against the closed OVERLAY_IDS enum.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["overlay_id", "reason"],
+        "properties": {
+          "overlay_id": {
+            "type": "string",
+            "description": "An overlay id; validated post-hoc against the closed OVERLAY_IDS enum (out-of-catalog ids dropped, never errored)."
+          },
+          "reason": {
+            "type": "string",
+            "description": "One-line justification for escalating to this overlay (truncated to the policy length, ~200 chars, by the filter)."
+          }
+        }
+      }
+    }
+  }
+}

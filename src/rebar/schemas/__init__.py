@@ -208,6 +208,11 @@ CONTRACT_SCHEMAS: frozenset[str] = frozenset(
     # The shared INPUT contract for the built-in reviewer PROMPTS (their `outputs` are
     # the existing review_result / completion_verdict schemas). Permissive by design.
     "reviewer_input",
+    # epic b744 / WS1: the OUTPUT contract of the code-review BASE reviewer prompt
+    # (`code-review-base.md` declares `outputs: code_review_base_output`). A prompt output
+    # contract consumed directly by the structured-output runner — not a command --output —
+    # so, like reviewer_input, it is exempt from OUTPUT_SCHEMAS via this set.
+    "code_review_base_output",
     # epic B gate ops whose OUTPUT is the existing completion_verdict schema (not an
     # <op>_output pair): only their INPUT contracts are authored here.
     "completion_reconcile_input",
