@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# observability.sh — minimal health + disk observability for the rebar box (S2).
+# observability.sh — the rebar box's host observability probe (S2 + S5 + S4b + S7).
 #
-# Run periodically by a systemd timer (install-observability.sh). It:
-#   1. Health-probes Gerrit (/) and the review-bot (/review/health) through nginx
-#      and logs the result to the journal (journald) via `logger`.
-#   2. Publishes the Gerrit data volume's disk-used-percent to a CloudWatch custom
-#      metric (rebar/host disk_used_percent), which the CloudWatch alarm created in
-#      infra (see install-observability.sh / S7 monitoring.tf) watches.
+# Run periodically by a systemd timer (install-observability.sh). Each run publishes
+# CloudWatch metrics + journald log lines:
+#   1. Health probe of Gerrit + the review-bot (/review/health) -> journald +
+#      rebar/host:{gerrit_healthy,reviewbot_healthy} (S2).
+#   2. Gerrit data-volume disk-used-percent -> rebar/host:disk_used_percent (S2 alarm).
+#   3. Gerrit->GitHub replication failures (replication_log) -> rebar/host:replication_errors (S5 alarm).
+#   4. review-bot voter failures (VOTER_ERROR in journald) -> rebar/host:voter_errors (S4b alarm).
+#   5. Gate reachability -> Rebar/Gate:GerritReachable (1/0), watched by the S7 gate-down
+#      alarm (treat_missing_data=breaching catches a dead host / stopped probe).
 #
 # Auth: the EC2 instance role (S1) grants cloudwatch:PutMetricData. No static keys.
 # ---------------------------------------------------------------------------
