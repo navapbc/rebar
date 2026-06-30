@@ -17,6 +17,7 @@ preserved-and-ignored-by-older-clones rollout (upgrade reconcile hosts first).
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -116,10 +117,13 @@ def latest_review_result(ticket_id: str, *, repo_root=None) -> dict[str, Any] | 
       envelope. Callers read ``result["findings"]`` directly.
     - No sidecar yet / ticket dir absent / empty dir → ``None`` (the common first-review
       case; the caller proceeds with no prior findings).
-    - Unreadable or malformed JSON in the newest file → ``None`` + a logged warning.
+    - **Walk-back over unusable files:** the newest sidecar is preferred, but a single
+      malformed (mid-emit crash) or foreign-schema newest file does NOT blind the caller
+      to older valid reviews — the reader walks from newest to oldest and returns the
+      first usable ``plan_review_result_v1`` payload (a malformed file is logged, once).
     - **Schema guard:** a payload whose ``schema`` != ``"plan_review_result_v1"`` is
-      rejected (``None``), so a future schema bump can never feed a stale shape to the
-      novelty sub-call.
+      skipped, so a future schema bump can never feed a stale shape to the novelty
+      sub-call. All files unusable → ``None``.
     """
     try:
         from rebar import config as _config
@@ -133,21 +137,21 @@ def latest_review_result(ticket_id: str, *, repo_root=None) -> dict[str, Any] | 
             for f in os.listdir(ticket_dir)
             if f.endswith(f"-{EVENT_TYPE}.json") and not f.startswith(".")
         )
-        if not files:
-            return None
-        # Filenames are timestamp-prefixed, so the last entry is the newest review.
-        import json
-
-        with open(os.path.join(ticket_dir, files[-1]), encoding="utf-8") as fh:
-            event = json.load(fh)
-        payload = event.get("data") if isinstance(event, dict) else None
-        if not isinstance(payload, dict):
-            return None
-        if payload.get("schema") != "plan_review_result_v1":
-            return None  # schema guard: never feed a stale/foreign shape downstream
-        return payload
+        # Filenames are timestamp-prefixed (fixed-width ns epoch), so reverse order is
+        # newest-first. Return the first USABLE v1 payload, tolerating a corrupt newest.
+        for fname in reversed(files):
+            try:
+                with open(os.path.join(ticket_dir, fname), encoding="utf-8") as fh:
+                    event = json.load(fh)
+            except (OSError, ValueError):
+                logger.warning("REVIEW_RESULT sidecar %s unreadable; trying older", fname)
+                continue
+            payload = event.get("data") if isinstance(event, dict) else None
+            if isinstance(payload, dict) and payload.get("schema") == "plan_review_result_v1":
+                return payload
+        return None
     except FileNotFoundError:
-        return None  # ticket dir / file absent → no prior review (common first-review case)
+        return None  # ticket dir absent → no prior review (common first-review case)
     except Exception:  # noqa: BLE001 — best-effort observability reader; broad-but-logged, never raises
         logger.warning(
             "REVIEW_RESULT sidecar read failed; treating as no prior review", exc_info=True

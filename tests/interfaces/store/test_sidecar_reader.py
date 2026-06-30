@@ -93,6 +93,29 @@ def test_latest_review_result_none_on_malformed_json(rebar_repo: Path) -> None:
     assert sidecar.latest_review_result(tid, repo_root=str(rebar_repo)) is None
 
 
+def test_latest_review_result_walks_back_past_corrupt_newest(rebar_repo: Path) -> None:
+    """A corrupt NEWEST sidecar (e.g. a mid-emit crash) must not blind the caller to an
+    older valid review: the reader walks back and returns the older valid v1 payload."""
+    tid = _make_ticket(rebar_repo)
+    assert sidecar.emit(
+        _verdict(tid, "older valid finding"), material="m1", repo_root=str(rebar_repo)
+    )
+    assert sidecar.emit(_verdict(tid, "newer finding"), material="m2", repo_root=str(rebar_repo))
+    tracker = str(_config.tracker_dir(str(rebar_repo)))
+    from rebar._engine_support.resolver import resolve_ticket_id
+
+    rid = resolve_ticket_id(tid, tracker) or tid
+    ticket_dir = os.path.join(tracker, rid)
+    files = sorted(f for f in os.listdir(ticket_dir) if f.endswith("-REVIEW_RESULT.json"))
+    with open(os.path.join(ticket_dir, files[-1]), "w", encoding="utf-8") as fh:
+        fh.write("{ corrupt mid-emit")  # clobber the NEWEST
+
+    got = sidecar.latest_review_result(tid, repo_root=str(rebar_repo))
+    assert got is not None
+    assert got["material_fingerprint"] == "m1"  # recovered the older valid review
+    assert got["findings"][0]["finding"] == "older valid finding"
+
+
 def test_latest_review_result_schema_guard_rejects_foreign_payload(rebar_repo: Path) -> None:
     """A newest sidecar whose schema != plan_review_result_v1 is rejected → None, so a
     future schema bump can never feed a stale shape to the novelty sub-call."""
