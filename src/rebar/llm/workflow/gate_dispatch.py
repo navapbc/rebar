@@ -351,6 +351,161 @@ def _degraded_plan_review_verdict(
     )
 
 
+# ── code-review (epic b744 / WS4) ─────────────────────────────────────────────────────
+def code_review_enabled(repo_root=None) -> bool:
+    """Whether the off-by-default code-review capability is enabled
+    (`[code_review].enabled` via `verify.enable_code_review` / REBAR_VERIFY_ENABLE_CODE_REVIEW)."""
+    from rebar import config as _config
+
+    try:
+        return bool(_config.load_config(repo_root).verify.enable_code_review)
+    except Exception:  # noqa: BLE001 — unreadable config ⇒ treat as disabled (inert/safe)
+        return False
+
+
+def _inert_code_review_verdict() -> dict[str, Any]:
+    """The verdict the capability returns when DISABLED — INERT, zero LLM calls: a clean PASS
+    with no findings and `coverage.enabled=False`. (The shim translates this to an empty
+    review_result + a 'capability disabled' note.)"""
+    return {
+        "verdict": "PASS",
+        "blocking": [],
+        "advisory": [],
+        "coaching": [],
+        "coverage": {"enabled": False, "llm_ran": False},
+    }
+
+
+def _degraded_code_review_verdict(*, error, runner_name: str | None) -> dict[str, Any]:
+    """The unsigned INDETERMINATE verdict a systemic LLM outage / mid-run failure degrades to —
+    never a hollow PASS (no findings, `coverage.llm_unavailable=True`)."""
+    return {
+        "verdict": "INDETERMINATE",
+        "blocking": [],
+        "advisory": [],
+        "coaching": [],
+        "coverage": {"llm_ran": False, "llm_unavailable": True, "llm_error": str(error)},
+        "runner": runner_name,
+    }
+
+
+def produce_code_review_verdict(
+    cfg,
+    *,
+    base: str = "HEAD~1",
+    head: str = "HEAD",
+    diff_text: str | None = None,
+    changed_files: list[str] | None = None,
+    runner=None,
+    target_ticket: str | None = None,
+    repo_root=None,
+) -> dict[str, Any]:
+    """Produce a ``code_review_verdict`` by running ``gates/code-review.yaml`` in-memory over a
+    DIFF (parallel to ``produce_plan_review_verdict``).
+
+    OFF by default: when ``verify.enable_code_review`` is false the capability is INERT — returns
+    the disabled verdict WITHOUT preflighting/running (ZERO LLM calls). When enabled, preflights
+    the runner so a systemic outage degrades to INDETERMINATE before any billable call; a mid-run
+    failure degrades the same way (never a hollow PASS). Drives the per-overlay batch with the
+    gate-specific ``CodeReviewBatchRunner`` (constructed with the assembled diff context). Emits a
+    ``REVIEW_RESULT`` sidecar ONLY when an explicit ``target_ticket`` is supplied."""
+    import time
+
+    from rebar.llm.code_review import assemble
+    from rebar.llm.code_review.batch_runner import CodeReviewBatchRunner
+    from rebar.llm.runner import get_runner
+
+    from . import executor as _ex
+    from .recorder import MemoryRecorder
+    from .runs import RunnerAgentStep
+
+    if not code_review_enabled(repo_root):
+        return _inert_code_review_verdict()
+
+    runner_sel = runner or get_runner(cfg)
+    try:
+        runner_sel.preflight()
+    except LLMUnavailableError as exc:
+        return _degraded_code_review_verdict(error=exc, runner_name=runner_sel.name)
+
+    dc = assemble.assemble_diff_context(
+        base=base, head=head, diff_text=diff_text, changed_files=changed_files, repo_root=repo_root
+    )
+    doc = _gate_doc("code-review", repo_root)
+    rec = MemoryRecorder()
+    _t_total = time.monotonic()
+    inputs = {
+        "base": base,
+        "head": head,
+        # Reuse the diff WE already assembled (above, for the batch runner context) so the gate's
+        # assemble_diff step doesn't re-shell `git diff` on the range path — dc.diff_text is the
+        # resolved diff (read from git or the supplied diff_text).
+        "diff_text": dc.diff_text,
+        "changed_files": list(dc.changed_files),
+    }
+    try:
+        res = _ex.run_workflow(
+            doc,
+            inputs,
+            target_ticket=target_ticket,
+            repo_root=repo_root,
+            agent_runner=RunnerAgentStep(runner=runner_sel, repo_root=repo_root, config=cfg),
+            batch_runner=CodeReviewBatchRunner(context=dc.context),
+            recorder=rec,
+        )
+    except LLMUnavailableError as exc:
+        return _degraded_code_review_verdict(error=exc, runner_name=runner_sel.name)
+    total_ms = round((time.monotonic() - _t_total) * 1000, 1)
+
+    verdict = res.terminal_output
+    if res.status == "succeeded" and isinstance(verdict, dict) and "verdict" in verdict:
+        _attach_code_review_metrics(verdict, rec, total_ms)
+        verdict.setdefault("runner", runner_sel.name)
+        verdict.setdefault("model", cfg.model)
+        if target_ticket:
+            from rebar.llm.code_review import sidecar as _sidecar
+
+            _sidecar.emit(verdict, target_ticket=target_ticket, repo_root=repo_root)
+        return verdict
+    # The run failed mid-tail (the LLM tier did not produce a verdict) — degrade to
+    # INDETERMINATE, never a hollow PASS.
+    return _degraded_code_review_verdict(
+        error=(res.error or "code-review workflow LLM tier failed"), runner_name=runner_sel.name
+    )
+
+
+def _attach_code_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -> None:
+    """Reconstruct ``coverage['metrics']`` from the workflow recorder's step timings (the
+    code-review analog of ``_attach_plan_review_metrics``): ``llm_ms`` = wall-clock of the
+    billable LLM tier (agent/batch steps: base + Round-A/B overlays + verify + coach),
+    ``total_ms`` = the whole run, ``llm_calls`` = batch criteria_count + succeeded agent steps.
+    Tolerant of untimed/partial records (never raises inside the gate)."""
+    llm_ms = 0.0
+    batch_criteria = 0
+    agent_calls = 0
+    for s in rec.steps:
+        if not isinstance(s, dict) or s.get("status") != "succeeded":
+            continue
+        kind = s.get("kind")
+        dur = s.get("duration_ms")
+        if isinstance(dur, (int, float)) and kind in _LLM_STEP_KINDS:
+            llm_ms += dur
+        if kind == "batch":
+            batch_criteria += int((s.get("outputs") or {}).get("criteria_count") or 0)
+        elif kind == "agent":
+            agent_calls += 1
+    coverage = verdict.get("coverage")
+    if not isinstance(coverage, dict):
+        coverage = {}
+        verdict["coverage"] = coverage
+    coverage["llm_ran"] = True
+    coverage["metrics"] = {
+        "llm_ms": round(llm_ms, 1),
+        "total_ms": round(total_ms, 1),
+        "llm_calls": batch_criteria + agent_calls,
+    }
+
+
 # ── completion ──────────────────────────────────────────────────────────────────────
 def produce_completion_verdict(
     ticket_id: str, *, graph: bool, repo_root=None, cfg, runner=None

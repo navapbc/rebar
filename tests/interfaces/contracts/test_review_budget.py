@@ -65,19 +65,11 @@ def test_review_ticket_applies_step_floor(rebar_repo: Path) -> None:
     assert fake.seen_max_iterations >= _FLOOR
 
 
-def test_review_code_applies_step_floor(rebar_repo: Path) -> None:
-    r = str(rebar_repo)
-    diff = "--- a/x.py\n+++ b/x.py\n@@ -0,0 +1 @@\n+print(1)\n"
-    cfg = LLMConfig.from_env(repo_root=r)
-    assert cfg.max_iterations == 250
-    fake = _RecordingRunner()
-
-    rebar.llm.review_code(
-        diff_text=diff, reviewers=["code-quality"], config=cfg, runner=fake, repo_root=r
-    )
-
-    assert fake.seen_max_iterations is not None
-    assert fake.seen_max_iterations >= _FLOOR
+# NOTE: the single-pass `review_code` step-floor (`_REVIEW_MIN_STEPS`) was RETIRED with the
+# single-pass route (epic b744 / WS4, ADR 0011). `review_code` is now the gate-backed shim;
+# per-step budgeting is the workflow's concern (the verify step's `step_budget_per_item`), and
+# the off-by-default gate makes ZERO LLM calls when disabled. The gate-backed disabled/enabled
+# review_code behaviour is covered by tests/unit/test_code_review_ws4.py.
 
 
 def test_review_ticket_operator_higher_budget_wins(rebar_repo: Path) -> None:

@@ -61,6 +61,7 @@ __all__ = [
     "REVIEW_RESULT",
     "COMPLETION_VERDICT",
     "PLAN_REVIEW_VERDICT",
+    "CODE_REVIEW_VERDICT",
     "SIGN_RESULT",
     "VERIFY_SIGNATURE_RESULT",
     "EXPORT",
@@ -112,6 +113,12 @@ COMPLETION_VERDICT = "completion_verdict"
 # — live LLM call → plain dict); the CLI/library JSON path is pinned via the
 # "review_plan" key below.
 PLAN_REVIEW_VERDICT = "plan_review_verdict"
+# rebar.llm.code_review — typed verdict of the four-pass code-review gate (epic b744),
+# produced by produce_code_review_verdict. Like plan_review_verdict it is the gate's internal
+# typed output (no CLI --output help arm — the public `review_code` surface returns a
+# review_result); wired below under "review_code_gate" so the every-schema-file-is-wired guard
+# sees it.
+CODE_REVIEW_VERDICT = "code_review_verdict"
 # signing.py — the persisted SIGNATURE record (`rebar sign`) and the uniform
 # verify verdict (`rebar verify-signature`), both over `--output json`.
 SIGN_RESULT = "sign_result"
@@ -278,6 +285,10 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     # NO_SCHEMA_EXEMPT; registered here so the every-schema-file-is-wired guard sees
     # plan_review_verdict and the CLI/library --output json path is pinned.
     "review_plan": PLAN_REVIEW_VERDICT,
+    # code-review gate verdict (epic b744): like review_plan, no CLI help arm (the --output
+    # coverage guard never drives it live — the public review_code surface returns review_result,
+    # NO_SCHEMA_EXEMPT); registered so the every-schema-file-is-wired guard sees it.
+    "review_code_gate": CODE_REVIEW_VERDICT,
     "sign": SIGN_RESULT,
     "verify_signature": VERIFY_SIGNATURE_RESULT,
     "verify_signature.not_found": ERROR_ENVELOPE,

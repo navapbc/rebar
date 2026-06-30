@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/code_review_verdict.schema.json",
+  "title": "CodeReviewVerdict",
+  "description": "Typed verdict of the four-pass code-review gate (epic b744), produced by `gate_dispatch.produce_code_review_verdict` running `gates/code-review.yaml`. Parallel to plan_review_verdict but for a DIFF. `blocking`/`advisory` are the kernel Pass-3 decided findings (kernel-shaped: finding/criteria/evidence/severity/decision); `coaching` are rendered Pass-4 move notes; `coverage` carries metrics + llm_ran (+ enabled:false on the inert disabled path). The capability is OFF by default; the verdict is the artifact the (source-separated) `review_code()` shim translates to a `review_result`.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["verdict"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["PASS", "BLOCK", "INDETERMINATE"],
+      "description": "BLOCK iff any blocking finding (or a fail-closed secrets/security detector — WS5); INDETERMINATE on LLM outage / mid-run degradation; else PASS (incl. the inert disabled path)."
+    },
+    "blocking": {
+      "type": "array",
+      "description": "Blocking findings (Pass-3 decision=block; cap-exempt).",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "advisory": {
+      "type": "array",
+      "description": "Surfaced advisory findings (Pass-3 decision=advisory) — coached by Pass-4.",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "coaching": {
+      "type": "array",
+      "description": "Rendered Pass-4 affirmative coaching notes (deterministic move templates).",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Run coverage: {llm_ran, metrics:{llm_ms,total_ms,llm_calls,...}}; enabled:false + llm_ran:false on the inert disabled path; degraded:<reason> on outage."
+    },
+    "runner": { "type": "string", "description": "The runner backend that produced the verdict." },
+    "model": { "type": ["string", "null"], "description": "The model id (null when not applicable)." }
+  }
+}

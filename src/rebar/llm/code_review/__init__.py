@@ -1,51 +1,24 @@
-"""Code-review capability package (epic b744).
+"""Code-review capability package (epic b744) — the four-pass code-review gate.
 
-Holds the four-pass code-review gate's building blocks — the diff context-assembler
-(:mod:`assemble`), the overlay-id registry + filters (:mod:`registry`), and the
-structured-output contract (:mod:`contracts`). The historical SINGLE-PASS reviewer lives in
-:mod:`single_pass` (the route WS4 retires); its public API (``review_code`` /
-``select_code_reviewers``) is LAZILY re-exported from this package for backward
-compatibility, so importing the new modules (``assemble`` / ``registry``) does NOT pull the
-single-pass route in at package-import time.
+Off by default and source-separated: nothing here runs unless `verify.enable_code_review` is
+on. The pieces: the diff context-assembler (:mod:`assemble`), the overlay-id registry +
+criteria routing (:mod:`registry`), the move-catalog (:mod:`moves`), the structured-output
+contracts (:mod:`contracts`), the escalation/Pass-wiring scripted ops (:mod:`workflow_ops`) +
+the per-overlay :mod:`batch_runner`, the verdict sidecar (:mod:`sidecar`), and the public
+gate-backed surface (:mod:`shim`).
 
-Importing this package registers the code-review structured-output contract (so the live
-runner can emit ``recommend_overlays``); the import is cheap (no pydantic until a model is
-built).
+The SINGLE-PASS route is RETIRED (WS4, ADR 0011): ``review_code`` is now the gate-backed shim —
+it keeps its name/signature and ``review_result`` return shape, but its implementation is the
+four-pass gate (inert empty result when disabled). Importing this package registers the
+structured-output contracts (cheap — pydantic is lazy).
 """
 
 from __future__ import annotations
 
-import importlib
-from typing import TYPE_CHECKING, Any
-
-# Register the structured-output contract on package import (cheap — pydantic is lazy).
+# Register the structured-output contracts on import (cheap — pydantic lazy in the builders).
 from rebar.llm.code_review import contracts as _contracts  # noqa: F401
 
-if TYPE_CHECKING:
-    # Static re-export FOR TYPE-CHECKERS ONLY: the single-pass public API is provided at
-    # RUNTIME via __getattr__ below (lazy), but mypy needs the concrete types here so callers
-    # (e.g. ``rebar.llm.review_code``) stay typed rather than ``Any``. This block is never
-    # executed at runtime, so it does NOT eagerly import the single-pass route.
-    from rebar.llm.code_review.single_pass import (  # noqa: F401
-        review_code,
-        select_code_reviewers,
-    )
+# The public surface — gate-backed (replaces the retired single-pass review_code).
+from rebar.llm.code_review.shim import review_code
 
-_SUBMODULES = ("contracts", "assemble", "registry", "single_pass")
-
-
-def __getattr__(name: str) -> Any:
-    """Lazily re-export the single-pass public API (``review_code`` / ``select_code_reviewers``
-    and its helpers) from :mod:`single_pass`, so legacy ``from rebar.llm.code_review import …``
-    callers keep working WITHOUT this package eagerly importing the single-pass route. WS4
-    retires :mod:`single_pass`; the new ``assemble`` / ``registry`` modules never touch it.
-
-    Uses ``importlib.import_module`` (NOT ``from . import``) so resolving a submodule name does
-    not re-enter this hook via the fromlist ``hasattr`` check (which would recurse)."""
-    if name in _SUBMODULES:
-        return importlib.import_module(f"{__name__}.{name}")
-    single_pass = importlib.import_module(f"{__name__}.single_pass")
-    try:
-        return getattr(single_pass, name)
-    except AttributeError:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+__all__ = ["review_code"]
