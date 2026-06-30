@@ -462,3 +462,50 @@ def test_voter_force_false_still_skips_when_already_voted(monkeypatch, tmp_path)
     assert res["status"] == "skipped"
     assert res["reason"] == "dedup"
     assert g.votes == []
+
+
+# ── get_patch decode paths (offline, captured payloads) ──────────────────────
+def _client(tmp_path):
+    from rebar.review_bot.gerrit_client import GerritClient
+
+    return GerritClient(_cfg(tmp_path))
+
+
+_SAMPLE_DIFF = (
+    "From 0123456789abcdef Mon Sep 17 00:00:00 2001\n"
+    "From: Dev <dev@example.com>\n"
+    "Subject: [PATCH] add a line\n\n"
+    "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1 +1,2 @@\n pass\n+# new\n"
+)
+
+
+def test_get_patch_decodes_captured_base64(tmp_path, monkeypatch):
+    """The /patch text/plain form is base64 (a captured payload). get_patch must
+    decode it to the unified diff text passed to the reviewer."""
+    import base64
+
+    captured = base64.b64encode(_SAMPLE_DIFF.encode()).decode("ascii")
+    gc = _client(tmp_path)
+    monkeypatch.setattr(gc, "_request", lambda *a, **k: (200, captured))
+    out = gc.get_patch("rebar~main~Iabc", "rev1")
+    assert out == _SAMPLE_DIFF
+    assert out.startswith("From ") and "diff --git" in out
+
+
+def test_get_patch_decodes_xssi_json_string(tmp_path, monkeypatch):
+    """The /patch Accept: application/json form is an XSSI-guarded JSON string of the
+    raw patch (the live shape). get_patch must strip XSSI + JSON-decode to the diff."""
+    import json as _json
+
+    body = ")]}'\n" + _json.dumps(_SAMPLE_DIFF)
+    gc = _client(tmp_path)
+    monkeypatch.setattr(gc, "_request", lambda *a, **k: (200, body))
+    assert gc.get_patch("rebar~main~Iabc", "rev1") == _SAMPLE_DIFF
+
+
+def test_get_patch_rejects_non_decodable_body(tmp_path, monkeypatch):
+    """A body that is neither JSON nor base64 fails closed with GerritError."""
+    gc = _client(tmp_path)
+    monkeypatch.setattr(gc, "_request", lambda *a, **k: (200, "!!! not base64 !!!"))
+    with pytest.raises(GerritError):
+        gc.get_patch("rebar~main~Iabc", "rev1")
