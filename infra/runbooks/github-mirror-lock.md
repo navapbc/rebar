@@ -147,3 +147,54 @@ If you applied via Terraform (Path A), `terraform destroy` (or removing the two
 resources and `apply`) also drops the locks — but still run the rollback script
 (or recreate from the snapshot) to restore `main-protection`, which Terraform
 does not manage.
+
+## Mirror-mode cutover playbook (the permanent-cutover steps)
+
+> These steps make the lock a PERMANENT cutover. They are DELIBERATELY NOT applied
+> by the d251 PoC, which ran an **apply-prove-rollback** (the lock was proven on the
+> live repo, then `main-protection` was restored). Apply these only at a real cutover.
+
+### Feature toggles (mirror hygiene)
+Once `main` is locked to the deploy key, turn off the now-unused GitHub collaboration
+surfaces so contributors are routed to Gerrit (all reversible via the same API):
+
+```bash
+# Disable Pull Requests is not a single repo flag; restrict to the mirror posture by
+# disabling Issues, Projects, Wiki, and Actions, and removing merge methods so the UI
+# offers no PR-merge path. (Re-enable by setting each back to true / restoring Actions.)
+gh api -X PATCH repos/navapbc/rebar \
+  -F has_issues=false -F has_projects=false -F has_wiki=false
+gh api -X PUT  repos/navapbc/rebar/actions/permissions -F enabled=false
+# Do NOT archive the repo — archiving freezes the replication bot's pushes too.
+```
+
+### Mirror banner (About + README)
+Set the repo description/About and add a README banner at the top:
+
+```bash
+gh repo edit navapbc/rebar \
+  --description "Read-only mirror of Gerrit (rebar.solutions.navateam.com). Contribute via Gerrit — see CONTRIBUTING.md."
+```
+
+README banner text (prepend to README.md at cutover):
+
+```markdown
+> **This GitHub repo is a read-only mirror.** `main` only advances via the
+> Gerrit server at `rebar.solutions.navateam.com` after the automated `LLM-Review`
+> gate passes. **Do not open GitHub PRs** — see [CONTRIBUTING.md](CONTRIBUTING.md)
+> for the Gerrit contribution workflow.
+```
+
+### Contributor workflow under mirror mode (the CONTRIBUTING.md content)
+At cutover, add a root `CONTRIBUTING.md` (and remove GitHub-PR guidance) describing the
+Gerrit-only flow:
+
+1. **Register your SSH key on Gerrit** — `https://rebar.solutions.navateam.com/settings/#SSHKeys`.
+2. **Install the Change-Id hook** — `curl -Lo .git/hooks/commit-msg https://rebar.solutions.navateam.com/tools/hooks/commit-msg && chmod +x .git/hooks/commit-msg` (or use `git-review`).
+3. **Add the Gerrit remote** — `git remote add gerrit ssh://<you>@rebar.solutions.navateam.com:29418/rebar`.
+4. **Push for review** — `git push gerrit HEAD:refs/for/main` (optionally `%topic=rebar-<feature>`).
+5. **The `LLM-Review` gate** — the review-bot reviews your patchset and votes
+   `LLM-Review` (the single submit requirement: `label:LLM-Review=MAX AND -has:unresolved`).
+   A stuck change can be re-reviewed via the receiver's `/rerun` (see ADR-0009 / S7 runbook).
+6. **Submit** in Gerrit once the gate is satisfied; Gerrit replicates the merge to
+   GitHub `main` (the only writer).
