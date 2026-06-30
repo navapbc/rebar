@@ -330,48 +330,59 @@ def remediation_mode_candidate(
         "prior_sidecar": False,
         "within_window": False,
     }
+    # NEVER raises (the docstring contract): the WHOLE body is guarded — a read error in ANY
+    # precondition (signing, the manifest parsers, current_code_sha / registry_version, or the
+    # sidecar reads) leaves that precondition False and yields eligible=False → a full review.
+    # The gate is fail-safe: a broken signal can only DENY remediation mode, never crash the
+    # plan review it gates (which runs only when verify.remediation_mode is on).
     try:
         result = signing.verify_signature(ticket_id, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — signing unavailable → not eligible, full review
-        return {"eligible": False, "reasons": reasons}
-    manifest = result.get("manifest") if result.get("verified") else None
-    if not is_plan_review_manifest(manifest):
-        return {"eligible": False, "reasons": reasons}
-    reasons["signed"] = True
+        manifest = result.get("manifest") if result.get("verified") else None
+        if not is_plan_review_manifest(manifest):
+            return {"eligible": False, "reasons": reasons}
+        reasons["signed"] = True
 
-    # plan CHANGED: the current material fingerprint differs from the prior signed one.
-    signed_material = manifest_material(manifest)
-    current_material = current_material_fingerprint(ticket_id, repo_root=repo_root)
-    reasons["plan_changed"] = (
-        signed_material is not None
-        and current_material is not None
-        and current_material != signed_material
-    )
-
-    # code UNCHANGED: current verified_at_sha equals the prior signed one (deterministic, reusing
-    # the signed snapshot ref). Both must be present and equal — a local-mode (None) review on
-    # either side is not a reliable code-unchanged signal, so it is treated as changed.
-    signed_sha = signing.verified_at_sha_from_manifest(manifest)
-    current_sha = current_code_sha()
-    reasons["code_unchanged"] = bool(signed_sha) and signed_sha == current_sha
-
-    # registry UNCHANGED: the criteria-routing version equals the prior signed one.
-    reasons["registry_unchanged"] = manifest_regver(manifest) == registry_version()
-
-    # prior REVIEW_RESULT sidecar WITH finding text available (child e344).
-    prior = sidecar.latest_review_result(ticket_id, repo_root=repo_root)
-    reasons["prior_sidecar"] = bool(
-        prior and any((f.get("finding") or "").strip() for f in prior.get("findings", []) or [])
-    )
-
-    # within the freshness window, measured from the last review of ANY kind (newest sidecar);
-    # each review emits a sidecar, so the window RESETS on every review.
-    last_ts = sidecar.latest_review_timestamp(ticket_id, repo_root=repo_root)
-    if last_ts is not None:
-        current_ns = now_ns if now_ns is not None else time.time_ns()
-        reasons["within_window"] = (
-            0 <= (current_ns - last_ts) <= window_minutes * 60 * 1_000_000_000
+        # plan CHANGED: the current material fingerprint differs from the prior signed one.
+        signed_material = manifest_material(manifest)
+        current_material = current_material_fingerprint(ticket_id, repo_root=repo_root)
+        reasons["plan_changed"] = (
+            signed_material is not None
+            and current_material is not None
+            and current_material != signed_material
         )
+
+        # code UNCHANGED: current verified_at_sha equals the prior signed one (deterministic,
+        # reusing the signed snapshot ref). Both must be present and equal — a local-mode (None)
+        # review on either side is not a reliable signal, so it is treated as changed.
+        signed_sha = signing.verified_at_sha_from_manifest(manifest)
+        current_sha = current_code_sha()
+        reasons["code_unchanged"] = bool(signed_sha) and signed_sha == current_sha
+
+        # registry UNCHANGED: the criteria-routing version equals the prior signed one.
+        reasons["registry_unchanged"] = manifest_regver(manifest) == registry_version()
+
+        # prior REVIEW_RESULT sidecar WITH finding text available (child e344). NOTE: this reads
+        # the newest USABLE v1 payload (walk-back over malformed/foreign-schema files), whereas
+        # the window below reads the newest FILE's timestamp; they can differ if the newest file
+        # is unusable — benign here (both only gate eligibility, conservatively).
+        prior = sidecar.latest_review_result(ticket_id, repo_root=repo_root)
+        reasons["prior_sidecar"] = bool(
+            prior and any((f.get("finding") or "").strip() for f in prior.get("findings", []) or [])
+        )
+
+        # within the freshness window, measured from the last review of ANY kind (newest sidecar);
+        # each review emits a sidecar, so the window RESETS on every review.
+        last_ts = sidecar.latest_review_timestamp(ticket_id, repo_root=repo_root)
+        if last_ts is not None:
+            current_ns = now_ns if now_ns is not None else time.time_ns()
+            reasons["within_window"] = (
+                0 <= (current_ns - last_ts) <= window_minutes * 60 * 1_000_000_000
+            )
+    except Exception:  # noqa: BLE001 — fail-safe: any read error → not eligible → full review, never crash
+        logger.warning(
+            "remediation-mode candidate check failed; treating as not eligible", exc_info=True
+        )
+        return {"eligible": False, "reasons": reasons}
 
     return {"eligible": all(reasons.values()), "reasons": reasons}
 

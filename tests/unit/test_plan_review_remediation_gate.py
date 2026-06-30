@@ -168,6 +168,24 @@ def test_candidate_never_raises_on_signing_error(monkeypatch) -> None:
     assert d["eligible"] is False  # fail-safe → full review
 
 
+@pytest.mark.parametrize("victim", ["registry_version", "current_code_sha"])
+def test_candidate_never_raises_on_any_precondition_error(monkeypatch, victim) -> None:
+    """The 'never raises' contract covers EVERY read, not just signing: a raise from a
+    precondition helper (e.g. registry_version / current_code_sha) is caught → not eligible →
+    a full review, never a crash of the plan review the gate runs under."""
+    _setup(monkeypatch)  # all preconditions would otherwise pass
+
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+
+    if victim == "registry_version":
+        monkeypatch.setattr(attest, "registry_version", boom)
+    else:
+        monkeypatch.setattr(llm_config, "current_code_sha", boom)
+    d = attest.remediation_mode_candidate("T", window_minutes=_WINDOW, now_ns=_MIN_NS)
+    assert d["eligible"] is False
+
+
 # ── config keys (default-OFF rollout + the back-out) ──────────────────────────────────────────
 def test_config_defaults_off_and_60_minutes() -> None:
     vc = core_config.VerifyConfig()
