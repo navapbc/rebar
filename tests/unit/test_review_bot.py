@@ -18,7 +18,7 @@ import asyncio
 
 import pytest
 
-from rebar.review_bot import adapter, voter
+from rebar.review_bot import adapter, reconcile, voter
 from rebar.review_bot.config import ReceiverConfig
 from rebar.review_bot.dedup import DedupStore
 from rebar.review_bot.gerrit_client import GerritError
@@ -304,3 +304,161 @@ def test_config_blocking_severities_override(monkeypatch):
     monkeypatch.setenv("BLOCKING_SEVERITIES", "critical, high, medium")
     cfg = ReceiverConfig.from_env()
     assert cfg.blocking_severities == frozenset({"critical", "high", "medium"})
+
+
+# ── reconcile (backfill) ──────────────────────────────────────────────────────
+def _events_log_event(change_id, revision, number=1, project="rebar", created_on=1_700_000_000):
+    """A Gerrit events-log ``patchset-created`` event (epoch ``eventCreatedOn``)."""
+    return {
+        "type": "patchset-created",
+        "eventCreatedOn": created_on,
+        "change": {"id": change_id, "number": number, "project": project},
+        "patchSet": {
+            "number": 1,
+            "revision": revision,
+            "ref": f"refs/changes/{number}/{number}/1",
+        },
+    }
+
+
+class ReconcileGerrit(FakeGerrit):
+    """FakeGerrit that also serves events-log events + per-revision vote state, recording
+    every ``list_events`` ``since`` arg so the cursor windowing can be asserted."""
+
+    def __init__(self, *, events=None, voted_revisions=(), list_raises=False, **kw):
+        super().__init__(**kw)
+        self._events = list(events or [])
+        self._voted = set(voted_revisions)
+        self._list_raises = list_raises
+        self.list_since_calls: list = []
+
+    def list_events(self, since=None):
+        self.list_since_calls.append(since)
+        if self._list_raises:
+            raise GerritError("events-log unreachable", status=503)
+        return list(self._events)
+
+    def has_llm_review_vote(self, change_id, revision="current"):
+        self.has_vote_calls += 1
+        return revision in self._voted
+
+
+def test_reconcile_once_reviews_only_the_gap_change_and_persists_cursor(monkeypatch, tmp_path):
+    """One change already voted, one vote-less (the gap): only the gap is reviewed, and
+    the cursor is persisted + advanced to the newest event time."""
+    _patch_review(monkeypatch, [])  # clean → PASS for the gap change
+    cfg = _cfg(tmp_path)
+    store = DedupStore(cfg.dedup_db_path)
+    g = ReconcileGerrit(
+        events=[
+            _events_log_event("rebar~main~Ialready", "rev-voted", number=10, created_on=1000),
+            _events_log_event("rebar~main~Igap", "rev-gap", number=11, created_on=2000),
+        ],
+        voted_revisions={"rev-voted"},  # the already-voted change's current revision
+    )
+
+    res = asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+
+    # Only the gap change was reviewed + voted.
+    assert res == {"scanned": 2, "reviewed": 1}
+    assert [v[0] for v in g.votes] == ["rebar~main~Igap"]
+    # First pass had no cursor (None), and the cursor file is now persisted + advanced.
+    assert g.list_since_calls == [None]
+    from pathlib import Path
+
+    cursor_file = Path(cfg.cursor_path)
+    assert cursor_file.exists()
+    persisted = cursor_file.read_text(encoding="utf-8").strip()
+    assert persisted  # a yyyy-MM-dd HH:mm:ss t1 string (newest event = created_on 2000)
+
+
+def test_reconcile_once_second_pass_is_idempotent_via_dedup_and_cursor(monkeypatch, tmp_path):
+    """A second pass over the same events does nothing new: the gap change is now in the
+    dedup ledger (idempotent) and the cursor is carried into the next ``since`` window."""
+    _patch_review(monkeypatch, [])
+    cfg = _cfg(tmp_path)
+    store = DedupStore(cfg.dedup_db_path)
+    g = ReconcileGerrit(
+        events=[_events_log_event("rebar~main~Igap", "rev-gap", number=11, created_on=2000)],
+    )
+
+    first = asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+    assert first == {"scanned": 1, "reviewed": 1}
+    assert len(g.votes) == 1
+
+    second = asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+    # Idempotent: scanned again but reviewed nothing new (dedup row present).
+    assert second["reviewed"] == 0
+    assert len(g.votes) == 1  # no second vote
+    # The 2nd pass passed the persisted cursor (not None) as the since window.
+    assert g.list_since_calls[0] is None
+    assert g.list_since_calls[1] is not None
+
+
+def test_reconcile_once_events_log_error_does_not_crash_or_vote(monkeypatch, tmp_path):
+    """events-log error → degraded fallback: no crash, no vote, no cursor advance."""
+    _patch_review(monkeypatch, [])
+    cfg = _cfg(tmp_path)
+    store = DedupStore(cfg.dedup_db_path)
+    g = ReconcileGerrit(list_raises=True)
+
+    res = asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+
+    assert res == {"scanned": 0, "reviewed": 0}
+    assert g.votes == []  # NEVER casts a vote on a degraded pass (fail-closed)
+    from pathlib import Path
+
+    assert not Path(cfg.cursor_path).exists()  # cursor NOT advanced on error
+
+
+def test_reconcile_once_malformed_events_body_does_not_vote(monkeypatch, tmp_path):
+    """events-log returns a non-list (malformed) body → degraded, no crash, no vote."""
+    _patch_review(monkeypatch, [])
+    cfg = _cfg(tmp_path)
+    store = DedupStore(cfg.dedup_db_path)
+
+    class MalformedGerrit(ReconcileGerrit):
+        def list_events(self, since=None):
+            self.list_since_calls.append(since)
+            return {"not": "a list"}  # malformed
+
+    g = MalformedGerrit()
+    res = asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+    assert res == {"scanned": 0, "reviewed": 0}
+    assert g.votes == []
+
+
+# ── force / rerun recovery ──────────────────────────────────────────────────────
+def test_voter_force_re_reviews_despite_existing_vote_and_dedup(monkeypatch, tmp_path):
+    """force=True (a manual /rerun) re-reviews + re-casts even when the change ALREADY
+    carries a Gerrit vote AND has a dedup row — proving /rerun recovers a stuck vote."""
+    _patch_review(monkeypatch, [])  # clean → PASS
+    cfg = _cfg(tmp_path)
+    store = DedupStore(cfg.dedup_db_path)
+    store.record_vote("rebar~main~Iabc", "rev1", "patchset-created", -1)  # stuck -1 row
+    g = FakeGerrit(has_vote=True)  # Gerrit reports an existing vote too
+
+    res = asyncio.run(
+        voter.review_and_vote(_event(), config=cfg, gerrit=g, dedup=store, force=True)
+    )
+
+    assert res["status"] == "voted"  # did NOT skip
+    assert g.votes and g.votes[0][2] == 1  # re-cast a fresh verdict
+    assert g.has_vote_calls == 0  # force skips the Gerrit existing-vote check entirely
+
+
+def test_voter_force_false_still_skips_when_already_voted(monkeypatch, tmp_path):
+    """Contrast: force=False skips when a dedup row is already present (no re-review)."""
+    _patch_review(monkeypatch, [])
+    cfg = _cfg(tmp_path)
+    store = DedupStore(cfg.dedup_db_path)
+    store.record_vote("rebar~main~Iabc", "rev1", "patchset-created", -1)
+    g = FakeGerrit(has_vote=True)
+
+    res = asyncio.run(
+        voter.review_and_vote(_event(), config=cfg, gerrit=g, dedup=store, force=False)
+    )
+
+    assert res["status"] == "skipped"
+    assert res["reason"] == "dedup"
+    assert g.votes == []

@@ -82,6 +82,24 @@ def _voter_error(**fields: Any) -> None:
     # Also write straight to stderr (journald) so the greppable VOTER_ERROR marker — the
     # source for the rebar/host:voter_errors metric — lands even if logging is reconfigured.
     print(line, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
+    _publish_voter_error_metric()
+
+
+def _publish_voter_error_metric() -> None:
+    """Best-effort direct publish of ``rebar/host:voter_errors`` via boto3 (instance
+    role). The journald → host-probe path (infra/.../observability.sh) is the RELIABLE
+    fallback — in-container boto3 may not reach IMDS for credentials (the container's
+    IMDS hop limit can preclude it), so any ImportError / boto / credential / network
+    failure is silently swallowed and we rely on the journald marker above."""
+    try:
+        import boto3  # noqa: PLC0415 — optional, lazy: only on a fail-closed error path
+
+        boto3.client("cloudwatch").put_metric_data(
+            Namespace="rebar/host",
+            MetricData=[{"MetricName": "voter_errors", "Value": 1, "Unit": "Count"}],
+        )
+    except Exception:  # noqa: BLE001 — IMDS hop limit / no creds / offline: journald is the fallback
+        pass
 
 
 def _extract(event: dict) -> dict[str, Any] | None:
@@ -116,6 +134,7 @@ async def review_and_vote(
     config: ReceiverConfig | None = None,
     gerrit: GerritClient | None = None,
     dedup: DedupStore | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Review the patchset described by ``event`` and cast the ``LLM-Review`` vote.
 
@@ -147,8 +166,13 @@ async def review_and_vote(
 
     lock = await _lock_for(key)
     async with lock:
+        # Dedup + existing-vote short-circuits are SKIPPED when force=True (a manual
+        # /rerun): forcing re-reviews even a change that already carries a vote (e.g.
+        # a stuck fail-closed -1), overwriting it with a fresh verdict. force still
+        # runs the full review + is still fail-closed — it can only request a fresh
+        # review, never force a PASS.
         # Dedup short-circuit (local ledger first — cheap, no network).
-        if store.already_voted(change_id, revision):
+        if not force and store.already_voted(change_id, revision):
             _emit(
                 logging.INFO,
                 "voter_skip",
@@ -160,7 +184,7 @@ async def review_and_vote(
         # Authoritative Gerrit-side guard (catches a lost dedup row / fresh box / an
         # admin vote). A failure HERE is fail-closed: we do not proceed to cast blindly.
         try:
-            if await asyncio.to_thread(gc.has_llm_review_vote, change_id, revision):
+            if not force and await asyncio.to_thread(gc.has_llm_review_vote, change_id, revision):
                 _emit(
                     logging.INFO,
                     "voter_skip",

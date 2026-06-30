@@ -110,6 +110,43 @@ SLASH is required) for patchsets whose current revision has no `LLM-Review` vote
 re-invokes the SAME `review_and_vote` (sharing the lock + dedup). events-log is a
 store, not an auto-replay; the reconciler is what recovers a dropped webhook.
 
+### 7a. Manual `/rerun` recovery endpoint (force re-review, still fail-closed)
+
+A transient outage (e.g. the LLM is briefly down) casts a fail-closed `-1` that then
+sticks: the dedup ledger + the Gerrit existing-vote guard both make a re-delivery a
+no-op skip, so the change stays unsubmittable with no automatic recovery. `POST /rerun`
+is the operator escape hatch. Auth is the SAME `?token=` secret as `/webhook`
+(constant-time compare). Given a `change` (id or number) it looks up the change's
+CURRENT revision via `gerrit_client.get_change_event` (shaped like a `patchset-created`
+event), enqueues it with a `_rebar_force` marker, and ACKs 202. The worker passes
+`force=True` into `voter.review_and_vote`, which **bypasses both short-circuits** (the
+dedup row AND the Gerrit existing-vote check) and re-reviews from scratch, overwriting
+the stuck vote with a fresh verdict. It is **still fail-closed**: `force` can only
+request a fresh review — the verdict is computed the same way, so a rerun can never cast
+a PASS the reviewer did not produce. (A `force=False` call with a recorded vote still
+skips, as before.)
+
+### 7b. Reconciler: persisted cursor + events-log fallback
+
+The reconciler no longer rescans the whole events-log every poll. It persists a
+**cursor** — the newest events-log event time it has processed — in a small file
+(`config.cursor_path`, default `<dedup dir>/reconcile_cursor`, on the same persistent
+data volume as the dedup DB). Each pass fetches only events **since** that cursor via the
+events-log REST time window (`GET /a/plugins/events-log/events/?t1=<yyyy-MM-dd HH:mm:ss>`,
+UTC), reviews gap (vote-less) patchsets, then advances + persists the cursor (written
+atomically: temp-file + replace) to the newest event seen. This makes the poller
+**resumable** across restarts and cheap on a long-lived log. The cursor is purely an
+optimization — **idempotency is still owned** by the per-`(change, revision)` dedup
+ledger + the authoritative Gerrit vote-existence check, so a lost/reset cursor (or a
+re-scan) can never double-vote.
+
+**Fallback (degraded, fail-closed).** If events-log is absent, errors, or returns a
+malformed (non-list) body, the reconciler logs a warning, emits a greppable
+`RECONCILE_DEGRADED` marker (to journald, like `VOTER_ERROR`, so the host probe / alarm
+can catch that backfill is degraded), does **NOT** advance the cursor, and casts **no**
+vote — it relies on the live webhook path. A change a degraded backfill missed simply
+stays vote-less = unsubmittable, never submittable-but-unreviewed.
+
 ### 8. Inbound vs outbound auth split
 
 - **Inbound** (Gerrit → receiver): the URL `?token=` secret + network ACL (ADR-0014).
@@ -126,6 +163,12 @@ host observability probe greps the review-bot container's journald for it and
 publishes `rebar/host:voter_errors`, watched by the `rebar-gerrit-voter-errors`
 CloudWatch alarm (`infra/terraform/monitoring_s4b.tf`) — mirroring the S5
 `replication_errors` pattern, so no AWS creds are needed inside the container.
+The voter ALSO makes a **best-effort direct** `cloudwatch:PutMetricData` of the same
+`rebar/host:voter_errors` metric via boto3 (instance role) from the `VOTER_ERROR` path,
+wrapped so any `ImportError` / missing-credential / network failure is silently skipped.
+In-container IMDS may be unreachable (the container IMDS hop limit can preclude it), so
+**the journald → host-probe path is the reliable fallback**; the direct publish is a
+convenience when IMDS is reachable, never load-bearing.
 
 ## Consequences
 

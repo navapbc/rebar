@@ -90,7 +90,10 @@ async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
     while True:
         event = await queue.get()
         try:
-            await _voter.review_and_vote(event, config=cfg)
+            # A manual /rerun enqueues the event with a _rebar_force marker so the
+            # voter bypasses the dedup + existing-vote short-circuits and re-reviews.
+            force = bool(event.pop("_rebar_force", False)) if isinstance(event, dict) else False
+            await _voter.review_and_vote(event, config=cfg, force=force)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 — a single bad event must not kill the worker
@@ -142,6 +145,53 @@ async def webhook(request: Request) -> JSONResponse:
     else:
         queued = False
     return JSONResponse(status_code=202, content={"status": "accepted", "queued": queued})
+
+
+@app.post("/rerun", status_code=202)
+async def rerun(request: Request) -> JSONResponse:
+    """Manually FORCE a fresh review of a change (operability — recover a stuck vote).
+
+    Auth: same ``?token=`` secret as ``/webhook`` (constant-time). Body/query supplies
+    ``change`` (a Gerrit change id/number). The receiver looks up the change's CURRENT
+    revision, enqueues it with the force marker, and ACKs 202; the worker re-reviews it
+    bypassing the dedup + existing-vote short-circuits — so a stuck fail-closed ``-1``
+    (e.g. from a transient LLM outage) is re-reviewed without amending. Still fail-closed:
+    a rerun can only request a FRESH review, never force a PASS.
+    """
+    cfg: ReceiverConfig = request.app.state.config
+    token = request.query_params.get("token", "")
+    if not cfg.webhook_token or not hmac.compare_digest(token, cfg.webhook_token):
+        return JSONResponse(status_code=401, content={"status": "unauthorized"})
+
+    change = request.query_params.get("change")
+    if not change:
+        with contextlib.suppress(Exception):
+            body = await request.json()
+            if isinstance(body, dict):
+                change = body.get("change") or body.get("change_id")
+    if not change:
+        return JSONResponse(status_code=400, content={"status": "missing 'change'"})
+
+    # Look up the change's current revision (off the event loop) to shape an event.
+    from rebar.review_bot.gerrit_client import GerritClient, GerritError
+
+    try:
+        event = await asyncio.to_thread(GerritClient(cfg).get_change_event, str(change))
+    except GerritError as exc:
+        return JSONResponse(status_code=502, content={"status": "gerrit error", "detail": str(exc)})
+    if event is None:
+        return JSONResponse(status_code=404, content={"status": "change not found"})
+
+    event["_rebar_force"] = True
+    queue: asyncio.Queue | None = getattr(request.app.state, "queue", None)
+    queued = False
+    if queue is not None:
+        queue.put_nowait(event)
+        queued = True
+    logger.info("review-bot rerun: queued force re-review of change %s", change)
+    return JSONResponse(
+        status_code=202, content={"status": "accepted", "queued": queued, "force": True}
+    )
 
 
 def _port() -> int:

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 def _int_env(name: str, default: int) -> int:
@@ -76,6 +77,18 @@ class ReceiverConfig:
     reconcile_interval_seconds: int = 300
     #: The Gerrit project the bot reviews; non-matching projects are skipped.
     project: str = "rebar"
+    #: Persisted reconciler cursor (last-processed events-log event time). Empty →
+    #: derive it next to the dedup DB (``<dedup dir>/reconcile_cursor``). Survives a
+    #: restart so the poller resumes from its tail rather than rescanning the whole log.
+    reconcile_cursor_path: str = ""
+
+    @property
+    def cursor_path(self) -> str:
+        """The resolved reconcile-cursor file path. Defaults to ``reconcile_cursor``
+        beside the dedup DB so it lives on the same persistent data volume."""
+        if self.reconcile_cursor_path:
+            return self.reconcile_cursor_path
+        return str(Path(self.dedup_db_path).parent / "reconcile_cursor")
 
     @classmethod
     def from_env(cls) -> ReceiverConfig:
@@ -98,4 +111,5 @@ class ReceiverConfig:
             webhook_token=webhook_token,
             reconcile_interval_seconds=_int_env("RECONCILE_INTERVAL_SECONDS", 300),
             project=os.environ.get("GERRIT_PROJECT", "rebar").strip(),
+            reconcile_cursor_path=os.environ.get("RECONCILE_CURSOR_PATH", "").strip(),
         )

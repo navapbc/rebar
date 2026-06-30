@@ -55,7 +55,10 @@ mcp = ["mcp>=1.2"]
 # Imported lazily (the fastapi import lives inside review_bot.app, so `import rebar`
 # stays dependency-free); only running the receiver needs this extra. `uvicorn[standard]`
 # pulls the production-grade ASGI server + its uvloop/httptools/websockets stack.
-reviewbot = ["fastapi", "uvicorn[standard]"]
+# `boto3` is for the BEST-EFFORT direct CloudWatch publish of rebar/host:voter_errors
+# from the fail-closed VOTER_ERROR path (voter.py); the journald → host-probe path
+# (infra observability.sh) is the reliable fallback when in-container IMDS is unreachable.
+reviewbot = ["fastapi", "uvicorn[standard]", "boto3"]
 # LLM agent-operations framework (rebar.llm). OPTIONAL — never required by core
 # rebar (the engine stays stdlib-only, `dependencies = []`). The in-process runner is the
 # provider-agnostic pydantic-ai runtime (the LangChain/LangGraph stack was dropped in the

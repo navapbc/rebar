@@ -143,6 +143,33 @@ class GerritClient:
                 continue
         return False
 
+    def get_change_event(self, change_id: str) -> dict | None:
+        """Build a webhook-shaped event for ``change_id`` from its CURRENT revision.
+
+        Used by the manual ``/rerun`` path (which has only a change id, not a live
+        webhook payload). Queries ``/a/changes/{id}?o=CURRENT_REVISION`` and shapes the
+        result like a ``patchset-created`` event so it flows through the SAME
+        ``voter.review_and_vote`` path. Returns ``None`` if the change has no current
+        revision."""
+        d = self._get_json(f"/a/changes/{self._q(change_id)}?o=CURRENT_REVISION")
+        cur = (d or {}).get("current_revision")
+        if not cur:
+            return None
+        rev = ((d.get("revisions") or {}).get(cur)) or {}
+        return {
+            "type": "manual-rerun",
+            "change": {
+                "id": d.get("id") or change_id,
+                "number": d.get("_number"),
+                "project": d.get("project"),
+            },
+            "patchSet": {
+                "number": rev.get("_number"),
+                "revision": cur,
+                "ref": rev.get("ref"),
+            },
+        }
+
     def post_vote(
         self,
         change_id: str,
@@ -186,13 +213,22 @@ class GerritClient:
             raise GerritError(f"post_vote({change_id}) -> HTTP {status}", status=status)
         return status
 
-    def list_events(self) -> list[dict]:
+    def list_events(self, since: str | None = None) -> list[dict]:
         """Fetch the events-log plugin's events (reconciler source).
 
         The endpoint is ``/a/plugins/events-log/events/`` — the TRAILING SLASH is
         required (without it Gerrit 404s). The body is newline-delimited JSON events
-        (one per line), NOT a JSON array, so parse line-by-line."""
-        status, text = self._request("GET", "/a/plugins/events-log/events/")
+        (one per line), NOT a JSON array, so parse line-by-line.
+
+        ``since`` (optional) restricts the window to events at/after a ``t1`` time
+        (the events-log REST ``?t1=`` query param, ``yyyy-MM-dd HH:mm:ss`` UTC). The
+        reconciler passes its persisted cursor so each poll fetches only the new tail
+        rather than rescanning the whole log. A blank/None ``since`` fetches all
+        retained events (first run / no cursor)."""
+        path = "/a/plugins/events-log/events/"
+        if since:
+            path += "?t1=" + urllib.parse.quote(str(since), safe="")
+        status, text = self._request("GET", path)
         events: list[dict] = []
         for line in _strip_xssi(text).splitlines():
             line = line.strip()
