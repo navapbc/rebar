@@ -1,1 +1,0 @@
-{"author":"Iso Tester","data":{"verify_commands":[{"command":"python -m pytest tests/interfaces/facades/test_cli_space_form_options.py -q","dd_id":"D1","dd_text":"space form accepted across read-CLI"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1782780377307787001,"uuid":"a46ac7ad-c15f-47a5-8f1f-85c93bbf0866"}
