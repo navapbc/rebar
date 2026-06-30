@@ -66,9 +66,15 @@ signing.sign_manifest(ticket_id, manifest, *, kind=None, repo_root=None) -> dict
 # `kind` (e.g. "plan-review"/"completion-verifier") is recorded UNSIGNED as a routing
 # hint for the reducer's kind-keyed attestations map; it never enters the signed payload.
 
-signing.verify_signature(ticket_id, *, repo_root=None) -> dict
-# READ-only (never mints a key). Reduces the ticket, verifies state['signature'].
-# → the verdict dict (below) + ticket_id.
+signing.verify_signature(ticket_id, *, kind=None, repo_root=None) -> dict
+# READ-only (never mints a key). Reduces the ticket and verifies one signature record.
+# `kind=None` verifies the most-recent `signature` mirror (back-compat); an explicit kind
+# ("plan-review"/"completion-verifier") verifies that kind strictly from the attestations map.
+# → the verdict dict (below) + ticket_id (+ `kind` when one was requested).
+
+signing.verify_attestations(ticket_id, *, repo_root=None) -> dict
+# READ-only. Verifies EVERY attestation kind on the ticket → {kind: verdict_dict} (sorted),
+# {} when none. The per-kind companion to verify_signature.
 
 signing.verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict
 # Pure, no I/O. The core verifier (use when you already hold the record + key).
