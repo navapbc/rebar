@@ -46,6 +46,13 @@ services:
       - gerrit_etc:/var/gerrit/etc
       - gerrit_logs:/var/gerrit/logs
       - gerrit_plugins:/var/gerrit/plugins
+      # S5 replication: the GitHub deploy key + known_hosts + ssh config live in
+      # the gerrit user's ~/.ssh (HOME=/var/gerrit -> /var/gerrit/.ssh). A DIRECT
+      # host bind mount (not an external named volume) onto /var/gerrit/site/dotssh,
+      # which infra/gerrit/materialize-deploy-key.sh populates (as uid 1000) from
+      # SSM BEFORE Gerrit starts. The replication plugin's `git push` reads this
+      # dir to authenticate to github.com:navapbc/rebar.
+      - /var/gerrit/site/dotssh:/var/gerrit/.ssh
     environment:
       # Public HTTPS origin (nginx-terminated). The entrypoint writes this into
       # etc/gerrit.config; it mirrors the canonicalWebUrl we pre-seed there.

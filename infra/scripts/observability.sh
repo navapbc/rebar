@@ -48,3 +48,29 @@ if [ -n "$used_pct" ]; then
     --dimensions InstanceId="$IID",mount="$DATA_MOUNT" 2>/dev/null || true
   logger -t rebar-health "disk ${DATA_MOUNT} used_percent=${used_pct}"
 fi
+
+# --- 3. Gerrit->GitHub replication failures (S5) ---------------------------
+# Watch the replication plugin's log for failure signatures and publish the COUNT
+# of NEW failure lines since last run to rebar/host:replication_errors (the metric
+# the S5 CloudWatch alarm watches). A persisted line-count offset turns the
+# cumulative grep into a per-interval delta. Failure signatures: a hard-rejected
+# non-fast-forward push (the one-way-door violation), max-retry exhaustion, ERROR.
+REPL_LOG="${REPL_LOG:-/var/gerrit/site/logs/replication_log}"
+REPL_OFFSET_FILE="${REPL_OFFSET_FILE:-/var/lib/rebar/repl-fail-offset}"
+if [ -f "$REPL_LOG" ]; then
+  mkdir -p "$(dirname "$REPL_OFFSET_FILE")"
+  # NOTE: `grep -c` prints 0 AND exits 1 on zero matches; do NOT add `|| echo 0`
+  # (that would append a SECOND "0" line and corrupt the arithmetic). Capture the
+  # single-line count and default-empty-to-0 instead.
+  total=$(grep -cE 'REJECTED_NONFASTFORWARD|non-fast-forward|Giving up|giving up after|\[ERROR\]' "$REPL_LOG" 2>/dev/null) || true
+  total=${total:-0}
+  prev=$(cat "$REPL_OFFSET_FILE" 2>/dev/null || echo 0)
+  case "$prev" in ''|*[!0-9]*) prev=0 ;; esac
+  new=$(( total - prev )); [ "$new" -lt 0 ] && new=$total
+  echo "$total" > "$REPL_OFFSET_FILE"
+  # Published WITHOUT dimensions to match the dimensionless alarm in monitoring_s5.tf
+  # (CloudWatch keys a metric by namespace+name+dimensions; the alarm has none).
+  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name replication_errors --unit Count --value "$new" 2>/dev/null || true
+  [ "$new" -gt 0 ] && logger -t rebar-health "replication failures (new this interval)=${new}"
+fi
