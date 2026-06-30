@@ -72,9 +72,10 @@ test:  ## Run the default test suite (excludes integration + external).
 # (target: quarterly, or when a relevant CVE/rule family lands) via a deliberate PR — see
 # docs/adr/0012. This target prints the refresh procedure + the pinned families (a real
 # auto-pull is intentionally NOT wired: vendoring is a reviewed, pinned change, not a silent
-# live fetch). A companion CI freshness check (warn when the pinned snapshot is older than the
-# cadence) is a documented FOLLOW-ON — see docs/adr/0012 (it needs an upstream-version
-# comparison, i.e. network; the v1 anchor is this target + the rules-present test).
+# live fetch). The companion CI freshness check is `python -m rebar.grounding.detectors.security_pin`
+# (the "Security-rules freshness gate" step in .github/workflows/test.yml): it WARNS when the
+# `vendored_at` pin in security_rules_pin.json is older than the quarterly cadence. (Time-based +
+# network-free; an upstream-version diff is the documented follow-on — see docs/adr/0012.)
 vendor-security-rules:  ## Print how to refresh the vendored security rule subset (WS5).
 	@echo "Vendored security rule families (refresh on the docs/adr/0012 cadence):"
 	@echo "  - p/owasp-top-ten subset  -> security_owasp_cwe.yaml"
@@ -82,4 +83,8 @@ vendor-security-rules:  ## Print how to refresh the vendored security rule subse
 	@echo "  - gitleaks (secrets)      -> security_secrets_gitleaks.yaml (sentinel; rules in the binary)"
 	@echo "Refresh: review upstream for new High/Critical rules, port the curated subset to the"
 	@echo "above YAML as native opengrep rules (rebar.builtin.security.* ids + rebar_envelope),"
-	@echo "validate with 'opengrep scan --validate', and open a PR pinning the new snapshot."
+	@echo "validate with 'opengrep scan --validate', then BUMP \`vendored_at\` in"
+	@echo "security_rules_pin.json (resets the CI freshness gate) and open a PR pinning the snapshot."
+	@echo ""
+	@echo "Current freshness:"
+	@python -m rebar.grounding.detectors.security_pin || true

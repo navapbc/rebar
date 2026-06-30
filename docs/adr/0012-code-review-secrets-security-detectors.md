@@ -48,13 +48,20 @@ Engine B `scan()` takes only `repo_root` (no scan-time changed-files param), so 
 POST-FILTER: a MATCH counts only when its location is a changed file. An ABSTAIN is whole-scan
 (no location) → always fail-closed (we could not verify the change at all).
 
-### 4. Vendored, pinned rules + refresh cadence
+### 4. Vendored, pinned rules + refresh cadence + a (time-based) CI freshness gate
 The security rules are VENDORED + pinned (not a live registry pull) for reproducible/offline
-scanning. They must not silently rot: `make vendor-security-rules` documents the refresh
-procedure + the pinned families; the cadence is quarterly (or when a relevant CVE/rule family
-lands), refreshed via a deliberate, reviewed PR. (A CI check that auto-compares the vendored
-snapshot to an upstream version requires network and is a documented follow-on; the v1 freshness
-anchor is the make target + a test that the vendored rule files are present + non-empty.)
+scanning. They must not silently rot, enforced by two committed pieces:
+- `make vendor-security-rules` documents the refresh procedure + the pinned families; the cadence
+  is quarterly (or when a relevant CVE/rule family lands), refreshed via a deliberate, reviewed PR.
+- A **CI freshness gate** (`python -m rebar.grounding.detectors.security_pin`, the
+  "Security-rules freshness gate" step in `.github/workflows/test.yml`) reads the pin manifest
+  `detectors/builtin/security_rules_pin.json` and **WARNS** (a GitHub Actions `::warning::`, never
+  a hard fail) when the recorded `vendored_at` date is older than `cadence_days`. It is
+  **time-based + network-free by design** — it compares the recorded refresh date against today,
+  so it needs no upstream access; warn-only so a lapsed cadence never blocks unrelated PRs, it
+  just prompts a refresh PR (which re-pins the families and bumps `vendored_at`). A
+  `vendored_at`-vs-upstream-VERSION diff (does an upstream rule actually exist that we haven't
+  vendored?) genuinely needs network and remains the documented **follow-on**.
 
 ## Consequences
 

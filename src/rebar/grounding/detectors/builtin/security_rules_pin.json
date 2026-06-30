@@ -1,0 +1,10 @@
+{
+  "_comment": "Freshness pin for the VENDORED security rule subset (epic b744 / WS5; ADR 0012). Bump `vendored_at` to the refresh date whenever `make vendor-security-rules` re-pins the families below. The CI freshness check (python -m rebar.grounding.detectors.security_pin) WARNS when `vendored_at` is older than `cadence_days`.",
+  "vendored_at": "2026-06-30",
+  "cadence_days": 90,
+  "families": [
+    "p/owasp-top-ten",
+    "p/cwe-top-25",
+    "gitleaks"
+  ]
+}

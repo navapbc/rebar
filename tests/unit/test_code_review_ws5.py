@@ -260,3 +260,61 @@ def test_grounding_info_advertises_the_sarif_backend():
     advertised = {b["name"] for b in oracle._backend_availability()}
     assert "sarif" in advertised
     assert BACKENDS <= advertised  # every Engine B backend is advertised
+
+
+# ── vendored-rules CI freshness gate (the make-target's CI companion) ────────────────────────
+def test_security_rules_pin_is_present_and_well_formed():
+    from rebar.grounding.detectors import security_pin
+
+    pin = security_pin.load_pin()
+    assert "vendored_at" in pin and isinstance(pin["vendored_at"], str)
+    assert int(pin["cadence_days"]) > 0
+    assert pin["families"]  # the pinned families are recorded
+    # the recorded date must parse — the gate relies on it
+    import datetime as _dt
+
+    _dt.date.fromisoformat(pin["vendored_at"])
+
+
+def test_freshness_fresh_pin_is_not_stale_and_emits_no_warning():
+    import datetime as _dt
+
+    from rebar.grounding.detectors import security_pin
+
+    pin = {"vendored_at": "2026-01-01", "cadence_days": 90, "families": ["x"]}
+    status = security_pin.freshness(_dt.date(2026, 2, 1), pin=pin)  # 31d < 90d
+    assert status["stale"] is False and status["age_days"] == 31
+    assert security_pin.format_warning(status) is None
+
+
+def test_freshness_stale_pin_warns():
+    import datetime as _dt
+
+    from rebar.grounding.detectors import security_pin
+
+    pin = {"vendored_at": "2026-01-01", "cadence_days": 90, "families": ["x"]}
+    status = security_pin.freshness(_dt.date(2026, 6, 1), pin=pin)  # 151d > 90d
+    assert status["stale"] is True
+    warning = security_pin.format_warning(status)
+    assert warning and warning.startswith("::warning") and "vendor-security-rules" in warning
+
+
+def test_freshness_unparseable_pin_is_treated_as_stale():
+    # fail-toward-refresh: a missing/garbled vendored_at must NOT silently pass as fresh.
+    import datetime as _dt
+
+    from rebar.grounding.detectors import security_pin
+
+    status = security_pin.freshness(_dt.date(2026, 6, 1), pin={"vendored_at": "not-a-date"})
+    assert status["stale"] is True and status["age_days"] is None
+    assert "unparseable" in security_pin.format_warning(status)
+
+
+def test_freshness_gate_main_is_warn_only_exit_zero(capsys):
+    # The committed pin is fresh today, but main() must ALWAYS exit 0 (warn-only per the AC),
+    # whether or not it is stale.
+    from rebar.grounding.detectors import security_pin
+
+    assert security_pin.main() == 0
+    out = capsys.readouterr().out
+    assert "freshness" in out.lower() or "::warning" in out
