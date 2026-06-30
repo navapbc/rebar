@@ -55,6 +55,21 @@ for d in git index cache db etc logs plugins; do
   mkdir -p "${SITE_HOST_DIR}/${d}"
 done
 
+# Create the EXTERNAL named volumes the compose file references — one per stateful
+# subdir, each a local `bind` volume onto the EBS-backed host path. external:true in
+# the compose file means `docker compose down -v` cannot destroy them. Idempotent:
+# `volume inspect || volume create`.
+for d in git index cache db etc logs plugins; do
+  vol="gerrit_${d}"
+  docker volume inspect "${vol}" >/dev/null 2>&1 || \
+    docker volume create \
+      --driver local \
+      --opt type=none \
+      --opt o=bind \
+      --opt device="${SITE_HOST_DIR}/${d}" \
+      "${vol}" >/dev/null
+done
+
 # Seed gerrit.config (always refresh from the repo so config changes deploy).
 cp "${REPO_ROOT}/infra/compose/gerrit.config" "${SITE_HOST_DIR}/etc/gerrit.config"
 

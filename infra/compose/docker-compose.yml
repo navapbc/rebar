@@ -34,15 +34,18 @@ services:
       # 29418: Gerrit SSH (git-over-SSH) — exposed directly (SG opens 29418).
       - "29418:29418"
     volumes:
-      # Persist the stateful site subdirs on the EBS-backed host path. The baked
-      # binaries under /var/gerrit (bin, lib, gerrit.war) are NOT shadowed.
-      - /var/gerrit/site/git:/var/gerrit/git
-      - /var/gerrit/site/index:/var/gerrit/index
-      - /var/gerrit/site/cache:/var/gerrit/cache
-      - /var/gerrit/site/db:/var/gerrit/db
-      - /var/gerrit/site/etc:/var/gerrit/etc
-      - /var/gerrit/site/logs:/var/gerrit/logs
-      - /var/gerrit/site/plugins:/var/gerrit/plugins
+      # Persist the stateful site subdirs via EXTERNAL named volumes (declared
+      # external: true below; created out-of-band by compose-up.sh as local `bind`
+      # volumes onto the EBS-backed host path /var/gerrit/site/*). external:true means
+      # `docker compose down -v` will NOT destroy them. Only the STATEFUL subdirs are
+      # mounted, so the image's baked binaries (bin, lib, gerrit.war) are NOT shadowed.
+      - gerrit_git:/var/gerrit/git
+      - gerrit_index:/var/gerrit/index
+      - gerrit_cache:/var/gerrit/cache
+      - gerrit_db:/var/gerrit/db
+      - gerrit_etc:/var/gerrit/etc
+      - gerrit_logs:/var/gerrit/logs
+      - gerrit_plugins:/var/gerrit/plugins
     environment:
       # Public HTTPS origin (nginx-terminated). The entrypoint writes this into
       # etc/gerrit.config; it mirrors the canonicalWebUrl we pre-seed there.
@@ -70,3 +73,24 @@ services:
     # the receiver calls the rebar.llm library directly — S4b).
     logging:
       driver: journald
+
+# External named volumes for the stateful Gerrit site subdirs. Declared external:true
+# so `docker compose down -v` does NOT destroy them. compose-up.sh creates each one
+# (idempotently) as a local `bind` volume onto /var/gerrit/site/<subdir> on the EBS
+# data volume BEFORE `docker compose up`. (Per-subdir, not one volume over the whole
+# /var/gerrit, so the image's baked binaries are not shadowed.)
+volumes:
+  gerrit_git:
+    external: true
+  gerrit_index:
+    external: true
+  gerrit_cache:
+    external: true
+  gerrit_db:
+    external: true
+  gerrit_etc:
+    external: true
+  gerrit_logs:
+    external: true
+  gerrit_plugins:
+    external: true
