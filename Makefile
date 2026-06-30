@@ -10,7 +10,7 @@
 .DEFAULT_GOAL := help
 sources = src tests
 
-.PHONY: help install hooks format lint typecheck check test
+.PHONY: help install hooks format lint typecheck check test vendor-security-rules
 
 help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -65,3 +65,21 @@ check: lint typecheck  ## Run every check-only gate (no mutation).
 
 test:  ## Run the default test suite (excludes integration + external).
 	pytest -m "not integration and not external" -q
+
+# epic b744 / WS5: refresh the VENDORED, PINNED High/Critical security rule subset
+# (src/rebar/grounding/detectors/builtin/security_*.yaml). The rules are vendored (not a live
+# registry pull) for reproducible/offline scanning, so they must be refreshed on a cadence
+# (target: quarterly, or when a relevant CVE/rule family lands) via a deliberate PR — see
+# docs/adr/0012. This target prints the refresh procedure + the pinned families (a real
+# auto-pull is intentionally NOT wired: vendoring is a reviewed, pinned change, not a silent
+# live fetch). A companion CI freshness check (warn when the pinned snapshot is older than the
+# cadence) is a documented FOLLOW-ON — see docs/adr/0012 (it needs an upstream-version
+# comparison, i.e. network; the v1 anchor is this target + the rules-present test).
+vendor-security-rules:  ## Print how to refresh the vendored security rule subset (WS5).
+	@echo "Vendored security rule families (refresh on the docs/adr/0012 cadence):"
+	@echo "  - p/owasp-top-ten subset  -> security_owasp_cwe.yaml"
+	@echo "  - p/cwe-top-25 subset     -> security_owasp_cwe.yaml"
+	@echo "  - gitleaks (secrets)      -> security_secrets_gitleaks.yaml (sentinel; rules in the binary)"
+	@echo "Refresh: review upstream for new High/Critical rules, port the curated subset to the"
+	@echo "above YAML as native opengrep rules (rebar.builtin.security.* ids + rebar_envelope),"
+	@echo "validate with 'opengrep scan --validate', and open a PR pinning the new snapshot."

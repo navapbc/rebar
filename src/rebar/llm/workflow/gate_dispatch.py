@@ -462,6 +462,14 @@ def produce_code_review_verdict(
         _attach_code_review_metrics(verdict, rec, total_ms)
         verdict.setdefault("runner", runner_sel.name)
         verdict.setdefault("model", cfg.model)
+        # WS5 fail-CLOSED: a secrets/High-Critical-security detector that abstains (can't verify)
+        # or matches (on a changed file) forces BLOCK + a coverage-gap annotation. Runs in the
+        # consumer (here), never the fail-OPEN oracle.
+        from rebar.llm.code_review import detectors as _detectors
+
+        _detectors.apply_failclosed(
+            verdict, changed_files=list(dc.changed_files), repo_root=repo_root
+        )
         if target_ticket:
             from rebar.llm.code_review import sidecar as _sidecar
 

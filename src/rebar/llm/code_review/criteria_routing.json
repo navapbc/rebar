@@ -82,13 +82,13 @@
     "applies_to": [],
     "default_posture": "blocking",
     "block_threshold": 0.5,
-    "blocking_enabled": false
+    "blocking_enabled": true
   },
   "high-critical-security": {
     "exec": "DET",
     "applies_to": [],
     "default_posture": "blocking",
     "block_threshold": 0.5,
-    "blocking_enabled": false
+    "blocking_enabled": true
   }
 }

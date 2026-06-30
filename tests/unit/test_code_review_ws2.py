@@ -44,20 +44,25 @@ def test_threshold_for_unknown_criterion_is_the_default():
 
 
 def test_threshold_for_takes_min_threshold_and_any_blocking():
-    # min over thresholds; blocking_enabled True iff ANY criterion is blocking-enabled
+    # min over thresholds; blocking_enabled True iff ANY criterion is blocking-enabled.
     bt, blocking = reg.threshold_for(["security", "secret-detection"])
     assert bt == 0.5  # secret-detection's lower threshold wins (min)
-    assert blocking is False  # both ship blocking_enabled=False in v1
+    assert blocking is True  # secret-detection is blocking-enabled (WS5 flipped it)
+    # a purely-advisory criterion set stays non-blocking.
+    assert reg.threshold_for(["security", "performance"]) == (0.95, False)
 
 
-def test_secrets_security_keys_ship_disabled_for_ws5_handoff():
-    """The WS2->WS5 contract: WS2 ships the detector keys with blocking_enabled=False; WS5 flips
-    EXACTLY these two to True. A test pins they exist and are disabled today."""
+def test_secrets_security_keys_are_the_ws5_blocking_handoff():
+    """The WS2->WS5 contract: WS2 OWNS the two detector criterion keys (shipped them with
+    blocking_enabled=False); WS5 flips EXACTLY these two to True (the only blocking-enabled
+    criteria). Post-WS5 they read True; threshold_for reflects it."""
     idx = reg.routing_index()
     for key in ("secret-detection", "high-critical-security"):
-        assert idx[key]["blocking_enabled"] is False, f"{key} must ship disabled (WS5 flips it)"
-    # threshold_for reflects the disabled posture
-    assert reg.threshold_for(["high-critical-security"])[1] is False
+        assert idx[key]["blocking_enabled"] is True, f"{key} is the WS5-flipped blocking criterion"
+    assert reg.threshold_for(["high-critical-security"])[1] is True
+    # and these remain the ONLY blocking-enabled criteria (every overlay stays advisory).
+    blocking = [k for k, v in idx.items() if v.get("blocking_enabled")]
+    assert set(blocking) == {"secret-detection", "high-critical-security"}
 
 
 def test_applies_to_globs_single_source_and_escalation_only():

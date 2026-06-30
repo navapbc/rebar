@@ -39,7 +39,15 @@ from typing import Any
 BACKEND_OPENGREP = "opengrep"
 BACKEND_ASTGREP = "ast-grep"
 BACKEND_METRIC = "metric"
-BACKENDS: frozenset[str] = frozenset({BACKEND_OPENGREP, BACKEND_ASTGREP, BACKEND_METRIC})
+# epic b744 / WS5: a generic SARIF-ingest backend. A detector declares `backend: sarif` + a tool
+# reference (no per-rule matcher YAML — the tool carries its own rules, e.g. gitleaks); the engine
+# subprocess-invokes the tool and ingests its SARIF. The fail-OPEN invariant is unchanged (a
+# missing/errored tool abstains); the consumer-side fail-CLOSED for secrets/security lives in the
+# code-review gate's verdict assembly, never here.
+BACKEND_SARIF = "sarif"
+BACKENDS: frozenset[str] = frozenset(
+    {BACKEND_OPENGREP, BACKEND_ASTGREP, BACKEND_METRIC, BACKEND_SARIF}
+)
 
 
 def _canonical_dimensions() -> frozenset[str]:

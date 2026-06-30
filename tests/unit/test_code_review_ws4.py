@@ -68,6 +68,11 @@ def test_review_code_disabled_returns_empty_review_result(monkeypatch):
 # ── enabled → runs the gate, schema-valid verdict ───────────────────────────────────────────
 def test_produce_verdict_enabled_runs_gate_and_validates(monkeypatch):
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
+    # focus on the LLM-verdict path: the WS5 security-detector fail-closed is its own suite, and
+    # without a repo it would otherwise scan the cwd. Stub it to a no-op here.
+    from rebar.llm.code_review import detectors as _det
+
+    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
     v = gate_dispatch.produce_code_review_verdict(
         LLMConfig.from_env(),
         diff_text=_DIFF,
@@ -81,8 +86,10 @@ def test_produce_verdict_enabled_runs_gate_and_validates(monkeypatch):
 
 def test_review_code_enabled_translates_verdict_to_review_result(monkeypatch):
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
+    from rebar.llm.code_review import detectors as _det
     from rebar.llm.code_review import review_code
 
+    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})  # focus on LLM path
     r = review_code(
         diff_text=_DIFF, changed_files=["x.py"], runner=FakeRunner(structured=_STRUCTURED)
     )

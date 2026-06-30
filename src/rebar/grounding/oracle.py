@@ -326,11 +326,12 @@ def _backend_availability() -> list[dict[str, Any]]:
     # The plain-filesystem refute backend is always available (no external tool).
     out.append({"name": resolve.BACKEND_FS, "available": True, "version": None})
 
-    # Engine B backends (opengrep/ast-grep/metric) — resolved by PATH probe.
+    # Engine B backends (opengrep/ast-grep/metric/sarif) — resolved by PATH probe.
     for backend, candidates in (
         (engine_b.BACKEND_OPENGREP, engine_b._OPENGREP_CANDIDATES),
         (engine_b.BACKEND_ASTGREP, engine_b._ASTGREP_CANDIDATES),
         (engine_b.BACKEND_METRIC, engine_b._METRIC_CANDIDATES),
+        (engine_b.BACKEND_SARIF, engine_b._GITLEAKS_CANDIDATES),
     ):
         binary = _safe(lambda c=candidates: engine_b._resolve_binary(c))
         version = _safe(lambda b=binary: engine_b._binary_version(b)) if binary else None
