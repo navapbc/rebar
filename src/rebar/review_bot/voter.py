@@ -41,6 +41,10 @@ logger = logging.getLogger("rebar.review_bot.voter")
 # at-least-once retries, and the backfill reconciler all key on the same pair, so
 # routing them through one asyncio.Lock serializes the review (the dedup/Gerrit check
 # inside the lock then makes the later ones a no-op skip).
+# NOTE (PoC scope): this dict grows by one small entry per (change, revision) over
+# the process lifetime — an accepted, bounded leak on the single-box PoC (the box is
+# rebuilt from IaC, and the entry count tracks distinct patchsets reviewed). A
+# longer-lived deployment would add an LRU cap / post-release eviction.
 _locks: dict[tuple[str, str], asyncio.Lock] = {}
 _locks_guard = asyncio.Lock()
 

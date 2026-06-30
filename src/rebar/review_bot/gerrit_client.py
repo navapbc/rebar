@@ -236,8 +236,13 @@ class GerritClient:
             )
         except (OSError, subprocess.CalledProcessError) as exc:
             stderr = getattr(exc, "stderr", "") or ""
-            # Never let the token leak into a log line via the URL.
-            redacted = str(stderr).replace(self._cfg.gerrit_bot_token, "***")
+            # Never let the token leak into a log line via the URL — redact BOTH the
+            # raw token AND its percent-encoded form (the token is URL-quoted into the
+            # fetch URL, so git's error output would echo the encoded form).
+            tok = self._cfg.gerrit_bot_token
+            redacted = (
+                str(stderr).replace(tok, "***").replace(urllib.parse.quote(tok, safe=""), "***")
+            )
             raise GerritError(
                 f"clone_change_ref(change={change_number}, ref={revision_ref}) failed: "
                 f"{redacted[:500]}"
