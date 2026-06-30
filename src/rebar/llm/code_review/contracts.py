@@ -1,36 +1,39 @@
-"""Structured-output contract for the code-review BASE reviewer (epic b744 / WS1).
+"""Structured-output contracts for the code-review gate (epic b744 / WS1 + WS2).
 
 The live ``PydanticAIRunner`` binds an agent step's structured-output shape via
-``contracts.response_model_for(output_schema)`` — which keys off the CONTRACTS registry,
-NOT the JSON-Schema registry. So a prompt that declares ``outputs: code_review_base_output``
-only emits the right fields if a Pydantic model is REGISTERED under that name here; without
-it the runner falls back to the default findings+summary model and ``recommend_overlays`` is
-structurally impossible to emit. This module registers that model (mirroring
-``plan_review/passes.py``'s ``register_contracts()``), so BOTH named outputs — kernel-shaped
-``findings`` and the bounded ``recommend_overlays`` escalation — survive into the workflow.
+``contracts.response_model_for(output_schema)`` — keyed off the CONTRACTS registry, NOT the
+JSON-Schema registry. So a prompt that declares ``outputs: <name>`` only emits the right
+fields if a Pydantic model is REGISTERED here. This module registers the code-review
+contracts (mirroring ``plan_review/passes.py``'s ``register_contracts()``):
 
-The JSON Schema (``code_review_base_output.schema.json``) stays the permissive post-hoc
-validator; THIS model is the generation-time contract. ``overlay_id`` is a plain ``str`` (not
-a ``Literal`` over the catalog) on purpose — the closed ``OVERLAY_IDS`` enum is enforced
-post-hoc by ``registry.filter_recommend_overlays`` (drop-not-error), so a hallucinated id
-costs nothing rather than failing the whole step.
-"""
+- ``code_review_base_output`` (WS1 base reviewer) — kernel-shaped ``findings`` + the bounded
+  ``recommend_overlays`` escalation.
+- ``code_review_findings`` (WS2 overlay finders) — kernel-shaped ``findings`` only (overlays
+  do not re-escalate; one-hop).
+- ``code_review_coach`` (WS2 Pass-4 coach) — move-picks ``[{move_id, subject, finding_refs}]``.
+
+The Pass-2 verifier reuses the kernel's gate-agnostic ``verification`` contract (registered by
+``review_kernel.verify``), so it is NOT re-registered here.
+
+Findings use the kernel Pass-1 shape (claim/criteria/evidence/impact — what the kernel Pass-2
+listing consumes); ``evidence`` is a ``list[str]`` so the kernel's ``' | '.join(...)`` cannot
+crash. ``overlay_id`` stays a plain ``str`` (the closed ``OVERLAY_IDS`` enum is enforced
+post-hoc by ``registry.filter_recommend_overlays`` — drop-not-error)."""
 
 from __future__ import annotations
 
 from rebar.llm import contracts
 
 
-def base_output_model() -> type:
-    """The base-reviewer response model: kernel Pass-1 findings (claim/criteria/evidence/
-    impact — the shape the kernel Pass-2 listing consumes) PLUS ``recommend_overlays`` and a
-    ``summary``. pydantic imported lazily so importing this module stays cheap."""
+def _code_finding_model() -> type:
+    """The kernel Pass-1 finding shape for code review (built lazily; pydantic imported here)."""
     from pydantic import BaseModel, Field
 
     class CodeFinding(BaseModel):
         finding: str = Field(description="The defect/gap, stated as a claim to verify.")
         criteria: list[str] = Field(
-            default_factory=list, description="Code-review dimension id(s) the finding maps to."
+            default_factory=list,
+            description="Code-review dimension/overlay id(s) the finding maps to.",
         )
         location: str = Field(
             default="",
@@ -50,6 +53,15 @@ def base_output_model() -> type:
             default="", description="A concrete fix — ONLY when confident; else empty."
         )
 
+    return CodeFinding
+
+
+def base_output_model() -> type:
+    """Base reviewer (WS1): kernel findings PLUS ``recommend_overlays`` + ``summary``."""
+    from pydantic import BaseModel, Field
+
+    CodeFinding = _code_finding_model()
+
     class OverlayRecommendation(BaseModel):
         overlay_id: str = Field(
             description="A specialist overlay id to ALSO run (validated post-hoc against the "
@@ -59,7 +71,7 @@ def base_output_model() -> type:
 
     class CodeReviewBaseOutput(BaseModel):
         analysis: str = Field(default="", description="Scratchpad — reason before emitting.")
-        findings: list[CodeFinding] = Field(default_factory=list)
+        findings: list[CodeFinding] = Field(default_factory=list)  # type: ignore[valid-type]
         recommend_overlays: list[OverlayRecommendation] = Field(
             default_factory=list,
             description="Bounded base->overlay escalation signal (may be empty).",
@@ -69,9 +81,44 @@ def base_output_model() -> type:
     return CodeReviewBaseOutput
 
 
+def findings_model() -> type:
+    """Overlay finders (WS2): kernel findings only — overlays do not re-escalate (one-hop)."""
+    from pydantic import BaseModel, Field
+
+    CodeFinding = _code_finding_model()
+
+    class CodeReviewFindings(BaseModel):
+        analysis: str = Field(default="", description="Scratchpad — reason before emitting.")
+        findings: list[CodeFinding] = Field(default_factory=list)  # type: ignore[valid-type]
+        summary: str | None = Field(default=None, description="Optional short summary.")
+
+    return CodeReviewFindings
+
+
+def coach_model() -> type:
+    """Pass-4 coach (WS2): move-picks; the kernel renders the prose deterministically."""
+    from pydantic import BaseModel, Field
+
+    class CodeCoachNote(BaseModel):
+        move_id: str = Field(description="A move id from the locked code move-catalog.")
+        subject: str = Field(
+            description="A short noun-phrase subject (≤8 words; no code, no imperative)."
+        )
+        finding_refs: list[str] = Field(
+            default_factory=list, description="The finding id(s) this move addresses."
+        )
+
+    class CodeCoachOutput(BaseModel):
+        notes: list[CodeCoachNote] = Field(default_factory=list)
+
+    return CodeCoachOutput
+
+
 def register_contracts() -> None:
-    """Register the code-review structured-output contract(s). Idempotent."""
+    """Register the code-review structured-output contracts. Idempotent."""
     contracts.register_contract("code_review_base_output", base_output_model)
+    contracts.register_contract("code_review_findings", findings_model)
+    contracts.register_contract("code_review_coach", coach_model)
 
 
 register_contracts()

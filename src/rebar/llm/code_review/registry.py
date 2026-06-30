@@ -17,6 +17,9 @@ is silently DROPPED, never errored — so a hallucinated id costs nothing.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from functools import lru_cache
+from importlib import resources
 from typing import Any, TypeGuard
 
 # ── The closed overlay-id vocabulary (WS1 OWNS this) ──────────────────────────────────────
@@ -118,3 +121,58 @@ def base_failure_result(reason: str) -> dict[str, Any]:
         "recommend_overlays": [],
         "coverage_gaps": [coverage_gap_note(f"base code-reviewer unavailable: {reason}")],
     }
+
+
+# ── Criteria routing (WS2) — per-criterion posture, read from the committed routing index ──
+# Mirrors plan_review/registry.py: the ROUTING (exec / applies_to / default_posture /
+# block_threshold / blocking_enabled) lives in the COMMITTED criteria_routing.json (the analog
+# of plan-review's), read here by threshold_for. The gate YAML holds NO threshold values.
+_ROUTING_RESOURCE = "criteria_routing.json"
+
+# The kernel's default when a criterion has no routing entry (kept in sync with
+# review_kernel.DEFAULT_BLOCK_THRESHOLD = 0.95 — the high-threshold, mostly-advisory v1 stance).
+DEFAULT_BLOCK_THRESHOLD = 0.95
+
+
+@lru_cache(maxsize=1)
+def routing_index() -> dict[str, Any]:
+    """The committed per-criterion routing index (cached). A flat map
+    ``{criterion_id: {exec, applies_to, default_posture, block_threshold, blocking_enabled}}``."""
+    import json
+
+    raw = resources.files("rebar.llm.code_review").joinpath(_ROUTING_RESOURCE).read_text("utf-8")
+    data = json.loads(raw)
+    return {k: v for k, v in data.items() if not k.startswith("_")}
+
+
+def applies_to_globs(criterion_id: str) -> list[str]:
+    """The `applies_to` file globs for a criterion (the single source for WS3's Round-A
+    glob-trigger logic). Empty list = escalation-only (no deterministic glob trigger)."""
+    entry = routing_index().get(criterion_id) or {}
+    globs = entry.get("applies_to") or []
+    return [g for g in globs if isinstance(g, str)]
+
+
+def threshold_for(criteria: Sequence[str]) -> tuple[float, bool]:
+    """Resolve ``(block_threshold, blocking_enabled)`` for a finding's criteria — the
+    ``ThresholdResolver`` the kernel ``pass3_over_findings(..., threshold_for=...)`` consumes.
+
+    block_threshold = the MIN over the criteria's thresholds (most aggressive; default 0.95);
+    blocking_enabled = True iff ANY criterion has ``blocking_enabled: true`` in the routing index
+    (the field WS5 flips True for the secret-detection / high-critical-security keys). An unknown
+    criterion contributes the default threshold and is NOT blocking — so a base-reviewer dimension
+    with no routing entry stays advisory at 0.95.
+
+    NOTE — intentional divergence from ``plan_review/orchestrator.py:_threshold_for``: that one
+    DERIVES blocking from ``default_posture == "blocking"``; we read an EXPLICIT
+    ``blocking_enabled`` field instead. This is deliberate — the detector keys are
+    ``default_posture: "blocking"`` (their INTENDED posture) yet must ship ADVISORY in v1, which
+    only a separate enable flag expresses; WS5 flips the flag without touching the posture.
+    ``default_posture``/``exec`` are staged data for WS3 (exec) / WS5 (posture) — do NOT "fix"
+    this back to the plan-review derivation."""
+    idx = routing_index()
+    thresholds = [
+        float(idx.get(c, {}).get("block_threshold", DEFAULT_BLOCK_THRESHOLD)) for c in criteria
+    ]
+    blocking_enabled = any(bool(idx.get(c, {}).get("blocking_enabled", False)) for c in criteria)
+    return (min(thresholds) if thresholds else DEFAULT_BLOCK_THRESHOLD), blocking_enabled

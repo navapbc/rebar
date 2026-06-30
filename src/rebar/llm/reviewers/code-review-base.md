@@ -3,9 +3,9 @@ schema_version: 1
 title: Code-review base reviewer (Pass-1)
 description: Pass 1 of the four-pass code-review gate (epic b744). The base reviewer
   ALWAYS runs over the whole change, surfaces grounded evidence-record findings, and
-  emits the bounded base->overlay escalation signal (recommend_overlays) constrained to
-  the fixed overlay catalog. No model-emitted severity (computed deterministically in
-  Pass 3).
+  emits the bounded base->overlay escalation signal (recommend_overlays) constrained
+  to the fixed overlay catalog. No model-emitted severity (computed deterministically
+  in Pass 3).
 inputs: reviewer_input
 outputs: code_review_base_output
 execution_mode: agentic

@@ -1,0 +1,94 @@
+{
+  "_comment": "Committed routing index for the code-review gate (analog of plan_review/criteria_routing.json). Top-level _-prefixed keys are stripped by registry.routing_index(). The secret-detection / high-critical-security keys ship blocking_enabled=false (advisory in v1); WS5 flips exactly those two to true (the deterministic gitleaks/semgrep detectors, fail-closed).",
+  "security": {
+    "exec": "AGENT",
+    "applies_to": ["**/auth*", "**/*secret*", "**/security/**", "**/signing*", "**/*cred*"],
+    "default_posture": "advisory",
+    "block_threshold": 0.95,
+    "blocking_enabled": false
+  },
+  "performance": {
+    "exec": "AGENT",
+    "applies_to": [],
+    "default_posture": "advisory",
+    "block_threshold": 0.95,
+    "blocking_enabled": false
+  },
+  "i18n": {
+    "exec": "1-TURN",
+    "applies_to": ["**/locale/**", "**/*i18n*", "**/translations/**"],
+    "default_posture": "advisory",
+    "block_threshold": 0.95,
+    "blocking_enabled": false
+  },
+  "a11y": {
+    "exec": "1-TURN",
+    "applies_to": ["**/*.html", "**/*.jsx", "**/*.tsx", "**/templates/**"],
+    "default_posture": "advisory",
+    "block_threshold": 0.95,
+    "blocking_enabled": false
+  },
+  "db-migrations": {
+    "exec": "AGENT",
+    "applies_to": ["**/migrations/**", "**/alembic/**", "**/*schema*.sql"],
+    "default_posture": "advisory",
+    "block_threshold": 0.95,
+    "blocking_enabled": false
+  },
+  "docs": {
+    "exec": "1-TURN",
+    "applies_to": ["**/*.md", "docs/**", "**/README*"],
+    "default_posture": "advisory",
+    "block_threshold": 0.95,
+    "blocking_enabled": false
+  },
+  "supply-chain": {
+    "exec": "1-TURN",
+    "applies_to": ["**/requirements*.txt", "**/pyproject.toml", "**/package*.json", "**/*.lock", "**/Pipfile*"],
+    "default_posture": "advisory",
+    "block_threshold": 0.95,
+    "blocking_enabled": false
+  },
+  "api-compat": {
+    "exec": "AGENT",
+    "applies_to": ["**/*api*", "**/schemas/**", "**/*.proto", "**/cli*", "**/mcp_server*"],
+    "default_posture": "advisory",
+    "block_threshold": 0.95,
+    "blocking_enabled": false
+  },
+  "iac": {
+    "exec": "AGENT",
+    "applies_to": ["**/*.tf", "**/*.tfvars", "**/k8s/**", "**/helm/**", "**/ansible/**", "**/Dockerfile*"],
+    "default_posture": "advisory",
+    "block_threshold": 0.95,
+    "blocking_enabled": false
+  },
+  "tests": {
+    "exec": "AGENT",
+    "applies_to": ["**/test_*.py", "**/*_test.py", "**/tests/**"],
+    "default_posture": "advisory",
+    "block_threshold": 0.95,
+    "blocking_enabled": false
+  },
+  "llm-prompts": {
+    "exec": "AGENT",
+    "applies_to": ["**/reviewers/**", "**/prompts*", "**/*.prompt", "**/schemas/*.schema.json"],
+    "default_posture": "advisory",
+    "block_threshold": 0.95,
+    "blocking_enabled": false
+  },
+  "secret-detection": {
+    "exec": "DET",
+    "applies_to": [],
+    "default_posture": "blocking",
+    "block_threshold": 0.5,
+    "blocking_enabled": false
+  },
+  "high-critical-security": {
+    "exec": "DET",
+    "applies_to": [],
+    "default_posture": "blocking",
+    "block_threshold": 0.5,
+    "blocking_enabled": false
+  }
+}
