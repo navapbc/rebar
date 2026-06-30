@@ -206,6 +206,20 @@ open→in_progress`) verifies, in order:
 4. the bound material fingerprint matches the **current** ticket — a material edit
    (description/AC/file-impact/decomposition) invalidates it. (Tags/comments/links/
    assignee are *not* material and do not invalidate.)
+5. it **post-dates the latest reopen** — reactivating a ticket (`closed → open`,
+   recorded as `state["last_reopened_at"]`) invalidates an attestation signed before it.
+
+**Validity-on-read, not write-time mutation (epic dark-acme-lumen, ADR 0009).** These
+checks are computed when a gate reads an attestation, by the single
+`plan_review.attest.compute_validity(attestation, ticket_state, kind)` dispatcher — the
+attestation records themselves are **immutable** and are never cleared/mutated by a
+transition (the old reopen-time `retire_attested_pin` is gone). An attestation can thus be
+HMAC-`certified` (integrity intact) yet not **valid** for its gate (e.g. after a reopen or a
+material edit). **Invariant: gates call `compute_validity` on a certified attestation — they
+never trust HMAC certification alone, nor mutate a record.** This is also what lets a ticket
+hold a plan-review *and* a completion-verifier attestation at once without either clobbering
+the other (the kind-keyed `attestations` map; the legacy top-level `signature` is a
+back-compat mirror of the most-recent one).
 
 The attestation means **"a review process was followed, no blocking red flags, with
 coverage recorded"** — *not* "perfect". The rich per-criterion verdicts live in the
@@ -352,6 +366,36 @@ in-session analysis, no human-feedback requirement.
 reviewed" predicate, and a **claimed-without-signature** (or force-claimed) ticket
 as the durable signal that the review was skipped — exactly parallel to the
 completion close gate's signed-verdict / closed-without-signature pair.
+
+### Multiple attestation kinds + how a CI gate reads them
+
+A ticket carries a **kind-keyed `attestations` map** (epic dark-acme-lumen): independent
+attestations of different **kinds** — `plan-review` (signed out-of-band by `review-plan`,
+verified at claim) and `completion-verifier` (signed by the close transition), with room for
+future kinds — coexist instead of
+clobbering one slot. `rebar show <ticket>` renders the map (the raw HMAC hex is stripped from
+every kind); the legacy top-level `signature` is a back-compat mirror of the most-recent
+attestation (its removal is the deferred follow-up — see ADR 0009 / ticket
+`352b-5097-9971-4dc1`).
+
+To read them:
+- **Per kind (the CI-gate form):** `rebar verify-signature <ticket> --kind plan-review`
+  (or `--kind completion-verifier`) — exit 0 iff that kind is certified. Since **only a PASS
+  is ever signed**, `certified` already implies the gate passed.
+- **All kinds at once:** the library `rebar.signing.verify_attestations(ticket)` →
+  `{kind: verdict}`; or the `attestations` field of `rebar show`.
+- **"Certified" ≠ "valid":** a record can be HMAC-`certified` yet stale (reopened / code
+  drifted / materially edited). A gate that cares about current applicability — including a
+  CI gate — must also confirm it (status, freshness), which is what
+  `plan_review.attest.compute_validity` does on the read path.
+
+> **CI deployment constraint (known follow-up).** The signature is an HMAC under the
+> environment's signing key, so a CI runner that *verifies* attestations needs that same
+> `REBAR_SIGNING_KEY` (a shared secret). This is the symmetric-key limitation of the current
+> scheme; moving to asymmetric verification (a CI verifier needs only a public key) — and
+> associating attestations with the *code* under review, not just the ticket — is deliberately
+> **out of scope** here and tracked as future work. This epic builds the per-ticket primitives
+> and does **not** add a dedicated CI `gate-check` command.
 
 ## End-to-end time-to-first-work (honest)
 

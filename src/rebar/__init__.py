@@ -597,7 +597,7 @@ def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> dict:
         ) from None
 
 
-def verify_signature(ticket_id: str, *, repo_root=None) -> dict:
+def verify_signature(ticket_id: str, *, kind: str | None = None, repo_root=None) -> dict:
     """Certify a ticket's recorded verified steps against its signature.
 
     Returns a verdict dict ``{ticket_id, verified, verdict, reason, manifest,
@@ -605,12 +605,16 @@ def verify_signature(ticket_id: str, *, repo_root=None) -> dict:
     environment's key), ``mismatch`` (steps altered / signature invalid),
     ``foreign_key`` (signed by a different environment), or ``unsigned``. Raises
     :class:`RebarError` only when the ticket id cannot be resolved.
+
+    ``kind`` selects which attestation to verify (epic dark-acme-lumen): ``None`` (default)
+    verifies the most-recent signature (back-compatible); an explicit kind (e.g.
+    ``"completion-verifier"``) verifies that kind strictly from the kind-keyed map.
     """
     from rebar import signing
     from rebar.signing import SigningError
 
     try:
-        return signing.verify_signature(ticket_id, repo_root=repo_root)
+        return signing.verify_signature(ticket_id, kind=kind, repo_root=repo_root)
     except SigningError as exc:
         raise RebarError(
             f"rebar verify-signature failed (exit {exc.returncode}): {exc.message}",

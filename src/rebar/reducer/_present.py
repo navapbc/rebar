@@ -50,4 +50,19 @@ def public_state(state: dict[str, Any]) -> dict[str, Any]:
         nested = out.get(parent_key)
         if isinstance(nested, dict) and any(s in nested for s in subkeys):
             out[parent_key] = {k: v for k, v in nested.items() if k not in subkeys}
+    # `attestations` is a kind-keyed map of signature records (epic dark-acme-lumen); the
+    # flat `_INTERNAL_SUBKEYS` rule above strips one level (the legacy single `signature`),
+    # but the HMAC hex here lives TWO levels deep (`attestations.<kind>.signature`). Strip it
+    # from EVERY per-kind record — the canonical hex-strip path for all present + future
+    # kinds, so the raw signature never leaks into show/list/search/MCP output.
+    attestations = out.get("attestations")
+    if isinstance(attestations, dict):
+        out["attestations"] = {kind: _strip_hex(rec) for kind, rec in attestations.items()}
     return out
+
+
+def _strip_hex(record: Any) -> Any:
+    """Drop the raw HMAC hex (`signature`) from one attestation record; pass non-dicts through."""
+    if not isinstance(record, dict):
+        return record
+    return {k: v for k, v in record.items() if k != "signature"}

@@ -355,13 +355,20 @@ def head_sha(repo_root) -> str:
 
 
 # ── Library-facing operations ─────────────────────────────────────────────────
-def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> dict:
+def sign_manifest(ticket_id: str, manifest, *, kind: str | None = None, repo_root=None) -> dict:
     """Sign a manifest of verified steps for a ticket; append a SIGNATURE event.
 
     Validates the manifest, resolves the ticket id, computes the HMAC with the
     environment key, and persists the signature record through the single locked
     write path. Returns the record (with the resolved ``ticket_id``). Raises
     :class:`SigningError` on a validation/resolve failure.
+
+    ``kind`` (e.g. ``"plan-review"`` / ``"completion-verifier"``) is recorded UNSIGNED on
+    the event as a routing hint for the reducer's kind-keyed attestations map (epic
+    dark-acme-lumen). It is never authoritative — the reducer derives the kind from the
+    signed ``manifest[0]`` and ignores a mismatched hint — so it does not enter the canonical
+    signed payload and never invalidates a prior signature. Omitted callers (e.g. `rebar sign`)
+    sign exactly as before.
     """
     from rebar._commands._seam import (
         CommandError,
@@ -396,6 +403,10 @@ def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> dict:
         "verified_at_sha": verified_at_sha_from_manifest(steps),
         "signed_at": time.time_ns(),
     }
+    # Unsigned routing hint for the reducer's kind-keyed map; omitted when not provided so
+    # existing callers' events are byte-identical to before.
+    if kind is not None:
+        record["kind"] = kind
     try:
         append_event(resolved, "SIGNATURE", record, tracker, repo_root=repo_root)
     except CommandError as exc:
@@ -403,51 +414,20 @@ def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> dict:
     return {**record, "ticket_id": resolved}
 
 
-def retire_attested_pin(ticket_id: str, *, repo_root=None) -> bool:
-    """Retire a ticket's attested ``verified_at_sha`` pin (epic raze-vet-ditch S4).
-
-    Called on reopen/abandon: a SHA pinned to a now-undone closure must not outlive it.
-    Only acts when the current signature actually carries a ``verified-at-sha:`` step
-    (an attested close) — a legacy/non-attested signature is left untouched, so reopen
-    behavior is unchanged for everything except attested closures. Retires by appending a
-    cleared SIGNATURE event (verify then reports ``unsigned``). Returns True if it retired
-    a pin. Best-effort: never raises (reopen must not fail on a signing hiccup)."""
-    from rebar.reducer import reduce_ticket
-
-    tracker = config.tracker_dir(repo_root)
-    try:
-        from rebar._engine_support.resolver import resolve_ticket_id
-
-        resolved = resolve_ticket_id(ticket_id, str(tracker)) or ticket_id
-        state = reduce_ticket(os.path.join(str(tracker), resolved)) or {}
-        sig = state.get("signature")
-        sig = sig if isinstance(sig, dict) else {}
-        if not verified_at_sha_from_manifest(sig.get("manifest")) and not sig.get(
-            "verified_at_sha"
-        ):
-            return False  # no attested pin — leave the signature as-is
-        from rebar._commands._seam import append_event
-
-        append_event(
-            resolved,
-            "SIGNATURE",
-            {"manifest": [], "signature": "", "retired": True, "signed_at": time.time_ns()},
-            tracker,
-            repo_root=repo_root,
-        )
-        return True
-    except Exception:  # noqa: BLE001 — best-effort retirement; never break reopen
-        return False
+# NOTE: ``retire_attested_pin`` (a write-time clear of the signature on reopen) was REMOVED
+# in epic dark-acme-lumen. Attestation records are now immutable and reopen invalidation is
+# computed on READ via ``state['last_reopened_at']`` + ``plan_review.attest.compute_validity``
+# — which, unlike the old clear, does not destroy the kind-keyed attestations a reopened ticket
+# still legitimately carries. See docs/adr/0009-reopen-invalidation-validity-on-read.md.
 
 
-def verify_signature(ticket_id: str, *, repo_root=None) -> dict:
-    """Certify a ticket's recorded verified-steps against its signature.
+def _resolve_and_reduce(ticket_id: str, repo_root):
+    """Shared verify boilerplate: resolve the id, reduce the ticket, load the key.
 
-    Resolves the id, reduces the ticket, and verifies ``state['signature']`` with
-    the environment key. Returns the verdict dict (see :func:`verify_record`) with
-    the resolved ``ticket_id`` attached. Raises :class:`SigningError` (exit 1)
-    only when the ticket itself cannot be resolved.
-    """
+    Verify is a READ: never mint a key on disk (a read-only deployment must not write a
+    secret). A key-less environment can only ever report unsigned/foreign_key — the honest
+    answer. Returns ``(resolved_id, state, key)``; raises :class:`SigningError` (exit 1) when
+    the ticket cannot be resolved."""
     from rebar._engine_support import reads
     from rebar._engine_support.resolver import resolve_ticket_id
     from rebar.reducer import reduce_ticket
@@ -460,13 +440,57 @@ def verify_signature(ticket_id: str, *, repo_root=None) -> dict:
     if resolved is None:
         raise SigningError(f"Error: ticket '{ticket_id}' not found")
     state = reduce_ticket(os.path.join(tracker, resolved)) or {}
-    # Verify is a READ: never mint a key on disk (a read-only deployment must not
-    # write a secret). A key-less environment can only ever report unsigned/
-    # foreign_key, which is the honest answer.
-    key = signing_key(tracker, create_if_missing=False)
-    result = verify_record(state.get("signature"), resolved, key)
+    return resolved, state, signing_key(tracker, create_if_missing=False)
+
+
+def _record_for_kind(state: dict, kind: str | None):
+    """The signature record to verify for ``kind``. ``kind=None`` returns the legacy
+    most-recent ``state['signature']`` mirror (EXACT pre-attestations behavior — verify the
+    latest signature of any kind). An explicit kind returns ``state['attestations'][kind]``
+    STRICTLY (None when that kind is absent → an honest ``unsigned``); the mirror — which may
+    be a different kind — is never substituted for a requested kind."""
+    if kind is None:
+        return state.get("signature")
+    att = state.get("attestations")
+    return att.get(kind) if isinstance(att, dict) else None
+
+
+def verify_signature(ticket_id: str, *, kind: str | None = None, repo_root=None) -> dict:
+    """Certify a ticket's recorded verified-steps against its signature.
+
+    Resolves the id, reduces the ticket, and verifies one signature record with the
+    environment key. Returns the verdict dict (see :func:`verify_record`) with the resolved
+    ``ticket_id`` attached. Raises :class:`SigningError` (exit 1) only when the ticket itself
+    cannot be resolved.
+
+    ``kind`` selects WHICH attestation to verify (epic dark-acme-lumen): ``None`` (default)
+    verifies the legacy most-recent ``signature`` mirror — exact pre-attestations behavior, so
+    every existing no-kind caller is unchanged — while an explicit kind (e.g. ``"plan-review"``
+    / ``"completion-verifier"``) verifies THAT kind strictly from the kind-keyed map. Use
+    :func:`verify_attestations` for all kinds at once."""
+    resolved, state, key = _resolve_and_reduce(ticket_id, repo_root)
+    result = verify_record(_record_for_kind(state, kind), resolved, key)
     result["ticket_id"] = resolved
+    if kind is not None:
+        result["kind"] = kind
     return result
+
+
+def verify_attestations(ticket_id: str, *, repo_root=None) -> dict:
+    """Verify EVERY attestation kind on a ticket: returns ``{kind: verdict_dict}`` (each a
+    :func:`verify_record` result with ``ticket_id`` + ``kind`` attached), kinds sorted. ``{}``
+    when the ticket carries no attestations. No LLM, no network — a pure local HMAC verify per
+    kind. Raises :class:`SigningError` only when the ticket cannot be resolved."""
+    resolved, state, key = _resolve_and_reduce(ticket_id, repo_root)
+    att = state.get("attestations")
+    out: dict = {}
+    if isinstance(att, dict):
+        for k in sorted(att):
+            r = verify_record(att[k], resolved, key)
+            r["ticket_id"] = resolved
+            r["kind"] = k
+            out[k] = r
+    return out
 
 
 # ── CLI arms (in-process dispatch from rebar._cli) ────────────────────────────
@@ -502,10 +526,16 @@ def sign_cli(argv: list[str]) -> int:
 
 
 def verify_signature_cli(argv: list[str]) -> int:
-    """``rebar verify-signature <ticket_id> [--output json]``.
+    """``rebar verify-signature <ticket_id> [--kind <kind>] [--output json]``.
 
-    Exit 0 iff the verdict is ``certified``; exit 1 for mismatch / foreign_key /
-    unsigned / unresolved ticket.
+    Verifies a SINGLE attestation and returns its verdict (json = the verdict dict, report =
+    one ``SIGNATURE: …`` line) — exit 0 iff ``certified``; exit 1 for
+    mismatch/foreign_key/unsigned; the SigningError exit code on an unresolved ticket.
+    Without ``--kind`` this verifies the most-recent signature (exact pre-attestations
+    behavior). With ``--kind K`` (``--kind K`` or ``--kind=K``) it verifies that kind strictly
+    from the kind-keyed map — the per-ticket CI-gate form (epic dark-acme-lumen). The full
+    per-kind set is available via the library ``verify_attestations`` and the ``attestations``
+    field of ``rebar show``.
     """
     import sys
 
@@ -520,16 +550,32 @@ def verify_signature_cli(argv: list[str]) -> int:
     except OutputFormatError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 2
-    if len(rest) < 1:
-        sys.stderr.write("Usage: rebar verify-signature <ticket_id>\n")
+    # Parse --kind (accept both the space and equals form, matching the read-CLI convention).
+    kind: str | None = None
+    pos: list[str] = []
+    i = 0
+    while i < len(rest):
+        a = rest[i]
+        if a == "--kind" and i + 1 < len(rest):
+            kind = rest[i + 1]
+            i += 2
+            continue
+        if a.startswith("--kind="):
+            kind = a[len("--kind=") :]
+            i += 1
+            continue
+        pos.append(a)
+        i += 1
+    if len(pos) < 1:
+        sys.stderr.write("Usage: rebar verify-signature <ticket_id> [--kind <kind>]\n")
         return 1
     try:
-        result = verify_signature(rest[0])
+        result = verify_signature(pos[0], kind=kind)
     except SigningError as exc:
         if fmt == "json":
             sys.stdout.write(
                 json.dumps(
-                    error_envelope("ticket_not_found", rest[0], exc.message, exc.returncode),
+                    error_envelope("ticket_not_found", pos[0], exc.message, exc.returncode),
                     ensure_ascii=False,
                 )
                 + "\n"
@@ -539,5 +585,6 @@ def verify_signature_cli(argv: list[str]) -> int:
     if fmt == "json":
         sys.stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
     else:
-        sys.stdout.write(f"SIGNATURE: {result['verdict']} — {result['reason']}\n")
+        label = f"SIGNATURE[{kind}]" if kind else "SIGNATURE"
+        sys.stdout.write(f"{label}: {result['verdict']} — {result['reason']}\n")
     return 0 if result["verified"] else 1

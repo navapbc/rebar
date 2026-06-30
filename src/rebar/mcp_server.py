@@ -502,14 +502,19 @@ def build_server():
         return BridgeFsckOut.model_validate(rebar.bridge_fsck())
 
     @mcp.tool()
-    def verify_signature(ticket_id: str) -> VerifySignatureResultOut:
+    def verify_signature(ticket_id: str, kind: str | None = None) -> VerifySignatureResultOut:
         """Certify a ticket's verified-steps manifest against its signature.
 
         Recomputes the HMAC with THIS environment's signing key and returns
         {ticket_id, verified, verdict, reason, manifest, ...}. verdict is
         'certified' (steps match), 'mismatch' (altered/invalid), 'foreign_key'
-        (signed by a different environment), or 'unsigned'. Read-only."""
-        return VerifySignatureResultOut.model_validate(rebar.verify_signature(ticket_id))
+        (signed by a different environment), or 'unsigned'. Read-only.
+
+        `kind` selects which attestation to verify (epic dark-acme-lumen): omitted verifies
+        the most-recent signature (back-compatible); an explicit kind (e.g. 'plan-review' /
+        'completion-verifier') verifies that kind strictly. The full per-kind set is on the
+        ticket-state `attestations` field via show_ticket."""
+        return VerifySignatureResultOut.model_validate(rebar.verify_signature(ticket_id, kind=kind))
 
     @mcp.tool()
     def reconcile(mode: str = "dry-run") -> dict:

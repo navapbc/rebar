@@ -112,9 +112,19 @@ shape) drawn from the canonical JSON Schemas — see
 `log_session` (capture helper — appends a verbose entry to the current
 `session_log`, creating one on first use),
 `sign_manifest` (HMAC-signs a manifest of verified steps with the environment key;
-`verify_signature` certifies it), and `run_workflow` (executes a
+`verify_signature` certifies it — pass `kind` to certify a specific attestation kind,
+e.g. `plan-review` / `completion-verifier`), and `run_workflow` (executes a
 `.rebar/workflows/*.yaml` workflow against a ticket — a lean-runtime capability
 that does not itself need the `[agents]` extra, though individual LLM steps do).
+
+> **Attestations are kind-keyed + additive (epic dark-acme-lumen).** A ticket holds a
+> `attestations` map (rendered by `show`, HMAC hex stripped): independent attestations of
+> different **kinds** (`plan-review` at claim, `completion-verifier` at close, future kinds)
+> coexist instead of clobbering one slot. Records are **immutable**; "valid for a gate right
+> now" is computed on read (`plan_review.attest.compute_validity`) — a reopen / code-drift /
+> material-edit makes a still-`certified` record read as not-valid. The top-level `signature`
+> is a back-compat mirror of the most-recent attestation. See `docs/plan-review-gate.md` +
+> ADR 0009.
 
 > **Authoring workflows + prompts.** The visual editor is
 > [docs/workflow-editor.md](docs/workflow-editor.md); the contract-bearing

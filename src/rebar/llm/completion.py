@@ -90,11 +90,22 @@ def _child_closure_findings(ticket_id: str, repo_root) -> list[dict]:
                 }
             )
             continue
+        # Verify the child's COMPLETION-VERIFIER attestation specifically (epic
+        # dark-acme-lumen) — not the most-recent signature of any kind — then run
+        # compute_validity so a reopened/materially-edited closure no longer counts as a
+        # validated closure (validity-on-read; records are never mutated).
         try:
-            verdict = rebar.verify_signature(cid, repo_root=repo_root).get("verdict")
-        except Exception as exc:  # noqa: BLE001 — never let a signature read crash the verification: the error is recorded in-band as the verdict string
-            verdict = f"error: {exc}"
-        if verdict != "certified":
+            sig = rebar.verify_signature(cid, kind="completion-verifier", repo_root=repo_root)
+            if sig.get("verdict") == "certified":
+                from rebar.llm.plan_review.attest import compute_validity
+
+                v = compute_validity(sig, c, "completion-verifier", repo_root=repo_root)
+                valid, detail = v.get("valid", False), v.get("reason", "")
+            else:
+                valid, detail = False, f"signature: {sig.get('verdict')}"
+        except Exception as exc:  # noqa: BLE001 — never let a signature read crash the verification: recorded in-band
+            valid, detail = False, f"error: {exc}"
+        if not valid:
             out.append(
                 {
                     "criterion": f"direct child {cid} has a signed/validated closure",
@@ -102,11 +113,11 @@ def _child_closure_findings(ticket_id: str, repo_root) -> list[dict]:
                     "dimension": "completion",
                     "detail": (
                         f"child {cid} ('{title}') is closed but its completion closure is not "
-                        f"certified (signature: {verdict}). Re-close it through the gate so it "
-                        "carries a validated closure."
+                        f"valid ({detail}). Re-close it through the gate so it carries a "
+                        "validated completion-verifier attestation."
                     ),
                     "citations": [
-                        {"kind": "source", "description": f"verify_signature({cid})={verdict}"}
+                        {"kind": "source", "description": f"completion-verifier({cid}): {detail}"}
                     ],
                 }
             )
