@@ -75,6 +75,25 @@ def _progressive_enabled(repo_root) -> bool:
         return False
 
 
+def _remediation_decision(ticket_id: str, repo_root) -> dict[str, Any] | None:
+    """The remediation-mode eligibility DECISION for ``ticket_id`` (epic 7d43, child ec89),
+    or ``None`` when the ``verify.remediation_mode`` key is off/absent (default-OFF v1 rollout) or
+    config is unreadable — in which case the gate runs a byte-identical full review. When enabled,
+    returns :func:`attest.remediation_mode_candidate`'s decision dict (the Pass-3 drop math that
+    consumes ``eligible`` is child cc5b; this only decides eligibility)."""
+    from rebar import config as _config
+
+    try:
+        verify_cfg = _config.load_config(repo_root).verify
+    except Exception:  # noqa: BLE001 — config unreadable → conservative full review (no remediation)
+        return None
+    if not verify_cfg.remediation_mode:
+        return None
+    return attest.remediation_mode_candidate(
+        ticket_id, window_minutes=verify_cfg.remediation_window_minutes, repo_root=repo_root
+    )
+
+
 def review_plan(
     ticket_id: str,
     *,
@@ -145,6 +164,12 @@ def _run_plan_review(
             from rebar.llm import findings
 
             return findings.validate_structured(refreshed, "plan_review_verdict")
+    # Remediation-mode eligibility (epic 7d43, child ec89) — decided here, PARALLEL to the
+    # drift-refresh check above and on the same code/material/registry signals, but it does NOT
+    # early-return: the full criteria set still runs, and the DECISION is recorded on the verdict
+    # so the Pass-3 rising floor (child cc5b) can consume it. Off/absent key ⇒ None ⇒ a
+    # byte-identical full review (the back-out).
+    remediation = _remediation_decision(ticket_id, repo_root) if sign else None
     cap = advisory_cap if advisory_cap is not None else orchestrator.DEFAULT_ADVISORY_CAP
     # Verdict PRODUCTION runs through the v3 engine workflow (gates/plan-review.yaml); the
     # signing/sidecar wrapper below is unchanged, so the signed attestation is stable. The
@@ -157,6 +182,13 @@ def _run_plan_review(
 
     material = orchestrator.material_fingerprint(ctx)
     verdict["material_fingerprint"] = material
+
+    # Record the remediation-mode decision on the verdict coverage (observability + the seam the
+    # Pass-3 rising floor reads in child cc5b). Only when remediation mode is enabled AND a real
+    # decision was produced — a normal full review (key off/absent) leaves coverage untouched, so
+    # the verdict shape is byte-identical to today's.
+    if remediation is not None:
+        verdict.setdefault("coverage", {})["remediation"] = remediation
 
     # Sidecar (best-effort; never fails the review). Skippable for a pure-read run.
     verdict["sidecar_emitted"] = (

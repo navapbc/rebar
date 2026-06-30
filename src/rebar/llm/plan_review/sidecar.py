@@ -159,6 +159,40 @@ def latest_review_result(ticket_id: str, *, repo_root=None) -> dict[str, Any] | 
         return None
 
 
+def latest_review_timestamp(ticket_id: str, *, repo_root=None) -> int | None:
+    """Return the nanosecond timestamp of the **most-recent** ``REVIEW_RESULT`` sidecar for
+    ``ticket_id`` (the "last review of ANY kind" marker — every review, PASS or BLOCK, emits a
+    sidecar), or ``None`` when none exists / on any error.
+
+    The remediation-mode freshness window (child ec89) measures from this. The timestamp is the
+    filename's ns prefix (``<ts_ns>-<uuid>-REVIEW_RESULT.json`` — see ``event_append``), so this
+    needs no JSON parse. Best-effort and never raises, matching the sidecar's observability
+    posture."""
+    try:
+        from rebar import config as _config
+        from rebar._engine_support.resolver import resolve_ticket_id
+
+        tracker = str(_config.tracker_dir(repo_root))
+        rid = resolve_ticket_id(ticket_id, tracker) or ticket_id
+        ticket_dir = os.path.join(tracker, rid)
+        files = sorted(
+            f
+            for f in os.listdir(ticket_dir)
+            if f.endswith(f"-{EVENT_TYPE}.json") and not f.startswith(".")
+        )
+        if not files:
+            return None
+        prefix = files[-1].split("-", 1)[0]  # the ns-epoch timestamp prefix of the newest file
+        return int(prefix)
+    except FileNotFoundError:
+        return None
+    except Exception:  # noqa: BLE001 — best-effort observability reader; broad-but-logged, never raises
+        logger.warning(
+            "REVIEW_RESULT sidecar timestamp read failed; treating as none", exc_info=True
+        )
+        return None
+
+
 # ── normalized finding fingerprint (OBSERVABILITY-ONLY — sidecar payload, never the
 #    surfaced verdict) ──────────────────────────────────────────────────────────────
 # The caller-visible finding ``id`` (orchestrator.mint_finding_id) hashes the EXACT

@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -287,6 +288,92 @@ def drift_refresh_candidate(ticket_id: str, *, repo_root=None) -> dict[str, Any]
     if current == deps:  # no drift → not a drift re-review at all
         return None
     return {"manifest": manifest, "deps": deps, "key_id": result.get("key_id")}
+
+
+def remediation_mode_candidate(
+    ticket_id: str, *, window_minutes: int, now_ns: int | None = None, repo_root=None
+) -> dict[str, Any]:
+    """Decide whether a re-review of ``ticket_id`` is eligible for REMEDIATION MODE (epic 7d43,
+    child ec89): the freshness-window + precondition check that gates the Pass-3 rising floor
+    (the drop math itself is child cc5b — this only decides eligibility). The complement of
+    :func:`drift_refresh_candidate` on the material axis: drift-refresh wants the plan UNCHANGED +
+    code drifted; remediation wants the plan CHANGED + code UNCHANGED.
+
+    Returns a DECISION dict — ``{"eligible": bool, "reasons": {precondition: bool, ...}}`` — never
+    raises (any read error → that precondition False → ``eligible=False`` → full review). The
+    preconditions (ALL required):
+
+    - ``signed`` — a certified prior plan-review signature exists (the baseline the SHA/regver/
+      material are read from).
+    - ``plan_changed`` — the current plan material fingerprint differs from the prior signed one
+      (an edited plan — else there is nothing to re-review under the floor).
+    - ``code_unchanged`` — the current run's ``verified_at_sha`` equals the prior signed one (the
+      reviewed code did not drift; reuses the already-signed snapshot ref, no new diff machinery).
+    - ``registry_unchanged`` — the criteria-routing registry version equals the prior signed one.
+    - ``prior_sidecar`` — a prior ``REVIEW_RESULT`` sidecar WITH finding text is available (the
+      Pass-2 novelty sub-call's prior findings — child e344).
+    - ``within_window`` — the last review of ANY kind (the newest sidecar) is within
+      ``window_minutes``, measured from that last review (RESET on each review).
+
+    Code-changed / both-drifted → not eligible → the caller runs a normal full review (the
+    ``drift_refresh`` path is untouched)."""
+    from rebar import signing
+    from rebar.llm.config import current_code_sha
+
+    from . import sidecar
+
+    reasons: dict[str, bool] = {
+        "signed": False,
+        "plan_changed": False,
+        "code_unchanged": False,
+        "registry_unchanged": False,
+        "prior_sidecar": False,
+        "within_window": False,
+    }
+    try:
+        result = signing.verify_signature(ticket_id, repo_root=repo_root)
+    except Exception:  # noqa: BLE001 — signing unavailable → not eligible, full review
+        return {"eligible": False, "reasons": reasons}
+    manifest = result.get("manifest") if result.get("verified") else None
+    if not is_plan_review_manifest(manifest):
+        return {"eligible": False, "reasons": reasons}
+    reasons["signed"] = True
+
+    # plan CHANGED: the current material fingerprint differs from the prior signed one.
+    signed_material = manifest_material(manifest)
+    current_material = current_material_fingerprint(ticket_id, repo_root=repo_root)
+    reasons["plan_changed"] = (
+        signed_material is not None
+        and current_material is not None
+        and current_material != signed_material
+    )
+
+    # code UNCHANGED: current verified_at_sha equals the prior signed one (deterministic, reusing
+    # the signed snapshot ref). Both must be present and equal — a local-mode (None) review on
+    # either side is not a reliable code-unchanged signal, so it is treated as changed.
+    signed_sha = signing.verified_at_sha_from_manifest(manifest)
+    current_sha = current_code_sha()
+    reasons["code_unchanged"] = bool(signed_sha) and signed_sha == current_sha
+
+    # registry UNCHANGED: the criteria-routing version equals the prior signed one.
+    reasons["registry_unchanged"] = manifest_regver(manifest) == registry_version()
+
+    # prior REVIEW_RESULT sidecar WITH finding text available (child e344).
+    prior = sidecar.latest_review_result(ticket_id, repo_root=repo_root)
+    reasons["prior_sidecar"] = bool(
+        prior and any((f.get("finding") or "").strip() for f in prior.get("findings", []) or [])
+    )
+
+    # within the freshness window, measured from the last review of ANY kind (newest sidecar);
+    # each review emits a sidecar, so the window RESETS on every review.
+    last_ts = sidecar.latest_review_timestamp(ticket_id, repo_root=repo_root)
+    if last_ts is not None:
+        current_ns = now_ns if now_ns is not None else time.time_ns()
+        reasons["within_window"] = (
+            0 <= (current_ns - last_ts) <= window_minutes * 60 * 1_000_000_000
+        )
+
+    return {"eligible": all(reasons.values()), "reasons": reasons}
 
 
 def refresh_attestation(

@@ -288,6 +288,18 @@ class VerifyConfig:
     # aggregate call; this only triggers on a pathological huge-findings ticket.
     verify_window_headroom: float = 0.8
 
+    # Convergent plan-edit re-review (epic 7d43, child ec89): when true, a re-review of an
+    # EDITED plan whose reviewed CODE is unchanged runs in remediation mode — the full criteria
+    # set still runs, but Pass-3 may drop only NOVEL, low-priority findings (the rising floor,
+    # child cc5b). Default OFF for v1 (expand-contract: ship off → validate on the dogfood
+    # corpus → flip in a follow-up); off/absent restores byte-identical full-review behavior.
+    remediation_mode: bool = False
+    # The freshness window (minutes) for remediation mode: a re-review is eligible only when the
+    # LAST review of any kind was within this many minutes, measured from that last review and
+    # RESET on each review (so the loop persists across a series of edits and lapses to a normal
+    # full review only after the agent goes idle). Default 60.
+    remediation_window_minutes: int = 60
+
 
 @dataclass
 class TicketConfig:
@@ -401,6 +413,8 @@ _SECTIONS: dict[str, dict] = {
         "require_plan_review_for_claim": lambda v, k: _as_bool(v, k),
         "progressive_drift_refresh": lambda v, k: _as_bool(v, k),
         "verify_window_headroom": lambda v, k: _as_float(v, k, minimum=0.1, maximum=1.0),
+        "remediation_mode": lambda v, k: _as_bool(v, k),
+        "remediation_window_minutes": lambda v, k: _as_int(v, k, minimum=1),
     },
     "ticket": {
         "display_mode": lambda v, k: _as_str(v, k) or "auto",

@@ -99,6 +99,14 @@ verify.require_completion_verification_for_close = false  # gate work-ticket clo
                                              # verdict (signed onto the ticket); fail-closed. ON for
                                              # this project's rebar.toml. Alternative to the signature gate.
 verify.require_plan_review_for_claim = false # gate claim on a successful (non-BLOCK) plan review attestation
+verify.remediation_mode            = false   # convergent plan-edit re-review (epic 7d43): when on, a
+                                             # re-review of an edited plan whose CODE is unchanged may
+                                             # drop only NOVEL low-priority findings (the rising floor).
+                                             # Default OFF (expand-contract rollout); off restores a
+                                             # byte-identical full review (the back-out).
+verify.remediation_window_minutes  = 60      # remediation-mode freshness window: a re-review is eligible
+                                             # only if the last review of any kind was within this many
+                                             # minutes (measured from it, reset on each review). Min 1.
 
 # tickets / display / maintenance
 ticket.display_mode      = "auto"
