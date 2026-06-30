@@ -928,3 +928,55 @@ def test_config_flag_default_off(tmp_path: Path) -> None:
     on.mkdir()
     (on / "rebar.toml").write_text("[verify]\nrequire_plan_review_for_claim = true\n")
     assert config.load_config(str(on)).verify.require_plan_review_for_claim is True
+
+
+# ── bug mellow-coke-veto: the `signature` field is a {signed: bool} CONTRACT, not a
+#    presence flag. A BLOCK verdict NEVER carries a passing signed attestation, and the
+#    object is ALWAYS present (so a consumer that checks presence/truthiness — instead of
+#    reading `.signed` — is the one that's misled, not the gate). These pin that contract.
+_NO_AC_DESC = (
+    "A detailed plan body that is comfortably over the length floor and reads like a real "
+    "change description across several clauses, but DELIBERATELY omits the Acceptance "
+    "Criteria block so the deterministic P1 readiness floor BLOCKS it with no LLM call."
+)
+
+
+def test_block_verdict_carries_no_passing_signature(rebar_repo: Path) -> None:
+    """BLOCK → ``signature.signed`` is False. The ``signature`` object is still PRESENT
+    (a non-null presence check is the documented footgun); ``.signed`` is the boolean of
+    record, and no HMAC attestation event is written to the ticket."""
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo, desc=_NO_AC_DESC)
+    verdict = rebar.llm.review_plan(tid, runner=_CLEAN, source="local", repo_root=str(rebar_repo))
+    assert verdict["verdict"] == "BLOCK"
+    # The field is ALWAYS present — a presence/truthiness check would WRONGLY read "signed".
+    assert verdict["signature"] is not None
+    # …but `.signed` is the trustworthy boolean: False on a BLOCK.
+    assert verdict["signature"]["signed"] is False
+    # And no HMAC attestation event was written to the ticket itself.
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo)).get("signature") in (None, {})
+
+
+def test_pass_verdict_carries_a_passing_signature(rebar_repo: Path) -> None:
+    """The mirror case: a genuine PASS DOES sign — ``signature.signed`` is True."""
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)  # _DESC carries the AC block → the DET floor passes
+    verdict = rebar.llm.review_plan(tid, runner=_CLEAN, source="local", repo_root=str(rebar_repo))
+    assert verdict["verdict"] == "PASS"
+    assert verdict["signature"]["signed"] is True
+
+
+def test_block_verdict_cannot_satisfy_the_claim_gate(rebar_repo: Path) -> None:
+    """AC#2: a BLOCKed plan is never claimable on the strength of its (non-)signature —
+    reviewing it leaves the claim gate unsatisfied, so the claim stays blocked."""
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo, desc=_NO_AC_DESC)
+    verdict = rebar.llm.review_plan(tid, runner=_CLEAN, source="local", repo_root=str(rebar_repo))
+    assert verdict["verdict"] == "BLOCK"
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
+    assert ei.value.returncode == 1
+    assert _status(tid, rebar_repo) == "open"  # never claimed off a BLOCK
