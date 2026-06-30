@@ -8,8 +8,11 @@ recognized anti-pattern):
 
   (1) provider-native CONSTRAINED decoding / strict json_schema where the provider
       offers it (:func:`output_mode` -> NativeOutput), else cross-provider
-      PromptedOutput — NEVER forced-tool ToolOutput when extended thinking is on
-      (Anthropic 400: "Thinking may not be enabled when tool_choice forces tool use");
+      PromptedOutput. PromptedOutput is also the mode used whenever extended thinking is
+      on, because Anthropic currently 400s when extended thinking is combined with a
+      native/forced output constraint ("Thinking may not be enabled when tool_choice
+      forces tool use") — a live API constraint on the current pydantic_ai output modes,
+      not a relic of any earlier forced-tool mechanism;
   (2) DETERMINISTIC tolerant parse of near-miss output (:func:`tolerant_parse`, via
       json-repair — NO LLM): strips markdown fences, repairs trailing commas / unclosed
       braces / smart quotes;
@@ -49,10 +52,11 @@ def output_mode(model_cls, model_str: str, *, thinking: bool = False):
     """Select the Pydantic AI output mode for ``model_cls`` (layer 1).
 
     NativeOutput for providers that enforce a strict json_schema; PromptedOutput for
-    everyone else (the broadest, and — crucially — NOT a forced tool call, so it is
-    compatible with Claude extended thinking, which the default ToolOutput is not).
-    ``thinking`` forces PromptedOutput regardless of provider (forced-tool/native
-    constraint + thinking is the documented 400)."""
+    everyone else (the broadest, and — crucially — not a constrained/native output mode,
+    so it stays compatible with Claude extended thinking, which pydantic_ai's default
+    ToolOutput mode is not). ``thinking`` forces PromptedOutput regardless of provider:
+    pairing extended thinking with a native/forced output constraint is the documented
+    Anthropic 400, so the prompted mode is the only thinking-compatible choice."""
     from pydantic_ai import NativeOutput, PromptedOutput
 
     provider = model_str.split(":", 1)[0] if ":" in model_str else ""
