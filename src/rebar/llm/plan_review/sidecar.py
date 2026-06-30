@@ -102,6 +102,59 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
         return 0
 
 
+def latest_review_result(ticket_id: str, *, repo_root=None) -> dict[str, Any] | None:
+    """Return the **most-recent** ``REVIEW_RESULT`` sidecar payload for ``ticket_id``,
+    or ``None`` when none is usable.
+
+    Contract (child e344) — this is the reader a remediation re-review uses to hand the
+    Pass-2 novelty sub-call its own prior findings. It mirrors the sidecar's
+    observability-only, best-effort posture and **never raises**, so a missing/garbled
+    prior review degrades gracefully to "no prior findings":
+
+    - Return value: the deserialized ``data`` payload of the latest sidecar event (the
+      ``build_payload`` dict — ``schema``, ``findings``, ``coverage``, …), NOT the event
+      envelope. Callers read ``result["findings"]`` directly.
+    - No sidecar yet / ticket dir absent / empty dir → ``None`` (the common first-review
+      case; the caller proceeds with no prior findings).
+    - Unreadable or malformed JSON in the newest file → ``None`` + a logged warning.
+    - **Schema guard:** a payload whose ``schema`` != ``"plan_review_result_v1"`` is
+      rejected (``None``), so a future schema bump can never feed a stale shape to the
+      novelty sub-call.
+    """
+    try:
+        from rebar import config as _config
+        from rebar._engine_support.resolver import resolve_ticket_id
+
+        tracker = str(_config.tracker_dir(repo_root))
+        rid = resolve_ticket_id(ticket_id, tracker) or ticket_id
+        ticket_dir = os.path.join(tracker, rid)
+        files = sorted(
+            f
+            for f in os.listdir(ticket_dir)
+            if f.endswith(f"-{EVENT_TYPE}.json") and not f.startswith(".")
+        )
+        if not files:
+            return None
+        # Filenames are timestamp-prefixed, so the last entry is the newest review.
+        import json
+
+        with open(os.path.join(ticket_dir, files[-1]), encoding="utf-8") as fh:
+            event = json.load(fh)
+        payload = event.get("data") if isinstance(event, dict) else None
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("schema") != "plan_review_result_v1":
+            return None  # schema guard: never feed a stale/foreign shape downstream
+        return payload
+    except FileNotFoundError:
+        return None  # ticket dir / file absent → no prior review (common first-review case)
+    except Exception:  # noqa: BLE001 — best-effort observability reader; broad-but-logged, never raises
+        logger.warning(
+            "REVIEW_RESULT sidecar read failed; treating as no prior review", exc_info=True
+        )
+        return None
+
+
 # ── normalized finding fingerprint (OBSERVABILITY-ONLY — sidecar payload, never the
 #    surfaced verdict) ──────────────────────────────────────────────────────────────
 # The caller-visible finding ``id`` (orchestrator.mint_finding_id) hashes the EXACT
@@ -135,6 +188,13 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
     are retained here for analysis)."""
 
     def _slim(f: dict[str, Any]) -> dict[str, Any]:
+        # Field-selection principle (child e344): persist the PROSE a remediation
+        # re-review's Pass-2 novelty sub-call needs to re-ground itself against the
+        # prior findings (``finding`` / ``suggested_fix`` / ``checklist_item``) plus the
+        # fingerprints/decision/verification needed for offline calibration — but
+        # deliberately exclude runtime-only carriers (e.g. ``scenarios``, ``evidence``,
+        # ``_agentic``) to keep the sidecar lean. As the finding schema grows, add a key
+        # here only when an offline consumer (calibration or re-grounding) needs it.
         return {
             "id": f.get("id"),
             # OBSERVABILITY-ONLY enrichment (db7b follow-on): a reword-tolerant fingerprint
@@ -151,6 +211,13 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
             "priority": f.get("priority"),
             "reason": f.get("reason"),
             "verification": f.get("verification"),
+            # Finding PROSE (child e344): re-grounding the Pass-2 novelty sub-call on a
+            # remediation re-review needs the prior finding's actual text — not just its
+            # fingerprint — to answer the matches-prior sub-answers. Sidecar event ONLY;
+            # the surfaced verdict shape is byte-unchanged (asserted in tests).
+            "finding": f.get("finding", ""),
+            "suggested_fix": f.get("suggested_fix", ""),
+            "checklist_item": f.get("checklist_item", ""),
         }
 
     all_findings = (
