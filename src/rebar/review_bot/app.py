@@ -1,4 +1,4 @@
-"""FastAPI ASGI app — the rebar review-bot webhook receiver (epic d251 / story S2).
+"""FastAPI ASGI app — the rebar review-bot webhook receiver (epic d251 / S4b).
 
 WHAT THIS IS (ADR-0007). A thin HTTP service that Gerrit posts review events to.
 It imports the rebar review kernel **as a library** rather than re-exposing the
@@ -8,9 +8,14 @@ routes ``/review/`` to this app (stripping the prefix), so externally the receiv
 lives at ``https://<host>/review/`` and these routes are reached as ``/health`` and
 ``/webhook`` after the prefix strip.
 
-SCOPE OF S2. Skeleton only — a liveness probe and a placeholder webhook sink. The
-review/vote logic (invoke the review kernel, post a Gerrit review score back) is
-story S4b; ``POST /webhook`` here merely accepts + logs the payload.
+S4b BEHAVIOR (the proven pipe). ``POST /webhook`` (1) validates the inbound
+``?token=`` secret (ADR-0014 — the ``webhooks`` plugin has no HMAC, so the URL token
++ network ACL are the inbound auth), (2) parses the JSON body, and (3) **ACKs fast**:
+it enqueues the event and returns 202 immediately. A background worker consumes the
+queue and runs ``voter.review_and_vote`` (clone → review → cast the ``LLM-Review``
+vote). An LLM review takes 30s–minutes and would blow Gerrit's ~5s webhook socket
+timeout if processed inline (→ timeout + re-delivery). On startup the lifespan also
+launches the ``reconcile_loop`` backfill poller.
 
 IMPORTABILITY CONTRACT. ``fastapi`` is imported at module top here on purpose — it
 is fine that ``import rebar.review_bot.app`` requires the ``reviewbot`` extra. What
@@ -25,12 +30,20 @@ port is passed on the uvicorn command line / by compose.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import hmac
 import logging
 import os
+from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+
+from rebar.review_bot import reconcile as _reconcile
+from rebar.review_bot import voter as _voter
+from rebar.review_bot.config import ReceiverConfig
 
 logger = logging.getLogger("rebar.review_bot")
 
@@ -39,10 +52,59 @@ logger = logging.getLogger("rebar.review_bot")
 #: it through docker-compose, so this default only matters for a bare local run.
 DEFAULT_PORT = 8000
 
+#: Number of background workers draining the review queue. One is enough for a
+#: single-box PoC (reviews serialize on the per-(change,rev) lock anyway).
+WORKER_COUNT = 1
+
+
+def _config() -> ReceiverConfig:
+    """Process-wide receiver config (env/SSM-sourced). Resolved fresh per app build so
+    a reload picks up rotated secrets."""
+    return ReceiverConfig.from_env()
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Start the queue, the background review worker(s), and the backfill reconciler;
+    cancel them cleanly on shutdown."""
+    cfg = app.state.config
+    app.state.queue = asyncio.Queue()
+    tasks: list[asyncio.Task] = []
+    for _ in range(WORKER_COUNT):
+        tasks.append(asyncio.create_task(_worker(app.state.queue, cfg)))
+    tasks.append(asyncio.create_task(_reconcile.reconcile_loop(config=cfg)))
+    app.state.tasks = tasks
+    try:
+        yield
+    finally:
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
+async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
+    """Drain the review queue, running one review→vote per event. A per-event failure
+    is logged and the worker continues (it must never die and starve the queue)."""
+    while True:
+        event = await queue.get()
+        try:
+            await _voter.review_and_vote(event, config=cfg)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — a single bad event must not kill the worker
+            logger.exception("review-bot worker: review_and_vote raised")
+        finally:
+            queue.task_done()
+
+
 app = FastAPI(
     title="rebar review-bot",
-    summary="Gerrit webhook receiver (skeleton — review/vote logic lands in S4b).",
+    summary="Gerrit webhook receiver — reviews a patchset and casts the LLM-Review vote.",
+    lifespan=lifespan,
 )
+app.state.config = _config()
 
 
 @app.get("/health")
@@ -53,22 +115,33 @@ async def health() -> dict[str, str]:
 
 @app.post("/webhook", status_code=202)
 async def webhook(request: Request) -> JSONResponse:
-    """Accept a Gerrit webhook payload, log it, and acknowledge (202).
+    """Authenticate, ACK fast (202), and enqueue the event for background review.
 
-    PLACEHOLDER (S2). Any JSON body is accepted and logged; no review is run and no
-    Gerrit vote is posted yet — that is story S4b. A non-JSON / empty body is still
-    acknowledged (we log that we could not parse it) so Gerrit's delivery does not
-    see a 4xx and start retrying against a skeleton that intentionally does nothing.
+    Auth (ADR-0014): the ``?token=`` query value must equal the configured
+    ``WEBHOOK_TOKEN`` (constant-time compare); a missing/empty/wrong token is 401. The
+    review itself is NOT awaited here — it is enqueued and a background worker casts the
+    vote — because the review takes far longer than Gerrit's webhook socket timeout.
     """
+    cfg: ReceiverConfig = request.app.state.config
+    token = request.query_params.get("token", "")
+    if not cfg.webhook_token or not hmac.compare_digest(token, cfg.webhook_token):
+        logger.warning("review-bot webhook: rejected (missing/invalid token)")
+        return JSONResponse(status_code=401, content={"status": "unauthorized"})
+
     payload: Any
     try:
         payload = await request.json()
-    except Exception:  # noqa: BLE001 — tolerate any non-JSON/empty body on the skeleton sink
-        payload = None
+    except Exception:  # noqa: BLE001 — tolerate a non-JSON/empty body; ACK so Gerrit doesn't retry
         logger.info("review-bot webhook: received non-JSON or empty body")
+        return JSONResponse(status_code=202, content={"status": "accepted", "queued": False})
+
+    queue: asyncio.Queue | None = getattr(request.app.state, "queue", None)
+    if queue is not None and isinstance(payload, dict):
+        queue.put_nowait(payload)
+        queued = True
     else:
-        logger.info("review-bot webhook: received payload %r", payload)
-    return JSONResponse(status_code=202, content={"status": "accepted"})
+        queued = False
+    return JSONResponse(status_code=202, content={"status": "accepted", "queued": queued})
 
 
 def _port() -> int:

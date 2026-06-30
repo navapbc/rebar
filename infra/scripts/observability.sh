@@ -74,3 +74,32 @@ if [ -f "$REPL_LOG" ]; then
     --metric-name replication_errors --unit Count --value "$new" 2>/dev/null || true
   [ "$new" -gt 0 ] && logger -t rebar-health "replication failures (new this interval)=${new}"
 fi
+
+# --- 4. review-bot LLM-Review voter failures (S4b) -------------------------
+# Watch the review-bot container's journald for the structured VOTER_ERROR marker
+# the voter emits when it cannot cast a vote (Gerrit 4xx/5xx, clone/diff failure,
+# LLM unavailable, expired token) and publish the COUNT of NEW markers since last
+# run to rebar/host:voter_errors (the metric the S4b CloudWatch alarm watches).
+# Same shape as the replication_errors section above: a persisted cumulative count
+# turned into a per-interval delta via an offset file. The voter writes VOTER_ERROR
+# to stderr, which compose's journald driver ships under CONTAINER_NAME=compose-review-bot-1.
+# Greping journald on the HOST avoids giving the container AWS creds (the IMDS hop
+# limit constrains in-container metadata access).
+VOTER_CONTAINER="${VOTER_CONTAINER:-compose-review-bot-1}"
+VOTER_OFFSET_FILE="${VOTER_OFFSET_FILE:-/var/lib/rebar/voter-fail-offset}"
+mkdir -p "$(dirname "$VOTER_OFFSET_FILE")"
+# NOTE: `grep -c` prints 0 AND exits 1 on zero matches; do NOT add `|| echo 0`
+# (that would append a SECOND "0" line and corrupt the arithmetic). Capture the
+# single-line count and default-empty-to-0 instead.
+vtotal=$(journalctl CONTAINER_NAME="$VOTER_CONTAINER" --no-pager -o cat 2>/dev/null | grep -cE 'VOTER_ERROR') || true
+vtotal=${vtotal:-0}
+vprev=$(cat "$VOTER_OFFSET_FILE" 2>/dev/null || echo 0)
+case "$vprev" in '' | *[!0-9]*) vprev=0 ;; esac
+vnew=$((vtotal - vprev))
+[ "$vnew" -lt 0 ] && vnew=$vtotal
+echo "$vtotal" >"$VOTER_OFFSET_FILE"
+# Published WITHOUT dimensions to match the dimensionless alarm in monitoring_s4b.tf
+# (CloudWatch keys a metric by namespace+name+dimensions; the alarm has none).
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name voter_errors --unit Count --value "$vnew" 2>/dev/null || true
+[ "$vnew" -gt 0 ] && logger -t rebar-health "review-bot voter failures (new this interval)=${vnew}"
