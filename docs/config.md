@@ -107,6 +107,11 @@ verify.remediation_mode            = false   # convergent plan-edit re-review (e
 verify.remediation_window_minutes  = 60      # remediation-mode freshness window: a re-review is eligible
                                              # only if the last review of any kind was within this many
                                              # minutes (measured from it, reset on each review). Min 1.
+verify.novelty_drop_threshold      = 0.7     # T_novel: a finding is droppable only if its novelty >= this
+verify.novelty_priority_floor      = 0.4     # rising floor: drop a novel finding only if priority < this
+                                             # (scalar ≈ corpus p40 impact; see the distribution script)
+verify.novelty_drop_active         = false   # EVIDENCE GATE: the rising floor stays inert until flipped
+                                             # true (manually, after the discriminates_novelty eval clears)
 
 # tickets / display / maintenance
 ticket.display_mode      = "auto"

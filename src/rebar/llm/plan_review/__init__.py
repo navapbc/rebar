@@ -94,6 +94,130 @@ def _remediation_decision(ticket_id: str, repo_root) -> dict[str, Any] | None:
     )
 
 
+def _apply_floor_to_verdict(
+    verdict: dict[str, Any], novelty_map: dict[int, float], *, t_novel: float, floor: float
+) -> None:
+    """Apply the Pass-3 rising floor (child cc5b) IN PLACE on the verdict's surfaced advisory
+    findings: a finding at position ``i`` is DROPPED iff ``decide.rising_floor_drop`` (novel +
+    low-priority). Dropped findings move from ``advisory`` into the verdict's ``dropped`` bucket
+    (the sidecar persists it with ``norm_id``), and the coverage records ``narrowed``/
+    ``floored_criteria``/``floored_finding_ids`` AND its ``counts`` are corrected (advisory_surfaced
+    down, dropped up) so the post-floor counts stay consistent with the buckets. Pure (no LLM); the
+    novelty per index is injected. A no-drop run leaves the verdict byte-identical."""
+    from rebar.llm.review_kernel import decide
+
+    advisory = verdict.get("advisory") or []
+    kept: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    for i, f in enumerate(advisory):
+        nov = novelty_map.get(i, 0.0)
+        prio = f.get("priority") or 0.0
+        if decide.rising_floor_drop(prio, nov, t_novel=t_novel, floor=floor):
+            dropped.append({**f, "_floored": True, "novelty": nov})
+        else:
+            kept.append(f)
+    if not dropped:
+        return
+    verdict["advisory"] = kept
+    verdict.setdefault("dropped", []).extend(dropped)
+    cov = verdict.setdefault("coverage", {})
+    cov["narrowed"] = True
+    cov["floored_criteria"] = sorted({c for f in dropped for c in (f.get("criteria") or [])})
+    cov["floored_finding_ids"] = [f.get("id") for f in dropped]
+    counts = cov.get("counts")
+    if isinstance(counts, dict):  # keep the baked counts consistent with the post-floor buckets
+        counts["advisory_surfaced"] = len(kept)
+        counts["dropped"] = (counts.get("dropped") or 0) + len(dropped)
+
+
+def _score_floor_novelty(
+    advisory: list[dict[str, Any]],
+    prior_findings: list[dict[str, Any]],
+    *,
+    ctx,
+    cfg: LLMConfig,
+    runner: Runner | None,
+    repo_root,
+) -> dict[int, float]:
+    """Run the 150b novelty sub-call over the surfaced advisory findings (the droppable surface)
+    against the prior findings, returning ``{advisory_index: novelty}``. Fail-safe: any error →
+    ``{}`` (no drops). The droppable surface is bounded by the advisory cap, so a generous single
+    window + a coarse char/4 estimator keep it to one sub-call."""
+    from rebar.llm.review_kernel.verify import score_novelty
+    from rebar.llm.runner import RunRequest, get_runner
+
+    from . import passes
+
+    try:
+        runner_sel = runner or get_runner(cfg)
+        vcfg = _verifier_cfg(cfg)
+        system = passes._resolve_system(passes.PASS_NOVELTY, ctx.plan_text, vcfg)
+
+        def run_chunk(instructions: str, context: str) -> list[dict[str, Any]]:
+            req = RunRequest(
+                system_prompt=system,
+                instructions=f"{instructions}\n\n## Prior-review findings (context)\n{context}",
+                config=vcfg,
+                reviewers=["plan-novelty"],
+                mode="structured",
+                output_schema="plan_review_novelty",
+                execution_mode="single_turn",
+            )
+            return runner_sel.run(req).get("novelties", []) or []
+
+        return score_novelty(
+            advisory,
+            prior_findings=prior_findings,
+            run_chunk=run_chunk,
+            window_tokens=100_000,
+            est_tokens=lambda s: len(s) // 4 + 1,
+        )
+    except Exception:  # noqa: BLE001 — fail-safe: a broken novelty signal yields NO drops (never suppresses)
+        logger.warning("rising-floor novelty scoring failed; running un-floored", exc_info=True)
+        return {}
+
+
+def _maybe_apply_rising_floor(
+    ticket_id: str,
+    verdict: dict[str, Any],
+    remediation: dict[str, Any] | None,
+    *,
+    ctx,
+    cfg: LLMConfig,
+    runner: Runner | None,
+    repo_root,
+) -> None:
+    """The triple-gated Pass-3 rising-floor entry (child cc5b): apply the floor ONLY when config
+    ``remediation_mode`` is on (``remediation`` is non-None), the per-review eligibility holds
+    (ec89's decision ``eligible``), AND ``verify.novelty_drop_active`` is true (the evidence gate,
+    flipped only after 150b's ``discriminates_novelty`` eval clears its bar). By default the flag is
+    False, so the floor is inert and the verdict is byte-identical to a normal review."""
+    from rebar import config as _config
+
+    if not (remediation and remediation.get("eligible")):
+        return
+    try:
+        verify_cfg = _config.load_config(repo_root).verify
+    except Exception:  # noqa: BLE001 — config unreadable → run un-floored
+        return
+    if not verify_cfg.novelty_drop_active:
+        return  # evidence gate: inert until the novelty discriminator has cleared its bar
+    advisory = verdict.get("advisory") or []
+    prior = sidecar.latest_review_result(ticket_id, repo_root=repo_root)
+    prior_findings = (prior or {}).get("findings") or []
+    if not advisory or not prior_findings:
+        return
+    novelty_map = _score_floor_novelty(
+        advisory, prior_findings, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
+    )
+    _apply_floor_to_verdict(
+        verdict,
+        novelty_map,
+        t_novel=verify_cfg.novelty_drop_threshold,
+        floor=verify_cfg.novelty_priority_floor,
+    )
+
+
 def review_plan(
     ticket_id: str,
     *,
@@ -189,6 +313,14 @@ def _run_plan_review(
     # the verdict shape is byte-identical to today's.
     if remediation is not None:
         verdict.setdefault("coverage", {})["remediation"] = remediation
+
+    # Pass-3 RISING FLOOR (child cc5b) — applied BEFORE the sidecar emit so the dropped findings
+    # land in the sidecar (with norm_id) while leaving the surfaced verdict narrowed. Triple-gated
+    # (config remediation_mode + per-review eligibility + verify.novelty_drop_active); inert (and
+    # the verdict byte-identical) by default.
+    _maybe_apply_rising_floor(
+        ticket_id, verdict, remediation, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
+    )
 
     # Sidecar (best-effort; never fails the review). Skippable for a pure-read run.
     verdict["sidecar_emitted"] = (

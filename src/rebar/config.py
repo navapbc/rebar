@@ -300,6 +300,19 @@ class VerifyConfig:
     # full review only after the agent goes idle). Default 60.
     remediation_window_minutes: int = 60
 
+    # Pass-3 rising floor (epic 7d43, child cc5b). On an eligible remediation re-review, a finding
+    # is DROPPED iff its novelty >= novelty_drop_threshold AND its priority (validity × impact) <
+    # novelty_priority_floor. T_novel default 0.7 (house precision-first). The floor is a scalar at
+    # the corpus p40 impact percentile (~0.4, the "below major" band; see
+    # scripts/plan_review_impact_distribution.py). Both config-overridable.
+    novelty_drop_threshold: float = 0.7
+    novelty_priority_floor: float = 0.4
+    # The EVIDENCE GATE: the rising floor stays inert (gate runs un-floored) until this is flipped
+    # true — done MANUALLY by the operator only after 150b's `discriminates_novelty` eval has
+    # cleared its bar (`rebar prompt eval plan-review-novelty`). Default False (a third gate on top
+    # of remediation_mode + per-review eligibility), so the floor never drops a finding by default.
+    novelty_drop_active: bool = False
+
 
 @dataclass
 class TicketConfig:
@@ -415,6 +428,9 @@ _SECTIONS: dict[str, dict] = {
         "verify_window_headroom": lambda v, k: _as_float(v, k, minimum=0.1, maximum=1.0),
         "remediation_mode": lambda v, k: _as_bool(v, k),
         "remediation_window_minutes": lambda v, k: _as_int(v, k, minimum=1),
+        "novelty_drop_threshold": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
+        "novelty_priority_floor": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
+        "novelty_drop_active": lambda v, k: _as_bool(v, k),
     },
     "ticket": {
         "display_mode": lambda v, k: _as_str(v, k) or "auto",

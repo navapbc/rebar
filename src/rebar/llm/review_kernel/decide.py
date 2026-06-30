@@ -84,6 +84,23 @@ def novelty(matches_prior: dict[str, Any]) -> float:
     return round(1.0 - sum(scores) / len(scores), 4)
 
 
+def rising_floor_drop(priority: float, novelty: float, *, t_novel: float, floor: float) -> bool:
+    """The Pass-3 RISING-FLOOR drop predicate (child cc5b), deterministic — no LLM holistic
+    severity. A finding is dropped IFF it is both NOVEL (``novelty >= t_novel``) AND LOW-PRIORITY
+    (``priority < floor``, where ``priority = validity × impact``). The four quadrants:
+
+    - novel + low-priority  → DROP (the only drop case — a fresh, low-stakes finding the edit
+      surfaced that would otherwise restart the remediation loop);
+    - novel + high-priority → KEEP (a real defect the edit introduced; may block);
+    - carryover (low novelty) → KEEP at the normal threshold (it was flagged before and must still
+      be resolved — never dropped, regardless of priority);
+    - carryover + high-priority → KEEP.
+
+    Pure; the caller supplies the per-finding ``priority``/``novelty`` and the configured
+    ``t_novel``/``floor``. The activation guard + eligibility live in the caller."""
+    return novelty >= t_novel and priority < floor
+
+
 def impact(attrs: dict[str, Any]) -> float:
     """IMPACT ∈ [0,1] = mean of the ordinal-mapped severity attributes:
     max(prod_impact, debt_impact), blast_radius, likelihood, reversibility."""
