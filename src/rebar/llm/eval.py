@@ -212,6 +212,7 @@ def validate_dataset_and_gold(spec: dict) -> list[str]:
         FIRE_EXPECTS,
         IMPACT_EXPECTS,
         NOFIRE_EXPECTS,
+        NOVELTY_EXPECTS,
         VALIDITY_EXPECTS,
     )
 
@@ -256,6 +257,9 @@ def validate_dataset_and_gold(spec: dict) -> list[str]:
         impact_axis = expects_used & IMPACT_EXPECTS
         if impact_axis and not {"high_impact", "low_impact"} <= expects_used:
             errs.append("strict: verifier dataset needs both high_impact and low_impact")
+        novelty_axis = expects_used & NOVELTY_EXPECTS
+        if novelty_axis and not {"high_novelty", "low_novelty"} <= expects_used:
+            errs.append("strict: novelty dataset needs both high_novelty and low_novelty")
     gold = spec.get("gold_set")
     if not isinstance(gold, list) or not gold:
         errs.append("strict: eval spec needs a non-empty `gold_set` (judge kappa alignment)")

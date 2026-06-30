@@ -148,6 +148,61 @@ def register_verification_contract() -> None:
 register_verification_contract()
 
 
+# ── the registered `novelty` CONTRACT — the SEPARATE Pass-2 sub-call that ALONE receives the
+#    prior findings (child 150b). Kept distinct from `verification` so the severity/validity
+#    sub-call structurally never sees the prior findings (the independence invariant, enforced by
+#    construction, not by prompt assertion). The matches-prior fields are anchored to the
+#    `decide.NOVELTY_SUBANSWERS` vocabulary so the contract and `decide.novelty()` can never name
+#    different questions. ───────────────────────────────────────────────────────────────────────
+def novelty_model(*, strict: bool = False) -> type:
+    """The Pass-2 ``novelty`` structured-output model: one ``Novelty`` per finding (by ``index``)
+    carrying the factual matches-prior sub-answers + the matched prior-finding id.
+
+    The sub-answers (``decide.NOVELTY_SUBANSWERS``) are graded yes/insufficient/no questions;
+    ``decide.novelty()`` maps them to a [0,1] novelty (``1 − mean``). Each defaults to
+    ``"insufficient"`` (mirroring the verification ``Binary`` defaults — a neutral 0.5, so a
+    partially-filled object never spuriously reads as fully novel/droppable). ``matched_prior_id``
+    defaults to ``""`` (no prior match). ``strict`` flips the tree to ``extra="forbid"`` (the
+    reject-don't-ignore boundary), mirroring :func:`verification_model`."""
+    from pydantic import BaseModel, ConfigDict, Field, create_model
+
+    from .decide import NOVELTY_SUBANSWERS
+
+    forbid = ConfigDict(extra="forbid") if strict else ConfigDict()
+
+    # The sub-answer field set is DERIVED from NOVELTY_SUBANSWERS (the single vocabulary in
+    # .decide) so the contract and the novelty math can never name different sub-questions.
+    matches_fields: dict[str, Any] = {
+        q: (str, Field(default="insufficient", description="yes|insufficient|no"))
+        for q in NOVELTY_SUBANSWERS
+    }
+    MatchesPrior = create_model("MatchesPrior", __config__=forbid, **matches_fields)
+
+    class Novelty(BaseModel):
+        model_config = forbid
+        index: int = Field(description="The 0-based index of the finding being scored.")
+        matched_prior_id: str = Field(
+            default="", description="The prior finding id this matches, or empty if none."
+        )
+        matches_prior: MatchesPrior = Field(default_factory=MatchesPrior)  # type: ignore[valid-type]
+
+    class NoveltyOutput(BaseModel):
+        model_config = forbid
+        novelties: list[Novelty] = Field(default_factory=list)
+
+    return NoveltyOutput
+
+
+def register_novelty_contract() -> None:
+    """Register the kernel ``novelty`` contract (idempotent) — the SEPARATE Pass-2 sub-call's
+    matches-prior vocabulary, distinct from ``verification`` so the prior findings reach ONLY
+    this sub-call (the structural independence invariant)."""
+    contracts.register_contract("novelty", novelty_model)
+
+
+register_novelty_contract()
+
+
 # ── the per-finding listing (the ONE canonical format every gate's verifier consumes) ──────
 def finding_listing(batch: list[tuple[int, dict[str, Any]]]) -> str:
     """The Pass-2 per-finding listing for a batch of ``(global_index, finding)`` pairs
@@ -391,3 +446,103 @@ def verify_findings(
         "omitted": omitted,
         "contract_violations": violations,
     }
+
+
+# ── the SEPARATE Pass-2 novelty sub-call (child 150b) — scores carryover-vs-novel for a
+#    remediation re-review. This sub-call ALONE receives the PRIOR findings (as its context); the
+#    verification sub-call above and Pass-1 never do, so the independence invariant holds by
+#    construction. ────────────────────────────────────────────────────────────────────────────
+def prior_findings_block(prior_findings: list[dict[str, Any]]) -> str:
+    """The PRIOR-review findings rendered as the novelty sub-call's context (the ONLY place the
+    prior findings appear). Each block carries the prior finding's id + prose so the sub-call can
+    answer the matches-prior questions and name ``matched_prior_id``."""
+    return "\n\n".join(
+        f"### prior finding {p.get('id', '?')}\n"
+        f"finding: {p.get('finding', '')}\n"
+        f"location: {p.get('location', '')}\n"
+        f"suggested_fix: {p.get('suggested_fix', '')}\n"
+        f"criteria: {', '.join(p.get('criteria', []) or [])}"
+        for p in prior_findings
+    )
+
+
+def novelty_instructions(batch: list[tuple[int, dict[str, Any]]]) -> str:
+    """The novelty sub-call INSTRUCTIONS over a batch of ``(global_index, finding)`` pairs — the
+    CURRENT findings to score. The prior findings are supplied SEPARATELY as context (see
+    :func:`prior_findings_block`); they are never inlined here so the listing stays the current
+    review's own findings."""
+    if not batch:
+        return "Score each finding's novelty by its index. Emit one novelty per finding."
+    return (
+        "For EACH current finding below, by its index, decide whether it MATCHES a specific PRIOR "
+        "finding (provided as context). Answer the factual matches-prior sub-answers "
+        "(yes|insufficient|no) and name the matched prior id (empty if none). These are FACTUAL "
+        "match questions, NOT a judgement of whether to downrank.\n\n"
+        f"{finding_listing(batch)}"
+    )
+
+
+def reshape_novelties(
+    raw: list[dict[str, Any]] | None, *, valid_indices: Collection[int] | None = None
+) -> dict[int, dict[str, Any]]:
+    """Reshape a flat novelty-output list into ``{index: {matches_prior, matched_prior_id}}``.
+    Mirrors :func:`reshape_verifications` tolerance: a non-int ``index`` is dropped, later wins on
+    a duplicate, an out-of-``valid_indices`` index is excluded. A dropped/absent index yields no
+    entry — and :func:`rebar.llm.review_kernel.decide.novelty` of an empty matches-prior is 0.0
+    (carryover), so a malformed item degrades to the fail-safe automatically."""
+    merged: dict[int, dict[str, Any]] = {}
+    for v in raw or []:
+        idx = v.get("index") if isinstance(v, dict) else None
+        if not isinstance(idx, int):
+            continue
+        if valid_indices is not None and idx not in valid_indices:
+            continue
+        merged[idx] = {
+            "matches_prior": v.get("matches_prior", {}) or {},
+            "matched_prior_id": v.get("matched_prior_id", ""),
+        }
+    return merged
+
+
+def score_novelty(
+    findings: list[dict[str, Any]],
+    *,
+    prior_findings: list[dict[str, Any]],
+    run_chunk: RunChunk,
+    window_tokens: int,
+    est_tokens: TokenEstimator,
+    headroom: float = DEFAULT_VERIFY_WINDOW_HEADROOM,
+) -> dict[int, float]:
+    """Pass-2 novelty over ``findings`` against ``prior_findings``: token-budget chunk the CURRENT
+    findings → run each chunk via ``run_chunk`` (the injected LLM seam, given the prior findings as
+    context) → map each finding's matches-prior sub-answers to a novelty via
+    :func:`rebar.llm.review_kernel.decide.novelty`. Returns ``{global_index: novelty}`` ∈ [0,1].
+
+    FAIL-SAFE (never silently suppress): with no findings or NO prior findings there is nothing to
+    match, so this returns ``{}`` (cc5b then treats every finding as carryover, novelty 0.0). A
+    chunk whose ``run_chunk`` raises (any error — contract, timeout, network) contributes no
+    novelties and is logged at WARNING; those findings fall back to novelty 0.0 (carryover → never
+    dropped). A malformed/garbage item likewise reshapes away to 0.0. A broken novelty signal can
+    only make the gate STRICTER, never drop a finding."""
+    from .decide import novelty as _novelty_of
+
+    if not findings or not prior_findings:
+        return {}
+    chunks, _omitted = verify_request_chunks(
+        findings, window_tokens=window_tokens, est_tokens=est_tokens, headroom=headroom
+    )
+    context = prior_findings_block(prior_findings)
+    raw: list[dict[str, Any]] = []
+    for chunk in chunks:
+        try:
+            raw.extend(run_chunk(novelty_instructions(chunk), context) or [])
+        except Exception:  # noqa: BLE001 — fail-safe: any failure → those findings degrade to carryover (0.0)
+            logger.warning(
+                "novelty sub-call failed for findings %s; falling back to novelty=0.0 (carryover)",
+                [gi for gi, _ in chunk],
+            )
+    sent_indices = {gi for chunk in chunks for gi, _ in chunk}
+    reshaped = reshape_novelties(raw, valid_indices=sent_indices)
+    # Every sent finding gets a novelty; an index the sub-call did not (or malformed-ly) cover
+    # maps through decide.novelty({}) == 0.0 — the carryover fail-safe.
+    return {gi: _novelty_of(reshaped.get(gi, {}).get("matches_prior", {})) for gi in sent_indices}

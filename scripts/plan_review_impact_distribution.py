@@ -85,6 +85,10 @@ def aggregate(tickets_root: str) -> dict[str, Any]:
             "min": min(impacts),
             "max": max(impacts),
             "pct_critical_ge_0.75": round(100 * sum(v >= 0.75 for v in impacts) / len(impacts), 1),
+            # Impact PERCENTILES — the reproducible inputs the rising-floor `novelty_priority_floor`
+            # default is derived from (child cc5b): the floor is set to ~the p40 impact band (the
+            # "below major" cut). Printed so the chosen scalar is auditable, not asserted.
+            "percentiles": _percentiles(impacts, (20, 40, 50, 60, 80)),
         }
     return {
         "events": len(files),
@@ -97,6 +101,23 @@ def aggregate(tickets_root: str) -> dict[str, Any]:
         "impact": impact_stats,
         "severity_attributes": {k: dict(c) for k, c in attrs.items()},
     }
+
+
+def _percentiles(values: list[float], pcts: tuple[int, ...]) -> dict[str, float]:
+    """Linear-interpolated percentiles of ``values`` at the given percent points, keyed
+    ``pNN``. Used to derive the rising-floor scalar reproducibly (child cc5b)."""
+    s = sorted(values)
+    out: dict[str, float] = {}
+    for p in pcts:
+        if len(s) == 1:
+            out[f"p{p}"] = round(s[0], 4)
+            continue
+        rank = (p / 100) * (len(s) - 1)
+        lo = int(rank)
+        frac = rank - lo
+        hi = min(lo + 1, len(s) - 1)
+        out[f"p{p}"] = round(s[lo] + (s[hi] - s[lo]) * frac, 4)
+    return out
 
 
 def _pct(counter: dict[str, int]) -> str:
@@ -123,6 +144,9 @@ def render_text(agg: dict[str, Any]) -> str:
             f"impact: n={i['n']} mean={i['mean']} median={i['median']} "
             f"min={i['min']:.2f} max={i['max']:.2f} critical(>=0.75)={i['pct_critical_ge_0.75']}%",
         ]
+        if i.get("percentiles"):
+            pcts = ", ".join(f"{k}={v}" for k, v in i["percentiles"].items())
+            lines.append(f"impact percentiles: {pcts}  (rising-floor default ~= p40)")
     lines += ["", f"decision: {_pct(agg['decision'])}", "", "severity_attributes (LLM):"]
     for k, c in agg["severity_attributes"].items():
         lines.append(f"  {k}: {_pct(c)}")

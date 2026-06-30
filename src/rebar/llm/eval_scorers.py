@@ -37,7 +37,14 @@ VALIDITY_EXPECTS = frozenset({"high_validity", "low_validity"})
 # Pass-3 rising-floor (drop NOVEL low-impact findings on a remediation re-review) rests
 # on a verifier whose severity attributes actually discriminate — not just its validity.
 IMPACT_EXPECTS = frozenset({"high_impact", "low_impact"})
-ALLOWED_EXPECTS = FIRE_EXPECTS | NOFIRE_EXPECTS | VALIDITY_EXPECTS | IMPACT_EXPECTS
+# The novelty axis (child 150b): a labeled carryover/novel pair tests the SEPARATE Pass-2
+# novelty sub-call's discrimination — a `novel` finding must score novelty >= 0.5 (the per-case
+# midpoint) and a `carryover` finding < 0.5, so the Pass-3 rising-floor rests on a novelty signal
+# that actually separates new findings from reworded prior ones (not one that rates all the same).
+NOVELTY_EXPECTS = frozenset({"high_novelty", "low_novelty"})
+ALLOWED_EXPECTS = (
+    FIRE_EXPECTS | NOFIRE_EXPECTS | VALIDITY_EXPECTS | IMPACT_EXPECTS | NOVELTY_EXPECTS
+)
 
 
 @dataclass(frozen=True)
@@ -257,6 +264,58 @@ def _discriminates_impact_levels(case: dict, out: dict) -> ScoreResult:
     )
 
 
+# severity_label analogue for novelty: the per-case 0.5 midpoint a novel finding clears and a
+# carryover finding falls below (the framework idiom; NOT an AUC literal). Distinct from the
+# runtime drop threshold T_novel (cc5b) — 0.5 is "did the scorer separate novel from carryover".
+_NOVELTY_MIDPOINT = 0.5
+
+
+def _novelty(out: dict) -> float | None:
+    """Extract a 0..1 NOVELTY for the scored finding, or None if absent. Tolerant of shape: a
+    numeric ``novelty``, else computed from the matches-prior sub-answers (top-level, nested under
+    ``matches_prior``, or the three sub-answer keys at top level) via the shared Pass-3 ordinal map
+    (:func:`rebar.llm.review_kernel.decide.novelty`), so the scorer and the gate's own novelty math
+    can never diverge."""
+    if not isinstance(out, dict):
+        return None
+    v = out.get("novelty")
+    if isinstance(v, int | float) and 0.0 <= float(v) <= 1.0:
+        return float(v)
+    from rebar.llm.review_kernel.decide import NOVELTY_SUBANSWERS
+    from rebar.llm.review_kernel.decide import novelty as _novelty_of
+
+    mp = out.get("matches_prior")
+    if not isinstance(mp, dict):
+        mp = {k: out[k] for k in NOVELTY_SUBANSWERS if k in out} or None
+    if isinstance(mp, dict) and any(k in mp for k in NOVELTY_SUBANSWERS):
+        return _novelty_of(mp)
+    return None
+
+
+def _expects_high_novelty(case: dict) -> bool:
+    return case.get("expect") == "high_novelty" or str(case.get("kind", "")).lower() == "novel"
+
+
+def _discriminates_novelty(case: dict, out: dict) -> ScoreResult:
+    """A labeled NOVEL finding must score novelty >= the 0.5 midpoint; a CARRYOVER one below it.
+    The novelty analogue of the validity/impact discriminators
+    (``_discriminates_true_from_false`` / ``_discriminates_impact_levels``): it is the evidence
+    gate the Pass-3 rising-floor (cc5b) rests on — a novelty signal that cannot
+    tell a genuinely new finding from a reworded prior one would make the floor drop real new
+    findings, so this must clear its bar before the drop rule is activated."""
+    if case.get("expect") not in NOVELTY_EXPECTS:
+        return _NA
+    nov = _novelty(out)
+    if nov is None:
+        return ScoreResult(True, False, "no novelty/matches_prior to discriminate on")
+    want_high = _expects_high_novelty(case)
+    got_high = nov >= _NOVELTY_MIDPOINT
+    ok = got_high == want_high
+    return ScoreResult(
+        True, ok, "" if ok else f"novelty {nov:.2f} contradicts expected high={want_high}"
+    )
+
+
 def _no_sycophancy(case: dict, out: dict) -> ScoreResult:
     """A real defect must not be sycophantically dismissed (graded low)."""
     if not _expects_high_validity(case):
@@ -298,6 +357,7 @@ REGISTRY: dict[str, Scorer] = {
     # verifier discrimination
     "discriminates_true_from_false": _discriminates_true_from_false,
     "discriminates_impact_levels": _discriminates_impact_levels,
+    "discriminates_novelty": _discriminates_novelty,
     "no_sycophancy_on_real_defects": _no_sycophancy,
 }
 
