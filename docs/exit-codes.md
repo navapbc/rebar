@@ -33,6 +33,18 @@ to an emitted code are contract changes and must be called out in release notes.
 - **State mismatch on a status-dependent op → `10`.** Includes `transition`
   with a stale `current` status, `claim` of a non-open ticket, and `reopen` of a
   non-closed ticket.
+- **Option-value syntax → accept BOTH `--opt value` and `--opt=value`.** Every
+  value-taking option on the structured read commands (`list --status`,
+  `session-logs --limit`, `search --status/--type/--has-tag/--sort`, `ready
+  --epic/--sort`, `list-epics --has-tag/--min-children`, plus `--output`) accepts
+  the space form *and* the equals form interchangeably — matching the
+  write/composer commands (`claim --assignee <you>`) and the `--opt <value>`
+  convention used throughout `CLAUDE.md`. So `rebar session-logs --limit 30` and
+  `rebar session-logs --limit=30` are equivalent; a space-form flag is **never**
+  mistaken for an unknown option (the historical footgun where a parse error read
+  as "no results"). The one exception is a value that itself begins with `-`
+  (e.g. the descending `--sort=-priority`): pass those via the equals form, since
+  the space form would ambiguously consume the following token.
 
 ### Unknown-option handling (scope + known gap)
 

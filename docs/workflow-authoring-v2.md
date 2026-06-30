@@ -99,6 +99,13 @@ creating/editing a *packaged* prompt **regenerates the derived index** (§5). No
 paths each surface a clear error, never silent corruption: an invalid/empty id, an id
 **collision** on create-new (refuse unless `overwrite`), and the neither-writable case.
 
+> **Note — editing a prompt's CONTRACT (not just its text).** Prompt *text* editing is
+> shipped; editing a prompt's `inputs`/`outputs` **schema names** from the editor is a
+> design proposal (schema-name picker + write-time resolve-check, the
+> `prompt_override_drift` interaction, the breaking-change UX, and the
+> scripted-op-contract-in-code boundary — ops stay code-only and read-only). See
+> [adr/0007-editing-prompt-contracts-from-the-editor.md](adr/0007-editing-prompt-contracts-from-the-editor.md).
+
 ---
 
 ## 2. Steps: scripted ops are contract-bearing too

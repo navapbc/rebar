@@ -212,12 +212,36 @@ coverage recorded"** — *not* "perfect". The rich per-criterion verdicts live i
 sidecar; a project composes any hard CI gate by checking the signed result + its
 coverage.
 
+### What the `signature` field guarantees (read this before trusting it)
+
+A signature (a real `SIGNATURE` event + a manifest whose first line is `plan-review:
+PASS`) is emitted **only** on a genuine non-blocking `PASS` where the LLM tier actually
+ran — i.e. **not** on `BLOCK`, **not** on `INDETERMINATE`, and **not** for an `exempt`
+runner (`bug` / `session_log` tickets, which are exempt from the gate). On every other
+outcome no manifest is signed and **no event is written to the ticket** (the ticket's
+own `signature` stays null), so the start-work gate has nothing to verify and the claim
+is denied.
+
+The one subtlety that has misled callers: the `review_plan` **verdict JSON** always
+carries a `signature` *object* — its shape is `{signed: bool, …}`. On a signed PASS it
+is `{signed: true, key_id, head_sha}`; on every other outcome it is `{signed: false,
+reason: "<VERDICT>"}` (e.g. `{signed: false, reason: "BLOCK"}`, or even `{signed:
+false, reason: "PASS"}` for an *exempt* runner that returned PASS but was not signed).
+
+> **Read `signature.signed` (a boolean), never the mere presence of the `signature`
+> object.** `if result["signature"]:` / `signed = bool(result.get("signature"))` is a
+> bug — the object is *always* present and truthy, so that check reports a signed BLOCK.
+> The trustworthy proof-of-PASS is the **certified `SIGNATURE` event** (`rebar
+> verify-signature <ticket>` / the claim gate's local HMAC verify), which a `BLOCK` can
+> never produce — `signature.signed == true` in the verdict JSON is only its in-band
+> echo.
+
 ## The convergent remediation re-review (rising floor)
 
 A re-review of an **edited** plan used to be at risk of not converging: each remediation
 round could surface *new*, lower-stakes findings in previously-clean criteria, expanding
 scope every run and never going green. The **rising-floor remediation re-review** (epic
-`7d43`; ADR [0007](adr/0007-convergent-plan-edit-re-review.md)) makes it converge while
+`7d43`; ADR [0008](adr/0008-convergent-plan-edit-re-review.md)) makes it converge while
 preserving full recall.
 
 It runs the **full criteria set every time** (no skipping, no Pass-1 anchoring → high-stakes

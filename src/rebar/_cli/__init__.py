@@ -98,7 +98,7 @@ def _reconcile(argv: list[str]) -> int:
     return subprocess.call([sys.executable, "-m", "rebar_reconciler", *args], env=engine_env(root))
 
 
-def _bridge_probe(argv: list[str]) -> int:
+def _bridge_probe(argv: list[str], *, extra_env: dict[str, str] | None = None) -> int:
     """``rebar bridge-probe`` → live Jira capability preflight.
 
     Launches the genuine python probe (``jira-capability-probe.py``) under
@@ -107,11 +107,22 @@ def _bridge_probe(argv: list[str]) -> int:
     passthrough (Tier E E6.5a). Talks only to Jira (creates + deletes a throwaway
     issue); needs no local tracker, so NO auto-init (matches the dispatcher arm).
     Output streams inherit so the operator sees the PROBE_PASS/FAIL lines directly.
+
+    ``extra_env`` overlays additional variables onto ``engine_env()`` before launch,
+    and these **override** any same-named variable inherited from ``os.environ``
+    (``{**engine_env(), **extra_env}`` — last writer wins). The probe reads
+    ``JIRA_URL`` / ``JIRA_USER`` / ``JIRA_PROJECT`` from its process env (not from
+    ``load_config()``), so ``rebar jira-onboard`` passes the just-persisted,
+    config-resolved settings here to bridge the file→env gap and to ensure the probe
+    validates exactly what was persisted (not a stale inherited env value).
     """
     from rebar._engine import engine_dir, engine_env
 
     script = str(engine_dir() / "jira-capability-probe.py")
-    return subprocess.call([sys.executable, script, *argv], env=engine_env())
+    env = engine_env()
+    if extra_env:
+        env = {**env, **extra_env}
+    return subprocess.call([sys.executable, script, *argv], env=env)
 
 
 def _grounding_info(argv: list[str]) -> int:
@@ -384,6 +395,13 @@ def main(argv: list[str] | None = None) -> int:
     # llm intercept (the LLM-framework setup wizard; owns its --help).
     if argv and argv[0] == "llm":
         return _llm(argv[1:])
+
+    # jira-onboard intercept (the interactive Jira onboarding wizard; owns its
+    # --help, like llm/reconcile). Detects + prompts + persists + validates.
+    if argv and argv[0] == "jira-onboard":
+        from rebar._cli._jira_onboard import jira_onboard
+
+        return jira_onboard(argv[1:])
 
     # prompt intercept (prompt evals — WS-G; owns its --help).
     if argv and argv[0] == "prompt":

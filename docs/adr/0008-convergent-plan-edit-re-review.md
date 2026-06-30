@@ -1,4 +1,4 @@
-# ADR 0007: Convergent plan-edit re-review (full-run + deterministic rising floor)
+# ADR 0008: Convergent plan-edit re-review (full-run + deterministic rising floor)
 
 - **Status:** Accepted
 - **Context:** Epic *Convergent plan-edit re-review: full-run + deterministic rising
