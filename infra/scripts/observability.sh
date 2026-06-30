@@ -40,6 +40,17 @@ aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
   --metric-name reviewbot_healthy --unit Count --value "$review_ok" \
   --dimensions InstanceId="$IID" 2>/dev/null || true
 
+# Gate-reachable signal for the S7 gerrit-gate-down alarm. Reuses the SAME
+# gerrit_ok value computed above (1 if the /config/server/version probe returned
+# 200, else 0) but publishes it to a SEPARATE namespace WITHOUT dimensions.
+# DIMENSIONLESS ON BOTH SIDES: the S7 alarm (monitoring.tf, Rebar/Gate /
+# GerritReachable) declares no dimensions, and CloudWatch keys a metric by
+# namespace+name+dimensions — adding a dimension to only one side makes the alarm
+# silently stop matching. When the host/probe stops publishing entirely the alarm's
+# treat_missing_data=breaching turns that gap into an ALARM (host-down backstop).
+aws cloudwatch put-metric-data --region "$REGION" --namespace "Rebar/Gate" \
+  --metric-name GerritReachable --unit Count --value "$gerrit_ok" 2>/dev/null || true
+
 # --- 2. Disk usage of the Gerrit data volume -------------------------------
 used_pct=$(df --output=pcent "$DATA_MOUNT" 2>/dev/null | tail -1 | tr -dc '0-9')
 if [ -n "$used_pct" ]; then
