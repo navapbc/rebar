@@ -33,6 +33,18 @@ resource "aws_security_group" "gerrit" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # HTTP — REQUIRED for Let's Encrypt HTTP-01 challenge (ACME): certbot proves
+  # domain control by serving a token over plain :80, and the nginx :80 server
+  # block redirects all other HTTP traffic to HTTPS. Without 80 open, cert
+  # issuance/renewal (S2) cannot complete. (Still NO inbound 22 — see below.)
+  ingress {
+    description = "HTTP (ACME HTTP-01 challenge + redirect to HTTPS)"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   # Gerrit SSH (git over SSH on Gerrit's dedicated port — NOT system sshd).
   ingress {
     description = "Gerrit SSH"

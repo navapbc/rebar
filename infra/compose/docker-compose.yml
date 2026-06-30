@@ -1,0 +1,72 @@
+# ---------------------------------------------------------------------------
+# rebar Gerrit + review-bot compose stack (epic d251 / story S2).
+#
+# Runs the two containers on the AL2023 arm64 box: Gerrit (the code-review server)
+# and the rebar review-bot (the FastAPI webhook receiver). nginx is NOT in this
+# stack — it runs as a HOST package (dnf nginx + host certbot) and proxies to the
+# published container ports (see infra/nginx/rebar.conf.template and
+# infra/scripts/install-certbot-timer.sh, and ADR-0007).
+#
+# Secrets come from infra/compose/.env, regenerated each boot from SSM by
+# infra/scripts/fetch-secrets.sh (ADR-0008). Compose auto-loads a sibling `.env`.
+#
+# PERSISTENCE MODEL (important): the official `gerritcodereview/gerrit` image runs
+# the server from the baked site at `/var/gerrit` (`-d /var/gerrit`) and IGNORES a
+# GERRIT_SITE override. Mounting one volume over the whole `/var/gerrit` would hide
+# the baked binaries (bin/, lib/, gerrit.war). So we persist only the STATEFUL
+# SUBDIRECTORIES by bind-mounting them from the EBS-backed host path
+# `/var/gerrit/site/*` into the container's `/var/gerrit/*`. Bind mounts onto the
+# persistent EBS mount are inherently safe from `docker compose down -v` (which only
+# removes named volumes), satisfying the "data survives down -v" requirement, and
+# they ride the EBS data volume's DLM daily snapshots (S7). compose-up.sh seeds
+# `site/etc/gerrit.config` (and copies the baked plugins) before first boot.
+# ---------------------------------------------------------------------------
+
+services:
+  # --- Gerrit code-review server -------------------------------------------
+  gerrit:
+    image: gerritcodereview/gerrit:3.14.1 # publishes arm64; matches the t4g box
+    restart: unless-stopped
+    ports:
+      # 8080: Gerrit HTTP — published to host loopback so the HOST nginx (TLS
+      # terminator) proxies to 127.0.0.1:8080; NOT directly internet-exposed.
+      - "127.0.0.1:8080:8080"
+      # 29418: Gerrit SSH (git-over-SSH) — exposed directly (SG opens 29418).
+      - "29418:29418"
+    volumes:
+      # Persist the stateful site subdirs on the EBS-backed host path. The baked
+      # binaries under /var/gerrit (bin, lib, gerrit.war) are NOT shadowed.
+      - /var/gerrit/site/git:/var/gerrit/git
+      - /var/gerrit/site/index:/var/gerrit/index
+      - /var/gerrit/site/cache:/var/gerrit/cache
+      - /var/gerrit/site/db:/var/gerrit/db
+      - /var/gerrit/site/etc:/var/gerrit/etc
+      - /var/gerrit/site/logs:/var/gerrit/logs
+      - /var/gerrit/site/plugins:/var/gerrit/plugins
+    environment:
+      # Public HTTPS origin (nginx-terminated). The entrypoint writes this into
+      # etc/gerrit.config; it mirrors the canonicalWebUrl we pre-seed there.
+      CANONICAL_WEB_URL: https://rebar.solutions.navateam.com/
+    # Ship container stdout/stderr to the host journal (journald), per the S2
+    # observability AC; `journalctl CONTAINER_NAME=compose-gerrit-1` then works.
+    logging:
+      driver: journald
+
+  # --- rebar review-bot webhook receiver -----------------------------------
+  review-bot:
+    build:
+      # Build context is the REPO ROOT so `pip install .` sees the whole package.
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.reviewbot
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      # Publish on host loopback for the HOST nginx /review/ proxy. Host port is
+      # single-sourced from .env (REVIEW_BOT_PORT, default 8000); container port
+      # is fixed at 8000 (uvicorn --port in the Dockerfile).
+      - "127.0.0.1:${REVIEW_BOT_PORT:-8000}:8000"
+    # REBAR_MCP_ALLOW_LLM deliberately NOT set (gates only the stdio MCP server;
+    # the receiver calls the rebar.llm library directly — S4b).
+    logging:
+      driver: journald

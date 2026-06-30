@@ -48,6 +48,14 @@ dependencies = [
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.2"]
+# Review-bot webhook receiver (epic d251 / story S2). OPTIONAL — never required by
+# core rebar. A thin FastAPI ASGI app (src/rebar/review_bot/) that receives Gerrit
+# webhooks and imports the review kernel as a library (see docs/adr/0007). The
+# review/vote LOGIC lands in S4b; this extra ships only the receiver skeleton.
+# Imported lazily (the fastapi import lives inside review_bot.app, so `import rebar`
+# stays dependency-free); only running the receiver needs this extra. `uvicorn[standard]`
+# pulls the production-grade ASGI server + its uvloop/httptools/websockets stack.
+reviewbot = ["fastapi", "uvicorn[standard]"]
 # LLM agent-operations framework (rebar.llm). OPTIONAL — never required by core
 # rebar (the engine stays stdlib-only, `dependencies = []`). The in-process runner is the
 # provider-agnostic pydantic-ai runtime (the LangChain/LangGraph stack was dropped in the

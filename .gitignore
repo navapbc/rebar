@@ -36,3 +36,7 @@ html/
 # Hybrid Logical Clock per-clone cache (P2.1) — disposable, rebuilt from the log
 .rebar/hlc.state
 .rebar/hlc.lock
+
+# Ephemeral container secrets — regenerated each boot from SSM by
+# infra/scripts/fetch-secrets.sh (ADR-0008); 0600, NEVER committed.
+infra/compose/.env
