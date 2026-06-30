@@ -530,3 +530,4 @@ The Python suite is sub-divided by concern:
     `init`; there is no `classify`);
   - `test_library.py` / `test_cli.py` / `test_mcp.py` cover per-interface
     specifics (typed exceptions, exit-code passthrough, read-only/live gates).
+# mirror-lock proof 1782813749
