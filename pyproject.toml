@@ -144,6 +144,12 @@ exclude = [
     "**/*.pyc",
     "**/*.pyo",
     "**/node_modules",
+    # The Terraform IaC tree (infra/) is operational infrastructure, never
+    # shipped in the wheel. It is already outside `packages = ["src/rebar"]`,
+    # but exclude it explicitly as belt-and-suspenders.
+    "/infra",
+    "infra",
+    "infra/**",
 ]
 
 [tool.hatch.build.targets.sdist]
@@ -153,6 +159,12 @@ exclude = [
     "**/*.pyc",
     "**/*.pyo",
     "**/node_modules",
+    # infra/ is already excluded by the `include` allowlist above (it is not in
+    # the list), but exclude it explicitly as belt-and-suspenders so a future
+    # `include` change can't accidentally start shipping the Terraform IaC.
+    "/infra",
+    "infra",
+    "infra/**",
 ]
 
 [tool.ruff]
