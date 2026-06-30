@@ -32,10 +32,11 @@ findings that genuinely earn it, so the impact axis discriminates across a ticke
 - likelihood (low|medium|high) — chance the harm actually materialises given the plan as written.
   low = needs an unlikely combination or is speculative; medium = plausible on a normal path;
   high = near-certain or on the default path.
-- reversibility (easy|moderate|hard) — cost to UNDO the planned approach once built. A plan is
-  pre-merge, so this is "how hard to change course later", NOT "roll back a deploy": easy = a
-  local edit; moderate = a contained refactor; hard = a migration, a data / on-disk-format change,
-  or a public-contract change that is costly to reverse.
+- reversibility (easy|moderate|hard) — cost to CHANGE COURSE later if the planned approach proves
+  wrong. A plan is pre-merge, so this is "how hard to walk the decision back", NOT "roll back a
+  deploy": easy = a local edit; moderate = a contained refactor; hard = the plan commits to a
+  one-way door — an on-disk data/format or public-contract shape that, once built on, is costly to
+  unwind (e.g. it forces a later migration to change).
 
 cited_reference_accurate is yes|no|insufficient|na — answer it only when the finding cites a
 specific code reference, else na. Be atomic: answer each sub-question on its own merits.
