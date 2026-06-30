@@ -355,13 +355,20 @@ def head_sha(repo_root) -> str:
 
 
 # ── Library-facing operations ─────────────────────────────────────────────────
-def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> dict:
+def sign_manifest(ticket_id: str, manifest, *, kind: str | None = None, repo_root=None) -> dict:
     """Sign a manifest of verified steps for a ticket; append a SIGNATURE event.
 
     Validates the manifest, resolves the ticket id, computes the HMAC with the
     environment key, and persists the signature record through the single locked
     write path. Returns the record (with the resolved ``ticket_id``). Raises
     :class:`SigningError` on a validation/resolve failure.
+
+    ``kind`` (e.g. ``"plan-review"`` / ``"completion-verifier"``) is recorded UNSIGNED on
+    the event as a routing hint for the reducer's kind-keyed attestations map (epic
+    dark-acme-lumen). It is never authoritative — the reducer derives the kind from the
+    signed ``manifest[0]`` and ignores a mismatched hint — so it does not enter the canonical
+    signed payload and never invalidates a prior signature. Omitted callers (e.g. `rebar sign`)
+    sign exactly as before.
     """
     from rebar._commands._seam import (
         CommandError,
@@ -396,6 +403,10 @@ def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> dict:
         "verified_at_sha": verified_at_sha_from_manifest(steps),
         "signed_at": time.time_ns(),
     }
+    # Unsigned routing hint for the reducer's kind-keyed map; omitted when not provided so
+    # existing callers' events are byte-identical to before.
+    if kind is not None:
+        record["kind"] = kind
     try:
         append_event(resolved, "SIGNATURE", record, tracker, repo_root=repo_root)
     except CommandError as exc:

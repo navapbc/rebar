@@ -276,10 +276,10 @@ def _completion_precheck(
     # yields a closed-without-signature ticket (the documented "not attested" signal).
     if result.get("source") == "local":
         return None
-    return _verdict_manifest(result, ticket_id)
+    return _verdict_manifest(result, ticket_id, repo_root)
 
 
-def _verdict_manifest(result: dict, ticket_id: str) -> list[str]:
+def _verdict_manifest(result: dict, ticket_id: str, repo_root=None) -> list[str]:
     """Deterministic manifest (non-empty strings) of the verified PASS verdict, for signing.
 
     The signature binds ``(ticket_id, manifest)``; the key fingerprint + head_sha on the record
@@ -290,7 +290,13 @@ def _verdict_manifest(result: dict, ticket_id: str) -> list[str]:
     On an attested verdict the manifest carries a ``verified-at-sha:<sha>`` step (epic
     raze-vet-ditch S4) binding WHICH immutable commit was verified into the signed bytes —
     via the manifest channel, so no ``_canonical_payload``/``PAYLOAD_VERSION`` change and no
-    prior signature is invalidated."""
+    prior signature is invalidated.
+
+    It also records the ticket's ``material: <fingerprint>`` (epic dark-acme-lumen) — the SAME
+    fingerprint plan-review signs (description/AC/file_impact/children) — so completion
+    validity-on-read can detect a material edit made after this verdict was signed, symmetric
+    with the plan-review claim gate. Omitted if the fingerprint can't be computed (then the
+    material check is simply skipped on read)."""
     from rebar import signing as _signing
 
     manifest = [
@@ -299,6 +305,14 @@ def _verdict_manifest(result: dict, ticket_id: str) -> list[str]:
         f"model: {result.get('model') or 'n/a'}",
         f"runner: {result.get('runner') or 'n/a'}",
     ]
+    try:
+        from rebar.llm.plan_review.attest import current_material_fingerprint
+
+        material = current_material_fingerprint(ticket_id, repo_root=repo_root)
+    except Exception:  # noqa: BLE001 — fingerprint is best-effort; absence just skips the material check on read
+        material = None
+    if material:
+        manifest.append(f"material: {material}")
     sha = result.get("verified_at_sha")
     if sha:
         manifest.append(_signing.verified_at_sha_step(sha))
@@ -495,7 +509,9 @@ def transition_compute(
     if target_status == "closed" and verified_manifest is not None:
         from rebar import signing as _signing
 
-        _signing.sign_manifest(ticket_id, verified_manifest, repo_root=repo_root)
+        _signing.sign_manifest(
+            ticket_id, verified_manifest, kind="completion-verifier", repo_root=repo_root
+        )
 
     # Reopen retires the attested verified_at_sha pin (epic raze-vet-ditch S4): a SHA bound to
     # a now-undone closure must not outlive it. Best-effort + guarded (only acts on an attested

@@ -23,7 +23,7 @@ def _params(func) -> list[str]:
 def test_signing_surface_signatures_match_doc() -> None:
     from rebar import signing
 
-    assert _params(signing.sign_manifest) == ["ticket_id", "manifest", "repo_root"]
+    assert _params(signing.sign_manifest) == ["ticket_id", "manifest", "kind", "repo_root"]
     assert _params(signing.verify_signature) == ["ticket_id", "repo_root"]
     assert _params(signing.verify_record) == ["record", "ticket_id", "key"]
     assert _params(signing.signing_key) == ["tracker", "create_if_missing"]

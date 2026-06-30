@@ -244,7 +244,9 @@ def sign_plan_review(verdict: dict[str, Any], *, material: str, repo_root=None) 
         regver=registry_version(),
         verified_at_sha=current_code_sha(),
     )
-    return signing.sign_manifest(verdict["ticket_id"], manifest, repo_root=repo_root)
+    return signing.sign_manifest(
+        verdict["ticket_id"], manifest, kind=_MANIFEST_PREFIX, repo_root=repo_root
+    )
 
 
 def _rehash(paths, *, repo_root=None, pinned_sha: str | None = None) -> dict[str, str]:
@@ -417,7 +419,7 @@ def refresh_attestation(
         regver=registry_version(),
         refreshed_from=f"{prior_digest} probe={probe}",
     )
-    return signing.sign_manifest(ticket_id, manifest, repo_root=repo_root)
+    return signing.sign_manifest(ticket_id, manifest, kind=_MANIFEST_PREFIX, repo_root=repo_root)
 
 
 def _manifest_field(manifest: list[str] | None, prefix: str) -> str:
