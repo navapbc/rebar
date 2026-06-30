@@ -14,9 +14,14 @@ how hard you push.
   **data volume** `vol-06fa2e77a9dd97527` and are captured by the DLM daily
   snapshots (retain=7, see below).
 - **Posture is freeze-and-restore, not HA.** A single box; on failure we restore
-  from the most recent good snapshot and re-provision. The RTO target is **a few
-  hours** (provision + volume restore + Gerrit reindex), not minutes. There is no
-  hot standby — that is an accepted tradeoff for a single-team review gate.
+  from the most recent good snapshot and re-provision. There is no hot standby —
+  that is an accepted tradeoff for a single-team review gate.
+- **RTO target: ≤ 2 hours** (provision + volume restore + Gerrit reindex). This is
+  the **pass/fail criterion for the restore drill**: a drill (or a real recovery)
+  that completes — snapshot → restored volume → verified-good Gerrit data — in
+  **≤ 2 h** PASSES; longer than 2 h FAILS and triggers the DR back-out below.
+  (Measured: the d251 drill ran **well under** target — see "Record the achieved
+  RTO".)
 
 ## Snapshot identification (the backup of record)
 
@@ -89,10 +94,21 @@ REGION=us-east-1
 INSTANCE_ID=i-00880b2c7f13527c5
 SRC_VOL=vol-06fa2e77a9dd97527
 
-# 1. Take an on-demand snapshot (or reuse the newest DLM snapshot above).
+# 0. RTO clock — capture the drill START timestamp (see "Record the achieved RTO").
+DRILL_START=$(date -u +%s)
+
+# 1. Take a QUIESCED, filesystem-consistent on-demand snapshot.
+#    Briefly STOP Gerrit so nothing is mid-write when the snapshot point is taken
+#    (alternatively put Gerrit read-only). This is a ~seconds gate pause — and it is
+#    SAFE: merged code is already on the GitHub mirror (S5), so the only thing paused
+#    is the review gate, not the source of truth. Restart Gerrit immediately once the
+#    snapshot has been INITIATED (create-snapshot captures a point-in-time; the wait
+#    can run after Gerrit is back up).
+sudo docker compose -f infra/compose/docker-compose.yml stop gerrit   # ~seconds pause
 SNAP=$(aws ec2 create-snapshot --region $REGION --volume-id $SRC_VOL \
   --description "restore-drill $(date -u +%FT%TZ)" \
   --query SnapshotId --output text)
+sudo docker compose -f infra/compose/docker-compose.yml start gerrit  # gate back up
 aws ec2 wait snapshot-completed --region $REGION --snapshot-ids $SNAP
 
 # 2. Find the instance's AZ and create a THROWAWAY volume from the snapshot
@@ -141,6 +157,53 @@ aws ec2 delete-snapshot --region $REGION --snapshot-id $SNAP
 
 The live `prevent_destroy` volume `vol-06fa2e77a9dd97527` is **never** detached,
 unmounted, or deleted by this drill.
+
+## Record the achieved RTO (every drill run)
+
+Capture the END timestamp once the restored copy is **verified good** (the
+`ls`/`rev-parse` checks above all pass), and compute the elapsed time against the
+**≤ 2 h** target. Record the result in the drill ticket / log:
+
+```bash
+DRILL_END=$(date -u +%s)
+ELAPSED=$(( DRILL_END - DRILL_START ))
+printf 'restore-drill RTO: %dm %ds (target: <= 2h / 7200s) — %s\n' \
+  $(( ELAPSED / 60 )) $(( ELAPSED % 60 )) \
+  "$( [ "$ELAPSED" -le 7200 ] && echo PASS || echo FAIL )"
+```
+
+**d251 drill result (2026-06-30, QUIESCED):** comfortably under target. Gerrit was
+briefly stopped (`docker compose stop gerrit`) for a filesystem-consistent snapshot
+and restarted immediately after the snapshot was initiated (Gerrit healthy again on
+restart); the throwaway volume was created from that snapshot, attached, mounted
+read-only, and the Gerrit NoteDb repos (`All-Projects.git`, `All-Users.git`,
+`rebar.git`) were verified present, then the throwaway volume + snapshot were
+deleted. **Measured end-to-end achieved RTO: ~126 s (≈ 2 minutes) — far under the
+≤ 2 h (7200 s) target.** The live `prevent_destroy` data volume was never touched.
+The snapshot is the long pole only because the volume is provisioned-large but
+lightly used; EBS snapshots are incremental and copy only used blocks.
+
+## DR back-out (reversibility)
+
+Restores can go wrong. Keep every step reversible:
+
+- **Failed DRILL.** The drill already operates only on a THROWAWAY volume, so
+  back-out is just the cleanup above: `detach` + `delete-volume` the
+  `rebar-restore-drill` volume (and optionally `delete-snapshot` the on-demand
+  drill snapshot). The live volume was never touched — nothing to undo.
+
+- **Failed REAL restore.** When recovering for real (replacing the live data
+  volume from a snapshot), **DETACH-BUT-RETAIN the original volume — never delete
+  it.** Only after the restored volume is **verified good** in service do you
+  consider releasing the old one. If the restore is botched:
+  1. Detach the (bad) restored volume from the instance.
+  2. **Re-attach the original** `vol-06fa2e77a9dd97527` at `/dev/sdf` and bring
+     Gerrit back on it — you are back to the pre-restore state, fully reversible.
+  3. Diagnose, then retry the restore from a different/earlier snapshot.
+  4. **Only after** a restore is verified good (Gerrit healthy, reindex clean,
+     review metadata intact) do you release the old volume — snapshot it once more
+     for safety, then delete. Until that point the original volume is the
+     irreplaceable fallback and stays retained, detached but intact.
 
 ## `prevent_destroy` removal procedure (intentional volume replace)
 
