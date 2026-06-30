@@ -48,6 +48,25 @@ Add the `[jira]` section so local `rebar reconcile` and the CI run agree on the
 target. The **secret** `JIRA_API_TOKEN` is **never** a config key — it is supplied
 via the environment only.
 
+> **Recommended: `rebar jira-onboard`.** Rather than hand-editing the file, run the
+> interactive wizard — it detects whatever is already set (env or file), prompts only
+> for the missing `url`/`user`/`project`, persists them to a rebar-owned `rebar.toml`
+> `[jira]` section, reminds you the token stays an env var, and runs `bridge-probe` to
+> validate end-to-end:
+>
+> ```sh
+> rebar jira-onboard                 # interactive
+> rebar jira-onboard --url https://your-site.atlassian.net \
+>     --user bridge-bot@your-org.com --project REB   # non-interactive
+> rebar jira-onboard --reset         # clear the persisted [jira] keys
+> ```
+>
+> The wizard writes the same three keys shown below; the manual edit remains valid if
+> you prefer it (e.g. checking the file into a pyproject-managed repo by hand). The
+> wizard never edits a `pyproject.toml`; it writes/creates `rebar.toml` (which takes
+> read precedence). It never writes the secret token — set `JIRA_API_TOKEN` in your
+> environment (`export JIRA_API_TOKEN=...`) before the `bridge-probe` step.
+
 ```toml
 [jira]
 url     = "https://your-site.atlassian.net"   # env JIRA_URL
