@@ -414,41 +414,11 @@ def sign_manifest(ticket_id: str, manifest, *, kind: str | None = None, repo_roo
     return {**record, "ticket_id": resolved}
 
 
-def retire_attested_pin(ticket_id: str, *, repo_root=None) -> bool:
-    """Retire a ticket's attested ``verified_at_sha`` pin (epic raze-vet-ditch S4).
-
-    Called on reopen/abandon: a SHA pinned to a now-undone closure must not outlive it.
-    Only acts when the current signature actually carries a ``verified-at-sha:`` step
-    (an attested close) — a legacy/non-attested signature is left untouched, so reopen
-    behavior is unchanged for everything except attested closures. Retires by appending a
-    cleared SIGNATURE event (verify then reports ``unsigned``). Returns True if it retired
-    a pin. Best-effort: never raises (reopen must not fail on a signing hiccup)."""
-    from rebar.reducer import reduce_ticket
-
-    tracker = config.tracker_dir(repo_root)
-    try:
-        from rebar._engine_support.resolver import resolve_ticket_id
-
-        resolved = resolve_ticket_id(ticket_id, str(tracker)) or ticket_id
-        state = reduce_ticket(os.path.join(str(tracker), resolved)) or {}
-        sig = state.get("signature")
-        sig = sig if isinstance(sig, dict) else {}
-        if not verified_at_sha_from_manifest(sig.get("manifest")) and not sig.get(
-            "verified_at_sha"
-        ):
-            return False  # no attested pin — leave the signature as-is
-        from rebar._commands._seam import append_event
-
-        append_event(
-            resolved,
-            "SIGNATURE",
-            {"manifest": [], "signature": "", "retired": True, "signed_at": time.time_ns()},
-            tracker,
-            repo_root=repo_root,
-        )
-        return True
-    except Exception:  # noqa: BLE001 — best-effort retirement; never break reopen
-        return False
+# NOTE: ``retire_attested_pin`` (a write-time clear of the signature on reopen) was REMOVED
+# in epic dark-acme-lumen. Attestation records are now immutable and reopen invalidation is
+# computed on READ via ``state['last_reopened_at']`` + ``plan_review.attest.compute_validity``
+# — which, unlike the old clear, does not destroy the kind-keyed attestations a reopened ticket
+# still legitimately carries. See docs/adr/0009-reopen-invalidation-validity-on-read.md.
 
 
 def _resolve_and_reduce(ticket_id: str, repo_root):

@@ -206,6 +206,20 @@ open→in_progress`) verifies, in order:
 4. the bound material fingerprint matches the **current** ticket — a material edit
    (description/AC/file-impact/decomposition) invalidates it. (Tags/comments/links/
    assignee are *not* material and do not invalidate.)
+5. it **post-dates the latest reopen** — reactivating a ticket (`closed → open`,
+   recorded as `state["last_reopened_at"]`) invalidates an attestation signed before it.
+
+**Validity-on-read, not write-time mutation (epic dark-acme-lumen, ADR 0009).** These
+checks are computed when a gate reads an attestation, by the single
+`plan_review.attest.compute_validity(attestation, ticket_state, kind)` dispatcher — the
+attestation records themselves are **immutable** and are never cleared/mutated by a
+transition (the old reopen-time `retire_attested_pin` is gone). An attestation can thus be
+HMAC-`certified` (integrity intact) yet not **valid** for its gate (e.g. after a reopen or a
+material edit). **Invariant: gates call `compute_validity` on a certified attestation — they
+never trust HMAC certification alone, nor mutate a record.** This is also what lets a ticket
+hold a plan-review *and* a completion-verifier attestation at once without either clobbering
+the other (the kind-keyed `attestations` map; the legacy top-level `signature` is a
+back-compat mirror of the most-recent one).
 
 The attestation means **"a review process was followed, no blocking red flags, with
 coverage recorded"** — *not* "perfect". The rich per-criterion verdicts live in the

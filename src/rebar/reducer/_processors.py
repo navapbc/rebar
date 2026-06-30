@@ -418,8 +418,8 @@ def process_signature(state: dict, event: dict, data: dict) -> None:
 
     The MIRROR keeps the exact prior single-slot last-writer-wins behavior — EVERY event
     (including a blank/retired one) replaces ``state['signature']`` — so the existing
-    ``state.get('signature')`` consumers (verify, the close gate, fsck, retire_attested_pin)
-    are unchanged by this slice, and the SNAPSHOT/rollback mirror is automatic (the compactor
+    ``state.get('signature')`` consumers (verify, the close gate, fsck) are unchanged by this
+    slice, and the SNAPSHOT/rollback mirror is automatic (the compactor
     builds compiled_state via this reducer).
 
     The MAP (``state['attestations']``, epic dark-acme-lumen) is purely additive: a kindable

@@ -149,33 +149,34 @@ def test_concurrent_writers_no_stale_or_double_pin(rebar_repo: Path):
 
 
 # --------------------------------------------------------------------------------------
-# AC4 — reopen retires the pin; local never signs
+# AC4 — reopen invalidates the closure via validity-on-read (records immutable); local
+# never signs
 # --------------------------------------------------------------------------------------
-def test_reopen_retires_attested_pin(rebar_repo: Path, monkeypatch):
+def test_reopen_invalidates_completion_via_validity_on_read(rebar_repo: Path, monkeypatch):
+    """Epic dark-acme-lumen: reopen no longer CLEARS the signature (retire_attested_pin is
+    gone). The completion attestation RECORD stays HMAC-certified (immutable), but
+    compute_validity reads it as not-valid because the ticket was reopened — so a reopened
+    closure is never trusted, without destroying the kind-keyed attestations it carries."""
+    from rebar.llm.plan_review.attest import compute_validity
+
     _commit(rebar_repo)
     _enable(rebar_repo)
     monkeypatch.setattr(rebar.llm, "verify_completion", _verdict("attested", "pinnedsha"))
     tid = rebar.create_ticket("task", "t", repo_root=str(rebar_repo))
     rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
     rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
-    v = rebar.verify_signature(tid, repo_root=str(rebar_repo))
-    assert v["verdict"] == "certified" and v["verified_at_sha"] == "pinnedsha"
-    # Reopen → the attested pin is retired (the closure it attested is undone).
+    sig = rebar.verify_signature(tid, kind="completion-verifier", repo_root=str(rebar_repo))
+    assert sig["verdict"] == "certified" and sig["verified_at_sha"] == "pinnedsha"
+    state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
+    assert compute_validity(sig, state, "completion-verifier", repo_root=str(rebar_repo))["valid"]
+
     rebar.reopen(tid, repo_root=str(rebar_repo))
-    v2 = rebar.verify_signature(tid, repo_root=str(rebar_repo))
-    assert v2["verdict"] == "unsigned"
-    assert v2["verified_at_sha"] is None
-
-
-def test_retire_leaves_legacy_signature_intact(rebar_repo: Path):
-    """retire_attested_pin only retires an ATTESTED signature; a legacy signature (no
-    verified-at-sha step) is left certified — so reopen behavior is unchanged for it."""
-    tid = rebar.create_ticket("task", "t", repo_root=str(rebar_repo))
-    signing.sign_manifest(
-        tid, ["completion-verifier: PASS", f"ticket: {tid}"], repo_root=str(rebar_repo)
-    )
-    assert signing.retire_attested_pin(tid, repo_root=str(rebar_repo)) is False
-    assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "certified"
+    # The record is NOT mutated — still HMAC-certified — but it no longer validates.
+    sig2 = rebar.verify_signature(tid, kind="completion-verifier", repo_root=str(rebar_repo))
+    assert sig2["verdict"] == "certified"
+    state2 = rebar.show_ticket(tid, repo_root=str(rebar_repo))
+    v = compute_validity(sig2, state2, "completion-verifier", repo_root=str(rebar_repo))
+    assert v["valid"] is False
 
 
 def test_local_source_close_never_signs(rebar_repo: Path, monkeypatch):

@@ -513,13 +513,11 @@ def transition_compute(
             ticket_id, verified_manifest, kind="completion-verifier", repo_root=repo_root
         )
 
-    # Reopen retires the attested verified_at_sha pin (epic raze-vet-ditch S4): a SHA bound to
-    # a now-undone closure must not outlive it. Best-effort + guarded (only acts on an attested
-    # signature), so legacy reopen behavior is otherwise unchanged.
-    if target_status == "open" and current_status == "closed":
-        from rebar import signing as _signing
-
-        _signing.retire_attested_pin(ticket_id, repo_root=repo_root)
+    # Reopen invalidation is NO LONGER a write-time mutation (epic dark-acme-lumen): attestation
+    # records are immutable, and a reopen is detected on READ via state["last_reopened_at"] +
+    # compute_validity (a completion/plan-review attestation signed before the reopen reads as
+    # not-valid). This replaces the former retire_attested_pin clear, and — unlike it — does not
+    # destroy the kind-keyed attestations a reopened ticket still carries.
 
     # Force-close audit comment (best-effort, silenced — matches bash || true).
     if target_status == "closed" and force_close:
