@@ -41,6 +41,47 @@ def _bridge_alert_warning(states: list[dict]) -> str | None:
     return None
 
 
+def _coalesce_value_opts(args: list[str], value_opts: frozenset[str]) -> list[str]:
+    """Normalize the space form ``--opt value`` into the equals form ``--opt=value``
+    for the listed value-taking options, so the read-CLI accepts BOTH forms — matching
+    ``--output``/``ready --epic``, the write/composer commands (``claim --assignee
+    <you>``), and the documented ``--opt <value>`` convention. Options already in
+    equals form, bare flags, and positionals pass through untouched. A ``--opt`` whose
+    next token is missing or itself looks like an option (starts with ``-``) is left
+    as-is, so the command's own handler still reports the right usage error and a
+    ``-``-prefixed value (e.g. the descending ``--sort=-priority``) is passed via the
+    equals form rather than ambiguously consuming the following flag."""
+    out: list[str] = []
+    i, n = 0, len(args)
+    while i < n:
+        arg = args[i]
+        if arg in value_opts and i + 1 < n and not args[i + 1].startswith("-"):
+            out.append(f"{arg}={args[i + 1]}")
+            i += 2
+        else:
+            out.append(arg)
+            i += 1
+    return out
+
+
+_LIST_VALUE_OPTS = frozenset(
+    {
+        "--sort",
+        "--type",
+        "--status",
+        "--parent",
+        "--has-tag",
+        "--priority",
+        "--without-tag",
+        "--min-children",
+    }
+)
+_SEARCH_VALUE_OPTS = frozenset({"--status", "--type", "--has-tag", "--sort"})
+_LIST_EPICS_VALUE_OPTS = frozenset({"--has-tag", "--min-children"})
+_SESSION_LOGS_VALUE_OPTS = frozenset({"--limit"})
+_READY_VALUE_OPTS = frozenset({"--epic", "--sort"})
+
+
 def _cmd_show(argv: list[str], tracker: str) -> int:
     usage = "Usage: ticket show [--output llm] [--include-scratch] <ticket_id> [<ticket_id> ...]"
     try:
@@ -133,6 +174,7 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         # opts back into the full ticket shape (matching show/search).
         "include_body": False,
     }
+    rest = _coalesce_value_opts(rest, _LIST_VALUE_OPTS)
     for arg in rest:
         if arg == "--include-archived":
             opts["include_archived"] = True
@@ -234,6 +276,7 @@ def _cmd_session_logs(argv: list[str], tracker: str) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
     limit = 5
+    rest = _coalesce_value_opts(rest, _SESSION_LOGS_VALUE_OPTS)
     for arg in rest:
         if arg.startswith("--limit="):
             raw = arg[len("--limit=") :]
@@ -299,6 +342,7 @@ def _cmd_ready(argv: list[str], tracker: str) -> int:
         return 2
     epic = None
     sort = ""
+    rest = _coalesce_value_opts(rest, _READY_VALUE_OPTS)
     i = 0
     while i < len(rest):
         arg = rest[i]
@@ -351,6 +395,7 @@ def _cmd_search(argv: list[str], tracker: str) -> int:
     status = ticket_type = has_tag = None
     include_archived = False
     sort = ""
+    argv = _coalesce_value_opts(argv, _SEARCH_VALUE_OPTS)
     for arg in argv:
         if arg.startswith("--status="):
             status = arg[len("--status=") :]
@@ -422,6 +467,7 @@ def _cmd_list_epics(argv: list[str], tracker: str) -> int:
     include_blocked = False
     has_tag = ""
     min_children: int | None = None
+    rest = _coalesce_value_opts(rest, _LIST_EPICS_VALUE_OPTS)
     for arg in rest:
         if arg == "--all":
             include_blocked = True
