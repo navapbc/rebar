@@ -1,1 +1,0 @@
-{"author":"Iso Tester","data":{"file_impact":[{"path":"src/rebar/gerrit/","reason":"Gerrit LLM-Review voter (event wiring + REST vote)"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782620597466788001,"uuid":"71be9b03-ab6d-4422-91e0-64d5cc6da879"}
