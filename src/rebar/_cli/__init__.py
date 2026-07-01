@@ -23,6 +23,7 @@ import sys
 from rebar._cli import _help
 from rebar._cli._init import ensure_initialized
 from rebar._cli._llm_commands import (
+    _criteria,
     _llm,
     _prompt,
     _review,
@@ -406,6 +407,10 @@ def main(argv: list[str] | None = None) -> int:
     # prompt intercept (prompt evals — WS-G; owns its --help).
     if argv and argv[0] == "prompt":
         return _prompt(argv[1:])
+
+    # criteria intercept (per-criterion calibration eval — story 55b8; owns its --help).
+    if argv and argv[0] == "criteria":
+        return _criteria(argv[1:])
 
     # config intercept (native config-transparency read; owns its own --help, like
     # reconcile/review). No store init: it reads working-tree config files only.
