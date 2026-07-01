@@ -406,8 +406,15 @@ def calibrate_criterion(
     from rebar.llm.eval_scorers import FIRE_EXPECTS, NOFIRE_EXPECTS
 
     runs = max(1, int(runs))
+    # The criterion's eval fixture lives at its filesystem-safe prompt id (task stew-kid-motif):
+    # a project.<name> criterion's fixture is `.rebar/evals/plan-review-project-<name>.eval.yaml`,
+    # decoupled from the dotted logical id — same mapping the rubric uses.
+    from rebar.llm.criteria.ids import criterion_prompt_id
+
     prompt_id = (
-        criterion_id if criterion_id.startswith("plan-review-") else f"plan-review-{criterion_id}"
+        criterion_id
+        if criterion_id.startswith("plan-review-")
+        else criterion_prompt_id(criterion_id)
     )
     spec = load_eval_spec(prompt_id, repo_root=repo_root)
     fire_nofire = FIRE_EXPECTS | NOFIRE_EXPECTS

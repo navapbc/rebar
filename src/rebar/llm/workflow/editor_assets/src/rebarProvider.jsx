@@ -1086,16 +1086,37 @@ function AuthoringKindEntry(props) {
   );
 }
 
+// Derive the rubric prompt filename from a criterion id, mirroring the backend's canonical
+// `criteria.ids.criterion_prompt_id` (task stew-kid-motif): a project.<name> logical id is stored
+// at the filesystem-safe `plan-review-project-<name>.md`, so the dotted namespace never reaches a
+// filename. Kept in lockstep with the Python mapping.
+function criterionPromptId(cid) {
+  return "plan-review-" + String(cid || "").replace(/\./g, "-");
+}
+
 function AuthoringIdEntry(props) {
   const { element, id } = props;
   const a = useAuthoring();
   const debounce = useService("debounceInput");
   if (!a.open) return null;
+  const isCriterion = a.kind === "criterion";
+  const cid = (a.id || "").trim();
+  // Surface WHAT will be created so the author isn't guessing: for a net-new PROJECT criterion the
+  // id is `project.<name>` (dotted namespace); its rubric lands at the sanitized prompt file.
+  let description;
+  if (isCriterion && cid) {
+    description = cid.startsWith("project.")
+      ? `Creates project criterion “${cid}” — rubric → .rebar/prompts/${criterionPromptId(cid)}.md`
+      : `Re-tunes built-in “${cid}”. (For a NEW project criterion, use project.<name>.)`;
+  } else if (isCriterion) {
+    description = "For a NEW project criterion use project.<name> (name = letters/digits/dashes).";
+  }
   return (
     <TextFieldEntry
       id={id}
       element={element}
-      label="new id (letters/digits/dashes)"
+      label={isCriterion ? "criterion id (project.<name> for a new one)" : "new id (letters/digits/dashes)"}
+      description={description}
       getValue={() => a.id}
       setValue={(v) => {
         a.id = v || "";

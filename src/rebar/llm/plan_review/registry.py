@@ -232,8 +232,13 @@ def _descriptor_from_prompt(
 
     def _get_prompt(criterion_id: str, root: str | None) -> Any:
         from rebar.llm import prompts
+        from rebar.llm.criteria.ids import criterion_prompt_id
 
-        return prompts.get_prompt(f"{_PROMPT_ID_PREFIX}{criterion_id}", repo_root=root)
+        # Decouple the logical criterion id from the rubric's filesystem-safe prompt id
+        # (task stew-kid-motif): a project.<name> id reads plan-review-project-<name>.md, so a
+        # net-new project criterion — whose dotted id `_valid_id` forbids as a filename — is
+        # authorable + loadable. A built-in id maps to plan-review-<id> unchanged.
+        return prompts.get_prompt(criterion_prompt_id(criterion_id), repo_root=root)
 
     return _criteria.build_descriptor(cid, routing, repo_root=rr, prompt_getter=_get_prompt)
 

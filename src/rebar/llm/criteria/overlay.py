@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import lru_cache
@@ -134,6 +135,19 @@ def _validate_routing_entry(cid: str, entry: Any, *, where: str) -> None:
         raise CriteriaError(
             f"{where}: routing for {cid!r} must be an object, got {type(entry).__name__}"
         )
+    # A project criterion's <name> must be the SAME filesystem-safe charset as any prompt id
+    # (task stew-kid-motif): [A-Za-z0-9][A-Za-z0-9-]* — alnum + dash, NO dots/underscores — so
+    # the single namespace dot is the only '.', and `criterion_prompt_id` (project.<name> →
+    # plan-review-project-<name>) is a total, injective, filesystem-safe map. A dotted/underscored
+    # name would make the rubric filename unauthorable (or the id→prompt-id map non-injective).
+    if cid.startswith(_PROJECT_PREFIX):
+        name = cid[len(_PROJECT_PREFIX) :]
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*", name):
+            raise CriteriaError(
+                f"{where}: project criterion name {name!r} in {cid!r} must match "
+                r"[A-Za-z0-9][A-Za-z0-9-]* (alnum + dash, no dots/underscores) — the rubric is "
+                "stored at plan-review-project-<name>.md, so the name must be filesystem-safe"
+            )
     exec_v = entry.get("exec", "1-TURN")
     if not isinstance(exec_v, str) or exec_v.upper() not in ("1-TURN", "2-STEP", "AGENT", "DET"):
         raise CriteriaError(

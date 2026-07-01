@@ -104,16 +104,16 @@ def test_code_review_effective_criteria_picks_up_activated_project_criterion(tmp
     code-review vocabulary — the analog of plan-review's overlay, on the code-review gate key."""
     root = _make_repo(
         tmp_path,
-        overlay={"code_review": {"project.no_eval": _CR_ROUTING}, "activate": ["project.no_eval"]},
+        overlay={"code_review": {"project.no-eval": _CR_ROUTING}, "activate": ["project.no-eval"]},
     )
     eff = cr.effective_criteria(root)
-    assert "project.no_eval" in eff
+    assert "project.no-eval" in eff
     # every packaged built-in overlay id is still present
     assert set(cr.routing_index()) <= set(eff)
     # its routing merged in, and threshold_for reads the re-tuned threshold via effective routing
     routing = cr.effective_routing(root)
-    assert routing["project.no_eval"]["block_threshold"] == 0.8
-    assert cr.threshold_for(["project.no_eval"], routing) == (0.8, False)
+    assert routing["project.no-eval"]["block_threshold"] == 0.8
+    assert cr.threshold_for(["project.no-eval"], routing) == (0.8, False)
 
 
 def test_code_review_overlay_is_isolated_from_plan_review_key(tmp_path):
@@ -121,11 +121,11 @@ def test_code_review_overlay_is_isolated_from_plan_review_key(tmp_path):
     vice versa — each gate reads only its own key."""
     root = _make_repo(
         tmp_path,
-        overlay={"code_review": {"project.cr_only": _CR_ROUTING}, "activate": ["project.cr_only"]},
+        overlay={"code_review": {"project.cr-only": _CR_ROUTING}, "activate": ["project.cr-only"]},
     )
-    assert "project.cr_only" in cr.effective_criteria(root)
-    assert "project.cr_only" not in pr.effective_routing(root)
-    assert "project.cr_only" not in pr.effective_criteria(root)
+    assert "project.cr-only" in cr.effective_criteria(root)
+    assert "project.cr-only" not in pr.effective_routing(root)
+    assert "project.cr-only" not in pr.effective_criteria(root)
 
 
 # ── (c) exec-tier-polymorphic build_descriptor ──────────────────────────────────────

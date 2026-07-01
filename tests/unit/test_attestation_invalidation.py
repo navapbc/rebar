@@ -77,11 +77,11 @@ def test_activating_project_criterion_changes_registry_version(tmp_path):
     base_ver = attest.registry_version(baseline)
     active = _make_repo(
         tmp_path / "active",
-        overlay={"plan_review": {"project.no_print": _ROUTING}, "activate": ["project.no_print"]},
+        overlay={"plan_review": {"project.no-print": _ROUTING}, "activate": ["project.no-print"]},
     )
     assert attest.registry_version(active) != base_ver
     # activating opens the vocabulary AND flips the stamp — a prior regver no longer matches
-    assert "project.no_print" in registry.effective_criteria(active)
+    assert "project.no-print" in registry.effective_criteria(active)
 
 
 # ── (c)/(d) compute_validity stale-regver ────────────────────────────────────────

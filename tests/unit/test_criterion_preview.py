@@ -92,32 +92,32 @@ def test_llm_preview_fires_for_existing_criterion(tmp_path):
     root = _make_repo(
         tmp_path,
         overlay={
-            "plan_review": {"project.no_print": _LLM_ROUTING},
-            "activate": ["project.no_print"],
+            "plan_review": {"project.no-print": _LLM_ROUTING},
+            "activate": ["project.no-print"],
         },
-        prompts={"plan-review-project.no_print": _RUBRIC},
+        prompts={"plan-review-project-no-print": _RUBRIC},
     )
-    fake = _fake([{"finding": "bare print()", "criteria": ["project.no_print"]}])
+    fake = _fake([{"finding": "bare print()", "criteria": ["project.no-print"]}])
     out = preview_criterion(
-        {"criterion_id": "project.no_print", "fixture": {"input": "add print() to lib.py"}},
+        {"criterion_id": "project.no-print", "fixture": {"input": "add print() to lib.py"}},
         repo_root=root,
         runner=fake,
     )
     assert out["verdict"] == "fire"
-    assert out["finding"]["criteria"] == ["project.no_print"]
+    assert out["finding"]["criteria"] == ["project.no-print"]
 
 
 def test_llm_preview_no_fire_when_findings_empty(tmp_path):
     root = _make_repo(
         tmp_path,
         overlay={
-            "plan_review": {"project.no_print": _LLM_ROUTING},
-            "activate": ["project.no_print"],
+            "plan_review": {"project.no-print": _LLM_ROUTING},
+            "activate": ["project.no-print"],
         },
-        prompts={"plan-review-project.no_print": _RUBRIC},
+        prompts={"plan-review-project-no-print": _RUBRIC},
     )
     out = preview_criterion(
-        {"criterion_id": "project.no_print", "fixture": {"input": "clean plan, uses logging"}},
+        {"criterion_id": "project.no-print", "fixture": {"input": "clean plan, uses logging"}},
         repo_root=root,
         runner=_fake([]),
     )
@@ -257,7 +257,7 @@ def test_preview_times_out(tmp_path):
 
 # ── atomic overlay authoring round-trip ──────────────────────────────────────────
 def test_write_criterion_overlay_activates(tmp_path):
-    root = _make_repo(tmp_path, overlay=None, prompts={"plan-review-project.foo": _RUBRIC})
+    root = _make_repo(tmp_path, overlay=None, prompts={"plan-review-project-foo": _RUBRIC})
     write_criterion_overlay(root, "project.foo", _LLM_ROUTING)
     prompt_library._invalidate_caches()
     # active = both routed AND in `activate`, written in one file
@@ -272,7 +272,7 @@ def test_write_criterion_overlay_merges_into_existing(tmp_path):
     root = _make_repo(
         tmp_path,
         overlay={"plan_review": {"project.a": _LLM_ROUTING}, "activate": ["project.a"]},
-        prompts={"plan-review-project.a": _RUBRIC, "plan-review-project.b": _RUBRIC},
+        prompts={"plan-review-project-a": _RUBRIC, "plan-review-project-b": _RUBRIC},
     )
     write_criterion_overlay(root, "project.b", _LLM_ROUTING)
     prompt_library._invalidate_caches()
@@ -280,12 +280,46 @@ def test_write_criterion_overlay_merges_into_existing(tmp_path):
     assert {"project.a", "project.b"} <= eff  # the first entry survives the read-modify-write
 
 
-def test_author_criterion_overlay_strips_prompt_prefix(tmp_path):
-    root = _make_repo(tmp_path, overlay=None, prompts={"plan-review-project.bar": _RUBRIC})
-    author_criterion_overlay(root, "plan-review-project.bar", _LLM_ROUTING)
+def test_author_criterion_overlay_keys_by_dotted_id(tmp_path):
+    # author_criterion_overlay takes the DOTTED criterion id directly (task stew-kid-motif); the
+    # rubric lives at the sanitized prompt id `criterion_prompt_id('project.bar')`.
+    root = _make_repo(tmp_path, overlay=None, prompts={"plan-review-project-bar": _RUBRIC})
+    author_criterion_overlay(root, "project.bar", _LLM_ROUTING)
     data = json.loads((tmp_path / ".rebar" / "criteria_routing.json").read_text())
-    assert "project.bar" in data["plan_review"]  # the bare id, not the prompt id
+    assert "project.bar" in data["plan_review"]  # keyed by the dotted logical id
     assert "project.bar" in registry.effective_criteria(root)
+
+
+def test_netnew_project_criterion_round_trips_via_library_create(tmp_path):
+    """THE editor-UX bug this task fixes: a net-new `project.<name>` criterion authored through the
+    `/library/create` handler's authoring path (`author_criterion` — exactly what
+    `editor._library_create` invokes for a `kind == "criterion"` POST) round-trips: the rubric
+    lands at the sanitized `.rebar/prompts/plan-review-project-<name>.md`, and the gate then loads
+    + resolves it. Previously `create_prompt` rejected the dotted `plan-review-project.<name>`
+    (`_valid_id` forbids '.'), dead-ending the UX at a 4xx."""
+    from rebar.llm.workflow.criterion_preview import author_criterion
+
+    root = str(tmp_path)
+    cid = "project.no-print"
+
+    # Drive the criterion-authoring path `/library/create` runs (JSON parse → author_criterion):
+    meta = {"title": "No bare print", "description": "no print in library code"}
+    body = "Flag any bare print() in importable library code (use logging)."
+    path = author_criterion(root, cid, meta, body, _LLM_ROUTING)
+    # 1) the rubric landed at the SANITIZED prompt filename (dotted id decoupled from filesystem)
+    assert path.name == "plan-review-project-no-print.md"
+    # 2) the gate now sees it (activated by the same atomic write) and resolves its rubric
+    assert cid in registry.effective_criteria(root)
+    descs = {c["id"]: c for c in registry.load_criteria(root)}
+    assert cid in descs and descs[cid]["scenario"]  # rubric body resolved from the sanitized file
+
+
+def test_builtin_prompt_id_unchanged(tmp_path):
+    """Back-compat sanity (not required, but asserted): a built-in id maps to plan-review-<id>."""
+    from rebar.llm.criteria.ids import criterion_prompt_id
+
+    assert criterion_prompt_id("F1") == "plan-review-F1"
+    assert criterion_prompt_id("T5a") == "plan-review-T5a"
 
 
 def test_author_criterion_overlay_rolls_back_invalid_netnew(tmp_path):
@@ -293,7 +327,7 @@ def test_author_criterion_overlay_rolls_back_invalid_netnew(tmp_path):
     must roll the overlay back rather than persist a load-breaking file."""
     root = _make_repo(tmp_path, overlay=None, prompts={"plan-review-myrule": _RUBRIC})
     with pytest.raises(registry.RegistryError):
-        author_criterion_overlay(root, "plan-review-myrule", _LLM_ROUTING)
+        author_criterion_overlay(root, "myrule", _LLM_ROUTING)
     # no overlay file was left behind (created-then-removed) → the repo stays packaged-only
     assert not (tmp_path / ".rebar" / "criteria_routing.json").is_file()
     assert set(registry.effective_criteria(root)) == set(registry.CANONICAL_LLM)
@@ -305,11 +339,11 @@ def test_author_criterion_overlay_rollback_preserves_prior(tmp_path):
     root = _make_repo(
         tmp_path,
         overlay={"plan_review": {"project.ok": _LLM_ROUTING}, "activate": ["project.ok"]},
-        prompts={"plan-review-project.ok": _RUBRIC, "plan-review-bad": _RUBRIC},
+        prompts={"plan-review-project-ok": _RUBRIC, "plan-review-bad": _RUBRIC},
     )
     prompt_library._invalidate_caches()
     with pytest.raises(registry.RegistryError):
-        author_criterion_overlay(root, "plan-review-bad", _LLM_ROUTING)
+        author_criterion_overlay(root, "bad", _LLM_ROUTING)
     # the prior overlay is intact; the bad id was not added
     data = json.loads((tmp_path / ".rebar" / "criteria_routing.json").read_text())
     assert "project.ok" in data["plan_review"] and "bad" not in data["plan_review"]
