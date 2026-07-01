@@ -126,7 +126,45 @@ gh api -X PATCH /repos/navapbc/rebar \
   -f description="Mirror of the Gerrit canonical repo — contribute via Gerrit, not GitHub."
 ```
 
-## Rollback (<15 minutes) — `infra/github/rollback-mirror-lock.sh`
+## Rollback
+
+### When to roll back (trigger)
+Roll back **immediately** if, after the cutover, **any** of these hold — they mean `main` is
+effectively frozen with no working path in:
+- **Gerrit is unavailable or the `LLM-Review` bot is down / not voting**, so no change can reach
+  `LLM-Review = +1` and nothing can submit.
+- **Replication to GitHub `main` is failing** (GitHub `main` stops advancing while Gerrit `main`
+  moves — check `replication_log` on the box or compare the two `main` SHAs).
+- **A critical hotfix must land now** and the Gerrit path is blocked for any reason.
+
+Do **NOT** roll back for a single rejected human push (`GH013: Cannot update this protected ref`) —
+that is the lock working as designed.
+
+### Fastest un-lock (seconds) — add a temporary bypass actor
+To restore a human merge path **without deleting the lock** (land an emergency fix, then re-tighten),
+add a temporary bypass actor to `gerrit-mirror-lock-main` instead of removing it. The ruleset update
+API replaces the whole ruleset, so fetch it, append a bypass actor, and PUT it back:
+```bash
+RID=$(gh api repos/navapbc/rebar/rulesets --jq '.[] | select(.name=="gerrit-mirror-lock-main") | .id')
+# Add a repo-admin (RepositoryRole id 5) bypass alongside the existing DeployKey bypass:
+gh api repos/navapbc/rebar/rulesets/$RID \
+  | jq '{name,target,enforcement,conditions,rules,bypass_actors:(.bypass_actors + [{actor_type:"RepositoryRole",actor_id:5,bypass_mode:"always"}])}' \
+  | gh api -X PUT repos/navapbc/rebar/rulesets/$RID --input -
+# … land the emergency change via a normal push/PR … then REMOVE the temporary bypass:
+gh api repos/navapbc/rebar/rulesets/$RID \
+  | jq '{name,target,enforcement,conditions,rules,bypass_actors:[.bypass_actors[] | select(.actor_type=="DeployKey")]}' \
+  | gh api -X PUT repos/navapbc/rebar/rulesets/$RID --input -
+```
+This is faster and less disruptive than the full delete + restore below, and keeps the lock in place
+(just with a temporary human exception you remove afterward).
+
+> **Note on the current live state (WS7 cutover, epic b744):** only `gerrit-mirror-lock-main` was
+> applied (tags left open); the legacy ruleset removed was **id 18306946** (not the older snapshot
+> id `18048287` the script references). If restoring legacy protection, verify the snapshot matches
+> the protection you actually want. Reconciling the snapshot/Terraform to the live ids is tracked as
+> a follow-up.
+
+### Full delete + restore (<15 minutes) — `infra/github/rollback-mirror-lock.sh`
 
 ```bash
 gh auth status

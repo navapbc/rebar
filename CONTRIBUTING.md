@@ -114,11 +114,17 @@ push). That replication is the only way GitHub `main` advances.
 
 ## 3. GitHub is a read-only mirror
 
-After the cutover, `navapbc/rebar` on GitHub is a **mirror**: `main` (and tags) only
-advance via Gerrit's replication identity. **Direct `git push` to GitHub `main` and PR
-merges are rejected by a repository ruleset** — there is no human merge path on GitHub.
-Open your changes in Gerrit, not as GitHub PRs. (Reading, cloning, issues, and CI on the
-mirror all keep working.)
+After the cutover, `navapbc/rebar` on GitHub is a **mirror**: `main` only advances via
+Gerrit's replication identity. **Direct `git push` to GitHub `main` and PR merges are
+rejected by a repository ruleset** — there is no human merge path on GitHub. Open your
+changes in Gerrit, not as GitHub PRs. (Reading, cloning, issues, and CI on the mirror all
+keep working; tags are not locked, so releases still publish normally.)
+
+> **Maintainers — emergency escape hatch.** If the Gerrit path is broken and `main` is
+> frozen (Gerrit/bot down, replication failing, or an urgent hotfix), the mirror lock can
+> be rolled back — see the **when-to-roll-back trigger** and the fast temporary-bypass
+> un-lock in [`infra/runbooks/github-mirror-lock.md`](infra/runbooks/github-mirror-lock.md).
+> A single rejected human push is the lock working as intended, not a reason to roll back.
 
 ---
 
