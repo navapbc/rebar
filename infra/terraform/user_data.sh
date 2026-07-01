@@ -93,6 +93,12 @@ declare -A PARAMS=(
   ["/rebar/prod/anthropic-api-key"]="ANTHROPIC_API_KEY"
   ["/rebar/prod/alert-endpoint"]="ALERT_ENDPOINT"
   ["/rebar/prod/gerrit-bot-token"]="GERRIT_BOT_TOKEN"
+  # NOTE: the GitHub OAuth App creds (b744/WS8) are deliberately NOT fetched here.
+  # This cloud-init .env (/etc/rebar/.env) has no consumer of them; the containers
+  # read the OAuth creds from infra/compose/.env (written by fetch-secrets.sh at
+  # compose-up), and they are only required under auth.type = OAUTH. Adding them to
+  # this unconditional CHANGEME-fail-fast map would make a fresh boot die on the
+  # OAuth params before OAuth is even in use.
 )
 
 for name in "$${!PARAMS[@]}"; do
