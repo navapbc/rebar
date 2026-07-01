@@ -1,0 +1,54 @@
+# syntax=docker/dockerfile:1
+# ---------------------------------------------------------------------------
+# rebar review-bot image (epic d251 / story S2).
+#
+# Builds the FastAPI webhook receiver (src/rebar/review_bot/app.py). The build
+# context is the REPO ROOT (see docker-compose.yml: build.context: ../..), so the
+# whole package is available to `pip install .`.
+#
+# .dockerignore NOTE: there is no infra/compose/.dockerignore here because the build
+# context is the repo root, so a context-root `.dockerignore` (at the repo top) is
+# what Docker honors. To keep the build context lean and avoid leaking secrets, add
+# (or confirm) these entries in the REPO-ROOT .dockerignore:
+#     .git
+#     .venv
+#     .tickets-tracker
+#     infra/compose/.env        <- the ephemeral SSM-sourced secrets file (0600)
+#     **/__pycache__
+#     dist/  build/  *.egg-info
+# (The .env is also git-ignored; excluding it from the build context as well keeps
+# secrets out of image layers.)
+#
+# python:3.12-slim is multi-arch and resolves to arm64 on the t4g (Graviton) box.
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim
+
+# Keep Python lean + predictable in a container.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# git is needed at runtime: rebar's engine shells out to git for the event store.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy the whole repo (the build context is the repo root) and install the package
+# with the agents + reviewbot extras:
+#   - reviewbot -> fastapi + uvicorn[standard] (the ASGI server)
+#   - agents    -> the rebar.llm runtime the review kernel uses (S4b will exercise it)
+COPY . /app
+RUN pip install ".[agents,reviewbot]"
+
+# The receiver port is single-sourced from the .env (REVIEW_BOT_PORT). The default
+# matches src/rebar/review_bot/app.py DEFAULT_PORT and the uvicorn --port below.
+ENV REVIEW_BOT_PORT=8000
+EXPOSE 8000
+
+# Run the ASGI app. Host 0.0.0.0 so the published container port is reachable from
+# the host's nginx. Port is fixed to 8000 inside the container; the host-side port
+# mapping (and nginx upstream) is what REVIEW_BOT_PORT drives in docker-compose.yml.
+CMD ["uvicorn", "rebar.review_bot.app:app", "--host", "0.0.0.0", "--port", "8000"]

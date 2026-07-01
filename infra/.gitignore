@@ -1,0 +1,16 @@
+# Terraform — never commit local state or provider binaries.
+# Remote state lives in the S3 backend (rebar-tfstate-896586841071); the
+# bootstrap stack uses LOCAL state on disk (by design, to break the backend
+# chicken-and-egg) and that file can contain sensitive resource attributes.
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+crash.log
+crash.*.log
+
+# Lock files are committed deliberately for reproducible provider versions.
+!**/.terraform.lock.hcl
+
+# Ephemeral, regenerated-at-boot secrets env (see fetch-secrets.sh / user_data.sh)
+compose/.env

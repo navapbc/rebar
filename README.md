@@ -243,6 +243,13 @@ pip install -e '.[dev]'
 > land real files. `engine_dir()` asserts the engine dir is present on disk at the
 > first reconciler call and fails loudly otherwise.
 
+> **Advanced (optional) — gate commits with self-hosted code review.** Not needed
+> for standard rebar use. If you want *every* commit to `main` automatically
+> LLM-reviewed before it can land, you can self-host Gerrit + the rebar review-bot on
+> AWS (the bot imports the same `rebar.llm` review kernel the MCP server exposes) and
+> demote GitHub to a read-only mirror that only advances via Gerrit after the
+> `LLM-Review` vote passes. See [docs/gerrit-aws-setup.md](docs/gerrit-aws-setup.md).
+
 ## CLI
 
 ```bash
