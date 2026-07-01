@@ -30,34 +30,45 @@ HIGH_CRITICAL_SECURITY = "high-critical-security"
 
 
 def _criterion_for(detector_id: str) -> str:
+    """The legacy hardcoded map (kept for reference / the deprecated alias's parity). The live
+    routing is now data-driven — see :func:`registry.criterion_for_detector`."""
     return SECRET_DETECTION if detector_id == SECRET_DETECTION_ID else HIGH_CRITICAL_SECURITY
 
 
-def run_security_detectors(*, changed_files: list[str], repo_root: Any = None) -> dict[str, dict]:
-    """Run ONLY the secrets/security detectors (a registry slice — not the whole grounding suite)
-    over ``repo_root`` and bucket their evidence per criterion: ``{criterion: {abstained: [...],
-    matches: [...]}}``. MATCHES are diff-scoped (post-filtered to ``changed_files``); ABSTAINS are
+def run_detectors(*, changed_files: list[str], repo_root: Any = None) -> dict[str, dict]:
+    """Run the DET-criteria detectors (a registry slice — not the whole grounding suite) over
+    ``repo_root`` and bucket their evidence per criterion: ``{criterion: {abstained: [...],
+    matches: [...]}}``.
+
+    The detector→criterion routing is DATA-DRIVEN (story 7f0d): the set of detectors run + the
+    criterion each maps to are read from the `exec: "DET"` routing entries' `detector` selectors
+    (:func:`registry.det_criteria` / :func:`registry.criterion_for_detector`), not a hardcoded
+    id prefix. MATCHES are diff-scoped (post-filtered to ``changed_files``); ABSTAINS are
     whole-scan (kept regardless — they mean we could not verify)."""
     import os
 
     from rebar.grounding import engine_b
     from rebar.grounding.detectors import Registry, load_registry
+    from rebar.llm.code_review import registry
 
-    # A missing root must NOT silently skip the scan (that would be a fail-OPEN, defeating WS5's
-    # fail-CLOSED). Default to the cwd — the gate runs from the repo it is reviewing.
+    # A missing root must NOT silently skip the scan (that would be a fail-OPEN, defeating the
+    # fail-CLOSED posture). Default to the cwd — the gate runs from the repo it is reviewing.
     repo_root = repo_root if repo_root is not None else os.getcwd()
+    det_map = registry.det_criteria()
     reg = load_registry(repo_root)
-    security = tuple(d for d in reg if d.id.startswith(SECURITY_DETECTOR_PREFIX))
-    if not security:
+    # Slice the registry to the detectors ANY DET criterion selects (exact id or id-prefix).
+    selected = tuple(d for d in reg if registry.criterion_for_detector(d.id, det_map) is not None)
+    if not selected:
         return {}
-    result = engine_b.scan(repo_root, registry=Registry(detectors=security))
+    result = engine_b.scan(repo_root, registry=Registry(detectors=selected))
     changed = set(changed_files or [])
     out: dict[str, dict] = {}
     for rec in result.records:
         did = rec.get("detector_id") or ""
-        if not did.startswith(SECURITY_DETECTOR_PREFIX):
+        crit = registry.criterion_for_detector(did, det_map)
+        if crit is None:
             continue
-        bucket = out.setdefault(_criterion_for(did), {"abstained": [], "matches": []})
+        bucket = out.setdefault(crit, {"abstained": [], "matches": []})
         outcome = rec.get("outcome")
         if outcome == "abstain":
             bucket["abstained"].append(rec)
@@ -71,26 +82,44 @@ def run_security_detectors(*, changed_files: list[str], repo_root: Any = None) -
     return out
 
 
+def run_security_detectors(*, changed_files: list[str], repo_root: Any = None) -> dict[str, dict]:
+    """Deprecated alias for :func:`run_detectors` (story 7f0d renamed it once the detector→
+    criterion routing became data-driven — the "security" framing is now just one class of DET
+    criterion). Delegates verbatim; kept for the existing WS5 call sites/tests."""
+    return run_detectors(changed_files=changed_files, repo_root=repo_root)
+
+
 def apply_failclosed(
     verdict: dict[str, Any], *, changed_files: list[str], repo_root: Any = None
 ) -> dict[str, Any]:
-    """Apply the consumer-side fail-CLOSED rule to ``verdict`` in place: a secrets/High-Critical
-    detector that MATCHES (on a changed file) or ABSTAINS forces ``verdict["verdict"] = "BLOCK"``
-    and records a ``coverage["security_detectors"]`` annotation distinguishing a fail-closed
-    abstain from a real-finding block. No security signal → the verdict is unchanged (the oracle's
-    fail-OPEN posture is untouched)."""
+    """Apply the consumer-side fail-CLOSED / fail-OPEN rule to ``verdict`` in place.
+
+    Iterates the DET criteria from the routing index (:func:`registry.det_criteria`, no longer a
+    hardcoded pair) and, per criterion, reads its ``fail_mode``:
+
+    * a MATCH (on a changed file) → force ``verdict["verdict"] = "BLOCK"`` per the criterion's
+      ``blocking_enabled`` (unchanged from WS5) + a ``detector-finding`` note;
+    * an ABSTAIN → block per ``blocking_enabled`` **only when** ``fail_mode == "closed"``
+      (coverage we could not establish must not silently pass). A ``fail_mode: "open"`` criterion
+      records the abstain in coverage but does NOT block — the generalization: project invariants
+      default to fail-OPEN, while the security class stays fail-CLOSED.
+
+    No DET signal → the verdict is unchanged (the oracle's fail-OPEN posture is untouched)."""
     from rebar.llm.code_review import registry
 
+    # Call via the alias so a monkeypatch of EITHER `run_detectors` (the alias delegates through
+    # the module global) or `run_security_detectors` is honored by the existing WS5 test suite.
     det = run_security_detectors(changed_files=changed_files, repo_root=repo_root)
+    det_map = registry.det_criteria()
     notes: list[dict[str, Any]] = []
     block = False
-    for crit in (SECRET_DETECTION, HIGH_CRITICAL_SECURITY):
+    for crit, spec in det_map.items():
         bucket = det.get(crit) or {"abstained": [], "matches": []}
         # The forced-BLOCK is gated by the criterion's `blocking_enabled` (criteria_routing.json,
         # via threshold_for) — so disabling a detector criterion in config makes it advisory
-        # (recorded in coverage, not blocking), and the WS2→WS5 flag is operative for the detector
-        # path, not just the LLM Pass-3 path.
+        # (recorded in coverage, not blocking).
         blocking_enabled = registry.threshold_for([crit])[1]
+        fail_mode = str(spec.get("fail_mode", "open")).lower()
         if bucket["matches"]:
             block = block or blocking_enabled
             notes.append(
@@ -102,15 +131,17 @@ def apply_failclosed(
                 }
             )
         elif bucket["abstained"]:
-            # fail-closed: coverage we could not establish must not silently pass (when blocking).
-            block = block or blocking_enabled
+            # fail-CLOSED criteria block on an abstain (coverage we could not establish);
+            # fail-OPEN criteria record it as coverage only (never block on absence).
+            fail_closed = fail_mode == "closed"
+            block = block or (blocking_enabled and fail_closed)
             reasons = sorted({a.get("reason") for a in bucket["abstained"] if a.get("reason")})
             notes.append(
                 {
                     "criterion": crit,
-                    "reason": "fail-closed-abstain",
+                    "reason": "fail-closed-abstain" if fail_closed else "fail-open-abstain",
                     "abstain_reasons": reasons,
-                    "blocking": blocking_enabled,
+                    "blocking": blocking_enabled and fail_closed,
                 }
             )
     if notes:

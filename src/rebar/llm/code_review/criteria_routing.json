@@ -82,13 +82,17 @@
     "applies_to": [],
     "default_posture": "blocking",
     "block_threshold": 0.5,
-    "blocking_enabled": true
+    "blocking_enabled": true,
+    "detector": { "id": "rebar.builtin.security.secrets-gitleaks" },
+    "fail_mode": "closed"
   },
   "high-critical-security": {
     "exec": "DET",
     "applies_to": [],
     "default_posture": "blocking",
     "block_threshold": 0.5,
-    "blocking_enabled": true
+    "blocking_enabled": true,
+    "detector": { "id_prefix": "rebar.builtin.security." },
+    "fail_mode": "closed"
   }
 }

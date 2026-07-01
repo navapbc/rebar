@@ -687,8 +687,16 @@ DET_CHECKS = (
 
 
 def run_det_floor(ctx: PlanContext) -> list[DetResult]:
-    """Run every DET check in order, fail-open per check (an unexpected error in a
-    check becomes an ``abstain``, never an exception that aborts the floor)."""
+    """Run the two-phase deterministic floor, fail-open per check:
+
+    1. the STATIC built-in floor (P1–P9, :data:`DET_CHECKS`) — the frozen, polyglot readiness
+       floor, in order;
+    2. the DYNAMIC project-invariant phase (:func:`det_invariants.run_project_det_checks`) — the
+       activated ``exec: "DET"`` project criteria from the ``.rebar/`` overlay (empty ⇒ zero
+       results, so the floor is byte-identical for a repo with no project DET criterion).
+
+    An unexpected error in a check becomes an ``abstain`` (logged), never an exception that aborts
+    the floor — for both phases."""
     results: list[DetResult] = []
     for check in DET_CHECKS:
         try:
@@ -706,6 +714,14 @@ def run_det_floor(ctx: PlanContext) -> list[DetResult]:
                     coverage={"ran": False, "reason": f"error:{exc}"},
                 )
             )
+    # Phase 2: the dynamic project-DET phase (its own per-criterion fail-open). Imported lazily so
+    # det_floor carries no import-time dependency on the registry/grounding stack.
+    try:
+        from .det_invariants import run_project_det_checks
+
+        results.extend(run_project_det_checks(ctx))
+    except Exception:  # noqa: BLE001 — fail-open: the whole project-DET phase degrades to nothing, logged
+        logger.warning("project DET phase raised; skipping", exc_info=True)
     return results
 
 
