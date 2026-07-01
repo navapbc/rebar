@@ -1,0 +1,50 @@
+# rebar built-in High/Critical SECURITY detectors (epic b744 / WS5) — a VENDORED, PINNED subset
+# of the p/owasp-top-ten + p/cwe-top-25 rule families, authored as native opengrep rules (the
+# opengrep backend; opengrep is a semgrep-compatible fork). Vendored (NOT a live registry pull) so
+# scanning is reproducible/offline; refresh the pinned subset with `make vendor-security-rules`
+# (see ADR 0012 for the cadence). Diff-scoped by the code-review gate as a post-filter.
+#
+# The `rebar.builtin.security.` id prefix marks these as the High-Critical-security detectors the
+# code-review gate fail-CLOSES on (an abstain on any of them -> BLOCK + coverage-gap).
+rules:
+  - id: rebar.builtin.security.python-eval-exec-injection
+    languages: [python]
+    severity: ERROR
+    message: "Dynamic code execution via eval()/exec() — code-injection risk (CWE-94)."
+    metadata:
+      rebar_envelope:
+        tier: T1
+        job: smell
+        namespace: builtin
+        dimension: smell_generic
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+
+  - id: rebar.builtin.security.python-subprocess-shell-true
+    languages: [python]
+    severity: ERROR
+    message: "subprocess called with shell=True — OS command-injection risk (CWE-78)."
+    metadata:
+      rebar_envelope:
+        tier: T1
+        job: smell
+        namespace: builtin
+        dimension: smell_generic
+    pattern-either:
+      - pattern: subprocess.run(..., shell=True, ...)
+      - pattern: subprocess.Popen(..., shell=True, ...)
+      - pattern: subprocess.call(..., shell=True, ...)
+
+  - id: rebar.builtin.security.python-yaml-unsafe-load
+    languages: [python]
+    severity: ERROR
+    message: "yaml.load without SafeLoader — unsafe deserialization (CWE-502)."
+    patterns:
+      - pattern: yaml.load($X)
+    metadata:
+      rebar_envelope:
+        tier: T1
+        job: smell
+        namespace: builtin
+        dimension: smell_generic

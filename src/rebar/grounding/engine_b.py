@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +41,7 @@ from .detectors import (
     BACKEND_ASTGREP,
     BACKEND_METRIC,
     BACKEND_OPENGREP,
+    BACKEND_SARIF,
     Detector,
     Registry,
     load_registry,
@@ -53,6 +55,9 @@ _OPENGREP_CANDIDATES = ("opengrep", "semgrep")
 _ASTGREP_CANDIDATES = ("ast-grep", "sg")
 #: Metric tools (size/complexity). Neither ships with rebar; absent -> abstain(no_tool).
 _METRIC_CANDIDATES = ("scc", "lizard")
+#: SARIF-emitting tools for the generic SARIF-ingest backend (WS5). gitleaks (secrets) is the
+#: v1 tool; absent -> abstain(no_tool) (fail-open here; the gate fail-closes on the abstain).
+_GITLEAKS_CANDIDATES = ("gitleaks",)
 
 #: Language → file extensions, for self-declared file-presence routing.
 _LANG_EXTENSIONS: dict[str, tuple[str, ...]] = {
@@ -650,10 +655,94 @@ def _binary_version(binary: str) -> str | None:
 
 # ── Scan entrypoint ──────────────────────────────────────────────────────────
 
+
+def _run_sarif(detectors: list[Detector], repo_root: Path) -> list[dict[str, Any]]:
+    """Generic SARIF-ingest backend (WS5): subprocess-invoke a SARIF-emitting tool (gitleaks for
+    secrets) and ingest its SARIF via ``sarif.from_sarif(trust_rebar_bag=False)``. Fail-OPEN like
+    every backend — a missing/errored/non-JSON tool abstains (the code-review gate's verdict
+    assembly turns a secrets/security abstain into a fail-CLOSED BLOCK; the oracle stays fail-open
+    for all other consumers). Each detector is a SENTINEL descriptor (no matcher rules — the tool
+    carries its own); the tool runs ONCE and its findings are attributed to the sentinel id."""
+    binary = _resolve_binary(_GITLEAKS_CANDIDATES)
+    if binary is None:
+        return [
+            ev.abstain(
+                "no_tool",
+                job=_job_for(d),
+                provenance_tier=_tier_for(d),
+                backend=BACKEND_SARIF,
+                detector_id=d.id,
+                detail="no gitleaks binary on PATH",
+            )
+            for d in detectors
+        ]
+    version = _binary_version(binary)
+    sentinel_id = detectors[0].id if detectors else "rebar.builtin.security.secrets-gitleaks"
+    # gitleaks writes SARIF to a FILE (it refuses an unwritable report path like /dev/stdout) and
+    # `--exit-code 0` keeps a leaks-found run exit-0 (the SARIF carries the findings). We read the
+    # report back. A run that produced NO parseable SARIF (errored / wrote nothing) ABSTAINS — it
+    # is NEVER read as "0 findings" (which would be the silent fail-OPEN the gate's fail-CLOSED
+    # forbids).
+    with tempfile.TemporaryDirectory() as _td:
+        report = os.path.join(_td, "gitleaks.sarif")
+        cmd = [
+            binary, "detect", "--no-banner", "--no-git",
+            "--source", str(repo_root),
+            "--report-format", "sarif", "--report-path", report,
+            "--exit-code", "0",
+        ]  # fmt: skip
+        res = harness.run_tool(cmd, backend=BACKEND_SARIF, version=version)
+        if res.abstained:
+            return [
+                res.as_abstain(job=_job_for(d), provenance_tier=_tier_for(d), detector_id=d.id)
+                for d in detectors
+            ]
+        sarif_text = ""
+        try:
+            if os.path.exists(report):
+                sarif_text = Path(report).read_text(encoding="utf-8")
+        except OSError:
+            sarif_text = ""
+        try:
+            sarif_doc = json.loads(sarif_text) if sarif_text.strip() else None
+        except json.JSONDecodeError:
+            sarif_doc = None
+    if sarif_doc is None:
+        # gitleaks ran but produced no parseable SARIF (e.g. a fatal error, non-zero exit) →
+        # ABSTAIN (coverage we could not establish), never a silent zero-finding pass.
+        return [
+            ev.abstain(
+                "parse_error",
+                job=_job_for(d),
+                provenance_tier=_tier_for(d),
+                backend=BACKEND_SARIF,
+                version=version,
+                detector_id=d.id,
+                detail=f"{d.id}: gitleaks produced no parseable SARIF (exit {res.returncode})",
+            )
+            for d in detectors
+        ]
+    # gitleaks emits ABSOLUTE artifact URIs; relativize them to repo_root so the gate's
+    # diff-scope (repo-relative changed_files) can match.
+    for run in sarif_doc.get("runs", []) or []:
+        for r in run.get("results", []) or []:
+            _relativize_location(r, repo_root)
+    records = sarif.from_sarif(
+        sarif_doc, backend=BACKEND_SARIF, version=version, trust_rebar_bag=False
+    )
+    # Re-attribute to the SENTINEL id: gitleaks' own ruleId (e.g. "github-pat") is not a
+    # rebar.builtin.security.* id, so the consumer would drop it. The sentinel ran ONE tool, so
+    # all its findings belong to the sentinel.
+    for rec in records:
+        rec["detector_id"] = sentinel_id
+    return records
+
+
 _BACKEND_RUNNERS = {
     BACKEND_OPENGREP: _run_opengrep,
     BACKEND_ASTGREP: _run_astgrep,
     BACKEND_METRIC: _run_metric,
+    BACKEND_SARIF: _run_sarif,
 }
 
 

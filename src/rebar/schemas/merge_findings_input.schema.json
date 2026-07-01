@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/merge_findings_input.schema.json",
+  "title": "MergeFindingsInput",
+  "description": "Inputs to merge_findings: base/round_a/round_b finding lists (or sources).",
+  "type": "object",
+  "additionalProperties": true
+}

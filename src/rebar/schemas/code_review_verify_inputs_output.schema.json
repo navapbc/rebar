@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/code_review_verify_inputs_output.schema.json",
+  "title": "CodeReviewVerifyInputsOutput",
+  "description": "OUTPUT of code_review_verify_inputs: the Pass-2 verifier prompt instructions.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "instructions": {
+      "type": "string"
+    }
+  }
+}

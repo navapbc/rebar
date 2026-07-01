@@ -84,16 +84,21 @@ def test_attested_materialize_works_in_shallow_detached_checkout(gha_checkout):
     assert (handle.path / "f.txt").read_text() == "v2\n"
 
 
-def test_review_code_under_shallow_clone_surfaces_clear_error(gha_checkout):
+def test_review_code_under_shallow_clone_surfaces_clear_error(gha_checkout, monkeypatch):
     gha, _ = gha_checkout
-    # A depth-1 clone has no HEAD~1, so a base..head diff cannot resolve. review-code must
-    # surface a clear error (not a silent empty review) — documents the fetch-depth need.
+    # A depth-1 clone has no HEAD~1, so a base..head diff cannot resolve. With the capability
+    # ENABLED, review-code must surface a clear error (not a silent empty review) — documents the
+    # fetch-depth need. review_code is OFF by default + inert (WS4), so force-enable the gate here
+    # so it actually reaches the git-range resolution rather than short-circuiting to empty.
+    from rebar.llm.workflow import gate_dispatch
+
+    monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
     with pytest.raises(Exception) as exc:
         rebar.llm.review_code(
             base="HEAD~1", head="HEAD", source="local", runner=FakeRunner([]), repo_root=str(gha)
         )
     msg = str(exc.value).lower()
-    assert "head~1" in msg or "ambiguous" in msg or "git diff" in msg
+    assert "head~1" in msg or "ambiguous" in msg or "git diff" in msg or "diff_text" in msg
 
 
 # --------------------------------------------------------------------------------------

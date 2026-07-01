@@ -333,6 +333,10 @@ def set_fields(ctx: StepContext) -> dict[str, Any]:
 # The heavy plan-review pipeline units are lazy-imported inside the op BODIES, so this import
 # also stays light (no LLM deps pulled at registration). (The broader workflow->plan_review
 # back-edge is a structural seam left to a separate ticket.)
+# epic b744 / WS3: the code-review gate's scripted ops (assemble_diff / overlay_union /
+# merge_findings / verify_inputs / decide / coach) register into the same STEP_REGISTRY. Like
+# plan_review.workflow_ops, the op bodies lazy-import their heavy deps, so this stays light.
+from rebar.llm.code_review import workflow_ops as _code_review_ops  # noqa: E402,F401
 from rebar.llm.plan_review import workflow_ops  # noqa: E402,F401
 
 from . import gate_ops  # noqa: E402,F401

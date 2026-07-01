@@ -1,26 +1,32 @@
-"""The formal b744 verdict→label seam (epic d251 / S4b).
+"""The formal b744 verdict→label seam (epic d251 / S4b; reimplemented by b744 / WS6).
 
 This module holds the ONE function the rest of the receiver depends on for a
 code-review decision:
 
-    code_review_decision(diff_text, repo_root, ref) -> {decision, message, findings}
+    code_review_decision(diff_text, repo_root, ref) -> {decision, message, findings, coverage_gap}
 
-For the d251 *proven pipe* it implements that contract over the EXISTING single-pass
-``rebar.llm.review_code(...)`` by mapping the returned ``review_result`` findings to a
-PASS/BLOCK decision via a configured blocking-severity threshold. b744-WS6 will
-REIMPLEMENT this same signature over ``gate_dispatch.produce_code_review_verdict``
-(``PASS``/``BLOCK`` typed verdict) — drop-in, with no caller change — so the function
-is kept deliberately small and free of receiver/Gerrit concerns.
+**WS6 (this revision):** the contract is now implemented over the FOUR-PASS
+``gate_dispatch.produce_code_review_verdict`` (the typed ``PASS``/``BLOCK``/``INDETERMINATE``
+verdict) — a drop-in swap of the earlier single-pass ``review_code`` implementation, with NO
+caller change (the voter still reads ``decision`` + ``message``). The four-pass gate's own
+deterministic Pass-3 blocker decides PASS vs BLOCK (via ``criteria_routing.json`` thresholds), so
+the adapter no longer applies a severity heuristic — ``ReceiverConfig.blocking_severities`` is now
+vestigial for this path.
 
-DECISION RULE. BLOCK if any finding is at/above a configured blocking severity
-(default ``{critical, high}``), else PASS. Fail-closed: any error, a missing result,
-or an unparseable result → BLOCK (never let an unreviewed/uncertain change pass).
+FORCE-ENABLE. The code-review gate is OFF by default (``verify.enable_code_review``), but voter
+activation is itself the authoritative gate (a project is only reviewed once its receiver is
+deployed + configured), so the adapter passes ``enabled=True`` — else every change would get the
+inert disabled verdict. See ADR 0015.
 
-SOURCE MODE. We call ``review_code(..., source="local", ...)``: the receiver has
-ALREADY cloned the change ref into ``repo_root`` (see ``gerrit_client.clone_change_ref``
-/ ``voter``), so the reviewer must read THAT working tree. ``attested`` mode would
-git-fetch ``origin`` and review the wrong (origin) state — wrong for a not-yet-merged
-patchset whose ref lives only in the clone.
+DECISION RULE (fail-closed). PASS only for a genuine ``verdict == PASS`` with full coverage. A
+real BLOCK (blocking findings), an INDETERMINATE (LLM outage), a fail-closed security-scanner
+abstain, an inert-disabled verdict, or ANY exception → BLOCK. A BLOCK caused by a coverage gap
+(infra) is marked ``coverage_gap=True`` and its message carries a DISTINCT tag from a real
+finding, so an operator can tell an infra veto from a code veto.
+
+SOURCE. The receiver has ALREADY cloned the change ref into ``repo_root`` (see
+``gerrit_client.clone_change_ref`` / ``voter``); we review that working tree by passing
+``repo_root`` (the security detectors scan the changed files there) + the fetched ``diff_text``.
 """
 
 from __future__ import annotations
@@ -34,34 +40,108 @@ logger = logging.getLogger("rebar.review_bot.adapter")
 
 __all__ = ["code_review_decision"]
 
+#: The review-message first-line tag suffixes, keyed by reason. The message begins with
+#: ``[LLM-Review: <suffix>]`` so an infra-failure ``-1`` (a coverage-gap sub-reason) is
+#: unmistakable from a real-finding ``-1``. Documented vocabulary — asserted by a test.
+_TAG_SUFFIXES: dict[str, str] = {
+    "PASS": "PASS",
+    "finding": "BLOCK — finding",
+    "gate-disabled": "BLOCK — coverage-gap (gate-disabled)",
+    "llm-unavailable": "BLOCK — coverage-gap (llm-unavailable)",
+    "scanner": "BLOCK — coverage-gap (scanner)",
+    "review-error": "BLOCK — coverage-gap (review-error)",
+}
 
-def _blocking(findings: list[dict[str, Any]], blocking_severities: frozenset[str]) -> list[dict]:
-    """The subset of findings whose severity is in the blocking set (case-insensitive)."""
-    blocked: list[dict] = []
-    for f in findings:
-        sev = str(f.get("severity", "")).strip().lower()
-        if sev in blocking_severities:
-            blocked.append(f)
-    return blocked
+#: Map the four-pass kernel severity ({critical,major,minor,none}) to the finding vocabulary the
+#: receiver logs ({critical,high,medium,info}) — mirrors the WS4 shim.
+_KERNEL_TO_COMMON_SEVERITY = {
+    "critical": "critical",
+    "major": "high",
+    "minor": "medium",
+    "none": "info",
+}
 
 
-def _summarize(findings: list[dict[str, Any]], blocked: list[dict[str, Any]]) -> str:
-    """A short, human-readable message for the Gerrit robot comment."""
-    if not findings:
-        return "rebar code review: no findings."
-    head = (
-        f"rebar code review: {len(findings)} finding(s), "
-        f"{len(blocked)} at/above the blocking threshold."
+def _message_tag(reason: str, *, label: str = "LLM-Review") -> str:
+    return f"[{label}: {_TAG_SUFFIXES[reason]}]"
+
+
+def _coverage_gap_reason(coverage: dict[str, Any]) -> str | None:
+    """The coverage-gap sub-reason for a verdict's ``coverage`` block, or None if coverage was
+    fully established. Order: inert **disabled** gate (``enabled is False``), then an **LLM outage**
+    (``llm_unavailable``), then a **fail-closed security scanner abstain**. A scanner MATCH
+    (``reason == 'detector-finding'``) is a real finding, NOT a coverage gap."""
+    if coverage.get("enabled") is False:
+        return "gate-disabled"
+    if coverage.get("llm_unavailable"):
+        return "llm-unavailable"
+    for note in coverage.get("security_detectors") or []:
+        if note.get("reason") == "fail-closed-abstain":
+            return "scanner"
+    return None
+
+
+def _translate_findings(verdict: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalize the verdict's blocking + advisory findings to the receiver's logged shape
+    (``{severity, dimension, detail}``)."""
+    out: list[dict[str, Any]] = []
+    for f in (verdict.get("blocking") or []) + (verdict.get("advisory") or []):
+        criteria = f.get("criteria") or []
+        out.append(
+            {
+                "severity": _KERNEL_TO_COMMON_SEVERITY.get(
+                    str(f.get("severity", "")).lower(), "info"
+                ),
+                "dimension": criteria[0] if criteria else "general",
+                "detail": str(f.get("finding", "")).strip(),
+            }
+        )
+    return out
+
+
+def _summarize(reason: str, verdict: dict[str, Any]) -> str:
+    coverage = verdict.get("coverage") or {}
+    if reason == "PASS":
+        n = len(verdict.get("advisory") or [])
+        return "rebar code review passed." + (
+            f" {n} advisory finding(s) (non-blocking)." if n else ""
+        )
+    if reason == "finding":
+        blocking = verdict.get("blocking") or []
+        lines = [f"rebar code review found {len(blocking)} blocking issue(s):"]
+        for f in blocking[:10]:
+            crit = (f.get("criteria") or ["general"])[0]
+            detail = str(f.get("finding", "")).strip().replace("\n", " ")[:240]
+            loc = f" [{f.get('location')}]" if f.get("location") else ""
+            lines.append(f"- ({crit}) {detail}{loc}")
+        return "\n".join(lines)
+    # coverage-gap sub-reasons — name the gap; it is infra, not "bad code".
+    if reason == "scanner":
+        gaps = "; ".join(
+            f"{n.get('criterion')} ({', '.join(n.get('abstain_reasons') or [])})"
+            for n in coverage.get("security_detectors") or []
+            if n.get("reason") == "fail-closed-abstain"
+        )
+        detail = f"a security scanner could not run: {gaps}"
+    else:
+        llm_err = coverage.get("llm_error", "outage")
+        detail = {
+            "gate-disabled": "the code-review gate is disabled — cannot certify",
+            "llm-unavailable": f"the review LLM was unavailable ({llm_err})",
+        }.get(reason, "the code review could not run")
+    return (
+        f"rebar code review coverage gap — {detail}. Fail-closed veto (infrastructure, not your "
+        "code); re-run once the gate/scanner is healthy."
     )
-    lines = [head]
-    for f in (blocked or findings)[:10]:
-        sev = str(f.get("severity", "info")).strip().lower()
-        dim = str(f.get("dimension", "general")).strip()
-        detail = str(f.get("detail", "")).strip().replace("\n", " ")
-        if len(detail) > 240:
-            detail = detail[:237] + "…"
-        lines.append(f"- [{sev}] ({dim}) {detail}")
-    return "\n".join(lines)
+
+
+def _block(reason: str, verdict: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "decision": "BLOCK",
+        "message": f"{_message_tag(reason)}\n{_summarize(reason, verdict)}",
+        "findings": _translate_findings(verdict),
+        "coverage_gap": reason != "finding",
+    }
 
 
 def code_review_decision(
@@ -71,62 +151,41 @@ def code_review_decision(
     *,
     config: ReceiverConfig | None = None,
 ) -> dict[str, Any]:
-    """Review ``diff_text`` and return ``{decision, message, findings}``.
-
-    ``decision`` is ``"PASS"`` or ``"BLOCK"``. PASS only when ``review_code`` returns a
-    parseable result whose findings are ALL below the configured blocking severity;
-    every other path (blocking finding, exception, no/empty result, bad shape) is
-    ``"BLOCK"`` — fail-closed. ``findings`` is the (possibly empty) normalized findings
-    list; ``message`` is a short summary safe to post as a Gerrit robot comment.
-
-    This is the seam b744-WS6 reimplements over ``produce_code_review_verdict`` — keep
-    the signature + return shape stable.
-    """
-    cfg = config or ReceiverConfig.from_env()
-
+    """Review ``diff_text`` (at the cloned ``repo_root``) via the four-pass gate and return
+    ``{decision, message, findings, coverage_gap}``. PASS only for a genuine full-coverage PASS;
+    a real BLOCK, an INDETERMINATE, a fail-closed scanner abstain, an inert-disabled verdict, or
+    ANY exception → BLOCK (fail-closed). Signature + return shape are stable (the voter is
+    unchanged); ``config`` is accepted for compatibility (the gate owns the threshold now)."""
+    _ = config  # the four-pass gate's Pass-3 owns the threshold; kept for signature stability
     try:
-        # Imported lazily: the [agents] extra (and its heavy deps) must not load merely
-        # because the receiver package was imported — only when a review actually runs.
-        from rebar.llm import review_code
+        # Lazily imported: the [agents] extra (heavy) must not load merely because the receiver
+        # package was imported — only when a review actually runs.
+        from rebar.llm.config import LLMConfig
+        from rebar.llm.workflow.gate_dispatch import produce_code_review_verdict
     except Exception as exc:  # noqa: BLE001 — a missing/broken extra is a fail-closed BLOCK
-        logger.warning("adapter: review_code import failed: %s", exc)
-        return {
-            "decision": "BLOCK",
-            "message": f"rebar code review unavailable (import failed: {exc}); blocking.",
-            "findings": [],
-        }
+        logger.warning("adapter: gate import failed: %s", exc)
+        return _block("review-error", {})
 
     try:
-        result = review_code(
+        verdict = produce_code_review_verdict(
+            LLMConfig.from_env(repo_root=repo_root),
             diff_text=diff_text,
-            source="local",
             repo_root=repo_root,
-            ref=ref,
+            enabled=True,  # voter activation is the authoritative gate (ADR 0015)
         )
     except Exception as exc:  # noqa: BLE001 — ANY review failure is fail-closed
-        logger.warning("adapter: review_code raised: %s", exc)
-        return {
-            "decision": "BLOCK",
-            "message": f"rebar code review failed ({exc}); blocking (fail-closed).",
-            "findings": [],
-        }
+        logger.warning("adapter: produce_code_review_verdict raised: %s", exc)
+        return _block("review-error", {})
 
-    if not isinstance(result, dict):
-        return {
-            "decision": "BLOCK",
-            "message": "rebar code review returned no usable result; blocking (fail-closed).",
-            "findings": [],
-        }
+    if not isinstance(verdict, dict) or "verdict" not in verdict:
+        return _block("review-error", {})
 
-    findings = result.get("findings")
-    if not isinstance(findings, list):
+    gap = _coverage_gap_reason(verdict.get("coverage") or {})
+    if verdict.get("verdict") == "PASS" and gap is None:
         return {
-            "decision": "BLOCK",
-            "message": "rebar code review result had no findings list; blocking (fail-closed).",
-            "findings": [],
+            "decision": "PASS",
+            "message": f"{_message_tag('PASS')}\n{_summarize('PASS', verdict)}",
+            "findings": _translate_findings(verdict),
+            "coverage_gap": False,
         }
-
-    blocked = _blocking(findings, cfg.blocking_severities)
-    decision = "BLOCK" if blocked else "PASS"
-    message = _summarize(findings, blocked)
-    return {"decision": decision, "message": message, "findings": findings}
+    return _block(gap if gap is not None else "finding", verdict)

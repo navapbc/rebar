@@ -148,6 +148,15 @@ jobs:
           fi
           echo "Prompt-index drift gate: OK (index.json is up to date)."
 
+      # Security-rules freshness gate (epic b744 / WS5; ADR 0012). The vendored security rule
+      # subset is pinned for reproducibility; this WARNS (never fails) when the recorded
+      # `vendored_at` is older than the quarterly cadence, prompting a deliberate
+      # `make vendor-security-rules` refresh PR. Time-based + network-free (an upstream-version
+      # diff is the documented follow-on). Warn-only so a lapsed cadence never blocks unrelated PRs.
+      - name: Security-rules freshness gate (warn-only)
+        shell: bash
+        run: python -m rebar.grounding.detectors.security_pin
+
       # Criteria-routing parity gate (epic 3156): criteria_routing.json is hand-authored
       # (thresholds/applies_at are judgement, no derivation source), so this is a PARITY gate
       # (not a regenerate-and-diff): it fails when the committed routing drifts out of sync

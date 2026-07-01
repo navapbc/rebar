@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/code_review_coach_input.schema.json",
+  "title": "CodeReviewCoachInput",
+  "description": "Inputs to code_review_coach: blocking/surfaced findings + the coach move-picks.",
+  "type": "object",
+  "additionalProperties": true
+}

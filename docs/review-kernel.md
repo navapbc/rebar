@@ -58,6 +58,41 @@ code-review gate (`b744`) builds on this seam **without copying the passes**: it
 supplies its own criteria/prompts/context-assembler/move-catalog and calls
 `verify_findings` / `pass3_over_findings` / `coach` directly.
 
+### Code-review consumer (`b744`) — what it plugs in
+
+The code-review gate lives in the `src/rebar/llm/code_review/` package and supplies the
+consumer-seam plug-ins (WS1 + WS2), mirroring plan-review's shapes:
+
+- **Domain context** = the DIFF (not plan text). `code_review/assemble.py`'s
+  `assemble_diff_context(...)` produces the kernel `context` string (changed-files /
+  orientation / diff), the analog of `PlanContext.plan_text`.
+- **Pass-1 finders** = the base reviewer (`reviewers/code-review-base.md`, which also emits the
+  bounded `recommend_overlays` escalation) + 11 specialist OVERLAY finders
+  (`reviewers/code-review-<overlay>.md`, one per `code_review/registry.py:OVERLAY_IDS`). All are
+  `category: code-review-pass` (NOT `review`), so they stay OUT of the single-pass
+  reviewer-selection catalog + the `reviewers/index.json` drift gate, and resolve via
+  `get_prompt(...)`. Their structured-output contracts are registered in
+  `code_review/contracts.py` (`code_review_base_output` / `code_review_findings`).
+- **Per-criterion routing + thresholds** live in the COMMITTED `code_review/criteria_routing.json`
+  (the analog of `plan_review/criteria_routing.json` — hand-maintained + test-validated, NOT
+  auto-derived and NOT in any gate YAML). `code_review/registry.py:threshold_for(criteria)`
+  reads it and returns `(block_threshold, blocking_enabled)` — the `ThresholdResolver` the
+  kernel `pass3_over_findings` consumes (min threshold; any blocking_enabled). The
+  secret-detection / high-critical-security keys ship `blocking_enabled: false` (advisory v1);
+  WS5 flips exactly those two to `true` (fail-closed). The `applies_to` globs in the routing
+  index are the single source for WS3's deterministic Round-A glob-trigger logic.
+- **Verify preamble** = `reviewers/code-review-verify.md`, which embeds the
+  `VERIFIER_RULES_SCAFFOLD` verbatim and re-grounds findings against the DIFF (severity scored as
+  the harm of the change as written). It reuses the kernel's gate-agnostic `verification` contract.
+- **Pass-4 move-catalog** = `code_review/moves.py` (a `MOVE_REGISTRY_SCHEMA` instance,
+  `validate_move_registry`'d at load; `applies_when` tags from `{OVERLAY_IDS ∪ "always"}`) +
+  `reviewers/code-review-coach.md` (the move-pick prompt, `code_review_coach` contract). The
+  gate passes `active_triggers` = the union of `criteria` carried by the surviving findings; the
+  kernel `coach()` renders the picked move templates deterministically.
+
+The escalation orchestration (base → overlay union, one-hop, capped) + the `gates/code-review.yaml`
+workflow + `produce_code_review_verdict` are WS3/WS4 (they do not change the kernel).
+
 ## The verifier-rules scaffold (soft prompt rules)
 
 `review_kernel.VERIFIER_RULES_SCAFFOLD` records the four soft rules a verifier's
@@ -102,7 +137,8 @@ behavior; the rules' *wording* is intentionally not gated by a lint.
 
 - The **completion verifier stays single-pass** (already binary-per-criterion; a full
   independent verify pass ≈2× the agentic cost for a small, unmeasured gain).
-- The throwaway `code_review.py` demo reviewers are not migrated (real code review =
-  `b744`, which consumes this kernel).
+- The throwaway single-pass demo reviewers (`code_review/single_pass.py`, formerly
+  `code_review.py`) are not migrated (real code review = `b744`, which consumes this kernel; WS4
+  retires the single-pass route).
 - Threshold/severity **calibration** is deferred; thresholds start high → mostly
   advisory in v1.

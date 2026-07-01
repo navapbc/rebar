@@ -61,6 +61,7 @@ __all__ = [
     "REVIEW_RESULT",
     "COMPLETION_VERDICT",
     "PLAN_REVIEW_VERDICT",
+    "CODE_REVIEW_VERDICT",
     "SIGN_RESULT",
     "VERIFY_SIGNATURE_RESULT",
     "EXPORT",
@@ -112,6 +113,12 @@ COMPLETION_VERDICT = "completion_verdict"
 # — live LLM call → plain dict); the CLI/library JSON path is pinned via the
 # "review_plan" key below.
 PLAN_REVIEW_VERDICT = "plan_review_verdict"
+# rebar.llm.code_review — typed verdict of the four-pass code-review gate (epic b744),
+# produced by produce_code_review_verdict. Like plan_review_verdict it is the gate's internal
+# typed output (no CLI --output help arm — the public `review_code` surface returns a
+# review_result); wired below under "review_code_gate" so the every-schema-file-is-wired guard
+# sees it.
+CODE_REVIEW_VERDICT = "code_review_verdict"
 # signing.py — the persisted SIGNATURE record (`rebar sign`) and the uniform
 # verify verdict (`rebar verify-signature`), both over `--output json`.
 SIGN_RESULT = "sign_result"
@@ -198,6 +205,16 @@ CONTRACT_SCHEMAS: frozenset[str] = frozenset(
         "plan_review_decide",
         # epic B / story B5: the dynamic-verify grounding op (code_grounded boolean).
         "plan_review_grounding",
+        # epic b744 / WS3: the code-review gate's scripted ops (each an <op>_input + <op>_output
+        # pair). assemble_diff (diff context), overlay_union (the escalation), merge_findings
+        # (cluster), and the Pass-2/3/4 wiring (verify_inputs / decide / coach_inputs / coach).
+        "assemble_diff",
+        "overlay_union",
+        "merge_findings",
+        "code_review_verify_inputs",
+        "code_review_decide",
+        "code_review_coach_inputs",
+        "code_review_coach",
         # plan-review LIVE plumbing: the verify/coach prompt-input ops that emit the
         # {{plan}} text + the verifier/coach INSTRUCTIONS listing for the LIVE prompt steps.
         "plan_review_verify_inputs",
@@ -208,6 +225,11 @@ CONTRACT_SCHEMAS: frozenset[str] = frozenset(
     # The shared INPUT contract for the built-in reviewer PROMPTS (their `outputs` are
     # the existing review_result / completion_verdict schemas). Permissive by design.
     "reviewer_input",
+    # epic b744 / WS1: the OUTPUT contract of the code-review BASE reviewer prompt
+    # (`code-review-base.md` declares `outputs: code_review_base_output`). A prompt output
+    # contract consumed directly by the structured-output runner — not a command --output —
+    # so, like reviewer_input, it is exempt from OUTPUT_SCHEMAS via this set.
+    "code_review_base_output",
     # epic B gate ops whose OUTPUT is the existing completion_verdict schema (not an
     # <op>_output pair): only their INPUT contracts are authored here.
     "completion_reconcile_input",
@@ -263,6 +285,10 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     # NO_SCHEMA_EXEMPT; registered here so the every-schema-file-is-wired guard sees
     # plan_review_verdict and the CLI/library --output json path is pinned.
     "review_plan": PLAN_REVIEW_VERDICT,
+    # code-review gate verdict (epic b744): like review_plan, no CLI help arm (the --output
+    # coverage guard never drives it live — the public review_code surface returns review_result,
+    # NO_SCHEMA_EXEMPT); registered so the every-schema-file-is-wired guard sees it.
+    "review_code_gate": CODE_REVIEW_VERDICT,
     "sign": SIGN_RESULT,
     "verify_signature": VERIFY_SIGNATURE_RESULT,
     "verify_signature.not_found": ERROR_ENVELOPE,

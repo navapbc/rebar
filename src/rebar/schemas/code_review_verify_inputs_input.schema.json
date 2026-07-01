@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/code_review_verify_inputs_input.schema.json",
+  "title": "CodeReviewVerifyInputsInput",
+  "description": "Inputs to code_review_verify_inputs: the merged findings.",
+  "type": "object",
+  "additionalProperties": true
+}

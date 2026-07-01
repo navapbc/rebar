@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/overlay_union_output.schema.json",
+  "title": "OverlayUnionOutput",
+  "description": "OUTPUT of overlay_union: a per-overlay include_<overlay> boolean (the batch `when` reads it) plus to_run/glob_overlays/recommend_overlays. Dynamic-keyed (one include_<overlay> per OVERLAY_IDS member).",
+  "type": "object",
+  "additionalProperties": true,
+  "patternProperties": {
+    "^include_[a-z0-9_]+$": {
+      "type": "boolean"
+    }
+  },
+  "properties": {
+    "to_run": {
+      "type": "array"
+    },
+    "glob_overlays": {
+      "type": "array"
+    },
+    "recommend_overlays": {
+      "type": "array"
+    }
+  }
+}

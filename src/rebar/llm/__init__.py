@@ -26,7 +26,7 @@ rebar.llm`` stay stdlib-only; running needs the ``nava-rebar[agents]`` extra +
 from __future__ import annotations
 
 from rebar.llm.aggregate import aggregate_findings
-from rebar.llm.code_review import review_code, select_code_reviewers
+from rebar.llm.code_review import review_code
 from rebar.llm.completion import verify_completion
 from rebar.llm.config import (
     LLMConfig,
@@ -70,7 +70,6 @@ __all__ = [
     "review_plan",
     "claim_gate_check",
     "select_reviewers",
-    "select_code_reviewers",
     "aggregate_findings",
     # config / diagnostics
     "LLMConfig",

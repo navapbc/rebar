@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/code_review_coach_inputs_input.schema.json",
+  "title": "CodeReviewCoachInputsInput",
+  "description": "Inputs to code_review_coach_inputs: the surviving (surfaced) findings.",
+  "type": "object",
+  "additionalProperties": true
+}

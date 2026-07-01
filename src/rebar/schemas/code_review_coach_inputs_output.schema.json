@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/code_review_coach_inputs_output.schema.json",
+  "title": "CodeReviewCoachInputsOutput",
+  "description": "OUTPUT of code_review_coach_inputs: the Pass-4 coach prompt instructions + has_surviving flag.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "instructions": {
+      "type": "string"
+    },
+    "has_surviving": {
+      "type": "boolean"
+    }
+  }
+}

@@ -493,7 +493,8 @@ def test_aggregate_clusters_across_line_bucket_boundary() -> None:
 
 
 def test_changed_from_diff_covers_deletes_and_renames() -> None:
-    from rebar.llm.code_review import _changed_from_diff
+    # epic b744: the diff-read moved into the code-review gate's assembler (single_pass retired).
+    from rebar.llm.code_review.assemble import changed_from_diff as _changed_from_diff
 
     diff = (
         "diff --git a/auth.py b/auth.py\n"
@@ -508,57 +509,17 @@ def test_changed_from_diff_covers_deletes_and_renames() -> None:
     assert "/dev/null" not in files
 
 
-def test_select_code_reviewers_rules() -> None:
-    from rebar.llm.code_review import select_code_reviewers
-
-    assert select_code_reviewers(["README.md"]) == ["code-quality"]
-    sel = select_code_reviewers(["src/rebar/auth.py", "tests/test_x.py"])
-    assert sel[0] == "code-quality" and "security" in sel and "tests" in sel
-
-
-def test_review_code_end_to_end(tmp_path: Path) -> None:
+def test_review_code_disabled_by_default_returns_empty_review_result() -> None:
+    # epic b744 / WS4: the single-pass route is retired; review_code is the gate-backed shim,
+    # OFF by default → a valid EMPTY review_result + a 'disabled' note, never an error/stub.
+    # (The ENABLED gate path is covered in tests/unit/test_code_review_ws4.py.)
     import rebar.llm as llm
-    from rebar.llm.config import LLMConfig
 
     diff = "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n+print('hi')\n"
-    runner = llm.FakeRunner(
-        findings=[
-            {
-                "severity": "high",
-                "dimension": "code-quality",
-                "detail": "bug",
-                "citations": [{"kind": "source", "description": "from the diff"}],
-            }
-        ],
-        summary="s",
-    )
-    result = llm.review_code(
-        diff_text=diff,
-        changed_files=["x.py"],
-        reviewers=["code-quality", "security"],
-        config=LLMConfig(repo_path=str(tmp_path)),
-        runner=runner,
-    )
+    result = llm.review_code(diff_text=diff, changed_files=["x.py"])
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
-    assert result["target"]["kind"] == "code" and result["target"]["files"] == ["x.py"]
-    assert set(result["reviewers"]) == {"code-quality", "security"}
-    # both reviewers raised the same finding → aggregated with agreement 2
-    assert result["findings"][0]["agreement"] == 2
-    assert sorted(result["findings"][0]["reviewers"]) == ["code-quality", "security"]
-
-
-def test_review_code_derives_changed_files_from_diff(tmp_path: Path) -> None:
-    import rebar.llm as llm
-    from rebar.llm.config import LLMConfig
-
-    diff = "--- a/a.py\n+++ b/a.py\n@@\n+x\n--- a/b.py\n+++ b/b.py\n@@\n+y\n"
-    result = llm.review_code(
-        diff_text=diff,
-        reviewers=["code-quality"],
-        config=LLMConfig(repo_path=str(tmp_path)),
-        runner=llm.FakeRunner(findings=[]),
-    )
-    assert set(result["target"]["files"]) == {"a.py", "b.py"}  # parsed from +++ lines
+    assert result["findings"] == []
+    assert "disabled" in result["summary"].lower()
 
 
 # ── batch spec scan ───────────────────────────────────────────────────────────

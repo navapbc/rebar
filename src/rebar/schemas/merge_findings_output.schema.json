@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/merge_findings_output.schema.json",
+  "title": "MergeFindingsOutput",
+  "description": "OUTPUT of merge_findings: the clustered findings + merged/clustered counts.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "findings": {
+      "type": "array"
+    },
+    "merged_count": {
+      "type": "integer"
+    },
+    "clustered_count": {
+      "type": "integer"
+    }
+  }
+}

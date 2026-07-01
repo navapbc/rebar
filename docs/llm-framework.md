@@ -332,16 +332,16 @@ we run an **ephemeral self-hosted stack**, not a persistent server:
 ## How the motivating examples map
 
 1. **LLM review of a ticket / ticket-graph** — the shipped `review_ticket` op.
-2. **Code review over a change with deterministic reviewer selection** — the
-   shipped `review_code` op (library `rebar.llm.review_code`, CLI `rebar
-   review-code`, gated MCP `review_code`). Diff-centric but agentic: reads the git
-   range (or a supplied `diff_text`), selects reviewers deterministically
-   (`select_code_reviewers` — `code-quality` always, plus catalog reviewers whose
-   `applies_to` globs match the changed files), runs each as its own pass, and
-   **aggregates** results (`aggregate.aggregate_findings`: cluster → consensus →
-   rank by severity×agreement; each finding carries `agreement` + `reviewers`). A
-   lightweight repo "orientation" seeds the changed-file layout (a full
-   tree-sitter/PageRank repo-map à la Aider is a future enhancement).
+2. **Code review over a change — the four-pass code-review GATE** — the `review_code` op
+   (library `rebar.llm.review_code`, CLI `rebar review-code`, gated MCP `review_code`). As of
+   epic b744 (WS4, ADR 0011) the throwaway single-pass route — deterministic reviewer selection
+   → parallel reviewers → `aggregate_findings` — is RETIRED. `review_code` is now the gate-backed
+   shim: OFF by default (`verify.enable_code_review` / `REBAR_VERIFY_ENABLE_CODE_REVIEW`), it
+   returns an inert empty `review_result` when disabled, and when enabled runs the four-pass
+   code-review gate (`gates/code-review.yaml`: a base reviewer + two-round overlay escalation →
+   kernel Pass-2 verify / Pass-3 decide / Pass-4 coach, via `produce_code_review_verdict`) and
+   TRANSLATES the typed `code_review_verdict` → a `review_result` (preserving the public surface).
+   See `docs/review-kernel.md` (the code-review consumer section) + ADRs 0010/0011.
 3. **Scan open epics against a spec (batched)** — the shipped `scan_epics_for_spec`
    op (library, CLI `rebar scan-spec`, gated MCP `scan_spec`). A batch evaluator:
    it pulls the store's open epics, evaluates them against the spec in batches
