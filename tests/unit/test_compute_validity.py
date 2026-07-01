@@ -54,21 +54,64 @@ def test_completion_valid_when_reclosed_after_reopen(monkeypatch) -> None:
 
 
 # ── plan-review (unscoped: no dep map → whole-HEAD freshness) ───────────────────
+# Every production plan-review manifest carries a regver stamp; compute_validity now treats a
+# stamp that no longer matches the current (overlay-aware) registry_version — or a MISSING stamp —
+# as stale-regver (story 08af). These unscoped tests carry a matching stamp to reach the head/
+# material checks under test.
+def _regver(monkeypatch, value="rv0") -> str:
+    monkeypatch.setattr(attest, "registry_version", lambda repo_root=None: value)
+    return f"regver: {value}"
+
+
 def test_plan_review_valid_when_head_and_material_match(monkeypatch) -> None:
     _fp(monkeypatch, "pm")
+    rv = _regver(monkeypatch)
     monkeypatch.setattr("rebar.signing.head_sha", lambda repo_root: "headA")
-    att = {"manifest": ["plan-review: PASS", "material: pm"], "head_sha": "headA", "signed_at": 100}
+    att = {
+        "manifest": ["plan-review: PASS", "material: pm", rv],
+        "head_sha": "headA",
+        "signed_at": 100,
+    }
     state = {"ticket_id": "t", "status": "in_progress"}
     assert compute_validity(att, state, "plan-review")["valid"] is True
 
 
 def test_plan_review_invalid_on_head_drift(monkeypatch) -> None:
     _fp(monkeypatch, "pm")
+    rv = _regver(monkeypatch)
     monkeypatch.setattr("rebar.signing.head_sha", lambda repo_root: "headB")
-    att = {"manifest": ["plan-review: PASS", "material: pm"], "head_sha": "headA", "signed_at": 100}
+    att = {
+        "manifest": ["plan-review: PASS", "material: pm", rv],
+        "head_sha": "headA",
+        "signed_at": 100,
+    }
     state = {"ticket_id": "t", "status": "in_progress"}
     res = compute_validity(att, state, "plan-review")
     assert res["valid"] is False and res["verdict"] == "stale-head"
+
+
+def test_plan_review_stale_when_regver_changed(monkeypatch) -> None:
+    _fp(monkeypatch, "pm")
+    monkeypatch.setattr(attest, "registry_version", lambda repo_root=None: "rv-NEW")
+    monkeypatch.setattr("rebar.signing.head_sha", lambda repo_root: "headA")
+    att = {
+        "manifest": ["plan-review: PASS", "material: pm", "regver: rv-OLD"],
+        "head_sha": "headA",
+        "signed_at": 100,
+    }
+    state = {"ticket_id": "t", "status": "in_progress"}
+    res = compute_validity(att, state, "plan-review")
+    assert res["valid"] is False and res["verdict"] == "stale-regver"
+
+
+def test_plan_review_stale_when_regver_missing(monkeypatch) -> None:
+    _fp(monkeypatch, "pm")
+    _regver(monkeypatch)
+    monkeypatch.setattr("rebar.signing.head_sha", lambda repo_root: "headA")
+    att = {"manifest": ["plan-review: PASS", "material: pm"], "head_sha": "headA", "signed_at": 100}
+    state = {"ticket_id": "t", "status": "in_progress"}
+    res = compute_validity(att, state, "plan-review")
+    assert res["valid"] is False and res["verdict"] == "stale-regver"
 
 
 def test_plan_review_invalid_when_reopened(monkeypatch) -> None:

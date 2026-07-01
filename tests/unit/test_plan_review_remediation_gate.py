@@ -57,7 +57,7 @@ def _setup(
         attest, "current_material_fingerprint", lambda tid, repo_root=None: cur_material
     )
     monkeypatch.setattr(llm_config, "current_code_sha", lambda: cur_sha)
-    monkeypatch.setattr(attest, "registry_version", lambda: cur_regver)
+    monkeypatch.setattr(attest, "registry_version", lambda repo_root=None: cur_regver)
     monkeypatch.setattr(
         sidecar,
         "latest_review_result",

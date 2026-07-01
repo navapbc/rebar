@@ -31,29 +31,55 @@ _MANIFEST_PREFIX = "plan-review"
 _DEP_PREFIX = "dep"
 _REGVER_PREFIX = "regver:"  # criteria-registry version stamp (progressive drift-refresh, ADR 0002)
 _REFRESHED_PREFIX = "refreshed-from:"  # provenance on a drift-refreshed attestation
+_DISABLED_PREFIX = "disabled_builtins:"  # built-in ids the project overlay disabled (story 08af)
 _ABSENT_HASH = "absent"  # sentinel for a dependency path that does not exist on disk
 
 
-def registry_version() -> str:
+def registry_version(repo_root=None) -> str:
     """A short, deterministic stamp of the criteria registry the review ran against
     (the canonical DET + LLM id sets + the routing index). Bound into the manifest so
     a progressive drift-refresh can detect that the registry changed since signing
-    (version skew) and fall back to a FULL re-review instead of reusing the verdict."""
+    (version skew) and fall back to a FULL re-review instead of reusing the verdict.
+
+    OVERLAY-AWARE (story 08af): with ``repo_root`` given, the stamp hashes the repo's
+    EFFECTIVE routing (packaged ⊕ the ``.rebar/criteria_routing.json`` overlay) plus the
+    overlay's activated-project ids and disabled-built-in set — so activating / re-tuning /
+    disabling a project criterion changes the stamp, which the claim gate reads as
+    ``stale-regver`` (invalidating a prior plan-review attestation). With ``repo_root=None``,
+    OR a repo with NO overlay, the basis is BYTE-IDENTICAL to the historical packaged stamp
+    (``activated`` / ``disabled`` are only added when non-empty), so existing attestations —
+    signed before this change — stay valid (zero churn)."""
     from . import registry
 
+    activated: list[str] = []
+    disabled: list[str] = []
     try:
-        routing = json.dumps(registry._routing_index(), sort_keys=True)
+        if repo_root is None:
+            routing_obj: dict = registry._routing_index()
+        else:
+            routing_obj = registry.effective_routing(repo_root)
+            disabled = registry.disabled_builtins(repo_root)
+            activated = sorted(
+                c for c in registry.effective_criteria(repo_root) if c.startswith("project.")
+            )
+        routing = json.dumps(routing_obj, sort_keys=True)
     except Exception:  # noqa: BLE001 — routing unreadable → stamp the id sets alone; still detects drift
         routing = ""
-    basis = json.dumps(
-        {
-            "det": sorted(registry.CANONICAL_DET),
-            "llm": sorted(registry.CANONICAL_LLM),
-            "grounded": sorted(registry.CODEBASE_GROUNDED),
-            "routing": routing,
-        },
-        sort_keys=True,
-    )
+        activated = []
+        disabled = []
+    # The overlay dimensions are added ONLY when non-empty so an overlay-absent repo hashes
+    # to the SAME basis as the packaged (repo_root=None) stamp — preserving back-compat.
+    basis_obj: dict[str, Any] = {
+        "det": sorted(registry.CANONICAL_DET),
+        "llm": sorted(registry.CANONICAL_LLM),
+        "grounded": sorted(registry.CODEBASE_GROUNDED),
+        "routing": routing,
+    }
+    if activated:
+        basis_obj["activated"] = activated
+    if disabled:
+        basis_obj["disabled"] = disabled
+    basis = json.dumps(basis_obj, sort_keys=True)
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
 
 
@@ -175,6 +201,12 @@ def build_manifest(
     ]
     if regver:
         lines.append(f"{_REGVER_PREFIX} {regver}")
+    # Record the built-in criteria the project overlay DISABLED for this review (sorted,
+    # deterministic). Additive — absent on a clean run, so the manifest is byte-identical to
+    # a pre-08af manifest when the overlay disables nothing (story 08af).
+    disabled = sorted((verdict.get("coverage", {}) or {}).get("disabled_builtins") or [])
+    if disabled:
+        lines.append(f"{_DISABLED_PREFIX} {','.join(disabled)}")
     if refreshed_from:
         lines.append(f"{_REFRESHED_PREFIX} {refreshed_from}")
     # Pin the snapshot SHA the dep hashes were computed against (epic raze-vet-ditch S4b),
@@ -214,6 +246,17 @@ def manifest_regver(manifest: list[str] | None) -> str | None:
     return None
 
 
+def manifest_disabled_builtins(manifest: list[str] | None) -> list[str]:
+    """The sorted built-in ids the overlay disabled at signing time, parsed from a manifest
+    (``[]`` when the line is absent — a clean run or a pre-08af attestation)."""
+    for line in manifest or []:
+        s = str(line)
+        if s.startswith(_DISABLED_PREFIX):
+            rest = s.split(":", 1)[1].strip()
+            return sorted(x for x in (p.strip() for p in rest.split(",")) if x)
+    return []
+
+
 def is_plan_review_manifest(manifest: list[str] | None) -> bool:
     if not manifest:
         return False
@@ -234,14 +277,24 @@ def sign_plan_review(verdict: dict[str, Any], *, material: str, repo_root=None) 
     from rebar import signing
     from rebar.llm.config import current_code_sha
 
+    from . import registry
+
     deps = dependency_hashes(verdict, repo_root=repo_root)
+    # Record the overlay's disabled built-ins on the verdict coverage so build_manifest emits
+    # the `disabled_builtins:` line (story 08af). Populated here (the sign path) so the stamp is
+    # authoritative even when the verdict the orchestrator produced did not carry it.
+    disabled = registry.disabled_builtins(repo_root)
+    if disabled:
+        verdict.setdefault("coverage", {})["disabled_builtins"] = disabled
     # Pin the snapshot SHA the deps were hashed at (attested review only — current_code_sha
     # is None in local mode), so the claim gate re-hashes the SAME basis (shared boundary).
+    # regver is overlay-aware (repo_root) so the stamp reflects an activated/edited/disabled
+    # criterion — a change the claim gate reads as stale-regver.
     manifest = build_manifest(
         verdict,
         material=material,
         deps=deps,
-        regver=registry_version(),
+        regver=registry_version(repo_root),
         verified_at_sha=current_code_sha(),
     )
     return signing.sign_manifest(
@@ -274,8 +327,8 @@ def drift_refresh_candidate(ticket_id: str, *, repo_root=None) -> dict[str, Any]
     manifest = result.get("manifest")
     if not is_plan_review_manifest(manifest):
         return None
-    # Registry skew → the probe's meaning may have changed → full review.
-    if manifest_regver(manifest) != registry_version():
+    # Registry skew → the probe's meaning may have changed → full review (overlay-aware).
+    if manifest_regver(manifest) != registry_version(repo_root):
         return None
     # Material edit is a separate invalidation (handled by the material-fingerprint gate).
     signed_material = manifest_material(manifest)
@@ -360,8 +413,9 @@ def remediation_mode_candidate(
         current_sha = current_code_sha()
         reasons["code_unchanged"] = bool(signed_sha) and signed_sha == current_sha
 
-        # registry UNCHANGED: the criteria-routing version equals the prior signed one.
-        reasons["registry_unchanged"] = manifest_regver(manifest) == registry_version()
+        # registry UNCHANGED: the criteria-routing version equals the prior signed one
+        # (overlay-aware — an activated/edited/disabled criterion is a registry change).
+        reasons["registry_unchanged"] = manifest_regver(manifest) == registry_version(repo_root)
 
         # prior REVIEW_RESULT sidecar WITH finding text available (child e344). NOTE: this reads
         # the newest USABLE v1 payload (walk-back over malformed/foreign-schema files), whereas
@@ -398,7 +452,9 @@ def refresh_attestation(
     prior signed paths (authoritative) rather than re-deriving the set."""
     from rebar import signing
 
-    fields = {
+    from . import registry
+
+    fields: dict[str, Any] = {
         "verdict": "PASS",
         "ticket_id": ticket_id,
         "model": _manifest_field(prior_manifest, "model:"),
@@ -410,13 +466,16 @@ def refresh_attestation(
             }
         },
     }
+    disabled = registry.disabled_builtins(repo_root)
+    if disabled:
+        fields["coverage"]["disabled_builtins"] = disabled
     prior_digest = signing.verify_signature(ticket_id, repo_root=repo_root).get("key_id", "?")
     new_deps = _rehash(manifest_deps(prior_manifest).keys(), repo_root=repo_root)
     manifest = build_manifest(
         fields,
         material=manifest_material(prior_manifest) or "",
         deps=new_deps,
-        regver=registry_version(),
+        regver=registry_version(repo_root),
         refreshed_from=f"{prior_digest} probe={probe}",
     )
     return signing.sign_manifest(ticket_id, manifest, kind=_MANIFEST_PREFIX, repo_root=repo_root)
@@ -511,6 +570,22 @@ def compute_validity(
         }
 
     if kind == _MANIFEST_PREFIX:  # plan-review
+        # Criteria-registry drift (story 08af): the overlay-aware stamp changes when a project
+        # criterion is activated / re-tuned / disabled, so a signed regver that no longer matches
+        # the current one means the criteria the plan was reviewed against changed. A MISSING
+        # regver line is treated as stale too (expand-contract: every production plan-review
+        # manifest carries one; an overlay-absent repo re-hashes to the SAME packaged stamp the
+        # manifest was signed with, so a real unchanged attestation stays valid).
+        signed_regver = manifest_regver(manifest)
+        if signed_regver is None or signed_regver != registry_version(repo_root):
+            return {
+                "valid": False,
+                "reason": (
+                    "the criteria registry changed since the plan review "
+                    "(overlay activated/edited/disabled)"
+                ),
+                "verdict": "stale-regver",
+            }
         # Code-drift freshness (ADR 0002): re-hash the SIGNED per-path map at the SAME
         # pinned-SHA basis the attestation signed against (so the gate and plan-review can't
         # diverge); when unscoped, fall back to conservative whole-HEAD freshness.
