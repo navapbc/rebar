@@ -52,6 +52,11 @@ from typing import Any
 from rebar.llm import criteria as _criteria
 from rebar.llm.criteria import overlay as _overlay_core
 
+# Back-compat re-export (story 5065): `_detector_matches` moved into the shared
+# `criteria.model`; `plan_review.det_invariants` (story 7f0d) imports it from here, so keep
+# the name resolvable on the registry module.
+from rebar.llm.criteria.model import _detector_matches  # noqa: F401
+
 # The gate error is the SHARED criteria error (story 5065): plan-review re-exports it as
 # ``RegistryError`` so every existing ``except RegistryError`` / ``pytest.raises`` keeps
 # working while the shared layer is the one that actually raises it during delegation.
