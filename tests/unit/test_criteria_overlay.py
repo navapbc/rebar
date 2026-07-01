@@ -118,6 +118,18 @@ def test_netnew_unprefixed_id_rejected(tmp_path):
         registry.effective_routing(root)
 
 
+def test_project_id_colliding_with_builtin_rejected(tmp_path, monkeypatch):
+    """A `project.`-prefixed id that equals a built-in id is rejected at load — a project
+    criterion can NEVER rebind a built-in. Normally unreachable (built-in ids are never
+    `project.`-prefixed), so we simulate a would-be future built-in named with a dot to
+    prove the defensive guard fires."""
+    monkeypatch.setattr(registry, "CANONICAL_LLM", registry.CANONICAL_LLM | {"project.evil"})
+    prompt_library._invalidate_caches()
+    root = _make_repo(tmp_path, overlay={"plan_review": {"project.evil": _ROUTING}, "activate": []})
+    with pytest.raises(registry.RegistryError, match="collides with a built-in"):
+        registry.effective_routing(root)
+
+
 def test_activated_without_routing_rejected(tmp_path):
     root = _make_repo(tmp_path, overlay={"plan_review": {}, "activate": ["project.ghost"]})
     with pytest.raises(registry.RegistryError, match="has no.*routing entry"):
@@ -208,6 +220,69 @@ def test_route_criteria_fans_in_activated_project_criterion(tmp_path):
     assert proj_agent == []
     # deduped against an already-resolved built-in set is a no-op for project ids
     assert production_batch_runner._project_criteria(ctx, exclude={"project.no_print"}) == ([], [])
+
+
+# ── MVP end-to-end: activate → runs through the runner → surfaces a finding ──────
+def test_mvp_end_to_end_activated_project_criterion_surfaces_finding(tmp_path, monkeypatch):
+    """The MVP slice: activate ONE project LLM criterion in the overlay → it fans in through
+    ProductionBatchRunner → the finder (a FakeRunner, no billable call) runs it → its finding
+    is surfaced in the batch result. Proves activate→run→surface end-to-end offline."""
+    import rebar
+    from rebar import config as _config
+    from rebar.llm.plan_review.production_batch_runner import ProductionBatchRunner
+    from rebar.llm.runner import FakeRunner
+    from rebar.llm.workflow.runners import BatchRunRequest
+
+    root = _make_repo(
+        tmp_path,
+        overlay={"plan_review": {"project.no_print": _ROUTING}, "activate": ["project.no_print"]},
+        prompts={"plan-review-project.no_print": _PROJECT_RUBRIC},
+    )
+    # Overlay discovery keys off config.repo_root() (the lightweight context builder resolves
+    # ctx.repo_root to None for a store-free tmp), so point it at the overlay repo.
+    monkeypatch.setattr(_config, "repo_root", lambda *a, **k: tmp_path)
+    prompt_library._invalidate_caches()
+
+    state = {
+        "ticket_id": "abcd-0000-0000-0001",
+        "ticket_type": "story",
+        "title": "Build X",
+        "description": "## Why\nx\n\n## What\nbuild X\n\n## Acceptance Criteria\n- [ ] x is true\n",
+        "deps": [],
+    }
+    monkeypatch.setattr(rebar, "show_ticket", lambda tid, *, repo_root=None: dict(state))
+    monkeypatch.setattr(rebar, "list_tickets", lambda *, parent=None, repo_root=None: [])
+
+    fake = FakeRunner(
+        structured={
+            "analysis": "",
+            "findings": [
+                {"finding": "bare print() in library code", "criteria": ["project.no_print"]}
+            ],
+        }
+    )
+    req = BatchRunRequest(
+        finder="plan-review-finder",
+        criteria=(),  # NO built-ins passed — the project criterion must be fanned in by the runner
+        usd_budget=None,
+        model_ladder=("claude-opus-4-8",),
+        workflow={},
+        target_ticket="abcd-0000-0000-0001",
+        repo_root=str(root),
+        run_id="run-1",
+        step_id="finders",
+    )
+    result = ProductionBatchRunner(runner=fake).run(req, None)
+
+    # the project criterion was fanned in...
+    assert result.outputs["batch_plan"]["batch_resolution"]["project"] == ["project.no_print"]
+    # ...ran, and surfaced its finding
+    surfaced = [
+        f for f in result.outputs["findings"] if "project.no_print" in (f.get("criteria") or [])
+    ]
+    assert surfaced, (
+        f"expected the project criterion to surface a finding; got {result.outputs['findings']}"
+    )
 
 
 # ── packaged-routing parity gate (the CI drift gate) ─────────────────────────────
