@@ -407,18 +407,35 @@ background so per-write network latency doesn't serialize a batch claim, and `of
 keeps commits local — both still surface `PUSH_PENDING` via `fsck` (see
 `docs/concurrency.md`).
 
-## Git workflow (code changes)
+## Git workflow (code changes) — land changes THROUGH GERRIT, not GitHub PRs
 
-**Merge code changes to `main` via a pull request, not a direct push.** Branch the
-work, open a PR, let CI + review run, and merge through the PR — never push commits
-straight to `main`. (This governs *code*; rebar's own ticket events on the `tickets`
-branch still auto-commit/auto-push as described above.)
+**This repo dogfoods its own premise: every change to `main` is LLM-reviewed by the
+Gerrit `LLM-Review` gate before it can land. `main` flows through Gerrit; GitHub is a
+read-only mirror.** Do **not** open GitHub PRs or push to GitHub `main` — a repository
+ruleset rejects direct pushes and PR merges there (only Gerrit's replication deploy key
+can advance the mirror). The full contributor guide is **[CONTRIBUTING.md](CONTRIBUTING.md)**;
+the short version for agents:
 
-**Auto-merge is authorized.** When you open a PR you may enable GitHub auto-merge
-(`gh pr merge --auto --squash`) so it merges itself once the required CI checks pass
-and review requirements are met — you don't have to babysit and merge by hand. The
-`main` ruleset still gates the merge (required status checks must be green), so
-auto-merge never bypasses CI.
+1. **Get Gerrit access once.** Sign in at `https://rebar.solutions.navateam.com` via
+   GitHub OAuth, generate an HTTP password (Settings → HTTP Credentials), clone from
+   Gerrit (`https://<user>@rebar.solutions.navateam.com/a/rebar`), and install the
+   `commit-msg` hook
+   (`curl -Lo .git/hooks/commit-msg https://rebar.solutions.navateam.com/tools/hooks/commit-msg && chmod +x .git/hooks/commit-msg`)
+   so commits carry a `Change-Id`.
+2. **Push for review:** `git push origin HEAD:refs/for/main` (the magic ref — creates a
+   Gerrit change, does not touch `main`).
+3. **The gate:** the rebar review-bot casts the single `LLM-Review` vote. A change is
+   submittable only at **`LLM-Review = +1` (MAX) AND no unresolved comments**. Only the
+   bot/admins can cast it — you cannot self-approve. A `-1` tagged
+   `[LLM-Review: BLOCK — coverage-gap (…)]` is an infra veto (not your code); a `-1` tagged
+   `[LLM-Review: BLOCK — finding]` names real findings in your diff.
+4. **Iterate:** fix findings, `git commit --amend --no-edit` (keep the `Change-Id`),
+   re-push. **Submit** once green → Gerrit merges and **replicates the new `main` to
+   GitHub** (where branch CI runs on the push).
+
+(This governs *code*. rebar's own **ticket events on the `tickets` branch** still
+auto-commit/auto-push as described above — that is unchanged and does NOT go through
+Gerrit.)
 
 ## Library quick reference
 
