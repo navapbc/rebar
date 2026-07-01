@@ -693,11 +693,7 @@ def edit_workflow(
             # green; it canonicalizes the front-matter and invalidates the registry caches so
             # the entry is immediately enumerable. 200 {ok:true, id, path} or 4xx {ok:false,
             # errors:[...]}. Token+Host guarded above.
-            from rebar.llm.prompt_library import (
-                CRITERION_CATEGORY,
-                LibraryWriteError,
-                PromptError,
-            )
+            from rebar.llm.prompt_library import LibraryWriteError, PromptError
             from rebar.llm.prompts import write_front_matter
 
             try:
@@ -717,11 +713,20 @@ def edit_workflow(
                 # one); fall back to the title/id so a minimal name+body form still validates.
                 "description": str(data.get("description") or data.get("title") or pid),
             }
-            if kind == "criterion":
-                meta["category"] = CRITERION_CATEGORY
-            text = write_front_matter(meta, str(data.get("body") or ""))
+            body_md = str(data.get("body") or "")
             try:
-                path = create_prompt(pid, text, repo_root=_repo_root)
+                if kind == "criterion":
+                    # A criterion is authored end-to-end (rubric at criterion_prompt_id + its
+                    # atomic routing overlay) so a net-new project.<name> round-trips (stew-kid).
+                    from .criterion_preview import author_criterion
+
+                    path = author_criterion(
+                        str(_repo_root), pid, meta, body_md, data.get("routing")
+                    )
+                else:
+                    path = create_prompt(
+                        pid, write_front_matter(meta, body_md), repo_root=_repo_root
+                    )
             except (LibraryWriteError, PromptError) as exc:
                 self._send(
                     400,
@@ -729,19 +734,13 @@ def edit_workflow(
                     "application/json",
                 )
                 return
-            # Routing-fields authoring (opt-in via `routing`): AFTER the prompt is written, couple
-            # the criterion's routing entry + activation into ONE atomic overlay write — a failed
-            # overlay leaves an inactive, harmless prompt, never a half-active criterion.
-            routing = data.get("routing")
-            if kind == "criterion" and isinstance(routing, dict) and routing:
-                from .criterion_preview import author_criterion_overlay
-
-                try:
-                    author_criterion_overlay(str(_repo_root), pid, routing)
-                except Exception as exc:  # noqa: BLE001 — overlay write failed → 4xx (prompt inactive)
-                    body = {"ok": False, "id": pid, "errors": [f"overlay: {exc}"]}
-                    self._send(400, json.dumps(body), "application/json")
-                    return
+            except Exception as exc:  # noqa: BLE001 — overlay write failed → 4xx (prompt left inactive)
+                self._send(
+                    400,
+                    json.dumps({"ok": False, "id": pid, "errors": [f"overlay: {exc}"]}),
+                    "application/json",
+                )
+                return
             self._send(
                 200,
                 json.dumps({"ok": True, "id": pid, "path": str(path)}),

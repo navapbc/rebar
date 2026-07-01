@@ -69,7 +69,7 @@ def test_calibrate_metrics_math(monkeypatch):
     assert r["false_accept"] == 0.5  # n1 fired, n2 did not
     assert r["agreement"] == 0.5  # f1 + n2 correct; f2 + n1 wrong
     assert -1.0 <= r["kappa"] <= 1.0
-    assert r["prompt"] == "plan-review-project.test"
+    assert r["prompt"] == "plan-review-project-test"
 
 
 def test_calibrate_perfect_criterion_kappa_one(monkeypatch):

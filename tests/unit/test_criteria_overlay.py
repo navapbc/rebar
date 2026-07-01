@@ -74,18 +74,18 @@ def test_overlay_absent_is_packaged_only(tmp_path):
 def test_activated_project_criterion_opens_the_vocabulary(tmp_path):
     root = _make_repo(
         tmp_path,
-        overlay={"plan_review": {"project.no_print": _ROUTING}, "activate": ["project.no_print"]},
-        prompts={"plan-review-project.no_print": _PROJECT_RUBRIC},
+        overlay={"plan_review": {"project.no-print": _ROUTING}, "activate": ["project.no-print"]},
+        prompts={"plan-review-project-no-print": _PROJECT_RUBRIC},
     )
     eff = registry.effective_criteria(root)
-    assert "project.no_print" in eff
+    assert "project.no-print" in eff
     # built-ins are still all present
     assert set(registry.CANONICAL_LLM) <= set(eff)
     # and it loads a descriptor from its prompt file + overlay routing
     descriptors = {c["id"]: c for c in registry.load_criteria(root)}
-    assert "project.no_print" in descriptors
-    assert descriptors["project.no_print"]["block_threshold"] == 0.9
-    assert descriptors["project.no_print"]["name"]  # from the prompt front-matter title
+    assert "project.no-print" in descriptors
+    assert descriptors["project.no-print"]["block_threshold"] == 0.9
+    assert descriptors["project.no-print"]["name"]  # from the prompt front-matter title
 
 
 def test_present_but_not_activated_does_not_run(tmp_path):
@@ -93,12 +93,12 @@ def test_present_but_not_activated_does_not_run(tmp_path):
     routing but is NOT in the effective (runnable) vocabulary."""
     root = _make_repo(
         tmp_path,
-        overlay={"plan_review": {"project.no_print": _ROUTING}, "activate": []},
-        prompts={"plan-review-project.no_print": _PROJECT_RUBRIC},
+        overlay={"plan_review": {"project.no-print": _ROUTING}, "activate": []},
+        prompts={"plan-review-project-no-print": _PROJECT_RUBRIC},
     )
-    assert "project.no_print" not in registry.effective_criteria(root)
+    assert "project.no-print" not in registry.effective_criteria(root)
     # ...but its routing is still merged (available for tooling/eval)
-    assert "project.no_print" in registry.effective_routing(root)
+    assert "project.no-print" in registry.effective_routing(root)
 
 
 def test_retune_builtin_merges_over_packaged(tmp_path):
@@ -180,18 +180,18 @@ def test_no_cross_repo_leakage(tmp_path):
     are repo-keyed, not globally cached."""
     repo_a = _make_repo(
         tmp_path / "a",
-        overlay={"plan_review": {"project.only_a": _ROUTING}, "activate": ["project.only_a"]},
-        prompts={"plan-review-project.only_a": _PROJECT_RUBRIC},
+        overlay={"plan_review": {"project.only-a": _ROUTING}, "activate": ["project.only-a"]},
+        prompts={"plan-review-project-only-a": _PROJECT_RUBRIC},
     )
     repo_b = _make_repo(tmp_path / "b", overlay=None)
 
     # Resolve A first (populates the repo-keyed memo), then B.
-    assert "project.only_a" in registry.effective_criteria(repo_a)
-    assert "project.only_a" not in registry.effective_criteria(repo_b)
+    assert "project.only-a" in registry.effective_criteria(repo_a)
+    assert "project.only-a" not in registry.effective_criteria(repo_b)
     # ...and the reverse order too (memo isolation is symmetric)
     prompt_library._invalidate_caches()
-    assert "project.only_a" not in registry.effective_criteria(repo_b)
-    assert "project.only_a" in registry.effective_criteria(repo_a)
+    assert "project.only-a" not in registry.effective_criteria(repo_b)
+    assert "project.only-a" in registry.effective_criteria(repo_a)
 
 
 def test_activated_missing_prompt_fails_loud(tmp_path):
@@ -199,11 +199,11 @@ def test_activated_missing_prompt_fails_loud(tmp_path):
     RegistryError from load_criteria — fail-loud, never a silent skip."""
     root = _make_repo(
         tmp_path,
-        overlay={"plan_review": {"project.no_prompt": _ROUTING}, "activate": ["project.no_prompt"]},
-        prompts={},  # no prompt file authored for project.no_prompt
+        overlay={"plan_review": {"project.no-prompt": _ROUTING}, "activate": ["project.no-prompt"]},
+        prompts={},  # no prompt file authored for project.no-prompt
     )
-    assert "project.no_prompt" in registry.effective_criteria(root)  # activated + routed
-    with pytest.raises(registry.RegistryError, match="project.no_prompt"):
+    assert "project.no-prompt" in registry.effective_criteria(root)  # activated + routed
+    with pytest.raises(registry.RegistryError, match="project.no-prompt"):
         registry.load_criteria(root)
 
 
@@ -218,8 +218,8 @@ def test_route_criteria_fans_in_activated_project_criterion(tmp_path):
 
     root = _make_repo(
         tmp_path,
-        overlay={"plan_review": {"project.no_print": _ROUTING}, "activate": ["project.no_print"]},
-        prompts={"plan-review-project.no_print": _PROJECT_RUBRIC},
+        overlay={"plan_review": {"project.no-print": _ROUTING}, "activate": ["project.no-print"]},
+        prompts={"plan-review-project-no-print": _PROJECT_RUBRIC},
     )
     ctx = PlanContext(
         ticket_id="abcd-0000-0000-0001",
@@ -229,13 +229,13 @@ def test_route_criteria_fans_in_activated_project_criterion(tmp_path):
         repo_root=root,
     )
     single, agent = route_criteria(ctx)
-    assert "project.no_print" in {c["id"] for c in single}
+    assert "project.no-print" in {c["id"] for c in single}
     # ...and the runner's project fan-in picks exactly the project subset (built-ins excluded)
     proj_single, proj_agent = production_batch_runner._project_criteria(ctx, exclude=set())
-    assert {c["id"] for c in proj_single} == {"project.no_print"}
+    assert {c["id"] for c in proj_single} == {"project.no-print"}
     assert proj_agent == []
     # deduped against an already-resolved built-in set is a no-op for project ids
-    assert production_batch_runner._project_criteria(ctx, exclude={"project.no_print"}) == ([], [])
+    assert production_batch_runner._project_criteria(ctx, exclude={"project.no-print"}) == ([], [])
 
 
 # ── MVP end-to-end: activate → runs through the runner → surfaces a finding ──────
@@ -251,8 +251,8 @@ def test_mvp_end_to_end_activated_project_criterion_surfaces_finding(tmp_path, m
 
     root = _make_repo(
         tmp_path,
-        overlay={"plan_review": {"project.no_print": _ROUTING}, "activate": ["project.no_print"]},
-        prompts={"plan-review-project.no_print": _PROJECT_RUBRIC},
+        overlay={"plan_review": {"project.no-print": _ROUTING}, "activate": ["project.no-print"]},
+        prompts={"plan-review-project-no-print": _PROJECT_RUBRIC},
     )
     # Overlay discovery keys off config.repo_root() (the lightweight context builder resolves
     # ctx.repo_root to None for a store-free tmp), so point it at the overlay repo.
@@ -273,7 +273,7 @@ def test_mvp_end_to_end_activated_project_criterion_surfaces_finding(tmp_path, m
         structured={
             "analysis": "",
             "findings": [
-                {"finding": "bare print() in library code", "criteria": ["project.no_print"]}
+                {"finding": "bare print() in library code", "criteria": ["project.no-print"]}
             ],
         }
     )
@@ -291,10 +291,10 @@ def test_mvp_end_to_end_activated_project_criterion_surfaces_finding(tmp_path, m
     result = ProductionBatchRunner(runner=fake).run(req, None)
 
     # the project criterion was fanned in...
-    assert result.outputs["batch_plan"]["batch_resolution"]["project"] == ["project.no_print"]
+    assert result.outputs["batch_plan"]["batch_resolution"]["project"] == ["project.no-print"]
     # ...ran, and surfaced its finding
     surfaced = [
-        f for f in result.outputs["findings"] if "project.no_print" in (f.get("criteria") or [])
+        f for f in result.outputs["findings"] if "project.no-print" in (f.get("criteria") or [])
     ]
     assert surfaced, (
         f"expected the project criterion to surface a finding; got {result.outputs['findings']}"
@@ -314,7 +314,7 @@ def test_editing_overlay_invalidates_memo_by_content(tmp_path):
     root = _make_repo(
         tmp_path,
         overlay={"plan_review": {"project.p": _ROUTING}, "activate": []},
-        prompts={"plan-review-project.p": _PROJECT_RUBRIC},
+        prompts={"plan-review-project-p": _PROJECT_RUBRIC},
     )
     assert "project.p" not in registry.effective_criteria(root)
     # activate it by rewriting the overlay (new content ⇒ new signature ⇒ fresh compute)

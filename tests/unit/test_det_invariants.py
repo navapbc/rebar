@@ -30,7 +30,7 @@ _DET_ROUTING = {
     "block_threshold": 0.5,
     "default_posture": "blocking",
     "fail_mode": "closed",
-    "detector": {"id": "project.no_eval"},
+    "detector": {"id": "project.no-eval"},
     "name": "No eval() in library code",
 }
 
@@ -145,18 +145,18 @@ def test_det_descriptor_branch_needs_no_prompt(tmp_path):
     root = _make_repo(
         tmp_path,
         overlay={
-            "plan_review": {"project.no_eval": _DET_ROUTING},
-            "activate": ["project.no_eval"],
+            "plan_review": {"project.no-eval": _DET_ROUTING},
+            "activate": ["project.no-eval"],
         },
     )
-    # NO .rebar/prompts/plan-review-project.no_eval.md file exists — load_criteria must NOT blow up.
+    # NO .rebar/prompts/plan-review-project-no-eval.md file exists — load_criteria must NOT blow up.
     descriptors = registry.by_id(root)
-    assert "project.no_eval" in descriptors
-    d = descriptors["project.no_eval"]
+    assert "project.no-eval" in descriptors
+    d = descriptors["project.no-eval"]
     assert d["exec"] == "DET"
     assert d["fail_mode"] == "closed"
     assert d["scenario"]  # falls back to the criterion name when the detector is unresolvable
-    assert d["detector"] == {"id": "project.no_eval"}
+    assert d["detector"] == {"id": "project.no-eval"}
 
 
 # ── (d) a DET criterion never reaches the LLM batch ──────────────────────────────
@@ -166,14 +166,14 @@ def test_det_criterion_absent_from_llm_batch(tmp_path, monkeypatch):
     root = _make_repo(
         tmp_path,
         overlay={
-            "plan_review": {"project.no_eval": _DET_ROUTING},
-            "activate": ["project.no_eval"],
+            "plan_review": {"project.no-eval": _DET_ROUTING},
+            "activate": ["project.no-eval"],
         },
     )
     ctx = _ctx(root)
     single, agent = orchestrator.route_criteria(ctx)
     ids = {c["id"] for c in single + agent}
-    assert "project.no_eval" not in ids  # NOT routed to any LLM tier
+    assert "project.no-eval" not in ids  # NOT routed to any LLM tier
 
     # And absent from the assemble op's include_ vocabulary too.
     import rebar
@@ -198,7 +198,7 @@ def test_det_criterion_absent_from_llm_batch(tmp_path, monkeypatch):
     out = workflow_ops.plan_review_assemble_criteria(_SC())
     assert "include_project_no_eval" not in out
     # sanity: effective_routing saw it as DET (so the exclusion, not absence, dropped it)
-    assert registry.effective_routing(root)["project.no_eval"]["exec"] == "DET"
+    assert registry.effective_routing(root)["project.no-eval"]["exec"] == "DET"
 
 
 # ── (e) no project DET criterion ⇒ the static floor is byte-identical (zero added) ─
@@ -219,12 +219,12 @@ def test_project_det_match_on_file_impact_blocks(tmp_path, monkeypatch):
     root = _make_repo(
         tmp_path,
         overlay={
-            "plan_review": {"project.no_eval": _DET_ROUTING},
-            "activate": ["project.no_eval"],
+            "plan_review": {"project.no-eval": _DET_ROUTING},
+            "activate": ["project.no-eval"],
         },
     )
     fake_det = Detector(
-        id="project.no_eval",
+        id="project.no-eval",
         backend="astgrep",
         namespace="project",
         source_path="x",
@@ -239,7 +239,7 @@ def test_project_det_match_on_file_impact_blocks(tmp_path, monkeypatch):
     class _Res:
         records = (
             {
-                "detector_id": "project.no_eval",
+                "detector_id": "project.no-eval",
                 "outcome": "match",
                 "location": {"file": "src/app.py"},
             },
@@ -251,7 +251,7 @@ def test_project_det_match_on_file_impact_blocks(tmp_path, monkeypatch):
     results = det_invariants.run_project_det_checks(ctx)
     assert len(results) == 1
     r = results[0]
-    assert r.id == "project.no_eval" and r.status == "fail" and r.blocking is True
+    assert r.id == "project.no-eval" and r.status == "fail" and r.blocking is True
     assert r.blocked  # blocking fail
     assert "eval" in r.finding["finding"]
 
@@ -263,12 +263,12 @@ def test_project_det_match_off_file_impact_is_advisory(tmp_path, monkeypatch):
     root = _make_repo(
         tmp_path,
         overlay={
-            "plan_review": {"project.no_eval": _DET_ROUTING},
-            "activate": ["project.no_eval"],
+            "plan_review": {"project.no-eval": _DET_ROUTING},
+            "activate": ["project.no-eval"],
         },
     )
     fake_det = Detector(
-        id="project.no_eval",
+        id="project.no-eval",
         backend="astgrep",
         namespace="project",
         source_path="x",
@@ -283,7 +283,7 @@ def test_project_det_match_off_file_impact_is_advisory(tmp_path, monkeypatch):
     class _Res:
         records = (
             {
-                "detector_id": "project.no_eval",
+                "detector_id": "project.no-eval",
                 "outcome": "match",
                 "location": {"file": "other.py"},
             },  # NOT in file_impact

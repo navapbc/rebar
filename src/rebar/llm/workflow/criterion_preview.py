@@ -485,6 +485,31 @@ def _first_rule_message(reg_slice: Any) -> str | None:
 
 
 # ── atomic authoring: routing overlay + activation ────────────────────────────────
+def author_criterion(
+    repo_root: str,
+    criterion_id: str,
+    meta: dict[str, Any],
+    body: str,
+    routing: dict[str, Any] | None,
+) -> Path:
+    """Author a criterion END-TO-END from its LOGICAL (dotted-for-project) id: write its rubric at
+    the filesystem-safe ``criterion_prompt_id(criterion_id)`` (task stew-kid-motif — so a net-new
+    ``project.<name>`` is authorable despite the ``.``-free filename rule), then, if ``routing`` is
+    given, atomically write + activate its overlay entry keyed by the dotted id. Prompt-first: a
+    failed overlay leaves an inactive, harmless rubric. Returns the rubric ``Path``. Raises
+    ``LibraryWriteError``/``PromptError`` (bad id/rubric) or ``RegistryError`` (bad overlay) — the
+    HTTP caller maps either to a 4xx."""
+    from rebar.llm.criteria.ids import criterion_prompt_id
+    from rebar.llm.prompt_library import CRITERION_CATEGORY, create_prompt
+    from rebar.llm.prompts import write_front_matter
+
+    text = write_front_matter({**meta, "category": CRITERION_CATEGORY}, body)
+    path = create_prompt(criterion_prompt_id(criterion_id), text, repo_root=repo_root)
+    if isinstance(routing, dict) and routing:
+        author_criterion_overlay(repo_root, criterion_id, routing)
+    return path
+
+
 def write_criterion_overlay(repo_root: str, criterion_id: str, routing: dict[str, Any]) -> None:
     """Write (read-modify-write) the project criterion's routing entry AND its ``activate``
     membership into ``.rebar/criteria_routing.json`` in a SINGLE atomic replace.
@@ -518,21 +543,26 @@ def write_criterion_overlay(repo_root: str, criterion_id: str, routing: dict[str
     _atomic_write(path, json.dumps(data, indent=2, sort_keys=True) + "\n")
 
 
-def author_criterion_overlay(repo_root: str, prompt_id: str, routing: dict[str, Any]) -> None:
-    """Author a criterion's routing overlay from its PROMPT id: strip the ``plan-review-`` prefix
-    to the bare criterion id, atomically write its routing + activation
-    (:func:`write_criterion_overlay`), then invalidate the registry caches so it is immediately
-    active. Called AFTER the rubric prompt is written (prompt-first).
+def author_criterion_overlay(repo_root: str, criterion_id: str, routing: dict[str, Any]) -> None:
+    """Author a criterion's routing overlay from its LOGICAL (dotted) criterion id, atomically
+    write its routing + activation (:func:`write_criterion_overlay`), then invalidate the
+    registry caches so it is immediately active. Called AFTER the rubric prompt is written
+    (prompt-first).
+
+    ``criterion_id`` is the DOTTED logical id (``project.<name>`` for a project criterion, or a
+    built-in id for a re-tune) — it is passed EXPLICITLY, never reverse-derived from the sanitized
+    rubric prompt id (which is a one-way, non-reversible map — task stew-kid-motif).
 
     VALIDATE-then-rollback: after writing, the merged overlay is re-resolved
     (``effective_routing`` + ``effective_criteria``). If it is invalid (e.g. a net-new id that
-    is not ``project.<name>``-prefixed — the ef7e namespace rule), the prior overlay is restored
-    and the :class:`RegistryError` re-raised, so a bad authoring attempt NEVER persists a broken
-    overlay (the caller maps it to a 4xx; the just-written prompt is left harmlessly inactive)."""
+    is not ``project.<name>``-prefixed, or a name outside the filesystem-safe charset), the prior
+    overlay is restored and the :class:`RegistryError` re-raised, so a bad authoring attempt NEVER
+    persists a broken overlay (the caller maps it to a 4xx; the just-written prompt is left
+    harmlessly inactive)."""
     from rebar.llm.plan_review import registry
     from rebar.llm.prompt_library import _invalidate_caches
 
-    cid = prompt_id[len("plan-review-") :] if prompt_id.startswith("plan-review-") else prompt_id
+    cid = criterion_id
     path = Path(repo_root) / ".rebar" / _OVERLAY_FILENAME
     prior = path.read_text(encoding="utf-8") if path.is_file() else None
     write_criterion_overlay(repo_root, cid, routing)
