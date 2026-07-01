@@ -285,6 +285,18 @@ def _diff_jira_vs_local(
             jira_val = "" if local_field not in ("priority",) else 2
         if local_val is None:
             local_val = "" if local_field not in ("priority",) else 2
+        # Convergence (mirror of outbound_fields.py:430-435, inbound direction):
+        # the send path truncates an over-length description so its ADF
+        # representation fits Jira's limit, so the Jira value we fetch back is the
+        # truncated form. Apply the IDENTICAL shared ADF-aware fit to the local
+        # value before comparing; otherwise an oversized local description never
+        # matches the landed truncated Jira body and the differ pulls the
+        # truncated form back into the local store every pass (clobbering the full
+        # local description and invalidating its plan-review fingerprint). The fit
+        # is applied to an in-memory comparison copy only — never written into
+        # ``changed`` — so a genuine Jira-side edit (Jira != fit(local)) still flows.
+        if local_field == "description" and isinstance(local_val, str):
+            local_val = _load_adf().fit_text_to_adf_limit(local_val)
         # Bug (plateau): trailing-whitespace round-trip stability.
         # Mirror of the outbound_differ fix — Jira's ADF normalization
         # strips trailing whitespace, so a local description ending in
