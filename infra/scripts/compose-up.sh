@@ -46,6 +46,13 @@ if ! docker compose version >/dev/null 2>&1; then
   }
 fi
 
+# git is used below to MERGE the OAuth creds into gerrit.config/secure.config (WS8) —
+# ensure it is present on the minimal AL2023 host (same pattern as the docker install).
+if ! command -v git >/dev/null 2>&1; then
+  echo "compose-up: installing git..." >&2
+  dnf install -y git
+fi
+
 # --- 2. Seed the persistent Gerrit site subdirs on the EBS data volume -----
 # Create the stateful subdirs (idempotent), seed etc/gerrit.config from the repo,
 # copy the image's baked plugins on first run (so an empty mounted plugins dir does
@@ -70,12 +77,10 @@ for d in git index cache db etc logs plugins; do
       "${vol}" >/dev/null
 done
 
-# Seed gerrit.config (always refresh from the repo so config changes deploy).
-cp "${REPO_ROOT}/infra/compose/gerrit.config" "${SITE_HOST_DIR}/etc/gerrit.config"
-
 # Copy the baked plugins ONCE (only if the persistent plugins dir is empty), so we
 # keep the image's bundled plugins (incl. replication, used by S5) while still
-# persisting any plugins S4a adds later.
+# persisting any plugins S4a/WS8 add later (events-log, oauth.jar) via the separate
+# install-plugins.sh step.
 if [ -z "$(ls -A "${SITE_HOST_DIR}/plugins" 2>/dev/null)" ]; then
   echo "compose-up: seeding baked plugins into ${SITE_HOST_DIR}/plugins" >&2
   # NOTE: the Gerrit image has an ENTRYPOINT, so we MUST override it with
@@ -84,10 +89,53 @@ if [ -z "$(ls -A "${SITE_HOST_DIR}/plugins" 2>/dev/null)" ]; then
     -c 'cp -a /var/gerrit/plugins/. /seed/ 2>/dev/null || true'
 fi
 
-chown -R "${GERRIT_UID}:${GERRIT_UID}" "${SITE_HOST_DIR}"
-
 # --- 3. Regenerate the secrets .env from SSM (fail-fast on SSM unreachable) -
+# BEFORE seeding gerrit.config, so the OAuth client-id/secret (WS8) can be materialized
+# into the live config from SSM.
 bash "${SCRIPT_DIR}/fetch-secrets.sh"
+ENV_FILE="${REPO_ROOT}/infra/compose/.env"
+
+# --- Seed gerrit.config + materialize OAuth creds (WS8) --------------------
+# Always refresh gerrit.config from the repo so config changes deploy, then (when the
+# config selects auth.type = OAUTH) set the non-secret client-id in gerrit.config and
+# the secret client-secret in etc/secure.config. Both are written with `git config
+# --file` (Gerrit configs ARE git-config files): a MERGE that (a) is immune to value
+# metacharacters, and (b) preserves any other keys Gerrit itself stores in secure.config
+# (e.g. registerEmailPrivateKey) instead of truncating them. Secrets NEVER land in
+# gerrit.config.
+#
+# Plugin install is a SEPARATE, operator-run step (infra/gerrit/install-plugins.sh —
+# runbook Step 3), so a whole-stack boot is not coupled to GerritForge CI reachability.
+# We only VERIFY oauth.jar is present here (fail-loud) before booting into OAUTH.
+cp "${REPO_ROOT}/infra/compose/gerrit.config" "${SITE_HOST_DIR}/etc/gerrit.config"
+
+oauth_client_id="$(grep -E '^GITHUB_OAUTH_CLIENT_ID=' "${ENV_FILE}" | cut -d= -f2-)"
+oauth_client_secret="$(grep -E '^GITHUB_OAUTH_CLIENT_SECRET=' "${ENV_FILE}" | cut -d= -f2-)"
+
+if grep -qE '^[[:space:]]*type[[:space:]]*=[[:space:]]*OAUTH' "${SITE_HOST_DIR}/etc/gerrit.config"; then
+  # Fail LOUD rather than boot a half-configured OAUTH Gerrit.
+  [ -f "${SITE_HOST_DIR}/plugins/oauth.jar" ] || {
+    echo "compose-up: FATAL — auth.type = OAUTH but plugins/oauth.jar is absent (run infra/gerrit/install-plugins.sh first)" >&2
+    exit 1; }
+  [ -n "${oauth_client_id}" ] && [ -n "${oauth_client_secret}" ] || {
+    echo "compose-up: FATAL — auth.type = OAUTH but OAuth client-id/secret missing from ${ENV_FILE}" >&2
+    exit 1; }
+
+  gerrit_cfg="${SITE_HOST_DIR}/etc/gerrit.config"
+  secure_cfg="${SITE_HOST_DIR}/etc/secure.config"
+  oauth_section="plugin.gerrit-oauth-provider-github-oauth"
+
+  git config --file "${gerrit_cfg}" "${oauth_section}.client-id" "${oauth_client_id}"
+
+  # Merge the secret into secure.config (create at 0600 if absent, preserve Gerrit's
+  # own keys if present), then re-assert 0600 regardless of the pre-existing mode.
+  [ -f "${secure_cfg}" ] || { (umask 077; : >"${secure_cfg}"); }
+  git config --file "${secure_cfg}" "${oauth_section}.client-secret" "${oauth_client_secret}"
+  chmod 600 "${secure_cfg}"
+  echo "compose-up: set OAuth client-id in gerrit.config, merged client-secret into secure.config (0600)" >&2
+fi
+
+chown -R "${GERRIT_UID}:${GERRIT_UID}" "${SITE_HOST_DIR}"
 
 # --- 4. Bring the stack up (build the review-bot image, pull Gerrit) -------
 docker compose -f "${COMPOSE_FILE}" up -d --build
