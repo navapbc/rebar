@@ -1,1 +1,0 @@
-{"author":"Iso Tester","data":{"file_impact":[{"path":"infra/terraform-github/main.tf","reason":"main-only + lifecycle precondition + comment reconcile"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782946251158657001,"uuid":"fbcb670b-9beb-4aea-8f7d-4cec2ef0e078"}
