@@ -1,1 +1,0 @@
-{"author":"Iso Tester","data":{"file_impact":[{"path":"src/rebar/llm/plan_review/attest.py","reason":"registry_version(repo_root) + disabled_builtins coverage + threading"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782872417823159001,"uuid":"67ef7a9d-16dc-4c9e-ba07-d79e5dee9c55"}
