@@ -34,7 +34,7 @@ Flag any plan that introduces a bare print() call in importable library code (us
 _ROUTING = {
     "exec": "1-TURN",
     "facet": "project-invariants",
-    "applies_at": {"levels": ["epic", "story", "task"]},
+    "applies_at": {"scope": ["container", "leaf"]},
     "block_threshold": 0.9,
     "default_posture": "advisory",
     "checklist": [],
@@ -154,6 +154,22 @@ def test_invalid_routing_entry_rejected(tmp_path):
     bad = {**_ROUTING, "block_threshold": 5.0}
     root = _make_repo(tmp_path, overlay={"plan_review": {"project.x": bad}, "activate": []})
     with pytest.raises(registry.RegistryError, match="block_threshold"):
+        registry.effective_routing(root)
+
+
+def test_legacy_levels_rejected_with_migration_hint(tmp_path):
+    # Proportionate scrutiny is keyed on container/leaf; a stale overlay using the old
+    # ticket-type `levels` vocabulary must fail loudly, not be silently ignored.
+    bad = {**_ROUTING, "applies_at": {"levels": ["task"]}}
+    root = _make_repo(tmp_path, overlay={"plan_review": {"project.x": bad}, "activate": []})
+    with pytest.raises(registry.RegistryError, match="no longer supported.*scope"):
+        registry.effective_routing(root)
+
+
+def test_invalid_scope_value_rejected(tmp_path):
+    bad = {**_ROUTING, "applies_at": {"scope": ["task"]}}  # 'task' is a type, not a node
+    root = _make_repo(tmp_path, overlay={"plan_review": {"project.x": bad}, "activate": []})
+    with pytest.raises(registry.RegistryError, match="scope must be"):
         registry.effective_routing(root)
 
 

@@ -26,7 +26,7 @@ pytestmark = pytest.mark.unit
 _DET_ROUTING = {
     "exec": "DET",
     "facet": "project-invariants",
-    "applies_at": {"levels": ["epic", "story", "task"]},
+    "applies_at": {"scope": ["container", "leaf"]},
     "block_threshold": 0.5,
     "default_posture": "blocking",
     "fail_mode": "closed",

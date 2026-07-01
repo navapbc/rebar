@@ -112,18 +112,10 @@ class PlanContext:
 
     @property
     def has_children(self) -> bool:
+        """Container (has children) vs leaf (none). This — NOT ticket type — is the
+        proportionate-scrutiny axis: a childless epic is a leaf, a story with
+        children is a container. See :func:`registry.applies`."""
         return bool(self.children)
-
-    @property
-    def level(self) -> str:
-        """Routing altitude: epic / story / task (bugs route as task-level here;
-        they are exempt from the gate entirely at a higher layer)."""
-        t = self.ticket_type
-        if t == "epic":
-            return "epic"
-        if t == "story":
-            return "story"
-        return "task"
 
     @property
     def plan_text(self) -> str:
@@ -646,8 +638,11 @@ def p9_file_impact_coverage(ctx: PlanContext) -> DetResult:
     containers (anything with children) or non-work types, where ``file_impact`` is
     legitimately absent — those pass."""
     fi = ctx.state.get("file_impact") or []
-    ttype = (ctx.ticket_type or "").lower()
-    applicable = not ctx.children and ttype in ("task", "story", "bug")
+    # Applicable to any LEAF (no children) — a leaf of any type is a work ticket that
+    # should scope its attestation. Container tickets pass (file_impact legitimately
+    # lives on their children). Bug/session_log are gate-exempt upstream, so they never
+    # reach the DET floor — no ticket-type gate is needed here.
+    applicable = not ctx.children
     cov = {"ran": True, "file_impact": len(fi), "applicable": applicable}
     if not applicable or fi:
         return DetResult("P9", "file-impact-coverage", "pass", coverage=cov)

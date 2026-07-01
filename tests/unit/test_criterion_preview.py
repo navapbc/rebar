@@ -55,7 +55,7 @@ Flag any plan that introduces a bare print() call in importable library code.
 _LLM_ROUTING = {
     "exec": "1-TURN",
     "facet": "project-invariants",
-    "applies_at": {"levels": ["epic", "story", "task"]},
+    "applies_at": {"scope": ["container", "leaf"]},
     "block_threshold": 0.9,
     "default_posture": "advisory",
     "checklist": [],

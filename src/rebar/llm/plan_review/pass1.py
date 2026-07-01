@@ -340,8 +340,8 @@ def _linked_session_log(ctx: PlanContext, cfg: LLMConfig, runner) -> tuple[str |
 
 
 def _ticket_size(ctx: PlanContext) -> str:
-    if ctx.level == "epic" or ctx.has_children:
-        return "epic"
+    if ctx.has_children:  # a container: halve the rubric chunk (size_factor)
+        return "has_children"
     if det_floor.est_tokens(ctx.plan_text) > 8000:
         return "large"
     return "moderate"

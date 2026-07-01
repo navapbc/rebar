@@ -178,10 +178,21 @@ not a validated constant.)
 
 ## Proportionate scrutiny & routing
 
-Criteria carry an `applies_at` descriptor (`registry.applies`): leaf-implementation
-criteria don't run at epic/story altitude, container criteria (G3/G4) run only when
-there are children, and type rules apply (**bugs and session_logs are exempt** from
-the whole gate; mechanical/test tasks suppress noisy criteria). Overlays fire from
+Criteria carry an `applies_at` descriptor (`registry.applies`) whose proportionate
+scrutiny is keyed on **container (has children) vs leaf (no children)** — never on
+ticket TYPE, so a childless epic is scrutinised as a leaf and a story with children
+as a container. `applies_at.scope` lists the nodes a criterion runs at (`["container",
+"leaf"]`, either or both; absent ⇒ both): leaf-implementation and code-grounding
+criteria are `["leaf"]`, container child-coverage criteria (G3/G4) are `["container"]`,
+and cross-cutting criteria (incl. the **T5c security** overlay) run at both — a
+regression fix, since a type-`levels` gate previously withheld security review from
+container epics that stand up infrastructure. The **T10 infra** overlay additionally
+checks an *endpoint access contract*: any network-reachable service a plan stands up
+must state its human/admin authentication (a named mechanism **or** a justified
+no-auth), independently of the machine credentials (deploy keys/tokens) it configures.
+Separately, **bugs and session_logs are exempt** from the whole gate (a distinct
+exemption axis, not part of container/leaf scrutiny); mechanical/test *leaves* suppress
+noisy criteria. Overlays fire from
 low-false-positive deterministic triggers where safe (T5a/T5d/T7/T12) and are
 LLM-routed otherwise. **Only the code-grounding set (E4/G1G2/A1/G6) greps the
 codebase**; everything else reasons from the plan text. The reviewed plan is

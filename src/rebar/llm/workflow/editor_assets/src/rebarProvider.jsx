@@ -701,7 +701,7 @@ const authoring = {
   // the .rebar/criteria_routing.json overlay + activation (author_criterion_overlay). Defaults
   // mirror the packaged routing floor so a minimal form still produces a valid entry.
   routingExec: "1-TURN", // 1-TURN | 2-STEP | AGENT | DET
-  routingLevels: "epic,story,task", // applies_at.levels (comma-separated)
+  routingScope: "container,leaf", // applies_at.scope (comma-separated)
   routingBlockThreshold: "0.95", // block_threshold, number in [0,1]
   routingPosture: "advisory", // default_posture: advisory | blocking
   routingFailMode: "open", // DET only: open | closed
@@ -736,7 +736,7 @@ function resetAuthoring() {
   authoring.id = "";
   authoring.body = "";
   authoring.routingExec = "1-TURN";
-  authoring.routingLevels = "epic,story,task";
+  authoring.routingScope = "container,leaf";
   authoring.routingBlockThreshold = "0.95";
   authoring.routingPosture = "advisory";
   authoring.routingFailMode = "open";
@@ -1135,14 +1135,14 @@ function isCriterionAuthoring(a) {
 // Build the `routing` object from the authoring store (or null when not authoring a criterion).
 function buildRouting(a) {
   if (a.kind !== "criterion") return null;
-  const levels = (a.routingLevels || "")
+  const scope = (a.routingScope || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
   const n = parseFloat(a.routingBlockThreshold);
   const routing = {
     exec: a.routingExec || "1-TURN",
-    applies_at: levels.length ? { levels } : {},
+    applies_at: scope.length ? { scope } : {},
     block_threshold: Number.isFinite(n) ? n : 0.95,
     default_posture: a.routingPosture || "advisory",
   };
@@ -1178,7 +1178,7 @@ function AuthoringRoutingExecEntry(props) {
   );
 }
 
-function AuthoringRoutingLevelsEntry(props) {
+function AuthoringRoutingScopeEntry(props) {
   const { element, id } = props;
   const a = useAuthoring();
   const debounce = useService("debounceInput");
@@ -1187,10 +1187,10 @@ function AuthoringRoutingLevelsEntry(props) {
     <TextFieldEntry
       id={id}
       element={element}
-      label="applies_at levels (comma-separated: epic,story,task)"
-      getValue={() => a.routingLevels}
+      label="applies_at scope (comma-separated: container,leaf)"
+      getValue={() => a.routingScope}
       setValue={(v) => {
-        a.routingLevels = v || "";
+        a.routingScope = v || "";
       }}
       debounce={debounce}
     />
@@ -1336,7 +1336,7 @@ function AuthoringSaveEntry(props) {
       a.id = "";
       a.body = "";
       a.routingExec = "1-TURN";
-      a.routingLevels = "epic,story,task";
+      a.routingScope = "container,leaf";
       a.routingBlockThreshold = "0.95";
       a.routingPosture = "advisory";
       a.routingFailMode = "open";
@@ -1529,8 +1529,8 @@ function authoringGroup(element) {
         isEdited: isSelectEntryEdited,
       },
       {
-        id: "rebar-author-routing-levels",
-        component: AuthoringRoutingLevelsEntry,
+        id: "rebar-author-routing-scope",
+        component: AuthoringRoutingScopeEntry,
         isEdited: isTextFieldEntryEdited,
       },
       {
