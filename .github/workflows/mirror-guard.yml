@@ -1,0 +1,47 @@
+name: mirror-guard
+
+# Ticket a774 (epic b744) — continuous guardian for the Gerrit->GitHub mirror lock.
+#
+# After the WS7 cutover, GitHub `main` is a read-only mirror gated by the
+# `gerrit-mirror-lock-main` ruleset. This scheduled job FAILS (-> GitHub notification) if
+# either post-cutover silent-failure mode appears:
+#   * replication has diverged (Gerrit `main` SHA != GitHub `main` SHA), or
+#   * the lock ruleset drifted (deleted / disabled / rules or bypass mutated out-of-band).
+#
+# It runs `python -m rebar.mirror_guard --all`, which exits non-zero on either. The Gerrit
+# `main` SHA is read anonymously; the GitHub Rulesets API read uses the Actions-native
+# GITHUB_TOKEN, which needs `administration: read` (granted below). If org policy disallows
+# that for the default token, provision a fine-grained PAT (administration:read) as the
+# `MIRROR_GUARD_TOKEN` secret and pass it instead (see the commented env line).
+
+on:
+  schedule:
+    - cron: "*/15 * * * *" # every 15 minutes (default-branch version only)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  administration: read # read the repo ruleset via the Rulesets API
+
+concurrency:
+  group: mirror-guard
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install rebar (core, stdlib-only)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: mirror-guard — replication + ruleset drift
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Fallback if the default token can't read rulesets under org policy:
+          # GITHUB_TOKEN: ${{ secrets.MIRROR_GUARD_TOKEN }}
+        run: python -m rebar.mirror_guard --all
