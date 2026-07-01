@@ -166,7 +166,7 @@ def _eligible_setup(monkeypatch, **overrides):
         attest, "current_material_fingerprint", lambda tid, repo_root=None: cfg["cur_material"]
     )
     monkeypatch.setattr(llm_config, "current_code_sha", lambda: cfg["cur_sha"])
-    monkeypatch.setattr(attest, "registry_version", lambda: cfg["cur_regver"])
+    monkeypatch.setattr(attest, "registry_version", lambda repo_root=None: cfg["cur_regver"])
     monkeypatch.setattr(
         sidecar,
         "latest_review_result",

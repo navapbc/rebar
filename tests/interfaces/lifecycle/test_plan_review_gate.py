@@ -826,7 +826,9 @@ def test_drift_refresh_skips_on_registry_skew(rebar_repo: Path, monkeypatch) -> 
     _enable(rebar_repo)
     tid = _scoped(rebar_repo)
     (rebar_repo / "dep.py").write_text("v = 9\n")  # drift
-    monkeypatch.setattr(attest, "registry_version", lambda: "different-version-stamp")
+    monkeypatch.setattr(
+        attest, "registry_version", lambda repo_root=None: "different-version-stamp"
+    )
     v = _review(tid, rebar_repo)
     assert "drift_refresh" not in v["coverage"]
 

@@ -85,6 +85,31 @@ into another (proved by a RED cross-repo-leak test); LRU eviction bounds growth.
 `prompt_library._invalidate_caches()` clears all three so a same-signature in-process authoring
 write is visible without a restart.
 
+### Attestation invalidation (story 08af)
+
+A plan-review **claim-gate attestation** must go stale when the overlay it was reviewed under
+changes — otherwise a project could activate/edit/disable a criterion and keep claiming against a
+review that never saw it. Three moving parts make the gate overlay-aware:
+
+- **`registry_version(repo_root)` hashes the overlay.** The registry-version stamp bound into
+  every signed manifest is now overlay-aware: with `repo_root` given it hashes the repo's
+  **effective** routing (`effective_routing`) plus the overlay's activated-project ids and
+  disabled-built-in set, so activating / re-tuning / disabling any criterion changes the stamp.
+  It stays **expand-contract**: with `repo_root=None`, or a repo with **no overlay**, the basis is
+  **byte-identical** to the historical packaged stamp (the `activated`/`disabled` dimensions are
+  added only when non-empty), so attestations signed before this change stay valid — zero churn.
+- **The `stale-regver` claim-gate check.** `compute_validity`'s plan-review branch compares the
+  manifest's signed `regver:` against the current `registry_version(repo_root)`; a mismatch — or a
+  **missing** `regver:` line (expand-contract: every production plan-review manifest carries one) —
+  is `{valid: false, verdict: "stale-regver"}`, forcing a fresh `review-plan` before the claim.
+- **Built-in `disabled: true`.** An overlay `plan_review` entry for an **un-prefixed built-in** id
+  may carry `"disabled": true` (rejected on a `project.` id — turn a project criterion off by
+  omitting it from `activate`). A disabled built-in is removed from `effective_criteria` (never
+  loaded/run) while its routing entry stays resolvable in `effective_routing`; `disabled_builtins
+  (repo_root)` returns the sorted disabled ids. The signed manifest records them on an additive
+  `disabled_builtins: <a,b>` line (absent — byte-identical to a pre-08af manifest — when nothing is
+  disabled), parsed back by `manifest_disabled_builtins`.
+
 ## Consequences
 
 - A project can add plan-review criteria (LLM prompts today; DET pattern-rules in a follow-on)
@@ -95,7 +120,7 @@ write is visible without a restart.
 - A **CI parity gate** (`python -m rebar.llm.plan_review.registry validate-routing`) keeps the
   packaged `criteria_routing.json` in sync with `CANONICAL_LLM` (no missing/orphan/malformed
   entry) — the analog of the `reviewers/index.json` drift gate, adapted to hand-authored routing.
-- Deferred to sibling stories: DET-invariant scan consumer + per-criterion `fail_mode`; the
-  per-criterion eval runner + calibration view; the editor live-preview + authoring; the
-  attestation-invalidation port (`registry_version(repo_root)` + `disabled_builtins`); and the
-  cross-gate unification into a shared `rebar.llm.criteria` layer (gated on `b744`).
+- Deferred to sibling stories: the per-criterion eval runner + calibration view; the editor
+  live-preview + authoring; and the cross-gate unification into a shared `rebar.llm.criteria`
+  layer (gated on `b744`). (DET-invariant scan consumer + per-criterion `fail_mode` landed in
+  `7f0d`; the attestation-invalidation port landed in `08af` — see above.)

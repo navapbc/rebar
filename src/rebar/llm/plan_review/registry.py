@@ -247,6 +247,21 @@ def _validate_routing_entry(cid: str, entry: Any, *, where: str) -> None:
             f"{where}: criterion {cid!r} fail_mode must be 'open' or 'closed', "
             f"got {entry.get('fail_mode')!r}"
         )
+    # A bool `disabled` key TURNS OFF a built-in criterion (removed from effective_criteria,
+    # so it is never loaded/run) — allowed ONLY on an un-prefixed built-in id, never on a
+    # `project.` id (a project criterion is turned off by omitting it from `activate`, not by
+    # `disabled`). See story 08af + docs/adr/0015.
+    if "disabled" in entry:
+        if cid.startswith(_PROJECT_PREFIX):
+            raise RegistryError(
+                f"{where}: criterion {cid!r} may not carry 'disabled' — only a built-in "
+                "criterion can be disabled (omit a project id from 'activate' to turn it off)"
+            )
+        if not isinstance(entry["disabled"], bool):
+            raise RegistryError(
+                f"{where}: criterion {cid!r} 'disabled' must be a boolean, "
+                f"got {entry.get('disabled')!r}"
+            )
 
 
 def effective_routing(repo_root: str | None = None) -> dict[str, Any]:
@@ -335,7 +350,24 @@ def effective_criteria(repo_root: str | None = None) -> tuple[str, ...]:
                     f"'{_GATE_KEY}' routing entry"
                 )
             ids.add(aid)
+    # A built-in the overlay DISABLES is removed from the runnable vocabulary (its routing entry
+    # stays resolvable via effective_routing, but it is never loaded/run). No-op when absent.
+    ids.difference_update(disabled_builtins(rr))
     return tuple(sorted(ids))
+
+
+def disabled_builtins(repo_root: str | None = None) -> list[str]:
+    """The sorted built-in criterion ids the project overlay DISABLES (a ``"disabled": true``
+    key on an un-prefixed built-in routing entry). A disabled built-in is EXCLUDED from
+    :func:`effective_criteria` (never loaded/run) while its routing entry stays resolvable in
+    :func:`effective_routing`. Empty (``[]``) when there is no overlay / nothing disabled — so
+    an overlay-absent repo is byte-identical to the packaged registry. Story 08af."""
+    routing = effective_routing(repo_root)
+    return sorted(
+        cid
+        for cid, entry in routing.items()
+        if cid in CANONICAL_LLM and isinstance(entry, dict) and entry.get("disabled") is True
+    )
 
 
 def _detector_matches(detector_id: str, selector: dict[str, Any] | None) -> bool:
