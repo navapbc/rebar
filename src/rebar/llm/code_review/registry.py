@@ -145,6 +145,52 @@ def routing_index() -> dict[str, Any]:
     return {k: v for k, v in data.items() if not k.startswith("_")}
 
 
+# ── DET-criteria selectors (data-driven detector→criterion routing, story 7f0d) ──
+# The code-review DET consumer (detectors.py) used to hardcode its detector→criterion map
+# (a `rebar.builtin.security.` prefix + a gitleaks sentinel id). It now reads it FROM the
+# routing index: every `exec: "DET"` entry may carry a `detector` selector ({"id": ...} for
+# an EXACT match, {"id_prefix": ...} for a prefix class) + a per-criterion `fail_mode`
+# ("open" | "closed"; default "open"). This is the generalization seam — a project can add
+# its own DET invariant criterion + detector without touching the consumer code.
+
+
+def det_criteria() -> dict[str, dict[str, Any]]:
+    """The `exec: "DET"` routing entries as ``{criterion_id: {detector, fail_mode}}``.
+
+    ``fail_mode`` defaults to ``"open"`` when absent (project invariants fail open — a coverage
+    gap is recorded but does not block); the packaged security criteria ship ``"closed"``. An
+    entry with no ``detector`` selector still appears (so the consumer records it) with
+    ``detector=None``."""
+    out: dict[str, dict[str, Any]] = {}
+    for cid, entry in routing_index().items():
+        if str((entry or {}).get("exec", "")).upper() != "DET":
+            continue
+        out[cid] = {
+            "detector": (entry or {}).get("detector"),
+            "fail_mode": (entry or {}).get("fail_mode", "open"),
+        }
+    return out
+
+
+def criterion_for_detector(detector_id: str, det_map: dict[str, dict[str, Any]]) -> str | None:
+    """Resolve the DET criterion a ``detector_id`` belongs to from a :func:`det_criteria` map.
+
+    An EXACT ``detector.id`` match wins over a ``detector.id_prefix`` match — so the gitleaks
+    sentinel routes to ``secret-detection`` while every OTHER ``rebar.builtin.security.*`` routes
+    to ``high-critical-security`` (reproducing the retired ``_criterion_for`` exactly). Returns
+    ``None`` when no selector matches (the detector is not one this consumer routes)."""
+    prefix_hit: str | None = None
+    for cid, spec in det_map.items():
+        sel = spec.get("detector") or {}
+        exact = sel.get("id")
+        if exact is not None and detector_id == exact:
+            return cid  # exact match wins outright
+        pref = sel.get("id_prefix")
+        if pref is not None and detector_id.startswith(pref):
+            prefix_hit = prefix_hit if prefix_hit is not None else cid
+    return prefix_hit
+
+
 def applies_to_globs(criterion_id: str) -> list[str]:
     """The `applies_to` file globs for a criterion (the single source for WS3's Round-A
     glob-trigger logic). Empty list = escalation-only (no deterministic glob trigger)."""
