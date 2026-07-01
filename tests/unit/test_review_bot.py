@@ -71,63 +71,148 @@ class FakeGerrit:
         return self._post_status
 
 
+def _verdict_from_findings(findings):
+    """Build a four-pass ``code_review_verdict`` from ``{severity,dimension,detail}`` findings: any
+    critical/high finding → a blocking entry (verdict BLOCK), the rest advisory (PASS if none)."""
+    blocking = [f for f in findings if str(f.get("severity", "")).lower() in ("critical", "high")]
+    advisory = [f for f in findings if f not in blocking]
+
+    def _entry(f, sev):
+        return {
+            "finding": f.get("detail", ""),
+            "criteria": [f.get("dimension", "general")],
+            "severity": sev,
+        }
+
+    return {
+        "verdict": "BLOCK" if blocking else "PASS",
+        "blocking": [_entry(f, "critical") for f in blocking],
+        "advisory": [_entry(f, "minor") for f in advisory],
+        "coverage": {"llm_ran": True},
+    }
+
+
+def _patch_verdict(monkeypatch, verdict):
+    """Stub the four-pass gate the adapter now calls (WS6)."""
+    import rebar.llm.workflow.gate_dispatch as gd
+
+    monkeypatch.setattr(gd, "produce_code_review_verdict", lambda cfg, **kw: verdict, raising=True)
+
+
 def _patch_review(monkeypatch, findings):
-    import rebar.llm
-
-    def fake_review_code(**kwargs):
-        assert kwargs.get("source") == "local"  # adapter must use local mode
-        return {"findings": findings, "runner": "fake", "model": None, "trace_id": None}
-
-    monkeypatch.setattr(rebar.llm, "review_code", fake_review_code, raising=False)
+    """Back-compat helper for the voter tests: stub the gate to a verdict derived from findings."""
+    _patch_verdict(monkeypatch, _verdict_from_findings(findings))
 
 
-# ── adapter ─────────────────────────────────────────────────────────────────
+# ── adapter (four-pass verdict → decision; WS6) ──────────────────────────────
 def test_adapter_clean_is_pass(monkeypatch, tmp_path):
-    _patch_review(monkeypatch, [])
+    _patch_verdict(
+        monkeypatch,
+        {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {"llm_ran": True}},
+    )
     out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
-    assert out["decision"] == "PASS"
-    assert out["findings"] == []
+    assert out["decision"] == "PASS" and out["coverage_gap"] is False
+    assert out["message"].startswith("[LLM-Review: PASS]")
 
 
-def test_adapter_low_severity_is_pass(monkeypatch, tmp_path):
-    _patch_review(monkeypatch, [{"severity": "low", "dimension": "style", "detail": "nit"}])
+def test_adapter_blocking_finding_is_block(monkeypatch, tmp_path):
+    _patch_verdict(
+        monkeypatch,
+        {
+            "verdict": "BLOCK",
+            "blocking": [{"finding": "rce", "criteria": ["security"], "location": "a.py:1"}],
+            "coverage": {},
+        },
+    )
     out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
-    assert out["decision"] == "PASS"
+    assert out["decision"] == "BLOCK" and out["coverage_gap"] is False
+    assert out["message"].startswith("[LLM-Review: BLOCK — finding]")
+    assert any(f["detail"] == "rce" for f in out["findings"])
 
 
-@pytest.mark.parametrize("sev", ["critical", "high"])
-def test_adapter_blocking_severity_is_block(monkeypatch, tmp_path, sev):
-    _patch_review(monkeypatch, [{"severity": sev, "dimension": "security", "detail": "bug"}])
+def test_adapter_indeterminate_is_coverage_gap_block(monkeypatch, tmp_path):
+    _patch_verdict(
+        monkeypatch,
+        {"verdict": "INDETERMINATE", "coverage": {"llm_unavailable": True, "llm_error": "outage"}},
+    )
     out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
-    assert out["decision"] == "BLOCK"
-    assert any(f["severity"] == sev for f in out["findings"])
+    assert out["decision"] == "BLOCK" and out["coverage_gap"] is True
+    assert "coverage-gap (llm-unavailable)" in out["message"]
+
+
+def test_adapter_inert_disabled_verdict_never_passes(monkeypatch, tmp_path):
+    # a PASS-but-disabled (inert) verdict must NEVER become a submittable PASS (defense-in-depth).
+    _patch_verdict(
+        monkeypatch, {"verdict": "PASS", "coverage": {"enabled": False, "llm_ran": False}}
+    )
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
+    assert out["decision"] == "BLOCK" and "coverage-gap (gate-disabled)" in out["message"]
+
+
+def test_adapter_scanner_abstain_is_coverage_gap(monkeypatch, tmp_path):
+    _patch_verdict(
+        monkeypatch,
+        {
+            "verdict": "BLOCK",
+            "coverage": {
+                "security_detectors": [
+                    {
+                        "criterion": "secret-detection",
+                        "reason": "fail-closed-abstain",
+                        "abstain_reasons": ["no_tool"],
+                    }
+                ]
+            },
+        },
+    )
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
+    assert out["decision"] == "BLOCK" and out["coverage_gap"] is True
+    assert "coverage-gap (scanner)" in out["message"]
+
+
+def test_adapter_scanner_MATCH_is_a_real_finding(monkeypatch, tmp_path):
+    # a detector-finding (a real secret) is a finding BLOCK, NOT a coverage gap.
+    _patch_verdict(
+        monkeypatch,
+        {
+            "verdict": "BLOCK",
+            "blocking": [{"finding": "secret", "criteria": ["secret-detection"]}],
+            "coverage": {"security_detectors": [{"reason": "detector-finding"}]},
+        },
+    )
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
+    assert out["decision"] == "BLOCK" and out["coverage_gap"] is False
+    assert "BLOCK — finding" in out["message"]
+
+
+def test_adapter_forces_gate_enabled(monkeypatch, tmp_path):
+    calls = {}
+    import rebar.llm.workflow.gate_dispatch as gd
+
+    def fake(cfg, **kw):
+        calls.update(kw)
+        return {"verdict": "PASS", "coverage": {"llm_ran": True}}
+
+    monkeypatch.setattr(gd, "produce_code_review_verdict", fake, raising=True)
+    adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
+    assert calls.get("enabled") is True  # voter activation is the authoritative gate (ADR 0013)
 
 
 def test_adapter_error_is_block_fail_closed(monkeypatch, tmp_path):
-    import rebar.llm
+    import rebar.llm.workflow.gate_dispatch as gd
 
-    def boom(**kwargs):
+    def boom(cfg, **kw):
         raise RuntimeError("LLM down")
 
-    monkeypatch.setattr(rebar.llm, "review_code", boom, raising=False)
+    monkeypatch.setattr(gd, "produce_code_review_verdict", boom, raising=True)
     out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
-    assert out["decision"] == "BLOCK"
+    assert out["decision"] == "BLOCK" and "coverage-gap (review-error)" in out["message"]
 
 
 def test_adapter_unparseable_result_is_block(monkeypatch, tmp_path):
-    import rebar.llm
-
-    monkeypatch.setattr(rebar.llm, "review_code", lambda **k: "not a dict", raising=False)
+    _patch_verdict(monkeypatch, "not a dict")
     out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
     assert out["decision"] == "BLOCK"
-
-
-def test_adapter_custom_blocking_set(monkeypatch, tmp_path):
-    # With only {"medium"} blocking, a high finding now PASSES (config-driven threshold).
-    _patch_review(monkeypatch, [{"severity": "high", "dimension": "x", "detail": "y"}])
-    cfg = ReceiverConfig(blocking_severities=frozenset({"medium"}), gerrit_bot_token="t")
-    out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=cfg)
-    assert out["decision"] == "PASS"
 
 
 # ── dedup ───────────────────────────────────────────────────────────────────

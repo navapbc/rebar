@@ -399,12 +399,16 @@ def produce_code_review_verdict(
     runner=None,
     target_ticket: str | None = None,
     repo_root=None,
+    enabled: bool | None = None,
 ) -> dict[str, Any]:
     """Produce a ``code_review_verdict`` by running ``gates/code-review.yaml`` in-memory over a
     DIFF (parallel to ``produce_plan_review_verdict``).
 
     OFF by default: when ``verify.enable_code_review`` is false the capability is INERT — returns
-    the disabled verdict WITHOUT preflighting/running (ZERO LLM calls). When enabled, preflights
+    the disabled verdict WITHOUT preflighting/running (ZERO LLM calls). Pass ``enabled=True`` to
+    OVERRIDE that per-repo config read (the Gerrit voter's force-enable — see WS6/ADR 0015: voter
+    activation is the authoritative gate, so the reviewed repo's ``verify.enable_code_review`` flag
+    is a redundant second gate there). When enabled, preflights
     the runner so a systemic outage degrades to INDETERMINATE before any billable call; a mid-run
     failure degrades the same way (never a hollow PASS). Drives the per-overlay batch with the
     gate-specific ``CodeReviewBatchRunner`` (constructed with the assembled diff context). Emits a
@@ -419,7 +423,8 @@ def produce_code_review_verdict(
     from .recorder import MemoryRecorder
     from .runs import RunnerAgentStep
 
-    if not code_review_enabled(repo_root):
+    is_enabled = code_review_enabled(repo_root) if enabled is None else enabled
+    if not is_enabled:
         return _inert_code_review_verdict()
 
     runner_sel = runner or get_runner(cfg)
