@@ -32,6 +32,7 @@ import logging
 from collections.abc import Iterator
 from typing import Any
 
+from rebar.llm import criteria as _criteria
 from rebar.llm import review_kernel
 from rebar.llm.config import (
     LLMConfig,
@@ -570,17 +571,12 @@ def pass3_over_findings(
     caller's (it differs by index-domain)."""
     crit_by_id = registry.by_id()
 
+    # DELEGATE the (block_threshold, blocking) resolution to the SHARED criteria layer with
+    # gate="plan_review" (story 5065): plan-review derives blocking from `default_posture ==
+    # "blocking"`. The descriptor map (`by_id()`) carries block_threshold + default_posture, so
+    # the resolution is byte-identical to the pre-unification private resolver.
     def _threshold_for(criteria: Any) -> tuple[float, bool]:
-        default_bt = review_kernel.DEFAULT_BLOCK_THRESHOLD
-        thresholds = [
-            float(crit_by_id.get(c, {}).get("block_threshold", default_bt)) for c in criteria
-        ]
-        blocking_enabled = any(
-            str(crit_by_id.get(c, {}).get("default_posture", "advisory")).lower() == "blocking"
-            for c in criteria
-        )
-        bt = min(thresholds) if thresholds else default_bt
-        return bt, blocking_enabled
+        return _criteria.threshold_for(criteria, crit_by_id, gate="plan_review")
 
     return review_kernel.pass3_over_findings(findings, verifs, threshold_for=_threshold_for)
 

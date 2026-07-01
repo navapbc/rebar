@@ -43,13 +43,19 @@ The DET floor (P1–P9) is NOT in this file — it is the ``exec=DET`` tier in
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from functools import lru_cache
 from importlib import resources
-from pathlib import Path
 from typing import Any
+
+from rebar.llm import criteria as _criteria
+from rebar.llm.criteria import overlay as _overlay_core
+
+# The gate error is the SHARED criteria error (story 5065): plan-review re-exports it as
+# ``RegistryError`` so every existing ``except RegistryError`` / ``pytest.raises`` keeps
+# working while the shared layer is the one that actually raises it during delegation.
+RegistryError = _criteria.CriteriaError
 
 # The DESIGNATED code-grounding criteria: the ones whose job is to reason about the
 # live codebase (used e.g. to route Pass-2 verification agentic). NOTE: this is NOT a
@@ -121,29 +127,20 @@ CANONICAL_LLM = frozenset(
 _PROMPT_ID_PREFIX = "plan-review-"
 _ROUTING_RESOURCE = "criteria_routing.json"
 
-# ── project-supplied criteria overlay (epic 3156, story ef7e) ───────────────────
+# ── project-supplied criteria overlay (epic 3156, story ef7e; unified in 5065) ──────
 # A project may add its OWN plan-review criteria + re-tune/disable a built-in via a
 # `.rebar/criteria_routing.json` overlay that REUSES the packaged routing schema, keyed
 # by gate:  {"plan_review": {"<id>": {…routing…}}, "code_review": {…}, "activate": […]}.
-# A NET-NEW project criterion id MUST be `project.<name>`-prefixed; an un-prefixed
-# built-in id is a re-tune/disable of that built-in; a `project.`-id that collides with a
-# built-in (or a net-new id that is NOT `project.`-prefixed) is REJECTED at load. A project
-# criterion RUNS only if listed in `activate` (presence in the file ≠ active). See
-# docs/adr/0015-project-supplied-criteria.md + docs/plan-review-gate.md.
-_OVERLAY_FILENAME = "criteria_routing.json"
+# The overlay MERGE / activation / cache-isolation machinery lives in the SHARED
+# `rebar.llm.criteria` layer (story 5065); this registry registers the plan-review gate
+# with it (its packaged index + canonical set) and its public `effective_*` /
+# `disabled_builtins` functions DELEGATE there with `gate_key="plan_review"`. Behaviour is
+# byte-identical to ef7e. See docs/adr/0015 + 0017 + docs/plan-review-gate.md.
 _GATE_KEY = "plan_review"
+# The project-criterion id namespace (a net-new project criterion is `project.<name>`). The
+# overlay MERGE uses the shared core's copy; this stays exported for `production_batch_runner`
+# (which splits the project subset off `route_criteria`).
 _PROJECT_PREFIX = "project."
-
-# Repo-keyed caches for the OVERLAY-merged views. The PACKAGED `_routing_index()` stays
-# `@lru_cache`d (immutable per binary); the overlay-merged routing/criteria are `@lru_cache`d
-# on (repo_root, overlay content-signature) so a long-lived MCP server serving many repos
-# never leaks one repo's routing into another (the G6 cache bug), with bounded LRU eviction
-# (maxsize) rather than an unbounded dict. `_invalidate_caches` clears them alongside the
-# packaged lru_cache. Editing an overlay yields a NEW signature ⇒ a fresh entry (no stale).
-
-
-class RegistryError(Exception):
-    """The criteria registry could not be loaded/validated."""
 
 
 @lru_cache(maxsize=1)
@@ -159,304 +156,81 @@ def _routing_index() -> dict[str, Any]:
     return json.loads(raw)
 
 
-def _resolve_repo_root(repo_root: str | None) -> str | None:
-    """Resolve an overlay discovery root: the explicit arg, else the rebar project root
-    (``config.repo_root()`` — the same root :func:`get_prompt` resolves ``.rebar/prompts/``
-    overrides against). Returns ``None`` only when there is no resolvable root."""
-    if repo_root is not None:
-        return str(repo_root)
-    try:
-        from rebar import config as _config
-
-        return str(_config.repo_root())
-    except Exception:  # noqa: BLE001 — no repo ⇒ packaged criteria only
-        return None
+# Register the plan-review gate with the shared overlay core. `canonical` is read via a
+# callable (not a snapshot) so a test that monkeypatches `CANONICAL_LLM` is still honoured
+# on a fresh overlay signature — mirroring how ef7e read the module global inside the cache.
+_criteria.register_gate(
+    _GATE_KEY,
+    packaged_index=_routing_index,
+    canonical=lambda: CANONICAL_LLM,
+)
 
 
-def _overlay_path(repo_root: str | None) -> Path | None:
-    if not repo_root:
-        return None
-    return Path(repo_root) / ".rebar" / _OVERLAY_FILENAME
-
-
-def _overlay_signature(repo_root: str | None) -> str:
-    """A content signature of the overlay file (sha256 of its bytes, or ``""`` when
-    absent) — the cache key that makes an EDIT to the overlay invalidate the memo without
-    an explicit clear. Prefer content over mtime (mtime granularity is coarse/flaky)."""
-    path = _overlay_path(repo_root)
-    if path is None:
-        return ""
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        return ""
-
-
-def _load_overlay(repo_root: str | None) -> dict[str, Any] | None:
-    """Read + parse the project's ``.rebar/criteria_routing.json`` overlay, or ``None``
-    when absent. A malformed overlay is a LOCATED :class:`RegistryError` (never a silent
-    skip) — the file path is named so the author can fix it."""
-    path = _overlay_path(repo_root)
-    if path is None or not path.is_file():
-        return None
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise RegistryError(f"cannot read criteria overlay {path}: {exc}") from exc
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise RegistryError(f"criteria overlay {path} is not valid JSON: {exc}") from exc
-    if not isinstance(data, dict):
-        raise RegistryError(
-            f"criteria overlay {path} must be a JSON object "
-            f"{{'plan_review': {{...}}, 'activate': [...]}}; got {type(data).__name__}"
-        )
-    return data
-
-
-def _validate_routing_entry(cid: str, entry: Any, *, where: str) -> None:
-    """Structural floor-check on ONE routing entry (located error). Mirrors the shape the
-    packaged index carries so an overlay entry can't smuggle a malformed record past load."""
-    if not isinstance(entry, dict):
-        raise RegistryError(
-            f"{where}: routing for {cid!r} must be an object, got {type(entry).__name__}"
-        )
-    exec_v = entry.get("exec", "1-TURN")
-    if not isinstance(exec_v, str) or exec_v.upper() not in ("1-TURN", "2-STEP", "AGENT", "DET"):
-        raise RegistryError(
-            f"{where}: criterion {cid!r} has invalid exec {exec_v!r} "
-            "(expected one of 1-TURN / 2-STEP / AGENT / DET)"
-        )
-    bt = entry.get("block_threshold", 0.95)
-    if not isinstance(bt, (int, float)) or isinstance(bt, bool) or not (0.0 <= float(bt) <= 1.0):
-        raise RegistryError(
-            f"{where}: criterion {cid!r} block_threshold must be a number in [0,1], got {bt!r}"
-        )
-    posture = entry.get("default_posture", "advisory")
-    if posture not in ("advisory", "blocking"):
-        raise RegistryError(
-            f"{where}: criterion {cid!r} default_posture must be 'advisory' or 'blocking', "
-            f"got {posture!r}"
-        )
-    # fail_mode governs an exec:DET criterion's abstain posture (fail-open records coverage;
-    # fail-closed blocks on absence). Validated only when present (a non-DET / silent entry
-    # defaults to "open" downstream), mirroring the code-review consumer's default.
-    if "fail_mode" in entry and entry.get("fail_mode") not in ("open", "closed"):
-        raise RegistryError(
-            f"{where}: criterion {cid!r} fail_mode must be 'open' or 'closed', "
-            f"got {entry.get('fail_mode')!r}"
-        )
-    # A bool `disabled` key TURNS OFF a built-in criterion (removed from effective_criteria,
-    # so it is never loaded/run) — allowed ONLY on an un-prefixed built-in id, never on a
-    # `project.` id (a project criterion is turned off by omitting it from `activate`, not by
-    # `disabled`). See story 08af + docs/adr/0015.
-    if "disabled" in entry:
-        if cid.startswith(_PROJECT_PREFIX):
-            raise RegistryError(
-                f"{where}: criterion {cid!r} may not carry 'disabled' — only a built-in "
-                "criterion can be disabled (omit a project id from 'activate' to turn it off)"
-            )
-        if not isinstance(entry["disabled"], bool):
-            raise RegistryError(
-                f"{where}: criterion {cid!r} 'disabled' must be a boolean, "
-                f"got {entry.get('disabled')!r}"
-            )
+# The overlay discovery + signature helpers are the SHARED core's (story 5065); these thin
+# aliases keep the internal callsites (`load_criteria`, `_descriptor_from_prompt`,
+# `check_registry_coverage`) unchanged. `_validate_routing_entry` is re-exported for the
+# packaged-routing parity gate below.
+_resolve_repo_root = _overlay_core._resolve_repo_root
+_overlay_signature = _overlay_core._overlay_signature
+_validate_routing_entry = _overlay_core._validate_routing_entry
 
 
 def effective_routing(repo_root: str | None = None) -> dict[str, Any]:
     """The packaged routing index MERGED with the project overlay's ``plan_review`` map
-    (repo-keyed, memoized by overlay content-signature — NOT lru-cached, so no cross-repo
-    leakage). Overlay merge rules (each violation is a LOCATED load-time error):
+    (repo-keyed, memoized by overlay content-signature — so no cross-repo leakage). DELEGATES
+    to the shared :func:`rebar.llm.criteria.effective_routing` with ``gate_key="plan_review"``;
+    the merge rules (re-tune / net-new namespace / collision reject) are unchanged (story 5065).
 
     * an un-prefixed **built-in** id ⇒ re-tune (routing merged over the packaged entry);
     * a ``project.<name>``-prefixed id ⇒ a net-new project criterion (added);
     * a ``project.``-id equal to a built-in id ⇒ REJECT (a project id can never rebind a
       built-in); a net-new id that is NOT ``project.``-prefixed ⇒ REJECT (must be namespaced)."""
-    rr = _resolve_repo_root(repo_root)
-    return _effective_routing_cached(rr or "", _overlay_signature(rr))
-
-
-@lru_cache(maxsize=128)
-def _effective_routing_cached(rr: str, _overlay_sig: str) -> dict[str, Any]:
-    """The (repo_root, overlay-signature)-keyed compute for :func:`effective_routing`. The
-    signature is a pure CACHE KEY (an overlay edit ⇒ a new key ⇒ a fresh compute); the merge
-    reads the overlay bytes fresh. ``rr == ""`` means no resolvable repo (packaged-only)."""
-    rr_arg: str | None = rr or None
-    merged: dict[str, Any] = dict(_routing_index())
-    overlay = _load_overlay(rr_arg)
-    if overlay is not None:
-        gate = overlay.get(_GATE_KEY) or {}
-        if not isinstance(gate, dict):
-            raise RegistryError(
-                f"criteria overlay {_overlay_path(rr_arg)}: '{_GATE_KEY}' must be an object of "
-                f"{{id: routing}}, got {type(gate).__name__}"
-            )
-        where = f"criteria overlay {_overlay_path(rr_arg)} [{_GATE_KEY}]"
-        for cid, entry in gate.items():
-            _validate_routing_entry(cid, entry, where=where)
-            is_builtin = cid in CANONICAL_LLM
-            if cid.startswith(_PROJECT_PREFIX):
-                if is_builtin:
-                    raise RegistryError(
-                        f"{where}: project id {cid!r} collides with a built-in criterion "
-                        "(a project criterion can never rebind a built-in)"
-                    )
-                merged[cid] = entry
-            elif is_builtin:
-                merged[cid] = {**merged[cid], **entry}  # re-tune: overlay wins per-key
-            else:
-                raise RegistryError(
-                    f"{where}: net-new criterion id {cid!r} must be "
-                    f"'{_PROJECT_PREFIX}<name>'-prefixed "
-                    "(an un-prefixed id may only re-tune an existing built-in)"
-                )
-    return merged
+    return _criteria.effective_routing(repo_root, gate_key=_GATE_KEY)
 
 
 def effective_criteria(repo_root: str | None = None) -> tuple[str, ...]:
     """The ACTIVE criterion-id vocabulary for a repo = ``CANONICAL_LLM`` ∪ the project ids
-    listed in the overlay's ``activate`` list (presence in the file ≠ active). An activated
-    project id with no routing entry, or a non-``project.`` id in ``activate``, is a LOCATED
-    load-time error. This is THE seam that opens the closed vocabulary — route it through
-    every plan-review vocabulary callsite (``load_criteria`` / ``check_registry_coverage`` /
-    the workflow Pass-1 batch vocab)."""
-    rr = _resolve_repo_root(repo_root)
-    overlay = _load_overlay(rr)
-    ids = set(CANONICAL_LLM)
-    if overlay is not None:
-        activate = overlay.get("activate") or []
-        if not isinstance(activate, list):
-            raise RegistryError(
-                f"criteria overlay {_overlay_path(rr)}: 'activate' must be a list of ids, "
-                f"got {type(activate).__name__}"
-            )
-        routing = effective_routing(rr)
-        for aid in activate:
-            if not isinstance(aid, str):
-                raise RegistryError(
-                    f"criteria overlay {_overlay_path(rr)}: 'activate' entries must be strings"
-                )
-            if aid in CANONICAL_LLM:
-                continue  # activating a built-in is a no-op (built-ins are always active)
-            if not aid.startswith(_PROJECT_PREFIX):
-                raise RegistryError(
-                    f"criteria overlay {_overlay_path(rr)}: activated id {aid!r} must be a "
-                    f"'{_PROJECT_PREFIX}<name>' project criterion (built-ins are always active)"
-                )
-            if aid not in routing:
-                raise RegistryError(
-                    f"criteria overlay {_overlay_path(rr)}: activated criterion {aid!r} has no "
-                    f"'{_GATE_KEY}' routing entry"
-                )
-            ids.add(aid)
-    # A built-in the overlay DISABLES is removed from the runnable vocabulary (its routing entry
-    # stays resolvable via effective_routing, but it is never loaded/run). No-op when absent.
-    ids.difference_update(disabled_builtins(rr))
-    return tuple(sorted(ids))
+    listed in the overlay's ``activate`` list (presence in the file ≠ active), minus any
+    disabled built-in. DELEGATES to the shared :func:`rebar.llm.criteria.effective_criteria`
+    with ``gate_key="plan_review"``. This is THE seam that opens the closed vocabulary — route
+    it through every plan-review vocabulary callsite (``load_criteria`` /
+    ``check_registry_coverage`` / the workflow Pass-1 batch vocab)."""
+    return _criteria.effective_criteria(repo_root, gate_key=_GATE_KEY)
 
 
 def disabled_builtins(repo_root: str | None = None) -> list[str]:
     """The sorted built-in criterion ids the project overlay DISABLES (a ``"disabled": true``
-    key on an un-prefixed built-in routing entry). A disabled built-in is EXCLUDED from
-    :func:`effective_criteria` (never loaded/run) while its routing entry stays resolvable in
-    :func:`effective_routing`. Empty (``[]``) when there is no overlay / nothing disabled — so
-    an overlay-absent repo is byte-identical to the packaged registry. Story 08af."""
-    routing = effective_routing(repo_root)
-    return sorted(
-        cid
-        for cid, entry in routing.items()
-        if cid in CANONICAL_LLM and isinstance(entry, dict) and entry.get("disabled") is True
-    )
-
-
-def _detector_matches(detector_id: str, selector: dict[str, Any] | None) -> bool:
-    """True iff ``detector_id`` matches a routing ``detector`` selector — an exact ``id`` or an
-    ``id_prefix`` class (the same selector grammar the code-review consumer reads)."""
-    if not selector:
-        return False
-    exact = selector.get("id")
-    if exact is not None and detector_id == exact:
-        return True
-    pref = selector.get("id_prefix")
-    return pref is not None and detector_id.startswith(pref)
-
-
-def _det_scenario(routing: dict[str, Any], repo_root: str | None) -> str | None:
-    """The human-readable "scenario" for an exec:DET criterion = the message of the first detector
-    its ``detector`` selector resolves to (from the on-disk detector registry). Returns ``None``
-    when no selector / no matching detector / no message (the caller falls back to name / id).
-    Fail-open: any registry-load error yields ``None`` (a DET descriptor never depends on the
-    detector suite being installed)."""
-    selector = routing.get("detector")
-    if not selector:
-        return None
-    try:
-        from rebar.grounding.detectors import load_registry
-
-        reg = load_registry(repo_root)
-    except Exception:  # noqa: BLE001 — the detector suite is optional; a missing registry ⇒ fallback
-        return None
-    for det in reg:
-        if _detector_matches(det.id, selector):
-            msg = (det.rule or {}).get("message")
-            if isinstance(msg, str) and msg.strip():
-                return msg.strip()
-            return None
-    return None
+    key on an un-prefixed built-in routing entry). DELEGATES to the shared
+    :func:`rebar.llm.criteria.disabled_builtins` with ``gate_key="plan_review"``. Empty
+    (``[]``) when there is no overlay / nothing disabled — so an overlay-absent repo is
+    byte-identical to the packaged registry. Story 08af."""
+    return _criteria.disabled_builtins(repo_root, gate_key=_GATE_KEY)
 
 
 def _descriptor_from_prompt(
     cid: str, *, repo_root: str | None = None, routing_index: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    """Build a criterion descriptor by merging its prompt-library file (the RUBRIC
-    body + facet/exec-mode from front-matter, resolved via the prompt machinery with
-    `.rebar/prompts/` overrides) with its routing index entry. ``routing_index`` may be a
-    pre-resolved :func:`effective_routing` map (avoids re-reading the overlay per criterion)."""
-    from rebar.llm import prompts
+    """Build a criterion descriptor by merging its prompt-library file (the RUBRIC body +
+    facet/exec-mode from front-matter, resolved via the prompt machinery with `.rebar/prompts/`
+    overrides) with its routing index entry. ``routing_index`` may be a pre-resolved
+    :func:`effective_routing` map (avoids re-reading the overlay per criterion).
 
+    DELEGATES the exec-tier-polymorphic build to the shared
+    :func:`rebar.llm.criteria.build_descriptor` (story 5065): an ``exec:DET`` criterion builds
+    a PROMPT-LESS descriptor (story 7f0d's branch); every other tier resolves its rubric via
+    the plan-review ``get_prompt`` wrapper passed as ``prompt_getter``."""
     rr = _resolve_repo_root(repo_root)
     routing_map = routing_index if routing_index is not None else effective_routing(rr)
     routing = routing_map.get(cid)
     if routing is None:
         raise RegistryError(f"criterion {cid!r} has no entry in {_ROUTING_RESOURCE}")
-    # exec:DET criteria are PROMPT-LESS (a pattern-rule detector, not an LLM rubric), so they must
-    # NOT resolve a prompt-library file (story 7f0d). Build the descriptor from the routing entry
-    # alone — the "scenario" is the detector's rule message (resolved from the detector registry
-    # via the routing `detector` selector), never a prompt body. This keeps `load_criteria` from
-    # blowing up on an activated project DET criterion that ships no `.rebar/prompts/…` file.
-    if str(routing.get("exec", "")).upper() == "DET":
-        return {
-            "id": cid,
-            "exec": "DET",
-            "facet": routing.get("facet", cid),
-            "name": routing.get("name", cid),
-            "scenario": _det_scenario(routing, rr) or routing.get("name") or cid,
-            "applies_at": routing.get("applies_at", {}),
-            "checklist": [],
-            "block_threshold": routing.get("block_threshold", 0.95),
-            "default_posture": routing.get("default_posture", "advisory"),
-            "fail_mode": routing.get("fail_mode", "open"),
-            "detector": routing.get("detector"),
-            "routing": routing.get("routing"),
-            "trigger": None,
-            "overlay_routing": None,
-        }
-    prompt = prompts.get_prompt(f"{_PROMPT_ID_PREFIX}{cid}", repo_root=rr)
-    return {
-        "id": cid,
-        "exec": routing.get("exec", "1-TURN"),
-        "facet": prompt.dimension or routing.get("facet", "misc"),
-        "name": prompt.title or cid,
-        "scenario": prompt.text.strip(),
-        "applies_at": routing.get("applies_at", {}),
-        "checklist": routing.get("checklist", []),
-        "block_threshold": routing.get("block_threshold", 0.95),
-        "default_posture": routing.get("default_posture", "advisory"),
-        "routing": routing.get("routing"),
-        "trigger": routing.get("trigger"),
-        "overlay_routing": routing.get("overlay_routing"),
-    }
+
+    def _get_prompt(criterion_id: str, root: str | None) -> Any:
+        from rebar.llm import prompts
+
+        return prompts.get_prompt(f"{_PROMPT_ID_PREFIX}{criterion_id}", repo_root=root)
+
+    return _criteria.build_descriptor(cid, routing, repo_root=rr, prompt_getter=_get_prompt)
 
 
 def load_criteria(repo_root: str | None = None) -> tuple[dict[str, Any], ...]:
