@@ -236,14 +236,25 @@ def test_run_sarif_abstains_when_no_parseable_report(monkeypatch):
 
 @pytest.mark.skipif(__import__("shutil").which("gitleaks") is None, reason="gitleaks not installed")
 def test_planted_secret_blocks_end_to_end_real_gitleaks():
-    # NON-mocked: a planted secret in a changed file flows real gitleaks → SARIF → re-attribute →
-    # relativize → diff-scope → fail-closed BLOCK. (The headline WS5 criterion.)
+    # NON-mocked wiring/smoke test: a planted secret in a changed file flows real gitleaks → SARIF →
+    # re-attribute → relativize → diff-scope → fail-closed BLOCK. (The headline WS5 criterion; the
+    # parse/decision logic is covered deterministically by the mocked _run_sarif tests above.)
+    #
+    # ASSEMBLE the fake PAT at RUNTIME — never commit a contiguous secret literal. This is exactly
+    # how gitleaks tests its own github-pat rule: `ghp_` + 36 random alphanumerics clears the
+    # entropy floor and matches `ghp_[0-9a-zA-Z]{36}`, so gitleaks detects it; but because the token
+    # is built in memory (and has an invalid CRC32 checksum), GitHub push-protection never sees a
+    # secret in this source file. See docs/adr/0012 + the WS5 research note.
+    import secrets as _secrets
+    import string as _string
+
     from rebar.llm.code_review import detectors
 
+    fake_pat = "ghp_" + "".join(
+        _secrets.choice(_string.ascii_letters + _string.digits) for _ in range(36)
+    )  # gitleaks:allow — assembled at runtime, no committed literal
     with tempfile.TemporaryDirectory() as t:
-        # A HIGH-ENTROPY, well-formed github PAT — gitleaks 8.x rejects low-entropy/sequential
-        # strings, so a realistic random token is what actually exercises the detect→block path.
-        Path(t, "app.py").write_text('GH = "ghp_REDACTED-TEST-FIXTURE-PURGED-FROM-HISTORY"\n')
+        Path(t, "app.py").write_text(f'GH = "{fake_pat}"\n')
         out = detectors.run_security_detectors(changed_files=["app.py"], repo_root=t)
         matches = out.get("secret-detection", {}).get("matches", [])
         assert matches, "real gitleaks should surface the planted secret"
