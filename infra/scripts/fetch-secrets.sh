@@ -13,6 +13,12 @@
 #   /rebar/prod/mcp-hmac-signing-key   -> MCP_HMAC_SIGNING_KEY  (verdict signing)
 #   /rebar/prod/gerrit-admin-password  -> GERRIT_ADMIN_PASSWORD (admin bootstrap)
 #   /rebar/prod/gerrit-bot-token       -> GERRIT_BOT_TOKEN      (bot posts reviews)
+#   /rebar/prod/github-oauth-client-id     -> GITHUB_OAUTH_CLIENT_ID     (WS8, OPTIONAL)
+#   /rebar/prod/github-oauth-client-secret -> GITHUB_OAUTH_CLIENT_SECRET (WS8, OPTIONAL)
+# The two OAuth creds are OPTIONAL here (blank if unpopulated) — they are only needed
+# under auth.type = OAUTH, and compose-up.sh FAILS LOUD if OAUTH is selected but they
+# are empty. Making them REQUIRED here would couple every boot (incl. non-OAUTH rollback)
+# to their presence.
 # Plus a non-secret: REVIEW_BOT_PORT=8000 (single-sources the port for compose+nginx).
 # (The other /rebar/prod/* params — ssh host key, replication deploy key, alert
 # endpoint — are consumed elsewhere, not by these containers, so they are not fetched.)
@@ -51,12 +57,33 @@ get_param() {
   printf '%s' "${val}"
 }
 
+# --- Read one OPTIONAL SecureString param ----------------------------------
+# Like get_param but NEVER aborts: yields empty if the param is absent, empty,
+# "None", or the "CHANGEME" placeholder. Used for conditionally-required creds
+# whose presence is enforced downstream (compose-up, only under auth.type = OAUTH).
+get_param_optional() {
+  local leaf="$1" val
+  val="$(aws ssm get-parameter \
+    --name "${SSM_PREFIX}/${leaf}" \
+    --with-decryption \
+    --query 'Parameter.Value' \
+    --output text 2>/dev/null || true)"
+  if [ -z "${val}" ] || [ "${val}" = "None" ] || [ "${val}" = "CHANGEME" ]; then
+    printf ''
+    return 0
+  fi
+  printf '%s' "${val}"
+}
+
 # Fetch all required params FIRST (into shell vars) so a failure aborts BEFORE we
 # overwrite the existing .env — a partial/empty .env must never be left behind.
 anthropic_api_key="$(get_param anthropic-api-key)"
 mcp_hmac_signing_key="$(get_param mcp-hmac-signing-key)"
 gerrit_admin_password="$(get_param gerrit-admin-password)"
 gerrit_bot_token="$(get_param gerrit-bot-token)"
+# OPTIONAL (blank until an operator populates them + auth.type = OAUTH is in use).
+github_oauth_client_id="$(get_param_optional github-oauth-client-id)"
+github_oauth_client_secret="$(get_param_optional github-oauth-client-secret)"
 
 # --- Write the .env atomically (0600), then move into place ----------------
 tmp="$(mktemp "${ENV_FILE}.XXXXXX")"
@@ -68,6 +95,8 @@ chmod 600 "${tmp}"
   echo "MCP_HMAC_SIGNING_KEY=${mcp_hmac_signing_key}"
   echo "GERRIT_ADMIN_PASSWORD=${gerrit_admin_password}"
   echo "GERRIT_BOT_TOKEN=${gerrit_bot_token}"
+  echo "GITHUB_OAUTH_CLIENT_ID=${github_oauth_client_id}"
+  echo "GITHUB_OAUTH_CLIENT_SECRET=${github_oauth_client_secret}"
   echo "REVIEW_BOT_PORT=8000"
 } >"${tmp}"
 mv -f "${tmp}" "${ENV_FILE}"

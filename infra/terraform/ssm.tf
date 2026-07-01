@@ -22,6 +22,11 @@ locals {
     "/rebar/prod/anthropic-api-key",
     "/rebar/prod/alert-endpoint",
     "/rebar/prod/gerrit-bot-token",
+    # GitHub OAuth App creds for the gerrit-oauth-provider plugin (b744/WS8).
+    # Required once auth.type = OAUTH: client-id materialized into gerrit.config,
+    # client-secret into secure.config. See infra/runbooks/gerrit-auth-hardening.md.
+    "/rebar/prod/github-oauth-client-id",
+    "/rebar/prod/github-oauth-client-secret",
   ]
 }
 
