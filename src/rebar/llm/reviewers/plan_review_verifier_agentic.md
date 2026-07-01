@@ -20,12 +20,29 @@ you have read-only repository tools — USE them, do not rely on memory or guess
 For EACH finding, by its 0-based index, emit (a) coarse severity ATTRIBUTES and (b) typed BINARY
 sub-answers (yes|no|insufficient).
 
+REASON FIRST: use the `analysis` field to reason through this finding's sub-questions
+independently, against the plan and code, BEFORE committing the attributes and answers.
+
+BE SKEPTICAL OF THE FINDING BY READING THE PLAN CHARITABLY: give the plan its most reasonable
+reading and confirm the finding only if the criticism still holds under that reading. If a
+reasonable reading already satisfies the criterion, the criticism is not justified — answer
+evidence_entails_finding=no. Charitable plan-reading here IS your skepticism of the finding.
+
+ABSENCE / 'missing X' findings get a HIGHER BAR: confirm X is genuinely absent from the COMPLETE
+artifact (the whole plan plus its children / linked context, and the actual code where relevant)
+before the finding stands — if X appears anywhere, evidence_entails_finding=no.
+
 SEVERITY ATTRIBUTES — score the harm AS A PLAN-STAGE defect: judge the PLANNED change pre-merge
-(what building the plan as written would cause), NOT a running system or a deploy event. Anchor
-each attribute to its levels below; calibrate per finding — do NOT default everything to the
-middle or the top. Most findings are NOT system-wide or irreversible; reserve the top level for
-findings that genuinely earn it, so the impact axis discriminates across a ticket's findings.
-For a code-grounded finding, let the ACTUAL code you read inform blast_radius and reversibility.
+(what building the plan as written would cause), NOT a running system or a deploy event. Score
+the harm of THE FLAW THIS FINDING IDENTIFIES — the marginal delta between the plan as written and
+the plan with this one finding fixed — NOT the size or reach of the plan's overall subject matter.
+A finding about how the work is ORGANISED, DOCUMENTED, SEQUENCED, or SCOPED is not high-impact
+merely because the underlying feature is large: blast_radius and likelihood are the FLAW's reach
+and chance of biting, not the feature's. Anchor each attribute to its levels below; calibrate per
+finding — do NOT default everything to the middle or the top. Most findings are NOT system-wide or
+irreversible; reserve the top level for findings that genuinely earn it, so the impact axis
+discriminates across a ticket's findings. For a code-grounded finding, let the ACTUAL code you
+read inform blast_radius and reversibility.
 - prod_impact (none|low|medium|high) — runtime / user-facing harm if the planned change ships as
   written. none = no runtime effect (docs / wording / test-only); low = cosmetic or rare-path;
   medium = degraded behaviour or a real but recoverable functional gap; high = data loss,
@@ -44,6 +61,25 @@ For a code-grounded finding, let the ACTUAL code you read inform blast_radius an
   deploy": easy = a local edit; moderate = a contained refactor; hard = the plan commits to a
   one-way door — an on-disk data/format or public-contract shape that, once built on, is costly to
   unwind (e.g. it forces a later migration to change).
+
+BINARY SUB-ANSWERS (yes|no|insufficient) — answer each atomically, about the FINDING as a claim:
+- is_verifiable — stated concretely enough to test against the plan or code; 'X is missing' is
+  verifiable by checking the complete artifact.
+- evidence_entails_finding — the cited evidence (plan quote/section, absence rationale, or code
+  citation) actually ENTAILS the finding under a charitable reading. Load-bearing for a plan finding.
+- path_reachable — the situation is actually reachable given the plan as written (flawed path is
+  taken, not dead/guarded); let the code you read inform this.
+- impact_follows_necessarily — the asserted harm NECESSARILY follows from the flaw, not merely
+  possibly and not contingent on a separate unlikely mistake.
+- no_viable_alternative_explanation — no reasonable benign reading dissolves the finding (e.g.
+  'coherent as one unit', 'handled elsewhere').
+- no_existing_mitigation — nothing in the plan / its children / an adopted dependency's contract /
+  the actual code already mitigates the flaw.
+- severity_claim_justified — the finding's own asserted impact is proportionate to the evidence,
+  not inflated.
+Answer `na` for a sub-question that genuinely does not apply to this finding's shape (e.g.
+path_reachable for a purely structural/organisational finding) — it is then EXCLUDED from the
+validity score rather than guessed as insufficient. Do not na evidence_entails_finding.
 
 cited_reference_accurate is yes|no|insufficient|na — for a finding that
 cites a specific code reference, VERIFY the citation with read_file/search_files and answer
