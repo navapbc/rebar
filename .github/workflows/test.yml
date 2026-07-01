@@ -148,6 +148,19 @@ jobs:
           fi
           echo "Prompt-index drift gate: OK (index.json is up to date)."
 
+      # Criteria-routing parity gate (epic 3156): criteria_routing.json is hand-authored
+      # (thresholds/applies_at are judgement, no derivation source), so this is a PARITY gate
+      # (not a regenerate-and-diff): it fails when the committed routing drifts out of sync
+      # with the canonical vocabulary (missing/orphan entry) or carries a malformed entry.
+      - name: Criteria-routing parity gate
+        shell: bash
+        run: |
+          if ! python -m rebar.llm.plan_review.registry validate-routing; then
+            echo "::error::src/rebar/llm/plan_review/criteria_routing.json is out of parity"
+            echo "with CANONICAL_LLM (a missing/orphan/malformed criterion routing entry)."
+            exit 1
+          fi
+
       - name: Run the default suite (Python tiers + bash collector; excludes integration + external)
         # Pin --basetemp under the runner temp (not /tmp): on long (10-16 min) runs
         # the macOS tmp-cleaner reaps pytest's default /tmp/pytest-of-* basetemp

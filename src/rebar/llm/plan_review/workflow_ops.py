@@ -149,20 +149,35 @@ def plan_review_assemble_criteria(ctx: StepContext) -> dict[str, Any]:
     tid = _ticket_id(ctx)
     pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
     single, agent = orchestrator.route_criteria(pctx)
-    # ISF is fed the linked session log by the finder itself (never a rubric chunk), so it is
-    # never a batch criterion — excluded from the inclusion vocabulary here.
-    canonical = sorted(set(registry.CANONICAL_LLM) - {"ISF"})
+    # The EFFECTIVE vocabulary = canonical built-ins ∪ activated PROJECT criteria (from the
+    # `.rebar/criteria_routing.json` overlay), resolved against the SAME root route_criteria
+    # loaded (pctx.repo_root) so the vocab and the loaded criteria never diverge. ISF is fed
+    # the linked session log by the finder itself (never a rubric chunk), so it is never a
+    # batch criterion — excluded from the inclusion vocabulary here.
+    effective = [cid for cid in registry.effective_criteria(pctx.repo_root) if cid != "ISF"]
+
+    # `.`→`_` sanitizes a `project.<name>` id to a valid workflow output key; co-located with
+    # the CONSUME-site `when` reference emitted in `project_criteria` below (built-in ids have
+    # no dots, so their `include_<ID>` keys are byte-identical to before).
+    def _key(cid: str) -> str:
+        return "include_" + cid.replace(".", "_")
+
     # PROBE MODE (drift-refresh tripwire): when `probe_criteria` is set, FORCE exactly that
     # allowlist (the cheap E4+G1G2 probe), bypassing applies()/overlay routing — mirroring the
     # bespoke drift probe, which ran its probe criteria directly as finders regardless of
-    # routing. Empty/absent → the full routed set (normal review). Restricted to canonical ids
+    # routing. Empty/absent → the full routed set (normal review). Restricted to effective ids
     # that own an include slot.
     probe = {str(c) for c in (ctx.inputs.get("probe_criteria") or [])}
     if probe:
-        included = {cid for cid in canonical if cid in probe}
+        included = {cid for cid in effective if cid in probe}
     else:
         included = {c["id"] for c in single + agent}
-    out: dict[str, Any] = {f"include_{cid}": (cid in included) for cid in canonical}
+    out: dict[str, Any] = {_key(cid): (cid in included) for cid in effective}
+    # Built-in criteria fan out via the STATIC `criteria:` list in the gate YAML (each gated
+    # by its `include_<ID>` key). Activated PROJECT criteria have no static YAML slot (the v3
+    # `batch` schema is immutable), so the rebar-specific ProductionBatchRunner fans them in
+    # from route_criteria — see production_batch_runner._project_criteria. The sanitized
+    # `include_project_<name>` booleans above remain the coverage/routing record for them.
     out["routing"] = {
         "single_turn": [c["id"] for c in single if c["id"] in included],
         "agent_tier": [c["id"] for c in agent if c["id"] in included],
