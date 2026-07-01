@@ -364,11 +364,11 @@ def test_criterion_prompt_supports_project_override(tmp_path, monkeypatch) -> No
         encoding="utf-8",
     )
     monkeypatch.setattr(_config, "repo_root", lambda *a, **k: tmp_path)
-    registry.load_criteria.cache_clear()
+    registry._load_criteria_cached.cache_clear()
     try:
         assert registry.by_id()["F1"]["scenario"] == "OVERRIDDEN RUBRIC."
     finally:
-        registry.load_criteria.cache_clear()
+        registry._load_criteria_cached.cache_clear()
 
 
 def test_registry_loads_descriptors() -> None:

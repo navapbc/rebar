@@ -214,7 +214,7 @@ def test_user_override_visible_through_registry_after_create(
     # both at tmp_path via REBAR_ROOT and prime the lru_cache before authoring.
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
     # Defensive: drop any cache another test warmed, then prime fresh under tmp_path.
-    registry.load_criteria.cache_clear()
+    registry._load_criteria_cached.cache_clear()
     registry._routing_index.cache_clear()
     baseline = registry.by_id()
     assert baseline["G6"]["name"] != "DISTINCTIVE OVERRIDE NAME"  # packaged default
