@@ -696,6 +696,16 @@ const authoring = {
   kind: "criterion",
   id: "",
   body: "",
+  // Routing-fields overlay for authoring a plan-review CRITERION (story 6e31). Collected only
+  // when kind === "criterion" and POSTed as a `routing` object to /library/create, which writes
+  // the .rebar/criteria_routing.json overlay + activation (author_criterion_overlay). Defaults
+  // mirror the packaged routing floor so a minimal form still produces a valid entry.
+  routingExec: "1-TURN", // 1-TURN | 2-STEP | AGENT | DET
+  routingLevels: "epic,story,task", // applies_at.levels (comma-separated)
+  routingBlockThreshold: "0.95", // block_threshold, number in [0,1]
+  routingPosture: "advisory", // default_posture: advisory | blocking
+  routingFailMode: "open", // DET only: open | closed
+  routingDetector: "", // DET only: a detector id, or `<prefix>*` for an id_prefix class
   targetIndex: null,
   // What the create-prompt save assigns the new id to: "criterion" (a batch criterion's
   // prompt at targetIndex) or "name" (the selected step's NAME == its prompt/uses action,
@@ -725,6 +735,12 @@ function resetAuthoring() {
   authoring.kind = "criterion";
   authoring.id = "";
   authoring.body = "";
+  authoring.routingExec = "1-TURN";
+  authoring.routingLevels = "epic,story,task";
+  authoring.routingBlockThreshold = "0.95";
+  authoring.routingPosture = "advisory";
+  authoring.routingFailMode = "open";
+  authoring.routingDetector = "";
   authoring.targetIndex = null;
   authoring.targetKind = "criterion";
   authoring.targetElementId = "";
@@ -1109,6 +1125,160 @@ function AuthoringBodyEntry(props) {
   );
 }
 
+// ── Routing-fields form (story 6e31): the plan-review ROUTING overlay for a criterion ──────
+// Shown only when authoring a criterion (a.kind === "criterion"). Each field drives one key of
+// the `routing` object POSTed to /library/create; fail_mode + detector are DET-only.
+function isCriterionAuthoring(a) {
+  return a.open && a.kind === "criterion";
+}
+
+// Build the `routing` object from the authoring store (or null when not authoring a criterion).
+function buildRouting(a) {
+  if (a.kind !== "criterion") return null;
+  const levels = (a.routingLevels || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const n = parseFloat(a.routingBlockThreshold);
+  const routing = {
+    exec: a.routingExec || "1-TURN",
+    applies_at: levels.length ? { levels } : {},
+    block_threshold: Number.isFinite(n) ? n : 0.95,
+    default_posture: a.routingPosture || "advisory",
+  };
+  if ((a.routingExec || "") === "DET") {
+    routing.fail_mode = a.routingFailMode || "open";
+    const det = (a.routingDetector || "").trim();
+    if (det) routing.detector = det.endsWith("*") ? { id_prefix: det.slice(0, -1) } : { id: det };
+  }
+  return routing;
+}
+
+function AuthoringRoutingExecEntry(props) {
+  const { element, id } = props;
+  const a = useAuthoring();
+  if (!isCriterionAuthoring(a)) return null;
+  return (
+    <SelectEntry
+      id={id}
+      element={element}
+      label="exec (how the criterion runs)"
+      getValue={() => a.routingExec}
+      setValue={(v) => {
+        a.routingExec = v || "1-TURN";
+        notifyAuthoring();
+      }}
+      getOptions={() => [
+        { value: "1-TURN", label: "1-TURN (single LLM call)" },
+        { value: "2-STEP", label: "2-STEP (LLM)" },
+        { value: "AGENT", label: "AGENT (tool-using LLM)" },
+        { value: "DET", label: "DET (deterministic detector)" },
+      ]}
+    />
+  );
+}
+
+function AuthoringRoutingLevelsEntry(props) {
+  const { element, id } = props;
+  const a = useAuthoring();
+  const debounce = useService("debounceInput");
+  if (!isCriterionAuthoring(a)) return null;
+  return (
+    <TextFieldEntry
+      id={id}
+      element={element}
+      label="applies_at levels (comma-separated: epic,story,task)"
+      getValue={() => a.routingLevels}
+      setValue={(v) => {
+        a.routingLevels = v || "";
+      }}
+      debounce={debounce}
+    />
+  );
+}
+
+function AuthoringRoutingThresholdEntry(props) {
+  const { element, id } = props;
+  const a = useAuthoring();
+  const debounce = useService("debounceInput");
+  if (!isCriterionAuthoring(a)) return null;
+  return (
+    <TextFieldEntry
+      id={id}
+      element={element}
+      label="block_threshold (0–1)"
+      getValue={() => a.routingBlockThreshold}
+      setValue={(v) => {
+        a.routingBlockThreshold = v || "";
+      }}
+      debounce={debounce}
+    />
+  );
+}
+
+function AuthoringRoutingPostureEntry(props) {
+  const { element, id } = props;
+  const a = useAuthoring();
+  if (!isCriterionAuthoring(a)) return null;
+  return (
+    <SelectEntry
+      id={id}
+      element={element}
+      label="default_posture"
+      getValue={() => a.routingPosture}
+      setValue={(v) => {
+        a.routingPosture = v || "advisory";
+        notifyAuthoring();
+      }}
+      getOptions={() => [
+        { value: "advisory", label: "advisory (coaching)" },
+        { value: "blocking", label: "blocking (fails the gate)" },
+      ]}
+    />
+  );
+}
+
+function AuthoringRoutingFailModeEntry(props) {
+  const { element, id } = props;
+  const a = useAuthoring();
+  if (!isCriterionAuthoring(a) || a.routingExec !== "DET") return null;
+  return (
+    <SelectEntry
+      id={id}
+      element={element}
+      label="fail_mode (DET: on detector abstain)"
+      getValue={() => a.routingFailMode}
+      setValue={(v) => {
+        a.routingFailMode = v || "open";
+        notifyAuthoring();
+      }}
+      getOptions={() => [
+        { value: "open", label: "open (abstain → advisory)" },
+        { value: "closed", label: "closed (abstain → block)" },
+      ]}
+    />
+  );
+}
+
+function AuthoringRoutingDetectorEntry(props) {
+  const { element, id } = props;
+  const a = useAuthoring();
+  const debounce = useService("debounceInput");
+  if (!isCriterionAuthoring(a) || a.routingExec !== "DET") return null;
+  return (
+    <TextFieldEntry
+      id={id}
+      element={element}
+      label="detector selector (id, or a 'prefix*' class)"
+      getValue={() => a.routingDetector}
+      setValue={(v) => {
+        a.routingDetector = v || "";
+      }}
+      debounce={debounce}
+    />
+  );
+}
+
 // Save button: POST /library/create (create_prompt under config.repo_root()), refresh
 // window.REBAR_LIBRARY, then assign the new id to the criterion that opened the form.
 function AuthoringSaveEntry(props) {
@@ -1138,6 +1308,10 @@ function AuthoringSaveEntry(props) {
           kind: a.kind,
           title: newId,
           body: a.body || "",
+          // A plan-review criterion carries its ROUTING overlay so the backend
+          // (author_criterion_overlay) writes .rebar/criteria_routing.json + activation
+          // atomically. Omitted for plain prompts (kind !== "criterion").
+          ...(buildRouting(a) ? { routing: buildRouting(a) } : {}),
         }),
       });
       const body = await r.json().catch(() => ({}));
@@ -1161,6 +1335,12 @@ function AuthoringSaveEntry(props) {
       a.status = "created " + newId;
       a.id = "";
       a.body = "";
+      a.routingExec = "1-TURN";
+      a.routingLevels = "epic,story,task";
+      a.routingBlockThreshold = "0.95";
+      a.routingPosture = "advisory";
+      a.routingFailMode = "open";
+      a.routingDetector = "";
       if (targetKind === "name") {
         // Agent-step prompt picker (item 7): the new id IS the step's prompt action.
         modeling.updateProperties(element, { name: newId });
@@ -1341,6 +1521,38 @@ function authoringGroup(element) {
         isEdited: isTextFieldEntryEdited,
       },
       { id: "rebar-author-body", component: AuthoringBodyEntry },
+      // Routing-fields (story 6e31): only render for kind === "criterion" (each component
+      // self-guards). fail_mode + detector additionally self-guard on exec === "DET".
+      {
+        id: "rebar-author-routing-exec",
+        component: AuthoringRoutingExecEntry,
+        isEdited: isSelectEntryEdited,
+      },
+      {
+        id: "rebar-author-routing-levels",
+        component: AuthoringRoutingLevelsEntry,
+        isEdited: isTextFieldEntryEdited,
+      },
+      {
+        id: "rebar-author-routing-threshold",
+        component: AuthoringRoutingThresholdEntry,
+        isEdited: isTextFieldEntryEdited,
+      },
+      {
+        id: "rebar-author-routing-posture",
+        component: AuthoringRoutingPostureEntry,
+        isEdited: isSelectEntryEdited,
+      },
+      {
+        id: "rebar-author-routing-failmode",
+        component: AuthoringRoutingFailModeEntry,
+        isEdited: isSelectEntryEdited,
+      },
+      {
+        id: "rebar-author-routing-detector",
+        component: AuthoringRoutingDetectorEntry,
+        isEdited: isTextFieldEntryEdited,
+      },
       { id: "rebar-author-save", component: AuthoringSaveEntry },
       {
         id: "rebar-trigger-name",
