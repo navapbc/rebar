@@ -154,7 +154,19 @@ def plan_review_assemble_criteria(ctx: StepContext) -> dict[str, Any]:
     # loaded (pctx.repo_root) so the vocab and the loaded criteria never diverge. ISF is fed
     # the linked session log by the finder itself (never a rubric chunk), so it is never a
     # batch criterion — excluded from the inclusion vocabulary here.
-    effective = [cid for cid in registry.effective_criteria(pctx.repo_root) if cid != "ISF"]
+    # exec:DET criteria run in the deterministic phase (det_floor), NOT the LLM batch — so they
+    # own NO `include_<ID>` batch slot. Exclude them (and ISF, fed the session log directly) from
+    # the inclusion vocabulary, reading `exec` from the effective routing. Story 7f0d.
+    _routing = registry.effective_routing(pctx.repo_root)
+
+    def _is_det(cid: str) -> bool:
+        return str((_routing.get(cid) or {}).get("exec", "")).upper() == "DET"
+
+    effective = [
+        cid
+        for cid in registry.effective_criteria(pctx.repo_root)
+        if cid != "ISF" and not _is_det(cid)
+    ]
 
     # `.`→`_` sanitizes a `project.<name>` id to a valid workflow output key; co-located with
     # the CONSUME-site `when` reference emitted in `project_criteria` below (built-in ids have

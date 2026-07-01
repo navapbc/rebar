@@ -239,6 +239,29 @@ def _validate_routing_entry(cid: str, entry: Any, *, where: str) -> None:
             f"{where}: criterion {cid!r} default_posture must be 'advisory' or 'blocking', "
             f"got {posture!r}"
         )
+    # fail_mode governs an exec:DET criterion's abstain posture (fail-open records coverage;
+    # fail-closed blocks on absence). Validated only when present (a non-DET / silent entry
+    # defaults to "open" downstream), mirroring the code-review consumer's default.
+    if "fail_mode" in entry and entry.get("fail_mode") not in ("open", "closed"):
+        raise RegistryError(
+            f"{where}: criterion {cid!r} fail_mode must be 'open' or 'closed', "
+            f"got {entry.get('fail_mode')!r}"
+        )
+    # A bool `disabled` key TURNS OFF a built-in criterion (removed from effective_criteria,
+    # so it is never loaded/run) — allowed ONLY on an un-prefixed built-in id, never on a
+    # `project.` id (a project criterion is turned off by omitting it from `activate`, not by
+    # `disabled`). See story 08af + docs/adr/0015.
+    if "disabled" in entry:
+        if cid.startswith(_PROJECT_PREFIX):
+            raise RegistryError(
+                f"{where}: criterion {cid!r} may not carry 'disabled' — only a built-in "
+                "criterion can be disabled (omit a project id from 'activate' to turn it off)"
+            )
+        if not isinstance(entry["disabled"], bool):
+            raise RegistryError(
+                f"{where}: criterion {cid!r} 'disabled' must be a boolean, "
+                f"got {entry.get('disabled')!r}"
+            )
 
 
 def effective_routing(repo_root: str | None = None) -> dict[str, Any]:
@@ -327,7 +350,60 @@ def effective_criteria(repo_root: str | None = None) -> tuple[str, ...]:
                     f"'{_GATE_KEY}' routing entry"
                 )
             ids.add(aid)
+    # A built-in the overlay DISABLES is removed from the runnable vocabulary (its routing entry
+    # stays resolvable via effective_routing, but it is never loaded/run). No-op when absent.
+    ids.difference_update(disabled_builtins(rr))
     return tuple(sorted(ids))
+
+
+def disabled_builtins(repo_root: str | None = None) -> list[str]:
+    """The sorted built-in criterion ids the project overlay DISABLES (a ``"disabled": true``
+    key on an un-prefixed built-in routing entry). A disabled built-in is EXCLUDED from
+    :func:`effective_criteria` (never loaded/run) while its routing entry stays resolvable in
+    :func:`effective_routing`. Empty (``[]``) when there is no overlay / nothing disabled — so
+    an overlay-absent repo is byte-identical to the packaged registry. Story 08af."""
+    routing = effective_routing(repo_root)
+    return sorted(
+        cid
+        for cid, entry in routing.items()
+        if cid in CANONICAL_LLM and isinstance(entry, dict) and entry.get("disabled") is True
+    )
+
+
+def _detector_matches(detector_id: str, selector: dict[str, Any] | None) -> bool:
+    """True iff ``detector_id`` matches a routing ``detector`` selector — an exact ``id`` or an
+    ``id_prefix`` class (the same selector grammar the code-review consumer reads)."""
+    if not selector:
+        return False
+    exact = selector.get("id")
+    if exact is not None and detector_id == exact:
+        return True
+    pref = selector.get("id_prefix")
+    return pref is not None and detector_id.startswith(pref)
+
+
+def _det_scenario(routing: dict[str, Any], repo_root: str | None) -> str | None:
+    """The human-readable "scenario" for an exec:DET criterion = the message of the first detector
+    its ``detector`` selector resolves to (from the on-disk detector registry). Returns ``None``
+    when no selector / no matching detector / no message (the caller falls back to name / id).
+    Fail-open: any registry-load error yields ``None`` (a DET descriptor never depends on the
+    detector suite being installed)."""
+    selector = routing.get("detector")
+    if not selector:
+        return None
+    try:
+        from rebar.grounding.detectors import load_registry
+
+        reg = load_registry(repo_root)
+    except Exception:  # noqa: BLE001 — the detector suite is optional; a missing registry ⇒ fallback
+        return None
+    for det in reg:
+        if _detector_matches(det.id, selector):
+            msg = (det.rule or {}).get("message")
+            if isinstance(msg, str) and msg.strip():
+                return msg.strip()
+            return None
+    return None
 
 
 def _descriptor_from_prompt(
@@ -341,10 +417,32 @@ def _descriptor_from_prompt(
 
     rr = _resolve_repo_root(repo_root)
     routing_map = routing_index if routing_index is not None else effective_routing(rr)
-    prompt = prompts.get_prompt(f"{_PROMPT_ID_PREFIX}{cid}", repo_root=rr)
     routing = routing_map.get(cid)
     if routing is None:
         raise RegistryError(f"criterion {cid!r} has no entry in {_ROUTING_RESOURCE}")
+    # exec:DET criteria are PROMPT-LESS (a pattern-rule detector, not an LLM rubric), so they must
+    # NOT resolve a prompt-library file (story 7f0d). Build the descriptor from the routing entry
+    # alone — the "scenario" is the detector's rule message (resolved from the detector registry
+    # via the routing `detector` selector), never a prompt body. This keeps `load_criteria` from
+    # blowing up on an activated project DET criterion that ships no `.rebar/prompts/…` file.
+    if str(routing.get("exec", "")).upper() == "DET":
+        return {
+            "id": cid,
+            "exec": "DET",
+            "facet": routing.get("facet", cid),
+            "name": routing.get("name", cid),
+            "scenario": _det_scenario(routing, rr) or routing.get("name") or cid,
+            "applies_at": routing.get("applies_at", {}),
+            "checklist": [],
+            "block_threshold": routing.get("block_threshold", 0.95),
+            "default_posture": routing.get("default_posture", "advisory"),
+            "fail_mode": routing.get("fail_mode", "open"),
+            "detector": routing.get("detector"),
+            "routing": routing.get("routing"),
+            "trigger": None,
+            "overlay_routing": None,
+        }
+    prompt = prompts.get_prompt(f"{_PROMPT_ID_PREFIX}{cid}", repo_root=rr)
     return {
         "id": cid,
         "exec": routing.get("exec", "1-TURN"),

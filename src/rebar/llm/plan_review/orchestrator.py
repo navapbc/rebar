@@ -281,6 +281,12 @@ def route_criteria(ctx: PlanContext) -> tuple[list[dict], list[dict]]:
         # finder (run_pass1), so it never enters the normal single/agent routing.
         if cid == "ISF":
             continue
+        # exec:DET criteria (project invariants + the packaged floor) run in the DETERMINISTIC
+        # phase (det_floor), NEVER as an LLM finder — they carry no prompt and must never reach
+        # pass1_chunk. Read `exec` DIRECTLY here (not via exec_tier, which has no DET arm and would
+        # misroute a DET criterion to 1-TURN). Story 7f0d.
+        if str(c.get("exec", "")).upper() == "DET":
+            continue
         if not registry.applies(
             c,
             level=ctx.level,

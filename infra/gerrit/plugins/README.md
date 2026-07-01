@@ -10,6 +10,7 @@ Two plugins matter here:
 |--------------|----------------|-----------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------|
 | `webhooks`   | 3.14.1 (bundled) | bundled in `gerritcodereview/gerrit:3.14.1` — **no external download** (provenance = the image itself)                                  | n/a (ships inside the image)                                       |
 | `events-log` | 3.14.x         | https://gerrit-ci.gerritforge.com/job/plugin-events-log-bazel-master-stable-3.14/lastSuccessfulBuild/artifact/bazel-bin/plugins/events-log/events-log.jar | `46ef4f8741a733251bdbc7ce80fcdc0cb9885aff13e7895e0038c7c52aec565c` |
+| `gerrit-oauth-provider` (`oauth.jar`) | 3.14.x (b744/WS8) | https://github.com/davido/gerrit-oauth-provider — build/download the jar matching the Gerrit 3.14 line (the GitHub OAuth backend) | **TBD — record on fetch** (`shasum -a 256 oauth.jar`); enforce like events-log |
 
 ## Notes
 
@@ -25,6 +26,15 @@ Two plugins matter here:
   (architecture-independent — the same jar runs on the arm64/Graviton host).
   Verified jar: 208173 bytes, `Gerrit-ApiVersion: 3.14.1-SNAPSHOT`,
   `Gerrit-PluginName: events-log`.
+
+- **`gerrit-oauth-provider` (auth hardening, b744/WS8) is NOT bundled** and is only
+  needed when Gerrit is switched from the PoC `DEVELOPMENT_BECOME_ANY_ACCOUNT` to
+  `auth.type = OAUTH` (GitHub backend). Fetch the jar matching the 3.14 line, record
+  its sha256 in the table above (same fail-on-mismatch discipline as `events-log`),
+  drop it in `plugins/oauth.jar`, and follow
+  `infra/runbooks/gerrit-auth-hardening.md` for the full switch (OAuth App, SSM
+  client-id/secret, `secure.config`, bot-credential provisioning). Actively
+  maintained (tracks the Gerrit release train); GitHub-identity precedent: GerritHub.
 
 - **Re-pinning.** GerritForge CI publishes the `lastSuccessfulBuild` of the
   `stable-3.14` branch, so the artifact at the URL can advance over time. When it
