@@ -373,6 +373,136 @@ def judge_alignment(
     }
 
 
+# ── per-criterion calibration view (story 55b8) ───────────────────────────────
+def _fired(verdict: dict | None) -> bool:
+    """Fire ⇔ the criterion finder surfaced ≥1 finding (matches eval_scorers' `_fired`)."""
+    return bool((verdict or {}).get("findings"))
+
+
+def calibrate_criterion(
+    criterion_id: str,
+    *,
+    repo_root=None,
+    runner=None,
+    runs: int = 1,
+    solve=None,
+) -> dict[str, Any]:
+    """Run a criterion's must-fire/must-not-fire fixtures live and compute a CALIBRATION
+    view (story 55b8): the same instruments rebar uses on its built-ins, so a maintainer
+    decides blocking/threshold informed.
+
+    Metrics (each over the fixture's fire/no-fire cases only — validity/impact/novelty axis
+    cases are skipped):
+      * ``recall``        = fired / total must-fire fixtures (`expect` ∈ {finding, fail});
+      * ``false_accept``  = wrongly-fired / total must-not-fire fixtures (`expect` == pass);
+      * ``agreement``     = fraction of cases where observed == expected fire/no-fire;
+      * ``kappa``         = Cohen's κ of expected vs observed two-category labels;
+      * ``stability``     = per-case fraction of the ``runs`` epochs agreeing with the
+                            case's majority verdict (N-run stability; ``runs`` default 1).
+
+    ``solve(prompt_id, case) -> verdict`` is injectable (mirrors :func:`run_eval`) so the
+    metric math is offline-testable with no model. Raises :class:`EvalError` on an unknown
+    criterion, an absent fixture (via :func:`load_eval_spec`), or an empty fire/no-fire set."""
+    from rebar.llm.eval_scorers import FIRE_EXPECTS, NOFIRE_EXPECTS
+
+    runs = max(1, int(runs))
+    prompt_id = (
+        criterion_id if criterion_id.startswith("plan-review-") else f"plan-review-{criterion_id}"
+    )
+    spec = load_eval_spec(prompt_id, repo_root=repo_root)
+    fire_nofire = FIRE_EXPECTS | NOFIRE_EXPECTS
+    all_cases = list(spec.get("dataset") or [])
+    if not any(c.get("expect") in fire_nofire for c in all_cases):
+        raise EvalError(
+            f"empty calibration dataset for {criterion_id!r}: {prompt_id}.eval.yaml has no "
+            "must-fire/must-not-fire cases (expect ∈ {finding, fail, pass})"
+        )
+    if solve is None:
+        solve = _criterion_solver(repo_root=repo_root, runner=runner)
+
+    # RUN the finder over EVERY case (must-fire / must-not-fire AND the discrimination axis
+    # cases execute live), but the calibration VIEW (recall/false-accept/κ/agreement) is
+    # computed only over the fire/no-fire subset — a discrimination case has no fire/no-fire
+    # expectation, so it is executed + counted, never miscounted into the fire metrics.
+    expected: list[str] = []
+    observed: list[str] = []
+    per_case: list[dict[str, Any]] = []
+    n_discrimination = 0
+    for case in all_cases:
+        fires = [_fired(solve(prompt_id, case)) for _ in range(runs)]
+        obs_fire = sum(fires) * 2 > runs  # strict majority of the N runs
+        stability = sum(1 for f in fires if f == obs_fire) / runs
+        if case.get("expect") not in fire_nofire:  # discrimination axis case: run, don't score
+            n_discrimination += 1
+            per_case.append(
+                {
+                    "id": case.get("id"),
+                    "expect": case.get("expect"),
+                    "discrimination": True,
+                    "observed_fire": obs_fire,
+                    "stability": stability,
+                }
+            )
+            continue
+        exp_fire = case["expect"] in FIRE_EXPECTS
+        expected.append("fire" if exp_fire else "no_fire")
+        observed.append("fire" if obs_fire else "no_fire")
+        per_case.append(
+            {
+                "id": case.get("id"),
+                "expect": case["expect"],
+                "expected_fire": exp_fire,
+                "observed_fire": obs_fire,
+                "stability": stability,
+            }
+        )
+
+    n_fire = expected.count("fire")
+    n_nofire = expected.count("no_fire")
+    tp = sum(1 for e, o in zip(expected, observed, strict=True) if e == "fire" and o == "fire")
+    fp = sum(1 for e, o in zip(expected, observed, strict=True) if e == "no_fire" and o == "fire")
+    stabilities = [c["stability"] for c in per_case]
+    return {
+        "criterion": criterion_id,
+        "prompt": prompt_id,
+        "runs": runs,
+        "n_fire": n_fire,
+        "n_nofire": n_nofire,
+        "n_discrimination": n_discrimination,
+        "recall": (tp / n_fire) if n_fire else None,
+        "false_accept": (fp / n_nofire) if n_nofire else None,
+        "agreement": sum(1 for e, o in zip(expected, observed, strict=True) if e == o)
+        / len(expected),
+        "kappa": cohens_kappa(expected, observed),
+        "stability_min": min(stabilities),
+        "stability_mean": sum(stabilities) / len(stabilities),
+        "cases": per_case,
+    }
+
+
+def _criterion_solver(*, repo_root, runner):
+    """Default calibration solver: run each case's criterion via its Pass-1 finder
+    (``eval_solver.run_case`` criterion arm) with the config/live runner, threading
+    ``repo_root`` so a project criterion resolves against its overlay. Missing ``agents``
+    extra / credentials surface as a user-actionable :class:`EvalError` up front."""
+    from rebar._optional import OptionalDependencyError
+    from rebar.llm import eval_solver
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.runner import get_runner
+
+    try:
+        cfg = LLMConfig.from_env(repo_root=repo_root)
+        live = get_runner(cfg, override=runner)
+        live.preflight()
+    except OptionalDependencyError as exc:
+        raise EvalError(str(exc)) from None
+
+    def solve(prompt_id: str, case: dict) -> dict:
+        return eval_solver.run_case(prompt_id, case, runner=live, repo_root=repo_root)
+
+    return solve
+
+
 # ── promptfoo / JUnit interop (WS-G3) ──────────────────────────────────────────
 
 
