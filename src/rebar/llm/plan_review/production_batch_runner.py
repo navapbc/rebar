@@ -46,9 +46,9 @@ from rebar.llm.workflow.runners import (
 )
 
 from . import registry
-from .orchestrator import assemble_context
+from .orchestrator import assemble_context, route_criteria
 from .pass1 import run_pass1
-from .registry import _PROMPT_ID_PREFIX
+from .registry import _PROJECT_PREFIX, _PROMPT_ID_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,16 @@ class ProductionBatchRunner(BatchRunner):
         # D5: resolve each criterion's descriptor by its prompt-id and split by tier.
         single, agent, skipped = _resolve_criteria(req.criteria)
 
+        # Project fan-in (epic 3156): activated `project.<name>` criteria have NO static YAML
+        # `criteria` slot (the v3 `batch` schema is immutable), so they are added HERE — routed
+        # through the SAME route_criteria applies()/overlay filter the built-ins use, keyed off
+        # ctx.repo_root (== the assemble step's root, so the vocab never diverges). Built-ins
+        # still come from req.criteria (the interpreter's when/probe-filtered set); only
+        # `project.`-prefixed ids are appended, deduped against the built-in set.
+        proj_single, proj_agent = _project_criteria(ctx, {c["id"] for c in (*single, *agent)})
+        single.extend(proj_single)
+        agent.extend(proj_agent)
+
         runner = self._runner or get_runner(cfg)
 
         # ``coverage`` IS the journaled OPAQUE plan (budget/shed/ladder/checkpoint),
@@ -106,6 +116,7 @@ class ProductionBatchRunner(BatchRunner):
                 "single": [c["id"] for c in single],
                 "agent": [c["id"] for c in agent],
                 "skipped": skipped,
+                "project": [c["id"] for c in (*proj_single, *proj_agent)],
             }
         }
 
@@ -190,6 +201,28 @@ def _resolve_criteria(
         else:
             single.append(desc)
     return single, agent, skipped
+
+
+def _project_criteria(ctx, exclude: set[str]) -> tuple[list[dict], list[dict]]:
+    """Fan in the ACTIVATED project criteria for the ticket (epic 3156). ``route_criteria``
+    already returns the FULL routed set (built-ins ∪ activated `project.<name>` criteria, each
+    past its ``applies()``/overlay filter); this picks out ONLY the ``project.``-prefixed ones
+    (deduped against the already-resolved built-in set), tier-split exactly as route_criteria
+    did. Built-ins are intentionally NOT taken from here — they come from ``req.criteria`` so the
+    interpreter's per-criterion ``when``/probe gating is preserved.
+
+    Caveat (documented follow-up): under PROBE MODE (drift-refresh) the built-in set is the tiny
+    probe allowlist, but route_criteria has no probe notion, so an activated project criterion is
+    also evaluated during a probe. Harmless (the drift comparison keys off E4/G1G2), but a future
+    change should thread the probe allowlist here to suppress it."""
+    single, agent = route_criteria(ctx)
+    proj_single = [
+        c for c in single if str(c["id"]).startswith(_PROJECT_PREFIX) and c["id"] not in exclude
+    ]
+    proj_agent = [
+        c for c in agent if str(c["id"]).startswith(_PROJECT_PREFIX) and c["id"] not in exclude
+    ]
+    return proj_single, proj_agent
 
 
 __all__ = ["ProductionBatchRunner"]

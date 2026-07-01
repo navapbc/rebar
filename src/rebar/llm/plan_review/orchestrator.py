@@ -271,7 +271,10 @@ def route_criteria(ctx: PlanContext) -> tuple[list[dict], list[dict]]:
     plan = ctx.plan_text
     triggers = registry.overlay_triggers(plan)
     single, agent = [], []
-    for c in registry.load_criteria():
+    # Load the EFFECTIVE criteria (built-ins ∪ activated project criteria from the
+    # `.rebar/criteria_routing.json` overlay). repo_root may be None here (the lightweight
+    # context builder); registry resolves it to config.repo_root() so the overlay is honored.
+    for c in registry.load_criteria(repo_root=ctx.repo_root):
         cid = c["id"]
         # ISF is special: it is fed the linked SESSION LOG (not the rubric chunk) and
         # fires only when a session log is linked — handled separately by the Pass-1

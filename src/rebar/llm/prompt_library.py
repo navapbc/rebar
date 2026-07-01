@@ -233,8 +233,13 @@ def _invalidate_caches() -> None:
     disk each call, so only the registry's ``lru_cache``s need clearing)."""
     from rebar.llm.plan_review import registry
 
-    registry.load_criteria.cache_clear()
     registry._routing_index.cache_clear()
+    # The overlay-merged views are (repo_root, overlay-signature)-keyed lru_caches — clear
+    # them too so a freshly-authored criterion/overlay is visible in-process without a
+    # restart (epic 3156). (An overlay EDIT self-invalidates via its content signature; this
+    # clear covers a same-signature in-place authoring write within one process.)
+    registry._effective_routing_cached.cache_clear()
+    registry._load_criteria_cached.cache_clear()
 
 
 def _write(prompt_id: str, text: str, *, repo_root) -> Path:
