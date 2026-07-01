@@ -290,25 +290,25 @@ def test_author_criterion_overlay_keys_by_dotted_id(tmp_path):
     assert "project.bar" in registry.effective_criteria(root)
 
 
-def test_netnew_project_criterion_round_trips_end_to_end(tmp_path):
-    """THE editor-UX bug this task fixes: a net-new `project.<name>` criterion can be authored
-    end-to-end (create_prompt no longer rejects the dotted id — it's stored at the sanitized
-    prompt id) AND is then loaded/run by the gate. Previously create_prompt rejected
-    `plan-review-project.<name>` because `_valid_id` forbids '.', dead-ending the UX."""
-    from rebar.llm.criteria.ids import criterion_prompt_id
-    from rebar.llm.prompt_library import create_prompt
+def test_netnew_project_criterion_round_trips_via_library_create(tmp_path):
+    """THE editor-UX bug this task fixes: a net-new `project.<name>` criterion authored through the
+    `/library/create` handler's authoring path (`author_criterion` — exactly what
+    `editor._library_create` invokes for a `kind == "criterion"` POST) round-trips: the rubric
+    lands at the sanitized `.rebar/prompts/plan-review-project-<name>.md`, and the gate then loads
+    + resolves it. Previously `create_prompt` rejected the dotted `plan-review-project.<name>`
+    (`_valid_id` forbids '.'), dead-ending the UX at a 4xx."""
+    from rebar.llm.workflow.criterion_preview import author_criterion
 
     root = str(tmp_path)
     cid = "project.no-print"
-    prompt_id = criterion_prompt_id(cid)
-    assert prompt_id == "plan-review-project-no-print"  # sanitized, filesystem-safe
 
-    # 1) author the rubric at the sanitized prompt id — this used to raise InvalidPromptIdError
-    path = create_prompt(prompt_id, _RUBRIC, repo_root=root)
+    # Drive the criterion-authoring path `/library/create` runs (JSON parse → author_criterion):
+    meta = {"title": "No bare print", "description": "no print in library code"}
+    body = "Flag any bare print() in importable library code (use logging)."
+    path = author_criterion(root, cid, meta, body, _LLM_ROUTING)
+    # 1) the rubric landed at the SANITIZED prompt filename (dotted id decoupled from filesystem)
     assert path.name == "plan-review-project-no-print.md"
-    # 2) author the routing overlay keyed by the DOTTED id + activate it
-    author_criterion_overlay(root, cid, _LLM_ROUTING)
-    # 3) the gate now sees it and resolves its rubric via the same mapping
+    # 2) the gate now sees it (activated by the same atomic write) and resolves its rubric
     assert cid in registry.effective_criteria(root)
     descs = {c["id"]: c for c in registry.load_criteria(root)}
     assert cid in descs and descs[cid]["scenario"]  # rubric body resolved from the sanitized file
