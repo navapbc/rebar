@@ -415,6 +415,47 @@ def test_t10_carries_endpoint_access_contract_check() -> None:
     assert registry.applies(t10, has_children=False)  # and on a leaf
 
 
+def test_t5c_leads_with_trust_boundary_scope_gate() -> None:
+    # Ticket 2e89: T5c must lead with an explicit trust-boundary scope gate that generalises
+    # across its dimensions, preserves the in-process/loopback positive-pass carve-out, and
+    # encodes the zero-trust "private ≠ exempt" caveat.
+    t5c = registry.by_id()["T5c"]
+    # The checklist LEADS with the trust-boundary gate, and the per-dimension checks are kept.
+    keys = [c["key"] for c in t5c["checklist"]]
+    assert keys[0] == "trust_boundary"
+    dims = {"access_classification", "data_protection", "least_privilege", "secret_lifecycle"}
+    assert dims <= set(keys)
+    gate = next(c for c in t5c["checklist"] if c["key"] == "trust_boundary")["check"].lower()
+    assert "lower-trust" in gate or "lower trust" in gate
+    assert "not-applicable" in gate or "not applicable" in gate  # the positive-pass carve-out
+    assert "zero-trust" in gate or "not exempt" in gate  # the zero-trust caveat
+    # The rubric body (scenario) carries the same framing: the gate, the carve-out, the
+    # mixed-scope + ambiguous-reachability rules, and the T10 no-blur scope note.
+    body = t5c.get("scenario", "").lower()
+    assert "trust-boundary" in body and "reachable by a lower-trust actor" in body
+    assert "loopback" in body and "not-applicable" in body  # carve-out preserved (FP-free)
+    assert "mixed-scope" in body  # sub-checks scoped to boundary-crossing components only
+    assert "zero-trust" in body  # single-tenant/private = lower severity, not exempt
+    assert "t10" in body and "no blurring" in body  # explicit no-blur scope note
+    # Still altitude-agnostic (fires on container AND leaf, per a278).
+    assert registry.applies(t5c, has_children=True)
+    assert registry.applies(t5c, has_children=False)
+
+
+def test_t10_not_reframed_by_trust_boundary_generalisation() -> None:
+    # Ticket 2e89 AC: the T5c trust-boundary generalisation must NOT blur into T10 — T10 keeps
+    # its infra facet, its LLM-routed infra-intent trigger (FP-safe on non-infra tickets), and
+    # its endpoint_access_contract check, and is NOT re-scoped to the general framing.
+    t10 = registry.by_id()["T10"]
+    assert t10["facet"] == "overlay-infra"  # unchanged — not folded into overlay-security
+    assert t10.get("overlay_routing") == "llm"  # still LLM-routed on infra intent only
+    assert "infrastructure" in t10["trigger"].lower() or "iac" in t10["trigger"].lower()
+    keys = {c["key"] for c in t10["checklist"]}
+    assert "endpoint_access_contract" in keys  # its own contract check is intact
+    # T10 did NOT inherit T5c's trust_boundary scope-gate key (no blurring).
+    assert "trust_boundary" not in keys
+
+
 def test_is_mechanical_leaf_keys_on_leaf_not_type() -> None:
     plan = "Refactor the module; rename the helper."
     assert registry.is_mechanical_leaf(plan, has_children=False)

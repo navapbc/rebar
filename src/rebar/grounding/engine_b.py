@@ -69,6 +69,12 @@ _LANG_EXTENSIONS: dict[str, tuple[str, ...]] = {
     "java": (".java",),
     "rust": (".rs",),
     "json": (".json",),
+    # IaC: terraform/hcl (`.tf`/`.tfvars`) and yaml (compose / k8s manifests) — added for the
+    # public-exposure detectors (task 830a). Without these a `languages: [terraform]` rule is
+    # skipped as `unsupported_lang` and never runs.
+    "terraform": (".tf", ".tfvars"),
+    "hcl": (".tf", ".tfvars"),
+    "yaml": (".yaml", ".yml"),
 }
 
 
