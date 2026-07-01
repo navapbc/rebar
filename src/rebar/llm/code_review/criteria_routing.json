@@ -94,5 +94,15 @@
     "blocking_enabled": true,
     "detector": { "id_prefix": "rebar.builtin.security." },
     "fail_mode": "closed"
+  },
+  "public-exposure-without-auth": {
+    "_comment": "task 830a: deterministic public-exposure signals (0.0.0.0/0 ingress, public IP, internet-facing LB, non-loopback compose bind) on the *.tf / docker-compose diff — the code-level counterpart to plan-review T10. ADVISORY (blocking_enabled=false, fail_mode=open): a match is a coach-not-block coverage finding, since boundary controls (gateway/mTLS/network policy) may live outside the diff. NOT under the fail-closed rebar.builtin.security. prefix.",
+    "exec": "DET",
+    "applies_to": ["**/*.tf", "**/*.tfvars", "**/docker-compose*.yml", "**/docker-compose*.yaml", "**/compose*.yml", "**/compose*.yaml"],
+    "default_posture": "advisory",
+    "block_threshold": 0.5,
+    "blocking_enabled": false,
+    "detector": { "id_prefix": "rebar.builtin.iac.public-exposure." },
+    "fail_mode": "open"
   }
 }
