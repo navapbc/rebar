@@ -56,6 +56,8 @@ _ASSET_CONTENT_TYPES = {
     "editor.js": "application/javascript; charset=utf-8",
     "editor.css": "text/css; charset=utf-8",
 }
+_PREVIEW_PATHS = ("/criterion/preview", "/criterion/preview/status")
+_POST_WRITE_PATHS = ("/save", "/prompt/save", "/validate", "/library/create", *_PREVIEW_PATHS)
 
 
 def assets_available() -> bool:
@@ -610,7 +612,7 @@ def edit_workflow(
                 self._send(404, "not found", "text/plain")
 
         def do_POST(self):  # noqa: N802 - stdlib handler name
-            if self.path not in ("/save", "/prompt/save", "/validate", "/library/create"):
+            if self.path not in _POST_WRITE_PATHS:
                 self._send(404, '{"errors":["unknown endpoint"]}', "application/json")
                 return
             # CSRF / DNS-rebinding guard: require the per-session token (a cross-origin
@@ -632,6 +634,13 @@ def edit_workflow(
                 return
             if self.path == "/library/create":
                 self._library_create(payload)
+                return
+            if self.path in _PREVIEW_PATHS:
+                # Spike-gate preview (sync-within-timeout else a 202 job + /status poll).
+                from .criterion_preview import handle_preview_post
+
+                code, body = handle_preview_post(self.path, payload, repo_root=str(_repo_root))
+                self._send(code, json.dumps(body), "application/json")
                 return
             xml = payload.decode("utf-8")
             errors = save_bpmn_to_ir(xml, target)
@@ -720,6 +729,19 @@ def edit_workflow(
                     "application/json",
                 )
                 return
+            # Routing-fields authoring (opt-in via `routing`): AFTER the prompt is written, couple
+            # the criterion's routing entry + activation into ONE atomic overlay write — a failed
+            # overlay leaves an inactive, harmless prompt, never a half-active criterion.
+            routing = data.get("routing")
+            if kind == "criterion" and isinstance(routing, dict) and routing:
+                from .criterion_preview import author_criterion_overlay
+
+                try:
+                    author_criterion_overlay(str(_repo_root), pid, routing)
+                except Exception as exc:  # noqa: BLE001 — overlay write failed → 4xx (prompt inactive)
+                    body = {"ok": False, "id": pid, "errors": [f"overlay: {exc}"]}
+                    self._send(400, json.dumps(body), "application/json")
+                    return
             self._send(
                 200,
                 json.dumps({"ok": True, "id": pid, "path": str(path)}),
