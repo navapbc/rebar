@@ -1,0 +1,104 @@
+# rebar built-in PUBLIC-EXPOSURE detectors (task 830a / bane-tuber-marsh) — deterministic,
+# tfsec/Checkov-ALIGNED signals for a network service exposed to untrusted networks. The code-level
+# counterpart to the plan-review T10 `endpoint_access_contract` (a278): plan-review reasons over prose
+# and cannot do reachability analysis; these fire on the ACTUAL `*.tf` / docker-compose diff.
+#
+# Native opengrep rules (opengrep is a semgrep-compatible fork; the `semgrep` fallback binary runs
+# them). There is NO tfsec/Checkov integration seam in the grounding layer, so these are authored
+# rules that CITE the equivalent tfsec / Checkov check id — not a tool bridge.
+#
+# The `rebar.builtin.iac.public-exposure.` id-prefix (NOT the fail-closed `rebar.builtin.security.`
+# prefix) routes these to the ADVISORY `public-exposure-without-auth` code-review criterion
+# (blocking_enabled: false / fail_mode: open): a match is a coach-not-block coverage finding, so
+# boundary controls that may live OUTSIDE the diff (an authenticating gateway / service-mesh mTLS /
+# network policy) remain the reviewer's judgement.
+#
+# DENY-BY-DEFAULT: each message names the exposure AND the obligation to verify an authenticating
+# front — the auth-absence CUE, not a deterministic auth-correlation a single rule cannot prove.
+#
+# FP GUARDS are pattern exclusions: only unambiguous public-exposure literals match. Private CIDRs
+# (10/8, 172.16/12, 192.168/16), loopback (127.0.0.1 / ::1), unix sockets, and `internal = true`
+# load balancers do NOT match, so they are never flagged.
+rules:
+  - id: rebar.builtin.iac.public-exposure.tf-ingress-open-ipv4
+    languages: [terraform]
+    severity: ERROR
+    message: >-
+      Security-group ingress open to 0.0.0.0/0 (the whole IPv4 internet). Verify an authenticating
+      gateway / WAF / bastion fronts this service, or restrict the CIDR. [tfsec
+      aws-vpc-no-public-ingress-sgr / Checkov CKV_AWS_260]
+    metadata:
+      rebar_envelope:
+        tier: T1
+        job: smell
+        namespace: builtin
+        dimension: has_iac
+      references:
+        - https://aquasecurity.github.io/tfsec/latest/checks/aws/vpc/no-public-ingress-sgr/
+    pattern: cidr_blocks = [..., "0.0.0.0/0", ...]
+
+  - id: rebar.builtin.iac.public-exposure.tf-ingress-open-ipv6
+    languages: [terraform]
+    severity: ERROR
+    message: >-
+      Security-group ingress open to ::/0 (the whole IPv6 internet). Verify an authenticating gateway
+      fronts this service, or restrict the CIDR. [tfsec aws-vpc-no-public-ingress-sgr / Checkov
+      CKV_AWS_260]
+    metadata:
+      rebar_envelope:
+        tier: T1
+        job: smell
+        namespace: builtin
+        dimension: has_iac
+    pattern: ipv6_cidr_blocks = [..., "::/0", ...]
+
+  - id: rebar.builtin.iac.public-exposure.tf-associate-public-ip
+    languages: [terraform]
+    severity: ERROR
+    message: >-
+      Instance/ENI is assigned a public IP (associate_public_ip_address = true), giving it a direct
+      internet-facing address. Verify this is intended and fronted by auth. [Checkov CKV_AWS_88]
+    metadata:
+      rebar_envelope:
+        tier: T1
+        job: smell
+        namespace: builtin
+        dimension: has_iac
+    pattern: associate_public_ip_address = true
+
+  - id: rebar.builtin.iac.public-exposure.tf-public-lb
+    languages: [terraform]
+    severity: ERROR
+    message: >-
+      Internet-facing load balancer (internal = false). Verify listeners require authentication (an
+      authorizer / OIDC / mTLS), not just network reachability. [tfsec aws-elb-alb-not-public / Checkov
+      CKV_AWS_150]
+    metadata:
+      rebar_envelope:
+        tier: T1
+        job: smell
+        namespace: builtin
+        dimension: has_iac
+    patterns:
+      - pattern: internal = false
+      - pattern-inside: |
+          resource "aws_lb" $NAME { ... }
+
+  - id: rebar.builtin.iac.public-exposure.compose-nonloopback-bind
+    languages: [yaml]
+    severity: ERROR
+    message: >-
+      docker-compose publishes a container port bound to 0.0.0.0 (all interfaces / non-loopback),
+      exposing it beyond the host. Bind to 127.0.0.1 or front it with an authenticating proxy if it is
+      not meant to be publicly reachable.
+    metadata:
+      rebar_envelope:
+        tier: T1
+        job: smell
+        namespace: builtin
+        dimension: has_iac
+    paths:
+      include:
+        - "*compose*.yml"
+        - "*compose*.yaml"
+    pattern-regex: '"0\.0\.0\.0:\d+:\d+"'

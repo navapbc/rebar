@@ -361,23 +361,27 @@
     "default_posture": "advisory",
     "checklist": [
       {
+        "key": "trust_boundary",
+        "check": "SCOPE GATE (apply first): a security concern is in scope ONLY when the plan exposes a component reachable by a LOWER-trust actor (public internet, another tenant, untrusted network, unauthenticated user). In-process / local-CLI / loopback-only surfaces → PASS not-applicable; a plan silent on network-reachability is treated as not-applicable (note the assumption). Mixed-scope plans apply the sub-checks below ONLY to the boundary-crossing components. The same gate governs every dimension below; a single-tenant / private network is LOWER severity (advisory), not exempt (zero-trust)."
+      },
+      {
         "key": "access_classification",
-        "check": "Every new endpoint/path declares its access level; sensitive paths require auth (ambiguity about access level is itself the failure) — cite OWASP category."
+        "check": "Where a boundary is crossed, every new endpoint/path declares its access level; sensitive paths require the app's own auth (ambiguity about access level is itself the failure) — cite OWASP category."
       },
       {
         "key": "data_protection",
-        "check": "Encryption at rest/in transit where applicable; PII/secrets identified; no secret-logging or data leakage."
+        "check": "Encryption in transit for data crossing the boundary (and at rest where stored); PII/secrets identified; no secret-logging or data leakage."
       },
       {
         "key": "least_privilege",
-        "check": "Grants scoped to the minimum; no wildcard *:* / admin-for-convenience."
+        "check": "Any credential/role/grant a boundary-crossing component holds is scoped to the minimum; no wildcard *:* / admin-for-convenience."
       },
       {
         "key": "secret_lifecycle",
-        "check": "No plaintext secrets in code/IaC/logs; use a secrets manager."
+        "check": "No plaintext secrets in code/IaC/logs on the boundary-crossing path; use a secrets manager."
       }
     ],
-    "trigger": "new endpoints, data access/storage/transmission, PII, or auth boundaries"
+    "trigger": "a component newly reachable by a lower-trust actor: new endpoints, network exposure, data access/storage/transmission, PII, or auth boundaries"
   },
   "T5e": {
     "exec": "1-TURN",
