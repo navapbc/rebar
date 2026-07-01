@@ -3,13 +3,6 @@
     "exec": "1-TURN",
     "facet": "ac-text-quality",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -39,15 +32,9 @@
     "exec": "1-TURN",
     "facet": "scope-intent",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
       "suppress_when": [
         "mechanical_leaf"
       ],
-      "container_only": false,
       "suppress_types": [
         "bug"
       ]
@@ -77,13 +64,6 @@
     "exec": "2-STEP",
     "facet": "coherence",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -113,13 +93,6 @@
     "exec": "1-TURN",
     "facet": "ac-text-quality",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -161,13 +134,6 @@
     "exec": "2-STEP",
     "facet": "scope-intent",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -197,14 +163,12 @@
     "exec": "1-TURN",
     "facet": "testing",
     "applies_at": {
-      "levels": [
-        "story",
-        "task"
+      "scope": [
+        "leaf"
       ],
       "suppress_when": [
         "test_task"
       ],
-      "container_only": false,
       "suppress_types": [
         "bug"
       ]
@@ -242,11 +206,9 @@
     "exec": "2-STEP",
     "facet": "ac-text-quality",
     "applies_at": {
-      "levels": [
-        "task"
+      "scope": [
+        "leaf"
       ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -284,13 +246,6 @@
     "exec": "1-TURN",
     "facet": "scope-intent",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -328,11 +283,9 @@
     "exec": "1-TURN",
     "facet": "overlay-perf",
     "applies_at": {
-      "levels": [
-        "task"
+      "scope": [
+        "leaf"
       ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -363,11 +316,9 @@
     "exec": "1-TURN",
     "facet": "overlay-reliability",
     "applies_at": {
-      "levels": [
-        "task"
+      "scope": [
+        "leaf"
       ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -398,11 +349,6 @@
     "exec": "AGENT",
     "facet": "overlay-security",
     "applies_at": {
-      "levels": [
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -433,13 +379,6 @@
     "exec": "1-TURN",
     "facet": "overlay-maintainability",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -466,13 +405,6 @@
     "exec": "1-TURN",
     "facet": "overlay-empirical",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -501,13 +433,6 @@
     "exec": "AGENT",
     "facet": "overlay-feasibility",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -540,13 +465,6 @@
     "exec": "1-TURN",
     "facet": "overlay-compat",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -579,12 +497,9 @@
     "exec": "1-TURN",
     "facet": "overlay-a11y",
     "applies_at": {
-      "levels": [
-        "story",
-        "task"
+      "scope": [
+        "leaf"
       ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -609,13 +524,6 @@
     "exec": "1-TURN",
     "facet": "coherence",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -638,13 +546,6 @@
     "exec": "AGENT",
     "facet": "overlay-priorart",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -673,12 +574,9 @@
     "exec": "1-TURN",
     "facet": "overlay-ux",
     "applies_at": {
-      "levels": [
-        "story",
-        "task"
+      "scope": [
+        "leaf"
       ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -707,13 +605,6 @@
     "exec": "1-TURN",
     "facet": "overlay-docs",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -742,13 +633,6 @@
     "exec": "AGENT",
     "facet": "overlay-llm",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -785,12 +669,9 @@
     "exec": "1-TURN",
     "facet": "overlay-sharedstate",
     "applies_at": {
-      "levels": [
-        "story",
-        "task"
+      "scope": [
+        "leaf"
       ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -827,11 +708,9 @@
     "exec": "AGENT",
     "facet": "codebase-grounding",
     "applies_at": {
-      "levels": [
-        "task"
+      "scope": [
+        "leaf"
       ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -858,11 +737,9 @@
     "exec": "AGENT",
     "facet": "codebase-grounding",
     "applies_at": {
-      "levels": [
-        "task"
+      "scope": [
+        "leaf"
       ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -889,11 +766,9 @@
     "exec": "AGENT",
     "facet": "codebase-grounding",
     "applies_at": {
-      "levels": [
-        "task"
+      "scope": [
+        "leaf"
       ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -928,12 +803,9 @@
     "exec": "AGENT",
     "facet": "container",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story"
+      "scope": [
+        "container"
       ],
-      "container_only": true,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -953,12 +825,9 @@
     "exec": "AGENT",
     "facet": "container",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story"
+      "scope": [
+        "container"
       ],
-      "container_only": true,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -978,13 +847,6 @@
     "exec": "AGENT",
     "facet": "approach-soundness",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -1017,13 +879,6 @@
     "exec": "AGENT",
     "facet": "overlay-infra",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -1038,6 +893,10 @@
       {
         "key": "least_privilege_iam",
         "check": "Roles/policies scoped to minimum; no wildcard *:* / admin-for-convenience; no long-lived creds committed."
+      },
+      {
+        "key": "endpoint_access_contract",
+        "check": "For EVERY network-reachable service the plan STANDS UP (each daemon / web UI / API / SSH or admin console — e.g. a code-review server, dashboard, or broker), the plan states how HUMAN principals (end users AND administrators) authenticate to THAT service: a named identity mechanism (OIDC/OAuth/SSO/LDAP/HTTP-auth) OR an explicit, justified no-auth rationale (loopback-only, behind an authenticating gateway, single-tenant private network). Service-to-service credentials (deploy keys, webhook/API tokens, SSM secrets) do NOT satisfy this — they authenticate machines, not human/admin access to the service. A stood-up service reachable from the internet or an untrusted network whose human/admin authentication is left unspecified is an under-specified contract (deny-by-default) — flag it."
       },
       {
         "key": "idempotency_drift",
@@ -1068,13 +927,6 @@
     "exec": "AGENT",
     "facet": "overlay-migration",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -1111,13 +963,6 @@
     "exec": "1-TURN",
     "facet": "overlay-rollout",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]
@@ -1146,13 +991,6 @@
     "exec": "2-STEP",
     "facet": "intent-provenance",
     "applies_at": {
-      "levels": [
-        "epic",
-        "story",
-        "task"
-      ],
-      "container_only": false,
-      "suppress_when": [],
       "suppress_types": [
         "bug"
       ]

@@ -15,8 +15,8 @@ into a descriptor (32: the Layer-2 judgment F/E/G/A, the T1–T12 overlays, COH,
 This registry provides the generic routing the orchestrator needs:
 
 * :func:`load_criteria` — merge each criterion's library prompt + routing entry (cached).
-* :func:`applies` — proportionate-scrutiny filter (``applies_at``: levels /
-  container-only / suppress-by-type / suppress-when-test-or-mechanical).
+* :func:`applies` — proportionate-scrutiny filter (``applies_at``: container/leaf
+  ``scope`` / suppress-by-type / suppress-when-test-or-mechanical).
 * :func:`chunk_by_facet` — pack same-``facet`` single-turn criteria into chunks of
   ``base_chunk(model) × size_factor(ticket)`` (the RUBRIC is the lever that fits a
   context window — the ticket content is NEVER chunked).
@@ -30,7 +30,7 @@ The merged descriptor (per criterion)::
     {
       "id": str, "exec": "1-TURN"|"2-STEP"|"AGENT", "facet": str,
       "name": str, "scenario": str (the rubric body, from the library prompt),
-      "applies_at": {"levels": [..], "container_only": bool,
+      "applies_at": {"scope": ["container"|"leaf", ...] (absent ⇒ both),
                      "suppress_types": [..], "suppress_when": [..]},
       "checklist": [{"key": str, "check": str}, ...],
       "default_posture": "advisory"|"blocking", "block_threshold": float
@@ -288,35 +288,40 @@ def is_test_task(plan: str) -> bool:
     return bool(_TEST_TASK_RE.search(p)) and len(p) < 1400
 
 
-def is_mechanical_leaf(plan: str, ticket_type: str | None) -> bool:
-    return ticket_type == "task" and bool(_MECHANICAL_RE.search(plan or ""))
+def is_mechanical_leaf(plan: str, *, has_children: bool = False) -> bool:
+    """A mechanical change (refactor/rename/dep-bump/…) at a LEAF (no children).
+    Keyed on container/leaf, never on ticket type — a childless ticket of any type
+    is a leaf."""
+    return not has_children and bool(_MECHANICAL_RE.search(plan or ""))
 
 
 def applies(
     crit: dict[str, Any],
     *,
-    level: str,
     has_children: bool = False,
     ticket_type: str | None = None,
     plan: str = "",
 ) -> bool:
-    """Proportionate-scrutiny filter from the criterion's ``applies_at`` field:
-    skip leaf-implementation criteria at epic/story altitude, container criteria
-    when there are no children, type-suppressed criteria (e.g. bugs), and
-    suppress-when conditions (test-task / mechanical-leaf). Defaults are permissive
-    (run everywhere) when ``applies_at`` is absent."""
+    """Proportionate-scrutiny filter from the criterion's ``applies_at`` field.
+
+    Scrutiny is keyed on **container vs leaf** — a container has children, a leaf
+    does not — never on ticket TYPE (epic/story/task): a childless epic is a leaf,
+    a story with children is a container. A criterion's ``scope`` lists the nodes it
+    runs at (subset of ``["container", "leaf"]``; absent ⇒ both). ``suppress_types``
+    (the bug/session_log exemption axis) and the ``suppress_when`` conditions
+    (test-task / mechanical-leaf) still apply. Defaults are permissive (run
+    everywhere) when ``applies_at`` is absent."""
     ap = crit.get("applies_at") or {}
     if ticket_type and ticket_type in (ap.get("suppress_types") or []):
         return False
-    levels = ap.get("levels") or ["epic", "story", "task"]
-    if level not in levels:
-        return False
-    if ap.get("container_only") and not has_children:
+    scope = ap.get("scope") or ["container", "leaf"]
+    node = "container" if has_children else "leaf"
+    if node not in scope:
         return False
     for cond in ap.get("suppress_when") or []:
         if cond == "test_task" and is_test_task(plan):
             return False
-        if cond == "mechanical_leaf" and is_mechanical_leaf(plan, ticket_type):
+        if cond == "mechanical_leaf" and is_mechanical_leaf(plan, has_children=has_children):
             return False
     return True
 
@@ -332,7 +337,7 @@ def base_chunk(model: str) -> int:
 
 
 def size_factor(ticket_size: str) -> float:
-    return 0.5 if ticket_size in ("large", "epic", "has_children") else 1.0
+    return 0.5 if ticket_size in ("large", "has_children") else 1.0
 
 
 def chunk_by_facet(

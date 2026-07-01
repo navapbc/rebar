@@ -377,8 +377,48 @@ def test_registry_loads_descriptors() -> None:
 
 def test_applies_suppresses_bugs() -> None:
     f1 = registry.by_id()["F1"]  # suppress_types includes bug
-    assert not registry.applies(f1, level="task", ticket_type="bug")
-    assert registry.applies(f1, level="task", ticket_type="task")
+    assert not registry.applies(f1, has_children=False, ticket_type="bug")
+    assert registry.applies(f1, has_children=False, ticket_type="task")
+
+
+def test_applies_is_keyed_on_container_leaf_not_type() -> None:
+    # The security overlay T5c is no longer altitude-gated: it runs on a CONTAINER
+    # (the Gerrit-epic regression) as well as a leaf, regardless of ticket type.
+    t5c = registry.by_id()["T5c"]
+    assert registry.applies(t5c, has_children=True)  # container epic — the fix
+    assert registry.applies(t5c, has_children=False)  # leaf
+    # Container-scoped child-coverage criteria (G3/G4) run ONLY on containers.
+    g3 = registry.by_id()["G3"]
+    assert registry.applies(g3, has_children=True)
+    assert not registry.applies(g3, has_children=False)
+    # Leaf-scoped implementation criteria (E4 code-grounding) run ONLY on leaves —
+    # and a CHILDLESS ticket of ANY type (e.g. a leaf-shaped epic) is a leaf.
+    e4 = registry.by_id()["E4"]
+    assert registry.applies(e4, has_children=False, ticket_type="epic")
+    assert not registry.applies(e4, has_children=True, ticket_type="epic")
+
+
+def test_t10_carries_endpoint_access_contract_check() -> None:
+    # The infra overlay must check that a stood-up network-reachable service declares
+    # its human/admin auth contract (the bug a278 regression: the Gerrit epic stood up
+    # an internet-facing service with no auth). It runs on containers AND leaves, and
+    # only on infra intent (LLM-routed) so it is FP-safe on non-infra tickets.
+    t10 = registry.by_id()["T10"]
+    keys = {c["key"] for c in t10["checklist"]}
+    assert "endpoint_access_contract" in keys
+    bullet = next(c for c in t10["checklist"] if c["key"] == "endpoint_access_contract")
+    text = bullet["check"].lower()
+    # The distinguishing content: HUMAN/admin auth, and that machine creds do NOT satisfy it.
+    assert "human" in text and "auth" in text
+    assert "deploy key" in text or "token" in text  # service-to-service creds are called out
+    assert registry.applies(t10, has_children=True)  # fires on a container epic (the fix)
+    assert registry.applies(t10, has_children=False)  # and on a leaf
+
+
+def test_is_mechanical_leaf_keys_on_leaf_not_type() -> None:
+    plan = "Refactor the module; rename the helper."
+    assert registry.is_mechanical_leaf(plan, has_children=False)
+    assert not registry.is_mechanical_leaf(plan, has_children=True)  # a container is never a leaf
 
 
 def test_chunk_by_facet_packs_and_never_empty_for_input() -> None:

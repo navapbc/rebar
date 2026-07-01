@@ -290,7 +290,6 @@ def route_criteria(ctx: PlanContext) -> tuple[list[dict], list[dict]]:
             continue
         if not registry.applies(
             c,
-            level=ctx.level,
             has_children=ctx.has_children,
             ticket_type=ctx.ticket_type,
             plan=plan,

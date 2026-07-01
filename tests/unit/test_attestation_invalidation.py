@@ -29,7 +29,7 @@ from rebar.llm.plan_review import attest, registry
 _ROUTING = {
     "exec": "1-TURN",
     "facet": "project-invariants",
-    "applies_at": {"levels": ["epic", "story", "task"]},
+    "applies_at": {"scope": ["container", "leaf"]},
     "block_threshold": 0.9,
     "default_posture": "advisory",
     "checklist": [],

@@ -173,6 +173,29 @@ def _validate_routing_entry(cid: str, entry: Any, *, where: str) -> None:
                 f"{where}: criterion {cid!r} 'disabled' must be a boolean, "
                 f"got {entry.get('disabled')!r}"
             )
+    ap = entry.get("applies_at")
+    if isinstance(ap, dict):
+        # Plan-review proportionate scrutiny is keyed on container/leaf, never ticket
+        # type. The legacy `levels`/`container_only` vocabulary is rejected with a
+        # migration hint so a stale overlay fails loudly, not silently ignored.
+        # (Code-review criteria don't carry applies_at, so this is inert for them.)
+        for legacy in ("levels", "container_only"):
+            if legacy in ap:
+                raise CriteriaError(
+                    f"{where}: criterion {cid!r} applies_at.{legacy} is no longer supported "
+                    "— proportionate scrutiny is keyed on container/leaf; use "
+                    '\'scope\': ["container", "leaf"] (either or both) instead'
+                )
+        scope = ap.get("scope")
+        if scope is not None and (
+            not isinstance(scope, list)
+            or not scope
+            or any(s not in ("container", "leaf") for s in scope)
+        ):
+            raise CriteriaError(
+                f"{where}: criterion {cid!r} applies_at.scope must be a non-empty list of "
+                f"'container'/'leaf', got {scope!r}"
+            )
 
 
 # ── effective (overlay-merged) views, gate-parameterized + repo-keyed ───────────────
