@@ -244,6 +244,41 @@ Record `set_file_impact` (the `{path,reason}` array that `next_batch` uses to
 avoid scheduling file-conflicting tickets together) and `set_verify_commands`
 (DD-level verification) so downstream scheduling and verification work.
 
+### Project-supplied criteria (both review gates)
+
+A project can add its OWN review criteria — naming rules, layering, banned APIs,
+architectural invariants — to **both** the plan-review and code-review gates through one
+`.rebar/criteria_routing.json` overlay over the shared `rebar.llm.criteria` registry (no
+plugin code runs in the gate; an absent overlay fails open to the packaged behaviour).
+The overlay is gate-keyed with a shared `activate` list:
+
+```json
+{
+  "plan_review": { "project.<name>": { "exec": "1-TURN", "block_threshold": 0.9, … } },
+  "code_review": { "project.<name>": { "exec": "1-TURN", "blocking_enabled": false, … } },
+  "activate":    ["project.<name>"]
+}
+```
+
+The author → activate → eval → block loop:
+
+1. **Author** — add a `project.<name>`-prefixed routing entry under the gate(s) you want
+   (an un-prefixed built-in id instead *re-tunes* or `"disabled": true`-disables that
+   built-in). For an LLM criterion, write its rubric prompt at
+   `.rebar/prompts/<gate>-project.<name>.md` (e.g. `plan-review-project.<name>.md`); an
+   `exec: "DET"` criterion is prompt-less (a grounding detector — see ADR 0016).
+2. **Activate** — list the id in `activate` (presence in the file ≠ active; built-ins are
+   always active). An id activated for a gate it has no routing entry in is simply inactive
+   *there*, not an error, so one `activate` list serves both gates.
+3. **Eval / block** — the criterion runs like a built-in. Blocking posture differs by gate
+   (the deliberate divergence): plan-review blocks on `default_posture: "blocking"`;
+   code-review blocks on an explicit `blocking_enabled: true`. Everything ships
+   advisory-by-default (coach-not-block) until you opt into blocking.
+
+Overlay edits are picked up automatically (the merged views are content-signature-keyed +
+repo-isolated). See **ADRs 0015 (plan-review overlay), 0016 (DET invariants), 0017 (the
+unified cross-gate registry)** and `docs/plan-review-gate.md`.
+
 ## Module-size policy (when editing rebar itself)
 
 rebar is built to be edited by agents that load a unit whole. **Target 200–500

@@ -22,6 +22,11 @@ from functools import lru_cache
 from importlib import resources
 from typing import Any, TypeGuard
 
+from rebar.llm import criteria as _criteria
+
+# The code-review gate key in the shared `.rebar/criteria_routing.json` overlay (story 5065).
+_GATE_KEY = "code_review"
+
 # ── The closed overlay-id vocabulary (WS1 OWNS this) ──────────────────────────────────────
 # The 11 specialist overlays the base reviewer may escalate to. WS2 authors the per-id
 # finder prompt + applies_to globs; adding a NEW overlay means adding its id HERE and its
@@ -145,6 +150,34 @@ def routing_index() -> dict[str, Any]:
     return {k: v for k, v in data.items() if not k.startswith("_")}
 
 
+# Register the code-review gate with the SHARED overlay core (story 5065) so a project's
+# `.rebar/criteria_routing.json` may carry a `code_review` map (net-new `project.` criteria +
+# re-tunes) the SAME way plan-review's overlay works. The canonical built-in set is the packaged
+# routing's key set (the 11 overlays + the two detector criteria); read via a callable so a
+# freshly-loaded packaged index is honoured. Overlay-ABSENT ⇒ effective == packaged (unchanged).
+_criteria.register_gate(
+    _GATE_KEY,
+    packaged_index=lambda: routing_index(),
+    canonical=lambda: frozenset(routing_index()),
+)
+
+
+def effective_routing(repo_root: str | None = None) -> dict[str, Any]:
+    """The packaged routing index MERGED with a project ``.rebar/criteria_routing.json``
+    overlay's ``code_review`` map (repo-keyed, cache-isolated). DELEGATES to the shared
+    :func:`rebar.llm.criteria.effective_routing` with ``gate_key="code_review"`` (story 5065).
+    Overlay-ABSENT ⇒ byte-identical to :func:`routing_index`."""
+    return _criteria.effective_routing(repo_root, gate_key=_GATE_KEY)
+
+
+def effective_criteria(repo_root: str | None = None) -> tuple[str, ...]:
+    """The ACTIVE code-review criterion-id vocabulary = the packaged built-ins ∪ the project
+    ids the overlay ``activate``s (minus any disabled built-in). DELEGATES to the shared
+    :func:`rebar.llm.criteria.effective_criteria` with ``gate_key="code_review"`` (story 5065),
+    so a project can add code-review criteria through the same overlay it uses for plan-review."""
+    return _criteria.effective_criteria(repo_root, gate_key=_GATE_KEY)
+
+
 # ── DET-criteria selectors (data-driven detector→criterion routing, story 7f0d) ──
 # The code-review DET consumer (detectors.py) used to hardcode its detector→criterion map
 # (a `rebar.builtin.security.` prefix + a gitleaks sentinel id). It now reads it FROM the
@@ -227,7 +260,9 @@ def overlay_flag_key(overlay_id: str) -> str:
     return "include_" + overlay_id.replace("-", "_")
 
 
-def threshold_for(criteria: Sequence[str]) -> tuple[float, bool]:
+def threshold_for(
+    criteria: Sequence[str], routing_map: dict[str, Any] | None = None
+) -> tuple[float, bool]:
     """Resolve ``(block_threshold, blocking_enabled)`` for a finding's criteria — the
     ``ThresholdResolver`` the kernel ``pass3_over_findings(..., threshold_for=...)`` consumes.
 
@@ -237,16 +272,15 @@ def threshold_for(criteria: Sequence[str]) -> tuple[float, bool]:
     criterion contributes the default threshold and is NOT blocking — so a base-reviewer dimension
     with no routing entry stays advisory at 0.95.
 
-    NOTE — intentional divergence from ``plan_review/orchestrator.py:_threshold_for``: that one
-    DERIVES blocking from ``default_posture == "blocking"``; we read an EXPLICIT
-    ``blocking_enabled`` field instead. This is deliberate — the detector keys are
-    ``default_posture: "blocking"`` (their INTENDED posture) yet must ship ADVISORY in v1, which
-    only a separate enable flag expresses; WS5 flips the flag without touching the posture.
-    ``default_posture``/``exec`` are staged data for WS3 (exec) / WS5 (posture) — do NOT "fix"
-    this back to the plan-review derivation."""
-    idx = routing_index()
-    thresholds = [
-        float(idx.get(c, {}).get("block_threshold", DEFAULT_BLOCK_THRESHOLD)) for c in criteria
-    ]
-    blocking_enabled = any(bool(idx.get(c, {}).get("blocking_enabled", False)) for c in criteria)
-    return (min(thresholds) if thresholds else DEFAULT_BLOCK_THRESHOLD), blocking_enabled
+    NOTE — intentional divergence from plan-review's resolver: that one DERIVES blocking from
+    ``default_posture == "blocking"``; we read an EXPLICIT ``blocking_enabled`` field instead.
+    This is deliberate — the detector keys are ``default_posture: "blocking"`` (their INTENDED
+    posture) yet must ship ADVISORY in v1, which only a separate enable flag expresses; WS5 flips
+    the flag without touching the posture. Since story 5065 BOTH conventions live SIDE-BY-SIDE in
+    the shared :func:`rebar.llm.criteria.threshold_for`, dispatched on ``gate=`` — this function
+    DELEGATES there with ``gate="code_review"`` (the divergence is preserved, not collapsed).
+
+    ``routing_map`` defaults to the PACKAGED :func:`routing_index` (byte-identical to before); a
+    repo-aware caller may pass :func:`effective_routing` to honour a project overlay's re-tunes."""
+    idx = routing_map if routing_map is not None else routing_index()
+    return _criteria.threshold_for(criteria, idx, gate=_GATE_KEY)

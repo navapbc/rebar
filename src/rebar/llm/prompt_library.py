@@ -231,14 +231,17 @@ def _invalidate_caches() -> None:
     """Drop the registry's cached criteria/routing so a freshly-authored criterion is
     visible in-process without a restart (``load_catalog``/``get_prompt`` read the
     disk each call, so only the registry's ``lru_cache``s need clearing)."""
+    from rebar.llm import criteria as _criteria
     from rebar.llm.plan_review import registry
 
     registry._routing_index.cache_clear()
-    # The overlay-merged views are (repo_root, overlay-signature)-keyed lru_caches — clear
-    # them too so a freshly-authored criterion/overlay is visible in-process without a
-    # restart (epic 3156). (An overlay EDIT self-invalidates via its content signature; this
-    # clear covers a same-signature in-place authoring write within one process.)
-    registry._effective_routing_cached.cache_clear()
+    # The overlay-merged views are (gate_key, repo_root, overlay-signature)-keyed lru_caches —
+    # clear them too so a freshly-authored criterion/overlay is visible in-process without a
+    # restart (epic 3156). Since story 5065 the overlay merge lives in the SHARED
+    # `rebar.llm.criteria` layer (clearing it covers BOTH gates); plan-review's descriptor memo
+    # (`_load_criteria_cached`) stays gate-local. (An overlay EDIT self-invalidates via its
+    # content signature; this clear covers a same-signature in-place authoring write.)
+    _criteria.clear_caches()
     registry._load_criteria_cached.cache_clear()
 
 
