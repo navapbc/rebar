@@ -21,9 +21,9 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-INBOUND_DIFFER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "inbound_differ.py"
-)
+ENGINE = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
+INBOUND_DIFFER_PATH = ENGINE / "inbound_differ.py"
+ADF_PATH = ENGINE / "adf.py"
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -38,6 +38,11 @@ def _load_module(name: str, path: Path) -> ModuleType:
 @pytest.fixture(scope="module")
 def inbound_differ() -> ModuleType:
     return _load_module("inbound_differ", INBOUND_DIFFER_PATH)
+
+
+@pytest.fixture(scope="module")
+def adf() -> ModuleType:
+    return _load_module("adf_inbound_conv", ADF_PATH)
 
 
 # ---------------------------------------------------------------------------
@@ -473,3 +478,101 @@ def test_inbound_label_diff_does_not_remove_local_colon_form_rebar_id(
             assert not (
                 lm.get("action") == "remove" and str(lm.get("label", "")).startswith("rebar-id:")
             ), f"Inbound differ emitted spurious REMOVE for rebar-id label: {lm}"
+
+
+# ---------------------------------------------------------------------------
+# Truncation convergence (bug tarry-amble-bugle): a Jira-side description that
+# is merely the reconciler's own send-side ADF-fit truncation of the local body
+# must NOT be pulled back inbound. Mirror of the OUTBOUND convergence guard
+# (outbound_fields._diff_fields applies fit_text_to_adf_limit to the local value
+# before comparing). Without the symmetric transform here, the inbound differ
+# emits changed["description"] = <truncated>, and the applier clobbers the full
+# local description — changing its plan-review fingerprint/signature.
+# ---------------------------------------------------------------------------
+
+# Multi-line oversize description: text_to_adf wraps each line in its own
+# paragraph node, so the ADF inflates far past plain-text length and the fit must
+# actually cut (mirrors the outbound convergence test's fixture).
+_OVERSIZE_DESC = ("X" * 30 + "\n") * 1500
+
+
+def _local_ticket(description: str) -> dict:
+    return {
+        "title": "Some issue",
+        "description": description,
+        "ticket_type": "bug",
+        "priority": 2,
+        "status": "open",
+        "assignee": "alice",
+        "tags": [],
+    }
+
+
+def _jira_snapshot(description: str) -> dict:
+    return {
+        "PROJ-900": {
+            "summary": "Some issue",
+            "description": description,
+            "issuetype": "Bug",
+            "priority": "Medium",
+            "status": "To Do",
+            "assignee": "alice",
+            "labels": [],
+        }
+    }
+
+
+def test_jira_truncated_description_not_pulled_back(
+    inbound_differ: ModuleType, adf: ModuleType
+) -> None:
+    """Jira holds the reconciler's own truncated body -> NO inbound description change.
+
+    The send path fit the local description to the ADF limit before it landed, so
+    Jira now carries ``fit_text_to_adf_limit(local_desc)``. The inbound differ must
+    apply the IDENTICAL fit to the local value before comparing and recognise the
+    two as equal — emitting no description mutation and leaving the local store
+    (and its fingerprint) untouched.
+    """
+    landed = adf.fit_text_to_adf_limit(_OVERSIZE_DESC)
+    assert len(landed) < len(_OVERSIZE_DESC), "fixture must actually truncate"
+
+    store = StubBindingStore({"PROJ-900": "local-900"})
+    local_tickets = {"local-900": _local_ticket(_OVERSIZE_DESC)}
+
+    result, suppressed = inbound_differ.compute_inbound_mutations(
+        jira_snapshot=_jira_snapshot(landed),
+        binding_store=store,
+        local_tickets_by_id=local_tickets,
+    )
+
+    desc_changes = [m for m in result if "description" in (m.fields or {})]
+    assert desc_changes == [], (
+        "Inbound differ must NOT pull the Jira-truncated description back into "
+        f"local (would clobber the full body / invalidate the signature): {desc_changes}"
+    )
+    # Local store must keep its full, untruncated description.
+    assert local_tickets["local-900"]["description"] == _OVERSIZE_DESC
+
+
+def test_genuine_jira_description_edit_still_flows_inbound(
+    inbound_differ: ModuleType, adf: ModuleType
+) -> None:
+    """A REAL Jira-side description edit (not mere truncation) must still sync inbound.
+
+    Guards against over-suppression: the convergence fix must only treat Jira as
+    equal when it is the truncated form of local. A genuinely different Jira body
+    must still emit an inbound description update (no regression to field-sync).
+    """
+    store = StubBindingStore({"PROJ-900": "local-900"})
+    local_tickets = {"local-900": _local_ticket(_OVERSIZE_DESC)}
+
+    edited = "A human edited this description in Jira entirely."
+    result, _ = inbound_differ.compute_inbound_mutations(
+        jira_snapshot=_jira_snapshot(edited),
+        binding_store=store,
+        local_tickets_by_id=local_tickets,
+    )
+
+    desc_changes = [m for m in result if "description" in (m.fields or {})]
+    assert len(desc_changes) == 1, "A genuine Jira description edit must flow inbound"
+    assert desc_changes[0].fields["description"] == edited

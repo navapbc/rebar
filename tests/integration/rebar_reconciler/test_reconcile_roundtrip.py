@@ -188,6 +188,65 @@ def test_description_survives_outbound_adf_inbound_unchanged(adf, outbound, inbo
     )
 
 
+def test_oversize_description_truncated_by_jira_not_pulled_back(adf, outbound, inbound):
+    """rebar -> Jira-TRUNCATED-ADF -> rebar: the truncated body must NOT clobber local.
+
+    Bug tarry-amble-bugle. When a local description is too long for Jira's ADF
+    limit, the send path truncates it (``adf.fit_text_to_adf_limit``) so it lands
+    — send-side only, the local store is never mutated. Jira then stores/returns
+    the TRUNCATED body. This chains the full round-trip and asserts the fixed
+    point:
+
+      * the OUTBOUND differ over the truncated Jira snapshot emits NO description
+        change (it fits the local value before comparing — long-standing);
+      * the INBOUND differ emits NO description change either (the fix — it must
+        apply the SAME fit to the local value, else it pulls Jira's truncated
+        body back into local, clobbering the full description and invalidating
+        the ticket's plan-review fingerprint/signature);
+      * the local ticket keeps its FULL, untruncated description.
+    """
+    bind = StubBindingStore({"loc-trunc": "DIG-99"})
+    # Multi-line oversize body: text_to_adf wraps each line in its own paragraph,
+    # so the ADF inflates well past the plain-text length and the fit must cut.
+    oversize = ("X" * 30 + "\n") * 1500
+    ticket = _make_ticket("loc-trunc", description=oversize, status="in_progress")
+
+    mapped = outbound._map_local_to_jira_fields(ticket)
+    landed = adf.fit_text_to_adf_limit(mapped["description"])
+    assert len(landed) < len(oversize), "fixture must actually truncate"
+
+    # Jira stores the truncated body as ADF — exactly what the next fetch returns.
+    jira_fields = {
+        "summary": mapped["summary"],
+        "description": adf.text_to_adf(landed),
+        "issuetype": {"name": mapped["issuetype"]},
+        "priority": {"name": mapped["priority"]},
+        "status": {"name": "In Progress"},
+        "assignee": {"displayName": ticket["assignee"]},
+        "labels": [],
+    }
+    assert jira_fields["description"]["type"] == "doc"  # sanity: really ADF
+
+    # Inbound must NOT pull the truncated body back into local.
+    inbound_muts, _ = inbound.compute_inbound_mutations(
+        {"DIG-99": jira_fields}, bind, {"loc-trunc": ticket}
+    )
+    inbound_desc = [m.fields["description"] for m in inbound_muts if "description" in m.fields]
+    assert inbound_desc == [], (
+        "inbound pulled Jira's TRUNCATED description back into local (would clobber "
+        f"the full body / invalidate the plan-review signature): {[d[:80] for d in inbound_desc]}"
+    )
+
+    # Outbound is also stable (it fits the local value before comparing).
+    out_muts, _ = outbound.compute_outbound_mutations([ticket], {"DIG-99": jira_fields}, bind)
+    assert "description" not in {f for m in out_muts for f in m.fields}, (
+        "outbound re-emitted the truncated description (per-pass churn)"
+    )
+
+    # Hard constraint: the local ticket keeps its FULL untruncated description.
+    assert ticket["description"] == oversize
+
+
 def test_description_with_trailing_whitespace_does_not_churn(adf, outbound, inbound):
     """A local description with trailing newlines must still converge.
 
