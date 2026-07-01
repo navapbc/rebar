@@ -117,3 +117,28 @@ echo "$vtotal" >"$VOTER_OFFSET_FILE"
 aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
   --metric-name voter_errors --unit Count --value "$vnew" 2>/dev/null || true
 [ "$vnew" -gt 0 ] && logger -t rebar-health "review-bot voter failures (new this interval)=${vnew}"
+
+# --- 5. Gerrit->GitHub mirror out-of-sync (WS7 / a774) ---------------------
+# After the mirror-lock cutover, GitHub `main` only advances via Gerrit replication.
+# If replication is stuck/failing, GitHub `main` falls BEHIND Gerrit `main` while Gerrit
+# keeps moving — a silent drift the S5 error-count probe (section 3) does NOT catch (a
+# push that never fires logs no failure). Publish mirror_out_of_sync = 1 when the two
+# `main` SHAs differ, else 0. Both reads are ANONYMOUS (Gerrit public REST + a public
+# `git ls-remote`), so no credentials are needed on the box. Transient lag (~15s after a
+# submit) is absorbed by the alarm's multi-period evaluation window (monitoring_ws7.tf),
+# not here. On a fetch failure we publish NOTHING (the alarm treats missing data as
+# healthy) rather than risk a false alarm from a blip.
+GERRIT_BASE_URL="${GERRIT_BASE_URL:-https://rebar.solutions.navateam.com}"
+GITHUB_REPO_URL="${GITHUB_REPO_URL:-https://github.com/navapbc/rebar}"
+gerrit_sha=$(curl -fsS --max-time 10 "${GERRIT_BASE_URL}/projects/rebar/branches/main" 2>/dev/null \
+  | sed "s/)]}'//" | grep -oE '"revision": ?"[0-9a-f]+"' | grep -oE '[0-9a-f]{40}')
+github_sha=$(git ls-remote "${GITHUB_REPO_URL}" refs/heads/main 2>/dev/null | awk '{print $1}')
+if [ -n "$gerrit_sha" ] && [ -n "$github_sha" ]; then
+  if [ "$gerrit_sha" = "$github_sha" ]; then oos=0; else oos=1; fi
+  # Dimensionless to match the alarm in monitoring_ws7.tf.
+  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name mirror_out_of_sync --unit Count --value "$oos" 2>/dev/null || true
+  [ "$oos" -gt 0 ] && logger -t rebar-health "mirror out-of-sync: gerrit=${gerrit_sha} github=${github_sha}"
+else
+  logger -t rebar-health "mirror sync check skipped (fetch failed: gerrit='${gerrit_sha}' github='${github_sha}')"
+fi

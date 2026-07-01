@@ -20,14 +20,26 @@
 #   On a provider < 6.8.0 this resource will not validate — use the gh-api path
 #   infra/github/apply-mirror-lock.sh instead (no provider-version dependency).
 #
+# MAIN-ONLY (WS7 cutover decision, epic b744):
+#   The live cutover locked ONLY `main` (ruleset `gerrit-mirror-lock-main`,
+#   id 18402431) and deliberately LEFT TAGS OPEN so `.github/workflows/release.yml`
+#   (PyPI publish on a human `v*` tag push) keeps working. The tag_lock resource
+#   was therefore REMOVED from this module. To re-lock tags later, re-add it plus a
+#   release-tag path (push tags via the deploy key or a CI bypass).
+#
 # NOT MANAGED HERE (deliberately):
 #   * No `github_repository` resource — managing it risks `terraform destroy`
 #     DELETING the repo. Repo feature toggles (PRs/Issues/Actions) and the
 #     "mirror" banner are runbook/gh-api steps, not Terraform.
-#   * The pre-existing `main-protection` ruleset (id 18048287) is NOT imported.
-#     It is snapshotted at infra/github/main-protection.snapshot.json (S6-pre)
-#     and removed during cutover (runbook / apply-mirror-lock.sh
-#     --delete-main-protection); rollback recreates it from the snapshot.
+#   * The legacy `main-protection` ruleset removed during the WS7 cutover was
+#     id **18306946** (not the older `18048287` the snapshot/S6 comments reference —
+#     the ruleset was recreated between S6-pre and cutover). It is snapshotted at
+#     infra/github/main-protection.snapshot.json; rollback recreates it from the
+#     snapshot (see infra/runbooks/github-mirror-lock.md).
+#
+# STATE: applied out-of-band via gh-api at cutover, then `terraform import`ed so
+#   `terraform plan` is clean. Keep it that way — future ruleset changes go through
+#   this module (`terraform apply`), not gh-api.
 # ---------------------------------------------------------------------------
 
 provider "github" {
@@ -39,26 +51,11 @@ provider "github" {
 }
 
 # EXISTENCE GATE — the S5 replication deploy key must be present. We read all
-# deploy keys and assert (in a `check` block below) that the titled key exists.
+# deploy keys and assert it (in a `lifecycle { precondition }` on the lock below).
 # Locking with a missing bypass actor would lock EVERYONE out, replication
-# included; this makes the apply fail loudly instead.
+# included, so the assertion must ABORT the apply (fail-closed), not merely warn.
 data "github_repository_deploy_keys" "all" {
   repository = var.repository
-}
-
-check "deploy_key_present" {
-  assert {
-    condition = length([
-      for k in data.github_repository_deploy_keys.all.keys :
-      k if k.title == var.deploy_key_title
-    ]) > 0
-    error_message = <<-EOT
-      Replication deploy key '${var.deploy_key_title}' not found on
-      navapbc/${var.repository}. Register it (S5, write-enabled) BEFORE applying
-      the mirror-lock — otherwise the lock's only bypass actor is absent and
-      replication is locked out along with everyone else.
-    EOT
-  }
 }
 
 # Branch lock: restrict updates to `main` to bypass actors only (the deploy
@@ -87,41 +84,23 @@ resource "github_repository_ruleset" "main_lock" {
     bypass_mode = "always"
     # actor_id intentionally omitted — a DeployKey bypass has no numeric id.
   }
-}
 
-# Tag lock: restrict creation/update/deletion of ALL tags to the deploy key.
-resource "github_repository_ruleset" "tag_lock" {
-  name        = "gerrit-mirror-lock-tags"
-  repository  = var.repository
-  target      = "tag"
-  enforcement = "active"
-
-  conditions {
-    ref_name {
-      include = ["refs/tags/**"]
-      exclude = []
+  # FAIL-CLOSED existence gate. Unlike a `check` block (which only emits a WARNING
+  # and lets `apply` proceed), a resource `precondition` ABORTS plan/apply when the
+  # replication deploy key is absent — so we can never activate a lock whose sole
+  # bypass actor does not exist (which would freeze `main` for replication too).
+  lifecycle {
+    precondition {
+      condition = length([
+        for k in data.github_repository_deploy_keys.all.keys :
+        k if k.title == var.deploy_key_title
+      ]) > 0
+      error_message = "Replication deploy key '${var.deploy_key_title}' not found on navapbc/${var.repository}. Register it (S5, write-enabled) BEFORE applying the mirror-lock — otherwise the lock's only bypass actor is absent and replication is locked out along with everyone else."
     }
-  }
-
-  rules {
-    creation = true
-    update   = true
-    deletion = true
-  }
-
-  bypass_actors {
-    actor_type  = "DeployKey"
-    bypass_mode = "always"
-    # actor_id intentionally omitted — a DeployKey bypass has no numeric id.
   }
 }
 
 output "main_lock_ruleset_id" {
   description = "Ruleset id of the branch lock on main."
   value       = github_repository_ruleset.main_lock.ruleset_id
-}
-
-output "tag_lock_ruleset_id" {
-  description = "Ruleset id of the tag lock."
-  value       = github_repository_ruleset.tag_lock.ruleset_id
 }
