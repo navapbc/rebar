@@ -458,6 +458,92 @@ def _prompt_eval(args) -> int:
     return 0
 
 
+def _criteria(argv: list[str]) -> int:
+    """``rebar criteria eval <id>`` → run a criterion's calibration fixtures LIVE (story
+    55b8). Unlike ``rebar prompt eval`` (validate-only), this executes the criterion's
+    must-fire/must-not-fire fixtures through its Pass-1 finder and prints the calibration
+    view (recall / false-accept / Cohen's κ / agreement / N-run stability) so a maintainer
+    can decide blocking/threshold informed. Needs the ``agents`` extra + credentials."""
+
+    parser = argparse.ArgumentParser(
+        prog="rebar criteria", description="Evaluate + calibrate review criteria."
+    )
+    subparsers = parser.add_subparsers(dest="cmd")
+    p_eval = subparsers.add_parser("eval", help="run a criterion's calibration fixtures live")
+    p_eval.add_argument("criterion_id", help="criterion id (e.g. F1, project.no_print)")
+    p_eval.add_argument(
+        "--runs", type=int, default=1, help="N-run stability: runs per fixture (default 1)"
+    )
+    p_eval.add_argument("--output", "-o", choices=["text", "json"], default="text")
+
+    args = parser.parse_args(argv)
+    if args.cmd == "eval":
+        return _criteria_eval(args)
+    parser.print_help()
+    return 1
+
+
+def _criteria_eval(args) -> int:
+    import json as _json
+
+    from rebar import config
+    from rebar.llm import eval as _eval
+    from rebar.llm.errors import LLMError
+
+    if not (args.criterion_id or "").strip():
+        sys.stderr.write("Error: a criterion id is required (e.g. `rebar criteria eval F1`)\n")
+        return 2
+    if args.runs < 1:
+        sys.stderr.write("Error: --runs must be >= 1\n")
+        return 2
+    try:
+        repo_root = str(config.repo_root())
+    except Exception:  # noqa: BLE001 — not in a repo — fall open to repo_root=None
+        repo_root = None
+
+    # Reject an unknown criterion up front (before touching fixtures) with a clear message.
+    try:
+        from rebar.llm.plan_review import registry
+
+        if args.criterion_id not in registry.by_id(repo_root):
+            sys.stderr.write(
+                f"Error: unknown criterion {args.criterion_id!r} (not in the effective registry; "
+                "activate a project criterion in .rebar/criteria_routing.json first)\n"
+            )
+            return 1
+    except LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+
+    try:
+        report = _eval.calibrate_criterion(args.criterion_id, repo_root=repo_root, runs=args.runs)
+    except LLMError as exc:  # absent fixture / empty dataset / missing extra — user-actionable
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+
+    if args.output == "json":
+        sys.stdout.write(_json.dumps(report) + "\n")
+        return 0
+
+    def _pct(v):
+        return "—" if v is None else f"{v * 100:.0f}%"
+
+    sys.stdout.write(f"Calibration for criterion {report['criterion']!r} ({report['prompt']}):\n")
+    sys.stdout.write(
+        f"  fixtures: {report['n_fire']} must-fire, {report['n_nofire']} must-not-fire, "
+        f"{report['n_discrimination']} discrimination  (runs={report['runs']})\n"
+    )
+    sys.stdout.write(f"  recall (must-fire fired):        {_pct(report['recall'])}\n")
+    sys.stdout.write(f"  false-accept (must-not-fire fired): {_pct(report['false_accept'])}\n")
+    sys.stdout.write(f"  agreement (observed==expected):  {_pct(report['agreement'])}\n")
+    sys.stdout.write(f"  Cohen's κ:                       {report['kappa']:.2f}\n")
+    sys.stdout.write(
+        f"  stability:                       min {_pct(report['stability_min'])}, "
+        f"mean {_pct(report['stability_mean'])}\n"
+    )
+    return 0
+
+
 def _llm(argv: list[str]) -> int:
     """``rebar llm setup`` → the LLM-framework onboarding wizard (WS-J2).
 
