@@ -231,6 +231,10 @@ pip install '.[mcp]'      # + MCP server (FastMCP)
 pip install -e '.[dev]'
 ```
 
+> **Contributing changes?** GitHub is a **read-only mirror** — `main` only advances via
+> the Gerrit `LLM-Review` gate. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the Gerrit
+> contribution flow (clone from Gerrit, push to `refs/for/main`, submit after the vote).
+
 > **Packaging note — why rebar installs *unpacked* to disk.** The library, CLI,
 > MCP server, and the whole read/write core run **in-process** in Python. The one
 > component that runs as a subprocess is the Jira **reconciler**, which ships under
@@ -248,7 +252,9 @@ pip install -e '.[dev]'
 > LLM-reviewed before it can land, you can self-host Gerrit + the rebar review-bot on
 > AWS (the bot imports the same `rebar.llm` review kernel the MCP server exposes) and
 > demote GitHub to a read-only mirror that only advances via Gerrit after the
-> `LLM-Review` vote passes. See [docs/gerrit-aws-setup.md](docs/gerrit-aws-setup.md).
+> `LLM-Review` vote passes. See [docs/gerrit-aws-setup.md](docs/gerrit-aws-setup.md) for
+> the server setup. *(This repo runs exactly that setup — see the contributor note above
+> and [CONTRIBUTING.md](CONTRIBUTING.md).)*
 
 ## CLI
 
