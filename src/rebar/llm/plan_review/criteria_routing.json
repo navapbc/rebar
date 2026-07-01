@@ -254,16 +254,20 @@
     "default_posture": "blocking",
     "checklist": [
       {
-        "key": "sizing_signals",
-        "check": ">3 files OR >=3 layers OR a new interface OR low scope-certainty pushes toward decompose."
+        "key": "single_concern",
+        "check": "COHERENCE is primary: flag decomposition only when the unit bundles >1 independently-releasable outcome, >1 reason-to-change (distinct actor/persona/concern), or mixes heterogeneous change kinds (fix + feature + unrelated refactor). An epic/parent that fails single-concern should have children."
       },
       {
-        "key": "parent_single_concern",
-        "check": "An epic/parent passes single-concern (no structural 'and' joining independent goals; not multi-persona/UI+backend/with-migration/>6 criteria) or has children."
+        "key": "value_preservation",
+        "check": "A decomposition finding stands ONLY if the unit would divide into pieces that are each independently valuable, testable, and releasable. A single increment of value whose parts would be coupled/order-dependent/worthless-apart is right-sized whole — PASS it."
       },
       {
-        "key": "decomposition_present",
-        "check": "Decomposition into children is present and sensible where size demands it."
+        "key": "not_layers_or_size",
+        "check": "Do NOT flag a unit for spanning multiple architectural layers, for touching several files, or for introducing an interface whose consumer ships in the same unit — that is a coherent vertical slice, the shape of a good unit. Splitting one feature horizontally by layer is an anti-pattern."
+      },
+      {
+        "key": "weak_priors",
+        "check": "Genuine diffusion (scatter across UNRELATED subsystems, not many files in one coherent area) and low scope-certainty are advisory-only signals to SURFACE, never the sole basis for a finding; weigh them only alongside a real single-concern violation. Observe the concern; do not prescribe a remedy."
       },
       {
         "key": "leaf_coherent",

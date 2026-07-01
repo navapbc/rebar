@@ -92,6 +92,26 @@ dataset:
     input: >
       An epic-sized task bundling schema migration + API + UI + docs into one ticket
       with a flat 18-item AC list and no decomposition.
+  - id: R-G5-mixed-kinds
+    corpus: rebar
+    criterion: G5
+    expect: finding
+    input: >
+      A single task that bundles THREE heterogeneous change kinds: fix a concurrency bug in
+      the reducer, ADD a new `--json` output flag to the CLI, AND reformat/refactor an
+      unrelated module for tidiness. Each is an independently-releasable outcome with its own
+      reason to change. G5 SHOULD fire (recall): mixing a bug-fix + a new feature + an
+      unrelated refactor fails single-concern; each belongs in its own child.
+  - id: R-G5-multi-outcome
+    corpus: snap
+    criterion: G5
+    expect: finding
+    input: >
+      A Rails story titled "Add CSV export AND migrate the auth provider to OAuth" — two
+      independently-valuable, independently-releasable outcomes joined by a structural 'and',
+      serving different personas (a data-exporting end user vs the auth/security concern).
+      G5 SHOULD fire (recall): each outcome would be independently valuable and testable on
+      its own, so the unit should decompose into two children.
   - id: R-F4-rebar
     corpus: rebar
     criterion: F4
@@ -175,6 +195,50 @@ dataset:
       (plus the offline suite). E5 must NOT fire proxy-validation: the defaulted path IS
       exercised live — the anti-FP pair for R-E5-proxy-validation-cutover (discrimination,
       not blanket firing on every cutover).
+  # ── G5 decomposition false-fires (the coherent-but-broad cases our tuning protects) ──
+  - id: FP-G5-vertical-slice
+    corpus: rebar
+    criterion: G5
+    expect: pass
+    mode: coherent-vertical-slice-spans-layers
+    input: >
+      A story implementing ONE feature — "let a user rename a ticket from the board" — as a
+      coherent vertical slice: it touches the UI (the board component), the request handler,
+      the domain/reducer, and the store (four files across three architectural layers).
+      Single concern, one user-facing outcome, delivered end-to-end. G5 must PASS: spanning
+      layers/files is the SHAPE OF A GOOD vertical slice, not a decomposition trigger.
+  - id: FP-G5-many-files-one-concern
+    corpus: rebar
+    criterion: G5
+    expect: pass
+    mode: many-files-one-coherent-area
+    input: >
+      A task that renames one domain concept ("assignee" → "owner") consistently across 6
+      files within a single coherent module (the model, its serializer, two call sites, and
+      two tests). One reason to change, one releasable outcome, tightly cohesive. G5 must
+      PASS: many files within one coherent area is not diffusion across unrelated subsystems.
+  - id: FP-G5-new-interface-with-consumer
+    corpus: rebar
+    criterion: G5
+    expect: pass
+    mode: new-interface-with-colocated-consumer
+    input: >
+      A story that adds a new `TicketExporter` interface AND its first concrete
+      implementation AND the single call site that uses it, all shipped together in one unit.
+      G5 must PASS: introducing an interface whose consumer ships in the same unit is a
+      complete logical change — splitting the producer from its only consumer would leave a
+      valueless half.
+  - id: FP-G5-coupled-not-splittable
+    corpus: snap
+    criterion: G5
+    expect: pass
+    mode: parts-not-independently-valuable
+    input: >
+      A story adding one atomic capability — "sign the completion manifest with an HMAC and
+      verify it on read" — whose sign and verify halves are useless apart (a signature no one
+      verifies, or a verifier with nothing to check) and must ship together to deliver any
+      value. G5 must PASS the value-preservation test: the parts would not each be
+      independently valuable/releasable, so the unit is right-sized whole.
 
 # Frozen human-gold subset (kappa alignment for the llm-judge). SEED labels — pending
 # human adjudication (the gating gold subset; auto-labels seed the bulk corpus).

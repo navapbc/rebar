@@ -91,12 +91,13 @@ def test_allow_insufficient_is_graded_honestly_not_dropped() -> None:
 
 def test_verdict_with_citation_not_fix_contract_has_no_fix_field() -> None:
     """The verifier renders a verdict-with-citation, never a fix: the verification contract
-    carries ONLY severity_attributes + the binary sub-answers + the index — no fix/remediation
-    field for the model to author prose into."""
+    carries severity_attributes + the binary sub-answers + the index (+ a REASON-FIRST `analysis`
+    scratchpad) — but NO fix/remediation field for the model to author a fix into."""
     model = review_kernel.verification_model()
     verification = model.model_fields["verifications"].annotation.__args__[0]
     fields = set(verification.model_fields)
-    assert fields == {"index", "severity_attributes", "binary"}
+    # The judgement fields (index + severity + binary) plus the reasoning scratchpad — nothing else.
+    assert fields == {"index", "analysis", "severity_attributes", "binary"}
     for forbidden in ("fix", "suggested_fix", "remediation", "patch"):
         assert forbidden not in fields
 

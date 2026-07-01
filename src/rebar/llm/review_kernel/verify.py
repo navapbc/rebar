@@ -118,17 +118,44 @@ def verification_model(*, strict: bool = False) -> type:
         reversibility: str = Field(default="easy", description="easy|moderate|hard")
 
     # The binary field set is DERIVED from GRADED_BINARY (the single vocabulary in .decide) so
-    # the contract and the validity math can never name different sub-questions.
+    # the contract and the validity math can never name different sub-questions. Each graded
+    # sub-question accepts yes|no|insufficient|na — `na` (or any non-yes/no/insufficient value)
+    # is EXCLUDED from the validity mean by `decide.validity`, so a verifier can abstain on a
+    # sub-question that does not apply to a finding's shape instead of guessing `insufficient`.
+    _BINARY_DESC = {
+        "is_verifiable": "yes|no|insufficient|na — finding stated concretely enough to test.",
+        "evidence_entails_finding": (
+            "yes|no|insufficient|na — the cited evidence actually ENTAILS the finding under a "
+            "charitable reading (load-bearing; do not answer na)."
+        ),
+        "path_reachable": (
+            "yes|no|insufficient|na — the situation is reachable as written (na if the finding is "
+            "structural/organisational with no execution path)."
+        ),
+        "impact_follows_necessarily": "yes|no|insufficient|na — asserted harm NECESSARILY follows.",
+        "no_viable_alternative_explanation": (
+            "yes|no|insufficient|na — no reasonable benign reading dissolves the finding."
+        ),
+        "no_existing_mitigation": "yes|no|insufficient|na — nothing already mitigates the flaw.",
+        "severity_claim_justified": (
+            "yes|no|insufficient|na — the finding's asserted impact is proportionate, not inflated."
+        ),
+    }
     binary_fields: dict[str, Any] = {
         "cited_reference_accurate": (str, Field(default="na", description="yes|no|insufficient|na"))
     }
     for q in GRADED_BINARY:
-        binary_fields[q] = (str, Field(default="insufficient"))
+        binary_fields[q] = (str, Field(default="insufficient", description=_BINARY_DESC.get(q, "")))
     Binary = create_model("Binary", __config__=forbid, **binary_fields)
 
     class Verification(BaseModel):
         model_config = forbid
         index: int = Field(description="The 0-based index of the finding being verified.")
+        analysis: str = Field(
+            default="",
+            description="REASON FIRST: brief reasoning through this finding's sub-questions "
+            "(as an unproven claim) before the attributes/answers.",
+        )
         severity_attributes: SeverityAttrs = Field(default_factory=SeverityAttrs)
         binary: Binary = Field(default_factory=Binary)  # type: ignore[valid-type]
 
