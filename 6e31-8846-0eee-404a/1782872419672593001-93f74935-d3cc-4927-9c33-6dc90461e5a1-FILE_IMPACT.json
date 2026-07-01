@@ -1,0 +1,1 @@
+{"author":"Iso Tester","data":{"file_impact":[{"path":"src/rebar/llm/workflow/editor.py","reason":"POST /criterion/preview + routing-form routes"},{"path":"src/rebar/llm/prompt_library.py","reason":"criterion authoring reuse"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782872419672593001,"uuid":"93f74935-d3cc-4927-9c33-6dc90461e5a1"}
