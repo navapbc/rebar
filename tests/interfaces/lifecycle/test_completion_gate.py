@@ -367,3 +367,37 @@ def test_session_log_close_is_refused_no_signature(rebar_repo: Path, monkeypatch
         _t.transition_compute(rid, "open", "closed", repo_root=str(rebar_repo))
     assert _status(log, rebar_repo) == "open"  # never closed (lifecycle guard refuses)
     assert rebar.verify_signature(log, repo_root=str(rebar_repo))["verdict"] == "unsigned"
+
+
+# ── session-provenance precedence: REBAR_SESSION_ID > SESSION_ID > short HEAD > "unknown" ──
+# Ticket c1bf (decided on 83f2): the FORCE_CLOSE audit-comment session id prefers the explicit,
+# rebar-owned REBAR_SESSION_ID, then the ambient SESSION_ID, then short git HEAD, then "unknown".
+# Additive "support both" — no deprecation warning; setting only ambient SESSION_ID is unchanged.
+def test_resolve_session_prefers_rebar_session_id(monkeypatch) -> None:
+    """(a) REBAR_SESSION_ID wins even when ambient SESSION_ID is also set."""
+    monkeypatch.setenv("REBAR_SESSION_ID", "explicit-rebar")
+    monkeypatch.setenv("SESSION_ID", "ambient")
+    assert _t._resolve_session("ignored") == "explicit-rebar"
+
+
+def test_resolve_session_falls_back_to_ambient_session_id(monkeypatch) -> None:
+    """(b) With only ambient SESSION_ID set, behavior is exactly as before (back-compat)."""
+    monkeypatch.delenv("REBAR_SESSION_ID", raising=False)
+    monkeypatch.setenv("SESSION_ID", "ambient")
+    assert _t._resolve_session("ignored") == "ambient"
+
+
+def test_resolve_session_falls_back_to_short_head(monkeypatch) -> None:
+    """(c) Neither env var set → short git HEAD is used."""
+    monkeypatch.delenv("REBAR_SESSION_ID", raising=False)
+    monkeypatch.delenv("SESSION_ID", raising=False)
+    monkeypatch.setattr(_t, "_short_head", lambda _tracker: "abc1234")
+    assert _t._resolve_session("ignored") == "abc1234"
+
+
+def test_resolve_session_falls_back_to_unknown(monkeypatch) -> None:
+    """(d) Neither env var set and no HEAD available → 'unknown'."""
+    monkeypatch.delenv("REBAR_SESSION_ID", raising=False)
+    monkeypatch.delenv("SESSION_ID", raising=False)
+    monkeypatch.setattr(_t, "_short_head", lambda _tracker: "")
+    assert _t._resolve_session("ignored") == "unknown"
