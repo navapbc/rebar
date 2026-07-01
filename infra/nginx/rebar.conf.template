@@ -1,0 +1,78 @@
+# ---------------------------------------------------------------------------
+# nginx site for rebar.solutions.navateam.com (epic d251 / story S2).
+#
+# This is a TEMPLATE: ${REVIEW_BOT_PORT} is substituted at boot via envsubst,
+# e.g. (in the deploy/boot script):
+#     export REVIEW_BOT_PORT
+#     envsubst '${REVIEW_BOT_PORT}' \
+#       < infra/nginx/rebar.conf.template \
+#       > /etc/nginx/conf.d/rebar.conf
+#     nginx -t && systemctl reload nginx
+# Only ${REVIEW_BOT_PORT} is templated; the single-quoted envsubst arg above ensures
+# nginx's own $variables (e.g. $host, $remote_addr) are left untouched.
+#
+# nginx runs as a HOST package (dnf nginx) — NOT a container — so host certbot can
+# manage the Let's Encrypt cert and reload it in place (see ADR-0007 and
+# infra/scripts/install-certbot-timer.sh). It proxies to the loopback-published
+# container ports: Gerrit on 127.0.0.1:8080, review-bot on 127.0.0.1:${REVIEW_BOT_PORT}.
+# ---------------------------------------------------------------------------
+
+# --- Port 80: ACME challenge + redirect everything else to HTTPS -----------
+server {
+    listen 80;
+    listen [::]:80;
+    server_name rebar.solutions.navateam.com;
+
+    # Serve the Let's Encrypt HTTP-01 challenge from the certbot webroot. certbot
+    # writes tokens here; this must stay reachable on plain HTTP for issuance/renewal.
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    # Everything else: permanent redirect to HTTPS.
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# --- Port 443: TLS terminator + reverse proxy -----------------------------
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name rebar.solutions.navateam.com;
+
+    ssl_certificate     /etc/letsencrypt/live/rebar.solutions.navateam.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/rebar.solutions.navateam.com/privkey.pem;
+
+    # Gerrit pushes/clones can be large; lift the body cap.
+    client_max_body_size 0;
+
+    # --- review-bot: /review/ -> the FastAPI receiver --------------------
+    # The trailing slash + trailing slash on proxy_pass STRIPS the /review/ prefix,
+    # so an external GET /review/health reaches the app as GET /health.
+    location /review/ {
+        proxy_pass http://127.0.0.1:${REVIEW_BOT_PORT}/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    # --- Gerrit: everything else -----------------------------------------
+    # CRITICAL — %2F-safe proxying. Gerrit project/change refs contain encoded
+    # slashes (e.g. /a/projects/foo%2Fbar), and Gerrit must receive the request URI
+    # with %2F INTACT. nginx preserves the raw, un-decoded request URI ONLY when
+    # proxy_pass has NO URI path component (no trailing slash, no path) AND there is
+    # no rewrite in this location. So we deliberately use a bare
+    # `proxy_pass http://127.0.0.1:8080;` (host:port only) — adding even a trailing
+    # `/` here would make nginx normalize/decode the URI and corrupt %2F. Do NOT add
+    # a path to this proxy_pass or a rewrite to this block.
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}

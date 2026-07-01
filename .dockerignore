@@ -1,0 +1,24 @@
+# Docker build context exclusions for the review-bot image (build context = repo
+# root; see infra/compose/Dockerfile.reviewbot). Keeps the context lean and — most
+# importantly — keeps the ephemeral SSM-sourced secrets .env OUT of image layers.
+# (.env is git-ignored, but git-ignore does NOT exclude it from the Docker context.)
+.git
+.venv
+.tickets-tracker
+infra/compose/.env
+**/.env
+**/__pycache__
+**/*.pyc
+.terraform
+**/.terraform
+*.tfstate
+*.tfstate.*
+dist
+build
+*.egg-info
+.serena
+.claude
+node_modules
+.pytest_cache
+.mypy_cache
+.ruff_cache

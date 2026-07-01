@@ -314,6 +314,15 @@ dead `TICKET_CMD`/`REBAR_TICKET_CLI`/`TICKET_WORDLIST_PATH`/`TICKET_SYNC_CMD`/
 `_REBAR_GC_AUTO_ZERO`/`REBAR_FSCK_NO_MUTATE` internals. See the env-var
 standardization story `60ce`.
 
+**Session provenance (`REBAR_SESSION_ID` / `SESSION_ID`).** The session id stamped
+into the FORCE_CLOSE audit comment resolves with precedence
+`REBAR_SESSION_ID` → `SESSION_ID` → short git HEAD → `"unknown"`. `REBAR_SESSION_ID`
+is the explicit, rebar-owned override; `SESSION_ID` is the ambient, externally-set
+(e.g. CI/agent) value. This is **additive "support both"**, *not* a deprecating
+rename: ambient `SESSION_ID` remains permanently valid (setting only it is unchanged),
+so there is **no deprecation warning** — unlike the renamed keys above. Decided on
+ticket `83f2`; see `60ce`.
+
 ## Transparency
 
 `rebar config` (a.k.a. `--show-config`) prints the resolved values and **which

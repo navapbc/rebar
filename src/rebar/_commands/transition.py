@@ -521,7 +521,7 @@ def transition_compute(
 
     # Force-close audit comment (best-effort, silenced — matches bash || true).
     if target_status == "closed" and force_close:
-        session = os.environ.get("SESSION_ID") or _short_head(tracker) or "unknown"
+        session = _resolve_session(tracker)
         body = (
             "FORCE_CLOSE: close gate(s) bypassed by user approval — no completion/signature "
             f'attestation was signed. Reason: "{force_close}". Session: {session}.'
@@ -556,6 +556,23 @@ def transition_compute(
         "newly_unblocked": newly_unblocked,
         "noop": False,
     }
+
+
+def _resolve_session(tracker: str) -> str:
+    """Resolve the event-provenance session id for the FORCE_CLOSE audit comment.
+
+    Precedence (ticket c1bf, decided on 83f2): the explicit, rebar-owned
+    ``REBAR_SESSION_ID`` wins, then the ambient (externally-set) ``SESSION_ID``,
+    then short git HEAD, then ``"unknown"``. This is an ADDITIVE "support both"
+    precedence, not a deprecating rename — ambient ``SESSION_ID`` stays permanently
+    valid (so setting only it is unchanged), hence NO deprecation warning here.
+    """
+    return (
+        os.environ.get("REBAR_SESSION_ID")
+        or os.environ.get("SESSION_ID")
+        or _short_head(tracker)
+        or "unknown"
+    )
 
 
 def _short_head(tracker: str) -> str:
