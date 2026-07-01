@@ -84,6 +84,36 @@ def test_produce_verdict_enabled_runs_gate_and_validates(monkeypatch):
     schemas.validator(schemas.CODE_REVIEW_VERDICT).validate(v)
 
 
+def test_produce_verdict_enabled_override_forces_run_when_config_disabled(monkeypatch):
+    # WS6 force-enable (ADR 0015): the reviewed repo has code_review_enabled=False, but the Gerrit
+    # voter passes enabled=True — the gate MUST run (not return the inert disabled verdict).
+    monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: False)
+    from rebar.llm.code_review import detectors as _det
+
+    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})  # focus on the gate path
+    v = gate_dispatch.produce_code_review_verdict(
+        LLMConfig.from_env(),
+        diff_text=_DIFF,
+        changed_files=["x.py"],
+        runner=FakeRunner(structured=_STRUCTURED),
+        enabled=True,
+    )
+    assert v["coverage"].get("enabled") is not False  # NOT the inert disabled verdict
+    assert v["coverage"].get("llm_ran") is True  # the gate actually ran
+
+
+def test_produce_verdict_enabled_false_forces_inert_when_config_enabled(monkeypatch):
+    # The override is symmetric: enabled=False forces the inert verdict + zero LLM calls even when
+    # the config says the gate is enabled.
+    monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
+    runner = _CountingRunner(structured=_STRUCTURED)
+    v = gate_dispatch.produce_code_review_verdict(
+        LLMConfig.from_env(), diff_text=_DIFF, runner=runner, enabled=False
+    )
+    assert v["verdict"] == "PASS" and v["coverage"]["enabled"] is False
+    assert runner.calls == 0  # inert: the override short-circuited before any LLM call
+
+
 def test_review_code_enabled_translates_verdict_to_review_result(monkeypatch):
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
     from rebar.llm.code_review import detectors as _det
