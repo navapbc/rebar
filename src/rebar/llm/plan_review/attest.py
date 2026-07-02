@@ -647,6 +647,104 @@ def compute_validity(
     return {"valid": True, "reason": f"certified {kind} attestation", "verdict": "certified"}
 
 
+# ── completion-awareness: is a container's child "delivered" right now? ───────────
+def _attested_delivered(ticket: dict[str, Any], *, repo_root=None) -> bool:
+    """Branch (A) of :func:`delivered_now` for a SINGLE ticket: it is ``closed`` AND holds a
+    ``completion-verifier`` attestation that is VALID ON READ.
+
+    Reuses the EXACT per-child validity read that
+    :func:`rebar.llm.completion._child_closure_findings` performs — get the ticket's
+    ``completion-verifier`` signature via :func:`rebar.verify_signature` and, when it is
+    ``certified``, run :func:`compute_validity` (kind ``"completion-verifier"``) against the
+    ticket's OWN state. A force-closed / unsigned / drift-stale (compute_validity ``valid=False``)
+    / not-closed ticket fails. Fail-closed: any read error → not delivered."""
+    import rebar
+
+    if ticket.get("status") != "closed":
+        return False
+    tid = ticket.get("ticket_id")
+    if not tid:
+        return False
+    try:
+        sig = rebar.verify_signature(tid, kind="completion-verifier", repo_root=repo_root)
+        if sig.get("verdict") != "certified":
+            return False
+        return bool(
+            compute_validity(sig, ticket, "completion-verifier", repo_root=repo_root).get("valid")
+        )
+    except Exception:  # noqa: BLE001 — never let a signature read crash the predicate; fail closed
+        logger.warning("delivered_now: attestation read failed for %s", tid, exc_info=True)
+        return False
+
+
+def _supersedes_child(candidate: dict[str, Any], child_id: str) -> bool:
+    """True when ``candidate`` carries a ``candidate -supersedes-> child`` link. A ``supersedes``
+    link is stored on the SOURCE ticket's ``deps`` as ``{"relation": "supersedes",
+    "target_id": <child>}`` (``add_dependency`` writes to the source dir; ``supersedes`` is never
+    hierarchy-promoted), so "A supersedes child" is A's dep whose ``target_id`` is the child."""
+    for dep in candidate.get("deps") or []:
+        if (
+            isinstance(dep, dict)
+            and dep.get("relation") == "supersedes"
+            and dep.get("target_id") == child_id
+        ):
+            return True
+    return False
+
+
+def delivered_now(child: dict[str, Any], siblings: list[dict[str, Any]], *, repo_root=None) -> bool:
+    """Is a container's CHILD ticket ``child`` DELIVERED right now, for plan-review
+    completion-awareness? Keys on VERIFIED delivery, NEVER bare ``closed`` status.
+
+    Returns ``True`` IFF either:
+
+    (A) DELIVERED-AND-ATTESTED — ``child`` is ``closed`` AND holds a ``completion-verifier``
+        attestation that is valid on read (see :func:`_attested_delivered`, which reuses the
+        SAME ``verify_signature`` + :func:`compute_validity` read as
+        ``completion._child_closure_findings``). A force-closed / unsigned / drift-stale /
+        reopened-after-signing child fails.
+
+    (B) SUPERSEDED-BY-LIVE-IN-EPIC-SIBLING — there is a ticket ``A`` in ``siblings`` that
+        SUPERSEDES ``child`` (an ``A -supersedes-> child`` link), shares ``child``'s
+        ``parent_id`` (an in-epic sibling), and is a LIVE vehicle: ``A`` is ``open`` /
+        ``in_progress``, OR ``A`` is itself delivered-and-attested (branch (A) applied to ``A``).
+        The supersede branch does NOT recurse (only ``A``'s own status/attestation is consulted),
+        so a superseded-by-non-sibling / superseded-by-force-closed(dead)-sibling ``child`` is
+        NOT delivered here.
+
+    PURE / recomputed each call — no persisted state, no caching. Reopen semantics fall out of
+    :func:`compute_validity` keying on each ticket's OWN ``last_reopened_at``: a PARENT reopen
+    does NOT un-deliver a child (the child's state is unchanged), only a CHILD's own reopen does.
+
+    ``siblings`` is supplied by the caller — the container's children, e.g.
+    ``rebar.list_tickets(parent=<container>, repo_root=…)`` — mirroring how
+    ``completion._child_closure_findings`` enumerates a parent's children."""
+    if _attested_delivered(child, repo_root=repo_root):
+        return True
+
+    child_id = child.get("ticket_id")
+    if not child_id:
+        return False
+    child_parent = child.get("parent_id")
+    for a in siblings or []:
+        if not isinstance(a, dict):
+            continue
+        a_id = a.get("ticket_id")
+        if a_id is None or a_id == child_id:
+            continue
+        if a.get("parent_id") != child_parent:  # not an in-epic sibling
+            continue
+        if not _supersedes_child(a, child_id):
+            continue
+        # A is a LIVE in-epic vehicle: actively open/in_progress, OR closed-and-attested
+        # (branch (A) on A — NON-recursive: A's own supersede chain is never followed).
+        if a.get("status") in ("open", "in_progress"):
+            return True
+        if _attested_delivered(a, repo_root=repo_root):
+            return True
+    return False
+
+
 def claim_gate_check(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     """The fast, local claim-path check for the PLAN-REVIEW gate. Returns
     ``{ok: bool, reason: str, verdict: str}``.
