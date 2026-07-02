@@ -80,7 +80,7 @@ jobs:
           gerrit-project: ${{ inputs.GERRIT_PROJECT }}
           gerrit-url: https://${{ vars.GERRIT_SERVER }}
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -169,4 +169,8 @@ jobs:
           gerrit-change-number: ${{ inputs.GERRIT_CHANGE_NUMBER }}
           gerrit-patchset-number: ${{ inputs.GERRIT_PATCHSET_NUMBER }}
           # success -> Verified+1, failure|cancelled -> Verified-1 (fail-closed).
+          # The action's vote message embeds THIS run's URL — its cast is
+          # `review --message "<STATUS>: <server>/<repo>/actions/runs/<run_id>"` — so the
+          # Gerrit vote always links back to the CI run's log surface (the "run URL in the
+          # vote message" requirement; no custom `comment` input exists nor is needed).
           vote-type: ${{ env.WORKFLOW_CONCLUSION }}
