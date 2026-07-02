@@ -217,6 +217,7 @@ requires a row here.
 | `config.py` | split the dataclass/schema from the env/CLI-override + cache machinery along the existing seam |
 | `mcp_server.py` | thin FastMCP tool layer. `build_server` is ~30 `@mcp.tool()` closures over a local `mcp`; splitting needs a registrar refactor — watch, don't split preemptively |
 | `llm/workflow/lint_refs.py` | grew past cap adding the prompt/step CONTRACT awareness (workflow authoring v2, 5e78): the engine-injected-inputs allow-list + the `${{ steps.*.outputs.* }}` name-existence map. Extract a `lint_contracts.py` once stories e050 (8 op contracts) + c768 (3-state validation depth) add the related logic that clears the 100-LOC floor; today that seam alone is sub-floor |
+| `llm/plan_review/attest.py` | crossed the cap (821 LOC) with the additive kind-keyed attestations (epic dark-acme-lumen) + the `delivered_now` container-completion predicate (3bf189f). Extract the validity-computation cluster (`compute_validity` + the reopen/code-drift/material-edit invalidation checks) into a sibling `attest_validity.py` once it clears the 100-LOC floor; today that seam is near-floor, so allow-list rather than split preemptively |
 
 `src/rebar/llm/runner.py` was **decomposed** in WS-A (epic a88f): the
 filesystem/repo cluster (`_safe_path`, `_git_tracked`, `_discovery_filter`,
