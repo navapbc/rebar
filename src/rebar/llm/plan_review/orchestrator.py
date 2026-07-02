@@ -206,6 +206,69 @@ def _assemble_context_uncached(
     )
 
 
+# ── delivered-children manifest (completion-aware container plan-review, epic 66ac / 94fd) ──────
+def _extract_ac_section(description: str) -> str:
+    """Extract the ``## Acceptance Criteria`` section BODY (verbatim, up to the next ``## ``
+    heading) from a ticket description. Empty when there is no AC section. Mirrors the heading-scan
+    ``det_floor._ac_item_lines`` uses, but keeps the WHOLE section (not just the ``- [ ]`` lines)
+    so the completion sub-call sees the child's full acceptance text."""
+    out: list[str] = []
+    found = False
+    for ln in description.split("\n"):
+        if not found and ln.strip().lower().startswith("## acceptance criteria"):
+            found = True
+            continue
+        if found and ln.startswith("## "):
+            break
+        if found:
+            out.append(ln)
+    return "\n".join(out).strip()
+
+
+def delivered_children_manifest(container_id: str, *, repo_root=None) -> list[dict[str, Any]]:
+    """The DELIVERED-children manifest the Pass-2 completion sub-call
+    (:func:`rebar.llm.plan_review.passes.pass2_completion`) receives.
+
+    Enumerates ``container_id``'s children (the SAME ``list_tickets(parent=…)`` +
+    per-child full ``show_ticket`` read as :func:`_assemble_context_uncached`, so delivery + the
+    supersede branch see full child state), then keeps only the DELIVERED ones per
+    :func:`rebar.llm.plan_review.attest.delivered_now` — returning each as
+    ``{"ticket_id", "ac_text"}`` (its ``## Acceptance Criteria`` section). Fail-safe: an
+    enumeration error yields an EMPTY manifest, and ``pass2_completion`` then classifies nothing so
+    the floor drops nothing."""
+    import rebar
+
+    from . import attest
+
+    try:
+        listed = rebar.list_tickets(parent=container_id, repo_root=repo_root) or []
+    except Exception:  # noqa: BLE001 — fail-safe: no manifest (the floor drops nothing), logged
+        logger.warning(
+            "could not list children of %s for the delivered manifest", container_id, exc_info=True
+        )
+        return []
+    children: list[dict[str, Any]] = []
+    for c in listed:
+        cid = c.get("ticket_id")
+        if cid is None:
+            children.append(c)
+            continue
+        try:  # full child state (status + attestation + supersede deps) for delivered_now
+            children.append(rebar.show_ticket(cid, repo_root=repo_root))
+        except Exception:  # noqa: BLE001 — per-child best-effort full-state fetch; fall back to summary
+            children.append(c)
+    manifest: list[dict[str, Any]] = []
+    for child in children:
+        if attest.delivered_now(child, children, repo_root=repo_root):
+            manifest.append(
+                {
+                    "ticket_id": child.get("ticket_id"),
+                    "ac_text": _extract_ac_section(child.get("description", "") or ""),
+                }
+            )
+    return manifest
+
+
 # ── verification contract-violation collection (run-scoped) ──────────────────────
 # Pass-2's verifier→Pass-3 reshape (the `plan_review_decide` op) detects contract violations
 # (malformed / duplicate / out-of-range verification indices) via the shared
