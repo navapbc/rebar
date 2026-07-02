@@ -25,7 +25,12 @@
 services:
   # --- Gerrit code-review server -------------------------------------------
   gerrit:
-    image: gerritcodereview/gerrit:3.14.1 # publishes arm64; matches the t4g box
+    # Extends gerritcodereview/gerrit:3.14.1 with Python + gerrit-to-platform so the
+    # `hooks` plugin can exec the g2p CI hooks in-container (epic 1fa8 / ADR-0022).
+    # The base image still publishes arm64; the added apt/pip layers are arch-neutral.
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.gerrit
     restart: unless-stopped
     ports:
       # 8080: Gerrit HTTP — published to host loopback so the HOST nginx (TLS
@@ -53,6 +58,10 @@ services:
       # SSM BEFORE Gerrit starts. The replication plugin's `git push` reads this
       # dir to authenticate to github.com:navapbc/rebar.
       - /var/gerrit/site/dotssh:/var/gerrit/.ssh
+      # epic 1fa8 (S3): gerrit-to-platform config + GitHub PAT, materialised from SSM
+      # by infra/gerrit/materialize-g2p-config.sh BEFORE boot (like the deploy key
+      # above). g2p (in-container) reads gerrit_to_platform.ini + replication.config here.
+      - /var/gerrit/site/g2p-config:/var/gerrit/.config/gerrit_to_platform
     environment:
       # Public HTTPS origin (nginx-terminated). The entrypoint writes this into
       # etc/gerrit.config; it mirrors the canonicalWebUrl we pre-seed there.

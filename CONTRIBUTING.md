@@ -1,15 +1,24 @@
 # Contributing to rebar
 
-rebar dogfoods its own premise: **every change to `main` is code-reviewed by an LLM
-before it can land.** Contributions flow through a self-hosted **Gerrit** server
-(`https://rebar.solutions.navateam.com`), where the **rebar review-bot** casts a
-single deterministic **`LLM-Review`** vote on your change. **GitHub is a read-only
-mirror** — `main` there only advances when a Gerrit-submitted change replicates out.
-Direct pushes and pull-request merges to GitHub `main` are rejected.
+rebar dogfoods its own premise: **every change to `main` is gated by two independent
+deterministic checks before it can land** — an LLM code review **and** CI. Contributions
+flow through a self-hosted **Gerrit** server (`https://rebar.solutions.navateam.com`),
+where two bots vote on your change: the **rebar review-bot** casts **`LLM-Review`** (the
+LLM code review) and **CI** casts **`Verified`** (build/test/lint/typecheck, run on GitHub
+Actions). **Both must be `+1` to submit** — neither a human nor either bot can bypass the
+other. **GitHub is a read-only mirror** — `main` there only advances when a
+Gerrit-submitted change replicates out. Direct pushes and pull-request merges to GitHub
+`main` are rejected.
 
 > **TL;DR of the loop:** clone from Gerrit → install the `commit-msg` hook → commit →
-> `git push origin HEAD:refs/for/main` → the bot votes `LLM-Review` → fix findings and
-> re-push the amended commit until it's `+1` → **Submit** → it replicates to GitHub `main`.
+> `git push origin HEAD:refs/for/main` → the bots vote `LLM-Review` (LLM) and `Verified`
+> (CI) → fix findings and re-push the amended commit until **both** are `+1` (comment
+> `recheck` to re-run CI) → **Submit** → it replicates to GitHub `main`.
+
+> **Rollout note.** The `Verified` (CI) requirement is being rolled out in stages: CI
+> records its `Verified` vote on every patchset, and it becomes a hard submit blocker once
+> the operator activates it (see `infra/runbooks/two-vote-gate-rollback.md`). `LLM-Review`
+> gates today regardless.
 
 If you only read the code (no contributions), just use the GitHub mirror as usual — you
 don't need Gerrit.
@@ -71,17 +80,25 @@ git push origin HEAD:refs/for/main
 ```
 Gerrit prints a change URL (`…/c/rebar/+/<number>`). Open it.
 
-### 2c. The `LLM-Review` vote (the gate)
-The rebar review-bot reviews your diff and casts a single **`LLM-Review`** vote. Your
-change is **submittable only when**:
+### 2c. The gate: two votes (`LLM-Review` + `Verified`)
+Two bots review your patchset independently and each casts one vote. Your change is
+**submittable only when both are `+1` and nothing is unresolved**:
 
-> `label:LLM-Review = MAX (+1)` **AND** there are **no unresolved comments**.
+> `label:LLM-Review = MAX (+1)` **AND** `label:Verified = MAX (+1)` **AND** there are **no
+> unresolved comments**.
 
-`LLM-Review` is the **sole** code-review gate in v1 — there is no separate human
-Code-Review or CI `Verified` requirement to submit. **Only the review-bot and
-administrators may cast `LLM-Review`**, so you cannot self-approve your own change.
+- **`LLM-Review`** — the rebar review-bot's LLM code review of your diff.
+- **`Verified`** — CI (the same build/test/lint/typecheck suite as the GitHub `test.yml`,
+  run on GitHub Actions via gerrit-to-platform) against your exact patchset. `+1` = CI
+  passed, `-1` = CI failed. A run link is posted with the vote.
 
-**Reading a `-1`.** A `-1` comes in two flavors — check the tag on the bot's message:
+The two votes are **independent**: an LLM finding does not fail CI, and a CI flake does not
+change the review verdict. **Only the two bots and administrators may cast either label**,
+so you cannot self-approve or self-verify your own change. (During rollout the `Verified`
+requirement records without blocking until activated — see the rollout note above.)
+
+**Reading a `-1`.** An `LLM-Review` `-1` comes in two flavors — check the tag on the bot's
+message:
 
 | Bot message tag | Meaning | What to do |
 |---|---|---|
@@ -90,6 +107,15 @@ administrators may cast `LLM-Review`**, so you cannot self-approve your own chan
 
 This distinction is deliberate: a coverage-gap `-1` means "we could not prove your change
 is safe," not "your change is bad."
+
+**A `Verified` `-1` (CI failed).** Open the linked run to see which check failed, then:
+
+- **Real test/lint/type failure** → fix the code, amend, and re-push (§2d). Each new
+  patchset drops the old `Verified` and triggers a fresh run automatically.
+- **A flaky/transient failure** (not your code) → comment **`recheck`** on the change to
+  re-run CI on the *same* patchset without amending. A new run dispatches and re-votes.
+  (You can also just push a new patchset; the in-flight run for the change is cancelled so
+  only the newest patchset's run survives.)
 
 ### 2d. Address findings and re-push
 Amend the **same** commit (keep the `Change-Id` so Gerrit updates the existing change
@@ -100,12 +126,13 @@ git add -A
 git commit --amend --no-edit    # keeps the Change-Id trailer
 git push origin HEAD:refs/for/main
 ```
-Each push is a new **patchset**. The bot re-reviews and re-votes. Resolve any inline
-comments (mark them **Done**/resolved) so `-has:unresolved` is satisfied.
+Each push is a new **patchset**. Both bots re-run: the review-bot re-reviews (LLM) and CI
+re-runs and re-votes `Verified`. Resolve any inline comments (mark them **Done**/resolved)
+so `-has:unresolved` is satisfied.
 
 ### 2e. Submit
-Once `LLM-Review` is `+1` and no comments are unresolved, click **Submit** on the change
-page (or `ssh -p 29418 <you>@rebar.solutions.navateam.com gerrit review --submit <change>,<patchset>`).
+Once **both** `LLM-Review` and `Verified` are `+1` and no comments are unresolved, click
+**Submit** on the change page (or `ssh -p 29418 <you>@rebar.solutions.navateam.com gerrit review --submit <change>,<patchset>`).
 Gerrit merges the change into its `main`, then **replicates the new `main` to GitHub** —
 where the same commit appears on the read-only mirror (and the branch CI runs on the
 push). That replication is the only way GitHub `main` advances.
@@ -141,8 +168,16 @@ keep working; tags are not locked, so releases still publish normally.)
   **Settings → HTTP Credentials** and update your credential helper.
 - **A `-1` tagged `coverage-gap`.** Infra, not your code — see §2c. Re-push once the
   review infra is healthy; don't change your diff to chase it.
-- **My change won't submit even at `LLM-Review +1`.** Check for **unresolved comments**
-  (the submit rule is `LLM-Review=MAX AND -has:unresolved`) and mark them resolved.
+- **My change won't submit even at `LLM-Review +1`.** Check that **`Verified` is also
+  `+1`** (both votes are required — see §2c) and that there are **no unresolved comments**
+  (the submit rule is `LLM-Review=MAX AND Verified=MAX AND -has:unresolved`); mark comments
+  resolved.
+- **CI (`Verified`) didn't run / no run appeared.** The CI dispatch (Gerrit →
+  gerrit-to-platform → GitHub Actions) may be down. Comment **`recheck`** to re-trigger; if
+  still nothing, it's an infra issue for maintainers (see
+  `infra/runbooks/two-vote-gate-rollback.md`) — not a problem with your diff.
+- **`Verified -1` but the failure looks transient/flaky.** Comment **`recheck`** to re-run
+  CI on the same patchset (§2c). A new patchset also re-runs it and cancels the stale run.
 
 ---
 

@@ -1,0 +1,14 @@
+# gerrit-to-platform config template (epic 1fa8 / story S3 / ADR-0022).
+#
+# Rendered to /var/gerrit/.config/gerrit_to_platform/gerrit_to_platform.ini by
+# infra/gerrit/materialize-g2p-config.sh, which substitutes __GITHUB_PAT__ from SSM
+# BEFORE Gerrit boots (fail-closed). The rendered file is mode 0600 — it holds the PAT.
+# g2p also reads replication.config from this same dir to discover the GitHub
+# owner/repo to workflow_dispatch; materialize-g2p-config.sh symlinks it alongside.
+#
+# The `recheck` comment ChatOps maps to the `verify` workflow filter — a `recheck`
+# comment on a change re-dispatches .github/workflows/gerrit-verify.yaml (re-run policy).
+[mapping "comment-added"]
+	recheck = verify
+[github.com]
+	token = __GITHUB_PAT__
