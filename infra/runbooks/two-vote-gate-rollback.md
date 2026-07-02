@@ -131,6 +131,46 @@ Prove the whole CI loop on a **throwaway change** while the requirement is still
 
 ---
 
+## C.1 — E2E EXECUTED (proof record, 2026-07-02)
+
+The §C loop was run live on the production Gerrit host (`rebar.solutions.navateam.com`) and
+the gate was activated per §B. Recorded here so the epic's "live E2E / coexistence" acceptance
+criteria are verifiable from the repo, not just an operator handoff. Throwaway change:
+`https://rebar.solutions.navateam.com/c/rebar/+/162`.
+
+- **Coexistence (both gates fire on one event).** Pushing patchset 1 of change 162 fired BOTH
+  legs on the same `patchset-created` event: the review-bot webhook cast `LLM-Review` (by
+  `rebar-review-bot`), AND g2p `workflow_dispatch`ed `gerrit-verify.yaml`
+  (GitHub Actions run `28612639871`), which cast **`Verified +1`** back over SSH as
+  `rebar-ci-bot`. (g2p on Gerrit 3.14.1 required the git-pinned build — the released g2p
+  crashes on the compact `project~number` change-id; see the compat fix in `Dockerfile.gerrit`.)
+- **Vote-back carries the run URL.** The CI votes linked their run, e.g. a red run cast
+  `Verified -1  FAILURE: https://github.com/navapbc/rebar/actions/runs/28615370753` (the
+  `gerrit-review-action` message is `<STATUS>: <server>/<repo>/actions/runs/<run_id>`).
+- **`recheck` re-runs.** A `recheck` comment on 162 re-dispatched `gerrit-verify` and re-voted
+  (the g2p `comment-added` → `verify` mapping).
+- **New patchset resets `Verified`.** Amending + re-pushing 162 dropped the prior votes —
+  Gerrit reported *"approvals got outdated and were removed: … Verified+1 … (copy condition:
+  changekind:NO_CODE_CHANGE)"* — and a fresh run cast a new one. No stale CI vote carried onto
+  new code (GerriScary-safe, CVE-2025-1568).
+- **Activated + both votes required to submit.** After deleting `applicableIf = is:false` (§B,
+  pushed to `refs/meta/config`), change 168 (the activation change) showed
+  `submit_requirements: Verified → UNSATISFIED, LLM-Review → UNSATISFIED` (vs `Verified →
+  NOT_APPLICABLE` on pre-activation change 165). It then earned **both** `LLM-Review +1` AND
+  `Verified +1`, became submittable, was **submitted → merged → replicated to GitHub `main`**
+  (`origin/main` `1d7caf129`). Red CI (`Verified -1`, e.g. run `28615370753`) leaves a change
+  unsubmittable once the requirement is active.
+- **Credentials provisioned (S4).** `rebar-ci-bot` (Gerrit account id `1000008`) is a member of
+  **Service Users** (so it may cast `Verified`); SSM holds `/rebar/prod/g2p-github-pat` +
+  `/rebar/prod/ci-gerrit-ssh-key`; the GitHub repo carries vars `GERRIT_SERVER` /
+  `GERRIT_SSH_USER=rebar-ci-bot` / `GERRIT_KNOWN_HOSTS` / `GERRIT_URL` and secret
+  `GERRIT_SSH_PRIVKEY`. NOTE: because g2p runs **in-container** (ADR-0022), the g2p GitHub PAT
+  is materialized by `infra/gerrit/materialize-g2p-config.sh` into `gerrit_to_platform.ini`
+  (0600) at boot — NOT via `infra/scripts/fetch-secrets.sh` (a deliberate deviation from the
+  original story text, which predated the in-container decision).
+
+---
+
 ## Design notes
 
 Rationale for the CI-gate design choices, for future maintainers:
