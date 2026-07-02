@@ -1,1 +1,0 @@
-{"author":"Iso Tester","data":{"body":"Code committed 8163cf0d: scoped refs/changes/* replication refspec + ADR-0021 + doc. Operator-pending: terraform/setup-replication apply + verify change refs reach the GitHub mirror."},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"COMMENT","timestamp":1782966614662690001,"uuid":"3622b92d-6ff9-4ddf-b0e7-1095090b888b"}
