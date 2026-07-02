@@ -51,16 +51,18 @@ Two plugins matter here:
   Like `webhooks` and `replication`, `hooks` is **bundled in `gerritcodereview/gerrit:3.14.1`**
   — there is nothing to download or sha256-pin (that discipline is only for the non-core
   `events-log`/`oauth` above). It is a **core plugin** (server-side script executor,
-  distinct from the HTTP-delivery `webhooks`), enabled from the war the same way core
-  plugins are seeded into the site `plugins/` volume at boot (`compose-up.sh` — ensure
-  `hooks` is among the copied core plugins, alongside `replication`, which is already
-  enabled for S5 mirroring). `hooks` execs `$site/hooks/<event>`; the
+  distinct from the HTTP-delivery `webhooks`). `compose-up.sh` **explicitly ensures
+  `hooks.jar` is in the site `plugins/` volume at every boot** (copying it from the
+  image if absent), so the plugin is enabled reproducibly — alongside `replication`,
+  already enabled for S5 mirroring. `hooks` execs `$site/hooks/<event>`; the
   gerrit-to-platform (g2p) CI dispatcher is installed **into the Gerrit image** by
   `infra/compose/Dockerfile.gerrit` (Python + `pip install gerrit-to-platform`), which
   symlinks the g2p `patchset-created` / `comment-added` / `change-merged` console-scripts
   into `/var/gerrit/hooks/`. g2p is a Python package, NOT a Gerrit `.jar`, so it is not
-  listed in the jar table above. Its config + PAT are materialised pre-boot by
-  `infra/gerrit/materialize-g2p-config.sh`.
+  listed in the jar table above. Its config + PAT are materialised at boot by
+  `infra/gerrit/materialize-g2p-config.sh`, which `compose-up.sh` invokes before
+  `docker compose up` (non-fatal — a missing PAT disables CI dispatch but never blocks
+  the stack from booting).
 
 - **Re-pinning.** GerritForge CI publishes the `lastSuccessfulBuild` of the
   `stable-3.14` branch, so the artifact at the URL can advance over time. When it

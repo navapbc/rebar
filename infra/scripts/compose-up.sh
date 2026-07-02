@@ -89,6 +89,16 @@ if [ -z "$(ls -A "${SITE_HOST_DIR}/plugins" 2>/dev/null)" ]; then
     -c 'cp -a /var/gerrit/plugins/. /seed/ 2>/dev/null || true'
 fi
 
+# Ensure the `hooks` core plugin specifically (epic 1fa8 / ADR-0022). g2p's CI dispatch
+# relies on the `hooks` plugin exec'ing $site/hooks/*. The first-run bulk seed above
+# copies it, but assert it EXPLICITLY + idempotently (every boot) so an already-seeded
+# box that predates g2p also gets it — copy hooks.jar from the image if absent.
+if [ ! -f "${SITE_HOST_DIR}/plugins/hooks.jar" ]; then
+  echo "compose-up: enabling the hooks core plugin (epic 1fa8)" >&2
+  docker run --rm --entrypoint sh -v "${SITE_HOST_DIR}/plugins:/seed" "${GERRIT_IMAGE}" \
+    -c 'cp -a /var/gerrit/plugins/hooks.jar /seed/ 2>/dev/null || true'
+fi
+
 # --- 3. Regenerate the secrets .env from SSM (fail-fast on SSM unreachable) -
 # BEFORE seeding gerrit.config, so the OAuth client-id/secret (WS8) can be materialized
 # into the live config from SSM.
@@ -136,6 +146,15 @@ if grep -qE '^[[:space:]]*type[[:space:]]*=[[:space:]]*OAUTH' "${SITE_HOST_DIR}/
 fi
 
 chown -R "${GERRIT_UID}:${GERRIT_UID}" "${SITE_HOST_DIR}"
+
+# --- Materialize the gerrit-to-platform CI config (epic 1fa8 / story S3) ----
+# g2p (in the Gerrit container) reads its GitHub PAT + config from a bind-mounted dir;
+# materialize it from SSM at boot, the same way the replication deploy key is. NON-FATAL:
+# a missing PAT must not block the whole stack from booting — g2p just won't dispatch CI
+# and the gate stays fail-closed (no Verified vote -> no submit) until it is fixed.
+if ! bash "${REPO_ROOT}/infra/gerrit/materialize-g2p-config.sh"; then
+  echo "compose-up: WARN — g2p config materialization failed; CI dispatch disabled until fixed" >&2
+fi
 
 # --- 4. Bring the stack up (build the review-bot image, pull Gerrit) -------
 docker compose -f "${COMPOSE_FILE}" up -d --build
