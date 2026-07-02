@@ -241,10 +241,12 @@ GERRIT_HOST=<your-domain> GERRIT_ADMIN_SSH_KEY=~/.ssh/gerrit_admin \
 ```
 
 This creates the project if absent and pushes the fully declarative
-`project.config` to `refs/meta/config`. The **single-gate design** (ADR-0013):
+`project.config` to `refs/meta/config`. The **gate design** (ADR-0013, extended to
+two votes by ADR-0020 / epic 1fa8):
 
-- **One custom label `LLM-Review`** (`-1..+1`) is the only code-review vote in v1 —
-  no human `Code-Review`, no CI `Verified`. The bot is the sole voter.
+- **Two independent votes gate submit:** `LLM-Review` (`-1..+1`, the review bot) AND
+  `Verified` (`-1..+1`, CI via gerrit-to-platform → GitHub Actions, epic 1fa8). Each
+  label has exactly one authorized (bot/CI) voter; there is no human `Code-Review` vote.
 - The label is **advisory** (`function = NoBlock` — Gerrit 3.14.1 *rejects* a
   blocking label function); **a submit requirement does the blocking**:
   `submittableIf = label:LLM-Review=MAX AND -has:unresolved`. The inherited
@@ -259,6 +261,14 @@ This creates the project if absent and pushes the fully declarative
 - **`change.submitWholeTopic = true`** is set server-level in `gerrit.config`
   `[change]` (a global key, ignored in project.config) so a reviewed multi-change
   feature lands atomically; adopt a `<feature>` topic naming convention.
+- **CI `Verified` rollout (epic 1fa8, ADR-0020):** the `Verified` label + its
+  submit-requirement are authored in `project.config`, but the requirement ships
+  **inactive** (`applicableIf = is:false`) so the label records CI votes without
+  blocking submit until the voter exists. Story S6 **activates** it (deletes the
+  `applicableIf` line) once the gerrit-to-platform CI voter is proven end-to-end; the
+  effective gate then becomes
+  `label:LLM-Review=MAX AND label:Verified=MAX AND -has:unresolved`. `Verified` uses
+  the same strict `copyCondition = changekind:NO_CODE_CHANGE` reset as `LLM-Review`.
 
 ---
 
