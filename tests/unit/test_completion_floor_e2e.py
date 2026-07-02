@@ -197,3 +197,67 @@ def test_non_regression_floor_is_review_only() -> None:
 
     # no NEW attestation kind: the plan-review manifest prefix is unchanged
     assert attest._MANIFEST_PREFIX == "plan-review"
+
+
+# ── anti-laundering: a supersede edge cannot launder a security/contract finding into a drop ─────
+# Story 457a AC: "the security/contract preserve-set (T5c/T10) is never dropped regardless of
+# supersede — so a manipulated edge cannot launder a security finding." A force-closed (unverified)
+# child B can be made `delivered-now` purely by adding a live sibling A that supersedes it (branch B
+# of delivered_now); this test proves the floor's preserve-set veto beats that path. It uses the
+# REAL delivered_now (only its store/attestation reads are mocked), so the supersede branch is
+# genuinely exercised, not stubbed.
+def _supersede_delivered_epic(monkeypatch) -> None:
+    """B is force-closed + UNSIGNED, but a LIVE sibling A supersedes it — so B is delivered-now
+    ONLY through the supersede edge (the laundering vector)."""
+    b = {"ticket_id": "launder-B", "status": "closed", "parent_id": "epic", "description": _AC}
+    a = {
+        "ticket_id": "super-A",
+        "status": "in_progress",
+        "parent_id": "epic",
+        "description": _AC,
+        "deps": [{"relation": "supersedes", "target_id": "launder-B", "link_uuid": "u1"}],
+    }
+    children = [b, a]
+    monkeypatch.setattr(rebar, "list_tickets", lambda *, parent, repo_root=None: children)
+    monkeypatch.setattr(
+        rebar,
+        "show_ticket",
+        lambda cid, repo_root=None: next(c for c in children if c["ticket_id"] == cid),
+    )
+    # nothing is attested → B is delivered ONLY via the supersede edge (the real delivered_now path)
+    monkeypatch.setattr(
+        rebar, "verify_signature", lambda tid, *, kind=None, repo_root=None: {"verdict": "unsigned"}
+    )
+    monkeypatch.setattr(attest, "current_material_fingerprint", lambda tid, repo_root=None: "m1")
+
+
+def test_supersede_edge_cannot_launder_security_or_contract_finding(monkeypatch) -> None:
+    _supersede_delivered_epic(monkeypatch)
+    # the REAL delivered_now supersede branch delivers B (only via the edge); A stays in scope
+    delivered = _delivered_ids()
+    assert delivered == {"launder-B"}, delivered
+
+    # three findings on the supersede-delivered child B, all classified as delivered plan-semantics
+    # below the floor: T5c (security) + T10 (contract) MUST be kept; a non-preserve COH IS dropped
+    # (proving the supersede delivery is real — so the preserve veto is what stops the laundering).
+    v = {
+        "advisory": [
+            {"id": "sec", "priority": 0.1, "criteria": ["T5c"]},
+            {"id": "contract", "priority": 0.1, "criteria": ["T10"]},
+            {"id": "plain", "priority": 0.1, "criteria": ["COH"]},
+        ],
+        "dropped": [],
+        "coverage": {"counts": {}},
+    }
+    ans = {
+        "attribution": "launder-B",
+        "containment": "limited-to-closed",
+        "layer": "plan-semantics",
+    }
+    plan_review._apply_completion_floor_to_verdict(
+        v, {0: ans, 1: ans, 2: ans}, floor=_FLOOR, preserve=_PRESERVE, delivered_ids=delivered
+    )
+    kept = {f["id"] for f in v["advisory"]}
+    dropped = {f["id"] for f in v["dropped"]}
+    assert "sec" in kept and "contract" in kept  # preserve veto beats the supersede-laundering path
+    assert dropped == {"plain"}  # the non-preserve finding IS dropped → the edge really did deliver
