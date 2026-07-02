@@ -27,6 +27,20 @@ locals {
     # client-secret into secure.config. See infra/runbooks/gerrit-auth-hardening.md.
     "/rebar/prod/github-oauth-client-id",
     "/rebar/prod/github-oauth-client-secret",
+    # CI Verified-vote gate (epic 1fa8 / story S4). Two secret slots for the
+    # gerrit-to-platform → GitHub Actions → Gerrit `Verified` vote path (ADR-0022,
+    # ADR-0023). NEITHER is consumed via the container .env (they are NOT in
+    # fetch-secrets.sh / user_data.sh's curated map):
+    #   - g2p-github-pat: the fine-grained, single-repo GitHub PAT that g2p uses to
+    #     workflow_dispatch gerrit-verify.yaml. MATERIALISED at boot into
+    #     gerrit_to_platform.ini (0600) by infra/gerrit/materialize-g2p-config.sh
+    #     (fail-closed) — like the replication deploy key, never via env/ps.
+    #   - ci-gerrit-ssh-key: the CI Gerrit service account's SSH PRIVATE key. The box
+    #     never reads it; an operator copies its value into the GitHub Actions secret
+    #     GERRIT_SSH_PRIVKEY so the workflow can SSH back into Gerrit :29418 to cast
+    #     Verified. See infra/runbooks/g2p-ci-credentials.md for the operator steps.
+    "/rebar/prod/g2p-github-pat",
+    "/rebar/prod/ci-gerrit-ssh-key",
   ]
 }
 
