@@ -1,0 +1,2 @@
+CI two-vote gate E2E probe — 49ad69b
+Triggers g2p -> gerrit-verify.yaml -> Verified vote. Abandon after.
