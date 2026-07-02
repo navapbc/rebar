@@ -1,0 +1,1 @@
+CI two-vote gate E2E probe (patchset 4) — verify code-review agent ticket access (attested + origin/tickets fetch).
