@@ -1,0 +1,1 @@
+{"author":"Iso Tester","data":{"file_impact":[{"path":"infra/gerrit/reviewbot-e2e.sh","reason":"scenario harness lives alongside"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782964950584035001,"uuid":"efcce61e-8922-4e4b-ad0f-4c82b058ef75"}
