@@ -64,6 +64,12 @@ so the (unenforced) code-blind criterion partition is not relied upon. Gated by
 `verify.progressive_drift_refresh` (**default off**); fail-safe to full re-review on probe
 error / registry-version skew / no reusable prior verdict.
 
+> **One of three Pass-3 floors.** This drift-refresh is one of three deterministic Pass-3
+> drop/refresh paths along independent axes: **material freshness** (this ADR), **novelty**
+> (ADR 0008 — plan-edit convergence), and **delivered-completion** (ADR 0024 — the container
+> completion floor, which suppresses re-litigation of already-delivered, settled plan text).
+> They compose; each is separately gated and inert by default.
+
 ### Measurement (cost of probe-only refresh vs full re-review)
 
 Reported from this implementation's own real plan-review runs (model `claude-opus-4-8`):

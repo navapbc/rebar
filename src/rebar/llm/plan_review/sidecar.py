@@ -248,6 +248,11 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
             "impact": f.get("impact"),
             "priority": f.get("priority"),
             "reason": f.get("reason"),
+            # Which Pass-3 floor (if any) dropped this finding — the join key that disambiguates the
+            # two floors offline (story 6533 / G6): "completion" (completion floor), "novelty"
+            # (novelty rising floor), or null (surfaced/normal). Each floor stamps its own
+            # drop_reason on the dropped finding; an un-floored finding has none.
+            "drop_reason": f.get("drop_reason"),
             "verification": f.get("verification"),
             # Finding PROSE (child e344): re-grounding the Pass-2 novelty sub-call on a
             # remediation re-review needs the prior finding's actual text — not just its

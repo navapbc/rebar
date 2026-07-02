@@ -182,6 +182,22 @@ def _as_str(v: Any, key: str) -> str:
     return str(v)
 
 
+def _as_str_tuple(v: Any, key: str) -> tuple[str, ...]:
+    """A tuple of non-empty, trimmed strings from either a TOML array or a comma-separated
+    string, so both ``key = ["T5c", "T10"]`` and ``key = "T5c, T10"`` parse. Empty entries are
+    dropped; a non-list/non-str value is rejected. Used for config-backed id sets (e.g.
+    ``verify.completion_preserve_criteria``)."""
+    if isinstance(v, (list, tuple)):
+        items = [str(x).strip() for x in v]
+    elif isinstance(v, str):
+        items = [p.strip() for p in v.split(",")]
+    else:
+        raise ConfigError(
+            f"{key}: expected a list or comma-separated string, got {type(v).__name__}"
+        )
+    return tuple(x for x in items if x)
+
+
 def _as_choice(v: Any, key: str, choices: set[str]) -> str:
     s = str(v).strip().lower()
     if s not in choices:
@@ -321,6 +337,25 @@ class VerifyConfig:
     # of remediation_mode + per-review eligibility), so the floor never drops a finding by default.
     novelty_drop_active: bool = False
 
+    # Pass-3 COMPLETION floor (epic 66ac / story 6533) — the container-completion analogue of the
+    # novelty rising floor, for a re-fired epic/story-with-children review. A finding is DROPPED iff
+    # its completion sub-answers say it is fully about DELIVERED, settled plan text (attribution = a
+    # delivered-now child AND containment = limited-to-closed AND layer = plan-semantics) AND its
+    # priority (validity × impact) < completion_priority_floor AND none of its criteria is in the
+    # always-preserve set. Every ambiguous/fail-safe sub-answer fails toward KEEP. The floor default
+    # (0.4) matches novelty_priority_floor (the corpus "below major" band).
+    completion_priority_floor: float = 0.4
+    # The always-preserve set: REGISTERED criterion ids a completion drop never touches, regardless
+    # of the other axes. Default the security overlay (T5c) + the endpoint/interface-contract
+    # criterion (T10) — so a delivered child's "endpoint has no auth" or "contract omits a field"
+    # is always kept. Adding privacy/compliance ids is a config change, not code.
+    completion_preserve_criteria: tuple[str, ...] = ("T5c", "T10")
+    # The EVIDENCE GATE: the completion floor stays inert (gate runs un-floored) until this is
+    # flipped true — manually by the operator only after the calibration gold-set (story 77cf) has
+    # cleared its must-never-suppress bar. Default False, so the floor never drops a finding by
+    # default (the total back-out, exactly like novelty_drop_active).
+    completion_floor_active: bool = False
+
 
 @dataclass
 class TicketConfig:
@@ -440,6 +475,9 @@ _SECTIONS: dict[str, dict] = {
         "novelty_drop_threshold": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
         "novelty_priority_floor": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
         "novelty_drop_active": lambda v, k: _as_bool(v, k),
+        "completion_priority_floor": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
+        "completion_preserve_criteria": lambda v, k: _as_str_tuple(v, k),
+        "completion_floor_active": lambda v, k: _as_bool(v, k),
     },
     "ticket": {
         "display_mode": lambda v, k: _as_str(v, k) or "auto",
