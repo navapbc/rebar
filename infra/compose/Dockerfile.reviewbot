@@ -30,9 +30,44 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # git is needed at runtime: rebar's engine shells out to git for the event store.
+# curl + ca-certificates: fetch the gitleaks release binary below.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
+    && apt-get install -y --no-install-recommends git curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Security scanners for the code-review gate's WS5 fail-CLOSED detectors (epic b744 / WS5).
+# engine_b resolves these off PATH (shutil.which); ABSENT -> abstain(no_tool) -> the gate
+# fail-closes a coverage-gap BLOCK on EVERY change. Installed BEFORE `COPY . /app` so the
+# (heavy) scanner layers cache across code rebuilds.
+#   - gitleaks -> the `secret-detection` criterion (secrets). A standalone Go binary; the
+#     latest release is resolved dynamically (arch-aware) to avoid a pinned-version 404.
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      arm64) gl_arch=arm64 ;; \
+      amd64) gl_arch=x64 ;; \
+      *) echo "unsupported arch for gitleaks: $arch" >&2; exit 1 ;; \
+    esac; \
+    ver="$(curl -fsSL https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
+      | grep -oE '"tag_name":[[:space:]]*"v[^"]+"' | head -1 | sed -E 's/.*"v([^"]+)".*/\1/')"; \
+    test -n "$ver"; \
+    curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_${gl_arch}.tar.gz" \
+      -o /tmp/gitleaks.tgz; \
+    tar -xzf /tmp/gitleaks.tgz -C /usr/local/bin gitleaks; \
+    rm -f /tmp/gitleaks.tgz; \
+    gitleaks version
+#   - semgrep -> the `high-critical-security` criterion. engine_b prefers `opengrep` and falls
+#     back to `semgrep` (a CLI-compatible fork; the bundled security_*.yaml rules are
+#     semgrep-format). Installed in an ISOLATED venv + symlinked onto PATH so semgrep's deps
+#     never conflict with rebar's [agents] runtime.
+RUN python -m venv /opt/semgrep \
+    && /opt/semgrep/bin/pip install --no-cache-dir semgrep \
+    && ln -s /opt/semgrep/bin/semgrep /usr/local/bin/semgrep \
+    && semgrep --version
+# semgrep runs OFFLINE inside the gate over rebar's local rules: no telemetry, no network
+# version check (both would add latency / a phone-home the gate must not depend on).
+ENV SEMGREP_SEND_METRICS=off \
+    SEMGREP_ENABLE_VERSION_CHECK=0
 
 WORKDIR /app
 
