@@ -75,11 +75,26 @@ chmod 0600 "$INI"
 chown "${GERRIT_UID}:${GERRIT_GID}" "$INI"
 echo "materialize-g2p-config: wrote ${INI} (0600, ${GERRIT_UID}:${GERRIT_GID})" >&2
 
-# --- 3. Symlink replication.config so g2p can discover owner/repo -----------
+# --- 3. Copy replication.config so g2p can discover owner/repo --------------
+# COPY, not symlink. g2p reads this file from INSIDE the Gerrit container (at
+# ~/.config/gerrit_to_platform/replication.config). A symlink to $REPLICATION_CONF
+# would store the HOST path (/var/gerrit/site/etc/replication.config) as its target,
+# which does not exist in the container's filesystem view (there the same file is the
+# gerrit_etc mount at /var/gerrit/etc/replication.config) — so the symlink dangles and
+# g2p dies with FileNotFoundError in get_replication_remotes(). A plain copy resolves
+# regardless of the host/container path split. It is re-copied every boot, so edits to
+# the live replication.config propagate on the next `compose-up`. Mode 0644 (no secret:
+# it holds only the GitHub owner/repo URL, never the PAT).
 if [ -e "$REPLICATION_CONF" ]; then
-	ln -sf "$REPLICATION_CONF" "${G2P_DIR}/replication.config"
-	chown -h "${GERRIT_UID}:${GERRIT_GID}" "${G2P_DIR}/replication.config"
-	echo "materialize-g2p-config: linked replication.config" >&2
+	# rm first: an older deploy may have left ${G2P_DIR}/replication.config as a SYMLINK
+	# back to $REPLICATION_CONF. cp would then see source and dest as the same host inode
+	# and abort ("are the same file"). Removing the stale link/file makes the copy
+	# idempotent across the symlink->copy migration.
+	rm -f "${G2P_DIR}/replication.config"
+	cp -f "$REPLICATION_CONF" "${G2P_DIR}/replication.config"
+	chmod 0644 "${G2P_DIR}/replication.config"
+	chown "${GERRIT_UID}:${GERRIT_GID}" "${G2P_DIR}/replication.config"
+	echo "materialize-g2p-config: copied replication.config" >&2
 else
 	echo "materialize-g2p-config: WARN — ${REPLICATION_CONF} not found; g2p owner/repo discovery will fail until replication is set up (story S2/S5)" >&2
 fi
