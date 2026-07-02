@@ -77,6 +77,12 @@ class ReceiverConfig:
     reconcile_interval_seconds: int = 300
     #: The Gerrit project the bot reviews; non-matching projects are skipped.
     project: str = "rebar"
+    #: Remote holding the rebar ``tickets`` branch, fetched alongside the change clone so the
+    #: code-review gate can materialize the ticket-store snapshot (the agent's ticket access —
+    #: a requirement). The store lives on the orphan ``tickets`` branch, which is NOT on Gerrit
+    #: (Gerrit carries only ``main`` + change refs) — it is on the public GitHub mirror, so we
+    #: fetch it from there (public repo → no auth). See clone_change_ref.
+    tickets_remote: str = "https://github.com/navapbc/rebar"
     #: Persisted reconciler cursor (last-processed events-log event time). Empty →
     #: derive it next to the dedup DB (``<dedup dir>/reconcile_cursor``). Survives a
     #: restart so the poller resumes from its tail rather than rescanning the whole log.
@@ -112,4 +118,7 @@ class ReceiverConfig:
             reconcile_interval_seconds=_int_env("RECONCILE_INTERVAL_SECONDS", 300),
             project=os.environ.get("GERRIT_PROJECT", "rebar").strip(),
             reconcile_cursor_path=os.environ.get("RECONCILE_CURSOR_PATH", "").strip(),
+            tickets_remote=os.environ.get("TICKETS_REMOTE", "https://github.com/navapbc/rebar")
+            .strip()
+            .rstrip("/"),
         )
