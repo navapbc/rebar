@@ -24,12 +24,19 @@ USER root
 # a too-old interpreter fails loudly rather than at runtime. If the base OS/Python ever
 # changes, this is the block to adjust (documented in ADR-0022).
 RUN set -eux; \
-    dnf install -y python3.11 python3.11-pip; \
+    dnf install -y python3.11 python3.11-pip git; \
     dnf clean all; \
     python3.11 -c 'import sys; assert sys.version_info >= (3, 11), f"g2p needs Python >= 3.11, got {sys.version}"'; \
     python3.11 -m venv /opt/g2p; \
     /opt/g2p/bin/pip install --no-cache-dir --upgrade pip; \
-    /opt/g2p/bin/pip install --no-cache-dir gerrit-to-platform
+    /opt/g2p/bin/pip install --no-cache-dir \
+      "gerrit-to-platform @ git+https://github.com/lfit/releng-gerrit_to_platform@44d5d46d4142e1063bffaecb548a2f3e2043697e"
+# Pin to a g2p git commit, NOT the PyPI release: the latest release (v0.3.1) predates
+# the "Support Gerrit 3.x compact change-id" fix (commit 64ce771), so on Gerrit 3.14
+# the released g2p crashes in get_change_id (IndexError on the compact project~number
+# form) and never dispatches CI. Gerrit-3.x peers install g2p from git for this reason;
+# revert to the plain package once a release ships the fix. Pin SHA = main@44d5d46 (has
+# _COMPACT_CHANGE_ID_RE). git is added above so pip can fetch the VCS source.
 
 # Symlink the g2p console-scripts (installed on the venv bin) as the Gerrit hook names.
 # The `hooks` plugin execs these on patchset-created / comment-added / change-merged.
