@@ -409,12 +409,19 @@ keeps commits local — both still surface `PUSH_PENDING` via `fsck` (see
 
 ## Git workflow (code changes) — land changes THROUGH GERRIT, not GitHub PRs
 
-**This repo dogfoods its own premise: every change to `main` is LLM-reviewed by the
-Gerrit `LLM-Review` gate before it can land. `main` flows through Gerrit; GitHub is a
-read-only mirror.** Do **not** open GitHub PRs or push to GitHub `main` — a repository
+**This repo dogfoods its own premise: every change to `main` must pass two independent
+Gerrit gates before it can land — the `LLM-Review` vote (the rebar review-bot's LLM code
+review) AND the `Verified` vote (CI: build/test/lint/typecheck on GitHub Actions). `main`
+flows through Gerrit; GitHub is a read-only mirror.** Do **not** open GitHub PRs or push to GitHub `main` — a repository
 ruleset rejects direct pushes and PR merges there (only Gerrit's replication deploy key
 can advance the mirror). The full contributor guide is **[CONTRIBUTING.md](CONTRIBUTING.md)**;
 the short version for agents:
+
+> **Work in a fresh worktree — not the main checkout.** `main` moves fast, so before you
+> edit, branch from current `origin/main` in a dedicated worktree
+> (`git fetch origin && git worktree add ../<name> -b <branch> origin/main`) and set up its
+> local venv (see [`docs/local-dev-env.md`](docs/local-dev-env.md)). Editing in the main
+> checkout risks building on stale code and a painful rebase at submit time.
 
 1. **Get Gerrit access once.** Sign in at `https://rebar.solutions.navateam.com` via
    GitHub OAuth, generate an HTTP password (Settings → HTTP Credentials), clone from
@@ -424,14 +431,18 @@ the short version for agents:
    so commits carry a `Change-Id`.
 2. **Push for review:** `git push origin HEAD:refs/for/main` (the magic ref — creates a
    Gerrit change, does not touch `main`).
-3. **The gate:** the rebar review-bot casts the single `LLM-Review` vote. A change is
-   submittable only at **`LLM-Review = +1` (MAX) AND no unresolved comments**. Only the
-   bot/admins can cast it — you cannot self-approve. A `-1` tagged
+3. **The gate — two votes:** two bots vote independently. The rebar review-bot casts
+   `LLM-Review` (LLM code review) and CI casts `Verified` (build/test/lint/typecheck on
+   GitHub Actions). A change is submittable only at **`LLM-Review = +1` (MAX) AND
+   `Verified = +1` (MAX) AND no unresolved comments** — only the bots/admins cast either
+   label, so you cannot self-approve or self-verify. On `LLM-Review`, a `-1` tagged
    `[LLM-Review: BLOCK — coverage-gap (…)]` is an infra veto (not your code); a `-1` tagged
-   `[LLM-Review: BLOCK — finding]` names real findings in your diff.
+   `[LLM-Review: BLOCK — finding]` names real findings in your diff. On `Verified`, a `-1`
+   is a CI failure — open the linked run; if it's a flake, comment `recheck` to re-run CI
+   on the same patchset.
 4. **Iterate:** fix findings, `git commit --amend --no-edit` (keep the `Change-Id`),
-   re-push. **Submit** once green → Gerrit merges and **replicates the new `main` to
-   GitHub** (where branch CI runs on the push).
+   re-push (each new patchset re-runs both votes). **Submit** once both are green → Gerrit
+   merges and **replicates the new `main` to GitHub** (where branch CI runs on the push).
 
 (This governs *code*. rebar's own **ticket events on the `tickets` branch** still
 auto-commit/auto-push as described above — that is unchanged and does NOT go through

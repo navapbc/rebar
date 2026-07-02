@@ -244,8 +244,9 @@ pip install -e '.[dev]'
 ```
 
 > **Contributing changes?** GitHub is a **read-only mirror** — `main` only advances via
-> the Gerrit `LLM-Review` gate. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the Gerrit
-> contribution flow (clone from Gerrit, push to `refs/for/main`, submit after the vote).
+> Gerrit's two-vote gate (`LLM-Review` + `Verified`/CI). Read [CONTRIBUTING.md](CONTRIBUTING.md)
+> for the Gerrit contribution flow (clone from Gerrit, push to `refs/for/main`, submit once
+> both votes pass).
 
 > **Packaging note — why rebar installs *unpacked* to disk.** The library, CLI,
 > MCP server, and the whole read/write core run **in-process** in Python. The one

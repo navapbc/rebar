@@ -15,10 +15,11 @@ Gerrit-submitted change replicates out. Direct pushes and pull-request merges to
 > (CI) → fix findings and re-push the amended commit until **both** are `+1` (comment
 > `recheck` to re-run CI) → **Submit** → it replicates to GitHub `main`.
 
-> **Rollout note.** The `Verified` (CI) requirement is being rolled out in stages: CI
-> records its `Verified` vote on every patchset, and it becomes a hard submit blocker once
-> the operator activates it (see `infra/runbooks/two-vote-gate-rollback.md`). `LLM-Review`
-> gates today regardless.
+> **Status.** Both votes are **live and blocking today**: a change needs `LLM-Review = +1`
+> **and** `Verified = +1` to submit. (The `Verified`/CI requirement was activated
+> 2026-07-02. If CI infra breaks, an operator can temporarily back out to single-vote
+> `LLM-Review`-only gating so `main` isn't frozen — see
+> `infra/runbooks/two-vote-gate-rollback.md`.)
 
 If you only read the code (no contributions), just use the GitHub mirror as usual — you
 don't need Gerrit.
@@ -94,8 +95,8 @@ Two bots review your patchset independently and each casts one vote. Your change
 
 The two votes are **independent**: an LLM finding does not fail CI, and a CI flake does not
 change the review verdict. **Only the two bots and administrators may cast either label**,
-so you cannot self-approve or self-verify your own change. (During rollout the `Verified`
-requirement records without blocking until activated — see the rollout note above.)
+so you cannot self-approve or self-verify your own change. (Both labels block submit today —
+the `Verified` requirement was activated 2026-07-02; see the status note above.)
 
 **Reading a `-1`.** An `LLM-Review` `-1` comes in two flavors — check the tag on the bot's
 message:
