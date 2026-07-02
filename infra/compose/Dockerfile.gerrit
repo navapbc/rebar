@@ -1,0 +1,44 @@
+# ---------------------------------------------------------------------------
+# Dockerfile.gerrit — the official Gerrit image + Python + gerrit-to-platform (g2p),
+# so the Gerrit `hooks` plugin can exec the g2p CI hooks IN-CONTAINER (epic 1fa8 /
+# story S3 / ADR-0022).
+#
+# WHY in-container (not host-side): the `hooks` plugin execs $site/hooks/<event> from
+# INSIDE the Gerrit process. A host-side g2p (hooks symlinked into a bind-mount) is
+# broken — the container cannot resolve a host interpreter path. So g2p + its Python
+# runtime must live in the image.
+#
+# The base image is Java-only (Eclipse Temurin / Ubuntu base) — no Python. We add
+# Python + g2p as root, symlink the three g2p console-scripts into /var/gerrit/hooks
+# (part of the baked site — NOT a mounted volume, so image symlinks persist), then
+# drop back to the gerrit uid. The g2p token + config are materialised at boot onto a
+# bind mount by infra/gerrit/materialize-g2p-config.sh (mirrors materialize-deploy-key.sh)
+# — NOT baked here, so no secret is in the image.
+# ---------------------------------------------------------------------------
+FROM gerritcodereview/gerrit:3.14.1
+
+USER root
+
+# Base is Ubuntu/Temurin -> apt. g2p needs Python >= 3.11 (pyproject requires >= 3.9);
+# we use the distro python3 in an isolated venv and ASSERT >= 3.11 at build so a too-old
+# base fails loudly rather than at runtime. If the base OS/Python ever changes, this is
+# the one line to adjust (documented in ADR-0022).
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends python3 python3-venv python3-pip; \
+    rm -rf /var/lib/apt/lists/*; \
+    python3 -c 'import sys; assert sys.version_info >= (3, 11), f"g2p needs Python >= 3.11, got {sys.version}"'; \
+    python3 -m venv /opt/g2p; \
+    /opt/g2p/bin/pip install --no-cache-dir --upgrade pip; \
+    /opt/g2p/bin/pip install --no-cache-dir gerrit-to-platform
+
+# Symlink the g2p console-scripts (installed on the venv bin) as the Gerrit hook names.
+# The `hooks` plugin execs these on patchset-created / comment-added / change-merged.
+RUN set -eux; \
+    mkdir -p /var/gerrit/hooks; \
+    for h in patchset-created comment-added change-merged; do \
+      ln -sf "/opt/g2p/bin/$h" "/var/gerrit/hooks/$h"; \
+    done; \
+    chown -R 1000:1000 /var/gerrit/hooks
+
+USER 1000
