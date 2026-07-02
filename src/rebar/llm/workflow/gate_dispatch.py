@@ -448,16 +448,41 @@ def produce_code_review_verdict(
         "diff_text": dc.diff_text,
         "changed_files": list(dc.changed_files),
     }
+    # SNAPSHOT GATE (epic raze-vet-ditch): the four-pass gate runs AGENTIC passes — the 'base'
+    # reviewer + overlays read the code with filesystem tools — so, like every other code-reading
+    # gate (operations.review_ticket / review_code), the run MUST execute inside a gate session
+    # rooted at the REVIEWED code. Otherwise runner.assert_gated fail-closes ("agentic filesystem
+    # tools ... OUTSIDE the repo-snapshot gate process") on the first agentic step and the Gerrit
+    # voter casts a coverage-gap BLOCK on every change. The retired single-pass review_code wrapped
+    # gate_read_root the same way; the WS4 four-pass swap dropped it (regression).
+    #
+    # The reviewed code is `repo_root` — the CALLER's checkout of the change under review (the
+    # Gerrit voter's isolated patchset clone), which may be a HOST/CLIENT project, NOT rebar's own
+    # tree — so we root an explicit LOCAL read-root there (never the configured attested
+    # origin/main, which would review the wrong tree) and pin the agent's file tools to it.
+    from dataclasses import replace as _replace
+
+    from rebar._snapshot import SnapshotHandle
+    from rebar.llm import gate_source
+
+    if repo_root:
+        cfg = _replace(cfg, repo_path=str(repo_root))
+    gate_handle = SnapshotHandle(
+        path=Path(repo_root) if repo_root else Path(cfg.repo_path or "."),
+        sha=None,
+        source=gate_source.SOURCE_LOCAL,
+    )
     try:
-        res = _ex.run_workflow(
-            doc,
-            inputs,
-            target_ticket=target_ticket,
-            repo_root=repo_root,
-            agent_runner=RunnerAgentStep(runner=runner_sel, repo_root=repo_root, config=cfg),
-            batch_runner=CodeReviewBatchRunner(context=dc.context),
-            recorder=rec,
-        )
+        with gate_source.gate_read_root(gate_handle):
+            res = _ex.run_workflow(
+                doc,
+                inputs,
+                target_ticket=target_ticket,
+                repo_root=repo_root,
+                agent_runner=RunnerAgentStep(runner=runner_sel, repo_root=repo_root, config=cfg),
+                batch_runner=CodeReviewBatchRunner(context=dc.context),
+                recorder=rec,
+            )
     except LLMUnavailableError as exc:
         return _degraded_code_review_verdict(error=exc, runner_name=runner_sel.name)
     total_ms = round((time.monotonic() - _t_total) * 1000, 1)
