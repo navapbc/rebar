@@ -134,8 +134,13 @@ _pass2_novelty_model = novelty_model
 #    coercion in `pass2_completion` — so ONE bad value coerces to the fail-safe default rather
 #    than failing the whole structured batch (the per-finding fail-safe the gate mandates). ─────
 COMPLETION_ATTRIBUTION_NONE = "none"  # attribution when a finding is about no closed child
-COMPLETION_CONTAINMENT = ("limited-to-closed", "spans-open-or-system", "n-a")
-COMPLETION_LAYER = ("plan-semantics", "delivered-functionality", "n-a")
+# The two DROP-ELIGIBLE enum values named once, so the sub-call vocabulary (the tuples below) and
+# the Pass-3 completion floor (`completion_floor_drop`) consume the SAME literal — no value drift
+# between the two ends of the contract (story 6533 AC).
+COMPLETION_CONTAINMENT_CLOSED = "limited-to-closed"  # containment value the floor drops on
+COMPLETION_LAYER_PLAN = "plan-semantics"  # layer value the floor drops on
+COMPLETION_CONTAINMENT = (COMPLETION_CONTAINMENT_CLOSED, "spans-open-or-system", "n-a")
+COMPLETION_LAYER = (COMPLETION_LAYER_PLAN, "delivered-functionality", "n-a")
 # Fail-safe defaults — each independently steers the (later) Pass-3 floor AWAY from a drop, so an
 # unsure / missing / invalid answer keeps the finding (drop-nothing is the safe direction).
 _COMPLETION_CONTAINMENT_DEFAULT = "spans-open-or-system"
@@ -621,6 +626,50 @@ def pass2_completion(
             ),
         }
     return out
+
+
+def completion_floor_drop(
+    completion: dict[str, Any],
+    priority: float,
+    criteria: list[str] | None,
+    *,
+    floor: float,
+    preserve: frozenset[str],
+    delivered_ids: frozenset[str],
+) -> bool:
+    """The Pass-3 COMPLETION-floor drop predicate (story 6533), deterministic — no LLM. Mirrors
+    :func:`rebar.llm.review_kernel.decide.rising_floor_drop`, but keyed on the completion
+    sub-answers instead of novelty.
+
+    A finding is dropped IFF **all** hold:
+
+    - its ``attribution`` is a child id that is provably **delivered-now** — i.e. in
+      ``delivered_ids`` (the manifest's delivered set). This is stronger than "not ``none``": a
+      structural ``_container_child`` attribution can name a **force-closed** (unverified) child,
+      which must NOT be dropped — "delivery is proven, not assumed" (ADR 0024). A hallucinated /
+      non-delivered id also fails here;
+    - its ``containment`` is exactly :data:`COMPLETION_CONTAINMENT_CLOSED` (limited to closed work);
+    - its ``layer`` is exactly :data:`COMPLETION_LAYER_PLAN` (plan-semantics, not delivered
+      functionality);
+    - its ``priority`` (validity × impact) is ``< floor``;
+    - **none** of its ``criteria`` is in the always-preserve set (e.g. security / contract).
+
+    Every OTHER combination KEEPS the finding — and because every ambiguous/fail-safe sub-answer
+    (``attribution="none"``, ``containment`` anything but limited-to-closed, ``layer`` anything but
+    plan-semantics) is a non-drop value, an unsure classification always fails toward KEEP. The
+    preserve-set veto is checked FIRST, so a security/contract finding is never dropped regardless
+    of the other axes. Pure; the caller supplies the per-finding answers + priority + criteria and
+    the configured floor + preserve set + the delivered-now id set."""
+    if any(c in preserve for c in (criteria or [])):
+        return False  # preserve-set veto (security/contract) — never dropped
+    attribution = completion.get("attribution", COMPLETION_ATTRIBUTION_NONE)
+    if attribution not in delivered_ids:
+        return False  # "none", a force-closed/undelivered child, or a hallucinated id — keep
+    if completion.get("containment") != COMPLETION_CONTAINMENT_CLOSED:
+        return False  # spans open/system work (or n-a) — still live
+    if completion.get("layer") != COMPLETION_LAYER_PLAN:
+        return False  # about delivered functionality (or n-a), not throw-away plan text
+    return priority < floor
 
 
 # ── Pass 3: decide (DETERMINISTIC — no model in this path) ────────────────────────

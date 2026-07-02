@@ -90,5 +90,9 @@ the full criteria set; only the *surfacing* of novel low-priority findings is su
   (ADR 0002) is untouched and orthogonal (it is the *complement* on the material axis:
   drift-refresh = plan unchanged + code drifted; remediation = plan changed + code
   unchanged).
+- **One of three Pass-3 floors.** This novelty floor is one of three deterministic Pass-3
+  drop/refresh paths along independent axes: **novelty** (this ADR — plan-edit convergence),
+  **material freshness** (ADR 0002 drift-refresh), and **delivered-completion** (ADR 0024 —
+  the container completion floor). They compose; each is separately gated and inert by default.
 - Suppression is **observable**: narrowed verdicts record `narrowed` + `floored_criteria`
   + `floored_finding_ids` on coverage, and the dropped findings live in the sidecar.

@@ -113,7 +113,7 @@ def _apply_floor_to_verdict(
         nov = novelty_map.get(i, 0.0)
         prio = f.get("priority") or 0.0
         if decide.rising_floor_drop(prio, nov, t_novel=t_novel, floor=floor):
-            dropped.append({**f, "_floored": True, "novelty": nov})
+            dropped.append({**f, "_floored": True, "novelty": nov, "drop_reason": "novelty"})
         else:
             kept.append(f)
     if not dropped:
@@ -215,6 +215,137 @@ def _maybe_apply_rising_floor(
         novelty_map,
         t_novel=verify_cfg.novelty_drop_threshold,
         floor=verify_cfg.novelty_priority_floor,
+    )
+
+
+def _apply_completion_floor_to_verdict(
+    verdict: dict[str, Any],
+    completion_map: dict[int, dict[str, Any]],
+    *,
+    floor: float,
+    preserve: frozenset[str],
+    delivered_ids: frozenset[str],
+) -> None:
+    """Apply the Pass-3 COMPLETION floor (story 6533) IN PLACE on the surfaced advisory findings:
+    a finding at position ``i`` is DROPPED iff :func:`passes.completion_floor_drop` (attribution in
+    ``delivered_ids`` + limited-to-closed + plan-semantics + priority < floor + not-preserved).
+    Dropped findings move from ``advisory`` into the verdict's ``dropped`` bucket carrying
+    ``drop_reason="completion"`` (+ the finding's ``completion`` answers for the sidecar join), and
+    the coverage records the completion-specific ``completion_floored_criteria`` /
+    ``completion_floored_finding_ids`` (namespaced so they never collide with the novelty floor's
+    keys) AND corrects its ``counts``. Pure (no LLM); the completion answers per index + the
+    delivered-now id set are injected. A no-drop run leaves the verdict byte-identical."""
+    from . import passes
+
+    advisory = verdict.get("advisory") or []
+    kept: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    for i, f in enumerate(advisory):
+        ans = completion_map.get(i)
+        if ans and passes.completion_floor_drop(
+            ans,
+            f.get("priority") or 0.0,
+            f.get("criteria") or [],
+            floor=floor,
+            preserve=preserve,
+            delivered_ids=delivered_ids,
+        ):
+            dropped.append({**f, "_floored": True, "drop_reason": "completion", "completion": ans})
+        else:
+            kept.append(f)
+    if not dropped:
+        return
+    verdict["advisory"] = kept
+    verdict.setdefault("dropped", []).extend(dropped)
+    cov = verdict.setdefault("coverage", {})
+    cov["narrowed"] = True
+    cov["completion_floored_criteria"] = sorted(
+        {c for f in dropped for c in (f.get("criteria") or [])}
+    )
+    cov["completion_floored_finding_ids"] = [f.get("id") for f in dropped]
+    counts = cov.get("counts")
+    if isinstance(counts, dict):  # keep the baked counts consistent with the post-floor buckets
+        counts["advisory_surfaced"] = len(kept)
+        counts["dropped"] = (counts.get("dropped") or 0) + len(dropped)
+
+
+def _classify_completion(
+    advisory: list[dict[str, Any]],
+    manifest: list[dict[str, Any]],
+    *,
+    ctx,
+    cfg: LLMConfig,
+    runner: Runner | None,
+) -> dict[int, dict[str, Any]]:
+    """Run the Pass-2 completion sub-call over the surfaced advisory findings against the given
+    delivered-children ``manifest``, returning ``{advisory_index: {attribution, containment,
+    layer}}``. Fail-safe: any error → ``{}`` (no drops). The sub-call itself also degrades to ``{}``
+    on error, so this is defense-in-depth."""
+    from rebar.llm.runner import get_runner
+
+    from . import passes
+
+    try:
+        runner_sel = runner or get_runner(cfg)
+        return passes.pass2_completion(
+            runner_sel,
+            _verifier_cfg(cfg),
+            plan=ctx.plan_text,
+            findings=advisory,
+            delivered_manifest=manifest,
+        )
+    except Exception:  # noqa: BLE001 — fail-safe: a broken completion signal yields NO drops
+        logger.warning("completion floor classification failed; running un-floored", exc_info=True)
+        return {}
+
+
+def _maybe_apply_completion_floor(
+    ticket_id: str,
+    verdict: dict[str, Any],
+    *,
+    ctx,
+    cfg: LLMConfig,
+    runner: Runner | None,
+    repo_root,
+) -> None:
+    """The Pass-3 COMPLETION floor entry (story 6533): apply the floor ONLY when the ticket is a
+    CONTAINER (``ctx.has_children`` — a leaf has no delivered children to settle) AND the evidence
+    gate ``verify.completion_floor_active`` is true. Builds the delivered-children manifest (its
+    ids are the ONLY droppable attributions — "delivery is proven, not assumed"), runs the
+    completion sub-call over the surfaced advisory findings, and drops the fully-delivered,
+    settled-plan-text findings below the floor. By default the flag is False, so the floor is inert
+    and the verdict is byte-identical to a normal review. Fail-safe: no children / empty manifest /
+    empty classification → no drops."""
+    from rebar import config as _config
+
+    if not getattr(ctx, "has_children", False):
+        return
+    try:
+        verify_cfg = _config.load_config(repo_root).verify
+    except Exception:  # noqa: BLE001 — config unreadable → run un-floored
+        return
+    if not verify_cfg.completion_floor_active:
+        return  # evidence gate: inert until the calibration gold-set has cleared its bar
+    advisory = verdict.get("advisory") or []
+    if not advisory:
+        return
+    try:
+        manifest = orchestrator.delivered_children_manifest(ticket_id, repo_root=repo_root)
+    except Exception:  # noqa: BLE001 — fail-safe: manifest build failed → no drops
+        logger.warning("delivered-children manifest failed; running un-floored", exc_info=True)
+        return
+    delivered_ids = frozenset(m["ticket_id"] for m in manifest if m.get("ticket_id"))
+    if not delivered_ids:
+        return  # nothing delivered → nothing to settle
+    completion_map = _classify_completion(advisory, manifest, ctx=ctx, cfg=cfg, runner=runner)
+    if not completion_map:
+        return
+    _apply_completion_floor_to_verdict(
+        verdict,
+        completion_map,
+        floor=verify_cfg.completion_priority_floor,
+        preserve=frozenset(verify_cfg.completion_preserve_criteria),
+        delivered_ids=delivered_ids,
     )
 
 
@@ -320,6 +451,14 @@ def _run_plan_review(
     # the verdict byte-identical) by default.
     _maybe_apply_rising_floor(
         ticket_id, verdict, remediation, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
+    )
+
+    # Pass-3 COMPLETION FLOOR (epic 66ac / story 6533) — the container-completion analogue of the
+    # rising floor, applied AFTER it and BEFORE the sidecar emit so completion-dropped findings land
+    # in the sidecar (with drop_reason="completion"). Gated by container(has_children) +
+    # verify.completion_floor_active; inert (and the verdict byte-identical) by default.
+    _maybe_apply_completion_floor(
+        ticket_id, verdict, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
     )
 
     # Sidecar (best-effort; never fails the review). Skippable for a pure-read run.

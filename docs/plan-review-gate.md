@@ -309,6 +309,30 @@ the *complement* of the code-drift `drift_refresh` path (ADR 0002): drift-refres
 `remediation_mode` (or `novelty_drop_active`) off restores byte-identical full-review
 behavior — the total back-out.
 
+## Completion-aware container review (the completion floor)
+
+When a **container** ticket (an epic, or a story with children) is re-reviewed after some of its
+children are already **delivered**, a full re-review re-litigates the *settled* acceptance text of
+that done work — raising throw-away findings about the wording/scope of an AC a closed, verified
+child already satisfies. The **completion floor** (ADR 0024) drops exactly those, and nothing live.
+
+A finding is dropped **iff all** hold: it is attributed to a **delivered-now** child, is
+**limited-to-closed** work (not spanning an open sibling / the system), is about **plan-semantics**
+(scope/clarity/sizing — not the delivered mechanism/contract), its `priority` < the floor, and its
+criterion is **not** in the always-preserve set. A **delivered-now** child is one that is `closed`
+with a **valid completion-verifier attestation** (ADR 0009 — so a *force-closed* child does **not**
+qualify) **or** is superseded by a **live in-epic sibling**. Every ambiguous sub-answer fails toward
+**KEEP**, so security (`T5c`), contract (`T10`), delivered-functionality, and spanning findings are
+always surfaced.
+
+The three sub-answers (`attribution` / `containment` / `layer`) come from a separate Pass-2
+sub-call (`plan_review_completion`); the drop is deterministic in Pass-3 (no LLM). A completion drop
+is recorded on `coverage` (`completion_floored_criteria` / `completion_floored_finding_ids`) and in
+the `REVIEW_RESULT` sidecar with `drop_reason: "completion"` (vs `"novelty"` / `null`) — the offline
+join key. This is the third of three deterministic Pass-3 floors — **novelty** (plan-edit
+convergence, above), **material freshness** (drift-refresh, ADR 0002), and **delivered-completion**
+(this) — each along an independent axis and inert by default.
+
 ## Configuration
 
 | Key | Default | Effect |
@@ -319,6 +343,9 @@ behavior — the total back-out.
 | `verify.novelty_drop_threshold` | `0.7` | `T_novel`: a finding is droppable only if its novelty ≥ this. |
 | `verify.novelty_priority_floor` | `0.4` | The rising floor: drop a novel finding only if its priority < this (a scalar ≈ the corpus p40 impact percentile; `scripts/plan_review_impact_distribution.py` prints the inputs). |
 | `verify.novelty_drop_active` | `false` | **Evidence gate.** The floor stays inert until flipped true — done manually only after the `discriminates_novelty` eval clears its bar. |
+| `verify.completion_floor_active` | `false` | **Evidence gate** for the completion floor (container completion-awareness, above). Off/absent → byte-identical full review (the back-out); flip true only after the calibration gold-set clears its must-never-suppress bar. |
+| `verify.completion_priority_floor` | `0.4` | The completion floor: drop a delivered, plan-semantics finding only if its priority < this (same "below major" band as the novelty floor). |
+| `verify.completion_preserve_criteria` | `["T5c","T10"]` | Always-preserve criterion ids the completion floor never drops (security overlay + endpoint/interface contract). Accepts a TOML array or a comma-separated string; add privacy/compliance ids here — a config change, not code. |
 
 Enable it in `.rebar/config.conf` (dotted legacy form) or a `[verify]` table in
 `rebar.toml` / `pyproject.toml`:
