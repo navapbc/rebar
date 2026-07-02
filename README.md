@@ -10,6 +10,10 @@ Jira. rebar makes the tracker *part of the repo itself*, so it travels with ever
 clone, needs no database or daemon, and lets many agents and sessions write at
 once without merge conflicts or lost work.
 
+Because unsupervised agents drift, rebar can also gate their work with optional
+LLM reviews — of a ticket's *plan* before work starts, its *completion* before
+the ticket closes, and its *code* before it merges.
+
 It's an event-sourced ticket system with a Jira reconciler, exposed three ways:
 
 - **CLI** — the `rebar` command
@@ -74,8 +78,16 @@ On top of that foundation, rebar adds what parallel agent work actually needs:
   `next-batch` hands parallel agents work that won't collide on the same files.
 - **Scratch space** — an invisible per-ticket channel for subagents to pass notes
   to one another.
-- **Quality gates** — clarity, acceptance-criteria, dispatch-readiness, and
-  repo-wide health checks keep work dispatch-ready.
+- **Structural quality gates** — clarity, acceptance-criteria, dispatch-readiness,
+  and repo-wide health checks keep work dispatch-ready.
+- **LLM review gates** *(optional)* — review an agent's *plan* before work starts,
+  its *completion* before the ticket closes, and its *code* before it merges.
+  Plan-review and code-review share one four-pass kernel — a finder cites evidence, a
+  *separate* verifier tests each claim with atomic yes/no questions, and a
+  **deterministic** policy (never the model) decides what blocks — so a review coaches
+  with grounded, cited findings rather than a black-box score. A passing plan or
+  completion review leaves an HMAC-signed attestation: a machine-checkable signal of
+  rigorous agentic development, not vibe-coding.
 - **Provenance links** — `discovered_from` ties emergent work back to the ticket
   that surfaced it.
 - **One store, three interfaces** — drive it from the CLI, a Python library, or
