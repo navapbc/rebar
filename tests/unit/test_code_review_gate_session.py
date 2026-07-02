@@ -1,29 +1,29 @@
-"""The four-pass code-review gate must run its agentic passes INSIDE a snapshot gate
-session rooted at the REVIEWED code (``repo_root``) — the raze-vet-ditch safeguard.
+"""The four-pass code-review gate must run its agentic passes inside the SAME snapshot-gate
+session pattern as every other code-reading gate (operations.review_ticket / review_plan /
+verify_completion): ``resolve_gate_handle -> apply_handle -> gate_read_root``, in ATTESTED
+mode, so the agent gets BOTH a pinned code snapshot AND a pinned clone of the ticket store.
 
-Regression (this suite pins the fix): the WS4 single-pass -> four-pass swap
-(``produce_code_review_verdict``) dropped the ``gate_read_root`` wrapping that the retired
-single-pass ``review_code`` had (``operations.py``). So every REAL review (the production
-``PydanticAIRunner``) fail-closed at the first agentic step ('base') with ``assert_gated``
-("agentic filesystem tools ... OUTSIDE the repo-snapshot gate process"), casting a
-``coverage-gap (llm-unavailable)`` BLOCK on every change. The existing WS4 tests only used
-``FakeRunner`` — which never calls ``assert_gated`` — so they never caught it.
-
-Two properties are pinned here, independent of the runner:
-1. the workflow run happens inside a gate session (``in_gate_session()`` True), and
-2. the agent step's file-tool root is the reviewed ``repo_root`` (the voter's isolated
-   patchset clone), NOT the configured attested ``origin/main`` — because "the code being
-   reviewed may not be rebar code itself; it is the host/client project's code".
+The ticket-store clone is the load-bearing REQUIREMENT (epic raze-vet-ditch): the reviewed
+project's tickets live on the orphan ``tickets`` branch, ABSENT from any code checkout, so
+without it the agent's rebar ticket tools error on a missing ``.tickets-tracker`` and cannot
+use the ticket system. Two regressions this pins: (1) the WS4 single->four-pass swap
+(``produce_code_review_verdict``) dropped the ``gate_read_root`` wrapping the retired
+single-pass ``review_code`` had, so a real ``PydanticAIRunner`` review fail-closed at the
+'base' step; (2) a first remediation used LOCAL mode — which marks the session but does NOT
+materialize the ticket clone — so the agent still had no ticket access. The gate must run
+ATTESTED (like plan review), with both the code root AND the ticket root active.
 """
 
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
+import rebar
 from rebar.llm import config as llmcfg
-from rebar.llm.config import LLMConfig
+from rebar.llm.config import LLMConfig, current_code_root, current_tickets_root
 from rebar.llm.runner import FakeRunner
 from rebar.llm.workflow import gate_dispatch
 
@@ -32,7 +32,41 @@ pytestmark = pytest.mark.unit
 _DIFF = "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n+print('hi')\n"
 
 
-def test_code_review_gate_runs_inside_gate_session_rooted_at_repo_root(tmp_path, monkeypatch):
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+@pytest.fixture
+def repo_with_origin(tmp_path, monkeypatch):
+    """A rebar repo with an ``origin`` remote: a code commit on ``main`` pushed to origin, and a
+    rebar ticket (auto-pushed to ``origin/tickets``) — so the attested gate can materialize both
+    the code snapshot and the ticket-store clone. Mirrors test_gate_ticket_snapshot.py."""
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "Test")
+    _git(repo, "config", "commit.gpgsign", "false")
+    monkeypatch.setenv("REBAR_ROOT", str(repo))
+    rebar.init_repo(repo_root=str(repo))
+    (repo / "x.py").write_text("print('hi')\n")
+    _git(repo, "add", "x.py")
+    _git(repo, "commit", "-q", "-m", "content")
+    _git(repo, "remote", "add", "origin", str(remote))
+    _git(repo, "push", "-q", "origin", "main")
+    tid = rebar.create_ticket("task", "code-review gate ticket-access test", repo_root=str(repo))
+    return repo, tid
+
+
+def test_code_review_gate_runs_attested_with_code_and_ticket_roots(
+    repo_with_origin, tmp_path, monkeypatch
+):
+    repo, tid = repo_with_origin
+    monkeypatch.setenv("REBAR_GATE_TMPDIR", str(tmp_path / "gate-store"))
     monkeypatch.delenv("REBAR_GATE_ALLOW_UNGATED", raising=False)
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
     # The WS5 security detector is its own concern; keep this focused on the gate wrapping.
@@ -40,21 +74,15 @@ def test_code_review_gate_runs_inside_gate_session_rooted_at_repo_root(tmp_path,
 
     monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
 
-    # Stand in for the voter's isolated patchset clone (voter.py clones the reviewed change
-    # into a fresh tempdir). A real git repo so LLMConfig.from_env resolves repo_path to it.
-    repo = tmp_path / "reviewed-clone"
-    repo.mkdir()
-    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True, capture_output=True)
-
     seen: dict = {}
 
     def _spy(doc, inputs, **kw):
-        # Record the gate state + the agent step's file-tool root AT THE MOMENT the workflow
-        # would run its (agentic) steps.
+        # Capture the gate state AT THE MOMENT the (agentic) passes would run.
         seen["gated"] = llmcfg.in_gate_session()
-        agent_runner = kw.get("agent_runner")
-        cfg = getattr(agent_runner, "_config", None)
-        seen["root"] = getattr(cfg, "repo_path", None)
+        seen["code_root"] = current_code_root()
+        seen["tickets_root"] = current_tickets_root()
+        cfg = getattr(kw.get("agent_runner"), "_config", None)
+        seen["cfg_tickets"] = getattr(cfg, "tickets_path", None)
 
         class _R:
             run_id = "r"
@@ -74,6 +102,8 @@ def test_code_review_gate_runs_inside_gate_session_rooted_at_repo_root(tmp_path,
 
     gate_dispatch.produce_code_review_verdict(
         LLMConfig.from_env(repo_root=str(repo)),
+        head="HEAD",
+        source="attested",
         diff_text=_DIFF,
         changed_files=["x.py"],
         runner=FakeRunner(structured={}),
@@ -82,10 +112,23 @@ def test_code_review_gate_runs_inside_gate_session_rooted_at_repo_root(tmp_path,
     )
 
     assert seen.get("gated") is True, (
-        "code-review gate must run its agentic passes INSIDE a snapshot gate session — "
-        "assert_gated fail-closes the 'base' step otherwise (coverage-gap veto on every change)"
+        "code-review gate must run its agentic passes INSIDE a snapshot gate session"
     )
-    assert seen.get("root") == str(repo), (
-        "the agent's file tools must be rooted at the REVIEWED code (repo_root, the isolated "
-        f"patchset clone), not origin/main or the server checkout; got {seen.get('root')!r}"
+    assert seen.get("code_root"), (
+        "attested: the pinned code snapshot must be the active code root (not the mutable checkout)"
+    )
+    assert seen.get("tickets_root"), (
+        "attested: the pinned ticket-store clone MUST be active — the agent's rebar ticket tools "
+        "read it; without it they error on a missing .tickets-tracker (ticket-access requirement)"
+    )
+    # The materialized ticket store actually holds the ticket — the agent can read it, no
+    # "cannot list '<clone>/.tickets-tracker'" error.
+    tracker = Path(seen["tickets_root"]) / ".tickets-tracker"
+    assert tracker.is_dir()
+    short = tid.split("-")[0]
+    assert any(d.is_dir() and d.name.startswith(short) for d in tracker.iterdir()), (
+        f"the pinned ticket store has no event dir for {tid!r}"
+    )
+    assert seen.get("cfg_tickets") == seen.get("tickets_root"), (
+        "the config handed to the agent runner must be re-rooted onto the ticket clone"
     )

@@ -394,6 +394,7 @@ def produce_code_review_verdict(
     *,
     base: str = "HEAD~1",
     head: str = "HEAD",
+    source: str | None = None,
     diff_text: str | None = None,
     changed_files: list[str] | None = None,
     runner=None,
@@ -449,31 +450,28 @@ def produce_code_review_verdict(
         "changed_files": list(dc.changed_files),
     }
     # SNAPSHOT GATE (epic raze-vet-ditch): the four-pass gate runs AGENTIC passes — the 'base'
-    # reviewer + overlays read the code with filesystem tools — so, like every other code-reading
-    # gate (operations.review_ticket / review_code), the run MUST execute inside a gate session
-    # rooted at the REVIEWED code. Otherwise runner.assert_gated fail-closes ("agentic filesystem
-    # tools ... OUTSIDE the repo-snapshot gate process") on the first agentic step and the Gerrit
-    # voter casts a coverage-gap BLOCK on every change. The retired single-pass review_code wrapped
-    # gate_read_root the same way; the WS4 four-pass swap dropped it (regression).
+    # reviewer + overlays read the code with filesystem tools — so, like EVERY other code-reading
+    # gate (operations.review_ticket / review_plan / verify_completion), the run MUST execute
+    # through gate_source using the SAME pattern they do (NOT an ad-hoc local root):
+    #   resolve_gate_handle -> apply_handle -> gate_read_root.
     #
-    # The reviewed code is `repo_root` — the CALLER's checkout of the change under review (the
-    # Gerrit voter's isolated patchset clone), which may be a HOST/CLIENT project, NOT rebar's own
-    # tree — so we root an explicit LOCAL read-root there (never the configured attested
-    # origin/main, which would review the wrong tree) and pin the agent's file tools to it.
-    from dataclasses import replace as _replace
-
-    from rebar._snapshot import SnapshotHandle
+    # resolve_gate_handle (attested — the configured default) materializes BOTH a pinned snapshot
+    # of the reviewed code AND a pinned clone of the ticket store, then apply_handle re-roots cfg
+    # onto both and gate_read_root marks the session + activates both roots. The ticket-store clone
+    # is a REQUIREMENT, not a nicety: the reviewed project's tickets live on the orphan `tickets`
+    # branch, which is ABSENT from any code checkout, so WITHOUT the materialized clone the agent's
+    # rebar ticket tools error on a missing `.tickets-tracker` and the agent cannot use the ticket
+    # system — the raze-vet-ditch design attaches it for exactly this reason. `head` is the ref of
+    # the code under review (the reviewed project — which may be a HOST/CLIENT project, not rebar's
+    # own tree); `source` follows the configured default (attested in prod; local offline). Without
+    # this wrapping runner.assert_gated also fail-closes the 'base' step. The retired single-pass
+    # review_code wrapped gate_read_root the same way; the WS4 four-pass swap dropped it.
     from rebar.llm import gate_source
 
-    if repo_root:
-        cfg = _replace(cfg, repo_path=str(repo_root))
-    gate_handle = SnapshotHandle(
-        path=Path(repo_root) if repo_root else Path(cfg.repo_path or "."),
-        sha=None,
-        source=gate_source.SOURCE_LOCAL,
-    )
+    handle = gate_source.resolve_gate_handle(ref=head, source=source, repo_root=repo_root)
+    cfg = gate_source.apply_handle(cfg, handle)
     try:
-        with gate_source.gate_read_root(gate_handle):
+        with gate_source.gate_read_root(handle):
             res = _ex.run_workflow(
                 doc,
                 inputs,
