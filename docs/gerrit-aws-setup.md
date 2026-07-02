@@ -400,9 +400,14 @@ sudo infra/gerrit/setup-replication.sh       # runs materialize-deploy-key.sh fi
 The one-way-door contract (ADR-0010):
 
 - **Gerrit is the SOLE writer; GitHub is fast-forward only.** The push refspecs
-  (`refs/heads/main:refs/heads/main`, `refs/tags/*:refs/tags/*`) have **no leading
-  `+`** → **NON-force**: a rewritten/diverged GitHub history is **rejected**, never
-  clobbered.
+  (`refs/heads/main:refs/heads/main`, `refs/tags/*:refs/tags/*`,
+  `refs/changes/*:refs/changes/*`) have **no leading `+`** → **NON-force**: a
+  rewritten/diverged GitHub history is **rejected**, never clobbered.
+- **`refs/changes/*` mirrored for CI (epic 1fa8, ADR-0021).** Per-patchset change
+  refs are replicated so the gerrit-to-platform GitHub Actions run can fetch the
+  change under test (`checkout-gerrit-change-action`, with a Gerrit-direct fallback on
+  replication lag). Scoped to `refs/changes/*` (NOT wildcard `refs/*`) so
+  `refs/meta/config` is never included — the webhook-token protection below is intact.
 - **`mirror = false`** — non-destructive (no `--prune` of GitHub refs).
 - **`projects = rebar`** scopes the remote to one project (the `url` hardcodes one
   repo with no `${name}` placeholder).
