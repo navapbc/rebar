@@ -1,0 +1,172 @@
+name: gerrit-verify
+
+# CI second gate vote (`Verified`) for Gerrit changes — epic 1fa8 (ADR-0020).
+#
+# Dispatched by gerrit-to-platform (the Gerrit `hooks` plugin, running IN the Gerrit
+# container — story S3) on `patchset-created` and on a `recheck` comment, with the
+# nine GERRIT_* inputs below. It runs the SAME checks as test.yml against the EXACT
+# patchset, then casts the Gerrit `Verified` label on the change over SSH.
+#
+# 3-job production shape (ONAP/O-RAN-SC pattern): clear-vote -> build-and-test -> vote.
+#   - clear-vote  resets Verified->0 at run start (GerriScary-safe; CVE-2025-1568).
+#   - build-and-test checks out the change (checkout-gerrit-change-action) + runs the
+#     gates/suite (same commands as test.yml).
+#   - vote  aggregates the run conclusion and casts Verified +1/-1, run URL in message.
+#
+# OPERATOR SETUP (story S4) — required for this workflow to vote:
+#   repo variables: GERRIT_SERVER, GERRIT_SSH_USER, GERRIT_KNOWN_HOSTS, GERRIT_URL
+#   repo secret:    GERRIT_SSH_PRIVKEY  (the CI service account's private key)
+# Until they are set the vote steps fail (fail-closed: no +1 -> no submit).
+#
+# All third-party actions are SHA-pinned (tag in trailing comment).
+
+on:
+  workflow_dispatch:
+    inputs:
+      GERRIT_BRANCH:            { description: "Gerrit target branch", required: true, type: string }
+      GERRIT_CHANGE_ID:         { description: "Gerrit Change-Id", required: true, type: string }
+      GERRIT_CHANGE_NUMBER:     { description: "Gerrit change number", required: true, type: string }
+      GERRIT_CHANGE_URL:        { description: "Gerrit change URL", required: true, type: string }
+      GERRIT_EVENT_TYPE:        { description: "Gerrit event type", required: true, type: string }
+      GERRIT_PATCHSET_NUMBER:   { description: "Gerrit patchset number", required: true, type: string }
+      GERRIT_PATCHSET_REVISION: { description: "Gerrit patchset revision (commit SHA)", required: true, type: string }
+      GERRIT_PROJECT:           { description: "Gerrit project", required: true, type: string }
+      GERRIT_REFSPEC:           { description: "Gerrit refspec (refs/changes/NN/NNNN/P)", required: true, type: string }
+
+permissions:
+  contents: read
+  actions: read   # workflow-conclusion queries this run's jobs
+
+concurrency:
+  # A newer patchset for the same change cancels the in-flight run (stale-run guard).
+  group: gerrit-verify-${{ github.event.inputs.GERRIT_CHANGE_ID || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  clear-vote:
+    name: clear Verified (reset to 0)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reset Verified->0 at run start (GerriScary-safe)
+        uses: lfreleng-actions/gerrit-review-action@a1c036a59b94c8ab89de26d378f6a28cc7378b13  # v1.1.2
+        with:
+          host: ${{ vars.GERRIT_SERVER }}
+          username: ${{ vars.GERRIT_SSH_USER }}
+          key: ${{ secrets.GERRIT_SSH_PRIVKEY }}
+          known_hosts: ${{ vars.GERRIT_KNOWN_HOSTS }}
+          gerrit-change-number: ${{ inputs.GERRIT_CHANGE_NUMBER }}
+          gerrit-patchset-number: ${{ inputs.GERRIT_PATCHSET_NUMBER }}
+          vote-type: clear
+
+  build-and-test:
+    name: CI (${{ matrix.os }}, py${{ matrix.python-version }})
+    needs: clear-vote
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # Same matrix as test.yml: full Python range on Linux; macOS on the primary
+      # interpreter only (platform-compat coverage — flock/mkdir lock, gtimeout).
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12"]
+        exclude:
+          - os: macos-latest
+            python-version: "3.11"
+    steps:
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+          gerrit-url: https://${{ vars.GERRIT_SERVER }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install rebar (editable) + dev deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+
+      # --- The gates + suite, identical to test.yml (single source of truth) ---
+      - name: Module-size gate
+        shell: bash
+        run: |
+          allowlist=.github/module-size-allowlist.txt
+          over=$(find src/rebar -name '*.py' | grep -v __pycache__ \
+            | xargs wc -l 2>/dev/null \
+            | awk '$2 != "total" && $1 > 800 { print $2 }' | sort)
+          allowed=$(grep -vE '^[[:space:]]*(#|$)' "$allowlist" | sort)
+          new_offenders=$(comm -23 <(printf '%s\n' "$over") <(printf '%s\n' "$allowed") | grep -v '^$' || true)
+          if [ -n "$new_offenders" ]; then
+            echo "::error::New file(s) over the 800-LOC soft cap and NOT in $allowlist:"
+            printf '%s\n' "$new_offenders"
+            exit 1
+          fi
+          echo "Module-size gate: OK."
+
+      - name: Prompt-index drift gate
+        shell: bash
+        run: |
+          python -m rebar.llm.prompts regenerate-index
+          if ! git diff --exit-code -- src/rebar/llm/reviewers/index.json; then
+            echo "::error::reviewers/index.json is stale — run: python -m rebar.llm.prompts regenerate-index"
+            exit 1
+          fi
+
+      - name: Security-rules freshness gate (warn-only)
+        shell: bash
+        run: python -m rebar.grounding.detectors.security_pin
+
+      - name: Criteria-routing parity gate
+        shell: bash
+        run: |
+          if ! python -m rebar.llm.plan_review.registry validate-routing; then
+            echo "::error::criteria_routing.json out of parity with CANONICAL_LLM."
+            exit 1
+          fi
+
+      - name: lint (ruff check + format --check, gating)
+        run: make lint
+
+      - name: mypy — full library (gating)
+        run: make typecheck
+
+      - name: Run the default suite (Python tiers + bash collector; excludes integration + external)
+        run: >-
+          pytest -m "not integration and not external" -q -p no:cacheprovider
+          --basetemp="${{ runner.temp }}/rebar-basetemp"
+          --cov=rebar --cov-report=term-missing:skip-covered
+
+      - name: Run the integration tier (concurrency + reconciler; network-guarded)
+        run: >-
+          pytest -m integration -q -p no:cacheprovider
+          --basetemp="${{ runner.temp }}/rebar-basetemp-int"
+
+  vote:
+    name: cast Verified
+    if: ${{ always() }}
+    needs: [clear-vote, build-and-test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate the run conclusion
+        uses: im-open/workflow-conclusion@8eac7f17381a6917bc04fec3e2c92e70ebc37526  # v3.0.0
+
+      - name: Cast Verified from the CI conclusion
+        uses: lfreleng-actions/gerrit-review-action@a1c036a59b94c8ab89de26d378f6a28cc7378b13  # v1.1.2
+        with:
+          host: ${{ vars.GERRIT_SERVER }}
+          username: ${{ vars.GERRIT_SSH_USER }}
+          key: ${{ secrets.GERRIT_SSH_PRIVKEY }}
+          known_hosts: ${{ vars.GERRIT_KNOWN_HOSTS }}
+          gerrit-change-number: ${{ inputs.GERRIT_CHANGE_NUMBER }}
+          gerrit-patchset-number: ${{ inputs.GERRIT_PATCHSET_NUMBER }}
+          # success -> Verified+1, failure|cancelled -> Verified-1 (fail-closed).
+          vote-type: ${{ env.WORKFLOW_CONCLUSION }}

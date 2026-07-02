@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# observability.sh — the rebar box's host observability probe (S2 + S5 + S4b + S7).
+# observability.sh — the rebar box's host observability probe (S2 + S5 + S4b + S7 + 1fa8).
 #
 # Run periodically by a systemd timer (install-observability.sh). Each run publishes
 # CloudWatch metrics + journald log lines:
@@ -9,8 +9,10 @@
 #   2. Gerrit data-volume disk-used-percent -> rebar/host:disk_used_percent (S2 alarm).
 #   3. Gerrit->GitHub replication failures (replication_log) -> rebar/host:replication_errors (S5 alarm).
 #   4. review-bot voter failures (VOTER_ERROR in journald) -> rebar/host:voter_errors (S4b alarm).
+#   4b. gerrit-to-platform CI-dispatch failures (Gerrit journald) -> rebar/host:g2p_dispatch_errors (epic 1fa8 alarm).
 #   5. Gate reachability -> Rebar/Gate:GerritReachable (1/0), watched by the S7 gate-down
 #      alarm (treat_missing_data=breaching catches a dead host / stopped probe).
+#   6. Gerrit->GitHub mirror out-of-sync -> rebar/host:mirror_out_of_sync (WS7/a774 alarm).
 #
 # Auth: the EC2 instance role (S1) grants cloudwatch:PutMetricData. No static keys.
 # ---------------------------------------------------------------------------
@@ -117,6 +119,47 @@ echo "$vtotal" >"$VOTER_OFFSET_FILE"
 aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
   --metric-name voter_errors --unit Count --value "$vnew" 2>/dev/null || true
 [ "$vnew" -gt 0 ] && logger -t rebar-health "review-bot voter failures (new this interval)=${vnew}"
+
+# --- 4b. gerrit-to-platform CI-dispatch failures (epic 1fa8) ---------------
+# Watch the GERRIT container's journald for gerrit-to-platform (g2p) error markers
+# and publish the COUNT of NEW markers since last run to rebar/host:g2p_dispatch_errors
+# (the metric the epic-1fa8 CloudWatch alarm in monitoring_1fa8.tf watches).
+#
+#   LOG SOURCE:   the Gerrit container's journald — CONTAINER_NAME=compose-gerrit-1.
+#                 The `hooks` plugin execs the in-container g2p console-scripts on
+#                 patchset-created / `recheck`; their stdout/stderr ships here (the
+#                 compose journald driver, docker-compose.yml). This is the DISPATCH
+#                 leg (Gerrit -> GitHub workflow_dispatch); the vote-back leg lives in
+#                 the GitHub Actions run status, not on this host (see ADR-0023).
+#   GREP PATTERN: g2p logs under the `gerrit_to_platform` logger; a dispatch failure
+#                 shows as that token with an error level / traceback, or an explicit
+#                 workflow_dispatch failure, or a GitHub 4xx/5xx from the dispatch call.
+#                 Case-insensitive (-iE) so casing drift in g2p's messages still matches;
+#                 tune the phrases here if g2p's actual log strings differ in prod.
+#   METRIC NAME:  rebar/host:g2p_dispatch_errors (DIMENSIONLESS, like the sections above).
+#
+# Same shape as sections 3/4: a persisted cumulative count turned into a per-interval
+# delta via an offset file. Greping journald on the HOST avoids giving the container
+# AWS creds (the IMDS hop limit constrains in-container metadata access).
+G2P_CONTAINER="${G2P_CONTAINER:-compose-gerrit-1}"
+G2P_OFFSET_FILE="${G2P_OFFSET_FILE:-/var/lib/rebar/g2p-fail-offset}"
+G2P_PATTERN="${G2P_PATTERN:-gerrit_to_platform.*(error|critical|traceback|exception)|failed to dispatch|workflow_dispatch.*(fail|error)|dispatch.*http (4|5)[0-9][0-9]}"
+mkdir -p "$(dirname "$G2P_OFFSET_FILE")"
+# NOTE: `grep -c` prints 0 AND exits 1 on zero matches; do NOT add `|| echo 0`
+# (that would append a SECOND "0" line and corrupt the arithmetic). Capture the
+# single-line count and default-empty-to-0 instead.
+gtotal=$(journalctl CONTAINER_NAME="$G2P_CONTAINER" --no-pager -o cat 2>/dev/null | grep -ciE "$G2P_PATTERN") || true
+gtotal=${gtotal:-0}
+gprev=$(cat "$G2P_OFFSET_FILE" 2>/dev/null || echo 0)
+case "$gprev" in '' | *[!0-9]*) gprev=0 ;; esac
+gnew=$((gtotal - gprev))
+[ "$gnew" -lt 0 ] && gnew=$gtotal
+echo "$gtotal" >"$G2P_OFFSET_FILE"
+# Published WITHOUT dimensions to match the dimensionless alarm in monitoring_1fa8.tf
+# (CloudWatch keys a metric by namespace+name+dimensions; the alarm has none).
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name g2p_dispatch_errors --unit Count --value "$gnew" 2>/dev/null || true
+[ "$gnew" -gt 0 ] && logger -t rebar-health "g2p CI-dispatch failures (new this interval)=${gnew}"
 
 # --- 5. Gerrit->GitHub mirror out-of-sync (WS7 / a774) ---------------------
 # After the mirror-lock cutover, GitHub `main` only advances via Gerrit replication.

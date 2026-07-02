@@ -47,6 +47,21 @@ Two plugins matter here:
   > The `-master-` form 404s for oauth. Job *pages* 403 for everyone; the jar
   > artifact path (200 vs 404) is the real existence signal.
 
+- **`hooks` is a CORE plugin (epic 1fa8 / ADR-0022), enabled for gerrit-to-platform.**
+  Like `webhooks` and `replication`, `hooks` is **bundled in `gerritcodereview/gerrit:3.14.1`**
+  — there is nothing to download or sha256-pin (that discipline is only for the non-core
+  `events-log`/`oauth` above). It is a **core plugin** (server-side script executor,
+  distinct from the HTTP-delivery `webhooks`), enabled from the war the same way core
+  plugins are seeded into the site `plugins/` volume at boot (`compose-up.sh` — ensure
+  `hooks` is among the copied core plugins, alongside `replication`, which is already
+  enabled for S5 mirroring). `hooks` execs `$site/hooks/<event>`; the
+  gerrit-to-platform (g2p) CI dispatcher is installed **into the Gerrit image** by
+  `infra/compose/Dockerfile.gerrit` (Python + `pip install gerrit-to-platform`), which
+  symlinks the g2p `patchset-created` / `comment-added` / `change-merged` console-scripts
+  into `/var/gerrit/hooks/`. g2p is a Python package, NOT a Gerrit `.jar`, so it is not
+  listed in the jar table above. Its config + PAT are materialised pre-boot by
+  `infra/gerrit/materialize-g2p-config.sh`.
+
 - **Re-pinning.** GerritForge CI publishes the `lastSuccessfulBuild` of the
   `stable-3.14` branch, so the artifact at the URL can advance over time. When it
   does, re-download, recompute the sha256 (`shasum -a 256 events-log.jar`), and
