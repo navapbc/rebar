@@ -270,6 +270,38 @@ class GerritClient:
                 capture_output=True,
                 text=True,
             )
+            # Fetch the current tickets-branch HEAD from the shared mirror ALONGSIDE the Gerrit
+            # code clone: the rebar ticket store lives on the orphan `tickets` branch, which is NOT
+            # on Gerrit (only `main` + change refs are) — it is on the public GitHub mirror. The
+            # code-review gate runs ATTESTED (like plan review) and its materialize_tickets pins the
+            # store from `origin/tickets`; without this the agent has no ticket access and the gate
+            # fail-closes on a missing `.tickets-tracker`. Add it as `origin` (materialize_tickets
+            # prefers `origin/tickets`, the shared store) and fetch depth-1 (the gate materializes
+            # only the tree at the tickets HEAD — no history needed). Public repo → no auth.
+            subprocess.run(
+                ["git", "-C", dest, "remote", "add", "origin", self._cfg.tickets_remote],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(
+                # fmt: off
+                [
+                    "git",
+                    "-C",
+                    dest,
+                    "fetch",
+                    "-q",
+                    "--depth",
+                    "1",
+                    "origin",
+                    "refs/heads/tickets:refs/remotes/origin/tickets",
+                ],
+                # fmt: on
+                check=True,
+                capture_output=True,
+                text=True,
+            )
         except (OSError, subprocess.CalledProcessError) as exc:
             stderr = getattr(exc, "stderr", "") or ""
             # Never let the token leak into a log line via the URL — redact BOTH the
