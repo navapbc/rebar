@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 # projection changes.
 #   v2: process_revert now un-archives on REVERT-of-ARCHIVED (bug vocal-jig-apron)
 #   v3: replay now projects a derived `updated_at` (P1.1); pre-v3 caches lack it
-_REDUCER_CACHE_VERSION = 3
+#   v4: replay now projects the kind-keyed `attestations` map (epic
+#       dark-acme-lumen); pre-v4 caches lack it, hiding a signed plan-review
+#       attestation and wrongly blocking `claim` (bug wait-warp-inlay)
+_REDUCER_CACHE_VERSION = 4
 
 
 def read_cache(cache_path: str, dir_hash: str) -> dict | None:
