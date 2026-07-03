@@ -89,15 +89,68 @@ def test_binding_drift_flags_live_retired_overlap(fsck, tmp_path):
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_dangling_and_unbound_are_online_only(fsck, tmp_path):
-    # Offline mode never populates the Jira-requiring cells.
+def test_no_snapshot_skips_jira_requiring_cells(fsck, tmp_path):
+    # Without a Jira snapshot artifact, dangling/unbound_jira cannot be decided.
     tracker = tmp_path / ".tickets-tracker"
     _write_bindings(tracker, bindings={"loc-1": _confirmed("REB-1")}, reverse={"REB-1": "loc-1"})
     drift = fsck.audit_binding_drift(
-        tracker, local_states=[{"ticket_id": "loc-1", "status": "open", "archived": False}]
+        tracker,
+        local_states=[{"ticket_id": "loc-1", "status": "open", "archived": False}],
+        use_prev_snapshot=False,
     )
     assert drift["dangling"] == []
     assert drift["unbound_jira"] == []
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_dangling_binding_flagged_with_snapshot(fsck, tmp_path):
+    # AC1(a)/AC4 — a confirmed binding whose Jira side is gone (absent from the
+    # snapshot) is flagged as dangling, even with an ACTIVE local ticket. RED
+    # before the snapshot arm: the audit returned clean for this exact case.
+    tracker = tmp_path / ".tickets-tracker"
+    _write_bindings(tracker, bindings={"f8b5": _confirmed("REB-530")}, reverse={"REB-530": "f8b5"})
+    drift = fsck.audit_binding_drift(
+        tracker,
+        local_states=[{"ticket_id": "f8b5", "status": "in_progress", "archived": False}],
+        jira_snapshot={},  # REB-530 absent from the snapshot → dangling candidate
+    )
+    assert drift["dangling"] == [{"local_id": "f8b5", "jira_key": "REB-530"}]
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_unbound_jira_native_flagged_with_snapshot(fsck, tmp_path):
+    # AC1(c) — a Jira-native issue in the snapshot with no binding is unbound_jira.
+    tracker = tmp_path / ".tickets-tracker"
+    _write_bindings(tracker, bindings={"loc-1": _confirmed("REB-1")}, reverse={"REB-1": "loc-1"})
+    drift = fsck.audit_binding_drift(
+        tracker,
+        local_states=[{"ticket_id": "loc-1", "status": "in_progress", "archived": False}],
+        jira_snapshot={
+            "REB-1": {"status": "In Progress"},
+            "REB-532": {"status": "To Do"},  # native, unbound → adopt candidate
+        },
+    )
+    assert drift["unbound_jira"] == [{"jira_key": "REB-532"}]
+    assert drift["dangling"] == []  # REB-1 is present + bound + active → no drift
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_would_terminal_via_snapshot_when_jira_live(fsck, tmp_path):
+    # An archived-local binding whose Jira is present + not Done → would_terminal.
+    tracker = tmp_path / ".tickets-tracker"
+    _write_bindings(
+        tracker, bindings={"loc-a": _confirmed("REB-464")}, reverse={"REB-464": "loc-a"}
+    )
+    drift = fsck.audit_binding_drift(
+        tracker,
+        local_states=[{"ticket_id": "loc-a", "status": "archived", "archived": True}],
+        jira_snapshot={"REB-464": {"status": "To Do"}},
+    )
+    assert drift["would_terminal"] == [{"local_id": "loc-a", "jira_key": "REB-464"}]
+    assert drift["dangling"] == []
 
 
 @pytest.mark.unit
