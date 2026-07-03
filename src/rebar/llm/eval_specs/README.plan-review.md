@@ -1,7 +1,7 @@
 # Plan-review standing eval suite
 
 The standing per-criterion eval set for the plan-review gate (epic `5fd2`, child
-`7284`), wired into the shipped Inspect-AI eval seam (`rebar.llm.eval`). Each spec is a
+`7284`), wired into the shipped Inspect-AI eval seam (`rebar.llm.evals.eval`). Each spec is a
 `<prompt-id>.eval.yaml` resolved by `load_eval_spec` (a project override at
 `.rebar/evals/<id>.eval.yaml` wins over the packaged copy).
 

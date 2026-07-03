@@ -33,7 +33,7 @@ from typing import Any
 
 # These live in NON-editor modules, so importing them here creates no back-edge into
 # ``editor`` (keeping this module out of the import cycle — see the module docstring).
-from rebar.llm.prompt_library import create_prompt, enumerate_library
+from rebar.llm.prompting.prompt_library import create_prompt, enumerate_library
 
 from .prompt_authoring import list_prompts, prompt_write_target, save_prompt
 
@@ -135,7 +135,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         pid = (parse_qs(urlsplit(self.path).query).get("id") or [""])[0]
         target = prompt_write_target(pid, repo_root=self.session.repo_root)
         try:
-            from rebar.llm.prompts import get_prompt, parse_front_matter
+            from rebar.llm.prompting.prompts import get_prompt, parse_front_matter
 
             prompt = get_prompt(pid, repo_root=self.session.repo_root)
             meta, _body = parse_front_matter(self._raw_prompt_text(pid) or "")
@@ -151,7 +151,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _raw_prompt_text(self, pid: str) -> str | None:
         # The RAW prompt file text (front-matter intact) so the edit form gets the
         # current front-matter; a project override wins over the packaged copy.
-        from rebar.llm.prompts import _catalog_dir, _packaged_prompt_files
+        from rebar.llm.prompting.prompts import _catalog_dir, _packaged_prompt_files
 
         if self.session.repo_root:
             user = Path(self.session.repo_root) / ".rebar" / "prompts" / f"{pid}.md"
@@ -310,8 +310,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         # green; it canonicalizes the front-matter and invalidates the registry caches so
         # the entry is immediately enumerable. 200 {ok:true, id, path} or 4xx {ok:false,
         # errors:[...]}. Token+Host guarded above.
-        from rebar.llm.prompt_library import LibraryWriteError, PromptError
-        from rebar.llm.prompts import write_front_matter
+        from rebar.llm.prompting.prompt_library import LibraryWriteError, PromptError
+        from rebar.llm.prompting.prompts import write_front_matter
 
         try:
             data = json.loads(raw.decode("utf-8"))

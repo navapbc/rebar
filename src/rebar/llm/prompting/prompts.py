@@ -32,28 +32,28 @@ from importlib.resources import files
 from pathlib import Path
 
 from rebar.llm.errors import LLMConfigError
-from rebar.llm.prompts_frontmatter import (
+from rebar.llm.prompting.prompts_frontmatter import (
     FRONT_MATTER_KEYS as FRONT_MATTER_KEYS,
 )
-from rebar.llm.prompts_frontmatter import (
+from rebar.llm.prompting.prompts_frontmatter import (
     PROMPT_SCHEMA_VERSION as PROMPT_SCHEMA_VERSION,
 )
-from rebar.llm.prompts_frontmatter import (
+from rebar.llm.prompting.prompts_frontmatter import (
     PromptError as PromptError,
 )
-from rebar.llm.prompts_frontmatter import (
+from rebar.llm.prompting.prompts_frontmatter import (
     PromptVersionError as PromptVersionError,
 )
-from rebar.llm.prompts_frontmatter import (
+from rebar.llm.prompting.prompts_frontmatter import (
     _refuse_newer_schema_version as _refuse_newer_schema_version,
 )
-from rebar.llm.prompts_frontmatter import (
+from rebar.llm.prompting.prompts_frontmatter import (
     _split_front_matter_raw as _split_front_matter_raw,
 )
-from rebar.llm.prompts_frontmatter import (
+from rebar.llm.prompting.prompts_frontmatter import (
     parse_front_matter as parse_front_matter,
 )
-from rebar.llm.prompts_frontmatter import (
+from rebar.llm.prompting.prompts_frontmatter import (
     write_front_matter as write_front_matter,
 )
 
@@ -148,7 +148,10 @@ class Prompt:
 
 
 def _catalog_dir():
-    return files(__package__).joinpath("reviewers")
+    # Anchor at the ``rebar.llm`` package explicitly: this module now lives in the
+    # ``rebar.llm.prompting`` subpackage, so ``__package__`` would resolve the wrong
+    # root. The packaged reviewer catalog stays a ``rebar.llm`` data dir.
+    return files("rebar.llm").joinpath("reviewers")
 
 
 def _index_path():
@@ -302,7 +305,7 @@ def build_prompt_index(repo_root=None) -> dict[str, dict]:
 def regenerate_prompt_index(repo_root=None) -> str:
     """Regenerate ``reviewers/index.json`` from the packaged prompt front-matter and
     write it (story afe6). Returns the canonical JSON text written. CI calls this via
-    ``python -m rebar.llm.prompts`` then diffs the file for drift."""
+    ``python -m rebar.llm.prompting.prompts`` then diffs the file for drift."""
     index = build_prompt_index(repo_root=repo_root)
     text = json.dumps(index, indent=2, ensure_ascii=False) + "\n"
     path = Path(str(_index_path()))
@@ -685,7 +688,7 @@ def select_reviewers(
 
 
 def _main(argv: list[str] | None = None) -> int:
-    """``python -m rebar.llm.prompts regenerate-index`` — regenerate the derived
+    """``python -m rebar.llm.prompting.prompts regenerate-index`` — regenerate the derived
     ``reviewers/index.json`` (the CI drift gate writes-then-diffs this)."""
     import sys
 

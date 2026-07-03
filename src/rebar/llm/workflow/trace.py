@@ -54,7 +54,7 @@ def _execution_mode(prompt_id: str | None, repo_root: str | None) -> str | None:
     if not prompt_id:
         return None
     try:
-        from rebar.llm.prompts import get_prompt
+        from rebar.llm.prompting.prompts import get_prompt
 
         return getattr(get_prompt(prompt_id, repo_root=repo_root), "execution_mode", None)
     except Exception:  # noqa: BLE001 — best-effort call-mode lookup; trace capture never fails the run

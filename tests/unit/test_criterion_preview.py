@@ -24,8 +24,8 @@ import pytest
 
 from rebar.grounding.detectors import Detector, Registry
 from rebar.grounding.engine_b import ScanResult
-from rebar.llm import prompt_library
 from rebar.llm.plan_review import det_invariants, registry
+from rebar.llm.prompting import prompt_library
 from rebar.llm.runner import FakeRunner
 from rebar.llm.workflow import criterion_preview
 from rebar.llm.workflow.criterion_preview import (

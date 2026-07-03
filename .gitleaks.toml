@@ -38,3 +38,16 @@ regexes = [
   # (2) obvious documentation placeholders immediately following the sk-lf-/pk-lf- prefix.
   '''(?:sk|pk)-lf-(?:<[^>]*>|EXAMPLE[\w-]*|YOUR[\w-]*|your[\w-]*|x{3,})''',
 ]
+
+[[allowlists]]
+description = """
+Obvious fake TEST signing keys in unit-test fixtures, e.g.
+REBAR_SIGNING_KEY="test-signing-key-08af" — the generic-api-key rule flags them on any
+edit to the file (the detector whole-file-scans changed files). The value is literally
+prefixed "test-signing-key-"; a real HMAC signing key never is, so genuine key leaks
+still trip. Scoped to that exact fake shape, never a path/test exclusion.
+"""
+regexTarget = "match"
+regexes = [
+  '''test-signing-key-[0-9A-Fa-f]{2,}''',
+]

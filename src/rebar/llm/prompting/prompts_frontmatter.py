@@ -1,6 +1,6 @@
 """Prompt front-matter I/O — parse / split / write the YAML front-matter block.
 
-Extracted from :mod:`rebar.llm.prompts` along the front-matter seam (epic 5ca8 /
+Extracted from :mod:`rebar.llm.prompting.prompts` along the front-matter seam (epic 5ca8 /
 ``dazed-daisy-bur``) so the prompt-registry module drops back under the module-size
 soft cap. This module owns the canonical front-matter format — the closed
 :data:`FRONT_MATTER_KEYS` set + :data:`PROMPT_SCHEMA_VERSION` — the read-side parsers
@@ -12,8 +12,8 @@ subclass). The exceptions MUST live here with the format: the version check rais
 leaving either behind in ``prompts.py`` would force this module to import
 ``prompts.py`` and create a cycle.
 
-:mod:`rebar.llm.prompts` imports every name here back and re-exports it, so existing
-``from rebar.llm.prompts import parse_front_matter`` (etc.) call-sites are unchanged.
+:mod:`rebar.llm.prompting.prompts` imports every name here back and re-exports it, so existing
+``from rebar.llm.prompting.prompts import parse_front_matter`` (etc.) call-sites are unchanged.
 
 Stdlib-only (``yaml`` is imported lazily inside the functions that need it).
 """

@@ -227,15 +227,15 @@ the pydantic-ai tools in `pai_tools.py`), bringing `runner.py` back under the so
 cap. `fs_tools.py` is also where the workflow engine's git-ref snapshot code (WS-D)
 will land.
 
-`src/rebar/llm/prompts.py` was **split** along its front-matter seam (epic 5ca8 /
+`src/rebar/llm/prompting/prompts.py` was **split** along its front-matter seam (epic 5ca8 /
 `dazed-daisy-bur`): the front-matter I/O cluster (`parse_front_matter`,
 `_split_front_matter_raw`, `write_front_matter`, `_refuse_newer_schema_version`, the
 `_FRONT_MATTER` fence + `FRONT_MATTER_KEYS`/`PROMPT_SCHEMA_VERSION`, and the
 `PromptError`/`PromptVersionError` exceptions — moved together because
 `PromptVersionError` subclasses `PromptError`) moved to
-`src/rebar/llm/prompts_frontmatter.py`, bringing `prompts.py` back under the soft cap.
-`prompts.py` re-exports every moved name, so `from rebar.llm.prompts import …`
-call-sites (and `rebar.llm.prompts.<name>` attribute access) are unchanged. The
+`src/rebar/llm/prompting/prompts_frontmatter.py`, bringing `prompts.py` back under the soft cap.
+`prompts.py` re-exports every moved name, so `from rebar.llm.prompting.prompts import …`
+call-sites (and `rebar.llm.prompting.prompts.<name>` attribute access) are unchanged. The
 cache-split helpers (`split_volatile`/`strip_volatile_marker`/`resolve_prompt_cached`)
 stay in `prompts.py` (they call `resolve_prompt`).
 

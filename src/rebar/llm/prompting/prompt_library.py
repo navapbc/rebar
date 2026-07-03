@@ -1,7 +1,7 @@
 """Prompt + criteria library WRITE + structured-ENUMERATE data model (story B-DM).
 
 This is the backend the visual editor's "select / create criteria & prompts" UX
-(story B-UX) sits on. It is ADDITIVE over :mod:`rebar.llm.prompts` (the read/index
+(story B-UX) sits on. It is ADDITIVE over :mod:`rebar.llm.prompting.prompts` (the read/index
 layer) and :mod:`rebar.llm.plan_review.registry` (criteria routing) — it does not
 change their read or index behaviour.
 
@@ -14,7 +14,7 @@ Two surfaces:
   criterion's overlay flag is sourced from the registry
   (:func:`rebar.llm.plan_review.registry.is_overlay`). It covers BOTH packaged
   reviewers and ``.rebar/prompts/<id>.md`` user entries (user wins on id clash,
-  mirroring :func:`rebar.llm.prompts.get_prompt`'s resolution order).
+  mirroring :func:`rebar.llm.prompting.prompts.get_prompt`'s resolution order).
 
 * :func:`create_prompt` / :func:`update_prompt` — write a VALIDATED prompt-library
   ``.md`` (front-matter + body) to the writable user-override home
@@ -24,7 +24,7 @@ Two surfaces:
 
 **Why the committed index is NOT regenerated on a user write (the drift-gate
 contract).** ``reviewers/index.json`` is DERIVED from the *packaged* reviewer
-front-matter only (:func:`rebar.llm.prompts.build_prompt_index` iterates the
+front-matter only (:func:`rebar.llm.prompting.prompts.build_prompt_index` iterates the
 packaged dir), and the CI drift gate diffs it after ``regenerate-index``. A
 user-authored prompt lives outside the packaged dir, so it is correctly absent from
 that committed artifact — the gate stays green precisely BECAUSE an authoring write
@@ -41,7 +41,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rebar.llm.prompts import (
+from rebar.llm.prompting.prompts import (
     EXECUTION_MODES,
     PromptError,
     PromptNotFound,

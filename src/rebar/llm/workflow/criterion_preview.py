@@ -317,7 +317,7 @@ def _preview_llm(
     plan = str(fixture.get("input") or "")
 
     if criterion_id:
-        from rebar.llm import eval_solver
+        from rebar.llm.evals import eval_solver
 
         result = eval_solver.run_case(
             criterion_id, {"input": plan}, runner=resolved, repo_root=repo_root
@@ -500,8 +500,8 @@ def author_criterion(
     ``LibraryWriteError``/``PromptError`` (bad id/rubric) or ``RegistryError`` (bad overlay) — the
     HTTP caller maps either to a 4xx."""
     from rebar.llm.criteria.ids import criterion_prompt_id
-    from rebar.llm.prompt_library import CRITERION_CATEGORY, create_prompt
-    from rebar.llm.prompts import write_front_matter
+    from rebar.llm.prompting.prompt_library import CRITERION_CATEGORY, create_prompt
+    from rebar.llm.prompting.prompts import write_front_matter
 
     text = write_front_matter({**meta, "category": CRITERION_CATEGORY}, body)
     path = create_prompt(criterion_prompt_id(criterion_id), text, repo_root=repo_root)
@@ -560,7 +560,7 @@ def author_criterion_overlay(repo_root: str, criterion_id: str, routing: dict[st
     persists a broken overlay (the caller maps it to a 4xx; the just-written prompt is left
     harmlessly inactive)."""
     from rebar.llm.plan_review import registry
-    from rebar.llm.prompt_library import _invalidate_caches
+    from rebar.llm.prompting.prompt_library import _invalidate_caches
 
     cid = criterion_id
     path = Path(repo_root) / ".rebar" / _OVERLAY_FILENAME

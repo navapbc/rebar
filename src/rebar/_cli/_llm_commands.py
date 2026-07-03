@@ -405,9 +405,9 @@ def _prompt_eval(args) -> int:
     import json as _json
 
     from rebar import config
-    from rebar.llm import eval as _eval
-    from rebar.llm import prompts as _prompts
     from rebar.llm.errors import LLMError
+    from rebar.llm.evals import eval as _eval
+    from rebar.llm.prompting import prompts as _prompts
 
     try:
         repo_root = str(config.repo_root())
@@ -489,8 +489,8 @@ def _criteria_eval(args) -> int:
     import json as _json
 
     from rebar import config
-    from rebar.llm import eval as _eval
     from rebar.llm.errors import LLMError
+    from rebar.llm.evals import eval as _eval
 
     if not (args.criterion_id or "").strip():
         sys.stderr.write("Error: a criterion id is required (e.g. `rebar criteria eval F1`)\n")

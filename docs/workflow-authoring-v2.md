@@ -26,7 +26,7 @@ prompts (see §4) — there is no separate reviewer catalog.
 ### 1.1 The closed front-matter key set
 
 Front-matter carries each prompt's contract. The key set is **closed** — authored in
-`rebar.llm.prompts.FRONT_MATTER_KEYS`, in canonical emit order:
+`rebar.llm.prompting.prompts.FRONT_MATTER_KEYS`, in canonical emit order:
 
 | Key              | Meaning |
 |------------------|---------|
@@ -51,7 +51,7 @@ so a newer key written by a newer binary survives a round-trip on an older one.
 
 ### 1.2 The `.rebar/prompts/<id>.md` override mechanism
 
-Prompt text resolution order (`rebar.llm.prompts.get_prompt`):
+Prompt text resolution order (`rebar.llm.prompting.prompts.get_prompt`):
 
 1. **Project override** — `<repo>/.rebar/prompts/<id>.md`, if present.
 2. **Built-in packaged** — `src/rebar/llm/reviewers/<id>.md` (shipped in the wheel).
@@ -242,7 +242,7 @@ index and `git diff --exit-code -- src/rebar/llm/reviewers/index.json`. A stale 
 (front-matter changed without regenerating) fails the build. Regenerate with:
 
 ```bash
-python -m rebar.llm.prompts regenerate-index
+python -m rebar.llm.prompting.prompts regenerate-index
 ```
 
 ---

@@ -204,7 +204,7 @@ Reviewers are now a **subset of prompts**, flagged by an explicit `category: rev
 the prompt front-matter (see [workflow-authoring-v2.md](workflow-authoring-v2.md)).
 Reviewer **identity + selection rules** (`id`, `dimension`, `applies_to` globs,
 `default`) are **derived** from that front-matter into a generated, committed index
-(`src/rebar/llm/reviewers/index.json`; regenerate with `python -m rebar.llm.prompts
+(`src/rebar/llm/reviewers/index.json`; regenerate with `python -m rebar.llm.prompting.prompts
 regenerate-index`, enforced by a CI drift gate) — there is no hand-edited catalog.
 Reviewer **prompt text is git-canonical** — resolved from the repo, never
 from Langfuse: a project override at `.rebar/prompts/<id>.md` wins if present,
@@ -320,7 +320,7 @@ we run an **ephemeral self-hosted stack**, not a persistent server:
 
 - **New reviewer:** ship a packaged prompt (`reviewers/<id>.md`) whose front-matter
   carries `category: review` plus `dimension` / `applies_to` / `default`, then
-  regenerate the derived index (`python -m rebar.llm.prompts regenerate-index`); a
+  regenerate the derived index (`python -m rebar.llm.prompting.prompts regenerate-index`); a
   project can override it with `.rebar/prompts/<id>.md`. `applies_to` globs make it
   eligible for rule-based selection. (No hand-edited catalog — the index is derived.)
 - **New operation:** assemble its deterministic context, resolve reviewer prompt(s)

@@ -194,7 +194,7 @@ A deterministic scorer **gates**; an `llm-judge` scorer only **reports** (it nev
 gates by itself) and is admitted only when its Cohen's-κ alignment to a frozen
 human-gold set clears threshold. To author a spec, copy an existing one and see
 `src/rebar/llm/eval_specs/README.plan-review.md`; scorer names must be registered in
-`src/rebar/llm/eval_scorers.py`.
+`src/rebar/llm/evals/eval_scorers.py`.
 
 ### Prompt-authoring guidance for review criteria (research-grounded)
 

@@ -8,8 +8,8 @@ import glob
 
 import yaml
 
-from rebar.llm import eval as ev
-from rebar.llm import eval_scorers as sc
+from rebar.llm.evals import eval as ev
+from rebar.llm.evals import eval_scorers as sc
 
 # ── the registry covers every packaged spec's scorer names ─────────────────────
 

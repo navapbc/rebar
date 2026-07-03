@@ -139,7 +139,12 @@ def lint_prompt_refs(doc: dict[str, Any], *, repo_root=None) -> list[LintFinding
     prompt (a catalog reviewer or a ``.rebar/prompts/<id>.md`` file), AND the step's
     inputs must satisfy the prompt's declared required-variable schema. Imports the
     (stdlib-only) prompt registry lazily so the core linter stays uncoupled."""
-    from rebar.llm.prompts import get_prompt, load_catalog, prompt_input_schema, prompt_ref_exists
+    from rebar.llm.prompting.prompts import (
+        get_prompt,
+        load_catalog,
+        prompt_input_schema,
+        prompt_ref_exists,
+    )
 
     findings: list[LintFinding] = []
     catalog = load_catalog()
@@ -250,7 +255,7 @@ def _prompt_override_drift_findings(repo_root) -> list[LintFinding]:
     Best-effort: the prompt registry is imported lazily and any failure is swallowed
     (the linter must never crash because a prompt override can't be read)."""
     try:
-        from rebar.llm.prompts import prompt_override_drift
+        from rebar.llm.prompting.prompts import prompt_override_drift
 
         return [
             LintFinding(".rebar/prompts", msg, "error")

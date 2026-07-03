@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from rebar._store.fsutil import atomic_write
-from rebar.llm.prompts import (
+from rebar.llm.prompting.prompts import (
     PromptError,
     _catalog_dir,
     _packaged_prompt_files,

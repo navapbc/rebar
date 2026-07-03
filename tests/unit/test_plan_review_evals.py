@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from rebar.llm import eval as E
+from rebar.llm.evals import eval as E
 
 PLAN_REVIEW_SPECS = (
     "plan-review-finder",
