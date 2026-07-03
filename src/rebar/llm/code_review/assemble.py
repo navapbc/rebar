@@ -22,6 +22,7 @@ import subprocess
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+from rebar._store.gitutil import run_git
 from rebar.llm.errors import LLMConfigError
 
 # Keep the inlined diff bounded; the verify/finder agents read files for the rest. A config
@@ -33,9 +34,7 @@ def _git(repo: str, args: list[str]) -> str:
     """Run a git subcommand in ``repo``, returning stdout (raises :class:`LLMConfigError`
     on failure with an actionable hint to pass ``diff_text`` instead)."""
     try:
-        proc = subprocess.run(
-            ["git", "-C", repo, *args], capture_output=True, text=True, timeout=30
-        )
+        proc = run_git(repo, *args, check=False, timeout=30)
     except (OSError, subprocess.SubprocessError) as exc:
         raise LLMConfigError(f"git failed ({' '.join(args)}): {exc}") from exc
     if proc.returncode != 0:

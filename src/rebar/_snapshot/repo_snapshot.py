@@ -58,6 +58,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from rebar._store.gitutil import run_git
+
 try:  # POSIX advisory locking; absent on some platforms (e.g. plain Windows)
     import fcntl
 except ImportError:  # pragma: no cover - platform-dependent
@@ -278,12 +280,7 @@ def _fetch_lock_for(repo_root: str) -> threading.Lock:
 def _git(
     repo_root: str, *args: str, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", repo_root, *args],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+    return run_git(repo_root, *args, check=False, env=env)
 
 
 def _has_remote(repo_root: str, remote: str = "origin") -> bool:

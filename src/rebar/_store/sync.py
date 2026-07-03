@@ -37,6 +37,7 @@ import os
 import subprocess
 
 from rebar._store import lock as _lock
+from rebar._store.gitutil import run_git
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +50,7 @@ _GIT_TIMEOUT = 30
 
 def _git(tracker: str, *args: str) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(
-            ["git", "-C", tracker, *args],
-            capture_output=True,
-            text=True,
-            timeout=_GIT_TIMEOUT,
-        )
+        return run_git(tracker, *args, check=False, timeout=_GIT_TIMEOUT)
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(
             ["git", "-C", tracker, *args],

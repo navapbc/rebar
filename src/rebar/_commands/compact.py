@@ -26,6 +26,7 @@ from rebar._commands import _seam
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._store import event_append, hlc, lock
 from rebar._store.canonical import canonical_str
+from rebar._store.gitutil import run_git
 from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
 
 
@@ -38,7 +39,7 @@ def _usage() -> int:
 
 
 def _git(tracker: str, *args: str):
-    return subprocess.run(["git", "-C", tracker, *args], capture_output=True, text=True)
+    return run_git(tracker, *args, check=False)
 
 
 def _sync_before_compact(tracker: str) -> None:

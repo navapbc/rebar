@@ -39,6 +39,7 @@ import uuid
 from rebar._commands._seam import CommandError
 from rebar._store import event_append, hlc, lock
 from rebar._store.canonical import canonical_str
+from rebar._store.gitutil import run_git
 from rebar.reducer import reduce_ticket
 from rebar.reducer._sort import prefix_ts as _prefix_ts
 
@@ -88,7 +89,7 @@ def _parent_status_uuid(ticket_dir_path: str) -> str | None:
 def _git(tracker_dir: str, *args: str) -> None:
     """Run a git command in the tracker, raising :class:`CommandError` (exit 2) on
     failure with the exact bash stderr prefix."""
-    cp = subprocess.run(["git", "-C", tracker_dir, *args], capture_output=True, text=True)
+    cp = run_git(tracker_dir, *args, check=False)
     if cp.returncode != 0:
         raise CommandError(f"Error: git operation failed: {cp.stderr}", returncode=2)
 

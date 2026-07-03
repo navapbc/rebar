@@ -19,6 +19,8 @@ import re
 import subprocess
 import sys
 
+from rebar._store.gitutil import run_git
+
 logger = logging.getLogger(__name__)
 
 _NON_FF = re.compile(r"non-fast-forward|rejected|fetch first", re.IGNORECASE)
@@ -52,13 +54,7 @@ _GIT_TIMEOUT = 30
 
 def _git(base: str, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(
-            ["git", "-C", base, *args],
-            capture_output=True,
-            text=True,
-            env=env,
-            timeout=_GIT_TIMEOUT,
-        )
+        return run_git(base, *args, check=False, env=env, timeout=_GIT_TIMEOUT)
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(
             ["git", "-C", base, *args],

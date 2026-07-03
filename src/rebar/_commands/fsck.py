@@ -26,6 +26,7 @@ import time
 
 from rebar import config
 from rebar._engine_support.output import OutputFormatError, parse_output
+from rebar._store.gitutil import run_git
 from rebar.reducer import reduce_ticket
 
 _STRUCTURED_KINDS = {
@@ -253,7 +254,7 @@ def _branch_mismatch(tracker: str, repo_root=None) -> str | None:
 
 def _push_pending(tracker: str) -> str | None:
     def _git(*args: str) -> subprocess.CompletedProcess:
-        return subprocess.run(["git", "-C", tracker, *args], capture_output=True, text=True)
+        return run_git(tracker, *args, check=False)
 
     # Branch + remote resolved from the MAIN repo config (the tracker's parent);
     # best-effort: a malformed config yields no push-pending notice rather than a crash.

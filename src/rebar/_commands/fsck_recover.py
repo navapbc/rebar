@@ -19,6 +19,7 @@ import subprocess
 import sys
 
 from rebar._commands.fsck import _resolve_tracker_git_dir
+from rebar._store.gitutil import run_git
 
 _TICKET_COMMIT_RE = (
     r"^ticket: (CREATE|STATUS|COMMENT|LINK|UNLINK|EDIT|FILE_IMPACT|VERIFY_COMMANDS|"
@@ -58,7 +59,7 @@ Flags:
 
 
 def _git(tracker: str, *args: str, **kw) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", tracker, *args], capture_output=True, text=True, **kw)
+    return run_git(tracker, *args, check=False, **kw)
 
 
 def _detect_stale_rebase(git_dir: str) -> str:
