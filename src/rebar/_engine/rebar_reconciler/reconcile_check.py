@@ -47,6 +47,17 @@ def _load_config() -> ModuleType:
     return _load_sibling("config", "config.py")
 
 
+def _load_classify() -> ModuleType:
+    """Load the pure convergence classifier (epic 3006-e198, child 8de5).
+
+    reconcile_check is the ONLINE arm of the ONE classifier: its lifecycle
+    findings (orphaned bindings, unbound Jira) delegate to ``classify()`` instead
+    of bespoke None-checks, so the report and the live pass share one decision
+    surface. Field-level comparison (``_compare_pair``) stays here.
+    """
+    return _load_sibling("classify", "classify.py")
+
+
 # ---------------------------------------------------------------------------
 # Field comparison helpers
 # ---------------------------------------------------------------------------
@@ -235,6 +246,13 @@ def reconcile_check(
     orphaned_bindings: list[str] = []
     checked = 0
 
+    # The ONE classifier drives the lifecycle routing (child 8de5). A bound pair
+    # whose classifier Decision is ALERT (local gone) or PROBE_GET (Jira gone /
+    # absent from the snapshot) is an orphaned binding; a present-present pair
+    # (SYNC_FIELDS / TERMINAL_TRANSITION / NOOP) proceeds to the field compare.
+    _c = _load_classify()
+    _ORPHAN_KINDS = {_c.DecisionKind.ALERT, _c.DecisionKind.PROBE_GET}
+
     for local_id, entry in bindings.items():
         jira_key = entry.get("jira_key", "")
         bound_local_ids.add(local_id)
@@ -243,19 +261,23 @@ def reconcile_check(
         local_ticket = local_by_id.get(local_id)
         jira_issue = jira_snapshot.get(jira_key)
 
-        if local_ticket is None:
+        if jira_issue is not None:
+            obs = _c.JiraObservation(_c.ObservedJira.PRESENT, key=jira_key, fields=jira_issue)
+        else:
+            obs = _c.JiraObservation(_c.ObservedJira.ABSENT_IN_WINDOW, key=jira_key)
+        decision = _c.classify(local_ticket, obs, entry, entry.get("baseline"))
+        if decision.kind in _ORPHAN_KINDS:
             orphaned_bindings.append(local_id)
             continue
 
-        if jira_issue is None:
-            orphaned_bindings.append(local_id)
-            continue
-
+        # Present-present pair — run the field-level comparison.
         checked += 1
-        pair_discs = _compare_pair(local_id, jira_key, local_ticket, jira_issue)
+        pair_discs = _compare_pair(local_id, jira_key, local_ticket or {}, jira_issue or {})
         discrepancies.extend(pair_discs)
 
-    # Orphaned Jira: issues with rebar-id-* labels but no binding
+    # Orphaned Jira: issues with rebar-id-* labels but no binding (an L10 anomaly —
+    # a labeled issue whose binding record was lost; distinct from the classifier's
+    # ADOPT cell for label-less native issues, counted as unbound_jira below).
     orphaned_jira: list[str] = []
     for jira_key, jira_issue in jira_snapshot.items():
         if jira_key in bound_jira_keys:
