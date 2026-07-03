@@ -91,14 +91,30 @@ def _resolve_open_parent(tracker: str, ticket_id: str) -> str | None:
     return parent_id
 
 
-def _parse_flags(args: list[str]) -> tuple[str, bool, str, str]:
-    """Parse [--reason[=]] [--force] [--verdict-hash[=]] [--force-close[=]] from the
-    args AFTER <current> <target>. Returns (reason, force, verdict_hash,
-    force_close_reason). Mirrors ticket-transition.sh's flag loop (unknown tokens
-    are silently skipped)."""
+def _warn_verdict_hash_deprecated() -> None:
+    """Emit the ``--verdict-hash`` deprecation warning at the CLI parse boundary.
+
+    The flag is fully IGNORED — the story/epic close gate now requires a certified
+    signature (``rebar sign``), not a verdict hash. This one-line warning is the ONLY
+    remaining trace of the flag: it is no longer threaded into ``transition_compute`` /
+    ``close_ticket`` / ``transition_core`` / ``_signature_gate`` (item 16b-1)."""
+    sys.stderr.write(
+        "Warning: --verdict-hash is deprecated and ignored; the close gate now "
+        "uses signatures (rebar sign <id> <manifest>).\n"
+    )
+
+
+def _parse_flags(args: list[str]) -> tuple[str, bool, str]:
+    """Parse [--reason[=]] [--force] [--force-close[=]] from the args AFTER
+    <current> <target>. Returns (reason, force, force_close_reason). Mirrors
+    ticket-transition.sh's flag loop (unknown tokens are silently skipped).
+
+    ``--verdict-hash`` is DEPRECATED and fully ignored: it is still recognised here
+    (and its value consumed) only to emit a one-line deprecation warning at the CLI
+    boundary, then discarded — it is not threaded any further into the transition
+    path."""
     reason = ""
     force = False
-    verdict_hash = ""
     force_close = ""
     i = 0
     while i < len(args):
@@ -115,12 +131,12 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str, str]:
             force = True
             i += 1
         elif a.startswith("--verdict-hash="):
-            verdict_hash = a[len("--verdict-hash=") :]
+            _warn_verdict_hash_deprecated()
             i += 1
         elif a == "--verdict-hash":
             if i + 1 >= len(args):
                 raise CommandError("Error: --verdict-hash requires a value", returncode=1)
-            verdict_hash = args[i + 1]
+            _warn_verdict_hash_deprecated()
             i += 2
         elif a.startswith("--force-close="):
             force_close = a[len("--force-close=") :]
@@ -132,7 +148,7 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str, str]:
             i += 2
         else:
             i += 1
-    return reason, force, verdict_hash, force_close
+    return reason, force, force_close
 
 
 def _validate_status(label: str, value: str) -> None:
@@ -159,7 +175,6 @@ def transition_compute(
     *,
     reason: str = "",
     force: bool = False,
-    verdict_hash: str = "",
     force_close: str = "",
     repo_root=None,
     cascade: bool = True,
@@ -276,7 +291,6 @@ def transition_compute(
         repo_root_str,
         repo_root,
         reason=reason,
-        verdict_hash=verdict_hash,
         force_close=force_close,
     )
 
@@ -456,14 +470,13 @@ def transition_cli(argv: list[str], *, repo_root=None) -> int:
         return _unarchive(ticket_id, target_status, tracker, os.path.dirname(tracker))
 
     try:
-        reason, force, verdict_hash, force_close = _parse_flags(flag_args)
+        reason, force, force_close = _parse_flags(flag_args)
         result = transition_compute(
             ticket_id,
             current_status,
             target_status,
             reason=reason,
             force=force,
-            verdict_hash=verdict_hash,
             force_close=force_close,
             repo_root=repo_root,
         )

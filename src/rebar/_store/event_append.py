@@ -1,4 +1,4 @@
-"""Canonical locked event-commit for the tickets store (Tier D, ``REBAR_WRITE_CORE``).
+"""Canonical locked event-commit for the tickets store.
 
 In-process replacement for the bash write path
 ``ticket-append-event.sh`` → ``write_commit_event`` → ``_flock_stage_commit``: takes

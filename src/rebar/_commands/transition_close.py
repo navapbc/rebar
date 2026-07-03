@@ -207,7 +207,6 @@ def close_ticket(
     repo_root,
     *,
     reason: str,
-    verdict_hash: str,
     force_close: str,
 ) -> dict:
     """Perform the locked write and its post-processing tail; return the transition
@@ -271,7 +270,6 @@ def close_ticket(
         env_id=env_id,
         author=author,
         close_reason=reason,
-        verdict_hash=verdict_hash,
         force_close_reason=force_close,
     )
 

@@ -6,7 +6,8 @@ Covers task 52f3-f71a-dfaa-4d03:
     seed_mutations= kwargs.
   - reconcile_once() runs a post-emit filter that invokes
     invariants.report_schema_drift() for every repair_property mutation
-    whose payload carries follow_on={'kind':'schema_drift', ...}.
+    whose payload carries follow_on={'kind':'schema_drift_signal', ...}
+    (the kind apply_inbound.inbound_repair_property actually emits).
   - The same-pass follow-on signal is preserved end-to-end (returned in
     the same pass, not deferred).
 
@@ -206,9 +207,10 @@ def test_schema_drift_post_emit_filter_invokes_report(tmp_path):
     """report_schema_drift must be invoked for repair_property follow-ons.
 
     Behavior under test: when the differ returns a repair_property mutation
-    whose payload carries follow_on={'kind':'schema_drift', ...}, the
+    whose payload carries follow_on={'kind':'schema_drift_signal', ...}, the
     post-emit filter in reconcile_once must call report_schema_drift with
-    the target/observed/expected fields from the follow-on payload.
+    the issue_key/observed/expected fields from the follow-on payload (here
+    the issue key falls back to the "target" field).
     """
     pass_id = "inv-phase-drift"
     snapshot = {"JIRA-1": {"summary": "x"}}
@@ -219,7 +221,7 @@ def test_schema_drift_post_emit_filter_invokes_report(tmp_path):
             "local_id": "local-7",
             "fields": {"local_id": "local-7"},
             "follow_on": {
-                "kind": "schema_drift",
+                "kind": "schema_drift_signal",
                 "target": "local_id",
                 "observed": "STRING",
                 "expected": "ARRAY",
@@ -273,7 +275,7 @@ def test_same_pass_follow_on_emitted(tmp_path):
             "local_id": "local-9",
             "fields": {"local_id": "local-9"},
             "follow_on": {
-                "kind": "schema_drift",
+                "kind": "schema_drift_signal",
                 "target": "labels",
                 "observed": "STRING",
                 "expected": "ARRAY",
@@ -307,3 +309,72 @@ def test_same_pass_follow_on_emitted(tmp_path):
         "report_schema_drift must fire within the same pass that produced the follow-on"
     )
     assert result["pass_id"] == pass_id
+
+
+def test_real_repair_failure_follow_on_is_surfaced(tmp_path):
+    """The REAL repair-failure follow-on (kind='schema_drift_signal') is now surfaced.
+
+    Regression for meta-bug 5f2a-9a9f-2b4a-4aab (item 16b-2): the applier
+    ``apply_inbound.inbound_repair_property`` emits a follow-on with
+    kind='schema_drift_signal' on a repair failure, but the reconcile_once post-emit
+    filter USED TO match the never-emitted kind 'schema_drift', so those in-pass
+    repair-failure signals were silently dropped. This drives the ACTUAL emitter to
+    produce the follow-on, feeds it through the filter, and asserts report_schema_drift
+    now fires — reading the issue key from the emitter's own 'issue_key' field (the
+    production path that was broken; before the fix this asserted 0 calls).
+    """
+    from rebar_reconciler.apply_inbound import inbound_repair_property
+
+    # Drive the real emitter's FAILURE path to obtain its GENUINE follow-on shape/kind
+    # (binds this test to the emitter — a future kind rename here breaks it, by design).
+    client = MagicMock()
+    client.set_issue_property.side_effect = RuntimeError("property write boom")
+    mutation = types.SimpleNamespace(target="DIG-500", payload={"local_id": "loc-500"})
+    outcome = inbound_repair_property(mutation, client)
+    follow_on = outcome["follow_on"]
+    assert follow_on["kind"] == "schema_drift_signal"
+    assert follow_on["issue_key"] == "DIG-500"
+    # The real emitter carries issue_key/reason, NOT target/observed/expected.
+    assert "target" not in follow_on
+
+    pass_id = "inv-phase-real-emitter"
+    snapshot = {"JIRA-1": {"summary": "x"}}
+    mutations = [
+        {
+            "action": "repair_property",
+            "key": "DIG-500",
+            "local_id": "loc-500",
+            "fields": {"local_id": "loc-500"},
+            "follow_on": follow_on,
+        }
+    ]
+
+    stub_fetcher = _make_stub_fetcher(snapshot)
+    stub_differ, _ = _make_stub_differ(returned_mutations=mutations)
+    stub_applier = _make_stub_applier()
+    stub_health = _make_stub_health()
+    stub_invariants, drift_spy = _make_stub_invariants()
+
+    _install_stubs(
+        fetcher=stub_fetcher,
+        differ=stub_differ,
+        applier=stub_applier,
+        health=stub_health,
+        invariants=stub_invariants,
+    )
+    try:
+        reconcile_mod = _load_reconcile()
+        reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
+    finally:
+        _cleanup_stubs()
+
+    # Behavior change: the real emitter's follow-on is now picked up. Before the fix
+    # the filter matched 'schema_drift' only, so this count was 0.
+    assert drift_spy.call_count == 1, (
+        "Expected report_schema_drift to fire for the real repair-failure follow-on, "
+        f"got {drift_spy.call_count}"
+    )
+    # The issue key is read from the emitter's 'issue_key' field (observed/expected None).
+    assert drift_spy.call_args.args == ("DIG-500", None, None), (
+        f"report_schema_drift called with unexpected args: {drift_spy.call_args.args!r}"
+    )
