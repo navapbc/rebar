@@ -945,3 +945,49 @@ def test_voter_emits_merge_debug_logs(monkeypatch, tmp_path, caplog):
     assert "merge_change_review" in blob and '"real_files": 1' in blob
     assert '"auto_diff_empty": false' in blob and '"files_fetched": 1' in blob
     assert "voter_voted" in blob and '"merge": true' in blob
+
+
+def test_voter_emits_merge_change_409_guard(monkeypatch, tmp_path, caplog):
+    """The is_merge branch routes a merge through the auto-merge-delta path INSTEAD of the
+    bare /patch (which 409s on a >=2-parent commit), and must emit the named
+    ``merge_change_409_guard`` signal (S2 follow-up sly-sloth-bay). It fires ONLY on a merge
+    — distinct from ``merge_detection`` (logged for every change) — so the otherwise-silent
+    guard is visible in the logs and its firing is diagnosable."""
+    import logging as _logging
+
+    _patch_review(monkeypatch, [])
+    # MERGE: the guard event MUST be present, and the bare /patch MUST NOT be called.
+    gm = FakeGerrit(
+        parents=2,
+        merge_files={"/COMMIT_MSG": {}, "src/x.py": {"status": "M"}},
+        file_diffs={"src/x.py": _diff_info(added=["n"])},
+        mergelist=[{"commit": "abc123", "subject": "s"}],
+    )
+    with caplog.at_level(_logging.INFO, logger="rebar.review_bot.voter"):
+        asyncio.run(
+            voter.review_and_vote(
+                _merge_event(),
+                config=_cfg(tmp_path),
+                gerrit=gm,
+                dedup=DedupStore(str(tmp_path / "m.db")),
+            )
+        )
+    merge_blob = "\n".join(r.message for r in caplog.records)
+    assert "merge_change_409_guard" in merge_blob and '"parent_count": 2' in merge_blob
+    assert gm.get_patch_calls == 0  # the guard: never the bare /patch on a merge
+
+    caplog.clear()
+    # NON-MERGE: the guard event MUST be absent (guard is merge-specific), /patch IS used.
+    gn = FakeGerrit(parents=1)
+    with caplog.at_level(_logging.INFO, logger="rebar.review_bot.voter"):
+        asyncio.run(
+            voter.review_and_vote(
+                _event(),
+                config=_cfg(tmp_path),
+                gerrit=gn,
+                dedup=DedupStore(str(tmp_path / "n.db")),
+            )
+        )
+    nonmerge_blob = "\n".join(r.message for r in caplog.records)
+    assert "merge_change_409_guard" not in nonmerge_blob
+    assert gn.get_patch_calls == 1
