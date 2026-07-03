@@ -34,10 +34,24 @@ def _now_iso() -> str:
 
 
 _EMPTY_STORE: dict[str, Any] = {
-    "version": 1,
+    "version": 2,
     "bindings": {},
     "reverse": {},
 }
+
+# ADR 0026 — the per-binding three-way-merge baseline: the last-synced Jira-side
+# values for the five inbound-mirrored scalar fields. Stored on the binding entry
+# as ``baseline`` (+ ``baseline_advanced_at``). An ABSENT baseline is VALID and
+# degrades to local-wins (safe/lossy); a version-1 store (no baselines) reads fine.
+# These are the Jira field names as they appear in prev_snapshot (``summary`` is
+# the Jira term for the local ``title``).
+_BASELINE_FIELDS: tuple[str, ...] = (
+    "summary",
+    "description",
+    "priority",
+    "status",
+    "assignee",
+)
 
 # Bug 1e08-1a35-0267-4ca6 — binding lifecycle (GC) defaults. These are the
 # reconciler's only int-valued binding env vars; parsed defensively below so a
@@ -279,6 +293,56 @@ class BindingStore:
         entry = self._data["bindings"].pop(local_id, None)
         if entry is not None and entry.get("jira_key"):
             self._data["reverse"].pop(entry["jira_key"], None)
+
+    # -- per-binding baseline (ADR 0026 — three-way-merge direction arbitration) --
+
+    def get_baseline(self, local_id: str) -> dict[str, Any] | None:
+        """Return the last-synced Jira-side field values for a binding, or None.
+
+        None (an absent baseline) is VALID and means "no last-synced ancestor
+        yet" — the consumer degrades to local-wins (ADR 0026 §2). A version-1
+        store, or an entry that predates baselines, simply has no ``baseline``
+        key and returns None here.
+        """
+        entry = self._data["bindings"].get(local_id)
+        if entry is None:
+            return None
+        baseline = entry.get("baseline")
+        if not isinstance(baseline, dict):
+            return None
+        return dict(baseline)
+
+    def set_baseline(self, local_id: str, fields: dict[str, Any]) -> None:
+        """Record the last-synced Jira-side values for a binding's 5 mirrored fields.
+
+        Filters ``fields`` to ``_BASELINE_FIELDS`` (so a whole prev_snapshot entry
+        can be passed directly) and stamps ``baseline_advanced_at``. A no-op if the
+        local id is not bound (you cannot baseline an unbound pair). In-memory until
+        ``save()`` — persisted by the existing binding-store commit path, no new
+        commit surface (ADR 0026 §Consequences).
+        """
+        entry = self._data["bindings"].get(local_id)
+        if entry is None:
+            return
+        entry["baseline"] = {k: fields.get(k) for k in _BASELINE_FIELDS if k in fields}
+        entry["baseline_advanced_at"] = _now_iso()
+
+    def seed_baselines_from_snapshot(self, prev_snapshot: dict[str, Any]) -> int:
+        """One-shot: seed a baseline for every bound key present in a Jira snapshot.
+
+        ``prev_snapshot`` is ``{jira_key: {summary, description, priority, status,
+        assignee, ...}}``. Derisk X4 proved all 613 bound+present keys carry all 5
+        mirrored fields, so already-bound pairs need no cold-start local-wins window.
+        Does NOT delete prev_snapshot or change its consumers (that is the rollout
+        task's swap). Returns the number of baselines seeded.
+        """
+        seeded = 0
+        for local_id, entry in self._data["bindings"].items():
+            jira_key = entry.get("jira_key")
+            if jira_key and jira_key in prev_snapshot:
+                self.set_baseline(local_id, prev_snapshot[jira_key])
+                seeded += 1
+        return seeded
 
     # -- absence lifecycle (bug 1e08) --------------------------------------
 

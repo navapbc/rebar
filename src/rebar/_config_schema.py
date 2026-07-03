@@ -334,6 +334,13 @@ class ReconcilerConfig:
     lock_max_retries: int = 5
     deletion_probe_limit: int = 20
     id_guard_bypass_unsafe: bool = False
+    # Convergence circuit breaker (epic 3006-e198): refuse a pass whose ACTING
+    # decisions (terminal-transition / retire / adopt) exceed this fraction of the
+    # binding population. 2026-07-03 census measured 1.14% acting — 8.8× headroom.
+    max_acting_fraction: float = 0.10
+    # Convergence rollout (task 7d23): dual-write the per-binding baseline
+    # alongside prev_snapshot WITHOUT consuming it, for the shadow phase.
+    baseline_dual_write: bool = False
 
 
 @dataclass
@@ -438,6 +445,8 @@ _SECTIONS: dict[str, dict] = {
         "lock_max_retries": lambda v, k: _as_int(v, k, minimum=0),
         "deletion_probe_limit": lambda v, k: _as_int(v, k, minimum=1),
         "id_guard_bypass_unsafe": lambda v, k: _as_bool(v, k),
+        "max_acting_fraction": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
+        "baseline_dual_write": lambda v, k: _as_bool(v, k),
     },
     "jira": {
         "url": lambda v, k: _as_str(v, k),
