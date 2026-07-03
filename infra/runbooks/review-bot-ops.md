@@ -137,3 +137,45 @@ journalctl CONTAINER_NAME=compose-review-bot-1 --since '1 hour ago' # recent win
 Each line carries `timestamp, change_id, revision_id, vote_value, http_status,
 error`. Gerrit's own logs are under `CONTAINER_NAME=compose-gerrit-1` and the
 replication_log at `/var/gerrit/site/logs/replication_log`.
+
+## Continuous auto-deploy (epic 88ab / story 8903)
+
+The box tracks `main` automatically: `rebar-autodeploy.timer` fires
+`rebar-autodeploy.service` (`infra/scripts/autodeploy.sh`) every ~2 min. On a `main`
+advance it re-applies ONLY the changed components — the review-bot container
+(rebuild+restart), `replication.config` / g2p config (materialise; autoReload, no Gerrit
+restart). `refs/meta/config` (project.config) is **detect-only** (logs + a
+`AUTODEPLOY_ERROR meta-config-manual` marker; apply it by hand).
+
+**Watch it:**
+```bash
+journalctl -u rebar-autodeploy.service -f          # deploy runs (JSON "autodeploy" lines)
+cat /var/lib/rebar/deployed-sha                    # what main SHA the box is at
+cat /var/lib/rebar/deploy-backoff 2>/dev/null      # "<sha> <fail#> <next-epoch>" if backing off
+```
+
+**Signals to watch:** `AUTODEPLOY_ERROR` markers -> the `rebar/host:deploy_errors` metric
+(observability.sh §4d) -> the `rebar-autodeploy-errors` CloudWatch alarm. Reasons:
+`fetch-failed`, `config-invalid` (config-check rejected the new config — should be rare, the
+CI config-gate blocks malformed config from reaching main), `materialise-failed`,
+`bot-build-failed`, `bot-unhealthy` (health check failed -> **auto-rolled-back to `:prev`**),
+`meta-config-manual` (project.config change needs a manual apply).
+
+**Failure behaviour (fail-safe):** a failed deploy keeps the **last-known-good** review-bot +
+config live (the gate is never frozen by a bad deploy). The loop retries with **capped
+exponential backoff** (60s→15m), keyed to the target SHA — a NEW `main` tip resets the
+backoff (a fix-forward deploys promptly). It never auto-disables.
+
+**A stuck bad `main`:** if a deploy keeps failing on the same SHA, the box stays on the prior
+good SHA and backs off; land a fix-forward on `main` (it deploys immediately). Inspect with
+`journalctl -u rebar-autodeploy`.
+
+**Back-out (disable auto-deploy):**
+```bash
+sudo systemctl disable --now rebar-autodeploy.timer     # stop auto-deploy
+```
+The manual deploy path (`compose-up.sh`, `setup-*.sh`, `materialize-g2p-config.sh`) is
+unchanged and still works. Re-enable with `systemctl enable --now rebar-autodeploy.timer`.
+
+**Bot-code rollback (manual):** `docker tag compose-review-bot:prev compose-review-bot:latest
+&& (cd infra/compose && docker compose up -d review-bot)` restores the prior image.

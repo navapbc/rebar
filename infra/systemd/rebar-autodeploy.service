@@ -1,0 +1,32 @@
+# rebar-autodeploy.service — oneshot continuous-deploy run (epic 88ab / story 8903).
+# Fired every ~2 min by rebar-autodeploy.timer. Makes the box reflect `main` (review-bot
+# container + replication/g2p config) with bounded blast radius + self-heal + SHA-keyed
+# exponential backoff (the loop NEVER auto-disables — see autodeploy.sh).
+#
+# Storm guard (outer bound, NOT the primary retry path): StartLimit* below puts THIS
+# oneshot into `failed` if it itself crashes repeatedly in a short window (e.g. a broken
+# script), requiring `systemctl reset-failed`. The deploy-attempt backoff for a bad `main`
+# SHA is handled inside the script (fix-forward-friendly); this guard is only for a
+# pathologically crashing unit. Docker's own restart policy guards a crash-looping bot
+# CONTAINER (compose service), which is a separate concern from this unit.
+[Unit]
+Description=rebar continuous auto-deploy (reflect main on the box)
+After=docker.service network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+# Tunables (single source of truth is the script's defaults; override here per-host).
+Environment=DEPLOY_REPO=/opt/rebar/src
+Environment=STATE_DIR=/var/lib/rebar
+# HEALTH_URL points at the review-bot receiver's /health route (host loopback port
+# REVIEW_BOT_PORT, default 8000 — NOT Gerrit's 8080). The container publishes
+# 127.0.0.1:${REVIEW_BOT_PORT:-8000}:8000 (see docker-compose.yml).
+Environment=HEALTH_URL=http://localhost:8000/health
+ExecStart=/opt/rebar/src/infra/scripts/autodeploy.sh
+# a failing deploy is fail-safe inside the script (last-known-good stays live); a nonzero
+# exit here just marks this run failed and lets the timer + backoff schedule the next.
+Nice=10
+IOSchedulingClass=idle

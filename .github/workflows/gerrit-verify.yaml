@@ -191,6 +191,11 @@ jobs:
       - name: mypy — full library (gating)
         run: make typecheck
 
+      # Infra config validation (epic 88ab story 8903) — mirrors test.yml. A malformed
+      # config FAILS the Verified vote, so it can never be submitted to `main`.
+      - name: config-check (infra configs parse; gating)
+        run: make config-check
+
       - name: Run the default suite (Python tiers + bash collector; excludes integration + external)
         run: >-
           pytest -m "not integration and not external" -q -p no:cacheprovider
