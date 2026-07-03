@@ -45,7 +45,7 @@
       },
       "applicabilityExpressionResult": {},
       "submittabilityExpressionResult": {
-        "value": {"expression":{"expressionString":"label:LLM-Review=MAX AND -has:unresolved"},"status":"FAIL","errorMessage":{"value":null},"passingAtoms":[],"failingAtoms":["label:LLM-Review=MAX","has:unresolved"],"atomExplanations":{"value":{"label:LLM-Review=MAX":"","has:unresolved":""}}}
+        "value": {"expression":{"expressionString":"label:LLM-Review=MAX AND -has:unresolved"},"status":"PASS","errorMessage":{"value":null},"passingAtoms":["label:LLM-Review=MAX"],"failingAtoms":["has:unresolved"],"atomExplanations":{"value":{"label:LLM-Review=MAX":"","has:unresolved":""}}}
       },
       "overrideExpressionResult": {},
       "patchSetCommitId": "70461e3db23d35f6ab96250c3898e7b523fee41e",
