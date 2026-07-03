@@ -26,6 +26,7 @@ from rebar._engine_support.reads import (
     sort_key_valid,
     tracker_dir,
 )
+from rebar._engine_support.ticket_query import TicketQuery
 from rebar.reducer.llm_format import to_llm
 
 
@@ -256,7 +257,7 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         print("Error: ticket system not initialized. Run 'ticket init' first.", file=sys.stderr)
         return 1
 
-    results = list_states(tracker, **opts)
+    results = list_states(tracker, TicketQuery(**opts))
     if fmt == "llm":
         for t in results:
             print(json.dumps(to_llm(t), ensure_ascii=False, separators=(",", ":")))
@@ -497,14 +498,16 @@ def _cmd_list_epics(argv: list[str], tracker: str) -> int:
         return 1
     epics = list_states(
         tracker,
-        ticket_type="epic",
-        status="open,in_progress",
-        blocking_state="" if include_blocked else "unblocked",
-        has_tag=has_tag,
-        min_children=min_children,
-        with_children_count=True,
+        TicketQuery(
+            ticket_type="epic",
+            status="open,in_progress",
+            blocking_state="" if include_blocked else "unblocked",
+            has_tag=has_tag,
+            min_children=min_children,
+            with_children_count=True,
+        ),
     )
-    p0_bugs = list_states(tracker, ticket_type="bug", priority="0")
+    p0_bugs = list_states(tracker, TicketQuery(ticket_type="bug", priority="0"))
     if fmt == "json":
         print(json.dumps({"p0_bugs": p0_bugs, "epics": epics}, ensure_ascii=False))
     else:

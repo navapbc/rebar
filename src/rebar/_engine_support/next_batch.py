@@ -140,8 +140,9 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
 
     # Open/in_progress tickets via the shared list path (== ``rebar list``).
     from rebar._engine_support import reads as _reads
+    from rebar._engine_support.ticket_query import TicketQuery
 
-    all_tickets = _reads.list_states(tracker, status="open,in_progress")
+    all_tickets = _reads.list_states(tracker, TicketQuery(status="open,in_progress"))
 
     ticket_status_map = {
         t.get("ticket_id", ""): t.get("status", "").lower()

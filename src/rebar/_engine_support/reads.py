@@ -39,6 +39,7 @@ from typing import Any, cast
 
 from rebar._engine import engine_dir as _engine_dir
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._engine_support.ticket_query import TicketQuery
 from rebar.graph._graph import build_dep_graph
 from rebar.graph._ready import find_ready_tickets
 from rebar.reducer import (
@@ -321,37 +322,40 @@ def _load_scratch(ticket_id: str, tracker: str) -> dict:
     return data
 
 
-def list_states(
-    tracker: str,
-    *,
-    status: str = "",
-    ticket_type: str = "",
-    priority: str = "",
-    parent: str = "",
-    has_tag: str = "",
-    without_tag: str = "",
-    include_archived: bool = False,
-    exclude_deleted: bool = False,
-    min_children: int | None = None,
-    blocking_state: str = "",
-    with_children_count: bool = False,
-    sort: str = "",
-    include_body: bool = True,
-) -> list[dict]:
-    """List ticket states. Two universal cross-ticket filters reuse the same
-    reducer/graph the bespoke ``list-epics`` used: ``min_children`` (keep tickets
-    with ≥ N direct children) and ``blocking_state`` ("unblocked" = all blockers
-    closed via ``find_ready_tickets``; "blocked" = active with an open blocker).
+def list_states(tracker: str, query: TicketQuery | None = None) -> list[dict]:
+    """List ticket states narrowed by a :class:`TicketQuery`. Two universal
+    cross-ticket filters reuse the same reducer/graph the bespoke ``list-epics``
+    used: ``min_children`` (keep tickets with ≥ N direct children) and
+    ``blocking_state`` ("unblocked" = all blockers closed via
+    ``find_ready_tickets``; "blocked" = active with an open blocker).
     ``with_children_count`` additionally surfaces a ``children_count`` field — kept
     OPT-IN so the default list shape stays identical to show/search (the
     single-reducer invariant, bug f026). These generalize what ``list-epics``
     filtered by, so it becomes a thin wrapper over ``list``.
 
-    ``include_body`` (default ``True``) controls whether the bulky ``description``
-    and ``comments`` fields are emitted. Agent-facing list surfaces (the ``list``
-    CLI and the MCP ``list_tickets`` tool) pass ``False`` so the default list stays
-    lean; internal callers (``validate``/``next_batch``/``list-epics``) keep the
-    default and still receive the bodies they consume."""
+    ``query.include_body`` (default ``True``) controls whether the bulky
+    ``description`` and ``comments`` fields are emitted. Agent-facing list surfaces
+    (the ``list`` CLI and the MCP ``list_tickets`` tool) pass ``False`` so the
+    default list stays lean; internal callers (``validate``/``next_batch``/
+    ``list-epics``) keep the default and still receive the bodies they consume.
+    ``query`` defaults to an all-pass :class:`TicketQuery` (list everything)."""
+    if query is None:
+        query = TicketQuery()
+    # Unpack once into locals; the filter body below is unchanged. ``ticket_type``
+    # is a local (it is reassigned for the detected_by:* auto-intersect below).
+    status = query.status
+    ticket_type = query.ticket_type
+    priority = query.priority
+    parent = query.parent
+    has_tag = query.has_tag
+    without_tag = query.without_tag
+    include_archived = query.include_archived
+    exclude_deleted = query.exclude_deleted
+    min_children = query.min_children
+    blocking_state = query.blocking_state
+    with_children_count = query.with_children_count
+    sort = query.sort
+    include_body = query.include_body
     # detected_by:* tags are bug-only — auto-intersect with --type=bug.
     if has_tag.startswith("detected_by:") and not ticket_type:
         ticket_type = "bug"
