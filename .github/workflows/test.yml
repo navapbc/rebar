@@ -132,6 +132,19 @@ jobs:
           fi
           echo "Module-size gate: OK (no new over-cap files)."
 
+      # Import-cycle strangler gate (ticket ebd8): src/rebar has a large import-cycle
+      # (SCC) held together by lazy imports. We are NOT untangling it — like the
+      # module-size gate above, this FREEZES it: it Tarjan-scans grimp's static import
+      # graph and FAILS when a change grows the largest cycle, draws a NEW top-level
+      # package pair into a cycle, or reintroduces a forbidden "reach up" layering import
+      # (e.g. the pure-replay `reducer` importing `_commands`/`llm`). The frozen surface
+      # lives in .import-cycle-baseline.json; regenerate deliberately with
+      # `python scripts/check_import_cycles.py --update` (see the script docstring). Fast
+      # (~1s) and deterministic across Python versions, so it runs on every matrix cell.
+      - name: Import-cycle gate
+        shell: bash
+        run: python scripts/check_import_cycles.py
+
       # Prompt-index drift gate (story afe6): reviewers/index.json is DERIVED from the
       # prompt front-matter and committed. Regenerate it and fail if the working tree
       # now differs — a stale index means a prompt's front-matter changed without the
