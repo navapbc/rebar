@@ -108,6 +108,28 @@ def _ancestors(graph: dict[str, list[str]]) -> dict[str, set[str]] | None:
 
 
 @dataclass(frozen=True)
+class _OutputContract:
+    """A producer step's declared output field-name contract for the ref linter.
+
+    ``literals`` are exact output keys (a schema's ``properties``); ``patterns`` are
+    compiled ``patternProperties`` regexes for dynamic keys (e.g. ``include_<overlay>``
+    on ``overlay_union_output``). A referenced field is produced iff it is a literal
+    OR fully matches a pattern — so a dynamic-keyed ref is honored while a typo that
+    matches neither is still flagged.
+    """
+
+    literals: frozenset[str]
+    patterns: tuple[re.Pattern[str], ...]
+
+    def produces(self, field_name: str) -> bool:
+        return field_name in self.literals or any(p.fullmatch(field_name) for p in self.patterns)
+
+    def describe(self) -> str:
+        parts = sorted(self.literals) + [f"match /{p.pattern}/" for p in self.patterns]
+        return ", ".join(parts)
+
+
+@dataclass(frozen=True)
 class _Scope:
     """The lexical scope a step's expressions resolve against, in one frame.
 
@@ -135,7 +157,7 @@ class _Scope:
     # Doc-wide step-id → declared OUTPUT field names (None when the producer has no
     # contract). A `${{ steps.<id>.outputs.<f> }}` ref checks <f> against this when
     # known; an UNKNOWN producer is never flagged (workflow authoring v2, 5e78).
-    output_fields: Mapping[str, frozenset[str] | None]
+    output_fields: Mapping[str, _OutputContract | None]
 
 
 def _validate_expression(inner: str, *, step_id: str, scope: _Scope) -> str | None:
@@ -183,10 +205,10 @@ def _validate_expression(inner: str, *, step_id: str, scope: _Scope) -> str | No
         # Name-existence against the producer's declared OUTPUT contract — only when
         # KNOWN; a producer with no contract maps to None and is never flagged.
         declared = scope.output_fields.get(ref)
-        if declared is not None and field_name not in declared:
+        if declared is not None and not declared.produces(field_name):
             return (
                 f"references output {field_name!r} not produced by step {ref!r} — its "
-                f"declared outputs are {{{', '.join(sorted(declared))}}}"
+                f"declared outputs are {{{declared.describe()}}}"
             )
     elif kind == "loop_var":
         name = match.group(1)
@@ -406,6 +428,25 @@ def _check_step(
         else:
             check_string(guard, f"{loc}.if")
 
+    # A `batch:` step's per-criterion `when:` guard (and any `with:` overrides)
+    # reference upstream step outputs in this same scope, exactly like `if:`/`with:`.
+    # But `batch` is not a CONTROL_KIND, so `_lint_control` never sees it — without
+    # this walk a typo'd `when:` ref is never name-checked and only fails at run time.
+    batch = step.get("batch")
+    if isinstance(batch, dict):
+        criteria = batch.get("criteria")
+        if isinstance(criteria, list):
+            for i, crit in enumerate(criteria):
+                if not isinstance(crit, dict):
+                    continue
+                cloc = f"{loc}.batch.criteria[{i}]"
+                when = crit.get("when")
+                if isinstance(when, str) and "${{" in when:
+                    check_string(when, f"{cloc}.when")
+                crit_with = crit.get("with")
+                if isinstance(crit_with, dict):
+                    _walk_with(crit_with, f"{cloc}.with", check_string, on_key_expr)
+
 
 def _lint_control(
     step: dict[str, Any],
@@ -416,7 +457,7 @@ def _lint_control(
     scope: _Scope,
     child_outer_ids: frozenset[str],
     inputs: frozenset[str],
-    output_fields: Mapping[str, frozenset[str] | None],
+    output_fields: Mapping[str, _OutputContract | None],
     expressions_on: bool,
     findings: list[LintFinding],
 ) -> None:
@@ -523,8 +564,8 @@ def _lint_control(
             )
 
 
-def _output_fields_map(doc: dict[str, Any]) -> dict[str, frozenset[str] | None]:
-    """Step id → declared OUTPUT field names (or ``None`` for a producer with no known
+def _output_fields_map(doc: dict[str, Any]) -> dict[str, _OutputContract | None]:
+    """Step id → declared OUTPUT field contract (or ``None`` for a producer with no known
     contract), built once per lint and shared across frames so a
     `${{ steps.<id>.outputs.<name> }}` ref can be checked NAME-EXISTENCE. ``None`` is
     "skip" — never a false error (5e78: an unannotated producer is UNKNOWN). Only
@@ -539,17 +580,30 @@ def _output_fields_map(doc: dict[str, Any]) -> dict[str, frozenset[str] | None]:
     except Exception:  # noqa: BLE001 — fail-open: step library unimportable → all refs UNKNOWN ({})
         return {}
 
-    def fields(uses: str) -> frozenset[str] | None:
+    def fields(uses: str) -> _OutputContract | None:
         try:
             contract = contract_for(uses)
             if contract is None or not contract.output_schema:
                 return None
-            props = schemas.load(contract.output_schema).get("properties")
-            return frozenset(props.keys()) if isinstance(props, dict) else None
+            schema = schemas.load(contract.output_schema)
+            props = schema.get("properties")
+            literals = frozenset(props.keys()) if isinstance(props, dict) else frozenset()
+            pat_props = schema.get("patternProperties")
+            patterns = (
+                tuple(re.compile(p) for p in pat_props if isinstance(p, str))
+                if isinstance(pat_props, dict)
+                else ()
+            )
+            # No literal keys AND no patterns → the producer declares no field shape:
+            # UNKNOWN (fail-open, unchanged). A patternProperties-only schema now yields
+            # a real contract instead of UNKNOWN, so its dynamic-keyed refs get checked.
+            if not literals and not patterns:
+                return None
+            return _OutputContract(literals, patterns)
         except Exception:  # noqa: BLE001 - any resolution failure is UNKNOWN
             return None
 
-    out: dict[str, frozenset[str] | None] = {}
+    out: dict[str, _OutputContract | None] = {}
     for s in _iter_all_steps(doc):
         sid, uses = s.get("id"), s.get("uses")
         if isinstance(sid, str) and sid:
@@ -577,7 +631,7 @@ def _lint_frame(
     outer_ids: frozenset[str],
     loop_vars: frozenset[str],
     map_binds: frozenset[str],
-    output_fields: Mapping[str, frozenset[str] | None],
+    output_fields: Mapping[str, _OutputContract | None],
     expressions_on: bool,
     is_top: bool,
 ) -> None:
