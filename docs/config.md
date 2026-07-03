@@ -120,8 +120,14 @@ ticket_clarity.threshold = 5      # clarity-check pass threshold (env REBAR_TICK
 compact.threshold        = 10     # env REBAR_COMPACT_THRESHOLD (alias: COMPACT_THRESHOLD)
 
 # sync (git-backed store)
-sync.push = "always"   # always | async | off   (env REBAR_SYNC_PUSH; alias REBAR_PUSH)
-sync.pull = "on"       # on | off               (env REBAR_SYNC_PULL; alias REBAR_NO_SYNC)
+sync.push   = "always"  # always | async | off   (env REBAR_SYNC_PUSH; alias REBAR_PUSH)
+sync.pull   = "on"      # on | off               (env REBAR_SYNC_PULL; alias REBAR_NO_SYNC)
+sync.remote = "origin"  # git remote the tickets branch syncs to — push/fetch/reconcile, the
+                        # fsck PUSH_PENDING check, and attested ticket-store materialization
+                        # (env REBAR_SYNC_REMOTE). Set it for split residency: e.g. the tickets
+                        # branch's source of truth on origin=GitHub while code review lives on a
+                        # separate `gerrit` remote. Validated as a git remote name (rejects
+                        # spaces / `:` / `~` / `/` / control; dots + non-leading hyphens allowed).
 
 # MCP server gates
 mcp.readonly         = false

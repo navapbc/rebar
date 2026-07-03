@@ -142,24 +142,26 @@ def push_tickets_branch(base_path: str) -> None:
         return
 
     # mode: always (default) — synchronous best-effort push.
-    remote = _git(base_path, "remote").stdout.splitlines()
-    if not remote or not remote[0].strip():
-        return  # no remote — nothing to push
-
-    # Branch resolved from the MAIN repo config (the tracker's parent), matching
-    # _push_mode. Best-effort: on a malformed config, skip rather than push to a
-    # guessed branch (a wrong refspec would publish to the wrong remote branch).
-    from rebar.config import ConfigError, tickets_branch
+    # Branch + remote resolved from the MAIN repo config (the tracker's parent), matching
+    # _push_mode. Best-effort: on a malformed config, skip rather than push to a guessed
+    # branch/remote (a wrong refspec would publish to the wrong place).
+    from rebar.config import ConfigError, tickets_branch, tickets_remote
 
     try:
         branch = tickets_branch(os.path.dirname(base_path))
+        remote = tickets_remote(os.path.dirname(base_path))
     except ConfigError:
         return
-    remote_ref = f"origin/{branch}"
+    # Guard on the CONFIGURED remote specifically (not "some remote exists"): if it is not a
+    # configured git remote there is nothing to push to — skip quietly (a local-only store
+    # is a supported mode, and fsck's PUSH_PENDING surfaces the unpushed commits).
+    if _git(base_path, "remote", "get-url", remote).returncode != 0:
+        return
+    remote_ref = f"{remote}/{branch}"
 
     push_env = {**os.environ, "PRE_COMMIT_ALLOW_NO_CONFIG": "1"}
     for attempt in range(1, _MAX_RETRIES + 1):
-        res = _git(base_path, "push", "origin", f"HEAD:{branch}", env=push_env)
+        res = _git(base_path, "push", remote, f"HEAD:{branch}", env=push_env)
         if res.returncode == 0:
             return
         stderr = res.stderr or ""
@@ -168,7 +170,7 @@ def push_tickets_branch(base_path: str) -> None:
             return  # non-retriable class — best-effort
 
         # Non-fast-forward: reconcile by MERGE (not rebase).
-        _git(base_path, "fetch", "origin", branch)
+        _git(base_path, "fetch", remote, branch)
         from rebar._store import lock as _lock
 
         try:

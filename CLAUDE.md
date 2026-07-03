@@ -396,13 +396,17 @@ holds event types newer than the running binary. **Upgrade reconcile hosts first
 ## The store shares every write immediately
 
 Every write (`create`/`edit`/`transition`/`claim`/`link`/…) auto-commits its
-event to the `tickets` branch **and** auto-pushes to `origin/tickets` when an
-`origin` remote exists — so your local ticket activity (including test tickets)
-propagates to the shared remote immediately. Push is best-effort: no remote means
-no push, and a push failure never fails the write (the commit stays local and
-diverged). `fsck` reports `PUSH_PENDING` when the local branch is ahead of origin.
-The **`REBAR_SYNC_PUSH`** env var tunes this (default `always`; deprecated alias
-`REBAR_PUSH`): `async` pushes in the
+event to the `tickets` branch **and** auto-pushes it to the configured **sync
+remote** (`<sync.remote>/tickets`) when that remote exists — so your local ticket
+activity (including test tickets) propagates to the shared remote immediately.
+Push is best-effort: no remote means no push, and a push failure never fails the
+write (the commit stays local and diverged). `fsck` reports `PUSH_PENDING` when
+the local branch is ahead of that remote. The sync remote is **`sync.remote`**
+(env `REBAR_SYNC_REMOTE`, default `origin`) — set it when the tickets branch's
+source of truth is a remote **other** than `origin` (this repo keeps it on
+`origin` = GitHub while code review lives on a separate `gerrit` remote; see the
+remotes note under "Git workflow"). The **`REBAR_SYNC_PUSH`** env var tunes push
+timing (default `always`; deprecated alias `REBAR_PUSH`): `async` pushes in the
 background so per-write network latency doesn't serialize a batch claim, and `off`
 keeps commits local — both still surface `PUSH_PENDING` via `fsck` (see
 `docs/concurrency.md`).
@@ -423,14 +427,30 @@ the short version for agents:
 > local venv (see [`docs/local-dev-env.md`](docs/local-dev-env.md)). Editing in the main
 > checkout risks building on stale code and a painful rebase at submit time.
 
+> **Remotes in this checkout (split residency).** This working checkout has **two** remotes
+> with distinct roles — don't conflate them:
+> - **`origin` → GitHub** (`navapbc/rebar`): the read-only **code mirror** AND the source of
+>   truth for the **`tickets`** branch (rebar's ticket events auto-push here; GitHub Actions
+>   sync that branch to Jira). rebar's ticket sync targets this remote — it is the configured
+>   **`sync.remote`** (default `origin`).
+> - **`gerrit` → `rebar.solutions.navateam.com`**: the **code-review** remote — push code for
+>   review here (step 2), **not** to `origin`.
+>
+> So **code review goes to `gerrit`; ticket events go to `origin`.** A plain
+> `git push origin HEAD:refs/for/main` here would push the review ref to GitHub (rejected).
+> (An external contributor who instead *clones from Gerrit* has `origin` = Gerrit and uses
+> CONTRIBUTING.md's `origin` commands verbatim; this note is THIS checkout's dual-remote layout.)
+
 1. **Get Gerrit access once.** Sign in at `https://rebar.solutions.navateam.com` via
    GitHub OAuth, generate an HTTP password (Settings → HTTP Credentials), clone from
    Gerrit (`https://<user>@rebar.solutions.navateam.com/a/rebar`), and install the
    `commit-msg` hook
    (`curl -Lo .git/hooks/commit-msg https://rebar.solutions.navateam.com/tools/hooks/commit-msg && chmod +x .git/hooks/commit-msg`)
    so commits carry a `Change-Id`.
-2. **Push for review:** `git push origin HEAD:refs/for/main` (the magic ref — creates a
-   Gerrit change, does not touch `main`).
+2. **Push for review:** `git push gerrit HEAD:refs/for/main` (the magic ref — creates a
+   Gerrit change, does not touch `main`). In this checkout the Gerrit remote is named
+   `gerrit` and `origin` is GitHub (see the remotes note above); an external clone-from-Gerrit
+   uses `origin` here instead.
 3. **The gate — two votes:** two bots vote independently. The rebar review-bot casts
    `LLM-Review` (LLM code review) and CI casts `Verified` (build/test/lint/typecheck on
    GitHub Actions). A change is submittable only at **`LLM-Review = +1` (MAX) AND

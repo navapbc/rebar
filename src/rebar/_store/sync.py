@@ -68,9 +68,9 @@ def _ok(tracker: str, *args: str) -> bool:
     return _git(tracker, *args).returncode == 0
 
 
-def _do_reconverge(tracker: str, branch: str) -> None:
+def _do_reconverge(tracker: str, branch: str, remote_name: str) -> None:
     """The locked mutation critical section (lock held, fetch already ran)."""
-    remote = f"origin/{branch}"
+    remote = f"{remote_name}/{branch}"
     # Recovery guard, re-checked under the lock (637b): a reset/merge through an
     # interrupted rebase/merge would strand picks / clear MERGE_HEAD.
     try:
@@ -154,25 +154,26 @@ def reconverge(tracker: str | os.PathLike, *, lock_timeout: int = _SYNC_LOCK_TIM
         )
         return
 
-    # Branch resolved from the MAIN repo config (the tracker's parent), matching
+    # Branch + remote resolved from the MAIN repo config (the tracker's parent), matching
     # reads._sync_disabled / _push_mode. Best-effort: a malformed config skips sync.
-    from rebar.config import ConfigError, tickets_branch
+    from rebar.config import ConfigError, tickets_branch, tickets_remote
 
     try:
         branch = tickets_branch(os.path.dirname(str(tracker)))
+        remote_name = tickets_remote(os.path.dirname(str(tracker)))
     except ConfigError:
         return
 
     # Fetch OUTSIDE the lock (only moves remote-tracking refs).
-    if not _ok(tracker, "fetch", "origin", branch, "--quiet"):
+    if not _ok(tracker, "fetch", remote_name, branch, "--quiet"):
         return
-    if not _ok(tracker, "rev-parse", "--verify", f"origin/{branch}"):
+    if not _ok(tracker, "rev-parse", "--verify", f"{remote_name}/{branch}"):
         return
 
     # Locked reset/merge. Best-effort on lock contention (another writer/syncer holds
     # it) — bash does `flock -w 15 || exit 0`, so a timeout silently skips this round.
     try:
         with _lock.write_lock(tracker, timeout=lock_timeout, attempts=1, dual_window=True):
-            _do_reconverge(tracker, branch)
+            _do_reconverge(tracker, branch, remote_name)
     except _lock.LockTimeout:
         return

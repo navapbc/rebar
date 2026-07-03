@@ -111,6 +111,21 @@ def tickets_branch(root: str | os.PathLike[str] | None = None) -> str:
     return load_config(root).tracker.branch
 
 
+def tickets_remote(root: str | os.PathLike[str] | None = None) -> str:
+    """The git remote the ticket event-log branch syncs to — push, fetch/reconcile, the
+    ``fsck`` PUSH_PENDING check, and the attested ticket-store materialization — resolved
+    through the full config precedence (``-c`` flag > ``REBAR_SYNC_REMOTE`` env >
+    project/user config > default ``origin``). The single source of the remote name for
+    every ticket git-network path; the remote counterpart to :func:`tickets_branch`.
+
+    Split-residency setups (code reviewed on a ``gerrit`` remote; the tickets branch's
+    source of truth on a ``github``/``origin`` remote for a downstream sync) set this so
+    the store no longer hard-assumes ``origin`` is the ticket remote. Like
+    :func:`tickets_branch`, a malformed config is NOT swallowed here: silently defaulting
+    could mis-route a push to the wrong remote, so the ``ConfigError`` propagates."""
+    return load_config(root).sync.remote
+
+
 # ── Typed config (the single source of truth for non-secret settings) ─────────
 #
 # This is the in-memory schema the config-refinement work (epic a621) builds on:
@@ -230,6 +245,25 @@ def _as_git_ref(v: Any, key: str) -> str:
     for comp in s.split("/"):
         if not comp or comp.startswith(".") or comp.endswith(".lock"):
             raise ConfigError(f"{key}: invalid branch name {s!r} (bad path component {comp!r})")
+    return s
+
+
+def _as_git_remote(v: Any, key: str) -> str:
+    """Validate a git REMOTE NAME (e.g. ``origin``, ``gerrit``, ``github``). Distinct from
+    :func:`_as_git_ref` (a branch name): a remote name is a single-level token that becomes
+    a path component under ``refs/remotes/<name>/`` and is passed as a positional to
+    ``git push``/``fetch``. Reject empty/whitespace, a leading ``-`` (would parse as a
+    flag), any ``/`` (remote names are single-level), ``..``, and the
+    check-ref-format-forbidden chars (space, ``~^:?*[\\``, control, DEL). Dots and
+    (non-leading) hyphens are allowed, so ``my-remote`` / ``gerrit.example`` pass."""
+    s = _as_str(v, key).strip()
+    if not s:
+        raise ConfigError(f"{key}: git remote name must not be empty")
+    if s.startswith("-") or "/" in s or ".." in s:
+        raise ConfigError(f"{key}: invalid git remote name {s!r} (leading '-', '/', or '..')")
+    bad = sorted(_BAD_REF_CHARS & set(s))
+    if bad:
+        raise ConfigError(f"{key}: invalid git remote name {s!r} (forbidden char(s) {bad})")
     return s
 
 
@@ -382,6 +416,7 @@ class CompactConfig:
 class SyncConfig:
     push: str = "always"  # always | async | off
     pull: str = "on"  # on | off
+    remote: str = "origin"  # git remote the tickets branch syncs to (push/fetch/fsck)
 
 
 @dataclass
@@ -488,6 +523,7 @@ _SECTIONS: dict[str, dict] = {
     "sync": {
         "push": lambda v, k: _as_choice(v, k, {"always", "async", "off"}),
         "pull": lambda v, k: _as_choice(v, k, {"on", "off"}),
+        "remote": lambda v, k: _as_git_remote(v, k),
     },
     "mcp": {
         "readonly": lambda v, k: _as_bool(v, k),
