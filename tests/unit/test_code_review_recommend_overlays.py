@@ -157,7 +157,7 @@ def test_base_prompt_enumerates_exactly_the_overlay_ids():
 
 
 def test_base_prompt_declares_the_structured_output_contract():
-    from rebar.llm.prompts import get_prompt
+    from rebar.llm.prompting.prompts import get_prompt
 
     p = get_prompt("code-review-base")
     assert p.outputs == "code_review_base_output"

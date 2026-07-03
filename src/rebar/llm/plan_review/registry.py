@@ -5,7 +5,7 @@ inline constant or the experiment ``criteria_v8.json`` (design reference only). 
 criterion's RUBRIC is a contract-bearing prompt file
 (``src/rebar/llm/reviewers/plan_review_<id>.md``, ``category:
 plan-review-criterion``) resolved through the da27 prompt machinery
-(:func:`rebar.llm.prompts.get_prompt` → front-matter contract + ``.rebar/prompts/``
+(:func:`rebar.llm.prompting.prompts.get_prompt` → front-matter contract + ``.rebar/prompts/``
 project overrides). Its ROUTING (``exec`` / ``applies_at`` / ``block_threshold`` /
 ``default_posture`` / ``checklist``) lives in the derived ``criteria_routing.json``
 index — the analog of the reviewers' ``index.json``, which likewise separates prompt
@@ -231,8 +231,8 @@ def _descriptor_from_prompt(
         raise RegistryError(f"criterion {cid!r} has no entry in {_ROUTING_RESOURCE}")
 
     def _get_prompt(criterion_id: str, root: str | None) -> Any:
-        from rebar.llm import prompts
         from rebar.llm.criteria.ids import criterion_prompt_id
+        from rebar.llm.prompting import prompts
 
         # Decouple the logical criterion id from the rubric's filesystem-safe prompt id
         # (task stew-kid-motif): a project.<name> id reads plan-review-project-<name>.md, so a

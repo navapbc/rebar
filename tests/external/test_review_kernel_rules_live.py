@@ -65,8 +65,8 @@ _FALSE_FINDING = {
 def _run_chunk_factory():
     """A live per-chunk verifier seam: run the kernel verification prompt over one chunk via the
     real runner. Returns the chunk's ``verifications`` list."""
-    from rebar.llm import prompts
     from rebar.llm.config import LLMConfig
+    from rebar.llm.prompting import prompts
     from rebar.llm.runner import RunRequest, get_runner
 
     cfg = LLMConfig.from_env()

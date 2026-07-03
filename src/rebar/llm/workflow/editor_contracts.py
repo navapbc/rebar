@@ -101,7 +101,7 @@ def prompt_contract_view(prompt_id: str | None, *, repo_root: Any = None) -> dic
     if not prompt_id:
         return dict(_EMPTY_CONTRACT_VIEW)
     try:
-        from rebar.llm.prompts import get_prompt
+        from rebar.llm.prompting.prompts import get_prompt
 
         prompt = get_prompt(prompt_id, repo_root=repo_root)
     except Exception:  # noqa: BLE001 - an unknown/malformed prompt surfaces as empty, not a crash

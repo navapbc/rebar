@@ -41,7 +41,7 @@ def test_import_rebar_llm_pulls_no_heavy_deps() -> None:
 # ── reviewer registry + prompt resolution (offline fallback) ──────────────────
 def test_catalog_and_fallback_prompt_render() -> None:
     import rebar.llm as llm
-    from rebar.llm import prompts
+    from rebar.llm.prompting import prompts
 
     catalog = llm.load_catalog()
     assert "ticket-quality" in catalog
@@ -61,7 +61,7 @@ def test_catalog_and_fallback_prompt_render() -> None:
 
 def test_unknown_reviewer_raises() -> None:
     import rebar.llm as llm
-    from rebar.llm.prompts import PromptNotFound
+    from rebar.llm.prompting.prompts import PromptNotFound
 
     with pytest.raises(PromptNotFound):
         llm.get_prompt("does-not-exist")
@@ -318,7 +318,7 @@ def test_framework_errors_are_llmerror() -> None:
     """H1: the expected failure modes are catchable as one LLMError vocabulary."""
     import rebar.llm as llm
     from rebar.llm.findings import FindingsError
-    from rebar.llm.prompts import ReviewerError
+    from rebar.llm.prompting.prompts import ReviewerError
 
     assert issubclass(FindingsError, llm.LLMError)
     assert issubclass(ReviewerError, llm.LLMError)

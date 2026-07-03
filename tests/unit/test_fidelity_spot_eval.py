@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import pytest
 
-from rebar.llm import prompts
 from rebar.llm.config import LLMConfig
 from rebar.llm.plan_review import fidelity_spot_eval as fse
+from rebar.llm.prompting import prompts
 
 pytestmark = pytest.mark.unit
 

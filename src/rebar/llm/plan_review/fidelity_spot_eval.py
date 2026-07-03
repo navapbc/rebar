@@ -29,9 +29,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from rebar.llm import gate_source, parity, prompts
+from rebar.llm import gate_source, parity
 from rebar.llm.config import LLMConfig
 from rebar.llm.parity import ItemRecord
+from rebar.llm.prompting import prompts
 from rebar.llm.runner import Runner, RunRequest, get_runner
 
 from . import passes, registry

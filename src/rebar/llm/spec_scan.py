@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from rebar.llm import prompts
 from rebar.llm.aggregate import _severity_rank
 from rebar.llm.config import LLMConfig
 from rebar.llm.findings import finalize_findings
+from rebar.llm.prompting import prompts
 from rebar.llm.runner import Runner, RunRequest, get_runner
 
 __all__ = ["scan_epics_for_spec"]

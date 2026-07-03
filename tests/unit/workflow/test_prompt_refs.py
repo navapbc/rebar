@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from rebar.llm import prompts
+from rebar.llm.prompting import prompts
 from rebar.llm.workflow import lint as L
 
 # The universe of variables any review op supplies (review_ticket/review_code →

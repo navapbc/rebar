@@ -239,7 +239,7 @@ def _resolve_system(prompt_id: str, plan: str, cfg: LLMConfig) -> str:
     system prompt (the WHOLE plan rendered into the {{plan}} var). A project
     `.rebar/prompts/<id>.md` override wins over the packaged prompt. Reuses the da27
     prompt machinery — no inline prompt strings."""
-    from rebar.llm import prompts
+    from rebar.llm.prompting import prompts
 
     prompt = prompts.get_prompt(prompt_id, repo_root=cfg.repo_path)
     system, _meta = prompts.resolve_prompt(prompt, {"plan": plan}, repo_root=cfg.repo_path)
@@ -466,7 +466,7 @@ def summarize_for_isf(runner: Runner, cfg: LLMConfig, *, log_text: str) -> str:
     """Compress an oversized session log to fit the ISF context window (a single
     text call). Used only when the log exceeds the budget — the PLAN is never
     summarized, only this supporting context."""
-    from rebar.llm import prompts
+    from rebar.llm.prompting import prompts
 
     prompt = prompts.get_prompt("plan-review-isf-summarizer", repo_root=cfg.repo_path)
     system, _meta = prompts.resolve_prompt(prompt, {}, repo_root=cfg.repo_path)

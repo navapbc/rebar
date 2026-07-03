@@ -1,4 +1,4 @@
-"""WS-F1: git-canonical prompt resolution (rebar.llm.prompts).
+"""WS-F1: git-canonical prompt resolution (rebar.llm.prompting.prompts).
 
 The committed prompt file is the source of truth; Langfuse is never consulted for
 text; rendering is strict; the content hash is returned for trace embedding.
@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from rebar.llm import prompts
-from rebar.llm.prompts import PromptError
+from rebar.llm.prompting import prompts
+from rebar.llm.prompting.prompts import PromptError
 
 
 def _reviewer():

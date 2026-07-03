@@ -155,7 +155,7 @@ def test_score_novelty_no_prior_findings_scores_nothing() -> None:
 
 # ── the discriminates_novelty eval scorer + its extractor ─────────────────────────────────────
 def test_discriminates_novelty_scorer() -> None:
-    from rebar.llm import eval_scorers as es
+    from rebar.llm.evals import eval_scorers as es
 
     assert "high_novelty" in es.ALLOWED_EXPECTS and "low_novelty" in es.ALLOWED_EXPECTS
     # numeric novelty in output

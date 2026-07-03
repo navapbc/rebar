@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from rebar.llm import prompts
+from rebar.llm.prompting import prompts
 from rebar.llm.runner import FakeRunner
 from rebar.llm.workflow.executor import StepContext
 from rebar.llm.workflow.runs import RunnerAgentStep

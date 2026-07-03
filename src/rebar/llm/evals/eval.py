@@ -62,8 +62,10 @@ def eval_spec_path(prompt_id: str, repo_root=None) -> Path:
 
 def _packaged_eval_spec(prompt_id: str) -> Path:
     """Packaged built-in eval spec (ships as package data), the fallback when a repo
-    has no user-authored ``.rebar/evals/<id>.eval.yaml``."""
-    return Path(__file__).resolve().parent / "eval_specs" / f"{prompt_id}.eval.yaml"
+    has no user-authored ``.rebar/evals/<id>.eval.yaml``. This module now lives in the
+    ``rebar.llm.evals`` subpackage, so the packaged spec dir is one level UP (it stays a
+    ``rebar.llm`` data dir at ``rebar/llm/eval_specs``)."""
+    return Path(__file__).resolve().parent.parent / "eval_specs" / f"{prompt_id}.eval.yaml"
 
 
 def load_eval_spec(prompt_id: str, *, repo_root=None) -> dict[str, Any]:
@@ -110,7 +112,7 @@ def validate_scorer(
     """Validate ONE scorer against the grader-discipline rules (WS-G2).
 
     A deterministic scorer gates and needs a name. When ``known`` is provided (the
-    registry of implemented scorers — see :mod:`rebar.llm.eval_scorers`), the name
+    registry of implemented scorers — see :mod:`rebar.llm.evals.eval_scorers`), the name
     must also be REGISTERED, so a typo'd or unimplemented scorer fails the offline
     gate instead of silently no-opping at run time. An ``llm-judge`` scorer MUST
     carry a pinned grader (model + temperature 0 + integer seed + dated snapshot), a
@@ -127,7 +129,7 @@ def validate_scorer(
         elif known is not None and scorer["name"] not in known:
             errs.append(
                 f"deterministic scorer {scorer['name']!r} is not a registered scorer "
-                "(rebar.llm.eval_scorers.REGISTRY) — implement it or fix the name"
+                "(rebar.llm.evals.eval_scorers.REGISTRY) — implement it or fix the name"
             )
         return errs
     if stype == "llm-judge":
@@ -207,7 +209,7 @@ def validate_dataset_and_gold(spec: dict) -> list[str]:
     ``epics`` for the scan_spec BATCH unit). 'Balanced' = at least one should-fire
     case AND at least one good (pass) case, so the spec measures both recall and
     false-fire."""
-    from rebar.llm.eval_scorers import (
+    from rebar.llm.evals.eval_scorers import (
         ALLOWED_EXPECTS,
         FIRE_EXPECTS,
         IMPACT_EXPECTS,
@@ -276,7 +278,7 @@ def validate_eval_spec(spec: dict, *, strict: bool = False) -> list[str]:
     scorer disciplined (WS-G2).
 
     ``strict=True`` additionally enforces that every deterministic scorer name is
-    REGISTERED (implemented in :mod:`rebar.llm.eval_scorers`) and that the dataset +
+    REGISTERED (implemented in :mod:`rebar.llm.evals.eval_scorers`) and that the dataset +
     gold_set are present, balanced, and well-shaped. Strict mode is what the CI
     discipline gate runs over the packaged specs; the lenient default keeps
     ``load_eval_spec`` / user `.rebar/evals` specs and unit fixtures working."""
@@ -308,7 +310,7 @@ def validate_eval_spec(spec: dict, *, strict: bool = False) -> list[str]:
         errs.append("at least one DETERMINISTIC scorer is required to gate (judges only report)")
     known = None
     if strict:
-        from rebar.llm.eval_scorers import known_scorer_names
+        from rebar.llm.evals.eval_scorers import known_scorer_names
 
         known = known_scorer_names()
     for s in scorers:
@@ -403,7 +405,7 @@ def calibrate_criterion(
     ``solve(prompt_id, case) -> verdict`` is injectable (mirrors :func:`run_eval`) so the
     metric math is offline-testable with no model. Raises :class:`EvalError` on an unknown
     criterion, an absent fixture (via :func:`load_eval_spec`), or an empty fire/no-fire set."""
-    from rebar.llm.eval_scorers import FIRE_EXPECTS, NOFIRE_EXPECTS
+    from rebar.llm.evals.eval_scorers import FIRE_EXPECTS, NOFIRE_EXPECTS
 
     runs = max(1, int(runs))
     # The criterion's eval fixture lives at its filesystem-safe prompt id (task stew-kid-motif):
@@ -493,8 +495,8 @@ def _criterion_solver(*, repo_root, runner):
     ``repo_root`` so a project criterion resolves against its overlay. Missing ``agents``
     extra / credentials surface as a user-actionable :class:`EvalError` up front."""
     from rebar._optional import OptionalDependencyError
-    from rebar.llm import eval_solver
     from rebar.llm.config import LLMConfig
+    from rebar.llm.evals import eval_solver
     from rebar.llm.runner import get_runner
 
     try:
@@ -561,8 +563,8 @@ def _live_solver(*, repo_root, runner):
     the config/live runner. Needs the ``agents`` extra (pydantic_ai); a missing one is
     a user-actionable config error (``EvalError``), not a crash."""
     from rebar._optional import OptionalDependencyError
-    from rebar.llm import eval_solver
     from rebar.llm.config import LLMConfig
+    from rebar.llm.evals import eval_solver
     from rebar.llm.runner import get_runner
 
     try:
@@ -585,7 +587,7 @@ def _gating_results(
     epoch iff every APPLICABLE case passes it (a scorer with no applicable cases — e.g.
     recall on a spec with no fire cases — is vacuously satisfied). Returns
     ``(passed, junit_cases)``."""
-    from rebar.llm.eval_scorers import score
+    from rebar.llm.evals.eval_scorers import score
 
     failed = 0
     junit: list[dict] = []
@@ -632,7 +634,7 @@ def run_eval(
     via ``REBAR_EVAL_MAX_CASES``); ``None`` runs the whole dataset.
 
     ``solve(prompt_id, case) -> output`` defaults to :func:`_live_solver` (the real op
-    via :mod:`rebar.llm.eval_solver`, needing the ``agents`` extra); it is injectable
+    via :mod:`rebar.llm.evals.eval_solver`, needing the ``agents`` extra); it is injectable
     so the whole aggregation path is offline-testable. Returns ``{prompt, epochs,
     gate, passed, coverage, epoch_pass, junit}``. Raises :class:`EvalError` if the spec
     is invalid or has no dataset to run."""

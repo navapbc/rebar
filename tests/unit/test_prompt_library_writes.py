@@ -1,5 +1,5 @@
 """Story B-DM: the prompt + criteria library WRITE + structured-ENUMERATE data model
-(:mod:`rebar.llm.prompt_library`) — the backend the visual editor sits on.
+(:mod:`rebar.llm.prompting.prompt_library`) — the backend the visual editor sits on.
 
 Covers: enumerate shape/fields for packaged + user-dir entries (incl. criteria +
 overlay flag), create/update round-trip (the new id resolves via get_prompt and
@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from rebar.llm import prompts
 from rebar.llm.plan_review import registry
-from rebar.llm.prompt_library import (
+from rebar.llm.prompting import prompts
+from rebar.llm.prompting.prompt_library import (
     InvalidPromptIdError,
     LibraryWriteError,
     PromptExistsError,
@@ -155,8 +155,12 @@ def test_update_missing_user_entry_raises(tmp_path: Path) -> None:
 def test_user_write_does_not_change_committed_index(tmp_path: Path) -> None:
     # The committed packaged index is DERIVED from packaged reviewers only; a user
     # write must leave it byte-consistent so the CI drift gate stays green.
+    # ``prompts`` now lives in the ``rebar.llm.prompting`` subpackage; the packaged
+    # reviewers/ data dir stays a ``rebar.llm`` sibling, so it is one level UP.
     committed = json.loads(
-        (Path(prompts.__file__).parent / "reviewers" / "index.json").read_text(encoding="utf-8")
+        (Path(prompts.__file__).parent.parent / "reviewers" / "index.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert prompts.build_prompt_index() == committed  # baseline: index is up to date
     create_prompt("my-prompt", _PROMPT_MD, repo_root=str(tmp_path))

@@ -306,7 +306,7 @@ def test_registry_coverage_guard_passes() -> None:
 def test_criteria_load_from_the_prompt_library() -> None:
     # ca03 AC: the registry loads each criterion's rubric from the prompt library
     # (a contract-bearing prompt file), NOT from an inline constant / packaged JSON.
-    from rebar.llm import prompts
+    from rebar.llm.prompting import prompts
 
     for cid in ("F1", "E2", "T5a", "ISF", "G3"):
         desc = registry.by_id()[cid]
@@ -341,7 +341,7 @@ def test_no_inline_pass_prompt_constants() -> None:
     assert not hasattr(passes, "PASS1_SYSTEM")
     assert not hasattr(passes, "PASS2_SYSTEM")
     assert not hasattr(passes, "_plan_system")
-    from rebar.llm import prompts
+    from rebar.llm.prompting import prompts
 
     for pid in (
         "plan-review-finder",

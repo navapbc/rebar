@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from rebar.llm import prompt_library
+from rebar.llm.prompting import prompt_library
 
 pytestmark = pytest.mark.unit
 

@@ -9,8 +9,8 @@ import pathlib
 
 import pytest
 
-from rebar.llm import eval_scorers as sc
-from rebar.llm import eval_solver
+from rebar.llm.evals import eval_scorers as sc
+from rebar.llm.evals import eval_solver
 from rebar.llm.runner import FakeRunner
 
 

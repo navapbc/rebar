@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from rebar.llm import eval as _eval
-from rebar.llm import eval_solver
 from rebar.llm.errors import LLMError
+from rebar.llm.evals import eval as _eval
+from rebar.llm.evals import eval_solver
 from rebar.llm.runner import FakeRunner
 
 _PLAN = "## Acceptance Criteria\n- [ ] improve the thing somehow\n"
