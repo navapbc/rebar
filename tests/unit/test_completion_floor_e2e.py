@@ -61,10 +61,9 @@ def _partial_epic(monkeypatch, *, delivered=DELIVERED_CHILD_IDS) -> None:
         {"ticket_id": "op-x", "status": "open", "description": _AC},  # open sibling
         {"ticket_id": "fc1", "status": "closed", "description": _AC},  # force-closed (unsigned)
     ]
-    monkeypatch.setattr(rebar, "list_tickets", lambda *, parent, repo_root=None: children)
+    monkeypatch.setattr("rebar._reads.list_tickets", lambda *, parent, repo_root=None: children)
     monkeypatch.setattr(
-        rebar,
-        "show_ticket",
+        "rebar._reads.show_ticket",
         lambda cid, repo_root=None: next(c for c in children if c["ticket_id"] == cid),
     )
     monkeypatch.setattr(
@@ -218,10 +217,9 @@ def _supersede_delivered_epic(monkeypatch) -> None:
         "deps": [{"relation": "supersedes", "target_id": "launder-B", "link_uuid": "u1"}],
     }
     children = [b, a]
-    monkeypatch.setattr(rebar, "list_tickets", lambda *, parent, repo_root=None: children)
+    monkeypatch.setattr("rebar._reads.list_tickets", lambda *, parent, repo_root=None: children)
     monkeypatch.setattr(
-        rebar,
-        "show_ticket",
+        "rebar._reads.show_ticket",
         lambda cid, repo_root=None: next(c for c in children if c["ticket_id"] == cid),
     )
     # nothing is attested → B is delivered ONLY via the supersede edge (the real delivered_now path)

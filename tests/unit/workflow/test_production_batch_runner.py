@@ -46,7 +46,6 @@ def _state(*, ttype: str = "story", description: str = _GOOD_AC) -> dict:
 def _stub_reads(monkeypatch):
     """Monkeypatch the rebar reads ``assemble_context`` uses so it reconstructs a
     synthetic, store-free ticket with no children."""
-    import rebar
 
     state = _state()
 
@@ -56,8 +55,8 @@ def _stub_reads(monkeypatch):
     def _list(*, parent=None, repo_root=None):  # noqa: ANN001
         return []
 
-    monkeypatch.setattr(rebar, "show_ticket", _show)
-    monkeypatch.setattr(rebar, "list_tickets", _list)
+    monkeypatch.setattr("rebar._reads.show_ticket", _show)
+    monkeypatch.setattr("rebar._reads.list_tickets", _list)
     return state
 
 

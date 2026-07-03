@@ -176,11 +176,9 @@ def test_det_criterion_absent_from_llm_batch(tmp_path, monkeypatch):
     assert "project.no-eval" not in ids  # NOT routed to any LLM tier
 
     # And absent from the assemble op's include_ vocabulary too.
-    import rebar
 
     monkeypatch.setattr(
-        rebar,
-        "show_ticket",
+        "rebar._reads.show_ticket",
         lambda tid, **k: {
             "ticket_id": ctx.ticket_id,
             "ticket_type": "task",
@@ -189,7 +187,7 @@ def test_det_criterion_absent_from_llm_batch(tmp_path, monkeypatch):
             "file_impact": [],
         },
     )
-    monkeypatch.setattr(rebar, "list_tickets", lambda **k: [])
+    monkeypatch.setattr("rebar._reads.list_tickets", lambda **k: [])
 
     class _SC:
         inputs = {"target_ticket": ctx.ticket_id, "ticket_id": ctx.ticket_id}

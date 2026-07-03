@@ -58,10 +58,10 @@ def _ticket_id(ctx: StepContext) -> str:
 )
 def fetch_ticket(ctx: StepContext) -> dict[str, Any]:
     """Compiled ticket state for the target ticket → {ticket, title, description, …}."""
-    import rebar
+    from rebar import _reads
 
     tid = _ticket_id(ctx)
-    state = rebar.show_ticket(tid, repo_root=ctx.repo_root)
+    state = _reads.show_ticket(tid, repo_root=ctx.repo_root)
     return {
         "ticket": state,
         "ticket_id": tid,
@@ -84,10 +84,10 @@ def fetch_commits(ctx: StepContext) -> dict[str, Any]:
 
     Reads the ticket's compiled ``commits`` list, so it works the moment WS-H
     starts populating it and returns ``[]`` (not an error) before then."""
-    import rebar
+    from rebar import _reads
 
     tid = _ticket_id(ctx)
-    state = rebar.show_ticket(tid, repo_root=ctx.repo_root)
+    state = _reads.show_ticket(tid, repo_root=ctx.repo_root)
     commits = state.get("commits", []) or []
     return {"commits": commits, "commit_count": len(commits)}
 
@@ -100,10 +100,10 @@ def fetch_commits(ctx: StepContext) -> dict[str, Any]:
 )
 def fetch_epic_graph(ctx: StepContext) -> dict[str, Any]:
     """A ticket's dependency/child graph → {deps, blockers, children}."""
-    import rebar
+    from rebar import _reads
 
     tid = _ticket_id(ctx)
-    graph = rebar.deps(tid, repo_root=ctx.repo_root)
+    graph = _reads.deps(tid, repo_root=ctx.repo_root)
     return {
         "graph": graph,
         "children": graph.get("children", []),
@@ -148,10 +148,10 @@ def overlay_triggers(ctx: StepContext) -> dict[str, Any]:
     if (linked_types or ctx.inputs.get("structural")) and (
         ctx.inputs.get("ticket_id") or ctx.target_ticket
     ):
-        import rebar
+        from rebar import _reads
 
         tid = str(ctx.inputs.get("ticket_id") or ctx.target_ticket)
-        graph = rebar.deps(tid, repo_root=ctx.repo_root)
+        graph = _reads.deps(tid, repo_root=ctx.repo_root)
         out["has_children"] = bool(graph.get("children"))
         if linked_types:
             wanted = set(linked_types)
@@ -161,7 +161,7 @@ def overlay_triggers(ctx: StepContext) -> dict[str, Any]:
                 if not target:
                     continue
                 try:
-                    linked_type = rebar.show_ticket(target, repo_root=ctx.repo_root).get(
+                    linked_type = _reads.show_ticket(target, repo_root=ctx.repo_root).get(
                         "ticket_type"
                     )
                 except Exception:  # noqa: BLE001 — an unreadable/missing linked ticket simply isn't counted
@@ -264,11 +264,12 @@ def comment_verdict(ctx: StepContext) -> StepResult:
     that marker already exists, so a crash-and-resume of the SAME run
     (effect-applied-but-marker-unwritten) never double-comments. A deliberately NEW
     run (fresh run_id) is a new verdict and posts a new comment by design."""
-    import rebar
+    import rebar  # rebar.comment (a write) is sourced from the facade
+    from rebar import _reads
 
     tid = _ticket_id(ctx)
     marker = f"[rebar-run {ctx.run_id}/{ctx.step_id}]"
-    state = rebar.show_ticket(tid, repo_root=ctx.repo_root)
+    state = _reads.show_ticket(tid, repo_root=ctx.repo_root)
     for c in state.get("comments", []):
         if marker in (c.get("body") or ""):
             return StepResult(

@@ -303,7 +303,7 @@ def _linked_session_log(ctx: PlanContext, cfg: LLMConfig, runner) -> tuple[str |
     whether it was summarized to fit the window. Returns ``(None, False)`` when no
     session log is linked (ISF then does not run). Best-effort: any read error →
     ``(None, False)`` (ISF is skipped, never crashes the review)."""
-    import rebar
+    from rebar import _reads
 
     bodies: list[str] = []
     try:
@@ -312,7 +312,7 @@ def _linked_session_log(ctx: PlanContext, cfg: LLMConfig, runner) -> tuple[str |
             if not tgt:
                 continue
             try:
-                log = rebar.show_ticket(tgt, repo_root=ctx.repo_root)
+                log = _reads.show_ticket(tgt, repo_root=ctx.repo_root)
             except Exception:  # noqa: BLE001 — per-dep best-effort session-log fetch; skip unreadable deps
                 continue
             if log.get("ticket_type") == "session_log":

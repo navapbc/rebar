@@ -60,10 +60,9 @@ def _state(*, ttype: str = "story", description: str = _GOOD_AC) -> dict:
 
 
 def _patch_reads(monkeypatch, state: dict) -> None:
-    import rebar
 
-    monkeypatch.setattr(rebar, "show_ticket", lambda tid, repo_root=None: dict(state))
-    monkeypatch.setattr(rebar, "list_tickets", lambda parent=None, repo_root=None: [])
+    monkeypatch.setattr("rebar._reads.show_ticket", lambda tid, repo_root=None: dict(state))
+    monkeypatch.setattr("rebar._reads.list_tickets", lambda parent=None, repo_root=None: [])
 
 
 class _CountingFinder(FakeRunner):

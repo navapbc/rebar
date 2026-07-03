@@ -22,6 +22,12 @@ from typing import Any
 from rebar import config
 from rebar._engine import engine_dir, engine_env
 
+# Exception types live in the stdlib-only leaf ``rebar._errors`` (item 9.3) so readers
+# such as ``rebar._reads`` can source them downward instead of reaching UP into this
+# facade. Re-exported here for back-compat: ``rebar.RebarError`` /
+# ``from rebar import RebarError`` (and ``ConcurrencyError``) are unchanged.
+from rebar._errors import ConcurrencyError, RebarError
+
 # Library hygiene — quiet by default. Attach a NullHandler to the ``rebar`` root logger
 # so importing rebar as a library never emits to stderr or warns about a missing
 # handler. Entrypoints install a real stderr handler via
@@ -39,20 +45,8 @@ except importlib.metadata.PackageNotFoundError:  # pragma: no cover - dev checko
 
 
 # ── Exceptions ───────────────────────────────────────────────────────────────
-class RebarError(RuntimeError):
-    """A rebar engine command failed."""
-
-    def __init__(self, message: str, *, returncode: int = 1, stderr: str = ""):
-        super().__init__(message)
-        self.returncode = returncode
-        self.stderr = stderr
-
-
-class ConcurrencyError(RebarError):
-    """Optimistic-concurrency rejection (the ticket changed since it was read).
-
-    Raised by :func:`transition` when the engine reports exit code 10.
-    """
+# ``RebarError`` / ``ConcurrencyError`` are re-exported from the leaf ``rebar._errors``
+# at the top of this module (see the import there); the names are unchanged.
 
 
 # ── Initialization ───────────────────────────────────────────────────────────

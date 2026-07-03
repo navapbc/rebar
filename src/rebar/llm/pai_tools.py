@@ -152,10 +152,10 @@ def rebar_tools(repo_path: str | None, *, allow_comment: bool) -> list[Callable]
         comments, deps) as JSON. Read-only."""
         import json
 
-        import rebar
+        from rebar import _reads
 
         try:
-            return json.dumps(rebar.show_ticket(ticket_id, repo_root=repo_path))
+            return json.dumps(_reads.show_ticket(ticket_id, repo_root=repo_path))
         except Exception as exc:  # noqa: BLE001 — agent-tool boundary: surface the error to the LLM as a tool-result string, never crash the agent loop
             return f"Error: {exc}"
 
