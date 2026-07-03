@@ -2,7 +2,7 @@
 
 An in-process Python CLI. Its structure:
 
-* ``argparse`` owns top-level tokenization (subcommand + REMAINDER); per-command
+* ``main()`` owns top-level tokenization (subcommand + remainder args); per-command
   flag parsing stays in each command's own implementation, so argument-error
   messages come from the unchanged impls.
 * Help / overview / unknown-subcommand output comes from the pinned package-data
@@ -15,7 +15,6 @@ An in-process Python CLI. Its structure:
 
 from __future__ import annotations
 
-import argparse
 import os
 import subprocess
 import sys
@@ -453,16 +452,6 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     return _dispatch(sub, rest)
-
-
-# argparse scaffold — a real ArgumentParser owns top-level tokenization. Help and
-# errors are intercepted in main() so the byte-exact dispatcher contract wins; the
-# parser exists so the CLI is argparse-structured and gains its tokenization.
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="rebar", add_help=False)
-    parser.add_argument("subcommand", nargs="?")
-    parser.add_argument("args", nargs=argparse.REMAINDER)
-    return parser
 
 
 if __name__ == "__main__":

@@ -29,12 +29,6 @@ SECRET_DETECTION = "secret-detection"
 HIGH_CRITICAL_SECURITY = "high-critical-security"
 
 
-def _criterion_for(detector_id: str) -> str:
-    """The legacy hardcoded map (kept for reference / the deprecated alias's parity). The live
-    routing is now data-driven — see :func:`registry.criterion_for_detector`."""
-    return SECRET_DETECTION if detector_id == SECRET_DETECTION_ID else HIGH_CRITICAL_SECURITY
-
-
 def run_detectors(*, changed_files: list[str], repo_root: Any = None) -> dict[str, dict]:
     """Run the DET-criteria detectors (a registry slice — not the whole grounding suite) over
     ``repo_root`` and bucket their evidence per criterion: ``{criterion: {abstained: [...],

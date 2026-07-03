@@ -310,13 +310,6 @@ def regenerate_prompt_index(repo_root=None) -> str:
     return text
 
 
-def packaged_prompt_text(reviewer: Reviewer | Prompt) -> str:
-    """The packaged fallback prompt text for a reviewer (raw, with {{vars}})."""
-    if not reviewer.fallback_file:
-        return ""
-    return _catalog_dir().joinpath(reviewer.fallback_file).read_text(encoding="utf-8")
-
-
 def template_variables(template: str) -> set[str]:
     """The set of ``{{var}}`` names a template references (for parity checks)."""
     return {m.group(1) for m in _VAR.finditer(template)}

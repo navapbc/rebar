@@ -638,19 +638,6 @@ def _delete_file_from_tickets_branch(repo_root: Path, filename: str, commit_mess
     _commit_in_detached_tickets_worktree(repo_root, commit_message, _mutate)
 
 
-def _current_branch(repo_root: Path) -> str:
-    """Return the current branch name, or empty string on detached HEAD / failure."""
-    result = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", "--abbrev-ref", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode == 0:
-        return result.stdout.strip()
-    return ""
-
-
 def _git_run(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess:
     """Run a git command in repo_root; raise CalledProcessError on non-zero exit."""
     return subprocess.run(

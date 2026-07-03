@@ -695,10 +695,3 @@ def _merge_cfg(step: dict[str, Any], cfg: dict[str, Any], skip: Collection[str] 
     for k, v in cfg.items():
         if k not in skip and k != "uses":
             step[k] = v
-
-
-def _find_by_id(container: ET.Element, eid: str) -> ET.Element | None:
-    for el in list(container):
-        if el.get("id") == eid:
-            return el
-    return None

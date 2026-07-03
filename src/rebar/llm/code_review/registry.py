@@ -210,8 +210,9 @@ def criterion_for_detector(detector_id: str, det_map: dict[str, dict[str, Any]])
 
     An EXACT ``detector.id`` match wins over a ``detector.id_prefix`` match — so the gitleaks
     sentinel routes to ``secret-detection`` while every OTHER ``rebar.builtin.security.*`` routes
-    to ``high-critical-security`` (reproducing the retired ``_criterion_for`` exactly). Returns
-    ``None`` when no selector matches (the detector is not one this consumer routes)."""
+    to ``high-critical-security`` (reproducing the former per-criterion detector logic
+    exactly). Returns ``None`` when no selector matches (the detector is not one this
+    consumer routes)."""
     prefix_hit: str | None = None
     for cid, spec in det_map.items():
         sel = spec.get("detector") or {}

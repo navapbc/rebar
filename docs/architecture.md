@@ -277,7 +277,7 @@ This brought `outbound_differ.py` back under the soft cap (dropped from the allo
 `src/rebar/_cli/__init__.py` was **split** along its command-handler seam: the
 LLM/agent-operation handlers moved to `src/rebar/_cli/_llm_commands.py` and the
 workflow handlers to `src/rebar/_cli/_workflow_commands.py`, leaving the argv router
-(`_dispatch`/`main`/`build_parser` + `_reconcile`) under the soft cap. `main()`
+(`_dispatch`/`main` + `_reconcile`) under the soft cap. `main()`
 imports the entrypoints it dispatches to; the two command modules don't import each
 other.
 
