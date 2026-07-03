@@ -136,6 +136,13 @@ _JIRA_TO_LOCAL_STATUS: dict[str, str] = {
     "Cancelled": "cancelled",
 }
 
+# Local statuses that are TERMINAL (the ticket has left the active working set).
+# ADR 0029 #2: when local is already in one of these, an inbound Jira ``Done`` (which
+# maps to ``closed``) is the echo of child 444d's outbound terminal transition and
+# MUST NOT flip the local terminal status — kept in lock-step with
+# classify._TERMINAL_LOCAL_STATUSES.
+_TERMINAL_LOCAL_STATUSES: frozenset[str] = frozenset({"archived", "deleted"})
+
 # rebar-status: annotation labels that override the Jira workflow status on inbound.
 # Maps rebar-status:<label> -> local status. Takes precedence over _JIRA_TO_LOCAL_STATUS.
 _REBAR_STATUS_LABEL_TO_LOCAL: dict[str, str] = {
@@ -308,6 +315,22 @@ def _diff_jira_vs_local(
             isinstance(local_val, str)
             and isinstance(jira_val, str)
             and local_val.rstrip() == jira_val.rstrip()
+        ):
+            continue
+        # ADR 0029 #2 — archived/deleted → Done round-trip suppression. Child
+        # 444d introduces an outbound ``archived``/``deleted`` → Jira ``Done``
+        # transition. Inbound maps Jira ``Done`` → local ``closed``, so a bare
+        # push would let the NEXT inbound pass flip a locally-archived (or
+        # -deleted) ticket to ``closed`` — an oscillation. The local terminal
+        # status is canonical: when local is already terminal (archived/deleted)
+        # and the inbound-mapped status is ``closed`` (i.e. Jira ``Done``, the
+        # echo of our own terminal transition), suppress the status field so the
+        # local terminal state is preserved. A genuine Jira-side move to any
+        # NON-Done status still flows (jira_val != "closed").
+        if (
+            local_field == "status"
+            and local_val in _TERMINAL_LOCAL_STATUSES
+            and jira_val == "closed"
         ):
             continue
         if jira_val != local_val:

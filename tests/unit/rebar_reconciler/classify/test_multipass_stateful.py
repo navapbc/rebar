@@ -14,7 +14,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from tests.unit.rebar_reconciler.classify._load import load_classify
+from ._load import load_classify
 
 c = load_classify()
 ObservedJira = c.ObservedJira

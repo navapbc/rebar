@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.unit.rebar_reconciler.classify._load import load_classify
+from ._load import load_classify
 
 c = load_classify()
 ObservedJira = c.ObservedJira
