@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from rebar.llm import prompts
-from rebar.llm.prompts import PromptError, PromptNotFound
+from rebar.llm.prompting import prompts
+from rebar.llm.prompting.prompts import PromptError, PromptNotFound
 
 
 # ── get_prompt: unified resolver ──────────────────────────────────────────────

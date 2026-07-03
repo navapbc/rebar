@@ -17,9 +17,9 @@ from pathlib import Path
 import pytest
 
 from rebar.llm import criteria as shared
-from rebar.llm import prompt_library
 from rebar.llm.code_review import registry as cr
 from rebar.llm.plan_review import registry as pr
+from rebar.llm.prompting import prompt_library
 
 _PROJECT_RUBRIC = """\
 ---

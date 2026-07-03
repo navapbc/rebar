@@ -234,7 +234,7 @@ def input_schema_for(kind: str, action: str | None, repo_root: Any = None) -> st
         return contract.input_schema if contract is not None else None
     if kind == "agent":
         try:
-            from rebar.llm.prompts import get_prompt
+            from rebar.llm.prompting.prompts import get_prompt
 
             prompt = get_prompt(action, repo_root=repo_root)
         except Exception:  # noqa: BLE001 - unknown/malformed prompt → UNKNOWN (skip)

@@ -230,7 +230,7 @@ author-editable pipeline → a **workflow**.
 
 ---
 
-## 3. The prompt library — `rebar.llm.prompts`
+## 3. The prompt library — `rebar.llm.prompting.prompts`
 
 The prompt library is the **single source of truth for prompt TEXT**: every prompt
 is a git-canonical, front-matter-bearing `*.md` file. Prompts are **never inline
@@ -262,7 +262,7 @@ prompts.resolve_prompt(reviewer_or_prompt, variables, langfuse_cfg=None,
 
 ### The front-matter contract (closed key set)
 
-`rebar.llm.prompts.FRONT_MATTER_KEYS` (canonical emit order):
+`rebar.llm.prompting.prompts.FRONT_MATTER_KEYS` (canonical emit order):
 `schema_version`, `title`, `description`, `inputs`, `outputs`, `execution_mode`,
 `category`, `model`, `tags`, `dimension`, `applies_to`, `langfuse_prompt`, `default`.
 
@@ -284,7 +284,7 @@ prompts.resolve_prompt(reviewer_or_prompt, variables, langfuse_cfg=None,
 ### Derived index + CI gates
 
 - **Reviewer index** — `reviewers/index.json` is DERIVED from the `category: review`
-  prompts' front-matter (`regenerate_prompt_index()` / `python -m rebar.llm.prompts
+  prompts' front-matter (`regenerate_prompt_index()` / `python -m rebar.llm.prompting.prompts
   regenerate-index`). It is the offline-testable selection catalog; a CI **drift
   gate** regenerates-then-diffs it. Invariants: exactly one `default: true` reviewer,
   no `dimension` collision.
@@ -313,7 +313,7 @@ domain-specific routing/selection metadata lives in a **derived index** beside i
 1. Write `src/rebar/llm/reviewers/<name>.md` with canonical front-matter (only closed
    keys) + a body using `{{var}}` placeholders. Keep it byte-canonical (author via
    `write_front_matter`, or run the canonical-form test).
-2. If it's a `category: review` reviewer, run `python -m rebar.llm.prompts
+2. If it's a `category: review` reviewer, run `python -m rebar.llm.prompting.prompts
    regenerate-index` and commit the updated `index.json`.
 3. Resolve it: `p = get_prompt("<id>", repo_root=...)`; `system, _ =
    resolve_prompt(p, {var: ...}, repo_root=...)`; pass `system` +

@@ -35,7 +35,7 @@ def test_signing_surface_signatures_match_doc() -> None:
 
 
 def test_prompt_library_signatures_match_doc() -> None:
-    from rebar.llm import prompts
+    from rebar.llm.prompting import prompts
 
     assert _params(prompts.get_prompt) == ["prompt_id", "repo_root"]
     assert _params(prompts.resolve_prompt) == [

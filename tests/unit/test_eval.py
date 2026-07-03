@@ -1,4 +1,4 @@
-"""WS-G: prompt-eval discipline (rebar.llm.eval) — all offline, no model.
+"""WS-G: prompt-eval discipline (rebar.llm.evals.eval) — all offline, no model.
 
 Covers G1 (spec loading + the packaged built-in), G2 (grader discipline, the
 at_least(k) gate, coverage), and G3 (Cohen's kappa, judge alignment, JUnit).
@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from rebar.llm import eval as ev
-from rebar.llm.eval import EvalError
+from rebar.llm.evals import eval as ev
+from rebar.llm.evals.eval import EvalError
 
 # ── G1: spec loading + the packaged built-in ──────────────────────────────────
 

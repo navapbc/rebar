@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from rebar.llm import prompts
-from rebar.llm.prompts import PromptError
+from rebar.llm.prompting import prompts
+from rebar.llm.prompting.prompts import PromptError
 
 
 # ── 1. execution_mode enum + default ──────────────────────────────────────────

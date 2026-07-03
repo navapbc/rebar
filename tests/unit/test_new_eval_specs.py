@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import pytest
 
-from rebar.llm import eval as ev
-from rebar.llm import eval_scorers as sc
+from rebar.llm.evals import eval as ev
+from rebar.llm.evals import eval_scorers as sc
 
 NEW_SPECS = ("completion-verifier", "ticket-quality", "spec-alignment")
 

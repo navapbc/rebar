@@ -135,8 +135,8 @@ class RunnerAgentStep(_ex.AgentStepRunner):
     def run(self, ctx: _ex.StepContext) -> _ex.StepResult:
         from dataclasses import replace as _replace
 
-        from rebar.llm import prompts
         from rebar.llm.config import LLMConfig, resolve_model
+        from rebar.llm.prompting import prompts
         from rebar.llm.runner import get_runner
 
         cfg = self._config or LLMConfig.from_env(repo_root=self._repo_root)
@@ -239,7 +239,7 @@ def build_agent_request(
       * ``agentic`` — the tool-using path, honoring the step's own
         ``mode``/``output_schema`` (the historical behavior).
     """
-    from rebar.llm.prompts import PromptError
+    from rebar.llm.prompting.prompts import PromptError
     from rebar.llm.runner import RunRequest
 
     em = prompt.execution_mode or "agentic"

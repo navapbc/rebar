@@ -43,7 +43,7 @@ from rebar.llm.errors import (
 from rebar.llm.findings import build_result, normalize_finding, validate_result
 from rebar.llm.operations import review_ticket, select_reviewers
 from rebar.llm.plan_review import claim_gate_check, review_plan
-from rebar.llm.prompt_library import (
+from rebar.llm.prompting.prompt_library import (
     InvalidPromptIdError,
     LibraryWriteError,
     PromptExistsError,
@@ -52,7 +52,7 @@ from rebar.llm.prompt_library import (
     enumerate_library,
     update_prompt,
 )
-from rebar.llm.prompts import Prompt, Reviewer, get_prompt, load_catalog
+from rebar.llm.prompting.prompts import Prompt, Reviewer, get_prompt, load_catalog
 from rebar.llm.runner import (
     FakeRunner,
     Runner,

@@ -23,8 +23,8 @@ import pytest
 
 import rebar
 from rebar import signing
-from rebar.llm import prompt_library
 from rebar.llm.plan_review import attest, registry
+from rebar.llm.prompting import prompt_library
 
 _ROUTING = {
     "exec": "1-TURN",

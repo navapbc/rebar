@@ -11,7 +11,7 @@ reject a spec that names a scorer with no implementation (no more silent typos).
 A deterministic scorer is the GATE (llm-judge scorers only report). Each returns a
 :class:`ScoreResult` with ``applicable`` (does this scorer's metric apply to this
 case?) and, when applicable, ``passed``. Aggregation across cases/epochs (recall,
-``at_least(k)``, coverage) is the caller's job — see :mod:`rebar.llm.eval`.
+``at_least(k)``, coverage) is the caller's job — see :mod:`rebar.llm.evals.eval`.
 
 The reviewer ``output`` is one of:
   * a ``review_result`` ``{findings:[...], ...}`` (review_ticket / scan_spec /

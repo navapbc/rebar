@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from rebar.llm.prompts import get_prompt, parse_front_matter
+from rebar.llm.prompting.prompts import get_prompt, parse_front_matter
 from rebar.llm.workflow import editor
 from rebar.llm.workflow.prompt_authoring import (
     PromptWriteError,
@@ -207,7 +207,7 @@ def test_packaged_save_regenerates_index(tmp_path, monkeypatch):
         "---\ncategory: review\ndimension: dk\ndefault: true\n---\nKEEP", encoding="utf-8"
     )
     monkeypatch.setattr("rebar.llm.workflow.prompt_authoring._packaged_dir", lambda: pkg)
-    monkeypatch.setattr("rebar.llm.prompts._catalog_dir", lambda: pkg)
+    monkeypatch.setattr("rebar.llm.prompting.prompts._catalog_dir", lambda: pkg)
     out = save_prompt(
         "extra-review",
         {"category": "review", "dimension": "dx", "default": False},

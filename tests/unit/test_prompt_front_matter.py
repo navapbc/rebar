@@ -12,7 +12,7 @@ import warnings
 
 import pytest
 
-from rebar.llm.prompts import (
+from rebar.llm.prompting.prompts import (
     FRONT_MATTER_KEYS,
     PROMPT_SCHEMA_VERSION,
     PromptError,

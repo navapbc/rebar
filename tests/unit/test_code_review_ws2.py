@@ -122,7 +122,7 @@ def test_security_only_move_is_filtered_out_when_not_triggered():
 
 # ── prompts: overlays + verify + coach resolve with the right contract/category ─────────────
 def test_overlay_prompts_resolve_as_code_review_pass_finders():
-    from rebar.llm.prompts import get_prompt
+    from rebar.llm.prompting.prompts import get_prompt
 
     for oid in reg.OVERLAY_IDS:
         p = get_prompt(f"code-review-{oid}")
@@ -146,7 +146,7 @@ def test_all_code_review_prompts_are_canonical_front_matter_fixed_points():
     """Guard: every code-review-*.md must be a front-matter FIXED POINT (the CI gate
     test_prompt_front_matter asserts this for ALL packaged prompts; pin it here so a new/edited
     code-review prompt with hand-wrapped front-matter is caught in this story's own suite)."""
-    from rebar.llm.prompts_frontmatter import _split_front_matter_raw, write_front_matter
+    from rebar.llm.prompting.prompts_frontmatter import _split_front_matter_raw, write_front_matter
 
     for p in sorted(pathlib.Path("src/rebar/llm/reviewers").glob("code-review-*.md")):
         text = p.read_text(encoding="utf-8")
@@ -157,7 +157,7 @@ def test_all_code_review_prompts_are_canonical_front_matter_fixed_points():
 
 def test_coach_contract_registered_with_move_pick_shape():
     from rebar.llm import contracts
-    from rebar.llm.prompts import get_prompt
+    from rebar.llm.prompting.prompts import get_prompt
 
     assert get_prompt("code-review-coach").outputs == "code_review_coach"
     model = contracts.response_model_for("code_review_coach")

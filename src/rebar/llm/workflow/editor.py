@@ -128,12 +128,12 @@ def resolve_prompts(doc: dict[str, Any], path: str | Path) -> dict[str, str]:
     for pid in _collect_prompt_ids(doc.get("steps", []) or []):
         text = ""
         try:
-            from rebar.llm.prompts import get_prompt
+            from rebar.llm.prompting.prompts import get_prompt
 
             text = get_prompt(pid, repo_root=repo_root).text
         except Exception:  # noqa: BLE001 - try a user prompt file, then give up gracefully
             try:
-                from rebar.llm.prompts import parse_front_matter
+                from rebar.llm.prompting.prompts import parse_front_matter
 
                 pf = Path(repo_root) / ".rebar" / "prompts" / f"{pid}.md"
                 if pf.is_file():

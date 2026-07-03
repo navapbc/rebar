@@ -145,10 +145,10 @@ jobs:
       - name: Prompt-index drift gate
         shell: bash
         run: |
-          python -m rebar.llm.prompts regenerate-index
+          python -m rebar.llm.prompting.prompts regenerate-index
           if ! git diff --exit-code -- src/rebar/llm/reviewers/index.json; then
             echo "::error::reviewers/index.json is stale — regenerate it with"
-            echo "  python -m rebar.llm.prompts regenerate-index"
+            echo "  python -m rebar.llm.prompting.prompts regenerate-index"
             echo "and commit the result (it is derived from the prompt front-matter)."
             exit 1
           fi
