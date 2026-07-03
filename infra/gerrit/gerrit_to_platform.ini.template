@@ -11,6 +11,34 @@
 #
 # The `recheck` comment ChatOps maps to the `verify` workflow filter — a `recheck`
 # comment on a change re-dispatches .github/workflows/gerrit-verify.yaml (re-run policy).
+#
+# ── Branch-filtering / feature-branch dispatch spec (epic 88ab / S3, VERIFIED) ─────────
+# g2p does NOT branch-filter dispatch. `patchset-created` on ANY target branch (incl.
+# refs/heads/feature/*) dispatches the mapped `verify` workflow: the event→workflow mapping
+# is filename-substring based (a workflow is selected iff its filename contains the search
+# filter `verify` AND the literal `gerrit`), with NO branch/ref allowlist and no branch key
+# in THIS ini (only `[mapping "..."]` sections exist). Source (lfit/releng-gerrit_to_platform
+# @44d5d46): patchset_created.py (unconditional find_and_dispatch(project,"verify",inputs)),
+# github.py filter_workflows/filter_path (branch-agnostic), config.py (no [filters] schema).
+#
+# HOWEVER g2p dispatches via GitHub `workflow_dispatch(ref = refs/heads/{GERRIT_BRANCH})`
+# (helpers.py; github.py dispatch_workflow), and workflow_dispatch REQUIRES that ref to EXIST
+# on the GitHub mirror to resolve the workflow file. Therefore feature/* changes get CI ONLY
+# IF refs/heads/feature/* is replicated to the mirror — see the `push = refs/heads/feature/*`
+# line in replication.config (without it a feature change 422s → no Verified; verified live:
+# change 198 pre-fix got LLM-Review but no CI; change 200 post-fix dispatched CI). GERRIT_REFSPEC
+# is computed as refs/changes/NN/NNNN/P (g2p helpers.py get_change_refspec — EXTERNAL g2p
+# source, not an in-repo symbol) IDENTICALLY for merge and normal commits, so a merge change's
+# patchset ref (which in Gerrit IS the merge tree) is what CI checks out — no special merge
+# handling needed.
+#
+# ORDERING HAZARD (replication lag): a feature branch's FIRST patchset can lose a race — if a
+# change is pushed before the replication plugin has pushed the newly-created feature branch to
+# the mirror, that first workflow_dispatch 422s. Mitigation: create the feature branch and let
+# it replicate (near-real-time) BEFORE pushing story changes; the `recheck` ChatOps below is the
+# fallback (re-dispatch once the ref exists). NOTE: replicating feature/* also makes the mirror's
+# push-triggered workflows (test/eval/optionality, on push:branches:["**"]) fan out on feature
+# pushes — tracked as follow-up fern-belief-gap; those runs cast no Verified and don't affect the gate.
 [mapping "comment-added"]
 	recheck = verify
 [github.com]
