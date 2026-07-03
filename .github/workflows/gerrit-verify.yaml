@@ -58,9 +58,61 @@ jobs:
           gerrit-patchset-number: ${{ inputs.GERRIT_PATCHSET_NUMBER }}
           vote-type: clear
 
+  require-ticket:
+    # Fail-fast gate: every commit to main must reference a rebar ticket that RESOLVES in
+    # the store (verify.require_ticket_for_commit). Runs before the matrix; its failure
+    # aggregates into the run conclusion → Verified-1. See docs/commit-ticket-trailer.md.
+    name: require resolvable rebar ticket
+    needs: clear-vote
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+          gerrit-url: https://${{ vars.GERRIT_SERVER }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install rebar (core)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+      - name: Require a resolvable rebar ticket in the commit message
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The tickets store's source of truth is the `tickets` branch on GitHub (this repo).
+          # Mount it as a real worktree so the standard resolver reads it. Idempotent
+          # (prune+rm — runners are ephemeral, but this also survives a `recheck` re-run) and
+          # retried, so a transient GitHub blip is never mistaken for a missing ticket.
+          git worktree prune || true
+          rm -rf .tickets-tracker
+          ok=0
+          for attempt in 1 2 3; do
+            if timeout 60 git fetch --depth=1 \
+                 "https://github.com/${{ github.repository }}" \
+                 '+tickets:refs/remotes/gh-tickets'; then ok=1; break; fi
+            echo "tickets-branch fetch attempt $attempt failed; retrying..." >&2
+            sleep 5
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::could not fetch the tickets branch from GitHub after 3 attempts —" \
+                 "INFRASTRUCTURE issue, not a commit problem. Comment 'recheck' to retry." >&2
+            exit 1
+          fi
+          git worktree add --detach .tickets-tracker refs/remotes/gh-tickets
+          export REBAR_TRACKER_DIR="$PWD/.tickets-tracker"
+          rebar verify-commit-ticket --rev HEAD
+
   build-and-test:
     name: CI (${{ matrix.os }}, py${{ matrix.python-version }})
-    needs: clear-vote
+    needs: [clear-vote, require-ticket]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -153,7 +205,7 @@ jobs:
   vote:
     name: cast Verified
     if: ${{ always() }}
-    needs: [clear-vote, build-and-test]
+    needs: [clear-vote, require-ticket, build-and-test]
     runs-on: ubuntu-latest
     steps:
       - name: Aggregate the run conclusion

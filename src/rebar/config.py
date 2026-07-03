@@ -324,6 +324,11 @@ class VerifyConfig:
     # and session_logs are exempt. Default off ⇒ `claim` keeps today's behavior;
     # turning it off is the rollback (an ordinary preference, no kill-switch needed).
     require_plan_review_for_claim: bool = False
+    # Opt-in commit-ticket gate: when true, `rebar verify-commit-ticket` (run in CI, the
+    # Gerrit Verified leg) requires every commit message to reference a rebar ticket that
+    # RESOLVES in the store (alias/full/short/Jira). Default off; enabled per-project in
+    # rebar.toml. Turning it off is the rollback. See docs/commit-ticket-trailer.md.
+    require_ticket_for_commit: bool = False
 
     # Opt-in agentic code-review capability (epic b744): when true, the public
     # `review_code()` (CLI `rebar review-code` / MCP `review_code`) runs the four-pass
@@ -502,6 +507,7 @@ _SECTIONS: dict[str, dict] = {
         "require_signature_for_close": lambda v, k: _as_bool(v, k),
         "require_completion_verification_for_close": lambda v, k: _as_bool(v, k),
         "require_plan_review_for_claim": lambda v, k: _as_bool(v, k),
+        "require_ticket_for_commit": lambda v, k: _as_bool(v, k),
         "enable_code_review": lambda v, k: _as_bool(v, k),
         "progressive_drift_refresh": lambda v, k: _as_bool(v, k),
         "verify_window_headroom": lambda v, k: _as_float(v, k, minimum=0.1, maximum=1.0),

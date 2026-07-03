@@ -99,6 +99,10 @@ verify.require_completion_verification_for_close = false  # gate work-ticket clo
                                              # verdict (signed onto the ticket); fail-closed. ON for
                                              # this project's rebar.toml. Alternative to the signature gate.
 verify.require_plan_review_for_claim = false # gate claim on a successful (non-BLOCK) plan review attestation
+verify.require_ticket_for_commit   = false   # CI Verified gate: every commit to main must reference a rebar
+                                             # ticket that RESOLVES in the store (rebar-ticket: <id> trailer or a
+                                             # leading <id>:; alias/full/short/Jira). env
+                                             # REBAR_VERIFY_REQUIRE_TICKET_FOR_COMMIT. See docs/commit-ticket-trailer.md
 verify.remediation_mode            = false   # convergent plan-edit re-review (epic 7d43): when on, a
                                              # re-review of an edited plan whose CODE is unchanged may
                                              # drop only NOVEL low-priority findings (the rising floor).

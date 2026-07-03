@@ -441,6 +441,12 @@ the short version for agents:
 > (An external contributor who instead *clones from Gerrit* has `origin` = Gerrit and uses
 > CONTRIBUTING.md's `origin` commands verbatim; this note is THIS checkout's dual-remote layout.)
 
+> **Every commit needs a rebar ticket.** CI's `Verified` gate rejects a commit to `main` whose
+> message does not reference a rebar ticket that RESOLVES in the store — add a
+> `rebar-ticket: <id>` trailer (preferred) or a leading `<id>:` subject; `<id>` = alias / full /
+> short / Jira key. Enforced by `verify.require_ticket_for_commit` (on for this repo); see
+> [`docs/commit-ticket-trailer.md`](docs/commit-ticket-trailer.md).
+
 1. **Get Gerrit access once.** Sign in at `https://rebar.solutions.navateam.com` via
    GitHub OAuth, generate an HTTP password (Settings → HTTP Credentials), clone from
    Gerrit (`https://<user>@rebar.solutions.navateam.com/a/rebar`), and install the
