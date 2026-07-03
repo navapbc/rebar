@@ -168,7 +168,177 @@ keep working; tags are not locked, so releases still publish normally.)
 
 ---
 
-## 4. Troubleshooting
+## 4. Multi-story features (feature branches)
+
+The single-change loop in §2 is the right path for **one** self-contained change. A
+larger feature that spans **several stories** — especially when multiple agents work it
+in parallel — lands instead through a **server-side feature branch**: stories are
+reviewed *into* `refs/heads/feature/<name>` (each passing both gates), and the whole
+branch is then merged into `main` by a **single reviewed `--no-ff` merge change** that is
+gated identically and submitted atomically. `main` never sees a half-finished feature,
+and each story still gets its own two-vote review. See
+[ADR-0025](docs/adr/0025-feature-branch-merge-carry.md) for the design.
+
+> **When to use this.** Reach for a feature branch only when a feature is genuinely
+> multi-story (or multi-agent). A single small change does **not** need one — just push
+> it to `refs/for/main` per §2. The feature branch buys you an integration point off
+> `main`; it also costs an extra reviewed merge change, so don't pay for it on a one-shot
+> fix.
+
+### 4a. Prerequisite — you must be a feature-branch driver
+
+Creating a `feature/*` branch and pushing the merge commit are restricted to the
+**`feature-branch-drivers`** Gerrit group (ADR-0025): only its members hold *Create
+Reference* / *Delete Reference* on `refs/heads/feature/*` and *Push Merge Commit* on
+`refs/for/refs/heads/main` and `refs/for/refs/heads/feature/*`. **Pushing ordinary story
+changes for review into a feature branch needs no special membership** — the inherited
+`refs/for/refs/heads/*` grant already allows any registered user to do that. Only branch
+*creation* and the *merge-commit* push are gated.
+
+If you are not a member, ask a repository administrator to add you (membership is
+provisioned declaratively via `setup-project.sh` / `FEATURE_BRANCH_DRIVER_MEMBERS`; see
+ADR-0025). A non-member create/merge-push is refused by Gerrit server-side.
+
+### 4b. Create the feature branch (driver, one-time per feature)
+
+A driver creates the branch off the current `main` tip, either in the Gerrit UI
+(*Browse → Repositories → rebar → Branches → Create*) or over SSH:
+
+```bash
+ssh -p 29418 <you>@rebar.solutions.navateam.com \
+  gerrit create-branch rebar refs/heads/feature/<name> main
+```
+
+Pick a short `<name>` (e.g. `feature/login-epic`). Everyone working the feature branches
+their local work from it.
+
+### 4c. The story loop — review each story INTO the feature branch
+
+Work each story exactly like §2, except the review target is the **feature branch's**
+magic ref, not `main`:
+
+```bash
+git fetch gerrit
+git checkout -b my-story gerrit/feature/<name>
+# … edit, commit (the commit-msg hook stamps a Change-Id; every commit needs a
+#     rebar-ticket trailer per §2a) …
+git push gerrit HEAD:refs/for/refs/heads/feature/<name>
+```
+
+Each story is a normal Gerrit change and gets the **full two-vote gate** (`LLM-Review` +
+`Verified`) against the feature branch. Submit each story once both are `+1` and nothing
+is unresolved; it merges into `feature/<name>`, not `main`.
+
+### 4d. Catch-up merge — keep the feature branch current with `main`
+
+While the feature is in flight `main` moves. Periodically merge `main` **into** the
+feature branch so stories review against current code (and so the final merge-back has
+fewer conflicts). A driver does this and pushes it for review like any other change:
+
+```bash
+git fetch gerrit
+git checkout -b catchup gerrit/feature/<name>
+git merge gerrit/main           # resolve conflicts if any (see §4f), then commit
+git push gerrit HEAD:refs/for/refs/heads/feature/<name>
+```
+
+This is itself a change on the feature branch — it goes through both gates and is
+submitted normally.
+
+### 4e. Merge-back — land the whole feature into `main` (driver)
+
+When every story has landed on `feature/<name>`, a driver opens the **single `--no-ff`
+merge change** that integrates the branch into `main`.
+
+**Prerequisite — install the `commit-msg` hook in THIS checkout first.** A merge commit
+needs a `Change-Id` just like any other change, and a **fresh worktree/clone does not have
+the hook** — if it is missing, the merge push is rejected with *missing Change-Id* (§5).
+Install it before you create the merge commit:
+
+```bash
+curl -sLo .git/hooks/commit-msg \
+  https://rebar.solutions.navateam.com/tools/hooks/commit-msg
+chmod +x .git/hooks/commit-msg
+```
+
+Then create the no-fast-forward merge and push it to `refs/for/main`:
+
+```bash
+git fetch gerrit
+git checkout -b merge-<name> gerrit/main
+git merge --no-ff gerrit/feature/<name>   # resolve conflicts if any (§4f)
+# The commit-msg hook should have stamped a Change-Id. If it did NOT (hook was
+# installed only after the merge commit was made), re-stamp WITHOUT re-editing:
+GIT_EDITOR=/bin/true git commit --amend
+git log -1   # confirm a "Change-Id: I…" line is present
+
+git push gerrit HEAD:refs/for/main
+```
+
+This merge change is gated **identically** to any other: `LLM-Review` + `Verified` must
+both be `+1`. The `LLM-Review` bot reviews the auto-merge delta; CI runs `Verified`
+against the merge tree. Submit once both are green — Gerrit lands the whole feature on
+`main` atomically and replicates it to the GitHub mirror.
+
+**Re-merge behaviour when `main` advances under your open merge change (ADR-0025).** If
+`main` moves while the merge change is in review, re-merge to refresh it:
+
+```bash
+git fetch gerrit
+git merge --no-ff gerrit/main            # brings your merge change's first parent up to date
+GIT_EDITOR=/bin/true git commit --amend  # keep the Change-Id
+git push gerrit HEAD:refs/for/main
+```
+
+This produces a `MERGE_FIRST_PARENT_UPDATE` patchset (first parent moved, reviewed
+feature tip unchanged). **`LLM-Review` carries** across it (the reviewed delta is
+identical) but **`Verified` re-runs** (a new merge tree must be re-built by CI). So expect
+CI to run again but the LLM vote to stick. **Changing the feature tip itself is REWORK, not
+`MERGE_FIRST_PARENT_UPDATE` — it drops *both* votes and forces a full fresh review.**
+
+### 4f. Resolving merge conflicts
+
+Both the catch-up (§4d) and merge-back (§4e) merges can conflict. Resolve them the normal
+git way — there is nothing Gerrit-specific:
+
+```bash
+git merge --no-ff gerrit/feature/<name>
+# … git reports conflicts …
+git status                 # list conflicted paths
+# edit each file to resolve, then:
+git add <resolved-paths>
+git commit                 # completes the merge; the commit-msg hook stamps a Change-Id
+```
+
+Keep the resolution commit as the merge commit (don't flatten it into a squash — the
+`--no-ff` merge topology is what makes the feature land atomically). If the hook did not
+stamp a `Change-Id` (e.g. you resolved with `git merge --continue` before installing it),
+re-stamp with `GIT_EDITOR=/bin/true git commit --amend` (§4e).
+
+### 4g. Abandon a bad merge change and start over
+
+If a merge change is wrong (bad conflict resolution, wrong parent, stale feature tip) and
+you'd rather restart than amend it:
+
+1. **Abandon the change in Gerrit** — on the change page click **Abandon**, or
+   `ssh -p 29418 <you>@rebar.solutions.navateam.com gerrit review --abandon <change>,<patchset>`.
+   Abandoning affects only the review change; it does **not** touch `main` or the feature
+   branch.
+2. **Redo the merge from a clean base** and push a fresh change:
+   ```bash
+   git fetch gerrit
+   git checkout -B merge-<name> gerrit/main
+   git merge --no-ff gerrit/feature/<name>   # resolve conflicts (§4f)
+   git push gerrit HEAD:refs/for/main         # a NEW Change-Id ⇒ a new change
+   ```
+   (Because you started from a fresh checkout the commit-msg hook mints a new `Change-Id`,
+   so this opens a new change rather than updating the abandoned one.)
+
+The feature branch itself is untouched — only the merge *change* is replaced.
+
+---
+
+## 5. Troubleshooting
 
 - **`missing Change-Id in commit message footer` on push.** The `commit-msg` hook isn't
   installed (or wasn't installed when you committed). Install it (§1b), then re-stamp the
@@ -191,6 +361,17 @@ keep working; tags are not locked, so releases still publish normally.)
   `infra/runbooks/two-vote-gate-rollback.md`) — not a problem with your diff.
 - **`Verified -1` but the failure looks transient/flaky.** Comment **`recheck`** to re-run
   CI on the same patchset (§2c). A new patchset also re-runs it and cancels the stale run.
+- **`! [remote rejected] … you are not allowed to upload merges` (or `not permitted:
+  push merge commit`) pushing the merge-back.** Pushing a merge commit to
+  `refs/for/refs/heads/feature/*` or `refs/for/main` is restricted to the
+  **`feature-branch-drivers`** group (§4a, ADR-0025). Ordinary (non-merge) story pushes
+  are unaffected — only the `--no-ff` merge push is gated. Ask an administrator to add you
+  to the group, or have a driver push the merge change.
+- **`missing Change-Id in commit message footer` on the merge push.** The `commit-msg`
+  hook isn't installed in this checkout — a **fresh worktree/clone does not carry it** (§4e).
+  Install it (§1b / §4e), then re-stamp the existing merge commit **without re-editing** the
+  message so you keep the merge as-is: `GIT_EDITOR=/bin/true git commit --amend`, confirm a
+  `Change-Id: I…` line with `git log -1`, and push again.
 
 ---
 

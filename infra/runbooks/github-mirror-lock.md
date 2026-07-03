@@ -231,8 +231,10 @@ Gerrit-only flow:
 2. **Install the Change-Id hook** — `curl -Lo .git/hooks/commit-msg https://rebar.solutions.navateam.com/tools/hooks/commit-msg && chmod +x .git/hooks/commit-msg` (or use `git-review`).
 3. **Add the Gerrit remote** — `git remote add gerrit ssh://<you>@rebar.solutions.navateam.com:29418/rebar`.
 4. **Push for review** — `git push gerrit HEAD:refs/for/main` (optionally `%topic=rebar-<feature>`).
-5. **The `LLM-Review` gate** — the review-bot reviews your patchset and votes
-   `LLM-Review` (the single submit requirement: `label:LLM-Review=MAX AND -has:unresolved`).
-   A stuck change can be re-reviewed via the receiver's `/rerun` (see ADR-0009 / S7 runbook).
+5. **The gate — two votes** — the review-bot casts `LLM-Review` (LLM code review) and CI
+   casts `Verified` (build/test/lint/typecheck); a change is submittable only at
+   `label:LLM-Review=MAX AND label:Verified=MAX AND -has:unresolved`. A stuck `LLM-Review`
+   `-1` can be re-reviewed via the receiver's `/rerun`; a `Verified` flake clears with a
+   `recheck` comment (see ADR-0009 / ADR-0020 / the review-bot runbook).
 6. **Submit** in Gerrit once the gate is satisfied; Gerrit replicates the merge to
    GitHub `main` (the only writer).

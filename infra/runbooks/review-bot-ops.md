@@ -104,6 +104,78 @@ or malformed), backfill is degraded: the cursor does NOT advance and no vote is
 cast — the live webhook path still works, and a missed change stays vote-less =
 unsubmittable (never submittable-but-unreviewed). Restore events-log to recover.
 
+## Merge-change ops (feature-branch flow — epic 88ab / ADR-0025)
+
+Feature-branch work (CONTRIBUTING.md §4) adds one review shape the bot must handle: the
+`--no-ff` merge change that lands `refs/heads/feature/<name>` into `main`, plus the
+re-merges that refresh it. Operate them as follows.
+
+**What the bot reviews on a merge change.** A merge change's `patchset-created` event is
+reviewed like any other: the bot clones the change ref and reviews the **auto-merge
+delta**, then casts `LLM-Review`. There is no special merge path in the receiver — a merge
+patchset is just a patchset. The asymmetry lives in Gerrit's copyCondition (ADR-0025), not
+the bot: on a `MERGE_FIRST_PARENT_UPDATE` re-merge (first parent moved, feature tip
+unchanged) **`LLM-Review` carries and is NOT re-requested**, while `Verified` re-runs. So
+after a re-merge you should see CI run again but **no** new `LLM-Review` review fire — that
+is correct, not a dropped webhook.
+
+**409 semantics on merge changes.** The bot casts a vote via Gerrit REST and treats a
+**409 Conflict** as a benign "already-voted / label-not-settable-right-now" race, staying
+fail-closed. On merge changes a 409 most often means the bot's *own image is behind the
+merge-review code that landed on `main`* (S2's merge-review code was on `main` while the
+running bot was pre-S2, so it 409'd on merge changes — the exact condition ADR-0026's
+continuous auto-deploy now prevents). **A burst of 409s specifically on merge changes ⇒
+suspect a stale bot image, not a Gerrit fault.** Check the running image against `main`
+(see rollback below) and let autodeploy converge (or redeploy).
+
+**`/rerun` on merges.** `/rerun` works identically on a merge change — pass the merge
+change's number/Change-Id; the worker looks up its current revision and re-reviews from
+scratch, bypassing both short-circuits, still fail-closed. Use it to clear a stuck merge-change
+`-1` from a transient outage **without** amending the merge commit (which would otherwise
+re-run everything). Note `/rerun` only refreshes `LLM-Review`; a stuck `Verified` is CI's —
+comment `recheck` on the change for that.
+
+**S2 log signals to watch.** In the review-bot journald
+(`CONTAINER_NAME=compose-review-bot-1`), the merge-review path emits:
+
+```bash
+journalctl CONTAINER_NAME=compose-review-bot-1 --no-pager -o cat \
+  | grep -E 'merge_detection|merge_change_review|voter_voted|MERGE_CHANGE_ERROR' | tail
+```
+
+- `merge_detection` — the bot recognised the patchset as a merge (into `main` or a
+  `feature/*` branch).
+- `merge_change_review` — it ran the review on the merge's auto-merge delta.
+- `voter_voted` — it successfully cast the `LLM-Review` vote (the write-on-success signal).
+- `MERGE_CHANGE_ERROR` — a merge-specific failure (bad merge parent, auto-merge/diff
+  failure). Fail-closed: the change keeps its `-1`/no-vote. Treat like a `VOTER_ERROR` —
+  restore the bot, then `/rerun` the affected merge change.
+
+**Feature-branch ACL signals (NOT in the bot's path).** Branch-create / merge-push refusals
+for non-members of `feature-branch-drivers` (ADR-0025) are enforced **natively by Gerrit** —
+the review-bot is not involved and emits no metric. The signal is **Gerrit's** sshd/httpd
+audit log, not the bot's:
+
+```bash
+journalctl CONTAINER_NAME=compose-gerrit-1 --no-pager -o cat | grep -Ei 'refs/heads/feature/|merge|not permitted|not allowed' | tail
+```
+
+**Bot-code rollback = redeploy the prior image.** A bad bot deploy (e.g. a merge-review
+regression) rolls back by restoring the previous image:
+
+```bash
+docker tag compose-review-bot:prev compose-review-bot:latest \
+  && (cd infra/compose && docker compose up -d review-bot)
+```
+
+Under continuous auto-deploy (ADR-0026 — see the section below) this is usually
+**automatic**: after `up -d` the health check gates success, and a failed health check
+**auto-rolls-back to `:prev`** and does not advance `deployed-sha` (marker `bot-unhealthy`
+→ the `rebar-autodeploy-errors` alarm). So a bad merge-review image self-heals to the
+last-known-good bot; a *fix-forward* on `main` deploys promptly (a new SHA resets the
+backoff). Manual rollback above is the escape hatch if you need to pin `:prev` while
+investigating.
+
 ## Kill-switch: disable replication
 
 If replication to GitHub is misbehaving (e.g. repeated non-fast-forward attempts)
