@@ -25,41 +25,56 @@ from _helpers import (
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_graph_build_1000_tickets_under_2s(graph: ModuleType, tmp_path: Path) -> None:
-    """build_dep_graph for the tail of a 1,000-ticket linear chain completes in <2s.
+def test_graph_build_scales_linearly(graph: ModuleType, tmp_path: Path) -> None:
+    """build_dep_graph scales ~linearly in chain length — a RELATIVE signal.
 
     Setup:
-        - 1,000 ticket directories: ticket-0000 through ticket-0999
-        - Linear chain: ticket-0000 blocks ticket-0001, ticket-0001 blocks ticket-0002, ...
-        - All tickets are closed except the last (ticket-0999)
+        - Two linear blocks-chains, of N and 2N tickets (all closed but the tail).
+        - Time build_dep_graph on the tail ticket of each.
 
-    Expected: build_dep_graph('ticket-0999', ...) returns in under 2 seconds.
+    Why relative, not an absolute ceiling: a raw ``elapsed < 2.0s`` gate false-failed
+    on loaded/slow shared CI runners (esp. macOS) even with unchanged code (bug
+    wall-marlin-filth). The doubling ratio ``t(2N)/t(N)`` is immune to that — runner
+    load inflates both measurements equally and cancels — while still catching a real
+    algorithmic regression: a linear build doubles (~2.0x), a reintroduced O(n^2) build
+    quadruples (~4.0x). The 3.0 threshold sits between, so a >2x regression fails and
+    infra contention does not.
     """
-    tracker_dir = tmp_path / "tracker"
-    tracker_dir.mkdir()
+
+    def build_tail(n: int, sub: str) -> float:
+        tracker_dir = tmp_path / sub
+        tracker_dir.mkdir()
+        for i in range(n):
+            _write_ticket(tracker_dir, f"ticket-{i:04d}", status="closed" if i < n - 1 else "open")
+        for i in range(n - 1):
+            _write_blocks_link(
+                tracker_dir,
+                f"ticket-{i:04d}",
+                f"ticket-{i + 1:04d}",
+                link_uuid=f"link-{i:04d}",
+                timestamp=1500 + i,
+            )
+        start = time.monotonic()
+        result = graph.build_dep_graph(f"ticket-{n - 1:04d}", str(tracker_dir))
+        elapsed = time.monotonic() - start
+        assert isinstance(result, dict), f"Expected dict, got {type(result)}"
+        return elapsed
 
     n = 1000
-    for i in range(n):
-        tid = f"ticket-{i:04d}"
-        status = "closed" if i < n - 1 else "open"
-        _write_ticket(tracker_dir, tid, status=status)
+    t_n = build_tail(n, "chain_n")
+    t_2n = build_tail(2 * n, "chain_2n")
 
-    for i in range(n - 1):
-        blocker_id = f"ticket-{i:04d}"
-        blocked_id = f"ticket-{i + 1:04d}"
-        link_uuid = f"link-{i:04d}"
-        _write_blocks_link(
-            tracker_dir, blocker_id, blocked_id, link_uuid=link_uuid, timestamp=1500 + i
-        )
+    # Guard against a divide-by-noise on an implausibly fast machine: if the N build is
+    # sub-20ms the ratio is dominated by timer noise, not scaling — the O(n) invariant
+    # is anyway locked structurally by the single-batch-scan mock tests below.
+    if t_n < 0.02:
+        pytest.skip(f"build too fast to measure a stable ratio (t({n})={t_n:.4f}s)")
 
-    start = time.monotonic()
-    result = graph.build_dep_graph(f"ticket-{n - 1:04d}", str(tracker_dir))
-    elapsed = time.monotonic() - start
-
-    assert elapsed < 2.0, (
-        f"build_dep_graph took {elapsed:.3f}s for 1,000-ticket chain (limit: 2.0s)"
+    ratio = t_2n / t_n
+    assert ratio < 3.0, (
+        f"build_dep_graph scaled super-linearly: t({n})={t_n:.3f}s, t({2 * n})={t_2n:.3f}s, "
+        f"ratio={ratio:.2f} (linear≈2.0, O(n^2)≈4.0; limit 3.0) — likely an algorithmic regression"
     )
-    assert isinstance(result, dict), f"Expected dict, got {type(result)}"
 
 
 @pytest.mark.unit
@@ -280,14 +295,21 @@ def test_compute_dep_graph_children_use_preloaded_state(graph: ModuleType, tmp_p
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_hierarchy_enforcement_benchmark_1000_tickets(graph: ModuleType, tmp_path: Path) -> None:
-    """Hierarchy enforcement completes 10 cross-tier add_dependency calls under 5s on 1000-ticket
-    hierarchy.
+def test_hierarchy_enforcement_benchmark_relative(graph: ModuleType, tmp_path: Path) -> None:
+    """Cross-tier add_dependency stays cheap RELATIVE to a same-run baseline op.
 
     Setup: 10 epics × 10 stories × 10 tasks = 1,000 tickets.
-    Action: 10 add_dependency calls linking a task to a *different* epic (cross-tier),
+    Action: 9 add_dependency calls linking a task to a *different* epic (cross-tier),
             which under the type-tier model promotes the task to its own epic ancestor.
-    Assert: all calls complete in <5.0 seconds AND at least one epic-level dep was promoted.
+    Assert: the 9 promotions cost less than a generous multiple of a SAME-RUN baseline
+            (one build_dep_graph over the hierarchy) AND at least one epic-level dep was
+            promoted.
+
+    Why relative, not an absolute ceiling: a raw ``elapsed < 5.0s`` gate false-failed on
+    loaded CI runners even with unchanged code (bug wall-marlin-filth). Normalizing to a
+    baseline measured on the same machine/run cancels runner load (both inflate equally),
+    while a per-call O(n^2) promotion regression — each call rescanning the whole store —
+    explodes the ratio far past the bound, so a real algorithmic regression still fails.
     """
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
@@ -310,6 +332,11 @@ def test_hierarchy_enforcement_benchmark_1000_tickets(graph: ModuleType, tmp_pat
                     parent_id=f"story-{i:02d}-{j:02d}",
                 )
 
+    # Same-run baseline: one full graph build over the hierarchy, on this machine.
+    b0 = time.monotonic()
+    graph.build_dep_graph("epic-00", str(tracker_dir))
+    baseline = time.monotonic() - b0
+
     # 9 cross-tier add_dependency calls: each task in epic-01..epic-09 depends_on
     # epic-00. Each task is promoted up to its own epic ancestor, yielding
     # epic-0X → epic-00 (a fan-in DAG — no cycle, no wrap-around).
@@ -323,8 +350,15 @@ def test_hierarchy_enforcement_benchmark_1000_tickets(graph: ModuleType, tmp_pat
         )
     elapsed = time.monotonic() - start
 
-    # Performance assertion
-    assert elapsed < 5.0, f"9 cross-tier add_dependency calls took {elapsed:.2f}s (limit: 5.0s)"
+    # Relative performance assertion (load-independent). Observed ratio ~2–3.4 on linear
+    # code (a cold first-call outlier included); the 15x bound leaves generous headroom
+    # for CI contention while an O(n^2) per-call regression (ratio ~n) fails decisively.
+    if baseline >= 0.02:
+        ratio = elapsed / baseline
+        assert ratio < 15.0, (
+            f"9 cross-tier add_dependency calls cost {elapsed:.2f}s vs a {baseline:.3f}s "
+            f"baseline build (ratio {ratio:.1f}, limit 15.0) — likely an O(n^2) per-call regression"
+        )
 
     # Correctness: verify at least one epic-level dep was actually written
     # (task-01-00-00 promoted to epic-01, depends_on epic-00).

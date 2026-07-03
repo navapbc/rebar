@@ -71,6 +71,55 @@ steps:
     assert any("unknown step 'ghost'" in f.message for f in findings), _msgs(findings)
 
 
+def test_batch_criterion_when_ref_is_name_checked() -> None:
+    # GAP 1 (bug runny-pip-lure / f18b): a batch criterion's `when:` expression is
+    # a control guard over upstream outputs, but was never routed through the ref
+    # linter (batch is not a CONTROL_KIND). A bogus `steps.ghost...` ref must be
+    # flagged just as an `if:`/`with:` ref is — not pass and misbehave at run time.
+    wf = """\
+schema_version: "3"
+name: x
+steps:
+  - id: finders
+    batch:
+      prompt: plan-review-finder
+      criteria:
+        - prompt: plan-review-E1
+          when: '${{ steps.ghost.outputs.x }}'
+"""
+    findings = L.lint_workflow(wf)
+    assert any("unknown step 'ghost'" in f.message for f in findings), _msgs(findings)
+
+
+def test_pattern_properties_output_ref_is_honored() -> None:
+    # GAP 2 (bug runny-pip-lure / f18b): an output whose dynamic keys live in a
+    # schema's `patternProperties` (overlay_union's include_<overlay>) must be
+    # recognized as produced — not falsely flagged — while a genuine typo that
+    # matches no pattern IS still flagged.
+    import rebar.llm.code_review.workflow_ops  # noqa: F401 — register overlay_union contract
+
+    good = """\
+schema_version: "3"
+name: x
+steps:
+  - id: union
+    uses: overlay_union
+  - id: consume
+    prompt: code_quality
+    needs: [union]
+    with:
+      flag: '${{ steps.union.outputs.include_security }}'
+"""
+    findings = L.lint_workflow(good)
+    assert not any("not produced by step 'union'" in f.message for f in findings), _msgs(findings)
+
+    # A typo that matches neither `properties` nor the `^include_[a-z0-9_]+$`
+    # pattern must still be flagged (the check is real, not merely disabled).
+    bad = good.replace("include_security", "includ_security")
+    findings = L.lint_workflow(bad)
+    assert any("not produced by step 'union'" in f.message for f in findings), _msgs(findings)
+
+
 def test_reference_to_non_ancestor_step_is_flagged() -> None:
     # `b` references `a`'s output but does not declare `a` in needs.
     wf = """\
