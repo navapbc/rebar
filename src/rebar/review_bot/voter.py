@@ -102,6 +102,149 @@ def _publish_voter_error_metric() -> None:
         pass
 
 
+# ── merge-change review path (epic 88ab / S2) ────────────────────────────────
+# Bounded sequential REST fan-out per merge review: 1 commit GET (detection) + 1 files GET
+# + 1 mergelist GET + N per-file diff GETs, N bounded by DIFF_CHAR_CAP (per-file diffs are
+# fetched only until the assembled string reaches the cap). Latency budget: the extra
+# per-review overhead is a small constant (~3 REST round-trips) plus at most a handful of
+# per-file diff GETs before the char cap short-circuits the loop — well inside the review's
+# existing multi-second LLM budget. Any REST failure on this path fails CLOSED.
+
+
+def _publish_merge_change_error_metric(reason: str) -> None:
+    """Best-effort publish of ``rebar/host:review_bot_merge_change_errors`` (reason-tagged),
+    mirroring :func:`_publish_voter_error_metric`. The journald marker + the host probe
+    (observability.sh) is the reliable path; in-container boto3 may not reach IMDS, so any
+    failure is swallowed."""
+    try:
+        import boto3  # noqa: PLC0415 — optional, lazy: only on a fail-closed error path
+
+        boto3.client("cloudwatch").put_metric_data(
+            Namespace="rebar/host",
+            MetricData=[
+                {
+                    "MetricName": "review_bot_merge_change_errors",
+                    "Value": 1,
+                    "Unit": "Count",
+                    "Dimensions": [{"Name": "reason", "Value": reason}],
+                }
+            ],
+        )
+    except Exception:  # noqa: BLE001 — IMDS hop limit / no creds / offline: journald is the fallback
+        pass
+
+
+def _merge_change_error(event: str, reason: str, **fields: Any) -> None:
+    """Structured ERROR marker for a merge-path REST failure. Writes a greppable
+    ``MERGE_CHANGE_ERROR`` line to stderr (the host observability probe greps it to publish
+    ``rebar/host:review_bot_merge_change_errors``, reason-tagged) with the specific event name
+    (``merge_commit_error`` / ``merge_files_error`` / ``mergelist_fetch_error`` /
+    ``merge_diff_error``) AND publishes the reason-tagged merge metric. The voter turns the
+    failure into a fail-closed ``-1`` coverage-gap vote (see :func:`_merge_coverage_gap_decision`)
+    so the merge change is BLOCKED and visibly flagged as an INFRA veto, not silently no-voted."""
+    record = {"event": event, "reason": reason, "timestamp": time.time(), **fields}
+    line = "MERGE_CHANGE_ERROR " + json.dumps(record, default=str)
+    logger.error(line)
+    print(line, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
+    _publish_merge_change_error_metric(reason)
+
+
+def _merge_coverage_gap_decision(note: str) -> dict[str, Any]:
+    """A fail-closed BLOCK decision for a merge-path infra failure — cast as a ``-1`` with a
+    coverage-gap tag so the merge change is BLOCKED and the operator sees an INFRA veto (the
+    merge review could not run), NOT a code finding. Mirrors the adapter's coverage-gap shape;
+    the tag carries the ``coverage-gap`` marker so it is unmistakable from a real ``-1``."""
+    return {
+        "decision": "BLOCK",
+        "message": (
+            "[LLM-Review: BLOCK — coverage-gap (merge-review)]\n"
+            f"rebar could not review the merge change — {note}. Fail-closed veto "
+            "(infrastructure, not your code); re-run once the merge-path is healthy."
+        ),
+        "findings": [],
+        "coverage_gap": True,
+    }
+
+
+def _assemble_merge_diff(
+    gc: GerritClient, change_id: str, revision: str
+) -> tuple[str, int, dict[str, Any]]:
+    """Assemble the merge-change review context (auto-merge delta + integrated-commit list)
+    for a MERGE revision and return ``(diff_text, integrated_commit_count, stats)``. NEVER
+    calls the bare ``/patch`` (409 on a merge). Per-file diffs are fetched only until the
+    assembled string reaches ``DIFF_CHAR_CAP`` (bounds the sequential REST fan-out). ANY REST
+    failure raises ``GerritError`` (the caller fails closed).
+
+    ``stats`` is a small dict the caller logs on ``merge_change_review`` so an operator can
+    debug WHAT the reviewer actually saw without re-running: how many real (non-magic)
+    conflict files the auto-merge had, how many diffs were fetched before the cap, whether the
+    auto-merge delta was empty (a clean merge), whether the REST fan-out was truncated by the
+    char cap, and the assembled context size."""
+    from rebar.llm.code_review.assemble import (  # noqa: PLC0415 — lazy (mirror adapter)
+        DIFF_CHAR_CAP,
+        assemble_merge_change_context,
+    )
+
+    try:
+        merge_files = gc.get_merge_files(change_id, revision)
+    except GerritError as exc:
+        _merge_change_error("merge_files_error", "files", change_id=change_id, error=str(exc))
+        raise
+    try:
+        mergelist = gc.get_mergelist(change_id, revision)
+    except GerritError as exc:
+        _merge_change_error(
+            "mergelist_fetch_error", "mergelist", change_id=change_id, error=str(exc)
+        )
+        raise
+
+    # Fetch per-file diffs for REAL files (skip magic pseudo-paths) until the combined cap.
+    real_files = [p for p in merge_files if p not in GerritClient.MAGIC_PATHS]
+    file_diffs: dict[str, str] = {}
+    running = 0
+    cap_hit = False
+    for path in real_files:
+        if running >= DIFF_CHAR_CAP:
+            cap_hit = True  # remaining files skipped — the reviewer sees a truncated fan-out
+            break
+        try:
+            info = gc.get_file_diff(change_id, path, revision)
+        except GerritError as exc:
+            _merge_change_error(
+                "merge_diff_error", "diff", change_id=change_id, file=path, error=str(exc)
+            )
+            raise
+        text = _render_diff_info(info)
+        file_diffs[path] = text
+        running += len(text)
+    diff_text = assemble_merge_change_context(merge_files, file_diffs, mergelist)
+    stats = {
+        "real_files": len(real_files),
+        "files_fetched": len(file_diffs),
+        "auto_diff_empty": len(file_diffs) == 0,
+        "diff_cap_hit": cap_hit,
+        "assembled_chars": len(diff_text),
+    }
+    return diff_text, len(mergelist), stats
+
+
+def _render_diff_info(info: dict) -> str:
+    """Flatten a Gerrit ``DiffInfo`` (``content`` list of ``{ab|a|b}`` segments) into unified
+    diff-ish text for the reviewer. Only changed segments (``a``/``b``) are emitted with
+    ``-``/``+`` prefixes; unchanged ``ab`` context is summarized to keep the delta focused."""
+    lines: list[str] = []
+    for seg in info.get("content") or []:
+        if "ab" in seg:
+            n = len(seg["ab"])
+            lines.append(f"  … {n} unchanged line(s) …")
+            continue
+        for ln in seg.get("a") or []:
+            lines.append(f"-{ln}")
+        for ln in seg.get("b") or []:
+            lines.append(f"+{ln}")
+    return "\n".join(lines)
+
+
 def _extract(event: dict) -> dict[str, Any] | None:
     """Pull the fields the voter needs out of a Gerrit ``patchset-created`` payload.
 
@@ -207,31 +350,99 @@ async def review_and_vote(
             )
             return {"status": "error", "change_id": change_id, "stage": "dedup_check"}
 
-        # Review: clone the ref, fetch the diff, run the adapter seam.
+        # Merge detection (epic 88ab / S2): a merge revision (>= 2 parents) cannot use the
+        # bare /patch (409) and must be reviewed on ONLY its auto-merge delta (R1). Detect
+        # here — AFTER the existing-vote check, BEFORE any diff fetch — so the webhook,
+        # reconciler-backfill, and /rerun paths all route through this SAME code (reconcile.py
+        # needs no change). The extra commit GET is accepted overhead. A merge-path REST
+        # failure (commit / files / mergelist / diff) is fail-closed as a -1 COVERAGE-GAP vote
+        # (not a silent no-vote): the merge change is blocked AND visibly flagged as an infra
+        # veto. ``decision`` is pre-set here on a commit-fetch failure so the review is skipped.
+        decision: dict[str, Any] | None = None
+        merge_commits: int | None = None
+        parent_count = -1  # -1 = commit fetch failed (unknown); logged with the vote below
         try:
-            with tempfile.TemporaryDirectory(prefix="reviewbot-") as repo_root:
-                await asyncio.to_thread(
-                    gc.clone_change_ref, info["change_number"], info["patchset_ref"], repo_root
-                )
-                diff_text = await asyncio.to_thread(gc.get_patch, change_id, revision)
-                decision = await asyncio.to_thread(
-                    adapter.code_review_decision,
-                    diff_text,
-                    repo_root,
-                    info["patchset_ref"],
-                    config=cfg,
-                )
-        except GerritError as exc:
-            # A clone/diff failure → cannot review → fail-closed BLOCK vote attempt below
-            # would itself need a usable Gerrit; surface the error and leave unsubmittable.
-            _voter_error(
+            commit_info = await asyncio.to_thread(gc.get_commit, change_id, revision)
+            parent_count = len(commit_info.get("parents") or [])
+            is_merge = parent_count >= 2
+            # Detection outcome is logged for EVERY change (not just merges): a merge that
+            # Gerrit flattened to a single parent — or a genuine merge — is then unambiguous
+            # from the logs, without which a mis-detection is silent (the failure mode that
+            # made the S2 live smoke's first merge look like a non-merge).
+            _emit(
+                logging.INFO,
+                "merge_detection",
                 change_id=change_id,
                 revision_id=revision,
-                vote_value=None,
-                http_status=getattr(exc, "status", None),
-                error=f"review_setup: {exc}",
+                parent_count=parent_count,
+                is_merge=is_merge,
             )
-            return {"status": "error", "change_id": change_id, "stage": "review_setup"}
+        except GerritError as exc:
+            _merge_change_error("merge_commit_error", "commit", change_id=change_id, error=str(exc))
+            decision = _merge_coverage_gap_decision(f"commit fetch failed: {exc}")
+            is_merge = False
+
+        # Review: clone the ref, fetch the diff (merge vs non-merge path), run the adapter seam.
+        # Skipped entirely when a merge-path infra gap already decided the vote above.
+        if decision is None:
+            try:
+                with tempfile.TemporaryDirectory(prefix="reviewbot-") as repo_root:
+                    await asyncio.to_thread(
+                        gc.clone_change_ref, info["change_number"], info["patchset_ref"], repo_root
+                    )
+                    if is_merge:
+                        # ONLY the auto-merge delta + integrated-commit context — never /patch.
+                        # A merge-path REST failure here is a fail-closed -1 coverage-gap (the
+                        # clone succeeded, so the vote POST below can still reach Gerrit).
+                        try:
+                            diff_text, merge_commits, stats = await asyncio.to_thread(
+                                _assemble_merge_diff, gc, change_id, revision
+                            )
+                        except GerritError as exc:
+                            decision = _merge_coverage_gap_decision(
+                                f"merge context assembly failed: {exc}"
+                            )
+                        else:
+                            # Log WHAT the reviewer saw (context stats) so a merge review can be
+                            # debugged from logs alone: empty auto-merge delta, a truncated REST
+                            # fan-out, or an unexpected file/commit count are all visible here.
+                            _emit(
+                                logging.INFO,
+                                "merge_change_review",
+                                change_id=change_id,
+                                revision_id=revision,
+                                integrated_commits=merge_commits,
+                                **stats,
+                            )
+                            decision = await asyncio.to_thread(
+                                adapter.code_review_decision,
+                                diff_text,
+                                repo_root,
+                                info["patchset_ref"],
+                                config=cfg,
+                                merge_commits=merge_commits,
+                            )
+                    else:
+                        diff_text = await asyncio.to_thread(gc.get_patch, change_id, revision)
+                        decision = await asyncio.to_thread(
+                            adapter.code_review_decision,
+                            diff_text,
+                            repo_root,
+                            info["patchset_ref"],
+                            config=cfg,
+                        )
+            except GerritError as exc:
+                # A clone / (non-merge) get_patch failure → cannot review → fail-closed. The
+                # vote POST below would itself need a usable Gerrit; surface the error and
+                # leave unsubmittable (no vote), matching the pre-S2 setup-failure behaviour.
+                _voter_error(
+                    change_id=change_id,
+                    revision_id=revision,
+                    vote_value=None,
+                    http_status=getattr(exc, "status", None),
+                    error=f"review_setup: {exc}",
+                )
+                return {"status": "error", "change_id": change_id, "stage": "review_setup"}
 
         # Map decision → vote value. BLOCK (incl. adapter fail-closed) → block value;
         # PASS → max value. A MAX is cast ONLY on an explicit PASS.
@@ -263,6 +474,11 @@ async def review_and_vote(
             vote_value=value,
             http_status=http_status,
             decision=decision.get("decision"),
+            # merge/parent_count on every vote: correlate a vote with the review path taken
+            # (merge vs /patch) — the single most useful field when debugging "why did this
+            # change get reviewed the way it did". parent_count == -1 means commit fetch failed.
+            merge=is_merge,
+            parent_count=parent_count,
         )
         return {
             "status": "voted",

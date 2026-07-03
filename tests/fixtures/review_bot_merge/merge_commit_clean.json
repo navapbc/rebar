@@ -1,0 +1,27 @@
+{
+  "commit": "70461e3db23d35f6ab96250c3898e7b523fee41e",
+  "parents": [
+    {
+      "commit": "bf489e508dc9b3ec6228bc6e0fd8d81ef2ea5303",
+      "subject": "Merge changes I0e8af6ed,Iaf7d6fde,I3a14391d into main"
+    },
+    {
+      "commit": "a3e65392f53f8b48b264b412d7da4663ccaa4a03",
+      "subject": "test(s1): member pushMerge probe (abandon)"
+    }
+  ],
+  "author": {
+    "name": "Joe Oakhart",
+    "email": "joeoakhart@navapbc.com",
+    "date": "2026-07-03 05:22:31.000000000",
+    "tz": -420
+  },
+  "committer": {
+    "name": "Joe Oakhart",
+    "email": "joeoakhart@navapbc.com",
+    "date": "2026-07-03 05:22:31.000000000",
+    "tz": -420
+  },
+  "subject": "test(s1): member merge probe (abandon)",
+  "message": "test(s1): member merge probe (abandon)\n\nChange-Id: Id7b4b5ebabb900d4203f46f34df914b5f68f2c81\n"
+}

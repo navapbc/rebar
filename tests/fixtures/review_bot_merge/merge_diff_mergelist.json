@@ -1,0 +1,23 @@
+{
+  "meta_b": {
+    "name": "/MERGE_LIST",
+    "content_type": "text/x-gerrit-merge-list",
+    "lines": 4
+  },
+  "change_type": "ADDED",
+  "diff_header": [
+    "diff --git /dev/null b//MERGE_LIST",
+    "--- /dev/null",
+    "+++ b//MERGE_LIST"
+  ],
+  "content": [
+    {
+      "b": [
+        "Merge List:",
+        "",
+        "* a3e65392 test(s1): member pushMerge probe (abandon)",
+        ""
+      ]
+    }
+  ]
+}

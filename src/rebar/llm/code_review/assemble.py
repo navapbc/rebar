@@ -93,6 +93,76 @@ def compose_diff_context(
     )
 
 
+# ── merge-change context (epic 88ab / S2) ────────────────────────────────────
+# A merge change is reviewed on ONLY its auto-merge delta (conflict resolutions) plus the
+# list of commits it integrates — never the whole feature diff (R1). Gerrit's synthetic
+# pseudo-paths are not real conflict files and are excluded from the auto-merge diff.
+_MAGIC_MERGE_PATHS = frozenset({"/COMMIT_MSG", "/MERGE_LIST"})
+
+#: COUNT pre-cap on the integrated-commit list (a huge feature branch could integrate
+#: thousands of commits — the subject list is bounded before the char cap applies).
+MERGELIST_MAX_COMMITS = 100
+
+
+def assemble_merge_change_context(
+    merge_files: dict[str, dict],
+    file_diffs: dict[str, str],
+    mergelist: list[dict],
+    *,
+    diff_char_cap: int = DIFF_CHAR_CAP,
+    mergelist_max_commits: int = MERGELIST_MAX_COMMITS,
+) -> str:
+    """The kernel ``diff_text`` for a MERGE change: a ``## Merge context`` section (the
+    integrated-commit subjects, COUNT-capped at ``mergelist_max_commits`` with a truncation
+    notice) followed by a ``## Auto-merge diff`` section (the per-file conflict-resolution
+    diffs, magic pseudo-paths excluded).
+
+    ``merge_files`` (from ``get_merge_files``) is an explicit input: it names the real
+    auto-merge files, paired with their fetched diff text in ``file_diffs``. Cap
+    apportionment: ``diff_char_cap`` governs the COMBINED string — the merge-context section
+    is laid down first (already count-bounded), then the auto-merge diff is truncated last to
+    fit the remaining budget. A CLEAN merge (no real files) renders an explicit empty-delta
+    notice and the review proceeds on the mergelist context alone."""
+    # 1. Merge context — integrated-commit subjects (count-capped).
+    total = len(mergelist)
+    shown = mergelist[:mergelist_max_commits]
+    ctx = [f"## Merge context ({total} integrated commit(s))"]
+    for c in shown:
+        sha = str(c.get("commit") or "")[:10]
+        subj_raw = c.get("subject") or ""
+        subj = subj_raw.splitlines()[0] if subj_raw else ""
+        ctx.append(f"- {sha} {subj}".rstrip())
+    if total > mergelist_max_commits:
+        ctx.append(f"…({total - mergelist_max_commits} more integrated commit(s) omitted)")
+    merge_ctx = "\n".join(ctx)
+
+    # 2. Auto-merge diff — real files only (magic pseudo-paths excluded), in file-map order.
+    real_files = [f for f in (merge_files or {}) if f not in _MAGIC_MERGE_PATHS]
+    diff_blocks: list[str] = []
+    for f in real_files:
+        d = (file_diffs or {}).get(f)
+        if d:
+            diff_blocks.append(f"### {f}\n{d}")
+    auto_diff = "\n\n".join(diff_blocks)
+
+    # 3. Combined cap — merge context first (count-bounded), diff truncated last.
+    if not auto_diff:
+        diff_section = (
+            "## Auto-merge diff\n(empty — the auto-merge produced no conflict delta "
+            "(clean merge). Review is on the integrated-commit context above.)"
+        )
+    else:
+        budget = max(0, diff_char_cap - len(merge_ctx) - len("\n\n## Auto-merge diff\n"))
+        body = (
+            auto_diff
+            if len(auto_diff) <= budget
+            else auto_diff[:budget]
+            + "\n…(auto-merge diff truncated; use your file tools for the rest)"
+        )
+        diff_section = f"## Auto-merge diff\n{body}"
+    return f"{merge_ctx}\n\n{diff_section}"
+
+
 @dataclass(frozen=True)
 class DiffContext:
     """Everything the code-review gate needs about a change under review — the

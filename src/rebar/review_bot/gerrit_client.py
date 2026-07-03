@@ -125,6 +125,46 @@ class GerritClient:
         except (ValueError, base64.binascii.Error):  # type: ignore[attr-defined]
             return decoded if isinstance(decoded, str) else str(decoded)
 
+    # ── merge-change review path (epic 88ab / S2) ─────────────────────────────
+    # A merge commit (>= 2 parents) fails a bare ``/patch`` with HTTP 409 ("Revision has
+    # more than 1 parent"), and ``/patch?parent=1`` would diff the ENTIRE feature (violates
+    # R1). The bot instead reviews ONLY the auto-merge delta (the conflict resolutions):
+    # ``files`` / per-file ``diff`` with NO ``base``/``parent`` param return the diff against
+    # the auto-merge base (Gerrit REST, rest-api-changes.html#list-files: "If the revision is
+    # a merge commit and neither base nor parent is set, the list of files is computed
+    # against the auto-merge"). Live-captured fixtures: tests/fixtures/review_bot_merge/.
+    #: Gerrit's synthetic pseudo-paths in a revision file map — NOT real conflict files.
+    MAGIC_PATHS = frozenset({"/COMMIT_MSG", "/MERGE_LIST"})
+
+    def get_commit(self, change_id: str, revision: str = "current") -> dict:
+        """Return the revision's ``CommitInfo`` (used for merge detection: a merge revision
+        has ``len(parents) >= 2``). One extra REST GET per review; a failure here fails
+        closed in the voter."""
+        return self._get_json(f"/a/changes/{self._q(change_id)}/revisions/{revision}/commit")
+
+    def get_merge_files(self, change_id: str, revision: str = "current") -> dict[str, dict]:
+        """Return the auto-merge-base file map for a MERGE revision — ``GET .../files`` with
+        NO ``base``/``parent`` param. For a merge commit this is the diff against the
+        auto-merge base (the conflict resolutions); a CLEAN merge yields only the magic
+        ``/COMMIT_MSG`` + ``/MERGE_LIST`` pseudo-paths (:attr:`MAGIC_PATHS`), i.e. an empty
+        real delta. NEVER call the bare ``/patch`` on a merge (it 409s)."""
+        d = self._get_json(f"/a/changes/{self._q(change_id)}/revisions/{revision}/files")
+        return d if isinstance(d, dict) else {}
+
+    def get_file_diff(self, change_id: str, file_path: str, revision: str = "current") -> dict:
+        """Per-file ``DiffInfo`` against the auto-merge base (no ``base``/``parent`` param) —
+        the conflict-resolution hunks for ``file_path`` in a merge revision."""
+        fp = urllib.parse.quote(file_path, safe="")
+        return self._get_json(
+            f"/a/changes/{self._q(change_id)}/revisions/{revision}/files/{fp}/diff"
+        )
+
+    def get_mergelist(self, change_id: str, revision: str = "current") -> list[dict]:
+        """The commits a merge revision integrates (``GET .../mergelist`` — the first-parent
+        delta list). Returns ``[]`` for a non-merge revision or an unexpected body."""
+        d = self._get_json(f"/a/changes/{self._q(change_id)}/revisions/{revision}/mergelist")
+        return d if isinstance(d, list) else []
+
     def has_llm_review_vote(self, change_id: str, revision: str = "current") -> bool:
         """True if the given revision already carries a NON-ZERO ``LLM-Review`` vote.
 

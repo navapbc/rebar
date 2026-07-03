@@ -9,6 +9,7 @@
 #   2. Gerrit data-volume disk-used-percent -> rebar/host:disk_used_percent (S2 alarm).
 #   3. Gerrit->GitHub replication failures (replication_log) -> rebar/host:replication_errors (S5 alarm).
 #   4. review-bot voter failures (VOTER_ERROR in journald) -> rebar/host:voter_errors (S4b alarm).
+#   4c. review-bot merge-change failures (MERGE_CHANGE_ERROR) -> rebar/host:review_bot_merge_change_errors (epic 88ab/S2 alarm).
 #   4b. gerrit-to-platform CI-dispatch failures (Gerrit journald) -> rebar/host:g2p_dispatch_errors (epic 1fa8 alarm).
 #   5. Gate reachability -> Rebar/Gate:GerritReachable (1/0), watched by the S7 gate-down
 #      alarm (treat_missing_data=breaching catches a dead host / stopped probe).
@@ -119,6 +120,27 @@ echo "$vtotal" >"$VOTER_OFFSET_FILE"
 aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
   --metric-name voter_errors --unit Count --value "$vnew" 2>/dev/null || true
 [ "$vnew" -gt 0 ] && logger -t rebar-health "review-bot voter failures (new this interval)=${vnew}"
+
+# --- 4c. review-bot merge-change path failures (epic 88ab / S2) -------------
+# The merge-change review path (a merge revision reviewed on its auto-merge delta only)
+# writes a structured MERGE_CHANGE_ERROR marker to stderr when a merge-path REST call
+# (files / mergelist / per-file diff) fails. This is a GRANULAR diagnosis metric — those
+# same failures ALSO surface in voter_errors above (the voter fails closed), but this
+# metric isolates "the merge path specifically is broken" from general voter failure.
+# Same offset-delta shape as section 4; published WITHOUT dimensions to match the
+# dimensionless alarm in monitoring_88ab.tf.
+MERGE_OFFSET_FILE="${MERGE_OFFSET_FILE:-/var/lib/rebar/merge-change-fail-offset}"
+mkdir -p "$(dirname "$MERGE_OFFSET_FILE")"
+mtotal=$(journalctl CONTAINER_NAME="$VOTER_CONTAINER" --no-pager -o cat 2>/dev/null | grep -cE 'MERGE_CHANGE_ERROR') || true
+mtotal=${mtotal:-0}
+mprev=$(cat "$MERGE_OFFSET_FILE" 2>/dev/null || echo 0)
+case "$mprev" in '' | *[!0-9]*) mprev=0 ;; esac
+mnew=$((mtotal - mprev))
+[ "$mnew" -lt 0 ] && mnew=$mtotal
+echo "$mtotal" >"$MERGE_OFFSET_FILE"
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name review_bot_merge_change_errors --unit Count --value "$mnew" 2>/dev/null || true
+[ "$mnew" -gt 0 ] && logger -t rebar-health "review-bot merge-change failures (new this interval)=${mnew}"
 
 # --- 4b. gerrit-to-platform CI-dispatch failures (epic 1fa8) ---------------
 # Watch the GERRIT container's journald for gerrit-to-platform (g2p) error markers
