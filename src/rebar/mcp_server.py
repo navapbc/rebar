@@ -219,8 +219,11 @@ def _mcp_gate(attr: str, *, fail: bool) -> bool:
 
 def _readonly() -> bool:
     # Fail-CLOSED (read-only) on a malformed config — consistent with the verify
-    # gate; a broken config hides the write tools rather than exposing them.
-    return _mcp_gate("readonly", fail=True)
+    # gate; a broken config hides the write tools rather than exposing them. Routed
+    # through the ONE shared resolver in rebar.config so the LLM runner's read-only
+    # gate (runner._readonly_gate) resolves identically and the two can't drift.
+    # (_mcp_gate stays for the allow_llm / allow_jira_sync gates below.)
+    return rebar.config.mcp_readonly()
 
 
 def _allow_llm() -> bool:

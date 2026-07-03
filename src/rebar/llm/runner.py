@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
@@ -564,8 +563,22 @@ def _pai_model(cfg: LLMConfig):
 
 
 def _readonly_gate() -> bool:
-    """True if the READONLY gate is set (``REBAR_MCP_READONLY`` truthy) — reused to
-    withhold the comment tool, so a read-only deployment grants the agent read-only
-    ticket access. Case-insensitive truthy (1/true/yes/on)."""
-    val = os.environ.get("REBAR_MCP_READONLY", "").strip().lower()
-    return val in ("1", "true", "yes", "on")
+    """True if the READONLY gate is set — reused to withhold the comment tool, so a
+    read-only deployment grants the agent read-only ticket access.
+
+    Resolves the SAME config-aware way as the MCP server's write-tool gate: env
+    ``REBAR_MCP_READONLY`` wins over the ``[tool.rebar.mcp] readonly`` file key, and a
+    malformed config fails CLOSED (read-only). Previously this read ONLY the env var
+    (its own truthy parser) and ignored the file key, so a server set read-only via the
+    config FILE alone still handed the review agent a live ``comment_ticket`` write in
+    ``source=local`` mode — half-enforced read-only. Both this and ``mcp_server._readonly``
+    now route through the one ``rebar.config.mcp_readonly`` resolver so they can't drift.
+
+    Import edge: we call the resolver in ``rebar.config`` (a core LEAF), NOT
+    ``mcp_server``. Importing ``mcp_server`` from ``rebar.llm`` would invert the layering
+    AND pull the ``mcp`` extra's module-top imports into the LLM runtime, breaking the
+    ``import rebar.llm`` optionality contract. The import is kept lazy (inside the
+    function) to leave the hot-path module-import graph unchanged."""
+    import rebar.config
+
+    return rebar.config.mcp_readonly()

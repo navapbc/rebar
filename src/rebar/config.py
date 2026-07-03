@@ -1128,6 +1128,21 @@ def load_config(
     return cfg
 
 
+def mcp_readonly() -> bool:
+    """THE shared resolver for the read-only gate (``mcp.readonly``). Resolves through
+    the single-source typed config, so env ``REBAR_MCP_READONLY`` wins over the
+    ``[tool.rebar.mcp] readonly`` file key (``load_config`` layers env above file), and
+    fail-CLOSED to read-only on a malformed config (a broken config withholds writes
+    rather than exposing them). Both read-only call sites route through this — the MCP
+    server's write-tool gating (``mcp_server._readonly``) and the LLM runner's
+    comment-tool withholding (``runner._readonly_gate``) — so the two cannot diverge
+    (they once did: the runner read only the env var and ignored the file key)."""
+    try:
+        return load_config().mcp.readonly
+    except ConfigError:
+        return True
+
+
 def read_config_file(path: str | os.PathLike[str]) -> Config:
     """Resolve a typed Config from a SINGLE explicit config file — no discovery, env,
     or user-layer merging. For callers that point at a specific file (e.g.
