@@ -378,21 +378,28 @@ the op then deterministically normalizes it and enforces FAIL⇔findings (`_reco
 resolves citations. Findings are **failures-only** (a completion check, not a code review);
 a ticket with no explicit criteria PASSes with a note.
 
-**Child-closure trust (parents/epics) — a deterministic gate BEFORE the LLM.** A parent is not
-complete unless every **direct** child is closed **with a certified completion signature**. This
-is a graph + signature invariant, checked **deterministically and FIRST**: `verify_completion`
-enumerates the direct children (via the `parent_id` hierarchy, `list_tickets(parent=…)`), and if
-any child is not closed+certified it returns a **FAIL verdict immediately, without ever invoking
-the LLM** (the verdict's `runner` is `"deterministic"`). It does **not** recurse into grandchildren
-and does **not** re-verify a child's own criteria — the child's certified signature **is** the
-trusted attestation that its criteria were validated when it closed. The consequence (and the fix
-for the count-dependent false-negatives + step-budget blowups of bug `a254`): the **LLM evaluator
-is only ever reached once all children are closed+signed**, so it never reasons about child
-closure — it judges only the parent's **own** substantive success criteria (the agent, against the
-code). The cost of the child check is independent of child count. It never re-walks the whole
-subtree (which is impractical and re-does work the children's own gates already did). The **close gate** runs the verifier with `graph=False` for
-exactly this reason (the standalone `rebar verify-completion <id> --graph` still inlines the
-subtree for a human review).
+**Child-closure trust (parents/epics) — a deterministic gate BEFORE the LLM.** Closing a parent
+enumerates its **direct** children (via the `parent_id` hierarchy, `list_tickets(parent=…)`) and
+splits them two ways, **deterministically and FIRST**, before any LLM call:
+
+- **an unclosed child BLOCKS.** If any direct child is not in a closed state, `verify_completion`
+  returns a **FAIL verdict immediately, without ever invoking the LLM** (the verdict's `runner` is
+  `"deterministic"`). A parent cannot be complete over open work.
+- **a closed-but-uncertified child WITHHOLDS CERTIFICATION, but does not block.** If a child is
+  closed *without* a certified/valid completion signature (e.g. it was `--force-close`d), the parent
+  may still **close** — judged on its **own** criteria — but the verdict carries **`certifiable:
+  false`** and the close is **left unsigned** (see the close gate below). The parent is
+  complete-enough-to-close but not certifiable, because a descendant's attestation is missing.
+
+It does **not** recurse into grandchildren and does **not** re-verify a *certified* child's own
+criteria — that child's certified signature **is** the trusted attestation that its criteria were
+validated when it closed. The consequence (and the fix for the count-dependent false-negatives +
+step-budget blowups of bug `a254`): the **LLM evaluator is reached once all children are closed**
+(signed or not) and it judges only the parent's **own** substantive success criteria (the agent,
+against the code) — never child closure. The cost of the child check is independent of child count;
+it never re-walks the whole subtree (which is impractical and re-does work the children's own gates
+already did). The **close gate** runs the verifier with `graph=False` for exactly this reason (the
+standalone `rebar verify-completion <id> --graph` still inlines the subtree for a human review).
 
 > **Why the verifier uses natural termination, not forced structured output (root cause).**
 > Forcing a tool-using agent's output (forced `tool_choice`) makes it **not terminate
@@ -422,9 +429,13 @@ this project**) wires this into `transition` **outside the write lock**, orderin
   LLM** (missing `[agents]` extra / API key / any verifier error), **blocks** the close
   (fail-closed `CommandError`) with the findings + a `--force-close` hint;
 - on **PASS** it signs the verdict onto the ticket *after* the close is confirmed (so a
-  failed/raced close never leaves an orphan certified signature) via `rebar.signing.sign_manifest`;
-- **`--force-close="<reason>"`** closes without verifying or signing — a **closed-without-
-  signature** ticket is the durable signal that validation did not pass / was bypassed.
+  failed/raced close never leaves an orphan certified signature) via `rebar.signing.sign_manifest`
+  — **unless the verdict is `certifiable: false`** (a closed-but-uncertified descendant), in which
+  case the parent closes but is **left unsigned**;
+- **`--force-close="<reason>"`** closes without verifying or signing. So a **closed-without-
+  signature** ticket means "not certified" — either the gate was bypassed (`--force-close`) *or* a
+  descendant is still uncertified; it no longer implies the ticket's **own** validation failed. The
+  remedy for the descendant case is to re-close the uncertified child so it earns a signature.
 
 **Trust model.** The signature is only *secure/meaningful* when rebar runs as the **MCP
 server**, whose environment signing key is canonical; a CLI/library install signs with a local
