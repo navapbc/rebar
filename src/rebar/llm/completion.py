@@ -21,11 +21,14 @@ needs no injected ticket tool.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 
 from rebar.llm import findings
 from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, LLMConfig
 from rebar.llm.runner import Runner
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["verify_completion"]
 
@@ -67,13 +70,48 @@ def _child_closure_findings(ticket_id: str, repo_root) -> tuple[list[dict], list
     * **uncertified** — a direct child that is closed but WITHOUT a certified/valid closure (a
       force-closed / reopened / drift-stale child). Its work is done, but its subtree is
       unattested: the parent may CLOSE (subject to its OWN criteria) but cannot be CERTIFIED —
-      certification propagates, so an unattested descendant WITHHOLDS the parent's signature."""
+      certification propagates, so an unattested descendant WITHHOLDS the parent's signature.
+
+    **Read-error path (fail-safe on certification).** If enumerating the children itself fails
+    (a transient store read error), we can no longer prove the subtree is attested, so we
+    WITHHOLD certification rather than forge it: we return ``([], [<marker>])`` — an EMPTY
+    ``blocking`` (the parent may still close on its OWN criteria; a read glitch shouldn't block
+    a legitimate close) but a NON-EMPTY ``uncertified`` (so ``certifiable`` is ``False`` and the
+    parent closes UNSIGNED). Returning ``([], [])`` here (the old behaviour) would have LAUNDERED
+    certification — a read failure would have signed the parent as if it were childless. This
+    mirrors ``plan_review.attest._attested_delivered``, which fails closed on the same error."""
     import rebar
 
     try:
         children = rebar.list_tickets(parent=ticket_id, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — no children on a list failure (natural no-op for childless tickets)
-        return [], []
+    except Exception as exc:  # noqa: BLE001 — WITHHOLD certification on a read error; logged below
+        logger.warning(
+            "child-closure enumeration failed for %s; withholding certification "
+            "(the parent may still close on its own criteria, but UNSIGNED) rather than "
+            "forging it from an unread (assumed-empty) child set",
+            ticket_id,
+            exc_info=True,
+        )
+        return [], [
+            {
+                "criterion": f"direct children of {ticket_id} could not be certified",
+                "severity": "high",
+                "dimension": "completion",
+                "detail": (
+                    f"could not enumerate the direct children of {ticket_id} to verify their "
+                    f"certified closure ({exc}); WITHHOLDING certification — the parent may still "
+                    "close on its OWN criteria but is NOT signed, rather than forging "
+                    "certification from an unread (assumed-empty) child set. Re-close once the "
+                    "store read succeeds to certify."
+                ),
+                "citations": [
+                    {
+                        "kind": "source",
+                        "description": f"list_tickets(parent={ticket_id}) read error: {exc}",
+                    }
+                ],
+            }
+        ]
     blocking: list[dict] = []
     uncertified: list[dict] = []
     for c in children:

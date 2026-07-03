@@ -180,6 +180,56 @@ def test_uncertified_child_does_not_block_but_withholds_certification(monkeypatc
     assert verdict["certifiable"] is False, "an uncertified descendant withholds certification"
 
 
+def test_child_enumeration_read_error_withholds_certification(monkeypatch):
+    # Regression (ffb3-730f-bd48-47f1): a TRANSIENT store error enumerating a parent's children
+    # must NOT LAUNDER certification. The old `except: return [], []` made `uncertified` empty →
+    # gate_ops' `certifiable = not uncertified` → True → the parent closed SIGNED as if it were
+    # childless, even though a direct child might be force-closed/uncertified. The correct
+    # behaviour (mirroring attest._attested_delivered's fail-closed-on-certification): the parent
+    # may still close on its OWN criteria (a read glitch shouldn't block a legitimate close), but
+    # the verdict must be certifiable=False (closes UNSIGNED).
+    import rebar
+    from rebar.llm.completion import _child_closure_findings
+
+    def _boom(parent=None, repo_root=None):
+        raise RuntimeError("transient store read error")
+
+    monkeypatch.setattr(
+        rebar,
+        "show_ticket",
+        lambda tid, repo_root=None: {"ticket_id": "T-1", "ticket_type": "epic"},
+    )
+    monkeypatch.setattr(rebar, "list_tickets", _boom)
+
+    # Direct contract (the fixed function): blocking EMPTY (don't fabricate a block on a read
+    # error — the close may proceed), uncertified NON-EMPTY (so `certifiable = not uncertified`
+    # is False). This is the exact empty/empty return the bug produced, now withheld.
+    blocking, uncertified = _child_closure_findings("T-1", None)
+    assert blocking == [], "a read error must NOT fabricate a blocking child (close may proceed)"
+    assert uncertified, "a read error must mark the parent uncertified (withhold, not forge)"
+
+    # End-to-end through the gate: the LLM still runs on the parent's own criteria (not blocked),
+    # the verdict passes, but certification is WITHHELD — not the certification-forging PASS+signed
+    # the empty/empty return would have produced.
+    runner = _CannedRunner(verdict="PASS")
+    rec = _Rec()
+    res = _ex.run_workflow(
+        _doc(),
+        {"ticket_id": "T-1"},
+        recorder=rec,
+        scripted_registry=dict(_ex.STEP_REGISTRY),
+        agent_runner=runner,
+    )
+    assert res.status == "succeeded"
+    assert runner.calls == 1, "a read error must NOT block the close (LLM judges own criteria)"
+    verdict = _terminal_verdict(rec)
+    assert verdict and verdict["verdict"] == "PASS"  # own criteria pass; a read error != block
+    assert verdict["certifiable"] is False, (
+        "a child-enumeration read error must WITHHOLD certification, not forge it (regression: "
+        "the old empty/empty return laundered the signature)"
+    )
+
+
 def test_reconcile_fail_without_findings_synthesizes_one(monkeypatch):
     runner = _CannedRunner(verdict="FAIL", findings=[])
     rec, _ = _run(runner, monkeypatch, children=[])
