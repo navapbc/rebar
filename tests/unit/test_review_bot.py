@@ -230,6 +230,48 @@ def test_adapter_scanner_MATCH_is_a_real_finding(monkeypatch, tmp_path):
     assert "BLOCK — finding" in out["message"]
 
 
+def test_adapter_renders_named_finding_for_detector_match_block(monkeypatch, tmp_path):
+    # Regression (bug f367): a fail-closed DET detector MATCH forces verdict=BLOCK via
+    # `apply_failclosed`; the adapter must render "found N blocking issue(s)" and NAME the match —
+    # never "found 0 blocking issue(s)" with no finding (which hid a real secret from the author).
+    # Drive the REAL apply_failclosed output (not a hand-built verdict) through the REAL adapter so
+    # the seam is exercised end-to-end: on the pre-fix code apply_failclosed leaves blocking=[]
+    # and this fails at the `verdict["blocking"]` assertion.
+    from rebar.llm.code_review import detectors
+
+    monkeypatch.setattr(
+        detectors,
+        "run_security_detectors",
+        lambda **kw: {
+            "high-critical-security": {
+                "abstained": [],
+                "matches": [
+                    {
+                        "detector_id": "rebar.builtin.security.python-eval-exec-injection",
+                        "location": {"file": "app.py"},
+                    }
+                ],
+            }
+        },
+    )
+    verdict = detectors.apply_failclosed(
+        {"verdict": "PASS", "blocking": [], "advisory": [], "coaching": [], "coverage": {}},
+        changed_files=["app.py"],
+        repo_root=None,
+    )
+    assert verdict["verdict"] == "BLOCK" and verdict["blocking"]  # the fix populated `blocking`
+    _patch_verdict(monkeypatch, verdict)
+
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
+    assert out["decision"] == "BLOCK" and out["coverage_gap"] is False
+    assert out["message"].startswith("[LLM-Review: BLOCK — finding]")
+    assert "found 1 blocking issue(s):" in out["message"]
+    assert "found 0 blocking issue(s)" not in out["message"]
+    # the criterion + matched file are named (an actionable, not empty, block)
+    assert "high-critical-security" in out["message"] and "app.py" in out["message"]
+    assert any(f["dimension"] == "high-critical-security" for f in out["findings"])
+
+
 def test_adapter_forces_gate_enabled(monkeypatch, tmp_path):
     calls = {}
     import rebar.llm.workflow.gate_dispatch as gd

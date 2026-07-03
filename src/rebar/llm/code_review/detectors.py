@@ -124,6 +124,37 @@ def apply_failclosed(
                     "blocking": blocking_enabled,
                 }
             )
+            # A forced-BLOCK must ALSO name the match in `verdict["blocking"]` — else the
+            # verdict reads BLOCK with an EMPTY blocking list, and the review-bot adapter
+            # renders "found 0 blocking issue(s)" with no named finding (and posts no robot
+            # comment), hiding a REAL leaked secret / High-Critical match from the author.
+            # Emit a kernel-shaped blocking finding (criteria/severity/finding/location, plus
+            # the deterministic decision/tier the LLM Pass-3 findings carry) so `_summarize` /
+            # `_translate_findings` consume it exactly like an LLM blocker. Only when the
+            # criterion actually blocks — an advisory-only detector stays in coverage alone.
+            if blocking_enabled:
+                files = sorted(
+                    {
+                        str(f)
+                        for m in bucket["matches"]
+                        if (f := (m.get("location") or {}).get("file"))
+                    }
+                )
+                verdict.setdefault("blocking", []).append(
+                    {
+                        "criteria": [crit],
+                        "severity": "critical",
+                        "decision": "block",
+                        "tier": "DET",
+                        "finding": (
+                            f"{crit}: a deterministic secrets/security detector matched "
+                            f"{len(bucket['matches'])} location(s) on changed file(s)"
+                            + (f": {', '.join(files)}" if files else "")
+                            + ". Remediate the match, or allowlist a confirmed false positive."
+                        ),
+                        "location": files[0] if files else None,
+                    }
+                )
         elif bucket["abstained"]:
             # fail-CLOSED criteria block on an abstain (coverage we could not establish);
             # fail-OPEN criteria record it as coverage only (never block on absence).
