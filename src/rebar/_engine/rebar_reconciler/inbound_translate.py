@@ -263,6 +263,25 @@ def _extract_name(val, default=""):
     return val or default
 
 
+# ``lazy_load`` centralizes the by-path sibling-loader idiom (rebar_reconciler/
+# _loader.py). Import it normally when package context exists, else bootstrap it
+# by file path — this module is itself exec'd standalone via
+# spec_from_file_location in tests.
+try:
+    from rebar_reconciler._loader import lazy_load
+except ImportError:  # standalone load without package context
+    _loader_key = "rebar_reconciler._loader"
+    if _loader_key not in sys.modules:
+        _loader_spec = importlib.util.spec_from_file_location(
+            _loader_key, Path(__file__).parent / "_loader.py"
+        )
+        assert _loader_spec is not None and _loader_spec.loader is not None
+        _loader_mod = importlib.util.module_from_spec(_loader_spec)
+        sys.modules[_loader_key] = _loader_mod
+        _loader_spec.loader.exec_module(_loader_mod)  # type: ignore[union-attr]
+    lazy_load = sys.modules[_loader_key].lazy_load
+
+
 _ADF_KEY_APPLIER = "rebar_reconciler.adf"
 _AdfModule_Applier = None
 
@@ -270,20 +289,9 @@ _AdfModule_Applier = None
 def _load_adf_module():
     """Lazy-load the sibling adf module (mirrors inbound_differ._load_adf)."""
     global _AdfModule_Applier
-    if _AdfModule_Applier is not None:
-        return _AdfModule_Applier
-    if _ADF_KEY_APPLIER in sys.modules:
-        _AdfModule_Applier = sys.modules[_ADF_KEY_APPLIER]
-        return _AdfModule_Applier
-    adf_path = Path(__file__).parent / "adf.py"
-    spec = importlib.util.spec_from_file_location(_ADF_KEY_APPLIER, adf_path)
-    if spec is None or spec.loader is None:
-        raise FileNotFoundError(f"adf.py not found at {adf_path}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[_ADF_KEY_APPLIER] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    _AdfModule_Applier = mod
-    return mod
+    if _AdfModule_Applier is None:
+        _AdfModule_Applier = lazy_load(_ADF_KEY_APPLIER, "adf.py")
+    return _AdfModule_Applier
 
 
 _TICKET_REDUCER_MODULE = None

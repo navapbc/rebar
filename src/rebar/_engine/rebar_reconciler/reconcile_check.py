@@ -19,19 +19,28 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+# ``lazy_load`` centralizes the by-path sibling-loader idiom (rebar_reconciler/
+# _loader.py). Import it normally when package context exists, else bootstrap it
+# by file path — this module is itself exec'd standalone via
+# spec_from_file_location in tests.
+try:
+    from rebar_reconciler._loader import lazy_load
+except ImportError:  # standalone load without package context
+    _loader_key = "rebar_reconciler._loader"
+    if _loader_key not in sys.modules:
+        _loader_spec = importlib.util.spec_from_file_location(
+            _loader_key, Path(__file__).parent / "_loader.py"
+        )
+        assert _loader_spec is not None and _loader_spec.loader is not None
+        _loader_mod = importlib.util.module_from_spec(_loader_spec)
+        sys.modules[_loader_key] = _loader_mod
+        _loader_spec.loader.exec_module(_loader_mod)  # type: ignore[union-attr]
+    lazy_load = sys.modules[_loader_key].lazy_load
+
 
 def _load_sibling(module_name: str, file_name: str) -> ModuleType:
     """Load a sibling module under a stable cache key without PYTHONPATH."""
-    sibling_path = Path(__file__).parent / file_name
-    cache_key = f"rebar_reconciler_{module_name}"
-    if cache_key in sys.modules:
-        return sys.modules[cache_key]
-    spec = importlib.util.spec_from_file_location(cache_key, sibling_path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[cache_key] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return lazy_load(f"rebar_reconciler_{module_name}", file_name)
 
 
 def _load_config() -> ModuleType:

@@ -25,26 +25,35 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+# ``lazy_load`` centralizes the by-path sibling-loader idiom (rebar_reconciler/
+# _loader.py). Import it normally when package context exists, else bootstrap it
+# by file path — this module is itself exec'd standalone via
+# spec_from_file_location in tests.
+try:
+    from rebar_reconciler._loader import lazy_load
+except ImportError:  # standalone load without package context
+    _loader_key = "rebar_reconciler._loader"
+    if _loader_key not in sys.modules:
+        _loader_spec = importlib.util.spec_from_file_location(
+            _loader_key, Path(__file__).parent / "_loader.py"
+        )
+        assert _loader_spec is not None and _loader_spec.loader is not None
+        _loader_mod = importlib.util.module_from_spec(_loader_spec)
+        sys.modules[_loader_key] = _loader_mod
+        _loader_spec.loader.exec_module(_loader_mod)  # type: ignore[union-attr]
+    lazy_load = sys.modules[_loader_key].lazy_load
+
 
 def _load(name: str, relpath: str):
     """Load a sibling module by relative file path, registering it in sys.modules.
 
     Returns the cached module when ``name`` is already in ``sys.modules``;
     this allows test fixtures to pre-register patched modules and have
-    ``run_differs`` reuse them rather than loading fresh copies. Mirrors the
-    identical loader in reconcile.py (the sibling-loading convention shared
-    across this package).
+    ``run_differs`` reuse them rather than loading fresh copies. Delegates to the
+    shared ``lazy_load`` helper (the package-wide by-path loader, mirrored by
+    reconcile.py).
     """
-    if name in sys.modules:
-        return sys.modules[name]
-    path = Path(__file__).parent / relpath
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None:
-        raise ImportError(f"cannot create module spec for {name} at {path}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return lazy_load(name, relpath)
 
 
 def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) -> None:

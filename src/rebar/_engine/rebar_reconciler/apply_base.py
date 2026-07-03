@@ -21,6 +21,25 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+# ``lazy_load`` centralizes the by-path sibling-loader idiom (rebar_reconciler/
+# _loader.py). Import it normally when package context exists, else bootstrap it
+# by file path — this module is itself exec'd standalone via
+# spec_from_file_location in tests.
+try:
+    from rebar_reconciler._loader import lazy_load
+except ImportError:  # standalone load without package context
+    _loader_key = "rebar_reconciler._loader"
+    if _loader_key not in sys.modules:
+        _loader_spec = importlib.util.spec_from_file_location(
+            _loader_key, Path(__file__).parent / "_loader.py"
+        )
+        assert _loader_spec is not None and _loader_spec.loader is not None
+        _loader_mod = importlib.util.module_from_spec(_loader_spec)
+        sys.modules[_loader_key] = _loader_mod
+        _loader_spec.loader.exec_module(_loader_mod)  # type: ignore[union-attr]
+    lazy_load = sys.modules[_loader_key].lazy_load
+
+
 _MutationModule = None  # late-loaded mutation module; written by _load_mutation_module()
 _ErrorsModule = None  # late-loaded _errors module; written by _load_errors_module()
 
@@ -53,20 +72,9 @@ def _load_mutation_module():
     crossed boundaries and routed mutations to the wrong leaf.
     """
     global _MutationModule
-    if _MutationModule is not None:
-        return _MutationModule
-    if _MUTATION_KEY in sys.modules:
-        _MutationModule = sys.modules[_MUTATION_KEY]
-        return _MutationModule
-    mut_path = Path(__file__).parent / "mutation.py"
-    spec = importlib.util.spec_from_file_location(_MUTATION_KEY, mut_path)
-    if spec is None:
-        raise FileNotFoundError(f"mutation.py not found at {mut_path}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[_MUTATION_KEY] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    _MutationModule = mod
-    return mod
+    if _MutationModule is None:
+        _MutationModule = lazy_load(_MUTATION_KEY, "mutation.py")
+    return _MutationModule
 
 
 def _load_errors_module():
@@ -79,21 +87,9 @@ def _load_errors_module():
     the class identity from rebar_id_audit's guard — see tangly-abbey-smelt.)
     """
     global _ErrorsModule
-    if _ErrorsModule is not None:
-        return _ErrorsModule
-    key = "rebar_reconciler_errors"
-    if key in sys.modules:
-        _ErrorsModule = sys.modules[key]
-        return _ErrorsModule
-    err_path = Path(__file__).parent / "_errors.py"
-    spec = importlib.util.spec_from_file_location(key, err_path)
-    if spec is None:
-        raise FileNotFoundError(f"_errors.py not found at {err_path}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[key] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    _ErrorsModule = mod
-    return mod
+    if _ErrorsModule is None:
+        _ErrorsModule = lazy_load("rebar_reconciler_errors", "_errors.py")
+    return _ErrorsModule
 
 
 # Re-export error classes so callers can import them from apply_base / applier.

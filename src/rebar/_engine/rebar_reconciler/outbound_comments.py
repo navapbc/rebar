@@ -42,6 +42,25 @@ _COMMENT_FIELD_KEY = "comment"
 # loop-breaker pattern.
 RECONCILER_MARKER = "<!-- rebar:reconciler-echo -->"
 
+# ``lazy_load`` centralizes the by-path sibling-loader idiom (rebar_reconciler/
+# _loader.py). Import it normally when package context exists, else bootstrap it
+# by file path — this module is itself exec'd standalone via
+# spec_from_file_location in tests.
+try:
+    from rebar_reconciler._loader import lazy_load
+except ImportError:  # standalone load without package context
+    _loader_key = "rebar_reconciler._loader"
+    if _loader_key not in sys.modules:
+        _loader_spec = importlib.util.spec_from_file_location(
+            _loader_key, Path(__file__).parent / "_loader.py"
+        )
+        assert _loader_spec is not None and _loader_spec.loader is not None
+        _loader_mod = importlib.util.module_from_spec(_loader_spec)
+        sys.modules[_loader_key] = _loader_mod
+        _loader_spec.loader.exec_module(_loader_mod)  # type: ignore[union-attr]
+    lazy_load = sys.modules[_loader_key].lazy_load
+
+
 # Lazy-loader singletons for the sibling adf / comment_limits modules. Kept
 # module-local (each reconciler module owns its own copy) because the differ may
 # be imported via ``importlib.util.spec_from_file_location`` in tests, which does
@@ -61,20 +80,9 @@ def _load_adf():
     package module (production) or by file path (tests).
     """
     global _AdfModule
-    if _AdfModule is not None:
-        return _AdfModule
-    if _ADF_KEY in sys.modules:
-        _AdfModule = sys.modules[_ADF_KEY]
-        return _AdfModule
-    adf_path = Path(__file__).parent / "adf.py"
-    spec = importlib.util.spec_from_file_location(_ADF_KEY, adf_path)
-    if spec is None or spec.loader is None:
-        raise FileNotFoundError(f"adf.py not found at {adf_path}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[_ADF_KEY] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    _AdfModule = mod
-    return mod
+    if _AdfModule is None:
+        _AdfModule = lazy_load(_ADF_KEY, "adf.py")
+    return _AdfModule
 
 
 def _load_comment_limits():
@@ -88,20 +96,9 @@ def _load_comment_limits():
     package context.
     """
     global _CommentLimitsModule
-    if _CommentLimitsModule is not None:
-        return _CommentLimitsModule
-    if _COMMENT_LIMITS_KEY in sys.modules:
-        _CommentLimitsModule = sys.modules[_COMMENT_LIMITS_KEY]
-        return _CommentLimitsModule
-    cl_path = Path(__file__).parent / "comment_limits.py"
-    spec = importlib.util.spec_from_file_location(_COMMENT_LIMITS_KEY, cl_path)
-    if spec is None or spec.loader is None:
-        raise FileNotFoundError(f"comment_limits.py not found at {cl_path}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[_COMMENT_LIMITS_KEY] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    _CommentLimitsModule = mod
-    return mod
+    if _CommentLimitsModule is None:
+        _CommentLimitsModule = lazy_load(_COMMENT_LIMITS_KEY, "comment_limits.py")
+    return _CommentLimitsModule
 
 
 def _map_comments_for_create(ticket: dict[str, Any]) -> list[dict[str, Any]]:

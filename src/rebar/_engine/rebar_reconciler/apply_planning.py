@@ -18,13 +18,12 @@ Imports downward only (inbound_translate for the local-id form); never applier.
 from __future__ import annotations
 
 import contextlib
-import importlib.util
 import json
 import os
-import sys
 import tempfile
 from pathlib import Path
 
+from rebar_reconciler._loader import lazy_load
 from rebar_reconciler.inbound_translate import _jira_key_to_local_id
 
 
@@ -35,32 +34,12 @@ def _load_mode_module():
     is shared with the entry-point loader; tests that pre-seed sys.modules
     under that key see their stub here too.
     """
-    key = "rebar_reconciler.mode"
-    if key in sys.modules:
-        return sys.modules[key]
-    mode_path = Path(__file__).parent / "mode.py"
-    spec = importlib.util.spec_from_file_location(key, mode_path)
-    if spec is None or spec.loader is None:
-        raise FileNotFoundError(f"mode.py not found at {mode_path}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[key] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return lazy_load("rebar_reconciler.mode", "mode.py")
 
 
 def _load_manifest_renderer():
     """Lazy-load manifest_renderer.py."""
-    key = "rebar_reconciler.manifest_renderer"
-    if key in sys.modules:
-        return sys.modules[key]
-    path = Path(__file__).parent / "manifest_renderer.py"
-    spec = importlib.util.spec_from_file_location(key, path)
-    if spec is None or spec.loader is None:
-        raise FileNotFoundError(f"manifest_renderer.py not found at {path}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[key] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return lazy_load("rebar_reconciler.manifest_renderer", "manifest_renderer.py")
 
 
 def _mode_sort_key(m) -> tuple[str, str, str]:

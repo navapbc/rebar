@@ -21,14 +21,14 @@ and does not import the concrete class.
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import sys
 import urllib.error
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
+
+from rebar_reconciler._loader import lazy_load
 
 # The comment-diff cluster lives in outbound_comments.py (split for module size;
 # the comment seam is self-contained and imports one-way). _diff_comments +
@@ -202,20 +202,9 @@ def _load_config():
     ticket types — e.g. ``session_log`` — that are never synced to Jira).
     """
     global _ConfigModule
-    if _ConfigModule is not None:
-        return _ConfigModule
-    if _CONFIG_KEY in sys.modules:
-        _ConfigModule = sys.modules[_CONFIG_KEY]
-        return _ConfigModule
-    cfg_path = Path(__file__).parent / "config.py"
-    spec = importlib.util.spec_from_file_location(_CONFIG_KEY, cfg_path)
-    if spec is None or spec.loader is None:
-        raise FileNotFoundError(f"config.py not found at {cfg_path}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[_CONFIG_KEY] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    _ConfigModule = mod
-    return mod
+    if _ConfigModule is None:
+        _ConfigModule = lazy_load(_CONFIG_KEY, "config.py")
+    return _ConfigModule
 
 
 # ---------------------------------------------------------------------------

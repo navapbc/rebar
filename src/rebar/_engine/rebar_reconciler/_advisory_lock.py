@@ -32,20 +32,28 @@ logger = logging.getLogger(__name__)
 # Lazy import of _concurrency to respect the importlib.util loading convention
 # ---------------------------------------------------------------------------
 
-_CONCURRENCY_PATH = Path(__file__).parent / "_concurrency.py"
+# ``lazy_load`` centralizes the by-path sibling-loader idiom (rebar_reconciler/
+# _loader.py). Import it normally when package context exists, else bootstrap it
+# by file path — this module is itself exec'd standalone via
+# spec_from_file_location in tests.
+try:
+    from rebar_reconciler._loader import lazy_load
+except ImportError:  # standalone load without package context
+    _loader_key = "rebar_reconciler._loader"
+    if _loader_key not in sys.modules:
+        _loader_spec = importlib.util.spec_from_file_location(
+            _loader_key, Path(__file__).parent / "_loader.py"
+        )
+        assert _loader_spec is not None and _loader_spec.loader is not None
+        _loader_mod = importlib.util.module_from_spec(_loader_spec)
+        sys.modules[_loader_key] = _loader_mod
+        _loader_spec.loader.exec_module(_loader_mod)  # type: ignore[union-attr]
+    lazy_load = sys.modules[_loader_key].lazy_load
 
 
 def _load_concurrency():
     """Load _concurrency module, caching in sys.modules."""
-    key = "rebar_reconciler__concurrency_advisory"
-    if key in sys.modules:
-        return sys.modules[key]
-    spec = importlib.util.spec_from_file_location(key, _CONCURRENCY_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[key] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return lazy_load("rebar_reconciler__concurrency_advisory", "_concurrency.py")
 
 
 def _rebase_retry(repo_root: Path, write_fn, **kwargs):
@@ -384,16 +392,7 @@ def check_phase_gate(target_mode, repo_root: Path) -> bool:
     # share a single Mode class object. Loading under a private key produced
     # two distinct Mode class identities — isinstance checks across module
     # boundaries silently mis-routed.
-    mode_key = "rebar_reconciler.mode"
-    if mode_key in sys.modules:
-        mode_mod = sys.modules[mode_key]
-    else:
-        mode_path = Path(__file__).parent / "mode.py"
-        spec = importlib.util.spec_from_file_location(mode_key, mode_path)
-        assert spec is not None and spec.loader is not None
-        mode_mod = importlib.util.module_from_spec(spec)
-        sys.modules[mode_key] = mode_mod
-        spec.loader.exec_module(mode_mod)  # type: ignore[union-attr]
+    mode_mod = lazy_load("rebar_reconciler.mode", "mode.py")
 
     try:
         gated_mode = mode_mod.Mode.from_str(gated_mode_str)
