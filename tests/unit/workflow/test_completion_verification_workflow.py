@@ -165,15 +165,19 @@ def test_precheck_short_circuits_without_calling_the_llm(monkeypatch):
     assert verdict["findings"], "a deterministic FAIL must itemize the failing child"
 
 
-def test_uncertified_child_also_short_circuits(monkeypatch):
-    runner = _CannedRunner()
+def test_uncertified_child_does_not_block_but_withholds_certification(monkeypatch):
+    # A closed-but-UNCERTIFIED (force-closed) direct child does NOT short-circuit: the LLM still
+    # runs on the parent's OWN criteria, and the verdict is marked certifiable=False — the parent
+    # may CLOSE but not CERTIFY (certification propagates; an unattested descendant withholds it).
+    runner = _CannedRunner(verdict="PASS")
     closed_but_unsigned = [{"ticket_id": "C-2", "title": "child", "status": "closed"}]
     rec, _ = _run(
         runner, monkeypatch, ticket_type="epic", children=closed_but_unsigned, child_sig="absent"
     )
-    assert runner.calls == 0
+    assert runner.calls == 1, "the LLM runs on the parent's own criteria (uncertified != block)"
     verdict = _terminal_verdict(rec)
-    assert verdict and verdict["verdict"] == "FAIL"
+    assert verdict and verdict["verdict"] == "PASS"  # parent's own criteria passed
+    assert verdict["certifiable"] is False, "an uncertified descendant withholds certification"
 
 
 def test_reconcile_fail_without_findings_synthesizes_one(monkeypatch):
@@ -241,5 +245,9 @@ def test_reconcile_matches_completion_py_tail(monkeypatch):
     }
     _findings.resolve_citations(expected, cfg.repo_path)
     _reconcile(expected)
+    # The workflow reconcile also carries the precheck's certification decision onto the verdict
+    # (default true — this run is childless, so certifiable). completion.py's shared tail helper
+    # (_reconcile) does the FAIL<->findings normalization; certifiable is added by the reconcile op.
+    expected["certifiable"] = True
     expected = _findings.validate_structured(expected, "completion_verdict")
     assert got == expected, "workflow reconcile diverged from completion.py's deterministic tail"

@@ -176,17 +176,20 @@ def test_child_closure_trust(rebar_repo: Path) -> None:
     assert r["verdict"] == "FAIL"
     assert any("is closed" in f["criterion"] for f in r["findings"])
 
-    # 2. child CLOSED but UNSIGNED -> parent still FAIL (closure not certified)
+    # 2. child CLOSED but UNSIGNED (force-closed) -> parent may CLOSE (own criteria PASS via the
+    #    FakeRunner) but is NOT certifiable: an uncertified descendant withholds the parent's
+    #    signature (certification propagates). Closure is not blocked; certification is.
     rebar.transition(child, "open", "closed", repo_root=str(rebar_repo))
     r = verdict()
-    assert r["verdict"] == "FAIL"
-    assert any("signed/validated closure" in f["criterion"] for f in r["findings"])
+    assert r["verdict"] == "PASS"  # the parent's own criteria pass; uncertified child != block
+    assert r.get("certifiable") is False, "an uncertified descendant withholds certification"
 
-    # 3. child closed AND signed -> child-check clears; parent PASS (own criteria PASS)
+    # 3. child closed AND signed -> child-check clears; parent PASS AND certifiable (can certify)
     rebar.sign_manifest(child, ["completion-verifier: PASS"], repo_root=str(rebar_repo))
     assert rebar.verify_signature(child, repo_root=str(rebar_repo))["verdict"] == "certified"
     r = verdict()
     assert r["verdict"] == "PASS", r["findings"]
+    assert r.get("certifiable") is not False, "all children certified -> parent is certifiable"
 
 
 def test_child_closure_gate_short_circuits_before_llm(rebar_repo: Path) -> None:

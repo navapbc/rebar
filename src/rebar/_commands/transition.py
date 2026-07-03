@@ -276,6 +276,13 @@ def _completion_precheck(
     # yields a closed-without-signature ticket (the documented "not attested" signal).
     if result.get("source") == "local":
         return None
+    # A closed-but-uncertified (force-closed) descendant WITHHOLDS certification: the parent's own
+    # criteria PASSED (it may close), but certification propagates — an unattested descendant leaves
+    # the subtree unattested, so we close WITHOUT signing (the same unsigned-close path as
+    # --force-close). The closed-without-signature ticket is the durable "not fully certified"
+    # signal; re-close the uncertified descendant through the gate to certify, then re-close here.
+    if result.get("certifiable") is False:
+        return None
     return _verdict_manifest(result, ticket_id, repo_root)
 
 

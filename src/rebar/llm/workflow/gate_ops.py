@@ -42,7 +42,10 @@ _OUTPUT_SCHEMA = "completion_verdict"
     ),
 )
 def completion_precheck(ctx: StepContext) -> dict[str, Any]:
-    """Run the child-closure gate; short-circuit to a deterministic FAIL verdict if it trips."""
+    """Run the child-closure/certification gate. An UNCLOSED direct child short-circuits to a
+    deterministic FAIL verdict (no LLM call — closure BLOCKED). A closed-but-UNCERTIFIED
+    (force-closed) direct child does NOT block: it emits ``certifiable=False`` and the LLM still
+    runs on the parent's OWN criteria (the parent may close but not certify)."""
     import rebar
     from rebar.llm.completion import _child_closure_findings, _deterministic_child_failure
     from rebar.llm.config import resolve_gate_config
@@ -55,17 +58,24 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
         )
     root = rebar.show_ticket(str(tid), repo_root=ctx.repo_root)
     canonical = root.get("ticket_id", str(tid))
-    child_findings = _child_closure_findings(canonical, ctx.repo_root)
-    if child_findings:
+    blocking, uncertified = _child_closure_findings(canonical, ctx.repo_root)
+    if blocking:
+        # A direct child is NOT closed → the parent is incomplete: fail fast, NO LLM call, BLOCK.
         cfg = resolve_gate_config(ctx.repo_root)  # caller-resolved run config (veiny-trout-brink)
-        verdict = _deterministic_child_failure(canonical, child_findings, cfg)
+        verdict = _deterministic_child_failure(canonical, blocking, cfg)
         return {
             "run_verify": False,
             "precheck_failed": True,
             "canonical_id": canonical,
             "verdict": verdict,
             "context": "",  # short-circuit: no verify runs, so no context is needed
+            "certifiable": False,
         }
+    # No unclosed child → run the LLM on the parent's OWN criteria. Certification is WITHHELD iff a
+    # direct child is closed-but-UNCERTIFIED (force-closed): the parent MAY close (subject to its
+    # own criteria) but cannot be certified — certification propagates, so an unattested descendant
+    # withholds the parent's signature. This is a close-vs-certify distinction, NOT a block.
+    certifiable = not uncertified
     # Assemble the verifier's fenced ticket context (the prompt-injection delimiter). HONOR the
     # caller's `graph`: the close gate (_commands.transition) passes graph=False so an epic close
     # verifies its OWN completion criteria, not its whole descendant subtree — children are trusted
@@ -86,6 +96,7 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
         "canonical_id": canonical,
         "verdict": None,
         "context": fenced,
+        "certifiable": certifiable,
     }
 
 
@@ -133,6 +144,16 @@ def completion_reconcile(ctx: StepContext) -> dict[str, Any]:
     ]
     findings.resolve_citations(result, cfg.repo_path)
     _reconcile(result)
+    # Carry the precheck's certification decision onto the verdict. `certifiable=False` (a
+    # closed-but-uncertified descendant) does NOT change the PASS/FAIL verdict — the parent's own
+    # criteria stand — but the close gate reads it to close WITHOUT signing (certification
+    # propagates). Defaults True (no uncertified descendant, or a direct workflow invocation).
+    result["certifiable"] = bool(ctx.inputs.get("certifiable", True))
+    if not result["certifiable"] and "summary" not in result:
+        result["summary"] = (
+            "Closed without certification: a force-closed (uncertified) descendant leaves the "
+            "subtree unattested; re-close it through the gate to certify."
+        )
     return findings.validate_structured(result, _OUTPUT_SCHEMA)
 
 

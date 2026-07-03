@@ -60,6 +60,10 @@ steps:
         runner: ${{ steps.verify.outputs.runner }}
         model: ${{ steps.verify.outputs.model }}
         trace_id: ${{ steps.verify.outputs.trace_id }}
+        # Certification decision from the precheck: false iff a closed-but-uncertified descendant
+        # withholds the parent's signature (the parent may close but not certify). Carried onto
+        # the verdict; the close gate closes WITHOUT signing when false.
+        certifiable: ${{ steps.precheck.outputs.certifiable }}
     else:
     - id: passthrough
       uses: completion_passthrough

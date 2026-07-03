@@ -11,7 +11,8 @@
     "summary": { "type": ["string", "null"], "description": "Optional agent summary." },
     "runner": { "type": ["string", "null"], "description": "Runner id from the agent run." },
     "model": { "type": ["string", "null"], "description": "Model id from the agent run." },
-    "trace_id": { "type": ["string", "null"], "description": "Trace id from the agent run." }
+    "trace_id": { "type": ["string", "null"], "description": "Trace id from the agent run." },
+    "certifiable": { "type": "boolean", "description": "From the precheck: false iff a closed-but-uncertified descendant withholds the parent's certification (the parent may close but not certify). Carried onto the verdict; defaults true." }
   },
   "required": ["ticket_id", "raw_verdict", "raw_findings"],
   "additionalProperties": false

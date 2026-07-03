@@ -34,6 +34,7 @@
       "items": { "type": "string" },
       "description": "Reviewer prompt ids that ran (['completion-verifier'])."
     },
+    "certifiable": { "type": "boolean", "description": "Whether the close may be CERTIFIED (signed). False iff a direct child is closed-but-uncertified (force-closed) — the parent may close but not certify, because certification propagates: an unattested descendant leaves the subtree unattested. Absent/true on the common path. Does not affect the PASS/FAIL verdict (the parent's own criteria stand); the close gate reads it to close without signing." },
     "runner": { "type": "string", "description": "Execution backend: 'pydantic_ai', 'fake'." },
     "model": { "type": ["string", "null"], "description": "Model id used (null for non-LLM/fake runners)." },
     "trace_id": { "type": ["string", "null"], "description": "Langfuse trace id when tracing is enabled; null otherwise." }

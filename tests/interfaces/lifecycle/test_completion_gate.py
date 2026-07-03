@@ -67,6 +67,18 @@ def PASS(ticket_id, **kw):
     return {"verdict": "PASS", "findings": [], "runner": "fake", "model": "m"}
 
 
+def PASS_uncertifiable(ticket_id, **kw):
+    # The parent's OWN criteria PASS, but a closed-but-uncertified (force-closed) descendant
+    # withholds certification: certifiable=False. The parent may close but not certify.
+    return {
+        "verdict": "PASS",
+        "findings": [],
+        "runner": "fake",
+        "model": "m",
+        "certifiable": False,
+    }
+
+
 def FAIL(ticket_id, **kw):
     return {
         "verdict": "FAIL",
@@ -106,6 +118,22 @@ def test_gate_pass_closes_and_signs_after_close(rebar_repo: Path, monkeypatch) -
     assert v["verdict"] == "certified", v
     # the SIGNATURE event is written (a SIGNATURE event exists on the ticket)
     assert "completion-verifier: PASS" in v["manifest"]
+
+
+def test_gate_pass_uncertifiable_closes_without_signature(rebar_repo: Path, monkeypatch) -> None:
+    """A PASS verdict with ``certifiable=False`` (an uncertified/force-closed descendant): the
+    parent's OWN criteria passed so it CLOSES — NOT blocked, no ``--force-close`` needed — but the
+    close is NOT certified (certification propagates: an unattested descendant leaves the subtree
+    unattested). No completion signature is written; the closed-without-signature ticket is the
+    durable 'not fully certified' signal."""
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", PASS_uncertifiable)
+    tid = _make(rebar_repo)
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "closed"  # CLOSED (not blocked)
+    v = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    assert v.get("verdict") != "certified", v  # NOT certified — no completion signature written
 
 
 def test_gate_pass_signs_strictly_after_close(rebar_repo: Path, monkeypatch) -> None:

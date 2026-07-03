@@ -53,24 +53,29 @@ _VERIFIER_DEFAULT_MODEL = VERIFIER_DEFAULT_MODEL
 _VERIFY_MIN_STEPS = 480
 
 
-def _child_closure_findings(ticket_id: str, repo_root) -> list[dict]:
-    """Deterministic **child-closure-trust** check (the "epic-level verdict trust" rule).
+def _child_closure_findings(ticket_id: str, repo_root) -> tuple[list[dict], list[dict]]:
+    """Deterministic child-closure / certification gate — the "epic-level verdict trust" rule.
 
-    A parent (epic/story) is not complete unless every **direct** child is CLOSED **with a
-    signed/validated closure** — i.e. carries a certified completion signature. This is checked
-    deterministically (a graph + signature invariant, not an LLM judgment): we DO NOT recurse
-    into grandchildren (each child owns its own subtree), and we DO NOT re-verify a child's own
-    completion criteria — the child's **certified signature IS** the trusted attestation that its
-    criteria were validated when it closed. Returns one completion finding per direct child that
-    is not closed, or closed without a certified signature. Childless tickets (most tasks/bugs)
-    yield ``[]`` (``list_tickets(parent=…)`` is empty), so this is a natural no-op for them."""
+    Returns ``(blocking, uncertified)`` for a parent's **direct** children (childless tickets yield
+    ``([], [])`` — a natural no-op for most tasks/bugs). Checked deterministically (a graph +
+    signature invariant, not an LLM judgment): we DO NOT recurse into grandchildren (each child
+    owns its own subtree), and we DO NOT re-verify a child's own completion criteria — a child's
+    **certified signature IS** the trusted attestation that its criteria were validated at close.
+
+    * **blocking** — a direct child that is NOT closed. The parent is INCOMPLETE (delegated work
+      unfinished): the close gate fails fast WITHOUT an LLM call and closure is BLOCKED.
+    * **uncertified** — a direct child that is closed but WITHOUT a certified/valid closure (a
+      force-closed / reopened / drift-stale child). Its work is done, but its subtree is
+      unattested: the parent may CLOSE (subject to its OWN criteria) but cannot be CERTIFIED —
+      certification propagates, so an unattested descendant WITHHOLDS the parent's signature."""
     import rebar
 
     try:
         children = rebar.list_tickets(parent=ticket_id, repo_root=repo_root)
     except Exception:  # noqa: BLE001 — no children on a list failure (natural no-op for childless tickets)
-        return []
-    out: list[dict] = []
+        return [], []
+    blocking: list[dict] = []
+    uncertified: list[dict] = []
     for c in children:
         cid = c.get("ticket_id")
         if cid is None:
@@ -78,7 +83,7 @@ def _child_closure_findings(ticket_id: str, repo_root) -> list[dict]:
         title = (c.get("title") or "")[:50]
         status = c.get("status")
         if status != "closed":
-            out.append(
+            blocking.append(
                 {
                     "criterion": f"direct child {cid} is closed",
                     "severity": "high",
@@ -106,22 +111,23 @@ def _child_closure_findings(ticket_id: str, repo_root) -> list[dict]:
         except Exception as exc:  # noqa: BLE001 — never let a signature read crash the verification: recorded in-band
             valid, detail = False, f"error: {exc}"
         if not valid:
-            out.append(
+            uncertified.append(
                 {
-                    "criterion": f"direct child {cid} has a signed/validated closure",
+                    "criterion": f"direct child {cid} has a certified closure",
                     "severity": "high",
                     "dimension": "completion",
                     "detail": (
                         f"child {cid} ('{title}') is closed but its completion closure is not "
-                        f"valid ({detail}). Re-close it through the gate so it carries a "
-                        "validated completion-verifier attestation."
+                        f"certified/valid ({detail}) — its subtree is unattested, so the parent "
+                        "closes WITHOUT certification. Re-close the child through the gate to "
+                        "certify (and re-close the parent) if a signed closure is required."
                     ),
                     "citations": [
                         {"kind": "source", "description": f"completion-verifier({cid}): {detail}"}
                     ],
                 }
             )
-    return out
+    return blocking, uncertified
 
 
 def _reconcile(result: dict) -> None:
@@ -155,13 +161,14 @@ def _reconcile(result: dict) -> None:
 
 
 def _deterministic_child_failure(ticket_id: str, child_findings: list[dict], cfg) -> dict:
-    """Build a FAIL ``completion_verdict`` from the deterministic child-closure findings
-    WITHOUT invoking the LLM evaluator.
+    """Build a FAIL ``completion_verdict`` from the deterministic BLOCKING child findings
+    (direct children that are not closed) WITHOUT invoking the LLM evaluator.
 
-    Used by the child-closure gate: a parent with a child that is not closed+signed is
-    incomplete by a graph+signature invariant, so there is nothing for the LLM to judge —
-    we return the deterministic failure directly (no billable call). Shaped like a normal
-    verdict (target/reviewers/runner) so the close gate and callers treat it uniformly;
+    Used by the child-closure gate: a parent with an UNCLOSED direct child is incomplete by a
+    graph invariant, so there is nothing for the LLM to judge — we return the deterministic
+    failure directly (no billable call). (An uncertified-but-closed child does NOT come here — it
+    withholds certification, not closure; the LLM still runs on the parent's own criteria.) Shaped
+    like a normal verdict (target/reviewers/runner) so callers treat it uniformly;
     ``runner='deterministic'`` records that no model ran."""
     result = {
         "verdict": "FAIL",
@@ -169,8 +176,8 @@ def _deterministic_child_failure(ticket_id: str, child_findings: list[dict], cfg
             findings.normalize_finding(f, reviewer_id=_REVIEWER_ID) for f in child_findings
         ],
         "summary": (
-            f"{len(child_findings)} direct child ticket(s) are not closed with a certified "
-            "completion signature — the parent cannot be complete until they are."
+            f"{len(child_findings)} direct child ticket(s) are not closed — the parent cannot be "
+            "complete until they are."
         ),
         "target": {"kind": "ticket", "ticket_ids": [ticket_id]},
         "reviewers": [_REVIEWER_ID],
