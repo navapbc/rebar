@@ -14,7 +14,9 @@ name: optionality
 
 on:
   push:
-    branches: ["**"]  # run on every branch, not just main (pre-PR CI feedback)
+    # every branch EXCEPT the S3-replicated feature/** (redundant mirror CI; casts no
+    # Verified vote — gerrit-verify is the sole Verified source; see fern-belief-gap).
+    branches-ignore: ["feature/**"]
   pull_request: {}
   workflow_dispatch: {}
 

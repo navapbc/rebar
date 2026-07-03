@@ -17,7 +17,9 @@ name: prompt-eval
 
 on:
   push:
-    branches: ["**"]  # run the offline tier on every branch (pre-PR feedback)
+    # every branch EXCEPT the S3-replicated feature/** (redundant mirror CI; casts no
+    # Verified vote — gerrit-verify is the sole Verified source; see fern-belief-gap).
+    branches-ignore: ["feature/**"]
   pull_request: {}
   workflow_dispatch: {}
   schedule:
