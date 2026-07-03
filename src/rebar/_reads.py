@@ -1,19 +1,19 @@
 """Library/MCP facade over the single-source read implementation (story 23d2-e0f3).
 
-There is now ONE read implementation — ``ticket_reads`` in the engine package
-(``src/rebar/_engine/ticket_reads.py``) — shared by the CLI dispatcher (via
-``ticket-reads.py``) and by this module (library + MCP). This file is a thin
-facade: it resolves the tracker dir, applies the uniform read-freshness policy,
-calls the shared ``ticket_reads.*_state`` helpers, and maps their ``ReadError``
-onto ``RebarError`` so the library's exit-1 contract is unchanged.
+There is now ONE read implementation — the ``rebar._engine_support.reads``
+subpackage (imported below as ``ticket_reads``) — shared by the CLI dispatcher
+and by this module (library + MCP). This file is a thin facade: it resolves the
+tracker dir, applies the uniform read-freshness policy, calls the shared
+``reads.*_state`` helpers, and maps their ``ReadError`` onto ``RebarError`` so the
+library's exit-1 contract is unchanged.
 
 Read-freshness (uniform across CLI / library / MCP): before each read we run a
 best-effort, throttled (<=1/min) ``git fetch origin tickets`` + reconverge via
-the shared ``ticket-sync.sh`` helper — so MCP (the primary agent surface) is no
-longer the stalest interface. Opt out with ``REBAR_SYNC_PULL=off`` (deprecated alias
-``REBAR_NO_SYNC=1``; the CLI also accepts ``--no-pull`` / deprecated ``--no-sync``).
-Reuses the SAME throttle marker the dispatcher uses, so
-CLI and in-process reads never double-fetch.
+the shared in-process freshness helper (``reads.ensure_fresh``) — so MCP (the
+primary agent surface) is no longer the stalest interface. Opt out with
+``REBAR_SYNC_PULL=off`` (deprecated alias ``REBAR_NO_SYNC=1``; the CLI also accepts
+``--no-pull`` / deprecated ``--no-sync``). Reuses the SAME throttle marker the
+dispatcher uses, so CLI and in-process reads never double-fetch.
 """
 
 from __future__ import annotations

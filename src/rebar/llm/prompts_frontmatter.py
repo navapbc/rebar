@@ -81,11 +81,15 @@ class PromptVersionError(PromptError):
 def parse_front_matter(text: str) -> tuple[dict, str]:
     """Split an optional YAML front-matter block off a prompt file → ``(meta, body)``.
 
-    A prompt may begin with ``---\\n<yaml>\\n---\\n``; declared keys are
-    ``variables`` (the vars the template uses), ``required`` (subset that MUST be
-    supplied), and ``variant_of`` (a parent prompt id for overlay chaining). No
-    front-matter → ``({}, text)`` (so existing front-matter-less prompts are
-    unchanged).
+    A prompt may begin with ``---\\n<yaml>\\n---\\n``; the canonical closed key set
+    is ``FRONT_MATTER_KEYS`` (``schema_version``, ``title``, ``description``,
+    ``inputs``, ``outputs``, ``execution_mode``, ``category``, ``model``, ``tags``,
+    ``dimension``, ``applies_to``, ``file_impact``, ``langfuse_prompt``,
+    ``default``). Unknown keys are WARN+PRESERVEd, not dropped — this is how the
+    legacy overlay keys ``variables``/``required``/``variant_of`` (still consumed by
+    the variant machinery in ``prompts.py``) survive without being in the closed
+    set. No front-matter → ``({}, text)`` (so existing front-matter-less prompts
+    are unchanged).
 
     Line endings are normalized first: a leading UTF-8 BOM is stripped and
     CRLF/CR are folded to LF, so a Windows checkout (or ``core.autocrlf``) cannot

@@ -58,8 +58,8 @@ when it mixes deterministic work with LLM calls, benefits from being visually
 reviewable/editable, or is a **gate** whose shape should be auditable and replayable.
 Reach for a **bespoke Python op** (in `rebar.llm`) only for logic that is not a
 step pipeline (tight library calls, one-shot helpers). The engine is the default
-substrate for LLM functionality; the plan-review and completion gates both moved onto
-it precisely so the review logic lives in one place.
+substrate for LLM functionality; the plan-review, completion, and code-review gates all
+moved onto it precisely so the review logic lives in one place.
 
 ### The YAML DSL (v3)
 
@@ -78,8 +78,8 @@ A workflow is `schema_version`, `name`/`description`, typed `inputs`, and a list
   referenced).
 
 Values flow via `${{ inputs.x }}` / `${{ steps.<id>.outputs.<k> }}`. The canonical
-skeleton lives at `src/rebar/llm/workflow/examples/review_skeleton.yaml`; the two real
-gates are `src/rebar/llm/workflow/gates/{plan-review,completion-verification}.yaml`.
+skeleton lives at `src/rebar/llm/workflow/examples/review_skeleton.yaml`; the three real
+gates are `src/rebar/llm/workflow/gates/{plan-review,completion-verification,code-review}.yaml`.
 
 ```yaml
 schema_version: "3"

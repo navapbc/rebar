@@ -909,12 +909,12 @@ def _run_differs(ctx: _PassContext) -> None:
     # carry a schema_drift kind. report_schema_drift surfaces each drift via
     # stderr WARN so the signal is not swallowed.
     #
-    # CONTRACT NOTE: applier.inbound_repair_property emits follow-ons with
-    # kind="schema_drift_signal" (see applier.py:1142), but this loop matches
-    # kind=="schema_drift". The naming mismatch means follow-ons produced
-    # from the in-pass repair_property failure path are NOT picked up here.
-    # The current consumers of this filter are the differ + test fixtures
-    # that emit kind="schema_drift" directly. Aligning these is tracked
+    # CONTRACT NOTE: apply_inbound.inbound_repair_property emits follow-ons with
+    # kind="schema_drift_signal" (see apply_inbound.py, inbound_repair_property),
+    # but this loop matches kind=="schema_drift". The naming mismatch means
+    # follow-ons produced from the in-pass repair_property failure path are NOT
+    # picked up here. The current consumers of this filter emit kind="schema_drift"
+    # directly (today only test fixtures do so). Aligning these is tracked
     # separately under meta-bug 5f2a-9a9f-2b4a-4aab.
     #
     # Mutations may be plain dicts (legacy schema) or Mutation dataclass
