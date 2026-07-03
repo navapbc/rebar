@@ -13,7 +13,6 @@ import json
 import logging
 import os
 import random
-import signal
 import subprocess
 import sys
 import time
@@ -310,66 +309,29 @@ def _decode_partial(data: Any) -> str | None:
 
 
 def _reap_process_group(p: subprocess.Popen[str]) -> None:
-    """Terminate and reap a timed-out child and its whole process group (bug d843).
+    """Reap a timed-out ACLI child + its process group via the shared reaper (bug d843).
 
-    On POSIX the child was started with ``start_new_session=True`` so it leads
-    its own group; we ``killpg`` the group (SIGTERM, grace, then SIGKILL) to
-    catch pipe-holding grandchildren that a direct ``p.kill()`` would orphan
-    (validation spikes E1/E2). All ``getpgid``/``killpg`` calls are guarded
-    against the ESRCH/EPERM race (spike E5: an already-exited group raises
-    ``ProcessLookupError``). The post-kill drain is itself bounded so a D-state
-    (unkillable) child can't block forever — a survivor is logged as a leaked
-    PID, never asserted.
+    Thin wrapper over :func:`rebar._proc.reap_process_group` — the single source of
+    truth for the SIGTERM → grace → SIGKILL → bounded-drain, ESRCH/EPERM-guarded,
+    D-state-safe group reap (formerly duplicated byte-for-byte in the grounding
+    harness). This caller pins its OWN timing constants and log identity
+    (``label="acli"``, this module's ``logger``); update the shared helper — not a
+    private copy — for any behavior change.
 
-    On non-POSIX (no ``killpg``) fall back to ``p.kill()`` + bounded wait.
+    Imported function-locally, mirroring this module's other ``rebar.*`` imports
+    (``rebar.config``): the reconciler subprocess always has ``rebar`` importable
+    (``rebar_reconciler.__main__`` imports it at startup and puts the package parent
+    on ``sys.path`` as a fallback), and ``rebar._proc`` is a stdlib-only leaf.
     """
-    if os.name != "posix":
-        try:
-            p.kill()
-        except ProcessLookupError:
-            pass
-        try:
-            p.wait(timeout=_ACLI_GRACE_SECONDS + _ACLI_DRAIN_SECONDS)
-        except subprocess.TimeoutExpired:
-            logger.warning("acli child PID %s did not exit after kill (leaked)", p.pid)
-        return
+    from rebar._proc import reap_process_group
 
-    try:
-        pgid = os.getpgid(p.pid)
-    except (ProcessLookupError, PermissionError):
-        # Child already gone (ESRCH) or we can't see it — best-effort reap and return.
-        try:
-            p.wait(timeout=_ACLI_DRAIN_SECONDS)
-        except subprocess.TimeoutExpired:
-            pass
-        return
-
-    # SIGTERM the group, then give it a grace window to flush + exit cleanly.
-    try:
-        os.killpg(pgid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        pass
-    try:
-        p.communicate(timeout=_ACLI_GRACE_SECONDS)
-        return  # exited on SIGTERM within the grace window — drained.
-    except subprocess.TimeoutExpired:
-        pass
-
-    # Grace expired — SIGKILL the group, then bound the final reap/drain so a
-    # D-state child cannot hang us indefinitely.
-    try:
-        os.killpg(pgid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
-    try:
-        p.communicate(timeout=_ACLI_DRAIN_SECONDS)
-    except subprocess.TimeoutExpired:
-        logger.warning(
-            "acli process group %s survived SIGKILL after %ss drain (leaked PID %s)",
-            pgid,
-            _ACLI_DRAIN_SECONDS,
-            p.pid,
-        )
+    reap_process_group(
+        p,
+        grace=_ACLI_GRACE_SECONDS,
+        drain=_ACLI_DRAIN_SECONDS,
+        label="acli",
+        logger=logger,
+    )
 
 
 def _run_acli(

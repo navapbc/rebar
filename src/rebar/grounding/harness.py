@@ -34,6 +34,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from rebar._proc import reap_process_group
+
 from . import evidence as ev
 
 logger = logging.getLogger("rebar.grounding")
@@ -109,58 +111,19 @@ class RunResult:
 
 
 def _reap_process_group(p: subprocess.Popen[str]) -> None:
-    """Terminate and reap a timed-out child and its whole process group.
+    """Reap a timed-out grounding child + its group via the shared reaper.
 
-    Mirrors ``acli_subprocess._reap_process_group`` (bug d843): on POSIX the child
-    leads its own session (``start_new_session=True``), so we ``killpg`` the group
-    (SIGTERM, grace, then SIGKILL) to catch pipe-holding grandchildren a direct
-    ``p.kill()`` would orphan. Every ``getpgid``/``killpg`` is guarded against the
-    ESRCH/EPERM race; the post-kill drain is bounded so a D-state child can't hang
-    us forever (a survivor is logged as leaked, never asserted).
+    Thin wrapper over :func:`rebar._proc.reap_process_group` (bug d843, the single
+    source of truth), pinning this harness's own grace/drain constants and log
+    identity (``label="grounding"``, this module's ``logger``).
     """
-    if os.name != "posix":
-        try:
-            p.kill()
-        except ProcessLookupError:
-            pass
-        try:
-            p.wait(timeout=_GRACE_SECONDS + _DRAIN_SECONDS)
-        except subprocess.TimeoutExpired:
-            logger.warning("grounding child PID %s did not exit after kill (leaked)", p.pid)
-        return
-
-    try:
-        pgid = os.getpgid(p.pid)
-    except (ProcessLookupError, PermissionError):
-        try:
-            p.wait(timeout=_DRAIN_SECONDS)
-        except subprocess.TimeoutExpired:
-            pass
-        return
-
-    try:
-        os.killpg(pgid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        pass
-    try:
-        p.communicate(timeout=_GRACE_SECONDS)
-        return
-    except subprocess.TimeoutExpired:
-        pass
-
-    try:
-        os.killpg(pgid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
-    try:
-        p.communicate(timeout=_DRAIN_SECONDS)
-    except subprocess.TimeoutExpired:
-        logger.warning(
-            "grounding process group %s survived SIGKILL after %ss drain (leaked PID %s)",
-            pgid,
-            _DRAIN_SECONDS,
-            p.pid,
-        )
+    reap_process_group(
+        p,
+        grace=_GRACE_SECONDS,
+        drain=_DRAIN_SECONDS,
+        label="grounding",
+        logger=logger,
+    )
 
 
 def run_tool(
