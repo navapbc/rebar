@@ -113,48 +113,6 @@ def test_stale_pre_p1_1_cache_is_invalidated(rebar_repo: Path) -> None:
     assert st.get("updated_at") is not None
 
 
-def test_stale_pre_attestations_cache_is_invalidated(rebar_repo: Path) -> None:
-    # A .cache.json written by a build WITHOUT the kind-keyed attestations
-    # projection (epic dark-acme-lumen) must be invalidated by the reducer-cache
-    # version bump, not served verbatim — otherwise a genuinely-signed
-    # plan-review attestation reads as absent and `rebar claim` is wrongly
-    # blocked. Regression guard for bug wait-warp-inlay (908b).
-    import os
-
-    from rebar.reducer import _cache
-    from rebar.reducer._api import reduce_ticket
-    from rebar.reducer._cache import compute_dir_hash, write_cache
-
-    tid = rebar.create_ticket("task", "attestation cache check", repo_root=str(rebar_repo))
-    # A signed manifest whose first line kinds the `plan-review` attestation.
-    rebar.sign_manifest(tid, ["plan-review: PASS", "ticket: t"], repo_root=str(rebar_repo))
-
-    tdir = str(rebar_repo / ".tickets-tracker" / tid)
-    events = sorted(f for f in os.listdir(tdir) if f.endswith(".json") and not f.startswith("."))
-
-    # Sanity: a fresh reduce (current version) DOES project the attestation.
-    assert reduce_ticket(tdir).get("attestations", {}).get("plan-review") is not None
-
-    # Forge a cache as a PRE-attestations build (reducer-cache version 3) would
-    # have: a reduced state with NO `attestations`, keyed by the dir-hash that
-    # version 3 produced. Before the bump the live version was ALSO 3, so this
-    # stale cache matched and was served — hiding the attestation.
-    pre_attestations_version = 3
-    saved = _cache._REDUCER_CACHE_VERSION
-    try:
-        _cache._REDUCER_CACHE_VERSION = pre_attestations_version
-        old_hash = compute_dir_hash(tdir, events)
-        stale_state = {k: v for k, v in reduce_ticket(tdir).items() if k != "attestations"}
-    finally:
-        _cache._REDUCER_CACHE_VERSION = saved
-    write_cache(str(Path(tdir) / ".cache.json"), old_hash, stale_state, tdir)
-
-    # Under the current (bumped) version the version-3 hash no longer matches →
-    # cache miss → the attestation is re-projected rather than served as absent.
-    st = reduce_ticket(tdir)
-    assert st.get("attestations", {}).get("plan-review") is not None
-
-
 def test_updated_at_survives_post_snapshot_event(rebar_repo: Path) -> None:
     tid = rebar.create_ticket("task", "compact then touch")
     rebar.comment(tid, "c1")

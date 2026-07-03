@@ -1,4 +1,4 @@
-"""The repo-wide health checks for ``validate``.
+"""The repo-wide health checks for ``validate`` (Tier C, ``REBAR_COMPUTE``).
 
 Faithful port of the nine ``check_*`` shell functions + their ``python3`` heredocs
 in ``validate-issues.sh``. Each check is a pure function over the normalized issue

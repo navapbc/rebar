@@ -653,7 +653,7 @@ def _attested_delivered(ticket: dict[str, Any], *, repo_root=None) -> bool:
     ``completion-verifier`` attestation that is VALID ON READ.
 
     Reuses the EXACT per-child validity read that
-    :func:`rebar.llm.completion.child_closure_findings` performs — get the ticket's
+    :func:`rebar.llm.completion._child_closure_findings` performs — get the ticket's
     ``completion-verifier`` signature via :func:`rebar.verify_signature` and, when it is
     ``certified``, run :func:`compute_validity` (kind ``"completion-verifier"``) against the
     ticket's OWN state. A force-closed / unsigned / drift-stale (compute_validity ``valid=False``)
@@ -701,7 +701,7 @@ def delivered_now(child: dict[str, Any], siblings: list[dict[str, Any]], *, repo
     (A) DELIVERED-AND-ATTESTED — ``child`` is ``closed`` AND holds a ``completion-verifier``
         attestation that is valid on read (see :func:`_attested_delivered`, which reuses the
         SAME ``verify_signature`` + :func:`compute_validity` read as
-        ``completion.child_closure_findings``). A force-closed / unsigned / drift-stale /
+        ``completion._child_closure_findings``). A force-closed / unsigned / drift-stale /
         reopened-after-signing child fails.
 
     (B) SUPERSEDED-BY-LIVE-IN-EPIC-SIBLING — there is a ticket ``A`` in ``siblings`` that
@@ -718,7 +718,7 @@ def delivered_now(child: dict[str, Any], siblings: list[dict[str, Any]], *, repo
 
     ``siblings`` is supplied by the caller — the container's children, e.g.
     ``rebar.list_tickets(parent=<container>, repo_root=…)`` — mirroring how
-    ``completion.child_closure_findings`` enumerates a parent's children."""
+    ``completion._child_closure_findings`` enumerates a parent's children."""
     if _attested_delivered(child, repo_root=repo_root):
         return True
 

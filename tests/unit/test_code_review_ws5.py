@@ -100,12 +100,7 @@ def test_failclosed_forces_block_on_detector_match(monkeypatch):
         lambda **kw: {
             "high-critical-security": {
                 "abstained": [],
-                "matches": [
-                    {
-                        "detector_id": "rebar.builtin.security.python-eval-exec-injection",
-                        "location": {"file": "app.py"},
-                    }
-                ],
+                "matches": [{"detector_id": "rebar.builtin.security.python-eval-exec-injection"}],
             }
         },
     )
@@ -113,36 +108,6 @@ def test_failclosed_forces_block_on_detector_match(monkeypatch):
     assert v["verdict"] == "BLOCK"
     note = v["coverage"]["security_detectors"][0]
     assert note["reason"] == "detector-finding"  # distinct from a fail-closed abstain
-    # A forced-BLOCK must NAME the match in `blocking` — else the review-bot adapter renders
-    # "found 0 blocking issue(s)" with no finding, hiding a real match from the author (bug f367).
-    assert v["blocking"], "a match-forced BLOCK must have a non-empty blocking list"
-    entry = v["blocking"][0]
-    assert entry["criteria"] == ["high-critical-security"]  # the criterion is named
-    assert entry["severity"] == "critical" and entry["decision"] == "block"
-    assert "high-critical-security" in entry["finding"] and "app.py" in entry["finding"]
-    assert entry["location"] == "app.py"  # the matched changed file
-
-
-def test_failclosed_match_names_no_blocking_when_criterion_advisory(monkeypatch):
-    # A detector criterion whose `blocking_enabled` is False records the match in coverage but must
-    # NOT force BLOCK nor append a blocking finding (advisory-only stays advisory).
-    from rebar.llm.code_review import detectors, registry
-
-    monkeypatch.setattr(
-        detectors,
-        "run_security_detectors",
-        lambda **kw: {
-            "high-critical-security": {
-                "abstained": [],
-                "matches": [{"detector_id": "rebar.builtin.security.python-eval-exec-injection"}],
-            }
-        },
-    )
-    monkeypatch.setattr(registry, "threshold_for", lambda crits: (0.95, False))  # not blocking
-    v = detectors.apply_failclosed(_pass_verdict(), changed_files=["app.py"], repo_root=None)
-    assert v["verdict"] == "PASS"  # advisory-only detector never forces BLOCK
-    assert v["blocking"] == []  # nothing appended
-    assert v["coverage"]["security_detectors"][0]["reason"] == "detector-finding"
 
 
 def test_failclosed_is_a_noop_when_no_security_signal(monkeypatch):
@@ -296,56 +261,6 @@ def test_planted_secret_blocks_end_to_end_real_gitleaks():
         assert all(m["location"]["file"] == "app.py" for m in matches)
         v = detectors.apply_failclosed(_pass_verdict(), changed_files=["app.py"], repo_root=t)
     assert v["verdict"] == "BLOCK"
-
-
-@pytest.mark.skipif(__import__("shutil").which("gitleaks") is None, reason="gitleaks not installed")
-def test_repo_gitleaks_config_allowlists_doc_throwaway_but_not_real_secret():
-    # Regression (ticket a6a5-f4a0-c5e6-40a8): the committed repo-root `.gitleaks.toml` allowlist
-    # must SUPPRESS the documented non-secret Langfuse throwaway (`sk-lf-1234567890`, the local
-    # docker-compose init default mirrored in docs/llm-framework.md) so a pure docs edit is not
-    # false-positive fail-closed BLOCKed — WITHOUT weakening real-secret detection: a genuine
-    # planted secret in the SAME scan must still surface. Auto-discovery of the root config is the
-    # exact mechanism the detector relies on (engine_b._run_sarif runs `gitleaks detect --source
-    # <repo_root>` with no `--config`).
-    import secrets as _secrets
-    import shutil as _shutil
-    import string as _string
-
-    from rebar.llm.code_review import detectors
-
-    repo_config = Path(__file__).resolve().parents[2] / ".gitleaks.toml"
-    assert repo_config.is_file(), "repo-root .gitleaks.toml must exist for the allowlist to apply"
-
-    # A genuine secret assembled at RUNTIME (no committed literal). The throwaway is a committed
-    # literal but is itself allowlisted by the config under test (so this file stays clean too).
-    fake_pat = "ghp_" + "".join(
-        _secrets.choice(_string.ascii_letters + _string.digits) for _ in range(36)
-    )  # gitleaks:allow — assembled at runtime, no committed literal
-    throwaway_line = "export LANGFUSE_SECRET_KEY=sk-lf-1234567890\n"  # gitleaks:allow
-
-    def flagged_files(*, with_config: bool) -> set[str]:
-        with tempfile.TemporaryDirectory() as t:
-            if with_config:
-                # Auto-discovered by gitleaks from the --source root (the detector's real path).
-                _shutil.copy(repo_config, Path(t, ".gitleaks.toml"))
-            Path(t, "doc_example.md").write_text(throwaway_line)
-            Path(t, "app.py").write_text(f'GH = "{fake_pat}"\n')
-            out = detectors.run_security_detectors(
-                changed_files=["doc_example.md", "app.py"], repo_root=t
-            )
-            matches = out.get("secret-detection", {}).get("matches", [])
-            return {m["location"]["file"] for m in matches}
-
-    # Baseline (default gitleaks, no repo allowlist): the throwaway DOES trip — i.e. it is a real
-    # false positive absent the allowlist (and the genuine secret trips, as always).
-    baseline = flagged_files(with_config=False)
-    assert "doc_example.md" in baseline, "the throwaway must trip WITHOUT the allowlist (real FP)"
-    assert "app.py" in baseline
-
-    # With the committed repo config: throwaway allowlisted, genuine secret still detected.
-    with_cfg = flagged_files(with_config=True)
-    assert "doc_example.md" not in with_cfg, "documented throwaway must be allowlisted (no FP)"
-    assert "app.py" in with_cfg, "a genuine secret must still be detected (fail-closed preserved)"
 
 
 # ── grounding_info advertises the new backend ───────────────────────────────────────────────

@@ -163,11 +163,6 @@ def test_reconcile_dry_run_against_live_jira(rebar_repo: Path) -> None:
     non-mutating (dry-run, no writes)."""
     if shutil.which("acli") is None:
         pytest.skip("requires `acli` on PATH + live Jira credentials")
-    # A live dry-run also needs a scoped Jira project — the inbound fetch refuses an
-    # unscoped search (empty `jira.project`) and errors. Without this guard the test
-    # would FAIL (not skip) on a machine that has `acli` but no configured project.
-    if not os.environ.get("JIRA_PROJECT"):
-        pytest.skip("requires a configured Jira project (JIRA_PROJECT / [jira] project)")
     cp = _cli("reconcile", cwd=str(rebar_repo))
     out = cp.stdout + cp.stderr
     assert "unknown subcommand 'reconcile'" not in out.lower()

@@ -9,35 +9,9 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-from rebar._config_schema import _ALIASES as _ALIASES
-from rebar._config_schema import _RESERVED_SECTIONS as _RESERVED_SECTIONS
-from rebar._config_schema import _SECTION_CLASSES as _SECTION_CLASSES
-
-# The typed config SCHEMA (dataclasses + coercion + section tables) lives in the
-# sibling module rebar._config_schema (a pure structural split). Import the names
-# config.py uses, then re-export every other moved name so `from rebar.config
-# import X` keeps working for the whole public API (config is imported tree-wide).
-from rebar._config_schema import (
-    _SECTIONS,
-    Config,
-    ConfigError,
-    _as_bool,
-    coerce_sparse,
-    merge_sparse,
-)
-from rebar._config_schema import CompactConfig as CompactConfig
-from rebar._config_schema import JiraConfig as JiraConfig
-from rebar._config_schema import McpConfig as McpConfig
-from rebar._config_schema import ReconcilerConfig as ReconcilerConfig
-from rebar._config_schema import ScratchConfig as ScratchConfig
-from rebar._config_schema import SyncConfig as SyncConfig
-from rebar._config_schema import TicketClarityConfig as TicketClarityConfig
-from rebar._config_schema import TicketConfig as TicketConfig
-from rebar._config_schema import TrackerConfig as TrackerConfig
-from rebar._config_schema import VerifyConfig as VerifyConfig
 
 logger = logging.getLogger("rebar.config")
 
@@ -150,6 +124,508 @@ def tickets_remote(root: str | os.PathLike[str] | None = None) -> str:
     :func:`tickets_branch`, a malformed config is NOT swallowed here: silently defaulting
     could mis-route a push to the wrong remote, so the ``ConfigError`` propagates."""
     return load_config(root).sync.remote
+
+
+# ── Typed config (the single source of truth for non-secret settings) ─────────
+#
+# This is the in-memory schema the config-refinement work (epic a621) builds on:
+# a stdlib dataclass (no pydantic-settings — core stays dependency-free) holding
+# the CORE config keys. ``from_mapping`` parses a nested mapping (TOML
+# ``[tool.rebar]`` shape) into the typed object — coercing types, applying
+# defaults, honoring legacy aliases, and WARNING (never silently dropping) on
+# unknown keys. The TOML loader + discovery + layering (CLI > env > project >
+# user > defaults) and routing the existing reads through this are subsequent
+# tasks; ``llm.*`` keys live in the optional ``rebar.llm`` layer (not here) so the
+# stdlib core never depends on the agents extra. See docs/config.md.
+
+
+class ConfigError(ValueError):
+    """A config value is invalid. Raised at load time so problems fail fast at one
+    site rather than surfacing deep in unrelated logic."""
+
+
+_TRUE = {"true", "1", "yes", "on"}
+_FALSE = {"false", "0", "no", "off", ""}
+
+
+def _src(source: str) -> str:
+    return f" ({source})" if source else ""
+
+
+def _as_bool(v: Any, key: str) -> bool:
+    if isinstance(v, bool):
+        return v
+    s = str(v).strip().lower()
+    if s in _TRUE:
+        return True
+    if s in _FALSE:
+        return False
+    raise ConfigError(f"{key}: expected a boolean, got {v!r}")
+
+
+def _as_int(v: Any, key: str, *, minimum: int | None = None) -> int:
+    if isinstance(v, bool):  # bool is an int subclass — reject to catch e.g. true→1
+        raise ConfigError(f"{key}: expected an integer, got boolean {v!r}")
+    try:
+        i = int(v)
+    except (TypeError, ValueError):
+        raise ConfigError(f"{key}: expected an integer, got {v!r}") from None
+    if minimum is not None and i < minimum:
+        raise ConfigError(f"{key}: must be >= {minimum}, got {i}")
+    return i
+
+
+def _as_float(
+    v: Any, key: str, *, minimum: float | None = None, maximum: float | None = None
+) -> float:
+    if isinstance(v, bool):
+        raise ConfigError(f"{key}: expected a number, got boolean {v!r}")
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise ConfigError(f"{key}: expected a number, got {v!r}") from None
+    if minimum is not None and f < minimum:
+        raise ConfigError(f"{key}: must be >= {minimum}, got {f}")
+    if maximum is not None and f > maximum:
+        raise ConfigError(f"{key}: must be <= {maximum}, got {f}")
+    return f
+
+
+def _as_str(v: Any, key: str) -> str:
+    if isinstance(v, (dict, list)):
+        raise ConfigError(f"{key}: expected a string, got {type(v).__name__}")
+    return str(v)
+
+
+def _as_str_tuple(v: Any, key: str) -> tuple[str, ...]:
+    """A tuple of non-empty, trimmed strings from either a TOML array or a comma-separated
+    string, so both ``key = ["T5c", "T10"]`` and ``key = "T5c, T10"`` parse. Empty entries are
+    dropped; a non-list/non-str value is rejected. Used for config-backed id sets (e.g.
+    ``verify.completion_preserve_criteria``)."""
+    if isinstance(v, (list, tuple)):
+        items = [str(x).strip() for x in v]
+    elif isinstance(v, str):
+        items = [p.strip() for p in v.split(",")]
+    else:
+        raise ConfigError(
+            f"{key}: expected a list or comma-separated string, got {type(v).__name__}"
+        )
+    return tuple(x for x in items if x)
+
+
+def _as_choice(v: Any, key: str, choices: set[str]) -> str:
+    s = str(v).strip().lower()
+    if s not in choices:
+        raise ConfigError(f"{key}: expected one of {sorted(choices)}, got {v!r}")
+    return s
+
+
+# Characters git's check-ref-format forbids anywhere in a ref component.
+_BAD_REF_CHARS = set(" ~^:?*[\\\x7f") | {chr(c) for c in range(0x20)}
+
+
+def _as_git_ref(v: Any, key: str) -> str:
+    """Validate a single-level git branch name against a `git check-ref-format`-style
+    rule set (the subset that matters for a branch): reject empty, whitespace, `..`,
+    a leading `-` or `.`, any of ``~^:?*[\\`` / control / DEL chars, an ``@{`` sequence,
+    a bare ``@``, a trailing ``/`` / ``.lock`` / ``.``, a leading/trailing/double slash,
+    and a component beginning with ``.``. Keeps the tracker branch a valid, pushable ref."""
+    s = _as_str(v, key).strip()
+    if not s:
+        raise ConfigError(f"{key}: branch name must not be empty")
+    if s == "@" or "@{" in s or ".." in s:
+        raise ConfigError(f"{key}: invalid branch name {s!r} (contains '@', '@{{', or '..')")
+    if s.startswith("-") or s.startswith("/") or s.endswith("/") or "//" in s:
+        raise ConfigError(f"{key}: invalid branch name {s!r} (bad slash placement or leading '-')")
+    if s.endswith("."):  # per-component '.lock' is caught by the loop below
+        raise ConfigError(f"{key}: invalid branch name {s!r} (ends with '.')")
+    bad = sorted(_BAD_REF_CHARS & set(s))
+    if bad:
+        raise ConfigError(f"{key}: invalid branch name {s!r} (forbidden char(s) {bad})")
+    for comp in s.split("/"):
+        if not comp or comp.startswith(".") or comp.endswith(".lock"):
+            raise ConfigError(f"{key}: invalid branch name {s!r} (bad path component {comp!r})")
+    return s
+
+
+def _as_git_remote(v: Any, key: str) -> str:
+    """Validate a git REMOTE NAME (e.g. ``origin``, ``gerrit``, ``github``). Distinct from
+    :func:`_as_git_ref` (a branch name): a remote name is a single-level token that becomes
+    a path component under ``refs/remotes/<name>/`` and is passed as a positional to
+    ``git push``/``fetch``. Reject empty/whitespace, a leading ``-`` (would parse as a
+    flag), any ``/`` (remote names are single-level), ``..``, and the
+    check-ref-format-forbidden chars (space, ``~^:?*[\\``, control, DEL). Dots and
+    (non-leading) hyphens are allowed, so ``my-remote`` / ``gerrit.example`` pass."""
+    s = _as_str(v, key).strip()
+    if not s:
+        raise ConfigError(f"{key}: git remote name must not be empty")
+    if s.startswith("-") or "/" in s or ".." in s:
+        raise ConfigError(f"{key}: invalid git remote name {s!r} (leading '-', '/', or '..')")
+    bad = sorted(_BAD_REF_CHARS & set(s))
+    if bad:
+        raise ConfigError(f"{key}: invalid git remote name {s!r} (forbidden char(s) {bad})")
+    return s
+
+
+def _as_tracker_dir(v: Any, key: str) -> str:
+    """Validate the tracker store dir. Allows a bare relative name (the common case,
+    e.g. ``.tickets-tracker`` — used as the repo-root symlink name + gitignore entry)
+    AND an absolute path (the supported relocated/decoupled store, EV-3b, set via
+    ``REBAR_TRACKER_DIR``). Rejects empty/whitespace, any ``..`` traversal component,
+    and control chars — values that would break the symlink/exclude or escape the repo."""
+    s = _as_str(v, key).strip()
+    if not s:
+        raise ConfigError(f"{key}: tracker dir must not be empty")
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in s):
+        raise ConfigError(f"{key}: tracker dir {s!r} contains control characters")
+    parts = s.replace("\\", "/").split("/")
+    if ".." in parts:
+        raise ConfigError(f"{key}: tracker dir {s!r} must not contain a '..' traversal component")
+    return s
+
+
+def _warn_unknown(section: str, leftover: dict, source: str, *, strict: bool = False) -> None:
+    """Handle keys left over after coercion (unknown to the schema). During the
+    deprecation window (``strict=False``, the default) WARN and ignore them — a typo
+    guard that never breaks a working install. Past the cutover (``strict=True``, via
+    ``REBAR_CONFIG_UNKNOWN_KEYS=error``) raise so the unknown key is a hard error."""
+    if not leftover:
+        return
+    if strict:
+        keys = ", ".join(f"{section}.{k}" for k in leftover)
+        raise ConfigError(
+            f"rebar config{_src(source)}: unknown key(s) {keys} "
+            "(REBAR_CONFIG_UNKNOWN_KEYS=error — remove them or fix the typo)"
+        )
+    for k in leftover:
+        logger.warning(
+            "rebar config%s: unknown key '%s.%s' ignored (typo? see docs/config.md)",
+            _src(source),
+            section,
+            k,
+        )
+
+
+@dataclass
+class VerifyConfig:
+    require_signature_for_close: bool = False
+    # Opt-in completion-verification close gate: when true, closing a work ticket runs the
+    # LLM completion-verifier (rebar.llm.verify_completion) and blocks on FAIL / unavailable
+    # LLM (fail-closed; --force-close bypasses without signing). On PASS the verdict is signed.
+    # Default off. NOTE: this and require_signature_for_close are ALTERNATIVES — the completion
+    # gate signs AFTER the close, while the signature gate requires a signature BEFORE it, so
+    # enabling both deadlocks a non-force close. Enable one.
+    require_completion_verification_for_close: bool = False
+    # Opt-in plan-review gate (epic 5fd2): when true, claiming a work ticket
+    # (open→in_progress) requires a fresh, certified plan-review attestation (run
+    # `rebar review-plan <id>` to earn one). Absent / stale (code-HEAD moved) /
+    # material-edited signatures BLOCK the claim; `--force` bypasses with a logged
+    # justification. A FAST local HMAC check only — no LLM on the claim path. Bugs
+    # and session_logs are exempt. Default off ⇒ `claim` keeps today's behavior;
+    # turning it off is the rollback (an ordinary preference, no kill-switch needed).
+    require_plan_review_for_claim: bool = False
+    # Opt-in commit-ticket gate: when true, `rebar verify-commit-ticket` (run in CI, the
+    # Gerrit Verified leg) requires every commit message to reference a rebar ticket that
+    # RESOLVES in the store (alias/full/short/Jira). Default off; enabled per-project in
+    # rebar.toml. Turning it off is the rollback. See docs/commit-ticket-trailer.md.
+    require_ticket_for_commit: bool = False
+
+    # Opt-in agentic code-review capability (epic b744): when true, the public
+    # `review_code()` (CLI `rebar review-code` / MCP `review_code`) runs the four-pass
+    # code-review GATE (`gates/code-review.yaml`) and `produce_code_review_verdict` is live.
+    # Default OFF ⇒ INERT — `review_code()` returns a valid empty `review_result` (+ a
+    # 'capability disabled' note), zero LLM calls. Source-separated + off-by-default so it has
+    # no effect when disabled. Env override: REBAR_VERIFY_ENABLE_CODE_REVIEW.
+    enable_code_review: bool = False
+
+    # Progressive drift-refresh (Story 2, epic boil-golem-veto / ADR 0002): on a
+    # drift-only-stale re-review, run a cheap E4+G1G2 probe and, if the plan still holds,
+    # REFRESH the attestation instead of a full re-review. OFF by default — opt-in until the
+    # token/latency saving is measured on a representative ticket.
+    progressive_drift_refresh: bool = False
+
+    # Token-budget headroom for the Pass-2 verify chunker (epic solid-timer-unison WS3): the
+    # fraction of the verifier model's context window a single verify request may use before
+    # the findings are split into multiple calls. Default 0.8 leaves room for the system
+    # prompt + the per-finding structured output. The common case (whole request fits) is one
+    # aggregate call; this only triggers on a pathological huge-findings ticket.
+    verify_window_headroom: float = 0.8
+
+    # Convergent plan-edit re-review (epic 7d43, child ec89): when true, a re-review of an
+    # EDITED plan whose reviewed CODE is unchanged runs in remediation mode — the full criteria
+    # set still runs, but Pass-3 may drop only NOVEL, low-priority findings (the rising floor,
+    # child cc5b). Default OFF for v1 (expand-contract: ship off → validate on the dogfood
+    # corpus → flip in a follow-up); off/absent restores byte-identical full-review behavior.
+    remediation_mode: bool = False
+    # The freshness window (minutes) for remediation mode: a re-review is eligible only when the
+    # LAST review of any kind was within this many minutes, measured from that last review and
+    # RESET on each review (so the loop persists across a series of edits and lapses to a normal
+    # full review only after the agent goes idle). Default 60.
+    remediation_window_minutes: int = 60
+
+    # Pass-3 rising floor (epic 7d43, child cc5b). On an eligible remediation re-review, a finding
+    # is DROPPED iff its novelty >= novelty_drop_threshold AND its priority (validity × impact) <
+    # novelty_priority_floor. T_novel default 0.7 (house precision-first). The floor is a scalar at
+    # the corpus p40 impact percentile (~0.4, the "below major" band; see
+    # scripts/plan_review_impact_distribution.py). Both config-overridable.
+    novelty_drop_threshold: float = 0.7
+    novelty_priority_floor: float = 0.4
+    # The EVIDENCE GATE: the rising floor stays inert (gate runs un-floored) until this is flipped
+    # true — done MANUALLY by the operator only after 150b's `discriminates_novelty` eval has
+    # cleared its bar (`rebar prompt eval plan-review-novelty`). Default False (a third gate on top
+    # of remediation_mode + per-review eligibility), so the floor never drops a finding by default.
+    novelty_drop_active: bool = False
+
+    # Pass-3 COMPLETION floor (epic 66ac / story 6533) — the container-completion analogue of the
+    # novelty rising floor, for a re-fired epic/story-with-children review. A finding is DROPPED iff
+    # its completion sub-answers say it is fully about DELIVERED, settled plan text (attribution = a
+    # delivered-now child AND containment = limited-to-closed AND layer = plan-semantics) AND its
+    # priority (validity × impact) < completion_priority_floor AND none of its criteria is in the
+    # always-preserve set. Every ambiguous/fail-safe sub-answer fails toward KEEP. The floor default
+    # (0.4) matches novelty_priority_floor (the corpus "below major" band).
+    completion_priority_floor: float = 0.4
+    # The always-preserve set: REGISTERED criterion ids a completion drop never touches, regardless
+    # of the other axes. Default the security overlay (T5c) + the endpoint/interface-contract
+    # criterion (T10) — so a delivered child's "endpoint has no auth" or "contract omits a field"
+    # is always kept. Adding privacy/compliance ids is a config change, not code.
+    completion_preserve_criteria: tuple[str, ...] = ("T5c", "T10")
+    # The EVIDENCE GATE: the completion floor stays inert (gate runs un-floored) until this is
+    # flipped true — manually by the operator only after the calibration gold-set (story 77cf) has
+    # cleared its must-never-suppress bar. Default False, so the floor never drops a finding by
+    # default (the total back-out, exactly like novelty_drop_active).
+    completion_floor_active: bool = False
+
+
+@dataclass
+class TicketConfig:
+    display_mode: str = "auto"
+    # The assignee `claim` falls back to when none is given (story c36c). A LOCAL
+    # default written into the claim's EDIT event; the reconciler resolves it to a
+    # Jira accountId at sync time, so it should be a Jira-resolvable identity (email
+    # / accountId) to survive — a bare ambiguous handle is left unassigned (bug 544e).
+    default_assignee: str = ""
+
+
+@dataclass
+class TicketClarityConfig:
+    threshold: int = 5  # clarity-check pass threshold (section name matches the
+    # legacy flat key `ticket_clarity.threshold`, so it reads with no alias)
+
+
+@dataclass
+class CompactConfig:
+    threshold: int = 10
+
+
+@dataclass
+class SyncConfig:
+    push: str = "always"  # always | async | off
+    pull: str = "on"  # on | off
+    remote: str = "origin"  # git remote the tickets branch syncs to (push/fetch/fsck)
+
+
+@dataclass
+class McpConfig:
+    readonly: bool = False
+    allow_llm: bool = False
+    allow_jira_sync: bool = False
+
+
+@dataclass
+class ReconcilerConfig:
+    jira_cli_timeout: int = 0
+    lock_max_retries: int = 5
+    deletion_probe_limit: int = 20
+    id_guard_bypass_unsafe: bool = False
+
+
+@dataclass
+class JiraConfig:
+    url: str = ""
+    user: str = ""
+    project: str = ""
+
+
+@dataclass
+class ScratchConfig:
+    base_dir: str = ""
+
+
+@dataclass
+class TrackerConfig:
+    # The ticket event-store worktree/symlink dir (repo-root-relative name by default;
+    # an absolute path relocates the store — EV-3b) and the orphan branch the event log
+    # lives on. Both default to today's values, so every existing repo is unaffected.
+    dir: str = ".tickets-tracker"
+    branch: str = "tickets"
+
+
+@dataclass
+class Config:
+    """The typed core configuration — defaults baked in; build with
+    :meth:`from_mapping`. Secrets are NOT here (env/.env only)."""
+
+    verify: VerifyConfig = field(default_factory=VerifyConfig)
+    ticket: TicketConfig = field(default_factory=TicketConfig)
+    ticket_clarity: TicketClarityConfig = field(default_factory=TicketClarityConfig)
+    compact: CompactConfig = field(default_factory=CompactConfig)
+    sync: SyncConfig = field(default_factory=SyncConfig)
+    mcp: McpConfig = field(default_factory=McpConfig)
+    reconciler: ReconcilerConfig = field(default_factory=ReconcilerConfig)
+    jira: JiraConfig = field(default_factory=JiraConfig)
+    scratch: ScratchConfig = field(default_factory=ScratchConfig)
+    tracker: TrackerConfig = field(default_factory=TrackerConfig)
+
+    @classmethod
+    def from_mapping(cls, raw: dict | None, *, source: str = "", strict: bool = False) -> Config:
+        """Build a Config from a nested mapping (TOML ``[tool.rebar]`` shape): coerce
+        + validate present values, apply defaults for the rest, honor legacy
+        aliases, and WARN (never silently drop) on unknown sections/keys — or, with
+        ``strict=True``, hard-error on them (the post-deprecation cutover). Raises
+        :class:`ConfigError` on an invalid value (fail-closed at load)."""
+        sparse = coerce_sparse(raw, source=source, strict=strict)
+        return cls(**{sect: _SECTION_CLASSES[sect](**vals) for sect, vals in sparse.items()})
+
+
+# ── schema: the single source of coercion truth (sparse parse + defaults) ─────
+_SECTION_CLASSES: dict[str, type] = {
+    "verify": VerifyConfig,
+    "ticket": TicketConfig,
+    "ticket_clarity": TicketClarityConfig,
+    "compact": CompactConfig,
+    "sync": SyncConfig,
+    "mcp": McpConfig,
+    "reconciler": ReconcilerConfig,
+    "jira": JiraConfig,
+    "scratch": ScratchConfig,
+    "tracker": TrackerConfig,
+}
+
+# section -> {key -> coercer(value, dotted_key) -> coerced value (raises ConfigError)}
+_SECTIONS: dict[str, dict] = {
+    "verify": {
+        "require_signature_for_close": lambda v, k: _as_bool(v, k),
+        "require_completion_verification_for_close": lambda v, k: _as_bool(v, k),
+        "require_plan_review_for_claim": lambda v, k: _as_bool(v, k),
+        "require_ticket_for_commit": lambda v, k: _as_bool(v, k),
+        "enable_code_review": lambda v, k: _as_bool(v, k),
+        "progressive_drift_refresh": lambda v, k: _as_bool(v, k),
+        "verify_window_headroom": lambda v, k: _as_float(v, k, minimum=0.1, maximum=1.0),
+        "remediation_mode": lambda v, k: _as_bool(v, k),
+        "remediation_window_minutes": lambda v, k: _as_int(v, k, minimum=1),
+        "novelty_drop_threshold": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
+        "novelty_priority_floor": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
+        "novelty_drop_active": lambda v, k: _as_bool(v, k),
+        "completion_priority_floor": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
+        "completion_preserve_criteria": lambda v, k: _as_str_tuple(v, k),
+        "completion_floor_active": lambda v, k: _as_bool(v, k),
+    },
+    "ticket": {
+        "display_mode": lambda v, k: _as_str(v, k) or "auto",
+        "default_assignee": lambda v, k: _as_str(v, k),
+    },
+    "ticket_clarity": {"threshold": lambda v, k: _as_int(v, k, minimum=1)},
+    "compact": {"threshold": lambda v, k: _as_int(v, k, minimum=1)},
+    "sync": {
+        "push": lambda v, k: _as_choice(v, k, {"always", "async", "off"}),
+        "pull": lambda v, k: _as_choice(v, k, {"on", "off"}),
+        "remote": lambda v, k: _as_git_remote(v, k),
+    },
+    "mcp": {
+        "readonly": lambda v, k: _as_bool(v, k),
+        "allow_llm": lambda v, k: _as_bool(v, k),
+        "allow_jira_sync": lambda v, k: _as_bool(v, k),
+    },
+    "reconciler": {
+        "jira_cli_timeout": lambda v, k: _as_int(v, k, minimum=0),
+        "lock_max_retries": lambda v, k: _as_int(v, k, minimum=0),
+        "deletion_probe_limit": lambda v, k: _as_int(v, k, minimum=1),
+        "id_guard_bypass_unsafe": lambda v, k: _as_bool(v, k),
+    },
+    "jira": {
+        "url": lambda v, k: _as_str(v, k),
+        "user": lambda v, k: _as_str(v, k),
+        "project": lambda v, k: _as_str(v, k),
+    },
+    "scratch": {"base_dir": lambda v, k: _as_str(v, k)},
+    "tracker": {
+        "dir": lambda v, k: _as_tracker_dir(v, k),
+        "branch": lambda v, k: _as_git_ref(v, k),
+    },
+}
+
+# section -> {deprecated_key -> canonical_key}
+_ALIASES: dict[str, dict[str, str]] = {
+    "verify": {"require_verdict_for_close": "require_signature_for_close"},
+}
+
+# Config sections owned by an OPTIONAL layer rather than the stdlib core typed
+# Config — currently ``llm`` (the ``nava-rebar[agents]`` extra; resolved by
+# ``rebar.llm.LLMConfig.from_env`` so the stdlib core never imports the agents
+# stack). They are RECOGNISED by the core parser — neither warned as unknown nor
+# coerced into :class:`Config` — and read raw via :func:`read_reserved_section`.
+# ``snapshot`` is the repo-snapshot-isolation gate cache/janitor tunables layer
+# (``rebar._snapshot``), resolved env-first by :class:`rebar._snapshot.JanitorConfig`.
+_RESERVED_SECTIONS: frozenset[str] = frozenset({"llm", "snapshot"})
+
+
+def coerce_sparse(raw: dict | None, *, source: str = "", strict: bool = False) -> dict:
+    """Coerce+validate a nested mapping into a SPARSE nested dict of ONLY the keys
+    actually present (NO defaults applied) — the per-layer building block for
+    precedence merging. Resolves legacy aliases (the legacy key is accepted, with a
+    deprecation warning, regardless of ``strict``); raises :class:`ConfigError` on an
+    invalid value. Unknown sections/keys WARN by default and, with ``strict=True``,
+    hard-error (the deprecation cutover). Defaults are applied ONCE, at the end, by
+    :meth:`Config.from_mapping` — so a lower-priority layer's default can never
+    override a higher layer's explicit value."""
+    raw = dict(raw or {})
+    out: dict[str, dict] = {}
+    for sect, val in raw.items():
+        if sect in _RESERVED_SECTIONS:
+            continue  # owned by an optional layer (e.g. llm → rebar.llm); not a core key
+        if sect not in _SECTIONS:
+            if strict:
+                raise ConfigError(
+                    f"rebar config{_src(source)}: unknown section [{sect}] "
+                    "(REBAR_CONFIG_UNKNOWN_KEYS=error)"
+                )
+            logger.warning("rebar config%s: unknown section [%s] ignored", _src(source), sect)
+            continue
+        if not isinstance(val, dict):
+            raise ConfigError(f"[{sect}]: expected a table/section, got {type(val).__name__}")
+        d = dict(val)
+        for old, new in _ALIASES.get(sect, {}).items():
+            if old in d:
+                if new not in d:
+                    logger.warning(
+                        "rebar config%s: '%s.%s' is deprecated; use '%s.%s'",
+                        _src(source),
+                        sect,
+                        old,
+                        sect,
+                        new,
+                    )
+                    d[new] = d.pop(old)
+                else:
+                    d.pop(old)  # canonical key wins
+        coerced: dict = {}
+        for key, coercer in _SECTIONS[sect].items():
+            if key in d:
+                coerced[key] = coercer(d.pop(key), f"{sect}.{key}")
+        _warn_unknown(sect, d, source, strict=strict)
+        if coerced:
+            out[sect] = coerced
+    return out
+
+
+def merge_sparse(*layers: dict | None) -> dict:
+    """Deep-merge sparse config layers in precedence order — LATER layers win,
+    per key. Each layer is a sparse nested dict from :func:`coerce_sparse`."""
+    out: dict[str, dict] = {}
+    for layer in layers:
+        for sect, vals in (layer or {}).items():
+            out.setdefault(sect, {}).update(vals)
+    return out
 
 
 # ── config-file discovery + layered load ──────────────────────────────────────
@@ -409,32 +885,8 @@ def _canonical_env_name(sect: str, key: str) -> str:
 # (EV-1/EV-3/EV-3c). The OLD name still works — read only when the canonical
 # counterpart is unset (canonical always wins) — with a deprecation warning.
 # ``REBAR_NO_SYNC`` is a NEGATIVE boolean flipped to the positive ``sync.pull``
-# (truthy → "off"/disabled; falsy/unset → "on"/enabled, per the shared ``_as_bool``
-# truthy convention); ``REBAR_ID_GUARD_MODE``
+# (truthy → "off"/disabled; unset-or-"0" → "on"/enabled); ``REBAR_ID_GUARD_MODE``
 # is similarly value-mapped (warn → bypass/"true", raise/other → "false").
-#
-# ── Deprecation removal horizons (DOC-ONLY; item 16b-4 / ticket 4419-1c85) ──────────
-# rebar accretes back-compat aliases faster than it retires them. Dropping any of these
-# is a BREAKING change (it removes an input users may still set), so each is scheduled
-# for a MAJOR boundary — v1.0.0 — the first release where retiring a still-warned alias
-# is semver-legal. Recording a horizon keeps the set from growing unbounded; do NOT
-# remove an alias before its horizon (that would break users mid-0.x). Release: 0.6.0.
-#
-#   alias / shim                          canonical replacement                 remove in
-#   -----------------------------------   -----------------------------------   ---------
-#   env  REBAR_PUSH                        REBAR_SYNC_PUSH                        v1.0.0
-#   env  TICKETS_TRACKER_DIR               REBAR_TRACKER_DIR                     v1.0.0
-#   env  REBAR_MCP_ALLOW_RECONCILE_LIVE    REBAR_MCP_ALLOW_JIRA_SYNC             v1.0.0
-#   cfg  verify.require_verdict_for_close  verify.require_signature_for_close    v1.0.0
-#   cfg  flat .rebar/config.conf reader    rebar.toml / [tool.rebar] pyproject   v1.0.0
-#   lib  edit_ticket(tags=…)               set_tags / add_tags / remove_tags     v1.0.0
-#   lib  rebar.list_epics()                list_tickets(ticket_type='epic')      v1.0.0
-#
-# The env/cfg rows live in this module (_LEGACY_ENV_ALIASES / _ALIASES / _read_legacy_conf);
-# the `lib` rows live in rebar.__init__ (edit_ticket / list_epics). Any alias added later
-# MUST get a row here with a horizon so the registry stays complete. (REBAR_NO_SYNC and the
-# other _LEGACY_ENV_ALIASES entries are permanent ergonomic renames, tracked with the rest
-# of the rename window above — not scheduled for removal here.)
 _LEGACY_ENV_ALIASES: dict[str, tuple[str, str, str]] = {
     # legacy name                      -> (section, key, canonical name)
     "REBAR_PUSH": ("sync", "push", "REBAR_SYNC_PUSH"),
@@ -461,14 +913,10 @@ _LEGACY_ENV_ALIASES: dict[str, tuple[str, str, str]] = {
 
 def _map_legacy_env(legacy: str, value: str) -> str:
     """Map a legacy env value to its canonical config value. Non-identity cases:
-    ``REBAR_NO_SYNC`` (negative→positive boolean flip; truthy per ``_as_bool`` →
-    pull "off") and ``REBAR_ID_GUARD_MODE`` (the id-guard value-flip: ``warn`` →
-    bypass/"true", ``raise``/other → "false")."""
+    ``REBAR_NO_SYNC`` (negative→positive boolean flip) and ``REBAR_ID_GUARD_MODE``
+    (the id-guard value-flip: ``warn`` → bypass/"true", ``raise``/other → "false")."""
     if legacy == "REBAR_NO_SYNC":
-        # Honor the shared truthy convention (``_as_bool``: 1/true/yes/on, case- and
-        # whitespace-insensitive) rather than "any non-empty, non-'0' string is set".
-        # ``REBAR_NO_SYNC`` truthy → disable pull; falsy/unset → leave pull on.
-        return "off" if _as_bool(value, legacy) else "on"
+        return "off" if (value and value != "0") else "on"
     if legacy == "REBAR_ID_GUARD_MODE":
         return "true" if value.strip().lower() == "warn" else "false"
     return value
@@ -678,21 +1126,6 @@ def load_config(
     cfg, validation = _resolve(root, effective_cli)
     _RESULT_CACHE[key] = (cfg, validation)
     return cfg
-
-
-def mcp_readonly() -> bool:
-    """THE shared resolver for the read-only gate (``mcp.readonly``). Resolves through
-    the single-source typed config, so env ``REBAR_MCP_READONLY`` wins over the
-    ``[tool.rebar.mcp] readonly`` file key (``load_config`` layers env above file), and
-    fail-CLOSED to read-only on a malformed config (a broken config withholds writes
-    rather than exposing them). Both read-only call sites route through this — the MCP
-    server's write-tool gating (``mcp_server._readonly``) and the LLM runner's
-    comment-tool withholding (``runner._readonly_gate``) — so the two cannot diverge
-    (they once did: the runner read only the env var and ignored the file key)."""
-    try:
-        return load_config().mcp.readonly
-    except ConfigError:
-        return True
 
 
 def read_config_file(path: str | os.PathLike[str]) -> Config:

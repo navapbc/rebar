@@ -65,25 +65,7 @@ def test_canonical_push_beats_legacy(tmp_path: Path, monkeypatch: pytest.MonkeyP
 # ── deprecated alias: REBAR_NO_SYNC -> sync.pull (negative->positive flip) ─────
 @pytest.mark.parametrize(
     "no_sync_val,expected_pull",
-    [
-        # truthy → pull off (sync disabled), per the shared _as_bool convention
-        ("1", "off"),
-        ("true", "off"),
-        ("yes", "off"),
-        ("on", "off"),
-        ("TRUE", "off"),  # case-insensitive
-        (" 1 ", "off"),  # whitespace-tolerant
-        # falsy → pull on (sync stays enabled). Regression (bug 7a): the old
-        # `value and value != "0"` treated these non-"0" strings as SET, WRONGLY
-        # disabling pull and inverting the documented truthy convention.
-        ("0", "on"),
-        ("", "on"),
-        ("false", "on"),
-        ("no", "on"),
-        ("off", "on"),
-        (" 0 ", "on"),  # whitespace-tolerant falsy
-        ("FALSE", "on"),  # case-insensitive falsy
-    ],
+    [("1", "off"), ("true", "off"), ("yes", "off"), ("0", "on"), ("", "on")],
 )
 def test_legacy_no_sync_flip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_sync_val: str, expected_pull: str

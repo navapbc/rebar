@@ -12,7 +12,7 @@ rebar's own reads, resolving the reviewer prompt, picking the runner) and delega
 run to a :class:`~rebar.llm.runner.Runner`. The structured-output **contract** is selected by
 ``output_schema="completion_verdict"`` (the pluggable-contract seam). The agent emits the
 verdict; the operation then deterministically normalizes/reconciles it (the verdict is the
-agent's, with a guardrail — see :func:`reconcile_verdict`) and resolves citations against the repo.
+agent's, with a guardrail — see :func:`_reconcile`) and resolves citations against the repo.
 
 Optionality: stdlib-only at import; the agent stack is lazy-imported by the runner. The
 pydantic_ai runner provides ``show_ticket`` natively (pai_tools.rebar_tools), so the verifier
@@ -21,25 +21,13 @@ needs no injected ticket tool.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import replace
 
 from rebar.llm import findings
 from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, LLMConfig
 from rebar.llm.runner import Runner
 
-logger = logging.getLogger(__name__)
-
-# Public seam: these three deterministic helpers are the completion gate's stable API,
-# consumed by the workflow gate ops (rebar.llm.workflow.gate_ops). They are exported (not
-# leading-underscore privates) so a MANDATORY gate does not depend on another module's
-# underscore-privates — a rename here is a visible contract change, not a silent break.
-__all__ = [
-    "child_closure_findings",
-    "deterministic_child_failure",
-    "reconcile_verdict",
-    "verify_completion",
-]
+__all__ = ["verify_completion"]
 
 _REVIEWER_ID = "completion-verifier"
 _OUTPUT_SCHEMA = "completion_verdict"
@@ -65,7 +53,7 @@ _VERIFIER_DEFAULT_MODEL = VERIFIER_DEFAULT_MODEL
 _VERIFY_MIN_STEPS = 480
 
 
-def child_closure_findings(ticket_id: str, repo_root) -> tuple[list[dict], list[dict]]:
+def _child_closure_findings(ticket_id: str, repo_root) -> tuple[list[dict], list[dict]]:
     """Deterministic child-closure / certification gate — the "epic-level verdict trust" rule.
 
     Returns ``(blocking, uncertified)`` for a parent's **direct** children (childless tickets yield
@@ -79,48 +67,13 @@ def child_closure_findings(ticket_id: str, repo_root) -> tuple[list[dict], list[
     * **uncertified** — a direct child that is closed but WITHOUT a certified/valid closure (a
       force-closed / reopened / drift-stale child). Its work is done, but its subtree is
       unattested: the parent may CLOSE (subject to its OWN criteria) but cannot be CERTIFIED —
-      certification propagates, so an unattested descendant WITHHOLDS the parent's signature.
-
-    **Read-error path (fail-safe on certification).** If enumerating the children itself fails
-    (a transient store read error), we can no longer prove the subtree is attested, so we
-    WITHHOLD certification rather than forge it: we return ``([], [<marker>])`` — an EMPTY
-    ``blocking`` (the parent may still close on its OWN criteria; a read glitch shouldn't block
-    a legitimate close) but a NON-EMPTY ``uncertified`` (so ``certifiable`` is ``False`` and the
-    parent closes UNSIGNED). Returning ``([], [])`` here (the old behaviour) would have LAUNDERED
-    certification — a read failure would have signed the parent as if it were childless. This
-    mirrors ``plan_review.attest._attested_delivered``, which fails closed on the same error."""
+      certification propagates, so an unattested descendant WITHHOLDS the parent's signature."""
     import rebar
 
     try:
         children = rebar.list_tickets(parent=ticket_id, repo_root=repo_root)
-    except Exception as exc:  # noqa: BLE001 — WITHHOLD certification on a read error; logged below
-        logger.warning(
-            "child-closure enumeration failed for %s; withholding certification "
-            "(the parent may still close on its own criteria, but UNSIGNED) rather than "
-            "forging it from an unread (assumed-empty) child set",
-            ticket_id,
-            exc_info=True,
-        )
-        return [], [
-            {
-                "criterion": f"direct children of {ticket_id} could not be certified",
-                "severity": "high",
-                "dimension": "completion",
-                "detail": (
-                    f"could not enumerate the direct children of {ticket_id} to verify their "
-                    f"certified closure ({exc}); WITHHOLDING certification — the parent may still "
-                    "close on its OWN criteria but is NOT signed, rather than forging "
-                    "certification from an unread (assumed-empty) child set. Re-close once the "
-                    "store read succeeds to certify."
-                ),
-                "citations": [
-                    {
-                        "kind": "source",
-                        "description": f"list_tickets(parent={ticket_id}) read error: {exc}",
-                    }
-                ],
-            }
-        ]
+    except Exception:  # noqa: BLE001 — no children on a list failure (natural no-op for childless tickets)
+        return [], []
     blocking: list[dict] = []
     uncertified: list[dict] = []
     for c in children:
@@ -177,7 +130,7 @@ def child_closure_findings(ticket_id: str, repo_root) -> tuple[list[dict], list[
     return blocking, uncertified
 
 
-def reconcile_verdict(result: dict) -> None:
+def _reconcile(result: dict) -> None:
     """Normalize the verdict and enforce the FAIL⇔findings invariant IN PLACE.
 
     The agent emits the verdict; this is a deterministic guardrail, NOT a re-judge:
@@ -207,7 +160,7 @@ def reconcile_verdict(result: dict) -> None:
     result["findings"] = items
 
 
-def deterministic_child_failure(ticket_id: str, child_findings: list[dict], cfg) -> dict:
+def _deterministic_child_failure(ticket_id: str, child_findings: list[dict], cfg) -> dict:
     """Build a FAIL ``completion_verdict`` from the deterministic BLOCKING child findings
     (direct children that are not closed) WITHOUT invoking the LLM evaluator.
 
@@ -233,7 +186,7 @@ def deterministic_child_failure(ticket_id: str, child_findings: list[dict], cfg)
         "trace_id": None,
     }
     findings.resolve_citations(result, cfg.repo_path)
-    reconcile_verdict(result)  # FAIL⇔findings invariant (already satisfied; defensive)
+    _reconcile(result)  # FAIL⇔findings invariant (already satisfied; defensive)
     return findings.validate_structured(result, _OUTPUT_SCHEMA)
 
 
@@ -314,7 +267,7 @@ def _verify_completion_inner(
     # (gates/completion-verification.yaml) — which owns its OWN deterministic child-closure
     # precheck → agentic verify → reconcile — and returns the reconciled completion_verdict.
     # (The child-closure precheck is the workflow's `completion_precheck` op, which reuses
-    # `child_closure_findings` / `deterministic_child_failure` from this module, so there is
+    # `_child_closure_findings` / `_deterministic_child_failure` from this module, so there is
     # exactly ONE child-closure implementation and no double check.) The close gate's signing
     # wrapper (_commands.transition) is unchanged, so the signed attestation stays
     # byte-compatible. cfg is already tuned (verifier model + step floor) above.

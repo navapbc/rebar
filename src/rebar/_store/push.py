@@ -1,4 +1,4 @@
-"""Best-effort push of the tickets branch.
+"""Best-effort push of the tickets branch (Tier D, ``REBAR_WRITE_CORE``).
 
 Faithful port of ``_push_tickets_branch`` (ticket-lib.sh). Honours the ``sync.push``
 policy (``always`` | ``async`` | ``off``, default ``always``; env ``REBAR_SYNC_PUSH``,

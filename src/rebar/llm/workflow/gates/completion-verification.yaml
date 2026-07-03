@@ -3,13 +3,11 @@ name: completion-verification
 description: >-
   The completion-verification gate expressed as an engine workflow (epic B, story B3). It mirrors
   rebar.llm.completion.verify_completion's real control flow — a deterministic child-closure precheck
-  that SHORT-CIRCUITS to a deterministic FAIL only for an UNCLOSED direct child (no LLM call); a
-  closed-but-uncertified child instead sets certifiable=false and still runs the verifier over the
-  ticket's own criteria. Then the agentic completion-verifier, then a deterministic reconcile
-  (FAIL<->findings invariant + citation downgrade) that also stamps certifiable onto the verdict. The
-  short-circuit is a branch (an if:-skipped step's outputs cannot be referenced), so the prompt runs
-  ONLY on the precheck-passed arm. It produces a completion_verdict; signing is the close-gate's job
-  (and it withholds the signature when certifiable=false).
+  that SHORT-CIRCUITS (a parent with an unclosed/uncertified child fails without any LLM call), then
+  the agentic completion-verifier over the ticket's own criteria, then a deterministic reconcile
+  (FAIL<->findings invariant + citation downgrade). The short-circuit is a branch (an if:-skipped
+  step's outputs cannot be referenced), so the prompt runs ONLY on the precheck-passed arm. It
+  produces a completion_verdict; signing is the close-gate's job (deferred to B5).
 inputs:
   ticket_id:
     description: The ticket whose completion requirements are verified.

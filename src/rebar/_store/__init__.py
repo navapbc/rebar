@@ -1,4 +1,4 @@
-"""The unified write/sync core.
+"""The unified write/sync core (Tier D, ``REBAR_WRITE_CORE``).
 
 ONE lock (``lock``), the canonical locked committer (``event_append``), the
 best-effort push (``push``), and cross-clone reconvergence (``sync``) — the

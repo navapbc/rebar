@@ -15,16 +15,21 @@ claim's error-envelope (ticket_not_found / concurrency_conflict / claim_failed) 
 from __future__ import annotations
 
 import json
+import logging
 import os
+import subprocess
 import sys
 
 from rebar import config
+from rebar._commands import scratch, txn
 from rebar._commands._seam import CommandError
-from rebar._commands.transition_close import close_ticket
 from rebar._commands.txn import ConcurrencyMismatch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar.graph._unblock import batch_close_operations
 from rebar.reducer import reduce_ticket
+
+logger = logging.getLogger(__name__)
 
 _VALID_STATUSES = ("open", "in_progress", "closed", "blocked")
 
@@ -91,30 +96,14 @@ def _resolve_open_parent(tracker: str, ticket_id: str) -> str | None:
     return parent_id
 
 
-def _warn_verdict_hash_deprecated() -> None:
-    """Emit the ``--verdict-hash`` deprecation warning at the CLI parse boundary.
-
-    The flag is fully IGNORED — the story/epic close gate now requires a certified
-    signature (``rebar sign``), not a verdict hash. This one-line warning is the ONLY
-    remaining trace of the flag: it is no longer threaded into ``transition_compute`` /
-    ``close_ticket`` / ``transition_core`` / ``_signature_gate`` (item 16b-1)."""
-    sys.stderr.write(
-        "Warning: --verdict-hash is deprecated and ignored; the close gate now "
-        "uses signatures (rebar sign <id> <manifest>).\n"
-    )
-
-
-def _parse_flags(args: list[str]) -> tuple[str, bool, str]:
-    """Parse [--reason[=]] [--force] [--force-close[=]] from the args AFTER
-    <current> <target>. Returns (reason, force, force_close_reason). Mirrors
-    ticket-transition.sh's flag loop (unknown tokens are silently skipped).
-
-    ``--verdict-hash`` is DEPRECATED and fully ignored: it is still recognised here
-    (and its value consumed) only to emit a one-line deprecation warning at the CLI
-    boundary, then discarded — it is not threaded any further into the transition
-    path."""
+def _parse_flags(args: list[str]) -> tuple[str, bool, str, str]:
+    """Parse [--reason[=]] [--force] [--verdict-hash[=]] [--force-close[=]] from the
+    args AFTER <current> <target>. Returns (reason, force, verdict_hash,
+    force_close_reason). Mirrors ticket-transition.sh's flag loop (unknown tokens
+    are silently skipped)."""
     reason = ""
     force = False
+    verdict_hash = ""
     force_close = ""
     i = 0
     while i < len(args):
@@ -131,12 +120,12 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str]:
             force = True
             i += 1
         elif a.startswith("--verdict-hash="):
-            _warn_verdict_hash_deprecated()
+            verdict_hash = a[len("--verdict-hash=") :]
             i += 1
         elif a == "--verdict-hash":
             if i + 1 >= len(args):
                 raise CommandError("Error: --verdict-hash requires a value", returncode=1)
-            _warn_verdict_hash_deprecated()
+            verdict_hash = args[i + 1]
             i += 2
         elif a.startswith("--force-close="):
             force_close = a[len("--force-close=") :]
@@ -148,7 +137,7 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str]:
             i += 2
         else:
             i += 1
-    return reason, force, force_close
+    return reason, force, verdict_hash, force_close
 
 
 def _validate_status(label: str, value: str) -> None:
@@ -168,6 +157,175 @@ def _validate_status(label: str, value: str) -> None:
     )
 
 
+def _compact_on_close(repo_root: str, ticket_id: str) -> None:
+    """Compact-on-close: squash the event log into a SNAPSHOT (non-blocking, output
+    silenced). In-process via rebar._commands.compact; --threshold=0 --skip-sync,
+    commit kept."""
+    import contextlib
+    import io
+
+    from rebar._commands import compact as _compact
+
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            _compact.compact_cli([ticket_id, "--threshold=0", "--skip-sync"], repo_root=repo_root)
+    except Exception:  # noqa: BLE001 — compact-on-close is non-blocking; broad-but-logged, the close still stands
+        logger.warning(
+            "compact-on-close failed for %s; continuing (close stands)", ticket_id, exc_info=True
+        )
+
+
+def _completion_precheck(
+    ticket_id: str,
+    ticket_type: str,
+    cfg_root: str,
+    repo_root,
+    *,
+    reason: str,
+    force_close: str,
+):
+    """The completion-verification close gate's PRE-close half (runs outside the write lock).
+
+    Returns the manifest to **sign** on a PASS verdict, or ``None`` when the gate is off or the
+    close is a ``--force-close`` (which closes WITHOUT verifying or signing — withholding the
+    signed confirmation, so a closed-without-signature ticket is the durable signal that
+    validation did not pass). Raises :class:`CommandError` (block) on a FAIL verdict, or when
+    the LLM is unavailable / any verifier error (fail-closed). The ``rebar.llm`` import is LAZY
+    so the optionality contract holds: core stays stdlib-only unless the gate is on AND a
+    non-force close is attempted."""
+    # session_log is lifecycle-exempt — it cannot be transitioned, so transition_core will refuse
+    # this close authoritatively. Skip the gate BEFORE the (billable) verifier runs, so a doomed
+    # close attempt never fires an LLM call.
+    if ticket_type == "session_log":
+        return None
+    from rebar._commands import gates
+
+    # Shared resolution + fail-OPEN-on-unreadable-config posture (see _commands/gates.py).
+    # The confirmed fail-CLOSED behavior still applies when the gate is readable-ON but the
+    # LLM is unavailable (below).
+    if not gates.gate_enabled(
+        cfg_root,
+        "require_completion_verification_for_close",
+        ticket_id=ticket_id,
+        gate_label="the completion-verification close gate",
+        extra=" (other close gates still apply)",
+    ):
+        return None
+    if force_close:
+        return None  # close, but withhold the signed confirmation (no verify, no sign)
+
+    # Cheap precondition BEFORE the billable LLM call: a bug close needs a valid --reason
+    # (transition_core would reject it anyway). Shared predicate, so it can't drift.
+    if ticket_type == "bug" and not txn.bug_close_reason_ok(reason):
+        raise CommandError(
+            'Error: closing a bug requires --reason starting with "Fixed:" or '
+            '"Escalated to user:" (checked before running completion verification).',
+            returncode=1,
+        )
+
+    try:
+        from rebar import llm  # LAZY — preserves the optionality contract
+
+        # graph=False: the close gate verifies THIS ticket's OWN completion criteria, NOT its
+        # whole descendant subtree. Children are separate tickets gated on their own close; the
+        # agent reads the actual code regardless of whether child ticket TEXT is inlined, so
+        # graph=True would only bloat the context and make an epic close re-verify the entire
+        # feature in one run (impractical — it blows the step budget). The standalone
+        # `rebar verify-completion <id> --graph` remains available for a deep human review.
+        # source="attested", ref="HEAD" (epic raze-vet-ditch S4): the close gate verifies an
+        # IMMUTABLE snapshot of the committed tree being closed (HEAD), not the live mutable
+        # checkout — the fix for the motivating wrong-branch false-negative (the verdict is
+        # reproducible + branch-independent) AND it makes the verdict SIGNABLE so the close signs
+        # a `verified-at-sha` attestation (the child-closure gate trusts only children closed
+        # with a certified signature). HEAD resolves offline (no origin needed) and is "the state
+        # about to be pushed" for the single-dev flow. `source=local` (opt-in) is the read-only
+        # verify-before-push back-out that never signs.
+        # fetch=False: ref="HEAD" always resolves from the LOCAL object DB, so there is no
+        # reason to hit the network — and fetching the real origin on every close would add
+        # latency and a failure surface (a slow/unreachable remote) to a purely local verify.
+        result = llm.verify_completion(
+            ticket_id, graph=False, source="attested", ref="HEAD", fetch=False, repo_root=repo_root
+        )
+    except Exception as exc:  # noqa: BLE001 — missing extra/key OR any verifier failure -> fail-closed (re-raise CommandError)
+        raise CommandError(
+            f"Error: cannot close {ticket_id}: completion verification could not run ({exc}). "
+            "The completion-verification gate is enabled "
+            "(verify.require_completion_verification_for_close); install the 'agents' extra and "
+            'set a model API key, or override with --force-close="<reason>".',
+            returncode=1,
+        ) from None
+
+    if str(result.get("verdict", "")).upper() != "PASS":
+        items = result.get("findings", []) or []
+        lines = [
+            f"  - {(f.get('criterion') or f.get('dimension') or '?')}: {f.get('detail', '')}"
+            for f in items[:20]
+        ]
+        raise CommandError(
+            f"Error: completion verification FAILED for {ticket_id} — {len(items)} unmet "
+            "criteria; not closing.\n"
+            + "\n".join(lines)
+            + '\n  Address the criteria above, or override with --force-close="<reason>" '
+            "(closes without a completion signature).",
+            returncode=1,
+        )
+    # local source (opt-in back-out) verified + passed but is NEVER signed (epic
+    # raze-vet-ditch S4: an unattested run produces no signature). Only an EXPLICIT local
+    # verdict suppresses signing; the default close path is attested and signs (a verdict with
+    # no source — e.g. a legacy caller — keeps the prior sign-on-PASS behavior). A local close
+    # yields a closed-without-signature ticket (the documented "not attested" signal).
+    if result.get("source") == "local":
+        return None
+    # A closed-but-uncertified (force-closed) descendant WITHHOLDS certification: the parent's own
+    # criteria PASSED (it may close), but certification propagates — an unattested descendant leaves
+    # the subtree unattested, so we close WITHOUT signing (the same unsigned-close path as
+    # --force-close). The closed-without-signature ticket is the durable "not fully certified"
+    # signal; re-close the uncertified descendant through the gate to certify, then re-close here.
+    if result.get("certifiable") is False:
+        return None
+    return _verdict_manifest(result, ticket_id, repo_root)
+
+
+def _verdict_manifest(result: dict, ticket_id: str, repo_root=None) -> list[str]:
+    """Deterministic manifest (non-empty strings) of the verified PASS verdict, for signing.
+
+    The signature binds ``(ticket_id, manifest)``; the key fingerprint + head_sha on the record
+    provide attribution + freshness. Findings are failures-only, so a PASS has no per-criterion
+    list to itemize — the minimal core IS the attestation. Deterministic (no timestamps) so
+    re-signing the same verified state is reproducible.
+
+    On an attested verdict the manifest carries a ``verified-at-sha:<sha>`` step (epic
+    raze-vet-ditch S4) binding WHICH immutable commit was verified into the signed bytes —
+    via the manifest channel, so no ``_canonical_payload``/``PAYLOAD_VERSION`` change and no
+    prior signature is invalidated.
+
+    It also records the ticket's ``material: <fingerprint>`` (epic dark-acme-lumen) — the SAME
+    fingerprint plan-review signs (description/AC/file_impact/children) — so completion
+    validity-on-read can detect a material edit made after this verdict was signed, symmetric
+    with the plan-review claim gate. Omitted if the fingerprint can't be computed (then the
+    material check is simply skipped on read)."""
+    from rebar import signing as _signing
+
+    manifest = [
+        "completion-verifier: PASS",
+        f"ticket: {ticket_id}",
+        f"model: {result.get('model') or 'n/a'}",
+        f"runner: {result.get('runner') or 'n/a'}",
+    ]
+    try:
+        from rebar.llm.plan_review.attest import current_material_fingerprint
+
+        material = current_material_fingerprint(ticket_id, repo_root=repo_root)
+    except Exception:  # noqa: BLE001 — fingerprint is best-effort; absence just skips the material check on read
+        material = None
+    if material:
+        manifest.append(f"material: {material}")
+    sha = result.get("verified_at_sha")
+    if sha:
+        manifest.append(_signing.verified_at_sha_step(sha))
+    return manifest
+
+
 def transition_compute(
     ticket_id: str,
     current_status: str,
@@ -175,6 +333,7 @@ def transition_compute(
     *,
     reason: str = "",
     force: bool = False,
+    verdict_hash: str = "",
     force_close: str = "",
     repo_root=None,
     cascade: bool = True,
@@ -263,90 +422,176 @@ def transition_compute(
         force_reason = (reason or "(no reason given)") if force else ""
         gates.plan_review_precheck(ticket_id, repo_root_str, repo_root, force_reason=force_reason)
 
-    # Parent-first cascade (open -> in_progress only): if this ticket has an OPEN
-    # parent, transition it first (recursively up the chain) so a child is never
-    # moved to in_progress while its parent is still open. See _cascade_open_parent.
-    _cascade_open_parent(
+    # Parent-first cascade (open -> in_progress only): if this ticket has an OPEN parent,
+    # transition the parent first (recursively up the chain) so a child is never moved to
+    # in_progress while its parent is still open. If the parent transition fails, the child
+    # is NOT transitioned and the error names the parent. _cascade_seen breaks any malformed
+    # parent cycle. (Keyed on `open` only — the cascade pulls an OPEN parent into progress;
+    # a blocked-ticket resume has no such parent semantics.)
+    if cascade and current_status == "open" and target_status == "in_progress":
+        seen = _cascade_seen or frozenset()
+        parent_id = _resolve_open_parent(tracker, ticket_id)
+        if parent_id is not None and parent_id != ticket_id and parent_id not in seen:
+            try:
+                transition_compute(
+                    parent_id,
+                    "open",
+                    "in_progress",
+                    reason=reason,
+                    force=force,
+                    repo_root=repo_root,
+                    _cascade_seen=seen | {ticket_id},
+                )
+            except CommandError as exc:
+                msg = (
+                    f"Error: cannot move {ticket_id} to in_progress: transitioning its "
+                    f"parent {parent_id} to in_progress failed first, so the child was not "
+                    f"transitioned.\n  Parent error: {exc.message}"
+                )
+                # Preserve the concurrency identity: a parent that raced surfaces as
+                # exit-10 / ConcurrencyError at the leaf too. ConcurrencyMismatch
+                # hardcodes returncode=10.
+                if isinstance(exc, ConcurrencyMismatch):
+                    raise ConcurrencyMismatch(msg) from None
+                raise CommandError(msg, returncode=exc.returncode) from None
+
+    # Open-children guard + newly_unblocked (one batch pass), only on close.
+    newly_unblocked: list[str] = []
+    if target_status == "closed":
+        batch = batch_close_operations(ticket_ids=[ticket_id], tracker_dir=tracker)
+        open_children = batch["open_children"]
+        newly_unblocked = batch["newly_unblocked"]
+        if open_children:
+            count = len(open_children)
+            # The child-closure relationship is a STRUCTURAL INTEGRITY invariant (a parent is
+            # not complete while its children are open), NOT a quality gate — so it is enforced
+            # UNCONDITIONALLY: neither --force (which bypasses the plan-review gate) nor
+            # --force-close (which bypasses the signature/completion-verifier requirement) can
+            # close a parent over open children. Resolve/close the children first, or detach
+            # (re-home) them, then close the parent.
+            raise CommandError(
+                f"Error: cannot close ticket '{ticket_id}' while it has {count} unresolved "
+                "(non-closed) child ticket(s) — the child-closure invariant cannot be bypassed "
+                "(not with --force or --force-close). Close or resolve these children first, or "
+                "detach them (re-home), then close:\n" + "\n".join(open_children),
+                returncode=1,
+            )
+
+    # Completion-verification close gate (opt-in; runs OUTSIDE the write lock since an LLM
+    # call must not serialize all writes). Ordering is verify -> close -> sign: the precheck
+    # runs the verifier and blocks (fail-closed) on FAIL / unavailable-LLM; on PASS it returns
+    # the manifest to sign AFTER a confirmed close (so a failed/raced close never leaves an
+    # orphan "certified" signature on an unclosed ticket). force_close skips both.
+    verified_manifest = None
+    if target_status == "closed":
+        from rebar.reducer import reduce_ticket as _reduce
+
+        ticket_type = (_reduce(os.path.join(tracker, ticket_id)) or {}).get("ticket_type", "")
+        verified_manifest = _completion_precheck(
+            ticket_id, ticket_type, repo_root_str, repo_root, reason=reason, force_close=force_close
+        )
+
+    from rebar._commands import _seam
+
+    env_id = _seam.env_id(config.tracker_dir(repo_root))
+    author = _seam.author("Unknown")
+
+    # Locked write (exit 10 on optimistic-concurrency mismatch).
+    txn.transition_core(
+        tracker,
         ticket_id,
         current_status,
         target_status,
-        tracker,
-        reason=reason,
-        force=force,
-        repo_root=repo_root,
-        cascade=cascade,
-        cascade_seen=_cascade_seen,
+        env_id=env_id,
+        author=author,
+        close_reason=reason,
+        verdict_hash=verdict_hash,
+        force_close_reason=force_close,
     )
 
-    # Locked write + close-path tail: the open-children guard, the completion-
-    # verification precheck (ordered verify -> close -> sign), the locked write,
-    # post-close signing / force-close audit, and compact-on-close + scratch
-    # cleanup + best-effort push. Lives in the sibling module (module-size seam);
-    # see :func:`rebar._commands.transition_close.close_ticket`.
-    return close_ticket(
-        ticket_id,
-        current_status,
-        target_status,
-        tracker,
-        repo_root_str,
-        repo_root,
-        reason=reason,
-        force_close=force_close,
-    )
+    # PASS attestation: sign the verified verdict AFTER the close is confirmed. A crash in this
+    # (two-local-commit) window leaves closed-without-signature — the conservative direction
+    # (reads as "bypassed", never a false "validated"). Errors surface: we WANT a hard signal if
+    # the trustworthy record can't be written.
+    if target_status == "closed" and verified_manifest is not None:
+        from rebar import signing as _signing
 
+        _signing.sign_manifest(
+            ticket_id, verified_manifest, kind="completion-verifier", repo_root=repo_root
+        )
 
-def _cascade_open_parent(
-    ticket_id: str,
-    current_status: str,
-    target_status: str,
-    tracker: str,
-    *,
-    reason: str,
-    force: bool,
-    repo_root,
-    cascade: bool,
-    cascade_seen: frozenset[str] | None,
-) -> None:
-    """Parent-first cascade for an ``open -> in_progress`` transition: if ``ticket_id``
-    has an OPEN parent, transition the parent first (recursively up the chain, via
-    :func:`transition_compute`) so a child is never moved to ``in_progress`` while its
-    parent is still ``open``. If the parent transition fails, the child is NOT
-    transitioned and the raised error names the parent as the cause (preserving the
-    parent's exit code / concurrency identity — a raced parent surfaces as exit-10 /
-    ConcurrencyError at the leaf too). ``cascade_seen`` breaks any malformed parent
-    cycle.
+    # Reopen invalidation is NO LONGER a write-time mutation (epic dark-acme-lumen): attestation
+    # records are immutable, and a reopen is detected on READ via state["last_reopened_at"] +
+    # compute_validity (a completion/plan-review attestation signed before the reopen reads as
+    # not-valid). This replaces the former retire_attested_pin clear, and — unlike it — does not
+    # destroy the kind-keyed attestations a reopened ticket still carries.
 
-    A no-op unless ``cascade`` is set AND this is the ``open -> in_progress`` edge (the
-    cascade pulls an OPEN parent into progress; a blocked-ticket resume has no such
-    parent semantics). ``cascade=False`` (replay/import re-materializing a recorded
-    status verbatim) suppresses it. Mirrors :func:`claim_compute`'s cascade."""
-    if not (cascade and current_status == "open" and target_status == "in_progress"):
-        return
-    seen = cascade_seen or frozenset()
-    parent_id = _resolve_open_parent(tracker, ticket_id)
-    if parent_id is not None and parent_id != ticket_id and parent_id not in seen:
+    # Force-close audit comment (best-effort, silenced — matches bash || true).
+    if target_status == "closed" and force_close:
+        session = _resolve_session(tracker)
+        body = (
+            "FORCE_CLOSE: close gate(s) bypassed by user approval — no completion/signature "
+            f'attestation was signed. Reason: "{force_close}". Session: {session}.'
+        )
         try:
-            transition_compute(
-                parent_id,
-                "open",
-                "in_progress",
-                reason=reason,
-                force=force,
-                repo_root=repo_root,
-                _cascade_seen=seen | {ticket_id},
+            from rebar._commands import leaf
+
+            leaf.comment(ticket_id, body, repo_root=repo_root)
+        except Exception:  # noqa: BLE001 — best-effort force-close audit comment; broad-but-logged, close proceeds
+            logger.warning(
+                "could not write FORCE_CLOSE audit comment on %s; continuing",
+                ticket_id,
+                exc_info=True,
             )
-        except CommandError as exc:
-            msg = (
-                f"Error: cannot move {ticket_id} to in_progress: transitioning its "
-                f"parent {parent_id} to in_progress failed first, so the child was not "
-                f"transitioned.\n  Parent error: {exc.message}"
-            )
-            # Preserve the concurrency identity: a parent that raced surfaces as
-            # exit-10 / ConcurrencyError at the leaf too. ConcurrencyMismatch
-            # hardcodes returncode=10.
-            if isinstance(exc, ConcurrencyMismatch):
-                raise ConcurrencyMismatch(msg) from None
-            raise CommandError(msg, returncode=exc.returncode) from None
+
+    if target_status == "closed":
+        _compact_on_close(repo_root_str, ticket_id)
+        scratch.cleanup_for_ticket(repo_root_str, ticket_id)
+
+    # The STATUS (and compact-on-close SNAPSHOT) commits are now in the local
+    # tickets branch but unpushed — txn.transition_core commits inline and does not
+    # go through write_and_push. Trigger the same best-effort push so a trailing
+    # transition (the last write of a session) isn't stranded (bug prone-octet-cheek).
+    from rebar._store import push
+
+    push.push_after_commit(tracker)
+
+    return {
+        "ticket_id": ticket_id,
+        "from": current_status,
+        "to": target_status,
+        "newly_unblocked": newly_unblocked,
+        "noop": False,
+    }
+
+
+def _resolve_session(tracker: str) -> str:
+    """Resolve the event-provenance session id for the FORCE_CLOSE audit comment.
+
+    Precedence (ticket c1bf, decided on 83f2): the explicit, rebar-owned
+    ``REBAR_SESSION_ID`` wins, then the ambient (externally-set) ``SESSION_ID``,
+    then short git HEAD, then ``"unknown"``. This is an ADDITIVE "support both"
+    precedence, not a deprecating rename — ambient ``SESSION_ID`` stays permanently
+    valid (so setting only it is unchanged), hence NO deprecation warning here.
+    """
+    return (
+        os.environ.get("REBAR_SESSION_ID")
+        or os.environ.get("SESSION_ID")
+        or _short_head(tracker)
+        or "unknown"
+    )
+
+
+def _short_head(tracker: str) -> str:
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+    except Exception:  # noqa: BLE001 — short-HEAD is a session-id nicety; fall open to "" if git is unavailable
+        return ""
 
 
 def _unarchive(ticket_id: str, target_status: str, tracker: str, repo_root_str: str) -> int:
@@ -470,13 +715,14 @@ def transition_cli(argv: list[str], *, repo_root=None) -> int:
         return _unarchive(ticket_id, target_status, tracker, os.path.dirname(tracker))
 
     try:
-        reason, force, force_close = _parse_flags(flag_args)
+        reason, force, verdict_hash, force_close = _parse_flags(flag_args)
         result = transition_compute(
             ticket_id,
             current_status,
             target_status,
             reason=reason,
             force=force,
+            verdict_hash=verdict_hash,
             force_close=force_close,
             repo_root=repo_root,
         )

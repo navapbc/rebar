@@ -1,4 +1,4 @@
-"""The ONE write lock for the tickets store.
+"""The ONE write lock for the tickets store (Tier D, ``REBAR_WRITE_CORE``).
 
 Unifies the three historical lock acquisitions — bash ``_flock_stage_commit``
 (``ticket-lib.sh``), ``ticket_txn.py``, and ``event_append.write_lock`` — into a

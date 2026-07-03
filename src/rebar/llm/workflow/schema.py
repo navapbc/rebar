@@ -361,6 +361,12 @@ def step_kind(step: dict[str, Any]) -> str:
     return "agent" if "prompt" in step else "scripted"
 
 
+def is_control_step(step: dict[str, Any]) -> bool:
+    """True if ``step`` is a v2 control construct (branch/loop/map), i.e. it carries
+    a nested frame rather than dispatching a single scripted/agent action."""
+    return step_kind(step) in CONTROL_KINDS
+
+
 # ── Deterministic serialization ───────────────────────────────────────────────
 
 # A stable top-level key order for human-facing serialization, so re-emitting a

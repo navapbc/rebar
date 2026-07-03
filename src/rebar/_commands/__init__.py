@@ -61,6 +61,11 @@ _ARGV_REGISTRY: dict[str, Callable[[list[str]], int]] = {
 }
 
 
+def is_ported(command: str) -> bool:
+    """True when ``command`` has a Python Tier B implementation registered."""
+    return command in _REGISTRY or command in _ARGV_REGISTRY
+
+
 def main(argv: list[str]) -> int:
     """CLI entry for the bash dispatcher's Python leaf-write route.
 

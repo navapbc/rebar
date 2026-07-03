@@ -1,4 +1,4 @@
-"""Python port of ``ticket-next-batch.sh``.
+"""Python port of ``ticket-next-batch.sh`` (Tier C, ``REBAR_COMPUTE``).
 
 Deterministic next-batch selector: picks the next batch of unblocked tasks under
 an epic that can be worked in parallel without file-level conflicts. This is a

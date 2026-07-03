@@ -196,16 +196,12 @@ and need the `nava-rebar[agents]` extra + `ANTHROPIC_API_KEY`. Part of the optio
 > **Completion-verification close gate (optional).** When
 > `verify.require_completion_verification_for_close=true` (default off; **on for
 > this project**), closing a work ticket runs `verify_completion` first: a **FAIL**
-> verdict (or an unavailable LLM) **blocks** the close (fail-closed), and on a **PASS**
-> that is also `certifiable` the verdict is HMAC-**signed** onto the ticket (the
-> trustworthy attestation, only meaningful under the MCP server's environment key; CI
-> verifies it). A PASS with **`certifiable: false`** — a parent whose direct child is
-> closed but uncertified (e.g. force-closed) — still **closes**, judged on its own
-> criteria, but is **left unsigned**. `--force-close` closes without verifying or
-> signing. So a **closed-without-signature** ticket means "not certified" — the gate was
-> bypassed *or* a descendant is still uncertified; it no longer implies the ticket's own
-> validation failed (re-close the uncertified child to earn its signature). It is an
-> *alternative* to the signature gate (`require_signature_for_close`), not composed with it.
+> verdict (or an unavailable LLM) **blocks** the close (fail-closed), and on **PASS**
+> the verdict is HMAC-**signed** onto the ticket (the trustworthy attestation, only
+> meaningful under the MCP server's environment key; CI verifies it). `--force-close`
+> closes without verifying or signing — so a **closed-without-signature** ticket is the
+> durable signal that validation did not pass. It is an *alternative* to the signature
+> gate (`require_signature_for_close`), not composed with it.
 
 ## Quality gates
 

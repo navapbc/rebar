@@ -1,13 +1,13 @@
-"""Write-core concurrency gates (docs/bash-migration.md §6).
+"""Tier D write-core concurrency gates (docs/bash-migration.md §6).
 
-The headline gate is the **stiff-mop-lane** writer storm: N concurrent writers on
-ONE clone, all taking the unified fcntl + mkdir lock. The motivating regression (now
-historical — the bash write core has been retired) was a mixed-impl storm on a
-flock(1)-less host: a bash-mkdir writer and a python-fcntl writer did NOT mutually
-exclude, so their concurrent ``git add``/``commit`` could collide on ``index.lock``
-and lose events. With the unified lock every writer takes BOTH mechanisms, so all N
-events must land and ``fsck`` stays clean. Only the Python core remains, so these
-tests no longer select an impl (the former ``REBAR_WRITE_CORE`` switch is gone).
+The headline gate is the **stiff-mop-lane** mixed-impl writer storm: N concurrent
+writers on ONE clone, split across the bash leaf-write forced onto the mkdir lock
+(``REBAR_WRITE_CORE=bash REBAR_FORCE_MKDIR_LOCK=1``) and the Python core
+(``REBAR_WRITE_CORE=python`` — fcntl + mkdir dual leg). Before the dual leg, a
+bash-mkdir writer and a python-fcntl writer did NOT mutually exclude on a
+flock(1)-less host, so their concurrent ``git add``/``commit`` could collide on
+``index.lock`` and lose events. With the unified lock every writer takes BOTH
+mechanisms, so all N events must land and ``fsck`` stays clean.
 
 These drive the live editable ``rebar`` (the published-vs-working-tree note: the
 suite is skipped unless an on-PATH ``rebar`` resolves the working tree's
@@ -32,8 +32,8 @@ def _clean_env(**extra: str) -> dict:
     """A subprocess env with ALL ambient ``REBAR_*`` scrubbed.
 
     These tests drive the CLI through git-backed stores in ``tmp_path``; an
-    inherited ``REBAR_ROOT``/``REBAR_FORCE_MKDIR_LOCK``/``REBAR_PUSH``/… from the
-    caller's shell would silently steer the writers at a different store or lock mode and
+    inherited ``REBAR_ROOT``/``REBAR_WRITE_CORE``/``REBAR_PUSH``/… from the caller's
+    shell would silently steer the writers at a different store or lock mode and
     make the storm assertions meaningless. We start from a REBAR-free environment
     and add back only the knobs each test sets explicitly (plus REBAR_NO_SYNC)."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("REBAR_")}
@@ -160,14 +160,14 @@ def test_concurrent_writer_storm_no_loss(clone: Path):
 def test_claim_storm_one_winner(clone: Path):
     """A concurrent claim storm on one open ticket (python core) yields exactly ONE
     winner and (N-1) exit-10 losers — optimistic concurrency under the unified lock."""
-    tid = _create(clone, "task", "claim target", {})
+    tid = _create(clone, "task", "claim target", {"REBAR_WRITE_CORE": "python"})
     n = 10
 
     def claimer(i: int):
         return subprocess.run(
             [_REBAR, "claim", tid, "--assignee", f"agent-{i}"],
             cwd=clone,
-            env=_clean_env(),
+            env=_clean_env(REBAR_WRITE_CORE="python"),
             capture_output=True,
             text=True,
         )
