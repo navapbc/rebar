@@ -474,6 +474,31 @@ the short version for agents:
    re-push (each new patchset re-runs both votes). **Submit** once both are green → Gerrit
    merges and **replicates the new `main` to GitHub** (where branch CI runs on the push).
 
+> **Multi-story features → a feature branch (not one giant change).** Steps 1–4 above are
+> the path for **one** change. When you're driving a **multi-story feature** — especially
+> several agents in parallel — don't stack it into one change or a fragile chain: use a
+> **server-side feature branch** (epic 88ab, ADR-0025). Each story is reviewed *into*
+> `refs/heads/feature/<name>` (push to `git push gerrit HEAD:refs/for/refs/heads/feature/<name>`)
+> and passes both gates there; then a **single `--no-ff` merge change** lands the whole
+> branch into `main` (`git merge --no-ff gerrit/feature/<name>` → `git push gerrit
+> HEAD:refs/for/main`), gated identically and submitted atomically. The full recipe —
+> catch-up merges, conflict/abandon handling, the driver-group prerequisite — is in
+> **[CONTRIBUTING.md](CONTRIBUTING.md) §4**.
+>
+> - **When to use it:** genuinely multi-story / multi-agent work. **A single small change
+>   → just push one change to `refs/for/main`** (steps 1–4) — a feature branch is overhead
+>   you don't need for a one-shot fix.
+> - **Who can create it:** branch creation and the merge-commit push are restricted to the
+>   `feature-branch-drivers` Gerrit group; ordinary story pushes into the branch are not.
+>   If you're not a driver, a driver creates the branch and lands the merge-back.
+> - **Re-merge cost (ADR-0025):** when `main` advances under an open merge change,
+>   re-merging carries `LLM-Review` but **re-runs `Verified`** (new merge tree). Changing
+>   the feature tip is REWORK and wipes **both** votes.
+> - **Fresh-worktree hook note:** a merge commit needs a `Change-Id`, and a fresh worktree
+>   does **not** carry the `commit-msg` hook — install it before the merge-back
+>   (`curl -sLo .git/hooks/commit-msg https://rebar.solutions.navateam.com/tools/hooks/commit-msg && chmod +x .git/hooks/commit-msg`),
+>   and re-stamp an already-made merge commit with `GIT_EDITOR=/bin/true git commit --amend`.
+
 (This governs *code*. rebar's own **ticket events on the `tickets` branch** still
 auto-commit/auto-push as described above — that is unchanged and does NOT go through
 Gerrit.)
