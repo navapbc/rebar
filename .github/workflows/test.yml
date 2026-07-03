@@ -15,7 +15,10 @@ name: test
 
 on:
   push:
-    branches: ["**"]  # run on every branch, not just main (pre-PR CI feedback)
+    # every branch EXCEPT the S3-replicated feature/** (those fan out redundant mirror CI
+    # that casts no Verified vote — the gerrit-verify workflow_dispatch is the sole Verified
+    # source; see fern-belief-gap). Nested depths matched by **.
+    branches-ignore: ["feature/**"]
   pull_request: {}
   workflow_dispatch: {}
 
