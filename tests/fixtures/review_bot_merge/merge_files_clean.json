@@ -1,0 +1,18 @@
+{
+  "/COMMIT_MSG": {
+    "status": "A",
+    "old_sha": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+    "new_sha": "2485e7539b2c97a21e718525bf51d56d1559a0ee",
+    "lines_inserted": 10,
+    "size_delta": 411,
+    "size": 411
+  },
+  "/MERGE_LIST": {
+    "status": "A",
+    "old_sha": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+    "new_sha": "2485e7539b2c97a21e718525bf51d56d1559a0ee",
+    "lines_inserted": 3,
+    "size_delta": 67,
+    "size": 67
+  }
+}

@@ -62,8 +62,17 @@ _KERNEL_TO_COMMON_SEVERITY = {
 }
 
 
-def _message_tag(reason: str, *, label: str = "LLM-Review") -> str:
-    return f"[{label}: {_TAG_SUFFIXES[reason]}]"
+def _message_tag(
+    reason: str, *, label: str = "LLM-Review", merge_commits: int | None = None
+) -> str:
+    """The first-line tag, e.g. ``[LLM-Review: PASS]``. For a merge change (``merge_commits``
+    set) the merge-change variant is appended INSIDE the tag —
+    ``[LLM-Review: PASS (merge-change, 3 integrated commits)]`` — reusing the strict
+    ``_TAG_SUFFIXES[reason]`` lookup so the non-merge tag vocabulary is unchanged."""
+    suffix = _TAG_SUFFIXES[reason]
+    if merge_commits is not None:
+        suffix += f" (merge-change, {merge_commits} integrated commit(s))"
+    return f"[{label}: {suffix}]"
 
 
 def _coverage_gap_reason(coverage: dict[str, Any]) -> str | None:
@@ -135,10 +144,13 @@ def _summarize(reason: str, verdict: dict[str, Any]) -> str:
     )
 
 
-def _block(reason: str, verdict: dict[str, Any]) -> dict[str, Any]:
+def _block(
+    reason: str, verdict: dict[str, Any], *, merge_commits: int | None = None
+) -> dict[str, Any]:
+    tag = _message_tag(reason, merge_commits=merge_commits)
     return {
         "decision": "BLOCK",
-        "message": f"{_message_tag(reason)}\n{_summarize(reason, verdict)}",
+        "message": f"{tag}\n{_summarize(reason, verdict)}",
         "findings": _translate_findings(verdict),
         "coverage_gap": reason != "finding",
     }
@@ -150,6 +162,7 @@ def code_review_decision(
     ref: str,
     *,
     config: ReceiverConfig | None = None,
+    merge_commits: int | None = None,
 ) -> dict[str, Any]:
     """Review ``diff_text`` (at the cloned ``repo_root``) via the four-pass gate and return
     ``{decision, message, findings, coverage_gap}``. PASS only for a genuine full-coverage PASS;
@@ -164,7 +177,7 @@ def code_review_decision(
         from rebar.llm.workflow.gate_dispatch import produce_code_review_verdict
     except Exception as exc:  # noqa: BLE001 — a missing/broken extra is a fail-closed BLOCK
         logger.warning("adapter: gate import failed: %s", exc)
-        return _block("review-error", {})
+        return _block("review-error", {}, merge_commits=merge_commits)
 
     try:
         verdict = produce_code_review_verdict(
@@ -175,17 +188,18 @@ def code_review_decision(
         )
     except Exception as exc:  # noqa: BLE001 — ANY review failure is fail-closed
         logger.warning("adapter: produce_code_review_verdict raised: %s", exc)
-        return _block("review-error", {})
+        return _block("review-error", {}, merge_commits=merge_commits)
 
     if not isinstance(verdict, dict) or "verdict" not in verdict:
-        return _block("review-error", {})
+        return _block("review-error", {}, merge_commits=merge_commits)
 
     gap = _coverage_gap_reason(verdict.get("coverage") or {})
     if verdict.get("verdict") == "PASS" and gap is None:
+        tag = _message_tag("PASS", merge_commits=merge_commits)
         return {
             "decision": "PASS",
-            "message": f"{_message_tag('PASS')}\n{_summarize('PASS', verdict)}",
+            "message": f"{tag}\n{_summarize('PASS', verdict)}",
             "findings": _translate_findings(verdict),
             "coverage_gap": False,
         }
-    return _block(gap if gap is not None else "finding", verdict)
+    return _block(gap if gap is not None else "finding", verdict, merge_commits=merge_commits)

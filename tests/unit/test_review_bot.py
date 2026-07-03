@@ -45,14 +45,37 @@ def _event(change_id="rebar~main~Iabc", revision="rev1", project="rebar") -> dic
 
 
 class FakeGerrit:
-    """Records vote/clone/diff/has-vote calls; no network."""
+    """Records vote/clone/diff/has-vote calls; no network. ``parents=1`` (default) is a
+    NON-merge revision (the get_patch path); ``parents>=2`` routes the voter through the
+    merge-change path (get_merge_files / get_file_diff / get_mergelist), epic 88ab / S2."""
 
-    def __init__(self, *, has_vote=False, post_status=200, raise_on_post=False):
+    # mirror the real client's magic-pseudo-path set so merge tests can reference it
+    MAGIC_PATHS = frozenset({"/COMMIT_MSG", "/MERGE_LIST"})
+
+    def __init__(
+        self,
+        *,
+        has_vote=False,
+        post_status=200,
+        raise_on_post=False,
+        parents=1,
+        merge_files=None,
+        file_diffs=None,
+        mergelist=None,
+        raise_on=None,
+    ):
         self._has_vote = has_vote
         self._post_status = post_status
         self._raise_on_post = raise_on_post
+        self._parents = parents
+        self._merge_files = merge_files or {}
+        self._file_diffs = file_diffs or {}
+        self._mergelist = mergelist or []
+        # name of a merge-path method that should raise GerritError (fail-closed tests)
+        self._raise_on = raise_on
         self.votes: list[tuple] = []
         self.has_vote_calls = 0
+        self.get_patch_calls = 0
 
     def has_llm_review_vote(self, change_id, revision="current"):
         self.has_vote_calls += 1
@@ -62,7 +85,29 @@ class FakeGerrit:
         return dest
 
     def get_patch(self, change_id, revision="current"):
+        self.get_patch_calls += 1
         return "diff --git a/x.py b/x.py\n+pass\n"
+
+    # ── merge-change path (S2) ──────────────────────────────────────────────
+    def get_commit(self, change_id, revision="current"):
+        if self._raise_on == "get_commit":
+            raise GerritError("commit fetch failed", status=500)
+        return {"parents": [{"commit": f"p{i}"} for i in range(self._parents)]}
+
+    def get_merge_files(self, change_id, revision="current"):
+        if self._raise_on == "get_merge_files":
+            raise GerritError("files fetch failed", status=500)
+        return dict(self._merge_files)
+
+    def get_file_diff(self, change_id, file_path, revision="current"):
+        if self._raise_on == "get_file_diff":
+            raise GerritError("diff fetch failed", status=500)
+        return self._file_diffs.get(file_path, {"content": []})
+
+    def get_mergelist(self, change_id, revision="current"):
+        if self._raise_on == "get_mergelist":
+            raise GerritError("mergelist fetch failed", status=500)
+        return list(self._mergelist)
 
     def post_vote(self, change_id, revision, value, message, robot_comments=None):
         if self._raise_on_post:
@@ -594,3 +639,267 @@ def test_get_patch_rejects_non_decodable_body(tmp_path, monkeypatch):
     monkeypatch.setattr(gc, "_request", lambda *a, **k: (200, "!!! not base64 !!!"))
     with pytest.raises(GerritError):
         gc.get_patch("rebar~main~Iabc", "rev1")
+
+
+# ── merge-change review path (epic 88ab / S2) ────────────────────────────────
+import json as _json  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+
+from rebar.llm.code_review.assemble import (  # noqa: E402
+    MERGELIST_MAX_COMMITS,
+    assemble_merge_change_context,
+)
+
+_FIXTURES = _Path(__file__).resolve().parents[1] / "fixtures" / "review_bot_merge"
+
+
+def _diff_info(added, removed=()):
+    """Build a Gerrit DiffInfo with one changed segment (the shape get_file_diff returns)."""
+    seg = {}
+    if removed:
+        seg["a"] = list(removed)
+    if added:
+        seg["b"] = list(added)
+    return {"content": [{"ab": ["ctx1", "ctx2"]}, seg]}
+
+
+def _merge_event(change_id="rebar~main~Imerge", revision="mrev", project="rebar"):
+    return {
+        "type": "patchset-created",
+        "change": {"id": change_id, "number": 77, "project": project},
+        "patchSet": {"number": 1, "revision": revision, "ref": "refs/changes/77/77/1"},
+    }
+
+
+def test_merge_files_fixture_proves_auto_merge_default(tmp_path, monkeypatch):
+    """AC#1 (riskiest assumption): the LIVE-captured Gerrit 3.14.1 fixture proves that
+    GET .../revisions/{rev}/files with NO base/parent param returns the AUTO-MERGE-BASE file
+    map for a merge commit (it does NOT 409 like /patch). Per Gerrit REST
+    rest-api-changes.html#list-files: for a merge with neither base nor parent set, the file
+    list is computed against the auto-merge. A clean merge yields only the magic pseudo-paths.
+    The client parses the fixture body identically to a live response."""
+    body = (_FIXTURES / "merge_files_clean.json").read_text(encoding="utf-8")
+    gc = _client(tmp_path)
+    monkeypatch.setattr(gc, "_request", lambda *a, **k: (200, body))
+    files = gc.get_merge_files("rebar~main~Imerge", "mrev")
+    # magic pseudo-paths present; a clean merge has NO real conflict file
+    assert set(files) == {"/COMMIT_MSG", "/MERGE_LIST"}
+    assert all(p in gc.MAGIC_PATHS for p in files)
+    # commit fixture has 2 parents => merge detection
+    commit = _json.loads((_FIXTURES / "merge_commit_clean.json").read_text())
+    assert len(commit["parents"]) >= 2
+
+
+def test_assemble_merge_context_format_and_real_files():
+    """assemble_merge_change_context: ## Merge context (integrated subjects) + ## Auto-merge
+    diff (real files only, magic paths excluded)."""
+    merge_files = {"/COMMIT_MSG": {}, "/MERGE_LIST": {}, "src/x.py": {"status": "M"}}
+    file_diffs = {"src/x.py": "-old\n+new"}
+    mergelist = [{"commit": "a1b2c3d4e5f6", "subject": "feat: story one"}]
+    out = assemble_merge_change_context(merge_files, file_diffs, mergelist)
+    assert "## Merge context (1 integrated commit(s))" in out
+    assert "a1b2c3d4e5 feat: story one" in out
+    assert "## Auto-merge diff" in out
+    assert "### src/x.py" in out and "+new" in out
+    # magic pseudo-paths never appear as reviewed files
+    assert "/COMMIT_MSG" not in out and "/MERGE_LIST" not in out
+
+
+def test_assemble_merge_context_empty_diff_clean_merge():
+    """A clean merge (only magic paths, no real file diffs) → explicit empty-delta notice;
+    review proceeds on the mergelist context alone."""
+    merge_files = {"/COMMIT_MSG": {}, "/MERGE_LIST": {}}
+    out = assemble_merge_change_context(merge_files, {}, [{"commit": "deadbeef00", "subject": "s"}])
+    assert "## Merge context (1 integrated commit(s))" in out
+    assert "empty" in out.lower() and "clean merge" in out.lower()
+
+
+def test_assemble_merge_context_mergelist_count_cap():
+    """MERGELIST_MAX_COMMITS bounds the integrated-commit list with a truncation notice."""
+    big = [
+        {"commit": f"{i:040x}", "subject": f"commit {i}"} for i in range(MERGELIST_MAX_COMMITS + 5)
+    ]
+    out = assemble_merge_change_context({}, {}, big)
+    assert f"## Merge context ({MERGELIST_MAX_COMMITS + 5} integrated commit(s))" in out
+    assert "5 more integrated commit(s) omitted" in out
+    # only MERGELIST_MAX_COMMITS subject lines rendered
+    assert out.count("- ") <= MERGELIST_MAX_COMMITS + 1  # +1 tolerance for notice bullet shapes
+
+
+def test_assemble_merge_context_diff_truncated_last_under_combined_cap():
+    """The combined string is bounded by diff_char_cap: the merge context is laid down first,
+    the auto-merge diff is truncated last."""
+    merge_files = {"big.py": {"status": "M"}}
+    file_diffs = {"big.py": "+x" * 10000}
+    out = assemble_merge_change_context(
+        merge_files, file_diffs, [{"commit": "c0ffee", "subject": "s"}], diff_char_cap=500
+    )
+    assert len(out) <= 700  # cap + notice slack
+    assert "truncated" in out
+    assert "## Merge context" in out  # context survives (laid down first)
+
+
+def test_voter_merge_change_casts_vote_with_merge_tag(monkeypatch, tmp_path):
+    """A merge revision (parents>=2) is reviewed on its auto-merge delta and the robot
+    comment carries the merge-change tag variant with the integrated-commit count."""
+    _patch_review(monkeypatch, [])  # PASS
+    g = FakeGerrit(
+        parents=2,
+        merge_files={"/COMMIT_MSG": {}, "/MERGE_LIST": {}, "src/x.py": {"status": "M"}},
+        file_diffs={"src/x.py": _diff_info(added=["new line"])},
+        mergelist=[
+            {"commit": "aaa111bbb222", "subject": "s1"},
+            {"commit": "ccc333", "subject": "s2"},
+        ],
+    )
+    store = DedupStore(str(tmp_path / "v.db"))
+    res = asyncio.run(
+        voter.review_and_vote(_merge_event(), config=_cfg(tmp_path), gerrit=g, dedup=store)
+    )
+    assert res["status"] == "voted" and res["vote_value"] == 1
+    msg = g.votes[0][3]
+    assert "(merge-change, 2 integrated commit(s))" in msg
+    # NEVER used the bare /patch on a merge (would 409)
+    assert g.get_patch_calls == 0
+
+
+def test_voter_non_merge_uses_get_patch_no_merge_tag(monkeypatch, tmp_path):
+    """A normal (1-parent) change still uses get_patch and carries NO merge-change tag."""
+    _patch_review(monkeypatch, [])
+    g = FakeGerrit(parents=1)
+    res = asyncio.run(
+        voter.review_and_vote(
+            _event(), config=_cfg(tmp_path), gerrit=g, dedup=DedupStore(str(tmp_path / "v.db"))
+        )
+    )
+    assert res["status"] == "voted"
+    assert g.get_patch_calls == 1
+    assert "merge-change" not in g.votes[0][3]
+
+
+def test_voter_merge_empty_auto_diff_still_reviews(monkeypatch, tmp_path):
+    """A CLEAN merge (only magic paths, empty auto-merge delta) is still reviewed (on the
+    mergelist context) and votes — it does not error or skip."""
+    _patch_review(monkeypatch, [])
+    g = FakeGerrit(
+        parents=2,
+        merge_files={"/COMMIT_MSG": {}, "/MERGE_LIST": {}},
+        mergelist=[{"commit": "d00d", "subject": "s"}],
+    )
+    res = asyncio.run(
+        voter.review_and_vote(
+            _merge_event(),
+            config=_cfg(tmp_path),
+            gerrit=g,
+            dedup=DedupStore(str(tmp_path / "v.db")),
+        )
+    )
+    assert res["status"] == "voted"
+    assert g.get_patch_calls == 0
+    assert "(merge-change, 1 integrated commit(s))" in g.votes[0][3]
+
+
+@pytest.mark.parametrize(
+    "raise_on", ["get_commit", "get_merge_files", "get_mergelist", "get_file_diff"]
+)
+def test_voter_merge_path_rest_failure_votes_block_coverage_gap(monkeypatch, tmp_path, raise_on):
+    """EVERY merge-path REST failure (commit/files/mergelist/diff) fails closed as a -1
+    COVERAGE-GAP vote (the merge change is BLOCKED and visibly flagged as an infra veto) —
+    never a MAX. The bare /patch is NEVER used on the merge (409 guard holds)."""
+    _patch_review(monkeypatch, [])
+    g = FakeGerrit(
+        parents=2,
+        merge_files={"src/x.py": {"status": "M"}},
+        file_diffs={"src/x.py": _diff_info(added=["x"])},
+        mergelist=[{"commit": "abc", "subject": "s"}],
+        raise_on=raise_on,
+    )
+    store = DedupStore(str(tmp_path / "v.db"))
+    res = asyncio.run(
+        voter.review_and_vote(_merge_event(), config=_cfg(tmp_path), gerrit=g, dedup=store)
+    )
+    assert res["status"] == "voted"
+    assert res["vote_value"] == -1  # block value, not MAX
+    assert g.votes and g.votes[0][2] == -1
+    assert "coverage-gap" in g.votes[0][3]
+    assert g.get_patch_calls == 0  # 409 guard: never bare /patch on a merge
+
+
+def test_voter_merge_detection_via_backfill_path(monkeypatch, tmp_path):
+    """Merge detection lives INSIDE review_and_vote, so the reconciler-backfill path routes a
+    merge change through the SAME merge review (reconcile.py needs no change)."""
+    _patch_review(monkeypatch, [])
+    cfg = _cfg(tmp_path)
+    store = DedupStore(cfg.dedup_db_path)
+    g = ReconcileGerrit(
+        events=[_events_log_event("rebar~main~Imerge", "mrev", number=77, created_on=3000)],
+        parents=2,
+        merge_files={"src/x.py": {"status": "M"}},
+        file_diffs={"src/x.py": _diff_info(added=["merged"])},
+        mergelist=[{"commit": "aaa", "subject": "s1"}],
+    )
+    res = asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+    assert res == {"scanned": 1, "reviewed": 1}
+    assert g.get_patch_calls == 0  # backfilled merge used the merge path, not /patch
+    assert "(merge-change, 1 integrated commit(s))" in g.votes[0][3]
+
+
+def test_voter_merge_detection_via_rerun_force_path(monkeypatch, tmp_path):
+    """The /rerun (force=True) path also routes a merge through the merge review."""
+    _patch_review(monkeypatch, [])
+    g = FakeGerrit(
+        parents=2,
+        merge_files={"src/x.py": {"status": "M"}},
+        file_diffs={"src/x.py": _diff_info(added=["y"])},
+        mergelist=[{"commit": "b", "subject": "s"}],
+    )
+    res = asyncio.run(
+        voter.review_and_vote(
+            _merge_event(),
+            config=_cfg(tmp_path),
+            gerrit=g,
+            dedup=DedupStore(str(tmp_path / "v.db")),
+            force=True,
+        )
+    )
+    assert res["status"] == "voted"
+    assert g.get_patch_calls == 0
+    assert "merge-change" in g.votes[0][3]
+
+
+def test_render_diff_info_flattens_segments():
+    """_render_diff_info turns a Gerrit DiffInfo into +/- unified-ish text."""
+    from rebar.review_bot.voter import _render_diff_info
+
+    text = _render_diff_info(_diff_info(added=["added"], removed=["gone"]))
+    assert "+added" in text and "-gone" in text and "unchanged line(s)" in text
+
+
+def test_voter_emits_merge_debug_logs(monkeypatch, tmp_path, caplog):
+    """The merge path emits debuggable structured logs: merge_detection (parent_count +
+    is_merge for EVERY change), merge_change_review (context stats), and voter_voted carries
+    merge/parent_count. These are the fields that make a future merge-review issue diagnosable
+    from logs alone (the S2 flattening incident had no such signal)."""
+    import logging as _logging
+
+    _patch_review(monkeypatch, [])
+    g = FakeGerrit(
+        parents=2,
+        merge_files={"/COMMIT_MSG": {}, "src/x.py": {"status": "M"}},
+        file_diffs={"src/x.py": _diff_info(added=["n"])},
+        mergelist=[{"commit": "abc123", "subject": "s"}],
+    )
+    with caplog.at_level(_logging.INFO, logger="rebar.review_bot.voter"):
+        asyncio.run(
+            voter.review_and_vote(
+                _merge_event(),
+                config=_cfg(tmp_path),
+                gerrit=g,
+                dedup=DedupStore(str(tmp_path / "v.db")),
+            )
+        )
+    blob = "\n".join(r.message for r in caplog.records)
+    assert "merge_detection" in blob and '"parent_count": 2' in blob and '"is_merge": true' in blob
+    assert "merge_change_review" in blob and '"real_files": 1' in blob
+    assert '"auto_diff_empty": false' in blob and '"files_fetched": 1' in blob
+    assert "voter_voted" in blob and '"merge": true' in blob
