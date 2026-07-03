@@ -167,9 +167,14 @@ jobs:
       - name: Prompt-index drift gate
         shell: bash
         run: |
-          python -m rebar.llm.prompts regenerate-index
+          # The prompt library is moving rebar.llm.prompts -> rebar.llm.prompting.prompts
+          # (ticket toll-clock-tier). This gate runs from main's workflow against each
+          # change's tree, so invoke whichever module path that tree provides — keeping the
+          # gate green across the move in both directions.
+          python -m rebar.llm.prompting.prompts regenerate-index 2>/dev/null \
+            || python -m rebar.llm.prompts regenerate-index
           if ! git diff --exit-code -- src/rebar/llm/reviewers/index.json; then
-            echo "::error::reviewers/index.json is stale — run: python -m rebar.llm.prompts regenerate-index"
+            echo "::error::reviewers/index.json is stale — run: python -m rebar.llm.prompting.prompts regenerate-index"
             exit 1
           fi
 
