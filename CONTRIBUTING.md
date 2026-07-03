@@ -73,6 +73,18 @@ git commit -m "component: what changed and why"
 git log -1   # confirm a "Change-Id: I…" line is present in the footer
 ```
 
+**Every commit must reference a rebar ticket.** CI's `Verified` gate rejects a commit to
+`main` whose message does not reference a rebar ticket that resolves in the store — via a
+`rebar-ticket: <id>` trailer (preferred) or a leading `<id>:` subject line. `<id>` may be an
+alias, full id, short id, or Jira key. See
+[docs/commit-ticket-trailer.md](docs/commit-ticket-trailer.md).
+
+```bash
+git commit -m "component: what changed and why
+
+rebar-ticket: blank-guild-koi"
+```
+
 ### 2b. Push for review
 Push to the magic `refs/for/main` ref — this creates (or updates) a Gerrit **change**,
 it does **not** touch `main`:
