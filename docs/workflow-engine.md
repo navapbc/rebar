@@ -33,8 +33,10 @@ during the normal ticket lifecycle (see the project guide / `CLAUDE.md`):
   `review_plan`). A BLOCK verdict must be remediated and re-run; even a PASS asks you
   to triage advisory findings.
 - **Completion-verification gate** — closing a work ticket runs the completion
-  verifier; a FAIL (or an unavailable LLM) blocks the close, and a PASS is signed onto
-  the ticket as the attestation that its criteria are met.
+  verifier; a FAIL (or an unavailable LLM) blocks the close, and a PASS that is also
+  `certifiable` is signed onto the ticket as the attestation that its criteria are met
+  (a PASS with `certifiable: false` — a closed-but-uncertified descendant — still closes
+  but is left unsigned).
 
 You normally **do not author workflows** to use rebar. When you want to inspect or run
 one directly:
