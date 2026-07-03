@@ -1,0 +1,40 @@
+# gitleaks configuration for the rebar repo.
+#
+# Auto-discovered by gitleaks from the scan root (precedence rule #4: "<target>/.gitleaks.toml"),
+# so it is honored by the review-bot's fail-closed `secret-detection` detector, which invokes
+# `gitleaks detect --no-git --source <repo_root> ...` with NO `--config`/`--no-config` override
+# (see src/rebar/grounding/engine_b.py, _run_sarif). That detector scans the whole CHANGED FILE,
+# not just the changed lines — so a documented example value living anywhere in a file force-BLOCKs
+# every edit to that file. This config exists to fix exactly that false-positive class WITHOUT
+# weakening real-secret detection.
+#
+# It EXTENDS the built-in ruleset (every default gitleaks rule stays active) and adds one TARGETED
+# allowlist for documented, non-secret example VALUES. It deliberately does NOT exclude docs by
+# path/glob: a REAL secret committed in a doc must still block. Only the specific fake values below
+# are exempt, so a real leaked key (e.g. a genuine Langfuse `sk-lf-<random>`, an AWS key, a PAT)
+# still trips.
+
+title = "rebar gitleaks config"
+
+[extend]
+# Layer the allowlist below on top of gitleaks' full built-in ruleset (do not replace it).
+useDefault = true
+
+[[allowlists]]
+description = """
+Documented NON-SECRET example values. Scoped to specific fake shapes, never a docs path exclusion.
+(1) The deterministic Langfuse throwaway keys the local docker-compose stack initializes itself
+    with (docker-compose.langfuse.yml default `${...:-pk-lf-1234567890}`/`${...:-sk-lf-1234567890}`)
+    and that docs/llm-framework.md mirrors so the local-tracing recipe is copy-pasteable.
+(2) Obvious inline placeholders in docs, e.g. `sk-lf-<your-key>`, `sk-lf-EXAMPLE...`, `sk-lf-xxxx`.
+A real Langfuse secret key is `sk-lf-` + a random UUID-shaped body, which matches none of these — so
+genuine Langfuse-key leaks (and every other secret family) are still detected.
+"""
+# Test the allowlist regexes against the full matched substring of the triggering rule.
+regexTarget = "match"
+regexes = [
+  # (1) the exact deterministic docker-compose init throwaway values — nothing else.
+  '''(?:sk|pk)-lf-1234567890''',
+  # (2) obvious documentation placeholders immediately following the sk-lf-/pk-lf- prefix.
+  '''(?:sk|pk)-lf-(?:<[^>]*>|EXAMPLE[\w-]*|YOUR[\w-]*|your[\w-]*|x{3,})''',
+]
