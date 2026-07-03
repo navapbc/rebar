@@ -279,7 +279,8 @@ def has_llm_steps(doc: dict[str, Any]) -> bool:
 
     Resolves each step's kind via the canonical :func:`schema.step_kind` (so a ``prompt:``
     agent step with no explicit ``kind`` is still detected); also recurses into the v2
-    control constructs (branch/loop/map) so an agent nested inside one isn't missed."""
+    AND v3 control constructs (branch/loop/map) so an agent nested inside one isn't missed
+    (v3 arms are bare step arrays, so the flatten path scans list-valued items too)."""
     from rebar.llm.workflow import schema as _schema
 
     def _scan(steps: object) -> bool:
@@ -288,6 +289,14 @@ def has_llm_steps(doc: dict[str, Any]) -> bool:
         if not isinstance(steps, list):
             return False
         for s in steps:
+            if isinstance(s, list):
+                # A bare step-array arm (v3 `branch` then/else, `loop`/`map` body) surfaced by
+                # flattening a control-construct dict's values — scan it as a step list. Without
+                # this, LLM steps living ONLY inside a v3 branch arm (both shipped gates) are
+                # invisible and the REBAR_MCP_ALLOW_LLM fence is silently skipped (diss-ale-jet).
+                if _scan(s):
+                    return True
+                continue
             if not isinstance(s, dict):
                 continue
             kind: str | None

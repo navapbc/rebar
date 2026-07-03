@@ -89,9 +89,44 @@ _DET_DOC = {"name": "wf", "steps": [{"id": "s", "uses": "noop"}]}
 def test_has_llm_steps_detects_agent_and_nested(tmp_path):
     assert runs.has_llm_steps(_AGENT_DOC) is True
     assert runs.has_llm_steps(_DET_DOC) is False
-    # nested in a branch arm
+    # nested in a v2 branch arm ({then: {steps: [...]}})
     nested = {"steps": [{"id": "b", "branch": {"then": {"steps": [{"id": "x", "prompt": "p"}]}}}]}
     assert runs.has_llm_steps(nested) is True
+
+
+def test_has_llm_steps_detects_v3_branch_arm_and_shipped_gates():
+    """Regression (diss-ale-jet): v3 branch/loop/map arms are BARE step arrays, NOT the v2
+    ``{then: {steps: [...]}}`` shape. An LLM step nested only inside a v3 arm must still be
+    detected — otherwise MCP run_workflow silently skips the REBAR_MCP_ALLOW_LLM fence and the
+    (billable) finder calls fire ungated. Both shipped gates hide their LLM steps this way."""
+    # Minimal v3 branch whose only LLM step lives in a bare-array `then` arm.
+    v3_branch = {
+        "name": "wf",
+        "steps": [
+            {
+                "id": "gate",
+                "branch": {
+                    "when": "${{ inputs.run }}",
+                    "then": [{"id": "f", "prompt": "p"}],
+                    "else": [{"id": "d", "uses": "noop"}],
+                },
+            }
+        ],
+    }
+    assert runs.has_llm_steps(v3_branch) is True
+    # loop/map bodies are bare arrays too.
+    v3_loop = {
+        "name": "wf",
+        "steps": [
+            {"id": "l", "loop": {"over": "${{ inputs.xs }}", "body": [{"id": "b", "prompt": "p"}]}}
+        ],
+    }
+    assert runs.has_llm_steps(v3_loop) is True
+    # The two shipped gates whose LLM steps live ONLY inside branch arms — the real regression.
+    from rebar.llm.workflow.gate_dispatch import _gate_doc
+
+    for name in ("plan-review", "completion-verification"):
+        assert runs.has_llm_steps(_gate_doc(name, None)) is True, name
 
 
 def test_run_workflow_executes_llm_workflow_inside_gate_session(tmp_path, monkeypatch):
