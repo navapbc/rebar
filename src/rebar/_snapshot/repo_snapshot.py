@@ -286,10 +286,10 @@ def _git(
     )
 
 
-def _has_origin(repo_root: str) -> bool:
+def _has_remote(repo_root: str, remote: str = "origin") -> bool:
     proc = _git(repo_root, "remote")
     remotes = {ln.strip() for ln in proc.stdout.splitlines()}
-    return "origin" in remotes
+    return remote in remotes
 
 
 def _rev_parse(repo_root: str, ref: str) -> str | None:
@@ -311,8 +311,8 @@ def _is_auth_failure(stderr: str) -> bool:
     return any(marker in low for marker in _AUTH_STDERR_MARKERS)
 
 
-def _fetch_origin(repo_root: str, *, ref: str | None = None) -> None:
-    """Coalesced ``git fetch origin`` (optionally a targeted ref/SHA).
+def _fetch_origin(repo_root: str, *, ref: str | None = None, remote: str = "origin") -> None:
+    """Coalesced ``git fetch <remote>`` (optionally a targeted ref/SHA).
 
     Serialized in-process (one fetch per repo at a time) and cross-process (an exclusive
     flock), since fetch is the only lock-taking step. Prefers a blobless partial fetch
@@ -322,7 +322,7 @@ def _fetch_origin(repo_root: str, *, ref: str | None = None) -> None:
     # Disable any interactive credential prompt so a missing credential fails fast with a
     # descriptive error instead of hanging the long-lived server on a TTY prompt.
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    args = ["fetch", "--quiet", "--filter=blob:none", "origin"]
+    args = ["fetch", "--quiet", "--filter=blob:none", remote]
     if ref is not None:
         # SECURITY: a client ref reaches this positional, so it MUST be terminated with
         # --end-of-options. Without it, git reorders interspersed options and a ref like
@@ -341,19 +341,21 @@ def _fetch_origin(repo_root: str, *, ref: str | None = None) -> None:
         stderr = (proc.stderr or "").strip()
         if _is_auth_failure(stderr):
             raise SnapshotFetchError(
-                "git fetch from 'origin' was rejected for authentication — the rebar "
+                f"git fetch from '{remote}' was rejected for authentication — the rebar "
                 "MCP server needs read credentials to fetch the verified ref from a "
                 "private repository. Configure a git credential helper, a deploy key, "
                 "or a token for the server's clone (see the MCP-server setup docs), "
                 f"then retry. git said: {stderr or '<no detail>'}"
             )
         raise SnapshotFetchError(
-            f"git fetch from 'origin' failed (attested mode fails closed): "
+            f"git fetch from '{remote}' failed (attested mode fails closed): "
             f"{stderr or '<no detail>'}"
         )
 
 
-def resolve_ref(ref: str, repo_root: str | None = None, *, fetch: bool = True) -> str:
+def resolve_ref(
+    ref: str, repo_root: str | None = None, *, fetch: bool = True, remote: str = "origin"
+) -> str:
     """Resolve a client ``ref`` (branch | tag | SHA) to an immutable commit SHA.
 
     When an ``origin`` remote exists and ``fetch`` is set, fetches first so the default
@@ -362,15 +364,15 @@ def resolve_ref(ref: str, repo_root: str | None = None, *, fetch: bool = True) -
     remote's ``uploadpack.allowReachableSHA1InWant``). Raises :class:`SnapshotRefError`
     (fail-closed) if the ref still does not resolve."""
     root = str(repo_root) if repo_root else "."
-    has_origin = fetch and _has_origin(root)
-    if has_origin:
-        _fetch_origin(root)
+    has_remote = fetch and _has_remote(root, remote)
+    if has_remote:
+        _fetch_origin(root, remote=remote)
     sha = _rev_parse(root, ref)
-    if sha is None and has_origin:
+    if sha is None and has_remote:
         # A bare SHA (or a ref only reachable by an explicit want) not present after the
         # general fetch — try a targeted fetch (allowReachableSHA1InWant on the remote).
         try:
-            _fetch_origin(root, ref=ref)
+            _fetch_origin(root, ref=ref, remote=remote)
         except SnapshotFetchError:
             pass  # fall through to the descriptive ref error below
         sha = _rev_parse(root, ref)
@@ -612,14 +614,22 @@ def materialize_tickets(
     ``config.tracker_dir(<root>)`` resolves to the ``.tickets-tracker/`` subdir holding the
     materialized event dirs. Fails closed (no path) on error, like :func:`materialize`."""
     root_dir = str(repo_root) if repo_root else "."
-    # Prefer origin/<ref> when an origin exists (fetch first, so we pin the SHARED store, not
-    # a stale local copy — matching how the code path resolves the shared ref), else the
-    # local branch. Fall back to the local branch when origin has no such ref yet (a freshly
-    # initialized repo whose tickets branch has not been pushed): a missing origin ref must
-    # not block the gate from reading the store that DOES exist locally.
-    if fetch and _has_origin(root_dir):
+    # Prefer <remote>/<ref> when the configured tickets remote exists (fetch first, so we
+    # pin the SHARED store, not a stale local copy — matching how the code path resolves the
+    # shared ref), else the local branch. The remote is config-resolved (sync.remote, default
+    # "origin"); a malformed config falls back to "origin". Fall back to the local branch when
+    # the remote has no such ref yet (a freshly initialized repo whose tickets branch has not
+    # been pushed): a missing remote ref must not block reading the store that exists locally.
+    from rebar.config import ConfigError as _ConfigError
+    from rebar.config import tickets_remote as _tickets_remote
+
+    try:
+        remote = _tickets_remote(root_dir)
+    except _ConfigError:
+        remote = "origin"
+    if fetch and _has_remote(root_dir, remote):
         try:
-            sha = resolve_ref(f"origin/{ref}", repo_root, fetch=fetch)
+            sha = resolve_ref(f"{remote}/{ref}", repo_root, fetch=fetch, remote=remote)
         except SnapshotRefError:
             sha = resolve_ref(ref, repo_root, fetch=False)
     else:

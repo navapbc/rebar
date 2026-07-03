@@ -255,14 +255,16 @@ def _push_pending(tracker: str) -> str | None:
     def _git(*args: str) -> subprocess.CompletedProcess:
         return subprocess.run(["git", "-C", tracker, *args], capture_output=True, text=True)
 
-    # Branch resolved from the MAIN repo config (the tracker's parent); best-effort:
-    # a malformed config yields no push-pending notice rather than a crash.
+    # Branch + remote resolved from the MAIN repo config (the tracker's parent);
+    # best-effort: a malformed config yields no push-pending notice rather than a crash.
     try:
-        branch = config.tickets_branch(os.path.dirname(os.path.realpath(tracker)))
+        base = os.path.dirname(os.path.realpath(tracker))
+        branch = config.tickets_branch(base)
+        remote = config.tickets_remote(base)
     except config.ConfigError:
         return None
-    remote_ref = f"origin/{branch}"
-    if _git("remote", "get-url", "origin").returncode != 0:
+    remote_ref = f"{remote}/{branch}"
+    if _git("remote", "get-url", remote).returncode != 0:
         return None
     if _git("rev-parse", "--verify", remote_ref).returncode != 0:
         return None

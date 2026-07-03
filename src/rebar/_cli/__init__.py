@@ -389,6 +389,13 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] == "review-plan":
         return _review_plan(argv[1:])
 
+    # verify-commit-ticket intercept (commit-message ticket gate; owns its --help). A pure
+    # intercept like review-plan: no help/*.txt, no dispatch arm, no golden capture.
+    if argv and argv[0] == "verify-commit-ticket":
+        from rebar._commands import verify_commit
+
+        return verify_commit.cli(argv[1:])
+
     # workflow intercept (native rebar.llm.workflow DSL toolchain; owns its --help).
     if argv and argv[0] == "workflow":
         return _workflow(argv[1:])

@@ -99,6 +99,10 @@ verify.require_completion_verification_for_close = false  # gate work-ticket clo
                                              # verdict (signed onto the ticket); fail-closed. ON for
                                              # this project's rebar.toml. Alternative to the signature gate.
 verify.require_plan_review_for_claim = false # gate claim on a successful (non-BLOCK) plan review attestation
+verify.require_ticket_for_commit   = false   # CI Verified gate: every commit to main must reference a rebar
+                                             # ticket that RESOLVES in the store (rebar-ticket: <id> trailer or a
+                                             # leading <id>:; alias/full/short/Jira). env
+                                             # REBAR_VERIFY_REQUIRE_TICKET_FOR_COMMIT. See docs/commit-ticket-trailer.md
 verify.remediation_mode            = false   # convergent plan-edit re-review (epic 7d43): when on, a
                                              # re-review of an edited plan whose CODE is unchanged may
                                              # drop only NOVEL low-priority findings (the rising floor).
@@ -120,8 +124,14 @@ ticket_clarity.threshold = 5      # clarity-check pass threshold (env REBAR_TICK
 compact.threshold        = 10     # env REBAR_COMPACT_THRESHOLD (alias: COMPACT_THRESHOLD)
 
 # sync (git-backed store)
-sync.push = "always"   # always | async | off   (env REBAR_SYNC_PUSH; alias REBAR_PUSH)
-sync.pull = "on"       # on | off               (env REBAR_SYNC_PULL; alias REBAR_NO_SYNC)
+sync.push   = "always"  # always | async | off   (env REBAR_SYNC_PUSH; alias REBAR_PUSH)
+sync.pull   = "on"      # on | off               (env REBAR_SYNC_PULL; alias REBAR_NO_SYNC)
+sync.remote = "origin"  # git remote the tickets branch syncs to — push/fetch/reconcile, the
+                        # fsck PUSH_PENDING check, and attested ticket-store materialization
+                        # (env REBAR_SYNC_REMOTE). Set it for split residency: e.g. the tickets
+                        # branch's source of truth on origin=GitHub while code review lives on a
+                        # separate `gerrit` remote. Validated as a git remote name (rejects
+                        # spaces / `:` / `~` / `/` / control; dots + non-leading hyphens allowed).
 
 # MCP server gates
 mcp.readonly         = false

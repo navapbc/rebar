@@ -294,11 +294,12 @@ def _acquire_init_lock(lock_dir: str) -> bool:
 
 
 def _mount_or_create_branch(repo: str, tracker: str) -> int:
-    from rebar.config import tickets_branch
+    from rebar.config import tickets_branch, tickets_remote
 
     branch = tickets_branch(repo)  # configured tracker.branch (default "tickets")
+    remote_name = tickets_remote(repo)  # configured sync.remote (default "origin")
     local = _git_ok(repo, "rev-parse", "--verify", branch)
-    remote = _git_ok(repo, "rev-parse", "--verify", f"origin/{branch}")
+    remote = _git_ok(repo, "rev-parse", "--verify", f"{remote_name}/{branch}")
     if local:
         cp = _git(repo, "worktree", "add", tracker, branch)
         if cp.returncode != 0:
@@ -306,7 +307,7 @@ def _mount_or_create_branch(repo: str, tracker: str) -> int:
             return 1
         return 0
     if remote:
-        _git(repo, "fetch", "origin", branch)
+        _git(repo, "fetch", remote_name, branch)
         cp = _git(repo, "worktree", "add", tracker, branch)
         if cp.returncode != 0:
             sys.stderr.write(f"ERROR: git worktree add (remote branch) failed: {cp.stderr}\n")
@@ -505,11 +506,12 @@ def pending_init_attaches_to_existing(repo_root=None) -> bool:
     repo = _resolve_repo_root(repo_root)
     if repo is None:
         return False
-    from rebar.config import tickets_branch
+    from rebar.config import tickets_branch, tickets_remote
 
     branch = tickets_branch(repo)
+    remote_name = tickets_remote(repo)
     return _git_ok(repo, "rev-parse", "--verify", branch) or _git_ok(
-        repo, "rev-parse", "--verify", f"origin/{branch}"
+        repo, "rev-parse", "--verify", f"{remote_name}/{branch}"
     )
 
 

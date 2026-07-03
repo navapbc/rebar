@@ -20,6 +20,13 @@ require_completion_verification_for_close = true
 # docs/plan-review-gate.md. Turning this off is the rollback.
 require_plan_review_for_claim = true
 
+# Commit-ticket gate (docs/commit-ticket-trailer.md): the CI `require-ticket` job (the
+# Gerrit Verified leg) requires every commit to `main` to reference a rebar ticket that
+# RESOLVES in the store — via a `rebar-ticket: <id>` trailer (or a leading `<id>:`), any of
+# alias / full id / short id / Jira key. Setting this to false is the rollback (the CI job
+# then no-ops). Enforced by `.github/workflows/gerrit-verify.yaml`.
+require_ticket_for_commit = true
+
 [ticket]
 # Default assignee `claim` uses when no --assignee is given (story c36c). Applied at
 # CLAIM time (not at ticket create). Use a Jira-RESOLVABLE identity (email/accountId),

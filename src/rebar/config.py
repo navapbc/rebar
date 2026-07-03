@@ -111,6 +111,21 @@ def tickets_branch(root: str | os.PathLike[str] | None = None) -> str:
     return load_config(root).tracker.branch
 
 
+def tickets_remote(root: str | os.PathLike[str] | None = None) -> str:
+    """The git remote the ticket event-log branch syncs to — push, fetch/reconcile, the
+    ``fsck`` PUSH_PENDING check, and the attested ticket-store materialization — resolved
+    through the full config precedence (``-c`` flag > ``REBAR_SYNC_REMOTE`` env >
+    project/user config > default ``origin``). The single source of the remote name for
+    every ticket git-network path; the remote counterpart to :func:`tickets_branch`.
+
+    Split-residency setups (code reviewed on a ``gerrit`` remote; the tickets branch's
+    source of truth on a ``github``/``origin`` remote for a downstream sync) set this so
+    the store no longer hard-assumes ``origin`` is the ticket remote. Like
+    :func:`tickets_branch`, a malformed config is NOT swallowed here: silently defaulting
+    could mis-route a push to the wrong remote, so the ``ConfigError`` propagates."""
+    return load_config(root).sync.remote
+
+
 # ── Typed config (the single source of truth for non-secret settings) ─────────
 #
 # This is the in-memory schema the config-refinement work (epic a621) builds on:
@@ -233,6 +248,25 @@ def _as_git_ref(v: Any, key: str) -> str:
     return s
 
 
+def _as_git_remote(v: Any, key: str) -> str:
+    """Validate a git REMOTE NAME (e.g. ``origin``, ``gerrit``, ``github``). Distinct from
+    :func:`_as_git_ref` (a branch name): a remote name is a single-level token that becomes
+    a path component under ``refs/remotes/<name>/`` and is passed as a positional to
+    ``git push``/``fetch``. Reject empty/whitespace, a leading ``-`` (would parse as a
+    flag), any ``/`` (remote names are single-level), ``..``, and the
+    check-ref-format-forbidden chars (space, ``~^:?*[\\``, control, DEL). Dots and
+    (non-leading) hyphens are allowed, so ``my-remote`` / ``gerrit.example`` pass."""
+    s = _as_str(v, key).strip()
+    if not s:
+        raise ConfigError(f"{key}: git remote name must not be empty")
+    if s.startswith("-") or "/" in s or ".." in s:
+        raise ConfigError(f"{key}: invalid git remote name {s!r} (leading '-', '/', or '..')")
+    bad = sorted(_BAD_REF_CHARS & set(s))
+    if bad:
+        raise ConfigError(f"{key}: invalid git remote name {s!r} (forbidden char(s) {bad})")
+    return s
+
+
 def _as_tracker_dir(v: Any, key: str) -> str:
     """Validate the tracker store dir. Allows a bare relative name (the common case,
     e.g. ``.tickets-tracker`` — used as the repo-root symlink name + gitignore entry)
@@ -290,6 +324,11 @@ class VerifyConfig:
     # and session_logs are exempt. Default off ⇒ `claim` keeps today's behavior;
     # turning it off is the rollback (an ordinary preference, no kill-switch needed).
     require_plan_review_for_claim: bool = False
+    # Opt-in commit-ticket gate: when true, `rebar verify-commit-ticket` (run in CI, the
+    # Gerrit Verified leg) requires every commit message to reference a rebar ticket that
+    # RESOLVES in the store (alias/full/short/Jira). Default off; enabled per-project in
+    # rebar.toml. Turning it off is the rollback. See docs/commit-ticket-trailer.md.
+    require_ticket_for_commit: bool = False
 
     # Opt-in agentic code-review capability (epic b744): when true, the public
     # `review_code()` (CLI `rebar review-code` / MCP `review_code`) runs the four-pass
@@ -382,6 +421,7 @@ class CompactConfig:
 class SyncConfig:
     push: str = "always"  # always | async | off
     pull: str = "on"  # on | off
+    remote: str = "origin"  # git remote the tickets branch syncs to (push/fetch/fsck)
 
 
 @dataclass
@@ -467,6 +507,7 @@ _SECTIONS: dict[str, dict] = {
         "require_signature_for_close": lambda v, k: _as_bool(v, k),
         "require_completion_verification_for_close": lambda v, k: _as_bool(v, k),
         "require_plan_review_for_claim": lambda v, k: _as_bool(v, k),
+        "require_ticket_for_commit": lambda v, k: _as_bool(v, k),
         "enable_code_review": lambda v, k: _as_bool(v, k),
         "progressive_drift_refresh": lambda v, k: _as_bool(v, k),
         "verify_window_headroom": lambda v, k: _as_float(v, k, minimum=0.1, maximum=1.0),
@@ -488,6 +529,7 @@ _SECTIONS: dict[str, dict] = {
     "sync": {
         "push": lambda v, k: _as_choice(v, k, {"always", "async", "off"}),
         "pull": lambda v, k: _as_choice(v, k, {"on", "off"}),
+        "remote": lambda v, k: _as_git_remote(v, k),
     },
     "mcp": {
         "readonly": lambda v, k: _as_bool(v, k),
