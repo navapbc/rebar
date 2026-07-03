@@ -165,13 +165,13 @@ def _assemble_context_uncached(
 ) -> PlanContext:
     """The actual N+1 store read (ticket + direct children, each whole). Always reads — the
     run-scoped memo lives in :func:`assemble_context`, which delegates here on a cache miss."""
-    import rebar
+    from rebar import _reads
 
-    state = rebar.show_ticket(ticket_id, repo_root=repo_root)
+    state = _reads.show_ticket(ticket_id, repo_root=repo_root)
     canonical = state.get("ticket_id", ticket_id)
     children: list[dict[str, Any]] = []
     try:
-        listed = rebar.list_tickets(parent=canonical, repo_root=repo_root) or []
+        listed = _reads.list_tickets(parent=canonical, repo_root=repo_root) or []
     except Exception:  # noqa: BLE001 — children enumeration degrades P5/P8 if it fails; broad-but-logged below, review continues
         # Failing to enumerate children degrades P5/P8 coverage — a real signal, logged.
         logger.warning("could not list children of %s; reviewing without", canonical, exc_info=True)
@@ -182,7 +182,7 @@ def _assemble_context_uncached(
             children.append(c)
             continue
         try:  # fetch full child state (deps + file_impact) for P5/P8
-            children.append(rebar.show_ticket(cid, repo_root=repo_root))
+            children.append(_reads.show_ticket(cid, repo_root=repo_root))
         except Exception:  # noqa: BLE001 — per-child best-effort full-state fetch; fall back to the summary
             children.append(c)
     return PlanContext(
@@ -236,12 +236,12 @@ def delivered_children_manifest(container_id: str, *, repo_root=None) -> list[di
     ``{"ticket_id", "ac_text"}`` (its ``## Acceptance Criteria`` section). Fail-safe: an
     enumeration error yields an EMPTY manifest, and ``pass2_completion`` then classifies nothing so
     the floor drops nothing."""
-    import rebar
+    from rebar import _reads
 
     from . import attest
 
     try:
-        listed = rebar.list_tickets(parent=container_id, repo_root=repo_root) or []
+        listed = _reads.list_tickets(parent=container_id, repo_root=repo_root) or []
     except Exception:  # noqa: BLE001 — fail-safe: no manifest (the floor drops nothing), logged
         logger.warning(
             "could not list children of %s for the delivered manifest", container_id, exc_info=True
@@ -254,7 +254,7 @@ def delivered_children_manifest(container_id: str, *, repo_root=None) -> list[di
             children.append(c)
             continue
         try:  # full child state (status + attestation + supersede deps) for delivered_now
-            children.append(rebar.show_ticket(cid, repo_root=repo_root))
+            children.append(_reads.show_ticket(cid, repo_root=repo_root))
         except Exception:  # noqa: BLE001 — per-child best-effort full-state fetch; fall back to summary
             children.append(c)
     manifest: list[dict[str, Any]] = []

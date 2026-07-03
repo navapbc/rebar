@@ -47,7 +47,7 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
     deterministic FAIL verdict (no LLM call — closure BLOCKED). A closed-but-UNCERTIFIED
     (force-closed) direct child does NOT block: it emits ``certifiable=False`` and the LLM still
     runs on the parent's OWN criteria (the parent may close but not certify)."""
-    import rebar
+    from rebar import _reads
     from rebar.llm.completion import child_closure_findings, deterministic_child_failure
     from rebar.llm.config import resolve_gate_config
 
@@ -57,7 +57,7 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
             f"step {ctx.step_id!r} needs a ticket: pass `with: {{ticket_id: ...}}` or run "
             f"the workflow against a target ticket"
         )
-    root = rebar.show_ticket(str(tid), repo_root=ctx.repo_root)
+    root = _reads.show_ticket(str(tid), repo_root=ctx.repo_root)
     canonical = root.get("ticket_id", str(tid))
     blocking, uncertified = child_closure_findings(canonical, ctx.repo_root)
     if blocking:

@@ -164,7 +164,6 @@ def test_precheck_grounds_code_root_without_hijacking_ticket_root(monkeypatch, t
     fix that threaded the CODE snapshot as the op's `repo_root` then broke ticket reads
     ('Ticket not found'), because the ticket store is NOT under the .git-less code snapshot.
     Both must hold at once."""
-    import rebar
     from rebar.llm import config as llm_config
     from rebar.llm.plan_review import workflow_ops
     from rebar.llm.workflow.executor import StepContext
@@ -180,8 +179,8 @@ def test_precheck_grounds_code_root_without_hijacking_ticket_root(monkeypatch, t
             "description": "## Acceptance Criteria\n- [ ] do the thing\n",
         }
 
-    monkeypatch.setattr(rebar, "show_ticket", _show)
-    monkeypatch.setattr(rebar, "list_tickets", lambda parent=None, repo_root=None: [])
+    monkeypatch.setattr("rebar._reads.show_ticket", _show)
+    monkeypatch.setattr("rebar._reads.list_tickets", lambda parent=None, repo_root=None: [])
 
     code_snap = str(tmp_path / "code-snapshot")  # the active attested CODE snapshot
     sc = StepContext(
@@ -253,11 +252,10 @@ def test_produce_plan_review_does_not_thread_code_snapshot_as_ticket_root(monkey
 
 # ── completion fail-closed-on-outage (preflight raises → close gate blocks) ─────────
 def test_completion_workflow_outage_raises_so_close_fails_closed(monkeypatch) -> None:
-    import rebar
     from rebar.llm.workflow import gate_dispatch
 
-    monkeypatch.setattr(rebar, "show_ticket", lambda tid, repo_root=None: {"ticket_id": tid})
-    monkeypatch.setattr(rebar, "list_tickets", lambda parent=None, repo_root=None: [])
+    monkeypatch.setattr("rebar._reads.show_ticket", lambda tid, repo_root=None: {"ticket_id": tid})
+    monkeypatch.setattr("rebar._reads.list_tickets", lambda parent=None, repo_root=None: [])
     cfg = dataclasses.replace(LLMConfig(runner="fake"), model="claude-haiku-4-5")
     with pytest.raises(LLMUnavailableError):
         gate_dispatch.produce_completion_verdict(

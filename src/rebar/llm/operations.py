@@ -68,9 +68,9 @@ def _format_ticket(t: dict) -> str:
 
 def _assemble_context(ticket_id: str, *, graph: bool, repo_root) -> tuple[str, list[str]]:
     """Build the deterministic review context + the list of ticket ids reviewed."""
-    import rebar
+    from rebar import _reads
 
-    root = ticket = rebar.show_ticket(ticket_id, repo_root=repo_root)
+    root = ticket = _reads.show_ticket(ticket_id, repo_root=repo_root)
     resolved_id = root.get("ticket_id", ticket_id)
     blocks = [_format_ticket(ticket)]
     ids = [resolved_id]
@@ -81,7 +81,7 @@ def _assemble_context(ticket_id: str, *, graph: bool, repo_root) -> tuple[str, l
         frontier = deque([resolved_id])
         while frontier:
             parent = frontier.popleft()
-            children = rebar.list_tickets(parent=parent, repo_root=repo_root)
+            children = _reads.list_tickets(parent=parent, repo_root=repo_root)
             for child in sorted(children, key=lambda c: c.get("ticket_id", "")):
                 cid = child.get("ticket_id")
                 if cid and cid not in seen:

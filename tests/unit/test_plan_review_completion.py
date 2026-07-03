@@ -209,7 +209,6 @@ _AC = "## Acceptance Criteria\n- [ ] c-delivered works\n- [ ] and is verified\n"
 
 
 def test_delivered_children_manifest_picks_only_delivered_and_extracts_ac(monkeypatch) -> None:
-    import rebar
 
     children = [
         {"ticket_id": "c1", "status": "closed", "description": f"Some body.\n\n{_AC}"},
@@ -220,12 +219,12 @@ def test_delivered_children_manifest_picks_only_delivered_and_extracts_ac(monkey
         },
     ]
 
-    monkeypatch.setattr(rebar, "list_tickets", lambda *, parent, repo_root=None: children)
+    monkeypatch.setattr("rebar._reads.list_tickets", lambda *, parent, repo_root=None: children)
 
     def _show(cid, repo_root=None):
         return next(c for c in children if c["ticket_id"] == cid)
 
-    monkeypatch.setattr(rebar, "show_ticket", _show)
+    monkeypatch.setattr("rebar._reads.show_ticket", _show)
     # Only c1 is delivered. orchestrator does `from . import attest` — patch the module it binds.
     monkeypatch.setattr(
         attest,
@@ -239,12 +238,11 @@ def test_delivered_children_manifest_picks_only_delivered_and_extracts_ac(monkey
 
 
 def test_delivered_children_manifest_empty_on_enumeration_error(monkeypatch) -> None:
-    import rebar
 
     def boom(*, parent, repo_root=None):
         raise RuntimeError("store read failed")
 
-    monkeypatch.setattr(rebar, "list_tickets", boom)
+    monkeypatch.setattr("rebar._reads.list_tickets", boom)
     assert orchestrator.delivered_children_manifest("epic", repo_root=None) == []
 
 

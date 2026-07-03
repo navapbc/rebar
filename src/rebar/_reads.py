@@ -40,9 +40,12 @@ def _fresh(tracker: str) -> None:
 
 
 def _rebar_error(message: str):
-    # Late import avoids a circular import at module load (rebar.__init__ imports
-    # this module). Mirrors the subprocess path's RebarError on a nonzero exit.
-    from rebar import RebarError
+    # Source RebarError from the stdlib-only leaf (item 9.3): keeps this read
+    # facade OUT of the import SCC (importing it from ``rebar`` was the last
+    # ``_reads -> rebar`` back-edge). Mirrors the subprocess path's RebarError on
+    # a nonzero exit. Now safe at module scope, but kept local to match the file's
+    # lazy-import style and avoid churn.
+    from rebar._errors import RebarError
 
     return RebarError(message, returncode=1, stderr=message)
 

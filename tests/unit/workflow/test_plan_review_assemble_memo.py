@@ -67,7 +67,6 @@ class _ReadSpy:
         self.list_calls: list[str | None] = []
 
     def install(self, monkeypatch, *, children: bool) -> None:
-        import rebar
 
         parent = _parent_state()
         child = _child_state()
@@ -80,8 +79,8 @@ class _ReadSpy:
             self.list_calls.append(parent)
             return [dict(child)] if children else []
 
-        monkeypatch.setattr(rebar, "show_ticket", _show)
-        monkeypatch.setattr(rebar, "list_tickets", _list)
+        monkeypatch.setattr("rebar._reads.show_ticket", _show)
+        monkeypatch.setattr("rebar._reads.list_tickets", _list)
 
     @property
     def total(self) -> int:
@@ -196,7 +195,6 @@ def test_cache_does_not_leak_across_scopes(monkeypatch) -> None:
 def test_distinct_keys_are_cached_separately(monkeypatch) -> None:
     """The memo keys on every input that changes the result (ticket_id + repo_root + cfg fields +
     active read-roots), so a different ticket within the same scope is NOT served a stale entry."""
-    import rebar
 
     seen: list[str] = []
 
@@ -210,8 +208,8 @@ def test_distinct_keys_are_cached_separately(monkeypatch) -> None:
             "deps": [],
         }
 
-    monkeypatch.setattr(rebar, "show_ticket", _show)
-    monkeypatch.setattr(rebar, "list_tickets", lambda parent=None, repo_root=None: [])
+    monkeypatch.setattr("rebar._reads.show_ticket", _show)
+    monkeypatch.setattr("rebar._reads.list_tickets", lambda parent=None, repo_root=None: [])
 
     with orchestrator.assemble_context_cache():
         a1 = orchestrator.assemble_context("ticket-A", repo_root=None)

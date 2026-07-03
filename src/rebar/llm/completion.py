@@ -89,10 +89,11 @@ def child_closure_findings(ticket_id: str, repo_root) -> tuple[list[dict], list[
     parent closes UNSIGNED). Returning ``([], [])`` here (the old behaviour) would have LAUNDERED
     certification — a read failure would have signed the parent as if it were childless. This
     mirrors ``plan_review.attest._attested_delivered``, which fails closed on the same error."""
-    import rebar
+    import rebar  # verify_signature (not a rebar._reads read) is sourced from the facade
+    from rebar import _reads
 
     try:
-        children = rebar.list_tickets(parent=ticket_id, repo_root=repo_root)
+        children = _reads.list_tickets(parent=ticket_id, repo_root=repo_root)
     except Exception as exc:  # noqa: BLE001 — WITHHOLD certification on a read error; logged below
         logger.warning(
             "child-closure enumeration failed for %s; withholding certification "
@@ -290,7 +291,7 @@ def _verify_completion_inner(
     config: LLMConfig,
     runner: Runner | None,
 ) -> dict:
-    import rebar
+    from rebar import _reads
 
     cfg = config
     # Default to a decisive verifier model unless the operator EXPLICITLY chose a non-default
@@ -306,7 +307,7 @@ def _verify_completion_inner(
         cfg = replace(cfg, max_iterations=_VERIFY_MIN_STEPS)
     # Resolve the ticket type once (one local read; no network). graph default depends on
     # ticket type (epics verify across children).
-    root = rebar.show_ticket(ticket_id, repo_root=repo_root)
+    root = _reads.show_ticket(ticket_id, repo_root=repo_root)
     if graph is None:
         graph = root.get("ticket_type") == "epic"
 

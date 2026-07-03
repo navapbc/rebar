@@ -33,7 +33,6 @@ _GOOD_AC = (
 
 
 def _patch_reads(monkeypatch) -> None:
-    import rebar
 
     state = {
         "ticket_id": _TARGET,
@@ -42,8 +41,8 @@ def _patch_reads(monkeypatch) -> None:
         "description": _GOOD_AC,
         "deps": [],
     }
-    monkeypatch.setattr(rebar, "show_ticket", lambda tid, repo_root=None: dict(state))
-    monkeypatch.setattr(rebar, "list_tickets", lambda parent=None, repo_root=None: [])
+    monkeypatch.setattr("rebar._reads.show_ticket", lambda tid, repo_root=None: dict(state))
+    monkeypatch.setattr("rebar._reads.list_tickets", lambda parent=None, repo_root=None: [])
 
 
 class _BranchingRunner(FakeRunner):

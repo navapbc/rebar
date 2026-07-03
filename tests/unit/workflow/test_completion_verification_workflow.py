@@ -88,12 +88,11 @@ def _patch_rebar(monkeypatch, *, ticket_type="story", children=None, child_sig="
     import rebar
 
     monkeypatch.setattr(
-        rebar,
-        "show_ticket",
+        "rebar._reads.show_ticket",
         lambda tid, repo_root=None: {"ticket_id": "T-1", "ticket_type": ticket_type},
     )
     monkeypatch.setattr(
-        rebar, "list_tickets", lambda parent=None, repo_root=None: list(children or [])
+        "rebar._reads.list_tickets", lambda parent=None, repo_root=None: list(children or [])
     )
     # Match the REAL call site (completion.child_closure_findings):
     # verify_signature(cid, kind="completion-verifier", repo_root=…). A fake missing `kind`
@@ -214,18 +213,16 @@ def test_child_enumeration_read_error_withholds_certification(monkeypatch):
     # behaviour (mirroring attest._attested_delivered's fail-closed-on-certification): the parent
     # may still close on its OWN criteria (a read glitch shouldn't block a legitimate close), but
     # the verdict must be certifiable=False (closes UNSIGNED).
-    import rebar
     from rebar.llm.completion import child_closure_findings
 
     def _boom(parent=None, repo_root=None):
         raise RuntimeError("transient store read error")
 
     monkeypatch.setattr(
-        rebar,
-        "show_ticket",
+        "rebar._reads.show_ticket",
         lambda tid, repo_root=None: {"ticket_id": "T-1", "ticket_type": "epic"},
     )
-    monkeypatch.setattr(rebar, "list_tickets", _boom)
+    monkeypatch.setattr("rebar._reads.list_tickets", _boom)
 
     # Direct contract (the fixed function): blocking EMPTY (don't fabricate a block on a read
     # error — the close may proceed), uncertified NON-EMPTY (so `certifiable = not uncertified`

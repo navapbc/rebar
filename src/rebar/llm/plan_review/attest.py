@@ -754,8 +754,7 @@ def claim_gate_check(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     drifted, it binds the current material fingerprint, and it post-dates any reopen. NO LLM
     and NO network — a pure local HMAC verify + a light fingerprint recompute + hashing a
     handful of dependency files."""
-    import rebar
-    from rebar import signing
+    from rebar import _reads, signing
 
     try:
         result = signing.verify_signature(ticket_id, kind=_MANIFEST_PREFIX, repo_root=repo_root)
@@ -774,7 +773,7 @@ def claim_gate_check(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     # We requested kind="plan-review" strictly, so a certified result IS a plan-review
     # attestation (no separate wrong-manifest check needed). Layer freshness/lifecycle.
     try:
-        state = rebar.show_ticket(ticket_id, repo_root=repo_root)
+        state = _reads.show_ticket(ticket_id, repo_root=repo_root)
     except Exception:  # noqa: BLE001 — unreadable state → fail closed below via compute_validity's material/None paths
         state = {}
     validity = compute_validity(result, state, _MANIFEST_PREFIX, repo_root=repo_root)
@@ -793,16 +792,16 @@ def current_material_fingerprint(ticket_id: str, *, repo_root=None) -> str | Non
     :func:`orchestrator.material_fingerprint`. Returns None on any read error
     (so a read failure never wrongly invalidates — the head_sha + certified checks
     still gate)."""
-    import rebar
+    from rebar import _reads
 
     from .det_floor import PlanContext
     from .orchestrator import material_fingerprint
 
     try:
-        state = rebar.show_ticket(ticket_id, repo_root=repo_root)
+        state = _reads.show_ticket(ticket_id, repo_root=repo_root)
         canonical = state.get("ticket_id", ticket_id)
         try:
-            kids = rebar.list_tickets(parent=canonical, repo_root=repo_root) or []
+            kids = _reads.list_tickets(parent=canonical, repo_root=repo_root) or []
         except Exception:  # noqa: BLE001 — children enumeration is best-effort for the fingerprint
             kids = []
         ctx = PlanContext(

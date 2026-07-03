@@ -22,11 +22,11 @@ _DESC_CAP = 600  # per-epic description chars inlined into the batch context
 
 
 def _fetch_epics(epics: list[str] | None, repo_root) -> list[dict]:
-    import rebar
+    from rebar import _reads
 
     if epics:
-        return [rebar.show_ticket(e, repo_root=repo_root) for e in epics]
-    return rebar.list_tickets(ticket_type="epic", status="open,in_progress", repo_root=repo_root)
+        return [_reads.show_ticket(e, repo_root=repo_root) for e in epics]
+    return _reads.list_tickets(ticket_type="epic", status="open,in_progress", repo_root=repo_root)
 
 
 def _render_epic(t: dict) -> str:

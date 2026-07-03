@@ -57,11 +57,9 @@ def test_no_triggers_and_no_ticket_yields_empty():
 
 # ── (2) structural triggers — read the ticket graph, reduce to booleans ───────────────────────────
 def test_structural_has_children_and_linked_session_log(monkeypatch):
-    import rebar
 
     monkeypatch.setattr(
-        rebar,
-        "deps",
+        "rebar._reads.deps",
         lambda tid, repo_root=None: {
             "children": ["c1", "c2"],
             "deps": [{"target_id": "sl1", "relation": "relates_to"}],
@@ -69,7 +67,7 @@ def test_structural_has_children_and_linked_session_log(monkeypatch):
         },
     )
     monkeypatch.setattr(
-        rebar, "show_ticket", lambda tid, repo_root=None: {"ticket_type": "session_log"}
+        "rebar._reads.show_ticket", lambda tid, repo_root=None: {"ticket_type": "session_log"}
     )
     out = overlay_triggers(_ctx(ticket_id="t1", linked_types=["session_log"]))
     assert out["has_children"] is True
@@ -77,10 +75,10 @@ def test_structural_has_children_and_linked_session_log(monkeypatch):
 
 
 def test_structural_no_children_no_linked(monkeypatch):
-    import rebar
 
     monkeypatch.setattr(
-        rebar, "deps", lambda tid, repo_root=None: {"children": [], "deps": [], "blockers": []}
+        "rebar._reads.deps",
+        lambda tid, repo_root=None: {"children": [], "deps": [], "blockers": []},
     )
     out = overlay_triggers(_ctx(ticket_id="t1", linked_types=["session_log"], structural=True))
     assert out["has_children"] is False
@@ -184,11 +182,11 @@ def test_inclusion_is_stable_under_a_store_edit_on_replay(monkeypatch):
     """A structural trigger reads the ticket graph at run time, but its boolean is RECORDED as the
     step output; on replay/resume the `if:` evaluates over that recorded output, so a store edit
     (a changed `rebar.deps`) between the original run and the replay cannot change inclusion."""
-    import rebar
 
     # Original run: the ticket HAS children → has_children truthy → the criterion runs + recorded.
     monkeypatch.setattr(
-        rebar, "deps", lambda tid, repo_root=None: {"children": ["c1"], "deps": [], "blockers": []}
+        "rebar._reads.deps",
+        lambda tid, repo_root=None: {"children": ["c1"], "deps": [], "blockers": []},
     )
     rec = _Rec()
     _ex.run_workflow(
@@ -205,7 +203,8 @@ def test_inclusion_is_stable_under_a_store_edit_on_replay(monkeypatch):
     # STORE EDIT: the ticket now has NO children. Replay/resume with the SAME recorder — the
     # recorded has_children=True is reused (live `deps` is never re-read), so the decision holds.
     monkeypatch.setattr(
-        rebar, "deps", lambda tid, repo_root=None: {"children": [], "deps": [], "blockers": []}
+        "rebar._reads.deps",
+        lambda tid, repo_root=None: {"children": [], "deps": [], "blockers": []},
     )
     _ex.run_workflow(
         _structural_wf(),

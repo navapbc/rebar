@@ -243,7 +243,6 @@ def test_mvp_end_to_end_activated_project_criterion_surfaces_finding(tmp_path, m
     """The MVP slice: activate ONE project LLM criterion in the overlay → it fans in through
     ProductionBatchRunner → the finder (a FakeRunner, no billable call) runs it → its finding
     is surfaced in the batch result. Proves activate→run→surface end-to-end offline."""
-    import rebar
     from rebar import config as _config
     from rebar.llm.plan_review.production_batch_runner import ProductionBatchRunner
     from rebar.llm.runner import FakeRunner
@@ -266,8 +265,8 @@ def test_mvp_end_to_end_activated_project_criterion_surfaces_finding(tmp_path, m
         "description": "## Why\nx\n\n## What\nbuild X\n\n## Acceptance Criteria\n- [ ] x is true\n",
         "deps": [],
     }
-    monkeypatch.setattr(rebar, "show_ticket", lambda tid, *, repo_root=None: dict(state))
-    monkeypatch.setattr(rebar, "list_tickets", lambda *, parent=None, repo_root=None: [])
+    monkeypatch.setattr("rebar._reads.show_ticket", lambda tid, *, repo_root=None: dict(state))
+    monkeypatch.setattr("rebar._reads.list_tickets", lambda *, parent=None, repo_root=None: [])
 
     fake = FakeRunner(
         structured={
