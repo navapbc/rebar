@@ -4,6 +4,11 @@
 # when no successful run has occurred within the alert window. Self-healing:
 # closes the alert ticket when the reconciler recovers.
 #
+# Also runs the binding-drift PARITY ORACLE (epic 3006-e198, child 8de5): each
+# cycle it runs `rebar bridge-fsck` (offline classifier over bindings.json +
+# prev_snapshot.json) and opens/updates/closes a `binding-drift-alert` bug when
+# the `binding_drift` section is non-empty — surfacing unhealed convergence drift.
+#
 # This is a TEMPLATE: client projects copy it verbatim (see docs/jira-sync-setup.md).
 #
 # rebar divergences from DSO's canary:
@@ -236,6 +241,111 @@ jobs:
           # bug-close requires a --reason prefixed "Fixed:" or "Escalated to user:".
           rebar transition "${TICKET_ID}" open closed \
             --reason "Fixed: reconciler recovered at ${RECOVERED_AT}. ${STATUS_MSG}"
+
+      # ── Binding-drift parity oracle (epic 3006-e198, child 8de5) ─────────────
+      # bridge-fsck now reads bindings.json + prev_snapshot.json READ-ONLY and runs
+      # the convergence classifier offline (would_terminal / dangling / local_gone /
+      # unbound_jira / retired_overlap). A non-empty binding_drift section is the
+      # PARITY ORACLE every heal is validated against — surface it as a bridge_alert
+      # bug so unhealed drift opens/updates a ticket and self-closes on recovery.
+      - name: Check bridge binding-drift
+        id: drift
+        run: |
+          set -uo pipefail
+          # bridge-fsck exits 1 when it finds issues — capture, don't abort.
+          out=$(rebar bridge-fsck --output json 2>/dev/null) || true
+          python3 - "$out" <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, sys
+          raw = sys.argv[1] if len(sys.argv) > 1 else ""
+          try:
+              data = json.loads(raw) if raw.strip() else {}
+          except Exception:
+              data = {}
+          bd = data.get("binding_drift") or {}
+          cells = ("would_terminal", "dangling", "local_gone", "unbound_jira", "retired_overlap")
+          counts = {c: len(bd.get(c, [])) for c in cells}
+          total = sum(counts.values())
+          summary = ", ".join(f"{c}={counts[c]}" for c in cells if counts[c]) or "none"
+          print(f"drift_found={'true' if total else 'false'}")
+          print(f"drift_total={total}")
+          print(f"drift_summary={summary}")
+          PY
+
+      - name: Find existing open binding-drift alert
+        id: find_drift
+        if: env.DRY_RUN == 'false'
+        env:
+          DRIFT_TAG: binding-drift-alert
+        run: |
+          set -euo pipefail
+          existing=$(rebar list --type=bug --status=open --has-tag="${DRIFT_TAG}" --output json 2>/dev/null \
+            | python3 -c "import sys, json; t = json.load(sys.stdin); print(t[0]['ticket_id'] if t else '')" 2>/dev/null || echo '')
+          echo "ticket_id=${existing}" >> "$GITHUB_OUTPUT"
+
+      - name: Open binding-drift alert (drift + none open)
+        if: >
+          steps.drift.outputs.drift_found == 'true' &&
+          env.DRY_RUN == 'false' &&
+          steps.find_drift.outputs.ticket_id == ''
+        env:
+          DRIFT_SUMMARY: ${{ steps.drift.outputs.drift_summary }}
+          DRIFT_TOTAL: ${{ steps.drift.outputs.drift_total }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          DETECTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          rebar create bug \
+            "[binding-drift] bridge-fsck found ${DRIFT_TOTAL} unhealed binding drift(s)" \
+            --priority 1 \
+            --tags "binding-drift-alert" \
+            --description "## Reproduction Steps
+
+          Run \`rebar bridge-fsck\` — the offline binding-drift arm (epic 3006-e198,
+          the convergence parity oracle) reports a non-empty \`binding_drift\` section.
+
+          ## Expected vs Actual
+
+          - **Expected:** \`binding_drift\` is empty (every bound pair converged).
+          - **Actual:** ${DRIFT_SUMMARY}
+          - **Detected at:** ${DETECTED_AT}
+          - **Canary run:** ${RUN_URL}
+
+          ## Acceptance Criteria
+
+          - [ ] Each reported drift is triaged (would_terminal → local archive/delete
+                to propagate; dangling → confirmed 404 GC; unbound_jira → adopt or
+                archive the Jira-native issue; local_gone → investigate).
+          - [ ] \`rebar bridge-fsck\` reports an empty \`binding_drift\` section.
+
+          This ticket auto-closes when bridge-fsck next reports zero binding drift."
+
+      - name: Comment on existing binding-drift alert (still drifting)
+        if: >
+          steps.drift.outputs.drift_found == 'true' &&
+          env.DRY_RUN == 'false' &&
+          steps.find_drift.outputs.ticket_id != ''
+        env:
+          DRIFT_SUMMARY: ${{ steps.drift.outputs.drift_summary }}
+          TICKET_ID: ${{ steps.find_drift.outputs.ticket_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          DETECTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          rebar comment "${TICKET_ID}" \
+            "BRIDGE_CANARY_ALERT: Binding drift still present as of ${DETECTED_AT}: ${DRIFT_SUMMARY}. Run: ${RUN_URL}"
+
+      - name: Close binding-drift alert on recovery
+        if: >
+          steps.drift.outputs.drift_found == 'false' &&
+          env.DRY_RUN == 'false' &&
+          steps.find_drift.outputs.ticket_id != ''
+        env:
+          TICKET_ID: ${{ steps.find_drift.outputs.ticket_id }}
+        run: |
+          set -euo pipefail
+          RECOVERED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          rebar transition "${TICKET_ID}" open closed \
+            --reason "Fixed: bridge-fsck reports zero binding drift at ${RECOVERED_AT}."
 
       - name: Flush any unpushed ticket changes to origin/tickets
         # rebar CLI auto-pushes, but best-effort: this guard re-pushes if a prior
