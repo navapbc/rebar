@@ -18,14 +18,17 @@ StartLimitBurst=5
 
 [Service]
 Type=oneshot
-# Tunables (single source of truth is the script's defaults; override here per-host).
-Environment=DEPLOY_REPO=/opt/rebar/src
+# Tunables (single source of truth is the script's defaults; override here per-host, or via
+# /etc/rebar/autodeploy.env which the script sources). The box deploys by COPY: /opt/rebar is
+# the compose build context (NOT a git checkout); autodeploy keeps its own git clone at MIRROR_DIR.
+Environment=DEPLOY_REPO=/opt/rebar
+Environment=MIRROR_DIR=/var/lib/rebar/mirror
 Environment=STATE_DIR=/var/lib/rebar
 # HEALTH_URL points at the review-bot receiver's /health route (host loopback port
 # REVIEW_BOT_PORT, default 8000 — NOT Gerrit's 8080). The container publishes
 # 127.0.0.1:${REVIEW_BOT_PORT:-8000}:8000 (see docker-compose.yml).
 Environment=HEALTH_URL=http://localhost:8000/health
-ExecStart=/opt/rebar/src/infra/scripts/autodeploy.sh
+ExecStart=/opt/rebar/infra/scripts/autodeploy.sh
 # a failing deploy is fail-safe inside the script (last-known-good stays live); a nonzero
 # exit here just marks this run failed and lets the timer + backoff schedule the next.
 Nice=10
