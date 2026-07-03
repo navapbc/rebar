@@ -120,7 +120,7 @@ individually by being routed under the switch only once ported):
 |--------|------|--------|-----------------|
 | ~~`REBAR_LEAF_WRITES`~~ | B | `bash` \| `python` | retired 2026-06-11 |
 | ~~`REBAR_COMPUTE`~~ | C | `bash` \| `python` | retired 2026-06-12 |
-| `REBAR_WRITE_CORE` | D | `bash` \| `python` | `bash` |
+| ~~`REBAR_WRITE_CORE`~~ | D | `bash` \| `python` | retired 2026-07-03 |
 
 (Tier E has no switch — it deletes the dispatcher after D's switch is gone.)
 

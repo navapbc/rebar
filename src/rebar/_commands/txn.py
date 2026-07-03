@@ -130,7 +130,6 @@ def transition_core(
     env_id: str,
     author: str,
     close_reason: str = "",
-    verdict_hash: str = "",
     force_close_reason: str = "",
 ) -> None:
     """Write the append-only STATUS(``target_status``) event under the write lock.
@@ -215,7 +214,6 @@ def transition_core(
                 ticket_id,
                 ticket_type,
                 state,
-                verdict_hash,
                 force_close_reason,
                 require_sig=bool(sig_require),
                 config_error=sig_config_error,
@@ -269,7 +267,6 @@ def _signature_gate(
     ticket_id: str,
     ticket_type: str,
     state: dict,
-    verdict_hash: str,
     force_close_reason: str,
     *,
     require_sig: bool,
@@ -291,8 +288,9 @@ def _signature_gate(
     must also have been made at the current HEAD so a stale attestation cannot
     close work whose code has since changed. Raises :class:`CommandError` when the
     ticket is not certified; a force-close reason bypasses with a stderr warning
-    (the wrapper writes the audit comment). Replaces the legacy verdict-hash gate;
-    ``--verdict-hash`` is deprecated and ignored."""
+    (the wrapper writes the audit comment). Replaces the legacy verdict-hash gate; the
+    deprecated ``--verdict-hash`` flag is now ignored at the CLI parse boundary
+    (``transition._warn_verdict_hash_deprecated``) and no longer reaches this gate."""
     import sys
 
     # Fail-closed warning, deferred from the (out-of-lock) flag resolution so it names the
@@ -307,13 +305,6 @@ def _signature_gate(
 
     if not require_sig:
         return
-
-    if verdict_hash:
-        print(
-            "Warning: --verdict-hash is deprecated and ignored; the close gate now "
-            "uses signatures (rebar sign <id> <manifest>).",
-            file=sys.stderr,
-        )
 
     if force_close_reason:
         print(

@@ -1,4 +1,4 @@
-"""Repo-wide tracker-health check ``validate`` (Tier C, ``REBAR_COMPUTE``).
+"""Repo-wide tracker-health check ``validate``.
 
 Faithful in-process port of ``validate-issues.sh``: normalize every ticket from
 ``ticket list`` into the internal issue schema, run the nine health checks

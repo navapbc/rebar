@@ -1,4 +1,4 @@
-"""Cross-clone reconvergence of the tickets branch (Tier D, ``REBAR_WRITE_CORE``).
+"""Cross-clone reconvergence of the tickets branch.
 
 Faithful port of ``_reconverge_tickets`` / ``_do_reconverge_tickets``
 (ticket-sync.sh). Best-effort: fetch happens OUTSIDE the write lock (it only moves

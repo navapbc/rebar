@@ -888,6 +888,29 @@ def _canonical_env_name(sect: str, key: str) -> str:
 # (truthy → "off"/disabled; falsy/unset → "on"/enabled, per the shared ``_as_bool``
 # truthy convention); ``REBAR_ID_GUARD_MODE``
 # is similarly value-mapped (warn → bypass/"true", raise/other → "false").
+#
+# ── Deprecation removal horizons (DOC-ONLY; item 16b-4 / ticket 4419-1c85) ──────────
+# rebar accretes back-compat aliases faster than it retires them. Dropping any of these
+# is a BREAKING change (it removes an input users may still set), so each is scheduled
+# for a MAJOR boundary — v1.0.0 — the first release where retiring a still-warned alias
+# is semver-legal. Recording a horizon keeps the set from growing unbounded; do NOT
+# remove an alias before its horizon (that would break users mid-0.x). Release: 0.6.0.
+#
+#   alias / shim                          canonical replacement                 remove in
+#   -----------------------------------   -----------------------------------   ---------
+#   env  REBAR_PUSH                        REBAR_SYNC_PUSH                        v1.0.0
+#   env  TICKETS_TRACKER_DIR               REBAR_TRACKER_DIR                     v1.0.0
+#   env  REBAR_MCP_ALLOW_RECONCILE_LIVE    REBAR_MCP_ALLOW_JIRA_SYNC             v1.0.0
+#   cfg  verify.require_verdict_for_close  verify.require_signature_for_close    v1.0.0
+#   cfg  flat .rebar/config.conf reader    rebar.toml / [tool.rebar] pyproject   v1.0.0
+#   lib  edit_ticket(tags=…)               set_tags / add_tags / remove_tags     v1.0.0
+#   lib  rebar.list_epics()                list_tickets(ticket_type='epic')      v1.0.0
+#
+# The env/cfg rows live in this module (_LEGACY_ENV_ALIASES / _ALIASES / _read_legacy_conf);
+# the `lib` rows live in rebar.__init__ (edit_ticket / list_epics). Any alias added later
+# MUST get a row here with a horizon so the registry stays complete. (REBAR_NO_SYNC and the
+# other _LEGACY_ENV_ALIASES entries are permanent ergonomic renames, tracked with the rest
+# of the rename window above — not scheduled for removal here.)
 _LEGACY_ENV_ALIASES: dict[str, tuple[str, str, str]] = {
     # legacy name                      -> (section, key, canonical name)
     "REBAR_PUSH": ("sync", "push", "REBAR_SYNC_PUSH"),

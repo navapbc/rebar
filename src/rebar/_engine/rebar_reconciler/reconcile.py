@@ -905,17 +905,17 @@ def _run_differs(ctx: _PassContext) -> None:
         seed_mutations=seed_repair_property_mutations,
     )
 
-    # Post-emit filter: scan mutations for repair_property follow-ons that
-    # carry a schema_drift kind. report_schema_drift surfaces each drift via
-    # stderr WARN so the signal is not swallowed.
+    # Post-emit filter: scan mutations for repair_property follow-ons that carry a
+    # schema-drift kind. report_schema_drift surfaces each drift (files a dedup'd bug
+    # ticket + writes an alert record) so the signal is not swallowed.
     #
-    # CONTRACT NOTE: apply_inbound.inbound_repair_property emits follow-ons with
-    # kind="schema_drift_signal" (see apply_inbound.py, inbound_repair_property),
-    # but this loop matches kind=="schema_drift". The naming mismatch means
-    # follow-ons produced from the in-pass repair_property failure path are NOT
-    # picked up here. The current consumers of this filter emit kind="schema_drift"
-    # directly (today only test fixtures do so). Aligning these is tracked
-    # separately under meta-bug 5f2a-9a9f-2b4a-4aab.
+    # CONTRACT NOTE (aligned under meta-bug 5f2a-9a9f-2b4a-4aab): this loop matches the
+    # ACTUAL kind that apply_inbound.inbound_repair_property emits on a repair failure —
+    # "schema_drift_signal" (see apply_inbound.py, inbound_repair_property). It PREVIOUSLY
+    # matched "schema_drift", a string no producer in src/ ever emits, so the in-pass
+    # repair_property repair-failure follow-ons were silently dropped here. The issue key
+    # is read from the emitter's "issue_key" field, with a "target" fallback for the
+    # observed/expected-shaped follow-ons.
     #
     # Mutations may be plain dicts (legacy schema) or Mutation dataclass
     # instances (canonical contract from epic 4047 / cde1). Normalise on
@@ -938,13 +938,13 @@ def _run_differs(ctx: _PassContext) -> None:
             follow_on = _m.get("follow_on")
         if action_str != mut_mod_for_action.MutationAction.repair_property.value:
             continue
-        if isinstance(follow_on, Mapping) and follow_on.get("kind") == "schema_drift":
+        if isinstance(follow_on, Mapping) and follow_on.get("kind") == "schema_drift_signal":
             # report_schema_drift FILES a local bug ticket + writes an alert
             # record (CREATE events). Skip in no-write / filtered passes.
             if skip_invariant_filing:
                 continue
             invariants_mod.report_schema_drift(
-                follow_on.get("target"),
+                follow_on.get("issue_key") or follow_on.get("target"),
                 follow_on.get("observed"),
                 follow_on.get("expected"),
             )
