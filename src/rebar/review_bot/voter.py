@@ -391,6 +391,17 @@ async def review_and_vote(
                         gc.clone_change_ref, info["change_number"], info["patchset_ref"], repo_root
                     )
                     if is_merge:
+                        # 409 guard (S2): a merge (>=2 parents) 409s the bare /patch, so route it
+                        # through the auto-merge-delta path instead. Emit the named signal so the
+                        # otherwise-silent guard is visible in the logs (fires ONLY on a merge —
+                        # merge_detection above logs is_merge for EVERY change).
+                        _emit(
+                            logging.INFO,
+                            "merge_change_409_guard",
+                            change_id=change_id,
+                            revision_id=revision,
+                            parent_count=parent_count,
+                        )
                         # ONLY the auto-merge delta + integrated-commit context — never /patch.
                         # A merge-path REST failure here is a fail-closed -1 coverage-gap (the
                         # clone succeeded, so the vote POST below can still reach Gerrit).

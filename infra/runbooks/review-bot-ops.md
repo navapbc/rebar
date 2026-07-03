@@ -140,11 +140,15 @@ comment `recheck` on the change for that.
 
 ```bash
 journalctl CONTAINER_NAME=compose-review-bot-1 --no-pager -o cat \
-  | grep -E 'merge_detection|merge_change_review|voter_voted|MERGE_CHANGE_ERROR' | tail
+  | grep -E 'merge_detection|merge_change_409_guard|merge_change_review|voter_voted|MERGE_CHANGE_ERROR' | tail
 ```
 
 - `merge_detection` — the bot recognised the patchset as a merge (into `main` or a
-  `feature/*` branch).
+  `feature/*` branch); logged for EVERY change with `parent_count` + `is_merge`.
+- `merge_change_409_guard` — fires ONLY on a merge: the bot took the auto-merge-delta path
+  and deliberately avoided the bare `/patch` endpoint (which 409s on a >=2-parent commit).
+  Its presence confirms the 409 guard engaged; absence on a change you expected to be a merge
+  means Gerrit flattened it to one parent (check `merge_detection`'s `parent_count`).
 - `merge_change_review` — it ran the review on the merge's auto-merge delta.
 - `voter_voted` — it successfully cast the `LLM-Review` vote (the write-on-success signal).
 - `MERGE_CHANGE_ERROR` — a merge-specific failure (bad merge parent, auto-merge/diff
