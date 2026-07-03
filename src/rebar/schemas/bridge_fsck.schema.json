@@ -2,13 +2,25 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/bridge_fsck.schema.json",
   "title": "BridgeFsck",
-  "description": "Bridge-mapping audit findings, emitted by `rebar bridge-fsck --output json` (the {orphaned, duplicates, stale} dict that audit_bridge_mappings already builds internally). Each entry is a finding object whose fields vary by anomaly type, so items are permissive objects.",
+  "description": "Bridge-mapping audit findings, emitted by `rebar bridge-fsck --output json` (the {orphaned, duplicates, stale, binding_drift} dict that audit_bridge_mappings builds internally). Each entry is a finding object whose fields vary by anomaly type, so items are permissive objects. `binding_drift` (epic 3006-e198, child 8de5) is the offline arm of the one convergence classifier — it reads bindings.json read-only and reports the binding-level drift the live pass would act on.",
   "type": "object",
   "additionalProperties": true,
   "required": ["orphaned", "duplicates", "stale"],
   "properties": {
     "orphaned": { "type": "array", "items": { "type": "object" } },
     "duplicates": { "type": "array", "items": { "type": "object" } },
-    "stale": { "type": "array", "items": { "type": "object" } }
+    "stale": { "type": "array", "items": { "type": "object" } },
+    "binding_drift": {
+      "type": "object",
+      "description": "Binding-level drift from the classifier's offline-decidable cells. `dangling`/`unbound_jira` require a live Jira snapshot and are populated by the online arm; the others are decidable offline.",
+      "additionalProperties": true,
+      "properties": {
+        "would_terminal": { "type": "array", "items": { "type": "object" }, "description": "Bound + local archived/deleted (would-be TERMINAL_TRANSITION)." },
+        "local_gone": { "type": "array", "items": { "type": "object" }, "description": "Bound but the local ticket is absent from the store (ALERT)." },
+        "retired_overlap": { "type": "array", "items": { "type": "object" }, "description": "A jira_key present in BOTH the live and retired binding stores." },
+        "dangling": { "type": "array", "items": { "type": "object" }, "description": "Confirmed binding whose Jira issue is gone (online arm only)." },
+        "unbound_jira": { "type": "array", "items": { "type": "object" }, "description": "Jira-native issue with no binding (online arm only)." }
+      }
+    }
   }
 }
