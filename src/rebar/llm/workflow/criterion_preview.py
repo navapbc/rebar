@@ -518,7 +518,7 @@ def write_criterion_overlay(repo_root: str, criterion_id: str, routing: dict[str
     both are set in the same atomic write — so a project criterion is never left half-active. A
     failed overlay write leaves the (already-written) rubric prompt harmlessly inactive. Callers
     should invalidate the registry caches (``prompt_library._invalidate_caches``) after writing."""
-    from .prompt_authoring import _atomic_write
+    from rebar._store.fsutil import atomic_write
 
     path = Path(repo_root) / ".rebar" / _OVERLAY_FILENAME
     data: dict[str, Any] = {}
@@ -540,7 +540,7 @@ def write_criterion_overlay(repo_root: str, criterion_id: str, routing: dict[str
     if criterion_id not in activate:
         activate.append(criterion_id)
     data["activate"] = activate
-    _atomic_write(path, json.dumps(data, indent=2, sort_keys=True) + "\n")
+    atomic_write(path, json.dumps(data, indent=2, sort_keys=True) + "\n", permissions=0o600)
 
 
 def author_criterion_overlay(repo_root: str, criterion_id: str, routing: dict[str, Any]) -> None:

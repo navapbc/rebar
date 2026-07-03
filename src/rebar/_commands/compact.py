@@ -24,7 +24,7 @@ from pathlib import Path
 from rebar import config
 from rebar._commands import _seam
 from rebar._engine_support.resolver import resolve_ticket_id
-from rebar._store import event_append, hlc, lock
+from rebar._store import event_append, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
 from rebar._store.gitutil import run_git
 from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
@@ -135,10 +135,7 @@ def _compact_locked(
         final_path = os.path.join(
             ticket_dir, event_append.event_filename(snapshot_ts, snapshot_uuid, "SNAPSHOT")
         )
-        staging = final_path + ".tmp"
-        with open(staging, "w", encoding="utf-8") as f:
-            f.write(canonical_str(snapshot_event))
-        os.rename(staging, final_path)
+        fsutil.atomic_write(final_path, canonical_str(snapshot_event), encoding="utf-8")
 
         for fp in event_files:
             try:

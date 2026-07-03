@@ -53,11 +53,11 @@ def _read_pointer(repo_root=None) -> str | None:
 
 
 def _write_pointer(ticket_id: str, repo_root=None) -> None:
+    from rebar._store.fsutil import atomic_write
+
     p = _pointer_path(repo_root)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.name + ".tmp")
-    tmp.write_text(ticket_id, encoding="utf-8")
-    os.replace(tmp, p)  # atomic publish
+    atomic_write(p, ticket_id, encoding="utf-8")  # atomic publish
 
 
 def _is_live_session_log(ticket_id: str, tracker: str) -> bool:

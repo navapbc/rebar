@@ -58,6 +58,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from rebar._store import fsutil
 from rebar._store.gitutil import run_git
 
 try:  # POSIX advisory locking; absent on some platforms (e.g. plain Windows)
@@ -159,10 +160,9 @@ def _caveats_path(sha: str, root: Path) -> Path:
 
 def _store_caveats(sha: str, root: Path, lfs: tuple[str, ...], subs: tuple[str, ...]) -> None:
     path = _caveats_path(sha, root)
-    tmp = path.with_suffix(".json.tmp")
     try:
-        tmp.write_text(json.dumps({"lfs_pointers": list(lfs), "submodules": list(subs)}))
-        os.replace(tmp, path)
+        payload = json.dumps({"lfs_pointers": list(lfs), "submodules": list(subs)})
+        fsutil.atomic_write(path, payload)
     except OSError:  # best-effort cache; absence just forces a recompute
         pass
 

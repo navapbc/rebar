@@ -40,6 +40,7 @@ from rebar._snapshot.repo_snapshot import (
     resolve_ref,
     store_root,
 )
+from rebar._store import fsutil
 
 
 class CacheMiss(RuntimeError):
@@ -119,9 +120,7 @@ def add_bytes(delta: int, root: Path | None = None) -> int:
         except (OSError, ValueError):
             current = 0
         new = max(0, current + delta)
-        tmp = path.with_suffix(".total.tmp")
-        tmp.write_text(str(new))
-        os.replace(tmp, path)
+        fsutil.atomic_write(path, str(new))
     return new
 
 

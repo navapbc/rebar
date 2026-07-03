@@ -37,7 +37,7 @@ import subprocess
 import uuid
 
 from rebar._commands._seam import CommandError
-from rebar._store import event_append, hlc, lock
+from rebar._store import event_append, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
 from rebar._store.gitutil import run_git
 from rebar.reducer import reduce_ticket
@@ -239,13 +239,9 @@ def transition_core(
             },
         }
 
-        temp_path = os.path.join(tracker_dir, f".tmp-transition-{event_uuid}")
-        with open(temp_path, "w", encoding="utf-8") as f:
-            f.write(canonical_str(event))
-
         final_filename = event_append.event_filename(timestamp, event_uuid, "STATUS")
         final_path = os.path.join(ticket_dir_path, final_filename)
-        os.rename(temp_path, final_path)
+        fsutil.atomic_write(final_path, canonical_str(event), encoding="utf-8")
 
         _git(tracker_dir, "add", f"{ticket_id}/{final_filename}")
         _git(tracker_dir, "commit", "-q", "--no-verify", "-m", f"ticket: STATUS {ticket_id}")
@@ -407,11 +403,8 @@ def claim_core(
             },
         }
         status_filename = event_append.event_filename(ts1, uuid1, "STATUS")
-        status_tmp = os.path.join(tracker_dir, f".tmp-claim-{uuid1}")
-        with open(status_tmp, "w", encoding="utf-8") as f:
-            f.write(canonical_str(status_event))
         status_path = os.path.join(ticket_dir_path, status_filename)
-        os.rename(status_tmp, status_path)
+        fsutil.atomic_write(status_path, canonical_str(status_event), encoding="utf-8")
         rel_paths.append(f"{ticket_id}/{status_filename}")
 
         # EDIT(assignee) — only when supplied. ts2 ticked AFTER ts1 so STATUS sorts
@@ -428,11 +421,8 @@ def claim_core(
                 "data": {"fields": {"assignee": assignee}},
             }
             edit_filename = event_append.event_filename(ts2, uuid2, "EDIT")
-            edit_tmp = os.path.join(tracker_dir, f".tmp-claim-{uuid2}")
-            with open(edit_tmp, "w", encoding="utf-8") as f:
-                f.write(canonical_str(edit_event))
             edit_path = os.path.join(ticket_dir_path, edit_filename)
-            os.rename(edit_tmp, edit_path)
+            fsutil.atomic_write(edit_path, canonical_str(edit_event), encoding="utf-8")
             rel_paths.append(f"{ticket_id}/{edit_filename}")
 
         # Stage BOTH events and commit ONCE (atomic).

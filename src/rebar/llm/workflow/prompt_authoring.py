@@ -26,10 +26,10 @@ from __future__ import annotations
 
 import os
 import re
-import tempfile
 from pathlib import Path
 from typing import Any
 
+from rebar._store.fsutil import atomic_write
 from rebar.llm.prompts import (
     PromptError,
     _catalog_dir,
@@ -226,25 +226,16 @@ def _prompt_exists(prompt_id: str, repo_root: Any, target: dict[str, Any]) -> bo
 
 
 def _atomic_write(path: Path, text: str) -> None:
-    """Write ``text`` to ``path`` ATOMICALLY: a temp file in the SAME directory then
-    ``os.replace`` (an atomic rename on the same filesystem). A failure before the
-    rename leaves the original file untouched; the temp file is cleaned up.
+    """Write ``text`` to ``path`` ATOMICALLY (delegates to the shared
+    :func:`rebar._store.fsutil.atomic_write` — a same-dir temp + ``os.replace``; a failure
+    before the rename leaves the original untouched and cleans up the temp).
 
     This is the SINGLE prompt-write primitive: ``save_prompt`` (/prompt/save) AND
-    ``prompt_library._write`` (create/update_prompt, /library/create) both write through
-    it (epic drag-gripe-brake), so a future refactor here must keep both call sites in mind."""
+    ``prompt_library._write`` (create/update_prompt, /library/create) both write through it
+    (epic drag-gripe-brake). ``permissions=0o600`` preserves the prompt file's historical mode
+    (from ``mkstemp``); text is written LF-exact (the helper disables newline translation)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
-            fh.write(text)
-        os.replace(tmp, path)  # atomic on POSIX/Windows (same dir = same filesystem)
-    except BaseException:  # noqa: BLE001 — atomic-write cleanup on ANY exit (incl. KeyboardInterrupt/SystemExit): unlink the temp file, then re-raise — never swallowed
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    atomic_write(path, text, encoding="utf-8", permissions=0o600)
 
 
 def save_prompt(

@@ -130,10 +130,11 @@ def _read_state(rebar_dir: Path) -> int:
 
 def _write_state(rebar_dir: Path, value: int) -> None:
     # Best-effort persist via a same-dir temp + atomic rename (a torn cache is
-    # still correct — it is re-derived from the log on the next tick).
-    tmp = rebar_dir / f".hlc.state.tmp-{os.getpid()}"
-    tmp.write_text(str(value), encoding="utf-8")
-    os.replace(tmp, rebar_dir / "hlc.state")
+    # still correct — it is re-derived from the log on the next tick). No fsync:
+    # the atomic replace is enough; the durable value rides in git.
+    from rebar._store.fsutil import atomic_write
+
+    atomic_write(rebar_dir / "hlc.state", str(value), encoding="utf-8")
 
 
 def next_tick(tracker: str | os.PathLike, ticket_id: str) -> int:

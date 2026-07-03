@@ -19,9 +19,9 @@ import os
 import re
 import shutil
 import sys
-import tempfile
 
 from rebar import config
+from rebar._store import fsutil
 from rebar.timeutils import utc_now_iso
 
 _MAX_BYTES = 98304
@@ -126,27 +126,10 @@ def _set(args: list[str]) -> int:
 
     target_dir = os.path.dirname(abs_path)
     os.makedirs(target_dir, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(
-        dir=target_dir, prefix=os.path.basename(abs_path) + ".tmp.", suffix=".scratch"
-    )
     try:
-        os.write(fd, payload)
-        os.fsync(fd)
-        os.close(fd)
-        os.rename(tmp_path, abs_path)
-        dir_fd = os.open(target_dir, os.O_RDONLY)
-        try:
-            os.fsync(dir_fd)
-        except OSError:
-            pass
-        finally:
-            os.close(dir_fd)
-    except Exception as exc:  # noqa: BLE001 — atomic-write failure surfaced to stderr below; clean up temp + return 2
-        for cleanup in (lambda: os.close(fd), lambda: os.unlink(tmp_path)):
-            try:
-                cleanup()
-            except OSError:
-                pass
+        # fsync=True (file + dir) + 0o600 preserve this writer's durability + mode.
+        fsutil.atomic_write(abs_path, payload, mode="wb", fsync=True, permissions=0o600)
+    except OSError as exc:
         sys.stderr.write(f"Error: atomic write failed: {exc}\n")
         return 2
 

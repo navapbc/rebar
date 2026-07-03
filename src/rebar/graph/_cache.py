@@ -7,6 +7,8 @@ import json
 import os
 from typing import Any
 
+from rebar._store import fsutil
+
 _GRAPH_CACHE_FILE = ".graph-cache.json"
 
 
@@ -68,10 +70,8 @@ def _read_graph_cache(tracker_dir: str, cache_key: str) -> dict[str, Any] | None
 def _write_graph_cache(tracker_dir: str, cache_key: str, graphs: dict[str, Any]) -> None:
     """Atomically write the graph cache."""
     cache_path = os.path.join(tracker_dir, _GRAPH_CACHE_FILE)
-    cache_tmp = cache_path + ".tmp"
     try:
-        with open(cache_tmp, "w", encoding="utf-8") as f:
-            json.dump({"cache_key": cache_key, "graphs": graphs}, f, ensure_ascii=False)
-        os.rename(cache_tmp, cache_path)
+        payload = json.dumps({"cache_key": cache_key, "graphs": graphs}, ensure_ascii=False)
+        fsutil.atomic_write(cache_path, payload, encoding="utf-8")
     except OSError:
         pass  # Cache write failure is non-fatal
