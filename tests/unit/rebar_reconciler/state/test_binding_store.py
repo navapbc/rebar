@@ -140,7 +140,9 @@ class TestPersistence:
         # Verify content is valid JSON
         with open(files[0]) as f:
             data = json.load(f)
-        assert data["version"] == 1
+        # Version 2 adds the ADR 0026 per-binding baseline (epic 3006-e198); a
+        # version-1 store without baselines still reads (back-compat).
+        assert data["version"] == 2
         assert "t1" in data["bindings"]
 
 
