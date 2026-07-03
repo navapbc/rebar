@@ -100,7 +100,12 @@ def test_failclosed_forces_block_on_detector_match(monkeypatch):
         lambda **kw: {
             "high-critical-security": {
                 "abstained": [],
-                "matches": [{"detector_id": "rebar.builtin.security.python-eval-exec-injection"}],
+                "matches": [
+                    {
+                        "detector_id": "rebar.builtin.security.python-eval-exec-injection",
+                        "location": {"file": "app.py"},
+                    }
+                ],
             }
         },
     )
@@ -108,6 +113,36 @@ def test_failclosed_forces_block_on_detector_match(monkeypatch):
     assert v["verdict"] == "BLOCK"
     note = v["coverage"]["security_detectors"][0]
     assert note["reason"] == "detector-finding"  # distinct from a fail-closed abstain
+    # A forced-BLOCK must NAME the match in `blocking` — else the review-bot adapter renders
+    # "found 0 blocking issue(s)" with no finding, hiding a real match from the author (bug f367).
+    assert v["blocking"], "a match-forced BLOCK must have a non-empty blocking list"
+    entry = v["blocking"][0]
+    assert entry["criteria"] == ["high-critical-security"]  # the criterion is named
+    assert entry["severity"] == "critical" and entry["decision"] == "block"
+    assert "high-critical-security" in entry["finding"] and "app.py" in entry["finding"]
+    assert entry["location"] == "app.py"  # the matched changed file
+
+
+def test_failclosed_match_names_no_blocking_when_criterion_advisory(monkeypatch):
+    # A detector criterion whose `blocking_enabled` is False records the match in coverage but must
+    # NOT force BLOCK nor append a blocking finding (advisory-only stays advisory).
+    from rebar.llm.code_review import detectors, registry
+
+    monkeypatch.setattr(
+        detectors,
+        "run_security_detectors",
+        lambda **kw: {
+            "high-critical-security": {
+                "abstained": [],
+                "matches": [{"detector_id": "rebar.builtin.security.python-eval-exec-injection"}],
+            }
+        },
+    )
+    monkeypatch.setattr(registry, "threshold_for", lambda crits: (0.95, False))  # not blocking
+    v = detectors.apply_failclosed(_pass_verdict(), changed_files=["app.py"], repo_root=None)
+    assert v["verdict"] == "PASS"  # advisory-only detector never forces BLOCK
+    assert v["blocking"] == []  # nothing appended
+    assert v["coverage"]["security_detectors"][0]["reason"] == "detector-finding"
 
 
 def test_failclosed_is_a_noop_when_no_security_signal(monkeypatch):
