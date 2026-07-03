@@ -95,8 +95,14 @@ def _patch_rebar(monkeypatch, *, ticket_type="story", children=None, child_sig="
     monkeypatch.setattr(
         rebar, "list_tickets", lambda parent=None, repo_root=None: list(children or [])
     )
+    # Match the REAL call site (completion.child_closure_findings):
+    # verify_signature(cid, kind="completion-verifier", repo_root=…). A fake missing `kind`
+    # raises TypeError, which the child-closure path swallows into `uncertified` — so the
+    # certified-child branch would be untestable (every call would fail via the exception arm).
     monkeypatch.setattr(
-        rebar, "verify_signature", lambda cid, repo_root=None: {"verdict": child_sig}
+        rebar,
+        "verify_signature",
+        lambda cid, kind=None, repo_root=None: {"verdict": child_sig},
     )
 
 
@@ -178,6 +184,26 @@ def test_uncertified_child_does_not_block_but_withholds_certification(monkeypatc
     verdict = _terminal_verdict(rec)
     assert verdict and verdict["verdict"] == "PASS"  # parent's own criteria passed
     assert verdict["certifiable"] is False, "an uncertified descendant withholds certification"
+
+
+def test_certified_child_is_certifiable(monkeypatch):
+    # The REAL certified-child branch: a closed direct child whose completion-verifier signature
+    # verifies as `certified` (and computes valid) does NOT block and does NOT withhold — the
+    # parent's own criteria still run (LLM once) and the verdict stays certifiable=True. This
+    # branch is only reachable because the fake's signature accepts `kind` (a fake missing it
+    # would raise TypeError and land in the uncertified-via-exception arm, masking this path).
+    runner = _CannedRunner(verdict="PASS")
+    certified_child = [{"ticket_id": "C-3", "title": "child", "status": "closed"}]
+    rec, _ = _run(
+        runner, monkeypatch, ticket_type="epic", children=certified_child, child_sig="certified"
+    )
+    assert runner.calls == 1, "the LLM runs on the parent's own criteria (a certified child)"
+    verdict = _terminal_verdict(rec)
+    assert verdict and verdict["verdict"] == "PASS"
+    assert verdict["certifiable"] is True, (
+        "a certified direct child must NOT withhold certification — the certified-child branch "
+        "(compute_validity → valid), not the uncertified-via-TypeError exception arm"
+    )
 
 
 def test_child_enumeration_read_error_withholds_certification(monkeypatch):

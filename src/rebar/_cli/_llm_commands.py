@@ -252,8 +252,10 @@ def _verify_completion(argv: list[str]) -> int:
     parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")
     parser.add_argument(
         "--graph",
-        action="store_true",
-        help="include the ticket's descendants (default: auto — on for epics)",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="include the ticket's descendants; use --no-graph to force own-criteria "
+        "verification (default: auto — on for epics, off otherwise)",
     )
     parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
     parser.add_argument(
@@ -272,7 +274,7 @@ def _verify_completion(argv: list[str]) -> int:
     ensure_initialized(init_only=True)
     try:
         result = llm.verify_completion(
-            args.ticket_id, graph=True if args.graph else None, ref=args.ref, source=args.source
+            args.ticket_id, graph=args.graph, ref=args.ref, source=args.source
         )
     except llm.LLMError as exc:
         sys.stderr.write(f"Error: {exc}\n")

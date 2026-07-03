@@ -75,6 +75,18 @@ def _seed(repo: Path) -> str:
     )
 
 
+def _capture_graph():
+    """A ``verify_completion`` fake that records the ``graph`` kwarg it was handed, so a surface
+    test can prove the CLI/MCP wrapper threaded the caller's tri-state through UNCHANGED."""
+    seen: dict = {}
+
+    def _fake(ticket_id, **kw):
+        seen["graph"] = kw.get("graph", "MISSING")
+        return _pass(ticket_id)
+
+    return seen, _fake
+
+
 def _enable_close_gate(repo: Path) -> None:
     """Turn ON the completion-verification CLOSE gate via the dotted .conf form (the
     INI ``[section]`` form is silently dropped — see test_completion_gate BL-1)."""
@@ -164,6 +176,27 @@ def test_cli_text_output_renders_verdict_and_findings(
     assert "src/x.py" in out  # the citation location
 
 
+@pytest.mark.parametrize(
+    "flags,expected_graph",
+    [([], None), (["--graph"], True), (["--no-graph"], False)],
+)
+def test_cli_graph_tristate_reaches_verify_completion(
+    rebar_repo: Path, monkeypatch, capsys, flags, expected_graph
+) -> None:
+    """Bug 7b (CLI surface): ``--graph``/``--no-graph`` is a TRI-STATE that threads through to
+    ``verify_completion`` unchanged. Unspecified ⇒ ``graph=None`` (ticket-type default preserved);
+    ``--no-graph`` ⇒ an explicit ``False`` (own-criteria verification of an epic) — previously
+    INEXPRESSIBLE because ``store_true`` + ``True if args.graph else None`` collapsed both unset
+    and False to ``None``."""
+    from rebar._cli import main
+
+    seen, fake = _capture_graph()
+    monkeypatch.setattr(rebar.llm, "verify_completion", fake)
+    tid = _seed(rebar_repo)
+    main(["verify-completion", tid, *flags])
+    assert seen["graph"] is expected_graph
+
+
 def test_cli_llm_error_is_clean_exit_one(rebar_repo: Path, monkeypatch, capsys) -> None:
     """A typed ``LLMError`` (e.g. missing extra) surfaces as a clean ``Error:`` line on stderr
     with exit 1 — never a raw Python traceback (automation must not mistake it for success)."""
@@ -230,6 +263,30 @@ def test_mcp_verify_completion_gate_on_returns_schema_valid_dict(
     schemas.validator(schemas.COMPLETION_VERDICT).validate(res)
     assert res["verdict"] == "FAIL"
     assert res["findings"][0]["criterion"].startswith("AC1")
+
+
+@pytest.mark.parametrize(
+    "graph_arg,expected_graph",
+    [({}, None), ({"graph": True}, True), ({"graph": False}, False)],
+)
+def test_mcp_graph_tristate_reaches_verify_completion(
+    rebar_repo: Path, monkeypatch, graph_arg, expected_graph
+) -> None:
+    """Bug 7b (MCP surface): the ``graph`` param is a TRI-STATE (``bool | None``). Omitted ⇒
+    ``None`` (ticket-type default preserved — an epic still deep-reviews its subtree); an explicit
+    ``False`` reaches ``verify_completion`` unchanged (own-criteria verification of an epic) —
+    previously collapsed to ``None`` by ``True if graph else None``."""
+    import asyncio
+
+    from adapters import _unwrap
+
+    monkeypatch.setenv("REBAR_MCP_ALLOW_LLM", "1")
+    seen, fake = _capture_graph()
+    monkeypatch.setattr(rebar.llm, "verify_completion", fake)
+    srv = _build_mcp()
+    tid = _seed(rebar_repo)
+    _unwrap(asyncio.run(srv.call_tool("verify_completion", {"ticket_id": tid, **graph_arg})))
+    assert seen["graph"] is expected_graph
 
 
 def test_mcp_verify_completion_advertises_no_output_schema(rebar_repo: Path) -> None:

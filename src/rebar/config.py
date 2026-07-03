@@ -885,7 +885,8 @@ def _canonical_env_name(sect: str, key: str) -> str:
 # (EV-1/EV-3/EV-3c). The OLD name still works — read only when the canonical
 # counterpart is unset (canonical always wins) — with a deprecation warning.
 # ``REBAR_NO_SYNC`` is a NEGATIVE boolean flipped to the positive ``sync.pull``
-# (truthy → "off"/disabled; unset-or-"0" → "on"/enabled); ``REBAR_ID_GUARD_MODE``
+# (truthy → "off"/disabled; falsy/unset → "on"/enabled, per the shared ``_as_bool``
+# truthy convention); ``REBAR_ID_GUARD_MODE``
 # is similarly value-mapped (warn → bypass/"true", raise/other → "false").
 _LEGACY_ENV_ALIASES: dict[str, tuple[str, str, str]] = {
     # legacy name                      -> (section, key, canonical name)
@@ -913,10 +914,14 @@ _LEGACY_ENV_ALIASES: dict[str, tuple[str, str, str]] = {
 
 def _map_legacy_env(legacy: str, value: str) -> str:
     """Map a legacy env value to its canonical config value. Non-identity cases:
-    ``REBAR_NO_SYNC`` (negative→positive boolean flip) and ``REBAR_ID_GUARD_MODE``
-    (the id-guard value-flip: ``warn`` → bypass/"true", ``raise``/other → "false")."""
+    ``REBAR_NO_SYNC`` (negative→positive boolean flip; truthy per ``_as_bool`` →
+    pull "off") and ``REBAR_ID_GUARD_MODE`` (the id-guard value-flip: ``warn`` →
+    bypass/"true", ``raise``/other → "false")."""
     if legacy == "REBAR_NO_SYNC":
-        return "off" if (value and value != "0") else "on"
+        # Honor the shared truthy convention (``_as_bool``: 1/true/yes/on, case- and
+        # whitespace-insensitive) rather than "any non-empty, non-'0' string is set".
+        # ``REBAR_NO_SYNC`` truthy → disable pull; falsy/unset → leave pull on.
+        return "off" if _as_bool(value, legacy) else "on"
     if legacy == "REBAR_ID_GUARD_MODE":
         return "true" if value.strip().lower() == "warn" else "false"
     return value

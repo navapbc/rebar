@@ -674,7 +674,7 @@ def build_server():
     @mcp.tool()
     def verify_completion(
         ticket_id: str,
-        graph: bool = False,
+        graph: bool | None = None,
         ref: str | None = None,
         source: str | None = None,
     ) -> dict:
@@ -684,6 +684,11 @@ def build_server():
         criterion + definition of done (for bugs, that the bug is resolved) against the
         implementation; on FAIL, each finding carries the failing criterion, an explanation,
         and a source-code citation. Read-only.
+
+        ``graph`` is a tri-state: unspecified (``None``) uses the ticket-type default
+        (an epic verifies its whole subtree; other types verify only their own criteria),
+        while an explicit ``True``/``False`` forces subtree/own-criteria verification —
+        so ``graph=False`` on an epic verifies just the epic's own criteria.
 
         ``source=attested`` (default) verifies a snapshot pinned at ``ref`` (default
         ``origin/main``) — reproducible, branch-independent — and records ``verified_at_sha``;
@@ -702,9 +707,7 @@ def build_server():
             )
         import rebar.llm
 
-        return rebar.llm.verify_completion(
-            ticket_id, graph=True if graph else None, ref=ref, source=source
-        )
+        return rebar.llm.verify_completion(ticket_id, graph=graph, ref=ref, source=source)
 
     @mcp.tool()
     def review_plan(ticket_id: str, ref: str | None = None, source: str | None = None) -> dict:
