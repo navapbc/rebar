@@ -257,6 +257,11 @@ select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201"]
 # command data output) so it KEEPS T201; its broad-excepts were swept.
 "src/rebar/_commands/*" = ["T201"]
 "src/rebar/_alias.py" = ["T201"]
+# _ids.py — the id-resolution leaf extracted from _engine_support/resolver.py (so the
+# reducer imports it DOWN instead of reaching UP into _engine_support). Same
+# legitimate-print category as resolver was: it emits ambiguous-match diagnostics to
+# stderr for the data CLIs. KEEPS T201.
+"src/rebar/_ids.py" = ["T201"]
 # reconciler subprocess — BLE001 SWEPT by 0569 (20 broad-excepts: cleanup-and-reraise,
 # rollback-must-not-mask-original, and fail-open fallbacks, all justified inline;
 # characterization tests pin the is_not_found/http_status classification). KEEPS T201:

@@ -238,8 +238,10 @@ def process_link(state: dict, event: dict, data: dict, tracker_dir: str | None =
     resolved_target = raw_target
     if tracker_dir and raw_target:
         try:
-            # local import avoids a module-load circular dep with the resolver
-            from rebar._engine_support.resolver import resolve_ticket_id
+            # Import DOWN from the stdlib-only leaf (mirrors the compute_alias
+            # import above): the resolution primitive lives in rebar._ids, so the
+            # pure replay layer never reaches UP into a higher read layer.
+            from rebar._ids import resolve_ticket_id
 
             canonical = resolve_ticket_id(raw_target, tracker_dir)
             if canonical:
