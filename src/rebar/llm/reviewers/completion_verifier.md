@@ -53,9 +53,6 @@ Requirements appear under headings and phrasings that vary by ticket type:
 - **Generic** — also honor any "close criteria", "completion criteria", "definition of done",
   or "requirements" the body states in other words.
 
-For an **epic or story**, use `show_ticket` to read child tickets when a criterion is
-satisfied by a child's work, so you verify the whole rather than re-deriving everything.
-
 ## How to verify each requirement
 
 For each requirement:

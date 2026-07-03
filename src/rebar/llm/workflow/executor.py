@@ -552,6 +552,13 @@ def run_workflow(
     rec = recorder
     secrets = secrets or {}
     inputs = dict(inputs or {})
+    # Apply declared input defaults: a `default:` on a workflow input. Without this a
+    # `${{ inputs.<x> }}` reference to an optional input the caller omitted fails to resolve
+    # (the resolver raises on an unknown input). Only fills a MISSING key — a passed value
+    # (including a falsy one) always wins.
+    for _name, _spec in (doc.get("inputs") or {}).items():
+        if _name not in inputs and isinstance(_spec, dict) and "default" in _spec:
+            inputs[_name] = _spec["default"]
 
     # Block only on real errors: the informational "note:" line (degraded
     # jsonschema-absent path) and lint warnings never stop a run.

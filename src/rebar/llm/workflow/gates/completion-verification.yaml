@@ -13,11 +13,22 @@ inputs:
     description: The ticket whose completion requirements are verified.
     type: string
     required: true
+  graph:
+    description: >-
+      Whether to inline the ticket's descendant context for the verifier. The close gate passes
+      false — an epic close verifies its OWN completion criteria, not its whole descendant subtree
+      (children are gated on their own close). Always supplied by the gate dispatcher; when absent
+      (a direct workflow invocation) it defaults to false (verify the ticket's own criteria); the
+      epic-includes-descendants deep-review default is resolved upstream in verify_completion.
+    type: boolean
+    required: false
+    default: false
 steps:
 - id: precheck
   uses: completion_precheck
   with:
     ticket_id: ${{ inputs.ticket_id }}
+    graph: ${{ inputs.graph }}
 - id: decide
   needs:
   - precheck

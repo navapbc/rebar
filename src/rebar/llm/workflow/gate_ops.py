@@ -66,13 +66,18 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
             "verdict": verdict,
             "context": "",  # short-circuit: no verify runs, so no context is needed
         }
-    # Assemble the verifier's ticket context HONORING graph (epics verify across their
-    # descendants) and FENCE it (the prompt-injection delimiter) — exactly as bespoke
-    # verify_completion does (completion.py) — so the workflow verify step gets the same
-    # graph-aware context instead of relying only on the agent's read tools.
+    # Assemble the verifier's fenced ticket context (the prompt-injection delimiter). HONOR the
+    # caller's `graph`: the close gate (_commands.transition) passes graph=False so an epic close
+    # verifies its OWN completion criteria, not its whole descendant subtree — children are trusted
+    # via the deterministic child-closure gate above (their certified signatures), not re-verified.
+    # `graph` is threaded from the caller (default False for a direct workflow invocation); the
+    # epic-includes-descendants default for a standalone `verify-completion` deep review is resolved
+    # UPSTREAM in verify_completion, not re-derived here. Re-deriving graph here (the old bug)
+    # overrode the close gate's graph=False and made an epic close re-verify every descendant,
+    # blowing the step budget.
     from rebar.llm import operations
 
-    graph = root.get("ticket_type") == "epic"
+    graph = bool(ctx.inputs.get("graph"))
     context, _ids = operations._assemble_context(str(tid), graph=graph, repo_root=ctx.repo_root)
     fenced = f"<untrusted_ticket_context>\n{context}\n</untrusted_ticket_context>"
     return {

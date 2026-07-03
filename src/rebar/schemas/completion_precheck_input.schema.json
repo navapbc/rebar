@@ -5,7 +5,11 @@
   "description": "INPUT contract of the `completion_precheck` step: the ticket to verify.",
   "type": "object",
   "properties": {
-    "ticket_id": { "type": "string", "description": "The ticket id/alias to verify." }
+    "ticket_id": { "type": "string", "description": "The ticket id/alias to verify." },
+    "graph": {
+      "type": "boolean",
+      "description": "Whether to inline the ticket's descendant context for the verifier. The close gate passes false (an epic close verifies its OWN criteria, not its descendant subtree); defaults false when omitted."
+    }
   },
   "required": ["ticket_id"],
   "additionalProperties": false

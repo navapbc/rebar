@@ -563,19 +563,20 @@ def produce_completion_verdict(
     runner_sel = get_runner(cfg, override=runner)
     runner_sel.preflight()  # raises LLMUnavailableError → close gate fail-closes (faithful)
 
-    # The completion gate is self-contained: `completion_precheck` assembles the verifier's
-    # graph-aware, fenced ticket context (epics verify across their descendants) and the verify
-    # step consumes it — so the workflow path no longer loses the descendant context bespoke
-    # supplies. (`graph` here is informational; the precheck resolves graph by ticket type, the
-    # same default the close gate always uses.)
-    del graph
+    # The completion gate is self-contained: `completion_precheck` runs the deterministic
+    # child-closure gate, then assembles the verifier's fenced ticket context — HONORING the
+    # caller-resolved `graph`. The close gate passes graph=False so an epic close verifies its OWN
+    # completion criteria, not its whole descendant subtree (children are trusted via their
+    # certified closure, not re-verified). Thread it through so the precheck no longer re-derives
+    # graph by ticket type — that override made an epic close re-verify every descendant and blew
+    # the step budget (see the step-floor history in completion.py).
     doc = _gate_doc("completion-verification", repo_root)
     # Publish the caller-resolved cfg for the run so the completion ops (precheck child-failure,
     # reconcile) read the SAME config via resolve_gate_config, not a per-op from_env (586c).
     with gate_config(cfg):
         res = _ex.run_workflow(
             doc,
-            {"ticket_id": ticket_id},
+            {"ticket_id": ticket_id, "graph": bool(graph)},
             target_ticket=ticket_id,
             repo_root=repo_root,
             agent_runner=RunnerAgentStep(runner=runner_sel, repo_root=repo_root, config=cfg),
