@@ -88,6 +88,24 @@ rebar show <any-ticket> 2>&1 | grep -i 'unknown key'
 If a global `rebar` keeps winning on `PATH`, invoke the module form explicitly so the repo
 package is used: `python -m rebar <args>` (with the venv active).
 
+### Stale reducer cache in a mixed-build checkout
+
+Each ticket dir caches its reduced state in a `.cache.json`, keyed by a content hash that
+folds in a **reducer-cache version**. When a projection changes, that version is bumped so
+older caches miss and are recompiled — but **only builds that carry the bump know the new
+version**. In a *mixed-build* checkout (a repo `.venv` alongside a global `pipx` build, an
+MCP server, or a git hook running a different build), an older build sharing the same
+`.tickets-tracker` can write a cache under the *old* version that a newer build then serves,
+so a ticket reads back **missing newer state** (e.g. a signed `plan-review`/`completion`
+attestation reads as absent, wrongly blocking `claim`).
+
+**Workaround:** run a **single build** against the store (activate the repo venv — see
+"Verify you're on the repo build" above — and don't let a stale global build touch the same
+`.tickets-tracker`). If a ticket already has a stale cache, **delete that ticket's
+`.cache.json`** (`rm .tickets-tracker/<id>/.cache.json`) and re-read it — the next reduce
+recompiles from the events. Keeping every build on the same version (upgrade the global
+build, or use `python -m rebar` from the repo) prevents it recurring.
+
 ## What the LLM ops need
 
 `review-plan`, `verify-completion`, and the other `rebar.llm` operations require, in
