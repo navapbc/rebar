@@ -230,8 +230,9 @@ Key properties:
 
 ## 6. Step 3 — Gerrit project + `LLM-Review` label + submit requirement
 
-> Owns: the `rebar` project, the single-label gate. See ADR-0013; files
-> `infra/gerrit/project.config`, `infra/gerrit/setup-project.sh`.
+> Owns: the `rebar` project, the two-vote gate, and the feature-branch flow (§6a). See
+> ADR-0013, ADR-0020, ADR-0025; files `infra/gerrit/project.config`,
+> `infra/gerrit/setup-project.sh`.
 
 ```bash
 # From a workstation holding the Gerrit admin SSH key:
@@ -269,6 +270,38 @@ two votes by ADR-0020 / epic 1fa8):
   effective gate then becomes
   `label:LLM-Review=MAX AND label:Verified=MAX AND -has:unresolved`. `Verified` uses
   the same strict `copyCondition = changekind:NO_CODE_CHANGE` reset as `LLM-Review`.
+
+### 6a. Feature-branch flow (epic 88ab / S1 — ADR-0025)
+
+For multi-story features that accumulate off `main` and land via one reviewed merge
+change, `setup-project.sh` also provisions the feature-branch machinery (declarative +
+idempotent, same script):
+
+- **Merge-carry copyCondition (LLM-Review only):**
+  `copyCondition = changekind:NO_CODE_CHANGE OR changekind:MERGE_FIRST_PARENT_UPDATE`.
+  A re-merge after `main` advances is a `MERGE_FIRST_PARENT_UPDATE` (first parent moves,
+  feature tip unchanged) — the reviewed auto-merge delta is identical, so the LLM vote
+  **carries**. **`Verified` is deliberately NOT given this token** — a re-merge is a new
+  merge tree, so CI must **re-run** (GerriScary-safe). Net: on a re-merge **LLM-Review
+  carries, Verified re-runs**.
+- **Submit type pinned:** `[submit] action = merge if necessary` + `mergeContent = true`
+  pins the current effective inherited behaviour (`MERGE_IF_NECESSARY` + content merge)
+  so the atomic `--no-ff` merge-back can't be broken by an All-Projects default change.
+- **`feature-branch-drivers` group + three ACL permission types:** Create Reference +
+  Delete Reference on `refs/heads/feature/*`, and Push Merge Commit on both
+  `refs/for/refs/heads/main` and `refs/for/refs/heads/feature/*`. Ordinary (non-merge)
+  story pushes for review are already allowed to Registered Users by the
+  `refs/for/refs/heads/*` grant; only the **merge-commit** push is group-restricted.
+  Membership = Administrators (subgroup) + named operating agents
+  (`FEATURE_BRANCH_DRIVER_MEMBERS`, space-separated usernames); the script **creates** the
+  group if absent and converges membership on every run.
+- **Enforcement + signals:** ACL refusals (non-member merge push / `feature/*` creation)
+  are refused natively by Gerrit and recorded in Gerrit's sshd/httpd audit log — the
+  review-bot is not in that path (see `infra/runbooks/review-bot-ops.md` "signals to
+  watch").
+- **Back-out:** delete the `[submit]` block to restore INHERIT; revoke the three ACL
+  grants + delete/empty the group to retire the flow (the copyCondition token is inert
+  absent merge changes and may be left or reverted). See ADR-0025.
 
 ---
 

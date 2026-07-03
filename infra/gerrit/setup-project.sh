@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# setup-project.sh — provision the `rebar` Gerrit project + push its refs/meta/config
-# (label LLM-Review, submit requirement, ACL grant). Story S3.
+# setup-project.sh — provision the `rebar` Gerrit project + its managed groups + push
+# its refs/meta/config (labels LLM-Review + Verified, submit requirements, submit-type
+# pin, and the feature-branch ACLs). Originally story S3; extended by epic 88ab / S1
+# (bored-tag-sale) to create/converge the `feature-branch-drivers` group and its ACLs.
 #
-# Declarative + idempotent: creates the project if absent, then pushes a fully
-# declarative project.config to refs/meta/config (overwriting prior config). The
+# Declarative + idempotent: creates the project + managed groups if absent, then pushes a
+# fully declarative project.config to refs/meta/config (overwriting prior config). The
 # SERVER-LEVEL change.submitWholeTopic (a global key, not project-scoped) is set
 # out-of-band in the site gerrit.config (infra/compose/gerrit.config [change]) — it
 # is NOT managed by this script.
@@ -40,6 +42,35 @@ else
   $GERRIT_SSH gerrit create-project "$PROJECT" --empty-commit
 fi
 
+# --- 1b. Ensure managed groups exist (idempotent) --------------------------
+# `feature-branch-drivers` (epic 88ab / S1 — bored-tag-sale; ADR 0025) holds the
+# Create/Delete Reference (refs/heads/feature/*) + Push Merge Commit
+# (refs/for/refs/heads/{main,feature/*}) ACLs in project.config. The `want`-dict step
+# below only RESOLVES the UUIDs of groups that ALREADY exist (via `ls-groups`), so a
+# group referenced by project.config but absent on the server would make Gerrit REJECT
+# the refs/meta/config push with an "unknown group" error. So create it here if absent,
+# and converge its membership on every run (both idempotent).
+#
+# Membership policy (ADR 0025): initial members = Administrators (included as a subgroup)
+# + the named operating agents listed in FEATURE_BRANCH_DRIVER_MEMBERS (space-separated
+# usernames; default empty = admins only). Membership changes flow through THIS script
+# (an admin-approved edit), not ad-hoc UI grants.
+FB_GROUP="feature-branch-drivers"
+if $GERRIT_SSH gerrit ls-groups | grep -qxF -- "$FB_GROUP"; then
+  echo "setup-project: group '$FB_GROUP' already exists" >&2
+else
+  echo "setup-project: creating group '$FB_GROUP'" >&2
+  $GERRIT_SSH gerrit create-group "$FB_GROUP" \
+    --description "Feature-branch drivers: create/delete feature/* branches + push merge commits (epic 88ab / ADR 0025)" \
+    --group Administrators
+fi
+# Converge membership idempotently (re-adding an existing member/subgroup is a no-op).
+$GERRIT_SSH gerrit set-members "$FB_GROUP" --include Administrators >/dev/null 2>&1 || true
+for _m in ${FEATURE_BRANCH_DRIVER_MEMBERS:-}; do
+  echo "setup-project: ensuring '$_m' in '$FB_GROUP'" >&2
+  $GERRIT_SSH gerrit set-members "$FB_GROUP" --add "$_m" >/dev/null 2>&1 || true
+done
+
 # --- 2. Push the declarative refs/meta/config ------------------------------
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -54,7 +85,7 @@ cp "${SCRIPT_DIR}/project.config" project.config
 # rejects the push if any referenced group is absent. Named groups (Administrators,
 # Service Users) get their UUID from the live group list; the system group "Registered
 # Users" has the well-known global: UUID.
-declare -A want=( ["Administrators"]=1 ["Service Users"]=1 )
+declare -A want=( ["Administrators"]=1 ["Service Users"]=1 ["feature-branch-drivers"]=1 )
 {
   echo "# UUID	Group Name"
   echo "global:Registered-Users	Registered Users"
@@ -79,6 +110,6 @@ fi
 
 git config user.email admin@example.com
 git config user.name Administrator
-git commit -q -m "S3: rebar LLM-Review label + submit requirement + ACL grant"
+git commit -q -m "rebar project.config: LLM-Review + Verified labels + submit requirements + submit-type pin + feature-branch ACLs"
 git push -q origin HEAD:refs/meta/config
 echo "setup-project: pushed refs/meta/config for '$PROJECT'" >&2
