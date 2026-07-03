@@ -1,6 +1,6 @@
 """Close-gate coverage for the completion-verification gate (epic c7c5).
 
-The gate (rebar._commands.transition._completion_precheck, wired into transition_compute) is
+The gate (rebar._commands.transition_close._completion_precheck, wired into transition_compute) is
 opt-in via ``verify.require_completion_verification_for_close``. These tests monkeypatch
 ``rebar.llm.verify_completion`` (the gate calls it by module attribute, so the patch is seen) —
 NO model/network — and assert the gate's deterministic behavior:
@@ -25,6 +25,7 @@ import rebar
 import rebar.llm
 from rebar import config as _config
 from rebar._commands import transition as _t
+from rebar._commands import transition_close as _tc
 from rebar._engine_support.resolver import resolve_ticket_id
 
 
@@ -369,7 +370,7 @@ def test_concurrency_mismatch_leaves_no_orphan_signature(rebar_repo: Path, monke
     def _raise(*a, **k):
         raise ConcurrencyMismatch('Error: current status is "open", not "in_progress".')
 
-    monkeypatch.setattr(_t.txn, "transition_core", _raise)
+    monkeypatch.setattr(_tc.txn, "transition_core", _raise)
     with pytest.raises(ConcurrencyMismatch):
         _t.transition_compute(rid, "in_progress", "closed", repo_root=str(rebar_repo))
     # The ticket never closed and carries NO signature (no orphan attestation).
@@ -405,27 +406,27 @@ def test_resolve_session_prefers_rebar_session_id(monkeypatch) -> None:
     """(a) REBAR_SESSION_ID wins even when ambient SESSION_ID is also set."""
     monkeypatch.setenv("REBAR_SESSION_ID", "explicit-rebar")
     monkeypatch.setenv("SESSION_ID", "ambient")
-    assert _t._resolve_session("ignored") == "explicit-rebar"
+    assert _tc._resolve_session("ignored") == "explicit-rebar"
 
 
 def test_resolve_session_falls_back_to_ambient_session_id(monkeypatch) -> None:
     """(b) With only ambient SESSION_ID set, behavior is exactly as before (back-compat)."""
     monkeypatch.delenv("REBAR_SESSION_ID", raising=False)
     monkeypatch.setenv("SESSION_ID", "ambient")
-    assert _t._resolve_session("ignored") == "ambient"
+    assert _tc._resolve_session("ignored") == "ambient"
 
 
 def test_resolve_session_falls_back_to_short_head(monkeypatch) -> None:
     """(c) Neither env var set → short git HEAD is used."""
     monkeypatch.delenv("REBAR_SESSION_ID", raising=False)
     monkeypatch.delenv("SESSION_ID", raising=False)
-    monkeypatch.setattr(_t, "_short_head", lambda _tracker: "abc1234")
-    assert _t._resolve_session("ignored") == "abc1234"
+    monkeypatch.setattr(_tc, "_short_head", lambda _tracker: "abc1234")
+    assert _tc._resolve_session("ignored") == "abc1234"
 
 
 def test_resolve_session_falls_back_to_unknown(monkeypatch) -> None:
     """(d) Neither env var set and no HEAD available → 'unknown'."""
     monkeypatch.delenv("REBAR_SESSION_ID", raising=False)
     monkeypatch.delenv("SESSION_ID", raising=False)
-    monkeypatch.setattr(_t, "_short_head", lambda _tracker: "")
-    assert _t._resolve_session("ignored") == "unknown"
+    monkeypatch.setattr(_tc, "_short_head", lambda _tracker: "")
+    assert _tc._resolve_session("ignored") == "unknown"

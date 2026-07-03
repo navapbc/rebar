@@ -15,7 +15,7 @@ import pytest
 
 import rebar
 from rebar import signing
-from rebar._commands.transition import _verdict_manifest
+from rebar._commands.transition_close import _verdict_manifest
 
 
 @pytest.fixture
