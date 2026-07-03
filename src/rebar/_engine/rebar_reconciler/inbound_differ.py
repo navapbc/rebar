@@ -310,6 +310,13 @@ def _diff_jira_vs_local(
             and local_val.rstrip() == jira_val.rstrip()
         ):
             continue
+        # ADR 0029 #2 — don't flip a locally-terminal ticket to closed on Jira's Done echo (444d).
+        if (
+            local_field == "status"
+            and local_val in ("archived", "deleted")
+            and jira_val == "closed"
+        ):
+            continue
         if jira_val != local_val:
             changed[local_field] = jira_val
 
