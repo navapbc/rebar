@@ -56,9 +56,11 @@ def test_batch_retry_loop_chains_cause(monkeypatch: pytest.MonkeyPatch) -> None:
     """AC3 (batch path): ``_call_with_retry`` chains the underlying cause (the prior
     ``raise RetryExhaustedError(str(last_exc))`` DROPPED ``__cause__``) and records
     ``last_exception``/``attempts``."""
-    from rebar_reconciler import batch_dispatch
+    from rebar_reconciler import batch_dispatch, dispatch_one
 
-    monkeypatch.setattr(batch_dispatch.time, "sleep", lambda *_a, **_k: None)
+    # _call_with_retry (and its module-level ``time``) now lives in dispatch_one and
+    # is re-exported by batch_dispatch; patch time at its point of use.
+    monkeypatch.setattr(dispatch_one.time, "sleep", lambda *_a, **_k: None)
     boom = JiraAPIError("server error", 500)  # 5xx is retryable → the loop exhausts
 
     def always_500(*_a, **_k):
