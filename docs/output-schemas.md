@@ -58,6 +58,13 @@ Structured via `--output json`:
 | `review` (CLI/library)           | `review_result`           |
 | `verify-completion` (CLI/library) | `completion_verdict`     |
 | `grounding-info`                 | `grounding_info`          |
+| `review-plan`                    | `plan_review_verdict`     |
+| `review-code-gate`               | `code_review_verdict`     |
+| `sign`                           | `sign_result`             |
+| `verify-signature`               | `verify_signature_result` |
+| `verify-signature` (not found)   | `error_envelope`          |
+| `get-workflow-status` / `get-workflow-result` | `workflow_run` |
+| `export`                         | `export`                  |
 
 The authoritative version of this table is `schemas.OUTPUT_SCHEMAS` in
 `src/rebar/schemas/__init__.py` — the registry the coverage guard consumes.
@@ -105,7 +112,8 @@ not a second source of truth. Tests pin both:
   without a canonical shape must be a documented exemption (so a new MCP tool
   cannot ship an unvalidated `outputSchema`).
 - `tests/interfaces/contracts/test_schema_coverage.py` — the **coverage guard**: every
-  schema file is wired into `OUTPUT_SCHEMAS`, every registry entry resolves, and
+  *output* schema file is wired into `OUTPUT_SCHEMAS` (the `COMMON`, `INPUT_SCHEMAS`,
+  and `CONTRACT_SCHEMAS` files are exempted), every registry entry resolves, and
   every command whose `--help` advertises `--output` is covered (so a new
   `--output` command without a schema fails CI).
 

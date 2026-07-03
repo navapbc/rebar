@@ -50,7 +50,8 @@ to an emitted code are contract changes and must be called out in release notes.
 
 Only the five **structured read commands** validate their options and exit `2`
 on an unrecognized `--option`: `show`, `list`, `deps`, `ready`, `search` (all
-route through `ticket_reads.py` / `parse_output`). These are pinned by
+route through `_engine_support/reads_cli.py`; option parsing lives in
+`_engine_support/output.py::parse_output`). These are pinned by
 `test_exit_codes.py::test_unknown_option_exits_2`.
 
 Other subcommands do **not** uniformly validate options: most mutation commands
@@ -144,11 +145,11 @@ These commands deliberately depart from "0=success / 1=error":
 
 While writing this contract, two deviations from "unknown option → 2" were found
 and **resolved by fixing the code** (not the doc), because every other read
-command already returned 2 and `ticket_reads._cmd_deps` even documented the
+command already returned 2 and `reads_cli._cmd_deps` even documented the
 cohort as "matching list/show/ready/search":
 
-- `rebar show <id> --bad-opt`: was `1`, now **`2`** (`ticket_reads._cmd_show`).
-- `rebar list --bad-opt`: was `1`, now **`2`** (`ticket_reads._cmd_list`).
+- `rebar show <id> --bad-opt`: was `1`, now **`2`** (`reads_cli._cmd_show`).
+- `rebar list --bad-opt`: was `1`, now **`2`** (`reads_cli._cmd_list`).
 
 The gate convention (clarity-check not-found = 2) and `validate`'s health-bucket
 exit were **kept as-is and documented** rather than changed, to avoid altering

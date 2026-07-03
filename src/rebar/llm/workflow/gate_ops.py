@@ -11,8 +11,9 @@ not coincidental). The workflow shape is:
            then: <prompt: completion-verifier> → completion_reconcile (uses)
            else: completion_passthrough (uses)   # the deterministic FAIL verdict
 
-The branch (not a bare `if:`) models `completion.py`'s child-closure SHORT-CIRCUIT
-(completion.py:223-225 returns a deterministic FAIL and skips the LLM): a branch arm
+The branch (not a bare `if:`) models the child-closure SHORT-CIRCUIT
+(`completion._child_closure_findings` surfaces a blocking/unclosed child, which
+`_deterministic_child_failure` turns into a FAIL verdict that skips the LLM): a branch arm
 references only steps that run in it, whereas referencing an `if:`-skipped step's outputs
 raises. So a failing precheck reaches the ELSE arm and NEVER runs the (billable) prompt —
 behaviour and cost preserved. Signing is NOT done here (completion.py has no signer; the
@@ -137,8 +138,8 @@ def completion_reconcile(ctx: StepContext) -> dict[str, Any]:
     if summary is not None:
         result["summary"] = summary
     # Same normalize → resolve_citations → reconcile → validate pipeline as
-    # completion.verify_completion's tail (completion.py:288-295), so the workflow path is
-    # behaviourally equivalent to the bespoke call.
+    # completion.verify_completion's tail (the normalize_finding/resolve_citations/_reconcile
+    # sequence), so the workflow path is behaviourally equivalent to the bespoke call.
     result["findings"] = [
         findings.normalize_finding(f, reviewer_id=_REVIEWER_ID) for f in result["findings"]
     ]
