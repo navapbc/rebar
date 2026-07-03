@@ -10,6 +10,7 @@
 #   3. Gerrit->GitHub replication failures (replication_log) -> rebar/host:replication_errors (S5 alarm).
 #   4. review-bot voter failures (VOTER_ERROR in journald) -> rebar/host:voter_errors (S4b alarm).
 #   4c. review-bot merge-change failures (MERGE_CHANGE_ERROR) -> rebar/host:review_bot_merge_change_errors (epic 88ab/S2 alarm).
+#   4d. continuous auto-deploy failures (AUTODEPLOY_ERROR in the unit journal) -> rebar/host:deploy_errors (epic 88ab/8903 alarm).
 #   4b. gerrit-to-platform CI-dispatch failures (Gerrit journald) -> rebar/host:g2p_dispatch_errors (epic 1fa8 alarm).
 #   5. Gate reachability -> Rebar/Gate:GerritReachable (1/0), watched by the S7 gate-down
 #      alarm (treat_missing_data=breaching catches a dead host / stopped probe).
@@ -141,6 +142,27 @@ echo "$mtotal" >"$MERGE_OFFSET_FILE"
 aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
   --metric-name review_bot_merge_change_errors --unit Count --value "$mnew" 2>/dev/null || true
 [ "$mnew" -gt 0 ] && logger -t rebar-health "review-bot merge-change failures (new this interval)=${mnew}"
+
+# --- 4d. continuous auto-deploy failures (epic 88ab / story 8903) -----------
+# autodeploy.sh (the systemd oneshot rebar-autodeploy.service) writes an AUTODEPLOY_ERROR
+# marker to stderr -> journald whenever a deploy step fails (fetch, config-check, build,
+# health-check-then-rollback, etc.). It is a systemd UNIT (not a container), so grep its
+# unit journal (not a CONTAINER_NAME). Same offset-delta shape as above; published without
+# dimensions to match the dimensionless alarm in monitoring_autodeploy.tf. A persistent
+# signal here means the box is NOT tracking main (drifting) and/or a deploy is failing +
+# backing off — the last-known-good stays live, but an operator should investigate.
+DEPLOY_OFFSET_FILE="${DEPLOY_OFFSET_FILE:-/var/lib/rebar/autodeploy-fail-offset}"
+mkdir -p "$(dirname "$DEPLOY_OFFSET_FILE")"
+dtotal=$(journalctl -u rebar-autodeploy.service --no-pager -o cat 2>/dev/null | grep -cE 'AUTODEPLOY_ERROR') || true
+dtotal=${dtotal:-0}
+dprev=$(cat "$DEPLOY_OFFSET_FILE" 2>/dev/null || echo 0)
+case "$dprev" in '' | *[!0-9]*) dprev=0 ;; esac
+dnew=$((dtotal - dprev))
+[ "$dnew" -lt 0 ] && dnew=$dtotal
+echo "$dtotal" >"$DEPLOY_OFFSET_FILE"
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name deploy_errors --unit Count --value "$dnew" 2>/dev/null || true
+[ "$dnew" -gt 0 ] && logger -t rebar-health "auto-deploy failures (new this interval)=${dnew}"
 
 # --- 4b. gerrit-to-platform CI-dispatch failures (epic 1fa8) ---------------
 # Watch the GERRIT container's journald for gerrit-to-platform (g2p) error markers

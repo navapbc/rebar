@@ -1,0 +1,14 @@
+# rebar-autodeploy.timer — poll cadence for the continuous auto-deploy (epic 88ab / 8903).
+# 2-min cadence: reflects `main` on the box within ~poll + deploy time. On-box pull model
+# (no GitHub->AWS trust); the timer + the script's flock make overlapping fires safe.
+[Unit]
+Description=Run rebar auto-deploy every 2 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Unit=rebar-autodeploy.service
+
+[Install]
+WantedBy=timers.target
