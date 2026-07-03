@@ -308,7 +308,7 @@ we run an **ephemeral self-hosted stack**, not a persistent server:
   docker compose -f docker-compose.langfuse.yml up -d            # ~2-3 min to Ready
   export LANGFUSE_HOST=http://localhost:3000
   export LANGFUSE_PUBLIC_KEY=pk-lf-1234567890
-  export LANGFUSE_SECRET_KEY=sk-lf-1234567890
+  export LANGFUSE_SECRET_KEY=sk-lf-1234567890   # gitleaks:allow — deterministic non-secret local throwaway (matches the docker-compose init default; NOT a real key)
   REBAR_RUN_EXTERNAL=1 ANTHROPIC_API_KEY=… pytest -m external tests/external/test_llm_trace.py
   docker compose -f docker-compose.langfuse.yml down -v          # tear down + wipe
   ```
