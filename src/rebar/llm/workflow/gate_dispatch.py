@@ -43,6 +43,65 @@ def _gate_doc(name: str, repo_root) -> dict[str, Any]:
 
 
 # ── plan-review ───────────────────────────────────────────────────────────────────
+# Named step ids for gates/plan-review.yaml. The dispatcher's mid-tail RECOVERY and the metrics
+# reconstruction below key off these ids (a run's succeeded-step partition is looked up by id); a
+# YAML rename that dropped one would make the lookup silently return None, so a recoverable run
+# would degrade to a hollow INDETERMINATE with NO error (the exact silent-failure this centralizes
+# away). Keep the literals here, once, and validate them against the loaded doc at dispatch time
+# (see `_validate_gate_step_ids`) so a rename is caught LOUDLY instead of silently degraded.
+STEP_PRECHECK = "precheck"
+STEP_ASSEMBLE = "assemble"
+STEP_FINDERS = "finders"
+STEP_VERIFY = "verify"
+STEP_DECIDE = "decide"
+STEP_COACH = "coach"
+
+# The step ids the recovery/metrics logic depends on being present in the loaded gate doc.
+_PLAN_REVIEW_REQUIRED_STEP_IDS = frozenset(
+    {STEP_PRECHECK, STEP_ASSEMBLE, STEP_FINDERS, STEP_VERIFY, STEP_DECIDE, STEP_COACH}
+)
+
+
+class GateContractError(RuntimeError):
+    """A loaded gate workflow is missing a step id the dispatcher's recovery/metrics logic
+    references — i.e. a YAML step was renamed/dropped out from under the recovery code. Raised
+    LOUDLY at dispatch (NOT silently degraded to INDETERMINATE) so the break surfaces where it
+    can be fixed instead of quietly discarding real findings."""
+
+
+def _collect_step_ids(node: Any) -> set[str]:
+    """Every step ``id`` in a loaded workflow doc, including ids nested inside ``branch``
+    then/else arms (a recursive walk over the plain dict/list doc structure)."""
+    ids: set[str] = set()
+    if isinstance(node, dict):
+        sid = node.get("id")
+        if isinstance(sid, str):
+            ids.add(sid)
+        for value in node.values():
+            ids |= _collect_step_ids(value)
+    elif isinstance(node, list):
+        for item in node:
+            ids |= _collect_step_ids(item)
+    return ids
+
+
+def _validate_gate_step_ids(doc: dict[str, Any], required: frozenset, *, gate_name: str) -> None:
+    """Fail LOUDLY if the loaded gate doc is missing any step id the dispatcher references.
+
+    A step-id rename in ``gates/<gate_name>.yaml`` would otherwise make the recovery lookups
+    silently return ``None`` and degrade a recoverable run to INDETERMINATE. Called at dispatch
+    time (right after the doc is loaded) so drift is caught here, not swallowed downstream."""
+    present = _collect_step_ids(doc.get("steps"))
+    missing = sorted(required - present)
+    if missing:
+        raise GateContractError(
+            f"gate workflow {gate_name!r} is missing step id(s) {missing} that the dispatcher's "
+            f"recovery/metrics logic references (present step ids: {sorted(present)}). A step was "
+            f"likely renamed in gates/{gate_name}.yaml — update the STEP_* constants in "
+            f"gate_dispatch.py to match, or restore the id."
+        )
+
+
 def produce_plan_review_verdict(
     ctx, cfg, *, runner=None, advisory_cap: int, repo_root=None, probe_criteria=None
 ) -> dict[str, Any]:
@@ -86,6 +145,9 @@ def produce_plan_review_verdict(
     # cfg.repo_path; so we must NOT thread the code snapshot here, or ticket reads would look
     # for the store under the .git-less code snapshot and miss it.
     doc = _gate_doc("plan-review", repo_root)
+    # Catch a step-id rename in gates/plan-review.yaml LOUDLY here — before the billable run —
+    # rather than letting a recovery lookup silently return None and degrade to INDETERMINATE.
+    _validate_gate_step_ids(doc, _PLAN_REVIEW_REQUIRED_STEP_IDS, gate_name="plan-review")
     rec = MemoryRecorder()
     _t_total = time.monotonic()
     # One run-scoped assemble_context memo for the whole workflow: the four plan-review ops
@@ -150,7 +212,7 @@ def produce_plan_review_verdict(
 
 
 # Step ids/kinds that partition a plan-review run into its latency tiers (toy-kink-ire).
-_DET_STEP_IDS = frozenset({"precheck"})  # the deterministic floor tier
+_DET_STEP_IDS = frozenset({STEP_PRECHECK})  # the deterministic floor tier
 _LLM_STEP_KINDS = frozenset({"agent", "batch"})  # the billable LLM tier (finders/verify/coach)
 
 
@@ -200,7 +262,7 @@ def _attach_plan_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
             finder_criteria += int((s.get("outputs") or {}).get("criteria_count") or 0)
         elif kind == "agent":
             agent_calls += 1
-            if step_id == "verify":
+            if step_id == STEP_VERIFY:
                 verify_requests += int(
                     ((s.get("outputs") or {}).get("_usage") or {}).get("requests") or 0
                 )
@@ -238,8 +300,8 @@ def _recover_plan_review_coach_failure(rec, cfg, *, error) -> dict[str, Any] | N
         fk = s.get("frame_key") or s.get("step_id") or ""
         succeeded[str(fk).rsplit("/", 1)[-1]] = s.get("outputs") or {}
 
-    decide = succeeded.get("decide")
-    precheck = succeeded.get("precheck")
+    decide = succeeded.get(STEP_DECIDE)
+    precheck = succeeded.get(STEP_PRECHECK)
     if not decide or not precheck or "blocking" not in decide:
         return None  # Pass-3 did not complete → the LLM tier failed, not just the coach
 
@@ -249,7 +311,7 @@ def _recover_plan_review_coach_failure(rec, cfg, *, error) -> dict[str, Any] | N
     }
     coverage = {
         "det": precheck.get("det_coverage") or {},
-        "routing": (succeeded.get("assemble") or {}).get("routing") or {},
+        "routing": (succeeded.get(STEP_ASSEMBLE) or {}).get("routing") or {},
         "llm_ran": True,
         "coach_error": str(error) if error else "pass-4 coach failed; verdict emitted without it",
     }
@@ -283,9 +345,9 @@ def _recover_plan_review_verify_failure(rec, cfg, *, error) -> dict[str, Any] | 
         fk = s.get("frame_key") or s.get("step_id") or ""
         succeeded[str(fk).rsplit("/", 1)[-1]] = s.get("outputs") or {}
 
-    finders = succeeded.get("finders")
-    precheck = succeeded.get("precheck")
-    if not finders or not precheck or "decide" in succeeded:
+    finders = succeeded.get(STEP_FINDERS)
+    precheck = succeeded.get(STEP_PRECHECK)
+    if not finders or not precheck or STEP_DECIDE in succeeded:
         # finders did not run (genuine LLM-tier failure), or decide DID run (a different
         # failure the coach-recovery handles) → not a verify-only failure.
         return None
@@ -306,7 +368,7 @@ def _recover_plan_review_verify_failure(rec, cfg, *, error) -> dict[str, Any] | 
     )
     coverage = {
         "det": precheck.get("det_coverage") or {},
-        "routing": (succeeded.get("assemble") or {}).get("routing") or {},
+        "routing": (succeeded.get(STEP_ASSEMBLE) or {}).get("routing") or {},
         "llm_ran": True,
         "verify_failed": True,
         "verify_error": str(error)

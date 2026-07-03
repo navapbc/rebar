@@ -12,8 +12,8 @@ not coincidental). The workflow shape is:
            else: completion_passthrough (uses)   # the deterministic FAIL verdict
 
 The branch (not a bare `if:`) models the child-closure SHORT-CIRCUIT
-(`completion._child_closure_findings` surfaces a blocking/unclosed child, which
-`_deterministic_child_failure` turns into a FAIL verdict that skips the LLM): a branch arm
+(`completion.child_closure_findings` surfaces a blocking/unclosed child, which
+`completion.deterministic_child_failure` turns into a FAIL verdict that skips the LLM): a branch arm
 references only steps that run in it, whereas referencing an `if:`-skipped step's outputs
 raises. So a failing precheck reaches the ELSE arm and NEVER runs the (billable) prompt —
 behaviour and cost preserved. Signing is NOT done here (completion.py has no signer; the
@@ -48,7 +48,7 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
     (force-closed) direct child does NOT block: it emits ``certifiable=False`` and the LLM still
     runs on the parent's OWN criteria (the parent may close but not certify)."""
     import rebar
-    from rebar.llm.completion import _child_closure_findings, _deterministic_child_failure
+    from rebar.llm.completion import child_closure_findings, deterministic_child_failure
     from rebar.llm.config import resolve_gate_config
 
     tid = ctx.inputs.get("ticket_id") or ctx.target_ticket
@@ -59,11 +59,11 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
         )
     root = rebar.show_ticket(str(tid), repo_root=ctx.repo_root)
     canonical = root.get("ticket_id", str(tid))
-    blocking, uncertified = _child_closure_findings(canonical, ctx.repo_root)
+    blocking, uncertified = child_closure_findings(canonical, ctx.repo_root)
     if blocking:
         # A direct child is NOT closed → the parent is incomplete: fail fast, NO LLM call, BLOCK.
         cfg = resolve_gate_config(ctx.repo_root)  # caller-resolved run config (veiny-trout-brink)
-        verdict = _deterministic_child_failure(canonical, blocking, cfg)
+        verdict = deterministic_child_failure(canonical, blocking, cfg)
         return {
             "run_verify": False,
             "precheck_failed": True,
@@ -115,7 +115,7 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
 def completion_reconcile(ctx: StepContext) -> dict[str, Any]:
     """Reconcile the agent verdict → a validated completion_verdict (parity with completion.py)."""
     from rebar.llm import findings
-    from rebar.llm.completion import _reconcile
+    from rebar.llm.completion import reconcile_verdict
     from rebar.llm.config import resolve_gate_config
 
     # The caller-resolved run config (veiny-trout-brink); this op uses cfg.repo_path for citation
@@ -138,13 +138,13 @@ def completion_reconcile(ctx: StepContext) -> dict[str, Any]:
     if summary is not None:
         result["summary"] = summary
     # Same normalize → resolve_citations → reconcile → validate pipeline as
-    # completion.verify_completion's tail (the normalize_finding/resolve_citations/_reconcile
+    # completion.verify_completion's tail (the normalize_finding/resolve_citations/reconcile_verdict
     # sequence), so the workflow path is behaviourally equivalent to the bespoke call.
     result["findings"] = [
         findings.normalize_finding(f, reviewer_id=_REVIEWER_ID) for f in result["findings"]
     ]
     findings.resolve_citations(result, cfg.repo_path)
-    _reconcile(result)
+    reconcile_verdict(result)
     # Carry the precheck's certification decision onto the verdict. `certifiable=False` (a
     # closed-but-uncertified descendant) does NOT change the PASS/FAIL verdict — the parent's own
     # criteria stand — but the close gate reads it to close WITHOUT signing (certification

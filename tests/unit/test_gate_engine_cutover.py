@@ -229,8 +229,15 @@ def test_produce_plan_review_does_not_thread_code_snapshot_as_ticket_root(monkey
         return _Res()
 
     monkeypatch.setattr(_ex, "run_workflow", _fake_run_workflow)
+    # Include the required step ids so the dispatch-time step-id contract check passes; this test
+    # exercises repo_root threading, not the recovery logic, so a minimal skeleton suffices.
     monkeypatch.setattr(
-        gate_dispatch, "_gate_doc", lambda name, repo_root: {"id": "g", "steps": []}
+        gate_dispatch,
+        "_gate_doc",
+        lambda name, repo_root: {
+            "id": "g",
+            "steps": [{"id": sid} for sid in gate_dispatch._PLAN_REVIEW_REQUIRED_STEP_IDS],
+        },
     )
 
     cfg = dataclasses.replace(

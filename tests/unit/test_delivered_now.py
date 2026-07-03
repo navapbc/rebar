@@ -4,7 +4,7 @@
 attestation on read), never bare ``closed`` status. These exercise both branches directly with
 constructed ticket-state dicts, monkeypatching the same two seams ``test_compute_validity``
 does (``rebar.verify_signature`` — the per-child attestation read reused from
-``completion._child_closure_findings`` — and ``attest.current_material_fingerprint``)."""
+``completion.child_closure_findings`` — and ``attest.current_material_fingerprint``)."""
 
 from __future__ import annotations
 

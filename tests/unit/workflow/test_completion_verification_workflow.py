@@ -189,7 +189,7 @@ def test_child_enumeration_read_error_withholds_certification(monkeypatch):
     # may still close on its OWN criteria (a read glitch shouldn't block a legitimate close), but
     # the verdict must be certifiable=False (closes UNSIGNED).
     import rebar
-    from rebar.llm.completion import _child_closure_findings
+    from rebar.llm.completion import child_closure_findings
 
     def _boom(parent=None, repo_root=None):
         raise RuntimeError("transient store read error")
@@ -204,7 +204,7 @@ def test_child_enumeration_read_error_withholds_certification(monkeypatch):
     # Direct contract (the fixed function): blocking EMPTY (don't fabricate a block on a read
     # error — the close may proceed), uncertified NON-EMPTY (so `certifiable = not uncertified`
     # is False). This is the exact empty/empty return the bug produced, now withheld.
-    blocking, uncertified = _child_closure_findings("T-1", None)
+    blocking, uncertified = child_closure_findings("T-1", None)
     assert blocking == [], "a read error must NOT fabricate a blocking child (close may proceed)"
     assert uncertified, "a read error must mark the parent uncertified (withhold, not forge)"
 
@@ -269,7 +269,7 @@ def test_reconcile_matches_completion_py_tail(monkeypatch):
     # Parity: the workflow's reconcile produces the SAME completion_verdict as completion.py's
     # own normalize → resolve_citations → reconcile → validate tail on the same raw agent output.
     from rebar.llm import findings as _findings
-    from rebar.llm.completion import _REVIEWER_ID, _reconcile
+    from rebar.llm.completion import _REVIEWER_ID, reconcile_verdict
     from rebar.llm.config import LLMConfig
 
     raw_findings = [
@@ -294,10 +294,11 @@ def test_reconcile_matches_completion_py_tail(monkeypatch):
         "trace_id": None,
     }
     _findings.resolve_citations(expected, cfg.repo_path)
-    _reconcile(expected)
+    reconcile_verdict(expected)
     # The workflow reconcile also carries the precheck's certification decision onto the verdict
     # (default true — this run is childless, so certifiable). completion.py's shared tail helper
-    # (_reconcile) does the FAIL<->findings normalization; certifiable is added by the reconcile op.
+    # (reconcile_verdict) does the FAIL<->findings normalization; certifiable is added by the
+    # reconcile op.
     expected["certifiable"] = True
     expected = _findings.validate_structured(expected, "completion_verdict")
     assert got == expected, "workflow reconcile diverged from completion.py's deterministic tail"

@@ -140,6 +140,21 @@ def transition_core(
     and (opt-in) story/epic signature-close guards. Raises :class:`CommandError` for
     validation / git failures. Returns ``None`` on success (the wrapper computes
     newly_unblocked + output separately)."""
+    # Resolve the signature-close gate FLAG *outside* the write lock — matching the completion
+    # gate, whose flag is resolved before the locked core — so the config read never holds the
+    # lock. Only a close can trigger the gate, so resolve only then (the ticket_type-specific
+    # applicability + the fail-closed WARNING are deferred to `_signature_gate`, which fires the
+    # warning under the lock once the re-read confirms a story/epic — so the message names the
+    # right type and only when the gate applies). The actual signature CHECK needs the fresh
+    # under-lock state, so it stays inside the lock (see `_signature_gate`).
+    sig_require: bool | None = None
+    sig_config_error: str | None = None
+    if target_status == "closed":
+        from rebar._commands.gates import resolve_signature_gate
+
+        cfg_root = os.environ.get("REBAR_ROOT") or tracker_dir.rsplit("/", 1)[0]
+        sig_require, sig_config_error = resolve_signature_gate(cfg_root)
+
     handle = _acquire_write_lock(tracker_dir)
     final_path = None
     try:
@@ -190,10 +205,20 @@ def transition_core(
                     returncode=1,
                 )
 
-        # Signature gate (story/epic closure; opt-in via config).
+        # Signature gate (story/epic closure; opt-in via config). The flag was resolved OUTSIDE
+        # the lock (above); only the signature CHECK runs here, under the lock, on the fresh
+        # re-read `state`. (`sig_require` is set whenever target_status == "closed", so it is a
+        # real bool here, never None.)
         if target_status == "closed" and ticket_type in ("story", "epic"):
             _signature_gate(
-                tracker_dir, ticket_id, ticket_type, state, verdict_hash, force_close_reason
+                tracker_dir,
+                ticket_id,
+                ticket_type,
+                state,
+                verdict_hash,
+                force_close_reason,
+                require_sig=bool(sig_require),
+                config_error=sig_config_error,
             )
 
         ticket_dir_path = os.path.join(tracker_dir, ticket_id)
@@ -246,10 +271,20 @@ def _signature_gate(
     state: dict,
     verdict_hash: str,
     force_close_reason: str,
+    *,
+    require_sig: bool,
+    config_error: str | None,
 ) -> None:
     """Story/epic close gate: require a CERTIFIED signature made at the current HEAD
     (OFF unless ``verify.require_signature_for_close=true`` — legacy alias
     ``verify.require_verdict_for_close=true`` — in ``.rebar/config.conf``).
+
+    The FLAG (is the gate on?) is resolved by ``gates.resolve_signature_gate`` OUTSIDE the write
+    lock and passed in as ``require_sig`` / ``config_error`` — so this function performs only the
+    actual signature CHECK, which needs the fresh under-lock ``state``. A present-but-unreadable
+    config fails CLOSED (``require_sig=True`` with ``config_error`` set); its warning is emitted
+    HERE (deferred from the flag resolution) now that ``ticket_type`` is known, so it names the
+    right ticket and only fires when the gate applies.
 
     A manifest of verified steps is HMAC-signed with the environment key
     (`rebar sign <id> <manifest>`) and recomputed/certified here; the signature
@@ -258,29 +293,20 @@ def _signature_gate(
     ticket is not certified; a force-close reason bypasses with a stderr warning
     (the wrapper writes the audit comment). Replaces the legacy verdict-hash gate;
     ``--verdict-hash`` is deprecated and ignored."""
-    cfg_root = os.environ.get("REBAR_ROOT") or tracker_dir.rsplit("/", 1)[0]
-    # Resolve the verify gate through the unified typed config (all layers + the
-    # legacy require_verdict_for_close alias). Fail-CLOSED: a present-but-unreadable
-    # config must never silently disable the gate — require a signature. An absent
-    # config returns the default (gate off), the intended opt-out.
-    from rebar.config import ConfigError, load_config
+    import sys
 
-    try:
-        require_sig = load_config(cfg_root).verify.require_signature_for_close
-    except ConfigError as cfg_exc:
-        import sys
-
+    # Fail-closed warning, deferred from the (out-of-lock) flag resolution so it names the
+    # ticket_type and fires only when the gate applies (a present-but-unreadable config →
+    # require_sig=True, config_error set).
+    if config_error is not None:
         print(
-            f"Warning: could not read rebar config ({cfg_exc}); requiring a "
+            f"Warning: could not read rebar config ({config_error}); requiring a "
             f"signature to close {ticket_type} {ticket_id} (fail-closed).",
             file=sys.stderr,
         )
-        require_sig = True
 
     if not require_sig:
         return
-
-    import sys
 
     if verdict_hash:
         print(
