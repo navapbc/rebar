@@ -10,6 +10,14 @@
 .DEFAULT_GOAL := help
 sources = src tests
 
+# Resolve the dev tools (ruff/mypy/pytest) from the project venv REGARDLESS of whether it
+# is activated, so the pre-commit gate (`make lint`/`make typecheck`) runs the PINNED tools
+# and never a stray system ruff/mypy on PATH. Invoke them as `$(PY) -m <tool>` so they come
+# from the same interpreter. Prefer `$(VENV)/bin/python` when it exists; otherwise fall back
+# to bare `python` (some CI installs the dev deps into the ambient env instead of a venv).
+VENV ?= .venv
+PY := $(shell [ -x $(VENV)/bin/python ] && echo $(VENV)/bin/python || echo python)
+
 .PHONY: help install hooks format lint typecheck check test vendor-security-rules
 
 help:  ## Show the available targets.
@@ -51,20 +59,20 @@ hooks:  ## (Re)install the pre-commit git hook and VERIFY it landed (the commit 
 	fi
 
 format:  ## MUTATES: auto-fix lint + format the code (the ONLY rewriting target).
-	ruff check --fix $(sources)
-	ruff format $(sources)
+	$(PY) -m ruff check --fix $(sources)
+	$(PY) -m ruff format $(sources)
 
 lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check. The gate CI runs.
-	ruff check $(sources)
-	ruff format --check $(sources)
+	$(PY) -m ruff check $(sources)
+	$(PY) -m ruff format --check $(sources)
 
 typecheck:  ## ERRORS ONLY: mypy over the whole library (gating; full src/rebar).
-	mypy src/rebar
+	$(PY) -m mypy src/rebar
 
 check: lint typecheck  ## Run every check-only gate (no mutation).
 
 test:  ## Run the default test suite (excludes integration + external).
-	pytest -m "not integration and not external" -q
+	$(PY) -m pytest -m "not integration and not external" -q
 
 # epic b744 / WS5: refresh the VENDORED, PINNED High/Critical security rule subset
 # (src/rebar/grounding/detectors/builtin/security_*.yaml). The rules are vendored (not a live
