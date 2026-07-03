@@ -81,22 +81,25 @@ def list_tickets(
 ) -> list[dict]:
     tracker = _tracker(repo_root)
     _fresh(tracker)
-    return ticket_reads.list_states(
-        tracker,
-        status=status or "",
-        ticket_type=ticket_type or "",
-        priority="" if priority is None else str(priority),
-        parent=parent or "",
-        has_tag=has_tag or "",
-        without_tag=without_tag or "",
+    # Keep this library shim's scalar signature (callers pass simple kwargs); build
+    # the TicketQuery here so the None→"" / priority-cast normalization lives once in
+    # TicketQuery.from_library rather than being respelled per read layer.
+    query = ticket_reads.TicketQuery.from_library(
+        status=status,
+        ticket_type=ticket_type,
+        priority=priority,
+        parent=parent,
+        has_tag=has_tag,
+        without_tag=without_tag,
         include_archived=include_archived,
         exclude_deleted=exclude_deleted,
         min_children=min_children,
         blocking_state=blocking_state,
         with_children_count=with_children_count,
-        sort=sort or "",
+        sort=sort,
         include_body=include_body,
     )
+    return ticket_reads.list_states(tracker, query)
 
 
 def deps(ticket_id: str, *, repo_root=None) -> dict:
