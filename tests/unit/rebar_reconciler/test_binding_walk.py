@@ -321,3 +321,116 @@ def test_no_client_absent_in_window_defers(tmp_path: Path) -> None:
     )
     assert result.mutations == []
     assert not bs.is_retired("REB-99")
+
+
+# ── class B — adopt an unbound Jira-native issue ─────────────────────────────
+
+
+def _empty_store(tmp_path: Path) -> BindingStore:
+    return _store(tmp_path, {})
+
+
+def test_class_b_unbound_present_adopts(tmp_path: Path) -> None:
+    """DD1(5854): a present Jira key with NO binding is ADOPTED — an (inbound,
+    create) mutation whose payload carries the raw fields for the create AND for
+    the baseline seed. Level-triggered: this fires regardless of prev_snapshot
+    (the exact cell today's suite never builds — key in BOTH snapshots, unbound)."""
+    bs = _empty_store(tmp_path)
+    fields = {"summary": "native issue", "status": "To Do", "priority": {"name": "High"}}
+    result = compute(
+        bs,
+        {"REB-532": fields},
+        active_local_ids=set(),
+        client=None,
+        local_reader=_archived_reader({}),
+        max_acting_fraction=1.0,
+    )
+    assert result.adopted == ["REB-532"]
+    assert len(result.mutations) == 1
+    m = result.mutations[0]
+    assert m.direction.value == "inbound"
+    assert m.action.value == "create"
+    assert m.target == "REB-532"
+    assert m.provenance["drift_class"] == "B"
+    # The raw snapshot entry rides the payload both as create fields and as the
+    # baseline seed source (echo suppression).
+    assert m.payload["fields"] == fields
+    assert m.payload["jira_fields"] == fields
+
+
+def test_class_b_retired_key_skips_adopt(tmp_path: Path) -> None:
+    """DD2(5854) / ADR 0027 §4a: a RETIRED key (its binding was GC'd by class C)
+    must NOT be re-adopted — that is the delete/re-adopt loop the two heals must
+    not create together. Classifier routes it to SKIP_RETIRED."""
+    bs = _store(tmp_path, {"loc-R": "REB-R"})
+    # Retire REB-R via GRACE consecutive 404s (class-C path), leaving it unbound
+    # AND in the retired set.
+    for _ in range(3):
+        bs.note_absent("REB-R")
+    assert bs.is_retired("REB-R")
+    assert bs.get_local_id("REB-R") is None
+
+    result = compute(
+        bs,
+        {"REB-R": {"summary": "resurrected?", "status": "To Do"}},
+        active_local_ids=set(),
+        client=None,
+        local_reader=_archived_reader({}),
+        max_acting_fraction=1.0,
+    )
+    assert result.adopted == [], "a retired key must never be re-adopted"
+    assert result.mutations == []
+
+
+def test_class_b_labeled_key_not_double_bound(tmp_path: Path) -> None:
+    """DD2(5854) / L10: an unbound key that already carries a rebar-id label is
+    identity-bound; adopting would double-create the phantom jira-dig-NNNN and can
+    trip the L11 quarantine. The unbound arm stands down."""
+    bs = _empty_store(tmp_path)
+    fields = {"summary": "marked", "status": "To Do", "labels": ["rebar-id:jira-dig-5029"]}
+    result = compute(
+        bs,
+        {"REB-777": fields},
+        active_local_ids=set(),
+        client=None,
+        local_reader=_archived_reader({}),
+        max_acting_fraction=1.0,
+    )
+    assert result.adopted == []
+    assert result.mutations == []
+
+
+def test_class_b_mass_adopt_tripped_by_breaker(tmp_path: Path) -> None:
+    """The breaker is a mass-ADOPT guard too: against a real binding population, a
+    fetch returning a flood of unbound issues (ADOPT is acting) is refused before
+    any create. (Cold-start with zero bindings is instead gated by MODE_CAPS in the
+    apply path — the fraction breaker needs a denominator.)"""
+    # Five confirmed bindings (all active → skipped by the bound arm) give the
+    # breaker a denominator of 5; twenty unbound keys would adopt at 400% ≫ 10%.
+    bs = _store(tmp_path, {f"loc-b{i}": f"REB-b{i}" for i in range(5)})
+    curr = {f"REB-n{i}": {"summary": f"n{i}", "status": "To Do"} for i in range(20)}
+    result = compute(
+        bs,
+        curr,
+        active_local_ids={f"loc-b{i}" for i in range(5)},
+        client=None,
+        local_reader=_archived_reader({}),
+        max_acting_fraction=0.10,
+    )
+    assert result.refused is True
+    assert result.mutations == []
+    assert result.adopted == []
+
+
+def test_class_b_bound_key_not_readopted(tmp_path: Path) -> None:
+    """A key that IS bound is owned by the field differ — the unbound arm skips it."""
+    bs = _store(tmp_path, {"loc-1": "REB-1"})
+    result = compute(
+        bs,
+        {"REB-1": {"summary": "bound", "status": "To Do"}},
+        active_local_ids={"loc-1"},  # active + bound → field differ owns it
+        client=None,
+        local_reader=_archived_reader({}),
+        max_acting_fraction=1.0,
+    )
+    assert result.adopted == []

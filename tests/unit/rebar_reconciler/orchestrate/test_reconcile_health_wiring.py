@@ -56,7 +56,8 @@ def _make_stub_fetcher(
     """Return a stub fetcher whose fetch_snapshot() writes a JSON file and returns its path."""
     import json
 
-    snapshot = snapshot or {"DIG-1": {"key": "DIG-1", "fields": {"summary": "Test issue"}}}
+    if snapshot is None:
+        snapshot = {"DIG-1": {"key": "DIG-1", "fields": {"summary": "Test issue"}}}
     snap_dir = tmp_path / "bridge_state" / "snapshots"
     snap_dir.mkdir(parents=True, exist_ok=True)
     snap_file = snap_dir / f"{pass_id}.curr.json"
@@ -164,7 +165,9 @@ def test_health_record_pass_called_with_zero_mutations(tmp_path, reconcile_mod):
     pass_id = "zero-mutation-pass"
     mutations: list = []
 
-    stub_fetcher = _make_stub_fetcher(tmp_path, pass_id)
+    # Empty snapshot: no unbound Jira-native issues, so the level-triggered adopt
+    # walk (epic 3006-e198) has nothing to adopt — the pass is genuinely zero-work.
+    stub_fetcher = _make_stub_fetcher(tmp_path, pass_id, snapshot={})
     stub_differ = _make_stub_differ(mutations)
     stub_applier = _make_stub_applier(tmp_path, pass_id)
     stub_health = _make_stub_health()
