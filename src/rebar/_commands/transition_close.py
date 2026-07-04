@@ -183,6 +183,9 @@ def _verdict_manifest(result: dict, ticket_id: str, repo_root=None) -> list[str]
         f"ticket: {ticket_id}",
         f"model: {result.get('model') or 'n/a'}",
         f"runner: {result.get('runner') or 'n/a'}",
+        # Which rebar gate code produced this attestation (audit/provenance, epic
+        # jira-reb-596), symmetric with the plan-review manifest. NEVER read on validity.
+        _signing.rebar_version_step(_signing.gate_code_version()),
     ]
     try:
         from rebar.llm.plan_review.attest import current_material_fingerprint
