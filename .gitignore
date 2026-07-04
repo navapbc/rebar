@@ -4,3 +4,7 @@
 .scratch/
 .cache.json
 */.cache.json
+.signing-key
+.ticket-write.lock
+.ticket-write.lock.d/
+.graph-cache.json
