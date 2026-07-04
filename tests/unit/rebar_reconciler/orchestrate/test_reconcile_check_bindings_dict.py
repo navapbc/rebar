@@ -55,6 +55,10 @@ def test_reconcile_check_passes_dict_binding_store(tmp_path, monkeypatch):
             }
 
         @staticmethod
+        def load_local_tickets(tracker_dir):
+            return []
+
+        @staticmethod
         def format_report(report):
             return "fake report"
 
@@ -129,6 +133,10 @@ def test_reconcile_check_uses_binding_store_module_when_available(tmp_path, monk
                 "unbound_local": 0,
                 "unbound_jira": 0,
             }
+
+        @staticmethod
+        def load_local_tickets(tracker_dir):
+            return []
 
         @staticmethod
         def format_report(r):

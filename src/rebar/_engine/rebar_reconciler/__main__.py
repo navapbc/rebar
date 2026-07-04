@@ -122,23 +122,15 @@ def _run_reconcile_check(repo_root: Path) -> int:
         # compute_snapshot (no bridge_state/snapshots/<pass>.json write) so the
         # diagnostic does not mutate the local store (ticket yaw-plait-doe).
         pass_id = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
-        import json as _json
 
         jira_snapshot = fetcher.compute_snapshot(pass_id, repo_root)
 
-        # Load local tickets from .tickets-tracker
+        # Load local tickets from .tickets-tracker. Bug ad39: the event-sourced
+        # store has no per-ticket ticket.json — the compiled ticket lives in
+        # <id>/.cache.json["state"]. rc_mod.load_local_tickets reads that (the
+        # old ticket.json read loaded nothing → all bindings reported orphaned).
         tracker_dir = repo_root / ".tickets-tracker"  # tickets-boundary-ok
-        local_tickets: list[dict] = []
-        if tracker_dir.is_dir():
-            for entry in sorted(tracker_dir.iterdir()):
-                if not entry.is_dir() or ".scratch" in entry.parts:
-                    continue
-                meta_path = entry / "ticket.json"
-                if meta_path.exists():
-                    ticket = _json.loads(meta_path.read_text())
-                    if "id" not in ticket:
-                        ticket["id"] = entry.name
-                    local_tickets.append(ticket)
+        local_tickets: list[dict] = rc_mod.load_local_tickets(tracker_dir)
 
         # Load binding store. BindingStore lives in binding_store.py — not in
         # applier.py (the previous lookup `hasattr(applier, "BindingStore")`

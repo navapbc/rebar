@@ -208,6 +208,47 @@ def _compare_pair(
 
 
 # ---------------------------------------------------------------------------
+# Local-ticket loading
+# ---------------------------------------------------------------------------
+
+
+def load_local_tickets(tracker_dir: Path) -> list[dict[str, Any]]:
+    """Load compiled local tickets from a ``.tickets-tracker`` directory.
+
+    The event-sourced store writes NO per-ticket ``ticket.json`` snapshot — a
+    ticket directory holds its event log (``*-CREATE.json`` etc.) plus a
+    compiled ``.cache.json`` whose ``state`` key is the reduced ticket (fields
+    keyed ``ticket_id``/``status``/…). Bug ad39: the previous reconcile-check
+    loader read ``<id>/ticket.json``, which never exists, so it loaded zero
+    local tickets and reported EVERY binding as orphaned. Read ``.cache.json``
+    ``state`` instead; a directory with no readable compiled state is skipped
+    (it contributes no local ticket, exactly as before).
+    """
+    tickets: list[dict[str, Any]] = []
+    if not tracker_dir.is_dir():
+        return tickets
+    for entry in sorted(tracker_dir.iterdir()):
+        if not entry.is_dir() or ".scratch" in entry.parts:
+            continue
+        cache_path = entry / ".cache.json"
+        if not cache_path.exists():
+            continue
+        try:
+            state = json.loads(cache_path.read_text()).get("state")
+        except (ValueError, OSError):
+            continue  # unreadable/corrupt cache → skip (no local ticket)
+        if not isinstance(state, dict):
+            continue
+        ticket = dict(state)
+        # The compiled state carries ``ticket_id``; keep ``id`` too so both the
+        # reconcile_check matcher (ticket_id-or-id) and legacy callers resolve.
+        ticket.setdefault("ticket_id", entry.name)
+        ticket.setdefault("id", ticket["ticket_id"])
+        tickets.append(ticket)
+    return tickets
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 

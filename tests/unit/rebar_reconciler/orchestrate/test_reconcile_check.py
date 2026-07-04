@@ -7,6 +7,7 @@ test tree (see conftest.py docstring).
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -226,3 +227,68 @@ def test_format_report_produces_readable_output(rc_mod: ModuleType) -> None:
     assert "9 in sync" in text
     assert "DIG-1" in text
     assert "DIG-999" in text
+
+
+# ---------------------------------------------------------------------------
+# Bug ad39: reconcile-check must load compiled tickets from .cache.json["state"],
+# not the nonexistent per-ticket ticket.json (which made EVERY binding orphan).
+# ---------------------------------------------------------------------------
+
+
+def _write_cache_ticket(tracker_dir: Path, tid: str, **state) -> None:
+    """Write a compiled ticket exactly as the event-sourced store does:
+    <id>/.cache.json with a top-level ``state`` object (plus sibling event
+    files that must be ignored). NO ticket.json is ever written."""
+    d = tracker_dir / tid
+    d.mkdir(parents=True)
+    st = {"ticket_id": tid, "status": "open", **state}
+    (d / ".cache.json").write_text(json.dumps({"dir_hash": "x", "state": st}))
+    # sibling event-log file — must not be mistaken for a ticket
+    (d / "1-CREATE.json").write_text(json.dumps({"event": "CREATE"}))
+
+
+def test_load_local_tickets_reads_compiled_cache_state(rc_mod: ModuleType, tmp_path: Path) -> None:
+    tracker = tmp_path / ".tickets-tracker"
+    _write_cache_ticket(tracker, "abc-1234", title="Fix bug", status="open")
+    tickets = rc_mod.load_local_tickets(tracker)
+    assert len(tickets) == 1
+    assert tickets[0]["ticket_id"] == "abc-1234"
+    assert tickets[0]["status"] == "open"
+    assert tickets[0]["title"] == "Fix bug"
+
+
+def test_load_local_tickets_skips_dirs_without_cache(rc_mod: ModuleType, tmp_path: Path) -> None:
+    """A ticket dir that has ONLY a legacy ticket.json (no .cache.json) yields
+    no ticket — proving the old ticket.json path is dead and the loader relies
+    on the compiled cache the store actually writes."""
+    tracker = tmp_path / ".tickets-tracker"
+    d = tracker / "no-cache"
+    d.mkdir(parents=True)
+    (d / "ticket.json").write_text(json.dumps({"id": "no-cache", "status": "open"}))
+    assert rc_mod.load_local_tickets(tracker) == []
+
+
+def test_bound_ticket_via_cache_is_checked_not_orphaned(rc_mod: ModuleType, tmp_path: Path) -> None:
+    """Regression for bug ad39: a binding whose local ticket (in .cache.json)
+    AND Jira issue both exist must count as checked/in_sync — NOT orphaned.
+
+    Before the fix, reconcile-check read <id>/ticket.json (never written), so
+    local_tickets was empty and EVERY binding fell into orphaned_bindings.
+    """
+    tracker = tmp_path / ".tickets-tracker"
+    _write_cache_ticket(tracker, "abc-1234", title="Fix bug", status="open")
+    jira_snapshot = {"DIG-100": {"summary": "Fix bug", "status": "To Do"}}
+    store = StubBindingStore([("abc-1234", "DIG-100")])
+
+    local_tickets = rc_mod.load_local_tickets(tracker)
+    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store)
+
+    assert report["orphaned_bindings"] == []  # was ["abc-1234"] before the fix
+    assert report["checked"] == 1
+    assert report["in_sync"] == 1
+
+    # Demonstrate the OLD behavior: with the broken loader (no ticket.json →
+    # empty local_tickets) the same binding is reported orphaned.
+    broken_report = rc_mod.reconcile_check([], jira_snapshot, store)
+    assert broken_report["orphaned_bindings"] == ["abc-1234"]
+    assert broken_report["checked"] == 0
