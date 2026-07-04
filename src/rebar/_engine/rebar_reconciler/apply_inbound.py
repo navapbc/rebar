@@ -75,6 +75,14 @@ def _apply_inbound_create(
     jira_key = mutation.target
     local_id = _jira_key_to_local_id(jira_key)
 
+    # ADOPT gate #1 (epic 3006-e198 / ADR 0027 §4a): never resurrect a RETIRED key
+    # (GC'd by class C) into a delete/re-adopt loop — a reappearing key is owned by
+    # binding recovery, not a fresh create.
+    if binding_store is not None and getattr(binding_store, "is_retired", None):
+        if binding_store.is_retired(jira_key):
+            detail = {"jira_key": jira_key, "skipped_retired": True}
+            return ApplyResult(mutation.direction, mutation.action, detail)
+
     # Defense-in-depth inbound dedup (ticket 1577). The snapshot differ normally
     # stands down for an already-bound issue by recognising its rebar-id:<local_id>
     # label in the fetched fields (bug 4354) — that is the primary production
@@ -187,6 +195,14 @@ def _apply_inbound_create(
         _bind_confirm = getattr(binding_store, "bind_confirm", None)
         if _bind_confirm is not None:
             _bind_confirm(local_id, jira_key)
+            # ADOPT gate #4 (ADR 0027 §4c / ADR 0029 §3): seed the baseline from the
+            # adopted Jira fields (payload["jira_fields"]) right after bind, so the
+            # first outbound diff is empty (echo suppression). set_baseline filters
+            # to the mirrored fields; it must run AFTER bind_confirm.
+            _set_baseline = getattr(binding_store, "set_baseline", None)
+            _adopted_fields = mutation.payload.get("jira_fields")
+            if _set_baseline is not None and isinstance(_adopted_fields, dict):
+                _set_baseline(local_id, _adopted_fields)
         else:
             import sys as _sys
 
