@@ -75,6 +75,18 @@ def _apply_inbound_create(
     jira_key = mutation.target
     local_id = _jira_key_to_local_id(jira_key)
 
+    # ADOPT gate #1 (epic 3006-e198 / ADR 0027 §4a): never resurrect a RETIRED
+    # key. A binding retired by the class-C GC (its Jira issue was confirmed gone)
+    # must not be re-adopted into a delete/re-adopt loop — if the key reappears it
+    # is owned by binding recovery, not a fresh create. Cheap local set lookup.
+    if binding_store is not None and getattr(binding_store, "is_retired", None):
+        if binding_store.is_retired(jira_key):
+            return ApplyResult(
+                mutation.direction,
+                mutation.action,
+                {"jira_key": jira_key, "skipped_retired": True},
+            )
+
     # Defense-in-depth inbound dedup (ticket 1577). The snapshot differ normally
     # stands down for an already-bound issue by recognising its rebar-id:<local_id>
     # label in the fetched fields (bug 4354) — that is the primary production
@@ -187,6 +199,17 @@ def _apply_inbound_create(
         _bind_confirm = getattr(binding_store, "bind_confirm", None)
         if _bind_confirm is not None:
             _bind_confirm(local_id, jira_key)
+            # ADOPT gate #4 (epic 3006-e198 / ADR 0027 §4c, ADR 0029 §3): seed the
+            # per-binding baseline from the ADOPTED Jira fields IMMEDIATELY on bind,
+            # so the FIRST outbound diff is empty (echo suppression — the freshly
+            # imported values are the last-synced ancestor, not a local edit).
+            # set_baseline filters to the mirrored fields and no-ops on an unbound
+            # id, so it must run AFTER bind_confirm. The raw snapshot entry rides
+            # the mutation payload under "jira_fields".
+            _set_baseline = getattr(binding_store, "set_baseline", None)
+            _adopted_fields = mutation.payload.get("jira_fields")
+            if _set_baseline is not None and isinstance(_adopted_fields, dict):
+                _set_baseline(local_id, _adopted_fields)
         else:
             import sys as _sys
 

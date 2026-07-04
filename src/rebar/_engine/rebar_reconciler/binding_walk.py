@@ -1,19 +1,24 @@
-"""Binding-store-driven acting walk (drift classes A + C; epic 3006-e198).
+"""Level-triggered acting walk (drift classes A + B + C; epic 3006-e198).
 
 The level-triggered controller step. Everywhere else the reconciler iterates the
-ACTIVE local snapshot (``rebar list`` — archived/deleted tickets are dropped), so
-a bound pair whose local ticket has LEFT the active set is invisible to the field
-differ. That blind spot is the shared root cause of two drift classes:
+ACTIVE local snapshot (``rebar list`` — archived/deleted tickets are dropped) or
+diffs prev-vs-curr fetch snapshots, so two whole regions of the state matrix are
+invisible: a bound pair whose local ticket has LEFT the active set, and a
+Jira-native issue that is present but UNBOUND. Those blind spots are the shared
+root cause of three drift classes:
 
 * **class A (444d)** — a locally archived/deleted ticket never drives its still-live
   Jira issue to a terminal status (stranded live issues).
 * **class C (13eb)** — a confirmed binding whose Jira issue was deleted is never
   garbage-collected once the local ticket is archived (dead entries accumulate).
+* **class B (5854)** — a Jira-native issue is never adopted at steady state
+  (edge-triggered inbound-create + a prev_snapshot proxy for "handled").
 
-Both are healed by ONE iteration over the BINDING STORE that *targeted-reads* the
+A + C are healed by ONE iteration over the BINDING STORE that *targeted-reads* the
 off-snapshot local ticket (13eb's contract: "SAME walk as 444d — one shared
-iteration, not two loops"). Each off-snapshot binding is classified by the pure
-:func:`classify` and dispatched:
+iteration, not two loops"); B is its complement — one iteration over the fetch
+window for keys with no binding. Both feed the pure :func:`classify` and one
+breaker/census. Each cell is classified and dispatched:
 
 * ``TERMINAL_TRANSITION`` → an ordinary outbound ``update {status: Done}`` mutation
   (the existing transition apply path handles it — no new MutationAction).
@@ -73,6 +78,7 @@ class BindingWalkResult:
     retired: list[str] = field(default_factory=list)
     probed: list[str] = field(default_factory=list)
     alerted: list[str] = field(default_factory=list)
+    adopted: list[str] = field(default_factory=list)
 
 
 def _resolve_grace() -> int:
@@ -100,6 +106,7 @@ def compute_binding_walk_mutations(
     grace: int | None = None,
     probe_get: Callable[[Any, str], Any] | None = None,
     persist: bool = True,
+    skip_adopt_keys: set[str] | None = None,
 ) -> BindingWalkResult:
     """Walk the binding store and heal drift classes A + C (see module docstring).
 
@@ -186,6 +193,40 @@ def compute_binding_walk_mutations(
         decision = classify_mod.classify(local, obs, entry, baseline, grace=grace)
         plans.append((local_id, jira_key, obs, decision))
 
+    # ---- phase 1b: unbound arm — ADOPT a Jira-native issue (drift class B) -----
+    # The COMPLEMENT of the bound walk: iterate the fetch window for keys with NO
+    # binding. inbound_differ skips these by design ("local is source of truth"),
+    # so a human-created Jira issue is never adopted at steady state. Level-
+    # triggered: every present-unbound key is (re)considered each pass — prev_
+    # snapshot plays no role in the trigger.
+    _skip_adopt = skip_adopt_keys or set()
+    for jira_key, fields in curr_snapshot.items():
+        if binding_store.get_local_id(jira_key) is not None:
+            continue  # already bound → owned by the field differ
+        if jira_key in _skip_adopt:
+            # The edge-triggered differ already emitted an inbound-create for this
+            # key THIS pass (it is new since prev_snapshot). The level-triggered
+            # adopt is the STEADY-STATE safety net for keys the edge trigger misses
+            # (present in BOTH prev and curr, still unbound) — it must not
+            # double-create what the differ already handles.
+            continue
+        if _has_rebar_id_label(fields):
+            # L10: the issue already carries a rebar-id:/rebar-id- marker → it is
+            # already identity-bound; adopting would double-create the phantom
+            # jira-dig-NNNN and can trip the L11 double-bind quarantine. Stand down
+            # (binding recovery owns re-linking a marked-but-unstored key).
+            continue
+        obs = JiraObservation(
+            state=ObservedJira.PRESENT,
+            key=jira_key,
+            fields=fields,
+            retired=binding_store.is_retired(jira_key),
+        )
+        # binding=None ⇒ the classifier's unbound arm: ADOPT, or SKIP_RETIRED when
+        # the key is soft-deleted (the retired flag gates it — ADR 0027 §4a).
+        decision = classify_mod.classify(None, obs, None, None, grace=grace)
+        plans.append(("", jira_key, obs, decision))
+
     # Nothing off-snapshot to act on — skip the breaker (and its confirmed_count
     # read) entirely so a no-op pass is truly cheap and side-effect-free.
     if not plans:
@@ -245,6 +286,28 @@ def compute_binding_walk_mutations(
                     # note_absent increments the counter and retires it (moves to
                     # bindings-retired.json + alert) when it reaches grace.
                     binding_store.note_absent(jira_key)
+        elif kind is DecisionKind.ADOPT:
+            # Class B — an unbound Jira-native issue. Route through the EXISTING
+            # inbound-create leaf (deterministic local id jira-dig-NNN ⇒ idempotent
+            # via the reverse-index dedup; it plants the rebar-id marker, binds, and
+            # — for this adopt path — seeds the baseline from ``jira_fields`` so the
+            # first outbound diff is empty). The raw snapshot entry rides the payload
+            # both as the create ``fields`` and as ``jira_fields`` for the seed.
+            _fields = dict(obs.fields or {})
+            result.mutations.append(
+                mut_mod.Mutation(
+                    direction=mut_mod.MutationDirection.inbound,
+                    action=mut_mod.MutationAction.create,
+                    target=jira_key,
+                    payload={"fields": _fields, "jira_fields": _fields},
+                    provenance={
+                        "source": "binding_walk",
+                        "drift_class": "B",
+                        "jira_key": jira_key,
+                    },
+                )
+            )
+            result.adopted.append(jira_key)
         elif kind is DecisionKind.ALERT:
             # bound + local vanished while Jira live — an anomaly; surface, do not act.
             result.alerted.append(jira_key)
@@ -252,3 +315,22 @@ def compute_binding_walk_mutations(
         # nothing to do.
 
     return result
+
+
+def _has_rebar_id_label(fields: Mapping[str, Any] | None) -> bool:
+    """True when a Jira snapshot entry already carries a rebar-id identity label.
+
+    Such a key is already identity-bound (``rebar-id:`` / ``rebar-id-`` marker);
+    adopting it would double-create the phantom ``jira-dig-NNNN`` local id and can
+    trip the L11 double-bind quarantine — so the unbound arm stands down (L10).
+    Tolerates the flat ``["rebar-id:…"]`` and nested ``{"labels": [...]}`` shapes.
+    """
+    if not fields:
+        return False
+    labels = fields.get("labels")
+    if not isinstance(labels, (list, tuple)):
+        return False
+    return any(
+        isinstance(lbl, str) and (lbl.startswith("rebar-id:") or lbl.startswith("rebar-id-"))
+        for lbl in labels
+    )

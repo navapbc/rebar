@@ -495,6 +495,16 @@ def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) 
     except ConfigError:
         _max_acting_fraction = 0.10
     _active_local_ids = {t.get("ticket_id") for t in local_tickets if t.get("ticket_id")}
+    # Keys the EDGE-triggered differ already emits an inbound-create for this pass
+    # (new since prev_snapshot) — the level-triggered adopt must not double-create
+    # them; it only heals steady-state misses (present in prev AND curr, unbound).
+    _already_created = {
+        getattr(m, "target", None)
+        for m in mutations
+        if getattr(m, "direction", None) == mut_mod.MutationDirection.inbound
+        and getattr(m, "action", None) == mut_mod.MutationAction.create
+        and getattr(m, "target", None)
+    }
     walk = binding_walk_mod.compute_binding_walk_mutations(
         binding_store,
         curr_snapshot,
@@ -506,6 +516,7 @@ def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) 
         mutation_mod=mut_mod,
         outbound_differ_mod=outbound_differ_mod,
         persist=persist,
+        skip_adopt_keys=_already_created,
     )
     sync_logger.log(
         "binding_walk_complete",
@@ -513,6 +524,7 @@ def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) 
         retired=len(walk.retired),
         probed=len(walk.probed),
         alerted=len(walk.alerted),
+        adopted=len(walk.adopted),
         breaker_allowed=bool(walk.breaker.allowed) if walk.breaker else True,
         refused=walk.refused,
     )
