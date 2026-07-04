@@ -397,3 +397,50 @@ create a third workflow that mounts the `tickets` worktree (steps 1–2 above) a
 
 on a weekly `cron` (e.g. `0 6 * * 1`), failing the job on anomalies so they surface
 before they accumulate. It is *hardening*, not required for sync.
+
+## Convergence rollout & rollback (epic 3006-e198)
+
+The level-triggered convergence controller (drift classes A/B/C) ships behind
+safety rails so it can be rolled out — and rolled back — without editing code.
+
+### The rollback brake
+
+`.github/workflows/reconcile-bridge.yml` exposes a **`workflow_dispatch` `mode`
+input** (`reconcile-check → dry-run → bootstrap-strict → bootstrap-throttle →
+live`). This is the one-click brake: dispatch the workflow with `mode: dry-run`
+(computes the plan, applies nothing) or `mode: reconcile-check` (read-only
+diagnostic) to **immediately stop all acting mutations** — terminal transitions,
+GC retirements, and adoptions — on the next pass, without a revert. The
+self-rescheduling chain re-dispatches the chosen mode, so it sticks until you
+change it back.
+
+### Circuit breaker
+
+Every acting pass is gated by `reconciler.max_acting_fraction` (default `0.10`):
+if the pass's acting decisions would exceed that fraction of the binding
+population, the whole acting phase is **refused before the first mutation**
+(prior art: Argo `allowEmpty`, Entra deletion threshold). A fetch/JQL regression
+that empties the window therefore trips the breaker instead of mass-retiring.
+The 2026-07-03 census measured 1.14% acting — 8.8× headroom. Lower the fraction
+to tighten the guard during rollout.
+
+### Baseline dual-write shadow (Phase 1 derisk)
+
+The one high-risk step is swapping direction arbitration from `prev_snapshot` to
+the per-binding `baseline` (ADR 0026). It is derisked in shadow first: set
+`reconciler.baseline_dual_write = true` to advance a per-binding baseline every
+live pass **without any consumer reading it**, logging a `baseline_shadow_check`
+(equal/divergent counts vs `prev_snapshot`) each pass. The consumer swap (Phase 3)
+is gated on **≥ N consecutive clean passes** (`divergent == 0`); any
+`baseline_shadow_divergence` event resets the count. Disable the flag to stop
+shadowing at any time — it never affects arbitration.
+
+### Rollback procedure (summary)
+
+1. Dispatch `reconcile-bridge.yml` with **`mode: dry-run`** (or `reconcile-check`)
+   — stops all acting mutations on the next pass.
+2. If a baseline swap misbehaves, set `reconciler.baseline_dual_write = false` and
+   keep the live consumer on `prev_snapshot`.
+3. Retirements are a reversible soft-delete (`bindings-retired.json`, full history
+   on the `tickets` branch); re-linking a wrongly-retired binding is a recovery,
+   not a re-create.
