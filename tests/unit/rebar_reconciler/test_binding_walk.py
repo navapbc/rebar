@@ -434,3 +434,46 @@ def test_class_b_bound_key_not_readopted(tmp_path: Path) -> None:
         max_acting_fraction=1.0,
     )
     assert result.adopted == []
+
+
+def test_key_in_both_prev_and_curr_unbound_is_adopted(tmp_path: Path) -> None:
+    """AC (5854), the LITERAL failing state: the SAME Jira key present in BOTH
+    ``prev_snapshot`` AND ``curr_snapshot`` with NO binding.
+
+    This is the exact cell the old suite never built. The EDGE-triggered inbound-
+    create fires only for a key in ``curr`` but NOT ``prev`` (``jira_new``), so a
+    key present in *both* snapshots produces ZERO creates from that path — the root
+    cause of drift B. The LEVEL-triggered walk adopts it regardless of
+    prev_snapshot. ``skip_adopt_keys`` carries exactly the keys the edge path
+    already created this pass (here: none, because the key is in both), so the walk
+    is the safety net that adopts the missed steady-state key.
+    """
+    prev_snapshot = {"REB-532": {"summary": "native", "status": {"name": "To Do"}}}
+    curr_snapshot = {"REB-532": {"summary": "native", "status": {"name": "To Do"}}}
+    bs = _store(tmp_path, {})  # REB-532 is UNBOUND
+
+    # The edge-triggered rule: create only for a key in curr but NOT prev. A key
+    # present in BOTH snapshots yields no create — this is what the old path misses.
+    edge_created = {k for k in curr_snapshot if k not in prev_snapshot}
+    assert edge_created == set(), (
+        "the edge-triggered inbound-create misses a key present in both "
+        "prev_snapshot and curr_snapshot (the drift-B root cause)"
+    )
+
+    # The level-triggered walk adopts the unbound key that the edge path missed.
+    result = compute(
+        bs,
+        curr_snapshot,
+        active_local_ids=set(),
+        client=None,
+        local_reader=_archived_reader({}),
+        max_acting_fraction=1.0,
+        skip_adopt_keys=edge_created,  # empty → the walk is not deduped away
+    )
+    assert result.adopted == ["REB-532"], (
+        "key in BOTH prev_snapshot and curr_snapshot with no binding must be adopted"
+    )
+    m = result.mutations[0]
+    assert m.direction.value == "inbound"
+    assert m.action.value == "create"
+    assert m.target == "REB-532"
