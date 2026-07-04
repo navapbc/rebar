@@ -127,6 +127,9 @@ try:
         verified: bool
         verdict: str
         reason: str
+        # Gate-code provenance: the rebar version+SHA that produced the attestation
+        # (audit-only, epic jira-reb-596). None for pre-stamp / unsigned records.
+        rebar_version: str | None = None
 
     class GroundingBackendOut(_Out):
         # One backend entry of GroundingInfoOut.backends.
