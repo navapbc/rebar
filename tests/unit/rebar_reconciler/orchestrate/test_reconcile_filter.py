@@ -68,6 +68,23 @@ class FakeBindingStore:
     def get_local_id(self, jira_key: str) -> str | None:
         return self._jira_to_local.get(jira_key)
 
+    # -- binding-store-walk interface (epic 3006-e198): the acting walk now runs
+    #    every pass, so the fake must answer the read side of that interface. All
+    #    bindings here are confirmed; none are archived or retired. --------------
+    def all_bindings(self) -> dict[str, dict]:
+        return {
+            lid: {"jira_key": jk, "state": "confirmed"} for lid, jk in self._local_to_jira.items()
+        }
+
+    def confirmed_count(self) -> int:
+        return len(self._local_to_jira)
+
+    def get_baseline(self, local_id: str) -> dict | None:
+        return None
+
+    def is_retired(self, jira_key: str) -> bool:
+        return False
+
 
 # ---------------------------------------------------------------------------
 # Tests for _build_filter_target_set

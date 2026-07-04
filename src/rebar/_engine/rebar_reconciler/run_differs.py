@@ -20,6 +20,7 @@ in as a parameter, and ``ctx`` is typed loosely to avoid importing ``_PassContex
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -54,6 +55,43 @@ def _load(name: str, relpath: str):
     reconcile.py).
     """
     return lazy_load(name, relpath)
+
+
+def _read_local_ticket_full(repo_root: Path, local_id: str, *, no_sync: bool) -> dict | None:
+    """Targeted read of ONE local ticket (including archived) via ``rebar show``.
+
+    The binding-store acting walk (epic 3006-e198) reconciles bound pairs whose
+    local ticket has left the ACTIVE snapshot (archived/deleted — ``rebar list``
+    omits them), so it must read those tickets individually. ``rebar show`` reads
+    any ticket regardless of archive state. Returns the ticket dict, or ``None``
+    when the ticket no longer exists (hard-deleted) or the read fails (fail-open:
+    the walk treats ``None`` as ``LocalState.ABSENT``). ``no_sync=True`` suppresses
+    the tickets-branch fetch so a no-write pass stays no-write on the git tree.
+    """
+    import os as _os
+    import subprocess as _sp
+
+    from rebar._engine import in_process_cli
+
+    cli = Path(in_process_cli())
+    if not cli.exists():
+        return None
+    _env = dict(_os.environ, REBAR_SYNC_PULL="off") if no_sync else None
+    try:
+        result = _sp.run(
+            [str(cli), "show", local_id],
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
+            timeout=30,
+            env=_env,
+        )
+        if result.returncode != 0:
+            return None
+        data = json.loads(result.stdout)
+        return data if isinstance(data, dict) else None
+    except Exception:  # noqa: BLE001 — fail-open: a failed read → ABSENT (no action)
+        return None
 
 
 def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) -> None:
@@ -440,5 +478,52 @@ def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) 
             },
         )
         mutations.append(typed)
+
+    # ── binding-store-driven acting walk (drift classes A + C; epic 3006-e198) ──
+    # The differ above iterates the ACTIVE local snapshot, so a bound pair whose
+    # local ticket has been archived/deleted (dropped from ``rebar list``) is
+    # invisible to it. The level-triggered walk closes that blind spot: it iterates
+    # the BINDING STORE, targeted-reads each off-snapshot local ticket, and drives
+    # class A (terminal-transition → Done) + class C (probe → grace → GC) from one
+    # shared iteration — breaker-gated before any mutation (13eb / 444d).
+    binding_walk_mod = _load("reconcile_binding_walk", "binding_walk.py")
+    classify_mod = _load("reconcile_classify", "classify.py")
+    from rebar.config import ConfigError, load_config
+
+    try:
+        _max_acting_fraction = load_config().reconciler.max_acting_fraction
+    except ConfigError:
+        _max_acting_fraction = 0.10
+    _active_local_ids = {t.get("ticket_id") for t in local_tickets if t.get("ticket_id")}
+    walk = binding_walk_mod.compute_binding_walk_mutations(
+        binding_store,
+        curr_snapshot,
+        _active_local_ids,
+        client=outbound_diff_client,
+        local_reader=lambda lid: _read_local_ticket_full(repo_root, lid, no_sync=not persist),
+        max_acting_fraction=_max_acting_fraction,
+        classify_mod=classify_mod,
+        mutation_mod=mut_mod,
+        outbound_differ_mod=outbound_differ_mod,
+        persist=persist,
+    )
+    sync_logger.log(
+        "binding_walk_complete",
+        acting=len(walk.mutations),
+        retired=len(walk.retired),
+        probed=len(walk.probed),
+        alerted=len(walk.alerted),
+        breaker_allowed=bool(walk.breaker.allowed) if walk.breaker else True,
+        refused=walk.refused,
+    )
+    sync_logger.log("binding_walk_census", **walk.census)
+    if walk.refused:
+        sync_logger.log(
+            "binding_walk_breaker_refused",
+            reason=walk.breaker.reason if walk.breaker else "",
+        )
+    for _alert_key in walk.alerted:
+        sync_logger.log("binding_walk_alert", jira_key=_alert_key)
+    mutations.extend(walk.mutations)
 
     ctx.mutations = mutations
