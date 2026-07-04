@@ -43,7 +43,7 @@ import os
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from . import deps, engine_b, resolve
+from . import deps, engine_b, resolve, semantic
 from . import evidence as ev
 from .detectors import BACKENDS as _ENGINE_B_BACKENDS
 from .detectors import Registry, load_registry
@@ -148,7 +148,38 @@ def refute_absence(
             config=kwargs.get("config"),
             timeout=kwargs.get("timeout"),
         )
+        rec = _maybe_escalate_t2(ref, rec, repo_root=repo_root, **kwargs)
     return ev.normalize_evidence(rec)
+
+
+def _maybe_escalate_t2(
+    ref: Mapping[str, Any], rec: dict[str, Any], *, repo_root: str, **kwargs: Any
+) -> dict[str, Any]:
+    """Escalate a T1 ``abstain`` on a T2-territory reference to the semantic seam.
+
+    The T2 tier (epic 850f) is confirm-only: it can only UPGRADE a T1 abstain to a
+    trustworthy ``refuted`` at ``TIER_T2``; it never downgrades a resolved record and
+    never asserts an absence. So we escalate ONLY when the T1 lane abstained on a
+    member/dotted or not-found bare symbol/import reference, and we keep the T1 record
+    unless T2 returns a ``refuted``. With T2 disabled (the default) ``refute_semantic``
+    returns ``None`` and this is a no-op — the returned record is byte-identical to the
+    T0+T1 floor.
+    """
+    if rec.get("outcome") != ev.OUTCOME_ABSTAIN or not semantic.is_t2_territory(ref):
+        return rec
+    config = kwargs.get("config") or resolve.load_config(repo_root)
+    if not getattr(config, "t2_enabled", False):
+        return rec
+    t2 = semantic.refute_semantic(
+        ref,
+        repo_root=repo_root,
+        config=config,
+        timeout=kwargs.get("timeout"),
+        cache=kwargs.get("cache"),
+    )
+    if t2 is not None and t2.get("outcome") == ev.OUTCOME_REFUTED:
+        return t2
+    return rec
 
 
 # ── Surface 2: applicability (job 2) — does a dimension apply to the repo? ─────
@@ -341,6 +372,10 @@ def _backend_availability() -> list[dict[str, Any]]:
     # probed here (it would make a network call); it is reported as a backend whose
     # availability is "best-effort at run time".
     out.append({"name": "registry", "available": True, "version": None})
+
+    # T2 semantic lane (epic 850f): one entry per registered, opt-in backend. Empty
+    # until a backend registers (story S3 adds pyright); each probe is fail-open.
+    out.extend(semantic.available_backends())
     return out
 
 

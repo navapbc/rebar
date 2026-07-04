@@ -21,7 +21,7 @@ nothing.
 
 from __future__ import annotations
 
-from . import deps, engine_b, evidence, harness, oracle, resolve, sarif
+from . import deps, engine_b, evidence, harness, oracle, resolve, sarif, semantic
 from .deps import enumerate_dependencies, refute_package, refute_packages
 from .engine_b import ScanResult
 from .evidence import (
@@ -62,6 +62,7 @@ __all__ = [
     "oracle",
     "resolve",
     "sarif",
+    "semantic",
     # evidence contract
     "ABSTAIN_REASONS",
     "OUTCOMES",
