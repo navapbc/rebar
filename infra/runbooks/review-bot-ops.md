@@ -164,6 +164,21 @@ audit log, not the bot's:
 journalctl CONTAINER_NAME=compose-gerrit-1 --no-pager -o cat | grep -Ei 'refs/heads/feature/|merge|not permitted|not allowed' | tail
 ```
 
+**Stale-branch inventory.** Gerrit does not auto-prune merged or abandoned `feature/*` refs, so
+they accumulate. `infra/gerrit/feature-branch-inventory.sh` enumerates the live `feature/*`
+branches and, per branch, classifies it **MERGED-BACK** (tip already reachable from `main` —
+safe to delete) vs **ABANDONED** (never merged, no recent activity), and flags any inactive
+beyond the **14-day** lifetime cap (CONTRIBUTING.md §4h). It is **read-only by default** — it
+prints the classification plus the owner-confirmed delete commands rather than running them, so
+a driver reviews before pruning:
+
+```bash
+bash infra/gerrit/feature-branch-inventory.sh   # read-only: classify + suggest deletes
+```
+
+Deleting `feature/*` refs needs the `feature-branch-drivers` Delete Reference grant (ADR-0025);
+run an emitted delete only after confirming with the branch owner.
+
 **Bot-code rollback = redeploy the prior image.** A bad bot deploy (e.g. a merge-review
 regression) rolls back by restoring the previous image:
 

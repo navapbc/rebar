@@ -336,6 +336,31 @@ you'd rather restart than amend it:
 
 The feature branch itself is untouched — only the merge *change* is replaced.
 
+### 4h. Branch lifetime & catch-up cadence — keep feature branches short-lived
+
+Feature branches are a **short-lived integration buffer for one multi-story feature**, not a
+place for sustained parallel development. The pattern's own sources are explicit about this:
+OpenDev documents server-side feature branches as **"not for sustained long-term
+development"**, and Qt **abandoned routine long-lived-branch merges** because the recurring
+catch-up/merge-back cost outgrew the benefit. A branch that lingers accrues conflict debt
+against a fast-moving `main` and dilutes the atomic merge-back guarantee.
+
+**Catch-up cadence (drivers).** Merge `main` into the feature branch (§4d) **at least every
+few days while the feature is in flight, and before starting each new story** on it, so every
+story is reviewed against current code and the final merge-back stays small. Don't let a
+branch drift more than a handful of `main` advances behind.
+
+**Lifetime cap.** Treat **14 days of inactivity** (no new story landed, no catch-up merge) as
+the point to either finish the merge-back (§4e) or abandon the branch. Gerrit does **not**
+auto-prune merged or stale `feature/*` refs — a driver must delete them explicitly (Delete
+Reference is a `feature-branch-drivers` grant; ADR-0025), so stale branches accumulate until
+someone cleans them up.
+
+**Inventory the branches.** `infra/gerrit/feature-branch-inventory.sh` lists the live
+`feature/*` refs, classifies each as **merged-back** (already integrated into `main`) vs
+**abandoned**, and flags any inactive beyond the 14-day cap — run it periodically and delete
+what it surfaces (owner-confirmed). See `infra/runbooks/review-bot-ops.md` for the ops view.
+
 ---
 
 ## 5. Troubleshooting
