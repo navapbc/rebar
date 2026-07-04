@@ -104,6 +104,12 @@ grounding = [
     "tree-sitter>=0.21",
     "tree-sitter-language-pack>=0.2",
 ]
+# The opt-in T2 semantic-resolution backend (epic 850f, ADR 0030): a self-contained
+# pyright the oracle shells out to. Absent it, the T2 tier abstains (no_tool) — it is
+# never on a deterministic blocking path, so a non-adopting client pays nothing.
+grounding-t2 = [
+    "pyright>=1.1",
+]
 dev = [
     "pytest>=8",
     "mcp>=1.2",

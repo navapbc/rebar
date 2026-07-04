@@ -203,8 +203,12 @@ def test_is_t2_territory() -> None:
 # ── availability / grounding_info conformance ─────────────────────────────────
 
 
-def test_available_backends_empty_in_s2() -> None:
-    assert semantic.available_backends() == []
+def test_available_backends_reports_pyright() -> None:
+    got = semantic.available_backends()
+    names = [b["name"] for b in got]
+    assert names == ["pyright"]
+    # availability tracks whether pyright is actually on PATH (may be absent here).
+    assert isinstance(got[0]["available"], bool)
 
 
 def test_available_backends_reports_registered(monkeypatch) -> None:

@@ -34,9 +34,9 @@ from typing import Any
 from . import evidence as ev
 
 #: The CLOSED set of selectable T2 backend names (advertised by
-#: :func:`available_backends` and used to validate ``t2_backend``). Empty until a
-#: concrete backend registers its name here (story S3 adds ``"pyright"``).
-T2_BACKENDS: tuple[str, ...] = ()
+#: :func:`available_backends` and used to validate ``t2_backend``). A new backend
+#: adds its name here plus a branch in :func:`_resolve_backend` / :func:`_backend_version`.
+T2_BACKENDS: tuple[str, ...] = ("pyright",)
 
 #: A backend callable: ``refute(reference, *, repo_root, timeout, cache) -> dict``
 #: returning ONE (un-normalized) evidence record. Matches the shape of the T1 lane's
@@ -52,8 +52,10 @@ def _resolve_backend(name: str) -> BackendRefute | None:
     stays import-clean for non-adopting clients. Returns ``None`` for any name not
     wired — the fail-open "no such backend" path.
     """
-    # story S3 wires the pyright branch here:
-    #   if name == "pyright": from . import pyright_backend; return pyright_backend.refute
+    if name == "pyright":
+        from . import pyright_backend  # lazy — keeps this module import-clean
+
+        return pyright_backend.refute
     return None
 
 
@@ -96,8 +98,10 @@ def refute_semantic(
 
 def _backend_version(name: str) -> str | None:
     """Best-effort version probe for a backend ``name`` (fail-open to ``None``)."""
-    # story S3 wires the pyright branch here:
-    #   if name == "pyright": from . import pyright_backend; return pyright_backend.version()
+    if name == "pyright":
+        from . import pyright_backend  # lazy — keeps this module import-clean
+
+        return pyright_backend.version()
     return None
 
 
