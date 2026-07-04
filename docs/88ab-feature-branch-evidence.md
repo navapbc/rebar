@@ -67,3 +67,124 @@ be re-built). Changing the feature tip → REWORK → both wiped. Exactly the AD
 - Behavior: a superseded patchset does not keep burning a runner or race a stale Verified;
   only the latest patchset's run proceeds. Because the group key is the Change-Id, it does
   **not** cross-cancel between different changes / a concurrent branch change.
+
+## S5 (leafy-vogue-ingot) — 7-scenario live feature-branch E2E
+
+Driven by the committed harness `infra/gerrit/feature-branch-e2e.sh` +
+`infra/gerrit/feature-branch-e2e-scenarios.sh` (HTTPS/REST; reuses `reviewbot-e2e.sh`
+conventions — the log/pass/harness/blocked terminal states, XSSI-stripped `api_get`,
+per-label vote parse, submit-requirement parse, and the GitHub-replication poll —
+and adds both-label polling, merge-change push, branch lifecycle, and abandon).
+Throwaway branch **`feature/e2e-20260704`** (created from main `78a358d5`, deleted on
+cleanup). Votes: **LLM-Review** cast by *rebar review bot* (`1000002`); **Verified** by
+*rebar CI bot* (`1000008`) after the GitHub-Actions `gerrit-verify` run.
+
+### Scenario 2 — Stacking: reviewed diff is delta-only (R1)
+- **Change 248** (https://rebar.solutions.navateam.com/c/rebar/+/248) pushed to
+  `refs/for/feature/e2e-20260704`. **LLM-Review=+1**. The reviewed file set was
+  **`docs/e2e/s2-stacked-*.txt` only** — the change's own delta, NOT the accumulated
+  branch history — proving R1 (never review the whole feature at once). CI
+  (`gerrit-verify`) was dispatched **on the feature branch** via g2p
+  `workflow_dispatch(ref=refs/heads/feature/e2e-20260704)`, live-confirming the
+  webhook + g2p branch-agnostic dispatch on `feature/*`. (CI dispatch requires the
+  feature branch to be replicated to the GitHub mirror first — the harness waits for
+  that before the first push, else `workflow_dispatch` 404s and no Verified is cast.)
+
+### Scenario 1 — Parallel siblings: no manual rebase, no vote wipe (R4)
+- Two independent story changes off `feature/e2e-20260704`: **change 251** (sibling A,
+  https://rebar.solutions.navateam.com/c/rebar/+/251) and **change 252** (sibling B,
+  https://rebar.solutions.navateam.com/c/rebar/+/252). **Both earned LLM-Review+1 AND
+  Verified+1** (CI wall-clock ~830–849 s each).
+- Submitted A then B. The feature-branch history proves the R4 claim:
+  ```
+  *   c0acd6091 Merge "test(e2e-s1): sibling story B …" into feature/e2e-20260704
+  |\
+  | * ffd3f6d1c test(e2e-s1): sibling story B
+  * | 4159e8be3 test(e2e-s1): sibling story A
+  |/
+  *   78a358d51 (feature branch base = main)
+  ```
+  A landed (`4159e8be3`); B then landed via a **Gerrit-created merge commit**
+  (`c0acd6091`) under the `merge if necessary` submit strategy — **zero manual rebase,
+  zero vote wipe**. The second sibling never had to rebase onto the first, so neither
+  change's attested votes were invalidated (R4 — no content-comparison / rebase
+  fragility). CI fired independently on each feature-branch change (g2p dispatch).
+
+### Scenario 3 — Merge-back: single atomic landing, zero re-review (R2/R3)
+- **Merge change 254** (https://rebar.solutions.navateam.com/c/rebar/+/254): a `--no-ff`
+  merge of `feature/e2e-20260704` (both S1 siblings accumulated) into `refs/for/main`.
+- **The bot's reviewed file set was `/MERGE_LIST` only** — Gerrit's synthetic merge-commit
+  list, NOT the story file contents. So the already-attested stories were **not
+  re-reviewed** (R1/R2): the merge change's auto-merge delta is empty. **LLM-Review+1 AND
+  Verified+1** (CI ran green on the **merge tree**, dispatched by g2p).
+- Submitted → **MERGED atomically** as the 2-parent merge commit `08194e1a9` (parents:
+  main tip `4bd06245d` + feature tip `c0acd6091`, which carries A `4159e8be3` + B
+  `ffd3f6d1c`). The **GitHub mirror `main` advanced to the identical SHA `08194e1a9`** via
+  replication — every feature commit present.
+- **RED/BLUE/GREEN replay (scenarios 1–3):** zero vote wipes, zero manual rebases, zero
+  re-reviews of attested stories, single atomic landing — all four properties demonstrated
+  live.
+
+### Scenario 4 — Vote-carry on re-merge (R4) — proven live by S3 AC4
+The `MERGE_FIRST_PARENT_UPDATE` vote-carry asymmetry this epic ships was proven live in the
+S3 AC4 evidence above: **change 234 PS3** re-merged onto a moved first parent →
+Gerrit *"Copied Votes: LLM-Review+1"* (**LLM-Review carried**) while **Verified was removed
+and CI re-dispatched** (run 28682539519); the REWORK counter-case **change 215 PS2** (feature
+tip changed) wiped **both** votes. This is the exact `copyCondition`
+(`LLM-Review: … OR changekind:MERGE_FIRST_PARENT_UPDATE`; `Verified: changekind:NO_CODE_CHANGE`)
+active on the project, so scenario 4 is cited from that live run rather than re-run (which would
+add redundant `main` churn for an already-demonstrated mechanism).
+
+### Scenario 7 — Races + negatives (ADR-0025 decision 3: exclusive ACLs)
+Probed with the **non-member identity `rebar-review-bot`** (`1000002`; Registered + Service
+Users, **not** `feature-branch-drivers`, **not** Administrators):
+- **(7c) `feature/*` branch creation → refused.** `PUT …/branches/feature%2Fneg-…` returned
+  **HTTP 403 `not permitted: create on refs/heads/feature/neg-…`**; the branch was not created.
+- **(7b) `--no-ff` merge push to `refs/for/main` → refused.** Gerrit rejected it:
+  **`commit …: you are not allowed to upload merges`** — the exclusive `pushMerge`
+  permission (`pushMerge = feature-branch-drivers`, `exclusiveGroupPermissions = pushMerge`).
+- **Positive contrast:** the same merge-push + submit **succeeded** for
+  `JoeOakhartNava` (a `feature-branch-drivers` member) in scenario 3 (change 254).
+- **(7a) concurrent submits behave:** scenario 1's two siblings (251, 252) both landed, the
+  second via `merge if necessary` — no corruption, no manual rebase.
+- **(7d) webhook backfill + concurrency:** S3 AC5 (per-Change-Id `cancel-in-progress`; change
+  234 PS1 run cancelled on PS2 push) + the reconciler's webhook-backfill runbook.
+
+### Scenario 6 — Semantic conflict: Verified=-1 blocks submit on an empty auto-merge diff
+The two-vote gate's complementarity — the review bot reviews the **author's merge delta**, CI
+tests the **full merged tree** — proven live end-to-end:
+- A throwaway base module `src/rebar/_e2e_s6_base_<stamp>.py` (defining `s6_target`) landed on
+  main (**change 271**). A **pytest test** importing it landed on a dedicated
+  `feature/e2e-s6-<stamp>` branch (**change 273**, bot-reviewed green — the module was present
+  there). main then **deleted** the base module (**change 275**) — net-zero on main.
+- The `--no-ff` merge of the dedicated branch into `refs/for/main` (**change 276**,
+  https://rebar.solutions.navateam.com/c/rebar/+/276) is a **clean** merge: its reviewed file
+  set is **`/MERGE_LIST` only** — an **empty author delta**. So **LLM-Review=+1** (nothing to
+  review). But CI builds the merged tree, where the test imports the now-deleted module →
+  **pytest collection `ModuleNotFoundError` → CI red → Verified=-1**. The **Verified submit
+  requirement is UNSATISFIED → the change is non-submittable** despite `LLM-Review=MAX`.
+- This is the GerriScary-safe guarantee (ADR-0020): a textually-clean but semantically-broken
+  merge that the diff-scoped LLM review cannot catch is still blocked by the tree-building CI
+  vote. (The break is a **pytest**-collected test, not a plain module, because mypy runs with
+  `ignore_missing_imports=true` — only a real import at test collection surfaces it.)
+
+### Scenario 5 — Textual conflict: the bot reviews the non-empty resolution delta
+- A feature edit (**change 277**) and a **conflicting** main edit (**change 278**) to the same
+  file `docs/e2e/s5-conflict.txt` both landed. The `--no-ff` merge of the feature branch into
+  main hit a real add/add textual conflict, **resolved in the merge commit** (**change 279**).
+- The auto-merge delta is **non-empty**: reviewed files = `[/MERGE_LIST, docs/e2e/s5-conflict.txt]`
+  — so the bot **reviews the conflict-resolution content** (LLM-Review+1, Verified+1). This is the
+  deliberate contrast with scenario 6: a *clean* merge shows `/MERGE_LIST` only (empty author
+  delta), while a *resolved-conflict* merge surfaces the human resolution for review.
+
+## Summary — all seven scenarios proven live
+
+| # | Scenario | Live evidence |
+|---|----------|---------------|
+| 1 | Parallel siblings | 251 + 252 both merged to the feature branch; second via `merge if necessary` (merge commit `c0acd6091`), zero manual rebase, zero vote wipe |
+| 2 | Stacking | 248 reviewed delta-only (`docs/e2e/s2-stacked-*.txt`), CI on `feature/*` |
+| 3 | Merge-back | 254 → MERGED `08194e1a9`, `/MERGE_LIST`-only review (zero re-review), GitHub main advanced |
+| 4 | Vote-carry on re-merge | S3 AC4 change 234 PS3: `MERGE_FIRST_PARENT_UPDATE` carries LLM-Review, Verified re-runs |
+| 5 | Textual conflict | 279 non-empty resolution delta reviewed |
+| 6 | Semantic conflict | 276 empty author delta → LLM-Review+1, CI red → **Verified=-1 blocks submit** |
+| 7 | Races + negatives | non-member 403 branch-create + "not allowed to upload merges"; concurrency + webhook-backfill precedent |
