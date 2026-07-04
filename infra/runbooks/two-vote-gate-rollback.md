@@ -78,6 +78,47 @@ a permanent retire, follow `g2p-ci-credentials.md` §4 after backing out here.
 
 ---
 
+## A.2. Back out the feature-branch flow (epic 88ab / ADR-0025)
+
+**When:** the feature-branch pattern is being retired (or a merge-change incident forces a
+return to the single-change-only flow) and you need to remove its Gerrit-side surface. This is
+independent of the `Verified` back-out (§A) — the two-vote gate itself is unchanged.
+
+All edits are in `infra/gerrit/project.config`; preview and push with the same declarative tool
+(`DRY_RUN=1 bash infra/gerrit/setup-project.sh`, then without `DRY_RUN`).
+
+1. **Revoke the feature-branch ACLs** — restores the single-change-only write path by removing
+   the three permission types bound to `feature-branch-drivers`:
+   - `[access "refs/heads/feature/*"]` — the `create` / `delete = group feature-branch-drivers`
+     grants (branch lifecycle).
+   - `[access "refs/for/refs/heads/main"]` — the `exclusiveGroupPermissions = pushMerge` +
+     `pushMerge = group feature-branch-drivers` block (merge-back push).
+   - `[access "refs/for/refs/heads/feature/*"]` — the same `exclusiveGroupPermissions =
+     pushMerge` + `pushMerge` block (catch-up merges into a feature branch).
+   With these gone, merge-commit pushes fall back to the inherited behaviour and `feature/*`
+   create/delete is no longer group-restricted.
+
+2. **LLM-Review copyCondition is inert to leave.** The `OR changekind:MERGE_FIRST_PARENT_UPDATE`
+   token on `[label "LLM-Review"]` cannot match a non-merge patchset, so absent merge changes it
+   is a no-op — **leave it or revert it**, either is safe (ADR-0025 back-out note).
+
+3. **Revert the submit type** — delete the `[submit]` block (`action = merge if necessary` +
+   `mergeContent = true`) to restore `INHERIT`. **VERIFY** the inherited value still matches the
+   S1-recorded prior state — **MERGE_IF_NECESSARY + content-merge `true`** — via a read-only
+   `GET /a/projects/rebar/config` before and after, so removing the pin does not silently change
+   submit semantics. If inheritance has drifted, re-pin rather than remove.
+
+4. **Bot rollback (if a merge-review image is implicated).** Rolling the review-bot back to the
+   prior image is a separate path — see `infra/runbooks/review-bot-ops.md` ("Bot-code rollback =
+   redeploy the prior image", ~lines 167–181): `docker tag compose-review-bot:prev …` / the
+   `:prev` auto-rollback under continuous auto-deploy.
+
+5. **Apply:** `DRY_RUN=1 bash infra/gerrit/setup-project.sh` to preview the staged diff, then
+   `bash infra/gerrit/setup-project.sh` to push `refs/meta/config`. (The full RETIRE path — also
+   emptying/deleting the `feature-branch-drivers` group — is ADR-0025 "Group RETIRE".)
+
+---
+
 ## B. Activate the `Verified` gate (OPERATOR handoff — needs live creds)
 
 > **DO NOT activate until the CI voter is proven end-to-end (§C).** This step is a live

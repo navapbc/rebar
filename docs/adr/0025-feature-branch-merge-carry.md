@@ -78,6 +78,29 @@ and idempotently by the script, which now **creates** the group if absent — th
 `want`-dict step only *resolved* existing UUIDs). A regular developer is not in the group and
 so cannot create `feature/*` branches or push merge commits.
 
+## Cost & latency
+
+The §1 asymmetry (LLM-Review carries, Verified re-runs across `MERGE_FIRST_PARENT_UPDATE`) is a
+deliberate cost trade: it avoids redundant LLM re-reviews while accepting the CI re-runs safety
+requires. Measured on the S5 live runs (story leafy-vogue-ingot):
+
+- **CI wall-clock per merge/change ≈ 830–849 s (~14 min) median** (S5 `gerrit-verify` runs,
+  e.g. changes 251 / 252 / 254). This matches the `test.yml` matrix latency and is the
+  **dominant measured cost** of the flow — every re-merge pays it once (Verified re-runs).
+
+- **LLM re-reviews avoided vs CI re-runs incurred.** On a first-parent-only re-merge,
+  `LLM-Review` **carries** (0 re-reviews) while `Verified` **re-runs** (1 CI run) — proven by
+  S3 AC4 (change 234 PS3) and S5 scenario 4. A merge-back does **not** re-review the stories:
+  the bot reviews only the auto-merge delta (S5 scenario 3, change 254, showed it reviewing
+  `/MERGE_LIST`, not the per-story files). So N accumulated stories cost **N per-story reviews
+  + 1 merge-change review**, versus re-reviewing the whole combined diff on every re-merge —
+  the carry is what makes the reviewed-merge pattern cheaper than a squash-and-re-review.
+
+- **Per-review LLM cost is not separately surfaced.** The review bot logs no per-call token or
+  dollar figure, so none is quoted here — a fabricated number would be worse than an honest
+  gap. CI wall-clock above is the concrete measured cost; the LLM saving is counted in
+  **re-reviews avoided**, not dollars.
+
 ## Consequences / back-out
 
 - **copyCondition back-out is inert to remove.** `MERGE_FIRST_PARENT_UPDATE` cannot match a
