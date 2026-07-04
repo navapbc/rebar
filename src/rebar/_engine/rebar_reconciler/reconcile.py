@@ -999,6 +999,31 @@ def _persist_and_log(ctx: _PassContext) -> dict:
     # helper writes/commits it to the tickets branch. Both are store writes —
     # skip the entire block in no-write mode (ticket yaw-plait-doe).
     if persist:
+        # Convergence rollout Phase 1 (epic 3006-e198 / 7d23): dual-write per-
+        # binding baselines from the current snapshot in SHADOW (no consumer reads
+        # them) and log the equivalence check vs prev_snapshot. Off unless
+        # reconciler.baseline_dual_write is enabled. Runs BEFORE save() so the
+        # advanced baselines persist this pass; fail-open (never break a sync pass).
+        try:
+            from rebar.config import load_config as _load_config
+
+            _dual_write = bool(_load_config().reconciler.baseline_dual_write)
+        except Exception:  # noqa: BLE001 — config unreadable → shadow off, sync unaffected
+            _dual_write = False
+        if _dual_write:
+            try:
+                _shadow_mod = _load("reconcile_baseline_shadow", "baseline_shadow.py")
+                _shadow_mod.run_dual_write_shadow(
+                    binding_store,
+                    ctx.curr_snapshot,
+                    ctx.prev_snapshot,
+                    sync_logger=sync_logger,
+                )
+            except Exception as exc:  # noqa: BLE001 — shadow is derisk-only; never break sync
+                print(  # noqa: T201
+                    f"reconcile: baseline dual-write shadow failed ({exc})",
+                    file=sys.stderr,
+                )
         try:
             binding_store.save()
             # Commit the updated bindings.json to the tickets orphan branch so
