@@ -98,6 +98,17 @@ jobs:
           git config --global user.name "${BRIDGE_BOT_NAME}"
           git config --global user.email "${BRIDGE_BOT_EMAIL}"
 
+      - name: Initialize the ticket store (seed .env-id for CLI writes)
+        # A bare `git worktree add` of the tickets branch does NOT create
+        # `.tickets-tracker/.env-id` (it is git-ignored and never committed to the
+        # branch), and the write seam refuses every rebar write without it. `rebar init`
+        # is the documented headless-CI provisioning path (docs/architecture.md): it
+        # attaches to the existing origin/tickets non-interactively and seeds `.env-id`.
+        # Idempotent — prints "already initialized" on subsequent runs.
+        run: |
+          set -euo pipefail
+          rebar init
+
       - name: Check last successful reconcile-bridge run
         id: check
         env:
