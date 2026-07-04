@@ -40,6 +40,15 @@ This is the **unification**: the standalone T1 resolver abstains-and-routes for
 `dependency`; the facade makes the deps call actually happen, so a consumer needs
 **one** entry point for every kind.
 
+> **T2 (semantic resolution).** The member/dotted `abstain` above is the
+> **abstain-by-default T2 seam**. Epic `850f` fills it with a self-contained,
+> opt-in, confirm-only semantic backend (v1: one-shot `pyright --outputjson`
+> diagnostics for Python) that escalates *from this facade* — a trustworthy
+> `refuted@T2` replaces the T1 abstain, and every flaky/missing/timeout case stays
+> an `abstain`. T2 never asserts an absence and never sits on a deterministic
+> blocking path. See [ADR 0030](adr/0030-code-grounding-t2-semantic-resolution.md)
+> for the backend selection + the confirm-only mapping.
+
 ### 2. `applies(dimension, repo_root) -> evidence` — job 2, applicability
 
 Decides whether an applicability **dimension** applies to the repo by running the
