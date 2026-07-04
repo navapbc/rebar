@@ -188,3 +188,38 @@ tests the **full merged tree** — proven live end-to-end:
 | 5 | Textual conflict | 279 non-empty resolution delta reviewed |
 | 6 | Semantic conflict | 276 empty author delta → LLM-Review+1, CI red → **Verified=-1 blocks submit** |
 | 7 | Races + negatives | non-member 403 branch-create + "not allowed to upload merges"; concurrency + webhook-backfill precedent |
+
+## S6 (norm-dam-swab) — back-out tested live
+
+The feature-branch flow's back-out (§A.2 of `infra/runbooks/two-vote-gate-rollback.md`) was
+executed and reversed on the running Gerrit — proving the pattern has no lock-in.
+
+### ACL revoke restores the single-change-only flow (tested)
+- **Revoke:** pushed `refs/meta/config` removing `pushMerge = group feature-branch-drivers`
+  from `[access "refs/for/refs/heads/main"]` (keeping `exclusiveGroupPermissions = pushMerge`,
+  so the inherited Registered-Users pushMerge stays ignored → zero grants → deny-all).
+- **Proof it restored single-change-only:** a `--no-ff` merge push to `refs/for/main` by
+  `JoeOakhartNava` — a `feature-branch-drivers` member who had merged change 254 minutes
+  earlier — was then **refused**: `commit 7451b07: you are not allowed to upload merges`. With
+  the grant gone, *nobody* can push a merge change; only single (non-merge) changes flow.
+- **Restore + re-verify:** re-added the grant via a forward `refs/meta/config` commit
+  (`project.config` byte-identical to the pre-test snapshot `f8bd6ac8`; both `pushMerge`
+  grants present). A merge push then **succeeded** again (throwaway change, abandoned). Fully
+  reversible, zero residual config change.
+
+### Submit-type revert verified against the S1-recorded prior state
+- Live read `GET /a/projects/rebar/config`: `submit_type = MERGE_IF_NECESSARY`,
+  `use_content_merge` configured `TRUE` / inherited `true`. This matches the **S1-recorded
+  prior state — `MERGE_IF_NECESSARY` + content-merge `true`** — so deleting the `[submit]`
+  pin resolves to the same effective value: a proven no-op, no submit-semantics change.
+
+### Bot-code back-out
+- Documented in `infra/runbooks/review-bot-ops.md` (redeploy the prior image / `:prev`
+  auto-rollback) and cross-referenced from §A.2. Exercised in practice this epic: the
+  review-bot regression (bug `pelt-mead-aeon`) was fixed-forward and redeployed live.
+
+### Cost & latency (ADR-0025 "## Cost & latency")
+Median CI wall-clock ≈ **830–849 s** per merge/change (S5 `gerrit-verify` runs 251/252/254);
+`MERGE_FIRST_PARENT_UPDATE` carries LLM-Review (0 re-reviews) while Verified re-runs (1 CI);
+a merge-back reviews only `/MERGE_LIST`, not the stories — so N stories cost N reviews + 1
+merge review, not a whole-diff re-review. Per-review LLM $-cost is not surfaced by the runner.
