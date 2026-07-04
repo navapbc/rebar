@@ -341,6 +341,13 @@ class GroundingConfig:
     ctags_options: tuple[str, ...] = ()
     supported_languages: frozenset[str] = frozenset()
 
+    # T2 semantic-resolution seam (epic 850f). All default-off: with ``t2_enabled``
+    # false the oracle is byte-identical to the T0+T1 floor. Malformed values fail
+    # open to these defaults (never a raise), like every key above.
+    t2_enabled: bool = False
+    t2_backend: str | None = None
+    t2_timeout_seconds: float = 30.0
+
 
 def load_config(repo_root: str) -> GroundingConfig:
     """Read ``.rebar/grounding.toml`` from ``repo_root``, fail-open to defaults.
@@ -382,10 +389,32 @@ def load_config(repo_root: str) -> GroundingConfig:
         if isinstance(langs_raw, list)
         else frozenset()
     )
+    # ── T2 seam keys (epic 850f) — each fails open to its default ──────────────
+    t2_enabled_raw = section.get("t2_enabled", False)
+    t2_enabled = t2_enabled_raw if isinstance(t2_enabled_raw, bool) else False
+    t2_backend_raw = section.get("t2_backend")
+    t2_backend = (
+        t2_backend_raw.strip()
+        if isinstance(t2_backend_raw, str) and t2_backend_raw.strip()
+        else None
+    )
+    t2_timeout_raw = section.get("t2_timeout_seconds", 30.0)
+    # bool is a subclass of int — reject it; require a positive number.
+    t2_timeout_seconds = (
+        float(t2_timeout_raw)
+        if isinstance(t2_timeout_raw, (int, float))
+        and not isinstance(t2_timeout_raw, bool)
+        and t2_timeout_raw > 0
+        else 30.0
+    )
+
     return GroundingConfig(
         ctags_optlib_dirs=_abs_strs("ctags_optlib_dirs"),
         ctags_options=_abs_strs("ctags_options"),
         supported_languages=langs,
+        t2_enabled=t2_enabled,
+        t2_backend=t2_backend,
+        t2_timeout_seconds=t2_timeout_seconds,
     )
 
 

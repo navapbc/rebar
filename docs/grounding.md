@@ -40,6 +40,15 @@ This is the **unification**: the standalone T1 resolver abstains-and-routes for
 `dependency`; the facade makes the deps call actually happen, so a consumer needs
 **one** entry point for every kind.
 
+> **T2 (semantic resolution).** The member/dotted `abstain` above is the
+> **abstain-by-default T2 seam**. Epic `850f` fills it with a self-contained,
+> opt-in, confirm-only semantic backend (v1: one-shot `pyright --outputjson`
+> diagnostics for Python) that escalates *from this facade* — a trustworthy
+> `refuted@T2` replaces the T1 abstain, and every flaky/missing/timeout case stays
+> an `abstain`. T2 never asserts an absence and never sits on a deterministic
+> blocking path. See [ADR 0030](adr/0030-code-grounding-t2-semantic-resolution.md)
+> for the backend selection + the confirm-only mapping.
+
 ### 2. `applies(dimension, repo_root) -> evidence` — job 2, applicability
 
 Decides whether an applicability **dimension** applies to the repo by running the
@@ -156,6 +165,53 @@ first, and a schema-invalid rule is dropped as `invalid_detector` so the scan
 never aborts on one bad rule (the engine would otherwise exit nonzero on the whole
 run). ast-grep validates a rule as part of `scan -r`; a parse complaint is its
 per-backend `invalid_detector` signal.
+
+## T2 semantic resolution (opt-in) — the pyright backend
+
+The refutation lane's member/dotted `abstain` is the **T2 seam** (see the callout
+under surface 1). Epic `850f` (ADR
+[0030](adr/0030-code-grounding-t2-semantic-resolution.md)) fills it with a
+self-contained, opt-in, **confirm-only** semantic backend. v1 ships one backend:
+**one-shot `pyright --outputjson` diagnostics for Python.**
+
+**How it resolves.** When enabled, `oracle.refute_absence` escalates a T1 `abstain`
+on a member/dotted (or not-found bare symbol/import) reference to
+`grounding.semantic.refute_semantic`, which dispatches to the pyright backend. The
+backend runs pyright once over the project root (so cross-module imports resolve)
+and decides, for a reference in file `F`:
+
+* **`refuted` at `T2`** iff pyright ran, its JSON parsed, `F` has **no**
+  import-resolution diagnostic (`reportMissingImports` / `reportMissingModuleSource`
+  — the "environment built" precondition), and **no** diagnostic in `F` names the
+  reference's leaf. A trustworthy semantic confirmation replaces the T1 abstain.
+* **`abstain` at `T2`** (closed reason) otherwise: `no_tool` (pyright absent),
+  `unsupported_lang` (not Python), `ambiguous` (no locatable file), `parse_error`,
+  `timeout`, or `other` (env-not-built / a diagnostic sits at the reference / an
+  unrecognized diagnostic at the reference).
+
+**Confirm-only.** T2 can only ever *upgrade* a T1 abstain to a `refuted`; it never
+downgrades a resolved record and **never asserts an absence** — a pyright diagnostic
+saying the reference does not resolve becomes an `abstain` (a suspected-absent), so
+T2 is never on a deterministic blocking path. Every flaky/missing/timeout case is an
+`abstain`, never a false accusation.
+
+**Enabling it.** Off by default. Install the extra and opt in:
+
+```toml
+# .rebar/grounding.toml
+[grounding]
+t2_enabled = true          # master opt-in (default false)
+t2_backend = "pyright"     # the selected backend (default null)
+t2_timeout_seconds = 30    # bounded per-invocation subprocess timeout (default 30)
+```
+
+```sh
+pip install 'nava-rebar[grounding-t2]'   # pulls pyright; absent it, T2 abstains(no_tool)
+```
+
+With `t2_enabled = false` (the default) or the extra uninstalled, no T2 code path
+runs and the oracle is byte-identical to the T0+T1 floor. `grounding-info` reports
+the pyright backend with its detected availability/version.
 
 ## The `.rebar/` language-extensibility slot + thresholds
 
