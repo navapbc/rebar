@@ -132,3 +132,89 @@ def test_code_review_gate_runs_attested_with_code_and_ticket_roots(
     assert seen.get("cfg_tickets") == seen.get("tickets_root"), (
         "the config handed to the agent runner must be re-rooted onto the ticket clone"
     )
+
+
+def test_code_review_gate_runner_is_rebuilt_from_rerooted_ticket_store(
+    repo_with_origin, tmp_path, monkeypatch
+):
+    """RED for bug pelt-mead-aeon: the runner that EXECUTES the passes must carry the
+    RE-ROOTED cfg (``tickets_path`` = materialized store), not the pre-snapshot cfg.
+
+    ``produce_code_review_verdict`` built ``runner_sel`` from cfg BEFORE ``apply_handle``
+    re-rooted it, then handed that stale runner to the passes. ``get_runner(cfg,
+    override=runner_sel)`` returns the override verbatim and ``PydanticAIRunner.run`` reads
+    its OWN baked-in ``self._config`` — so the agent's ``rebar_tools`` ran against the bare
+    clone (``tickets_path`` None → falls back to ``repo_path``) and errored on a missing
+    ``.tickets-tracker``, casting no vote. This asserts on the RUNNER actually used
+    (``agent_runner._runner._config``), NOT the ``RunnerAgentStep.config`` (which the sibling
+    test already covers), and takes the PRODUCTION path (``runner=None``) so the rebuild is
+    actually exercised — an injected runner would mask it.
+    """
+    repo, tid = repo_with_origin
+    monkeypatch.setenv("REBAR_GATE_TMPDIR", str(tmp_path / "gate-store"))
+    monkeypatch.delenv("REBAR_GATE_ALLOW_UNGATED", raising=False)
+    monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
+    from rebar.llm.code_review import detectors as _det
+
+    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+
+    class _RecordingRunner:
+        """A runner whose ``_config`` is exactly the cfg it was built from — so the test can see
+        WHICH cfg (pre-snapshot vs re-rooted) the effective runner carries."""
+
+        name = "recording"
+
+        def __init__(self, config):
+            self._config = config
+
+        def preflight(self):
+            return None
+
+    # Replace get_runner at its source (the gate imports it locally): the production path builds
+    # the runner via get_runner(cfg), so each call captures the cfg it was built from.
+    from rebar.llm import runner as _runner_mod
+
+    monkeypatch.setattr(_runner_mod, "get_runner", lambda cfg, **kw: _RecordingRunner(cfg))
+
+    seen: dict = {}
+
+    def _spy(doc, inputs, **kw):
+        agent_runner = kw.get("agent_runner")
+        runner = getattr(agent_runner, "_runner", None)
+        seen["runner_tickets"] = getattr(getattr(runner, "_config", None), "tickets_path", None)
+        seen["tickets_root"] = current_tickets_root()
+
+        class _R:
+            run_id = "r"
+            workflow_name = doc.get("name")
+            status = "succeeded"
+            terminal_step = None
+            terminal_output = {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {}}
+            outputs: dict = {}
+            steps: dict = {}
+            error = None
+
+        return _R()
+
+    from rebar.llm.workflow import executor as _executor
+
+    monkeypatch.setattr(_executor, "run_workflow", _spy)
+
+    gate_dispatch.produce_code_review_verdict(
+        LLMConfig.from_env(repo_root=str(repo)),
+        head="HEAD",
+        source="attested",
+        diff_text=_DIFF,
+        changed_files=["x.py"],
+        runner=None,  # PRODUCTION path — the gate must build+rebuild the runner itself
+        repo_root=str(repo),
+        enabled=True,
+    )
+
+    assert seen.get("tickets_root"), "attested gate must materialize a ticket-store clone"
+    assert seen.get("runner_tickets") == seen.get("tickets_root"), (
+        "the runner that EXECUTES the passes must carry the re-rooted ticket store "
+        f"(got tickets_path={seen.get('runner_tickets')!r}, "
+        f"expected {seen.get('tickets_root')!r}); otherwise the agent's rebar tools run "
+        "against the bare clone and error on a missing .tickets-tracker"
+    )

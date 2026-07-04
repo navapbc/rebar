@@ -532,6 +532,14 @@ def produce_code_review_verdict(
 
     handle = gate_source.resolve_gate_handle(ref=head, source=source, repo_root=repo_root)
     cfg = gate_source.apply_handle(cfg, handle)
+    # Rebuild the runner from the RE-ROOTED cfg (bug pelt-mead-aeon). apply_handle set
+    # cfg.tickets_path (the materialized ticket-store clone) and cfg.repo_path (the attested
+    # code snapshot) AFTER runner_sel was built above for the early preflight. get_runner(...,
+    # override=) returns the override verbatim and PydanticAIRunner.run reads its OWN baked-in
+    # self._config, so reusing the pre-snapshot runner_sel would run the agent's rebar ticket
+    # tools against the bare clone (tickets_path None -> repo_path) and error on a missing
+    # .tickets-tracker, casting no vote. An injected test runner (runner is not None) is preserved.
+    runner_sel = runner or get_runner(cfg)
     try:
         with gate_source.gate_read_root(handle):
             res = _ex.run_workflow(
