@@ -1,0 +1,11 @@
+{
+  "retired": {
+    "REB-530": {
+      "absent_404_count": 3,
+      "last_jira_key": "REB-530",
+      "local_id": "f8b5-2f30-b474-46ac",
+      "retired_at": "2026-07-04T00:40:13Z"
+    }
+  },
+  "version": 1
+}
