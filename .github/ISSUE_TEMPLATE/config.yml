@@ -1,0 +1,17 @@
+# GitHub Issues are disabled on this read-only mirror; blank issues are off and
+# these contact links route contributors to the real channels (Gerrit / docs /
+# security). If Issues are ever re-enabled, the forms below still apply.
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Documentation & command reference
+    url: https://github.com/navapbc/rebar#readme
+    about: Start here — the README Quickstart, docs/, and `rebar --help` answer most questions.
+  - name: 🛠️ Contribute a change (via Gerrit)
+    url: https://github.com/navapbc/rebar/blob/main/CONTRIBUTING.md
+    about: rebar is a read-only mirror; code lands through our Gerrit review flow. See CONTRIBUTING.md.
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/navapbc/rebar/blob/main/SECURITY.md
+    about: Do not file security issues publicly — follow the private disclosure process in SECURITY.md.
+  - name: 💬 Get support
+    url: https://github.com/navapbc/rebar/blob/main/SUPPORT.md
+    about: Where to ask questions and report bugs or feature ideas.
