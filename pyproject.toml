@@ -137,6 +137,11 @@ dev = [
 rebar = "rebar.cli:main"
 rebar-mcp = "rebar.mcp_server:main"
 
+# Bake the gate-code commit SHA into the wheel/sdist for non-git installs (epic
+# jira-reb-596). Auto-discovers hatch_build.py at the repo root; writes the generated,
+# git-ignored src/rebar/_build_info.py, force-included in the wheel below.
+[tool.hatch.build.hooks.custom]
+
 [tool.hatch.build.targets.wheel]
 # packages includes the whole src/rebar tree (the _engine dir with the reconciler
 # package, the Jira probe, and the alias wordlist ships verbatim as package data —
@@ -148,6 +153,9 @@ artifacts = [
     # ignores `dist/` globally, so without this the shipped editor.{js,css} would be
     # dropped from the wheel (verified by tests/unit/test_engine_dir.py).
     "src/rebar/llm/workflow/editor_assets/dist/**/*",
+    # Build-baked gate-code SHA (git-ignored, written by hatch_build.py) — force-include
+    # so the baked fallback reaches PyPI/wheel installs (epic jira-reb-596).
+    "src/rebar/_build_info.py",
 ]
 # Never ship compiled bytecode. The `artifacts` glob above force-includes engine
 # files that .gitignore would otherwise drop, so spell out the bytecode exclusion

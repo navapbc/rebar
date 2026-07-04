@@ -187,8 +187,11 @@ def build_manifest(
     signature binds ``(ticket_id, manifest)``; the manifest records the verdict, the
     material fingerprint (for material-edit invalidation), the per-path code-drift
     dependency map (for code-drift invalidation, ADR 0002), the criteria-registry
-    version stamp (for progressive-refresh skew detection), and provenance. No
-    timestamps, so re-signing the same verified state is reproducible."""
+    version stamp (for progressive-refresh skew detection), and provenance (including a
+    ``rebar-version:`` stamp of the gate code that signed — audit-only, stable for a given
+    rebar build). No timestamps, so re-signing the same verified state is reproducible."""
+    from rebar import signing as _signing
+
     counts = (verdict.get("coverage", {}) or {}).get("counts", {}) or {}
     lines = [
         f"{_MANIFEST_PREFIX}: {verdict.get('verdict', 'PASS')}",
@@ -198,6 +201,9 @@ def build_manifest(
         f"runner: {verdict.get('runner') or 'n/a'}",
         f"blocking: {counts.get('blocking', 0)}",
         f"advisory: {counts.get('advisory_surfaced', 0)}",
+        # Which rebar gate code produced this attestation (audit/provenance, epic
+        # jira-reb-596). NEVER read by compute_validity.
+        _signing.rebar_version_step(_signing.gate_code_version()),
     ]
     if regver:
         lines.append(f"{_REGVER_PREFIX} {regver}")
@@ -244,6 +250,16 @@ def manifest_regver(manifest: list[str] | None) -> str | None:
         if str(line).startswith(_REGVER_PREFIX):
             return str(line).split(":", 1)[1].strip()
     return None
+
+
+def manifest_rebar_version(manifest: list[str] | None) -> str | None:
+    """The gate-code version+SHA provenance stamp from a manifest, or ``None`` when the
+    manifest predates the stamp (epic jira-reb-596). Audit-only — thin re-export of
+    :func:`rebar.signing.rebar_version_from_manifest` co-located with the other manifest
+    parsers."""
+    from rebar import signing as _signing
+
+    return _signing.rebar_version_from_manifest(manifest)
 
 
 def manifest_disabled_builtins(manifest: list[str] | None) -> list[str]:

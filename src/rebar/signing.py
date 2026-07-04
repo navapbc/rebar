@@ -37,6 +37,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import subprocess
 import time
@@ -45,6 +46,8 @@ from pathlib import Path
 
 from rebar import config
 from rebar._store.canonical import canonical_bytes
+
+logger = logging.getLogger(__name__)
 
 # HMAC over SHA-256. Recorded on every signature so a future algorithm migration
 # is detectable on old records rather than silently mis-verified.
@@ -240,6 +243,101 @@ def verified_at_sha_subject(sha: str, ticket_id: str, predicate_type: str) -> di
     }
 
 
+# ── gate-code provenance (which rebar produced an attestation) ────────────────
+# Audit/provenance ONLY: recorded in the signed manifest and displayed, NEVER read
+# by validity computation. Distinct from ``verified-at-sha`` (the TARGET repo commit
+# a plan-review verified) and from ``regver`` (the criteria-registry skew stamp, which
+# DOES enforce). See epic jira-reb-596.
+REBAR_VERSION_PREFIX = "rebar-version:"
+
+
+def rebar_version_step(value: str) -> str:
+    """The signed manifest step recording the gate code that produced the attestation
+    (``rebar-version:<version> (<short-sha>[-dirty])``)."""
+    return f"{REBAR_VERSION_PREFIX} {value}"
+
+
+def rebar_version_from_manifest(manifest: list[str] | None) -> str | None:
+    """Extract the gate-code version+SHA provenance stamp, or ``None`` when the manifest
+    predates the stamp (epic jira-reb-596)."""
+    for step in manifest or []:
+        if isinstance(step, str) and step.startswith(REBAR_VERSION_PREFIX):
+            return step[len(REBAR_VERSION_PREFIX) :].strip() or None
+    return None
+
+
+def _gate_source_dir() -> str:
+    """Directory of the installed rebar package — the gate code doing the certifying."""
+    import rebar
+
+    return os.path.dirname(os.path.abspath(rebar.__file__))
+
+
+def _baked_commit_sha() -> str | None:
+    """The commit SHA baked into the wheel at build time (``rebar._build_info.COMMIT``),
+    or ``None`` when absent (editable/source install, or built outside a git tree). This
+    is the non-git fallback for :func:`_gate_commit_sha` (epic jira-reb-596, story 2)."""
+    import importlib
+
+    try:
+        # Dynamic import: _build_info.py is generated at build time (git-ignored), so it is
+        # absent from the source tree that mypy/CI type-checks against.
+        mod = importlib.import_module("rebar._build_info")
+    except ImportError:
+        return None
+    commit = getattr(mod, "COMMIT", None)
+    return commit or None
+
+
+def _gate_commit_sha(*, source_dir: str | None = None) -> str | None:
+    """Short commit SHA of the rebar SOURCE checkout (the gate code), with a ``-dirty``
+    suffix when its working tree has uncommitted changes. Resolution order (epic
+    jira-reb-596): live git checkout first (the source of truth in dev/editable installs),
+    then the build-baked SHA for non-git (wheel/PyPI) installs, then ``None``. Best-effort:
+    any git failure falls through to the baked SHA (+ a debug log)."""
+    src = source_dir or _gate_source_dir()
+    try:
+        out = subprocess.run(
+            ["git", "-C", src, "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        logger.debug("gate commit sha: git executable unavailable for %s", src)
+        return _baked_commit_sha()
+    sha = out.stdout.strip()
+    if out.returncode != 0 or not sha:
+        logger.debug("gate commit sha: %s is not a live git checkout; using baked SHA", src)
+        return _baked_commit_sha()
+    # `-dirty` marker — an honest audit needs to distinguish "this exact commit certified"
+    # from "some uncommitted variant of it did". Scoped to the rebar source tree.
+    try:
+        status = subprocess.run(
+            ["git", "-C", src, "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if status.returncode == 0 and status.stdout.strip():
+            sha += "-dirty"
+    except OSError:
+        pass  # a resolvable HEAD but unresolvable dirty-state — keep the clean SHA
+    return sha
+
+
+def gate_code_version(*, source_dir: str | None = None) -> str:
+    """Provenance string for the rebar gate code that produced an attestation:
+    ``"<version> (<short-sha>[-dirty])"``, or just ``"<version>"`` when no commit SHA is
+    resolvable (a non-git install with no baked SHA). Audit-only; never consumed by the
+    claim/close validity computation (epic jira-reb-596)."""
+    import rebar
+
+    version = getattr(rebar, "__version__", None) or "0+unknown"
+    sha = _gate_commit_sha(source_dir=source_dir)
+    return f"{version} ({sha})" if sha else version
+
+
 # ── Verification (pure; no I/O) ───────────────────────────────────────────────
 def verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict:
     """Certify a stored signature ``record`` against a freshly recomputed HMAC.
@@ -278,6 +376,9 @@ def verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict:
         # The attested SHA the verdict was computed against (from the signed manifest step;
         # falls back to the record field). None for legacy/non-attested signatures.
         "verified_at_sha": verified_at_sha_from_manifest(manifest) or record.get("verified_at_sha"),
+        # The rebar gate code that produced the attestation (audit/provenance, epic
+        # jira-reb-596). None for pre-stamp / unsigned records.
+        "rebar_version": rebar_version_from_manifest(manifest),
     }
 
     if not stored_sig:

@@ -78,3 +78,235 @@ def test_verdict_manifest_omits_material_when_unavailable(monkeypatch: pytest.Mo
     manifest = _verdict_manifest({"model": "m", "runner": "r"}, "tid-1", repo_root="/x")
     assert manifest[0] == "completion-verifier: PASS"
     assert not any(line.startswith("material:") for line in manifest)
+
+
+# ── gate-code version+SHA provenance stamp (epic jira-reb-596) ─────────────────────────
+def _git_repo(path: Path) -> Path:
+    """A tmp git checkout with one commit — a stand-in for a live rebar source checkout."""
+    path.mkdir(parents=True, exist_ok=True)
+    for args in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "t@t"],
+        ["git", "config", "user.name", "t"],
+    ):
+        subprocess.run(args, cwd=path, check=True)
+    (path / "f.py").write_text("x = 1\n")
+    subprocess.run(["git", "add", "-A"], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-qm", "c"], cwd=path, check=True)
+    return path
+
+
+def test_gate_code_version_live_checkout_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = _git_repo(tmp_path / "src")
+    monkeypatch.setattr(rebar, "__version__", "1.2.3")
+    got = signing.gate_code_version(source_dir=str(src))
+    # "<version> (<short-sha>)" — no -dirty on a clean tree.
+    assert got.startswith("1.2.3 (")
+    assert got.endswith(")") and "-dirty" not in got
+
+
+def test_gate_code_version_live_checkout_dirty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = _git_repo(tmp_path / "src")
+    (src / "untracked.py").write_text("y = 2\n")  # dirty the working tree
+    monkeypatch.setattr(rebar, "__version__", "1.2.3")
+    assert signing.gate_code_version(source_dir=str(src)).endswith("-dirty)")
+
+
+def test_gate_code_version_non_git_omits_sha(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plain = tmp_path / "nogit"
+    plain.mkdir()
+    monkeypatch.setattr(rebar, "__version__", "1.2.3")
+    monkeypatch.setattr(signing, "_baked_commit_sha", lambda: None)  # no wheel-baked SHA either
+    # No live checkout and no baked SHA -> version only.
+    assert signing.gate_code_version(source_dir=str(plain)) == "1.2.3"
+
+
+def test_gate_code_version_falls_back_to_baked_sha(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Story 2: a non-git (wheel/PyPI) install with a build-baked SHA records that SHA."""
+    plain = tmp_path / "nogit"
+    plain.mkdir()
+    monkeypatch.setattr(rebar, "__version__", "1.2.3")
+    monkeypatch.setattr(signing, "_baked_commit_sha", lambda: "bakedsha")
+    assert signing.gate_code_version(source_dir=str(plain)) == "1.2.3 (bakedsha)"
+
+
+def test_gate_code_version_prefers_live_over_baked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Live checkout wins over the baked SHA (the baked value can be stale in an editable
+    install that has since advanced)."""
+    src = _git_repo(tmp_path / "src")
+    monkeypatch.setattr(rebar, "__version__", "1.2.3")
+    monkeypatch.setattr(signing, "_baked_commit_sha", lambda: "STALEBAKED")
+    got = signing.gate_code_version(source_dir=str(src))
+    assert "STALEBAKED" not in got and got.startswith("1.2.3 (")
+
+
+def test_baked_commit_sha_reads_build_info(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    import types
+
+    mod = types.ModuleType("rebar._build_info")
+    mod.COMMIT = "deadbeef"  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "rebar._build_info", mod)
+    assert signing._baked_commit_sha() == "deadbeef"
+    mod.COMMIT = None  # type: ignore[attr-defined]
+    assert signing._baked_commit_sha() is None
+
+
+def test_build_hook_writes_build_info(tmp_path: Path) -> None:
+    """The hatchling build hook bakes the source-tree HEAD SHA into src/rebar/_build_info.py."""
+    import hatch_build
+
+    root = _git_repo(tmp_path / "proj")
+    (root / "src" / "rebar").mkdir(parents=True)
+    commit = hatch_build._build_commit(root)
+    assert commit and len(commit) >= 4
+    target = root / "src" / "rebar" / "_build_info.py"
+    target.write_text(f"COMMIT = {commit!r}\n")
+    ns: dict = {}
+    exec(target.read_text(), ns)  # noqa: S102 — reading back the generated module
+    assert ns["COMMIT"] == commit
+
+
+def test_build_hook_non_git_commit_none(tmp_path: Path) -> None:
+    import hatch_build
+
+    plain = tmp_path / "nogit"
+    plain.mkdir()
+    assert hatch_build._build_commit(plain) is None
+
+
+def test_built_wheel_bakes_build_info(tmp_path: Path) -> None:
+    """AC (story 2): the FULL hatchling build cycle produces a wheel that actually contains
+    src/rebar/_build_info.py with a baked commit SHA — not just the unit-level hook helper.
+    Mirrors tests/unit/test_engine_dir.py::test_wheel_contains_no_compiled_bytecode."""
+    import re
+    import zipfile
+
+    hatchling_wheel = pytest.importorskip("hatchling.builders.wheel")
+
+    repo_root = Path(rebar.__file__).resolve().parents[2]
+    assert (repo_root / "pyproject.toml").is_file(), repo_root
+    generated = repo_root / "src" / "rebar" / "_build_info.py"
+    pre_existing = generated.exists()
+    try:
+        builder = hatchling_wheel.WheelBuilder(str(repo_root))
+        wheels = [p for p in builder.build(directory=str(tmp_path)) if str(p).endswith(".whl")]
+        assert wheels, "no wheel produced"
+        with zipfile.ZipFile(wheels[0]) as zf:
+            members = [n for n in zf.namelist() if n.endswith("rebar/_build_info.py")]
+            assert members, "the built wheel must contain the baked src/rebar/_build_info.py"
+            content = zf.read(members[0]).decode()
+    finally:
+        if not pre_existing and generated.exists():
+            generated.unlink()  # clean the git-ignored build artifact
+    # Built from this git checkout -> COMMIT is a real short SHA, not None.
+    assert re.search(r"COMMIT = '[0-9a-f]{4,}'", content), content
+
+
+# ── story 3: surface the stamp in verify_signature + show ─────────────────────────────
+def test_verify_signature_returns_rebar_version(store: Path) -> None:
+    tid = rebar.create_ticket("task", "stamp surfacing", repo_root=str(store))
+    signing.sign_manifest(
+        tid,
+        ["plan-review: PASS", signing.rebar_version_step("7.7.7 (cafef00d)")],
+        kind="plan-review",
+        repo_root=str(store),
+    )
+    result = rebar.verify_signature(tid, repo_root=str(store))
+    assert result["verdict"] == "certified"
+    assert result["rebar_version"] == "7.7.7 (cafef00d)"
+
+
+def test_verify_signature_rebar_version_none_for_pre_stamp(store: Path) -> None:
+    tid = rebar.create_ticket("task", "pre-stamp", repo_root=str(store))
+    # A manifest with no rebar-version step (a pre-jira-reb-596 signature).
+    signing.sign_manifest(tid, ["plan-review: PASS"], kind="plan-review", repo_root=str(store))
+    result = rebar.verify_signature(tid, repo_root=str(store))
+    assert result["verdict"] == "certified"
+    assert result["rebar_version"] is None
+
+
+def test_verify_signature_rebar_version_none_when_unsigned(store: Path) -> None:
+    tid = rebar.create_ticket("task", "unsigned", repo_root=str(store))
+    result = rebar.verify_signature(tid, repo_root=str(store))
+    assert result["verdict"] == "unsigned"
+    assert result["rebar_version"] is None
+
+
+def test_show_displays_rebar_version_stamp(store: Path) -> None:
+    tid = rebar.create_ticket("task", "show stamp", repo_root=str(store))
+    signing.sign_manifest(
+        tid,
+        ["plan-review: PASS", signing.rebar_version_step("8.8.8 (b4dc0de-dirty)")],
+        kind="plan-review",
+        repo_root=str(store),
+    )
+    state = rebar.show_ticket(tid, repo_root=str(store))
+    manifest = state["attestations"]["plan-review"]["manifest"]
+    # The stamp is displayed in the show attestation block via the signed manifest line.
+    assert any(line.startswith("rebar-version: 8.8.8 (b4dc0de-dirty)") for line in manifest)
+    assert signing.rebar_version_from_manifest(manifest) == "8.8.8 (b4dc0de-dirty)"
+
+
+def test_verify_signature_result_model_documents_rebar_version() -> None:
+    """The typed MCP contract (VerifySignatureResultOut) carries the field (epic jira-reb-596)."""
+    models = pytest.importorskip("rebar._mcp_models")
+    model = models.VerifySignatureResultOut
+    if model is None:  # pydantic unavailable in this env
+        pytest.skip("pydantic not installed")
+    field = model.model_fields.get("rebar_version")
+    assert field is not None, "VerifySignatureResultOut must document rebar_version"
+    assert not field.is_required(), "rebar_version must be optional for pre-stamp back-compat"
+
+
+def test_both_manifests_carry_rebar_version_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(signing, "gate_code_version", lambda source_dir=None: "9.9.9 (deadbee)")
+    monkeypatch.setattr(
+        "rebar.llm.plan_review.attest.current_material_fingerprint",
+        lambda ticket_id, repo_root=None: None,
+    )
+    from rebar.llm.plan_review import attest
+
+    plan = attest.build_manifest({"verdict": "PASS", "ticket_id": "t"}, material="m")
+    completion = _verdict_manifest({"model": "m", "runner": "r"}, "tid-1", repo_root="/x")
+    assert "rebar-version: 9.9.9 (deadbee)" in plan
+    assert "rebar-version: 9.9.9 (deadbee)" in completion
+
+
+def test_rebar_version_parser_roundtrip_and_pre_stamp_none() -> None:
+    from rebar.llm.plan_review import attest
+
+    stamped = [signing.rebar_version_step("0.6.0 (abc123-dirty)"), "ticket: t"]
+    assert signing.rebar_version_from_manifest(stamped) == "0.6.0 (abc123-dirty)"
+    assert attest.manifest_rebar_version(stamped) == "0.6.0 (abc123-dirty)"
+    # A manifest signed before the stamp existed parses to None (no crash).
+    assert signing.rebar_version_from_manifest(["plan-review: PASS", "ticket: t"]) is None
+    assert attest.manifest_rebar_version(["plan-review: PASS"]) is None
+    assert signing.rebar_version_from_manifest(None) is None
+
+
+def test_rebar_version_stamp_is_inert_to_validity_parsers() -> None:
+    """The stamp is provenance-only: adding it must not change the values compute_validity
+    reads (material / regver / deps). Proven by parsing a manifest with and without the line."""
+    from rebar.llm.plan_review import attest
+
+    base = attest.build_manifest(
+        {"verdict": "PASS", "ticket_id": "t"},
+        material="fp-1",
+        regver="rv-1",
+        deps={"a.py": "h1"},
+    )
+    without = [ln for ln in base if not ln.startswith(signing.REBAR_VERSION_PREFIX)]
+    assert attest.manifest_material(base) == attest.manifest_material(without) == "fp-1"
+    assert attest.manifest_regver(base) == attest.manifest_regver(without) == "rv-1"
+    assert attest.manifest_deps(base) == attest.manifest_deps(without) == {"a.py": "h1"}
