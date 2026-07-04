@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"verify_commands":[{"command":"pytest tests/unit/grounding/","dd_id":"DD1","dd_text":"pyright backend fail-open matrix passes"},{"command":"make lint","dd_id":"DD2","dd_text":"lint passes"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1783125501939172001,"uuid":"29b6da21-a2c4-468f-a7de-22e9d171e160"}
