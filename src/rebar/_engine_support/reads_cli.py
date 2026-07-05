@@ -91,10 +91,21 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
     include_scratch = False
+    # ``managed_refs`` is the reducer's strictly-monotonic removal-sync projection
+    # (see reducer._managed_refs): it retains every ref the ticket EVER managed, so
+    # a link removed via ``unlink`` still appears there. Surfacing it in the default
+    # human view makes a removed link read as live and ``unlink`` look broken. So it
+    # is stripped from the default view and gated behind ``--include-provenance`` — an
+    # internal, intentionally-undocumented flag the Jira reconciler always passes (it
+    # reads this dict via ``rebar show`` stdout to drive removal-propagation). Keeping
+    # the flag out of ``usage`` keeps it reconciler-only in practice.
+    include_provenance = False
     ids: list[str] = []
     for arg in rest:
         if arg == "--include-scratch":
             include_scratch = True
+        elif arg == "--include-provenance":
+            include_provenance = True
         elif arg.startswith("-"):
             print(f"Error: unknown option '{arg}'", file=sys.stderr)
             print(usage, file=sys.stderr)
@@ -113,6 +124,13 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
             print()
         try:
             state = show_state(raw_id, tracker, include_scratch=include_scratch)
+            if not include_provenance and fmt != "llm":
+                # Hide the monotonic removal-sync projection from the default view so
+                # unlinked/removed refs don't read as live links. Scoped to the default
+                # view only: the reconciler reads this dict via the default format and
+                # passes ``--include-provenance`` to keep the field; the ``llm`` view is
+                # left untouched to preserve ``show``/``list`` llm-output parity.
+                state.pop("managed_refs", None)
         except ReadError as exc:
             # show emits a parseable JSON error to stdout AND a free-form stderr
             # line (preserving the historical contract callers depend on).

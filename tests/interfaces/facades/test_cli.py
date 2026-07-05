@@ -7,6 +7,7 @@ don't exercise.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import stat
@@ -197,3 +198,39 @@ def test_validate_is_repo_wide_no_ticket_id(rebar_repo: Path) -> None:
     assert "score" in r
     for key in ("critical_issues", "major_issues", "minor_issues", "warnings", "suggestions"):
         assert key in r
+
+
+def test_show_hides_managed_refs_by_default(rebar_repo: Path) -> None:
+    """A removed (unlinked) relation must not read as a live link in the default view.
+
+    ``managed_refs`` is the reducer's strictly-monotonic removal-sync projection: an
+    ``unlink``-ed ref is retained there (to drive Jira removal-propagation) even though
+    the live link graph (``deps``) no longer holds it. The default ``show`` view hides
+    that projection so a removed link doesn't look present; the reconciler-internal
+    ``--include-provenance`` flag surfaces it. Regression for the confusing display in
+    which an unlinked ref read as an active relation.
+    """
+    root = str(rebar_repo)
+    a = rebar.create_ticket("task", "managed-ref-source", repo_root=root)
+    b = rebar.create_ticket("task", "managed-ref-target", repo_root=root)
+    # relates_to is a managed kind → it enters managed_refs; unlink removes the live
+    # link but leaves the monotonic projection in place.
+    rebar.link(a, b, "relates_to", repo_root=root)
+    rebar.unlink(a, b, repo_root=root)
+
+    # Default view: managed_refs hidden, and the live link graph is genuinely empty.
+    default = _cli("show", a)
+    assert default.returncode == 0, default.stderr
+    data = json.loads(default.stdout)
+    assert "managed_refs" not in data, "default show must not surface the removal-sync projection"
+    assert data["deps"] == [], "the unlinked relation must be gone from the live link graph"
+
+    # Provenance view (reconciler-internal): managed_refs present and still records the
+    # removed relates_to ref — this is the data the outbound differ reads.
+    prov = _cli("show", "--include-provenance", a)
+    assert prov.returncode == 0, prov.stderr
+    pdata = json.loads(prov.stdout)
+    assert [
+        "relates_to",
+        b,
+    ] in pdata["managed_refs"], "provenance view must retain the removed ref for removal-sync"
