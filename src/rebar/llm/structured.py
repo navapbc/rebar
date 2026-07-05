@@ -165,6 +165,15 @@ def validate_to(model_cls, data: Any):
     Anthropic's strict-grammar subset); they fire here."""
     from pydantic import ValidationError
 
+    # Unwrap a single-element array carrying one object: some models emit their lone
+    # structured result wrapped in a top-level JSON array (a bare one-element list)
+    # instead of the bare object — which otherwise deterministically fails validation
+    # ("got list") and, for the completion-verifier, blocks a close fail-closed
+    # (bug artsy-chain-hold / dash-lure-slag). A multi-element or non-object array
+    # stays ambiguous and is still rejected below.
+    if isinstance(data, list) and len(data) == 1 and isinstance(data[0], dict):
+        data = data[0]
+
     if not isinstance(data, dict):
         raise StructuredOutputError(
             f"structured output must be a JSON object, got {type(data).__name__}"
