@@ -16,6 +16,29 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
+authors = [{ name = "Nava PBC", email = "hello@navapbc.com" }]
+maintainers = [{ name = "Joe Oakhart", email = "joeoakhart@navapbc.com" }]
+keywords = [
+    "mcp",
+    "cli",
+    "jira",
+    "agent-coordination",
+    "ticketing",
+    "event-sourcing",
+    "git",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: POSIX",
+    "Operating System :: MacOS :: MacOS X",
+    "Topic :: Software Development :: Bug Tracking",
+    "Topic :: Software Development :: Version Control :: Git",
+]
+
 # Core stays deliberately tiny. Two runtime dependencies, both serving the
 # LEAN-RUNTIME workflow + schema capability (epic a88f) that must work WITHOUT the
 # heavy `[agents]`/`[eval]`/`[tracing]` extras:
@@ -45,6 +68,14 @@ dependencies = [
 # alias wordlist) are stdlib-only and ship as package data under rebar/_engine/.
 # System prerequisites (not pip deps): git, and `acli` (only for live Jira
 # reconciliation).
+
+[project.urls]
+Homepage = "https://github.com/navapbc/rebar"
+Repository = "https://github.com/navapbc/rebar"
+Documentation = "https://github.com/navapbc/rebar/tree/main/docs"
+Issues = "https://github.com/navapbc/rebar/blob/main/SUPPORT.md"
+Changelog = "https://github.com/navapbc/rebar/blob/main/docs/release-notes.md"
+Security = "https://github.com/navapbc/rebar/blob/main/SECURITY.md"
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.2"]
