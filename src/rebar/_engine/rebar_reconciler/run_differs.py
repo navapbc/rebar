@@ -79,7 +79,11 @@ def _read_local_ticket_full(repo_root: Path, local_id: str, *, no_sync: bool) ->
     _env = dict(_os.environ, REBAR_SYNC_PULL="off") if no_sync else None
     try:
         result = _sp.run(
-            [str(cli), "show", local_id],
+            # ``--include-provenance`` keeps ``managed_refs`` (the monotonic
+            # removal-sync projection) in the output — the outbound differ reads it
+            # to decide REMOVE-vs-ADOPT. It is stripped from the default human view,
+            # so the reconciler MUST always pass this flag here.
+            [str(cli), "show", "--include-provenance", local_id],
             capture_output=True,
             text=True,
             cwd=str(repo_root),
