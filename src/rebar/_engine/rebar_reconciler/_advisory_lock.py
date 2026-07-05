@@ -412,18 +412,37 @@ def check_phase_gate(target_mode, repo_root: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _is_cas_mismatch(exc: subprocess.CalledProcessError) -> bool:
+def _is_cas_mismatch(
+    exc: subprocess.CalledProcessError, ref_name: str = "refs/heads/tickets"
+) -> bool:
     """Return True iff *exc* is an ``update-ref`` compare-and-swap old-sha mismatch.
 
-    ``git update-ref refs/heads/tickets <new> <old>`` exits 128 when the ref no
-    longer points at <old> (a concurrent writer advanced it). We discriminate on
-    BOTH the command shape (an ``update-ref`` invocation) and the exit code so an
+    ``git update-ref <ref> <new> <old>`` exits 128 when the ref no longer points at
+    <old> (a concurrent writer advanced it). We discriminate on BOTH the command
+    shape (an ``update-ref`` invocation naming *ref_name*) and the exit code so an
     unrelated exit-128 from some other git command is not misclassified as a
     retryable race.
+
+    *ref_name* defaults to ``refs/heads/tickets`` so every existing tickets-branch
+    call site is preserved verbatim; the ref-lock primitive
+    (:mod:`_ref_lock`) passes its own ``refs/reconciler/*`` ref so a CAS exit
+    there is classified correctly (shared discriminator, not a second one).
+
+    ``git update-ref <ref> <new> <old>`` (create-only or advance) reports a CAS
+    old-sha mismatch as **exit 128**; the delete form ``git update-ref -d <ref>
+    <old>`` reports it as **exit 1**. Both carry ``cannot lock ref '<ref>'`` in
+    stderr, so we accept exit 128 (the historical tickets-branch signal, which
+    only ever advances) OR an exit-1 ``cannot lock ref`` (the ref-lock delete
+    CAS) — a strict superset that never misclassifies an unrelated failure.
     """
     args = exc.cmd or []
-    is_update_ref = "update-ref" in args and "refs/heads/tickets" in args
-    return is_update_ref and exc.returncode == 128
+    is_update_ref = "update-ref" in args and ref_name in args
+    if not is_update_ref:
+        return False
+    if exc.returncode == 128:
+        return True
+    stderr = getattr(exc, "stderr", "") or ""
+    return "cannot lock ref" in stderr
 
 
 def _cas_backoff_seconds(retry_index: int) -> float:
@@ -444,8 +463,35 @@ def _cas_backoff_seconds(retry_index: int) -> float:
     )
 
 
-def _cas_advance_with_retry(repo_root: Path, mutate_and_advance) -> None:
-    """Run *mutate_and_advance* with bounded retry on a tickets-ref CAS mismatch.
+def _cas_once(mutate_and_advance, ref_name: str = "refs/heads/tickets") -> bool:
+    """Run *mutate_and_advance* exactly once and classify the CAS outcome.
+
+    Returns ``True`` when the callable completed (CAS succeeded), ``False`` when
+    it failed with a CAS old-sha mismatch on *ref_name* (:func:`_is_cas_mismatch`).
+    Any other ``CalledProcessError`` (or other exception) propagates immediately
+    (fail-CLOSED — genuine faults are not masked).
+
+    This is the single-shot CAS seam shared by the retrying tickets-ref path
+    (:func:`_cas_advance_with_retry`) and the ref-lock primitive
+    (:mod:`_ref_lock`), whose three exit-128 outcomes differ and must NOT retry:
+    an acquire mismatch means "already held" (definitive), a release mismatch is
+    idempotent success, and a steal mismatch means "lost the single-winner race".
+    Each caller interprets the ``False`` return itself.
+    """
+    try:
+        mutate_and_advance()
+        return True
+    except subprocess.CalledProcessError as exc:
+        if _is_cas_mismatch(exc, ref_name):
+            return False
+        # Not a CAS race — propagate (fail-CLOSED).
+        raise
+
+
+def _cas_advance_with_retry(
+    repo_root: Path, mutate_and_advance, ref_name: str = "refs/heads/tickets"
+) -> None:
+    """Run *mutate_and_advance* with bounded retry on a *ref_name* CAS mismatch.
 
     *mutate_and_advance* is a zero-arg callable that performs the full
     read-tip -> build-commit-in-detached-worktree -> ``update-ref`` CAS
@@ -454,37 +500,36 @@ def _cas_advance_with_retry(repo_root: Path, mutate_and_advance) -> None:
     recovery is to re-run the WHOLE sequence so the commit is rebuilt on the new
     tip. We therefore retry the callable as a unit.
 
-    Retries ONLY on a CAS old-sha mismatch (:func:`_is_cas_mismatch`). Any other
+    Retries ONLY on a CAS old-sha mismatch (via :func:`_cas_once`). Any other
     ``CalledProcessError`` (or other exception) propagates immediately
     (fail-CLOSED — genuine faults are not masked). Exhausting
     ``_CAS_RETRY_BUDGET`` re-raises the last CAS-mismatch error so the caller's
     ``rebase_retry`` wrapper records it as ``abort_due_to_error`` rather than
     looping forever.
     """
+    # A non-mismatch CalledProcessError raised by _cas_once propagates out of the
+    # loop unchanged (fail-CLOSED). Only a False return (mismatch) is retried.
     for attempt in range(1, _CAS_RETRY_BUDGET + 1):
-        try:
-            mutate_and_advance()
+        if _cas_once(mutate_and_advance, ref_name):
             return
-        except subprocess.CalledProcessError as exc:
-            if not _is_cas_mismatch(exc):
-                # Not a CAS race — propagate (fail-CLOSED).
-                raise
-            if attempt >= _CAS_RETRY_BUDGET:
-                logger.warning(
-                    "tickets-ref CAS retry budget (%d) exhausted; concurrent "
-                    "writers kept advancing the ref — surfacing as error",
-                    _CAS_RETRY_BUDGET,
-                )
-                raise
-            backoff = _cas_backoff_seconds(attempt - 1)
-            logger.info(
-                "tickets-ref CAS mismatch (concurrent writer advanced ref); "
-                "rebuilding on new tip — retry %d/%d after %.3fs",
-                attempt,
+        if attempt >= _CAS_RETRY_BUDGET:
+            logger.warning(
+                "%s CAS retry budget (%d) exhausted; concurrent "
+                "writers kept advancing the ref — surfacing as error",
+                ref_name,
                 _CAS_RETRY_BUDGET,
-                backoff,
             )
-            time.sleep(backoff)
+            raise subprocess.CalledProcessError(128, ["git", "update-ref", ref_name])
+        backoff = _cas_backoff_seconds(attempt - 1)
+        logger.info(
+            "%s CAS mismatch (concurrent writer advanced ref); "
+            "rebuilding on new tip — retry %d/%d after %.3fs",
+            ref_name,
+            attempt,
+            _CAS_RETRY_BUDGET,
+            backoff,
+        )
+        time.sleep(backoff)
 
 
 def _commit_in_detached_tickets_worktree(repo_root: Path, commit_message: str, mutate_fn) -> None:
@@ -582,7 +627,7 @@ def _commit_in_detached_tickets_worktree(repo_root: Path, commit_message: str, m
                 pass
             _shutil.rmtree(worktree_parent, ignore_errors=True)
 
-    _cas_advance_with_retry(repo_root, _mutate_and_advance)
+    _cas_advance_with_retry(repo_root, _mutate_and_advance, ref_name="refs/heads/tickets")
 
 
 def _write_file_to_tickets_branch(
