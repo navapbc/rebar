@@ -2,17 +2,19 @@ name: mirror-guard
 
 # Ticket a774 (epic b744) — continuous guardian for the Gerrit->GitHub mirror lock.
 #
-# After the WS7 cutover, GitHub `main` is a read-only mirror gated by the
-# `gerrit-mirror-lock-main` ruleset. This scheduled job FAILS (-> GitHub notification) if
-# either post-cutover silent-failure mode appears:
-#   * replication has diverged (Gerrit `main` SHA != GitHub `main` SHA), or
-#   * the lock ruleset drifted (deleted / disabled / rules or bypass mutated out-of-band).
+# After the WS7 cutover, GitHub `main` is a read-only mirror that only advances via Gerrit's
+# replication deploy key. This scheduled job verifies REPLICATION HEALTH: it FAILS
+# (-> GitHub notification) if Gerrit `main` SHA != GitHub `main` SHA, i.e. replication has
+# stalled and GitHub `main` has fallen behind/ahead of Gerrit.
 #
-# It runs `python -m rebar.mirror_guard --all`, which exits non-zero on either. The Gerrit
-# `main` SHA is read anonymously; the GitHub Rulesets API read uses the Actions-native
-# GITHUB_TOKEN, which needs `administration: read` (granted below). If org policy disallows
-# that for the default token, provision a fine-grained PAT (administration:read) as the
-# `MIRROR_GUARD_TOKEN` secret and pass it instead (see the commented env line).
+# It runs `python -m rebar.mirror_guard --replication`. Both reads are cheap and need no
+# elevated auth: the Gerrit `main` SHA is read anonymously, and the GitHub `main` SHA is a
+# public-repo read (the Actions-native GITHUB_TOKEN is passed only to lift API rate limits).
+# So this runs on the default token with no fine-grained PAT.
+#
+# NOTE: the lock-ruleset-drift check (`--ruleset`) is intentionally NOT run here — it needs
+# `administration:read`, which the default GITHUB_TOKEN cannot be granted. Ruleset drift is
+# covered out-of-band; this workflow is scoped to replication only.
 
 on:
   schedule:
@@ -20,8 +22,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: read
-  administration: read # read the repo ruleset via the Rulesets API
+  contents: read # read the GitHub main SHA (public read; token only lifts rate limits)
 
 concurrency:
   group: mirror-guard
@@ -39,9 +40,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
-      - name: mirror-guard — replication + ruleset drift
+      - name: mirror-guard — replication health (Gerrit vs GitHub main SHA)
         env:
+          # Default token only — passed to lift GitHub API rate limits on the public
+          # main-SHA read; no elevated scope needed for the replication check.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Fallback if the default token can't read rulesets under org policy:
-          # GITHUB_TOKEN: ${{ secrets.MIRROR_GUARD_TOKEN }}
-        run: python -m rebar.mirror_guard --all
+        run: python -m rebar.mirror_guard --replication
