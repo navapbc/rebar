@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/_engine/rebar_reconciler/_ref_lock.py","reason":"lease/heartbeat/CAS-break self-heal"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783216171805154001,"uuid":"dfb9e92c-3c8b-49d8-82f4-df8194b07a5a"}
