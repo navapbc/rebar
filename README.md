@@ -25,6 +25,8 @@ orphan branch (worktree at `.tickets-tracker/`); state is computed by replaying
 events. A level-triggered reconciler bidirectionally syncs tickets with Jira. Both
 the branch name and the worktree/symlink dir default to those values but are
 configurable (`tracker.branch` / `tracker.dir`) — see [Configuration](#configuration).
+Reads stay sub-second into the thousands of tickets; for measured numbers and
+git-growth expectations see [`docs/scale-envelope.md`](docs/scale-envelope.md).
 
 This project was extracted from the `digital-service-orchestra` Claude Code
 plugin. It began as a bash + Python engine; that engine has since been fully ported
@@ -387,6 +389,12 @@ the write — it leaves the local commit intact and the branch diverged.
 `rebar fsck` reports `PUSH_PENDING` when the local `tickets` branch is ahead of
 `origin/tickets`, so unpushed activity is observable. See
 [`docs/concurrency.md`](docs/concurrency.md) for the push/merge-retry algorithm.
+
+How big can it get? Reads stay sub-second into the thousands of tickets; writes
+are bounded by the per-event git commit (~25–30/s). See
+[`docs/scale-envelope.md`](docs/scale-envelope.md) for representative measured
+numbers, git-growth expectations, and the compaction/maintenance commands, and
+[`docs/import-export.md`](docs/import-export.md) for bulk NDJSON export/import.
 
 ### Reads share one freshness policy across CLI, library, and MCP
 
