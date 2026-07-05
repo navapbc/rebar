@@ -153,6 +153,13 @@ steps:
             # not trip the default cap and degrade the whole review (bug 59bc). A `with:` input
             # (the v3 step schema is immutable + closed; `with` is the open extension point).
             step_budget_per_item: 25
+            # Scale the per-CALL OUTPUT cap with the finding count too: the structured
+            # plan_review_verification grows ~1 verification object per finding, so a fixed cap
+            # truncates (finish_reason=length) on a finding-rich plan and collapses the review to
+            # INDETERMINATE (bug spy-luge-wool / sole-teal-churn). ~2000 output tokens/finding
+            # (raising the cap to max(floor, 2000×findings), ceiling 64000 — the value proven to
+            # let a ~30-finding verify complete).
+            output_tokens_per_item: 2000
         - id: decide
           needs:
           - verify

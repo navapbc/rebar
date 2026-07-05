@@ -16,10 +16,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from rebar.llm.config import LLMConfig
+from rebar.llm.config import DEFAULT_MAX_TOKENS, LLMConfig
 from rebar.llm.plan_review import orchestrator
 from rebar.llm.plan_review.det_floor import PlanContext
-from rebar.llm.runner import FakeRunner, effective_max_iterations
+from rebar.llm.runner import FakeRunner, effective_max_iterations, effective_max_tokens
 from rebar.llm.workflow import gate_dispatch
 from rebar.llm.workflow.executor import StepContext
 from rebar.llm.workflow.runs import RunnerAgentStep
@@ -29,14 +29,18 @@ pytestmark = pytest.mark.unit
 
 # ── budget scaling: the agentic verifier's step budget scales with the finding count ──────────
 class _CapturingRunner(FakeRunner):
-    """Records the ``max_iterations`` the step resolved onto the RunRequest config."""
+    """Records the per-request budgets (max_iterations / max_tokens) and call count."""
 
     def __init__(self, **kw) -> None:
         super().__init__(**kw)
         self.max_iterations: int | None = None
+        self.max_tokens: int | None = None
+        self.calls: int = 0
 
     def run(self, req):
+        self.calls += 1
         self.max_iterations = req.config.max_iterations
+        self.max_tokens = getattr(req.config, "max_tokens", None)
         return super().run(req)
 
 
@@ -85,6 +89,69 @@ def test_runner_honors_per_request_budget_not_just_self_config() -> None:
     assert effective_max_iterations(50, 475) == 475  # a request RAISES the floor
     assert effective_max_iterations(50, None) == 50  # no override → the floor
     assert effective_max_iterations(100, 50) == 100  # a request can NEVER lower the floor
+
+
+# ── output-cap scaling: the verifier's per-CALL max_tokens scales with finding count ──────────
+# Bug spy-luge-wool (=b54e) / sole-teal-churn: the Pass-2 verify structured output grows ~1
+# verification per finding, so a FIXED per-call max_tokens truncates (finish_reason=length) on a
+# finding-rich plan and the whole review collapses to INDETERMINATE. The turn budget already
+# scales (above); the OUTPUT cap must scale the same way.
+def test_verify_output_cap_scales_with_finding_count() -> None:
+    findings = [{"finding": f"f{i}", "criteria": ["G6"]} for i in range(30)]
+    runner = _CapturingRunner(structured={"verifications": []})
+    ctx = _verify_ctx(
+        {
+            "findings": findings,
+            "instructions": "verify",
+            "step_budget_per_item": 25,
+            "output_tokens_per_item": 2000,
+        }
+    )
+    res = RunnerAgentStep(runner=runner, repo_root=None).run(ctx)
+    assert res.status == "succeeded"
+    # 2000 × 30 = 60000, well above the 16000 default — enough to emit 30 verifications.
+    assert runner.max_tokens is not None and runner.max_tokens >= 2000 * len(findings)
+    assert runner.max_tokens > DEFAULT_MAX_TOKENS
+
+
+def test_verify_output_cap_unscaled_without_the_input() -> None:
+    """Absent ``output_tokens_per_item`` the step keeps the configured cap (a tiny ticket is
+    unaffected — the floor is never lowered)."""
+    default = LLMConfig.from_env().max_tokens
+    findings = [{"finding": f"f{i}", "criteria": ["G6"]} for i in range(30)]
+    runner = _CapturingRunner(structured={"verifications": []})
+    ctx = _verify_ctx({"findings": findings, "instructions": "verify"})  # no per-item token knob
+    RunnerAgentStep(runner=runner, repo_root=None).run(ctx)
+    assert runner.max_tokens == default
+
+
+def test_runner_honors_per_request_output_cap() -> None:
+    """The effective per-call output cap is max(operator floor, per-request), mirroring the
+    turn-budget seam — so a scaled verifier cap on ``req.config`` is actually applied and can
+    never lower the configured floor."""
+    assert effective_max_tokens(16000, 60000) == 60000  # a request RAISES the floor
+    assert effective_max_tokens(16000, None) == 16000  # no override → the floor
+    assert effective_max_tokens(32000, 16000) == 32000  # a request can NEVER lower the floor
+
+
+# ── turf-purple-dot: an empty instructions list must never silently zero-dispatch verify ──────
+def test_empty_instructions_still_dispatches_and_warns(caplog) -> None:
+    """A literal empty ``instructions`` list made the chunk loop run the model ZERO times and
+    merge to ``{}`` — a SILENT no-op (verify_requests=0, empty stderr) that degraded every
+    finding to no-verification. The step must instead dispatch one aggregate call AND log a
+    diagnostic, never a hollow success."""
+    import logging
+
+    findings = [{"finding": f"f{i}", "criteria": ["G6"]} for i in range(3)]
+    runner = _CapturingRunner(structured={"verifications": []})
+    ctx = _verify_ctx({"findings": findings, "instructions": []})  # the degenerate empty list
+    with caplog.at_level(logging.WARNING):
+        res = RunnerAgentStep(runner=runner, repo_root=None).run(ctx)
+    assert runner.calls >= 1, "verify must dispatch at least one call, not zero (silent no-op)"
+    assert res.status == "succeeded"
+    assert any("instruction" in r.getMessage().lower() for r in caplog.records), (
+        "a degraded/empty verify dispatch must emit a diagnostic, never be silent"
+    )
 
 
 # ── the verdict rule: a verify failure fails OPEN unless a finding is potentially-blocking ────
