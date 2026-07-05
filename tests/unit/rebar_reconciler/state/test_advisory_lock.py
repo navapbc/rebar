@@ -471,3 +471,62 @@ def test_phase_gate_blocks_advancement(
         "check_phase_gate must return False (not blocked) for BOOTSTRAP_STRICT "
         f"when gate file contains 'bootstrap-strict' (same rank); got {result_strict!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Ref backend (epic dust-troth-naval / C3): the same public API over
+# refs/reconciler/* instead of tickets-branch files. Extends this file's
+# file-backend coverage with the ref-backend path.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def _ref_backend(advisory_lock: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force lock_backend=ref, a local (no-remote) CAS, and a short lease."""
+    monkeypatch.setattr(advisory_lock, "_lock_backend", lambda: "ref")
+    monkeypatch.setattr(advisory_lock, "_lock_lease_secs", lambda: 1)
+    monkeypatch.setattr(advisory_lock, "_lock_remote", lambda repo_root: None)
+
+
+def test_ref_backend_acquire_release_roundtrip(
+    advisory_lock: ModuleType, tmp_git_repo: Path, _ref_backend: None
+) -> None:
+    """Under lock_backend=ref, acquire returns an oid on refs/reconciler/lock and
+    writes NO .reconciler-pass-lock to the tickets branch; release tears it down."""
+    oid = advisory_lock.acquire_pass_lock("pass-1", tmp_git_repo)
+    assert oid, "ref-backend acquire must return the ref oid"
+    ref = advisory_lock._load_ref_lock().LOCK_REF
+    assert _git(["rev-parse", ref], tmp_git_repo).stdout.strip() == oid
+    # No tickets-branch lock file was written.
+    show = subprocess.run(
+        ["git", "-C", str(tmp_git_repo), "cat-file", "-e", "tickets:.reconciler-pass-lock"],
+        capture_output=True,
+    )
+    assert show.returncode != 0, "ref backend must not write a tickets-branch lock file"
+    advisory_lock.release_pass_lock("pass-1", tmp_git_repo, oid=oid)
+    gone = subprocess.run(
+        ["git", "-C", str(tmp_git_repo), "rev-parse", "--verify", "--quiet", ref],
+        capture_output=True,
+    )
+    assert gone.returncode != 0, "release must delete the ref"
+
+
+def test_double_acquire_convergence_single_winner(
+    advisory_lock: ModuleType, tmp_git_repo: Path, _ref_backend: None
+) -> None:
+    """Named double-acquire convergence test: a second acquire against a held ref
+    converges to exactly one winner (the loser raises ReconcileLockError)."""
+    advisory_lock.acquire_pass_lock("pass-1", tmp_git_repo)
+    with pytest.raises(advisory_lock.ReconcileLockError):
+        advisory_lock.acquire_pass_lock("pass-2", tmp_git_repo)
+
+
+def test_ref_backend_phase_gate(
+    advisory_lock: ModuleType, mode_mod: ModuleType, tmp_git_repo: Path, _ref_backend: None
+) -> None:
+    """Under the ref backend, check_phase_gate reads the refs/reconciler/gate blob."""
+    ref_lock = advisory_lock._load_ref_lock()
+    assert advisory_lock.check_phase_gate(mode_mod.Mode.BOOTSTRAP_THROTTLE, tmp_git_repo) is False
+    ref_lock.set_gate(tmp_git_repo, mode_mod.Mode.BOOTSTRAP_STRICT.value)
+    assert advisory_lock.check_phase_gate(mode_mod.Mode.BOOTSTRAP_THROTTLE, tmp_git_repo) is True
+    assert advisory_lock.check_phase_gate(mode_mod.Mode.BOOTSTRAP_STRICT, tmp_git_repo) is False

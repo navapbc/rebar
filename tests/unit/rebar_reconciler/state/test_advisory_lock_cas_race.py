@@ -271,3 +271,31 @@ def test_non_cas_git_failure_still_fails_fast(
         "Non-CAS git failures must fail fast, not be CAS-retried; "
         f"worktree_add_calls={state['worktree_add_calls']}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Ref backend CAS race (epic dust-troth-naval / C3): the ref-lock create-only
+# CAS on refs/reconciler/* must resolve concurrent acquirers to a single winner.
+# Extends this file's tickets-branch CAS-race coverage with the ref backend.
+# ---------------------------------------------------------------------------
+
+
+def test_ref_backend_create_cas_single_winner(
+    lock_mod: ModuleType, tmp_git_repo_with_tickets: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two acquirers race the create-only CAS on refs/reconciler/lock; exactly one
+    wins and the other gets ReconcileLockError (the CAS discriminator classifies the
+    exit-128 'reference already exists' correctly for the reconciler ref)."""
+    monkeypatch.setattr(lock_mod, "_lock_backend", lambda: "ref")
+    monkeypatch.setattr(lock_mod, "_lock_lease_secs", lambda: 1)
+    monkeypatch.setattr(lock_mod, "_lock_remote", lambda repo_root: None)
+    repo = tmp_git_repo_with_tickets
+
+    first = lock_mod.acquire_pass_lock("pass-A", repo)
+    assert first, "first acquirer wins the create-only CAS"
+    with pytest.raises(lock_mod.ReconcileLockError):
+        lock_mod.acquire_pass_lock("pass-B", repo)
+    # Winner can release; the ref is then free for a fresh acquire.
+    lock_mod.release_pass_lock("pass-A", repo, oid=first)
+    second = lock_mod.acquire_pass_lock("pass-B", repo)
+    assert second, "after release the ref is re-acquirable"

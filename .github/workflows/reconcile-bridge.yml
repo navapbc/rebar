@@ -103,6 +103,16 @@ jobs:
           rm -rf .tickets-tracker
           git worktree add -B tickets .tickets-tracker origin/tickets
 
+      - name: Sync reconciler lock refs (ref-lock backend)
+        # The self-healing pass-lock/phase-gate live on refs/reconciler/* (epic
+        # dust-troth-naval, ADR 0031), NOT in the tickets tree. Sync them before the
+        # pass so acquire sees the authoritative remote state. Best-effort: absent
+        # refs (first run / file backend) simply fetch nothing. The reconciler's own
+        # acquire/renew/release also force-sync + --force-with-lease on each op.
+        run: |
+          set -euo pipefail
+          git fetch origin '+refs/reconciler/*:refs/reconciler/*' || true
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

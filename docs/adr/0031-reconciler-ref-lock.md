@@ -194,6 +194,29 @@ after one lease interval — with **no cross-clone clock comparison**.
 * Structured logs fire on lease-steal (won), expiry-detection (no progress over one lease), and
   renewal-failure (`LeaseLostError`).
 
+## Reconciler cutover (C3 — wires the primitive in)
+
+C3 puts the primitive behind an **expand-contract switch** so the file backend stays for
+rollback (C4 removes it and flips the default to `ref`):
+
+* **`[reconciler] lock_backend = file | ref`** (default `file`) + `lock_lease_secs` (default 120).
+  `acquire_pass_lock` / `release_pass_lock` / `check_phase_gate` each dispatch on it at one point;
+  the `file` path is byte-for-byte unchanged. `acquire_pass_lock` returns the ref **oid** (threaded
+  to renew/release) and maps `RefLockHeldError` → `ReconcileLockError`.
+* **Phase gate** on `ref` uses `refs/reconciler/gate` (a `{"gated_mode": "<mode>"}` blob via
+  `read_gate`/`set_gate`/`clear_gate`) — CAS-managed, its own tiny schema (not the lease-lock blob).
+  `check_phase_gate` blocks iff `target_mode > gated_mode`; a corrupt gate blob fails closed.
+* **Heartbeat + lost-lease abort.** `__main__` starts a daemon `_Heartbeat` that renews at
+  `heartbeat_interval(lease)`; on `LeaseLostError` it sets a `threading.Event` (`lock_lost`) and
+  exits (a daemon thread can't raise into the main thread). The pass polls it at **per-mutation
+  checkpoints** via an `abort_check` callback threaded `run_pass → reconcile_once → applier.apply`
+  (defaults to `None`, so the file backend and existing callers are unaffected); on a set signal it
+  raises `ReconcileLockLost`, the pass aborts, and the `finally` release no-ops (the ref already
+  moved) — a re-run is idempotent. `ReconcileLockError` = "couldn't get the lock"; `ReconcileLockLost`
+  = "held it, then lost it".
+* The GHA workflow fetches `+refs/reconciler/*` before the pass; acquire/renew/release push with
+  `--force-with-lease=<ref>:<old>` against `origin`.
+
 ## Consequences
 
 * The lock leaves the tickets tree entirely: no `merge=ours` entry needed for it, no tickets-branch
@@ -203,3 +226,9 @@ after one lease interval — with **no cross-clone clock comparison**.
   definitive outcome.
 * C1 is intentionally incomplete as a *self-healing* lock: a crash wedges the ref until manual
   break-glass or C2's lease expiry. That is the C1/C2 seam, not a gap.
+* **Backend-cutover quiesce (operational).** `file` and `ref` locks are independent namespaces, so
+  they do NOT mutually exclude each other. Flipping `[reconciler] lock_backend` must therefore be a
+  quiesced cutover: ensure no `file`-backend pass is in flight before the first `ref`-backend pass
+  starts (in practice trivial — the reconciler is single-writer-by-design and runs on a timer, so
+  land the config change between passes). A corrupt/unreadable lock blob fails closed (treated as
+  HELD, never stolen); the operator break-glass above clears it.
