@@ -65,6 +65,13 @@ def _coalesce_value_opts(args: list[str], value_opts: frozenset[str]) -> list[st
     return out
 
 
+# The full set of ticket statuses that may appear in a compiled ticket's `status`
+# field and are therefore valid `--status` filter values: the four lifecycle states
+# plus archived/deleted tombstones and the reducer's error/fsck_needed sentinels.
+_VALID_LIST_STATUSES = frozenset(
+    {"open", "in_progress", "closed", "blocked", "archived", "deleted", "error", "fsck_needed"}
+)
+
 _LIST_VALUE_OPTS = frozenset(
     {
         "--sort",
@@ -270,6 +277,23 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
                     file=sys.stderr,
                 )
                 return 1
+
+    # --status: reject unknown values loudly (comma-separated for OR). A mistyped
+    # status (e.g. `all`) otherwise falls through to the reducer's set-membership
+    # filter, matches nothing, and returns [] with exit 0 — indistinguishable from
+    # "no tickets match", which has silently corrupted real measurements
+    # (bug spiny-ferry-ripen).
+    if opts["status"]:
+        bad = [
+            s.strip() for s in opts["status"].split(",") if s.strip() not in _VALID_LIST_STATUSES
+        ]
+        if bad:
+            print(
+                f"Error: invalid --status value(s) {', '.join(repr(b) for b in bad)}. "
+                f"Valid statuses: {', '.join(sorted(_VALID_LIST_STATUSES))}.",
+                file=sys.stderr,
+            )
+            return 2
 
     if not os.path.isdir(tracker):
         print("Error: ticket system not initialized. Run 'ticket init' first.", file=sys.stderr)
