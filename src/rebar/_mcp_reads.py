@@ -30,6 +30,7 @@ from rebar._mcp_models import (
     VerifyCommandItemOut,
     VerifySignatureResultOut,
     WorkflowRunOut,
+    tool_annotation_presets,
 )
 
 
@@ -42,12 +43,14 @@ def register_read_tools(mcp, ctx) -> None:
     Mode = ctx.Mode
 
     # ── Read tools ────────────────────────────────────────────────────────────
-    @mcp.tool()
+    _ANN = tool_annotation_presets()
+
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def show_ticket(ticket_id: str) -> TicketStateOut:
         """Show compiled ticket state (accepts full id, short id, or alias)."""
         return TicketStateOut.model_validate(rebar.show_ticket(ticket_id))
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def list_tickets(
         status: str | None = None,
         ticket_type: str | None = None,
@@ -97,24 +100,24 @@ def register_read_tools(mcp, ctx) -> None:
             )
         ]
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def ticket_deps(ticket_id: str) -> DepsGraphOut:
         """Show the dependency graph for a ticket."""
         return DepsGraphOut.model_validate(rebar.deps(ticket_id))
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def ready_tickets(sort: str | None = None) -> list[TicketStateOut]:
         """List tickets ready to work (all blockers closed). ``sort`` orders by
         ``priority|created|updated|id|status`` (prefix ``-`` for descending;
         unset values sort last)."""
         return [TicketStateOut.model_validate(t) for t in rebar.ready(sort=sort)]
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def next_batch(epic_id: str) -> NextBatchOut:
         """Next parallel batch of unblocked tickets under an epic's hierarchy."""
         return NextBatchOut.model_validate(rebar.next_batch(epic_id))
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def search(
         query: str,
         status: str | None = None,
@@ -143,14 +146,14 @@ def register_read_tools(mcp, ctx) -> None:
             )
         ]
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def recent_session_logs(limit: int = 5) -> list[TicketStateOut]:
         """The newest session_log tickets, newest first (by created_at; default
         limit 5). session_logs are hidden from list_tickets; this is the
         type-specific read that surfaces them."""
         return [TicketStateOut.model_validate(t) for t in rebar.recent_session_logs(limit=limit)]
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
     def fsck(recover: bool = False) -> str:
         """Check ticket-store integrity (JSON validity, CREATE presence, lock
         cleanup). Set recover=True to run the recovery path."""
@@ -164,42 +167,42 @@ def register_read_tools(mcp, ctx) -> None:
         return rebar.fsck(recover=recover, report_only=_readonly())
 
     # ── Quality gates + file-impact reads (WS5d) ───────────────────────────────
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def clarity_check(ticket_id: str) -> ClarityResultOut:
         """Score ticket clarity (score / verdict / threshold / passed)."""
         return ClarityResultOut.model_validate(rebar.clarity_check(ticket_id))
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def check_ac(ticket_id: str) -> GateResultOut:
         """Check the ticket has an Acceptance Criteria block
         ({verdict, criteria_count, reason, passed})."""
         return GateResultOut.model_validate(rebar.check_ac(ticket_id))
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def quality_check(ticket_id: str) -> GateResultOut:
         """Check ticket dispatch readiness ({verdict, line_count, keyword_count,
         ac_items, file_impact, reason, passed})."""
         return GateResultOut.model_validate(rebar.quality_check(ticket_id))
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def validate() -> ValidateReportOut:
         """Repo-wide quality health check (JSON report: score, critical/major/
         minor issues, warnings, suggestions). Takes no ticket id."""
         return ValidateReportOut.model_validate(rebar.validate())
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def get_file_impact(ticket_id: str) -> list[FileImpactItemOut]:
         """Get the file-impact array (consumed by next-batch conflict scheduling)."""
         return [FileImpactItemOut.model_validate(e) for e in rebar.get_file_impact(ticket_id)]
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def get_verify_commands(ticket_id: str) -> list[VerifyCommandItemOut]:
         """Get the DD-level verify-commands array for a ticket."""
         return [
             VerifyCommandItemOut.model_validate(e) for e in rebar.get_verify_commands(ticket_id)
         ]
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def grounding_info() -> GroundingInfoOut:
         """The STATIC code-grounding oracle integration contract (epic 8f6c): the
         closed dimension-ID vocabulary + version, the reference kinds, the closed
@@ -208,12 +211,12 @@ def register_read_tools(mcp, ctx) -> None:
         repo-independent discovery surface (no repo is scanned). Takes no args."""
         return GroundingInfoOut.model_validate(rebar.grounding_info())
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def summary(ticket_ids: list[str]) -> list[dict]:
         """One-line-per-ticket summary [{ticket_id, status, title, blocking_summary}]."""
         return rebar.summary(*ticket_ids)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def list_epics(
         include_blocked: bool = False,
         has_tag: str | None = None,
@@ -234,12 +237,12 @@ def register_read_tools(mcp, ctx) -> None:
                 )
             )
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def bridge_fsck() -> BridgeFsckOut:
         """Audit bridge mappings -> {orphaned, duplicates, stale}."""
         return BridgeFsckOut.model_validate(rebar.bridge_fsck())
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def verify_signature(ticket_id: str, kind: str | None = None) -> VerifySignatureResultOut:
         """Certify a ticket's verified-steps manifest against its signature.
 
@@ -254,7 +257,7 @@ def register_read_tools(mcp, ctx) -> None:
         ticket-state `attestations` field via show_ticket."""
         return VerifySignatureResultOut.model_validate(rebar.verify_signature(ticket_id, kind=kind))
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["MUTATE_OPEN_WORLD"])
     def reconcile(mode: str = "dry-run") -> dict:
         """Run the Jira reconciler. Defaults to a non-mutating dry-run.
 
@@ -281,7 +284,7 @@ def register_read_tools(mcp, ctx) -> None:
                 )
         return rebar.reconcile(parsed.value)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def get_workflow_status(run_id: str, ticket_id: str | None = None) -> WorkflowRunOut:
         """Read a workflow run's current status via replay (no execution) ->
         {run_id, ticket_id, workflow_name, status, terminal_step, error, steps}.
@@ -292,7 +295,7 @@ def register_read_tools(mcp, ctx) -> None:
             _cap_workflow_payload(rebar.get_workflow_status(run_id, ticket_id))
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def get_workflow_result(run_id: str, ticket_id: str | None = None) -> WorkflowRunOut:
         """Read a workflow run's outputs via replay -> {run_id, status,
         terminal_step, terminal_output, outputs, error}. The terminal step's output
@@ -305,7 +308,7 @@ def register_read_tools(mcp, ctx) -> None:
             _cap_workflow_payload(rebar.get_workflow_result(run_id, ticket_id))
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def render_workflow(workflow: str) -> str:
         """Render a workflow (a .rebar/workflows/<name> name or a file path) to a
         read-only Mermaid flowchart (TEXT; the host renders it to SVG, never
