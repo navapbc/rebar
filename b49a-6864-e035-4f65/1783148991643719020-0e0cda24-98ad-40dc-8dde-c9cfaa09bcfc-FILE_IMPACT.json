@@ -1,1 +1,0 @@
-{"author":"Claude","data":{"file_impact":[{"path":"server.json","reason":"fix env contract"},{"path":".github/workflows/test.yml","reason":"add drift gate step"},{"path":"scripts/","reason":"drift-guard script"}]},"env_id":"58e9f32e-f999-436d-9c1a-5d0eef5c9903","event_type":"FILE_IMPACT","timestamp":1783148991643719020,"uuid":"0e0cda24-98ad-40dc-8dde-c9cfaa09bcfc"}
