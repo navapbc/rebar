@@ -102,6 +102,11 @@ _ZERO_OID = "0" * 40  # create-only CAS old-value: "ref must not exist"
 _LOCAL_TIMEOUT_SECS = 5.0
 _REMOTE_TIMEOUT_SECS = 30.0
 
+# Default lease (seconds) a holder claims; C3 wires ``[reconciler] lock_lease_secs``
+# into the acquire call. The value is carried IN the blob, so a contender waits the
+# HOLDER's lease, not its own — the skew-proof relative-duration rule (C2 / ADR 0031).
+DEFAULT_LEASE_SECS = 120
+
 # Blob field contract (Design decision 3): the closed set + their runtime types.
 _REQUIRED_FIELDS = ("holder", "lease_secs", "heartbeat_ns", "fence")
 
@@ -135,6 +140,13 @@ class RefLockCorruptError(ValueError):
 
 class RefLockTimeoutError(RefLockError):
     """Raised when a git subprocess exceeds its timeout (fail-closed: treat as HELD)."""
+
+
+class LeaseLostError(RefLockError):
+    """Raised by :func:`renew` when the lease was lost or stolen (the renewal CAS was
+    rejected, or the ref no longer points at the held oid). The orchestrator (C3) turns
+    this into a clean pass-abort — :func:`renew` never silently retries into another
+    holder's lock."""
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +393,136 @@ def release(repo_root: Path, ref: str, *, oid: str, remote: str | None = None) -
         oid,
     )
     return False
+
+
+# ---------------------------------------------------------------------------
+# Lease self-healing: heartbeat (renew) + CAS-break-on-stale steal.
+#
+# The lease is relative-duration and skew-proof (DynamoDB-lock-client pattern):
+# expiry is NOT a cross-clone timestamp comparison. A contender records
+# (observed_oid, fence), waits one lease interval on ITS OWN clock, re-reads, and
+# treats the lock as dead only if neither the ref oid nor the fence advanced over
+# a full lease. `heartbeat_ns` is therefore diagnostic only; `fence` is the
+# progress witness the expiry rule reads.
+# ---------------------------------------------------------------------------
+
+
+def heartbeat_interval(lease_secs: float) -> int:
+    """Heartbeat cadence in seconds for a given lease: ``max(1, lease // 3)`` (integer floor)."""
+    return max(1, int(lease_secs // 3))
+
+
+def _cas_advance(
+    repo_root: Path, ref: str, *, new_oid: str, old_oid: str, remote: str | None
+) -> bool:
+    """Advance *ref* from *old_oid* to *new_oid* under CAS (local update-ref or remote push).
+
+    Returns True on success, False on a CAS mismatch (someone else moved the ref),
+    re-raising any non-mismatch failure — the shared single-shot contract. Used by
+    both :func:`renew` (heartbeat) and :func:`try_break_if_stale` (steal); acquire's
+    create-only CAS uses ``old_oid`` = 40 zeros.
+    """
+
+    def _do() -> None:
+        if remote is None:
+            _git(repo_root, ["update-ref", ref, new_oid, old_oid], timeout=_LOCAL_TIMEOUT_SECS)
+        else:
+            _push_cas(repo_root, ref, new_oid, old_oid, remote)
+
+    return _cas_once(_do, ref)
+
+
+def renew(repo_root: Path, ref: str, *, oid: str, remote: str | None = None) -> str:
+    """Owner-only heartbeat: CAS-bump ``heartbeat_ns`` + ``fence`` while we still hold *oid*.
+
+    Reads the current state; if the ref is absent or no longer points at *oid*
+    (lost or stolen) it raises :class:`LeaseLostError` **without** attempting a CAS.
+    Otherwise it CAS-updates the blob to ``{holder, lease_secs (unchanged),
+    heartbeat_ns=now, fence+1}`` against *oid*; a rejected CAS also raises
+    :class:`LeaseLostError`. It NEVER retries into another holder's lock. Returns
+    the new oid the caller threads into its next :func:`renew`.
+    """
+    state = read(repo_root, ref, remote=remote)  # fail-closed on corrupt/timeout
+    if state is None or state.oid != oid:
+        logger.warning(
+            "ref-lock renew: %s lease lost — expected oid %s, ref is %s",
+            ref,
+            oid,
+            "absent" if state is None else f"at {state.oid}",
+        )
+        raise LeaseLostError(f"lease on {ref} lost before renew (expected {oid})")
+    new_blob = _encode_blob(state.holder, state.lease_secs, time.time_ns(), state.fence + 1)
+    new_oid = _hash_object(repo_root, new_blob)
+    if not _cas_advance(repo_root, ref, new_oid=new_oid, old_oid=oid, remote=remote):
+        logger.warning("ref-lock renew: %s CAS rejected — lease lost/stolen (held %s)", ref, oid)
+        raise LeaseLostError(f"renew CAS on {ref} rejected — lease lost/stolen")
+    return new_oid
+
+
+def try_break_if_stale(
+    repo_root: Path,
+    ref: str,
+    *,
+    first: RefLockState,
+    holder: str,
+    remote: str | None = None,
+) -> str | None:
+    """CAS-break *ref* ONLY if the holder made no progress since the *first* observation.
+
+    This is the second half of a steal (the caller waits one lease between the
+    *first* observation and this call). Re-reads: if the ref is now free (``None``)
+    or its ``(oid, fence)`` changed, the holder released or heartbeated -> returns
+    ``None`` (live, never stolen). Otherwise it CAS-replaces the blob against
+    ``first.oid`` with a fresh blob owned by *holder* (``fence = first.fence + 1``);
+    a rejected CAS means another contender won the single-winner race -> ``None``.
+    Returns the new oid on a won steal. A corrupt/unreadable blob propagates
+    (fail-closed): a contender never steals on an unreadable lock.
+    """
+    second = read(repo_root, ref, remote=remote)  # fail-closed on corrupt/timeout
+    if second is None:
+        return None  # released meanwhile — that is acquire's job, not steal
+    if second.oid != first.oid or second.fence != first.fence:
+        logger.info(
+            "ref-lock steal: %s holder made progress (oid/fence advanced) — live, not stolen", ref
+        )
+        return None
+    new_blob = _encode_blob(holder, second.lease_secs, time.time_ns(), second.fence + 1)
+    new_oid = _hash_object(repo_root, new_blob)
+    if not _cas_advance(repo_root, ref, new_oid=new_oid, old_oid=second.oid, remote=remote):
+        logger.info(
+            "ref-lock steal: %s CAS lost to another contender (single-winner) — not stolen", ref
+        )
+        return None
+    logger.warning(
+        "ref-lock steal: %s expired lease broken by %r (fence %d -> %d)",
+        ref,
+        holder,
+        second.fence,
+        second.fence + 1,
+    )
+    return new_oid
+
+
+def steal(
+    repo_root: Path,
+    ref: str,
+    *,
+    holder: str,
+    remote: str | None = None,
+    sleep_fn=time.sleep,
+) -> str | None:
+    """Observe -> wait one (holder's) lease on our own clock -> :func:`try_break_if_stale`.
+
+    Returns the new oid on a won steal, else ``None`` (the ref was free — use
+    :func:`acquire` — or the holder is live, or we lost the single-winner race).
+    The one-lease wait is injected via *sleep_fn* so tests exercise the CAS/expiry
+    logic without real time.
+    """
+    first = read(repo_root, ref, remote=remote)
+    if first is None:
+        return None  # free — caller should acquire, not steal
+    sleep_fn(first.lease_secs)
+    return try_break_if_stale(repo_root, ref, first=first, holder=holder, remote=remote)
 
 
 # ---------------------------------------------------------------------------

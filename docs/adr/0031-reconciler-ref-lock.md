@@ -165,6 +165,35 @@ git update-ref -d refs/reconciler/lock     # local
 C2's relative-duration lease makes this rarely necessary — a crashed holder's lock becomes
 steal-able after one lease interval automatically.
 
+## Lease self-healing (C2 — extends this module)
+
+C1 leaves a crashed holder's ref wedged until manual break-glass. C2 adds a **relative-duration,
+skew-proof lease** (the DynamoDB-lock-client pattern) so a dead holder's lock becomes steal-able
+after one lease interval — with **no cross-clone clock comparison**.
+
+* **`renew(repo_root, ref, *, oid, remote=None) -> str`** — the heartbeat. Owner-only: it reads the
+  current state and, only if the ref still points at the held `oid`, CAS-updates the blob to
+  `{holder, lease_secs (unchanged), heartbeat_ns=now, fence+1}` against `oid`. If the ref is absent /
+  moved, or the CAS is rejected, it raises **`LeaseLostError`** — it never silently retries into
+  another holder's lock. Returns the new oid the caller threads into its next `renew`.
+* **Expiry rule (skew-proof).** A contender records `(oid, fence)`, waits **one lease measured on its
+  own clock**, and re-reads; the holder is considered dead **only if neither the ref oid nor `fence`
+  advanced** over that full lease. `heartbeat_ns` is never compared across clones — it is diagnostic;
+  `fence` is the progress witness. Because the wait is one *lease* and the holder heartbeats every
+  `heartbeat_interval = max(1, lease // 3)` seconds, a live holder advances `fence` ≥3× per lease and
+  is never mistaken for dead.
+* **CAS-break-on-stale (single-winner).** The steal is split so it is testable without real time:
+  `try_break_if_stale(…, first, holder)` re-reads and, if `(oid, fence)` is unchanged, CAS-replaces
+  the blob against `first.oid` (new holder, `fence = first.fence + 1`); a rejected CAS means another
+  contender won — it returns `None`, it does **not** also acquire. The convenience `steal(…, holder,
+  sleep_fn=time.sleep)` does observe → `sleep_fn(first.lease_secs)` → break. A **free** ref is never
+  "stolen" (that is `acquire`); a **live** holder is never stolen (regression-tested); a corrupt /
+  unreadable blob fails closed (never stolen).
+* **Lease config.** `DEFAULT_LEASE_SECS = 120`; the value is carried IN the blob so a contender waits
+  the *holder's* lease, not its own. C3 wires `[reconciler] lock_lease_secs` into the `acquire` call.
+* Structured logs fire on lease-steal (won), expiry-detection (no progress over one lease), and
+  renewal-failure (`LeaseLostError`).
+
 ## Consequences
 
 * The lock leaves the tickets tree entirely: no `merge=ours` entry needed for it, no tickets-branch
