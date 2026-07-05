@@ -44,20 +44,53 @@ def _pointer_path(repo_root=None) -> Path:
     return Path(root) / ".rebar" / _POINTER_NAME
 
 
-def _read_pointer(repo_root=None) -> str | None:
+def _resolve_session_fp() -> str | None:
+    """The current session fingerprint used to auto-rotate the current-log pointer.
+
+    Precedence: the Claude Code harness' stable per-session ``CLAUDE_CODE_SESSION_ID``,
+    then the rebar-owned ``REBAR_SESSION_ID``, then the ambient ``SESSION_ID``. We
+    DELIBERATELY stop at ``None`` — unlike ``transition_close._resolve_session`` we do
+    NOT fall back to git HEAD, because a HEAD-based fingerprint would change on every
+    commit within one session and spuriously rotate the log mid-session.
+    """
+    return (
+        os.environ.get("CLAUDE_CODE_SESSION_ID")
+        or os.environ.get("REBAR_SESSION_ID")
+        or os.environ.get("SESSION_ID")
+        or None
+    )
+
+
+def _read_pointer(repo_root=None) -> dict | None:
+    """Read the current-log pointer as ``{"id", "session"}``.
+
+    Tolerates the LEGACY bare-string format (a pointer written before session
+    fingerprinting): any file that is not JSON with an ``id`` key is treated as
+    ``{"id": <raw>, "session": None}`` so pre-existing pointers keep working (and,
+    with ``session`` None, never trigger rotation — degrade-safe).
+    """
     try:
-        val = _pointer_path(repo_root).read_text(encoding="utf-8").strip()
+        raw = _pointer_path(repo_root).read_text(encoding="utf-8").strip()
     except OSError:
         return None
-    return val or None
+    if not raw:
+        return None
+    try:
+        obj = json.loads(raw)
+        if isinstance(obj, dict) and obj.get("id"):
+            return {"id": obj["id"], "session": obj.get("session")}
+    except (ValueError, TypeError):
+        pass
+    return {"id": raw, "session": None}  # legacy bare-string pointer
 
 
-def _write_pointer(ticket_id: str, repo_root=None) -> None:
+def _write_pointer(ticket_id: str, session: str | None = None, repo_root=None) -> None:
     from rebar._store.fsutil import atomic_write
 
     p = _pointer_path(repo_root)
     p.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write(p, ticket_id, encoding="utf-8")  # atomic publish
+    payload = json.dumps({"id": ticket_id, "session": session}, ensure_ascii=False)
+    atomic_write(p, payload, encoding="utf-8")  # atomic publish
 
 
 def _is_live_session_log(ticket_id: str, tracker: str) -> bool:
@@ -79,9 +112,10 @@ def _is_live_session_log(ticket_id: str, tracker: str) -> bool:
     )
 
 
-def _resolve_current(tracker: str, repo_root=None) -> str | None:
+def _resolve_current(tracker: str, repo_root=None) -> dict | None:
+    """Return the pointer dict (``{"id", "session"}``) iff it names a live log."""
     ptr = _read_pointer(repo_root)
-    if ptr and _is_live_session_log(ptr, tracker):
+    if ptr and _is_live_session_log(ptr["id"], tracker):
         return ptr
     return None
 
@@ -102,7 +136,7 @@ def start(*, summary=None, relates_to=None, discovered_from=None, repo_root=None
     short-work-summary convention); absent, a default title is used.
     """
     res = create_core("session_log", summary or _DEFAULT_TITLE, description="", repo_root=repo_root)
-    _write_pointer(res["id"], repo_root)
+    _write_pointer(res["id"], _resolve_session_fp(), repo_root)
     _link_optional(
         res["id"], relates_to=relates_to, discovered_from=discovered_from, repo_root=repo_root
     )
@@ -117,6 +151,19 @@ def append(entry, *, summary=None, relates_to=None, discovered_from=None, repo_r
         raise CommandError("Error: session-log entry must be non-empty")
     tracker = tracker_dir(repo_root)
     current = _resolve_current(str(tracker), repo_root)
+    # Session-scoped auto-rotation (bug kooky-graft-cap): if the current log was
+    # stamped with a session fingerprint that differs from THIS session's, treat it
+    # as absent so a fresh log is started below. Guarded on both sides being non-None
+    # so a legacy (session=None) pointer or an absent session id never rotates —
+    # degrade-safe and backward compatible.
+    now = _resolve_session_fp()
+    if (
+        current is not None
+        and current.get("session") is not None
+        and now is not None
+        and current["session"] != now
+    ):
+        current = None
     created = False
     alias = None
     if current is None:
@@ -126,15 +173,16 @@ def append(entry, *, summary=None, relates_to=None, discovered_from=None, repo_r
             discovered_from=discovered_from,
             repo_root=repo_root,
         )
-        current, alias, created = res["id"], res["alias"], True
+        current_id, alias, created = res["id"], res["alias"], True
     else:
+        current_id = current["id"]
         _link_optional(
-            current, relates_to=relates_to, discovered_from=discovered_from, repo_root=repo_root
+            current_id, relates_to=relates_to, discovered_from=discovered_from, repo_root=repo_root
         )
-    resolved = require_id(current, tracker)
+    resolved = require_id(current_id, tracker)
     require_not_ghost(resolved, tracker)
     append_event(resolved, "COMMENT", {"body": entry}, tracker, repo_root=repo_root)
-    return {"id": current, "alias": alias, "created": created}
+    return {"id": current_id, "alias": alias, "created": created}
 
 
 # ───────────────────────────────── CLI ───────────────────────────────────────

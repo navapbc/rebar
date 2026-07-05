@@ -177,6 +177,16 @@ that same log. Retrieve recent logs with `rebar.recent_session_logs(limit=5)` /
 `rebar session-logs [--limit=<n>]` / the MCP `recent_session_logs` tool (newest
 first, default 5).
 
+**Auto-rotation per session (no manual `start` needed).** The pointer stores a
+session fingerprint alongside the log id, taken from `CLAUDE_CODE_SESSION_ID` (then
+`REBAR_SESSION_ID` / `SESSION_ID`). When a NEW session's first `append` sees a
+pointer stamped with a *different* fingerprint, it auto-rotates to a fresh log — so
+distinct agent sessions get distinct logs without anyone running `session-log start`.
+It degrades safely: if no session id is set (fingerprint `None`), or the pointer is a
+legacy bare-id (no fingerprint), it NEVER rotates — a single continuous session keeps
+appending to one log. The fingerprint deliberately does NOT fall back to git HEAD (a
+commit within one session must not rotate the log).
+
 **LLM agent operations (optional, gated):** `review_ticket(ticket_id, reviewer_id,
 graph)` runs a tool-using LLM agent that reviews a ticket (or its graph) and
 returns a `review_result` (`{findings[], …}`). `verify_completion(ticket_id,

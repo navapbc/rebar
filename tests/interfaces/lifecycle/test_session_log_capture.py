@@ -76,6 +76,42 @@ def test_empty_entry_refused(rebar_repo: Path) -> None:
         rebar.append_session_log("", repo_root=str(rebar_repo))
 
 
+# ── session-scoped auto-rotation (bug kooky-graft-cap) ───────────────────────────
+def test_distinct_sessions_produce_distinct_logs(rebar_repo: Path, monkeypatch) -> None:
+    """A new session's FIRST append auto-rotates to a fresh log — no manual start."""
+    r = str(rebar_repo)
+    monkeypatch.delenv("REBAR_SESSION_ID", raising=False)
+    monkeypatch.delenv("SESSION_ID", raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-A")
+    a = rebar.append_session_log("from session A", repo_root=r)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-B")
+    b = rebar.append_session_log("from session B", repo_root=r)
+    assert a["id"] != b["id"], "a distinct session must auto-rotate to a fresh log"
+    assert b["created"] is True
+
+
+def test_same_session_appends_to_one_log(rebar_repo: Path, monkeypatch) -> None:
+    r = str(rebar_repo)
+    monkeypatch.delenv("REBAR_SESSION_ID", raising=False)
+    monkeypatch.delenv("SESSION_ID", raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-fixed")
+    a = rebar.append_session_log("e1", repo_root=r)
+    b = rebar.append_session_log("e2", repo_root=r)
+    assert a["id"] == b["id"], "the same session must keep appending to one log"
+    assert b["created"] is False
+
+
+def test_no_session_id_degrades_to_single_log(rebar_repo: Path, monkeypatch) -> None:
+    r = str(rebar_repo)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    monkeypatch.delenv("REBAR_SESSION_ID", raising=False)
+    monkeypatch.delenv("SESSION_ID", raising=False)
+    a = rebar.append_session_log("e1", repo_root=r)
+    b = rebar.append_session_log("e2", repo_root=r)
+    assert a["id"] == b["id"], "no session id must not trigger spurious rotation"
+    assert b["created"] is False
+
+
 # ── linking rules (relates_to allowed, blocks refused) ──────────────────────────
 def test_relates_to_allowed_blocking_refused(rebar_repo: Path) -> None:
     r = str(rebar_repo)
