@@ -349,11 +349,14 @@ def run(
 ) -> dict[str, Any]:
     """Execute a workflow and return its result as a dict (WS-C4 sync entrypoint).
 
-    Persists run-state to ``ticket_id`` (durable; resumable) when given, and records
-    the run_id→ticket index so status/result resolve by run_id. Sweeps orphaned
-    snapshots first (WS-C3 backstop). Synchronous — the MCP layer wraps this for its
-    async, return-run_id-immediately contract. ``review_runner`` injects a specific
-    rebar.llm Runner into agent steps (the offline/parallel-diff seam).
+    Persists step effects to ``ticket_id``'s event log with idempotency markers when
+    given (a durable persistence substrate — NOT automatic crash-resumption: nothing
+    re-drives an interrupted run; a re-invocation with the same run_id resumes it by
+    skipping already-completed steps), and records the run_id→ticket index so
+    status/result resolve by run_id. Sweeps orphaned snapshots first (WS-C3 backstop).
+    Synchronous — the MCP layer wraps this for its async, return-run_id-immediately
+    contract. ``review_runner`` injects a specific rebar.llm Runner into agent steps
+    (the offline/parallel-diff seam).
 
     If the workflow has LLM/agent steps, the run executes inside the repo-snapshot gate
     (epic raze-vet-ditch): ``ref``/``source_mode`` select a pinned snapshot (attested,
