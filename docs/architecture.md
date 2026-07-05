@@ -68,7 +68,10 @@ over one git-backed store.
   - **Reconciler** (`rebar_reconciler/`, shipped as `_engine/` package data) —
     level-triggered, bidirectional Jira sync, launched as a subprocess
     (`python -m rebar_reconciler`); the one component with a grandfathered
-    cross-client advisory lock (`.reconciler-pass-lock`, single-writer-by-design).
+    cross-client advisory lock — a `[reconciler] lock_backend`-selected pass-lock,
+    single-writer-by-design: the legacy tickets-branch `.reconciler-pass-lock`
+    (`file`) or the self-healing `refs/reconciler/*` bare-ref CAS lock (`ref`; epic
+    dust-troth-naval / ADR 0031).
   - **Import/export** (`rebar._io`, code at `src/rebar/_io/`) — NDJSON
     export/import of ticket state backing `rebar.export_tickets`/`import_tickets`,
     the CLI `export`/`import` subcommands, and the MCP equivalents (see

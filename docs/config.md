@@ -177,8 +177,14 @@ standard names, which deliberately differ from the auto-derived
 ```toml
 [tool.rebar.reconciler]   # advanced; sensible defaults, rarely needed
 jira_cli_timeout       = 0     # acli call timeout (s); 0 ⇒ the 120s default. env REBAR_JIRA_CLI_TIMEOUT (alias REBAR_ACLI_TIMEOUT)
-lock_max_retries       = 5     # advisory-lock outer retries.    env REBAR_RECONCILER_LOCK_MAX_RETRIES (alias REBAR_RECONCILER_LOCK_RETRY_BUDGET)
+lock_backend           = ref   # pass-lock/phase-gate backend: "ref" (default; self-healing refs/reconciler/* CAS lock).
+                               # "file" (the legacy tickets-branch lock files) was removed in the dust-troth-naval epic
+                               # and is deprecated-and-ignored — honoured as "ref" with a one-time warning. See ADR 0031.
+lock_lease_secs        = 120   # ref-lock lease (s); the heartbeat renews at max(1, lease // 3).
 deletion_probe_limit   = 20    # GET probes to confirm a deletion. env REBAR_RECONCILER_DELETION_PROBE_LIMIT (alias RECONCILER_ABSENT_GET_BUDGET)
+# Removed in the dust-troth-naval epic: `lock_max_retries` (+ env REBAR_RECONCILER_LOCK_MAX_RETRIES /
+# REBAR_RECONCILER_LOCK_RETRY_BUDGET) — it tuned the b859 outer-retry loop, now superseded by the
+# self-healing ref lock. A still-present key is ignored with a one-time deprecation warning (not a load error).
 id_guard_bypass_unsafe = false # TEMPORARY bypass of the rebar-id write guard — do NOT leave on; fail-CLOSED.
                                # env REBAR_UNSAFE_ID_GUARD_BYPASS; deprecated REBAR_ID_GUARD_MODE env + legacy flat
                                # `rebar_id_guard_mode` key (value-flip: warn→true/bypass, raise→false/guard)
@@ -315,7 +321,6 @@ deprecated aliases (with a warning): `REBAR_PUSH`→`REBAR_SYNC_PUSH`,
 `REBAR_COMPACT_THRESHOLD`, `SCRATCH_BASE_DIR`→`REBAR_SCRATCH_BASE_DIR`,
 `REBAR_MCP_ALLOW_RECONCILE_LIVE`→`REBAR_MCP_ALLOW_JIRA_SYNC`, `TICKETS_TRACKER_DIR`→
 `REBAR_TRACKER_DIR`, `REBAR_ACLI_TIMEOUT`→`REBAR_JIRA_CLI_TIMEOUT`,
-`REBAR_RECONCILER_LOCK_RETRY_BUDGET`→`REBAR_RECONCILER_LOCK_MAX_RETRIES`,
 `RECONCILER_ABSENT_GET_BUDGET`→`REBAR_RECONCILER_DELETION_PROBE_LIMIT`,
 `REBAR_LLM_MAX_ITERS`→`REBAR_LLM_MAX_STEPS`, `REBAR_ID_GUARD_MODE`→
 `REBAR_UNSAFE_ID_GUARD_BYPASS` (raise→false/warn→true). Removed (no alias):

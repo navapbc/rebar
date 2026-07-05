@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler import _advisory_lock, acli_subprocess, rebar_id_audit
+from rebar_reconciler import acli_subprocess, rebar_id_audit
 
 pytestmark = pytest.mark.unit
 
@@ -46,21 +46,9 @@ def test_acli_timeout_canonical_beats_legacy(monkeypatch: pytest.MonkeyPatch) ->
     assert acli_subprocess._acli_call_timeout() == 45
 
 
-# ── LOCK_RETRY_BUDGET -> LOCK_MAX_RETRIES (fixes the dup-name no-op alias) ─────
-def test_lock_retries_canonical(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("REBAR_RECONCILER_LOCK_MAX_RETRIES", "7")
-    assert _advisory_lock._resolve_retry_budget() == 7
-
-
-def test_lock_retries_legacy_alias(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("REBAR_RECONCILER_LOCK_RETRY_BUDGET", "3")
-    assert _advisory_lock._resolve_retry_budget() == 3
-
-
-def test_lock_retries_canonical_beats_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("REBAR_RECONCILER_LOCK_MAX_RETRIES", "7")
-    monkeypatch.setenv("REBAR_RECONCILER_LOCK_RETRY_BUDGET", "3")
-    assert _advisory_lock._resolve_retry_budget() == 7
+# (LOCK_RETRY_BUDGET / LOCK_MAX_RETRIES env aliases + the lock_max_retries key were
+#  removed in epic dust-troth-naval / C4 — the b859 retry loop they tuned is
+#  superseded by the self-healing ref lock. Their tests are retired with them.)
 
 
 # ── REBAR_ID_GUARD_MODE -> REBAR_UNSAFE_ID_GUARD_BYPASS (value-flip) ───────────

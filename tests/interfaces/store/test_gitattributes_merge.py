@@ -48,7 +48,9 @@ def test_init_commits_gitattributes_and_configures_driver(fresh_repo: Path) -> N
     show = _git(tracker, "show", "tickets:.gitattributes")
     assert show.returncode == 0, "init must commit .gitattributes on the tickets branch"
     assert ".bridge_state/* merge=ours" in show.stdout
-    assert ".reconciler-* merge=ours" in show.stdout
+    # The .reconciler-* merge=ours carve-out was retired in epic dust-troth-naval / C4
+    # (the lock moved off the tickets tree onto refs/reconciler/*).
+    assert ".reconciler-*" not in show.stdout
     attr_lines = [ln for ln in show.stdout.splitlines() if ln.strip() and not ln.startswith("#")]
     assert all("merge=union" not in ln for ln in attr_lines), (
         "union would corrupt JSON — must NOT be used"
@@ -97,3 +99,25 @@ def test_bindings_json_race_converges_keeping_ours(fresh_repo: Path) -> None:
         f"bindings.json race wedged the merge:\n{merge.stdout}{merge.stderr}"
     )
     assert (bridge / "bindings.json").read_text() == '{"v":3}\n', "merge=ours must keep OUR copy"
+
+
+# ── C4 migration: strip the retired .reconciler-* line from existing trackers ──
+def test_gitattributes_migration_strips_retired_reconciler_line(fresh_repo: Path) -> None:
+    """A tracker initialized before the ref-lock still carries `.reconciler-* merge=ours`.
+    Re-init runs the update-migration arm which strips it; idempotent."""
+    rebar.init_repo(repo_root=str(fresh_repo))
+    tracker = _tracker(fresh_repo)
+
+    # Simulate a pre-C4 tracker by re-adding the retired line to committed .gitattributes.
+    content = _git(tracker, "show", "tickets:.gitattributes").stdout + ".reconciler-* merge=ours\n"
+    (tracker / ".gitattributes").write_text(content)
+    _git(tracker, "add", ".gitattributes")
+    _git(tracker, "commit", "-q", "--no-verify", "-m", "re-add retired line")
+    assert ".reconciler-*" in _git(tracker, "show", "tickets:.gitattributes").stdout
+
+    # Re-init twice → migration strips the line and is idempotent.
+    rebar.init_repo(repo_root=str(fresh_repo))
+    rebar.init_repo(repo_root=str(fresh_repo))
+    after = _git(tracker, "show", "tickets:.gitattributes").stdout
+    assert ".reconciler-*" not in after, "migration must strip the retired .reconciler-* line"
+    assert ".bridge_state/* merge=ours" in after, "the .bridge_state carve-out must remain"

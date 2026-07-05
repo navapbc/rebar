@@ -445,11 +445,9 @@ _LEGACY_ENV_ALIASES: dict[str, tuple[str, str, str]] = {
     "REBAR_MCP_ALLOW_RECONCILE_LIVE": ("mcp", "allow_jira_sync", "REBAR_MCP_ALLOW_JIRA_SYNC"),
     # reconciler.* (EV-3c renames) — canonical names are the ergonomic ones above.
     "REBAR_ACLI_TIMEOUT": ("reconciler", "jira_cli_timeout", "REBAR_JIRA_CLI_TIMEOUT"),
-    "REBAR_RECONCILER_LOCK_RETRY_BUDGET": (
-        "reconciler",
-        "lock_max_retries",
-        "REBAR_RECONCILER_LOCK_MAX_RETRIES",
-    ),
+    # (reconciler.lock_max_retries + its env aliases REBAR_RECONCILER_LOCK_MAX_RETRIES /
+    #  REBAR_RECONCILER_LOCK_RETRY_BUDGET were removed in epic dust-troth-naval / C4 —
+    #  the b859 retry loop they tuned is superseded by the self-healing ref lock.)
     "RECONCILER_ABSENT_GET_BUDGET": (
         "reconciler",
         "deletion_probe_limit",
