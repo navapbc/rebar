@@ -62,6 +62,51 @@ def _rebase_retry(repo_root: Path, write_fn, **kwargs):
     return concurrency.rebase_retry(repo_root, write_fn, **kwargs)
 
 
+def _load_ref_lock():
+    """Load the C1/C2 ref-lock primitive (the ``lock_backend=ref`` path)."""
+    return lazy_load("rebar_reconciler__ref_lock_advisory", "_ref_lock.py")
+
+
+# Backend selection (epic dust-troth-naval): the pass-lock/phase-gate read
+# ``[reconciler] lock_backend`` — "file" (default) keeps today's tickets-branch
+# lock files; "ref" uses the self-healing refs/reconciler/* CAS lock. Config reads
+# fail SAFE to the file backend so a config error never silently drops the lock.
+def _lock_backend() -> str:
+    cfg = _reconciler_config()
+    return getattr(cfg, "lock_backend", "file") if cfg is not None else "file"
+
+
+def _reconciler_config():
+    from rebar.config import ConfigError, load_config
+
+    try:
+        return load_config().reconciler
+    except ConfigError:
+        return None
+
+
+def _lock_lease_secs() -> int:
+    cfg = _reconciler_config()
+    return int(getattr(cfg, "lock_lease_secs", 120)) if cfg is not None else 120
+
+
+def _lock_remote(repo_root: Path) -> str | None:
+    """The sync remote the ref lock is authoritative on, or None if it is not a
+    configured remote of *repo_root* (single-clone / test → pure-local CAS)."""
+    from rebar.config import ConfigError, load_config
+
+    try:
+        remote = load_config().sync.remote or "origin"
+    except ConfigError:
+        remote = "origin"
+    check = subprocess.run(
+        ["git", "-C", str(repo_root), "remote", "get-url", remote],
+        capture_output=True,
+        check=False,
+    )
+    return remote if check.returncode == 0 else None
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -168,8 +213,16 @@ class ReconcileLockError(RuntimeError):
 
     Fail-CLOSED means: when we cannot determine lock state confidently (e.g.
     missing tickets branch, unrecognised git error), we block the orchestrator
-    rather than silently disabling concurrency protection.
+    rather than silently disabling concurrency protection. Under the ref backend
+    this also signals "could not acquire the pass lock" (someone holds it).
     """
+
+
+class ReconcileLockLost(RuntimeError):
+    """Raised mid-pass when the ref-backend heartbeat detects the lease was lost or
+    stolen. Distinct from :class:`ReconcileLockError` ("could not get the lock"):
+    this means "held it, then lost it" — the pass aborts and the ``finally`` release
+    no-ops (the ref already moved), so a re-run is safe/idempotent."""
 
 
 # ---------------------------------------------------------------------------
@@ -240,18 +293,33 @@ def check_pass_lock(repo_root: Path) -> bool:
     return contents is not None
 
 
-def acquire_pass_lock(pass_id: str, repo_root: Path) -> None:
-    """Write .reconciler-pass-lock to the tickets branch via rebase_retry.
+def acquire_pass_lock(pass_id: str, repo_root: Path) -> str | None:
+    """Acquire the reconciler pass lock. Returns the ref oid under the ``ref``
+    backend (thread it to :func:`renew_pass_lock` / :func:`release_pass_lock`), or
+    ``None`` under the ``file`` backend.
 
-    The lock file contains *pass_id* + timestamp_ns on separate lines so that
-    release_pass_lock can verify ownership before deletion.
-
-    Uses rebase_retry from _concurrency.py (plan-review F3 alignment: existing
-    serialization-safe write path; no new raw git commit path introduced).
+    File backend: write .reconciler-pass-lock to the tickets branch via
+    rebase_retry. Ref backend: create-only CAS on ``refs/reconciler/lock``.
 
     Raises:
-        ReconcileLockError — if rebase_retry fails (drift exhaustion or error).
+        ReconcileLockError — if the lock cannot be acquired (already held, drift
+        exhaustion, or fail-CLOSED git error).
     """
+    if _lock_backend() == "ref":
+        ref_lock = _load_ref_lock()
+        try:
+            return ref_lock.acquire(
+                repo_root,
+                ref_lock.LOCK_REF,
+                holder=pass_id,
+                lease_secs=_lock_lease_secs(),
+                remote=_lock_remote(repo_root),
+            )
+        except ref_lock.RefLockHeldError as exc:
+            raise ReconcileLockError(
+                f"pass lock {ref_lock.LOCK_REF} already held (pass_id={pass_id!r}): {exc}"
+            ) from exc
+
     timestamp_ns = time.time_ns()
     lock_contents = f"{pass_id}\n{timestamp_ns}\n"
 
@@ -270,7 +338,7 @@ def acquire_pass_lock(pass_id: str, repo_root: Path) -> None:
     for attempt in range(1, budget + 1):
         result = _rebase_retry(repo_root, _write)
         if result.ok:
-            return
+            return None  # file backend has no oid to thread
         last_result = result
         kind = result.event.kind if result.event else "unknown"
         # Fail-fast for non-drift errors; only retry reject_and_reschedule.
@@ -299,19 +367,35 @@ def acquire_pass_lock(pass_id: str, repo_root: Path) -> None:
     )
 
 
-def release_pass_lock(pass_id: str, repo_root: Path) -> None:
-    """Delete .reconciler-pass-lock from the tickets branch via rebase_retry.
+def renew_pass_lock(pass_id: str, repo_root: Path, oid: str) -> str:
+    """Ref-backend heartbeat: renew the pass lease, returning the new oid.
 
-    Ownership check (G5): reads the existing lock contents and verifies the
-    stored pass_id matches *pass_id* before deletion. On mismatch, logs a
-    warning and returns without raising (defensive — never disrupt the caller,
-    never unlock another process's lock).
-
-    Idempotent: if the lock file is absent, returns silently.
-
-    Raises:
-        ReconcileLockError — if the tickets branch is missing.
+    Raises :class:`_ref_lock.LeaseLostError` if the lease was lost/stolen. Only
+    meaningful under the ``ref`` backend; the file backend has no heartbeat.
     """
+    ref_lock = _load_ref_lock()
+    return ref_lock.renew(repo_root, ref_lock.LOCK_REF, oid=oid, remote=_lock_remote(repo_root))
+
+
+def release_pass_lock(pass_id: str, repo_root: Path, oid: str | None = None) -> None:
+    """Release the reconciler pass lock (idempotent).
+
+    Ref backend: observed-oid CAS delete of ``refs/reconciler/lock`` against *oid*
+    (the latest oid from acquire/renew); a stale/absent ref is a benign no-op. File
+    backend: delete .reconciler-pass-lock via rebase_retry after an ownership check
+    (stored pass_id must match; mismatch logs + returns). Raises ReconcileLockError
+    (file backend) if the tickets branch is missing.
+    """
+    if _lock_backend() == "ref":
+        ref_lock = _load_ref_lock()
+        ref_lock.release(
+            repo_root,
+            ref_lock.LOCK_REF,
+            oid=oid or ("0" * 40),
+            remote=_lock_remote(repo_root),
+        )
+        return
+
     # Ownership check before attempting deletion
     try:
         contents = _git_show_tickets_file(repo_root, _LOCK_FILE)
@@ -369,8 +453,15 @@ def check_phase_gate(target_mode, repo_root: Path) -> bool:
         BOOTSTRAP_STRICT (rank 1)   → not blocked (1 == 1) → False.
 
     The Mode enum is imported from mode.py at call time so this module does
-    not hard-code ordering.
+    not hard-code ordering. Under the ``ref`` backend the gated mode is read from
+    the ``refs/reconciler/gate`` blob instead of the tickets-branch file; the
+    mode-ordering semantics are identical.
     """
+    if _lock_backend() == "ref":
+        ref_lock = _load_ref_lock()
+        gated_mode_str = ref_lock.read_gate(repo_root, remote=_lock_remote(repo_root))
+        return _mode_blocks(target_mode, gated_mode_str)
+
     # Fail-CLOSED on missing tickets branch (alignment with check_pass_lock):
     # if we cannot determine the gate state, refuse to proceed rather than
     # silently disabling phase-gate protection. Bug from coderabbit review —
@@ -378,12 +469,16 @@ def check_phase_gate(target_mode, repo_root: Path) -> bool:
     # raised; the asymmetry let phase-gate violations slip past when the
     # tickets branch was absent.
     contents = _git_show_tickets_file(repo_root, _GATE_FILE)
+    gated_mode_str = contents.strip() if contents is not None else None
+    return _mode_blocks(target_mode, gated_mode_str)
 
-    if contents is None:
-        # Gate file absent — no block
-        return False
 
-    gated_mode_str = contents.strip()
+def _mode_blocks(target_mode, gated_mode_str: str | None) -> bool:
+    """Return True iff *target_mode* is blocked by *gated_mode_str* (None = open).
+
+    Shared by both gate backends. An unrecognised mode string is treated as no
+    gate (matching the historical file-gate behaviour).
+    """
     if not gated_mode_str:
         return False
 
@@ -398,7 +493,7 @@ def check_phase_gate(target_mode, repo_root: Path) -> bool:
         gated_mode = mode_mod.Mode.from_str(gated_mode_str)
     except ValueError:
         logger.warning(
-            "check_phase_gate: unrecognised mode %r in gate file; treating as no gate",
+            "check_phase_gate: unrecognised mode %r in gate; treating as no gate",
             gated_mode_str,
         )
         return False

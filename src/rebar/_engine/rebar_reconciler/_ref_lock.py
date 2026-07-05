@@ -296,6 +296,36 @@ def _fetch_ref(repo_root: Path, ref: str, remote: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _ref_oid(repo_root: Path, ref: str, *, remote: str | None = None) -> str | None:
+    """Return the OID *ref* points at (force-syncing from *remote* first), or None if absent."""
+    if remote is not None:
+        _fetch_ref(repo_root, ref, remote)
+    result = _git(
+        repo_root,
+        ["rev-parse", "--verify", "--quiet", ref],
+        timeout=_LOCAL_TIMEOUT_SECS,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None  # ref absent
+    oid = result.stdout.strip()
+    return oid or None
+
+
+def _read_blob_bytes(repo_root: Path, ref: str, oid: str) -> bytes:
+    """Read the blob payload *ref*/*oid* points at (a blob, or a commit's ``<name>.json``)."""
+    obj_type = _git(repo_root, ["cat-file", "-t", oid], timeout=_LOCAL_TIMEOUT_SECS).stdout.strip()
+    if obj_type == "blob":
+        return _git_bytes(repo_root, ["cat-file", "blob", oid], timeout=_LOCAL_TIMEOUT_SECS)
+    if obj_type == "commit":
+        # AC0 ref->tiny-commit fallback: the blob lives at <ref>:<name>.json.
+        name = "gate.json" if ref == GATE_REF else "lock.json"
+        return _git_bytes(
+            repo_root, ["cat-file", "blob", f"{ref}:{name}"], timeout=_LOCAL_TIMEOUT_SECS
+        )
+    raise RefLockCorruptError(f"ref {ref} points at unexpected object type {obj_type!r}")
+
+
 def read(repo_root: Path, ref: str, *, remote: str | None = None) -> RefLockState | None:
     """Return the current :class:`RefLockState`, or ``None`` if the lock is free.
 
@@ -303,32 +333,10 @@ def read(repo_root: Path, ref: str, *, remote: str | None = None) -> RefLockStat
     authoritative). ``None`` means the ref is absent (free); a present-but-corrupt
     blob raises :class:`RefLockCorruptError` (callers treat that as HELD).
     """
-    if remote is not None:
-        _fetch_ref(repo_root, ref, remote)
-
-    oid_result = _git(
-        repo_root,
-        ["rev-parse", "--verify", "--quiet", ref],
-        timeout=_LOCAL_TIMEOUT_SECS,
-        check=False,
-    )
-    if oid_result.returncode != 0:
-        return None  # ref absent -> free
-    oid = oid_result.stdout.strip()
-    if not oid:
+    oid = _ref_oid(repo_root, ref, remote=remote)
+    if oid is None:
         return None
-
-    obj_type = _git(repo_root, ["cat-file", "-t", oid], timeout=_LOCAL_TIMEOUT_SECS).stdout.strip()
-    if obj_type == "blob":
-        raw = _git_bytes(repo_root, ["cat-file", "blob", oid], timeout=_LOCAL_TIMEOUT_SECS)
-    elif obj_type == "commit":
-        # AC0 ref->tiny-commit fallback: the blob lives at <ref>:lock.json.
-        raw = _git_bytes(
-            repo_root, ["cat-file", "blob", f"{ref}:lock.json"], timeout=_LOCAL_TIMEOUT_SECS
-        )
-    else:
-        raise RefLockCorruptError(f"ref {ref} points at unexpected object type {obj_type!r}")
-    return _decode_blob(raw, oid)
+    return _decode_blob(_read_blob_bytes(repo_root, ref, oid), oid)
 
 
 # ---------------------------------------------------------------------------
@@ -523,6 +531,73 @@ def steal(
         return None  # free — caller should acquire, not steal
     sleep_fn(first.lease_secs)
     return try_break_if_stale(repo_root, ref, first=first, holder=holder, remote=remote)
+
+
+# ---------------------------------------------------------------------------
+# Phase gate (C3 consumer): a persistent throttle marker, NOT a lease-held lock.
+#
+# The gate uses the SAME ref->blob CAS mechanism but its own tiny schema
+# ``{"gated_mode": "<mode>"}`` (no holder/lease/fence — it is not leased or
+# stolen). set/clear are CAS-managed; a corrupt/unreadable gate blob fails closed
+# (treated as gated) consistent with the lock read contract.
+# ---------------------------------------------------------------------------
+
+_GATE_FIELD = "gated_mode"
+
+
+def _encode_gate(mode: str) -> bytes:
+    return (json.dumps({_GATE_FIELD: mode}, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _decode_gate(raw: bytes) -> str:
+    if not raw:
+        raise RefLockCorruptError("empty gate blob", raw=raw)
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RefLockCorruptError(f"corrupt gate blob: {exc}", raw=raw) from exc
+    if (
+        not isinstance(doc, dict)
+        or not isinstance(doc.get(_GATE_FIELD), str)
+        or not doc[_GATE_FIELD]
+    ):
+        raise RefLockCorruptError(f"gate blob missing a non-empty {_GATE_FIELD!r}", raw=raw)
+    return doc[_GATE_FIELD]
+
+
+def read_gate(repo_root: Path, ref: str = GATE_REF, *, remote: str | None = None) -> str | None:
+    """Return the gated mode string, or ``None`` if the gate ref is absent (open).
+
+    A present-but-corrupt gate blob raises :class:`RefLockCorruptError` (callers
+    treat that as gated — fail-closed).
+    """
+    oid = _ref_oid(repo_root, ref, remote=remote)
+    if oid is None:
+        return None
+    return _decode_gate(_read_blob_bytes(repo_root, ref, oid))
+
+
+def set_gate(repo_root: Path, mode: str, ref: str = GATE_REF, *, remote: str | None = None) -> str:
+    """Create-or-CAS-update the gate to *mode*; returns the new blob oid.
+
+    A rejected CAS (a concurrent gate change) raises :class:`RefLockError` — gate
+    transitions are rare and a conflict is worth surfacing, not silently retrying.
+    """
+    old = _ref_oid(repo_root, ref, remote=remote)
+    new_oid = _hash_object(repo_root, _encode_gate(mode))
+    old_oid = old if old is not None else _ZERO_OID
+    if not _cas_advance(repo_root, ref, new_oid=new_oid, old_oid=old_oid, remote=remote):
+        raise RefLockError(f"gate CAS on {ref} rejected — concurrent gate update")
+    logger.info("ref-lock gate: %s set to mode %r", ref, mode)
+    return new_oid
+
+
+def clear_gate(repo_root: Path, ref: str = GATE_REF, *, remote: str | None = None) -> bool:
+    """Delete the gate ref (observed-oid CAS). Idempotent: ``False`` if already absent."""
+    oid = _ref_oid(repo_root, ref, remote=remote)
+    if oid is None:
+        return False
+    return release(repo_root, ref, oid=oid, remote=remote)
 
 
 # ---------------------------------------------------------------------------

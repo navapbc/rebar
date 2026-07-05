@@ -332,6 +332,13 @@ class McpConfig:
 class ReconcilerConfig:
     jira_cli_timeout: int = 0
     lock_max_retries: int = 5
+    # Pass-lock/phase-gate backend (epic dust-troth-naval): "file" = today's
+    # tickets-branch lock files (default; rollback lever); "ref" = the self-healing
+    # refs/reconciler/* CAS lock (C1/C2). C4 flips the default to "ref".
+    lock_backend: str = "file"
+    # Lease (seconds) the ref-backend pass-lock holds; the heartbeat renews at
+    # max(1, lease // 3). Consumed by the ref backend (C2/C3); ignored under "file".
+    lock_lease_secs: int = 120
     deletion_probe_limit: int = 20
     id_guard_bypass_unsafe: bool = False
     # Convergence circuit breaker (epic 3006-e198): refuse a pass whose ACTING
@@ -443,6 +450,8 @@ _SECTIONS: dict[str, dict] = {
     "reconciler": {
         "jira_cli_timeout": lambda v, k: _as_int(v, k, minimum=0),
         "lock_max_retries": lambda v, k: _as_int(v, k, minimum=0),
+        "lock_backend": lambda v, k: _as_choice(v, k, {"file", "ref"}),
+        "lock_lease_secs": lambda v, k: _as_int(v, k, minimum=1),
         "deletion_probe_limit": lambda v, k: _as_int(v, k, minimum=1),
         "id_guard_bypass_unsafe": lambda v, k: _as_bool(v, k),
         "max_acting_fraction": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),

@@ -380,6 +380,7 @@ def apply(
     mode=None,
     binding_store=None,
     persist: bool = True,
+    abort_check=None,
 ):
     """Polymorphic dispatch entry point.
 
@@ -454,6 +455,11 @@ def apply(
     for mut in inbound_typed:
         if not persist:
             break
+        # Per-mutation lost-lease checkpoint (epic dust-troth-naval): abort_check
+        # raises (ReconcileLockLost) if the ref-lock heartbeat lost the lease, so a
+        # displaced pass stops writing immediately. Defaults to None (no-op).
+        if abort_check is not None:
+            abort_check()
         if suppression.is_suppressed(getattr(mut, "target", "")):
             continue
         result = _apply_typed(mut, client=client, repo_root=repo_root, binding_store=binding_store)
@@ -491,6 +497,7 @@ def apply(
                 pass_id,
                 repo_root=repo_root,
                 binding_store=binding_store,
+                abort_check=abort_check,
             )
     finally:
         if pending_bug_tickets and not is_dry_run:
@@ -538,6 +545,7 @@ def _apply_batch(
     pass_id: str,
     repo_root: Path | None = None,
     binding_store=None,
+    abort_check=None,
 ) -> Path:
     """Legacy batch dispatch: write a flat-JSON manifest for a list of dict mutations.
 
@@ -646,6 +654,10 @@ def _apply_batch(
 
     try:
         for mutation in mutations:
+            # Per-mutation lost-lease checkpoint (epic dust-troth-naval): raises if
+            # the ref-lock heartbeat lost the lease. Defaults to None (no-op).
+            if abort_check is not None:
+                abort_check()
             head_pin = _recheck_drift(concurrency, repo_root, head_pin)
             _apply_one(mutation, ctx, mutations_with_outcomes)
     except HeadDriftError:

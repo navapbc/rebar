@@ -22,6 +22,7 @@ import importlib
 import importlib.util
 import os
 import sys
+import threading
 from pathlib import Path
 
 # Defensive rebar bootstrap (Tier E E5b): the reconciler now imports the
@@ -163,11 +164,70 @@ def _run_reconcile_check(repo_root: Path) -> int:
         return 1
 
 
+class _Heartbeat:
+    """Daemon-thread lease heartbeat for the ref-lock backend (epic dust-troth-naval).
+
+    Renews the pass lease every ``interval`` seconds via
+    ``advisory.renew_pass_lock``. On a lost/stolen lease it sets ``lock_lost`` and
+    stops (a daemon thread cannot raise into the main thread — the main pass polls
+    ``lock_lost`` at per-mutation checkpoints and aborts). Other (transient) renew
+    errors are logged and retried on the next tick. The latest oid is published
+    back so the ``finally`` release CASes against the right value.
+    """
+
+    def __init__(self, advisory_mod, pass_id: str, repo_root: Path, oid: str, interval: int):
+        self._advisory = advisory_mod
+        self._pass_id = pass_id
+        self._repo_root = repo_root
+        self._oid = oid
+        self._interval = interval
+        self.lock_lost = threading.Event()
+        self._stop = threading.Event()
+        self._oid_lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._lease_lost_cls = advisory_mod._load_ref_lock().LeaseLostError
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, name="reconciler-heartbeat", daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            try:
+                new_oid = self._advisory.renew_pass_lock(
+                    self._pass_id, self._repo_root, self.current_oid()
+                )
+                with self._oid_lock:
+                    self._oid = new_oid
+            except self._lease_lost_cls:
+                print(
+                    f"ERROR: reconcile heartbeat lost the lease "
+                    f"(pass_id={self._pass_id!r}) — aborting pass",
+                    file=sys.stderr,
+                )
+                self.lock_lost.set()
+                return
+            except Exception as exc:  # noqa: BLE001 — transient renew error: log + retry
+                print(
+                    f"WARN: reconcile heartbeat renew failed (retrying): {exc!r}", file=sys.stderr
+                )
+
+    def current_oid(self) -> str:
+        with self._oid_lock:
+            return self._oid
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self._interval + 5)
+
+
 def run_pass(
     repo_root: Path | None = None,
     pass_id: str | None = None,
     target_mode=None,
     filter_local_ids: set[str] | None = None,
+    abort_check=None,
 ) -> int:
     """Execute one steady-state reconciliation pass via reconcile.reconcile_once().
 
@@ -207,6 +267,7 @@ def run_pass(
             repo_root=repo_root,
             target_mode=target_mode,
             filter_local_ids=filter_local_ids,
+            abort_check=abort_check,
         )
     except Exception as exc:  # noqa: BLE001 — body-inspecting: classify reschedule vs error to pick exit code
         if reschedule_error_cls is not None and isinstance(exc, reschedule_error_cls):
@@ -402,9 +463,30 @@ def main(argv: list[str] | None = None) -> int:
     # actually held the lock. Diagnostic tracebacks are emitted to stderr
     # so the probe's unfiltered side-car log captures them too.
     acquired = False
+    lock_oid: str | None = None
+    heartbeat: _Heartbeat | None = None
+    abort_check = None
     try:
-        advisory.acquire_pass_lock(pass_id, repo_root)
+        lock_oid = advisory.acquire_pass_lock(pass_id, repo_root)
         acquired = True
+        # Ref backend (epic dust-troth-naval): start the daemon heartbeat that renews
+        # the lease at max(1, lease//3); build the per-mutation abort checkpoint that
+        # raises ReconcileLockLost if the heartbeat loses the lease mid-pass. Guarded
+        # with getattr so a test stub of `advisory` (no _lock_backend) => file behaviour.
+        _backend = getattr(advisory, "_lock_backend", lambda: "file")
+        if _backend() == "ref":
+            ref_lock = advisory._load_ref_lock()
+            interval = ref_lock.heartbeat_interval(advisory._lock_lease_secs())
+            heartbeat = _Heartbeat(advisory, pass_id, repo_root, lock_oid, interval)
+            heartbeat.start()
+            _lock_lost = heartbeat.lock_lost
+
+            def abort_check() -> None:
+                if _lock_lost.is_set():
+                    raise advisory.ReconcileLockLost(
+                        f"pass lock lease lost mid-pass (pass_id={pass_id!r}) — aborting"
+                    )
+
         filter_local_ids: set[str] | None = None
         if args.filter_local_ids is not None:
             parsed = {s.strip() for s in args.filter_local_ids.split(",") if s.strip()}
@@ -420,6 +502,7 @@ def main(argv: list[str] | None = None) -> int:
             pass_id=pass_id,
             target_mode=target_mode,
             filter_local_ids=filter_local_ids,
+            abort_check=abort_check,
         )
     except Exception as exc:  # noqa: BLE001 — CLI top-level: log + traceback, return exit code 1
         # Print the prefixed line first so grep-based probes see it, THEN
@@ -430,9 +513,18 @@ def main(argv: list[str] | None = None) -> int:
         _tb.print_exc(file=sys.stderr)
         return 1
     finally:
+        # Stop the heartbeat first so it no longer advances the ref, then release
+        # against the LATEST oid it renewed to (a stale/absent ref no-ops).
+        if heartbeat is not None:
+            heartbeat.stop()
         if acquired:
             try:
-                advisory.release_pass_lock(pass_id, repo_root)
+                if heartbeat is not None:
+                    # Ref backend: release against the LATEST renewed oid.
+                    advisory.release_pass_lock(pass_id, repo_root, oid=heartbeat.current_oid())
+                else:
+                    # File backend (or a test stub with a 2-arg release).
+                    advisory.release_pass_lock(pass_id, repo_root)
             except Exception as _rel_exc:  # noqa: BLE001 — release in finally must not mask original error
                 # Release failure must not mask the original error path.
                 print(

@@ -581,6 +581,10 @@ class _PassContext:
     repo_root: Path
     target_mode: Any = None
     filter_local_ids: set[str] | None = None
+    # optional per-mutation lost-lease checkpoint (epic dust-troth-naval): a
+    # zero-arg callable the applier invokes before each mutation; it raises
+    # (ReconcileLockLost) if the ref-lock heartbeat lost the lease. None = no-op.
+    abort_check: Any = None
     # populated by _load_snapshots
     persist: bool = True
     fetcher: Any = None
@@ -615,6 +619,7 @@ def reconcile_once(
     repo_root: Path | None = None,
     target_mode=None,
     filter_local_ids: set[str] | None = None,
+    abort_check=None,
 ) -> dict:
     """Run one reconciler pass: fetch → diff → apply.
 
@@ -654,6 +659,7 @@ def reconcile_once(
         repo_root=repo_root,
         target_mode=target_mode,
         filter_local_ids=filter_local_ids,
+        abort_check=abort_check,
     )
     _load_snapshots(ctx)
     # Diff phase lives in the sibling run_differs.py (loaded lazily by file path,
@@ -916,9 +922,12 @@ def _apply_mutations(ctx: _PassContext) -> None:
         # that does not accept the `mode` kwarg. Only pass it when caller
         # actually supplied a target_mode (i.e., when cap enforcement is
         # requested).
+        # Only forward abort_check when set, so tests that stub applier.apply with
+        # a narrower signature are unaffected (epic dust-troth-naval).
+        _abort_kw = {"abort_check": ctx.abort_check} if ctx.abort_check is not None else {}
         if target_mode is None:
             manifest_path = applier.apply(
-                mutations, pass_id, repo_root, binding_store=binding_store
+                mutations, pass_id, repo_root, binding_store=binding_store, **_abort_kw
             )
         else:
             manifest_path = applier.apply(
@@ -928,6 +937,7 @@ def _apply_mutations(ctx: _PassContext) -> None:
                 mode=target_mode,
                 binding_store=binding_store,
                 persist=persist,
+                **_abort_kw,
             )
     except BaseException as exc:  # noqa: BLE001 — must re-raise after recording
         apply_exc = exc

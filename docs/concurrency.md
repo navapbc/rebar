@@ -106,13 +106,23 @@ Cross-client coordination is **only** git merge-as-union + optimistic
 concurrency. No feature may require a lock spanning clients/machines, nor a
 committed index/aggregate that concurrent clients would both rewrite.
 
-- **Sanctioned, grandfathered exception:** the reconciler's
-  `.reconciler-pass-lock` (`rebar_reconciler/_advisory_lock.py:62`) is a committed,
-  tickets-branch, cross-client advisory lock. It is single-writer-by-design (only
-  one reconciler should run at a time). It also performs a ref-advance
-  **compare-and-swap** (`git update-ref refs/heads/tickets <new> <old>`,
-  `_advisory_lock.py:86-99`) that retries on a concurrent writer. This is the one
-  allowed exception — **not** a precedent for new cross-client locks.
+- **Sanctioned, grandfathered exception:** the reconciler's pass-lock/phase-gate is a
+  single-writer-by-design cross-client advisory lock (only one reconciler runs at a
+  time). It has **two backends**, selected by `[reconciler] lock_backend` (epic
+  dust-troth-naval / ADR 0031):
+  - `file` (today's default): a committed, tickets-branch `.reconciler-pass-lock` /
+    `.reconciler-phase-gate` (`rebar_reconciler/_advisory_lock.py`), advanced via a
+    `git update-ref refs/heads/tickets <new> <old>` CAS that retries on a concurrent
+    writer.
+  - `ref`: a self-healing **bare-ref CAS lock on `refs/reconciler/*`** (`_ref_lock.py`)
+    — a ref → blob, so it is **never in the tickets working tree and never
+    union-merged**. Acquire is a create-only CAS; a lease + heartbeat lets a crashed
+    holder's lock be reclaimed after one lease interval (skew-proof, no cross-clone
+    clock comparison). Authoritative on `origin` via `git push
+    --force-with-lease=<ref>:<old>`.
+  This is the one allowed cross-client lock — **not** a precedent for new ones. The
+  `ref` backend keeps I6 cleaner: the lock is no longer a committed tickets-branch
+  file needing a `merge=ours` union-merge carve-out.
 
 ### I7 — Derived/aggregate data is computed from replay or stored local-only
 Search indexes, counters, memory stores, etc. are either recomputed from the
