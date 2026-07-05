@@ -1,1 +1,0 @@
-{"author":"Claude","data":{"file_impact":[{"path":"src/rebar/_mcp_writes.py","reason":"fix docstring"},{"path":"src/rebar/llm/workflow/runs.py","reason":"align wording"}]},"env_id":"58e9f32e-f999-436d-9c1a-5d0eef5c9903","event_type":"FILE_IMPACT","timestamp":1783149003749948777,"uuid":"375aecda-3e64-4444-92d3-89c1dfd49a1e"}
