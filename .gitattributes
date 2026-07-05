@@ -5,4 +5,3 @@
 # JSON into invalid JSON. The 'ours' driver is defined in git config by init
 # (merge.ours.driver=true); without it these patterns are silently ignored.
 .bridge_state/* merge=ours
-.reconciler-* merge=ours
