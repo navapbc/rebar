@@ -9,8 +9,8 @@
 #
 # Single-flight concurrency (cancel-in-progress: false) ensures a running pass
 # completes before the next scheduled invocation starts; the reconciler's own
-# pass-lock (.reconciler-pass-lock on the tickets branch) is a second guard
-# (exit 3 == "another pass already running", treated as benign here).
+# pass-lock (refs/reconciler/lock, the self-healing ref-lock; ADR 0031) is a second
+# guard (exit 3 == "another pass already running", treated as benign here).
 #
 # Continuous loop (OPT-IN, default OFF): set repo Variable RECONCILE_CONTINUOUS=true
 # to have each run re-dispatch the next via workflow_dispatch (the documented

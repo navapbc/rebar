@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from rebar import config as cfg
-from rebar_reconciler import _advisory_lock, acli_subprocess, rebar_id_audit
+from rebar_reconciler import acli_subprocess, rebar_id_audit
 
 pytestmark = pytest.mark.unit
 
@@ -124,27 +124,9 @@ def test_timeout_precedence_cli_gt_env_gt_project_gt_user_gt_default(
     cfg.set_cli_overrides(None)
 
 
-# ── lock_max_retries (canonical name already matches REBAR_RECONCILER_*) ───────
-def test_lock_retries_file_and_zero_clamp(tmp_path: Path, monkeypatch) -> None:
-    p = _proj(tmp_path)
-    (p / "rebar.toml").write_text("[reconciler]\nlock_max_retries = 0\n", encoding="utf-8")
-    monkeypatch.setenv("REBAR_ROOT", str(p))
-    # 0 = "disable outer retry" → clamped to a single attempt (1).
-    assert _advisory_lock._resolve_retry_budget() == 1
-
-
-def test_lock_retries_env_beats_file(tmp_path: Path, monkeypatch) -> None:
-    p = _proj(tmp_path)
-    (p / "rebar.toml").write_text("[reconciler]\nlock_max_retries = 3\n", encoding="utf-8")
-    monkeypatch.setenv("REBAR_ROOT", str(p))
-    monkeypatch.setenv("REBAR_RECONCILER_LOCK_MAX_RETRIES", "7")
-    assert _advisory_lock._resolve_retry_budget() == 7
-
-
-def test_lock_retries_legacy_alias(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("REBAR_ROOT", str(_proj(tmp_path)))
-    monkeypatch.setenv("REBAR_RECONCILER_LOCK_RETRY_BUDGET", "4")
-    assert _advisory_lock._resolve_retry_budget() == 4
+# (lock_max_retries + the b859 retry loop it tuned were removed in epic
+#  dust-troth-naval / C4 — superseded by the self-healing ref lock. Its tests are
+#  retired with it.)
 
 
 # ── deletion_probe_limit (resolved value the outbound differ now reads) ────────

@@ -54,8 +54,13 @@ _GITATTRIBUTES = """# Shared mutable root files are per-pass derived CACHES the 
 # JSON into invalid JSON. The 'ours' driver is defined in git config by init
 # (merge.ours.driver=true); without it these patterns are silently ignored.
 .bridge_state/* merge=ours
-.reconciler-* merge=ours
 """
+
+# The retired ``.reconciler-*`` merge=ours line (epic dust-troth-naval / C4): the
+# reconciler pass-lock/phase-gate moved off the tickets tree onto refs/reconciler/*,
+# so it no longer needs a union-merge carve-out. Kept as a constant so the
+# already-initialized-tracker migration can strip it from committed .gitattributes.
+_RETIRED_GITATTRIBUTES_LINES = (".reconciler-* merge=ours",)
 
 _PRECOMMIT = """# No-op pre-commit config for the tickets orphan branch.
 # The tickets branch carries event-sourced ticket data only — no source
@@ -410,8 +415,14 @@ def _ensure_merge_ours_driver(tracker: str) -> None:
 def _commit_gitattributes(tracker: str) -> None:
     """Commit the tickets-branch ``.gitattributes`` (create-if-absent, idempotent),
     so a union merge keeps OUR copy of the per-pass mutable root files instead of
-    wedging. Pairs with :func:`_ensure_merge_ours_driver` (the driver it names)."""
-    if _git(tracker, "show", "tickets:.gitattributes").returncode != 0:
+    wedging. Pairs with :func:`_ensure_merge_ours_driver` (the driver it names).
+
+    Also runs a one-time migration (epic dust-troth-naval / C4): an already-committed
+    ``.gitattributes`` predating the ref-lock still carries ``.reconciler-* merge=ours``;
+    strip that retired line (the lock moved off the tickets tree onto refs/reconciler/*).
+    Idempotent; a git failure logs and continues (never aborts init)."""
+    show = _git(tracker, "show", "tickets:.gitattributes")
+    if show.returncode != 0:
         with open(os.path.join(tracker, ".gitattributes"), "w", encoding="utf-8") as f:
             f.write(_GITATTRIBUTES)
         _git(tracker, "add", ".gitattributes")
@@ -423,6 +434,28 @@ def _commit_gitattributes(tracker: str) -> None:
             "-m",
             "chore: add .gitattributes merge=ours for shared mutable root files (epic 97e7)",
         )
+        return
+
+    # Migration arm: strip any retired line from an existing committed .gitattributes.
+    lines = show.stdout.splitlines()
+    kept = [ln for ln in lines if ln.strip() not in _RETIRED_GITATTRIBUTES_LINES]
+    if len(kept) == len(lines):
+        return  # nothing retired present — idempotent no-op
+    try:
+        path = os.path.join(tracker, ".gitattributes")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(kept) + ("\n" if kept else ""))
+        _git(tracker, "add", ".gitattributes")
+        _git(
+            tracker,
+            "commit",
+            "-q",
+            "--no-verify",
+            "-m",
+            "chore(reconciler): drop retired .reconciler-* merge=ours (moved to refs/reconciler/*)",
+        )
+    except OSError as exc:  # log-and-continue: a migration failure must not abort init
+        print(f"WARN: .gitattributes migration skipped: {exc!r}", file=sys.stderr)
 
 
 def _commit_precommit(tracker: str) -> None:

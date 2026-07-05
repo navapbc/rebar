@@ -22,8 +22,8 @@ def test_defaults_when_empty() -> None:
     assert c.compact.threshold == 10
     assert c.sync.push == "always" and c.sync.pull == "on"
     assert c.mcp.readonly is False and c.mcp.allow_llm is False and c.mcp.allow_jira_sync is False
-    assert c.reconciler.lock_max_retries == 5 and c.reconciler.deletion_probe_limit == 20
-    assert c.reconciler.id_guard_bypass_unsafe is False
+    assert c.reconciler.lock_backend == "ref" and c.reconciler.deletion_probe_limit == 20
+    assert c.reconciler.lock_lease_secs == 120 and c.reconciler.id_guard_bypass_unsafe is False
     assert c.jira.url == "" and c.scratch.base_dir == ""
 
 
@@ -34,7 +34,7 @@ def test_parses_known_keys_typed() -> None:
             "compact": {"threshold": 25},
             "sync": {"push": "async", "pull": "off"},
             "mcp": {"allow_jira_sync": True},
-            "reconciler": {"lock_max_retries": 9, "id_guard_bypass_unsafe": True},
+            "reconciler": {"lock_lease_secs": 90, "id_guard_bypass_unsafe": True},
             "jira": {"url": "https://x.atlassian.net", "project": "DSO"},
             "scratch": {"base_dir": "/tmp/s"},
         }
@@ -43,7 +43,7 @@ def test_parses_known_keys_typed() -> None:
     assert c.compact.threshold == 25
     assert c.sync.push == "async" and c.sync.pull == "off"
     assert c.mcp.allow_jira_sync is True
-    assert c.reconciler.lock_max_retries == 9 and c.reconciler.id_guard_bypass_unsafe is True
+    assert c.reconciler.lock_lease_secs == 90 and c.reconciler.id_guard_bypass_unsafe is True
     assert c.jira.url == "https://x.atlassian.net" and c.jira.project == "DSO"
     assert c.scratch.base_dir == "/tmp/s"
 

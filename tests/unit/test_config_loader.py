@@ -130,9 +130,9 @@ def test_xdg_user_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_env_var_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
-    monkeypatch.setenv("REBAR_RECONCILER_LOCK_MAX_RETRIES", "9")
+    monkeypatch.setenv("REBAR_RECONCILER_DELETION_PROBE_LIMIT", "9")
     c = cfg.load_config(root=_proj(tmp_path))
-    assert c.sync.push == "off" and c.reconciler.lock_max_retries == 9
+    assert c.sync.push == "off" and c.reconciler.deletion_probe_limit == 9
 
 
 # ── precedence ───────────────────────────────────────────────────────────────

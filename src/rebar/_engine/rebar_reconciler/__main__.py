@@ -21,6 +21,7 @@ import datetime
 import importlib
 import importlib.util
 import os
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -162,6 +163,91 @@ def _run_reconcile_check(repo_root: Path) -> int:
     except Exception as exc:  # noqa: BLE001 — CLI top-level: log and return exit code 1
         print(f"ERROR: reconcile-check failed: {exc}", file=sys.stderr)
         return 1
+
+
+_LEGACY_LOCK_FILES = (".reconciler-pass-lock", ".reconciler-phase-gate")
+
+
+def _purge_committed_reconciler_locks(repo_root: Path) -> None:
+    """Remove any legacy ``.reconciler-*`` lock files still committed on the tickets
+    branch (epic dust-troth-naval / C4 migration).
+
+    The lock moved to ``refs/reconciler/*``; a repo initialized under the old file
+    backend may still carry committed ``.reconciler-pass-lock`` / ``.reconciler-phase-gate``
+    blobs on the ``tickets`` branch. This deletes them once via a single ref-advance
+    CAS commit. Idempotent (no-op when none are present) and best-effort: any git
+    failure is logged and swallowed so it never aborts the pass.
+    """
+    try:
+        present = [
+            f
+            for f in _LEGACY_LOCK_FILES
+            if subprocess.run(
+                ["git", "-C", str(repo_root), "cat-file", "-e", f"tickets:{f}"],
+                capture_output=True,
+            ).returncode
+            == 0
+        ]
+        if not present:
+            return
+        old = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "tickets"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        # Prune the legacy paths in a DETACHED temp index (read-tree → rm --cached →
+        # write-tree → commit-tree), then CAS-advance refs/heads/tickets — the main
+        # worktree/index is never touched, and the CAS makes a concurrent writer safe.
+        env = {**os.environ, "GIT_INDEX_FILE": str(repo_root / ".git" / "reconciler-purge-index")}
+        subprocess.run(
+            ["git", "-C", str(repo_root), "read-tree", old],
+            capture_output=True,
+            check=True,
+            env=env,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_root), "rm", "--cached", "--ignore-unmatch", *present],
+            capture_output=True,
+            check=True,
+            env=env,
+        )
+        new_tree = subprocess.run(
+            ["git", "-C", str(repo_root), "write-tree"],
+            capture_output=True,
+            text=True,
+            check=True,
+            env=env,
+        ).stdout.strip()
+        new_commit = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "commit-tree",
+                new_tree,
+                "-p",
+                old,
+                "-m",
+                "chore(reconciler): drop legacy .reconciler-* lock files "
+                "(moved to refs/reconciler/*)",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            env=env,
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "-C", str(repo_root), "update-ref", "refs/heads/tickets", new_commit, old],
+            capture_output=True,
+            check=True,
+        )
+        print(
+            f"reconcile: purged legacy committed lock files {present} from the tickets branch",
+            file=sys.stderr,
+        )
+    except Exception as exc:  # noqa: BLE001 — migration is best-effort, never aborts the pass
+        print(f"WARN: legacy .reconciler-* purge skipped: {exc!r}", file=sys.stderr)
 
 
 class _Heartbeat:
@@ -428,10 +514,16 @@ def main(argv: list[str] | None = None) -> int:
     # -------------------------------------------------------------------------
     advisory = _load_sibling_keyed(_ADVISORY_LOCK_KEY, "_advisory_lock.py")
 
+    # One-time migration (epic dust-troth-naval / C4): the lock moved to
+    # refs/reconciler/*; scrub any pre-existing .reconciler-* lock files still
+    # committed on the tickets branch from the old file backend. Idempotent; a git
+    # failure logs and continues (never aborts the pass).
+    _purge_committed_reconciler_locks(repo_root)
+
     # Step 2a: pass-lock check (dd-3)
     if advisory.check_pass_lock(repo_root):
         print(
-            "reconcile: .reconciler-pass-lock present on tickets branch — another pass in flight",
+            "reconcile: refs/reconciler/lock is held — another pass in flight",
             file=sys.stderr,
         )
         return 3
@@ -439,8 +531,8 @@ def main(argv: list[str] | None = None) -> int:
     # Step 2b: phase-gate check (dd-4)
     if advisory.check_phase_gate(target_mode, repo_root):
         print(
-            f"reconcile: .reconciler-phase-gate blocks advancement to "
-            f"{target_mode.value}; remove the file from tickets to advance",
+            f"reconcile: refs/reconciler/gate blocks advancement to "
+            f"{target_mode.value}; clear the gate to advance",
             file=sys.stderr,
         )
         return 4
@@ -469,12 +561,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         lock_oid = advisory.acquire_pass_lock(pass_id, repo_root)
         acquired = True
-        # Ref backend (epic dust-troth-naval): start the daemon heartbeat that renews
-        # the lease at max(1, lease//3); build the per-mutation abort checkpoint that
-        # raises ReconcileLockLost if the heartbeat loses the lease mid-pass. Guarded
-        # with getattr so a test stub of `advisory` (no _lock_backend) => file behaviour.
-        _backend = getattr(advisory, "_lock_backend", lambda: "file")
-        if _backend() == "ref":
+        # The ref-lock backend returns an oid; start the daemon heartbeat that renews
+        # the lease at max(1, lease//3) and build the per-mutation abort checkpoint that
+        # raises ReconcileLockLost if the heartbeat loses the lease mid-pass. A test
+        # stub of `advisory` returning None (no ref backend) simply skips the heartbeat.
+        if lock_oid is not None and hasattr(advisory, "_load_ref_lock"):
             ref_lock = advisory._load_ref_lock()
             interval = ref_lock.heartbeat_interval(advisory._lock_lease_secs())
             heartbeat = _Heartbeat(advisory, pass_id, repo_root, lock_oid, interval)

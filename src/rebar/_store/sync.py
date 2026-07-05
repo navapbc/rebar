@@ -16,8 +16,8 @@ that keeps both parents), never by a reset that orphans local commits. So:
 
 This is why rebar no longer forces ``gc.auto=0`` (see ``init._migrate_gc_config``)
 and why the reflog is no longer load-bearing. UUID-named event files never collide
-on merge; the only shared mutable root files (``.bridge_state/*``, ``.reconciler-*``)
-resolve via the tickets-branch ``.gitattributes`` ``merge=ours`` (they are per-pass
+on merge; the only shared mutable root file (``.bridge_state/*``) resolves via the
+tickets-branch ``.gitattributes`` ``merge=ours`` (it is per-pass
 derived caches the reconciler rebuilds). Resolution by case: unrelated histories →
 ``merge --allow-unrelated-histories`` (union); related + no local commits →
 fast-forward adopt (``reset --hard`` onto an ancestor — discards nothing); local
@@ -83,8 +83,8 @@ def _do_reconverge(tracker: str, branch: str, remote_name: str) -> None:
 
     # Unrelated histories (no common ancestor): UNION them, never discard local.
     # The append-only event files are UUID-named so they never collide; the only
-    # shared mutable root files (.bridge_state/*, .reconciler-*) resolve via the
-    # tickets-branch .gitattributes `merge=ours` (WU-3). Reuses the diverged-path
+    # shared mutable root file (.bridge_state/*) resolves via the tickets-branch
+    # .gitattributes `merge=ours` (WU-3). Reuses the diverged-path
     # conflict net below (abort → keep local → hint fsck) — extend, don't reinvent.
     if not _ok(tracker, "merge-base", "HEAD", remote):
         _union_merge(tracker, remote, "--allow-unrelated-histories")

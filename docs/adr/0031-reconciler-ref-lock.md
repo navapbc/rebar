@@ -217,6 +217,30 @@ rollback (C4 removes it and flips the default to `ref`):
 * The GHA workflow fetches `+refs/reconciler/*` before the pass; acquire/renew/release push with
   `--force-with-lease=<ref>:<old>` against `origin`.
 
+## Band-aid retirement (C4 — flips the default, removes the file backend)
+
+Once the ref backend baked behind C3's switch, C4 makes `ref` the default and deletes the
+now-superseded machinery:
+
+* **`lock_backend` defaults to `ref`.** The file-backend dispatch is removed (acquire/release/gate
+  are unconditionally ref); `_advisory_lock.py` shrinks to the ref adapter plus the shared
+  `_cas_once` / `_is_cas_mismatch` discriminator that `_ref_lock` imports. A configured
+  `lock_backend=file` is **deprecated-and-ignored** — a one-time warning, then the ref backend is
+  used (rollback via `file` is intentionally gone).
+* **The `b859-8fa1` retry loop is superseded.** That outer retry-with-backoff loop existed to paper
+  over file-lock contention on the tickets branch; the self-healing ref lock (create-only CAS +
+  lease + heartbeat) removes the contention it fought, so the loop and its helpers
+  (`_resolve_retry_budget`, `_compute_backoff_seconds`, the backoff constants) and the
+  `lock_max_retries` config key + its env aliases are deleted. A still-present `lock_max_retries` is
+  ignored with a one-time deprecation warning (not a load error).
+* **`merge=ours` carve-out + committed locks removed, with migrations.** `.reconciler-*` is dropped
+  from `_GITATTRIBUTES`; an init-time update-migration strips the retired `.reconciler-* merge=ours`
+  line from an already-committed `.gitattributes`, and a one-time reconciler-startup migration
+  (`_purge_committed_reconciler_locks`, called once from `__main__.main()` before acquire) deletes any
+  pre-existing committed `.reconciler-pass-lock` / `.reconciler-phase-gate` from the tickets branch.
+  Both are idempotent and log-and-continue on git failure (never abort). A regression test asserts no
+  `.reconciler-*` path is ever committed to the tickets branch under the ref backend.
+
 ## Consequences
 
 * The lock leaves the tickets tree entirely: no `merge=ours` entry needed for it, no tickets-branch

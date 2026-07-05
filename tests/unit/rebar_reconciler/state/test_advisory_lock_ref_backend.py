@@ -218,3 +218,64 @@ def test_applier_apply_invokes_abort_check(repo: Path) -> None:
     with pytest.raises(RuntimeError, match="aborted at checkpoint"):
         applier.apply([mutation], "pass-abort", repo_root=repo, abort_check=abort_check)
     assert calls, "abort_check must be called before applying the mutation"
+
+
+# ---------------------------------------------------------------------------
+# C4 startup migration: purge legacy committed .reconciler-* lock files
+# ---------------------------------------------------------------------------
+
+
+def _repo_with_tickets_branch(tmp_path: Path) -> Path:
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    _git(["config", "user.email", "test@example.com"], tmp_path)
+    _git(["config", "user.name", "Test"], tmp_path)
+    _git(["commit", "--allow-empty", "-m", "init"], tmp_path)
+    _git(["checkout", "-q", "--orphan", "tickets"], tmp_path)
+    (tmp_path / ".gitkeep").write_text("")
+    _git(["add", ".gitkeep"], tmp_path)
+    _git(["commit", "-q", "-m", "tickets init"], tmp_path)
+    return tmp_path
+
+
+def test_purge_committed_reconciler_locks(tmp_path: Path) -> None:
+    """The startup migration deletes legacy committed .reconciler-* files from the
+    tickets branch; idempotent (a second run is a no-op) and a regression that no
+    such path survives."""
+    main_mod = _load("rebar_reconciler.__main__", ENGINE / "__main__.py")
+    repo = _repo_with_tickets_branch(tmp_path)
+    # Seed the legacy committed lock files on the tickets branch.
+    for name in (".reconciler-pass-lock", ".reconciler-phase-gate"):
+        (repo / name).write_text("pass-old\n")
+        _git(["add", name], repo)
+    _git(["commit", "-q", "-m", "legacy locks"], repo)
+    _git(["checkout", "-q", "main" if _has_main(repo) else "master"], repo)
+    assert _committed(repo, ".reconciler-pass-lock"), "precondition: legacy lock committed"
+
+    main_mod._purge_committed_reconciler_locks(repo)
+    assert not _committed(repo, ".reconciler-pass-lock"), "purge must remove the pass-lock"
+    assert not _committed(repo, ".reconciler-phase-gate"), "purge must remove the phase-gate"
+
+    # Idempotent: a second run finds nothing and does not error / re-commit.
+    head_before = _git(["rev-parse", "tickets"], repo).stdout.strip()
+    main_mod._purge_committed_reconciler_locks(repo)
+    assert _git(["rev-parse", "tickets"], repo).stdout.strip() == head_before
+
+
+def _has_main(repo: Path) -> bool:
+    return (
+        subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", "main"],
+            capture_output=True,
+        ).returncode
+        == 0
+    )
+
+
+def _committed(repo: Path, path: str) -> bool:
+    return (
+        subprocess.run(
+            ["git", "-C", str(repo), "cat-file", "-e", f"tickets:{path}"],
+            capture_output=True,
+        ).returncode
+        == 0
+    )
