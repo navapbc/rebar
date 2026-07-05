@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/llm/code_review/moves.py","reason":"file-follow-on-ticket + delete-bad-test moves + applies_when tags"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783268587225937001,"uuid":"cf76a872-9fd5-464f-bd6c-b9ffd712aaaf"}
