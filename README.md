@@ -34,6 +34,51 @@ to in-process Python (see `docs/bash-migration.md`). The reconciler ships under
 `src/rebar/_engine/` as package data, and the three interfaces are thin layers over
 the in-process core.
 
+**New here? Jump to the [Quickstart](#quickstart)** to run one ticket end-to-end.
+
+## Quickstart
+
+Install rebar, initialize a store in your repo, and run one ticket through the
+whole loop. This is the golden path — for every command and flag,
+`rebar --help` (and `rebar <command> --help`) is the authoritative reference;
+this section deliberately doesn't reproduce it.
+
+```bash
+pipx install nava-rebar        # the `rebar` CLI on your PATH (see Install for library/MCP/agents extras)
+cd /path/to/your/repo
+rebar init                     # -> Ticket system initialized.
+```
+
+Create a ticket, see what's ready, claim it, and close it:
+
+```bash
+# Create a task — prints the human line (an id + a memorable alias) then the id:
+rebar create task "Add a login page" --priority 2
+#   Created ticket reel-lot-tea (e804-6013-4fcb-4127): Add a login page
+
+# What's ready to work (nothing blocking it)?
+rebar ready
+
+# Claim it atomically (open -> in_progress + assignee; exit 10 if already taken):
+rebar claim reel-lot-tea --assignee alice
+#   CLAIMED: e804-6013-4fcb-4127 (assignee: alice)
+
+# ...do the work, then close it (there is no `rebar close` — use transition):
+rebar transition reel-lot-tea in_progress closed
+```
+
+Point a coding agent at the same repo over MCP — one entry in your MCP client
+config (installs on demand via `uvx`; no separate install step):
+
+```json
+{ "mcpServers": { "rebar": { "command": "uvx", "args": ["--from", "nava-rebar[mcp]", "rebar-mcp"] } } }
+```
+
+That's the whole loop — **init → create → ready → claim → close** — shared through
+the repo so many agents (and teammates via Jira) coordinate without stepping on
+each other. Next: [Install](#install) for the library / MCP / agent extras, or
+`rebar --help` for the full command list.
+
 ## Why rebar
 
 If you run coding agents against a repo, you eventually want to run *several* at
