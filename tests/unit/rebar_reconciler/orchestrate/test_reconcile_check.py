@@ -292,3 +292,86 @@ def test_bound_ticket_via_cache_is_checked_not_orphaned(rc_mod: ModuleType, tmp_
     broken_report = rc_mod.reconcile_check([], jira_snapshot, store)
     assert broken_report["orphaned_bindings"] == ["abc-1234"]
     assert broken_report["checked"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Bug runny-lens-strafe: reconcile-check compared RAW live Jira snapshot values
+# (nested {"name": ...} objects, ADF description dicts, assignee dicts,
+# reconciler-written labels) against local scalars WITHOUT the extraction /
+# normalization the real inbound differ applies — so on a healthy live store it
+# flagged EVERY binding as discrepant (~3660 false positives) while the differ
+# dispatched ~0 changes. reconcile-check must normalize the Jira snapshot the
+# same way the differ does before comparing.
+# ---------------------------------------------------------------------------
+
+
+def _adf_doc(text: str) -> dict:
+    """Build a minimal ADF (Atlassian Document Format) description dict, exactly
+    the shape a live Jira cloud fetch returns for the ``description`` field."""
+    return {
+        "type": "doc",
+        "version": 1,
+        "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}],
+    }
+
+
+def _live_binding(status_name: str) -> tuple[list[dict], dict, StubBindingStore]:
+    """One present-present binding in LIVE Jira snapshot shapes whose NORMALIZED
+    values agree with the local ticket, parameterized by the Jira status name."""
+    local_tickets = [
+        {
+            "id": "abc-1",
+            "title": "T",
+            "status": "open",
+            "priority": 2,
+            "description": "Hello",
+            "assignee": "user@x.com",
+            "tags": ["team:backend"],
+        },
+    ]
+    jira_snapshot = {
+        "DIG-1": {
+            "summary": "T",
+            "status": {"name": status_name},
+            "priority": {"name": "Medium"},
+            # issuetype is a deliberately sync-excepted field: the differ never
+            # dispatches it, so it must be dropped from comparison entirely.
+            "issuetype": {"name": "Story"},
+            "description": _adf_doc("Hello"),
+            "assignee": {
+                "emailAddress": "user@x.com",
+                "displayName": "User X",
+                "accountId": "acc-1",
+            },
+            # jira-only reconciler-written labels that the differ excludes.
+            "labels": ["team:backend", "rebar-status:blocked", "rebar-id:abc-1"],
+        },
+    }
+    store = StubBindingStore([("abc-1", "DIG-1")])
+    return local_tickets, jira_snapshot, store
+
+
+def test_normalized_agree_raw_differ_counts_in_sync(rc_mod: ModuleType) -> None:
+    """A healthy live-shape binding whose normalized values agree with local
+    must count as in_sync with ZERO discrepancies (the false-positive bug)."""
+    local_tickets, jira_snapshot, store = _live_binding("To Do")
+
+    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store)
+
+    assert report["checked"] == 1
+    assert report["in_sync"] == 1
+    assert report["discrepancies"] == []
+
+
+def test_real_status_drift_still_reported(rc_mod: ModuleType) -> None:
+    """Normalization must NOT suppress actionable drift: an identical binding
+    except a genuinely different Jira status ("Done" vs local "open") must
+    still report exactly one status discrepancy (critical guard)."""
+    local_tickets, jira_snapshot, store = _live_binding("Done")
+
+    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store)
+
+    status_discs = [d for d in report["discrepancies"] if d["field"] == "status"]
+    assert len(status_discs) == 1
+    # status is the ONLY drift — normalization suppressed the raw-shape noise.
+    assert report["discrepancies"] == status_discs

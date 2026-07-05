@@ -58,6 +58,28 @@ def _load_classify() -> ModuleType:
     return _load_sibling("classify", "classify.py")
 
 
+def _load_outbound_fields() -> ModuleType:
+    """Load the outbound field-normalization helpers (bug runny-lens-strafe).
+
+    reconcile-check must extract/normalize a LIVE Jira snapshot the SAME way the
+    real differ does before comparing — ``_extract_jira_field`` unwraps nested
+    ``{"name": ...}`` objects and decodes ADF descriptions, ``_assignee_matches``
+    does shape-tolerant assignee equality — otherwise raw nested Jira shapes are
+    compared against local scalars and every binding is falsely flagged.
+    """
+    return _load_sibling("outbound_fields", "outbound_fields.py")
+
+
+def _load_adf() -> ModuleType:
+    """Load the ADF helpers (``fit_text_to_adf_limit``) for description parity."""
+    return _load_sibling("adf", "adf.py")
+
+
+def _load_inbound_differ() -> ModuleType:
+    """Load the inbound differ for its canonical bridge-internal label prefixes."""
+    return _load_sibling("inbound_differ", "inbound_differ.py")
+
+
 # ---------------------------------------------------------------------------
 # Field comparison helpers
 # ---------------------------------------------------------------------------
@@ -98,8 +120,18 @@ _TYPE_JIRA_TO_LOCAL: dict[str, str] = {v: k for k, v in _TYPE_LOCAL_TO_JIRA.item
 
 
 def _is_rebar_internal_label(label: str) -> bool:
-    """Return True for labels that should be excluded from comparison."""
-    return label.startswith("rebar-id-") or label.startswith("imported:")
+    """Return True for labels that should be excluded from comparison.
+
+    Bug runny-lens-strafe: this must match the differ's exclusion set exactly —
+    ``inbound_differ._EXCLUDED_PREFIXES`` = ``("rebar-id:", "rebar-id-",
+    "imported:", "rebar-status:")``. The old two-prefix set omitted the
+    canonical colon-form ``rebar-id:`` and the reconciler-managed
+    ``rebar-status:`` annotation labels, so those bridge-internal labels (which
+    the differ never syncs) were falsely flagged as label discrepancies on
+    every bound ticket.
+    """
+    prefixes = _load_inbound_differ()._EXCLUDED_PREFIXES
+    return any(label.startswith(p) for p in prefixes)
 
 
 def _compare_labels(
@@ -149,11 +181,14 @@ def _values_match_with_mapping(
 
 
 # Fields compared on each bound pair.  "title"↔"summary" is handled specially.
+# Bug runny-lens-strafe: "issuetype" is DELIBERATELY absent — it is a
+# sync-excepted field the inbound differ never dispatches (Jira's coarse
+# Bug/Story/Task/Epic taxonomy is not a faithful reverse-map for the richer
+# local types), so comparing it here only ever produced false discrepancies.
 _COMPARABLE_FIELDS: tuple[str, ...] = (
     "description",
     "status",
     "priority",
-    "issuetype",
     "assignee",
 )
 
@@ -181,12 +216,40 @@ def _compare_pair(
             }
         )
 
+    # Bug runny-lens-strafe: on a LIVE store the Jira snapshot fields are nested
+    # objects (status/priority = {"name": ...}, assignee = {accountId,...},
+    # description = an ADF dict), so a raw ``jira_issue.get(field)`` compared to
+    # a local scalar NEVER matched and flagged every binding. Extract/normalize
+    # each field with the SAME helpers the real inbound differ uses before
+    # comparing, so reconcile-check's discrepancy set mirrors what the differ
+    # would actually dispatch. The reported ``jira_value`` stays the raw snapshot
+    # value (what is actually stored in Jira).
+    of = _load_outbound_fields()
+    adf = _load_adf()
     for field in _COMPARABLE_FIELDS:
         local_val = local_ticket.get(field)
         jira_val = jira_issue.get(field)
         if local_val is None and jira_val is None:
             continue
-        if not _values_match_with_mapping(field, local_val, jira_val):
+
+        if field == "assignee":
+            # Shape-tolerant equality: a live Jira assignee is a dict; local is a
+            # bare string that may be any of {email, accountId, displayName}.
+            matches = of._assignee_matches(str(local_val or ""), jira_val)
+        elif field == "description":
+            # Decode the ADF description to text and apply the identical
+            # ADF-fit + trailing-whitespace tolerance the differ uses, so an
+            # oversized/normalized body does not read as drift.
+            jira_text = of._extract_jira_field(jira_issue, "description")
+            local_text = adf.fit_text_to_adf_limit(str(local_val or ""))
+            matches = local_text.rstrip() == (jira_text or "").rstrip()
+        else:
+            # status / priority: unwrap the nested {"name": ...} object, then
+            # apply the local→Jira mapping comparison.
+            jira_norm = of._extract_jira_field(jira_issue, field)
+            matches = _values_match_with_mapping(field, local_val, jira_norm)
+
+        if not matches:
             discs.append(
                 {
                     "local_id": local_id,
