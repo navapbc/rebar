@@ -183,6 +183,15 @@ jobs:
             exit 1
           fi
 
+      # server.json env-contract drift gate (epic sail-shoe-smear): server.json is the
+      # MCP front-door manifest; rebar.mcp_server.MCP_ENV_VARS is the single source of
+      # truth for the env gates. This fails when the manifest's advertised env-var set
+      # diverges from that canonical list (missing/extra var). Style mirrors the
+      # prompt-index / criteria-routing drift gates above.
+      - name: server.json env-contract drift gate
+        shell: bash
+        run: python scripts/check_server_manifest.py
+
       - name: Run the default suite (Python tiers + bash collector; excludes integration + external)
         # Pin --basetemp under the runner temp (not /tmp): on long (10-16 min) runs
         # the macOS tmp-cleaner reaps pytest's default /tmp/pytest-of-* basetemp

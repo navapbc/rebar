@@ -76,9 +76,63 @@ __all__ = [
     "VerifyCommandItemOut",
     "VerifySignatureResultOut",
     "WorkflowRunOut",
+    "MCP_ENV_VARS",
     "build_server",
     "main",
 ]
+
+
+# ── Canonical MCP environment-variable contract ──────────────────────────────
+# The SINGLE SOURCE OF TRUTH for the env vars the MCP server honors. The published
+# manifest (server.json) MUST advertise exactly this set — a CI drift-guard
+# (scripts/check_server_manifest.py, wired into .github/workflows/test.yml) diffs
+# server.json against this list and fails the build on divergence, so the manifest
+# can never silently drift from the real gates again. The ``--help`` text below is
+# also derived from this list, so the three stay in lockstep.
+#
+# Each entry: name, a one-line description, and whether it is a deprecated alias.
+# The active gates are read in mcp_server.build_server / _mcp_reads / _mcp_llm /
+# _mcp_writes / config.py; REBAR_MCP_ALLOW_RECONCILE_LIVE is the deprecated alias
+# of REBAR_MCP_ALLOW_JIRA_SYNC (resolved in config.py).
+MCP_ENV_VARS: tuple[dict, ...] = (
+    {
+        "name": "REBAR_ROOT",
+        "description": (
+            "Path to the repo root that holds the .tickets-tracker store "
+            "(defaults to the git toplevel of the working dir)."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_READONLY",
+        "description": "Set to 1 to expose only the read tools (no write/mutation tools).",
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_ALLOW_LLM",
+        "description": (
+            "Set to 1 to enable the billable LLM tools (review_ticket / review_code / "
+            "scan_spec / verify_completion / review_plan); off by default."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_ALLOW_JIRA_SYNC",
+        "description": (
+            "Set to 1 to allow the live (mutating) Jira reconcile mode; otherwise "
+            "reconcile is dry-run only."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_ALLOW_RECONCILE_LIVE",
+        "description": (
+            "DEPRECATED alias of REBAR_MCP_ALLOW_JIRA_SYNC — prefer that name; "
+            "still honored for backward compatibility."
+        ),
+        "deprecated": True,
+    },
+)
 
 
 # The reconcile tool gates modes by the engine's canonical MODE_CAPS table, which
@@ -230,12 +284,16 @@ def main() -> None:
     # stdio server (so a curious `rebar-mcp --help` does not hang waiting on stdin,
     # and a CI boot check can confirm the entry point resolves).
     if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
+        # Env list is DERIVED from MCP_ENV_VARS so --help can't drift from the
+        # manifest (server.json) or the real gates.
+        env_lines = "\n".join(
+            f"       {v['name']}{'  (deprecated alias)' if v['deprecated'] else ''}"
+            for v in MCP_ENV_VARS
+        )
         print(  # noqa: T201 — --help output belongs on stdout (server not yet started)
             "rebar-mcp — the rebar MCP server (FastMCP, stdio transport).\n"
             "Usage: rebar-mcp            # serve MCP over stdio (takes no options)\n"
-            "Env:   REBAR_MCP_READONLY=1            gate write tools off\n"
-            "       REBAR_MCP_ALLOW_LLM=1           enable the billable LLM tools\n"
-            "       REBAR_MCP_ALLOW_JIRA_SYNC=1     allow reconcile live mode"
+            "Env:\n" + env_lines
         )
         return
     # Observability floor: install a stderr handler on the ``rebar`` root logger so
