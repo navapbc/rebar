@@ -5,7 +5,8 @@
 full ticket object per line**. This is a **lossy interop projection, NOT a
 backup**: for a lossless, full-audit-trail backup use
 `git bundle create tickets.bundle tickets` (the event log is the source of truth).
-Two consumers:
+For how fast bulk import runs and how large a store gets, see
+[`docs/scale-envelope.md`](scale-envelope.md). Two consumers:
 
 - **Reporting / data-mining (primary).** A flat, row-oriented, stream-parseable
   artifact other tools read directly (DuckDB / jq / pandas / BigQuery).

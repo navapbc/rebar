@@ -30,6 +30,41 @@ No separate accounts; everything rides on GitHub.
   in lockstep, and the Homebrew formula's `url`/`sha256` pointing at the matching
   PyPI sdist.
 
+## Supply-chain attestations (PyPI digital attestations)
+
+Every PyPI release carries **PEP 740 digital attestations** — signed provenance
+that ties each published artifact back to *this* repo's `release.yml` run. They
+are produced automatically: `release.yml`'s publish step uses
+`pypa/gh-action-pypi-publish@release/v1` with `id-token: write` and
+`attestations: true`, so the action signs each wheel/sdist with the release job's
+short-lived OIDC identity (the same identity Trusted Publishing uses — no stored
+keys) and uploads the attestation alongside the artifact. There is nothing extra
+to run at release time.
+
+**How consumers verify them.** PyPI records each artifact's attestations under
+the release's "provenance"; a downstream can confirm an artifact was built by
+this repo's release workflow (not re-uploaded by a leaked token) with GitHub's
+attestation tooling:
+
+```bash
+# Download the artifact you want to check, then verify its provenance names
+# this repo + the release workflow as the signing identity.
+pip download nava-rebar==X.Y.Z --no-deps -d /tmp/nava-rebar-verify
+gh attestation verify /tmp/nava-rebar-verify/nava_rebar-X.Y.Z-py3-none-any.whl \
+  --repo navapbc/rebar
+```
+
+A passing verify proves the file was built and signed by `navapbc/rebar`'s
+`release.yml` via OIDC. (The attestations are also visible on the release's PyPI
+page under each file's *"Provenance"* / *"View details"*.)
+
+**Confirm a cut release actually exposes them** (add to the post-release smoke
+test): after step 2 below shows the version live, the release's file listing on
+`https://pypi.org/project/nava-rebar/X.Y.Z/#files` should show a *"Provenance"*
+link per artifact, and the `gh attestation verify` above should pass. If it does
+not, `id-token: write` / `attestations: true` was dropped from `release.yml` —
+fix and ship a new version (PyPI is immutable; see Hard rules).
+
 ---
 
 ## Release procedure

@@ -190,6 +190,18 @@ jobs:
             exit 1
           fi
 
+      # Public-types drift gate in the Verified gate too (story 3a10): src/rebar/types.py
+      # is DERIVED from the canonical JSON Schemas. Mirrors test.yml — a stale committed
+      # types.py fails the Verified vote so it can never land on `main`.
+      - name: Public-types drift gate
+        shell: bash
+        run: |
+          python -m rebar.schemas.gen_types
+          if ! git diff --exit-code -- src/rebar/types.py; then
+            echo "::error::src/rebar/types.py is stale — run: python -m rebar.schemas.gen_types"
+            exit 1
+          fi
+
       - name: lint (ruff check + format --check, gating)
         run: make lint
 
@@ -200,6 +212,38 @@ jobs:
       # config FAILS the Verified vote, so it can never be submitted to `main`.
       - name: config-check (infra configs parse; gating)
         run: make config-check
+
+      # Dependency-vulnerability scan in the Verified gate too (story 95dc,
+      # plan-review advisory #2 — not only branch CI's test.yml). Runs once, on
+      # the primary cell, to avoid 4× duplicate advisory-DB fetches; a hit fails
+      # build-and-test → Verified -1. Same failure/flake policy as test.yml's
+      # pip-audit job (any fixable vuln fails; network fetch retried 3×).
+      - name: pip-audit (dependency vulnerabilities; gating, network-retried)
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        shell: bash
+        run: |
+          set -uo pipefail
+          python -m pip install pip-audit
+          attempt=0
+          until [ "$attempt" -ge 3 ]; do
+            attempt=$((attempt + 1))
+            echo "pip-audit attempt ${attempt}/3"
+            if out=$(pip-audit --desc 2>&1); then
+              echo "$out"
+              echo "pip-audit: OK (no known vulnerabilities)."
+              exit 0
+            fi
+            echo "$out"
+            if printf '%s' "$out" | grep -qiE 'temporarily|timed out|timeout|connection|resolve|network|503|502|504'; then
+              echo "pip-audit: transient DB error — backing off before retry." >&2
+              sleep $((attempt * 5))
+              continue
+            fi
+            echo "::error::pip-audit found dependency vulnerabilities (see output). Bump the pinned version, or add --ignore-vuln <ID> with justification if accepted." >&2
+            exit 1
+          done
+          echo "::error::pip-audit could not reach the advisory DB after 3 attempts — INFRASTRUCTURE issue, not a vulnerability. Comment 'recheck' to retry." >&2
+          exit 1
 
       - name: Run the default suite (Python tiers + bash collector; excludes integration + external)
         run: >-

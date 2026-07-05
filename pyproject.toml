@@ -16,6 +16,29 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
+authors = [{ name = "Nava PBC", email = "hello@navapbc.com" }]
+maintainers = [{ name = "Joe Oakhart", email = "joeoakhart@navapbc.com" }]
+keywords = [
+    "mcp",
+    "cli",
+    "jira",
+    "agent-coordination",
+    "ticketing",
+    "event-sourcing",
+    "git",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: POSIX",
+    "Operating System :: MacOS :: MacOS X",
+    "Topic :: Software Development :: Bug Tracking",
+    "Topic :: Software Development :: Version Control :: Git",
+]
+
 # Core stays deliberately tiny. Two runtime dependencies, both serving the
 # LEAN-RUNTIME workflow + schema capability (epic a88f) that must work WITHOUT the
 # heavy `[agents]`/`[eval]`/`[tracing]` extras:
@@ -46,8 +69,16 @@ dependencies = [
 # System prerequisites (not pip deps): git, and `acli` (only for live Jira
 # reconciliation).
 
+[project.urls]
+Homepage = "https://github.com/navapbc/rebar"
+Repository = "https://github.com/navapbc/rebar"
+Documentation = "https://github.com/navapbc/rebar/tree/main/docs"
+Issues = "https://github.com/navapbc/rebar/blob/main/SUPPORT.md"
+Changelog = "https://github.com/navapbc/rebar/blob/main/docs/release-notes.md"
+Security = "https://github.com/navapbc/rebar/blob/main/SECURITY.md"
+
 [project.optional-dependencies]
-mcp = ["mcp>=1.2"]
+mcp = ["mcp>=1.9"]
 # Review-bot webhook receiver (epic d251 / story S2). OPTIONAL — never required by
 # core rebar. A thin FastAPI ASGI app (src/rebar/review_bot/) that receives Gerrit
 # webhooks and imports the review kernel as a library (see docs/adr/0007). The
@@ -112,7 +143,7 @@ grounding-t2 = [
 ]
 dev = [
     "pytest>=8",
-    "mcp>=1.2",
+    "mcp>=1.9",
     # jsonschema/referencing moved to core [project.dependencies] — the schema
     # registry + workflow contract validation are lean-runtime paths, not dev-only.
     "hatchling>=1.18",
@@ -300,6 +331,12 @@ select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201"]
 # Import-cycle strangler gate CLI — prints its guard report + ::error:: annotations
 # to stdout (the CI surface). Legitimate-print category like the other scripts. KEEPS T201.
 "scripts/check_import_cycles.py" = ["T201"]
+# server.json env-contract drift gate CLI — prints its guard report + ::error::
+# annotations to stdout (the CI surface). Legitimate-print category. KEEPS T201.
+"scripts/check_server_manifest.py" = ["T201"]
+# TypedDict generator CLI (story 3a10) — prints its regenerate/--check report to
+# stdout (the CI drift-gate surface). Legitimate-print category. KEEPS T201.
+"src/rebar/schemas/gen_types.py" = ["T201"]
 
 [tool.mypy]
 # Scoped, opt-in type checking. The pure in-process library core

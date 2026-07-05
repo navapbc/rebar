@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import time
+from collections.abc import Mapping
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -513,7 +514,7 @@ def _manifest_int(manifest: list[str] | None, prefix: str) -> int:
 
 # ── the fast claim-gate check (no LLM, no heavy reads) ────────────────────────────
 def compute_validity(
-    attestation: dict[str, Any] | None,
+    attestation: Mapping[str, Any] | None,
     ticket_state: dict[str, Any],
     kind: str,
     *,

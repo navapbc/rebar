@@ -25,12 +25,59 @@ orphan branch (worktree at `.tickets-tracker/`); state is computed by replaying
 events. A level-triggered reconciler bidirectionally syncs tickets with Jira. Both
 the branch name and the worktree/symlink dir default to those values but are
 configurable (`tracker.branch` / `tracker.dir`) — see [Configuration](#configuration).
+Reads stay sub-second into the thousands of tickets; for measured numbers and
+git-growth expectations see [`docs/scale-envelope.md`](docs/scale-envelope.md).
 
 This project was extracted from the `digital-service-orchestra` Claude Code
 plugin. It began as a bash + Python engine; that engine has since been fully ported
 to in-process Python (see `docs/bash-migration.md`). The reconciler ships under
 `src/rebar/_engine/` as package data, and the three interfaces are thin layers over
 the in-process core.
+
+**New here? Jump to the [Quickstart](#quickstart)** to run one ticket end-to-end.
+
+## Quickstart
+
+Install rebar, initialize a store in your repo, and run one ticket through the
+whole loop. This is the golden path — for every command and flag,
+`rebar --help` (and `rebar <command> --help`) is the authoritative reference;
+this section deliberately doesn't reproduce it.
+
+```bash
+pipx install nava-rebar        # the `rebar` CLI on your PATH (see Install for library/MCP/agents extras)
+cd /path/to/your/repo
+rebar init                     # -> Ticket system initialized.
+```
+
+Create a ticket, see what's ready, claim it, and close it:
+
+```bash
+# Create a task — prints the human line (an id + a memorable alias) then the id:
+rebar create task "Add a login page" --priority 2
+#   Created ticket reel-lot-tea (e804-6013-4fcb-4127): Add a login page
+
+# What's ready to work (nothing blocking it)?
+rebar ready
+
+# Claim it atomically (open -> in_progress + assignee; exit 10 if already taken):
+rebar claim reel-lot-tea --assignee alice
+#   CLAIMED: e804-6013-4fcb-4127 (assignee: alice)
+
+# ...do the work, then close it (there is no `rebar close` — use transition):
+rebar transition reel-lot-tea in_progress closed
+```
+
+Point a coding agent at the same repo over MCP — one entry in your MCP client
+config (installs on demand via `uvx`; no separate install step):
+
+```json
+{ "mcpServers": { "rebar": { "command": "uvx", "args": ["--from", "nava-rebar[mcp]", "rebar-mcp"] } } }
+```
+
+That's the whole loop — **init → create → ready → claim → close** — shared through
+the repo so many agents (and teammates via Jira) coordinate without stepping on
+each other. Next: [Install](#install) for the library / MCP / agent extras, or
+`rebar --help` for the full command list.
 
 ## Why rebar
 
@@ -388,6 +435,12 @@ the write — it leaves the local commit intact and the branch diverged.
 `origin/tickets`, so unpushed activity is observable. See
 [`docs/concurrency.md`](docs/concurrency.md) for the push/merge-retry algorithm.
 
+How big can it get? Reads stay sub-second into the thousands of tickets; writes
+are bounded by the per-event git commit (~25–30/s). See
+[`docs/scale-envelope.md`](docs/scale-envelope.md) for representative measured
+numbers, git-growth expectations, and the compaction/maintenance commands, and
+[`docs/import-export.md`](docs/import-export.md) for bulk NDJSON export/import.
+
 ### Reads share one freshness policy across CLI, library, and MCP
 
 Every **read** — `show`, `list`, `ready`, `search`, `deps` — first runs a
@@ -443,8 +496,8 @@ import rebar
 
 rebar.init_repo(repo_root="/path/to/repo")
 tid = rebar.create_ticket("story", "Add login page", priority=2)
-ticket = rebar.show_ticket(tid)                 # dict
-tickets = rebar.list_tickets(status="open")     # list[dict]
+ticket = rebar.show_ticket(tid)                 # TicketState
+tickets = rebar.list_tickets(status="open")     # list[TicketState]
 try:
     rebar.transition(tid, "open", "in_progress")
 except rebar.ConcurrencyError:
@@ -459,6 +512,32 @@ verdict = rebar.verify_signature(tid)            # {"verified": True, "verdict":
 # Native, in-process reads (no subprocess):
 from rebar import reduce_all_tickets, reduce_ticket
 ```
+
+**Typed return contract.** The schema-backed `rebar.*` functions are annotated
+with `TypedDict`s in [`rebar.types`](src/rebar/types.py) (e.g. `TicketState`,
+`TransitionResult`, `ClaimResult`), so a type checker knows which keys a return
+value carries. These are derived from the canonical JSON Schemas and describe the
+*guaranteed* keys — returns stay plain `dict`s and the runtime shape is open
+(extra keys may appear), so this is a floor, not a closed universe. Import them for
+annotations/`TypedDict` access:
+
+```python
+from rebar.types import TicketState, TransitionResult
+
+t: TransitionResult = rebar.transition(tid, "open", "in_progress")
+```
+
+**Stable exception surface.** `rebar.RebarError` (base) and its subclass
+`rebar.ConcurrencyError` are the public exceptions. `RebarError` carries
+`.returncode` (the underlying engine exit code) and `.stderr`; `ConcurrencyError`
+(exit 10) means a status-dependent op (`transition`/`claim`/`reopen`) lost an
+optimistic-concurrency race — re-read and retry, don't force. Catch `RebarError`
+to handle any rebar failure uniformly.
+
+**What's stable to depend on.** rebar is versioned 0.x; see
+[docs/api-stability.md](docs/api-stability.md) for the per-surface stability
+matrix (CLI, `--output json` schemas, the `rebar.*` facade, MCP tools, the event
+wire format, and config keys) and what "may change before 1.0" means for each.
 
 ## MCP server
 

@@ -63,3 +63,11 @@ jobs:
           path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # PEP 740 digital attestations: the action generates + uploads
+          # provenance attestations for each artifact, signed via the same OIDC
+          # identity as Trusted Publishing. On by default when id-token: write is
+          # present; set explicitly so a future default flip can't silently drop
+          # them. Consumers verify with `gh attestation verify` — see
+          # docs/releasing.md ("Supply-chain attestations").
+          attestations: true

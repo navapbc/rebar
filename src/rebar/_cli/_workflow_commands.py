@@ -127,7 +127,11 @@ def _workflow(argv: list[str]) -> int:
         metavar="KEY=VALUE",
         help="a workflow input (repeatable)",
     )
-    p_run.add_argument("--ticket", help="persist run-state to this ticket (durable + resumable)")
+    p_run.add_argument(
+        "--ticket",
+        help="persist step effects to this ticket's event log; a later re-invocation "
+        "with --run-id skips completed steps (resume-by-re-invocation, not auto-resume)",
+    )
     p_run.add_argument("--run-id", help="reuse a run id (idempotent resume)")
     p_run.add_argument(
         "--dry-run",

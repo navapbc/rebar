@@ -17,6 +17,8 @@ globals).
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import rebar
 from rebar._mcp_models import (
     ClaimResultOut,
@@ -24,6 +26,7 @@ from rebar._mcp_models import (
     FileImpactItemOut,
     SignResultOut,
     VerifyCommandItemOut,
+    tool_annotation_presets,
 )
 
 
@@ -39,7 +42,9 @@ def register_write_tools(mcp, ctx) -> None:
     _allow_llm = ctx.allow_llm
     logger = ctx.logger
 
-    @mcp.tool()
+    _ANN = tool_annotation_presets()
+
+    @mcp.tool(annotations=_ANN["MUTATE"])
     def create_ticket(
         ticket_type: str,
         title: str,
@@ -64,7 +69,7 @@ def register_write_tools(mcp, ctx) -> None:
             )
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["MUTATE"])
     def transition_ticket(ticket_id: str, current_status: str, target_status: str) -> dict:
         """Transition a ticket's status (optimistic concurrency). Returns the
         engine result {ticket_id, from, to, newly_unblocked}.
@@ -74,9 +79,9 @@ def register_write_tools(mcp, ctx) -> None:
         As with ``claim_ticket``, there is intentionally NO ``force`` bypass over
         MCP — an agent that hits the gate must earn an attestation
         (``review_plan``); the audited ``--force`` override is CLI/library-only."""
-        return rebar.transition(ticket_id, current_status, target_status)
+        return cast("dict[str, Any]", rebar.transition(ticket_id, current_status, target_status))
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["MUTATE"])
     def claim_ticket(ticket_id: str, assignee: str | None = None) -> ClaimResultOut:
         """Atomically claim an OPEN ticket (-> in_progress + assignee).
 
@@ -85,19 +90,19 @@ def register_write_tools(mcp, ctx) -> None:
         """
         return ClaimResultOut.model_validate(rebar.claim(ticket_id, assignee=assignee))
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["MUTATE"])
     def reopen_ticket(ticket_id: str) -> dict:
         """Reopen a closed ticket (closed -> open). Optimistic-concurrency:
         raises a tool error if the ticket is not currently closed."""
-        return rebar.reopen(ticket_id)
+        return cast("dict[str, Any]", rebar.reopen(ticket_id))
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["MUTATE"])
     def comment_ticket(ticket_id: str, body: str) -> str:
         """Append a comment to a ticket."""
         rebar.comment(ticket_id, body)
         return "ok"
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["MUTATE"])
     def log_session(
         entry: str,
         summary: str | None = None,
@@ -116,7 +121,7 @@ def register_write_tools(mcp, ctx) -> None:
         )
         return CreateResultOut.model_validate({"id": res["id"], "alias": res.get("alias")})
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["MUTATE"])
     def edit_ticket(
         ticket_id: str,
         title: str | None = None,
@@ -148,38 +153,38 @@ def register_write_tools(mcp, ctx) -> None:
         )
         return "ok"
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["MUTATE"])
     def link_tickets(id1: str, id2: str, relation: str) -> str:
         """Link two tickets (one of the six canonical relations: blocks |
         depends_on | relates_to | duplicates | supersedes | discovered_from)."""
         rebar.link(id1, id2, relation)
         return "ok"
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["MUTATE"])
     def unlink_tickets(id1: str, id2: str) -> str:
         """Remove a link between two tickets."""
         rebar.unlink(id1, id2)
         return "ok"
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
     def tag_ticket(ticket_id: str, tag: str) -> str:
         """Add a tag to a ticket."""
         rebar.tag(ticket_id, tag)
         return "ok"
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
     def untag_ticket(ticket_id: str, tag: str) -> str:
         """Remove a tag from a ticket."""
         rebar.untag(ticket_id, tag)
         return "ok"
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["DESTRUCTIVE"])
     def archive_ticket(ticket_id: str) -> str:
         """Archive a ticket (excludes it from the default list)."""
         rebar.archive(ticket_id)
         return "ok"
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["DESTRUCTIVE"])
     def compact_ticket(ticket_id: str | None = None) -> str:
         """Compact a ticket's event log (or all tickets if id omitted)."""
         rebar.compact(ticket_id)
@@ -188,20 +193,20 @@ def register_write_tools(mcp, ctx) -> None:
     # ── File-impact / verify-commands writes (WS5d; feed next-batch) ───────
     # Typed item params so the tools advertise an inputSchema (the {path,reason}
     # / {dd_id,dd_text,command} shapes mirror the get_* output models + schemas).
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
     def set_file_impact(ticket_id: str, impact: list[FileImpactItemOut]) -> str:
         """Record file impact (list of {path, reason}) for conflict-aware
         next-batch scheduling."""
         rebar.set_file_impact(ticket_id, [_dump(e) for e in impact])
         return "ok"
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
     def set_verify_commands(ticket_id: str, commands: list[VerifyCommandItemOut]) -> str:
         """Record DD-level verify commands (list of {dd_id, dd_text, command})."""
         rebar.set_verify_commands(ticket_id, [_dump(e) for e in commands])
         return "ok"
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["MUTATE"])
     def sign_manifest(ticket_id: str, manifest: list[str]) -> SignResultOut:
         """Sign a manifest of verified steps with the environment signing key.
 
@@ -212,7 +217,7 @@ def register_write_tools(mcp, ctx) -> None:
         later — only this environment (holding the key) can certify."""
         return SignResultOut.model_validate(rebar.sign_manifest(ticket_id, manifest))
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["MUTATE_OPEN_WORLD"])
     async def run_workflow(
         workflow: str,
         ticket_id: str,
@@ -222,12 +227,18 @@ def register_write_tools(mcp, ctx) -> None:
         source: str | None = None,
     ) -> dict:
         """Start a workflow run; returns {run_id, ticket_id, status:'running'}
-        IMMEDIATELY (async — the run executes in the background so it survives
-        client timeouts). Poll get_workflow_status / get_workflow_result to read
-        its outcome. Run-state persists durably to ``ticket_id``'s event log
-        (resumable on crash). ``workflow`` is a .rebar/workflows/<name> name or a
-        file path; ``dry_run`` executes agent steps with the offline FakeRunner
-        (no tokens). Write tool (gated by REBAR_MCP_READONLY).
+        IMMEDIATELY (async — the run executes on a background **daemon thread**, so
+        it survives client request timeouts). Poll get_workflow_status /
+        get_workflow_result to read its outcome. DURABILITY IS LIMITED: the daemon
+        thread does NOT survive the MCP process exiting, and there is NO reaper or
+        automatic resume — if the process dies mid-run the run is left ``running``
+        forever and nothing re-drives it. Step effects ARE persisted to
+        ``ticket_id``'s event log with idempotency markers, so a run can be
+        **resumed only by explicitly re-invoking it** (already-completed steps are
+        then skipped); it does not resume on its own. ``workflow`` is a
+        .rebar/workflows/<name> name or a file path; ``dry_run`` executes agent
+        steps with the offline FakeRunner (no tokens). Write tool (gated by
+        REBAR_MCP_READONLY).
 
         A workflow with LLM/agent steps reads a snapshot pinned at ``ref`` (default
         ``origin/main``) in ``source=attested`` (default) mode — never the server's

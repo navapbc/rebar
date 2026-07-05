@@ -15,13 +15,17 @@ plain ``dict`` (a model-produced result), so no output models are imported here.
 
 from __future__ import annotations
 
+from rebar._mcp_models import tool_annotation_presets
+
 
 def register_llm_tools(mcp, ctx) -> None:
     """Register the LLM/agent tools on ``mcp`` (see module docstring)."""
     _allow_llm = ctx.allow_llm
     _readonly = ctx.readonly
 
-    @mcp.tool()
+    _ANN = tool_annotation_presets()
+
+    @mcp.tool(annotations=_ANN["READ_ONLY_OPEN_WORLD"])
     def review_ticket(
         ticket_id: str,
         reviewer_id: str | None = None,
@@ -53,7 +57,7 @@ def register_llm_tools(mcp, ctx) -> None:
 
         return rebar.llm.review_ticket(ticket_id, reviewer_id, graph=graph, ref=ref, source=source)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY_OPEN_WORLD"])
     def review_code(
         base: str = "HEAD~1",
         head: str = "HEAD",
@@ -85,7 +89,7 @@ def register_llm_tools(mcp, ctx) -> None:
             base=base, head=head, reviewers=reviewers, ref=ref, source=source
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY_OPEN_WORLD"])
     def scan_spec(
         spec_text: str,
         batch_size: int = 5,
@@ -112,7 +116,7 @@ def register_llm_tools(mcp, ctx) -> None:
             spec_text, batch_size=batch_size, ref=ref, source=source
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY_OPEN_WORLD"])
     def verify_completion(
         ticket_id: str,
         graph: bool | None = None,
@@ -150,7 +154,7 @@ def register_llm_tools(mcp, ctx) -> None:
 
         return rebar.llm.verify_completion(ticket_id, graph=graph, ref=ref, source=source)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANN["READ_ONLY_OPEN_WORLD"])
     def review_plan(ticket_id: str, ref: str | None = None, source: str | None = None) -> dict:
         """Run the plan-review gate on a ticket -> a plan_review_verdict dict
         {verdict: "PASS"|"BLOCK"|"INDETERMINATE", blocking[], advisory[], coaching[],

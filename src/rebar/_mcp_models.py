@@ -173,3 +173,41 @@ except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     SignResultOut = VerifySignatureResultOut = None  # type: ignore[assignment,misc]
     WorkflowRunOut = None  # type: ignore[assignment,misc]
     GroundingInfoOut = GroundingBackendOut = None  # type: ignore[assignment,misc]
+
+
+def tool_annotation_presets() -> dict:
+    """The single source of truth for MCP ``ToolAnnotations`` behavior hints, keyed
+    by category, applied by the ``register_*_tools`` registrars.
+
+    ``ToolAnnotations`` is imported LAZILY here (not at module top) so this leaf
+    module stays importable WITHOUT the ``mcp`` extra — the registrars call this
+    only while building the server, at which point ``mcp`` is guaranteed present.
+
+    Hint semantics (per the MCP spec, all advisory/untrusted):
+    - ``READ_ONLY`` — does not modify its environment; local.
+    - ``READ_ONLY_OPEN_WORLD`` — no store mutation, but reaches an external system
+      (a live LLM): the review/verify tools.
+    - ``MUTATE`` — modifies the store, non-destructive, not safe to blindly repeat.
+    - ``MUTATE_IDEMPOTENT`` — modifies the store but repeating with the same args is
+      a no-op (tag/untag, set-* replace-semantics, fsck's stale-lock cleanup).
+    - ``DESTRUCTIVE`` — modifies the store irreversibly (archive/compact).
+    - ``MUTATE_OPEN_WORLD`` — may mutate AND reach an external system (run_workflow;
+      reconcile in its live/bootstrap modes — annotated conservatively even though
+      its default mode is a local dry run).
+    """
+    from mcp.types import ToolAnnotations
+
+    return {
+        "READ_ONLY": ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+        "READ_ONLY_OPEN_WORLD": ToolAnnotations(readOnlyHint=True, openWorldHint=True),
+        "MUTATE": ToolAnnotations(
+            readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False
+        ),
+        "MUTATE_IDEMPOTENT": ToolAnnotations(
+            readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
+        ),
+        "DESTRUCTIVE": ToolAnnotations(
+            readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
+        ),
+        "MUTATE_OPEN_WORLD": ToolAnnotations(readOnlyHint=False, openWorldHint=True),
+    }
