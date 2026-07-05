@@ -481,6 +481,11 @@ t: TransitionResult = rebar.transition(tid, "open", "in_progress")
 optimistic-concurrency race — re-read and retry, don't force. Catch `RebarError`
 to handle any rebar failure uniformly.
 
+**What's stable to depend on.** rebar is versioned 0.x; see
+[docs/api-stability.md](docs/api-stability.md) for the per-surface stability
+matrix (CLI, `--output json` schemas, the `rebar.*` facade, MCP tools, the event
+wire format, and config keys) and what "may change before 1.0" means for each.
+
 ## MCP server
 
 ```bash

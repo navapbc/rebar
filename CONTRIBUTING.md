@@ -166,6 +166,13 @@ keep working; tags are not locked, so releases still publish normally.)
 > un-lock in [`infra/runbooks/github-mirror-lock.md`](infra/runbooks/github-mirror-lock.md).
 > A single rejected human push is the lock working as intended, not a reason to roll back.
 
+> **Changing a public surface?** rebar is 0.x, but its public surfaces have
+> differing stability guarantees — the `--output json` schemas and the event wire
+> format are compatibility-bearing even pre-1.0. Before you change a CLI flag, a
+> JSON schema, a `rebar.*` signature, an MCP tool, an event type, or a config key,
+> read [docs/api-stability.md](docs/api-stability.md) and follow the
+> deprecate-then-remove rule it documents.
+
 ---
 
 ## 4. Multi-story features (feature branches)
