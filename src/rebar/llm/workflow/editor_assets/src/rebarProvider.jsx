@@ -1154,8 +1154,14 @@ function isCriterionAuthoring(a) {
 }
 
 // Build the `routing` object from the authoring store (or null when not authoring a criterion).
+//
+// The batch-criterion prompt picker (targetKind === "criterion") authors a rubric it references
+// by prompt-library id — it must NOT force the plan-review criteria_routing.json ACTIVATION
+// overlay. That overlay (author_criterion_overlay) requires a `project.<name>`-prefixed id and
+// 400s an un-namespaced one (bug jinx-node-mudra), which stranded the new id on the step. So
+// return null for that reference flow; the genuine overlay-activation flow keeps its routing.
 function buildRouting(a) {
-  if (a.kind !== "criterion") return null;
+  if (a.kind !== "criterion" || a.targetKind === "criterion") return null;
   const scope = (a.routingScope || "")
     .split(",")
     .map((s) => s.trim())

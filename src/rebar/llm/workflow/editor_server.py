@@ -331,14 +331,26 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             "description": str(data.get("description") or data.get("title") or pid),
         }
         body_md = str(data.get("body") or "")
+        routing = data.get("routing")
         try:
-            if kind == "criterion":
-                # A criterion is authored end-to-end (rubric at criterion_prompt_id + its
-                # atomic routing overlay) so a net-new project.<name> round-trips (stew-kid).
+            if kind == "criterion" and isinstance(routing, dict) and routing:
+                # ACTIVATION flow: a project.<name> criterion authored end-to-end (rubric at the
+                # sanitized criterion_prompt_id + its atomic routing overlay) so a net-new
+                # project.<name> round-trips (stew-kid). Requires the project-prefix (6e31).
                 from .criterion_preview import author_criterion
 
-                path = author_criterion(
-                    str(self.session.repo_root), pid, meta, body_md, data.get("routing")
+                path = author_criterion(str(self.session.repo_root), pid, meta, body_md, routing)
+            elif kind == "criterion":
+                # REFERENCE flow (bug jinx-node-mudra): a batch step references a criterion rubric
+                # by its prompt-library id, so write the criterion-category rubric at the RAW id
+                # (no criterion_prompt_id sanitization, no routing overlay) — the id the step
+                # references IS the file that resolves. Forcing the overlay here 400'd an
+                # un-namespaced id and stranded the reference on the step.
+                from rebar.llm.prompting.prompt_library import CRITERION_CATEGORY
+
+                meta["category"] = CRITERION_CATEGORY
+                path = create_prompt(
+                    pid, write_front_matter(meta, body_md), repo_root=self.session.repo_root
                 )
             else:
                 path = create_prompt(

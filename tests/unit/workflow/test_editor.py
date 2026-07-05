@@ -226,6 +226,86 @@ def test_save_rejects_xxe_external_entity(tmp_path):
     assert path.read_text(encoding="utf-8") == before
 
 
+def _post_library_create(base, token, payload):
+    """POST /library/create; return (http_status, decoded_json_body)."""
+    req = urllib.request.Request(
+        base + "/library/create",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={"X-Rebar-Token": token, "Content-Type": "application/json"},
+    )
+    try:
+        resp = urllib.request.urlopen(req)
+        return resp.status, json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read())
+
+
+@pytest.fixture
+def _repo_server(tmp_path, monkeypatch):
+    """A loopback edit server whose repo_root is a writable tmp project, so /library/create
+    writes authored prompts into tmp's ``.rebar/prompts`` (not the real source tree)."""
+    (tmp_path / ".rebar" / "prompts").mkdir(parents=True)
+    import rebar.config as _cfg
+
+    monkeypatch.setattr(_cfg, "repo_root", lambda explicit=None: tmp_path)
+    path = _wf_file(tmp_path)
+    server, host, port, token = editor.edit_workflow(
+        path, open_browser=False, serve_forever=False, host="127.0.0.1"
+    )
+    try:
+        yield tmp_path, f"http://{host}:{port}", token
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.allow_network  # loopback only
+def test_library_create_criterion_reference_writes_raw_id_no_overlay(_repo_server):
+    # Bug jinx-node-mudra: authoring a batch-criterion rubric (kind=criterion, NO routing) must
+    # write the criterion-category rubric at the RAW id — the id the batch step references — and
+    # return 200. It must NOT force the routing overlay (which 400'd an un-namespaced id and
+    # stranded the reference on the step) nor sanitize the filename to plan-review-<id>.
+    repo, base, token = _repo_server
+    status, body = _post_library_create(
+        base, token, {"id": "my-new-crit", "kind": "criterion", "body": "Check the new thing."}
+    )
+    assert status == 200 and body["ok"] is True, body
+    written = repo / ".rebar" / "prompts" / "my-new-crit.md"
+    assert written.is_file(), (
+        f"rubric not written at the raw id: {list((repo / '.rebar' / 'prompts').iterdir())}"
+    )
+    text = written.read_text(encoding="utf-8")
+    assert "category: plan-review-criterion" in text  # criterion category still stamped
+    assert not (repo / ".rebar" / "criteria_routing.json").exists()  # no activation overlay
+
+
+@pytest.mark.allow_network  # loopback only
+def test_library_create_criterion_routing_still_requires_project_prefix(_repo_server):
+    # The genuine ACTIVATION flow (routing present) is unchanged: an un-namespaced id is still
+    # rejected (namespace rule intact), while a project.<name> id round-trips to the sanitized
+    # rubric filename + writes the routing overlay.
+    _repo, base, token = _repo_server
+    routing = {
+        "exec": "1-TURN",
+        "applies_at": {"scope": ["container", "leaf"]},
+        "block_threshold": 0.95,
+        "default_posture": "advisory",
+    }
+    bad_status, bad_body = _post_library_create(
+        base, token, {"id": "my-new-crit", "kind": "criterion", "body": "x", "routing": routing}
+    )
+    assert bad_status == 400 and bad_body["ok"] is False
+    assert "project." in "; ".join(bad_body["errors"])
+
+    ok_status, ok_body = _post_library_create(
+        base,
+        token,
+        {"id": "project.my-new-crit", "kind": "criterion", "body": "x", "routing": routing},
+    )
+    assert ok_status == 200 and ok_body["ok"] is True, ok_body
+
+
 def test_sequential_saves_each_back_up_the_prior_ir(tmp_path):
     # Two saves in a row both succeed; the .bak after the second reflects the state
     # written by the FIRST (the backup is taken before each overwrite, so the prior IR
