@@ -255,8 +255,15 @@ class PydanticAIRunner:
         # output truncated (stop_reason=max_tokens) and tripped the structured-output retry.
         # max_tokens is a base ModelSettings field, so it rides alongside the cache flags.
         model_settings = dict(cache_settings) if cache_settings is not None else {}
-        if cfg.max_tokens:
-            model_settings["max_tokens"] = cfg.max_tokens
+        # The output cap is PER-REQUEST too (bug spy-luge-wool / sole-teal-churn): a finding-rich
+        # Pass-2 verifier carries a scaled max_tokens on ``req.config`` so its structured output
+        # doesn't truncate (finish_reason=length), without mutating a shared runner's self._config.
+        # A request can only RAISE the configured floor, never lower it.
+        eff_max_tokens = effective_max_tokens(
+            cfg.max_tokens, getattr(req.config, "max_tokens", None)
+        )
+        if eff_max_tokens:
+            model_settings["max_tokens"] = eff_max_tokens
         if model_settings:
             kwargs["model_settings"] = model_settings
         # pydantic-ai's request_limit counts MODEL REQUESTS (~1 per tool-call cycle).
@@ -478,6 +485,16 @@ def effective_max_iterations(floor: int, requested: int | None) -> int:
     verifier scaled by its finding count), without mutating a shared runner's ``self._config``
     under other steps. The request can only raise the operator-configured floor, never lower it —
     so ``max(floor, requested)``; a missing/None request value leaves the floor untouched."""
+    return max(floor, requested or floor)
+
+
+def effective_max_tokens(floor: int, requested: int | None) -> int:
+    """The PER-REQUEST output-token cap (bug spy-luge-wool / sole-teal-churn) — the exact analogue
+    of :func:`effective_max_iterations` for the per-call OUTPUT budget. A finding-rich Pass-2 verify
+    emits ~1 verification object per finding, so its structured output overflows a fixed cap
+    (``finish_reason=length``) and the whole review collapses to INDETERMINATE. A caller scales
+    the cap for a single call via ``RunRequest.config.max_tokens``; it can only RAISE the operator
+    floor, never lower it — ``max(floor, requested)`` — a missing/None request leaves it as-is."""
     return max(floor, requested or floor)
 
 

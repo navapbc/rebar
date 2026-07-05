@@ -20,6 +20,7 @@ FakeAgentRunner for ``dry_run=True`` (no tokens). Scripted steps always run for 
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,14 @@ from . import executor as _ex
 from . import steps as _steps  # noqa: F401 — importing registers the built-in scripted steps
 from .migrate import migrate_to_current
 from .schema import load_workflow as _load_file
+
+logger = logging.getLogger(__name__)
+
+# Ceiling for the workload-scaled per-call output cap (bug spy-luge-wool / sole-teal-churn).
+# 64000 is the value proven to let a ~30-finding verify complete (sole-teal-churn evidence) and
+# stays within the output limit of the models the gates run on — so scaling cannot turn a
+# truncation into an API "max_tokens too large" error on a pathological finding count.
+_MAX_OUTPUT_TOKENS_CEILING = 64000
 
 
 def _repo_root(repo_root: str | None) -> Path:
@@ -158,6 +167,17 @@ class RunnerAgentStep(_ex.AgentStepRunner):
         items = ctx.inputs.get("findings")
         if per_item and isinstance(items, list) and items:
             cfg = _replace(cfg, max_iterations=max(cfg.max_iterations, int(per_item) * len(items)))
+        # The per-CALL OUTPUT cap must scale with the workload too (bug spy-luge-wool /
+        # sole-teal-churn): the Pass-2 verifier's structured `plan_review_verification` grows
+        # ~1 verification object per finding, so a FIXED max_tokens truncates
+        # (finish_reason=length) on a finding-rich plan and the whole review collapses to
+        # INDETERMINATE. A `with: {output_tokens_per_item: <n>}` input raises this call's output
+        # cap to max(configured floor, n × len(findings)), capped at a model-safe ceiling so a
+        # pathological finding count can't request an output larger than the model can emit.
+        tokens_per_item = ctx.inputs.get("output_tokens_per_item")
+        if tokens_per_item and isinstance(items, list) and items:
+            scaled = min(int(tokens_per_item) * len(items), _MAX_OUTPUT_TOKENS_CEILING)
+            cfg = _replace(cfg, max_tokens=max(cfg.max_tokens, scaled))
         prompt_id = ctx.step.get("prompt") or ""
         prompt = prompts.get_prompt(prompt_id, repo_root=self._repo_root)
         ticket_id = str(ctx.inputs.get("ticket_id") or ctx.target_ticket or "")
@@ -190,6 +210,20 @@ class RunnerAgentStep(_ex.AgentStepRunner):
         # as a workflow-level fan-out.
         raw_instructions = ctx.inputs.get("instructions")
         chunks = raw_instructions if isinstance(raw_instructions, list) else [raw_instructions]
+        if not chunks:
+            # A LITERAL empty instructions list would run the model ZERO times and merge to {} —
+            # a SILENT no-op that degrades every finding to `no-verification` with an empty stderr
+            # and verify_requests=0, indistinguishable from a healthy review (bug turf-purple-dot).
+            # Never silently skip: log a diagnostic and fall back to ONE aggregate call
+            # (chunk=None → default_instructions), mirroring the producer's own `chunks or [[]]`.
+            n_items = len(items) if isinstance(items, list) else 0
+            logger.warning(
+                "workflow step %r received an empty instructions list; %d finding(s) would "
+                "degrade unverified — dispatching one aggregate call instead of skipping.",
+                ctx.step.get("id") or ctx.step.get("prompt") or "?",
+                n_items,
+            )
+            chunks = [None]
         runner = get_runner(cfg, override=self._runner)
         outs: list[dict] = []
         for chunk in chunks:
