@@ -185,6 +185,25 @@ def test_adapter_indeterminate_is_coverage_gap_block(monkeypatch, tmp_path):
     assert "coverage-gap (llm-unavailable)" in out["message"]
 
 
+def test_adapter_indeterminate_no_gap_no_findings_is_coverage_gap_not_finding(
+    monkeypatch, tmp_path
+):
+    # Bug spy-luge-wool (expanded scope): a non-PASS (INDETERMINATE) verdict with ZERO blocking
+    # findings and NO detected coverage gap was mapped to _block("finding"), rendering the
+    # misleading "[LLM-Review: BLOCK — finding] rebar code review found 0 blocking issue(s):"
+    # (the false -1 observed on change 223). It must be a coverage-gap/INDETERMINATE BLOCK —
+    # never a "finding" BLOCK with no findings.
+    _patch_verdict(
+        monkeypatch,
+        {"verdict": "INDETERMINATE", "blocking": [], "advisory": [], "coverage": {"llm_ran": True}},
+    )
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
+    assert out["decision"] == "BLOCK" and out["coverage_gap"] is True
+    assert "BLOCK — finding" not in out["message"]
+    assert "coverage-gap (indeterminate)" in out["message"]
+    assert "0 blocking issue(s)" not in out["message"]
+
+
 def test_adapter_inert_disabled_verdict_never_passes(monkeypatch, tmp_path):
     # a PASS-but-disabled (inert) verdict must NEVER become a submittable PASS (defense-in-depth).
     _patch_verdict(

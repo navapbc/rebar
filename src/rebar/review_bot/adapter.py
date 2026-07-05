@@ -50,6 +50,7 @@ _TAG_SUFFIXES: dict[str, str] = {
     "llm-unavailable": "BLOCK — coverage-gap (llm-unavailable)",
     "scanner": "BLOCK — coverage-gap (scanner)",
     "review-error": "BLOCK — coverage-gap (review-error)",
+    "indeterminate": "BLOCK — coverage-gap (indeterminate)",
 }
 
 #: Map the four-pass kernel severity ({critical,major,minor,none}) to the finding vocabulary the
@@ -137,6 +138,8 @@ def _summarize(reason: str, verdict: dict[str, Any]) -> str:
         detail = {
             "gate-disabled": "the code-review gate is disabled — cannot certify",
             "llm-unavailable": f"the review LLM was unavailable ({llm_err})",
+            "indeterminate": "the review returned INDETERMINATE with no blocking findings "
+            "(could not establish coverage — not a code finding)",
         }.get(reason, "the code review could not run")
     return (
         f"rebar code review coverage gap — {detail}. Fail-closed veto (infrastructure, not your "
@@ -202,4 +205,12 @@ def code_review_decision(
             "findings": _translate_findings(verdict),
             "coverage_gap": False,
         }
-    return _block(gap if gap is not None else "finding", verdict, merge_commits=merge_commits)
+    if gap is not None:
+        return _block(gap, verdict, merge_commits=merge_commits)
+    if verdict.get("blocking"):
+        return _block("finding", verdict, merge_commits=merge_commits)
+    # Non-PASS (e.g. INDETERMINATE) with NO blocking findings and no detected coverage gap: the
+    # review could not establish coverage — a coverage gap, NOT a code finding. Mapping this to
+    # "finding" rendered the misleading "[LLM-Review: BLOCK — finding] ... 0 blocking issue(s):"
+    # false -1 on a clean change (bug spy-luge-wool, observed on change 223).
+    return _block("indeterminate", verdict, merge_commits=merge_commits)
