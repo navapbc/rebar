@@ -17,6 +17,8 @@ globals).
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import rebar
 from rebar._mcp_models import (
     ClaimResultOut,
@@ -77,7 +79,7 @@ def register_write_tools(mcp, ctx) -> None:
         As with ``claim_ticket``, there is intentionally NO ``force`` bypass over
         MCP — an agent that hits the gate must earn an attestation
         (``review_plan``); the audited ``--force`` override is CLI/library-only."""
-        return rebar.transition(ticket_id, current_status, target_status)
+        return cast("dict[str, Any]", rebar.transition(ticket_id, current_status, target_status))
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def claim_ticket(ticket_id: str, assignee: str | None = None) -> ClaimResultOut:
@@ -92,7 +94,7 @@ def register_write_tools(mcp, ctx) -> None:
     def reopen_ticket(ticket_id: str) -> dict:
         """Reopen a closed ticket (closed -> open). Optimistic-concurrency:
         raises a tool error if the ticket is not currently closed."""
-        return rebar.reopen(ticket_id)
+        return cast("dict[str, Any]", rebar.reopen(ticket_id))
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def comment_ticket(ticket_id: str, body: str) -> str:

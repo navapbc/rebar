@@ -334,6 +334,9 @@ select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201"]
 # server.json env-contract drift gate CLI — prints its guard report + ::error::
 # annotations to stdout (the CI surface). Legitimate-print category. KEEPS T201.
 "scripts/check_server_manifest.py" = ["T201"]
+# TypedDict generator CLI (story 3a10) — prints its regenerate/--check report to
+# stdout (the CI drift-gate surface). Legitimate-print category. KEEPS T201.
+"src/rebar/schemas/gen_types.py" = ["T201"]
 
 [tool.mypy]
 # Scoped, opt-in type checking. The pure in-process library core

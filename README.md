@@ -443,8 +443,8 @@ import rebar
 
 rebar.init_repo(repo_root="/path/to/repo")
 tid = rebar.create_ticket("story", "Add login page", priority=2)
-ticket = rebar.show_ticket(tid)                 # dict
-tickets = rebar.list_tickets(status="open")     # list[dict]
+ticket = rebar.show_ticket(tid)                 # TicketState
+tickets = rebar.list_tickets(status="open")     # list[TicketState]
 try:
     rebar.transition(tid, "open", "in_progress")
 except rebar.ConcurrencyError:
@@ -459,6 +459,27 @@ verdict = rebar.verify_signature(tid)            # {"verified": True, "verdict":
 # Native, in-process reads (no subprocess):
 from rebar import reduce_all_tickets, reduce_ticket
 ```
+
+**Typed return contract.** The schema-backed `rebar.*` functions are annotated
+with `TypedDict`s in [`rebar.types`](src/rebar/types.py) (e.g. `TicketState`,
+`TransitionResult`, `ClaimResult`), so a type checker knows which keys a return
+value carries. These are derived from the canonical JSON Schemas and describe the
+*guaranteed* keys — returns stay plain `dict`s and the runtime shape is open
+(extra keys may appear), so this is a floor, not a closed universe. Import them for
+annotations/`TypedDict` access:
+
+```python
+from rebar.types import TicketState, TransitionResult
+
+t: TransitionResult = rebar.transition(tid, "open", "in_progress")
+```
+
+**Stable exception surface.** `rebar.RebarError` (base) and its subclass
+`rebar.ConcurrencyError` are the public exceptions. `RebarError` carries
+`.returncode` (the underlying engine exit code) and `.stderr`; `ConcurrencyError`
+(exit 10) means a status-dependent op (`transition`/`claim`/`reopen`) lost an
+optimistic-concurrency race — re-read and retry, don't force. Catch `RebarError`
+to handle any rebar failure uniformly.
 
 ## MCP server
 

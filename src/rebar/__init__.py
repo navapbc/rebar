@@ -17,10 +17,36 @@ import json
 import logging
 import subprocess
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 from rebar import config
 from rebar._engine import engine_dir, engine_env
+
+if TYPE_CHECKING:
+    # Schema-derived return types (story 3a10). Import-only under TYPE_CHECKING —
+    # ``from __future__ import annotations`` makes every annotation a string, so
+    # these names never need to exist at runtime (zero import cost, no cycle).
+    # The module is GENERATED from the canonical JSON Schemas; see
+    # ``rebar.schemas.gen_types``.
+    from rebar.types import (
+        BridgeFsck,
+        ClaimResult,
+        ClarityResult,
+        CreateResult,
+        DepsGraph,
+        FileImpactEntry,
+        GateResult,
+        GroundingInfo,
+        ListEpics,
+        NextBatch,
+        SignResult,
+        TicketState,
+        TransitionResult,
+        ValidateReport,
+        VerifyCommandEntry,
+        VerifySignatureResult,
+        WorkflowRun,
+    )
 
 # Exception types live in the stdlib-only leaf ``rebar._errors`` (item 9.3) so readers
 # such as ``rebar._reads`` can source them downward instead of reaching UP into this
@@ -64,6 +90,38 @@ def init_repo(*, repo_root=None) -> None:
 
 
 # ── Write path (subprocess → dispatcher) ─────────────────────────────────────
+@overload
+def create_ticket(
+    ticket_type: str,
+    title: str,
+    *,
+    parent: str | None = ...,
+    priority: int | None = ...,
+    assignee: str | None = ...,
+    description: str | None = ...,
+    tags: list[str] | None = ...,
+    source: dict | None = ...,
+    return_alias: Literal[False] = ...,
+    repo_root=...,
+) -> str: ...
+
+
+@overload
+def create_ticket(
+    ticket_type: str,
+    title: str,
+    *,
+    parent: str | None = ...,
+    priority: int | None = ...,
+    assignee: str | None = ...,
+    description: str | None = ...,
+    tags: list[str] | None = ...,
+    source: dict | None = ...,
+    return_alias: Literal[True],
+    repo_root=...,
+) -> CreateResult: ...
+
+
 def create_ticket(
     ticket_type: str,
     title: str,
@@ -76,7 +134,7 @@ def create_ticket(
     source: dict | None = None,
     return_alias: bool = False,
     repo_root=None,
-):
+) -> str | CreateResult:
     """Create a ticket.
 
     Returns the canonical 16-hex ticket id (default). With ``return_alias=True``,
@@ -125,7 +183,7 @@ def transition(
     reason: str = "",
     force_close: str | None = None,
     repo_root=None,
-) -> dict:
+) -> TransitionResult:
     """Transition a ticket's status with optimistic concurrency.
 
     Raises :class:`ConcurrencyError` if the ticket's actual status no longer
@@ -192,7 +250,7 @@ def transition(
     }
 
 
-def claim(ticket_id: str, *, assignee=None, force=None, repo_root=None) -> dict:
+def claim(ticket_id: str, *, assignee=None, force=None, repo_root=None) -> ClaimResult:
     """Atomically claim an OPEN ticket: move it to ``in_progress`` and set its
     assignee in one locked critical section.
 
@@ -226,8 +284,11 @@ def claim(ticket_id: str, *, assignee=None, force=None, repo_root=None) -> dict:
         # Pass assignee THROUGH (don't coerce None→""): None is the "unspecified"
         # sentinel that triggers the ticket.default_assignee fallback in claim_compute,
         # while an explicit "" clears the assignee without falling back (story c36c).
-        return _transition.claim_compute(
-            resolved, assignee=assignee, force_plan_review=force or "", repo_root=repo_root
+        return cast(
+            "ClaimResult",
+            _transition.claim_compute(
+                resolved, assignee=assignee, force_plan_review=force or "", repo_root=repo_root
+            ),
         )
     except ConcurrencyMismatch as exc:
         raise ConcurrencyError(
@@ -243,7 +304,7 @@ def claim(ticket_id: str, *, assignee=None, force=None, repo_root=None) -> dict:
         ) from None
 
 
-def reopen(ticket_id: str, *, repo_root=None) -> dict:
+def reopen(ticket_id: str, *, repo_root=None) -> TransitionResult:
     """Reopen a closed ticket (closed -> open) — a thin convenience over
     :func:`transition`, still optimistic-concurrency (raises ConcurrencyError if
     the ticket is not currently ``closed``)."""
@@ -266,7 +327,7 @@ def _json_or(out: str, default):
         return default
 
 
-def clarity_check(ticket_id: str, *, repo_root=None) -> dict:
+def clarity_check(ticket_id: str, *, repo_root=None) -> ClarityResult:
     """Score ticket clarity → {score, verdict, threshold, passed}."""
     import os as _os
 
@@ -279,16 +340,20 @@ def clarity_check(ticket_id: str, *, repo_root=None) -> dict:
         state = reads.show_state(ticket_id, tracker)
     except ReadError as exc:
         # Schema-conformant structured failure (threshold 0 == "not evaluated").
-        return {"score": 0, "verdict": "fail", "threshold": 0, "reason": str(exc), "passed": False}
+        # ``reason``/``passed`` are library-added keys (open shape) beyond the base schema.
+        return cast(
+            "ClarityResult",
+            {"score": 0, "verdict": "fail", "threshold": 0, "reason": str(exc), "passed": False},
+        )
     threshold = gates._clarity_threshold(_os.path.dirname(tracker), None)
     data, code = gates.clarity_check_compute(
         (state.get("ticket_type") or "").strip(), state.get("description") or "", threshold
     )
     data["passed"] = code == 0
-    return data
+    return cast("ClarityResult", data)
 
 
-def check_ac(ticket_id: str, *, repo_root=None) -> dict:
+def check_ac(ticket_id: str, *, repo_root=None) -> GateResult:
     """Check a ticket has an Acceptance Criteria block.
 
     Returns the engine's structured gate result {verdict, criteria_count, reason}
@@ -298,11 +363,11 @@ def check_ac(ticket_id: str, *, repo_root=None) -> dict:
     tracker = reads.tracker_dir(repo_root)
     reads.ensure_fresh(tracker)
     data, code = gates.check_ac_compute(ticket_id, tracker)
-    data["passed"] = code == 0
-    return data
+    data["passed"] = code == 0  # library-added convenience key (open shape)
+    return cast("GateResult", data)
 
 
-def quality_check(ticket_id: str, *, repo_root=None) -> dict:
+def quality_check(ticket_id: str, *, repo_root=None) -> GateResult:
     """Check ticket dispatch readiness.
 
     Returns the engine's structured gate result {verdict, line_count,
@@ -313,11 +378,11 @@ def quality_check(ticket_id: str, *, repo_root=None) -> dict:
     tracker = reads.tracker_dir(repo_root)
     reads.ensure_fresh(tracker)
     data, code, _warn = gates.quality_check_compute(ticket_id, tracker)
-    data["passed"] = code == 0
-    return data
+    data["passed"] = code == 0  # library-added convenience key (open shape)
+    return cast("GateResult", data)
 
 
-def validate(*, repo_root=None) -> dict:
+def validate(*, repo_root=None) -> ValidateReport:
     """Repo-wide quality health check (JSON report).
 
     ``validate`` is repo-wide and takes no ticket id. Its exit code is
@@ -329,10 +394,10 @@ def validate(*, repo_root=None) -> dict:
     from rebar._engine_support import validate as _validate
 
     tracker = str(config.tracker_dir(repo_root))
-    return _validate.validate_state(tracker)
+    return cast("ValidateReport", _validate.validate_state(tracker))
 
 
-def get_file_impact(ticket_id: str, *, repo_root=None) -> list:
+def get_file_impact(ticket_id: str, *, repo_root=None) -> list[FileImpactEntry]:
     """Get the current file-impact array for a ticket ([] on a miss)."""
     from rebar._engine_support import field_reads, reads
 
@@ -353,7 +418,7 @@ def set_file_impact(ticket_id: str, impact, *, repo_root=None) -> None:
     )
 
 
-def get_verify_commands(ticket_id: str, *, repo_root=None) -> list:
+def get_verify_commands(ticket_id: str, *, repo_root=None) -> list[VerifyCommandEntry]:
     """Get the current DD-level verify-commands array for a ticket.
 
     A missing ticket raises ``RebarError`` (the dispatcher's exit-1 contract),
@@ -389,7 +454,7 @@ def set_verify_commands(ticket_id: str, commands, *, repo_root=None) -> None:
     )
 
 
-def grounding_info() -> dict:
+def grounding_info() -> GroundingInfo:
     """Return the STATIC code-grounding oracle integration contract (epic 8f6c).
 
     A fast, deterministic, repo-INDEPENDENT read: the closed dimension-ID
@@ -401,7 +466,7 @@ def grounding_info() -> dict:
     """
     from rebar.grounding import oracle
 
-    return oracle.contract()
+    return cast("GroundingInfo", oracle.contract())
 
 
 def _python_leaf(fn, *args, repo_root, what: str, **kwargs) -> None:
@@ -569,7 +634,7 @@ def compact(ticket_id: str | None = None, *, repo_root=None) -> None:
 
 
 # ── Cryptographic manifest signing (environment-bound) ────────────────────────
-def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> dict:
+def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> SignResult:
     """Sign a manifest of verified steps for a ticket with the environment key.
 
     ``manifest`` is a list of verified-step strings (or a JSON-array string).
@@ -582,7 +647,7 @@ def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> dict:
     from rebar.signing import SigningError
 
     try:
-        return signing.sign_manifest(ticket_id, manifest, repo_root=repo_root)
+        return cast("SignResult", signing.sign_manifest(ticket_id, manifest, repo_root=repo_root))
     except SigningError as exc:
         raise RebarError(
             f"rebar sign failed (exit {exc.returncode}): {exc.message}",
@@ -591,7 +656,9 @@ def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> dict:
         ) from None
 
 
-def verify_signature(ticket_id: str, *, kind: str | None = None, repo_root=None) -> dict:
+def verify_signature(
+    ticket_id: str, *, kind: str | None = None, repo_root=None
+) -> VerifySignatureResult:
     """Certify a ticket's recorded verified steps against its signature.
 
     Returns a verdict dict ``{ticket_id, verified, verdict, reason, manifest,
@@ -608,7 +675,10 @@ def verify_signature(ticket_id: str, *, kind: str | None = None, repo_root=None)
     from rebar.signing import SigningError
 
     try:
-        return signing.verify_signature(ticket_id, kind=kind, repo_root=repo_root)
+        return cast(
+            "VerifySignatureResult",
+            signing.verify_signature(ticket_id, kind=kind, repo_root=repo_root),
+        )
     except SigningError as exc:
         raise RebarError(
             f"rebar verify-signature failed (exit {exc.returncode}): {exc.message}",
@@ -620,11 +690,11 @@ def verify_signature(ticket_id: str, *, kind: str | None = None, repo_root=None)
 # ── Read path (in-process via rebar._reads; alias-aware, returns parsed JSON) ──
 # Reads compute from the in-process rebar.reducer / rebar.graph packages — no
 # subprocess (the bash orchestrator was retired in the bash→Python migration).
-def show_ticket(ticket_id: str, *, repo_root=None) -> dict:
+def show_ticket(ticket_id: str, *, repo_root=None) -> TicketState:
     """Compiled ticket state as a dict (alias/short-id aware)."""
     from rebar import _reads
 
-    return _reads.show_ticket(ticket_id, repo_root=repo_root)
+    return cast("TicketState", _reads.show_ticket(ticket_id, repo_root=repo_root))
 
 
 # ── Workflow engine (epic a88f) — sync library entrypoints (WS-C4) ────────────
@@ -655,18 +725,22 @@ def run_workflow(
     )
 
 
-def get_workflow_status(run_id: str, ticket_id: str | None = None, *, repo_root=None) -> dict:
+def get_workflow_status(
+    run_id: str, ticket_id: str | None = None, *, repo_root=None
+) -> WorkflowRun:
     """A workflow run's current status, read via replay (no execution)."""
     from rebar.llm.workflow import runs
 
-    return runs.status(run_id, ticket_id, repo_root=repo_root)
+    return cast("WorkflowRun", runs.status(run_id, ticket_id, repo_root=repo_root))
 
 
-def get_workflow_result(run_id: str, ticket_id: str | None = None, *, repo_root=None) -> dict:
+def get_workflow_result(
+    run_id: str, ticket_id: str | None = None, *, repo_root=None
+) -> WorkflowRun:
     """A workflow run's outputs (the terminal step's output is the result)."""
     from rebar.llm.workflow import runs
 
-    return runs.result(run_id, ticket_id, repo_root=repo_root)
+    return cast("WorkflowRun", runs.result(run_id, ticket_id, repo_root=repo_root))
 
 
 def attach_commits(ticket_id: str, commits, *, repo_root=None) -> dict:
@@ -772,7 +846,7 @@ def list_tickets(
     sort: str | None = None,
     full: bool = True,
     repo_root=None,
-) -> list[dict]:
+) -> list[TicketState]:
     """List tickets as a list of dicts, with optional filters.
 
     ``exclude_deleted`` drops tickets whose reduced status is ``deleted``. Note
@@ -790,32 +864,35 @@ def list_tickets(
     """
     from rebar import _reads
 
-    return _reads.list_tickets(
-        status=status,
-        ticket_type=ticket_type,
-        priority=priority,
-        parent=parent,
-        has_tag=has_tag,
-        without_tag=without_tag,
-        include_archived=include_archived,
-        exclude_deleted=exclude_deleted,
-        min_children=min_children,
-        blocking_state=blocking_state,
-        with_children_count=with_children_count,
-        sort=sort,
-        include_body=full,
-        repo_root=repo_root,
+    return cast(
+        "list[TicketState]",
+        _reads.list_tickets(
+            status=status,
+            ticket_type=ticket_type,
+            priority=priority,
+            parent=parent,
+            has_tag=has_tag,
+            without_tag=without_tag,
+            include_archived=include_archived,
+            exclude_deleted=exclude_deleted,
+            min_children=min_children,
+            blocking_state=blocking_state,
+            with_children_count=with_children_count,
+            sort=sort,
+            include_body=full,
+            repo_root=repo_root,
+        ),
     )
 
 
-def deps(ticket_id: str, *, repo_root=None) -> dict:
+def deps(ticket_id: str, *, repo_root=None) -> DepsGraph:
     """Dependency graph for a ticket (JSON)."""
     from rebar import _reads
 
-    return _reads.deps(ticket_id, repo_root=repo_root)
+    return cast("DepsGraph", _reads.deps(ticket_id, repo_root=repo_root))
 
 
-def ready(*, sort: str | None = None, repo_root=None) -> Any:
+def ready(*, sort: str | None = None, repo_root=None) -> list[TicketState]:
     """Tickets ready to work (all blockers closed).
 
     ``sort`` orders by ``priority|created|updated|id|status`` (``-`` prefix =
@@ -825,14 +902,14 @@ def ready(*, sort: str | None = None, repo_root=None) -> Any:
     return _reads.ready(sort=sort, repo_root=repo_root)
 
 
-def next_batch(epic_id: str, *, repo_root=None) -> dict:
+def next_batch(epic_id: str, *, repo_root=None) -> NextBatch:
     """Next parallel batch of unblocked tickets under an epic's hierarchy (JSON).
 
     Runs in-process via the shared read plumbing, like every other read (Tier C
     retired the bash orchestrator)."""
     from rebar import _reads
 
-    return _reads.next_batch(epic_id, repo_root=repo_root)
+    return cast("NextBatch", _reads.next_batch(epic_id, repo_root=repo_root))
 
 
 def search(
@@ -844,7 +921,7 @@ def search(
     include_archived: bool = False,
     sort: str | None = None,
     repo_root=None,
-) -> list:
+) -> list[TicketState]:
     """Full-text search over titles/descriptions/comments/tags (replay-derived).
 
     Returns a JSON list of matching ticket states (same element shape as
@@ -868,7 +945,7 @@ def search(
     )
 
 
-def recent_session_logs(*, limit: int = 5, repo_root=None) -> list:
+def recent_session_logs(*, limit: int = 5, repo_root=None) -> list[TicketState]:
     """The ``limit`` newest ``session_log`` tickets, newest first (by created_at).
 
     session_log tickets are hidden from :func:`list_tickets`; this is the
@@ -877,7 +954,7 @@ def recent_session_logs(*, limit: int = 5, repo_root=None) -> list:
     returns an empty list."""
     from rebar import _reads
 
-    return _reads.recent_session_logs(limit=limit, repo_root=repo_root)
+    return cast("list[TicketState]", _reads.recent_session_logs(limit=limit, repo_root=repo_root))
 
 
 def fsck(*, recover: bool = False, report_only: bool = False, repo_root=None) -> str:
@@ -927,7 +1004,7 @@ def fsck(*, recover: bool = False, report_only: bool = False, repo_root=None) ->
     return out.getvalue()
 
 
-def summary(*ticket_ids: str, repo_root=None) -> list:
+def summary(*ticket_ids: str, repo_root=None) -> list[dict[str, Any]]:
     """One-line-per-ticket summary as structured JSON: a list of
     {ticket_id, status, title, blocking_summary}."""
     from rebar._engine_support import gates, reads
@@ -939,7 +1016,7 @@ def summary(*ticket_ids: str, repo_root=None) -> list:
 
 def list_epics(
     *, include_blocked: bool = False, has_tag=None, min_children=None, repo_root=None
-) -> dict:
+) -> ListEpics:
     """DEPRECATED — thin wrapper over the generic ``list``. Returns
     ``{p0_bugs, epics}`` (both ``ticket_state`` arrays) by making exactly TWO
     generic calls: one for epics, one for P0 bugs. Blocking-awareness is now the
@@ -969,10 +1046,10 @@ def list_epics(
         repo_root=repo_root,
     )
     p0_bugs = list_tickets(ticket_type="bug", priority=0, repo_root=repo_root)
-    return {"p0_bugs": p0_bugs, "epics": epics}
+    return cast("ListEpics", {"p0_bugs": p0_bugs, "epics": epics})
 
 
-def bridge_fsck(*, repo_root=None) -> dict:
+def bridge_fsck(*, repo_root=None) -> BridgeFsck:
     """Bridge-mapping audit as structured JSON: {orphaned, duplicates, stale}.
     A nonzero exit (anomalies present) is NORMAL, not an error.
 
@@ -985,7 +1062,7 @@ def bridge_fsck(*, repo_root=None) -> dict:
 
     tracker = config.tracker_dir(repo_root)
     findings = audit_bridge_mappings(Path(tracker))
-    return {k: findings.get(k, []) for k in ("orphaned", "duplicates", "stale")}
+    return cast("BridgeFsck", {k: findings.get(k, []) for k in ("orphaned", "duplicates", "stale")})
 
 
 # ── Reconciler (Jira sync) ────────────────────────────────────────────────────

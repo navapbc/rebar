@@ -251,6 +251,23 @@ jobs:
         shell: bash
         run: python scripts/check_server_manifest.py
 
+      # Public-types drift gate (story 3a10): src/rebar/types.py is DERIVED from the
+      # canonical JSON Schemas (the schema-backed rebar.* return shapes). Regenerate
+      # it and fail if the working tree now differs — a stale types.py means a
+      # schema changed without the committed TypedDicts being regenerated. Style
+      # mirrors the prompt-index drift gate above.
+      - name: Public-types drift gate
+        shell: bash
+        run: |
+          python -m rebar.schemas.gen_types
+          if ! git diff --exit-code -- src/rebar/types.py; then
+            echo "::error::src/rebar/types.py is stale — regenerate it with"
+            echo "  python -m rebar.schemas.gen_types"
+            echo "and commit the result (it is derived from the canonical JSON Schemas)."
+            exit 1
+          fi
+          echo "Public-types drift gate: OK (types.py is up to date)."
+
       - name: Run the default suite (Python tiers + bash collector; excludes integration + external)
         # Pin --basetemp under the runner temp (not /tmp): on long (10-16 min) runs
         # the macOS tmp-cleaner reaps pytest's default /tmp/pytest-of-* basetemp
