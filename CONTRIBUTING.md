@@ -252,7 +252,7 @@ merge change** that integrates the branch into `main`.
 
 **Prerequisite — install the `commit-msg` hook in THIS checkout first.** A merge commit
 needs a `Change-Id` just like any other change, and a **fresh worktree/clone does not have
-the hook** — if it is missing, the merge push is rejected with *missing Change-Id* (§5).
+the hook** — if it is missing, the merge push is rejected with *missing Change-Id* (§6).
 Install it before you create the merge commit:
 
 ```bash
@@ -363,7 +363,37 @@ what it surfaces (owner-confirmed). See `infra/runbooks/review-bot-ops.md` for t
 
 ---
 
-## 5. Troubleshooting
+## 5. Supply-chain security & dependency updates
+
+rebar runs two supply-chain checks in CI, and both produce **alerts only** — there
+is **no automated fix-PR path**, because GitHub PRs cannot merge here (the tree is
+Gerrit-gated; see §3). Any resulting fix lands as an ordinary Gerrit change (§2).
+
+- **CodeQL SAST** (`.github/workflows/codeql.yml`) statically analyses the Python
+  source and uploads findings to the repo's **Security → Code scanning** alerts
+  tab. It runs on push to `main` (the post-merge tree), on mirror PRs, and weekly.
+- **`pip-audit`** scans rebar's installed dependency closure against the PyPI/OSV
+  advisory database. It is **gating**: a known vulnerability with a fix fails
+  `Verified` (it runs in both branch CI `test.yml` and the Gerrit `gerrit-verify`
+  gate). An accepted/unfixable advisory is silenced in-workflow with
+  `--ignore-vuln <ID>` plus a justification — never a blanket skip. A transient
+  advisory-DB fetch error is retried and, if still failing, is an infra issue
+  (comment `recheck`), not a vulnerability.
+
+**Dependency updates use security *alerts only*, not version-bump PRs.** GitHub
+Dependabot / Dependabot security **alerts** are enabled to surface vulnerable
+deps, but Dependabot **version-update PRs are intentionally NOT configured** —
+they would open PRs that cannot merge on the mirror. When an alert (or a
+`pip-audit` failure) tells you to bump a dependency, **land the bump through
+Gerrit** like any other change (§2): edit the pin in `pyproject.toml`, commit with
+a `rebar-ticket:` trailer, and push to `refs/for/main`.
+
+> **Reporting a vulnerability.** See [`SECURITY.md`](SECURITY.md) for private
+> disclosure — do not open a public issue for a security report.
+
+---
+
+## 6. Troubleshooting
 
 - **`missing Change-Id in commit message footer` on push.** The `commit-msg` hook isn't
   installed (or wasn't installed when you committed). Install it (§1b), then re-stamp the

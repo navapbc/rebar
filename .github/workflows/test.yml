@@ -78,6 +78,65 @@ jobs:
       - name: config-check (infra configs parse; gating)
         run: make config-check
 
+  pip-audit:
+    # GATING dependency-vulnerability scan (story 95dc). Audits rebar's actual
+    # installed dependency closure against the PyPI advisory / OSV database and
+    # FAILS on any known vulnerability. We scan the base runtime install (no
+    # extras) — that is what a plain `pip install nava-rebar` consumer gets —
+    # plus the [dev] extra so build/test tooling is covered too.
+    #
+    # Failure policy (plan-review advisory #3):
+    #   - ANY vulnerability with a known fix version fails the job (→ Verified -1
+    #     when mirrored in gerrit-verify.yaml). Remediate by bumping the pin.
+    #   - An advisory that is a false positive / unfixable / accepted risk is
+    #     silenced with `--ignore-vuln <GHSA/PYSEC-ID>` below and a one-line
+    #     justification — deliberate, reviewed, and greppable (never a blanket
+    #     skip). No ignores are needed today; the list is intentionally empty.
+    #   - Network flake: the OSV/PyPI advisory DB fetch is retried (3× with
+    #     backoff). If every attempt fails to REACH the DB it is an INFRA error,
+    #     not a vuln — comment `recheck` (Gerrit) / re-run the job (branch CI).
+    name: pip-audit (dependency vulnerabilities)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install rebar (runtime + dev) and pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+          python -m pip install pip-audit
+      - name: pip-audit (scan installed environment; gating, network-retried)
+        shell: bash
+        run: |
+          set -uo pipefail
+          # Retry only the network-bound advisory-DB fetch so a transient OSV/PyPI
+          # blip casts no spurious -1; a real vuln fails on the first try and the
+          # exit code is preserved. `--desc` prints advisory detail on a hit.
+          attempt=0
+          until [ "$attempt" -ge 3 ]; do
+            attempt=$((attempt + 1))
+            echo "pip-audit attempt ${attempt}/3"
+            if out=$(pip-audit --desc 2>&1); then
+              echo "$out"
+              echo "pip-audit: OK (no known vulnerabilities)."
+              exit 0
+            fi
+            echo "$out"
+            # Distinguish a real finding from a DB-unreachable infra flake: only
+            # retry when the failure looks network-related.
+            if printf '%s' "$out" | grep -qiE 'temporarily|timed out|timeout|connection|resolve|network|503|502|504'; then
+              echo "pip-audit: transient DB error — backing off before retry." >&2
+              sleep $((attempt * 5))
+              continue
+            fi
+            echo "::error::pip-audit found dependency vulnerabilities (see output). Bump the pinned version, or add --ignore-vuln <ID> with justification if accepted." >&2
+            exit 1
+          done
+          echo "::error::pip-audit could not reach the advisory DB after 3 attempts — INFRASTRUCTURE issue, not a vulnerability. Re-run the job / comment 'recheck'." >&2
+          exit 1
+
   test:
     name: pytest (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
