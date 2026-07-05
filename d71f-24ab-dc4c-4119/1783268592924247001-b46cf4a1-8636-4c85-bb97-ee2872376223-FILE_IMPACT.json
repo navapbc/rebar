@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/llm/reviewers/code-review-security.md","reason":"red-team concerns + DET deference"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783268592924247001,"uuid":"b46cf4a1-8636-4c85-bb97-ee2872376223"}
