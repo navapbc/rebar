@@ -79,6 +79,28 @@ def test_validate_to_rejects_non_object():
         structured.validate_to(_Verdict, ["not", "a", "dict"])
 
 
+def test_validate_to_unwraps_single_element_array():
+    # Bug artsy-chain-hold/dash-lure-slag: the completion-verifier's model sometimes
+    # emits its structured verdict wrapped in a top-level JSON array (a bare one-element
+    # list) instead of the bare object, deterministically blocking a close fail-closed.
+    # A single-element array carrying one object must be unwrapped, not rejected.
+    obj = structured.validate_to(_Verdict, [{"verdict": "PASS", "confidence": 0.9}])
+    assert obj.verdict == "PASS" and obj.confidence == 0.9
+
+
+def test_parse_structured_unwraps_top_level_array():
+    # End-to-end through the deterministic layers: a top-level array string parses+validates.
+    obj = structured.parse_structured('[{"verdict": "FAIL"}]', _Verdict)
+    assert obj.verdict == "FAIL"
+
+
+def test_validate_to_still_rejects_multi_element_array():
+    # A genuine multi-object array is ambiguous (which verdict?) and must stay an error —
+    # unwrapping is scoped to the single-element case only.
+    with pytest.raises(StructuredOutputError, match="object"):
+        structured.validate_to(_Verdict, [{"verdict": "PASS"}, {"verdict": "FAIL"}])
+
+
 def test_parse_structured_combines_layers():
     # A near-miss (fenced + trailing comma) that nonetheless yields a valid verdict.
     obj = structured.parse_structured(
