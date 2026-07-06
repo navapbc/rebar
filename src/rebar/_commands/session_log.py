@@ -151,18 +151,17 @@ def append(entry, *, summary=None, relates_to=None, discovered_from=None, repo_r
         raise CommandError("Error: session-log entry must be non-empty")
     tracker = tracker_dir(repo_root)
     current = _resolve_current(str(tracker), repo_root)
-    # Session-scoped auto-rotation (bug kooky-graft-cap): if the current log was
-    # stamped with a session fingerprint that differs from THIS session's, treat it
-    # as absent so a fresh log is started below. Guarded on both sides being non-None
-    # so a legacy (session=None) pointer or an absent session id never rotates —
-    # degrade-safe and backward compatible.
+    # Session-scoped auto-rotation (bug kooky-graft-cap; defensive rotation
+    # slum-shoal-gully): if THIS session has a fingerprint that differs from the one on
+    # the current-log pointer, treat the log as absent so a fresh one is started below.
+    # A DIFFERING pointer fingerprint includes a MISSING one (``session=None``): a
+    # fingerprint-less pointer was written by a prior run with no session id, so a
+    # fingerprinted session must rotate off it rather than pollute that stranger's log.
+    # Only ``now is None`` (this session has no fingerprint) suppresses rotation — a
+    # session that cannot identify itself never rotates, so a continuous no-id session
+    # keeps one log (degrade-safe, backward compatible).
     now = _resolve_session_fp()
-    if (
-        current is not None
-        and current.get("session") is not None
-        and now is not None
-        and current["session"] != now
-    ):
+    if current is not None and now is not None and current.get("session") != now:
         current = None
     created = False
     alias = None
