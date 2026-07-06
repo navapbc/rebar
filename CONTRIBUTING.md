@@ -443,6 +443,26 @@ a `rebar-ticket:` trailer, and push to `refs/for/main`.
   message so you keep the merge as-is: `GIT_EDITOR=/bin/true git commit --amend`, confirm a
   `Change-Id: I…` line with `git log -1`, and push again.
 
+## 7. Editing the plan-review reviewer prompts (affirmative-framing habit)
+
+The plan-review gate critiques prompt hygiene in the plans it reviews (criterion T8:
+instruction-locality, the pink-elephant/negative-priming antipattern), so its **own** reviewer
+prompts under `src/rebar/llm/reviewers/plan_review_*.md` must hold themselves to the same bar
+(gap-report R-6, epic `cite-stone-sea` / WS7). When you add or edit one of those prompts, apply
+this **review-time checklist**:
+
+- **Lead with the affirmative** — say what the reviewer SHOULD do first; keep any genuinely-needed
+  prohibition terse and put the "do this instead" redirect right next to it (e.g. "score the
+  flaw's own reach — a wide blast radius never *raises* a trivial finding's severity").
+- **No bare DO-NOT-only blocks** — never leave a bullet or paragraph whose only content is a
+  prohibition with no adjacent affirmative. Don't narrate failure mechanics at length; the
+  cross-cutting stance (material-vs-instruction trust boundary, the forward-looking rule) already
+  lives once in the shared preamble (`_SHARED_PREAMBLE` in `src/rebar/llm/plan_review/passes.py`),
+  injected into every pass system prompt by `_resolve_system` — don't re-derive it per prompt.
+
+This is enforced deterministically by `tests/unit/test_reviewer_prompt_hygiene.py`
+(`test_no_bare_do_not_only_blocks`), which runs in CI — a re-runnable guard, not a hand checklist.
+
 ---
 
 Track your work in rebar (see [`CLAUDE.md`](CLAUDE.md) and [`docs/`](docs/)); the Gerrit
