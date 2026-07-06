@@ -33,6 +33,13 @@ logger = logging.getLogger(__name__)
 
 _TYPES = ("bug", "epic", "story", "task", "session_log")
 
+# Ticket types exempt from the plan-review file-impact-coverage gate (P9). Kept in
+# lockstep with the gate's own exemption at
+# rebar.llm.plan_review.orchestrator (bug/session_log short-circuit before P9). The
+# create-time warning below mirrors it so a freshly-created work ticket is nudged to
+# record file_impact early, before `review-plan` flags it.
+_FILE_IMPACT_EXEMPT_TYPES = ("bug", "session_log")
+
 _USAGE = (
     "Usage: ticket create <ticket_type> <title> [--parent <id>] [--priority <n>] "
     "[--assignee <name>] [--description <text>] [--tags <tag1,tag2>]\n"
@@ -252,6 +259,21 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
         else:
             print(f"Created ticket {tid}: {res['title']}")
         print(tid)
+
+    # Nudge the author to record file_impact now (it cannot be passed at create
+    # time). The plan-review file-impact-coverage gate (P9) flags any leaf work
+    # ticket lacking it, so surfacing the requirement here — right after create —
+    # lets it be fixed before `review-plan` runs. Warning only (stderr), so stdout
+    # stays pure in both text and json modes. Exempt types mirror the gate.
+    if ticket_type not in _FILE_IMPACT_EXEMPT_TYPES:
+        new_id = res["id"]
+        print(
+            f"Warning: no file_impact recorded for {ticket_type} {new_id} — "
+            "set it before plan-review with: "
+            f"""rebar set-file-impact {new_id} '[{{"path":"...","reason":"..."}}]' """
+            "(the file-impact-coverage gate will otherwise flag it).",
+            file=sys.stderr,
+        )
     return 0
 
 
