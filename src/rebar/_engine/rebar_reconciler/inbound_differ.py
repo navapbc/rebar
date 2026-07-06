@@ -126,6 +126,8 @@ _JIRA_TO_LOCAL_PRIORITY: dict[str, int] = {
 }
 
 _JIRA_TO_LOCAL_STATUS: dict[str, str] = {
+    # Kept in lock-step with config.jira_to_local_status by the parity test.
+    "IDEA": "idea",
     "To Do": "open",
     "In Progress": "in_progress",
     # "In Review" is a live DIG workflow state that was missing from the map,

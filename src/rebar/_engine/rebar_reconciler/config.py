@@ -20,6 +20,11 @@ EXCLUDED_SYNC_TYPES: frozenset[str] = frozenset({"session_log"})
 # kill-switch — preflight tolerates an empty mapping when no update
 # mutations contain a status field.
 local_to_jira_status: dict[str, str] = {
+    # `idea ↔ IDEA` is a UNIQUE (injective) mapping — no rebar-status: annotation
+    # label is needed to reconstruct it inbound. Requires the Jira project workflow
+    # to define an `IDEA` status with transitions into/out of it (operator
+    # prerequisite — see docs/jira-sync-setup.md "The `idea` status ↔ Jira `IDEA`").
+    "idea": "IDEA",
     "open": "To Do",
     "in_progress": "In Progress",
     # blocked/cancelled have no direct equivalent in the live DIG workflow
@@ -45,6 +50,7 @@ local_to_jira_status: dict[str, str] = {
 # Must stay in lock-step with inbound_differ._JIRA_TO_LOCAL_STATUS (parity
 # is enforced by tests/unit/rebar_reconciler/test_config.py).
 jira_to_local_status: dict[str, str] = {
+    "IDEA": "idea",
     "To Do": "open",
     "In Progress": "in_progress",
     # "In Review" is a live DIG workflow state with no local equivalent;

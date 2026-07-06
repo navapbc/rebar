@@ -444,3 +444,46 @@ shadowing at any time — it never affects arbitration.
 3. Retirements are a reversible soft-delete (`bindings-retired.json`, full history
    on the `tickets` branch); re-linking a wrongly-retired binding is a recovery,
    not a re-create.
+
+## The `idea` status ↔ Jira `IDEA`
+
+rebar's `idea` status (a parking lot for captured-but-undesigned work — see the
+`idea` section in `CLAUDE.md`) round-trips to a Jira status named **`IDEA`**. It is
+a **unique (injective) mapping**, so — unlike `blocked`/`cancelled`, which share a
+Jira status and are reconstructed from `rebar-status:` annotation labels — no
+annotation label is needed, and the reconciler's terminal-set is unchanged.
+
+### Operator prerequisite (Jira-admin action, outside the codebase)
+
+Jira statuses are **workflow-gated**. Before syncing `idea` tickets, a Jira admin
+must add an **`IDEA`** status to the target project's workflow **with transitions**:
+
+- **into `IDEA`** from the workflow's initial status (so a newly-created idea can
+  converge to `IDEA` on a later pass), and
+- **out of `IDEA`** — to **To Do** (promote: local `idea → open`) and to **Done**
+  (reject: local `idea → closed`).
+
+Without these transitions, an outbound `IDEA` mutation fails at
+`transition_issue_by_name` (Jira rejects the unreachable transition).
+
+### Deployment sequencing (LOAD-BEARING)
+
+Ship the Jira side and the code side in a safe order. Either:
+
+1. **Provision Jira first** — add the `IDEA` workflow status + transitions
+   before (or atomically with) merging the mapping change; **or**
+2. **Land the reconciler transition-failure isolation follow-up first** (tracked
+   `discovered_from` this epic) — with it, a missing `IDEA` transition degrades to
+   a **reported per-mutation failure** instead of **aborting the whole pass**
+   (previously a preflight `StatusMappingError` / a `RuntimeError` from
+   `transition_issue_by_name` took the entire pass down).
+
+Merging the mapping while Jira has no reachable `IDEA` status, and without the
+isolation follow-up landed, would abort reconciler passes — do not do that.
+
+### Create-drops-status convergence quirk (accepted, documented — not code-fixed)
+
+A newly-synced idea is **born in the Jira project's default status** (the create
+call does not set status), and reaches `IDEA` only on a **later** reconcile pass
+(the status is applied as a follow-up transition). This one-pass lag is accepted
+and expected; it is not a bug and is not fixed here.

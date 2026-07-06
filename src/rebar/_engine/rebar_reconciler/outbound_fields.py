@@ -90,6 +90,7 @@ _LOCAL_TO_JIRA_PRIORITY: dict[int, str] = {
 }
 
 _LOCAL_TO_JIRA_STATUS: dict[str, str] = {
+    "idea": "IDEA",
     "open": "To Do",
     "in_progress": "In Progress",
     # blocked/cancelled have no direct equivalent in the live DIG workflow

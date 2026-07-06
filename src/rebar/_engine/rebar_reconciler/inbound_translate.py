@@ -85,6 +85,7 @@ _VALID_PRIORITY_RANGE = range(0, 5)  # 0-4 inclusive
 # the Jira→local mapper (see _apply_inbound_update). Kept as a module
 # constant so any future check is consistent with the reducer.
 _LOCAL_STATUS_VALUES: tuple[str, ...] = (
+    "idea",
     "open",
     "in_progress",
     "blocked",

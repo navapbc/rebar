@@ -98,7 +98,9 @@ tag deliberately: `claim` only accepts `open` tickets, so an `idea` ticket is
   structural checks (e.g. cycles) still apply.
 - **Jira: `idea ↔ IDEA`.** `idea` round-trips to the Jira status `IDEA` through the
   reconciler, subject to the usual workflow-transition prerequisite (the target Jira
-  workflow must permit the transition into `IDEA`).
+  workflow must permit the transition into `IDEA`) — see
+  [docs/jira-sync-setup.md](docs/jira-sync-setup.md) "The `idea` status ↔ Jira `IDEA`"
+  for the operator prerequisite, deployment sequencing, and the convergence quirk.
 - **Capture in one atomic step.** `rebar idea "<title>"` (and the MCP `create_idea` /
   library `rebar.idea(...)`) creates a ticket **directly** in status `idea` in a
   single genesis event — never momentarily `open`/claimable.

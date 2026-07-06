@@ -165,3 +165,29 @@ def test_jira_to_local_status_parity_with_inbound_differ(
     sys.modules["inbound_differ_for_config_parity"] = inbound_differ
     spec.loader.exec_module(inbound_differ)  # type: ignore[union-attr]
     assert config.jira_to_local_status == inbound_differ._JIRA_TO_LOCAL_STATUS
+    # The `idea ↔ IDEA` entry must be present on BOTH sides of the parity.
+    assert config.jira_to_local_status["IDEA"] == "idea"
+    assert inbound_differ._JIRA_TO_LOCAL_STATUS["IDEA"] == "idea"
+
+
+def test_idea_maps_to_jira_idea_across_all_status_maps(config: ModuleType) -> None:
+    """`idea ↔ IDEA` is a unique (injective) mapping present in every hand-maintained
+    reconciler status map — a missing one causes a preflight abort or a silent
+    mistranslation (story tawny-herb-bug)."""
+
+    def _load_attr(module_file: str, attr: str):
+        path = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / module_file
+        spec = importlib.util.spec_from_file_location(f"_parity_{module_file}", path)
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[f"_parity_{module_file}"] = mod
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return getattr(mod, attr)
+
+    import sys
+
+    assert config.local_to_jira_status["idea"] == "IDEA"
+    assert config.jira_to_local_status["IDEA"] == "idea"
+    assert _load_attr("inbound_differ.py", "_JIRA_TO_LOCAL_STATUS")["IDEA"] == "idea"
+    assert _load_attr("jira_fields.py", "_LOCAL_STATUS_TO_JIRA")["idea"] == "IDEA"
+    assert _load_attr("outbound_fields.py", "_LOCAL_TO_JIRA_STATUS")["idea"] == "IDEA"
