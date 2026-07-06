@@ -17,8 +17,10 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 from pathlib import Path
+from typing import Any
 
 # Split-JQL contract (bug f6cc-b174-9e9a-435c — single JQL hit 1000-issue
 # ACLI ceiling because DIG has > 1000 issues across active + Done):
@@ -158,6 +160,77 @@ def _load_alert_store():
         sys.modules.pop(_ALERT_STORE_KEY, None)
         raise
     return mod
+
+
+def _known_jira_statuses() -> frozenset[str]:
+    """Jira workflow status names the reconciler has an inbound mapping for
+    (``config.jira_to_local_status`` keys).
+
+    A Jira status OUTSIDE this set has no reconciler mapping: if it reaches an
+    outbound mutation it trips ``reconcile.preflight_status_mapping``. The fetcher
+    flags such a status at snapshot-build time (see ``_flag_unmapped_statuses``) so
+    a newly-added Jira-side status is surfaced for a mapping proactively — rather
+    than being discovered only via a downstream per-mutation failure. An empty
+    mapping disables the check (mirrors the preflight kill-switch)."""
+    from rebar_reconciler import config as _cfg
+
+    return frozenset(getattr(_cfg, "jira_to_local_status", {}) or {})
+
+
+def _flag_unmapped_statuses(
+    snapshot: dict[str, dict],
+    pass_id: str,
+    repo_root: Path,
+    alert_store: Any,
+    log: Any,
+) -> None:
+    """Warn + emit an observable bridge_alert for any Jira workflow status in
+    ``snapshot`` that the reconciler has no mapping for (see
+    :func:`_known_jira_statuses`).
+
+    Fires at most once per DISTINCT unmapped status per pass (a local ``seen`` set),
+    and de-duplicates the observable alert across passes via ``alert_store.is_deduped``
+    (24h window) so a persistent unmapped status does not re-file every ~20-minute
+    pass. Fully fail-open: any error is logged and swallowed — proactive detection
+    must never break the fetch/reconcile pass."""
+    known = _known_jira_statuses()
+    if not known:
+        return  # kill-switch: an empty mapping disables the check
+    seen: set[str] = set()
+    for snap_key, snap_fields in snapshot.items():
+        status_obj = snap_fields.get("status") if isinstance(snap_fields, dict) else None
+        name = status_obj.get("name") if isinstance(status_obj, dict) else status_obj
+        if not isinstance(name, str) or not name or name in known or name in seen:
+            continue
+        seen.add(name)
+        log.warning(
+            "fetch_snapshot: Jira status %r (e.g. %s) has no reconciler mapping in "
+            "config.jira_to_local_status — add a mapping, or it will trip the outbound "
+            "status preflight if it reaches a mutation. (pass %s)",
+            name,
+            snap_key,
+            pass_id,
+        )
+        dedup_key = f"unmapped-jira-status:{name}"
+        try:
+            if not alert_store.is_deduped(dedup_key, repo_root=repo_root):
+                alert_store.append(
+                    {
+                        "kind": "fetcher-unmapped-jira-status",
+                        "key": dedup_key,
+                        "status": name,
+                        "example_issue": snap_key,
+                        "pass_id": pass_id,
+                        "timestamp_ns": time.time_ns(),
+                    },
+                    repo_root=repo_root,
+                )
+        except Exception as exc:  # noqa: BLE001 — observability write is best-effort; never fail the fetch
+            log.warning(
+                "fetch_snapshot: failed to emit unmapped-status alert for %r (%r)",
+                name,
+                exc,
+            )
 
 
 def _extract_issues(result) -> list[dict]:
@@ -473,6 +546,17 @@ def _build_snapshot(
             "snapshot written without issuelink data (degraded)",
             exc,
         )
+
+    # Proactive unmapped-status detection (defense-in-depth): surface a Jira
+    # workflow status the reconciler has no mapping for at snapshot-build time, so a
+    # newly-added Jira-side status is flagged for a mapping BEFORE it reaches an
+    # outbound mutation and trips the status preflight (the failure mode that once
+    # stalled the whole bridge via a stale IDEA status). Fully fail-open — detection
+    # must never break the fetch.
+    try:
+        _flag_unmapped_statuses(snapshot, pass_id, repo_root, alert_store, _fetcher_log)
+    except Exception as exc:  # noqa: BLE001 — detection is best-effort; never fail the fetch
+        _fetcher_log.warning("fetch_snapshot: unmapped-status detection failed (%r)", exc)
 
     return snapshot
 
