@@ -13,7 +13,7 @@ callbacks — host-page render, BPMN<->IR round-trip, config validation) is thre
 through :class:`EditorSession`, injected per-server via ``functools.partial(_Handler,
 session=…)``. Keeping the domain functions in ``editor.py`` and INJECTING them (rather than
 importing ``editor`` here) keeps this module free of a back-edge into ``editor`` — no import
-cycle (``python scripts/check_import_cycles.py`` stays green).
+cycle.
 
 Security properties are UNCHANGED from the pre-split closure: the server binds loopback-only
 (in ``edit_workflow``), the write/sensitive endpoints require a loopback ``Host`` header AND
