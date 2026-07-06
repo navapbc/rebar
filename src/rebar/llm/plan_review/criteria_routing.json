@@ -766,6 +766,10 @@
       {
         "key": "read_before_flag",
         "check": "ANTI-FP: read the named implementation file before flagging a contract-doc-only claim."
+      },
+      {
+        "key": "scope_exclusions_verified",
+        "check": "SCOPE EXCLUSIONS (G-4): a descoping claim ('OUT: X — already exists / handled by Y / covered by Z') gets a Grep/Read probe like any assertion — a false exclusion deletes work invisibly. FIRE on a codebase exclusion the tools refute; ABSTAIN-with-coverage on an external-fact exclusion they cannot settle."
       }
     ],
     "routing": "leaf"
@@ -1021,5 +1025,34 @@
     ],
     "routing": "base",
     "trigger": "ticket is LINKED TO A SESSION LOG (else PASS not-applicable / skip — never fabricate an intent baseline)"
+  },
+  "hedge": {
+    "exec": "1-TURN",
+    "facet": "codebase-grounding",
+    "applies_at": {
+      "scope": [
+        "leaf"
+      ],
+      "suppress_types": [
+        "bug"
+      ]
+    },
+    "block_threshold": 0.95,
+    "default_posture": "advisory",
+    "checklist": [
+      {
+        "key": "hedged_commitment_probed",
+        "check": "A COMMITTED element (AC/task/edit/scope) resting on a HEDGED assertion ('probably','we assume','should return') with no verification or fallback is surfaced; Pass-2 grades its substance via committed_work_relies_on_unbacked_claim."
+      },
+      {
+        "key": "substance_not_word_presence",
+        "check": "Judge substance, not word-presence: a hedge on already-verified prose, an explicitly-flagged assumption, or a non-load-bearing aside is not a finding."
+      },
+      {
+        "key": "ac_clause_dedup",
+        "check": "AC-clause dedup (rubric-level): a hedge inside an AC proving-command clause is E6.no_hedges territory — mark not-applicable; E6 owns it. This targets hedged requirements/premises outside the AC surface."
+      }
+    ],
+    "routing": "leaf"
   }
 }

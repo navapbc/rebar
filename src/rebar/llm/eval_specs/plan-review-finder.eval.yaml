@@ -262,6 +262,47 @@ dataset:
       result. T5a must NOT fire a performance finding by interpolating scale upward from the
       domain ("it's a government portal, so millions of requests") — the small-scale default
       holds and scale sensitivity is orthogonal to volume.
+  # WS2 (epic cite-stone-sea): E4 scope-exclusion sub-check (G-4) — FIRE on a codebase exclusion
+  # the tools refute; ABSTAIN-with-coverage (no fire) on an external-fact exclusion.
+  - id: R-E4-scope-exclusion-codebase
+    corpus: rebar
+    criterion: E4
+    expect: finding
+    mode: scope-exclusion-false
+    input: >
+      A story's scope says 'OUT: rate-limiting — already exists in gateway.py' and creates no task
+      or AC to build one, but gateway.py contains no rate-limiter for this path. E4 must FIRE: the
+      descoping claim is an unverified codebase assertion that deletes work invisibly.
+  - id: FP-E4-scope-exclusion-external
+    corpus: rebar
+    criterion: E4
+    expect: pass
+    mode: scope-exclusion-external
+    input: >
+      A story's scope says 'OUT: billing integration — owned and operated by the payments team'.
+      This is an external-fact exclusion the repo tools cannot settle. E4 must NOT fire — it
+      abstains with coverage (records it as unverifiable) rather than asserting an ungroundable gap.
+  # WS2: hedged-requirement finder (`hedge`, 1-TURN) — a committed element on a hedged assumption
+  # FIRES; a hedge inside an AC proving-command clause is E6's territory (dedup -> not-applicable).
+  - id: R-hedge-committed-assumption
+    corpus: rebar
+    criterion: hedge
+    expect: finding
+    mode: hedged-commitment
+    input: >
+      A story commits 'the importer returns a sorted list (we assume the upstream API already
+      returns results sorted)' with no verification and no fallback sort. The `hedge` finder must
+      FIRE — a committed edit rests on a hedged, unbacked assumption (Pass-2 then grades it via
+      committed_work_relies_on_unbacked_claim).
+  - id: FP-hedge-ac-clause-e6-territory
+    corpus: rebar
+    criterion: hedge
+    expect: pass
+    mode: ac-clause-e6-territory
+    input: >
+      An acceptance criterion reads 'AC: the /health endpoint should probably work'. The hedge sits
+      inside an AC proving-command clause — E6.no_hedges owns that. The `hedge` criterion must mark
+      itself not-applicable here (rubric-level dedup) and NOT report it.
 
 # Frozen human-gold subset (kappa alignment for the llm-judge). SEED labels — pending
 # human adjudication (the gating gold subset; auto-labels seed the bulk corpus).
