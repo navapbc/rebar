@@ -210,6 +210,12 @@ def _is_applicable(
     skip. A detector that declares neither always applies (e.g. metric detectors).
     """
     langs = det.languages
+    # `generic` is opengrep/semgrep's language-agnostic mode: the rule scans EVERY file regardless
+    # of extension (used by polyglot detectors like the conflict-marker rule, story da25). It has no
+    # extension set to gate on, so a `generic` detector is ALWAYS applicable — the file-presence
+    # check below would otherwise skip it as `unsupported_lang` and it would never run.
+    if langs and "generic" in langs:
+        return True, None
     if langs:
         wanted: set[str] = set()
         for lang in langs:
