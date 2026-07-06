@@ -24,8 +24,10 @@ No separate accounts; everything rides on GitHub.
   `navapbc/rebar`, workflow `release.yml`, environment `pypi`.
 - GitHub **environment `pypi`** exists, restricted to `v*` tags.
 - The Homebrew tap repo exists and is public.
-- MCP Registry publishing authenticates via `mcp-publisher login github` (your
-  GitHub identity; the `io.github.navapbc/*` namespace needs navapbc org access).
+- MCP Registry publishing authenticates in CI via GitHub Actions OIDC
+  (`mcp-publisher login github-oidc`); the `io.github.navapbc/*` namespace is
+  authorized by the workflow running in `navapbc/rebar`. See step 4 (manual
+  `mcp-publisher login github` remains a fallback).
 
 ## Hard rules
 - **PyPI is immutable.** A version can never be re-uploaded or amended (even after
@@ -116,27 +118,36 @@ The formula installs the base package (zero pip deps → no `resource` blocks). 
 MCP server (`rebar-mcp`) needs the `mcp` extra; brew users get it via
 `pipx install 'nava-rebar[mcp]'` or `uvx --from nava-rebar[mcp] rebar-mcp`.
 
-### 4. Update the MCP Registry
-Prereqs (both already satisfied for this project — listed so they aren't
-rediscovered):
+### 4. Update the MCP Registry — automated (OIDC in CI)
+**No manual step in the normal path.** The `mcp_registry` job in
+`.github/workflows/release.yml` publishes `server.json` on the `vX.Y.Z` tag using
+**GitHub Actions OIDC** (`mcp-publisher login github-oidc`) — the same
+no-stored-secret trust model as the PyPI Trusted Publishing above. The runner's
+OIDC token proves the workflow runs in `navapbc/rebar`, which authorizes the
+`io.github.navapbc/*` namespace. The job `needs: publish`, so it runs after PyPI.
+
+Standing prereqs (already satisfied; listed so they aren't rediscovered):
 - The PyPI release must carry the `mcp-name: io.github.navapbc/rebar` annotation
   (it lives in `README.md` = the PyPI long description; the registry greps it to
   verify package ownership).
 - `server.json` `description` must be **≤ 100 characters** (the registry rejects
   longer with HTTP 422 — note PyPI/pyproject have no such limit, so the two
   descriptions can differ).
-- To publish under the **org** namespace `io.github.navapbc/*`, your `navapbc`
-  GitHub membership must be **public**:
-  `gh api --method PUT orgs/navapbc/public_members/<you>` (revert with `DELETE`).
+- The tag commit's `server.json` must carry the release version (the `Release
+  X.Y.Z` commit bumps it before tagging — step 1), since the job publishes the tree as-is.
 
-```bash
-mcp-publisher login github      # browser/device auth as a navapbc-org GitHub user
-mcp-publisher publish           # publishes ./server.json (validates schema first)
-```
-**Gotcha:** `mcp-publisher` captures your org namespace claims **at login time**.
-If you publicize org membership *after* logging in, re-run `mcp-publisher login
-github` before `publish`, or you'll get a 403 listing only `io.github.<you>/*`.
-Verify: `curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.navapbc/rebar"`.
+Verify after the run:
+`curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.navapbc/rebar"`.
+
+**Manual fallback** (only if the CI job is unavailable, or to publish out of band —
+e.g. a metadata-only re-push): `mcp-publisher login github` does an interactive
+browser/device auth as a navapbc-org GitHub user, then `mcp-publisher publish`
+publishes `./server.json`. This path needs your `navapbc` membership **public**
+(`gh api --method PUT orgs/navapbc/public_members/<you>`) and captures namespace
+claims **at login time** — if you publicize membership *after* logging in, re-run
+`mcp-publisher login github` before `publish` or you'll get a 403 listing only
+`io.github.<you>/*`. The interactive JWT also expires, which is exactly why the
+normal path is the OIDC job above.
 
 ### 5. Post-release smoke test — update the local install from the channel, then probe
 Once the version is live on PyPI, **update your local install from the
