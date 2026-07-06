@@ -303,6 +303,45 @@ dataset:
       An acceptance criterion reads 'AC: the /health endpoint should probably work'. The hedge sits
       inside an AC proving-command clause — E6.no_hedges owns that. The `hedge` criterion must mark
       itself not-applicable here (rubric-level dedup) and NOT report it.
+  # WS3 (epic cite-stone-sea): T13 prohibition-enumeration overlay (gap-report G-5).
+  - id: R-T13-prohibition-uncovered
+    corpus: rebar
+    criterion: T13
+    expect: finding
+    mode: prohibition-uncovered-call-site
+    input: >
+      A plan adds a CI gate that REQUIRES tests to pass before any merge, but the repo still has
+      direct `gh pr merge` call sites and a release workflow that merges without the new gate, none
+      of which the plan migrates or exempts. T13 must FIRE: those call sites are UNCOVERED — the new
+      prohibition will start rejecting them with no migration path.
+  - id: FP-T13-describes-enforcement
+    corpus: rebar
+    criterion: T13
+    expect: pass
+    mode: describes-existing-enforcement
+    input: >
+      A plan merely DESCRIBES the already-existing branch-protection rule ('merges already require a
+      green build') without introducing any new prohibition. T13 must PASS not-applicable — no
+      newly-outlawed behavior means no invisible affected set to enumerate.
+  # WS3: T14 CI-trigger / release-infra overlay (gap-report G-10).
+  - id: R-T14-excluded-workflow
+    corpus: rebar
+    criterion: T14
+    expect: finding
+    mode: new-ref-excluded-workflow
+    input: >
+      A plan introduces a new `release/*` branch namespace, but the CI test workflow is filtered
+      `on: push: branches: [main]` and does not include `release/*`. T14 must FIRE: that workflow is
+      EXCLUDED for the new ref pattern and will silently skip release branches.
+  - id: FP-T14-unknown-ci-failopen
+    corpus: rebar
+    criterion: T14
+    expect: pass
+    mode: unknown-ci-fail-open
+    input: >
+      A plan adds a new tag pattern, but CI runs on a third-party system whose trigger config the
+      repo tools cannot read/parse. T14 must FAIL OPEN — abstain with coverage for that workflow
+      rather than asserting an EXCLUDED gap it cannot ground; it must not fail closed on unknown CI.
 
 # Frozen human-gold subset (kappa alignment for the llm-judge). SEED labels — pending
 # human adjudication (the gating gold subset; auto-labels seed the bulk corpus).

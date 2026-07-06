@@ -1054,5 +1054,61 @@
       }
     ],
     "routing": "leaf"
+  },
+  "T13": {
+    "exec": "AGENT",
+    "facet": "overlay-prohibition",
+    "applies_at": {
+      "suppress_types": [
+        "bug"
+      ]
+    },
+    "block_threshold": 0.95,
+    "default_posture": "advisory",
+    "checklist": [
+      {
+        "key": "prohibition_call_sites_enumerated",
+        "check": "A NEW prohibition (block/reject/require-before/enforce/must-pass/cannot-merge-until) is translated into grep patterns over EXISTING call sites of the outlawed behavior, and each site is classified MIGRATED / EXEMPTED / UNCOVERED."
+      },
+      {
+        "key": "uncovered_sites_flagged",
+        "check": "Each UNCOVERED call site (performs the outlawed behavior; plan neither migrates nor exempts it) is the finding, cited by location."
+      },
+      {
+        "key": "fail_open_unenumerable",
+        "check": "Fail-open: if the outlawed behavior cannot be reduced to a checkable grep pattern, ABSTAIN with coverage rather than assert an ungroundable gap; never fabricate call sites."
+      }
+    ],
+    "routing": "overlay",
+    "overlay_routing": "llm",
+    "trigger": "plan NEWLY FORBIDS a previously-permitted action (LLM-routed — a lexical prohibition trigger over-fires on descriptive prose; the LLM router decides applicability, PASS not-applicable is cheap)"
+  },
+  "T14": {
+    "exec": "AGENT",
+    "facet": "overlay-citrigger",
+    "applies_at": {
+      "suppress_types": [
+        "bug"
+      ]
+    },
+    "block_threshold": 0.95,
+    "default_posture": "advisory",
+    "checklist": [
+      {
+        "key": "workflow_trigger_filters_audited",
+        "check": "For a NEW git ref pattern / event source / schedule, each workflow's trigger filter is classified INCLUDED / EXCLUDED / NO_FILTER; an EXCLUDED workflow that should fire is the finding (the branches:[main] silent-skip defect)."
+      },
+      {
+        "key": "release_infra_accounted",
+        "check": "A release-time-exercised change (new package / CI job / plugin entry point) is reflected in the release script's dependency graph — an internal-script dependency the external-outcome classifier misses."
+      },
+      {
+        "key": "fail_open_unknown_ci",
+        "check": "Fail-open: an unknown/unparseable workflow trigger or CI system ABSTAINS with coverage — never fail-closed on unknown CI, never fabricate an EXCLUDED gap."
+      }
+    ],
+    "routing": "overlay",
+    "overlay_routing": "llm",
+    "trigger": "plan introduces a new git ref pattern / event source / schedule, or new release-time-exercised infra (LLM-routed — deterministic ref/CI keywords over-fire on prose; the LLM router distinguishes a real trigger change)"
   }
 }

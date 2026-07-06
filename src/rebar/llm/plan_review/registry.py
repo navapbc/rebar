@@ -119,6 +119,12 @@ CANONICAL_LLM = frozenset(
         "T10",
         "T11",
         "T12",
+        # LLM-routed enumeration overlays (epic cite-stone-sea / WS3, ADR 0034). Gap-report
+        # G-5/G-10 → Txx ids (G5 is taken; is_overlay needs the Txx pattern). Each enumerates an
+        # INVISIBLE affected set in its own agentic context window: T13 prohibition→call-sites,
+        # T14 new-ref/event→workflow-trigger filters + release-infra.
+        "T13",
+        "T14",
         # Cross-cutting
         "COH",
     }
