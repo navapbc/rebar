@@ -117,10 +117,13 @@ def _dispatch_mutation(mutation: Any, context: Any = None) -> Any:
 
 
 class StatusMappingError(Exception):
-    """Raised when a mutation references a local status absent from
-    ``config.local_to_jira_status``. The preflight scan raises this before the
-    applier dispatch loop runs so an unmapped status cannot be silently
-    forwarded to Jira."""
+    """Raised when a mutation references a status that ``config.local_to_jira_status``
+    maps in NEITHER direction — i.e. the value is neither a local-status key nor a
+    Jira workflow status value. (Outbound mutations may carry either shape, so a Jira
+    status added without a corresponding reconciler mapping trips this — the offending
+    value is not necessarily a local status.) The preflight scan raises this before the
+    applier dispatch loop runs so an unmapped status cannot be silently forwarded to
+    Jira."""
 
 
 def preflight_status_mapping(mutations) -> None:
@@ -193,7 +196,10 @@ def preflight_status_mapping(mutations) -> None:
         # legitimately-mapped values.
         if status and status not in mapping and status not in set(mapping.values()):
             raise StatusMappingError(
-                f"local status {status!r} not in local_to_jira_status mapping (target={target})"
+                f"status {status!r} is not mapped in local_to_jira_status "
+                f"(it is neither a local-status key nor a Jira workflow status value; "
+                f"target={target}). A Jira status added without a corresponding reconciler "
+                f"mapping trips this — the value may originate on the Jira side, not locally."
             )
 
 

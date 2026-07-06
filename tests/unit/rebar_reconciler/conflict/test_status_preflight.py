@@ -66,6 +66,30 @@ def test_missing_status_raises_before_applier(reconcile_mod):
     assert "DIG-1" in str(exc.value)
 
 
+def test_unmapped_jira_status_not_mislabeled_as_local(reconcile_mod):
+    """An unmapped JIRA workflow status (e.g. ``IDEA`` added Jira-side) must not be
+    reported as a "local status" (bug c672). The preflight accepts both local-status
+    keys and Jira-status values and fails only when the value is in neither, so the
+    message must describe an unmapped status of indeterminate side and acknowledge the
+    Jira-status possibility — otherwise it misdirects debugging toward a non-existent
+    local ticket."""
+    mutations = [
+        {"action": "update", "key": "REB-716", "fields": {"status": "IDEA"}},
+    ]
+    with pytest.raises(reconcile_mod.StatusMappingError) as exc:
+        reconcile_mod.preflight_status_mapping(mutations)
+    msg = str(exc.value)
+    # Still names the offending value + target.
+    assert "IDEA" in msg
+    assert "REB-716" in msg
+    # Must NOT frame the VALUE as a local status (it is a Jira workflow status here);
+    # the specific mislabel "local status 'IDEA'" is the bug.
+    assert "local status 'IDEA'" not in msg
+    # Must acknowledge the Jira-status side and name the map that lacks the entry.
+    assert "Jira" in msg
+    assert "local_to_jira_status" in msg
+
+
 def test_present_status_does_not_raise(reconcile_mod):
     """An update mutation whose status is in local_to_jira_status passes
     cleanly through the preflight scan."""
