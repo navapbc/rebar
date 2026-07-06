@@ -132,5 +132,48 @@ jobs:
       # same trust model as the PyPI Trusted Publishing above.
       - name: Authenticate to the MCP Registry via GitHub Actions OIDC
         run: ./mcp-publisher login github-oidc
+      # The registry validates that the PyPI package exists before accepting the
+      # server. Right after the publish job, pypi.org may not yet serve the new
+      # version — that raced on v0.7.1 (registry returned "PyPI package not found
+      # (404)"). Wait until PyPI serves this exact version before publishing.
+      - name: Wait for PyPI to serve this version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          echo "Waiting for PyPI to serve nava-rebar ${version} (the registry validates against it)…"
+          for attempt in $(seq 1 30); do   # up to 30 × 10s = 5 min
+            if [ "$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/nava-rebar/${version}/json")" = "200" ]; then
+              echo "PyPI is serving ${version}."
+              exit 0
+            fi
+            echo "  attempt ${attempt}/30: not ready yet; sleeping 10s"
+            sleep 10
+          done
+          echo "::error::PyPI did not serve nava-rebar ${version} within 5 minutes"
+          exit 1
+      # Publish with a bounded, idempotent retry: check the registry for this
+      # version BEFORE each attempt, so a retry after a partial/duplicate publish
+      # (versions are immutable) is treated as success rather than looping to failure.
       - name: Publish server.json to the MCP Registry
-        run: ./mcp-publisher publish
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          in_registry() {
+            curl -fsS "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.navapbc/rebar" | python3 -c "import json,sys; v='${version}'; d=json.load(sys.stdin); print(any((s.get('server',s) or {}).get('version')==v for s in d.get('servers',[])))" 2>/dev/null | grep -qx True
+          }
+          for attempt in $(seq 1 5); do   # up to 5 attempts × 15s backoff
+            if in_registry; then
+              echo "nava-rebar ${version} already in the registry — nothing to do."
+              exit 0
+            fi
+            if ./mcp-publisher publish; then
+              echo "Published nava-rebar ${version} to the MCP Registry."
+              exit 0
+            fi
+            echo "  publish attempt ${attempt}/5 failed; retrying in 15s"
+            sleep 15
+          done
+          echo "::error::mcp-publisher publish failed for ${version} after 5 attempts"
+          exit 1
