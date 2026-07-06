@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
@@ -227,6 +228,21 @@ class PydanticAIRunner:
             toolsets = pai_tools.mcp_toolsets(cfg.mcp_servers)
         resolved = _pai_model(cfg)
         model = self._model_override or resolved
+        # Exclude rebar's own agent from a LOCAL Claude-Code payload optimizer (bug
+        # sue-skimp-tear): when ANTHROPIC_BASE_URL points at a loopback proxy (e.g.
+        # headroom on 127.0.0.1), it corrupts our multi-turn AGENTIC tool-loop requests
+        # into an empty provider stream, collapsing the plan-review/completion verifiers to
+        # INDETERMINATE. Pin an Anthropic model to the DIRECT public API so rebar bypasses
+        # the local proxy; real (non-loopback) gateways and the test model_override path are
+        # left untouched, and REBAR_LLM_ALLOW_LOCAL_PROXY=1 opts back in.
+        if self._model_override is None and resolved.startswith("anthropic"):
+            _direct = _local_proxy_bypass_base_url()
+            if _direct:
+                from pydantic_ai.models.anthropic import AnthropicModel
+                from pydantic_ai.providers.anthropic import AnthropicProvider
+
+                _name = resolved.split(":", 1)[1] if ":" in resolved else resolved
+                model = AnthropicModel(_name, provider=AnthropicProvider(base_url=_direct))
         # Provenance records the PROVIDER-QUALIFIED string actually invoked (or a marker
         # for an injected test model), not the bare config model — so a parity diff sees
         # exactly what ran.
@@ -562,6 +578,34 @@ def _pai_check_config(cfg: LLMConfig) -> None:
             f"(OpenAI-compatible local-server config); omit these settings. "
             f"Not silently ignored."
         )
+
+
+_DIRECT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0.0.0.0"})
+
+
+def _local_proxy_bypass_base_url() -> str | None:
+    """The DIRECT Anthropic base_url to use INSTEAD of a loopback ``ANTHROPIC_BASE_URL``,
+    or ``None`` when no bypass applies.
+
+    A local Claude-Code payload optimizer (e.g. headroom on ``127.0.0.1``) inherited via
+    ``ANTHROPIC_BASE_URL`` corrupts rebar's own multi-turn agentic tool-loop requests into
+    an empty provider stream (bug sue-skimp-tear), so rebar's internal agent must talk to
+    Anthropic directly. Returns the direct public API URL ONLY when ``ANTHROPIC_BASE_URL``
+    is set to a loopback host; a non-loopback gateway is respected (``None``), an unset var
+    is a no-op (``None``), and ``REBAR_LLM_ALLOW_LOCAL_PROXY`` truthy opts back in
+    (``None``)."""
+    base = os.environ.get("ANTHROPIC_BASE_URL", "").strip()
+    if not base:
+        return None
+    if os.environ.get("REBAR_LLM_ALLOW_LOCAL_PROXY", "").strip().lower() in ("1", "true", "yes"):
+        return None
+    from urllib.parse import urlparse
+
+    host = (urlparse(base).hostname or "").strip().lower()
+    if host in _LOOPBACK_HOSTS or host.endswith(".localhost"):
+        return _DIRECT_ANTHROPIC_BASE_URL
+    return None
 
 
 def _pai_model(cfg: LLMConfig):
