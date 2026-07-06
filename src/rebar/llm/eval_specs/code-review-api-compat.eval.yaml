@@ -1,0 +1,150 @@
+# Standing eval spec for the code-review API-COMPAT overlay (Pass-1) — story 3cb3.
+# Recall (seeded compat break) + no-fire families, seeded from the DSO code-review incidents
+# (asymmetric-change / producer-consumer drift material + the "rename with all callsites
+# updated → minor" carve-out). The api-compat overlay reviews the change along the api
+# compatibility dimension and emits kernel evidence findings; it is scored on FINDINGS
+# presence, not a FAIL/BLOCK verdict.
+# Validate offline: `rebar prompt eval code-review-api-compat`.
+prompt: code-review-api-compat
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  - type: deterministic
+    name: code_review_emits_valid_findings
+    description: The overlay output is a dict carrying a `findings` list (native Pass-1 shape).
+  - type: deterministic
+    name: code_review_recall
+    description: A diff with a seeded api-compat break produces a finding.
+  - type: deterministic
+    name: code_review_no_fire
+    description: A backward-compatible diff produces no finding.
+
+dataset:
+  # ── recall: seeded api-compat breaks (bad diff → finding) ────────────────────
+  - id: R-removed-public-json-key
+    corpus: dso
+    expect: finding
+    mode: wire-removed-json-key
+    note: >
+      A public serialized JSON key is renamed on the producer side while a surviving consumer
+      still reads the OLD key — a producer/consumer wire break. The overlay must grep the old
+      key, find the un-updated reader, and cite it.
+    diff: |
+      --- a/rebar/serialize.py
+      +++ b/rebar/serialize.py
+      @@ -3,2 +3,2 @@ def to_wire(ticket):
+      -    return {"assignee": ticket.assignee}
+      +    return {"assigned_to": ticket.assignee}   # renamed public key
+      --- a/rebar/reader.py
+      +++ b/rebar/reader.py
+      @@ -6,1 +6,1 @@ def load(payload):
+           return payload["assignee"]   # consumer STILL reads the old key — KeyError at runtime
+  - id: R-renamed-cli-flag-live-consumer
+    corpus: dso
+    expect: finding
+    mode: cli-renamed-flag
+    note: >
+      A public CLI flag is renamed but a surviving caller (a script / other module) still passes
+      the old flag — a CLI backward-compat break with a concrete broken consumer.
+    diff: |
+      --- a/rebar/cli.py
+      +++ b/rebar/cli.py
+      @@ -5,1 +5,1 @@
+      -    parser.add_argument("--assignee")
+      +    parser.add_argument("--owner")   # renamed public flag; old --assignee removed
+      --- a/scripts/claim_all.sh
+      +++ b/scripts/claim_all.sh
+      @@ -2,1 +2,1 @@
+           rebar claim "$id" --assignee "$USER"   # caller STILL passes the removed flag
+  - id: R-asymmetric-signature-change
+    corpus: dso
+    expect: finding
+    mode: asymmetric-signature-change
+    note: >
+      A function signature gains a required positional parameter but Grep shows a callsite outside
+      the diff still calls the old arity — a classic asymmetric interface change (dso L2095-2103).
+    diff: |
+      --- a/rebar/claim.py
+      +++ b/rebar/claim.py
+      @@ -8,1 +8,1 @@
+      -def claim(tid, assignee):
+      +def claim(tid, assignee, expected_status):   # new REQUIRED param, no default
+      --- a/rebar/mcp_server.py
+      +++ b/rebar/mcp_server.py
+      @@ -12,1 +12,1 @@
+           return claim(tid, assignee)   # callsite NOT updated — TypeError at runtime
+  - id: R-changed-default-alters-behavior
+    corpus: dso
+    expect: finding
+    mode: changed-default
+    note: >
+      A public config default is changed so existing callers who relied on the old default get
+      different behavior with no opt-out — an unversioned config backward-compat break.
+    diff: |
+      --- a/rebar/config.py
+      +++ b/rebar/config.py
+      @@ -4,1 +4,1 @@
+      -    push = os.environ.get("REBAR_SYNC_PUSH", "always")
+      +    push = os.environ.get("REBAR_SYNC_PUSH", "off")   # flips default: writes no longer push
+  # ── no-fire: backward-compatible diffs the overlay must NOT flag ─────────────
+  - id: FP-rename-all-callsites-updated
+    corpus: dso
+    expect: pass
+    mode: rename-all-callsites-updated
+    note: >
+      The "rename with all callsites updated → minor" carve-out (dso L787). A function is renamed
+      and EVERY reference in the repo is updated consistently in the same diff — grep the old name
+      finds nothing dangling. This is minor hygiene, NOT a compat break; the overlay must NOT fire.
+    diff: |
+      --- a/rebar/claim.py
+      +++ b/rebar/claim.py
+      @@ -8,1 +8,1 @@
+      -def claim(tid, assignee):
+      +def acquire(tid, assignee):   # renamed
+      --- a/rebar/mcp_server.py
+      +++ b/rebar/mcp_server.py
+      @@ -12,1 +12,1 @@
+      -    return claim(tid, assignee)
+      +    return acquire(tid, assignee)   # the ONLY callsite, updated in the same diff
+  - id: FP-purely-additive-optional-field
+    corpus: dso
+    expect: pass
+    mode: additive-optional-field
+    note: >
+      A purely-additive change — a new OPTIONAL field with a safe default, added without touching
+      existing surface. Existing producers/consumers keep working unchanged; backward-compatible.
+      The overlay must NOT flag it.
+    diff: |
+      --- a/rebar/serialize.py
+      +++ b/rebar/serialize.py
+      @@ -3,2 +3,3 @@ def to_wire(ticket):
+      -    return {"assignee": ticket.assignee}
+      +    return {"assignee": ticket.assignee,
+      +            "priority": getattr(ticket, "priority", None)}   # NEW optional field, safe default
+  - id: FP-private-internal-symbol
+    corpus: dso
+    expect: pass
+    mode: private-internal-surface
+    note: >
+      A change to a private/internal symbol (a `_`-prefixed helper with no external or cross-module
+      consumer) is not a public contract — out of the api-compat dimension's scope. The overlay
+      must NOT raise a compat finding.
+    diff: |
+      --- a/rebar/reducer.py
+      +++ b/rebar/reducer.py
+      @@ -6,1 +6,1 @@ class Store:
+      -    def _apply_one(self, ev):
+      +    def _apply_one(self, ev, *, strict=False):   # private helper, no external consumer
+
+gold_set:
+  - input: "A public JSON key renamed on the producer while a surviving consumer still reads the old key."
+    label: useful
+  - input: "A function signature gaining a required param with a callsite outside the diff not updated."
+    label: useful
+  - input: "A rename where every callsite in the repo is updated consistently in the same diff."
+    label: not_useful
+  - input: "A new optional field with a safe default added without touching existing surface."
+    label: not_useful
