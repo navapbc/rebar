@@ -1,0 +1,151 @@
+# Standing eval spec for the code-review DB-MIGRATIONS overlay (Pass-1) — story f894.
+# Recall (seeded migration hazard) + no-fire families, seeded from the DSO code-review
+# incidents (migration symmetry, destructive/backfill/expand-contract/lock-duration). The
+# db-migrations overlay reviews the change along the database-migrations dimension and emits
+# kernel evidence findings; it is scored on FINDINGS presence, not a FAIL/BLOCK verdict.
+# Validate offline: `rebar prompt eval code-review-db-migrations`.
+prompt: code-review-db-migrations
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  - type: deterministic
+    name: code_review_emits_valid_findings
+    description: The overlay output is a dict carrying a `findings` list (native Pass-1 shape).
+  - type: deterministic
+    name: code_review_recall
+    description: A diff with a seeded migration hazard produces a finding.
+  - type: deterministic
+    name: code_review_no_fire
+    description: A safe expand-phase / correctly-sequenced migration produces no finding.
+
+dataset:
+  # ── recall: seeded migration hazards (bad diff → finding) ────────────────────
+  - id: R-drop-column-no-backfill
+    corpus: dso
+    expect: finding
+    mode: destructive-drop-column
+    diff: |
+      --- a/migrations/0007_drop_legacy_email.py
+      +++ b/migrations/0007_drop_legacy_email.py
+      @@ -1,2 +1,4 @@
+      +def upgrade():
+      +    # destructive: DROP COLUMN on a populated table with no backfill / expand-contract path
+      +    op.drop_column("users", "legacy_email")
+  - id: R-not-null-no-default-populated
+    corpus: dso
+    expect: finding
+    mode: expand-contract-not-null
+    diff: |
+      --- a/migrations/0008_add_tenant_id.py
+      +++ b/migrations/0008_add_tenant_id.py
+      @@ -1,2 +1,4 @@
+      +def upgrade():
+      +    # NOT NULL with no default on a populated table — rejects existing rows / blocks writes
+      +    op.add_column("orders", sa.Column("tenant_id", sa.Integer(), nullable=False))
+  - id: R-asymmetric-down-migration
+    corpus: dso
+    expect: finding
+    mode: delete-replace-symmetry
+    diff: |
+      --- a/migrations/0009_rename_status.py
+      +++ b/migrations/0009_rename_status.py
+      @@ -1,3 +1,7 @@
+      +def upgrade():
+      +    op.alter_column("tickets", "state", new_column_name="status")
+      +def downgrade():
+      +    # asymmetric: down does NOT undo the rename — leaves the schema in a different shape
+      +    pass
+  - id: R-non-idempotent-unbatched-backfill
+    corpus: dso
+    expect: finding
+    mode: backfill-correctness
+    diff: |
+      --- a/migrations/0010_backfill_totals.py
+      +++ b/migrations/0010_backfill_totals.py
+      @@ -1,2 +1,4 @@
+      +def upgrade():
+      +    # non-idempotent + unbatched: one statement rewrites every row and double-counts on re-run
+      +    op.execute("UPDATE invoices SET total = total + line_sum")
+  - id: R-blocking-index-build
+    corpus: dso
+    expect: finding
+    mode: lock-duration
+    diff: |
+      --- a/migrations/0011_index_events.py
+      +++ b/migrations/0011_index_events.py
+      @@ -1,2 +1,4 @@
+      +def upgrade():
+      +    # non-concurrent index build on a large table — exclusive lock blocks production writes
+      +    op.create_index("ix_events_ticket", "events", ["ticket_id"])
+  # ── no-fire: safe migrations the overlay must NOT flag ───────────────────────
+  - id: FP-create-index-concurrently
+    corpus: dso
+    expect: pass
+    mode: safe-expand-concurrent-index
+    note: >
+      Additive expand-phase done right — CREATE INDEX CONCURRENTLY takes no blocking lock. The safe
+      pattern, not a defect; the overlay must NOT raise a lock-duration finding.
+    diff: |
+      --- a/migrations/0012_index_status.py
+      +++ b/migrations/0012_index_status.py
+      @@ -1,2 +1,4 @@
+      +def upgrade():
+      +    # safe expand: concurrent build, no blocking lock
+      +    op.execute("CREATE INDEX CONCURRENTLY ix_tickets_status ON tickets (status)")
+  - id: FP-additive-nullable-column
+    corpus: dso
+    expect: pass
+    mode: safe-expand-nullable-column
+    note: >
+      Additive nullable column on an existing table — the safe expand pattern (no data loss, no
+      rewrite-lock, no rejected rows). The overlay must NOT flag it as destructive/expand-contract.
+    diff: |
+      --- a/migrations/0013_add_note.py
+      +++ b/migrations/0013_add_note.py
+      @@ -1,2 +1,3 @@
+      +def upgrade():
+      +    op.add_column("tickets", sa.Column("note", sa.Text(), nullable=True))
+  - id: FP-gated-contract-step
+    corpus: dso
+    expect: pass
+    mode: correctly-sequenced-contract
+    note: >
+      Correctly-gated contract step — the DROP is sequenced AFTER a completed expand+backfill+deploy
+      (documented in the migration), so the destructiveness alone is not the defect. The overlay must
+      verify the sequence and NOT flag it.
+    diff: |
+      --- a/migrations/0014_drop_old_after_backfill.py
+      +++ b/migrations/0014_drop_old_after_backfill.py
+      @@ -1,3 +1,5 @@
+      +def upgrade():
+      +    # contract phase: 0011 added new col, 0012 backfilled, deploy read from new col — now safe to drop
+      +    op.drop_column("users", "email_v1")
+  - id: FP-new-table-migration
+    corpus: dso
+    expect: pass
+    mode: brand-new-table
+    note: >
+      Migration on a brand-new table created in the same migration — no existing data, so no data-loss
+      or lock risk. NOT NULL columns here are safe. The overlay must NOT flag it.
+    diff: |
+      --- a/migrations/0015_create_audit.py
+      +++ b/migrations/0015_create_audit.py
+      @@ -1,2 +1,6 @@
+      +def upgrade():
+      +    op.create_table("audit_log",
+      +        sa.Column("id", sa.Integer(), primary_key=True),
+      +        sa.Column("actor", sa.String(), nullable=False),
+      +    )
+
+gold_set:
+  - input: "A migration that drops a column on a populated table with no backfill or expand-contract path."
+    label: useful
+  - input: "A migration adding a NOT NULL column with no default to a populated table."
+    label: useful
+  - input: "An additive nullable column on an existing table (safe expand phase)."
+    label: not_useful
+  - input: "A CREATE INDEX CONCURRENTLY on an existing table (no blocking lock)."
+    label: not_useful
