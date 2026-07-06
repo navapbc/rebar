@@ -400,6 +400,27 @@ def test_class_b_labeled_key_not_double_bound(tmp_path: Path) -> None:
     assert result.mutations == []
 
 
+def test_class_b_empty_rebar_id_marker_is_adopted(tmp_path: Path) -> None:
+    """A MALFORMED, empty ``rebar-id:`` marker (no local id after the prefix) is NOT a
+    real binding — the L10 guard must not treat it as identity-bound, or the key is
+    trapped forever (never adopted, never bound → perpetual unbound_jira drift; the
+    REB-659 case). An empty marker is unmarked → the key adopts normally."""
+    bs = _empty_store(tmp_path)
+    fields = {"summary": "half-bound", "status": "To Do", "labels": ["rebar-id:"]}
+    result = compute(
+        bs,
+        {"REB-659": fields},
+        active_local_ids=set(),
+        client=None,
+        local_reader=_archived_reader({}),
+        max_acting_fraction=1.0,
+    )
+    # An empty marker is NOT a real binding → the key adopts (inbound create), not stands down.
+    assert result.adopted == ["REB-659"], "empty rebar-id: marker must not block adoption"
+    assert len(result.mutations) == 1
+    assert result.mutations[0].action.value == "create"
+
+
 def test_class_b_mass_adopt_tripped_by_breaker(tmp_path: Path) -> None:
     """The breaker is a mass-ADOPT guard too: against a real binding population, a
     fetch returning a flood of unbound issues (ADOPT is acting) is refused before

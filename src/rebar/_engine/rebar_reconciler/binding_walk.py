@@ -330,7 +330,15 @@ def _has_rebar_id_label(fields: Mapping[str, Any] | None) -> bool:
     labels = fields.get("labels")
     if not isinstance(labels, (list, tuple)):
         return False
-    return any(
-        isinstance(lbl, str) and (lbl.startswith("rebar-id:") or lbl.startswith("rebar-id-"))
-        for lbl in labels
-    )
+    # Only a WELL-FORMED marker (a non-empty local id after the prefix) is a real
+    # identity binding. A malformed/empty ``rebar-id:`` (no id) is NOT a binding — treating
+    # it as one strands the key forever (adoption stands down here on the L10 guard, yet
+    # binding-recovery has no id to re-link → perpetual unbound_jira drift; the REB-659
+    # case). An empty marker is therefore treated as unmarked, so the key adopts normally.
+    for lbl in labels:
+        if not isinstance(lbl, str):
+            continue
+        for prefix in ("rebar-id:", "rebar-id-"):
+            if lbl.startswith(prefix) and lbl[len(prefix) :].strip():
+                return True
+    return False
