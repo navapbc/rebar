@@ -295,13 +295,28 @@ idempotent, same script):
   Membership = Administrators (subgroup) + named operating agents
   (`FEATURE_BRANCH_DRIVER_MEMBERS`, space-separated usernames); the script **creates** the
   group if absent and converges membership on every run.
+- **`Contributors` group + Submit ACL (landing authorization):** an explicit, exclusive
+  `submit` grant on `refs/heads/*` (`exclusiveGroupPermissions = submit`; `submit = group
+  Contributors` / `Administrators`) restricts *who may land a change* to authorized
+  contributors + admins. Anyone may still push to `refs/for/*` to **propose**; only a
+  Contributor/admin can **Submit** — even with both gate votes at MAX. This closes the gap
+  where `submit` was inherited from All-Projects (and thus available to any Registered
+  User). Membership = Administrators (subgroup) + the accounts in `CONTRIBUTOR_MEMBERS`
+  (space-separated usernames; **default `RebarBotNava`**, the landing bot); the script
+  **creates** the group (owned by Administrators) if absent and converges membership on
+  every run (additive — offboarding is a manual `gerrit set-members Contributors
+  --remove <user>`). This is the documented Gerrit Contributor/Developer split (the Go
+  model), orthogonal to the two gate labels above.
 - **Enforcement + signals:** ACL refusals (non-member merge push / `feature/*` creation)
   are refused natively by Gerrit and recorded in Gerrit's sshd/httpd audit log — the
   review-bot is not in that path (see `infra/runbooks/review-bot-ops.md` "signals to
   watch").
 - **Back-out:** delete the `[submit]` block to restore INHERIT; revoke the three ACL
   grants + delete/empty the group to retire the flow (the copyCondition token is inert
-  absent merge changes and may be left or reverted). See ADR-0025.
+  absent merge changes and may be left or reverted). See ADR-0025. To retire the
+  **landing-authorization** gate specifically, delete the `submit` ACL lines from
+  `[access "refs/heads/*"]` (restores inherited submit to all Registered Users) and
+  optionally remove the `Contributors` group.
 
 ---
 
