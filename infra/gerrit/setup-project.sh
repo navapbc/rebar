@@ -2,8 +2,10 @@
 # ---------------------------------------------------------------------------
 # setup-project.sh — provision the `rebar` Gerrit project + its managed groups + push
 # its refs/meta/config (labels LLM-Review + Verified, submit requirements, submit-type
-# pin, and the feature-branch ACLs). Originally story S3; extended by epic 88ab / S1
-# (bored-tag-sale) to create/converge the `feature-branch-drivers` group and its ACLs.
+# pin, the feature-branch ACLs, and the Contributors Submit gate). Originally story S3;
+# extended by epic 88ab / S1 (bored-tag-sale) to create/converge the
+# `feature-branch-drivers` group and its ACLs, and later to add the `Contributors` group
+# + the Submit ACL that restricts landing to authorized contributors + Administrators.
 #
 # Declarative + idempotent: creates the project + managed groups if absent, then pushes a
 # fully declarative project.config to refs/meta/config (overwriting prior config). The
@@ -71,6 +73,33 @@ for _m in ${FEATURE_BRANCH_DRIVER_MEMBERS:-}; do
   $GERRIT_SSH gerrit set-members "$FB_GROUP" --add "$_m" >/dev/null 2>&1 || true
 done
 
+# `Contributors` (landing-authorization gate; see the Submit ACL in project.config
+# [access "refs/heads/*"]): its members + Administrators are the ONLY accounts allowed to
+# Submit (land) a change — everyone else can still push to refs/for/* to PROPOSE. Created
+# + converged here so the group referenced by project.config exists BEFORE the
+# refs/meta/config push (an absent group makes Gerrit reject the push, same as the
+# feature-branch-drivers group above).
+#
+# Membership policy (mirrors feature-branch-drivers): initial members = Administrators
+# (included as a subgroup) + the named accounts in CONTRIBUTOR_MEMBERS (space-separated
+# usernames; default empty = admins only). Membership changes flow through THIS script
+# (an admin-approved edit), not ad-hoc UI grants.
+CONTRIB_GROUP="Contributors"
+if $GERRIT_SSH gerrit ls-groups | grep -qxF -- "$CONTRIB_GROUP"; then
+  echo "setup-project: group '$CONTRIB_GROUP' already exists" >&2
+else
+  echo "setup-project: creating group '$CONTRIB_GROUP'" >&2
+  $GERRIT_SSH gerrit create-group "$CONTRIB_GROUP" \
+    --description "Authorized contributors: the only non-admin accounts allowed to Submit (land) changes" \
+    --group Administrators
+fi
+# Converge membership idempotently (re-adding an existing member/subgroup is a no-op).
+$GERRIT_SSH gerrit set-members "$CONTRIB_GROUP" --include Administrators >/dev/null 2>&1 || true
+for _m in ${CONTRIBUTOR_MEMBERS:-}; do
+  echo "setup-project: ensuring '$_m' in '$CONTRIB_GROUP'" >&2
+  $GERRIT_SSH gerrit set-members "$CONTRIB_GROUP" --add "$_m" >/dev/null 2>&1 || true
+done
+
 # --- 2. Push the declarative refs/meta/config ------------------------------
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -85,7 +114,7 @@ cp "${SCRIPT_DIR}/project.config" project.config
 # rejects the push if any referenced group is absent. Named groups (Administrators,
 # Service Users) get their UUID from the live group list; the system group "Registered
 # Users" has the well-known global: UUID.
-declare -A want=( ["Administrators"]=1 ["Service Users"]=1 ["feature-branch-drivers"]=1 )
+declare -A want=( ["Administrators"]=1 ["Service Users"]=1 ["feature-branch-drivers"]=1 ["Contributors"]=1 )
 {
   echo "# UUID	Group Name"
   echo "global:Registered-Users	Registered Users"
@@ -110,6 +139,6 @@ fi
 
 git config user.email admin@example.com
 git config user.name Administrator
-git commit -q -m "rebar project.config: LLM-Review + Verified labels + submit requirements + submit-type pin + feature-branch ACLs"
+git commit -q -m "rebar project.config: LLM-Review + Verified labels + submit requirements + submit-type pin + feature-branch ACLs + Contributors submit gate"
 git push -q origin HEAD:refs/meta/config
 echo "setup-project: pushed refs/meta/config for '$PROJECT'" >&2
