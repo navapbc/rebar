@@ -40,6 +40,11 @@ def check_orphaned_tasks(issues: list[dict]) -> list[Finding]:
             continue
         if issue.get("status", "open") == "closed":
             continue
+        # `idea` tickets are captured-but-undesigned and often intentionally
+        # un-parented — exempt them from the orphan finding (and its creation-hour
+        # cluster). Structural checks below stay active for idea tickets.
+        if issue.get("status", "open") == "idea":
+            continue
         parent = issue.get("parent", issue.get("parent_id", None))
         deps = issue.get("dependencies", issue.get("deps", []))
         is_child = bool(parent) or any(
@@ -94,10 +99,9 @@ def check_empty_epics(issues: list[dict]) -> list[Finding]:
     out: list[Finding] = [Finding("verbose", "Checking for epics with 0 children...")]
     epic_ids = set()
     for issue in issues:
-        if (
-            issue.get("type", issue.get("issue_type", "task")) == "epic"
-            and issue.get("status", "open") != "closed"
-        ):
+        if issue.get("type", issue.get("issue_type", "task")) == "epic" and issue.get(
+            "status", "open"
+        ) not in ("closed", "idea"):
             iid = issue.get("id", "")
             if iid:
                 epic_ids.add(iid)
@@ -113,10 +117,9 @@ def check_empty_epics(issues: list[dict]) -> list[Finding]:
                     epics_with_children.add(dep_id)
     empty = 0
     for issue in issues:
-        if (
-            issue.get("type", issue.get("issue_type", "task")) == "epic"
-            and issue.get("status", "open") != "closed"
-        ):
+        if issue.get("type", issue.get("issue_type", "task")) == "epic" and issue.get(
+            "status", "open"
+        ) not in ("closed", "idea"):
             iid = issue.get("id", "")
             title = issue.get("title", issue.get("name", "?"))
             if iid and iid not in epics_with_children:
@@ -138,9 +141,12 @@ def check_empty_epics(issues: list[dict]) -> list[Finding]:
 
 
 def check_ticket_count(issues: list[dict]) -> list[Finding]:
-    """Total unarchived ticket count: ≥600 → MAJOR, ≥300 → WARNING, else verbose."""
+    """Total unarchived ticket count: ≥600 → MAJOR, ≥300 → WARNING, else verbose.
+
+    `idea` tickets are excluded: a parking lot of undesigned ideas is not active
+    tracker load and must not push the count into a scored WARNING/MAJOR band."""
     out: list[Finding] = [Finding("verbose", "Checking total ticket count...")]
-    total = len(issues)
+    total = sum(1 for i in issues if i.get("status", "open") != "idea")
     if total >= 600:
         out.append(
             Finding(
@@ -264,7 +270,8 @@ def check_missing_descriptions(issues: list[dict]) -> list[Finding]:
     for issue in issues:
         if issue.get("type", issue.get("issue_type", "task")) != "task":
             continue
-        if issue.get("status", "open") == "closed":
+        if issue.get("status", "open") in ("closed", "idea"):
+            # `idea` tasks are captured-but-undesigned; a terse/empty body is expected.
             continue
         desc = issue.get("description", issue.get("body", "") or "")
         iid = issue.get("id", "?")
@@ -301,7 +308,8 @@ def check_interface_contracts(issues: list[dict], ticket_cmd: str) -> list[Findi
         Finding("verbose", "Checking interface contract tasks for documentation...")
     ]
     for issue in issues:
-        if issue.get("status", "open") == "closed":
+        if issue.get("status", "open") in ("closed", "idea"):
+            # `idea` tickets are undesigned; don't demand a contract file/method ref.
             continue
         title = issue.get("title", issue.get("name", ""))
         if not _is_interface_contract_title(title):
