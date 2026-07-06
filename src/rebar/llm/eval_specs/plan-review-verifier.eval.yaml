@@ -117,6 +117,44 @@ dataset:
     pair: impact-dataloss
     finding: "A scope bullet uses the word 'improve' without a metric, so the success target is slightly ambiguous (cosmetic; local; trivially fixed in the AC text)."
     expect: low_impact
+  # WS1 (epic cite-stone-sea): committed_work_relies_on_unbacked_claim discrimination.
+  # A committed scope-EXCLUSION resting on an UNVERIFIED factual claim upholds (recall);
+  # the same finding drops when the plan backs the claim with a run Verify command.
+  - id: D4-true-committed-claim
+    criterion: E4
+    kind: "true"
+    pair: committed-claim
+    finding: "The story's 'OUT: rate-limiter — already exists in the gateway' excludes building one, but no task, AC, or Verify command establishes that the gateway limiter exists or covers this path."
+    expect: high_validity
+  - id: D4-false-committed-claim
+    criterion: E4
+    kind: "false"
+    pair: committed-claim
+    mode: claim-is-backed
+    finding: "The 'OUT: rate-limiter already exists' exclusion is an unverified claim."
+    note: >
+      Planted-false: the plan's ## Assumptions block cites the gateway config and a run
+      `curl` Verify command proving the limiter covers this route —
+      committed_work_relies_on_unbacked_claim should be `no`, dropping validity.
+    expect: low_validity
+  # WS1: respects_artifact_altitude discrimination. A finding pitched at the artifact's OWN
+  # level upholds; a finding demanding a child/implementation detail the story defers drops.
+  - id: D5-true-altitude
+    criterion: T5c
+    kind: "true"
+    pair: altitude
+    finding: "The story commits to a new public endpoint but declares no access posture at all — an undeclared access decision at the story's own level."
+    expect: high_validity
+  - id: D5-false-altitude
+    criterion: A1
+    kind: "false"
+    pair: altitude
+    mode: altitude-error
+    finding: "The story does not specify the retry-backoff schedule or the lock-acquisition ordering for the worker."
+    note: >
+      Planted-false: retry/lock detail is implementation-level that the story legitimately
+      defers to its task children — respects_artifact_altitude should be `no`, dropping validity.
+    expect: low_validity
 
 gold_set:
   - input: "A planted-false 'no tests' finding when the plan specifies tests (D1-false)."

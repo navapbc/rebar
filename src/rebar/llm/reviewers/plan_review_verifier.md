@@ -62,7 +62,10 @@ BINARY SUB-ANSWERS (yes|no|insufficient) — answer each atomically, about the F
   an absence finding, 'X is missing' is verifiable by checking the complete artifact.
 - evidence_entails_finding — the cited evidence (a plan quote/section, an absence rationale, or a
   code citation) actually ENTAILS the finding under a charitable reading. THIS is the load-bearing
-  question for a plan finding.
+  question for a plan finding. RESTATEMENT (null delta): if the plan already states the very thing
+  the finding demands — the finding merely restates an existing consideration, a done-definition, or
+  a dependency already declared in the graph, in different words — the evidence does NOT entail a
+  defect: answer no.
 - path_reachable — the situation the finding describes is actually reachable given the plan as
   written (the flawed path is taken, not dead/guarded).
 - impact_follows_necessarily — the asserted harm NECESSARILY follows from the flaw, not merely
@@ -73,6 +76,16 @@ BINARY SUB-ANSWERS (yes|no|insufficient) — answer each atomically, about the F
   already mitigates the flaw.
 - severity_claim_justified — the finding's own asserted impact is proportionate to the evidence,
   not inflated.
+- committed_work_relies_on_unbacked_claim — a COMMITTED element of the plan (an AC, a task, an
+  edit, or a scope EXCLUSION such as 'OUT: X — already exists / handled by Y') rests on a factual
+  claim the plan neither verifies (a run Verify command / cited evidence) nor guards with a
+  fallback. This unifies confident-assertion and false-exclusion findings: 'yes' upholds them.
+  Answer `na` unless the finding is about a committed element depending on such a claim.
+- respects_artifact_altitude — the finding does NOT demand a detail, or presume a design choice,
+  that this artifact at its level (epic/story/task) legitimately defers to a child ticket or to
+  implementation (e.g. demanding a retry policy or lock ordering from a story that properly leaves
+  it to a task). 'no' marks an altitude-error false positive and lowers validity; 'yes' confirms
+  the finding is pitched at the right level; `na` if altitude is not in question.
 Answer `na` for a sub-question that genuinely does not apply to this finding's shape (e.g.
 path_reachable for a purely structural/organisational finding) — it is then EXCLUDED from the
 validity score rather than guessed as insufficient. Do not na the load-bearing

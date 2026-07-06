@@ -71,10 +71,76 @@ def test_independence_instructions_never_leak_the_findings_conclusion() -> None:
 
 def test_atomicity_each_binary_subquestion_is_an_independent_field() -> None:
     fields = _binary_fields()
-    # the 7 graded sub-questions are each their own field, plus the conditional veto
+    # each graded sub-question is its own field, plus the conditional veto
+    # (cited_reference_accurate) — count stays len(GRADED_BINARY) + 1 as the tuple grows.
     assert review_kernel.GRADED_BINARY and set(review_kernel.GRADED_BINARY) <= fields
     assert "cited_reference_accurate" in fields
     assert len(fields) == len(review_kernel.GRADED_BINARY) + 1
+
+
+def test_verifier_new_subanswers_are_in_the_verification_contract() -> None:
+    """WS1 (epic cite-stone-sea): the two DSO-adopted sub-answers appear as graded binary
+    fields in the verification contract AND in decide.GRADED_BINARY (so they participate in
+    validity through the uniform loop, not a criterion-specific branch)."""
+    fields = _binary_fields()
+    for key in ("committed_work_relies_on_unbacked_claim", "respects_artifact_altitude"):
+        assert key in review_kernel.GRADED_BINARY, f"{key} missing from GRADED_BINARY"
+        assert key in fields, f"{key} missing from the verification contract"
+
+
+def test_new_subanswers_default_to_na_and_are_excluded_from_validity() -> None:
+    """WS1: the two new sub-answers default to `na` in the Binary model — so a verifier that
+    does not engage them ABSTAINS (excluded from the validity mean) rather than dragging it,
+    while the pre-existing sub-answers keep their `insufficient` default."""
+    binary_model = (
+        review_kernel.verification_model()
+        .model_fields["verifications"]
+        .annotation.__args__[0]
+        .model_fields["binary"]
+        .annotation
+    )
+    defaults = {name: f.default for name, f in binary_model.model_fields.items()}
+    assert defaults["committed_work_relies_on_unbacked_claim"] == "na"
+    assert defaults["respects_artifact_altitude"] == "na"
+    assert defaults["is_verifiable"] == "insufficient"  # unchanged sub-answers stay insufficient
+    # `na` is excluded from the mean: an otherwise-perfect finding that abstains on the two
+    # new keys grades exactly the same as one that never carried them.
+    perfect = {q: "yes" for q in review_kernel.GRADED_BINARY}
+    with_na = {
+        **perfect,
+        "committed_work_relies_on_unbacked_claim": "na",
+        "respects_artifact_altitude": "na",
+    }
+    assert review_kernel.validity(with_na) == 1.0
+
+
+def test_old_sidecar_findings_stay_validity_comparable() -> None:
+    """WS1 old-sidecar comparability: a pre-change finding dict (which lacks the two new keys
+    entirely) grades to exactly the validity it did before they were introduced — the absent
+    keys are non-answerable, identical to `na`, and never enter the mean."""
+    pre_change = {
+        "is_verifiable": "yes",
+        "evidence_entails_finding": "yes",
+        "path_reachable": "no",
+        "impact_follows_necessarily": "insufficient",
+        "no_viable_alternative_explanation": "yes",
+        "no_existing_mitigation": "yes",
+        "severity_claim_justified": "no",
+    }
+    # 7 answered keys: yes,yes,no,insufficient,yes,yes,no -> (1+1+0+0.5+1+1+0)/7, rounded 4dp.
+    expected = round((1 + 1 + 0 + 0.5 + 1 + 1 + 0) / 7, 4)
+    assert review_kernel.validity(pre_change) == expected
+    # Adding the new keys as na (or omitting them) does not change the score.
+    assert (
+        review_kernel.validity(
+            {
+                **pre_change,
+                "committed_work_relies_on_unbacked_claim": "na",
+                "respects_artifact_altitude": "na",
+            }
+        )
+        == expected
+    )
 
 
 def test_allow_insufficient_is_graded_honestly_not_dropped() -> None:

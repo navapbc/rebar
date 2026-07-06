@@ -36,6 +36,13 @@ GRADED_BINARY = (
     "no_viable_alternative_explanation",
     "no_existing_mitigation",
     "severity_claim_justified",
+    # DSO-adopted sub-answers (epic cite-stone-sea / WS1, ADR 0032). Generic GRADED_BINARY
+    # entries — they participate in validity() through the SAME uniform loop, no per-criterion
+    # branching. Their Binary-model default is "na" (see verify._BINARY_NA_DEFAULT), so a
+    # verifier that does not address them abstains (excluded from the mean) rather than
+    # dragging validity, and old sidecars that predate them stay comparable.
+    "committed_work_relies_on_unbacked_claim",
+    "respects_artifact_altitude",
 )
 _GRADE = {"yes": 1.0, "insufficient": 0.5, "no": 0.0}
 _SEV01: dict[str | None, float] = {"none": 0.0, "low": 0.33, "medium": 0.67, "high": 1.0}
