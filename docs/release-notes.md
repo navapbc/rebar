@@ -4,6 +4,15 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## 0.7.1 — MCP Registry auto-published; first fully-automated release
+
+The `mcp_registry` job (GitHub Actions OIDC) now auto-publishes `server.json` to
+the MCP Registry on a tag, so all three distribution channels + the GitHub Release
+are hands-off from one `vX.Y.Z` tag push — no interactive `mcp-publisher login`.
+This is the first release cut through the complete automation (PyPI + GitHub Release
++ MCP Registry), and the first real end-to-end run of the auto GitHub Release
+(0.7.0's was a manual one-off due to a job bug fixed since). (ticket `dazed-cherry-knelt`)
+
 ## 0.7.0 — GitHub Releases now auto-created on tag
 
 The release workflow (`.github/workflows/release.yml`) now creates the **GitHub
