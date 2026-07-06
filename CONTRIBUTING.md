@@ -150,6 +150,14 @@ Gerrit merges the change into its `main`, then **replicates the new `main` to Gi
 where the same commit appears on the read-only mirror (and the branch CI runs on the
 push). That replication is the only way GitHub `main` advances.
 
+> **Submitting requires contributor authorization.** The **Submit** action is restricted to
+> the `Contributors` group (plus Administrators) — anyone may push to `refs/for/*` to
+> *propose* a change, but only an authorized contributor (or an admin) can *land* one, even
+> when both votes are `+1`. If Submit is unavailable to you, ask an admin to add your Gerrit
+> account to the `Contributors` group (or to submit on your behalf). This is enforced
+> natively by the Submit ACL in `infra/gerrit/project.config` (managed by
+> `infra/gerrit/setup-project.sh` via `CONTRIBUTOR_MEMBERS`).
+
 ---
 
 ## 3. GitHub is a read-only mirror
