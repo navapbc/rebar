@@ -187,6 +187,40 @@ def test_hedge_dedup() -> None:
     )
 
 
+def _reviewer_prompt(name: str) -> str:
+    from pathlib import Path
+
+    from rebar.llm.plan_review import passes
+
+    return (Path(passes.__file__).parent.parent / "reviewers" / name).read_text()
+
+
+def test_g5_prohibition() -> None:
+    # WS3 (epic cite-stone-sea): the prohibition-enumeration overlay (gap-report G-5, id T13).
+    # Recall: a require-tests-before-merge plan yields UNCOVERED `gh pr merge` sites; FP: a plan
+    # that merely describes existing enforcement does not fire. Enums defined in the prompt.
+    prompt = _reviewer_prompt("plan_review_T13.md")
+    for token in ("MIGRATED", "EXEMPTED", "UNCOVERED"):
+        assert token in prompt, f"T13 prompt missing enum value {token}"
+    ds = E.load_eval_spec("plan-review-finder").get("dataset", [])
+    t13 = {c.get("id"): c for c in ds if c.get("criterion") == "T13"}
+    assert t13.get("R-T13-prohibition-uncovered", {}).get("expect") == "finding"
+    assert t13.get("FP-T13-describes-enforcement", {}).get("expect") == "pass"
+
+
+def test_g10_citrigger() -> None:
+    # WS3: the CI-trigger/release-infra overlay (gap-report G-10, id T14). Recall: a new ref
+    # pattern yields an EXCLUDED workflow; plus a fail-open abstain on unknown CI. Enums in prompt.
+    prompt = _reviewer_prompt("plan_review_T14.md")
+    for token in ("INCLUDED", "EXCLUDED", "NO_FILTER"):
+        assert token in prompt, f"T14 prompt missing enum value {token}"
+    ds = E.load_eval_spec("plan-review-finder").get("dataset", [])
+    t14 = {c.get("id"): c for c in ds if c.get("criterion") == "T14"}
+    assert t14.get("R-T14-excluded-workflow", {}).get("expect") == "finding"
+    failopen = t14.get("FP-T14-unknown-ci-failopen", {})
+    assert failopen.get("expect") == "pass" and failopen.get("mode") == "unknown-ci-fail-open"
+
+
 def test_verifier_has_blast_radius_ratchet_pair() -> None:
     # WS6 FP-3(b): the one-way blast_radius ratchet is a Pass-2 (verifier) behavior, so it is
     # exercised in the verifier eval — a real system-wide defect keeps impact; a trivial finding
