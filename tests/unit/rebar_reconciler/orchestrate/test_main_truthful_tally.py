@@ -56,7 +56,13 @@ def _make_stub_reconcile(return_value):
 
 
 def test_run_pass_prints_applied_count_when_writes_succeed(main_mod, tmp_path, capsys):
-    """When 3 of 10 mutations land in Jira, the OK line must report applied=3."""
+    """When 3 of 10 mutations land in Jira, the OK line must report applied=3.
+
+    Fail-loud (Facet 2, reconciler-abort-isolation): a pass with per-mutation
+    failures (mutation_failures > 0) now returns a NON-ZERO exit code so a
+    scheduler/CI treats the pass as degraded, even though the truthful OK line
+    is still printed.
+    """
     stub = _make_stub_reconcile(
         {
             "pass_id": "p-001",
@@ -69,7 +75,7 @@ def test_run_pass_prints_applied_count_when_writes_succeed(main_mod, tmp_path, c
     with patch.object(main_mod, "_try_load_step", return_value=stub):
         rc = main_mod.run_pass(repo_root=tmp_path)
     out = capsys.readouterr().out
-    assert rc == 0
+    assert rc != 0, "a pass with mutation_failures > 0 must fail loud (non-zero exit)"
     assert "applied 3" in out or "applied=3" in out, (
         f"OK line must report applied count truthfully; got: {out!r}"
     )
