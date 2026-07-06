@@ -52,7 +52,9 @@ read inform blast_radius and reversibility.
   architectural decision that is expensive to unwind later.
 - blast_radius (local|module|system) — how far the planned change's effect reaches. local = one
   function / section / ticket; module = one component or package; system = cross-cutting, many
-  call sites, or the whole store / workflow.
+  call sites, or the whole store / workflow. ONE-WAY ratchet: a wide blast_radius only LOWERS
+  tolerance for a defect that is already real; it never raises the severity of a small or trivial
+  finding. Score the flaw's own reach, not the reach of the plan's overall subject matter.
 - likelihood (low|medium|high) — chance the harm actually materialises given the plan as written.
   low = needs an unlikely combination or is speculative; medium = plausible on a normal path;
   high = near-certain or on the default path.

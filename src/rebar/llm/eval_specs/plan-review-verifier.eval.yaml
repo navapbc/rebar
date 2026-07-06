@@ -155,6 +155,25 @@ dataset:
       Planted-false: retry/lock detail is implementation-level that the story legitimately
       defers to its task children — respects_artifact_altitude should be `no`, dropping validity.
     expect: low_validity
+  # WS6 (epic cite-stone-sea) FP-3(b): the one-way blast_radius ratchet lives in Pass-2, so its
+  # behavioral proof belongs HERE (the finder cannot emit severity). A real system-wide defect
+  # keeps its impact; a trivial/local finding is NOT inflated to blocking by a grand subject.
+  - id: BR-true-wide-real-defect
+    criterion: T4
+    kind: "true"
+    pair: blast-radius-ratchet
+    finding: "A breaking change to a shared event-schema field is planned with no migration for the many existing consumers across the store — a real defect whose blast radius is genuinely system-wide."
+    expect: high_impact
+  - id: BR-false-inflated-trivial
+    criterion: A1
+    kind: "false"
+    pair: blast-radius-ratchet
+    mode: grand-subject-inflation
+    finding: "A helper's local variable name is slightly unclear (cosmetic, local), inside a plan whose overall subject is a system-wide workflow-engine rewrite."
+    note: >
+      Planted-false: the finding's OWN reach is local/trivial; the grand system-wide subject must
+      NOT inflate blast_radius or severity (one-way ratchet). Expect low impact, never blocking.
+    expect: low_impact
 
 gold_set:
   - input: "A planted-false 'no tests' finding when the plan specifies tests (D1-false)."
