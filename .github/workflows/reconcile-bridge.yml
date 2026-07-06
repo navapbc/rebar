@@ -75,7 +75,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: true   # the mounted worktree reuses these creds to push
-          fetch-depth: 1
+          # Full history (NOT shallow). A shallow graft defeats git's merge-base
+          # computation, so reconciling a compaction (which deletes source event
+          # files) against the remote resurrects those files — SNAPSHOT_INCONSISTENT
+          # corruption (bug saggy-pupil-plant / f193). The tickets store MUST be
+          # reconciled with full history + merge, never shallow + rebase.
+          fetch-depth: 0
 
       - name: Validate Jira configuration
         env:
@@ -99,7 +104,9 @@ jobs:
         # tracker.branch matches and `rebar fsck` does not WARN on a mismatch.
         run: |
           set -euo pipefail
-          git fetch origin '+tickets:refs/remotes/origin/tickets' --depth=1
+          # Full fetch (no --depth): a shallow tickets history defeats merge-base and
+          # corrupts compaction reconciliation (bug f193). See fetch-depth note above.
+          git fetch origin '+tickets:refs/remotes/origin/tickets'
           rm -rf .tickets-tracker
           git worktree add -B tickets .tickets-tracker origin/tickets
 
@@ -235,7 +242,7 @@ jobs:
             git commit -m "chore: sync events from rebar reconciler [run ${{ github.run_id }}]"
           fi
 
-          git fetch origin tickets --depth=1 || true
+          git fetch origin tickets || true
           ahead=$(git rev-list --count origin/tickets..HEAD 2>/dev/null || echo 0)
           if [ "$ahead" -eq 0 ]; then
             echo "Local tickets branch not ahead of origin — nothing to push."
@@ -258,15 +265,21 @@ jobs:
 
             if echo "$push_stderr" | grep -qiE 'non-fast-forward|rejected|fetch first'; then
               printf 'Push rejected (attempt %d):\n%s\n' "$attempt" "$push_stderr" >&2
-              git fetch origin tickets --depth=1 2>&1 || echo "Fetch failed — retrying with stale remote" >&2
+              git fetch origin tickets 2>&1 || echo "Fetch failed — retrying with stale remote" >&2
             else
               echo "Push failed (non-retryable, exit $push_exit): $push_stderr" >&2
               exit 1
             fi
 
-            if ! git rebase origin/tickets 2>&1; then
-              git rebase --abort 2>/dev/null || true
-              echo "Rebase conflict during push retry (attempt $attempt)" >&2
+            # Reconcile with MERGE, not rebase. Event files are write-once and
+            # union by unique filename, so a merge resolves cleanly; a rebase
+            # re-applies this stale worktree over a remote compaction and resurrects
+            # the source files it deleted (SNAPSHOT_INCONSISTENT, bug f193). This
+            # mirrors the local client path (_store/push.py) and invariant I1
+            # (docs/concurrency.md: "merge unions cleanly, rebase conflicts").
+            if ! git merge --no-edit origin/tickets 2>&1; then
+              git merge --abort 2>/dev/null || true
+              echo "Merge conflict during push retry (attempt $attempt)" >&2
               exit 1
             fi
 

@@ -68,13 +68,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: true
-          fetch-depth: 1
+          # Full history (NOT shallow): a shallow tickets graft defeats merge-base and
+          # corrupts compaction reconciliation (bug f193). Reconcile with full history
+          # + merge, never shallow + rebase.
+          fetch-depth: 0
           ref: main
 
       - name: Mount tickets branch as a worktree
         run: |
           set -euo pipefail
-          git fetch origin '+tickets:refs/remotes/origin/tickets' --depth=1
+          git fetch origin '+tickets:refs/remotes/origin/tickets'
           rm -rf .tickets-tracker
           git worktree add -B tickets .tickets-tracker origin/tickets
 
@@ -365,7 +368,7 @@ jobs:
         run: |
           set -euo pipefail
           cd .tickets-tracker
-          git fetch origin tickets --depth=1 || true
+          git fetch origin tickets || true
           ahead=$(git rev-list --count origin/tickets..HEAD 2>/dev/null || echo 0)
           if [ "$ahead" -eq 0 ]; then
             echo "Nothing to flush — local tickets branch not ahead of origin."
@@ -377,8 +380,10 @@ jobs:
               echo "Push succeeded (attempt $attempt)."; exit 0
             fi
             if grep -qiE 'non-fast-forward|rejected|fetch first' /tmp/push_err; then
-              git fetch origin tickets --depth=1 || true
-              git rebase origin/tickets || { git rebase --abort 2>/dev/null || true; echo "::error::rebase conflict"; exit 1; }
+              git fetch origin tickets || true
+              # MERGE, not rebase: rebase over a remote compaction resurrects the
+              # source event files it deleted (SNAPSHOT_INCONSISTENT, bug f193).
+              git merge --no-edit origin/tickets || { git merge --abort 2>/dev/null || true; echo "::error::merge conflict"; exit 1; }
               sleep $(( (1 << attempt) + RANDOM % 3 ))
             else
               echo "::error::non-retryable push failure: $(cat /tmp/push_err)"; exit 1

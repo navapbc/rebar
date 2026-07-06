@@ -27,7 +27,7 @@ import time
 from rebar import config
 from rebar._engine_support.output import OutputFormatError, parse_output
 from rebar._store.gitutil import run_git
-from rebar.reducer import reduce_ticket
+from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
 
 _STRUCTURED_KINDS = {
     "corrupt",
@@ -192,7 +192,10 @@ def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> 
     if not source_uuids:
         return out
 
-    event_files: dict[str, str] = {}
+    # Map uuid -> (filename, event_type). The type is parsed from the filename
+    # suffix (``{ts}-{uuid}-{TYPE}.json``, written by event_filename from the event's
+    # own event_type), so it agrees with the event body without a second file read.
+    event_files: dict[str, tuple[str, str]] = {}
     for name in sorted(os.listdir(ticket_dir)):
         if not name.endswith(".json") or name.startswith("."):
             continue
@@ -205,16 +208,25 @@ def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> 
         type_split = rest_no_ext.rsplit("-", 1)
         if len(type_split) < 2:
             continue
-        event_files[type_split[0]] = name
+        event_files[type_split[0]] = (name, type_split[1])
 
     source_uuid_set = set(source_uuids)
     for u in source_uuids:
         if u in event_files:
             out.append(
                 f"SNAPSHOT_INCONSISTENT: {ticket_id}/{snapshot_filename} — source UUID "
-                f"{u} still exists as {event_files[u]}"
+                f"{u} still exists as {event_files[u][0]}"
             )
-    for file_uuid, name in event_files.items():
+    for file_uuid, (name, etype) in event_files.items():
+        # Compaction folds ONLY KNOWN_EVENT_TYPES into source_event_uuids
+        # (_commands/compact.py excludes any other type from both deletion and the
+        # source list). A pre-snapshot event of a non-KNOWN type (e.g. the
+        # reducer-ignored REVIEW_RESULT, or a forward-compat type from a newer
+        # clone) is therefore *correctly* absent from source_event_uuids — flagging
+        # it ORPHAN_EVENT is a false positive. Stay symmetric with compaction: only
+        # a genuinely orphaned KNOWN-type event is real data loss.
+        if etype not in KNOWN_EVENT_TYPES:
+            continue
         if name < snapshot_filename and "-SNAPSHOT.json" not in name:
             if file_uuid not in source_uuid_set:
                 out.append(
