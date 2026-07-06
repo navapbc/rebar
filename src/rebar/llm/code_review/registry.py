@@ -48,6 +48,7 @@ OVERLAY_IDS: tuple[str, ...] = (
     "tests",  # test sufficiency / regression coverage for the change
     "llm-prompts",  # prompt/contract/output-schema changes to LLM surfaces
     "deletion-impact",  # (content-triggered) removed def/class/signature → dangling references
+    "scope-intent",  # (content-triggered) diff vs the UNION scope/AC of the commit's tickets
 )
 
 # Operational policy (config, not a magic constant baked into the wire schema): the
