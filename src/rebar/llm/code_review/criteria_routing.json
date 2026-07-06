@@ -120,5 +120,15 @@
     "blocking_enabled": false,
     "detector": { "id_prefix": "rebar.builtin.iac.public-exposure." },
     "fail_mode": "open"
+  },
+  "conflict-markers": {
+    "_comment": "story da25: deterministic, polyglot detector for leftover VCS merge-conflict markers (<<<<<<< / >>>>>>> / diff3 |||||||) committed into source. Runs in opengrep `generic` mode over every file type. ADVISORY (blocking_enabled=false, fail_mode=open): a match is a coach-not-block coverage finding; an abstain (no engine on PATH) never blocks — no new BLOCK source. applies_to empty so it considers every changed file (matches are diff-scoped by location in run_detectors). NOT under the fail-closed rebar.builtin.security. prefix. The FP-prone bare `=======` separator is deliberately NOT matched.",
+    "exec": "DET",
+    "applies_to": [],
+    "default_posture": "advisory",
+    "block_threshold": 0.5,
+    "blocking_enabled": false,
+    "detector": { "id_prefix": "rebar.builtin.smell.conflict-markers." },
+    "fail_mode": "open"
   }
 }
