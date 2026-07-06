@@ -1,0 +1,1 @@
+{"author":"rebar-bridge[bot]","data":{"body":"BRIDGE_CANARY_ALERT: Binding drift still present as of 2026-07-05T13:35:45Z: unbound_jira=1. Run: https://github.com/navapbc/rebar/actions/runs/28742573219"},"env_id":"a4bb1ca4-b186-4e86-834b-e894e50f688d","event_type":"COMMENT","timestamp":1783258545956313658,"uuid":"19b9b33d-d5a1-4b86-8480-755d049ee013"}
