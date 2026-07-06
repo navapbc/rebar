@@ -113,7 +113,13 @@ def verification_model(*, strict: bool = False) -> type:
         model_config = forbid
         prod_impact: str = Field(default="none", description="none|low|medium|high")
         debt_impact: str = Field(default="none", description="none|low|medium|high")
-        blast_radius: str = Field(default="local", description="local|module|system")
+        blast_radius: str = Field(
+            default="local",
+            description=(
+                "local|module|system — ONE-WAY ratchet: a wide radius only LOWERS tolerance for "
+                "an already-real defect; it never raises a trivial finding's severity."
+            ),
+        )
         likelihood: str = Field(default="low", description="low|medium|high")
         reversibility: str = Field(default="easy", description="easy|moderate|hard")
 

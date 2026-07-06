@@ -239,6 +239,29 @@ dataset:
       verifies, or a verifier with nothing to check) and must ship together to deliver any
       value. G5 must PASS the value-preservation test: the parts would not each be
       independently valuable/releasable, so the unit is right-sized whole.
+  # WS6 (epic cite-stone-sea): the G-9 scale-inference anchors are FINDER-side (A1/T5a),
+  # so their proof is fire/no-fire here. (1) evidenced high scale -> T5a FIRES; (2) scale
+  # invented by interpolation from the subject -> T5a must NOT fire (small-scale default).
+  - id: R-T5a-scale-evidenced
+    corpus: rebar
+    criterion: T5a
+    expect: finding
+    mode: evidenced-high-scale
+    input: >
+      A story states an explicit scale AC ("ingest ~10M events/day") and plans a synchronous
+      per-event LLM classification call on the hot path with no batching or async fan-out
+      control. T5a SHOULD fire: the O(n)-LLM-call pattern is unjustified at the stated,
+      evidenced scale.
+  - id: FP-T5a-inflated-scale
+    corpus: rebar
+    criterion: T5a
+    expect: pass
+    mode: inflated-scale-interpolation
+    input: >
+      A story adds an internal admin report with no stated scale, no volume AC, and no profiling
+      result. T5a must NOT fire a performance finding by interpolating scale upward from the
+      domain ("it's a government portal, so millions of requests") — the small-scale default
+      holds and scale sensitivity is orthogonal to volume.
 
 # Frozen human-gold subset (kappa alignment for the llm-judge). SEED labels — pending
 # human adjudication (the gating gold subset; auto-labels seed the bulk corpus).

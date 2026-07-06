@@ -131,6 +131,26 @@ def test_verifier_committed_claim_and_altitude_pairs() -> None:
         )
 
 
+def test_finder_has_scale_calibration_cases() -> None:
+    # WS6 (epic cite-stone-sea): the G-9 scale anchors are finder-side (A1/T5a), proven as
+    # fire/no-fire — evidenced high scale FIRES; scale invented by subject-interpolation does NOT.
+    ds = E.load_eval_spec("plan-review-finder").get("dataset", [])
+    by_id = {c.get("id"): c for c in ds}
+    assert by_id.get("R-T5a-scale-evidenced", {}).get("expect") == "finding"
+    fp = by_id.get("FP-T5a-inflated-scale", {})
+    assert fp.get("expect") == "pass" and fp.get("mode") == "inflated-scale-interpolation"
+
+
+def test_verifier_has_blast_radius_ratchet_pair() -> None:
+    # WS6 FP-3(b): the one-way blast_radius ratchet is a Pass-2 (verifier) behavior, so it is
+    # exercised in the verifier eval — a real system-wide defect keeps impact; a trivial finding
+    # is NOT inflated to blocking by a grand subject. (discriminates_impact_levels scores it.)
+    ds = E.load_eval_spec("plan-review-verifier").get("dataset", [])
+    cases = [c for c in ds if c.get("pair") == "blast-radius-ratchet"]
+    assert {c.get("kind") for c in cases} == {"true", "false"}
+    assert {c.get("expect") for c in cases} == {"high_impact", "low_impact"}
+
+
 def test_finder_has_proxy_validation_cutover_cases() -> None:
     # super-plant-liver AC: the B5-shaped scenario (a cutover that DEFAULTS to a new path
     # whose AC is satisfiable by offline/mocked tests that never exercise the live path)
