@@ -1,0 +1,192 @@
+# Standing eval spec for the code-review BASE reviewer (Pass-1) — story f93a.
+# Recall (seeded-defect) + no-fire families for the four-pass code-review gate, seeded
+# from the DSO code-review incidents. The base reviewer runs over the WHOLE diff and emits
+# grounded evidence findings; it is scored on FINDINGS presence (not a FAIL/BLOCK verdict).
+# Validate offline: `rebar prompt eval code-review-base`. The live model run needs the
+# [eval] extra + credentials (the eval CI). The gold_set is the human-adjudicated subset the
+# llm-judge would be aligned to (seed labels pending adjudication).
+prompt: code-review-base
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  # Deterministic scorers GATE the build.
+  - type: deterministic
+    name: code_review_emits_valid_findings
+    description: The base output is a dict carrying a `findings` list (native Pass-1 shape).
+  - type: deterministic
+    name: code_review_recall
+    description: A diff with a seeded defect produces at least one finding.
+  - type: deterministic
+    name: code_review_no_fire
+    description: A clean / linter-owned diff produces no finding (false-fire guard).
+
+# `expect: finding` = the base reviewer SHOULD fire (recall); `expect: pass` = a GOOD diff it
+# must NOT fire on (no-fire). Each case's `diff` is the unified-diff text under review.
+dataset:
+  # ── recall: seeded defects (bad diff → finding) ──────────────────────────────
+  - id: R-dangling-deletion
+    corpus: dso
+    expect: finding
+    mode: dangling-deletion
+    diff: |
+      --- a/rebar/store.py
+      +++ b/rebar/store.py
+      @@ -10,7 +10,3 @@
+      -def compact_events(path):
+      -    """Rewrite the event log, dropping tombstoned records."""
+      -    ...
+      @@ -40,2 +36,2 @@ def maintenance():
+           run_fsck(path)
+      -    compact_events(path)
+      +    compact_events(path)  # still called; definition was removed above
+  - id: R-asymmetric-signature
+    corpus: dso
+    expect: finding
+    mode: asymmetric-signature-change
+    diff: |
+      --- a/rebar/reducer.py
+      +++ b/rebar/reducer.py
+      @@ -3,2 +3,2 @@
+      -def apply_event(state, event):
+      +def apply_event(state, event, *, clock):
+           return _reduce(state, event)
+      --- a/rebar/replay.py
+      +++ b/rebar/replay.py
+      @@ -8 +8 @@ def replay(events):
+      -        state = apply_event(state, e)
+      +        state = apply_event(state, e)   # not updated for the new required `clock` arg
+  - id: R-vcs-conflict-marker
+    corpus: dso
+    expect: finding
+    mode: unresolved-conflict-marker
+    diff: |
+      --- a/rebar/config.py
+      +++ b/rebar/config.py
+      @@ -12,3 +12,7 @@
+      +<<<<<<< HEAD
+      +DEFAULT_TIMEOUT = 30
+      +=======
+      +DEFAULT_TIMEOUT = 60
+      +>>>>>>> feature/tune-timeout
+  - id: R-ticket-scope-drift
+    corpus: dso
+    expect: finding
+    mode: ticket-scope-drift
+    diff: |
+      --- a/rebar/cli.py
+      +++ b/rebar/cli.py
+      @@ -5,3 +5,4 @@ def main():
+           parse_args()
+      +    # ticket is "fix claim exit code"; this rewrites an UNRELATED formatting module
+      +    reformat_report_module()
+      --- a/rebar/report.py
+      +++ b/rebar/report.py
+      @@ -1,40 +1,80 @@
+      -# (40 lines of the existing report formatter, wholesale rewritten below)
+      +# (80 lines of an unrelated rewrite with no bearing on the claim exit code)
+  # ── no-fire: GOOD diffs the base reviewer must NOT flag (seeded from DSO false-fires) ──
+  - id: FP-sourced-bash
+    corpus: dso
+    expect: pass
+    mode: sourced-bash-function
+    diff: |
+      --- a/scripts/lib.sh
+      +++ b/scripts/lib.sh
+      @@ -1,2 +1,5 @@
+      +log() { printf '%s\n' "$*" >&2; }
+      --- a/scripts/deploy.sh
+      +++ b/scripts/deploy.sh
+      @@ -1,2 +1,3 @@
+      +source "$(dirname "$0")/lib.sh"   # `log` IS defined — sourced, not dangling
+       log "deploying"
+  - id: FP-subdir-scripts
+    corpus: dso
+    expect: pass
+    mode: moved-to-subdirectory
+    diff: |
+      --- a/build.sh
+      +++ /dev/null
+      @@ -1,3 +0,0 @@
+      -#!/bin/sh
+      -echo build
+      --- /dev/null
+      +++ b/scripts/build.sh
+      @@ -0,0 +1,3 @@
+      +#!/bin/sh
+      +echo build
+      --- a/Makefile
+      +++ b/Makefile
+      @@ -2 +2 @@
+      -	./build.sh
+      +	./scripts/build.sh   # caller updated for the moved path
+  - id: FP-list-form-subprocess
+    corpus: dso
+    expect: pass
+    mode: list-form-subprocess
+    diff: |
+      --- a/rebar/git.py
+      +++ b/rebar/git.py
+      @@ -4,2 +4,3 @@
+      -    subprocess.run(f"git -C {d} add -A", shell=True)
+      +    # list form, no shell — not a shell-injection surface
+      +    subprocess.run(["git", "-C", d, "add", "-A"], check=True)
+  - id: FP-moved-code-rename
+    corpus: dso
+    expect: pass
+    mode: rename-callers-updated
+    diff: |
+      --- a/rebar/util.py
+      +++ b/rebar/util.py
+      @@ -1 +1 @@
+      -def slugify(s): return s.lower()
+      +def to_slug(s): return s.lower()
+      --- a/rebar/create.py
+      +++ b/rebar/create.py
+      @@ -7 +7 @@
+      -    alias = slugify(title)
+      +    alias = to_slug(title)   # sole caller updated with the rename
+  - id: FP-public-config-read
+    corpus: dso
+    expect: pass
+    mode: already-public-config-read
+    diff: |
+      --- a/rebar/mcp_server.py
+      +++ b/rebar/mcp_server.py
+      @@ -3,2 +3,3 @@
+      +# reading an already-public, non-secret config value (documented default)
+      +timeout = config.get("REBAR_TIMEOUT", 30)
+  - id: FP-nit-only-style
+    corpus: dso
+    expect: pass
+    mode: nit-only-style
+    note: >
+      NIT-FRAMING experiment (story f93a) — a diff whose ONLY changes are style/format/import
+      nits that the linter already enforces (import reorder, whitespace, trailing comma). The
+      base reviewer must NOT fire: nits are linter-owned, not review findings. Committed as the
+      baseline the gate is held to.
+    diff: |
+      --- a/rebar/reads.py
+      +++ b/rebar/reads.py
+      @@ -1,4 +1,4 @@
+      -import os, sys
+      -import json
+      +import json
+      +import os
+      +import sys
+      @@ -10,3 +10,3 @@ def show(tid):
+      -    return {'id':tid,'status':status}
+      +    return {"id": tid, "status": status}
+
+# Frozen human-gold subset (kappa alignment for a future llm-judge). SEED labels.
+gold_set:
+  - input: "A deleted function still called by a surviving caller (dangling deletion)."
+    label: useful
+  - input: "A required-arg signature change with a call site left unupdated."
+    label: useful
+  - input: "A sourced-bash function flagged as 'undefined' though `source` defines it (FP)."
+    label: not_useful
+  - input: "An import reorder + quote-style change flagged as a finding though the linter owns it."
+    label: not_useful

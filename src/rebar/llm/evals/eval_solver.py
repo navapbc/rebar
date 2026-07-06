@@ -103,6 +103,56 @@ def _run_criterion_case(cid: str, case: dict, *, runner: Runner, repo_root: str 
     return {"findings": list(findings)}
 
 
+def _code_review_prompt_id(prompt_id: str) -> str | None:
+    """Resolve ``prompt_id`` to a code-review PROMPT id this arm can eval as a single-prompt
+    run over a case's diff, else ``None``. The evaluable set is the base reviewer
+    (``code-review-base``), the Pass-2 verifier (``code-review-verify``), and the 11 specialist
+    overlays (``code-review-<overlay>`` for overlay in ``code_review.registry.OVERLAY_IDS``) —
+    the coach prompt is NOT evaluated. Guarded by the ``code-review-`` prefix so it can never
+    collide with a plan-review criterion id (story f93a)."""
+    if not prompt_id.startswith("code-review-"):
+        return None
+    from rebar.llm.code_review.registry import OVERLAY_IDS
+
+    valid = {"code-review-base", "code-review-verify"} | {
+        f"code-review-{oid}" for oid in OVERLAY_IDS
+    }
+    return prompt_id if prompt_id in valid else None
+
+
+def _run_code_review_case(
+    prompt_id: str, case: dict, *, runner: Runner, repo_root: str | None
+) -> dict:
+    """Run ONE code-review prompt over a case's inline ``diff`` and return the prompt's NATIVE
+    structured output — a base/overlay reviewer's ``{findings:[...]}`` (+ base's
+    ``recommend_overlays``) or the verifier's ``{verifications:[...]}``. This is per-prompt
+    calibration granularity, NOT the full four-pass gate: the returned output is scored on
+    findings presence (recall / no-fire) or verification presence, never a gate verdict
+    (story f93a). Mirrors the RunRequest wiring in ``rebar.llm.workflow.runs``."""
+    from rebar.llm.config import resolve_gate_config
+    from rebar.llm.prompting import prompts
+    from rebar.llm.runner import RunRequest
+
+    prompt = prompts.get_prompt(prompt_id, repo_root=repo_root)
+    diff = case.get("diff") or case.get("input") or ""
+    variables = {"ticket_id": str(case.get("id", "")), "ticket_context": diff}
+    cfg = resolve_gate_config(repo_root)
+    system_prompt, instructions, langfuse_prompt = prompts.resolve_prompt_cached(
+        prompt, variables, base_instructions="", langfuse_cfg=cfg.langfuse, repo_root=repo_root
+    )
+    req = RunRequest(
+        system_prompt=system_prompt,
+        instructions=instructions,
+        config=cfg,
+        reviewers=[prompt_id],
+        langfuse_prompt=langfuse_prompt,
+        mode="structured",
+        output_schema=prompt.outputs if isinstance(prompt.outputs, str) else None,
+        execution_mode=(prompt.execution_mode or "agentic"),
+    )
+    return runner.run(req)
+
+
 def run_case(
     prompt_id: str, case: dict, *, runner: Runner, graph: bool = False, repo_root: str | None = None
 ) -> dict:
@@ -128,6 +178,13 @@ def run_case(
     cid = _criterion_id(prompt_id, repo_root)
     if cid is not None:
         return _run_criterion_case(cid, case, runner=runner, repo_root=repo_root)
+
+    # Code-review arm (story f93a): run ONE code-review prompt over the case's inline diff
+    # and return its NATIVE structured output — no disposable store / ticket scaffolding
+    # (like the criterion arm, the input is inline text). Checked before case_store so a
+    # code-review id never falls through to the agentic reviewers.
+    if _code_review_prompt_id(prompt_id) is not None:
+        return _run_code_review_case(prompt_id, case, runner=runner, repo_root=repo_root)
 
     # The code-reading gates snapshot a ref (default origin/main) unless source=local;
     # the disposable fixture store has no origin, so always read its in-place checkout.
