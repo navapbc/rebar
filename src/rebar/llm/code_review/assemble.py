@@ -174,10 +174,18 @@ class DiffContext:
     head: str | None = None
     repo_root: str | None = None
     diff_char_cap: int = DIFF_CHAR_CAP
+    # The UNION scope/AC of the commit's ``rebar-ticket:`` trailer tickets — a SEPARATE field
+    # consumed ONLY by the scope-intent overlay (via a per-overlay context_override), NEVER the
+    # shared ``context`` below. Empty when no trailer ticket resolves ⇒ scope-intent stays inert.
+    # Keeping it OUT of ``context`` is what preserves base + every other overlay's ticket-blindness.
+    scope_context: str = ""
 
     @property
     def context(self) -> str:
-        """The kernel ``context`` string (see :func:`compose_diff_context`)."""
+        """The kernel ``context`` string (see :func:`compose_diff_context`).
+
+        Deliberately TICKET-BLIND: it never includes :attr:`scope_context`, so base and every
+        overlay but scope-intent review the diff with no knowledge of the referenced tickets."""
         return compose_diff_context(
             self.changed_files, self.diff_text, diff_char_cap=self.diff_char_cap
         )
@@ -191,6 +199,7 @@ def assemble_diff_context(
     changed_files: list[str] | None = None,
     repo_root: str | None = None,
     diff_char_cap: int = DIFF_CHAR_CAP,
+    commit_message: str = "",
 ) -> DiffContext:
     """Build a :class:`DiffContext` from a git range OR a supplied unified diff.
 
@@ -198,6 +207,12 @@ def assemble_diff_context(
     (``git diff base..head`` from the real checkout's object DB — a pinned snapshot tree
     has no history). When ``diff_text`` is supplied (the offline/test seam), ``changed_files``
     is parsed from it if not given. The ``(base, head)`` range is recorded on the context.
+
+    ``commit_message`` (default ``""``) is the change's commit message: its ``rebar-ticket:``
+    trailer(s) drive the scope-intent overlay. Each resolving trailer ticket's scope/AC is
+    unioned into :attr:`DiffContext.scope_context` — a SEPARATE field the scope-intent overlay
+    alone consumes (base + every other overlay stay ticket-blind). No trailer resolves ⇒ empty
+    ⇒ scope-intent stays inert.
     """
     if diff_text is None:
         # Resolve the object DB via the standard config precedence (repo_root arg >
@@ -222,4 +237,76 @@ def assemble_diff_context(
         head=head,
         repo_root=repo_root,
         diff_char_cap=diff_char_cap,
+        scope_context=assemble_ticket_scope_context(commit_message, repo_root=repo_root),
+    )
+
+
+# ── scope-intent: the UNION scope/AC of the commit's rebar-ticket: trailer tickets ───────────
+# Section markers the ticket templates use for scope-bearing prose; we surface these (when
+# present) rather than the whole body, else fall back to the full description. Case-insensitive.
+_SCOPE_HEADINGS = ("## why", "## what", "## scope", "## success criteria", "## acceptance criteria")
+
+
+def _scope_sections(description: str) -> str:
+    """Extract the scope-bearing markdown sections (:data:`_SCOPE_HEADINGS`) from a ticket
+    description, in document order; fall back to the whole description when none are present."""
+    lines = description.splitlines()
+    out: list[str] = []
+    keep = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            keep = stripped.lower() in _SCOPE_HEADINGS
+        if keep:
+            out.append(line)
+    body = "\n".join(out).strip()
+    return body or description.strip()
+
+
+def assemble_ticket_scope_context(commit_message: str, *, repo_root: str | None = None) -> str:
+    """The UNION scope/AC of the tickets named in ``commit_message``'s ``rebar-ticket:`` trailer(s).
+
+    Parses the trailer(s) with :func:`rebar._commands.verify_commit.extract_ticket_refs`, resolves
+    each SAFE candidate against the ticket store, and unions the scope/AC of every ticket that
+    RESOLVES into one fenced context string. Returns ``""`` when there is no trailer or NONE of
+    the referenced tickets resolve — so the scope-intent overlay fires ONLY on a resolving trailer
+    (the AC's content-trigger). A commit naming SEVERAL tickets yields the union of ALL of them, so
+    a faithful multi-ticket change is not flagged as out-of-scope. Best-effort: any resolve/read
+    failure for one candidate is skipped, never raised."""
+    if not commit_message:
+        return ""
+    from rebar import config as _config
+    from rebar import show_ticket
+    from rebar._commands.verify_commit import extract_ticket_refs
+    from rebar._engine_support.resolver import resolve_ticket_id
+
+    candidates = extract_ticket_refs(commit_message)
+    if not candidates:
+        return ""
+    try:
+        tracker = str(_config.tracker_dir(repo_root))
+    except Exception:  # noqa: BLE001 — an unlocatable store ⇒ no ticket context (inert/safe)
+        return ""
+    blocks: list[str] = []
+    seen: set[str] = set()
+    for cand in candidates:
+        try:
+            resolved = resolve_ticket_id(cand, tracker)
+        except Exception:  # noqa: BLE001 — a bad candidate never fails the assembler
+            resolved = None
+        if not resolved or resolved in seen:
+            continue
+        seen.add(resolved)
+        try:
+            ticket = show_ticket(resolved, repo_root=repo_root)
+        except Exception:  # noqa: BLE001 — an unreadable ticket is simply skipped
+            continue
+        title = str(ticket.get("title") or "")
+        scope = _scope_sections(str(ticket.get("description") or ""))
+        blocks.append(f"### {resolved} — {title}\n\n{scope}".rstrip())
+    if not blocks:
+        return ""
+    return (
+        "## Referenced tickets (scope/AC of the commit's rebar-ticket trailer)\n\n"
+        + "\n\n".join(blocks)
     )

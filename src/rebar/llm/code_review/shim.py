@@ -118,6 +118,7 @@ def review_code(
     head: str = "HEAD",
     diff_text: str | None = None,
     changed_files: list[str] | None = None,
+    commit_message: str = "",
     reviewers: list[str] | None = None,
     ref: str | None = None,
     source: str | None = None,
@@ -142,6 +143,7 @@ def review_code(
         head=head,
         diff_text=diff_text,
         changed_files=changed_files,
+        commit_message=commit_message,
         runner=runner,
         repo_root=repo_root,
     )

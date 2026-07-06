@@ -85,6 +85,14 @@
     "block_threshold": 0.95,
     "blocking_enabled": false
   },
+  "scope-intent": {
+    "_comment": "story 3c5d: CONTENT-triggered (not glob) overlay — fires ONLY when >=1 ticket resolves from the commit's rebar-ticket: trailer, so applies_to is empty. It reviews the diff against the UNION scope/AC of those tickets (injected as its per-overlay ticket_context; base + every other overlay stay ticket-blind). ADVISORY (blocking_enabled=false): scope drift is a coach-not-block finding, verified in Pass-2 and decided in Pass-3 like every other overlay.",
+    "exec": "AGENT",
+    "applies_to": [],
+    "default_posture": "advisory",
+    "block_threshold": 0.95,
+    "blocking_enabled": false
+  },
   "secret-detection": {
     "exec": "DET",
     "applies_to": [],

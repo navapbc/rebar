@@ -166,6 +166,7 @@ def code_review_decision(
     *,
     config: ReceiverConfig | None = None,
     merge_commits: int | None = None,
+    commit_message: str = "",
 ) -> dict[str, Any]:
     """Review ``diff_text`` (at the cloned ``repo_root``) via the four-pass gate and return
     ``{decision, message, findings, coverage_gap}``. PASS only for a genuine full-coverage PASS;
@@ -186,6 +187,7 @@ def code_review_decision(
         verdict = produce_code_review_verdict(
             LLMConfig.from_env(repo_root=repo_root),
             diff_text=diff_text,
+            commit_message=commit_message,  # drives the scope-intent overlay (default "")
             repo_root=repo_root,
             enabled=True,  # voter activation is the authoritative gate (ADR 0015)
         )

@@ -459,6 +459,7 @@ def produce_code_review_verdict(
     source: str | None = None,
     diff_text: str | None = None,
     changed_files: list[str] | None = None,
+    commit_message: str = "",
     runner=None,
     target_ticket: str | None = None,
     repo_root=None,
@@ -497,8 +498,19 @@ def produce_code_review_verdict(
         return _degraded_code_review_verdict(error=exc, runner_name=runner_sel.name)
 
     dc = assemble.assemble_diff_context(
-        base=base, head=head, diff_text=diff_text, changed_files=changed_files, repo_root=repo_root
+        base=base,
+        head=head,
+        diff_text=diff_text,
+        changed_files=changed_files,
+        repo_root=repo_root,
+        commit_message=commit_message,
     )
+    # scope-intent per-overlay context: the union scope/AC of the commit's rebar-ticket trailer
+    # tickets goes ONLY to the scope-intent overlay (base + every other overlay stay ticket-blind).
+    # Built ONLY when >=1 trailer ticket resolved (dc.scope_context non-empty); else omitted so the
+    # overlay is inert. The gate's overlay_union independently gates include_scope_intent on the
+    # same dc.scope_context (threaded through the workflow's assemble_diff step) so the two agree.
+    context_overrides = {"code-review-scope-intent": dc.scope_context} if dc.scope_context else None
     doc = _gate_doc("code-review", repo_root)
     rec = MemoryRecorder()
     _t_total = time.monotonic()
@@ -510,6 +522,9 @@ def produce_code_review_verdict(
         # resolved diff (read from git or the supplied diff_text).
         "diff_text": dc.diff_text,
         "changed_files": list(dc.changed_files),
+        # Thread the commit message so the workflow's assemble_diff re-derives the SAME
+        # scope_context and its overlay_union gates include_scope_intent consistently.
+        "commit_message": commit_message,
     }
     # SNAPSHOT GATE (epic raze-vet-ditch): the four-pass gate runs AGENTIC passes — the 'base'
     # reviewer + overlays read the code with filesystem tools — so, like EVERY other code-reading
@@ -548,7 +563,9 @@ def produce_code_review_verdict(
                 target_ticket=target_ticket,
                 repo_root=repo_root,
                 agent_runner=RunnerAgentStep(runner=runner_sel, repo_root=repo_root, config=cfg),
-                batch_runner=CodeReviewBatchRunner(context=dc.context),
+                batch_runner=CodeReviewBatchRunner(
+                    context=dc.context, context_overrides=context_overrides
+                ),
                 recorder=rec,
             )
     except LLMUnavailableError as exc:
