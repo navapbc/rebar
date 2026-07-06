@@ -1,0 +1,40 @@
+# rebar built-in CONFLICT-MARKER detector (story da25 / epic sure-foyer-aroma) — deterministic,
+# polyglot, zero-FP: leftover VCS merge-conflict markers committed into source. This is the #5
+# reclassification from the DSO gap report: an unambiguous, language-agnostic fact belongs in a
+# deterministic DET criterion, not an LLM pass.
+#
+# Native opengrep rule (opengrep is a semgrep-compatible fork; the `semgrep` fallback binary runs
+# it) in `generic` mode so it matches EVERY file type, not one language. It routes — via the
+# dedicated `rebar.builtin.smell.conflict-markers.` id-prefix (NOT the fail-closed
+# `rebar.builtin.security.` prefix) — to the ADVISORY `conflict-markers` code-review criterion
+# (blocking_enabled: false / fail_mode: open): a match is a coach-not-block coverage finding and an
+# abstain (no engine on PATH) never blocks. No new BLOCK source is introduced.
+#
+# GRANULARITY (documented decision — see the story): engine_b.scan matches whole-file and the
+# consumer (`code_review.detectors.run_detectors`) post-filters a MATCH to the changed-file set by
+# its LOCATION — it is NOT a native added-lines-only match. We accept file-scoped match-location
+# post-filter (the simplest option, identical to the public-exposure detector): a conflict marker
+# ANYWHERE in a changed file is flagged. That is correct here — a committed conflict marker in a
+# touched file is worth surfacing regardless of which hunk introduced it.
+#
+# FP GUARD — the low-false-positive core: we key ONLY on the merge-BLOCK delimiters `<<<<<<<` and
+# `>>>>>>>` (seven angle brackets at line start, followed by whitespace/EOL), plus the diff3 base
+# marker `|||||||`. Seven consecutive `<`/`>`/`|` at column 0 essentially never occur in real
+# source or prose. We deliberately DROP the bare `=======` separator: seven `=` is FP-prone (a
+# Markdown H1 underline, a comment/box divider, a reStructuredText rule), and the block delimiters
+# already prove a conflict. So a legitimate `=======` inside a string, heredoc, or doc NEVER fires.
+# The fuzzier DSO signals (truncation stubs, pasted non-code text) are dropped as too FP-prone.
+rules:
+  - id: rebar.builtin.smell.conflict-markers.git-merge-conflict
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      Leftover VCS merge-conflict marker (<<<<<<<, >>>>>>>, or the diff3 base |||||||) in committed
+      source. Resolve the conflict and remove the marker before merging.
+    metadata:
+      rebar_envelope:
+        tier: T1
+        job: smell
+        namespace: builtin
+        dimension: smell_generic
+    pattern-regex: '(?m)^(<<<<<<<|>>>>>>>|\|\|\|\|\|\|\|)(\s|$)'
