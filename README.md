@@ -22,17 +22,11 @@ It's an event-sourced ticket system with a Jira reconciler, exposed three ways:
 
 Tickets are stored as an append-only event log on a dedicated `tickets` git
 orphan branch (worktree at `.tickets-tracker/`); state is computed by replaying
-events. A level-triggered reconciler bidirectionally syncs tickets with Jira. Both
+events. An optional level-triggered reconciler bidirectionally syncs tickets with Jira. Both
 the branch name and the worktree/symlink dir default to those values but are
 configurable (`tracker.branch` / `tracker.dir`) — see [Configuration](#configuration).
 Reads stay sub-second into the thousands of tickets; for measured numbers and
 git-growth expectations see [`docs/scale-envelope.md`](docs/scale-envelope.md).
-
-This project was extracted from the `digital-service-orchestra` Claude Code
-plugin. It began as a bash + Python engine; that engine has since been fully ported
-to in-process Python (see `docs/bash-migration.md`). The reconciler ships under
-`src/rebar/_engine/` as package data, and the three interfaces are thin layers over
-the in-process core.
 
 **New here? Jump to the [Quickstart](#quickstart)** to run one ticket end-to-end.
 
