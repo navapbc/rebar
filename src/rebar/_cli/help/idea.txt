@@ -1,0 +1,4 @@
+Usage: rebar idea "<title>" [--description <text>] [--output json]
+  Capture an undesigned idea: creates an epic in status 'idea' in a single CREATE event.
+  An idea is never momentarily 'open'/claimable, is excluded from ready/next-batch, and
+  'idea -> closed' (reject) skips the completion gates. Promote with 'transition <id> idea open'.

@@ -65,6 +65,7 @@ _IO = frozenset({"export", "import"})
 _WRITES_FULL = frozenset(
     {
         "create",
+        "idea",
         "comment",
         "link",
         "unlink",

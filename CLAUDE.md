@@ -139,7 +139,8 @@ typed read tools advertise an `outputSchema` (a documented, validated return
 shape) drawn from the canonical JSON Schemas — see
 [docs/output-schemas.md](docs/output-schemas.md).
 
-**Writes (gated by `REBAR_MCP_READONLY=1`):** `create_ticket`,
+**Writes (gated by `REBAR_MCP_READONLY=1`):** `create_ticket`, `create_idea`
+(capture an undesigned idea — an `epic` born in status `idea` in one CREATE),
 `transition_ticket`, `claim_ticket`, `reopen_ticket`, `comment_ticket`,
 `edit_ticket`, `link_tickets`, `unlink_tickets`, `tag_ticket`, `untag_ticket`,
 `archive_ticket`, `compact_ticket`, `set_file_impact`, `set_verify_commands`,

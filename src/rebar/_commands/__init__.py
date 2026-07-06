@@ -17,6 +17,7 @@ from collections.abc import Callable
 from typing import NamedTuple
 
 from rebar._commands import composer, leaf
+from rebar._commands import idea as _idea
 from rebar._commands import session_log as _session_log
 from rebar._commands import unlink as _unlink
 from rebar._commands._seam import CommandError
@@ -53,6 +54,7 @@ _REGISTRY: dict[str, _Cmd] = {
 # exit code directly — the heavier event-composers (docs/bash-migration.md §4).
 _ARGV_REGISTRY: dict[str, Callable[[list[str]], int]] = {
     "create": composer.create_cli,
+    "idea": _idea.idea_cli,
     "edit": composer.edit_cli,
     "link": composer.link_cli,
     "unlink": _unlink.unlink_cli,

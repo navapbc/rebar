@@ -5,6 +5,7 @@ Run 'rebar <subcommand> --help' for usage of a specific subcommand.
 Subcommands:
   init        Initialize the ticket system
   create      Create a new ticket
+  idea        Capture an undesigned idea (creates an epic in status 'idea'; excluded from ready/next-batch)
   show        Show ticket details
   list        List all tickets as JSON
   transition  Transition ticket status (optimistic concurrency)
