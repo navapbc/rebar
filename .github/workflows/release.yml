@@ -93,6 +93,10 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          # This job does not check out the repo, so `gh` has no local git remote
+          # to infer the target from — GH_REPO gives it the repo explicitly (the
+          # `gh release` subcommands + --generate-notes all resolve via the API).
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
