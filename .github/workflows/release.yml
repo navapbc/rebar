@@ -105,3 +105,32 @@ jobs:
           else
             gh release create "$TAG" --title "$TAG" --generate-notes --latest --verify-tag dist/*
           fi
+
+  mcp_registry:
+    name: Publish to MCP Registry
+    needs: publish
+    runs-on: ubuntu-latest
+    # Runs after PyPI so the registry's package-ownership check (the `mcp-name:`
+    # annotation on the published PyPI release) resolves against a live version.
+    # Same version-tag gate as publish, so workflow_dispatch dry-runs don't publish.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      id-token: write   # mint the OIDC token that authenticates to the registry
+      contents: read    # checkout server.json
+    steps:
+      # server.json lives in the repo tree; the tag commit already carries the
+      # bumped version (the "Release X.Y.Z" commit sets it before tagging), so no
+      # in-workflow version rewrite is needed.
+      - uses: actions/checkout@v5
+      # Fetch the mcp-publisher release binary (os/arch-detected), per
+      # https://modelcontextprotocol.io/registry/github-actions.
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+      # GitHub Actions OIDC: the runner's id-token proves this is navapbc/rebar,
+      # which authorizes the io.github.navapbc/* namespace — no stored secret, the
+      # same trust model as the PyPI Trusted Publishing above.
+      - name: Authenticate to the MCP Registry via GitHub Actions OIDC
+        run: ./mcp-publisher login github-oidc
+      - name: Publish server.json to the MCP Registry
+        run: ./mcp-publisher publish
