@@ -141,6 +141,52 @@ def test_finder_has_scale_calibration_cases() -> None:
     assert fp.get("expect") == "pass" and fp.get("mode") == "inflated-scale-interpolation"
 
 
+def test_e4_scope_exclusion() -> None:
+    # WS2 (epic cite-stone-sea): E4's scope-exclusion sub-check (G-4) discriminates — a false
+    # CODEBASE exclusion FIRES; an external-fact exclusion ABSTAINS-with-coverage (no fire).
+    ds = E.load_eval_spec("plan-review-finder").get("dataset", [])
+    e4 = {c.get("id"): c for c in ds if c.get("criterion") == "E4"}
+    assert e4.get("R-E4-scope-exclusion-codebase", {}).get("expect") == "finding"
+    assert e4.get("FP-E4-scope-exclusion-external", {}).get("expect") == "pass"
+
+
+def test_hedge_finder() -> None:
+    # WS2: the hedge finder is a 1-TURN criterion (NOT exec:DET — ADR 0033) that fires on a
+    # committed element resting on a hedged assumption.
+    import json
+    from pathlib import Path
+
+    from rebar.llm.plan_review import registry
+
+    routing = json.loads((Path(registry.__file__).parent / "criteria_routing.json").read_text())
+    assert routing["hedge"]["exec"] == "1-TURN", "hedge must be exec:1-TURN, not exec:DET"
+    ds = E.load_eval_spec("plan-review-finder").get("dataset", [])
+    hedge = [c for c in ds if c.get("criterion") == "hedge"]
+    assert any(c.get("expect") == "finding" for c in hedge), "hedge needs a recall (fire) case"
+
+
+def test_hedge_dedup() -> None:
+    # WS2: rubric-level dedup vs E6 — a hedge inside an AC proving-command clause is E6's
+    # no_hedges territory; the hedge criterion marks itself not-applicable (no double-report).
+    from pathlib import Path
+
+    from rebar.llm.plan_review import passes
+
+    prompt = (
+        Path(passes.__file__).parent.parent / "reviewers" / "plan_review_hedge.md"
+    ).read_text()
+    assert "not-applicable" in prompt and "E6" in prompt, (
+        "hedge prompt must carry the E6 dedup rule"
+    )
+    ds = E.load_eval_spec("plan-review-finder").get("dataset", [])
+    dedup = [
+        c for c in ds if c.get("criterion") == "hedge" and c.get("mode") == "ac-clause-e6-territory"
+    ]
+    assert dedup and dedup[0].get("expect") == "pass", (
+        "need an AC-clause dedup (not-applicable) case"
+    )
+
+
 def test_verifier_has_blast_radius_ratchet_pair() -> None:
     # WS6 FP-3(b): the one-way blast_radius ratchet is a Pass-2 (verifier) behavior, so it is
     # exercised in the verifier eval — a real system-wide defect keeps impact; a trivial finding

@@ -99,6 +99,9 @@ CANONICAL_LLM = frozenset(
         "G5",
         "G6",
         "ISF",
+        # Cheap 1-TURN provenance finder (epic cite-stone-sea / WS2) — hedged-requirement
+        # signal feeding Pass-2's committed_work_relies_on_unbacked_claim. See ADR 0033.
+        "hedge",
         # Triggered overlays
         "T1",
         "T2",
