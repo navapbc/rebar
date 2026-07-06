@@ -28,12 +28,6 @@ configurable (`tracker.branch` / `tracker.dir`) — see [Configuration](#configu
 Reads stay sub-second into the thousands of tickets; for measured numbers and
 git-growth expectations see [`docs/scale-envelope.md`](docs/scale-envelope.md).
 
-This project was extracted from the `digital-service-orchestra` Claude Code
-plugin. It began as a bash + Python engine; that engine has since been fully ported
-to in-process Python (see `docs/bash-migration.md`). The reconciler ships under
-`src/rebar/_engine/` as package data, and the three interfaces are thin layers over
-the in-process core.
-
 **New here? Jump to the [Quickstart](#quickstart)** to run one ticket end-to-end.
 
 ## Quickstart
@@ -44,7 +38,7 @@ whole loop. This is the golden path — for every command and flag,
 this section deliberately doesn't reproduce it.
 
 ```bash
-pipx install nava-rebar        # the `rebar` CLI on your PATH (see Install for library/MCP/agents extras)
+brew install navapbc/rebar/rebar   # the `rebar` CLI on your PATH (see Install for library/MCP/agents extras)
 cd /path/to/your/repo
 rebar init                     # -> Ticket system initialized.
 ```
@@ -142,49 +136,53 @@ On top of that foundation, rebar adds what parallel agent work actually needs:
 
 ## Requirements
 
-**Runtime (system):**
-- Python ≥ 3.11
-- `git` — required (the store is a git orphan branch + worktree). The engine is
-  pure in-process Python; `bash` and `jq` are **not** required at runtime.
-- `flock` from **util-linux** — recommended for robust write serialization, but
-  **not strictly required**: it is not on `PATH` by default on macOS
-  (`brew install util-linux`), and when no util-linux `flock` is found rebar falls
-  back to a `mkdir`-based lock automatically. (A non-util-linux `flock` such as
-  BusyBox's is ignored in favor of the fallback.)
-- `acli` (Atlassian CLI) — only for **live** Jira reconciliation.
+**System prerequisites:**
+- [Python](https://www.python.org) ≥ 3.11
+- [`git`](https://git-scm.com) — required (the store is a git orphan branch +
+  worktree). The engine is pure in-process Python; `bash` and `jq` are **not**
+  required at runtime.
+- [`flock`](https://github.com/util-linux/util-linux) from **util-linux** —
+  recommended for robust write serialization, but **not strictly required**: it is
+  not on `PATH` by default on macOS (`brew install util-linux`), and when no
+  util-linux `flock` is found rebar falls back to a `mkdir`-based lock
+  automatically. (A non-util-linux `flock` such as BusyBox's is ignored in favor of
+  the fallback.)
+- [`acli`](https://developer.atlassian.com/cloud/acli/) (Atlassian CLI) — only for
+  **live** Jira reconciliation.
 
-**Python dependencies — runtime (prod) vs. rebar development.** rebar keeps a
-deliberately tiny footprint; the distinction is between *running* rebar (and its
-optional capabilities) and *developing rebar itself*:
+**Python dependencies.** A base install (`pip install nava-rebar`) — the `rebar`
+CLI, the `import rebar` library, and the lean workflow engine — pulls only two
+runtime dependencies: [`pyyaml`](https://pyyaml.org) (the workflow DSL loader) and
+[`jsonschema`](https://python-jsonschema.readthedocs.io) (the schema-registry +
+workflow input/output-contract validator); the engine core and reconciler are
+otherwise stdlib-only. Everything else is an optional extra, lazy-imported so the
+base stays light (CI enforces that):
 
-- **Runtime — base.** `pip install nava-rebar` gives the `rebar` CLI + `import
-  rebar` library + the **lean workflow engine** (author/validate/render/run
-  *scripted* workflows). Its only runtime dependencies are **`pyyaml`** (the
-  workflow DSL loader, epic a88f) and **`jsonschema`** (the schema-registry +
-  workflow input/output-contract validator) — both lean-runtime paths — so the
-  engine core and reconciler are otherwise stdlib-only.
-- **Runtime — optional capability extras** (install only what you use; each is
-  lazy-imported, so the base stays light and CI enforces that):
-  - **`[mcp]`** — the `rebar-mcp` server (`mcp>=1.2`).
-  - **`[agents]`** — the LLM agent-operations framework + **agentic workflow
-    steps** (`rebar review`, the `code_review` workflow): the provider-agnostic
-    pydantic-ai runtime (`pydantic-ai-slim[anthropic]` + `json-repair`).
-  - **`[eval]`** — prompt evaluation (`rebar prompt eval`): Inspect AI. An
-    authoring/CI capability, not needed to serve.
-  - **`[tracing]`** — the OTLP trace sink (write-only; OpenTelemetry is never read
-    back into a rebar decision).
-- **Development (working ON rebar).** `pip install -e '.[dev]'` adds the
-  test/lint/type tooling (`pytest`, `ruff`, `mypy`, `hatchling`) and
-  self-references `[agents]` so the validation tests **run** rather than skip. It
-  is **required to run the full test suite** (the interface-parity tests import the
-  MCP server, so they error — not skip — without `mcp`).
-  - **Node/npm** are needed **only** for the workflow visual editor's front-end —
-    *rebuilding* its vendored bundle (`src/rebar/llm/workflow/editor_assets/`, the
-    bpmn-js editor) and running the faithful editor **E2E tier** (`tests/e2e/`, which
-    drives the real bpmn-io libraries). Both are developer-only: the built bundle is
-    committed/shipped, and the E2E tier self-skips when Node is absent, so neither the
-    base install nor the default test suite needs Node. See
-    [docs/workflow-editor.md](docs/workflow-editor.md).
+- **Optional runtime capabilities** — install what you serve:
+  - **`[mcp]`** — the [`rebar-mcp` server](https://modelcontextprotocol.io)
+    (`mcp>=1.2`).
+  - **`[agents]`** — the LLM agent-operations framework + agentic workflow steps
+    (`rebar review`, the `code_review` workflow): the provider-agnostic
+    [pydantic-ai](https://ai.pydantic.dev) runtime (`pydantic-ai-slim[anthropic]`)
+    plus [`json-repair`](https://github.com/mangiucugna/json_repair).
+- **Development & authoring extras** — not needed to run or serve rebar:
+  - **`[eval]`** — prompt evaluation (`rebar prompt eval`) with
+    [Inspect AI](https://inspect.aisi.org.uk); an authoring/CI capability.
+  - **`[tracing]`** — an [OpenTelemetry](https://opentelemetry.io) OTLP trace sink
+    (write-only; never read back into a rebar decision), for diagnostics.
+  - **`[dev]`** — the test/lint/type tooling ([pytest](https://docs.pytest.org),
+    [ruff](https://docs.astral.sh/ruff/), [mypy](https://mypy-lang.org),
+    [hatchling](https://hatch.pypa.io)). `pip install -e '.[dev]'` also
+    self-references `[agents]` so the validation tests **run** rather than skip, and
+    is **required to run the full test suite** (the interface-parity tests import the
+    MCP server, so they error — not skip — without `mcp`).
+  - **[Node/npm](https://nodejs.org)** — needed **only** for the workflow visual
+    editor's front-end: *rebuilding* its vendored bundle
+    (`src/rebar/llm/workflow/editor_assets/`, the bpmn-js editor) and running the
+    faithful editor **E2E tier** (`tests/e2e/`, which drives the real bpmn-io
+    libraries). Both are developer-only — the built bundle is committed/shipped and
+    the E2E tier self-skips when Node is absent — so neither the base install nor the
+    default test suite needs Node. See [docs/workflow-editor.md](docs/workflow-editor.md).
 
 See [Install](#install) and [Tests](#tests).
 
@@ -260,8 +258,7 @@ name; or register it directly in your client config (zero pre-install via
 
 (Already pip/pipx-installed `nava-rebar[mcp]`? Use `"command": "rebar-mcp"`
 instead.) Server flags: `REBAR_MCP_READONLY=1` exposes only read tools;
-`reconcile` is dry-run unless `REBAR_MCP_ALLOW_JIRA_SYNC=1` (deprecated alias
-`REBAR_MCP_ALLOW_RECONCILE_LIVE`). Both flags
+`reconcile` is dry-run unless `REBAR_MCP_ALLOW_JIRA_SYNC=1`. Both flags
 accept any case-insensitive truthy value — `1`, `true`, or `yes` (surrounding
 whitespace tolerated); anything else (incl. unset) is off.
 
@@ -321,22 +318,26 @@ pip install -e '.[dev]'
 ```bash
 rebar init                                   # create the tickets branch + worktree
 rebar create story "Add login page"          # prints the ticket id
-rebar list [--status=open] [--has-tag=...]   # JSON array
 rebar show <id|alias>                         # compiled ticket state (JSON)
+rebar summary <id> [<id> ...]                 # one-line summary + blocking status for one or more ids
+rebar list [--status=open] [--has-tag=...]   # JSON array
+rebar edit <id> [--title ... --priority ... --parent ... --add-tag ...]   # edit ticket fields / tags
 rebar claim <id> --assignee <you>             # atomic open -> in_progress + assignee (the work-start primitive)
 rebar transition <id> <current> <target>      # optimistic-concurrency status change
+rebar reopen <id>                             # closed -> open (exit 10 if not currently closed)
 rebar comment <id> "<body>"
+rebar tag <id> <tag> / untag <id> <tag>       # add / remove a tag (convergent add/remove deltas)
 rebar link <id1> <id2> <relation>            # relation REQUIRED (see relations below)
 rebar unlink <source> <target>               # remove ONE link for the ordered pair (no relation arg)
 rebar deps <id>                               # dependency graph
 rebar search <query>                          # full-text over titles/descriptions/comments/tags (JSON)
 rebar ready                                   # tickets with all blockers closed
 rebar next-batch <epic-id>                    # unblocked tickets under an epic's hierarchy
+rebar scratch <set|get|clear> <id> ...        # per-ticket scratch channel for subagents
+rebar session-log "<entry>"                   # append to the current session_log (auto-rotates per session)
+rebar session-logs [--limit=<n>]              # list the newest session_log tickets, newest first
 rebar validate                                # repo-wide tracker health (NO ticket id; whole-store score 1-5)
-rebar clarity-check <id> / check-ac <id> / quality-check <id>   # per-ticket quality gates
 rebar review-plan <id>                        # plan-review gate: DET floor + 3-pass advisory; signs an attestation (exit 0=PASS,1=BLOCK,2=INDETERMINATE)
-rebar sign <id> '["ran tests: PASS", "lint clean"]'   # HMAC-sign a manifest of verified steps
-rebar verify-signature <id>                   # certify the steps match the signature (exit 0=certified)
 rebar export [-o FILE]                        # store -> NDJSON (one ticket/line; for jq/DuckDB/pandas + rebar->rebar migration)
 rebar import [FILE]                           # import export NDJSON (fresh local ids; [--dry-run])
 rebar reconcile [--mode dry-run|reconcile-check|live]   # Jira sync (default: dry-run)
@@ -359,17 +360,14 @@ documented by a JSON Schema and validated across the CLI, library, and MCP in CI
 See [docs/output-schemas.md](docs/output-schemas.md) for the per-command contract
 and the schema source-of-truth.
 
-**`validate` vs. the per-ticket gates.** `rebar validate` takes **no ticket id** —
-it scans the whole store and prints an overall tracker-health score (1-5, exit
-0-4) bucketed into critical / major / minor / warning findings (`--output json`,
-`--terse`, `--verbose`, `--fix`). Passing it a ticket id errors. The *per-ticket*
-quality gates are separate commands that each take an `<id>`: `clarity-check`,
-`check-ac`, `quality-check`. They are **structural floor checks** — they verify a
-ticket is *shaped* like dispatchable work, not that the content is good. Every
-type needs an `## Acceptance Criteria` checklist (`- [ ]` items); `check-ac` and
-`clarity-check` both require it. See the per-type ticket template (Why/What/Scope
-for stories, Reproduction Steps for bugs, Success Criteria/Context for epics) in
-[CLAUDE.md](CLAUDE.md#ticket-template-the-gates-enforce).
+**Repo-wide health with `validate`.** `rebar validate` takes **no ticket id** — it
+scans the whole store and prints an overall tracker-health score (1-5, exit 0-4)
+bucketed into critical / major / minor / warning findings (`--output json`,
+`--terse`, `--verbose`, `--fix`). Passing it a ticket id errors. (rebar also has
+*per-ticket* structural gates that each take an `<id>` and verify a ticket is
+*shaped* like dispatchable work — every type needs an `## Acceptance Criteria`
+checklist. See the ticket template and gate reference in
+[CLAUDE.md](CLAUDE.md#ticket-template-the-gates-enforce).)
 
 **Links.** `rebar link <id1> <id2> <relation>` **requires** a relation; the six
 relations are `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`,
@@ -381,36 +379,11 @@ same pair you call `unlink` repeatedly. Note that **blocking** links
 below), so `unlink` must target the **promoted (ancestor)** endpoint to remove
 such a link.
 
-### Signing a manifest of verified steps
-
-`rebar sign <id> <manifest>` records a **cryptographic attestation** on a ticket:
-a manifest (a JSON array of verified-step strings) plus an HMAC-SHA256 signature
-computed with a key that is **specific to the environment** rebar runs in. The key
-is resolved from `REBAR_SIGNING_KEY` (injected out-of-band into a shared
-deployment — e.g. an MCP server) or, failing that, a per-environment
-`.signing-key` file generated on first use (gitignored, never committed, never
-shared). `rebar verify-signature <id>` recomputes the HMAC with the local key and
-**certifies** that the recorded steps still match the signature:
-
-```bash
-rebar sign abcd-1234 '["unit tests: PASS", "security review: clean", "deployed to staging"]'
-rebar verify-signature abcd-1234        # SIGNATURE: certified — verified steps match the signature
-```
-
-The signature binds both the ticket id and the manifest, so it cannot be replayed
-onto another ticket and any edit to the step list invalidates it. Because the key
-never leaves the environment, `verify-signature` reports `foreign_key` (rather
-than `certified`) when a record was signed by a *different* environment — only the
-environment that holds the key can certify its own attestations. The signature is
-stored as a normal append-only `SIGNATURE` event, so it replays into `show`
-output, survives compaction, and flows to other clones like any other write.
-
-The signing key is a shared secret (HMAC), so the attestation proves a signature
-was produced by a holder of the environment key and that the steps are unaltered
-since — it is **not** a public-key identity. Anyone who can read the
-`.signing-key` file (written `0600`, owner-only) or the injected `REBAR_SIGNING_KEY`
-can forge a `certified` record, so protect read access to the environment
-accordingly.
+Ticket work also leaves an **HMAC-signed attestation** — a machine-checkable proof
+that a gate ran and that its verified steps are unaltered. For most projects this is
+produced automatically by the code-review, plan-review, and completion-verifier
+gates, so you never sign by hand. To sign manifests yourself or customize the
+process, see [docs/manifest-signing.md](docs/manifest-signing.md).
 
 ### Hierarchy promotion of blocking links
 
@@ -435,6 +408,22 @@ the write — it leaves the local commit intact and the branch diverged.
 `origin/tickets`, so unpushed activity is observable. See
 [`docs/concurrency.md`](docs/concurrency.md) for the push/merge-retry algorithm.
 
+**Running locally, offline, or read-only.** This auto-sync is configurable when you
+don't want the store talking to a remote (the full key set and env names are in
+[`docs/config.md`](docs/config.md)):
+
+- **`sync.push`** (env `REBAR_SYNC_PUSH`) — `always` (default) pushes each write
+  synchronously; `async` pushes in the background so per-write network latency
+  doesn't serialize a batch; `off` keeps commits **local** and never pushes (`fsck`
+  still surfaces `PUSH_PENDING`).
+- **`sync.pull`** (env `REBAR_SYNC_PULL`) — `on` (default) lets reads fetch from the
+  remote (the [freshness policy](#reads-share-one-freshness-policy-across-cli-library-and-mcp)
+  below); `off` gives a pure-local replay (offline work, tight loops, or right after
+  a write that already synced). Pass `--no-pull` to a single read subcommand for the
+  same effect (e.g. `rebar list --no-pull`).
+- **`mcp.readonly`** (env `REBAR_MCP_READONLY=1`) — serves only read tools over MCP,
+  so no writes — and therefore no commits or pushes — happen at all.
+
 How big can it get? Reads stay sub-second into the thousands of tickets; writes
 are bounded by the per-event git commit (~25–30/s). See
 [`docs/scale-envelope.md`](docs/scale-envelope.md) for representative measured
@@ -450,13 +439,10 @@ within at most a minute. This is **one contract shared by all three interfaces**
 CLI, library (`rebar.list_tickets()`, …), and the MCP read tools all resolve
 through a single read implementation. (Previously only CLI reads synced, leaving
 MCP — the primary agent surface — with the *stalest* reads; that divergence is
-gone.)
-
-**Opt out** for a pure-local replay (offline work, tight loops, or right after a
-write that already synced): set `REBAR_SYNC_PULL=off` (honored everywhere;
-deprecated alias `REBAR_NO_SYNC=1`) or pass `--no-pull` to any read subcommand
-(e.g. `rebar list --no-pull`; deprecated alias `--no-sync`). Only the network
-fetch/merge is skipped; the local reduce/cache path is unchanged. See
+gone.) To skip this fetch for a pure-local replay, set `sync.pull=off` or pass
+`--no-pull` — see [Running locally, offline, or read-only](#the-store-auto-commits-and-auto-pushes-every-write)
+above. Only the network fetch/merge is affected; the local reduce/cache path is
+unchanged. See
 [`docs/concurrency.md`](docs/concurrency.md#read-freshness-policy-uniform-across-cli-library-and-mcp).
 
 ### The on-disk store is not human-readable — read it with `rebar`
@@ -546,8 +532,7 @@ rebar-mcp          # stdio transport
 ```
 
 Exposes ticket operations as MCP tools. `reconcile` defaults to `dry-run`
-(`live` requires `REBAR_MCP_ALLOW_JIRA_SYNC=1`, deprecated alias
-`REBAR_MCP_ALLOW_RECONCILE_LIVE`). Set `REBAR_MCP_READONLY=1`
+(`live` requires `REBAR_MCP_ALLOW_JIRA_SYNC=1`). Set `REBAR_MCP_READONLY=1`
 to expose only the read tools (no write/mutation tools). To register it in an MCP
 client (registry name `io.github.navapbc/rebar`, or a direct `uvx` config), see
 [Install → MCP server](#mcp-server--from-the-mcp-registry) above.
@@ -576,7 +561,7 @@ values and which layer each came from.
 [tool.rebar]
 verify.require_signature_for_close = true  # gate story/epic close on a certified
                                            # signature at HEAD (rebar sign); default
-                                           # false. Alias: verify.require_verdict_for_close
+                                           # false.
 ticket.display_mode = "auto"               # auto | canonical | alias | short
 compact.threshold   = 10
 sync.push = "always"                       # always | async | off
@@ -588,19 +573,17 @@ tracker.branch = "tickets"                 # orphan branch the event log lives o
 ```
 
 The full key set, the `REBAR_<KEY>` env names, and deprecation aliases are in
-[`docs/config.md`](docs/config.md). The legacy flat `.rebar/config.conf`
-(`key=value`) is still read during a deprecation window for back-compat.
+[`docs/config.md`](docs/config.md).
 
 When the close gate is enabled, closing a story/epic requires a **certified
 signature made at the current HEAD** — sign a manifest of verified steps
 (`rebar sign <id> '[...]'`) then `rebar transition <id> closed`; re-sign if HEAD
-moved, or bypass with `--force-close=<reason>`. This replaces the older
-`--verdict-hash`/`compute-verdict-hash.sh` gate, which is now deprecated.
+moved, or bypass with `--force-close=<reason>`.
 
 rebar keeps its writable state under `.rebar/` at the repo root. The `scratch`
 store defaults to `<repo>/.rebar/scratch/` (override with `scratch.base_dir` /
-`REBAR_SCRATCH_BASE_DIR`; the unprefixed `SCRATCH_BASE_DIR` is a deprecated alias),
-and one-shot migration stamps are written under `.rebar/` as well.
+`REBAR_SCRATCH_BASE_DIR`), and one-shot migration stamps are written under
+`.rebar/` as well.
 
 ## Tests
 
