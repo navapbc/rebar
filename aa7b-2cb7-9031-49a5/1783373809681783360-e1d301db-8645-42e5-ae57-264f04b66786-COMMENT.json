@@ -1,0 +1,1 @@
+{"author":"rebar-bridge[bot]","data":{"body":"BRIDGE_CANARY_ALERT: Still stale as of 2026-07-06T21:36:49Z: Last successful run was 5h 48m ago (threshold: 2h). Run: https://github.com/navapbc/rebar/actions/runs/28824882984"},"env_id":"fdc9425b-7c69-4b6d-99f0-1d339ebc3ba3","event_type":"COMMENT","timestamp":1783373809681783360,"uuid":"e1d301db-8645-42e5-ae57-264f04b66786"}
