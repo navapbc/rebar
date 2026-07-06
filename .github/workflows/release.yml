@@ -71,3 +71,33 @@ jobs:
           # them. Consumers verify with `gh attestation verify` — see
           # docs/releasing.md ("Supply-chain attestations").
           attestations: true
+
+  github_release:
+    name: Create GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    # Same gate as publish: only a version-tag push creates a release. Runs after
+    # PyPI so a GitHub Release never appears for a version that failed to publish.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write   # create the release + upload its asset
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: dist
+          path: dist/
+      # Create the GitHub Release for this tag with auto-generated notes (commit/PR
+      # list since the previous release) and mark it Latest, attaching the built
+      # sdist + wheel. --verify-tag ensures the tag exists; the step is idempotent —
+      # if a release already exists for the tag it is updated rather than failing.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --latest --draft=false
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes --latest --verify-tag dist/*
+          fi

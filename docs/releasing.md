@@ -12,6 +12,11 @@ step-by-step runbook for cutting a release and updating every channel.
   `brew install navapbc/rebar/rebar`.
 - **MCP Registry** — manifest `server.json` (`io.github.navapbc/rebar`),
   published with the `mcp-publisher` CLI.
+- **GitHub Releases** — the human-facing "what's the latest version" surface at
+  `github.com/navapbc/rebar/releases`. Not a distribution channel (nothing
+  installs from it), but it must not lag the others. Created **automatically** by
+  `.github/workflows/release.yml` on a `vX.Y.Z` tag (auto-generated notes, marked
+  Latest, with the built sdist + wheel attached) — no manual step.
 
 ## Accounts / prerequisites (one-time — already done)
 No separate accounts; everything rides on GitHub.
@@ -82,8 +87,10 @@ git add pyproject.toml server.json && git commit -m "Release X.Y.Z" && git push 
 git tag -a vX.Y.Z -m "nava-rebar X.Y.Z" && git push origin vX.Y.Z
 gh run watch "$(gh run list --workflow=release.yml --event=push -L1 --json databaseId -q '.[0].databaseId')" --exit-status
 ```
-The workflow builds + `twine check`s + publishes via OIDC. (A `workflow_dispatch`
-run builds without publishing — use it as a dry run.)
+The workflow builds + `twine check`s + publishes via OIDC, then its
+`github_release` job **creates the GitHub Release** for the tag (auto-generated
+notes, marked Latest, sdist + wheel attached). (A `workflow_dispatch` run builds
+without publishing or releasing — use it as a dry run.)
 
 Verify the version is live on the channel:
 ```bash
@@ -155,6 +162,17 @@ REBAR="$(pipx environment --value PIPX_BIN_DIR)/rebar" PROBE_LIVE=1 bash scripts
 `PROBE RESULT: N passed, 0 failed`; a non-zero exit means the published build is
 broken. Since **PyPI is immutable**, recover by *yanking* the bad version and
 shipping a fixed version bump (re-run this step on the new version).
+
+### Fixing or retiring a bad GitHub Release
+The `github_release` job is idempotent (re-running the workflow for a tag edits
+the existing release rather than erroring). To correct one after the fact:
+```bash
+gh release edit vX.Y.Z --notes-file NOTES.md      # amend auto-generated notes
+gh release edit vX.Y.Z --prerelease --latest=false # de-list a bad release
+gh release delete vX.Y.Z --yes                      # remove it entirely (keeps the tag)
+```
+Note this only touches the GitHub Release surface — the PyPI artifact is
+immutable and is recovered by *yanking* + a version bump (see Hard rules).
 
 ### Optional — live Jira capability preflight
 
