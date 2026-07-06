@@ -30,6 +30,7 @@ import logging
 import os
 import re
 import sys
+import urllib.error
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -165,6 +166,7 @@ def _file_conflict_bug_ticket(cli_path: Path, title: str, description: str, pare
 from rebar_reconciler.apply_handlers import (  # noqa: E402
     BatchApplyContext,
     dispatch_mutation,
+    record_backstop_failure,
 )
 
 # Outbound batch dispatch + Jira-call retry live in batch_dispatch.py.
@@ -747,7 +749,15 @@ def _apply_one(mutation: dict, ctx: BatchApplyContext, mutations_with_outcomes: 
     # bypassed for every legacy dict-shaped mutation — only _apply_typed enforced
     # the contract.
     _audit_rebar_id_label_writes(f"outbound_{action}", [_BatchAuditView(mutation)])
-    result = dispatch_mutation(mutation, ctx)
+    try:
+        result = dispatch_mutation(mutation, ctx)
+    except (HeadDriftError, RescheduleError, urllib.error.HTTPError):
+        # Control-flow / fail-fast contracts — re-raise (see record_backstop_failure):
+        # HeadDriftError (drift-abort), RescheduleError (rebase-retry exhausted), HTTPError
+        # (404 soft-failed in the handler; non-404 deliberately propagates fail-fast).
+        raise
+    except Exception as exc:  # noqa: BLE001 — per-mutation failure backstop (records + continues)
+        result = record_backstop_failure(mutation, exc, action, ctx)
     mutations_with_outcomes.append(result.outcome)
     _print_batch_recon(action, result.outcome, soft_failed=result.soft_failed)
 

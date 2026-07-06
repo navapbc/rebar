@@ -272,3 +272,36 @@ def dispatch_mutation(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     action = mutation.get("action", "")
     handler = _ACTION_HANDLERS.get(action, handle_unknown)
     return handler(mutation, ctx)
+
+
+def record_backstop_failure(
+    mutation: dict, exc: Exception, action: str, ctx: BatchApplyContext
+) -> HandlerResult:
+    """Per-mutation failure backstop, shared with the applier's dispatch loop.
+
+    Generalizes the enumerated soft-fails above (400-comment / 404 / assignee /
+    gone-delete): a mutation whose dispatch raised an *unhandled* exception — e.g.
+    ``acli.transition_issue_by_name`` raising a bare ``RuntimeError`` for an
+    unreachable Jira transition — is recorded as a per-mutation failure (a
+    ``bridge_alerts`` entry + an outcome carrying an ``"error"`` key, which counts as
+    a ``mutation_failure`` in reconcile's manifest tally) instead of propagating and
+    aborting the whole pass. The caller re-raises the control-flow / fail-fast
+    contracts (HeadDriftError / RescheduleError / non-404 HTTPError) before reaching
+    here, so only genuine per-mutation failures land in this backstop.
+    """
+    key = mutation.get("key") or mutation.get("local_id") or "<unknown>"
+    _load_alert_store().append(
+        {
+            "kind": "mutation-error",
+            "key": mutation.get("key"),
+            "local_id": mutation.get("local_id"),
+            "action": action,
+            "pass_id": ctx.pass_id,
+            "timestamp_ns": time.time_ns(),
+            "reason": str(exc),
+        },
+        repo_root=ctx.repo_root,
+    )
+    logger.warning("outbound %s on %s failed (%s) — recorded, continuing", action, key, exc)
+    outcome = {**mutation, "action": action, "result": None, "error": f"mutation-error: {exc!s}"}
+    return HandlerResult(outcome, soft_failed=True)
