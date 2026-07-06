@@ -124,12 +124,20 @@ class StatusMappingError(Exception):
 
 
 def preflight_status_mapping(mutations) -> None:
-    """Raise :class:`StatusMappingError` if any update mutation references a
-    status absent from ``config.local_to_jira_status``.
+    """Scan update mutations for statuses absent from
+    ``config.local_to_jira_status`` and WARN (non-fatally) on each.
 
-    An empty mapping disables the scan (kill-switch). Non-update mutations and
-    mutations whose ``fields`` payload does not include a ``status`` key are
-    ignored.
+    Facet 3 (reconciler-abort-isolation): this scan used to RAISE
+    :class:`StatusMappingError` on the first unmapped status, aborting the whole
+    pass before any mutation was applied. It now logs a warning to stderr for
+    each offending mutation and returns normally, so the mutation flows to the
+    applier and is recorded there as a per-mutation failure (fail-loud) instead
+    of taking down the entire pass. :class:`StatusMappingError` remains defined
+    for other references.
+
+    An empty mapping disables the scan (kill-switch). Non-update mutations,
+    inbound mutations, and mutations whose ``fields`` payload does not include a
+    ``status`` key are ignored.
     """
     cfg = _load("reconcile_config", "config.py")
     mapping = getattr(cfg, "local_to_jira_status", {}) or {}
@@ -192,8 +200,22 @@ def preflight_status_mapping(mutations) -> None:
         # *unmapped* statuses before the applier dispatch; both shapes are
         # legitimately-mapped values.
         if status and status not in mapping and status not in set(mapping.values()):
-            raise StatusMappingError(
-                f"local status {status!r} not in local_to_jira_status mapping (target={target})"
+            # Facet 3 (reconciler-abort-isolation): this preflight used to RAISE
+            # StatusMappingError here, which aborted the ENTIRE pass on the FIRST
+            # unmapped status — before ANY mutation was applied. That turned one
+            # misconfigured mutation into a whole-pass outage. Downgrade to
+            # NON-FATAL: log a warning to stderr naming the offending status +
+            # target and RETURN NORMALLY, letting the mutation flow to the applier
+            # where the per-mutation backstop (_apply_one) records it as a
+            # per-mutation failure (so it still counts toward fail-loud / a
+            # non-zero exit). The StatusMappingError class stays defined for other
+            # references; the empty-mapping kill-switch and the inbound-skip above
+            # are preserved.
+            print(  # noqa: T201
+                f"reconcile: preflight — local status {status!r} not in "
+                f"local_to_jira_status mapping (target={target}); NOT aborting "
+                f"the pass — the applier will record it as a per-mutation failure",
+                file=sys.stderr,
             )
 
 
@@ -894,9 +916,11 @@ def _apply_mutations(ctx: _PassContext) -> None:
             target_keys=len(target_set),
         )
 
-    # Preflight: abort the pass if any update mutation references a status
+    # Preflight: WARN (non-fatally) if any update mutation references a status
     # not present in config.local_to_jira_status. Runs exactly once per pass,
-    # before any applier dispatch, so unmapped statuses cannot reach Jira.
+    # before any applier dispatch. It no longer aborts the pass (Facet 3): an
+    # unmapped status flows to the applier and is recorded there as a
+    # per-mutation failure rather than taking down every later mutation.
     preflight_status_mapping(mutations)
 
     # F8: wrap apply in try/except/finally so health.record_pass STILL fires

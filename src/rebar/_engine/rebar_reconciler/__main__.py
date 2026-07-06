@@ -399,6 +399,16 @@ def run_pass(
         print(f"OK: applied {applied} of {computed} mutations")
     else:
         print(f"OK: applied {applied} of {computed} mutations ({failures} failed)")
+    # Fail loud: a pass that reached the applier but recorded per-mutation
+    # failures (e.g. the _apply_one backstop isolated an unhandled handler
+    # exception) must surface a NON-ZERO exit so a scheduler/CI treats the pass
+    # as degraded rather than clean. Distinct from EXIT_RESCHEDULE (75, above)
+    # and the hard-exception path (also 1, above). Benign paths stay 0: the
+    # 400-comment-fallback is counted as APPLIED (no "error" key — see
+    # reconcile.py), so it does not increment `failures`, and a zero-failure
+    # pass returns 0.
+    if failures > 0:
+        return 1
     return 0
 
 
