@@ -112,6 +112,34 @@ def test_no_session_id_degrades_to_single_log(rebar_repo: Path, monkeypatch) -> 
     assert b["created"] is False
 
 
+def test_fingerprinted_session_rotates_off_a_fingerprintless_pointer(
+    rebar_repo: Path, monkeypatch
+) -> None:
+    """A session WITH a fingerprint must rotate away from a pointer left WITHOUT one
+    (bug slum-shoal-gully, option 1 defensive rotation).
+
+    A prior run with no session id writes the pointer with ``session=None``; a later
+    fingerprinted session must NOT keep appending to that stranger's log — it must
+    rotate to a fresh one. Otherwise cross-session pollution (the exact thing
+    auto-rotation exists to prevent) slips through whenever the pointer lacks a
+    fingerprint.
+    """
+    r = str(rebar_repo)
+    monkeypatch.delenv("REBAR_SESSION_ID", raising=False)
+    monkeypatch.delenv("SESSION_ID", raising=False)
+    # Session 1: NO fingerprint → writes a pointer with session=None.
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    a = rebar.append_session_log("from a fingerprint-less session", repo_root=r)
+    # Session 2: HAS a fingerprint → must rotate off the session=None pointer.
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-real")
+    b = rebar.append_session_log("from a fingerprinted session", repo_root=r)
+    assert b["id"] != a["id"], (
+        "a fingerprinted session must rotate off a fingerprint-less (session=None) pointer, "
+        "not append to the prior session's log"
+    )
+    assert b["created"] is True
+
+
 # ── linking rules (relates_to allowed, blocks refused) ──────────────────────────
 def test_relates_to_allowed_blocking_refused(rebar_repo: Path) -> None:
     r = str(rebar_repo)

@@ -180,12 +180,17 @@ first, default 5).
 **Auto-rotation per session (no manual `start` needed).** The pointer stores a
 session fingerprint alongside the log id, taken from `CLAUDE_CODE_SESSION_ID` (then
 `REBAR_SESSION_ID` / `SESSION_ID`). When a NEW session's first `append` sees a
-pointer stamped with a *different* fingerprint, it auto-rotates to a fresh log — so
-distinct agent sessions get distinct logs without anyone running `session-log start`.
-It degrades safely: if no session id is set (fingerprint `None`), or the pointer is a
-legacy bare-id (no fingerprint), it NEVER rotates — a single continuous session keeps
-appending to one log. The fingerprint deliberately does NOT fall back to git HEAD (a
-commit within one session must not rotate the log).
+pointer whose fingerprint *differs* from this session's, it auto-rotates to a fresh
+log — so distinct agent sessions get distinct logs without anyone running
+`session-log start`. A *differing* pointer fingerprint includes a **missing** one: if
+this session has a fingerprint but the pointer has none (`session=None` — a legacy
+bare-id, or a pointer written by a prior run that had no session id), it still rotates,
+so a fingerprinted session never pollutes a fingerprint-less stranger's log (defensive
+rotation, bug slum-shoal-gully). It degrades safely only when **this** session cannot
+identify itself: if no session id is set (fingerprint `None`), it NEVER rotates — a
+single continuous no-id session keeps appending to one log. The fingerprint
+deliberately does NOT fall back to git HEAD (a commit within one session must not
+rotate the log).
 
 **LLM agent operations (optional, gated):** `review_ticket(ticket_id, reviewer_id,
 graph)` runs a tool-using LLM agent that reviews a ticket (or its graph) and
