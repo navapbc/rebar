@@ -125,6 +125,11 @@ MCP server (`rebar-mcp`) needs the `mcp` extra; brew users get it via
 no-stored-secret trust model as the PyPI Trusted Publishing above. The runner's
 OIDC token proves the workflow runs in `navapbc/rebar`, which authorizes the
 `io.github.navapbc/*` namespace. The job `needs: publish`, so it runs after PyPI.
+Because the registry validates the package against PyPI, the job first **waits for
+pypi.org to serve the new version** (up to 5 min) — this absorbs the
+publish→PyPI propagation lag that once 404'd the registry check — then runs
+`mcp-publisher publish` with a **bounded, idempotent retry** (it checks the registry
+for the version before each attempt, so a re-run after a duplicate publish is a no-op).
 
 Standing prereqs (already satisfied; listed so they aren't rediscovered):
 - The PyPI release must carry the `mcp-name: io.github.navapbc/rebar` annotation
