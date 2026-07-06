@@ -283,6 +283,82 @@ def test_unreadable_config_fails_gate_off_with_warning(
     assert _status(tid, rebar_repo) == "closed"
 
 
+def _set_impact(tid: str, repo: Path) -> None:
+    rebar.set_file_impact(tid, [{"path": "src/x.py", "reason": "touched"}], repo_root=str(repo))
+
+
+def _commit_ref(repo: Path, ref: str) -> None:
+    """Empty commit whose message carries a ``rebar-ticket: <ref>`` trailer."""
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-q", "-m", f"work\n\nrebar-ticket: {ref}"],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_file_impact_without_referencing_commit_blocks(rebar_repo: Path, monkeypatch) -> None:
+    """A ticket that records file_impact but has NO commit referencing it (rebar-ticket
+    trailer) is blocked BEFORE the billable verifier runs (fail-fast, deterministic) — the
+    implementation has not landed, so completion cannot be confirmed."""
+    _commit(rebar_repo)  # a HEAD commit exists, but it does NOT reference the ticket
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", _never)  # must NOT reach the LLM
+    tid = _make(rebar_repo)
+    _set_impact(tid, rebar_repo)
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert ei.value.returncode == 1
+    # The message names the reason (file_impact) and the remediation (a referencing commit).
+    assert "file_impact" in ei.value.stderr
+    assert "commit" in ei.value.stderr.lower()
+    assert _status(tid, rebar_repo) == "in_progress"
+    assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "unsigned"
+
+
+def test_file_impact_with_referencing_commit_closes(rebar_repo: Path, monkeypatch) -> None:
+    """The same ticket closes once a commit references it via a rebar-ticket trailer — the
+    deterministic precheck passes and the (mocked PASS) verifier runs and signs."""
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", PASS)
+    tid = _make(rebar_repo)
+    _set_impact(tid, rebar_repo)
+    _commit_ref(rebar_repo, tid)  # commit references the ticket by id
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "closed"
+    assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "certified"
+
+
+def test_no_file_impact_skips_commit_check(rebar_repo: Path, monkeypatch) -> None:
+    """The precheck applies only when file_impact is recorded — a ticket with no file_impact
+    closes even though no commit references it."""
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", PASS)
+    tid = _make(rebar_repo)  # no file_impact recorded
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "closed"
+
+
+def test_force_close_skips_file_impact_check(rebar_repo: Path, monkeypatch) -> None:
+    """--force-close bypasses the deterministic file_impact/commit precheck too (it withholds
+    the signature but still closes)."""
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", _never)  # must not verify
+    tid = _make(rebar_repo)
+    _set_impact(tid, rebar_repo)
+    _t.transition_compute(
+        _rid(tid, rebar_repo),
+        "in_progress",
+        "closed",
+        force_close="manual override",
+        repo_root=str(rebar_repo),
+    )
+    assert _status(tid, rebar_repo) == "closed"
+    assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "unsigned"
+
+
 def test_config_dotted_conf_enables_flag_but_ini_form_does_not(tmp_path: Path, monkeypatch) -> None:
     """BL-1 regression: the DOTTED legacy form loads the flag; the [section] INI form in a
     .conf is silently dropped (must NOT enable it)."""

@@ -29,6 +29,34 @@ from rebar.graph._unblock import batch_close_operations
 logger = logging.getLogger(__name__)
 
 
+def _referencing_commit_exists(resolved_id: str, tracker: str, repo_root) -> bool:
+    """True if any commit reachable from the code repo's history references ``resolved_id``
+    via a ``rebar-ticket:`` trailer (or a leading ``<id>:`` subject token).
+
+    Each extracted candidate is put through the SAME shared resolver the commit-ticket gate
+    uses (:func:`resolve_ticket_id`), so every id form — full / short / alias / Jira key /
+    prefix — matches the ticket being closed. Resolves are cached across commits. A git
+    failure (not a repo, no commits) yields ``False`` (no referencing commit found)."""
+    from rebar._commands.verify_commit import extract_ticket_refs
+    from rebar._engine_support.resolver import resolve_ticket_id
+
+    proc = subprocess.run(
+        ["git", "-C", str(repo_root), "log", "--format=%B%x00"],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return False
+    resolved_cache: dict[str, str | None] = {}
+    for message in proc.stdout.split("\0"):
+        for ref in extract_ticket_refs(message):
+            if ref not in resolved_cache:
+                resolved_cache[ref] = resolve_ticket_id(ref, tracker)
+            if resolved_cache[ref] == resolved_id:
+                return True
+    return False
+
+
 def _compact_on_close(repo_root: str, ticket_id: str) -> None:
     """Compact-on-close: squash the event log into a SNAPSHOT (non-blocking, output
     silenced). In-process via rebar._commands.compact; --threshold=0 --skip-sync,
@@ -92,6 +120,26 @@ def _completion_precheck(
         raise CommandError(
             'Error: closing a bug requires --reason starting with "Fixed:" or '
             '"Escalated to user:" (checked before running completion verification).',
+            returncode=1,
+        )
+
+    # Deterministic precheck BEFORE the billable LLM call (alongside the open-children guard):
+    # a ticket that records file_impact claims a concrete code change, so there MUST be a commit
+    # that references it (a `rebar-ticket: <id>` trailer). If none exists, the implementation has
+    # not landed and completion cannot be confirmed — fail fast (no LLM call).
+    from rebar._engine_support import field_reads
+    from rebar._engine_support.resolver import resolve_ticket_id
+
+    tracker = str(config.tracker_dir(repo_root))
+    resolved_id = resolve_ticket_id(ticket_id, tracker) or ticket_id
+    if field_reads.file_impact(ticket_id, tracker) and not _referencing_commit_exists(
+        resolved_id, tracker, repo_root
+    ):
+        raise CommandError(
+            f"Error: cannot close {ticket_id}: it records file_impact (a code change) but no "
+            f"commit references it. Add a 'rebar-ticket: {resolved_id}' trailer to the commit "
+            'that implements it, then retry (or override with --force-close="<reason>"). '
+            "Completion verification cannot confirm the work landed without a referencing commit.",
             returncode=1,
         )
 
