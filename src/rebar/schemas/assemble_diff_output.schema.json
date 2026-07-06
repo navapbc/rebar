@@ -11,6 +11,10 @@
     },
     "changed_files": {
       "type": "array"
+    },
+    "scope_context": {
+      "type": "string",
+      "description": "The UNION scope/AC of the commit's rebar-ticket trailer tickets (empty unless >=1 resolves). Consumed ONLY by the scope-intent overlay; NOT part of the ticket-blind `context`."
     }
   }
 }

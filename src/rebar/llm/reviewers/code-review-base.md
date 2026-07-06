@@ -64,6 +64,7 @@ but do not pad. The catalog:
 - `tests` — test sufficiency / regression coverage for the change.
 - `llm-prompts` — prompt, contract, or output-schema changes to LLM surfaces.
 - `deletion-impact` — a removed/renamed def/class/signature that may leave dangling references (this overlay also fires automatically on such diffs).
+- `scope-intent` — the diff drifts outside the scope/AC of the commit's rebar-ticket(s) (this overlay fires automatically from the commit trailer, not from your recommendation).
 
 Return both `findings` and `recommend_overlays` through the structured output. Add a short
 `summary`.
