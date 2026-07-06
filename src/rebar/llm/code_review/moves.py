@@ -54,6 +54,33 @@ MOVE_REGISTRY: dict[str, dict[str, Any]] = {
         "template": "Update the user/operator/API docs that track {subject}.",
         "applies_when": ["docs", "always"],
     },
+    # story 7c58 (dso lessons). Both key on EXISTING {OVERLAY_IDS ∪ "always"} tags — never a novel
+    # value — because Pass-4 offers a move only when its `applies_when` overlaps `active_triggers`,
+    # and `active_triggers` is the union of the surviving findings' overlay `criteria`
+    # (workflow_ops.code_review_coach_inputs). A move keyed on a tag no reviewer emits would
+    # register but never fire, so a novel `applies_when` value would be a dead move.
+    "file-follow-on-ticket": {
+        "name": "file a follow-on ticket",
+        # A pre-existing / out-of-scope issue can surface under ANY overlay, so `always`: the LLM
+        # picks this move when the finding is not the change's own defect. It pairs with rebar's
+        # discovered_from provenance link rather than fixing the issue in-scope.
+        "template": (
+            "File a follow-on ticket (discovered_from this change) for {subject}, a pre-existing / "
+            "out-of-scope issue — do not fix it in this change."
+        ),
+        "applies_when": ["always"],
+    },
+    "delete-bad-test": {
+        "name": "delete the change-detector test",
+        # Keys on the `tests` overlay (where change-detector / tautological findings arrive). The
+        # name + template signal DELETE — distinct from `add-regression-test` — so the coach picks
+        # deletion, not re-pinning, for a change-detector subject.
+        "template": (
+            "Delete the change-detector / tautological test {subject}; do not re-pin it to the new "
+            "source text — a test that only mirrors the implementation asserts nothing."
+        ),
+        "applies_when": ["tests"],
+    },
 }
 
 
