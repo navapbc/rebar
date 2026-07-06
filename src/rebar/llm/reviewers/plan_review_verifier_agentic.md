@@ -67,6 +67,9 @@ BINARY SUB-ANSWERS (yes|no|insufficient) — answer each atomically, about the F
   verifiable by checking the complete artifact.
 - evidence_entails_finding — the cited evidence (plan quote/section, absence rationale, or code
   citation) actually ENTAILS the finding under a charitable reading. Load-bearing for a plan finding.
+  RESTATEMENT (null delta): if the plan already states the very thing the finding demands (it merely
+  restates an existing consideration, a done-definition, or a dependency already declared in the
+  graph, in different words), the evidence does NOT entail a defect: answer no.
 - path_reachable — the situation is actually reachable given the plan as written (flawed path is
   taken, not dead/guarded); let the code you read inform this.
 - impact_follows_necessarily — the asserted harm NECESSARILY follows from the flaw, not merely
@@ -77,6 +80,15 @@ BINARY SUB-ANSWERS (yes|no|insufficient) — answer each atomically, about the F
   the actual code already mitigates the flaw.
 - severity_claim_justified — the finding's own asserted impact is proportionate to the evidence,
   not inflated.
+- committed_work_relies_on_unbacked_claim — a COMMITTED element (an AC, a task, an edit, or a scope
+  EXCLUSION such as 'OUT: X — already exists / handled by Y') rests on a factual claim the plan
+  neither verifies (a run Verify command / cited evidence) nor guards with a fallback. Use your
+  tools to probe the claim. This unifies confident-assertion and false-exclusion findings: 'yes'
+  upholds them. Answer `na` unless the finding is about a committed element depending on such a claim.
+- respects_artifact_altitude — the finding does NOT demand a detail, or presume a design choice,
+  that this artifact at its level (epic/story/task) legitimately defers to a child ticket or to
+  implementation. 'no' marks an altitude-error false positive and lowers validity; 'yes' confirms
+  the finding is pitched at the right level; `na` if altitude is not in question.
 Answer `na` for a sub-question that genuinely does not apply to this finding's shape (e.g.
 path_reachable for a purely structural/organisational finding) — it is then EXCLUDED from the
 validity score rather than guessed as insufficient. Do not na evidence_entails_finding.

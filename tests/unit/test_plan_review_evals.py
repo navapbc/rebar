@@ -98,6 +98,39 @@ def test_verifier_has_discrimination_pairs() -> None:
     assert "no_sycophancy_on_real_defects" in names
 
 
+def test_verifier_new_subanswers() -> None:
+    # WS1 (epic cite-stone-sea) AC: the two DSO-adopted sub-answers appear in the Pass-2
+    # verification contract. (Deeper kernel-math coverage — the na-default and old-sidecar
+    # validity comparability — lives in tests/unit/test_review_kernel_rules.py.)
+    from rebar.llm import review_kernel
+
+    model = review_kernel.verification_model()
+    binary = (
+        model.model_fields["verifications"].annotation.__args__[0].model_fields["binary"].annotation
+    )
+    contract = set(binary.model_fields)
+    for key in ("committed_work_relies_on_unbacked_claim", "respects_artifact_altitude"):
+        assert key in review_kernel.GRADED_BINARY, f"{key} missing from GRADED_BINARY"
+        assert key in contract, f"{key} missing from the verification contract"
+
+
+def test_verifier_committed_claim_and_altitude_pairs() -> None:
+    # WS1 (epic cite-stone-sea): the two DSO-adopted sub-answers each get a labeled
+    # discrimination pair — a genuinely-unbacked committed claim / an undeclared-at-this-level
+    # finding SURVIVES (high validity); a claim the plan backs / a wrong-altitude finding DROPS.
+    ds = E.load_eval_spec("plan-review-verifier").get("dataset", [])
+    for pair in ("committed-claim", "altitude"):
+        cases = [c for c in ds if c.get("pair") == pair]
+        kinds = {c.get("kind") for c in cases}
+        assert kinds == {"true", "false"}, (
+            f"{pair} pair needs both a recall and a planted-false case"
+        )
+        expects = {c.get("expect") for c in cases}
+        assert "high_validity" in expects and "low_validity" in expects, (
+            f"{pair} pair needs a surviving (high_validity) and a dropped (low_validity) case"
+        )
+
+
 def test_finder_has_proxy_validation_cutover_cases() -> None:
     # super-plant-liver AC: the B5-shaped scenario (a cutover that DEFAULTS to a new path
     # whose AC is satisfiable by offline/mocked tests that never exercise the live path)

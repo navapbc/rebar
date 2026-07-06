@@ -140,12 +140,37 @@ def verification_model(*, strict: bool = False) -> type:
         "severity_claim_justified": (
             "yes|no|insufficient|na — the finding's asserted impact is proportionate, not inflated."
         ),
+        # DSO-adopted (epic cite-stone-sea / WS1, ADR 0032). Both na-default (see below).
+        "committed_work_relies_on_unbacked_claim": (
+            "yes|no|insufficient|na — a COMMITTED element of the plan (an AC, a task, an "
+            "edit, or a scope EXCLUSION such as 'OUT: X — already exists / handled by Y') "
+            "rests on a factual claim the plan neither verifies (a run Verify command / "
+            "cited evidence) nor guards with a fallback. 'yes' upholds a confident-assertion "
+            "or false-exclusion finding; `na` unless the finding is about a committed element "
+            "depending on such a claim."
+        ),
+        "respects_artifact_altitude": (
+            "yes|no|insufficient|na — the finding does NOT demand a detail, or presume a "
+            "design choice, that this artifact at its level (epic/story/task) legitimately "
+            "defers to a child or to implementation. 'no' marks an altitude-error false "
+            "positive (it then LOWERS validity like any other sub-answer); `na` if altitude "
+            "is not in question."
+        ),
     }
+    # Sub-answers that default to "na" (abstain, EXCLUDED from validity) rather than
+    # "insufficient": they apply only to a specific finding SHAPE, so a verifier that does not
+    # engage them must not drag validity, and old sidecars predating them stay comparable
+    # (absent key == na, both excluded by decide.validity). Data-driven default over the SAME
+    # uniform loop — no per-criterion branching in the pass. See ADR 0032 (epic cite-stone-sea).
+    _BINARY_NA_DEFAULT = frozenset(
+        {"committed_work_relies_on_unbacked_claim", "respects_artifact_altitude"}
+    )
     binary_fields: dict[str, Any] = {
         "cited_reference_accurate": (str, Field(default="na", description="yes|no|insufficient|na"))
     }
     for q in GRADED_BINARY:
-        binary_fields[q] = (str, Field(default="insufficient", description=_BINARY_DESC.get(q, "")))
+        _default = "na" if q in _BINARY_NA_DEFAULT else "insufficient"
+        binary_fields[q] = (str, Field(default=_default, description=_BINARY_DESC.get(q, "")))
     Binary = create_model("Binary", __config__=forbid, **binary_fields)
 
     class Verification(BaseModel):
