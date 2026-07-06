@@ -52,6 +52,7 @@ steps:
     uses: overlay_union
     with:
       changed_files: ${{ steps.assemble_diff.outputs.changed_files }}
+      diff_text: ${{ steps.assemble_diff.outputs.context }}
 
   # ── Pass 1a: the base reviewer (ALWAYS runs; standalone so recommend_overlays survives). ────
   - id: base
@@ -80,6 +81,7 @@ steps:
         - { prompt: code-review-iac, when: "${{ steps.triggers.outputs.include_iac }}" }
         - { prompt: code-review-tests, when: "${{ steps.triggers.outputs.include_tests }}" }
         - { prompt: code-review-llm-prompts, when: "${{ steps.triggers.outputs.include_llm_prompts }}" }
+        - { prompt: code-review-deletion-impact, when: "${{ steps.triggers.outputs.include_deletion_impact }}" }
 
   # ── Round-B membership: (glob ∪ base.recommend) − already-run(Round-A), capped at N=3. ──────
   - id: union
@@ -87,6 +89,7 @@ steps:
     uses: overlay_union
     with:
       changed_files: ${{ steps.assemble_diff.outputs.changed_files }}
+      diff_text: ${{ steps.assemble_diff.outputs.context }}
       recommend: ${{ steps.base.outputs.recommend_overlays }}
       already_run: ${{ steps.triggers.outputs.to_run }}
       cap: 3
@@ -108,6 +111,7 @@ steps:
         - { prompt: code-review-iac, when: "${{ steps.union.outputs.include_iac }}" }
         - { prompt: code-review-tests, when: "${{ steps.union.outputs.include_tests }}" }
         - { prompt: code-review-llm-prompts, when: "${{ steps.union.outputs.include_llm_prompts }}" }
+        - { prompt: code-review-deletion-impact, when: "${{ steps.union.outputs.include_deletion_impact }}" }
 
   # ── Merge + cluster the three finding sources. ──────────────────────────────────────────────
   - id: merge
