@@ -106,3 +106,26 @@ def test_diagnostic_goes_to_stderr_not_stdout() -> None:
     assert "ValueError: boom" in proc.stderr
     assert "forced best-effort diagnostic" not in proc.stdout
     assert "Traceback" not in proc.stdout
+
+
+def test_create_non_bug_warns_missing_file_impact_on_stderr(repo: Path) -> None:
+    """`create task` nudges about missing file_impact on stderr; stdout stays clean.
+
+    file_impact cannot be set at create time, so the plan-review file-impact-coverage
+    gate (P9) would flag any leaf work ticket lacking it. The create command surfaces
+    that requirement early as a stderr warning — never on stdout.
+    """
+    proc = _engine_run(repo, "create", "task", "needs file impact")
+    assert "Warning: no file_impact recorded" in proc.stderr
+    assert "set-file-impact" in proc.stderr
+    # stdout carries only the created-ticket data lines — the warning must not leak there.
+    assert "Warning: no file_impact recorded" not in proc.stdout
+    assert "Created ticket" in proc.stdout
+
+
+def test_create_bug_does_not_warn_missing_file_impact(repo: Path) -> None:
+    """`create bug`/`session_log` are file-impact gate-exempt → no create-time warning."""
+    bug = _engine_run(repo, "create", "bug", "a defect")
+    assert "Warning: no file_impact recorded" not in bug.stderr
+    log = _engine_run(repo, "create", "session_log", "a log")
+    assert "Warning: no file_impact recorded" not in log.stderr
