@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/_engine_support/validate_checks.py","reason":"exempt idea from empty-epic/orphan/missing-desc/interface-contract/count checks; keep structural checks"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783359643004040001,"uuid":"16c26b9b-52f1-4c6c-9624-28c5a31c4422"}
