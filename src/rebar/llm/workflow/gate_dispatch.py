@@ -414,6 +414,11 @@ def _degraded_plan_review_verdict(
 
 
 # ── code-review (epic b744 / WS4) ─────────────────────────────────────────────────────
+# The code-review gate reuses STEP_VERIFY ("verify") + STEP_DECIDE ("decide"); its Pass-0
+# assemble step (source of the changed-files/diff for the advisory grounding heuristic) is:
+STEP_ASSEMBLE_DIFF = "assemble_diff"
+
+
 def code_review_enabled(repo_root=None) -> bool:
     """Whether the off-by-default code-review capability is enabled
     (`[code_review].enabled` via `verify.enable_code_review` / REBAR_VERIFY_ENABLE_CODE_REVIEW)."""
@@ -597,26 +602,96 @@ def produce_code_review_verdict(
     )
 
 
+#: High-priority rule for the approach-viability signal (documented, ONE consistent rule):
+#: a finding whose kernel ``priority`` (validity × impact ∈ [0,1]) is ≥ this is "high-priority".
+#: We key off ``priority`` (always present after Pass-3) rather than the ``severity`` label so
+#: the rule is a single numeric comparison.
+_HIGH_PRIORITY_FLOOR = 0.7
+
+
+def _count_diff_lines(text: str) -> int:
+    """A changed-lines proxy: unified-diff body lines (``+``/``-``), excluding the ``+++``/``---``
+    file headers. Computed over the assembled ``context`` string (which embeds the capped diff)."""
+    n = 0
+    for ln in text.splitlines():
+        if ln.startswith(("+", "-")) and not ln.startswith(("+++", "---")):
+            n += 1
+    return n
+
+
 def _attach_code_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -> None:
     """Reconstruct ``coverage['metrics']`` from the workflow recorder's step timings (the
     code-review analog of ``_attach_plan_review_metrics``): ``llm_ms`` = wall-clock of the
     billable LLM tier (agent/batch steps: base + Round-A/B overlays + verify + coach),
     ``total_ms`` = the whole run, ``llm_calls`` = batch criteria_count + succeeded agent steps.
+
+    ADVISORY enrichment (story 1669) — all observational, NEVER touches ``verdict['verdict']``
+    nor adds a blocking source:
+
+    * ``metrics['findings_per_run']`` — blocking + advisory finding count.
+    * ``metrics['verify_requests']`` — Pass-2 verifier model-request count (mirrors
+      ``_attach_plan_review_metrics``'s STEP_VERIFY ``_usage.requests`` sum).
+    * ``metrics['grounding_health']`` — ``"low"`` iff the diff is non-trivial AND the verifier
+      made 0 model requests (findings may be under-grounded), else ``"ok"``.
+    * ``coverage['grounding_note']`` — emitted ONLY when grounding_health is ``"low"``.
+    * ``coverage['approach_viability_note']`` — emitted when the surviving high-priority count
+      or the Pass-2 drop-rate crosses the ledger thresholds (a Rule-of-Three viability hint).
+
     Tolerant of untimed/partial records (never raises inside the gate)."""
+    from rebar.llm.code_review.fp_ledger import (
+        MAX_PASS2_DROP_RATE,
+        MIN_SURVIVING_HIGH_PRIORITY,
+        NON_TRIVIAL_DIFF_LINES,
+        is_non_trivial_diff,
+    )
+
     llm_ms = 0.0
     batch_criteria = 0
     agent_calls = 0
+    # Pass-2 verifier model-request count (mirror plan-review's STEP_VERIFY sum).
+    verify_requests = 0
+    # Pass-3 dropped findings (from the `decide` step; absent from the terminal verdict).
+    dropped = 0
+    changed_files = 0
+    changed_lines = 0
     for s in rec.steps:
         if not isinstance(s, dict) or s.get("status") != "succeeded":
             continue
         kind = s.get("kind")
+        step_id = s.get("step_id")
         dur = s.get("duration_ms")
+        outputs = s.get("outputs") or {}
         if isinstance(dur, (int, float)) and kind in _LLM_STEP_KINDS:
             llm_ms += dur
         if kind == "batch":
-            batch_criteria += int((s.get("outputs") or {}).get("criteria_count") or 0)
+            batch_criteria += int(outputs.get("criteria_count") or 0)
         elif kind == "agent":
             agent_calls += 1
+            if step_id == STEP_VERIFY:
+                verify_requests += int((outputs.get("_usage") or {}).get("requests") or 0)
+        if step_id == STEP_DECIDE:
+            dropped += len(outputs.get("dropped") or [])
+        if step_id == STEP_ASSEMBLE_DIFF:
+            changed_files = len(outputs.get("changed_files") or [])
+            changed_lines = _count_diff_lines(str(outputs.get("context") or ""))
+
+    blocking = list(verdict.get("blocking") or [])
+    # The terminal code-review verdict carries surviving advisories under `advisory` (= the
+    # decide step's `surfaced`); tolerate either key.
+    advisory = list(verdict.get("advisory") or verdict.get("surfaced") or [])
+    surviving_high_priority = sum(
+        1
+        for f in advisory
+        if isinstance(f, dict) and float(f.get("priority") or 0.0) >= _HIGH_PRIORITY_FLOOR
+    )
+    denom = dropped + len(advisory) + len(blocking)
+    pass2_drop_rate = (dropped / denom) if denom else 0.0
+    grounding_health = (
+        "low"
+        if is_non_trivial_diff(changed_files, changed_lines) and verify_requests == 0
+        else "ok"
+    )
+
     coverage = verdict.get("coverage")
     if not isinstance(coverage, dict):
         coverage = {}
@@ -626,7 +701,25 @@ def _attach_code_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
         "llm_ms": round(llm_ms, 1),
         "total_ms": round(total_ms, 1),
         "llm_calls": batch_criteria + agent_calls,
+        "findings_per_run": len(blocking) + len(advisory),
+        "verify_requests": verify_requests,
+        "grounding_health": grounding_health,
     }
+    # Advisory notes live on `coverage` (NOT in `metrics`), and NEVER on `verdict['verdict']`.
+    if grounding_health == "low":
+        coverage["grounding_note"] = (
+            f"non-trivial diff (>{NON_TRIVIAL_DIFF_LINES} changed lines or >1 file) but the "
+            "Pass-2 verifier made 0 model requests — findings may be under-grounded (advisory)."
+        )
+    if (
+        surviving_high_priority >= MIN_SURVIVING_HIGH_PRIORITY
+        or pass2_drop_rate >= MAX_PASS2_DROP_RATE
+    ):
+        coverage["approach_viability_note"] = (
+            f"{surviving_high_priority} surviving high-priority finding(s), Pass-2 drop-rate "
+            f"{pass2_drop_rate:.0%} — the approach (not just nits) may be worth a second look "
+            "(advisory; the verdict is unchanged)."
+        )
 
 
 # ── completion ──────────────────────────────────────────────────────────────────────
