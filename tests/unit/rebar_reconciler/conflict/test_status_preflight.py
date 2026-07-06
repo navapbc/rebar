@@ -1,9 +1,12 @@
 """Tests for reconcile.preflight_status_mapping.
 
-Verifies the preflight status-mapping scan raises ``StatusMappingError`` for
-any update mutation whose status field is absent from
-``config.local_to_jira_status``, and that the scan runs before the applier
-dispatches anything. An empty mapping acts as a kill-switch.
+Verifies the preflight status-mapping scan WARNS (non-fatally) for any update
+mutation whose status field is absent from ``config.local_to_jira_status``,
+without aborting the pass (Facet 3, reconciler-abort-isolation: the scan used
+to raise ``StatusMappingError`` and abort every later mutation; it now logs to
+stderr and returns so the offending mutation flows to the applier and is
+recorded there as a per-mutation failure). An empty mapping acts as a
+kill-switch.
 
 Follows the module-loading convention documented in
 ``tests/unit/rebar_reconciler/conftest.py``.
@@ -41,10 +44,11 @@ def reconcile_mod():
     return _load_module("reconcile_under_test", RECONCILE_PATH)
 
 
-def test_missing_status_raises_before_applier(reconcile_mod):
-    """An update mutation with an unmapped status raises StatusMappingError
-    before any mutations are applied (preflight is a pure scan that raises
-    on the first offending mutation)."""
+def test_missing_status_warns_but_does_not_abort(reconcile_mod, capsys):
+    """An update mutation with an unmapped status WARNS to stderr but does NOT
+    raise (Facet 3): the preflight no longer aborts the pass, so the offending
+    mutation can flow to the applier and be recorded as a per-mutation failure.
+    The warning must still name the offending status value and target key."""
     mutations = [
         {
             "action": "update",
@@ -59,26 +63,31 @@ def test_missing_status_raises_before_applier(reconcile_mod):
             "fields": {"status": "open"},
         },
     ]
-    with pytest.raises(reconcile_mod.StatusMappingError) as exc:
-        reconcile_mod.preflight_status_mapping(mutations)
-    # Error must mention the offending status value and target key.
-    assert "neither" in str(exc.value)
-    assert "DIG-1" in str(exc.value)
+    # Must NOT raise — the scan is now non-fatal.
+    reconcile_mod.preflight_status_mapping(mutations)
+    # The warning must still surface the offending status value and target key.
+    err = capsys.readouterr().err
+    assert "neither" in err
+    assert "DIG-1" in err
 
 
-def test_unmapped_jira_status_not_mislabeled_as_local(reconcile_mod):
+def test_unmapped_jira_status_not_mislabeled_as_local(reconcile_mod, capsys):
     """An unmapped JIRA workflow status (e.g. ``IDEA`` added Jira-side) must not be
     reported as a "local status" (bug c672). The preflight accepts both local-status
     keys and Jira-status values and fails only when the value is in neither, so the
     message must describe an unmapped status of indeterminate side and acknowledge the
     Jira-status possibility — otherwise it misdirects debugging toward a non-existent
-    local ticket."""
+    local ticket.
+
+    Facet 3 (reconciler-abort-isolation): the preflight now WARNS non-fatally instead
+    of raising, so the message is asserted against stderr rather than an exception. The
+    bug-c672 intent (do not mislabel a Jira status as local) is unchanged."""
     mutations = [
         {"action": "update", "key": "REB-716", "fields": {"status": "IDEA"}},
     ]
-    with pytest.raises(reconcile_mod.StatusMappingError) as exc:
-        reconcile_mod.preflight_status_mapping(mutations)
-    msg = str(exc.value)
+    # Must NOT raise (non-fatal now); the message is emitted to stderr instead.
+    reconcile_mod.preflight_status_mapping(mutations)
+    msg = capsys.readouterr().err
     # Still names the offending value + target.
     assert "IDEA" in msg
     assert "REB-716" in msg
