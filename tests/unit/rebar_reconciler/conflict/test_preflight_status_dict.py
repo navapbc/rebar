@@ -62,8 +62,9 @@ def test_preflight_accepts_dict_status_with_known_name(reconcile, monkeypatch):
     reconcile.preflight_status_mapping(mutations)
 
 
-def test_preflight_does_not_crash_on_dict_status(reconcile, monkeypatch):
-    """When the .name isn't in mapping, the error is StatusMappingError, not TypeError."""
+def test_preflight_does_not_crash_on_dict_status(reconcile, monkeypatch, capsys):
+    """When the .name isn't in mapping, the dict is normalized (no TypeError) and
+    the unmapped status is WARNED, not raised (Facet 3: preflight is non-fatal)."""
     _patch_mapping(reconcile, monkeypatch, {"To Do": "To Do"})
     mutations = [
         {
@@ -72,8 +73,10 @@ def test_preflight_does_not_crash_on_dict_status(reconcile, monkeypatch):
             "fields": {"status": {"name": "Bogus Status", "id": "999"}},
         }
     ]
-    with pytest.raises(reconcile.StatusMappingError):
-        reconcile.preflight_status_mapping(mutations)
+    # Must NOT raise (neither StatusMappingError nor TypeError) — dict-status is
+    # normalized to its .name and the unmapped value is warned, not aborted.
+    reconcile.preflight_status_mapping(mutations)
+    assert "Bogus Status" in capsys.readouterr().err
 
 
 def test_preflight_string_status_unchanged_behavior(reconcile, monkeypatch):
@@ -156,8 +159,10 @@ def test_preflight_accepts_outbound_jira_side_status_name(reconcile, monkeypatch
     reconcile.preflight_status_mapping(mutations)
 
 
-def test_preflight_rejects_truly_unmapped_status(reconcile, monkeypatch):
-    """A status that is neither a key nor a value in the mapping is unmapped — reject."""
+def test_preflight_warns_on_truly_unmapped_status(reconcile, monkeypatch, capsys):
+    """A status that is neither a key nor a value in the mapping is unmapped — it
+    is WARNED (naming the target), not raised (Facet 3: preflight is non-fatal so
+    the mutation flows to the applier and is recorded as a per-mutation failure)."""
     _patch_mapping(reconcile, monkeypatch, {"open": "To Do", "in_progress": "In Progress"})
     mutations = [
         {
@@ -167,5 +172,8 @@ def test_preflight_rejects_truly_unmapped_status(reconcile, monkeypatch):
             "fields": {"status": "Nonsense"},
         }
     ]
-    with pytest.raises(reconcile.StatusMappingError):
-        reconcile.preflight_status_mapping(mutations)
+    # Must NOT raise — the scan is now non-fatal.
+    reconcile.preflight_status_mapping(mutations)
+    err = capsys.readouterr().err
+    assert "Nonsense" in err
+    assert "DIG-7" in err

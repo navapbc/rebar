@@ -30,6 +30,8 @@ import logging
 import os
 import re
 import sys
+import time
+import urllib.error
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -187,6 +189,7 @@ from rebar_reconciler.pass_io import (  # noqa: E402
     EXIT_RESCHEDULE,
     RescheduleError,
     _handle_failed_write_result,
+    _load_alert_store,
     _load_mapping,
     _write_mapping_atomic,
     _write_mapping_json_atomic,
@@ -747,7 +750,62 @@ def _apply_one(mutation: dict, ctx: BatchApplyContext, mutations_with_outcomes: 
     # bypassed for every legacy dict-shaped mutation — only _apply_typed enforced
     # the contract.
     _audit_rebar_id_label_writes(f"outbound_{action}", [_BatchAuditView(mutation)])
-    result = dispatch_mutation(mutation, ctx)
+    try:
+        result = dispatch_mutation(mutation, ctx)
+    except (HeadDriftError, RescheduleError, urllib.error.HTTPError):
+        # These must NOT be isolated as per-mutation failures — re-raise so they
+        # propagate and abort the pass:
+        #   - HeadDriftError    — the drift-abort contract (a competing reconciler
+        #                         write); the batch must stop.
+        #   - RescheduleError   — the rebase-retry-exhausted contract.
+        #   - urllib.error.HTTPError — the 404 stale-binding path is already
+        #                         soft-failed inside the handler (apply_handlers.py)
+        #                         and returns without raising; a NON-404 HTTPError
+        #                         (e.g. a transient 5xx) is DELIBERATELY re-raised
+        #                         by that handler to keep the pass fail-fast, so it
+        #                         must keep propagating rather than be recorded as a
+        #                         permanent per-mutation failure.
+        raise
+    except Exception as exc:  # noqa: BLE001 — per-mutation backstop (see below)
+        # Per-mutation failure backstop. The enumerated soft-fails in
+        # apply_handlers.py (400-illegal-transition→comment, HTTP-404 stale
+        # binding, AssigneeNotFoundError, gone-delete) catch only KNOWN failure
+        # shapes; anything else — e.g. acli.transition_issue_by_name raising a
+        # BARE RuntimeError ("no transition reaches <status>...") which is NOT a
+        # JiraAPIError — used to propagate out of the per-mutation loop and abort
+        # the ENTIRE pass mid-batch, silently skipping every later mutation.
+        # Generalize the existing soft-fail pattern to a backstop: record a
+        # per-mutation failure outcome (carrying an "error" key so it counts as a
+        # mutation_failure in reconcile's manifest tally), raise a bridge_alert
+        # (mirroring the AssigneeNotFoundError soft-fail), and CONTINUE the loop.
+        _outcome_key = mutation.get("key") or mutation.get("local_id") or "<unknown>"
+        alert_store = _load_alert_store()
+        alert_store.append(
+            {
+                "kind": "mutation-error",
+                "key": mutation.get("key"),
+                "local_id": mutation.get("local_id"),
+                "action": action,
+                "pass_id": ctx.pass_id,
+                "timestamp_ns": time.time_ns(),
+                "reason": str(exc),
+            },
+            repo_root=ctx.repo_root,
+        )
+        logger.warning(
+            "outbound %s on %s failed (%s) — recording per-mutation failure "
+            "and continuing the pass",
+            action or "<unknown>",
+            _outcome_key,
+            exc,
+        )
+        outcome = dict(mutation)
+        outcome["action"] = action
+        outcome["result"] = None
+        outcome["error"] = f"mutation-error: {exc!s}"
+        mutations_with_outcomes.append(outcome)
+        _print_batch_recon(action, outcome, soft_failed=True)
+        return
     mutations_with_outcomes.append(result.outcome)
     _print_batch_recon(action, result.outcome, soft_failed=result.soft_failed)
 
