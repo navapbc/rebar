@@ -329,6 +329,22 @@ def test_file_impact_with_referencing_commit_closes(rebar_repo: Path, monkeypatc
     assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "certified"
 
 
+def test_file_impact_commit_check_resolves_root_when_repo_root_is_none(
+    rebar_repo: Path, monkeypatch
+) -> None:
+    """Regression: the CLI passes ``repo_root=None`` to the close path. The commit check must
+    still find the referencing commit by deriving the code root from the (resolved) tracker —
+    NOT by running ``git -C None`` (which fails and would spuriously block a legitimate close)."""
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", PASS)
+    monkeypatch.chdir(rebar_repo)  # so repo_root=None resolves via cwd, mirroring the CLI
+    tid = _make(rebar_repo)  # note: no repo_root passed
+    rebar.set_file_impact(tid, [{"path": "src/x.py", "reason": "touched"}])
+    _commit_ref(rebar_repo, tid)
+    rebar.transition(tid, "in_progress", "closed")  # no repo_root — the None path
+    assert _status(tid, rebar_repo) == "closed"
+
+
 def test_no_file_impact_skips_commit_check(rebar_repo: Path, monkeypatch) -> None:
     """The precheck applies only when file_impact is recorded — a ticket with no file_impact
     closes even though no commit references it."""

@@ -131,9 +131,14 @@ def _completion_precheck(
     from rebar._engine_support.resolver import resolve_ticket_id
 
     tracker = str(config.tracker_dir(repo_root))
+    # Derive the code repo root from the (always-resolved) tracker rather than the raw
+    # ``repo_root`` param — the CLI passes ``repo_root=None``, which would make ``git -C None``
+    # fail and the check spuriously report "no referencing commit". ``os.path.dirname(tracker)``
+    # is the same resolution ``transition_compute`` uses for ``repo_root_str``.
+    code_root = os.path.dirname(tracker)
     resolved_id = resolve_ticket_id(ticket_id, tracker) or ticket_id
     if field_reads.file_impact(ticket_id, tracker) and not _referencing_commit_exists(
-        resolved_id, tracker, repo_root
+        resolved_id, tracker, code_root
     ):
         raise CommandError(
             f"Error: cannot close {ticket_id}: it records file_impact (a code change) but no "
