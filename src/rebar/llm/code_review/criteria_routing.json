@@ -77,6 +77,14 @@
     "block_threshold": 0.95,
     "blocking_enabled": false
   },
+  "deletion-impact": {
+    "_comment": "story f983: CONTENT-triggered (not glob) overlay — registry.content_triggered_overlays fires it when the diff removes a def/class/signature, so applies_to is empty. ADVISORY (blocking_enabled=false): a now-dangling reference is a coach-not-block finding, verified in Pass-2 and decided in Pass-3 like every other overlay.",
+    "exec": "AGENT",
+    "applies_to": [],
+    "default_posture": "advisory",
+    "block_threshold": 0.95,
+    "blocking_enabled": false
+  },
   "secret-detection": {
     "exec": "DET",
     "applies_to": [],

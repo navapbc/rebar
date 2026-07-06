@@ -63,6 +63,7 @@ but do not pad. The catalog:
 - `iac` — infrastructure-as-code (Terraform/CDK/Kubernetes/Helm/Ansible).
 - `tests` — test sufficiency / regression coverage for the change.
 - `llm-prompts` — prompt, contract, or output-schema changes to LLM surfaces.
+- `deletion-impact` — a removed/renamed def/class/signature that may leave dangling references (this overlay also fires automatically on such diffs).
 
 Return both `findings` and `recommend_overlays` through the structured output. Add a short
 `summary`.
