@@ -40,6 +40,10 @@ Do NOT emit severity, confidence, or priority — a later pass computes those de
 A clean change returns an empty `findings` list — that is expected and good. Report only
 discrete issues you are confident about; no stylistic padding.
 
+Automated tooling (linters, formatters, import sorters, type checkers) and CI already enforce
+style, formatting, import ordering, and typing — your value is the substantive correctness,
+design, and safety issues that tooling cannot see, so spend your attention there.
+
 ### 2. Recommend specialist overlays (the escalation signal)
 Decide which SPECIALIST overlays should ALSO review this change, and list them in
 `recommend_overlays` as `[{overlay_id, reason}]`. The `overlay_id` MUST be one of the FIXED

@@ -21,6 +21,20 @@ Apply these verifier rules:
 - allow-insufficient: 'insufficient' is an allowed and honest answer when the evidence does not decide it.
 - verdict-with-citation-not-fix: Verdict-with-citation, never verdict-with-fix — judge the claim; do not author a fix.
 
+VERIFICATION DISCIPLINE — feed the sub-answers above with EVIDENCE, not rhetoric:
+- evidence over tone: a finding's confident or authoritative wording is NOT evidence. Credit it only
+  from what the diff and the code actually show; if the cited evidence does not entail the claim, the
+  entailment sub-answer is `no`.
+- verify reachability via callers: before crediting that a flawed path is reached, find and read its
+  CALLERS — a defect on an unreachable/dead/guarded path does not stand.
+- compute, don't estimate: for any arithmetic or quantitative claim (sizes, offsets, counts, bounds,
+  complexity), work it step by step from the code; do not accept the finding's numbers on faith.
+- prove absence by searching: for a 'missing X' / absence finding, actively SEARCH the complete
+  artifact for X before the finding stands — if X exists anywhere relevant, the finding is a
+  partial-view false positive.
+- prefer precise tools: when available, use AST / LSP / code-graph tools to locate definitions,
+  callers, and references; fall back to `grep`/text search only when those are unavailable.
+
 SEVERITY ATTRIBUTES — score the harm of the CHANGE AS WRITTEN (what shipping this diff would
 cause). Anchor each attribute to its levels; calibrate per finding — do NOT default to the
 middle or the top. Reserve the top level for findings that genuinely earn it.
