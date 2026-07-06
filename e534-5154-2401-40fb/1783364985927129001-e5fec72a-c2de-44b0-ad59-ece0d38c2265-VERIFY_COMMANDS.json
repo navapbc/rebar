@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"verify_commands":[{"command":".venv/bin/python -m pytest tests/unit/rebar_reconciler/ -q","dd_id":"DD1","dd_text":"reconciler unit suite (incl. isolation/fail-loud/preflight tests) passes"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1783364985927129001,"uuid":"e5fec72a-c2de-44b0-ad59-ece0d38c2265"}
