@@ -4,6 +4,14 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## 0.7.0 — GitHub Releases now auto-created on tag
+
+The release workflow (`.github/workflows/release.yml`) now creates the **GitHub
+Release** automatically on a `vX.Y.Z` tag push (auto-generated notes, marked
+Latest, sdist + wheel attached), so `github.com/navapbc/rebar/releases` no longer
+lags PyPI/Homebrew/MCP. No maintainer action needed; see `docs/releasing.md`. This
+is the first release cut *through* that automation. (ticket `wormy-sod-gorge`)
+
 ## Auto-push policy — `REBAR_PUSH`
 
 New env var (default `always`, unchanged behaviour): `always` pushes synchronously
