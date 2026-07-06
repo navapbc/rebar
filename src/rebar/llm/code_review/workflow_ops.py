@@ -61,13 +61,15 @@ def assemble_diff(ctx: StepContext) -> dict[str, Any]:
     input_schema="overlay_union_input",
     output_schema="overlay_union_output",
     description=(
-        "Compute the overlay inclusion set: (glob ∪ base.recommend) − already_run, ONE-HOP, "
-        "capped at N (configurable, default uncapped). `glob` = overlays whose applies_to globs "
-        "match the changed files (registry.glob_triggered_overlays); `recommend` = the base "
-        "reviewer's enum-validated recommend_overlays; `already_run` = the Round-A set (explicit "
-        "with: input). Emits include_<overlay> booleans (underscored ids) + to_run/glob_overlays/"
+        "Compute the overlay inclusion set: (glob ∪ content ∪ base.recommend) − already_run, "
+        "ONE-HOP, capped at N (configurable, default uncapped). `glob` = overlays whose applies_to "
+        "globs match the changed files (registry.glob_triggered_overlays); `content` = overlays "
+        "triggered by the DIFF CONTENT (registry.content_triggered_overlays, e.g. deletion-impact "
+        "on a removed def/class/signature); `recommend` = the base reviewer's enum-validated "
+        "recommend_overlays; `already_run` = the Round-A set (explicit with: input). Emits "
+        "include_<overlay> booleans (underscored ids) + to_run/glob_overlays/content_overlays/"
         "recommend_overlays. Called twice: as the Round-A `triggers` step (recommend/already_run "
-        "default empty → to_run = glob) and the Round-B `union` step (recommend=base, "
+        "default empty → to_run = glob ∪ content) and the Round-B `union` step (recommend=base, "
         "already_run=triggers.to_run, cap=N)."
     ),
 )
@@ -75,13 +77,15 @@ def overlay_union(ctx: StepContext) -> dict[str, Any]:
     from rebar.llm.code_review import registry
 
     changed = list(ctx.inputs.get("changed_files") or [])
+    diff_text = str(ctx.inputs.get("diff_text") or "")
     recommend = ctx.inputs.get("recommend") or []
     already_run = set(ctx.inputs.get("already_run") or [])
     cap = ctx.inputs.get("cap")
 
     glob_set = registry.glob_triggered_overlays(changed)
+    content_set = registry.content_triggered_overlays(diff_text)
     recommend_ids = registry.recommend_overlay_ids(recommend)
-    selected = set(glob_set) | set(recommend_ids)
+    selected = set(glob_set) | set(content_set) | set(recommend_ids)
     # Ordered by OVERLAY_IDS (deterministic); minus the already-run set (one-hop bound: a
     # Round-A overlay never re-runs in Round-B).
     to_run = [o for o in registry.OVERLAY_IDS if o in selected and o not in already_run]
@@ -92,6 +96,7 @@ def overlay_union(ctx: StepContext) -> dict[str, Any]:
     }
     out["to_run"] = to_run
     out["glob_overlays"] = glob_set
+    out["content_overlays"] = content_set
     out["recommend_overlays"] = recommend_ids
     return out
 
