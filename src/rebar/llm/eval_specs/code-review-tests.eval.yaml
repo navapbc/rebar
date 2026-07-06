@@ -95,6 +95,106 @@ dataset:
       +    for md in reviewers_dir.glob("code-review-*.md"):
       +        front = md.read_text().split("---", 2)[1]
       +        assert "category: code-review-pass" in front, md.name
+  # ── recall: additional seeded antipatterns (story 0f8f) ──────────────────────
+  - id: R-change-detector-internal-state
+    corpus: dso
+    expect: finding
+    mode: change-detector
+    diff: |
+      --- a/tests/test_formatter.py
+      +++ b/tests/test_formatter.py
+      @@ -1,3 +1,6 @@
+      +def test_indent_tracking():
+      +    f = Formatter("  x")
+      +    f.format()
+      +    # asserts INTERNAL state — breaks on any refactor of how indent is tracked
+      +    assert f._indent_level == 2
+  - id: R-over-mocking-internal-helper
+    corpus: dso
+    expect: finding
+    mode: over-mocking
+    diff: |
+      --- a/tests/test_parser.py
+      +++ b/tests/test_parser.py
+      @@ -1,3 +1,7 @@
+      +def test_parse(monkeypatch):
+      +    # mocks a helper INTERNAL to the unit under test — asserts structure, not behavior
+      +    monkeypatch.setattr("parser._tokenize", lambda s: ["fake"])
+      +    assert parse("x") is not None
+  - id: R-source-grepping
+    corpus: dso
+    expect: finding
+    mode: source-grepping
+    diff: |
+      --- a/tests/test_claim.py
+      +++ b/tests/test_claim.py
+      @@ -1,3 +1,6 @@
+      +def test_claim_raises_on_conflict():
+      +    # greps the SOURCE UNDER TEST for a line — tests text, not behavior
+      +    src = pathlib.Path("rebar/claim.py").read_text()
+      +    assert "raise ConcurrencyError" in src
+  - id: R-existence-only
+    corpus: dso
+    expect: finding
+    mode: existence-only
+    diff: |
+      --- a/tests/test_skill.sh
+      +++ b/tests/test_skill.sh
+      @@ -1,2 +1,4 @@
+      +test_skill_file_present() {
+      +  # existence-only: a standalone -f check with no structural contract — a change-detector
+      +  test -f "skills/sprint/SKILL.md"
+      +}
+  # ── no-fire: valid patterns the FP-guards must protect (story 0f8f) ──────────
+  - id: FP-four-criterion-philosophy
+    corpus: dso
+    expect: pass
+    mode: four-criterion-philosophy-disagreement
+    note: >
+      Four-Criterion Test — the assertion targets an OBSERVABLE output (the argument the bridge
+      passes to its dependency), exercises real code, survives refactoring, and has no isolation
+      issue. No defect criterion holds, so it is a philosophy disagreement, NOT a defect — the
+      overlay must NOT flag it as implementation-coupled / change-detector.
+    diff: |
+      --- a/tests/test_bridge.py
+      +++ b/tests/test_bridge.py
+      @@ -1,3 +1,7 @@
+      +def test_bridge_passes_parent(fake_jira):
+      +    bridge.sync(ticket, parent="DSO-9999")
+      +    # asserts the observable arg passed to the external dep — an output contract
+      +    assert fake_jira.create.call_args.kwargs["parent"] == "DSO-9999"
+  - id: FP-table-driven-exact-value
+    corpus: dso
+    expect: pass
+    mode: table-driven-pure-function
+    note: >
+      Table-driven / classifier test — exact-value assertions on a PURE function's output that
+      "look tautological" are valid (VALID-patterns-not-to-flag). The overlay must NOT call it
+      tautological or a change-detector.
+    diff: |
+      --- a/tests/test_slug.py
+      +++ b/tests/test_slug.py
+      @@ -1,3 +1,8 @@
+      +@pytest.mark.parametrize("raw,expected", [("A B", "a-b"), ("X_Y", "x-y")])
+      +def test_to_slug(raw, expected):
+      +    # exact-value assertion on a pure function's observable output — valid
+      +    assert to_slug(raw) == expected
+  - id: FP-boundary-mock
+    corpus: dso
+    expect: pass
+    mode: external-boundary-mock
+    note: >
+      Mocks at the EXTERNAL boundary (an HTTP client) to isolate the unit — correct per Rule 3.
+      The overlay must NOT flag it as "tests the mock, not the logic".
+    diff: |
+      --- a/tests/test_fetch.py
+      +++ b/tests/test_fetch.py
+      @@ -1,3 +1,8 @@
+      +def test_fetch_retries(monkeypatch):
+      +    # mock the EXTERNAL http boundary, then assert observable retry behavior
+      +    client = Mock(side_effect=[Timeout(), Response(200)])
+      +    monkeypatch.setattr(fetch, "_http", client)
+      +    assert fetch("/x").status == 200 and client.call_count == 2
 
 gold_set:
   - input: "A test that asserts a mock's own configured return value (tautological)."
