@@ -181,6 +181,40 @@ def _schema_verification(case: dict, out: dict) -> ScoreResult:
     return ScoreResult(True, True)
 
 
+# ── code-review contract scorers (story f93a) ──────────────────────────────────
+# The code-review arm (eval_solver) runs an INDIVIDUAL code-review prompt over a case's
+# diff and returns its NATIVE structured output — a base/overlay reviewer emits
+# ``{findings:[...]}`` (no `verdict`), the Pass-2 verifier emits ``{verifications:[...]}``.
+# So a code-review case is scored on FINDINGS presence (recall / no-fire) via `_fired`
+# (which already returns `bool(findings)` for a verdict-less output) and never through the
+# completion-verifier's FAIL/BLOCK-only path.
+
+
+def _schema_code_review_findings(case: dict, out: dict) -> ScoreResult:
+    """A base/overlay code-review output must be a dict carrying a ``findings`` list — the
+    native Pass-1 evidence shape. Applicable to every case (a shape check, not a fire check):
+    an EMPTY findings list is still valid shape. No `verdict` is expected here — the arm
+    evaluates one prompt, not the full-gate verdict."""
+    if not isinstance(out, dict):
+        return ScoreResult(True, False, "output is not a dict")
+    if not isinstance(out.get("findings"), list):
+        return ScoreResult(True, False, "code-review output has no `findings` list")
+    return ScoreResult(True, True)
+
+
+def _verify_emits_verifications(case: dict, out: dict) -> ScoreResult:
+    """The Pass-2 verifier must emit a NON-EMPTY ``verifications`` list (one per finding it
+    re-grounds). The T8-advisory contract: verify is scored on PRESENCE of verifications, NOT
+    on any FAIL/BLOCK verdict — so this gates on the verifier producing a graded answer set,
+    never on a polarity it deliberately leaves to Pass-3."""
+    if not isinstance(out, dict):
+        return ScoreResult(True, False, "output is not a dict")
+    verifs = out.get("verifications")
+    if isinstance(verifs, list) and verifs:
+        return ScoreResult(True, True)
+    return ScoreResult(True, False, "verifier emitted no `verifications`")
+
+
 # ── recall / no-fire scorers (applicable by `expect`) ──────────────────────────
 
 
@@ -339,6 +373,11 @@ REGISTRY: dict[str, Scorer] = {
     "emits_valid_findings": _schema_review_result,
     "emits_valid_verdict": _schema_verdict,
     "emits_valid_verification": _schema_verification,
+    # code-review (story f93a): findings-based, NOT the FAIL/BLOCK verdict path
+    "code_review_emits_valid_findings": _schema_code_review_findings,
+    "code_review_recall": _recall,
+    "code_review_no_fire": _no_fire,
+    "code_review_verify_emits_verifications": _verify_emits_verifications,
     # recall (should-fire cases)
     "recall_on_seeded_defects": _recall,
     "recall_on_silent_drop": _recall,

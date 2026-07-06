@@ -1,0 +1,107 @@
+# Standing eval spec for the code-review TEST-SUFFICIENCY overlay (Pass-1) — story f93a.
+# Recall (seeded test-defect) + no-fire families, seeded from the DSO code-review incidents.
+# The tests overlay reviews the change along the test-sufficiency dimension and emits kernel
+# evidence findings; it is scored on FINDINGS presence, not a FAIL/BLOCK verdict.
+# Validate offline: `rebar prompt eval code-review-tests`.
+prompt: code-review-tests
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  - type: deterministic
+    name: code_review_emits_valid_findings
+    description: The overlay output is a dict carrying a `findings` list (native Pass-1 shape).
+  - type: deterministic
+    name: code_review_recall
+    description: A diff with an insufficient / tautological test produces a finding.
+  - type: deterministic
+    name: code_review_no_fire
+    description: A diff with a valid observable-postcondition test produces no finding.
+
+dataset:
+  # ── recall: seeded test defects (bad diff → finding) ─────────────────────────
+  - id: R-tautological-test
+    corpus: dso
+    expect: finding
+    mode: tautological-test
+    diff: |
+      --- a/tests/test_reducer.py
+      +++ b/tests/test_reducer.py
+      @@ -1,3 +1,6 @@
+      +def test_apply_event(monkeypatch):
+      +    m = Mock(return_value=42)
+      +    # asserts the mock's OWN configured return — proves nothing about the code
+      +    assert m() == 42
+  - id: R-missing-regression-test
+    corpus: dso
+    expect: finding
+    mode: bugfix-without-regression-test
+    diff: |
+      --- a/rebar/claim.py
+      +++ b/rebar/claim.py
+      @@ -8,3 +8,4 @@ def claim(tid, assignee):
+           if held_by_other(tid):
+      -        return 0            # BUG: swallowed a concurrency conflict
+      +        raise ConcurrencyError(tid)   # fix — but NO test added exercising this path
+  # ── no-fire: GOOD test diffs the tests overlay must NOT flag ─────────────────
+  - id: FP-valid-observable-test
+    corpus: dso
+    expect: pass
+    mode: observable-postcondition-test
+    diff: |
+      --- a/tests/test_claim.py
+      +++ b/tests/test_claim.py
+      @@ -1,3 +1,7 @@
+      +def test_claim_conflict_raises(store):
+      +    store.claim("t1", "a")
+      +    with pytest.raises(ConcurrencyError):
+      +        store.claim("t1", "b")   # asserts a REAL observable postcondition
+  - id: FP-nit-only-style
+    corpus: dso
+    expect: pass
+    mode: nit-only-style
+    note: >
+      NIT-FRAMING experiment (story f93a) — a test-file diff whose ONLY changes are
+      style/format/import nits the linter enforces. The tests overlay must NOT fire (nits are
+      linter-owned). Committed as the baseline the overlay is held to.
+    diff: |
+      --- a/tests/test_util.py
+      +++ b/tests/test_util.py
+      @@ -1,4 +1,4 @@
+      -import pytest,os
+      +import os
+      +
+      +import pytest
+      @@ -9,2 +9,2 @@ def test_slug():
+      -    assert to_slug('A B')=='a b'
+      +    assert to_slug("A B") == "a b"
+  - id: FP-rule5-structural-grep
+    corpus: dso
+    expect: pass
+    mode: rule5-structural-grep
+    note: >
+      Rule-5 structural-artifact exception (story f93a) — a test that greps SOURCE to assert a
+      STRUCTURAL invariant (here: every reviewer prompt declares canonical front-matter). Grepping
+      source IS the correct tool for a structural-artifact assertion, so the tests overlay must NOT
+      flag it as the source-grepping antipattern (which applies to grepping for BEHAVIOR).
+    diff: |
+      --- a/tests/unit/test_prompt_frontmatter.py
+      +++ b/tests/unit/test_prompt_frontmatter.py
+      @@ -1,3 +1,9 @@
+      +def test_all_reviewer_prompts_declare_category(reviewers_dir):
+      +    # structural invariant over source text — Rule-5 exception, not a behavior grep
+      +    for md in reviewers_dir.glob("code-review-*.md"):
+      +        front = md.read_text().split("---", 2)[1]
+      +        assert "category: code-review-pass" in front, md.name
+
+gold_set:
+  - input: "A test that asserts a mock's own configured return value (tautological)."
+    label: useful
+  - input: "A bug fix that changes control flow with no regression test added."
+    label: useful
+  - input: "A test asserting a real observable postcondition (raises on conflict)."
+    label: not_useful
+  - input: "A test-file diff that only reorders imports and normalizes quotes (linter-owned)."
+    label: not_useful
