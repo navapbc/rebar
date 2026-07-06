@@ -1,0 +1,85 @@
+# Standing eval spec for the code-review SECURITY overlay (Pass-1) — story f93a.
+# Recall (seeded security defect) + no-fire families, seeded from the DSO code-review
+# incidents. The security overlay reviews the change along the security dimension and emits
+# kernel evidence findings; it is scored on FINDINGS presence, not a FAIL/BLOCK verdict.
+# Validate offline: `rebar prompt eval code-review-security`.
+prompt: code-review-security
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  - type: deterministic
+    name: code_review_emits_valid_findings
+    description: The overlay output is a dict carrying a `findings` list (native Pass-1 shape).
+  - type: deterministic
+    name: code_review_recall
+    description: A diff with a seeded security defect produces a finding.
+  - type: deterministic
+    name: code_review_no_fire
+    description: A benign (non-secret / non-injection) diff produces no finding.
+
+dataset:
+  # ── recall: seeded security defects (bad diff → finding) ─────────────────────
+  - id: R-shell-injection
+    corpus: dso
+    expect: finding
+    mode: shell-injection
+    diff: |
+      --- a/rebar/git.py
+      +++ b/rebar/git.py
+      @@ -4,2 +4,2 @@
+      -    subprocess.run(["git", "-C", d, "checkout", ref], check=True)
+      +    subprocess.run(f"git -C {d} checkout {ref}", shell=True)   # ref is user-controlled
+  - id: R-hardcoded-secret
+    corpus: dso
+    expect: finding
+    mode: hardcoded-secret
+    diff: |
+      --- a/rebar/mcp_server.py
+      +++ b/rebar/mcp_server.py
+      @@ -2,2 +2,3 @@
+      +ANTHROPIC_API_KEY = "sk-ant-api03-Zk9f4t2Q_liveKeyCommittedInline_abcdef"
+      +client = Anthropic(api_key=ANTHROPIC_API_KEY)
+  - id: R-hallucinated-crypto-api
+    corpus: dso
+    expect: finding
+    mode: hallucinated-security-api
+    diff: |
+      --- a/rebar/signing.py
+      +++ b/rebar/signing.py
+      @@ -3,2 +3,3 @@
+      +# hashlib has no `secure_hash`; the "constant-time" claim is fabricated
+      +digest = hashlib.secure_hash(payload, constant_time=True)
+  # ── no-fire: benign diffs the security overlay must NOT flag ──────────────────
+  - id: FP-list-form-subprocess
+    corpus: dso
+    expect: pass
+    mode: list-form-subprocess
+    diff: |
+      --- a/rebar/git.py
+      +++ b/rebar/git.py
+      @@ -4,2 +4,2 @@
+      -    subprocess.run(f"git -C {d} add -A", shell=True)
+      +    subprocess.run(["git", "-C", d, "add", "-A"], check=True)   # no shell, no injection
+  - id: FP-public-config-read
+    corpus: dso
+    expect: pass
+    mode: already-public-config-read
+    diff: |
+      --- a/rebar/config.py
+      +++ b/rebar/config.py
+      @@ -3,2 +3,3 @@
+      +# a public, non-secret default — not a credential
+      +sync_remote = os.environ.get("REBAR_SYNC_REMOTE", "origin")
+
+gold_set:
+  - input: "A subprocess call switched to shell=True with an interpolated user-controlled ref."
+    label: useful
+  - input: "A live API key literal committed inline in source."
+    label: useful
+  - input: "A subprocess call in list form with no shell (no injection surface)."
+    label: not_useful
+  - input: "Reading a public, non-secret env default (REBAR_SYNC_REMOTE)."
+    label: not_useful
