@@ -165,6 +165,8 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
                     ticket_status_map[entry.name] = "deleted"
 
     # Derive ready (unblocked) tasks scoped to the epic's descendants.
+    # Only "open-ish" statuses are candidates; `idea` is excluded by omission so an
+    # undesigned idea is never dispatched into a parallel batch.
     ready_tasks = []
     for t in all_tickets:
         tid = t.get("ticket_id", "")

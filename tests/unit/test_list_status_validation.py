@@ -32,7 +32,7 @@ def test_list_invalid_status_errors(tmp_path, capsys: pytest.CaptureFixture[str]
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "good",
-    ["open", "in_progress", "closed", "blocked", "archived", "deleted", "open,closed"],
+    ["idea", "open", "in_progress", "closed", "blocked", "archived", "deleted", "open,closed"],
 )
 def test_list_valid_status_not_rejected(
     tmp_path, capsys: pytest.CaptureFixture[str], good: str

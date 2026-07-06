@@ -66,10 +66,22 @@ def _coalesce_value_opts(args: list[str], value_opts: frozenset[str]) -> list[st
 
 
 # The full set of ticket statuses that may appear in a compiled ticket's `status`
-# field and are therefore valid `--status` filter values: the four lifecycle states
-# plus archived/deleted tombstones and the reducer's error/fsck_needed sentinels.
+# field and are therefore valid `--status` filter values: the pre-work `idea` parking
+# lot plus the four lifecycle states, archived/deleted tombstones, and the reducer's
+# error/fsck_needed sentinels. `idea` is fully listable/searchable even though it is
+# carved out of the dispatch surfaces (ready/next-batch) — see graph/_ready.py.
 _VALID_LIST_STATUSES = frozenset(
-    {"open", "in_progress", "closed", "blocked", "archived", "deleted", "error", "fsck_needed"}
+    {
+        "idea",
+        "open",
+        "in_progress",
+        "closed",
+        "blocked",
+        "archived",
+        "deleted",
+        "error",
+        "fsck_needed",
+    }
 )
 
 _LIST_VALUE_OPTS = frozenset(

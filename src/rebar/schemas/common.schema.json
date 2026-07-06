@@ -6,7 +6,7 @@
   "$defs": {
     "ticket_status": {
       "type": "string",
-      "enum": ["open", "in_progress", "blocked", "closed", "archived", "deleted"]
+      "enum": ["idea", "open", "in_progress", "blocked", "closed", "archived", "deleted"]
     },
     "ticket_type": {
       "type": "string",
