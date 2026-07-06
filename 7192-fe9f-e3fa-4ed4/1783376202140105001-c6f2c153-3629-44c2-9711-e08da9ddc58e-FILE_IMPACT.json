@@ -1,1 +1,0 @@
-{"author":"Joe Oakhart","data":{"file_impact":[{"path":"README.md","reason":"Requirements/CLI/signing/sync-config cleanup"},{"path":"docs/manifest-signing.md","reason":"new doc holding the moved manifest-signing section"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783376202140105001,"uuid":"c6f2c153-3629-44c2-9711-e08da9ddc58e"}
