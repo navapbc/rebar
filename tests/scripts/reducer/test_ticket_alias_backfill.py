@@ -26,7 +26,7 @@ import time
 import uuid
 from pathlib import Path
 
-from rebar._alias import compute_alias
+from rebar._alias import compute_alias, compute_genesis_alias
 from rebar._engine_support.resolver import (
     _resolve_via_binding_store,
     _scan_alias,
@@ -397,3 +397,64 @@ def test_resolver_snapshot_only_ticket_does_not_match_computed_alias(tmp_path):
         f"(Bug 9894: if a match appears here, the resolver incorrectly used "
         f"compute_alias instead of the SNAPSHOT compiled_state.alias={stored!r})"
     )
+
+
+# ── v2 genesis alias (adjective-adjective-animal) ─────────────────────────────
+#
+# New tickets use compute_genesis_alias (gfycat adjective-adjective-animal),
+# persisted onto the CREATE event at create time. Legacy tickets are unaffected:
+# their read-time backfill still uses compute_alias (adjective-noun-noun). These
+# tests pin the new format and prove the two paths are independent.
+
+
+def test_genesis_alias_is_adj_adj_animal():
+    """A full 16-hex id yields a 3-word alias drawn from the v2 wordlist: the first
+    two words are adjectives, the third an animal, and the adjectives differ."""
+    from rebar._alias import _load_v2
+
+    adjs, animals = _load_v2()
+    adj_set, animal_set = set(adjs), set(animals)
+    alias = compute_genesis_alias("0193-d61d-abcd-1234")
+    assert alias is not None
+    a1, a2, animal = alias.split("-")
+    assert a1 in adj_set and a2 in adj_set, f"first two words must be adjectives: {alias!r}"
+    assert animal in animal_set, f"third word must be an animal: {alias!r}"
+    assert a1 != a2, f"the two adjectives must differ: {alias!r}"
+
+
+def test_genesis_alias_deterministic_and_too_short_is_none():
+    tid = "0193-d61d-abcd-1234"
+    assert compute_genesis_alias(tid) == compute_genesis_alias(tid)
+    # Native ids are always 16-hex; a <12-hex id can't fill three slots → None.
+    assert compute_genesis_alias("0193-d61d") is None
+    assert compute_genesis_alias("abc") is None
+
+
+def test_genesis_and_legacy_paths_are_independent():
+    """The create path (genesis, adj-adj-animal) and the legacy backfill path
+    (compute_alias, adj-noun-noun) must produce different aliases for the same id —
+    proving the format switch applies only to new tickets and leaves the legacy
+    read-time backfill untouched."""
+    tid = "9894-a463-090a-43e5"
+    # Legacy value is pinned by other tests in this file (== 'real-soil-anger').
+    assert compute_genesis_alias(tid) != compute_alias(tid)
+    # Legacy stays 3 words but from the noun list; genesis is 3 words from v2.
+    assert len(compute_genesis_alias(tid).split("-")) == 3
+
+
+def test_load_v2_warns_once_when_wordlist_missing(tmp_path, capsys, monkeypatch):
+    """When the v2 wordlist is unavailable, _load_v2() emits a one-shot stderr
+    diagnostic and callers fall back to a hex alias — mirroring the legacy loader."""
+    from rebar import _alias as alias_mod
+
+    monkeypatch.setattr(alias_mod, "_WORDS_V2_CACHE", None)
+    monkeypatch.setattr(alias_mod, "_WARNED_MISSING_V2", False)
+    monkeypatch.setattr(
+        alias_mod, "_wordlist_v2_path", lambda: str(tmp_path / "does-not-exist.txt")
+    )
+    alias_mod._load_v2()
+    alias_mod._load_v2()
+    # With the wordlist gone, genesis falls back to the hex prefix (no crash).
+    assert alias_mod.compute_genesis_alias("0193-d61d-abcd-1234") == "0193d61d"
+    occurrences = capsys.readouterr().err.count("ticket-wordlist-v2.txt unavailable")
+    assert occurrences == 1, f"expected exactly one WARN, saw {occurrences}"
