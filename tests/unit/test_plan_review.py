@@ -506,6 +506,40 @@ def test_pass4_coach_maps_findings_and_renders_deterministically() -> None:
     assert n["coaching"] == moves["1"]["template"].format(subject="the retry/timeout policy")
 
 
+def test_move_registry_foundation_enhancement_and_no_defer() -> None:
+    # WS8 (epic cite-stone-sea): the foundation/enhancement move (10) is the follow-on route that
+    # REPLACES a DEFERRED_MEASUREMENT move — which must NOT exist (a blocking AC must be
+    # in-session-closable). It is scoped (applies_when) to sizing/complexity/risk criteria, and
+    # move 9 is sharpened to cover restating a deferred/unobservable target as an observable proxy.
+    reg = orchestrator.MOVE_REGISTRY
+    m10 = reg.get("10", {})
+    assert "foundation" in m10.get("name", "").lower()
+    assert "follow-on" in m10.get("template", "").lower(), "move 10 routes to a dependent follow-on"
+    assert m10.get("applies_when"), "move 10 must be scoped via applies_when"
+    assert set(m10["applies_when"]) <= {"G5", "A1", "T2"}
+    # NO defer / DEFERRED_MEASUREMENT move (dropped as counter-architectural).
+    blob = " ".join(f"{m.get('name', '')} {m.get('template', '')}" for m in reg.values()).lower()
+    assert "deferred_measurement" not in blob and "defer the measurement" not in blob
+    # move 9 sharpened to the verifiable-proxy restatement.
+    assert "proxy" in reg["9"]["template"].lower()
+
+
+def test_move_registry_matches_docs_table() -> None:
+    # WS8 AC: docs/plan-review-gate.md's move table mirrors MOVE_REGISTRY id -> template.
+    import re
+    from pathlib import Path
+
+    from rebar.llm.plan_review import passes
+
+    doc = (Path(passes.__file__).parents[4] / "docs" / "plan-review-gate.md").read_text()
+    rows = dict(re.findall(r"^\|\s*(\d+)\s*\|[^|]+\|\s*\"(.+?)\"\s*\|$", doc, re.MULTILINE))
+    reg = orchestrator.MOVE_REGISTRY
+    assert rows, "no move-table rows parsed from the doc"
+    for mid, move in reg.items():
+        assert rows.get(mid) == move["template"], f"doc row {mid} != MOVE_REGISTRY template"
+    assert set(rows) == set(reg), "doc move table and MOVE_REGISTRY have different id sets"
+
+
 def test_load_move_registry_merges_project_extensions(tmp_path) -> None:
     (tmp_path / ".rebar").mkdir()
     (tmp_path / ".rebar" / "plan_review_moves.json").write_text(
