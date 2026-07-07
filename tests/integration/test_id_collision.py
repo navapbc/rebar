@@ -25,7 +25,7 @@ import re
 
 import pytest
 
-from rebar._alias import compute_alias
+from rebar._alias import compute_alias, compute_genesis_alias
 from rebar._commands.composer import _new_ticket_id
 
 pytestmark = pytest.mark.integration
@@ -71,3 +71,16 @@ def test_compute_alias_is_total_and_deterministic() -> None:
         aliases[tid] = alias
     # Sanity: aliases ARE mnemonic (adj-noun-noun), not just the hex id.
     assert any("-" in a for a in aliases.values())
+
+
+def test_compute_genesis_alias_is_total_deterministic_and_three_words() -> None:
+    """New tickets get an adjective-adjective-animal alias. For every generated id
+    the genesis generator must be total (never empty), deterministic, and yield a
+    3-word alias whose two adjectives differ."""
+    for tid in (_new_ticket_id() for _ in range(2000)):
+        alias = compute_genesis_alias(tid)
+        assert alias, f"compute_genesis_alias returned empty for {tid!r}"
+        assert compute_genesis_alias(tid) == alias, f"non-deterministic for {tid!r}"
+        parts = alias.split("-")
+        assert len(parts) == 3, f"expected adj-adj-animal, got {alias!r}"
+        assert parts[0] != parts[1], f"the two adjectives must differ: {alias!r}"

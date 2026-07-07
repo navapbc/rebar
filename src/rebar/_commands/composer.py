@@ -55,18 +55,19 @@ def _new_ticket_id() -> str:
 
 
 def _compute_alias(ticket_id: str) -> str:
-    """Human alias via the in-process helper (``rebar._alias``).
+    """Human alias for a NEW ticket via the in-process helper (``rebar._alias``).
 
-    Tier E E6.5a: replaced the ``ticket-alias-compute.py`` subprocess with the
-    canonical in-process helper — byte-identical adj-noun-noun derivation, the same
-    8-hex fallback when the wordlist is unavailable (it self-resolves the bundled
-    wordlist), and its own one-shot WARN. The
-    ``or`` guards the ``None`` a malformed (<8-hex) id would return; native ids are
-    always 16-hex so this is belt-and-suspenders.
+    New tickets use the v2 ``adjective-adjective-animal`` generator
+    (:func:`rebar._alias.compute_genesis_alias`), backed by the bundled gfycat
+    wordlist; the alias is persisted onto the CREATE event so the format is locked
+    in at genesis. (Legacy tickets are unaffected — their read-time backfill still
+    uses the adjective-noun-noun :func:`compute_alias`.) Same hex fallback when the
+    wordlist is unavailable. The ``or`` guards the ``None`` a malformed (<12-hex) id
+    would return; native ids are always 16-hex so this is belt-and-suspenders.
     """
-    from rebar._alias import compute_alias
+    from rebar._alias import compute_genesis_alias
 
-    return compute_alias(ticket_id) or ticket_id.replace("-", "")[:8]
+    return compute_genesis_alias(ticket_id) or ticket_id.replace("-", "")[:8]
 
 
 def create_core(
