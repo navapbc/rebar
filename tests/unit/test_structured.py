@@ -123,6 +123,41 @@ def test_parse_structured_recovers_verdict_from_array_with_leading_noise():
     assert obj.verdict == "FAIL"
 
 
+def test_tolerant_parse_skips_nonjson_brace_before_object():
+    # Bug 67ee / messianic-wild-dassie: the completion-verifier model prepended a prose
+    # preamble whose GitHub Actions expression ``${{ github.repository }}`` puts a NON-JSON
+    # '{' BEFORE the real trailing verdict object. _first_json_object anchored on that first
+    # '{', failed to parse the ``{{ … }}`` region, and gave up — so json-repair then mangled
+    # the whole text into a list of prose fragments (zero dicts), and validate_to rejected it
+    # "got list", fail-closing every close of that ticket. The scan must ADVANCE past the
+    # non-JSON brace to the first '{' that actually parses.
+    text = (
+        "The fix adds `GH_REPO: ${{ github.repository }}` to the release step, resolving "
+        '"fatal: not a git repository".\n\n'
+        '{"verdict": "PASS", "confidence": 0.9}'
+    )
+    parsed = structured.tolerant_parse(text)
+    assert isinstance(parsed, dict) and parsed.get("verdict") == "PASS"
+
+
+def test_completion_verdict_recovered_when_prose_holds_github_actions_expr():
+    # Faithful end-to-end reproduction of the CAPTURED 67ee runtime payload: prose containing
+    # ``${{ github.repository }}`` before the verdict object, whose own ``summary`` also holds
+    # that expression (the '{{' inside a JSON string must be string-aware, not a brace). Must
+    # recover + validate to a real CompletionVerdict, not fail-close "got list".
+    from rebar.llm.contracts import completion_verdict_response_model
+
+    model = completion_verdict_response_model()
+    text = (
+        "The fix is clearly present. The `GH_REPO: ${{ github.repository }}` env var was "
+        'added to the release step, resolving "fatal: not a git repository".\n\n'
+        '{"verdict": "PASS", "findings": [], '
+        '"summary": "Fixed by adding GH_REPO: ${{ github.repository }} at line 99."}'
+    )
+    obj = structured.validate_to(model, structured.tolerant_parse(text))
+    assert obj.verdict == "PASS" and obj.findings == []
+
+
 def test_parse_structured_combines_layers():
     # A near-miss (fenced + trailing comma) that nonetheless yields a valid verdict.
     obj = structured.parse_structured(

@@ -87,35 +87,42 @@ def schema_directive(model_cls) -> str:
 
 
 def _first_json_object(text: str) -> Any | None:
-    """The FIRST balanced ``{…}`` object in ``text`` (string-aware brace matching),
-    parsed — or None. Preferring the first complete object makes multi-object output
-    DETERMINISTIC (a model that emits a draft then a correction does not get the
-    last-wins surprise json-repair gives) and cleanly handles prose-wrapped JSON."""
+    """The first balanced ``{…}`` object in ``text`` that PARSES as JSON (string-aware
+    brace matching), or None.
+
+    Advancing to the NEXT ``{`` when a candidate region fails to parse is what makes
+    prose-wrapped JSON robust: a preamble containing a non-JSON brace — e.g. a GitHub
+    Actions ``${{ … }}`` expression before the real object — no longer aborts the scan
+    and loses the trailing object (bug 67ee / messianic-wild-dassie: the abort dropped the
+    verdict, json-repair then mangled the prose into a list, and the completion-verifier
+    close gate fail-closed with "got list"). Preferring the first PARSING object still
+    makes multi-object output DETERMINISTIC (a model that emits a draft then a correction
+    does not get the last-wins surprise json-repair gives)."""
     start = text.find("{")
-    if start < 0:
-        return None
-    depth, in_str, esc = 0, False, False
-    for i in range(start, len(text)):
-        c = text[i]
-        if in_str:
-            if esc:
-                esc = False
-            elif c == "\\":
-                esc = True
+    while start >= 0:
+        depth, in_str, esc = 0, False, False
+        for i in range(start, len(text)):
+            c = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
             elif c == '"':
-                in_str = False
-        elif c == '"':
-            in_str = True
-        elif c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-            if depth == 0:
-                try:
-                    return json.loads(text[start : i + 1])
-                except json.JSONDecodeError:
-                    return None
-    return None  # no balanced object (e.g. a truncated stream)
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start : i + 1])
+                    except json.JSONDecodeError:
+                        break  # this region isn't valid JSON — advance to the next '{'
+        start = text.find("{", start + 1)
+    return None  # no balanced object parses (e.g. a truncated stream)
 
 
 def tolerant_parse(text: str) -> Any:
