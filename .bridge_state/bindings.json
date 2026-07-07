@@ -372,6 +372,12 @@
       "state": "confirmed",
       "updated_at": "2026-06-27T07:01:42Z"
     },
+    "18ae-4f54-a85b-4ddb": {
+      "created_at": "2026-07-07T06:36:42Z",
+      "jira_key": "REB-742",
+      "state": "confirmed",
+      "updated_at": "2026-07-07T06:36:42Z"
+    },
     "1913-7f93-ab94-4577": {
       "created_at": "2026-06-25T22:58:28Z",
       "jira_key": "REB-38",
@@ -3168,6 +3174,12 @@
       "state": "confirmed",
       "updated_at": "2026-07-03T19:15:57Z"
     },
+    "bb16-5f76-880d-405d": {
+      "created_at": "2026-07-07T06:36:45Z",
+      "jira_key": "REB-743",
+      "state": "confirmed",
+      "updated_at": "2026-07-07T06:36:45Z"
+    },
     "bb4e-7aae-c5a3-40a6": {
       "created_at": "2026-06-25T23:13:56Z",
       "jira_key": "REB-294",
@@ -5068,6 +5080,8 @@
     "REB-74": "3164-34ca-ce91-4612",
     "REB-740": "8a12-b8f7-5df7-479b",
     "REB-741": "1088-0ce9-57c4-449f",
+    "REB-742": "18ae-4f54-a85b-4ddb",
+    "REB-743": "bb16-5f76-880d-405d",
     "REB-75": "316c-6c42-32d3-4f9b",
     "REB-76": "31a2-aacb-739a-4219",
     "REB-77": "31e4-f7ee-0e14-4e63",
