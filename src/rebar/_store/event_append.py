@@ -136,7 +136,17 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
             )
             if add.returncode != 0:
                 _silent_unlink(final_path)
-                raise StoreError("Error: git commit failed while holding lock", 1)
+                # Surface git's real stderr. The create path historically hid it behind
+                # this generic message, leaving intermittent CI git races (bug edf7 —
+                # "could not parse HEAD" / index.lock contention) undiagnosable; the
+                # transition path (txn.py) already includes stderr. The recognizable
+                # phrase is kept as a substring for anything matching on it.
+                add_err = (add.stderr or add.stdout).strip()
+                raise StoreError(
+                    "Error: git commit failed while holding lock"
+                    + (f": {add_err}" if add_err else ""),
+                    1,
+                )
             if commit.returncode != 0:
                 # A pre-existing unmerged (UU) index entry — e.g. a stranded stash/merge
                 # conflict on a reconciler-regenerable .bridge_state/* file (bug 6818) —
@@ -145,7 +155,15 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
                 healed, detail = _recover_from_unmerged(tracker, relative_path, commit_msg)
                 if not healed:
                     _silent_unlink(final_path)
-                    raise StoreError(detail or "Error: git commit failed while holding lock", 1)
+                    git_err = (commit.stderr or commit.stdout).strip()
+                    raise StoreError(
+                        detail
+                        or (
+                            "Error: git commit failed while holding lock"
+                            + (f": {git_err}" if git_err else "")
+                        ),
+                        1,
+                    )
     except (RebaseGuard, LockTimeout):
         _silent_unlink(staging)
         raise
