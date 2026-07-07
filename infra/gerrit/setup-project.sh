@@ -82,20 +82,26 @@ done
 #
 # Membership policy (mirrors feature-branch-drivers): initial members = Administrators
 # (included as a subgroup) + the named accounts in CONTRIBUTOR_MEMBERS (space-separated
-# usernames; default empty = admins only). Membership changes flow through THIS script
-# (an admin-approved edit), not ad-hoc UI grants.
+# usernames; DEFAULT = "RebarBotNava", the landing bot). Set CONTRIBUTOR_MEMBERS to
+# override the default list. Membership changes flow through THIS script (an
+# admin-approved edit), not ad-hoc UI grants. NOTE: convergence is additive — to REMOVE
+# a contributor, drop them from CONTRIBUTOR_MEMBERS AND run
+# `gerrit set-members Contributors --remove <user>` as an admin; a re-run alone will not
+# offboard.
 CONTRIB_GROUP="Contributors"
+CONTRIBUTOR_MEMBERS="${CONTRIBUTOR_MEMBERS:-RebarBotNava}"
 if $GERRIT_SSH gerrit ls-groups | grep -qxF -- "$CONTRIB_GROUP"; then
   echo "setup-project: group '$CONTRIB_GROUP' already exists" >&2
 else
   echo "setup-project: creating group '$CONTRIB_GROUP'" >&2
   $GERRIT_SSH gerrit create-group "$CONTRIB_GROUP" \
     --description "Authorized contributors: the only non-admin accounts allowed to Submit (land) changes" \
+    --owner Administrators \
     --group Administrators
 fi
 # Converge membership idempotently (re-adding an existing member/subgroup is a no-op).
 $GERRIT_SSH gerrit set-members "$CONTRIB_GROUP" --include Administrators >/dev/null 2>&1 || true
-for _m in ${CONTRIBUTOR_MEMBERS:-}; do
+for _m in $CONTRIBUTOR_MEMBERS; do
   echo "setup-project: ensuring '$_m' in '$CONTRIB_GROUP'" >&2
   $GERRIT_SSH gerrit set-members "$CONTRIB_GROUP" --add "$_m" >/dev/null 2>&1 || true
 done
