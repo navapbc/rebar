@@ -13,107 +13,10 @@ import json
 import os
 import shutil
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-# ---------------------------------------------------------------------------
-# Typed-mutation dispatch table
-#
-# Maps (direction_value: str, action_value: str) → leaf callable from applier.
-# Built lazily at first call to _dispatch_mutation so that top-level import of
-# reconcile.py does NOT pull in applier (preserves the existing test invariant:
-# test_import_does_not_load_fetcher / T3's import-topology guard).
-#
-# INVALID_PAIRS lists (direction, action) string pairs that are NOT routed by
-# the dispatch table and are NOT in mutation._VALID_COMBINATIONS — pairs that
-# neither direction has semantics for.  Currently empty because _VALID_COMBINATIONS
-# already excludes the two inbound-only actions from the outbound direction;
-# the dispatch table is built solely from _VALID_COMBINATIONS.
-# ---------------------------------------------------------------------------
-
-INVALID_PAIRS: frozenset[tuple[str, str]] = frozenset(
-    {
-        ("outbound", "clean_label"),
-        ("outbound", "repair_property"),
-    }
-)
-"""String (direction, action) pairs with no valid dispatch arm and no applier semantics.
-
-These two pairs are inbound-only actions: clean_label and repair_property have no
-outbound semantics (they only apply to Jira-side data corrections).  The pairs are
-excluded from mutation._VALID_COMBINATIONS by _INBOUND_ONLY_ACTIONS; they are listed
-here so the enumerative coverage test can verify completeness of the dispatch table
-over the full {inbound, outbound} × MutationAction cartesian product.
-"""
-
-_DISPATCH_TABLE: dict[tuple[str, str], Callable[..., Any]] | None = None
-
-
-def _build_dispatch_table() -> dict[tuple[str, str], Callable[..., Any]]:
-    """Build and return the (direction_str, action_str) → leaf callable mapping.
-
-    Loads the applier module via ``_load()`` (the same lazy-loader used by
-    ``reconcile_once``) so that applier.py is NOT imported at reconcile
-    module-load time, preserving the import topology invariant tested in
-    test_reconcile_main.py.  Fetching the leaf functions via ``getattr``
-    after the module load avoids relative imports, which cannot resolve when
-    reconcile.py is loaded via ``importlib.util.spec_from_file_location``
-    outside of a package context (as in the unit-test harness).
-    """
-    applier = _load("reconcile_applier", "applier.py")
-
-    return {
-        ("inbound", "create"): applier._apply_inbound_create,
-        ("inbound", "update"): applier._apply_inbound_update,
-        ("inbound", "delete"): applier._apply_inbound_delete,
-        ("inbound", "probe"): applier._apply_inbound_probe,
-        ("inbound", "clean_label"): applier._apply_inbound_clean_label,
-        ("inbound", "repair_property"): applier._apply_inbound_repair_property,
-        ("inbound", "conflict"): applier._apply_inbound_conflict,
-        ("outbound", "create"): applier._apply_outbound_create,
-        ("outbound", "update"): applier._apply_outbound_update,
-        ("outbound", "delete"): applier._apply_outbound_delete,
-        ("outbound", "probe"): applier._apply_outbound_probe,
-        ("outbound", "conflict"): applier._apply_outbound_conflict,
-    }
-
-
-def _dispatch_mutation(mutation: Any, context: Any = None) -> Any:
-    """Route a typed Mutation to its leaf handler in the applier.
-
-    Dispatches based on (mutation.direction, mutation.action) string values
-    via the module-level ``_DISPATCH_TABLE``.  The table is built lazily on
-    the first call to avoid pulling applier into the import graph at module
-    load time.
-
-    Args:
-        mutation: A ``mutation.Mutation`` (or duck-typed object with
-                  ``.direction`` and ``.action`` string-valued attributes).
-        context:  Optional call context forwarded to the leaf (currently
-                  unused by stub leaves; reserved for client injection).
-
-    Returns:
-        The ``ApplyResult`` returned by the matching leaf callable.
-
-    Raises:
-        NotImplementedError: When (direction, action) is not in the dispatch
-            table, naming the tuple in the message so callers can identify
-            the unhandled pair.
-    """
-    global _DISPATCH_TABLE
-    if _DISPATCH_TABLE is None:
-        _DISPATCH_TABLE = _build_dispatch_table()
-
-    d = str(getattr(mutation.direction, "value", mutation.direction))
-    a = str(getattr(mutation.action, "value", mutation.action))
-    key = (d, a)
-
-    leaf = _DISPATCH_TABLE.get(key)
-    if leaf is None:
-        raise NotImplementedError(f"no dispatch arm for (direction={d!r}, action={a!r})")
-    return leaf(mutation, client=context)
 
 
 class StatusMappingError(Exception):
@@ -941,9 +844,7 @@ def _apply_mutations(ctx: _PassContext) -> None:
     # cb858e468d) was a parallel workaround for the same gap; with cap
     # enforcement landing in applier.apply (story 286b), all mutations must
     # flow through that single entry point so caps apply uniformly across
-    # both directions. `_dispatch_mutation` is preserved as a public seam
-    # for tests/test_dispatch_coverage.py — it is no longer called from
-    # reconcile_once.
+    # both directions.
     manifest_path = None
     nowrite_plan: dict | None = None
     apply_exc: BaseException | None = None
