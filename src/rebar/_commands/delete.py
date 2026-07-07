@@ -26,7 +26,7 @@ import uuid
 from pathlib import Path
 
 from rebar import config
-from rebar._alias import compute_alias
+from rebar._alias import compute_alias, compute_genesis_alias
 from rebar._commands import scratch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
@@ -64,12 +64,18 @@ def _has_any_link_refs(tracker_path: Path, deleted_id: str) -> bool:
                 return True
 
     search_terms = [deleted_id]
-    try:
-        alias = compute_alias(deleted_id)
-    except Exception:  # noqa: BLE001 — alias is an extra search term; fall open to id-only matching
-        alias = None
-    if alias:
-        search_terms.append(alias)
+    # Add both alias formats as extra search terms: the legacy adj-noun-noun
+    # (compute_alias, used by pre-v2 tickets) AND the v2 adj-adj-animal
+    # (compute_genesis_alias, used by tickets created after the format switch).
+    # We can't tell which era the deleted ticket is from without a reduce, so we
+    # scan for both; unrelated terms simply don't match.
+    for _alias_fn in (compute_alias, compute_genesis_alias):
+        try:
+            alias = _alias_fn(deleted_id)
+        except Exception:  # noqa: BLE001 — alias is an extra search term; fall open to id-only matching
+            alias = None
+        if alias and alias not in search_terms:
+            search_terms.append(alias)
     pattern = "|".join(re.escape(t) for t in search_terms)
     try:
         result = subprocess.run(

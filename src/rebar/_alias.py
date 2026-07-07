@@ -19,6 +19,15 @@ import sys
 _WORDS_CACHE: tuple[list[str], list[str]] | None = None
 _WARNED_MISSING: bool = False
 
+# v2 (adjective-adjective-animal) genesis-alias state. Kept separate from the
+# legacy (adjective-noun-noun) caches above so the legacy read-time backfill path
+# is untouched: pre-existing tickets that recompute their alias on read continue
+# to surface exactly the alias they were assigned. Only NEW tickets (via the
+# create composer) use the v2 generator, and they persist that alias onto the
+# CREATE event, so the new format is locked in at genesis.
+_WORDS_V2_CACHE: tuple[list[str], list[str]] | None = None
+_WARNED_MISSING_V2: bool = False
+
 
 def _wordlist_path() -> str:
     """Resolve the bundled wordlist path (self-resolved; not a user knob).
@@ -99,3 +108,74 @@ def compute_alias(ticket_id: str) -> str | None:
             return f"{adj}-{n1}"
         return f"{adj}-{n1}-{n2}"
     return f"{adj}-{n1}"
+
+
+def _wordlist_v2_path() -> str:
+    """Absolute path to the bundled v2 (adjective-adjective-animal) wordlist."""
+    return os.path.join(os.path.dirname(__file__), "_engine", "resources", "ticket-wordlist-v2.txt")
+
+
+def _load_v2() -> tuple[list[str], list[str]]:
+    """Load + cache the v2 wordlist as ``(adjectives, animals)``.
+
+    Same two-section text format as the legacy loader but split on a ``# ANIMALS``
+    marker (adjectives before it, animals after). Comment (``#``) and blank lines
+    are skipped. On a missing/unreadable file it warns once to stderr and returns
+    empty lists (callers fall back to a hex alias).
+    """
+    global _WORDS_V2_CACHE, _WARNED_MISSING_V2
+    if _WORDS_V2_CACHE is not None:
+        return _WORDS_V2_CACHE
+    adjs: list[str] = []
+    animals: list[str] = []
+    section = "adj"
+    try:
+        with open(_wordlist_v2_path(), encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if line == "# ANIMALS":
+                    section = "animals"
+                    continue
+                if not line or line.startswith("#"):
+                    continue
+                (adjs if section == "adj" else animals).append(line)
+    except OSError:
+        if not _WARNED_MISSING_V2:
+            print(
+                "WARN: ticket-wordlist-v2.txt unavailable; falling back to hex alias",
+                file=sys.stderr,
+            )
+            _WARNED_MISSING_V2 = True
+    _WORDS_V2_CACHE = (adjs, animals)
+    return _WORDS_V2_CACHE
+
+
+def compute_genesis_alias(ticket_id: str) -> str | None:
+    """Deterministic ``adjective-adjective-animal`` alias for a NEW ticket id.
+
+    Used only at ticket-creation time (the create composer), where ids are always
+    full 16-hex; the alias is persisted onto the CREATE event, so a ticket keeps
+    this format for life. Legacy tickets are unaffected — their read-time backfill
+    still goes through :func:`compute_alias` (adjective-noun-noun).
+
+    Indexes deterministically off the hex id: adjective from hex[0:4], a second
+    adjective from hex[4:8] (bumped to the next word if it collides with the
+    first, so the two adjectives differ), animal from hex[8:12]. Returns ``None``
+    for a too-short (<12 hex) id, and an up-to-8-char hex fallback if the wordlist
+    is unavailable.
+    """
+    hex_id = ticket_id.replace("-", "")
+    if len(hex_id) < 12:
+        return None
+    adjs, animals = _load_v2()
+    if not adjs or not animals:
+        return hex_id[: min(len(hex_id), 8)]
+    try:
+        i1 = int(hex_id[0:4], 16) % len(adjs)
+        i2 = int(hex_id[4:8], 16) % len(adjs)
+        ianimal = int(hex_id[8:12], 16) % len(animals)
+    except ValueError:
+        return None
+    if i2 == i1:
+        i2 = (i2 + 1) % len(adjs)
+    return f"{adjs[i1]}-{adjs[i2]}-{animals[ianimal]}"
