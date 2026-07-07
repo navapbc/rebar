@@ -398,6 +398,16 @@ it and does not warn). Offline replay joins on `ticket_id` + finding `id` to
 reconstruct per-criterion false-positive / remediation rates — capture only, no
 in-session analysis, no human-feedback requirement.
 
+Each sidecar finding also carries a **`cohort`** (epic cite-stone-sea / WS9): the sorted set of
+criterion ids that were **co-resident** in the finder call that produced it — the sorted chunk
+ids for a `pass1_chunk` finding, the container criteria ids for a `pass1_container` finding, and
+the singleton `["ISF"]` for the ISF path (which is never co-resident). It is the offline
+calibration key for chunk-contamination analysis (R-1): how often a blocking-tier finding came
+from a chunk where other criteria were co-resident rather than being reviewed in isolation
+(`scripts/plan_review_contamination_rate.py`). A finding written before WS9 — or by a path that
+does not stamp it — has **no `cohort` key**; offline analysis MUST treat a **missing `cohort` as
+"unknown"** (skip it), never as an empty/isolated set.
+
 ## The CI rigor signal
 
 `rebar verify-signature <ticket>` certifies the attestation; a CI process treats a
