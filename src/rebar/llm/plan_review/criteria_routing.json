@@ -1110,5 +1110,30 @@
     "routing": "overlay",
     "overlay_routing": "llm",
     "trigger": "plan introduces a new git ref pattern / event source / schedule, or new release-time-exercised infra (LLM-routed — deterministic ref/CI keywords over-fire on prose; the LLM router distinguishes a real trigger change)"
+  },
+  "removal-rationale": {
+    "exec": "AGENT",
+    "facet": "codebase-grounding",
+    "applies_at": {
+      "scope": [
+        "leaf"
+      ],
+      "suppress_types": [
+        "bug"
+      ]
+    },
+    "block_threshold": 0.95,
+    "default_posture": "advisory",
+    "checklist": [
+      {
+        "key": "removes_external_behavior_or_guarded_fence",
+        "check": "GATE (Chesterton's Fence): the plan removes/weakens an externally-observable behavior or contract on ANY path (incl. failure/timeout/invalid/boundary/exception semantics), OR removes a check/test/validation guarding one, OR removes an artifact with an explicit intent marker (comment / #do-not-remove / referenced bug / bug-named test). no -> not-applicable."
+      },
+      {
+        "key": "removal_scenario_grounded",
+        "check": "Only when gated in: the plan supplies a concrete TRIGGERING SCENARIO where the removed behavior/guard mattered, GROUNDED in a comment/test/blame/linked-ticket (verify with tools, not invented), plus evidence the reason no longer applies. A fabricated/ungrounded justification is no (low validity). Coach via move 6 (specification-by-example)."
+      }
+    ],
+    "routing": "leaf"
   }
 }
