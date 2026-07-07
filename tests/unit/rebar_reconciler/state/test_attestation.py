@@ -114,6 +114,37 @@ def test_returns_false_on_subprocess_error(attestation):
     assert result is False
 
 
+def test_repo_root_passes_dash_c_to_git(attestation):
+    """F14: with repo_root set, BOTH git subprocesses run against that repo via
+    ``git -C <repo_root>`` (the sibling-worktree / wrong-CWD case) rather than
+    inheriting the caller's CWD and fail-closing spuriously."""
+    verify_ok = _make_completed_process(returncode=0)
+    log_ok = _make_completed_process(returncode=0, stdout=f"{_HUMAN_EMAIL}\n")
+    root = Path("/some/other/worktree")
+
+    with patch("subprocess.run", side_effect=[verify_ok, log_ok]) as mock_run:
+        result = attestation.verify_attested_commit(_SHA, _BOT_ALLOWLIST, repo_root=root)
+
+    assert result is True
+    assert mock_run.call_count == 2
+    for call in mock_run.call_args_list:
+        cmd = call[0][0]
+        assert cmd[:3] == ["git", "-C", str(root)], cmd
+
+
+def test_default_no_repo_root_omits_dash_c(attestation):
+    """Default (no repo_root) preserves the prior CWD-relative behavior — no ``-C``."""
+    verify_ok = _make_completed_process(returncode=0)
+    log_ok = _make_completed_process(returncode=0, stdout=f"{_HUMAN_EMAIL}\n")
+
+    with patch("subprocess.run", side_effect=[verify_ok, log_ok]) as mock_run:
+        attestation.verify_attested_commit(_SHA, _BOT_ALLOWLIST)
+
+    for call in mock_run.call_args_list:
+        cmd = call[0][0]
+        assert cmd[0] == "git" and "-C" not in cmd, cmd
+
+
 # ---------------------------------------------------------------------------
 # verify_manifest_hash() — F8 regression coverage
 # ---------------------------------------------------------------------------

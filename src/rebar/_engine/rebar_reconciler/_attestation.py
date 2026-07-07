@@ -88,17 +88,15 @@ def build_acli_client_from_env() -> Any:
     )
 
 
-def verify_attested_commit(sha: str, allowlist: list[str]) -> bool:
+def verify_attested_commit(sha: str, allowlist: list[str], repo_root: Path | None = None) -> bool:
     """Return True when *sha* is human-attested.
 
-    TODO(bug TBD — F14): the subprocess calls inherit the caller's CWD;
-    when a band is invoked outside the repo containing the attestation
-    commit (e.g., from a sibling worktree), ``git verify-commit`` looks
-    up the SHA in the wrong repo and fails-closed. Either accept a
-    ``repo_root`` argument and pass ``-C <repo_root>`` to git, or
-    document the CWD requirement at every caller. Deferred — non-crash
-    edge case, but operator-visible when bands run from anywhere other
-    than the host repo root.
+    F14 fix: pass ``repo_root`` to run the git subprocesses against a SPECIFIC
+    repository via ``git -C <repo_root>`` instead of inheriting the caller's CWD.
+    Without it, a band invoked outside the repo containing the attestation commit
+    (e.g. from a sibling worktree) looked the SHA up in the wrong repo and
+    fail-closed spuriously. ``repo_root=None`` (the default) preserves the prior
+    CWD-relative behavior for existing callers.
 
     A commit is considered human-attested when ALL of the following hold:
 
@@ -112,13 +110,16 @@ def verify_attested_commit(sha: str, allowlist: list[str]) -> bool:
     Args:
         sha: Full or abbreviated commit SHA to verify.
         allowlist: List of bot committer email addresses to exclude.
+        repo_root: Repository to run git in (``git -C <repo_root>``); ``None``
+            (default) runs git in the caller's CWD, preserving prior behavior.
 
     Returns:
         True if the commit passes both checks, False otherwise.
     """
+    git = ["git", "-C", str(repo_root)] if repo_root is not None else ["git"]
     try:
         result = subprocess.run(
-            ["git", "verify-commit", sha],
+            [*git, "verify-commit", sha],
             capture_output=True,
             check=False,
             # Bound the GPG verify: it can hang on a gpg-agent / keyserver lookup.
@@ -132,7 +133,7 @@ def verify_attested_commit(sha: str, allowlist: list[str]) -> bool:
 
     try:
         email_result = subprocess.run(
-            ["git", "log", "-1", "--format=%ae", sha],
+            [*git, "log", "-1", "--format=%ae", sha],
             capture_output=True,
             text=True,
             check=False,
