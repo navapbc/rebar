@@ -705,7 +705,7 @@ def completion_floor_drop(
 # Pass-4 move registry (moves 1-9,11,12 with LOCKED templates; project-extensible
 # via .rebar later — child 75a9). The LLM picks the move + names a {subject}; the
 # prose is rendered deterministically from these templates (it never authors prose).
-MOVE_REGISTRY: dict[str, dict[str, str]] = {
+MOVE_REGISTRY: dict[str, dict[str, Any]] = {
     "1": {
         "name": "spike",
         "template": "Consider a short spike to de-risk {subject} before committing the plan.",
@@ -740,7 +740,25 @@ MOVE_REGISTRY: dict[str, dict[str, str]] = {
     },
     "9": {
         "name": "plan the verification",
-        "template": "Plan how {subject} will be verified before implementing it.",
+        "template": (
+            "Plan how {subject} will be verified in-session — restate any deferred or "
+            "unobservable success target as an observable proxy."
+        ),
+    },
+    # Foundation/enhancement split (epic cite-stone-sea / WS8): the removal of DEFERRED_MEASUREMENT
+    # (counter-architectural — a blocking AC must be in-session-closable). Instead of deferring the
+    # measurement inside the current AC, ship the functional goal with existing machinery now and
+    # route the ideal version to a DEPENDENT FOLLOW-ON ticket. Scoped (applies_when) to the
+    # sizing/complexity/risk criteria where "split by fidelity, not scope" is the productive move —
+    # complements move 7 (thin vertical slice). applies_when values are REAL criterion ids (the
+    # active triggers are the surviving findings' criteria[]).
+    "10": {
+        "name": "foundation/enhancement split",
+        "template": (
+            "Deliver {subject} with existing machinery first; make the ideal version a "
+            "dependent follow-on ticket."
+        ),
+        "applies_when": ["G5", "A1", "T2"],
     },
     "11": {
         "name": "propagate to children",

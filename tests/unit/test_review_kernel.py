@@ -476,6 +476,13 @@ def test_plan_review_coach_reexports_are_the_kernel_objects() -> None:
     assert passes._validate_subject is kcoach.validate_subject
     assert passes.coach_instructions is kcoach.coach_listing
     assert passes.applicable_moves is kcoach.applicable_moves
-    # plan-review's MOVE_REGISTRY is a catalog INSTANCE whose moves are always-applicable
+    # plan-review's MOVE_REGISTRY moves are always-applicable EXCEPT the scoped
+    # foundation/enhancement move (epic cite-stone-sea / WS8), offered only for the
+    # sizing/complexity/risk criteria in its applies_when.
     for move in passes.MOVE_REGISTRY.values():
-        assert kcoach.move_applies(move, active_triggers=[])
+        if move.get("applies_when"):
+            # scoped: off with no trigger, on for its own triggers
+            assert not kcoach.move_applies(move, active_triggers=[])
+            assert kcoach.move_applies(move, active_triggers=move["applies_when"])
+        else:
+            assert kcoach.move_applies(move, active_triggers=[])  # always-applicable
