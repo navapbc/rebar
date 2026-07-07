@@ -5,6 +5,18 @@
       "last_jira_key": "REB-530",
       "local_id": "f8b5-2f30-b474-46ac",
       "retired_at": "2026-07-04T00:40:13Z"
+    },
+    "REB-737": {
+      "absent_404_count": 3,
+      "last_jira_key": "REB-737",
+      "local_id": "38d0-5d35-a78e-4886",
+      "retired_at": "2026-07-07T05:10:02Z"
+    },
+    "REB-738": {
+      "absent_404_count": 3,
+      "last_jira_key": "REB-738",
+      "local_id": "4c3b-b984-2903-4d87",
+      "retired_at": "2026-07-07T05:10:02Z"
     }
   },
   "version": 1
