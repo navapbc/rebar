@@ -44,7 +44,36 @@ def test_format_via_symlink_tracker(
     full_id = rebar.create_ticket("task", f"symlink test {mode}", repo_root=str(rebar_repo))
     out, rc = _format(["format", full_id, mode], capsys)
     assert rc == 0
-    # A valid short form: non-empty, not the raw full id, within the bash bound.
+    # A valid short handle: non-empty, not the raw full id, and it resolves back to
+    # this exact ticket THROUGH the symlinked tracker. Asserting a fixed char-length
+    # bound (`len(out) <= 32`) was brittle: `auto` returns the adjective-adjective-animal
+    # alias, whose length is the sum of wordlist word lengths (no hard cap), so a long
+    # alias tripped it in CI (bug 9b3a / subsequent-glandular-albino). Round-trip
+    # resolution is the true invariant of symlink resolution and is length-independent.
     assert out, f"format {mode} via symlink returned empty (the -L regression)"
     assert out != full_id
-    assert len(out) <= 32
+    resolved, rrc = _format(["resolve", out], capsys)
+    assert rrc == 0, f"resolve {out!r} via symlink failed (rc={rrc})"
+    assert resolved == full_id, f"format {mode} -> {out!r} did not resolve back to {full_id!r}"
+
+
+def test_format_auto_alias_length_is_not_bounded(
+    rebar_repo: Path,
+    symlinked_tracker: str,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`format auto` returns the ticket's alias, whose length is wordlist-dependent and
+    intentionally NOT capped. Guards against re-introducing a brittle ``len(out) <= N``
+    bound (bug 9b3a): a long alias — the failure mode that produced ``assert 35 <= 32`` in
+    CI — must still resolve back to its ticket through the symlinked tracker.
+    """
+    long_alias = "extraordinarily-unbecoming-hippopotamus"  # 39 chars: exceeds any fixed bound
+    monkeypatch.setattr("rebar._alias.compute_genesis_alias", lambda _tid: long_alias)
+    full_id = rebar.create_ticket("task", "long alias", repo_root=str(rebar_repo))
+
+    out, rc = _format(["format", full_id, "auto"], capsys)
+    assert rc == 0
+    assert out == long_alias and len(out) > 32  # the retired `len(out) <= 32` bound would fail here
+    resolved, rrc = _format(["resolve", out], capsys)
+    assert rrc == 0 and resolved == full_id  # but the true invariant (round-trip) still holds
