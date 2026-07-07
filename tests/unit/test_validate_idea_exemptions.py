@@ -119,3 +119,33 @@ def test_duplicate_titles_still_fires_for_idea():
     assert any(f.severity == "minor" and "Colliding Title" in f.message for f in findings), (
         "duplicate-title structural check must still fire for idea tickets"
     )
+
+
+# ── retained structural checks: child->parent + cross-epic deps STAY active for idea ──
+def test_child_parent_dep_still_fires_for_idea():
+    # An idea child that depends on its OWN parent is still the CRITICAL anti-pattern —
+    # check_child_parent_deps has no idea exemption (structural integrity, not noise).
+    child = _issue(
+        "c1",
+        "idea",
+        parent="epicA",
+        deps=[
+            {"type": "parent-child", "depends_on_id": "epicA"},
+            {"type": "blocks", "depends_on_id": "epicA"},
+        ],
+    )
+    findings = vc.check_child_parent_deps([child])
+    assert any(f.severity == "critical" and "Child->parent" in f.message for f in findings), (
+        "child->parent dependency check must still fire for idea tickets"
+    )
+
+
+def test_cross_epic_child_dep_still_fires_for_idea():
+    # An idea child of epicA depending on a child of a DIFFERENT epic is still CRITICAL —
+    # check_cross_epic_child_deps has no idea exemption.
+    c1 = _issue("c1", "idea", parent="epicA", deps=[{"type": "blocks", "depends_on_id": "c2"}])
+    c2 = _issue("c2", "open", parent="epicB")
+    findings = vc.check_cross_epic_child_deps([c1, c2])
+    assert any(f.severity == "critical" and "Cross-epic" in f.message for f in findings), (
+        "cross-epic child dependency check must still fire for idea tickets"
+    )
