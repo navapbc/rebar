@@ -291,3 +291,52 @@ def test_project_det_match_off_file_impact_is_advisory(tmp_path, monkeypatch):
     ctx = _ctx(root, file_impact=[{"path": "src/app.py"}])
     r = det_invariants.run_project_det_checks(ctx)[0]
     assert r.status == "fail" and r.blocking is False  # advisory, not blocking
+
+
+# ── (WS4, epic cite-stone-sea) p6 verify-command lint (G-3a) ─────────────────────
+def test_verify_command_lint():
+    """The p6 verify-command lint FIRES on all three mechanically-checkable defect classes and
+    ABSTAINS (coverage-recorded, no false-accusation) on an unrecognized command shape."""
+    from rebar.llm.plan_review.det_floor import PlanContext, p6_ac_quality
+
+    cmds = [
+        {"command": "cat output.json"},  # (1) file-inspection, asserts nothing
+        {"command": "grep cycle log.txt"},  # (2) unanchored grep (substring-matches)
+        {"command": "grep $PATTERN results.txt"},  # (3) unquoted shell var in grep pattern
+        {"command": "python scripts/verify_thing.py --run"},  # unknown shape -> abstain
+    ]
+    ctx = PlanContext(
+        ticket_id="abcd-0000-0000-0002",
+        ticket_type="task",
+        title="T",
+        description="## Acceptance Criteria\n- [ ] does the work with a proving command\n",
+        state={"file_impact": [], "verify_commands": cmds},
+        repo_root=None,
+    )
+    res = p6_ac_quality(ctx)
+    assert res.status == "fail"
+    blob = " ".join((res.finding or {}).get("evidence", []))
+    assert "asserts nothing" in blob, "class (1) file-inspection-no-assertion must fire"
+    assert "unanchored" in blob, "class (2) unanchored-grep must fire"
+    assert "shell variable" in blob, "class (3) unquoted-metacharacter must fire"
+    # per-line abstains AGGREGATE into the single P6 coverage dict as counts (not per-line events)
+    assert res.coverage["verify_commands_linted"] == 4
+    assert res.coverage["verify_lint_abstained"] == 1
+
+
+def test_verify_command_lint_documents_shellcheck_prior_art():
+    """AC3: the shellcheck prior-art note is recorded in the criterion's code comment."""
+    import inspect
+
+    from rebar.llm.plan_review import det_floor
+
+    src = inspect.getsource(det_floor)
+    assert "shellcheck" in src.lower(), "verify-command lint must cite shellcheck prior art"
+
+
+def test_verify_command_lint_keeps_det_checks_p1_to_p9():
+    """The lint EXTENDS p6 — it must not add a P10; DET_CHECKS stays exactly P1-P9."""
+    from rebar.llm.plan_review.det_floor import DET_CHECKS
+
+    ids = [c.__name__ if callable(c) else c for c in DET_CHECKS]
+    assert len(DET_CHECKS) == 9, f"DET_CHECKS must stay P1-P9, got {len(DET_CHECKS)}: {ids}"

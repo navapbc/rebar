@@ -490,6 +490,91 @@ def _ac_item_lines(text: str) -> list[str]:
     return out
 
 
+# ── Verify-command lint (G-3a, epic cite-stone-sea / WS4) ───────────────────────
+# A DETERMINISTIC, mechanically-checkable lint over the verify/proving commands a plan states,
+# catching three classes of a "present command that silently lies". PRIOR ART: shellcheck is the
+# reference lint here — SC2126 (a file-inspection pipeline that asserts nothing), SC2062/SC2063
+# (an unquoted/unanchored grep pattern), SC2086 (an unquoted `$var` the shell expands before the
+# tool sees it). We keep a BESPOKE, dependency-free, LANGUAGE-AGNOSTIC subset rather than shell out
+# to shellcheck (bash-only + a heavy external dep, and verify commands here are polyglot), and we
+# FAIL OPEN: a command in a shape we cannot confidently parse ABSTAINS (recorded in coverage) rather
+# than being false-accused. This is advisory (P6 never blocks); the LLM tier (E6) catches the
+# judgement-requiring defects (fixture validity, cardinality, wrong assertion target).
+_VERIFY_INSPECTION_VERBS = ("grep", "egrep", "fgrep", "find", "ls", "wc", "cat", "head", "tail")
+# An assertion construct that turns an inspection into a real check (exit code / comparison).
+_VERIFY_ASSERTION_RE = re.compile(
+    r"(-eq|-ne|-gt|-lt|-ge|-le|==|!=|\s-q\b|\s-c\b|\btest\b|\[\s|\[\[|&&|\|\||\bexit\b|"
+    r"\bjq\s+-e\b|\bdiff\b|\bcmp\b|\s-z\b|\s-n\b)"
+)
+_GREP_RE = re.compile(r"\b(grep|egrep|fgrep)\b")
+# A bare-identifier grep pattern (quoted or not) with no anchoring/structure around it.
+_GREP_BARE_WORD_RE = re.compile(
+    r"\b(?:grep|egrep|fgrep)(?:\s+-\w+)*\s+'?([A-Za-z_][A-Za-z0-9_]*)'?(?:\s|$)"
+)
+# ^ $ [] () \ : " — any of these anywhere in the command reads as "anchored / structured".
+_GREP_ANCHOR_CHARS = re.compile(r"[\^$\[\]()\\:\"]")
+_SHELL_VAR_RE = re.compile(r"\$\w+|\$\{|\$\?")
+
+
+def _lint_verify_command(cmd: str) -> tuple[str | None, bool]:
+    """Lint ONE verify/proving command. Returns ``(defect_msg, abstained)``:
+    a defect string (the command mechanically lies), or ``abstained=True`` (shape we cannot
+    parse — fail-open, coverage-recorded), or ``(None, False)`` when the command is clean."""
+    c = (cmd or "").strip().strip("`")
+    if not c:
+        return None, True
+    tokens = c.split()
+    verb = tokens[0] if tokens else ""
+    is_grep = bool(_GREP_RE.search(c))
+    if verb not in _VERIFY_INSPECTION_VERBS and not is_grep:
+        return None, True  # not a shape this bespoke lint understands → fail-open abstain
+    if is_grep:
+        # (3) unquoted shell variable in the grep command — expands before grep sees it (SC2086).
+        if _SHELL_VAR_RE.search(c):
+            return (
+                f"verify command `{c}` has an unquoted shell variable ($VAR/$?) in its grep — it "
+                "expands before grep runs; the pattern is not what you wrote",
+                False,
+            )
+        # (2) unanchored grep — a bare-word pattern substring-matches (SC2062): `grep cycle`
+        # matches `review_cycle`. Anchor with \\b / ^$ / a quoted key.
+        m = _GREP_BARE_WORD_RE.search(c + " ")
+        if m and not _GREP_ANCHOR_CHARS.search(c):
+            w = m.group(1)
+            return (
+                f"verify command `{c}` greps the unanchored word '{w}' — it substring-matches "
+                f"(e.g. 'review_{w}'); anchor it (\\b, ^$, or a quoted key like '\"{w}\":')",
+                False,
+            )
+    # (1) file-inspection with no assertion — `cat out.json` proves nothing (SC2126); add an
+    # exit-code / comparison (-q, [ ... -eq N ], jq -e).
+    if verb in _VERIFY_INSPECTION_VERBS and not _VERIFY_ASSERTION_RE.search(c):
+        return (
+            f"verify command `{c}` inspects output with `{verb}` but asserts nothing — add an "
+            'exit-code or comparison (-q, [ "$(...)" -eq N ], jq -e) so a failure is observable',
+            False,
+        )
+    return None, False
+
+
+def _verify_command_strings(ctx: PlanContext) -> list[str]:
+    """The verify/proving commands to lint: the structured `verify_commands` (each entry's
+    `command`) PLUS command-shaped lines the plan states inline (`Verify:` / `Proof:` prose and
+    backtick-fenced commands in AC items) — the 'present command that lies' defect shows up in
+    both channels."""
+    out: list[str] = []
+    for entry in ctx.state.get("verify_commands") or []:
+        cmd = entry.get("command") if isinstance(entry, dict) else None
+        if cmd:
+            out.append(str(cmd))
+    for ln in ctx.plan_text.split("\n"):
+        m = re.search(r"(?:Verify|Proof)\s*:\s*(.+)", ln, re.IGNORECASE)
+        if m:
+            out.append(m.group(1).strip())
+        out.extend(re.findall(r"`([^`]+)`", ln))  # backtick-fenced commands
+    return out
+
+
 def p6_ac_quality(ctx: PlanContext) -> DetResult:
     """Advisory. Lexical AC quality checks: compound-AND criteria (one item
     bundling multiple deliverables joined by ' and '), vague/subjective lexicon,
@@ -514,7 +599,23 @@ def p6_ac_quality(ctx: PlanContext) -> DetResult:
     has_verify = bool(ctx.state.get("verify_commands")) or "verif" in low or "test" in low
     if not has_verify:
         issues.append("no verification commands or testing plan referenced")
-    cov = {"ran": True, "ac_items": len(items)}
+    # Verify-command lint (G-3a, WS4): mechanically-checkable defects in the stated proving
+    # commands. Per-line abstains AGGREGATE into the single P6 coverage dict as counts (never
+    # per-line events) so the DET floor stays P1-P9 (this extends p6, adds no check).
+    linted = _verify_command_strings(ctx)
+    lint_abstained = 0
+    for cmd in linted:
+        defect, abstained = _lint_verify_command(cmd)
+        if abstained:
+            lint_abstained += 1
+        elif defect:
+            issues.append(defect)
+    cov = {
+        "ran": True,
+        "ac_items": len(items),
+        "verify_commands_linted": len(linted),
+        "verify_lint_abstained": lint_abstained,
+    }
     if not issues:
         return DetResult("P6", "ac-quality", "pass", coverage=cov)
     return DetResult(
