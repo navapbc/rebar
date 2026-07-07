@@ -67,11 +67,10 @@ def _matching_detectors(selector: dict[str, Any] | None, repo_root: str | None):
     """The detector-registry slice a routing ``detector`` selector resolves to (exact ``id`` or
     ``id_prefix`` class). Returns a ``Registry`` (possibly empty) or ``None`` on load failure."""
     from rebar.grounding.detectors import Registry, load_registry
-
-    from .registry import _detector_matches
+    from rebar.llm.criteria.model import detector_matches
 
     reg = load_registry(repo_root)
-    selected = tuple(d for d in reg if _detector_matches(d.id, selector))
+    selected = tuple(d for d in reg if detector_matches(d.id, selector))
     return Registry(detectors=selected)
 
 

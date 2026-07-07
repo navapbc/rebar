@@ -87,9 +87,14 @@ def threshold_for(
 
 
 # ── exec-tier-polymorphic descriptor builder ────────────────────────────────────────
-def _detector_matches(detector_id: str, selector: dict[str, Any] | None) -> bool:
+def detector_matches(detector_id: str, selector: dict[str, Any] | None) -> bool:
     """True iff ``detector_id`` matches a routing ``detector`` selector — an exact ``id`` or
-    an ``id_prefix`` class (the selector grammar both gates' DET consumers read)."""
+    an ``id_prefix`` class (the selector grammar both gates' DET consumers read).
+
+    PUBLIC criteria-model API (SC2): the plan-review DET-invariant consumer
+    (``plan_review.det_invariants``) imports this directly, so it is a documented
+    cross-package entry point rather than a leading-underscore symbol re-exported
+    through the registry."""
     if not selector:
         return False
     exact = selector.get("id")
@@ -115,7 +120,7 @@ def _det_scenario(routing: dict[str, Any], repo_root: str | None) -> str | None:
     except Exception:  # noqa: BLE001 — the detector suite is optional; a missing registry ⇒ fallback
         return None
     for det in reg:
-        if _detector_matches(det.id, selector):
+        if detector_matches(det.id, selector):
             msg = (det.rule or {}).get("message")
             if isinstance(msg, str) and msg.strip():
                 return msg.strip()
