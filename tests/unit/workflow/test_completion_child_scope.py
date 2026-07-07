@@ -6,7 +6,7 @@ gated on their own close (the deterministic child-closure precheck trusts their 
 signatures). Bug: ``completion_precheck`` re-derived ``graph = (ticket_type == "epic")``,
 overriding the documented ``graph=False`` — so epic closes re-verified every descendant and blew
 the step budget (see the step-floor history in ``completion.py``). This pins that the precheck
-threads the caller's ``graph`` through to ``_assemble_context`` (with the epic default preserved
+threads the caller's ``graph`` through to ``assemble_context`` (with the epic default preserved
 only when ``graph`` is not threaded — the standalone ``verify-completion`` path).
 """
 
@@ -67,7 +67,7 @@ def test_precheck_honors_caller_graph_false_for_epic(tmp_path, monkeypatch):
         seen["graph"] = graph
         return ("ctx-text", [str(tid)])
 
-    monkeypatch.setattr(operations, "_assemble_context", _spy)
+    monkeypatch.setattr(operations, "assemble_context", _spy)
 
     out = completion_precheck(_ctx(epic, repo, {"ticket_id": epic, "graph": False}))
 
@@ -89,7 +89,7 @@ def test_precheck_defaults_to_false_when_graph_not_threaded(tmp_path, monkeypatc
         seen["graph"] = graph
         return ("ctx-text", [str(tid)])
 
-    monkeypatch.setattr(operations, "_assemble_context", _spy)
+    monkeypatch.setattr(operations, "assemble_context", _spy)
 
     completion_precheck(_ctx(epic, repo, {"ticket_id": epic}))  # no graph key
 

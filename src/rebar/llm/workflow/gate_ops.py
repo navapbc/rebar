@@ -89,7 +89,7 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
     from rebar.llm import operations
 
     graph = bool(ctx.inputs.get("graph"))
-    context, _ids = operations._assemble_context(str(tid), graph=graph, repo_root=ctx.repo_root)
+    context, _ids = operations.assemble_context(str(tid), graph=graph, repo_root=ctx.repo_root)
     fenced = f"<untrusted_ticket_context>\n{context}\n</untrusted_ticket_context>"
     return {
         "run_verify": True,

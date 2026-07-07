@@ -49,8 +49,8 @@ def run_review_ticket_as_workflow(
     Assembles context exactly like the legacy op, then runs the one-step agent
     workflow through the executor with the (optionally injected) review runner. The
     terminal step's outputs ARE the review_result."""
-    rid = reviewer_id or operations._default_reviewer_id()
-    context, ids = operations._assemble_context(ticket_id, graph=graph, repo_root=repo_root)
+    rid = reviewer_id or operations.default_reviewer_id()
+    context, ids = operations.assemble_context(ticket_id, graph=graph, repo_root=repo_root)
     doc = review_ticket_workflow_doc(rid)
     # Pass the assembled context to the agent step (the bridge resolves the prompt).
     doc["steps"][0]["with"]["context"] = context

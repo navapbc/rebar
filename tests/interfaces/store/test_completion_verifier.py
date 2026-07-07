@@ -346,13 +346,13 @@ def test_graph_auto_default_depends_on_ticket_type(rebar_repo: Path, monkeypatch
     from rebar.llm import operations
 
     seen: dict[str, bool] = {}
-    orig = operations._assemble_context
+    orig = operations.assemble_context
 
     def spy(ticket_id, *, graph, repo_root):
         seen[ticket_id] = graph
         return orig(ticket_id, graph=graph, repo_root=repo_root)
 
-    monkeypatch.setattr(operations, "_assemble_context", spy)
+    monkeypatch.setattr(operations, "assemble_context", spy)
     PASS = {"verdict": "PASS", "findings": []}
     epic = rebar.create_ticket(
         "epic",

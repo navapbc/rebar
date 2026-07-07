@@ -22,7 +22,7 @@ from rebar.llm.prompting import prompts
 from rebar.llm.prompting.prompts import select_reviewers  # re-export (rules layer)
 from rebar.llm.runner import Runner, RunRequest, get_runner
 
-__all__ = ["review_ticket", "select_reviewers"]
+__all__ = ["assemble_context", "default_reviewer_id", "review_ticket", "select_reviewers"]
 
 # A tool-using review is inherently multi-step (explore → search → read several files →
 # report). The framework review default (REBAR_LLM_MAX_STEPS=50 ≈ 25 tool calls) is far too
@@ -33,7 +33,11 @@ __all__ = ["review_ticket", "select_reviewers"]
 _REVIEW_MIN_STEPS = 120
 
 
-def _default_reviewer_id() -> str:
+def default_reviewer_id() -> str:
+    """The catalog's default reviewer id (PUBLIC API). Raises :class:`LLMError` when no
+    catalog entry is marked default. Public so cross-module callers (the review-workflow
+    op and the completion gate) select the reviewer through a documented entry point rather
+    than a leading-underscore sibling import (SC1)."""
     catalog = prompts.load_catalog()
     for rid, rv in catalog.items():
         if rv.default:
@@ -66,8 +70,15 @@ def _format_ticket(t: dict) -> str:
     return "\n".join(lines)
 
 
-def _assemble_context(ticket_id: str, *, graph: bool, repo_root) -> tuple[str, list[str]]:
-    """Build the deterministic review context + the list of ticket ids reviewed."""
+def assemble_context(ticket_id: str, *, graph: bool, repo_root) -> tuple[str, list[str]]:
+    """Build the deterministic LLM review context for a ticket (PUBLIC API).
+
+    Returns ``(context_text, reviewed_ids)`` — the rendered, deterministic context block
+    fed to a review/verify agent, and the list of ticket ids it covers (just ``ticket_id``,
+    or the whole subtree when ``graph`` is true). This is the shared context-builder BOTH
+    the review op (:func:`review_ticket`) and the mandatory completion gate
+    (``llm.workflow.gate_ops``) consume. It is public (SC1) so the gate reaches it through a
+    documented contract instead of importing a leading-underscore sibling across modules."""
     from rebar import _reads
 
     root = ticket = _reads.show_ticket(ticket_id, repo_root=repo_root)
@@ -126,10 +137,10 @@ def review_ticket(
         cfg = gate_source.apply_handle(cfg, handle)
         if cfg.max_iterations < _REVIEW_MIN_STEPS:
             cfg = replace(cfg, max_iterations=_REVIEW_MIN_STEPS)
-        rid = reviewer_id or _default_reviewer_id()
+        rid = reviewer_id or default_reviewer_id()
         reviewer = prompts.get_prompt(rid, repo_root=repo_root)
 
-        context, ids = _assemble_context(ticket_id, graph=graph, repo_root=repo_root)
+        context, ids = assemble_context(ticket_id, graph=graph, repo_root=repo_root)
         variables = {
             "ticket_id": ids[0],
             "ticket_context": context,
