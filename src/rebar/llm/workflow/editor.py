@@ -271,6 +271,28 @@ def node_kind_help() -> dict[str, dict[str, Any]]:
     return json.loads(json.dumps(_NODE_KIND_HELP))
 
 
+def _js_embed(obj: Any) -> str:
+    """JSON-encode ``obj`` for SAFE interpolation into an inline ``<script>`` element.
+
+    ``json.dumps`` alone escapes neither ``/`` nor ``<``, so repo-sourced content
+    containing a literal ``</script>`` (or ``<!--``) terminates/comments the enclosing
+    script element and injects markup that runs with the page's ``window.REBAR_TOKEN``
+    guarding the ``/save`` write endpoint (finding A1). We escape ``<``, ``>`` and ``&``
+    as ``\\uXXXX`` — plus the U+2028/U+2029 line separators that JS (pre-ES2019) treats
+    as literal newlines inside a string — which are all valid JSON escapes, so the value
+    parses back BYTE-IDENTICALLY (no change to legitimate content) while never being able
+    to close the element. Mirrors the well-known Django ``json_script`` / Flask ``tojson``
+    hardening."""
+    return (
+        json.dumps(obj)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace(" ", "\\u2028")
+        .replace(" ", "\\u2029")
+    )
+
+
 def build_host_html(
     bpmn_xml: str,
     *,
@@ -289,14 +311,17 @@ def build_host_html(
     READ this page (so cannot learn the token), closing the CSRF/DNS-rebinding write vector
     on ``/save``. The Modeler's palette is BPMN-only, so a human cannot draw a shape that
     does not map back to the IR."""
-    desc = json.dumps(descriptor or REBAR_MODDLE_DESCRIPTOR)
-    diagram = json.dumps(bpmn_xml)
-    tok = json.dumps(token)
-    prompt_map = json.dumps(prompts or {})
-    contract_map = json.dumps(contracts or {})
-    library_list = json.dumps(library or [])
-    overlay_trigger_list = json.dumps(overlay_triggers or [])
-    help_map = json.dumps(node_kind_help())
+    # A1: every payload below is interpolated into the inline <script> and may carry
+    # repo-sourced content (descriptor overrides, prompts, contracts, library, workflow
+    # names) — route ALL of them through _js_embed so a `</script>` cannot break out.
+    desc = _js_embed(descriptor or REBAR_MODDLE_DESCRIPTOR)
+    diagram = _js_embed(bpmn_xml)
+    tok = _js_embed(token)
+    prompt_map = _js_embed(prompts or {})
+    contract_map = _js_embed(contracts or {})
+    library_list = _js_embed(library or [])
+    overlay_trigger_list = _js_embed(overlay_triggers or [])
+    help_map = _js_embed(node_kind_help())
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>

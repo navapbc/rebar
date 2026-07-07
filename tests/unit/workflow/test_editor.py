@@ -57,6 +57,40 @@ def test_host_html_embeds_the_integration_contract():
     assert "REBAR_PROMPTS" in html and "do the review" in html  # prompt text for display
 
 
+def test_js_embed_neutralizes_script_breakout_and_roundtrips():
+    # A1: _js_embed is the single choke-point that makes repo-sourced content safe to
+    # interpolate into an inline <script>. Two properties matter: (1) it is INERT — no
+    # literal `<`, `>`, or `</script>` survives, so content can never terminate the
+    # enclosing element; (2) it is LOSSLESS — the \uXXXX escapes are valid JSON, so the
+    # value parses back byte-identically (no change to legitimate editor content).
+    payload = {
+        "prompt": "</script><script>window.REBAR_PWNED=1</script>",
+        "amp": "a & b <tag>",
+        "sep": "line1 line2 line3",  # JS-newline separators
+    }
+    embedded = editor._js_embed(payload)
+    assert "</script>" not in embedded  # cannot close the enclosing <script>
+    assert "<" not in embedded and ">" not in embedded  # every angle bracket escaped
+    assert " " not in embedded and " " not in embedded  # line-separators escaped
+    assert json.loads(embedded) == payload  # lossless: parses back to the exact value
+
+
+def test_host_html_renders_script_breakout_payload_inert():
+    # End-to-end: a </script> hidden in ANY repo-sourced payload (workflow name, prompt,
+    # contract) that build_host_html embeds must render inert — the breakout sequence
+    # never appears literally, and its escaped form is present instead.
+    payload = "</script><script>window.REBAR_PWNED=1</script>"
+    xml = bpmn.ir_to_bpmn(
+        {"schema_version": "2", "name": payload, "steps": [{"id": "a", "uses": "o"}]}
+    )
+    html = editor.build_host_html(
+        xml, token="tok", prompts={"evil": payload}, contracts={"evil": payload}
+    )
+    assert "</script><script>" not in html  # the raw breakout adjacency never appears
+    assert "window.REBAR_PWNED=1" in html  # payload IS embedded (inert, inside a JSON string)
+    assert "\\u003c/script\\u003e\\u003cscript\\u003e" in html  # ...as escaped \uXXXX
+
+
 def test_served_assets_are_allow_listed():
     # Only the two known bundle files are served; an arbitrary name (path traversal etc.)
     # returns nothing. Skips if the bundle has not been built in this checkout.
