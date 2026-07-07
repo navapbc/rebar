@@ -28,6 +28,13 @@ def _enable_signature_gate(repo: Path) -> None:
     (repo / ".rebar" / "config.conf").write_text("verify.require_signature_for_close=true\n")
 
 
+def _enable_completion_gate(repo: Path) -> None:
+    (repo / ".rebar").mkdir(exist_ok=True)
+    (repo / ".rebar" / "config.conf").write_text(
+        "verify.require_completion_verification_for_close = true\n"
+    )
+
+
 def _commit(repo: Path) -> None:
     subprocess.run(
         ["git", "commit", "--allow-empty", "-q", "-m", "c"],
@@ -98,3 +105,60 @@ def test_idea_parent_open_children_guard_still_holds(rebar_repo: Path) -> None:
     rebar.transition(child, "open", "closed", repo_root=str(rebar_repo))
     out = rebar.transition(parent, "idea", "closed", repo_root=str(rebar_repo))
     assert out["to"] == "closed"
+
+
+# ── the completion-verifier bypass, with the gate ENABLED (spy assertions) ────────
+def test_idea_close_does_not_invoke_completion_verifier(rebar_repo: Path, monkeypatch) -> None:
+    """With the completion-verification gate ON, an `idea → closed` transition must NOT
+    invoke the verifier (the transition_close bypass), while a non-idea close under the
+    SAME gate DOES reach it — the discriminator that proves the bypass is real (not the
+    gate being off). The gate calls `rebar.llm.verify_completion` by module attribute."""
+    import rebar.llm
+
+    _enable_completion_gate(rebar_repo)
+    _commit(rebar_repo)
+
+    def _never(ticket_id, **kw):  # must NOT be called for an idea close
+        raise AssertionError("completion verifier was invoked for an idea->closed transition")
+
+    monkeypatch.setattr(rebar.llm, "verify_completion", _never)
+
+    idea = rebar.create_ticket("task", "Parked idea", repo_root=str(rebar_repo))
+    rebar.transition(idea, "open", "idea", repo_root=str(rebar_repo))
+    out = rebar.transition(idea, "idea", "closed", repo_root=str(rebar_repo))
+    assert out["to"] == "closed"  # bypassed: verifier never called, close succeeds
+
+    # Discriminator: a NON-idea close under the same gate reaches the verifier, so the
+    # _never spy fires and the close does NOT succeed — proving the idea arm truly bypassed.
+    work = rebar.create_ticket("task", "Real work", repo_root=str(rebar_repo))
+    rebar.transition(work, "open", "in_progress", repo_root=str(rebar_repo))
+    with pytest.raises((AssertionError, rebar.RebarError)):
+        rebar.transition(work, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert _status(work, rebar_repo) != "closed"
+
+
+def test_idea_close_skips_completion_precheck_including_file_impact(
+    rebar_repo: Path, monkeypatch
+) -> None:
+    """The file-impact→referencing-commit precheck lives INSIDE `_completion_precheck`
+    (transition_close), which an `idea → closed` transition skips wholesale. Patching the
+    precheck to fire proves neither the verifier nor the file-impact check runs for idea —
+    even for an idea ticket that has file_impact recorded but no referencing commit (which
+    the precheck would otherwise block)."""
+    from rebar._commands import transition_close
+
+    _enable_completion_gate(rebar_repo)
+    _commit(rebar_repo)
+
+    def _never_precheck(*a, **k):
+        raise AssertionError("_completion_precheck (verifier + file-impact) ran for idea close")
+
+    monkeypatch.setattr(transition_close, "_completion_precheck", _never_precheck)
+
+    idea = rebar.create_ticket("task", "Parked idea", repo_root=str(rebar_repo))
+    rebar.set_file_impact(
+        idea, [{"path": "src/x.py", "reason": "touch"}], repo_root=str(rebar_repo)
+    )
+    rebar.transition(idea, "open", "idea", repo_root=str(rebar_repo))
+    out = rebar.transition(idea, "idea", "closed", repo_root=str(rebar_repo))
+    assert out["to"] == "closed"  # whole precheck skipped for idea
