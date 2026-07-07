@@ -1,7 +1,7 @@
 """RED test: the fetcher flags a Jira workflow status with no reconciler mapping.
 
 When the fetcher builds a snapshot and a Jira issue carries a workflow status
-absent from ``config.jira_to_local_status`` (e.g. an ``IDEA`` status added on the
+absent from ``config.jira_to_local_status`` (e.g. an ``Backlog`` status added on the
 Jira side before the reconciler has a mapping for it), the fetcher MUST surface it
 proactively — emit an observable ``fetcher-unmapped-jira-status`` BRIDGE_ALERT via
 ``alert_store.append`` naming the offending status — so a newly-added Jira status
@@ -64,7 +64,7 @@ def _protect_alert_store():
 
 class _StatusPagingClient:
     """Stub ACLI client: the active query returns one MAPPED ('To Do') and one
-    UNMAPPED ('IDEA') issue; the recent-Done query (ORDER BY) returns nothing."""
+    UNMAPPED ('Backlog') issue; the recent-Done query (ORDER BY) returns nothing."""
 
     def search_issues(self, jql: str, start_at: int = 0, max_results: int = 50):
         if "ORDER BY" in jql or start_at != 0:
@@ -82,7 +82,7 @@ class _StatusPagingClient:
                 "key": "DIG-2",
                 "fields": {
                     "summary": "unmapped",
-                    "status": {"name": "IDEA"},
+                    "status": {"name": "Backlog"},
                     "updated": "2026-07-06T10:00:00Z",
                 },
             },
@@ -118,11 +118,11 @@ def test_unmapped_jira_status_emits_alert(tmp_path, fetcher):
 
     unmapped = [r for r in captured if r.get("kind") == "fetcher-unmapped-jira-status"]
     assert unmapped, (
-        "Expected a fetcher-unmapped-jira-status alert naming the IDEA status. "
+        "Expected a fetcher-unmapped-jira-status alert naming the Backlog status. "
         f"Captured alerts: {captured!r}"
     )
-    assert "IDEA" in json.dumps(unmapped[0]), (
-        f"alert must name the unmapped status 'IDEA'; got {unmapped[0]!r}"
+    assert "Backlog" in json.dumps(unmapped[0]), (
+        f"alert must name the unmapped status 'Backlog'; got {unmapped[0]!r}"
     )
     # A MAPPED status ('To Do') must never be flagged as unmapped.
     assert all("To Do" not in json.dumps(r) for r in unmapped), (
@@ -186,7 +186,7 @@ def test_unmapped_status_alert_deduped_across_passes(tmp_path, fetcher):
     advisory flagged as unverifiable is actually verified end-to-end: a record
     missing ``key`` or ``timestamp_ns`` would re-fire and fail this test.
     """
-    mock_acli = _make_acli_mock()  # returns the unmapped 'IDEA' issue
+    mock_acli = _make_acli_mock()  # returns the unmapped 'Backlog' issue
 
     # Do NOT patch _load_alert_store: use the real one so append + is_deduped hit
     # the real JSONL store under tmp_path/bridge_state/bridge_alerts/.
@@ -205,7 +205,7 @@ def test_unmapped_status_alert_deduped_across_passes(tmp_path, fetcher):
         f"unmapped-status alert must be deduped to ONE across two passes; got {unmapped!r}"
     )
     rec = unmapped[0]
-    assert rec["key"] == "unmapped-jira-status:IDEA", (
+    assert rec["key"] == "unmapped-jira-status:Backlog", (
         f"record 'key' must equal the dedup lookup key for is_deduped to work; got {rec!r}"
     )
     assert rec.get("timestamp_ns", 0) > 0, (
