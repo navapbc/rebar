@@ -66,6 +66,27 @@ def repo_root(explicit: str | os.PathLike[str] | None = None) -> Path:
     return Path.cwd()
 
 
+# Plan-review criteria authoring-guide deep-links (epic cite-stone-sea / WS10). A NARROW env-read
+# — the base URL for the generated guide's per-criterion anchors — NOT a typed TOML config key
+# (deep-links are a plan-review rendering concern, not core config surface).
+def plan_review_docs_url(explicit_root: str | os.PathLike[str] | None = None) -> str:
+    """Base URL for the plan-review criteria authoring guide (no trailing ``#anchor``):
+    ``REBAR_DOCS_URL`` if set, else a repo-relative ``file://`` path to the generated
+    ``docs/plan-review-criteria-guide.md``."""
+    env = os.environ.get("REBAR_DOCS_URL", "").strip()
+    if env:
+        return env.rstrip("/")
+    return (repo_root(explicit_root) / "docs" / "plan-review-criteria-guide.md").as_uri()
+
+
+def plan_review_guide_anchor(
+    criterion_id: str, explicit_root: str | os.PathLike[str] | None = None
+) -> str:
+    """A stable deep-link to a criterion's guide section: ``<base>#<criterion-id lower-cased>``
+    (the anchor matches the guide's ``## <criterion-id>`` heading slug)."""
+    return f"{plan_review_docs_url(explicit_root)}#{criterion_id.lower()}"
+
+
 def config_file(root: str | os.PathLike[str] | None = None) -> Path | None:
     """First existing of $REBAR_CONFIG, <root>/.rebar/config.conf, <root>/.rebar.conf."""
     env = os.environ.get("REBAR_CONFIG")

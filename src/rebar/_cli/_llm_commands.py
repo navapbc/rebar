@@ -290,6 +290,31 @@ def _verify_completion(argv: list[str]) -> int:
     return 0 if result.get("verdict") == "PASS" else 1
 
 
+def _explain(argv: list[str]) -> int:
+    """``rebar explain <criterion-id>`` → the plan-review criteria authoring-guide section for a
+    criterion (WS10). A pure registry/guide READ (no LLM); owns its --help like review-plan. Exit
+    0 on success, 1 on a clear error (unknown id / malformed registry / missing guide file)."""
+    import sys
+
+    from rebar.llm.plan_review import registry
+
+    parser = argparse.ArgumentParser(
+        prog="rebar explain",
+        description="Print the plan-review criteria authoring-guide section for a criterion id "
+        "(e.g. `rebar explain F1`). One shared lookup with the MCP explain_criterion tool.",
+    )
+    parser.add_argument("criterion_id", nargs="?", help="a plan-review criterion id (e.g. F1, G3)")
+    args = parser.parse_args(argv)
+    if not args.criterion_id:
+        parser.error("a criterion id is required (e.g. `rebar explain F1`)")
+    try:
+        sys.stdout.write(registry.explain_criterion(args.criterion_id) + "\n")
+        return 0
+    except registry.ExplainError as exc:
+        sys.stderr.write(f"rebar explain: {exc} [{exc.kind}]\n")
+        return 1
+
+
 def _review_plan(argv: list[str]) -> int:
     """``rebar review-plan`` → rebar.llm.review_plan (native; like verify-completion).
 
@@ -300,11 +325,18 @@ def _review_plan(argv: list[str]) -> int:
     without them. Exit 0 on PASS, 1 on BLOCK, 2 on INDETERMINATE."""
     import json as _json
 
+    from rebar import config
+
     parser = argparse.ArgumentParser(
         prog="rebar review-plan",
         description="Run the plan-review gate on a ticket: a deterministic Layer-1 floor + a "
         "four-pass (find → verify → decide → coach) review of the plan, then sign a "
         "plan-review attestation on a non-blocking PASS. The inverse of verify-completion.",
+        epilog=(
+            "Coaching deep-links + `rebar explain <criterion-id>` reference the criteria "
+            f"authoring guide at {config.plan_review_docs_url()} "
+            "(anchor `#<criterion-id lower-cased>`; override the base with REBAR_DOCS_URL)."
+        ),
     )
     parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")
     parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
@@ -372,7 +404,8 @@ def _render_plan_review_text(result: dict) -> None:
             f"see the REVIEW_RESULT sidecar)\n"
         )
     for c in result.get("coaching", []):
-        sys.stdout.write(f"  → {c.get('coaching', '')}\n")
+        link = c.get("guide_url")
+        sys.stdout.write(f"  → {c.get('coaching', '')}" + (f"  [{link}]\n" if link else "\n"))
     sig = result.get("signature", {})
     if sig.get("signed"):
         sys.stdout.write("  signed: plan-review attestation written\n")
