@@ -17,6 +17,7 @@ is silently DROPPED, never errored — so a hallucinated id costs nothing.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from functools import lru_cache
 from importlib import resources
@@ -28,9 +29,12 @@ from rebar.llm import criteria as _criteria
 _GATE_KEY = "code_review"
 
 # ── The closed overlay-id vocabulary (WS1 OWNS this) ──────────────────────────────────────
-# The 11 specialist overlays the base reviewer may escalate to. WS2 authors the per-id
+# The 12 specialist overlays the base reviewer may escalate to. WS2 authors the per-id
 # finder prompt + applies_to globs; adding a NEW overlay means adding its id HERE and its
-# content in WS2 — the two cannot drift because both derive from this tuple.
+# content in WS2 — the two cannot drift because both derive from this tuple. Most overlays are
+# GLOB-triggered (their applies_to globs match the changed files); `deletion-impact` is instead
+# CONTENT-triggered (see :func:`content_triggered_overlays`) — it fires on the diff's removed
+# def/class/signature lines, so it ships with an empty `applies_to`.
 OVERLAY_IDS: tuple[str, ...] = (
     "security",  # authn/authz, secrets, injection, unsafe deserialization
     "performance",  # hot paths, N+1, allocation, complexity regressions
@@ -43,6 +47,8 @@ OVERLAY_IDS: tuple[str, ...] = (
     "iac",  # infrastructure-as-code (Terraform/CDK/K8s/Helm/Ansible)
     "tests",  # test sufficiency / regression coverage for the change
     "llm-prompts",  # prompt/contract/output-schema changes to LLM surfaces
+    "deletion-impact",  # (content-triggered) removed def/class/signature → dangling references
+    "scope-intent",  # (content-triggered) diff vs the UNION scope/AC of the commit's tickets
 )
 
 # Operational policy (config, not a magic constant baked into the wire schema): the
@@ -252,6 +258,45 @@ def glob_triggered_overlays(changed_files: Sequence[str]) -> list[str]:
         if globs and any(_glob_match(f, g) for f in changed_files for g in globs):
             out.append(oid)
     return out
+
+
+# ── Content triggers (the analog of glob triggers, keyed on the DIFF's removed lines) ────────
+# Pragmatic, POLYGLOT removed-declaration patterns. This is deliberately a heuristic (the story
+# expects it to EVOLVE per language): it matches a def/class/function/method SIGNATURE on a
+# removed (`-`) diff line. Anchored at the (indentation-stripped) start of the line so a call or
+# reference in the MIDDLE of a line never fires it.
+_REMOVED_DECL_PATTERNS = (
+    r"def\s+\w+\s*\(",  # Python function / method
+    r"class\s+\w+",  # Python / JS / TS / Java / C++ class
+    r"func\s+(?:\([^)]*\)\s*)?\w+\s*\(",  # Go function / method (optional receiver)
+    r"fn\s+\w+",  # Rust function
+    r"function\s*\*?\s*\w*\s*\(",  # JS / TS function (incl. generators / anonymous)
+    # JS/TS arrow fn: `const x = (a) =>` (optional type annotations / async):
+    r"(?:const|let|var)\s+\w+\s*(?::[^=]+?)?=\s*(?:async\s+)?\([^)]*\)\s*(?::\s*[^=]+?)?=>",
+    r"(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?function",  # JS `const x = function`
+)
+_REMOVED_DECL_RE = re.compile(
+    r"^\s*(?:export\s+|default\s+|public\s+|private\s+|protected\s+|static\s+|async\s+)*"
+    r"(?:" + "|".join(_REMOVED_DECL_PATTERNS) + r")"
+)
+
+
+def content_triggered_overlays(diff_text: str) -> list[str]:
+    """The overlays triggered by the DIFF CONTENT (the ``content`` operand of ``overlay_union``,
+    unioned alongside the glob triggers). Scans ONLY the removed (``-``) lines of the unified
+    diff — skipping the ``---`` file header — for a removed def/class/function-signature, and
+    returns ``["deletion-impact"]`` when any matches (so the ``deletion-impact`` overlay can look
+    for now-dangling references to the removed symbol), else ``[]``. A pure add-only diff, a
+    body-only edit that keeps the signature (the ``def`` line stays a context line), and removed
+    comment/blank lines all yield ``[]``."""
+    if not diff_text:
+        return []
+    for raw in diff_text.splitlines():
+        if not raw.startswith("-") or raw.startswith("---"):
+            continue
+        if _REMOVED_DECL_RE.search(raw[1:]):  # strip the diff marker; keep the indentation
+            return ["deletion-impact"]
+    return []
 
 
 def overlay_flag_key(overlay_id: str) -> str:

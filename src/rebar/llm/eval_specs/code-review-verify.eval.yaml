@@ -1,0 +1,60 @@
+# Standing eval spec for the code-review Pass-2 VERIFIER — story f93a.
+# The verifier re-grounds each Pass-1 finding against the diff and emits coarse severity
+# attributes + a typed binary sub-answer set — one `verifications` entry per finding. Per the
+# T8-advisory contract it is scored on PRESENCE of verifications, NOT a FAIL/BLOCK verdict.
+# The dataset carries both a should-fire (real-defect) and a good (clean) diff so it stays
+# balanced; either way the verifier must emit a graded answer set. Validate offline:
+# `rebar prompt eval code-review-verify`.
+prompt: code-review-verify
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  - type: deterministic
+    name: code_review_verify_emits_verifications
+    description: >
+      The verifier emits a non-empty `verifications` list (one per finding it re-grounds) —
+      the T8-advisory presence contract, scored independently of any FAIL/BLOCK polarity.
+
+dataset:
+  # `expect` keeps the dataset balanced (finding = a real-defect diff, pass = a clean diff);
+  # the gating scorer is presence-based, so the verifier must emit verifications for both.
+  - id: V-real-defect
+    corpus: dso
+    expect: finding
+    mode: verify-real-defect
+    diff: |
+      --- a/rebar/reducer.py
+      +++ b/rebar/reducer.py
+      @@ -3,2 +3,2 @@
+      -def apply_event(state, event):
+      +def apply_event(state, event, *, clock):
+           return _reduce(state, event)
+      --- a/rebar/replay.py
+      +++ b/rebar/replay.py
+      @@ -8 +8 @@ def replay(events):
+      -        state = apply_event(state, e)
+      +        state = apply_event(state, e)   # missing the new required `clock` arg
+  - id: V-clean-rename
+    corpus: dso
+    expect: pass
+    mode: verify-clean-diff
+    diff: |
+      --- a/rebar/util.py
+      +++ b/rebar/util.py
+      @@ -1 +1 @@
+      -def slugify(s): return s.lower()
+      +def to_slug(s): return s.lower()
+      --- a/rebar/create.py
+      +++ b/rebar/create.py
+      @@ -7 +7 @@
+      -    alias = slugify(title)
+      +    alias = to_slug(title)   # sole caller updated — a benign rename
+
+gold_set:
+  - input: "A verification set that flags the unupdated call site of a required-arg change."
+    label: useful
+  - input: "A verification set that confirms a benign rename with its caller updated."
+    label: useful

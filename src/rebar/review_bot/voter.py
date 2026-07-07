@@ -361,9 +361,11 @@ async def review_and_vote(
         decision: dict[str, Any] | None = None
         merge_commits: int | None = None
         parent_count = -1  # -1 = commit fetch failed (unknown); logged with the vote below
+        commit_message = ""  # the change's commit body (drives scope-intent); "" if unknown
         try:
             commit_info = await asyncio.to_thread(gc.get_commit, change_id, revision)
             parent_count = len(commit_info.get("parents") or [])
+            commit_message = str(commit_info.get("message") or "")
             is_merge = parent_count >= 2
             # Detection outcome is logged for EVERY change (not just merges): a merge that
             # Gerrit flattened to a single parent — or a genuine merge — is then unambiguous
@@ -441,6 +443,7 @@ async def review_and_vote(
                             repo_root,
                             info["patchset_ref"],
                             config=cfg,
+                            commit_message=commit_message,  # scope-intent overlay (non-merge path)
                         )
             except GerritError as exc:
                 # A clone / (non-merge) get_patch failure → cannot review → fail-closed. The

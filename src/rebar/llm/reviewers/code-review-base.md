@@ -40,6 +40,10 @@ Do NOT emit severity, confidence, or priority — a later pass computes those de
 A clean change returns an empty `findings` list — that is expected and good. Report only
 discrete issues you are confident about; no stylistic padding.
 
+Automated tooling (linters, formatters, import sorters, type checkers) and CI already enforce
+style, formatting, import ordering, and typing — your value is the substantive correctness,
+design, and safety issues that tooling cannot see, so spend your attention there.
+
 ### 2. Recommend specialist overlays (the escalation signal)
 Decide which SPECIALIST overlays should ALSO review this change, and list them in
 `recommend_overlays` as `[{overlay_id, reason}]`. The `overlay_id` MUST be one of the FIXED
@@ -59,6 +63,8 @@ but do not pad. The catalog:
 - `iac` — infrastructure-as-code (Terraform/CDK/Kubernetes/Helm/Ansible).
 - `tests` — test sufficiency / regression coverage for the change.
 - `llm-prompts` — prompt, contract, or output-schema changes to LLM surfaces.
+- `deletion-impact` — a removed/renamed def/class/signature that may leave dangling references (this overlay also fires automatically on such diffs).
+- `scope-intent` — the diff drifts outside the scope/AC of the commit's rebar-ticket(s) (this overlay fires automatically from the commit trailer, not from your recommendation).
 
 Return both `findings` and `recommend_overlays` through the structured output. Add a short
 `summary`.

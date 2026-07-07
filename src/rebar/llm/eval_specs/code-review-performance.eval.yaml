@@ -1,0 +1,133 @@
+# Standing eval spec for the code-review PERFORMANCE overlay (Pass-1) — story a010.
+# Recall (seeded performance defect) + no-fire families, seeded from the DSO code-review
+# incidents (the 8 AI-advantaged performance concerns + the "breaks under load / worse with
+# scale" bright-line, dso L2609–2647). The performance overlay reviews the change along the
+# performance dimension and emits kernel evidence findings; it is scored on FINDINGS presence,
+# not a FAIL/BLOCK verdict.
+# Validate offline: `rebar prompt eval code-review-performance`.
+prompt: code-review-performance
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  - type: deterministic
+    name: code_review_emits_valid_findings
+    description: The overlay output is a dict carrying a `findings` list (native Pass-1 shape).
+  - type: deterministic
+    name: code_review_recall
+    description: A diff with a seeded performance defect produces a finding.
+  - type: deterministic
+    name: code_review_no_fire
+    description: A micro-optimization / constant-factor diff produces no finding.
+
+dataset:
+  # ── recall: seeded performance defects (bad diff → finding) ──────────────────
+  - id: R-n-plus-1-in-loop
+    corpus: dso
+    expect: finding
+    mode: n-plus-1-query-in-loop
+    diff: |
+      --- a/rebar/report.py
+      +++ b/rebar/report.py
+      @@ -3,3 +3,5 @@ def summarize(ticket_ids):
+      -    rows = db.fetch_all(ticket_ids)     # one batched query
+      +    rows = []
+      +    for tid in ticket_ids:              # N+1: one query per id, scales with input
+      +        rows.append(db.fetch_one(tid))
+           return rows
+  - id: R-unbounded-accumulation
+    corpus: dso
+    expect: finding
+    mode: unbounded-accumulation
+    diff: |
+      --- a/rebar/cache.py
+      +++ b/rebar/cache.py
+      @@ -2,2 +2,4 @@ class Session:
+      +    def record(self, event):
+      +        # grows without bound or eviction; size driven by user request volume
+      +        self._events.append(event)
+  - id: R-blocking-io-in-async
+    corpus: dso
+    expect: finding
+    mode: blocking-io-in-async
+    diff: |
+      --- a/rebar/handler.py
+      +++ b/rebar/handler.py
+      @@ -4,2 +4,3 @@ async def handle(req):
+      +    # synchronous blocking call inside a coroutine — starves the event loop
+      +    resp = requests.get(req.url, timeout=30)
+      +    return resp.json()
+  - id: R-super-linear-complexity
+    corpus: dso
+    expect: finding
+    mode: super-linear-complexity
+    diff: |
+      --- a/rebar/merge.py
+      +++ b/rebar/merge.py
+      @@ -3,3 +3,5 @@ def dedupe(items):
+      -    seen = set(existing)
+      +    out = []
+      +    for it in items:                    # O(n^2): membership scan of a list per item
+      +        if it not in out:               # `out` is a list, not a set
+      +            out.append(it)
+  # ── no-fire: performance-benign diffs the FP-guards must protect ─────────────
+  - id: FP-micro-optimization
+    corpus: dso
+    expect: pass
+    mode: micro-optimization-no-scaling-impact
+    note: >
+      Micro-optimization with no measured/asymptotic impact (story a010) — caching a local
+      variable / using a set over a tiny FIXED collection. Constant-factor, does not move the
+      asymptote. The overlay must NOT fire (fails the breaks-under-load / worse-with-scale
+      bright-line).
+    diff: |
+      --- a/rebar/util.py
+      +++ b/rebar/util.py
+      @@ -1,3 +1,4 @@ def classify(kind):
+      -    if kind in ["task", "bug", "story", "epic"]:
+      +    VALID = {"task", "bug", "story", "epic"}   # fixed 4-element set — micro-opt only
+      +    if kind in VALID:
+               return True
+  - id: FP-constant-factor-style
+    corpus: dso
+    expect: pass
+    mode: constant-factor-style-choice
+    note: >
+      Constant-factor style choice (story a010) — a fixed-cost rewrite with no scaling argument
+      ("a more efficient approach would be…"). Rejected rationalization; not a finding.
+    diff: |
+      --- a/rebar/format.py
+      +++ b/rebar/format.py
+      @@ -2,3 +2,3 @@ def label(t):
+      -    s = t.title.strip()
+      -    s = s.lower()
+      +    s = t.title.strip().lower()   # chained, same fixed cost — style only
+           return s
+  - id: FP-small-fixed-loop
+    corpus: dso
+    expect: pass
+    mode: fine-loop-over-small-fixed-collection
+    note: >
+      A genuinely fine loop over a SMALL, FIXED collection (story a010) — the iteration count is
+      bounded by a constant, not user-controlled input, so there is no scale/asymptotic argument.
+      The overlay must NOT flag it.
+    diff: |
+      --- a/rebar/config.py
+      +++ b/rebar/config.py
+      @@ -3,2 +3,4 @@ def defaults():
+      +    out = {}
+      +    for key in ("remote", "push", "readonly"):   # fixed 3 keys — bounded by a constant
+      +        out[key] = _lookup(key)
+      +    return out
+
+gold_set:
+  - input: "A DB query moved inside a per-item loop (N+1, scales with input size)."
+    label: useful
+  - input: "A list/cache that grows without bound or eviction on user-controlled volume."
+    label: useful
+  - input: "Using a set over a fixed 4-element collection (constant-factor micro-optimization)."
+    label: not_useful
+  - input: "A loop over a fixed 3-key tuple (bounded by a constant, no scaling argument)."
+    label: not_useful

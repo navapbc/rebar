@@ -1,0 +1,177 @@
+# Standing eval spec for the code-review SECURITY overlay (Pass-1) — story f93a.
+# Recall (seeded security defect) + no-fire families, seeded from the DSO code-review
+# incidents. The security overlay reviews the change along the security dimension and emits
+# kernel evidence findings; it is scored on FINDINGS presence, not a FAIL/BLOCK verdict.
+# Validate offline: `rebar prompt eval code-review-security`.
+prompt: code-review-security
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  - type: deterministic
+    name: code_review_emits_valid_findings
+    description: The overlay output is a dict carrying a `findings` list (native Pass-1 shape).
+  - type: deterministic
+    name: code_review_recall
+    description: A diff with a seeded security defect produces a finding.
+  - type: deterministic
+    name: code_review_no_fire
+    description: A benign (non-secret / non-injection) diff produces no finding.
+
+dataset:
+  # ── recall: seeded security defects (bad diff → finding) ─────────────────────
+  - id: R-shell-injection
+    corpus: dso
+    expect: finding
+    mode: shell-injection
+    diff: |
+      --- a/rebar/git.py
+      +++ b/rebar/git.py
+      @@ -4,2 +4,2 @@
+      -    subprocess.run(["git", "-C", d, "checkout", ref], check=True)
+      +    subprocess.run(f"git -C {d} checkout {ref}", shell=True)   # ref is user-controlled
+  - id: R-hardcoded-secret
+    corpus: dso
+    expect: finding
+    mode: hardcoded-secret
+    diff: |
+      --- a/rebar/mcp_server.py
+      +++ b/rebar/mcp_server.py
+      @@ -2,2 +2,3 @@
+      +ANTHROPIC_API_KEY = "sk-ant-api03-Zk9f4t2Q_liveKeyCommittedInline_abcdef"
+      +client = Anthropic(api_key=ANTHROPIC_API_KEY)
+  - id: R-hallucinated-crypto-api
+    corpus: dso
+    expect: finding
+    mode: hallucinated-security-api
+    diff: |
+      --- a/rebar/signing.py
+      +++ b/rebar/signing.py
+      @@ -3,2 +3,3 @@
+      +# hashlib has no `secure_hash`; the "constant-time" claim is fabricated
+      +digest = hashlib.secure_hash(payload, constant_time=True)
+  # ── no-fire: benign diffs the security overlay must NOT flag ──────────────────
+  - id: FP-list-form-subprocess
+    corpus: dso
+    expect: pass
+    mode: list-form-subprocess
+    diff: |
+      --- a/rebar/git.py
+      +++ b/rebar/git.py
+      @@ -4,2 +4,2 @@
+      -    subprocess.run(f"git -C {d} add -A", shell=True)
+      +    subprocess.run(["git", "-C", d, "add", "-A"], check=True)   # no shell, no injection
+  - id: FP-public-config-read
+    corpus: dso
+    expect: pass
+    mode: already-public-config-read
+    diff: |
+      --- a/rebar/config.py
+      +++ b/rebar/config.py
+      @@ -3,2 +3,3 @@
+      +# a public, non-secret default — not a credential
+      +sync_remote = os.environ.get("REBAR_SYNC_REMOTE", "origin")
+  # ── recall: additional seeded concerns from dso's 8 red-team criteria (d71f) ──
+  - id: R-fail-open-error-handling
+    corpus: dso
+    expect: finding
+    mode: fail-open-error-handling
+    diff: |
+      --- a/rebar/authz.py
+      +++ b/rebar/authz.py
+      @@ -4,3 +4,5 @@ def is_authorized(user, resource):
+      -    return policy.check(user, resource)
+      +    try:
+      +        return policy.check(user, resource)
+      +    except PolicyTimeout:
+      +        return True   # fail-open: a timeout GRANTS access
+  - id: R-toctou-race
+    corpus: dso
+    expect: finding
+    mode: toctou-race
+    diff: |
+      --- a/rebar/store.py
+      +++ b/rebar/store.py
+      @@ -6,3 +6,5 @@ def write_ticket(path, data):
+      +    if not os.path.exists(path):        # CHECK
+      +        ...                              # gap: another writer can create it here
+      +    with open(path, "w") as f:          # USE — TOCTOU between check and open
+      +        f.write(data)
+  - id: R-crypto-static-iv
+    corpus: dso
+    expect: finding
+    mode: crypto-misuse
+    diff: |
+      --- a/rebar/crypto.py
+      +++ b/rebar/crypto.py
+      @@ -3,3 +3,4 @@ def encrypt(key, plaintext):
+      +    iv = b"\x00" * 16                    # STATIC IV reused across every message
+      +    cipher = AES.new(key, AES.MODE_CBC, iv)
+      +    return cipher.encrypt(pad(plaintext))
+  - id: R-missing-authz-check
+    corpus: dso
+    expect: finding
+    mode: missing-authz
+    diff: |
+      --- a/rebar/api.py
+      +++ b/rebar/api.py
+      @@ -8,3 +8,5 @@
+      +@app.route("/tickets/<tid>/delete", methods=["POST"])
+      +def delete_ticket(tid):
+      +    # no authorization check — any caller can delete any ticket
+      +    return store.delete(tid)
+  # ── no-fire: FP-guards the security overlay must protect (d71f) ───────────────
+  - id: FP-secret-deferred-to-det
+    corpus: dso
+    expect: pass
+    mode: secret-owned-by-det-criterion
+    note: >
+      Secret leakage is OWNED BY the deterministic `secret-detection` (gitleaks) criterion. This overlay
+      must NOT re-flag a committed secret — it defers to the DET criterion by name (a leaked key here is
+      caught deterministically, not by this LLM overlay). No overlay finding expected.
+    diff: |
+      --- a/rebar/settings.py
+      +++ b/rebar/settings.py
+      @@ -2,2 +2,3 @@
+      +# gitleaks (DET secret-detection) owns this — the overlay defers, does not re-flag
+      +TOKEN = os.environ["REBAR_TOKEN"]   # read from env, not hardcoded
+  - id: FP-list-form-argv-user-arg
+    corpus: dso
+    expect: pass
+    mode: list-form-subprocess-user-arg
+    note: >
+      List-form carve-out — `subprocess.run([...], shell=False)` passes each element as one argv token with
+      no shell, so a user-controlled element that is NOT re-shelled is not command injection. The overlay
+      must NOT flag it (contrast the re-shell exception `["bash","-c",f"...{x}"]`, which is NOT present here).
+    diff: |
+      --- a/rebar/git.py
+      +++ b/rebar/git.py
+      @@ -4,2 +4,2 @@
+      -    subprocess.run(f"git checkout {ref}", shell=True)
+      +    subprocess.run(["git", "checkout", ref], check=True)   # ref is one argv token, no shell
+  - id: FP-exposes-already-public-path
+    corpus: dso
+    expect: pass
+    mode: trust-boundary-already-public
+    note: >
+      Trust-boundary carve-out — a doc/config referencing a gate path already tracked in this same public
+      repo does NOT "expose internal X"; the gate source is itself publicly readable. The overlay must NOT
+      raise a trust-boundary finding here (distinct from genuine secret leakage, which stays flagged).
+    diff: |
+      --- a/docs/gates.md
+      +++ b/docs/gates.md
+      @@ -1,2 +1,3 @@
+      +The coverage gate lives at `.github/workflows/test.yml` and the module-size
+      +allowlist at `.github/module-size-allowlist.txt` — both already public in this repo.
+
+gold_set:
+  - input: "A subprocess call switched to shell=True with an interpolated user-controlled ref."
+    label: useful
+  - input: "A live API key literal committed inline in source."
+    label: useful
+  - input: "A subprocess call in list form with no shell (no injection surface)."
+    label: not_useful
+  - input: "Reading a public, non-secret env default (REBAR_SYNC_REMOTE)."
+    label: not_useful

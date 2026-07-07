@@ -26,8 +26,15 @@ _FINDINGS_SCHEMA = "code_review_findings"
 class CodeReviewBatchRunner(BatchRunner):
     """Run each INCLUDED overlay's own prompt as a structured finder over the diff context."""
 
-    def __init__(self, context: str = "") -> None:
+    def __init__(self, context: str = "", context_overrides: dict[str, str] | None = None) -> None:
         self._context = context
+        # Per-overlay ticket_context overrides keyed by prompt_id. When an overlay's prompt_id is
+        # present, that string is injected as ITS ticket_context instead of the shared diff
+        # ``_context``; every other overlay keeps the shared diff (base + others stay
+        # ticket-blind). Additive + default-None: absent ⇒ the single-context behaviour is
+        # unchanged. produce_code_review_verdict populates {"code-review-scope-intent": <union
+        # ticket scope>} ONLY when the commit's rebar-ticket trailers resolve >=1 ticket.
+        self._context_overrides = context_overrides or {}
 
     def run(self, req: BatchRunRequest, agent_runner: Any) -> BatchRunResult:
         from rebar.llm.workflow.executor import StepContext
@@ -55,7 +62,10 @@ class CodeReviewBatchRunner(BatchRunner):
                 step_id=f"{req.step_id}:{prompt_id}",
                 kind="agent",
                 step=step,
-                inputs={"ticket_context": self._context, "ticket_id": "(code review)"},
+                inputs={
+                    "ticket_context": self._context_overrides.get(prompt_id, self._context),
+                    "ticket_id": "(code review)",
+                },
                 workflow=req.workflow,
                 target_ticket=req.target_ticket,
                 repo_root=req.repo_root,

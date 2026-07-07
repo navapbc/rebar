@@ -2,7 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/assemble_diff_input.schema.json",
   "title": "AssembleDiffInput",
-  "description": "Inputs to assemble_diff: base/head/diff_text/changed_files (the diff source).",
+  "description": "Inputs to assemble_diff: base/head/diff_text/changed_files (the diff source) + optional commit_message (its rebar-ticket trailer drives the scope-intent overlay).",
   "type": "object",
-  "additionalProperties": true
+  "additionalProperties": true,
+  "properties": {
+    "commit_message": {
+      "type": "string",
+      "description": "The change's commit message; its rebar-ticket: trailer(s) name the tickets whose union scope/AC the scope-intent overlay reviews the diff against. Default \"\" (overlay inert)."
+    }
+  }
 }

@@ -1,0 +1,148 @@
+# Standing eval spec for the code-review LLM-PROMPTS overlay (Pass-1) — story 1ead.
+# Recall (seeded prompt/contract/schema regression + ui-artifact + domain-mismatch) +
+# no-fire families, seeded from the DSO code-review incidents. This overlay guards rebar's
+# OWN LLM surfaces (reviewer/prompt .md front-matter, the prompt↔contract seam, output-schema
+# JSON); it emits kernel evidence findings, scored on FINDINGS presence, not a FAIL/BLOCK verdict.
+# Validate offline: `rebar prompt eval code-review-llm-prompts`.
+prompt: code-review-llm-prompts
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  - type: deterministic
+    name: code_review_emits_valid_findings
+    description: The overlay output is a dict carrying a `findings` list (native Pass-1 shape).
+  - type: deterministic
+    name: code_review_recall
+    description: A diff with a seeded prompt/contract/schema regression produces a finding.
+  - type: deterministic
+    name: code_review_no_fire
+    description: A contract-preserving (prose-only / additive / non-parsed-rename) diff produces no finding.
+
+dataset:
+  # ── recall: seeded prompt/contract/schema regressions (bad diff → finding) ────
+  - id: R-frontmatter-field-removed
+    corpus: dso
+    expect: finding
+    mode: required-frontmatter-field-removed
+    note: >
+      A required front-matter field (`outputs:`) is deleted from a reviewer prompt. The prompt-loader
+      / registry branches on this key — its removal breaks the parsed contract, not merely the prose.
+    diff: |
+      --- a/src/rebar/llm/reviewers/code-review-tests.md
+      +++ b/src/rebar/llm/reviewers/code-review-tests.md
+      @@ -5,7 +5,6 @@ schema_version: 1
+       title: Code-review Test sufficiency overlay (Pass-1)
+      -outputs: code_review_findings
+       execution_mode: agentic
+       category: code-review-pass
+       dimension: code-review-tests
+  - id: R-outputs-changed-schema-stale
+    corpus: dso
+    expect: finding
+    mode: outputs-changed-without-schema-update
+    note: >
+      The prompt's declared `outputs:` is renamed but the consuming output-schema / contract file is
+      NOT updated — prompt↔schema drift: the parser still expects the old shape.
+    diff: |
+      --- a/src/rebar/llm/reviewers/code-review-security.md
+      +++ b/src/rebar/llm/reviewers/code-review-security.md
+      @@ -6,2 +6,2 @@ description: ...
+      -outputs: code_review_findings
+      +outputs: security_findings   # renamed; output_schemas/*.json still keys on code_review_findings
+  - id: R-schema-key-required-not-emitted
+    corpus: dso
+    expect: finding
+    mode: schema-requires-key-prompt-omits
+    note: >
+      The output-schema adds a REQUIRED key the prompt never instructs the model to emit — the parser
+      will reject every conformant emission. Contract drift on the schema side.
+    diff: |
+      --- a/src/rebar/llm/output_schemas/code_review_findings.json
+      +++ b/src/rebar/llm/output_schemas/code_review_findings.json
+      @@ -8,3 +8,4 @@
+           "properties": { "finding": {"type": "string"}, "criteria": {"type": "array"} },
+      -    "required": ["finding", "criteria"]
+      +    "required": ["finding", "criteria", "severity"]
+  - id: R-ui-artifact-preamble
+    corpus: dso
+    expect: finding
+    mode: ui-artifact-leakage
+    note: >
+      Conversational preamble + a wrapping code fence pasted INTO a prompt body that is consumed
+      programmatically — a UI/transcript artifact, almost always an unintentional paste.
+    diff: |
+      --- a/src/rebar/llm/reviewers/code-review-tests.md
+      +++ b/src/rebar/llm/reviewers/code-review-tests.md
+      @@ -13,3 +13,6 @@
+      +Sure! Here's the improved prompt for you:
+      +```markdown
+       You are a SPECIALIST code reviewer running a Pass-1 overlay of a four-pass code review, focused
+  - id: R-domain-mismatch-reimplemented-rubric
+    corpus: dso
+    expect: finding
+    mode: domain-mismatch-duplicated-standard
+    note: >
+      This overlay inlines the evidence-record contract instead of referencing the shared standard
+      the other reviewers already own — duplication that will drift out of sync.
+    diff: |
+      --- a/src/rebar/llm/reviewers/code-review-security.md
+      +++ b/src/rebar/llm/reviewers/code-review-security.md
+      @@ -20,3 +20,8 @@
+      +For each finding, hand-roll your OWN evidence record here: pick any field names you like for
+      +the issue, its grounding, and its location — do not follow the shared evidence-record contract
+      +that every other overlay references. (Reimplements the shared standard instead of citing it.)
+  # ── no-fire: contract-preserving diffs the overlay must NOT flag ──────────────
+  - id: FP-prose-reword-preserves-contract
+    corpus: dso
+    expect: pass
+    mode: prose-reword-contract-preserved
+    note: >
+      A pure guidance rewording — tightened instruction prose. No parsed token / front-matter field /
+      schema key changed, so it is NOT drift. The LLM reads prose robustly.
+    diff: |
+      --- a/src/rebar/llm/reviewers/code-review-tests.md
+      +++ b/src/rebar/llm/reviewers/code-review-tests.md
+      @@ -14,2 +14,2 @@
+      -ONLY on the **test sufficiency** dimension. Use your read-only file tools to read the changed files.
+      +ONLY on the **test sufficiency** dimension. Read the changed files and their surrounding context first.
+  - id: FP-additive-optional-frontmatter
+    corpus: dso
+    expect: pass
+    mode: backward-compatible-frontmatter-addition
+    note: >
+      Adding a NEW OPTIONAL front-matter field does not break existing consumers (they ignore unknown
+      keys) — a backward-compatible addition, not drift.
+    diff: |
+      --- a/src/rebar/llm/reviewers/code-review-tests.md
+      +++ b/src/rebar/llm/reviewers/code-review-tests.md
+      @@ -11,2 +11,3 @@
+       langfuse_prompt: rebar-code-review-tests
+      +owner: code-review-guild   # new optional metadata; no consumer branches on it
+  - id: FP-non-parsed-heading-rename
+    corpus: dso
+    expect: pass
+    mode: non-parsed-section-rename
+    note: >
+      A body heading that no tooling parses is renamed — organizational content, not the contract.
+      Contrast a front-matter KEY or schema-key rename, which WOULD be drift.
+    diff: |
+      --- a/src/rebar/llm/reviewers/code-review-tests.md
+      +++ b/src/rebar/llm/reviewers/code-review-tests.md
+      @@ -22,2 +22,2 @@
+      -**Antipatterns to FLAG (recall):**
+      +**Patterns to catch (recall):**
+
+gold_set:
+  - input: "A reviewer prompt drops the required `outputs:` front-matter field the loader parses."
+    label: useful
+  - input: "A prompt's `outputs:` is renamed but the output-schema keyed on the old name is untouched."
+    label: useful
+  - input: "A conversational preamble and code fence pasted into a programmatically-consumed prompt."
+    label: useful
+  - input: "A pure guidance rewording that changes no parsed token, field, or schema key."
+    label: not_useful
+  - input: "Adding a new optional front-matter field no consumer branches on."
+    label: not_useful

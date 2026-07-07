@@ -34,6 +34,13 @@ inputs:
     description: The changed-file list (parsed from diff_text when omitted).
     type: array
     required: false
+  commit_message:
+    description: >-
+      The change's commit message; its rebar-ticket: trailer(s) drive the scope-intent overlay
+      (the diff vs the union scope/AC of the referenced tickets). Default "" ⇒ overlay inert.
+    type: string
+    required: false
+    default: ""
 
 steps:
   # ── Pass 0: assemble the diff context ─────────────────────────────────────────────────────
@@ -44,6 +51,7 @@ steps:
       head: ${{ inputs.head }}
       diff_text: ${{ inputs.diff_text }}
       changed_files: ${{ inputs.changed_files }}
+      commit_message: ${{ inputs.commit_message }}
 
   # ── Round-A trigger set: overlays whose applies_to globs match the diff (recommend/already
   #    default empty → to_run == glob set). ──────────────────────────────────────────────────
@@ -52,6 +60,8 @@ steps:
     uses: overlay_union
     with:
       changed_files: ${{ steps.assemble_diff.outputs.changed_files }}
+      diff_text: ${{ steps.assemble_diff.outputs.context }}
+      scope_context: ${{ steps.assemble_diff.outputs.scope_context }}
 
   # ── Pass 1a: the base reviewer (ALWAYS runs; standalone so recommend_overlays survives). ────
   - id: base
@@ -80,6 +90,8 @@ steps:
         - { prompt: code-review-iac, when: "${{ steps.triggers.outputs.include_iac }}" }
         - { prompt: code-review-tests, when: "${{ steps.triggers.outputs.include_tests }}" }
         - { prompt: code-review-llm-prompts, when: "${{ steps.triggers.outputs.include_llm_prompts }}" }
+        - { prompt: code-review-deletion-impact, when: "${{ steps.triggers.outputs.include_deletion_impact }}" }
+        - { prompt: code-review-scope-intent, when: "${{ steps.triggers.outputs.include_scope_intent }}" }
 
   # ── Round-B membership: (glob ∪ base.recommend) − already-run(Round-A), capped at N=3. ──────
   - id: union
@@ -87,6 +99,8 @@ steps:
     uses: overlay_union
     with:
       changed_files: ${{ steps.assemble_diff.outputs.changed_files }}
+      diff_text: ${{ steps.assemble_diff.outputs.context }}
+      scope_context: ${{ steps.assemble_diff.outputs.scope_context }}
       recommend: ${{ steps.base.outputs.recommend_overlays }}
       already_run: ${{ steps.triggers.outputs.to_run }}
       cap: 3
@@ -108,6 +122,8 @@ steps:
         - { prompt: code-review-iac, when: "${{ steps.union.outputs.include_iac }}" }
         - { prompt: code-review-tests, when: "${{ steps.union.outputs.include_tests }}" }
         - { prompt: code-review-llm-prompts, when: "${{ steps.union.outputs.include_llm_prompts }}" }
+        - { prompt: code-review-deletion-impact, when: "${{ steps.union.outputs.include_deletion_impact }}" }
+        - { prompt: code-review-scope-intent, when: "${{ steps.union.outputs.include_scope_intent }}" }
 
   # ── Merge + cluster the three finding sources. ──────────────────────────────────────────────
   - id: merge
