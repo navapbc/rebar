@@ -12,14 +12,12 @@ from __future__ import annotations
 import json
 import logging
 import os
-import random
 import subprocess
 import sys
 import time
-import urllib.error
 from typing import Any, NamedTuple
 
-from rebar_reconciler._errors import RetryExhaustedError
+from rebar_reconciler._errors import RetryExhaustedError  # noqa: F401 — re-exported via acli
 
 logger = logging.getLogger(__name__)
 
@@ -107,9 +105,6 @@ _ASSIGNEE_PERMISSION_ERROR: str = "cannot be assigned"
 _ASSIGNEE_NOT_FOUND_ERROR: str = (
     "User not found for email:"  # prefix match — email value varies per call
 )
-
-# HTTP status codes eligible for automatic retry with backoff.
-_RETRYABLE_HTTP_CODES: frozenset[int] = frozenset({429, 502, 503})
 
 
 class AssigneeNotFoundError(ValueError):
@@ -231,65 +226,6 @@ def _check_mutation_failure(stdout: str, cmd: list[str]) -> None:
             else f"successCount=0 (totalCount={parsed.get('totalCount')!r})"
         )
         raise AcliMutationError(f"ACLI mutation reported FAILURE (exit=0) for {cmd!r}: {detail}")
-
-
-def _call_with_backoff(
-    fn: Any,
-    *args: Any,
-    max_retries: int = 5,
-    **kwargs: Any,
-) -> Any:
-    """Call fn with exponential backoff on transient HTTP/network errors.
-
-    Retries up to *max_retries* times when ``fn`` raises:
-    - ``urllib.error.HTTPError`` with status 429, 502, or 503
-    - ``urllib.error.URLError`` (connection refused, DNS failure, timeout)
-
-    Each retry waits with exponential backoff (2s base, capped at 60s) plus
-    random jitter (0-1s).  If a ``Retry-After`` header is present on a 429
-    response, that value is used instead of the computed delay.
-
-    Raises RetryExhaustedError after all retries are exhausted.
-    """
-    last_error: urllib.error.HTTPError | urllib.error.URLError | None = None
-    for attempt in range(max_retries + 1):  # initial + max_retries
-        try:
-            return fn(*args, **kwargs)
-        except urllib.error.HTTPError as exc:
-            if exc.code not in _RETRYABLE_HTTP_CODES:
-                raise
-            last_error = exc
-            if attempt >= max_retries:
-                break
-            # Compute delay: exponential backoff capped at 60s, with jitter
-            base_delay = min(2 ** (attempt + 1), 60)
-            retry_after = (
-                exc.headers.get("Retry-After") if exc.code == 429 and exc.headers else None
-            )
-            if retry_after is not None:
-                try:
-                    delay = float(retry_after)
-                except (ValueError, TypeError):
-                    delay = base_delay
-            else:
-                delay = base_delay
-            delay += random.random()  # 0-1s jitter  # noqa: S311
-            time.sleep(delay)
-        except urllib.error.URLError as exc:
-            # Transient network error — connection refused, DNS failure, timeout
-            last_error = exc
-            if attempt >= max_retries:
-                break
-            base_delay = min(2 ** (attempt + 1), 60)
-            delay = base_delay + random.random()  # noqa: S311
-            time.sleep(delay)
-
-    assert last_error is not None
-    raise RetryExhaustedError(
-        f"All {max_retries} retries exhausted after transient errors",
-        last_exception=last_error,
-        attempts=max_retries + 1,  # the loop is range(max_retries + 1): initial + retries
-    ) from last_error
 
 
 def _decode_partial(data: Any) -> str | None:

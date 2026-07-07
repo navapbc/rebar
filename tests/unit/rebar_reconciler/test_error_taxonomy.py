@@ -15,8 +15,6 @@ No grep/glob/substring heuristics — pure object-identity / isinstance / ``__ca
 
 from __future__ import annotations
 
-import urllib.error
-
 import pytest
 
 from rebar_reconciler._errors import JiraAPIError, ReconcilerError, RetryExhaustedError
@@ -69,23 +67,5 @@ def test_batch_retry_loop_chains_cause(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(RetryExhaustedError) as ei:
         batch_dispatch._call_with_retry(always_500, max_retries=2)
     assert ei.value.__cause__ is boom  # chained (previously dropped)
-    assert ei.value.last_exception is boom
-    assert ei.value.attempts == 3  # max_retries + 1
-
-
-def test_acli_retry_loop_chains_cause(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AC3 (acli path): ``_call_with_backoff`` keeps chaining the cause AND now records
-    ``last_exception``/``attempts`` on the unified type."""
-    from rebar_reconciler import acli_subprocess
-
-    monkeypatch.setattr(acli_subprocess.time, "sleep", lambda *_a, **_k: None)
-    boom = urllib.error.HTTPError("http://x", 503, "Service Unavailable", None, None)  # retryable
-
-    def always_503(*_a, **_k):
-        raise boom
-
-    with pytest.raises(RetryExhaustedError) as ei:
-        acli_subprocess._call_with_backoff(always_503, max_retries=2)
-    assert ei.value.__cause__ is boom
     assert ei.value.last_exception is boom
     assert ei.value.attempts == 3  # max_retries + 1
