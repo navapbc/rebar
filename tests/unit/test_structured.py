@@ -95,10 +95,32 @@ def test_parse_structured_unwraps_top_level_array():
 
 
 def test_validate_to_still_rejects_multi_element_array():
-    # A genuine multi-object array is ambiguous (which verdict?) and must stay an error —
-    # unwrapping is scoped to the single-element case only.
+    # A genuine multi-OBJECT array is ambiguous (which verdict?) and must stay an error —
+    # unwrapping recovers a list's SOLE dict element, so two dicts remain ambiguous.
     with pytest.raises(StructuredOutputError, match="object"):
         structured.validate_to(_Verdict, [{"verdict": "PASS"}, {"verdict": "FAIL"}])
+
+
+def test_validate_to_recovers_sole_dict_among_non_dict_noise():
+    # Bug slit-rubble-braid: a REASONING completion-verifier model emits a valid top-level
+    # JSON array that concatenates echoed intermediate arrays it reasoned over with the real
+    # verdict object as the sole dict element, e.g. [["open","in_progress"], {verdict}]. This
+    # parses whole via json.loads (a list), and the length-1 unwrap does not catch it, so it
+    # was rejected "got list" on every bounded retry — fail-closing the completion gate and
+    # blocking every close. The sole dict element must be recovered.
+    obj = structured.validate_to(
+        _Verdict, [["open", "in_progress"], {"verdict": "PASS", "confidence": 0.9}]
+    )
+    assert obj.verdict == "PASS" and obj.confidence == 0.9
+
+
+def test_parse_structured_recovers_verdict_from_array_with_leading_noise():
+    # End-to-end reproduction of the captured runtime payload: a valid JSON-array string with
+    # leading non-dict elements and the verdict object last parses + validates to the verdict.
+    obj = structured.parse_structured(
+        '[["idea","open","in_progress"], ["open","in_progress"], {"verdict": "FAIL"}]', _Verdict
+    )
+    assert obj.verdict == "FAIL"
 
 
 def test_parse_structured_combines_layers():

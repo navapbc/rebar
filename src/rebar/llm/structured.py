@@ -165,14 +165,22 @@ def validate_to(model_cls, data: Any):
     Anthropic's strict-grammar subset); they fire here."""
     from pydantic import ValidationError
 
-    # Unwrap a single-element array carrying one object: some models emit their lone
-    # structured result wrapped in a top-level JSON array (a bare one-element list)
-    # instead of the bare object — which otherwise deterministically fails validation
-    # ("got list") and, for the completion-verifier, blocks a close fail-closed
-    # (bug artsy-chain-hold / dash-lure-slag). A multi-element or non-object array
-    # stays ambiguous and is still rejected below.
-    if isinstance(data, list) and len(data) == 1 and isinstance(data[0], dict):
-        data = data[0]
+    # Unwrap a top-level JSON array carrying exactly one object: some models emit their
+    # lone structured result wrapped in a top-level JSON array instead of the bare object
+    # — either as a bare one-element list, or (reasoning models) as an array that
+    # concatenates echoed intermediate arrays it reasoned over with the real result as
+    # the sole dict element, e.g. [["open","in_progress"], {"verdict":"PASS", …}]. Both
+    # otherwise deterministically fail validation ("got list") and, for the
+    # completion-verifier, block a close fail-closed (bug artsy-chain-hold /
+    # dash-lure-slag / slit-rubble-braid). We unwrap when the top-level list holds
+    # exactly one dict element (regardless of accompanying non-dict noise); a list with
+    # zero dicts, or two-or-more dicts (genuinely ambiguous — which object?), stays
+    # ambiguous and is still rejected below. Only the top-level elements are considered —
+    # we never recurse into or flatten nested lists.
+    if isinstance(data, list):
+        dict_elems = [item for item in data if isinstance(item, dict)]
+        if len(dict_elems) == 1:
+            data = dict_elems[0]
 
     if not isinstance(data, dict):
         raise StructuredOutputError(
