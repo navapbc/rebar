@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Callable
+from typing import NamedTuple
 
 from ._managed_refs import add_managed_ref, seed_managed_refs_from_current
 from ._version import KNOWN_EVENT_TYPES, TAG_DELTA
@@ -645,6 +647,49 @@ def scan_for_latest_snapshot(
     return latest_snapshot_idx, snapshot_source_uuids
 
 
+class _ReplayCtx(NamedTuple):
+    """The per-event arguments a replay handler may need. Bundled so the replay loop can
+    dispatch through the single flat ``_EVENT_HANDLERS`` table below instead of a deep
+    event-type if/elif tower — each handler pulls exactly the fields its processor takes."""
+
+    state: dict
+    event: dict
+    data: dict
+    ticket_id: str
+    cache_path: str
+    dir_hash: str
+    filepath: str
+    event_uuid: str
+    tracker_dir: str | None
+
+
+# Event-type -> per-event handler. Flattens the former deep if/elif dispatch tower in
+# replay_events into an O(1) table over the existing ``process_*`` processors; each entry
+# adapts the shared _ReplayCtx to its processor's signature. Only CREATE returns a value
+# (the corrupt-CREATE early-return dict); every other processor returns None.
+_EVENT_HANDLERS: dict[str, Callable[[_ReplayCtx], dict | None]] = {
+    "CREATE": lambda c: process_create(
+        c.state, c.event, c.data, c.ticket_id, c.cache_path, c.dir_hash
+    ),
+    "STATUS": lambda c: process_status(c.state, c.event, c.data, c.filepath),
+    "COMMENT": lambda c: process_comment(c.state, c.event, c.data),
+    "LINK": lambda c: process_link(c.state, c.event, c.data, tracker_dir=c.tracker_dir),
+    "UNLINK": lambda c: process_unlink(c.state, c.data),
+    "BRIDGE_ALERT": lambda c: process_bridge_alert(c.state, c.event, c.data, c.event_uuid),
+    "REVERT": lambda c: process_revert(c.state, c.event, c.data, c.event_uuid),
+    "EDIT": lambda c: process_edit(c.state, c.data),
+    "FILE_IMPACT": lambda c: process_file_impact(c.state, c.event, c.data),
+    "VERIFY_COMMANDS": lambda c: process_verify_commands(c.state, c.event, c.data),
+    "SIGNATURE": lambda c: process_signature(c.state, c.event, c.data),
+    "WORKFLOW_RUN": lambda c: process_workflow_run(c.state, c.event, c.data),
+    "WORKFLOW_STEP": lambda c: process_workflow_step(c.state, c.event, c.data),
+    "COMMITS": lambda c: process_commits(c.state, c.event, c.data),
+    TAG_DELTA: lambda c: process_tag_delta(c.state, c.data),
+    "ARCHIVED": lambda c: process_archived(c.state),
+    "SNAPSHOT": lambda c: process_snapshot(c.state, c.data),
+}
+
+
 def replay_events(
     state: dict,
     event_files: list[str],
@@ -712,48 +757,34 @@ def replay_events(
         if ev_ts is not None and (max_ts is None or ev_ts > max_ts):
             max_ts = ev_ts
 
-        if event_type == "CREATE":
-            result = process_create(state, event, data, ticket_id, cache_path, dir_hash)
-            if result is not None:
-                return valid_event_count, result
-        elif event_type == "STATUS":
-            process_status(state, event, data, filepath)
-        elif event_type == "COMMENT":
-            process_comment(state, event, data)
-        elif event_type == "LINK":
-            process_link(state, event, data, tracker_dir=tracker_dir)
-        elif event_type == "UNLINK":
-            process_unlink(state, data)
-        elif event_type == "BRIDGE_ALERT":
-            process_bridge_alert(state, event, data, event_uuid)
-        elif event_type == "REVERT":
-            process_revert(state, event, data, event_uuid)
-        elif event_type == "EDIT":
-            process_edit(state, data)
-        elif event_type == "FILE_IMPACT":
-            process_file_impact(state, event, data)
-        elif event_type == "VERIFY_COMMANDS":
-            process_verify_commands(state, event, data)
-        elif event_type == "SIGNATURE":
-            process_signature(state, event, data)
-        elif event_type == "WORKFLOW_RUN":
-            process_workflow_run(state, event, data)
-        elif event_type == "WORKFLOW_STEP":
-            process_workflow_step(state, event, data)
-        elif event_type == "COMMITS":
-            process_commits(state, event, data)
-        elif event_type == TAG_DELTA:
-            process_tag_delta(state, data)
-        elif event_type == "ARCHIVED":
-            process_archived(state)
-        elif event_type == "SNAPSHOT":
-            process_snapshot(state, data)
-        elif event_type not in KNOWN_EVENT_TYPES:
-            # Forward compatibility (schema-version rule, see _version.py): an event
-            # kind a NEWER rebar introduced. Preserved-and-ignored — skipped here
-            # without error so the ticket stays readable; ticket-compact.sh keeps the
-            # file so an older clone's compaction doesn't destroy a newer clone's data.
+        # KNOWN_EVENT_TYPES is the forward-compat authority, checked FIRST: an event kind
+        # a NEWER rebar introduced — or, for a downgraded clone, a type absent from its
+        # KNOWN_EVENT_TYPES — is preserved-and-ignored (skipped without error so the ticket
+        # stays readable; ticket-compact keeps the file so an older clone's compaction can't
+        # destroy a newer clone's data). Gating on KNOWN_EVENT_TYPES (not the static handler
+        # table) is what lets a downgraded reducer that masks the type ignore it, matching
+        # the pre-flattening if/elif tower's final `not in KNOWN_EVENT_TYPES` branch.
+        if event_type not in KNOWN_EVENT_TYPES:
             pass
+        else:
+            handler = _EVENT_HANDLERS.get(event_type)
+            if handler is not None:
+                result = handler(
+                    _ReplayCtx(
+                        state,
+                        event,
+                        data,
+                        ticket_id,
+                        cache_path,
+                        dir_hash,
+                        filepath,
+                        event_uuid,
+                        tracker_dir,
+                    )
+                )
+                # Only CREATE yields a value: the corrupt-CREATE early-return result.
+                if result is not None:
+                    return valid_event_count, result
 
     # Derived presentation field (not an event-log field). None when no applied
     # event carried a timestamp; the None-last sort key handles that.
