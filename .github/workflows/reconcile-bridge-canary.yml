@@ -253,8 +253,16 @@ jobs:
           set -euo pipefail
           RECOVERED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           # bug-close requires a --reason prefixed "Fixed:" or "Escalated to user:".
+          # --force-close ALSO bypasses the completion-verification close gate
+          # (verify.require_completion_verification_for_close): this canary installs
+          # plain rebar (no [agents] extra, no model API key) and manages a bot-authored
+          # alert ticket that has no verifiable acceptance criteria, so the LLM
+          # completion-verifier cannot and should not run here. Without it the close
+          # fails closed and the alert ticket sticks open while the canary goes red on
+          # every recovery (bug 0dc5 / nitpicking-unbecoming-wisent).
           rebar transition "${TICKET_ID}" open closed \
-            --reason "Fixed: reconciler recovered at ${RECOVERED_AT}. ${STATUS_MSG}"
+            --reason "Fixed: reconciler recovered at ${RECOVERED_AT}. ${STATUS_MSG}" \
+            --force-close="Fixed: reconciler recovered at ${RECOVERED_AT} (bot alert auto-close; heartbeat tickets have no completion criteria to verify)."
 
       # ── Binding-drift parity oracle (epic 3006-e198, child 8de5) ─────────────
       # bridge-fsck now reads bindings.json + prev_snapshot.json READ-ONLY and runs
@@ -358,8 +366,12 @@ jobs:
         run: |
           set -euo pipefail
           RECOVERED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          # --force-close bypasses the completion-verification close gate — same reason
+          # as the heartbeat close above (bot-authored alert ticket, plain-rebar install
+          # with no [agents] extra, nothing for the LLM verifier to check). Bug 0dc5.
           rebar transition "${TICKET_ID}" open closed \
-            --reason "Fixed: bridge-fsck reports zero binding drift at ${RECOVERED_AT}."
+            --reason "Fixed: bridge-fsck reports zero binding drift at ${RECOVERED_AT}." \
+            --force-close="Fixed: zero binding drift at ${RECOVERED_AT} (bot alert auto-close)."
 
       - name: Flush any unpushed ticket changes to origin/tickets
         # rebar CLI auto-pushes, but best-effort: this guard re-pushes if a prior
