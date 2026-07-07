@@ -20,6 +20,9 @@ from rebar.reducer import reduce_all_tickets
 
 from ._relations import build_blocked_by
 
+# The "open-ish" statuses that make a ticket eligible for readiness/dispatch.
+# `idea` is deliberately EXCLUDED (by omission): an undesigned idea must never
+# surface in `ready`/`next-batch`, so it is never counted as ready work here.
 _OPEN_STATUSES = {"open", "in_progress"}
 _CLOSED_STATUSES = {"closed"}
 

@@ -70,6 +70,18 @@ def register_write_tools(mcp, ctx) -> None:
         )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
+    def create_idea(title: str, description: str | None = None) -> CreateResultOut:
+        """Capture an undesigned idea: create an epic in status 'idea' atomically.
+
+        The idea is born in status 'idea' via a single CREATE event (never momentarily
+        'open'/claimable), is excluded from ready/next-batch, and 'idea -> closed'
+        (reject) skips the completion gates. Promote a kept idea with
+        transition_ticket(id, "idea", "open"). Returns {id, alias}."""
+        return CreateResultOut.model_validate(
+            rebar.idea(title, description=description, return_alias=True)
+        )
+
+    @mcp.tool(annotations=_ANN["MUTATE"])
     def transition_ticket(ticket_id: str, current_status: str, target_status: str) -> dict:
         """Transition a ticket's status (optimistic concurrency). Returns the
         engine result {ticket_id, from, to, newly_unblocked}.

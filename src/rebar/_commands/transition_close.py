@@ -303,8 +303,16 @@ def close_ticket(
     # runs the verifier and blocks (fail-closed) on FAIL / unavailable-LLM; on PASS it returns
     # the manifest to sign AFTER a confirmed close (so a failed/raced close never leaves an
     # orphan "certified" signature on an unclosed ticket). force_close skips both.
+    #
+    # `idea → closed` is a REJECT/DROP, not a completion: closing an undesigned idea
+    # means "we won't pursue this," so there is nothing built to verify or attest.
+    # Running the completion precheck (verifier + file-impact→referencing-commit +
+    # reason-guard copy) would nonsensically BLOCK the rejection, so we skip it entirely
+    # when the from-status is `idea`. The open-children structural guard above still
+    # ran unconditionally (integrity, not completion), so an idea parent over
+    # non-closed children is still refused.
     verified_manifest = None
-    if target_status == "closed":
+    if target_status == "closed" and current_status != "idea":
         from rebar.reducer import reduce_ticket as _reduce
 
         ticket_type = (_reduce(os.path.join(tracker, ticket_id)) or {}).get("ticket_type", "")

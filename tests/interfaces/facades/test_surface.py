@@ -41,6 +41,7 @@ def test_mcp_exposes_expected_tools() -> None:
         "search",
         "reconcile",
         "create_ticket",
+        "create_idea",
         "transition_ticket",
         "claim_ticket",
         "reopen_ticket",
@@ -105,6 +106,7 @@ def test_library_public_api() -> None:
     for fn in (
         "init_repo",
         "create_ticket",
+        "idea",
         "transition",
         "claim",
         "reopen",

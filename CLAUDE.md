@@ -69,6 +69,42 @@ list / search ──▶ ready ──▶ next-batch ──▶ claim ──▶ (wo
    pass the status you believe is current; a mismatch is exit 10). Use `reopen`
    to move a closed ticket back to open.
 
+## The `idea` status (a parking lot for undesigned work)
+
+`idea` is a first-class ticket **status** (any ticket type can hold it) for future
+work that is **captured but not yet designed or ready to implement** — a durable
+parking lot, distinct from `open` (which means "designed enough to work; eligible
+for `ready`/`next-batch`"). It exists because the only other pre-work status is
+`open`, and an `open` ticket is immediately claimable work; `idea` gives you a place
+to record a rough idea without it becoming dispatchable. It is a status rather than a
+tag deliberately: `claim` only accepts `open` tickets, so an `idea` ticket is
+**structurally unclaimable** with no genesis window where it is momentarily `open`.
+
+- **Transitions are free.** rebar does not enforce a rigid state machine — you can
+  `transition <id> open idea`, `idea open`, `idea in_progress`, etc. (`idea` is a
+  valid `current`/`target` status everywhere `transition` is used).
+- **Excluded from dispatch (by omission).** `idea` tickets **never** appear in
+  `ready` or `next-batch` — those surfaces only consider `open`/`in_progress`, so an
+  undesigned idea is never scheduled as parallel work.
+- **Fully listable/searchable.** `list --status=idea` returns them and `search`
+  matches them, so ideas can always be found and later promoted (`idea → open`).
+- **`idea → closed` skips the completion gates.** Rejecting/dropping an idea closes
+  with **no** completion-verifier / signature / bug-close-reason gate (an undesigned
+  idea has nothing to verify) — but the **structural open-children guard still
+  holds** (you cannot close a parent that has open children).
+- **Exempt from noisy `validate` findings.** `idea` tickets do not contribute
+  empty-epic / orphan / missing-description / interface-contract / count findings to
+  the store-health score (an idea is *expected* to be loosely specified); genuine
+  structural checks (e.g. cycles) still apply.
+- **Jira: `idea ↔ IDEA`.** `idea` round-trips to the Jira status `IDEA` through the
+  reconciler, subject to the usual workflow-transition prerequisite (the target Jira
+  workflow must permit the transition into `IDEA`) — see
+  [docs/jira-sync-setup.md](docs/jira-sync-setup.md) "The `idea` status ↔ Jira `IDEA`"
+  for the operator prerequisite, deployment sequencing, and the convergence quirk.
+- **Capture in one atomic step.** `rebar idea "<title>"` (and the MCP `create_idea` /
+  library `rebar.idea(...)`) creates a ticket **directly** in status `idea` in a
+  single genesis event — never momentarily `open`/claimable.
+
 ## Gate protocols (MANDATORY)
 
 These two gates are not advisory — adhere to them strictly.
@@ -105,7 +141,8 @@ typed read tools advertise an `outputSchema` (a documented, validated return
 shape) drawn from the canonical JSON Schemas — see
 [docs/output-schemas.md](docs/output-schemas.md).
 
-**Writes (gated by `REBAR_MCP_READONLY=1`):** `create_ticket`,
+**Writes (gated by `REBAR_MCP_READONLY=1`):** `create_ticket`, `create_idea`
+(capture an undesigned idea — an `epic` born in status `idea` in one CREATE),
 `transition_ticket`, `claim_ticket`, `reopen_ticket`, `comment_ticket`,
 `edit_ticket`, `link_tickets`, `unlink_tickets`, `tag_ticket`, `untag_ticket`,
 `archive_ticket`, `compact_ticket`, `set_file_impact`, `set_verify_commands`,

@@ -109,6 +109,7 @@ CLI_OUTPUT_DRIVERS: dict[str, object] = {
     "list-epics": lambda s: ["list-epics"],
     "grounding-info": lambda s: ["grounding-info"],
     "create": lambda s: ["create", "task", "Made by guard"],
+    "idea": lambda s: ["idea", "Made by guard"],
     "claim": lambda s: ["claim", s["claimable"], "--assignee=agent"],
     "transition": lambda s: ["transition", s["openish"], "open", "in_progress"],
     "reopen": lambda s: ["reopen", s["closed"]],

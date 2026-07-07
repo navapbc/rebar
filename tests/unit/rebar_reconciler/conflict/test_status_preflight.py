@@ -72,28 +72,33 @@ def test_missing_status_warns_but_does_not_abort(reconcile_mod, capsys):
 
 
 def test_unmapped_jira_status_not_mislabeled_as_local(reconcile_mod, capsys):
-    """An unmapped JIRA workflow status (e.g. ``IDEA`` added Jira-side) must not be
-    reported as a "local status" (bug c672). The preflight accepts both local-status
-    keys and Jira-status values and fails only when the value is in neither, so the
-    message must describe an unmapped status of indeterminate side and acknowledge the
-    Jira-status possibility — otherwise it misdirects debugging toward a non-existent
-    local ticket.
+    """An unmapped JIRA workflow status (e.g. ``Selected for Development`` added
+    Jira-side) must not be reported as a "local status" (bug c672). The preflight
+    accepts both local-status keys and Jira-status values and fails only when the value
+    is in neither, so the message must describe an unmapped status of indeterminate side
+    and acknowledge the Jira-status possibility — otherwise it misdirects debugging
+    toward a non-existent local ticket.
+
+    (Uses ``Selected for Development`` rather than the once-used ``IDEA``: ``IDEA`` is
+    now a MAPPED status — local ``idea`` ↔ Jira ``IDEA`` — so it no longer exercises the
+    unmapped-status path.)
 
     Facet 3 (reconciler-abort-isolation): the preflight now WARNS non-fatally instead
     of raising, so the message is asserted against stderr rather than an exception. The
     bug-c672 intent (do not mislabel a Jira status as local) is unchanged."""
+    unmapped = "Selected for Development"
     mutations = [
-        {"action": "update", "key": "REB-716", "fields": {"status": "IDEA"}},
+        {"action": "update", "key": "REB-716", "fields": {"status": unmapped}},
     ]
     # Must NOT raise (non-fatal now); the message is emitted to stderr instead.
     reconcile_mod.preflight_status_mapping(mutations)
     msg = capsys.readouterr().err
     # Still names the offending value + target.
-    assert "IDEA" in msg
+    assert unmapped in msg
     assert "REB-716" in msg
     # Must NOT frame the VALUE as a local status (it is a Jira workflow status here);
-    # the specific mislabel "local status 'IDEA'" is the bug.
-    assert "local status 'IDEA'" not in msg
+    # the specific mislabel "local status '<value>'" is the bug.
+    assert f"local status '{unmapped}'" not in msg
     # Must acknowledge the Jira-status side and name the map that lacks the entry.
     assert "Jira" in msg
     assert "local_to_jira_status" in msg

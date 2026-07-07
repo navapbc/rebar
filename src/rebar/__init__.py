@@ -174,6 +174,45 @@ def create_ticket(
     return {"id": res["id"], "alias": res["alias"] or ""}
 
 
+def idea(
+    title: str,
+    *,
+    description: str | None = None,
+    return_alias: bool = False,
+    repo_root=None,
+) -> str | CreateResult:
+    """Capture an undesigned idea: create an ``epic`` in status ``idea`` atomically.
+
+    The idea is born in status ``idea`` via a single CREATE event (no intervening
+    STATUS event), so it is never momentarily ``open``/claimable. It is excluded from
+    ``ready``/``next-batch``, and ``idea -> closed`` (reject) skips the completion
+    gates. Promote a kept idea with ``transition(id, "idea", "open")``.
+
+    Returns the canonical 16-hex ticket id (default), or ``{"id", "alias"}`` with
+    ``return_alias=True`` — same shape as :func:`create_ticket`.
+    """
+    from rebar._commands import composer
+    from rebar._commands._seam import CommandError
+
+    try:
+        res = composer.create_core(
+            "epic",
+            title,
+            description=description,
+            status="idea",
+            repo_root=repo_root,
+        )
+    except CommandError as exc:
+        raise RebarError(
+            f"rebar idea failed (exit {exc.returncode}): {exc.message}",
+            returncode=exc.returncode,
+            stderr=exc.message,
+        ) from None
+    if not return_alias:
+        return res["id"]
+    return {"id": res["id"], "alias": res["alias"] or ""}
+
+
 def transition(
     ticket_id: str,
     current_status: str,
@@ -1131,6 +1170,7 @@ __all__ = [
     # write path
     "init_repo",
     "create_ticket",
+    "idea",
     "transition",
     "claim",
     "reopen",

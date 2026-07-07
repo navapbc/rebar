@@ -26,14 +26,14 @@ from rebar._engine_support.output import OutputFormatError, error_envelope, pars
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar.reducer import reduce_ticket
 
-_VALID_STATUSES = ("open", "in_progress", "closed", "blocked")
+_VALID_STATUSES = ("idea", "open", "in_progress", "closed", "blocked")
 
 _USAGE = (
     "Usage: ticket transition <ticket_id> <current_status> <target_status> "
     "[--reason=<text>] [--force] [--force-close=<reason>]\n"
     "       ticket transition <ticket_id> <target_status> [--reason=<text>] [--force] "
     "[--force-close=<reason>]  (auto-detects current status)\n"
-    "  current_status / target_status: open | in_progress | closed | blocked\n"
+    "  current_status / target_status: idea | open | in_progress | closed | blocked\n"
     "  Parent-first (open -> in_progress only): if the ticket has an OPEN parent, the\n"
     "  parent is transitioned first (recursively); a parent failure aborts the child\n"
     "  and the error names the parent. close/reopen/blocked never cascade.\n"
@@ -163,7 +163,8 @@ def _validate_status(label: str, value: str) -> None:
             returncode=1,
         )
     raise CommandError(
-        f"Error: invalid {label} '{value}'. Must be one of: open, in_progress, closed, blocked",
+        f"Error: invalid {label} '{value}'. "
+        "Must be one of: idea, open, in_progress, closed, blocked",
         returncode=1,
     )
 

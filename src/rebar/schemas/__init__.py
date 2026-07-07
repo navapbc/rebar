@@ -266,6 +266,8 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "show.not_found": ERROR_ENVELOPE,
     "bridge_fsck": BRIDGE_FSCK,
     "create": CREATE_RESULT,
+    "idea": CREATE_RESULT,
+    "create_idea": CREATE_RESULT,
     "claim": CLAIM_RESULT,
     "transition": TRANSITION_RESULT,
     "reopen": TRANSITION_RESULT,

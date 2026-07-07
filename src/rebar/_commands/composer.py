@@ -79,6 +79,7 @@ def create_core(
     description: str | None = None,
     tags=None,
     source: dict | None = None,
+    status: str | None = None,
     repo_root=None,
 ) -> dict:
     """Validate, compose, and append a CREATE event; return ``{id, alias, title}``.
@@ -161,6 +162,13 @@ def create_core(
         data["assignee"] = assignee
     if alias:
         data["alias"] = alias
+    # Genesis status (soup-drift-augur): only the `rebar idea` command passes a
+    # non-`open` status, so the ticket is born in `idea` in a single CREATE event
+    # (no intervening STATUS event → never momentarily `open`/claimable). Absent,
+    # the reducer defaults to `open`, so a normal create is unchanged and no general
+    # `create --status` flag is exposed.
+    if status:
+        data["status"] = status
     if source:
         for _src_key in ("source_id", "source_created_at", "source_author", "source_env"):
             _src_val = source.get(_src_key)

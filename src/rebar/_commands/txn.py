@@ -191,8 +191,15 @@ def transition_core(
 
         ticket_type = state.get("ticket_type", "")
 
+        # `idea → closed` is a reject/drop, not a completion: an undesigned idea has
+        # nothing built to verify or attest, so it bypasses BOTH the bug-close-reason
+        # guard and the story/epic signature gate below (mirrors the completion-precheck
+        # bypass in transition_close.close_ticket). The open-children structural guard is
+        # enforced elsewhere and is NOT relaxed for idea.
+        from_idea = current_status == "idea"
+
         # Bug-close-reason guard (predicate shared with the completion gate's pre-check).
-        if target_status == "closed" and ticket_type == "bug":
+        if target_status == "closed" and ticket_type == "bug" and not from_idea:
             if not close_reason:
                 raise CommandError(
                     "Error: closing a bug ticket requires --reason with prefix "
@@ -209,7 +216,7 @@ def transition_core(
         # the lock (above); only the signature CHECK runs here, under the lock, on the fresh
         # re-read `state`. (`sig_require` is set whenever target_status == "closed", so it is a
         # real bool here, never None.)
-        if target_status == "closed" and ticket_type in ("story", "epic"):
+        if target_status == "closed" and ticket_type in ("story", "epic") and not from_idea:
             _signature_gate(
                 tracker_dir,
                 ticket_id,

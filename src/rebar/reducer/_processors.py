@@ -51,6 +51,12 @@ def process_create(
     state["ticket_id"] = ticket_id
     state["ticket_type"] = data.get("ticket_type")
     state["title"] = data.get("title")
+    # Genesis status (soup-drift-augur): a CREATE event MAY carry a `status`. The
+    # `rebar idea` command is its sole producer of a non-`open` genesis (`status=idea`)
+    # so an idea is born in `idea` — never momentarily `open`/claimable. Default to the
+    # value make_initial_state already seeded (`open`) when absent, so a normal CREATE
+    # is byte-for-byte unchanged.
+    state["status"] = data.get("status", state["status"])
     state["author"] = event.get("author")
     state["created_at"] = event.get("timestamp")
     state["env_id"] = event.get("env_id")

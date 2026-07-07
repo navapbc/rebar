@@ -58,6 +58,7 @@ _JIRA_LABEL_MAX_CHARS: int = 255
 # ({To Do, In Progress, In Review, Done} only); lossless information is
 # preserved via rebar-status: annotation labels managed by outbound_differ.
 _LOCAL_STATUS_TO_JIRA: dict[str, str] = {
+    "idea": "IDEA",
     "open": "To Do",
     "in_progress": "In Progress",
     "closed": "Done",

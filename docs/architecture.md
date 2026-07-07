@@ -215,6 +215,7 @@ requires a row here.
 
 | File | Remedy |
 |------|--------|
+| `rebar_reconciler/inbound_differ.py` | crossed the cap (was exactly at 800) adding the `idea ↔ IDEA` status-map entry (epic idea-status). Split along the existing seam: the hand-maintained `_JIRA_TO_LOCAL_STATUS` map + status-translation helpers (`_jira_status_to_local` and friends) into a sibling `inbound_status.py`, leaving the field/comment/link diffing in `inbound_differ.py` — both stay well above the 100-LOC floor |
 | `rebar_reconciler/reconcile.py` | `reconcile_once` is now a thin ~50-LOC sequencer, but the phase helpers it calls carry the mass — `_run_differs` alone is ~380 LOC (legacy + inbound/outbound diff + OM/IM→Mutation conversion). Extract the differ-running phase into a sibling `run_differs.py` (well above the 100-LOC file floor) along the phase seam the sequencer already carves |
 | `__init__.py` | library facade over the cap (also carries the workflow entrypoints `run_workflow`/`get_workflow_status`/`get_workflow_result` + `attach_commits`, epic a88f). KEEP as one surface: it is a deliberate flat public-API namespace whose functions share private helpers; a read/write split forces re-exports for no readability gain |
 | `config.py` | split the dataclass/schema from the env/CLI-override + cache machinery along the existing seam |
