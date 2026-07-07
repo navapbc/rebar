@@ -23,6 +23,7 @@ from rebar._cli import _help
 from rebar._cli._init import ensure_initialized
 from rebar._cli._llm_commands import (
     _criteria,
+    _explain,
     _llm,
     _prompt,
     _review,
@@ -388,6 +389,11 @@ def main(argv: list[str] | None = None) -> int:
     # review-plan intercept (native rebar.llm plan-review gate; owns its --help).
     if argv and argv[0] == "review-plan":
         return _review_plan(argv[1:])
+
+    # explain intercept (WS10: `rebar explain <criterion-id>` — a pure registry/guide READ, no
+    # LLM; owns its --help like review-plan, so no help/*.txt or dispatch arm).
+    if argv and argv[0] == "explain":
+        return _explain(argv[1:])
 
     # verify-commit-ticket intercept (commit-message ticket gate; owns its --help). A pure
     # intercept like review-plan: no help/*.txt, no dispatch arm, no golden capture.

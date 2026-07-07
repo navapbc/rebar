@@ -504,6 +504,24 @@ def finalize_verdict(
         "dropped": len(dropped),
         "indeterminate": len(indeterminate),
     }
+    # Deep-link each coaching note to its criterion's authoring-guide section (WS10). Anchor on
+    # the FIRST criterion of the finding(s) the note addresses; fall back to the guide base URL.
+    # Additive `guide_url` field — passthrough-safe for every coaching consumer (they read the
+    # `coaching` prose). Plan-review-specific (NOT the shared render_coach_notes). See ADR/docs.
+    from rebar import config as _config
+
+    _base = _config.plan_review_docs_url(ctx.repo_root)
+    _crit_by_fid = {
+        f.get("id"): (f.get("criteria") or [])
+        for group in (blocking, surfaced, overflow, indeterminate, dropped)
+        for f in group
+    }
+    for note in coaching:
+        crit = next(
+            (c for fid in (note.get("finding_refs") or []) for c in _crit_by_fid.get(fid, [])),
+            None,
+        )
+        note["guide_url"] = f"{_base}#{crit.lower()}" if crit else _base
     return {
         "verdict": verdict,
         "ticket_id": ctx.ticket_id,

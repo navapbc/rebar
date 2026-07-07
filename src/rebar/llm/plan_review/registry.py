@@ -451,15 +451,143 @@ def validate_packaged_routing() -> list[str]:
     return problems
 
 
+# ── Criteria authoring guide (R-5, epic cite-stone-sea / WS10) ───────────────────
+# A GENERATED, section-keyed Markdown guide (docs/plan-review-criteria-guide.md): one `## <id>`
+# section per criterion, DERIVED from the registry (the rubric a plan author must satisfy).
+# Regenerated in place (`... registry regenerate-criteria-guide`) and kept honest by
+# validate_criteria_guide (folded into the validate-routing gate) — the same regenerate-in-place +
+# parity-diff contract as reviewers/index.json. `explain_criterion` is the ONE shared lookup that
+# `rebar explain`, the MCP read tool, and the library all wrap.
+_GUIDE_RELPATH = ("docs", "plan-review-criteria-guide.md")
+
+
+class ExplainError(RegistryError):
+    """A criterion-explain lookup failure. ``kind`` is the failing state shared across all three
+    surfaces (CLI / MCP / library): ``unknown-id`` / ``malformed-registry`` / ``missing-file``."""
+
+    def __init__(self, kind: str, message: str) -> None:
+        super().__init__(message)
+        self.kind = kind
+
+
+def _guide_path(repo_root_path: str | None = None):  # -> Path
+    from rebar import config
+
+    return config.repo_root(repo_root_path).joinpath(*_GUIDE_RELPATH)
+
+
+def _guide_section_body(criterion: dict[str, Any]) -> str:
+    posture = criterion.get("default_posture", "advisory")
+    header = f"**{criterion.get('name', '')}** — exec:{criterion.get('exec', '1-TURN')}, {posture}"
+    facet = criterion.get("facet", "")
+    if facet:
+        header += f", facet:{facet}"
+    lines = [f"## {criterion['id']}", header, "", (criterion.get("scenario") or "").strip()]
+    checklist = criterion.get("checklist") or []
+    if checklist:
+        lines += ["", "Checklist:"]
+        lines += [f"- {c.get('check', c) if isinstance(c, dict) else c}" for c in checklist]
+    return "\n".join(lines).rstrip()
+
+
+def regenerate_criteria_guide(repo_root_path: str | None = None) -> str:
+    """Generate docs/plan-review-criteria-guide.md from the registry — one `## <id>` section per
+    criterion, sorted by id. Returns the written path (regenerate-in-place; diff detects drift)."""
+    criteria = sorted(load_criteria(repo_root=repo_root_path), key=lambda c: c["id"])
+    header = (
+        "# Plan-review criteria authoring guide\n\n"
+        "GENERATED from the criteria registry (`python -m rebar.llm.plan_review.registry "
+        "regenerate-criteria-guide`) — do not hand-edit. One `## <criterion-id>` section per "
+        "criterion; `rebar explain <criterion-id>` prints a section, and coach deep-links anchor "
+        "to `#<criterion-id lower-cased>` (the heading slug).\n"
+    )
+    body = "\n\n".join(_guide_section_body(c) for c in criteria)
+    path = _guide_path(repo_root_path)
+    path.write_text(header + "\n" + body + "\n", encoding="utf-8")
+    return str(path)
+
+
+def _guide_sections(text: str) -> dict[str, str]:
+    """Parse a guide into ``{criterion-id: section-text}`` keyed by ``## <id>`` headings."""
+    out: dict[str, str] = {}
+    cur_id: str | None = None
+    buf: list[str] = []
+    for line in text.split("\n"):
+        m = re.match(r"^## (\S+)\s*$", line)
+        if m:
+            if cur_id is not None:
+                out[cur_id] = "\n".join(buf).strip()
+            cur_id, buf = m.group(1), [line]
+        elif cur_id is not None:
+            buf.append(line)
+    if cur_id is not None:
+        out[cur_id] = "\n".join(buf).strip()
+    return out
+
+
+def validate_criteria_guide(repo_root_path: str | None = None) -> list[str]:
+    """Parity: every ``CANONICAL_LLM`` criterion has a ``## <id>`` guide section and the guide
+    has no ORPHAN section. Returns problems (empty == in sync). Folded into the routing gate so a
+    removed/renamed section fails ``validate-routing``."""
+    path = _guide_path(repo_root_path)
+    if not path.exists():
+        return [f"criteria guide missing at {path} (run regenerate-criteria-guide)"]
+    sections = set(_guide_sections(path.read_text(encoding="utf-8")))
+    problems = [
+        f"criterion {cid!r} has no `## {cid}` section in the criteria guide"
+        for cid in sorted(CANONICAL_LLM - sections)
+    ]
+    problems += [
+        f"criteria guide has an ORPHAN section `## {cid}` (not in CANONICAL_LLM)"
+        for cid in sorted(sections - CANONICAL_LLM)
+    ]
+    return problems
+
+
+def explain_criterion(criterion_id: str, *, repo_root_path: str | None = None) -> str:
+    """The ONE shared lookup behind ``rebar explain``, the MCP ``explain_criterion`` tool, and the
+    library — returns a criterion's authoring-guide section. Raises :class:`ExplainError` with a
+    ``kind`` of ``malformed-registry`` / ``unknown-id`` / ``missing-file``."""
+    try:
+        ids = {c["id"] for c in load_criteria(repo_root=repo_root_path)}
+    except Exception as exc:  # noqa: BLE001 — any registry-load failure is the malformed-registry state
+        raise ExplainError("malformed-registry", f"criteria registry is malformed: {exc}") from exc
+    if criterion_id not in ids:
+        raise ExplainError(
+            "unknown-id", f"unknown criterion {criterion_id!r}; known: {', '.join(sorted(ids))}"
+        )
+    path = _guide_path(repo_root_path)
+    if not path.exists():
+        raise ExplainError(
+            "missing-file",
+            f"criteria guide not found at {path}; run "
+            "`python -m rebar.llm.plan_review.registry regenerate-criteria-guide`",
+        )
+    section = _guide_sections(path.read_text(encoding="utf-8")).get(criterion_id)
+    if not section:
+        raise ExplainError("missing-file", f"criteria guide has no section for {criterion_id!r}")
+    return section
+
+
 def _main(argv: list[str] | None = None) -> int:
     """``python -m rebar.llm.plan_review.registry validate-routing`` — the CI parity gate."""
     import sys
 
     args = sys.argv[1:] if argv is None else argv
-    if args[:1] != ["validate-routing"]:
-        print("usage: python -m rebar.llm.plan_review.registry validate-routing", file=sys.stderr)  # noqa: T201
+    cmd = args[0] if args else ""
+    if cmd == "regenerate-criteria-guide":
+        print(f"wrote {regenerate_criteria_guide()}")  # noqa: T201
+        return 0
+    if cmd != "validate-routing":
+        print(  # noqa: T201
+            "usage: python -m rebar.llm.plan_review.registry "
+            "validate-routing | regenerate-criteria-guide",
+            file=sys.stderr,
+        )
         return 2
-    problems = validate_packaged_routing()
+    # The parity gate now covers BOTH the routing index AND the derived criteria guide (WS10) —
+    # a removed/renamed guide section fails validate-routing.
+    problems = validate_packaged_routing() + validate_criteria_guide()
     if problems:
         print("criteria_routing.json parity gate FAILED:", file=sys.stderr)  # noqa: T201
         for p in problems:

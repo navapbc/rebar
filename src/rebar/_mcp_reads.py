@@ -51,6 +51,20 @@ def register_read_tools(mcp, ctx) -> None:
         return TicketStateOut.model_validate(rebar.show_ticket(ticket_id))
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
+    def explain_criterion(criterion_id: str) -> dict:
+        """Explain a plan-review criterion — its authoring-guide section (epic cite-stone-sea /
+        WS10). A pure registry/guide READ (no LLM, so it is NOT gated on REBAR_MCP_ALLOW_LLM); the
+        SAME shared lookup as the `rebar explain` CLI. On failure returns a structured error
+        ``{error, kind}`` (kind ∈ unknown-id / malformed-registry / missing-file)."""
+        from rebar.llm.plan_review import registry
+
+        try:
+            section = registry.explain_criterion(criterion_id)
+            return {"criterion_id": criterion_id, "section": section}
+        except registry.ExplainError as exc:
+            return {"error": str(exc), "kind": exc.kind}
+
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def list_tickets(
         status: str | None = None,
         ticket_type: str | None = None,

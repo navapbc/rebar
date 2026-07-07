@@ -457,6 +457,32 @@ the prompt cache each round, so the real cost-to-signature ≈ per-run cost ×
 revisions. Per-run latency/cost is captured on the sidecar for passive refinement —
 no upfront wall-clock benchmark is claimed.
 
+## Asymmetric-error invariants (a design invariant — read before tuning a floor or adding a criterion)
+
+The gate's reliability comes from each stage erring in a **deliberately opposite** direction; the
+errors balance rather than compound. Documented here (R-3) so a future floor-tuner or criterion
+author does not accidentally point two adjacent stages' skepticism the **same** way — which is how
+real findings die (or false ones survive):
+
+| Stage | Errs toward | Why |
+|-------|-------------|-----|
+| Pass-1 finder | **surface** (over-report) | recall first; a severity-free finder floods, the verifier filters |
+| Pass-2 verifier | **the author** (charitable) | drops a finding whose evidence doesn't entail it under a charitable reading |
+| Pass-3 decide | **drop** below 0.5 validity | arithmetic, not a second skepticism pass |
+| DET floor (P1–P9) | **fail-open** | a check that cannot run abstains (recorded coverage) and is treated as PASS |
+| Claim gate | **fail-closed** | a missing/stale plan-review attestation BLOCKS the claim |
+| Novelty / completion floors | **KEEP** | when unsure whether a finding is novel / a criterion met, keep the finding / do not certify |
+
+**Floor-tuning & criteria-authoring checklist:**
+- Do NOT make two adjacent stages err the same way (e.g. a stricter verifier AND a higher validity
+  cutoff double-counts skepticism — real findings die).
+- A new blocking-eligible criterion must be in-session-closable and fail-open on what it cannot
+  ground (mirror the DET floor); reserve fail-closed for the claim gate.
+- A new DET check blocks ONLY when it is sound + unambiguous (P1 / P5-cycle / P8); everything else
+  is advisory or coverage-only.
+- Adding a Pass-2 graded sub-answer? Default it to `na` (excluded until answered) so old sidecars
+  stay comparable (ADR 0032) — do not silently shift the validity denominator.
+
 ## The `removal-rationale` criterion (Chesterton's Fence — the removal-side dual of A1)
 
 The gate has strong ADDITION-side discipline — A1 (rule-of-three / YAGNI / NIH /

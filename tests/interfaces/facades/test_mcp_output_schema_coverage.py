@@ -89,6 +89,10 @@ EXEMPT_GENERIC: dict[str, str] = {
 
 # Tools that HAVE a canonical schema but advertise NO outputSchema by design.
 NO_SCHEMA_EXEMPT: dict[str, str] = {
+    "explain_criterion": "plan-review criteria authoring-guide lookup (epic cite-stone-sea / "
+    "WS10): a pure registry/guide READ that returns a plain dict — {criterion_id, section} on "
+    "success or {error, kind} on failure — a FREE-FORM doc section, not a schema-backed model, "
+    "so it advertises NO outputSchema by design.",
     "transition_ticket": "returns {ticket_id, from, to, …}; `from` is a Python "
     "reserved word, so it returns a plain dict (no pydantic "
     "model). CLI/library JSON pinned to transition_result.",
