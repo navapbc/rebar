@@ -4506,39 +4506,6 @@
       "state": "confirmed",
       "updated_at": "2026-07-05T04:48:35Z"
     },
-    "jira-reb-695": {
-      "absent_404_count": 2,
-      "baseline": {
-        "assignee": null,
-        "description": null,
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
-          "id": "3",
-          "name": "Medium",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24029",
-          "name": "To Do",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24029",
-          "statusCategory": {
-            "colorName": "blue-gray",
-            "id": 2,
-            "key": "new",
-            "name": "To Do",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/2"
-          }
-        },
-        "summary": "EXPERIMENT (delete me): assignee clobber repro"
-      },
-      "baseline_advanced_at": "2026-07-06T01:10:38Z",
-      "created_at": "2026-07-06T01:10:38Z",
-      "jira_key": "REB-695",
-      "state": "confirmed",
-      "updated_at": "2026-07-07T21:09:01Z"
-    },
     "jira-reb-714": {
       "created_at": "2026-07-06T07:20:11Z",
       "jira_key": "REB-714",
@@ -5248,7 +5215,6 @@
     "REB-692": "3ecd-dc8c-503b-4c90",
     "REB-693": "65dd-e93b-666a-4caa",
     "REB-694": "3b37-abf4-61f4-4d2b",
-    "REB-695": "jira-reb-695",
     "REB-696": "dec2-1232-de64-4e14",
     "REB-697": "9f78-ccbf-9248-4097",
     "REB-698": "1733-6b71-e83d-49c3",
