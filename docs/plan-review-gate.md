@@ -446,6 +446,34 @@ the prompt cache each round, so the real cost-to-signature ≈ per-run cost ×
 revisions. Per-run latency/cost is captured on the sidecar for passive refinement —
 no upfront wall-clock benchmark is claimed.
 
+## The `removal-rationale` criterion (Chesterton's Fence — the removal-side dual of A1)
+
+The gate has strong ADDITION-side discipline — A1 (rule-of-three / YAGNI / NIH /
+anti-premature-optimization) catches an agent adding machinery it does not need. `removal-rationale`
+is its **removal-side dual**: don't tear down a fence until you understand why it was built. An
+autonomous agent under scope pressure is biased toward "simplifying" by deleting guardrails it does
+not understand — exactly the early-trajectory defect this gate exists to catch. T4 already covers a
+removal's *consequences* (consumer breakage, reversibility, destructiveness) and E5 partly covers
+test sync, but none asks whether the plan *understands why the removed thing existed* — you can
+knowingly tear down a fence with a rollback plan and still not know why it was built.
+
+It is an **advisory, code-grounded, AGENT-tier** criterion (`applies_at: leaf`) with two bright-line
+triggers (a disjunction — no subjective "is this incidental?" call): the plan removes/weakens an
+externally-observable behavior or contract on any path (including failure/timeout/exception
+semantics — "internal" means observable-behavior-preserving, not file-local); it removes a
+guarding check/test; or it removes an artifact carrying an explicit intent marker (comment,
+`# do not remove`, referenced bug, bug-named test). To PASS, the plan must supply a concrete
+triggering scenario GROUNDED in evidence (comment / pinning test / git-blame / linked ticket) —
+never invented — plus evidence the reason no longer applies. Coaching reuses **move 6
+(specification-by-example)** to ask for that grounded scenario, and when E5's changed-behavior-tests
+finding also fires, the Pass-4 coaching pass GROUPS the two rather than double-reporting.
+
+**Accepted limitation (no silent cap — R-3):** a purely-latent guard whose removal changes behavior
+only for inputs never exercised today AND which carries no intent marker will NOT fire — it is
+indistinguishable from dead code without an external signal, and chasing it is the un-scalable nag
+this criterion deliberately avoids. This limitation is recorded in the criterion's coverage, not
+hidden.
+
 ## Scope (v1)
 
 Shipped advisory-by-default with high thresholds; **threshold calibration and tier

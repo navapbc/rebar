@@ -125,6 +125,10 @@ CANONICAL_LLM = frozenset(
         # T14 new-ref/event→workflow-trigger filters + release-infra.
         "T13",
         "T14",
+        # Removal-side dual of A1 (epic cite-stone-sea / WS11) — Chesterton's Fence: an advisory,
+        # code-grounded gate that fires when a plan removes/weakens an observable behavior, a guard,
+        # or an intent-marked artifact, and asks for a grounded triggering scenario.
+        "removal-rationale",
         # Cross-cutting
         "COH",
     }

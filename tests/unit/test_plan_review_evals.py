@@ -221,6 +221,55 @@ def test_g10_citrigger() -> None:
     assert failopen.get("expect") == "pass" and failopen.get("mode") == "unknown-ci-fail-open"
 
 
+def _finder_cases_for(criterion: str) -> dict:
+    ds = E.load_eval_spec("plan-review-finder").get("dataset", [])
+    return {c.get("id"): c for c in ds if c.get("criterion") == criterion}
+
+
+def test_removal_rationale_exempt() -> None:
+    # WS11 (epic cite-stone-sea): the gate EXEMPTS dead-code / behavior-preserving refactor.
+    c = _finder_cases_for("removal-rationale").get("FP-removal-rationale-dead-code", {})
+    assert c.get("expect") == "pass" and c.get("mode") == "dead-code-exempt"
+
+
+def test_removal_rationale_error_path() -> None:
+    # WS11: the gate FIRES on an internals change that alters error/failure handling.
+    c = _finder_cases_for("removal-rationale").get("R-removal-rationale-error-path", {})
+    assert c.get("expect") == "finding" and c.get("mode") == "error-handling-change"
+
+
+def test_removal_rationale_intent_marker_and_fabricated() -> None:
+    # WS11: FIRES on removal of an intent-marked artifact (no happy-path delta); a fabricated /
+    # ungrounded justification does not satisfy the grounded-scenario bar — the case pins the
+    # expected sub-answer removal_scenario_grounded ∈ {no, insufficient} (low validity).
+    cases = _finder_cases_for("removal-rationale")
+    assert cases.get("R-removal-rationale-intent-marker", {}).get("expect") == "finding"
+    fabricated = cases.get("R-removal-rationale-fabricated", {})
+    assert fabricated.get("mode") == "fabricated-scenario"
+    assert fabricated.get("expect") == "finding"
+    grounded = fabricated.get("checklist_expect", {}).get("removal_scenario_grounded")
+    assert grounded in ("no", "insufficient"), (
+        "an invented scenario must score low on removal_scenario_grounded"
+    )
+
+
+def test_removal_rationale_advisory_and_coaching() -> None:
+    # WS11: advisory posture (does not block a claim) + coaching reuses move 6, and the E5
+    # test-removal overlap is grouped by the coaching pass (a recall case where both fire).
+    import json
+    from pathlib import Path
+
+    from rebar.llm.plan_review import passes, registry
+
+    routing = json.loads((Path(registry.__file__).parent / "criteria_routing.json").read_text())
+    assert routing["removal-rationale"]["default_posture"] == "advisory"
+    prompt = (
+        Path(passes.__file__).parent.parent / "reviewers" / "plan_review_removal_rationale.md"
+    ).read_text()
+    assert "move 6" in prompt, "removal-rationale must frame its ask as coach move 6"
+    assert _finder_cases_for("removal-rationale").get("R-removal-rationale-e5-overlap")
+
+
 def test_verifier_has_blast_radius_ratchet_pair() -> None:
     # WS6 FP-3(b): the one-way blast_radius ratchet is a Pass-2 (verifier) behavior, so it is
     # exercised in the verifier eval — a real system-wide defect keeps impact; a trivial finding

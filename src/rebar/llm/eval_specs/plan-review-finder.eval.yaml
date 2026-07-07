@@ -342,6 +342,56 @@ dataset:
       A plan adds a new tag pattern, but CI runs on a third-party system whose trigger config the
       repo tools cannot read/parse. T14 must FAIL OPEN — abstain with coverage for that workflow
       rather than asserting an EXCLUDED gap it cannot ground; it must not fail closed on unknown CI.
+  # WS11 (epic cite-stone-sea): removal-rationale (Chesterton's Fence — removal-side dual of A1).
+  - id: FP-removal-rationale-dead-code
+    corpus: rebar
+    criterion: removal-rationale
+    expect: pass
+    mode: dead-code-exempt
+    input: >
+      A plan deletes a private helper with zero call sites and no observable-behavior delta (a pure
+      internal simplification). removal-rationale must PASS not-applicable — dead-code / behavior-
+      preserving cleanup is exempt; rebar values legitimate simplification.
+  - id: R-removal-rationale-error-path
+    corpus: rebar
+    criterion: removal-rationale
+    expect: finding
+    mode: error-handling-change
+    input: >
+      A 'refactor' replaces a retry-with-backoff around a flaky network call with a single fail-fast
+      call and swallows the timeout exception, with no grounded scenario for why the retry no longer
+      matters. removal-rationale must FIRE — failure-mode behavior is outward-facing, and the plan
+      shows no understanding of why the guard existed.
+  - id: R-removal-rationale-intent-marker
+    corpus: rebar
+    criterion: removal-rationale
+    expect: finding
+    mode: intent-marker
+    input: >
+      A plan deletes a code block preceded by a comment '# workaround for upstream bug #4821 — do
+      not remove until fixed' with no happy-path behavior delta and no evidence the upstream bug is
+      fixed. removal-rationale must FIRE on the explicit intent marker even absent a happy-path delta.
+  - id: R-removal-rationale-fabricated
+    corpus: rebar
+    criterion: removal-rationale
+    expect: finding
+    mode: fabricated-scenario
+    checklist_expect:
+      removal_scenario_grounded: "no"
+    input: >
+      A plan removes an input-validation guard and justifies it with an invented scenario ('callers
+      surely always pass valid input') that cites no comment, test, blame, or ticket. removal-
+      rationale must FIRE: removal_scenario_grounded is no — an ungrounded/fabricated justification
+      does not satisfy the grounded-scenario bar.
+  - id: R-removal-rationale-e5-overlap
+    corpus: rebar
+    criterion: removal-rationale
+    expect: finding
+    mode: e5-overlap-coach-grouped
+    input: >
+      A plan removes a boundary-condition behavior AND deletes the test that pinned it, with no
+      grounded rationale. Both removal-rationale and E5 (changed-behavior-tests) fire; the Pass-4
+      coaching pass GROUPS them (move 6, specification-by-example) rather than double-reporting.
 
 # Frozen human-gold subset (kappa alignment for the llm-judge). SEED labels — pending
 # human adjudication (the gating gold subset; auto-labels seed the bulk corpus).
