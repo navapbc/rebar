@@ -241,6 +241,13 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
             "norm_id": norm_id(f),
             "location": f.get("location", ""),
             "criteria": f.get("criteria", []),
+            # COHORT (epic cite-stone-sea / WS9): the sorted criterion-id set co-resident in the
+            # finder call that produced this finding (a singleton ["ISF"] for the ISF path). It is
+            # an offline calibration carrier for R-1 (chunk-contamination analysis) — a small scalar
+            # list, safe to persist here. A finding written before this field (or by a path that
+            # doesn't stamp it) has NO cohort key; offline analysis MUST treat a MISSING cohort as
+            # "unknown" (skip it), never as an empty set.
+            "cohort": f.get("cohort"),
             "tier": f.get("tier"),
             "decision": f.get("decision"),
             "severity": f.get("severity"),

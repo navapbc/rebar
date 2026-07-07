@@ -85,6 +85,10 @@ def _too_big_finding(
         ),
         "suggested_fix": "Decompose the oversized ticket(s).",
         "tier": "DET",
+        # COHORT (WS9): this container-failure finding bypasses pass1_container, but its cohort is
+        # deterministically the merged container criteria — stamp it so it isn't excluded from
+        # contamination analysis under the missing-cohort-as-unknown rule.
+        "cohort": sorted(ids),
     }
 
 

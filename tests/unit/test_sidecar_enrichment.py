@@ -118,3 +118,94 @@ def test_slim_persists_finding_prose_for_re_grounding() -> None:
     assert "scenarios" not in sf
     assert "evidence" not in sf
     assert "_agentic" not in sf
+
+
+# ── (WS9, epic cite-stone-sea) cohort field ─────────────────────────────────────
+def test_cohort_persists_through_slim_and_missing_is_unknown() -> None:
+    """cohort round-trips into the SIDECAR finding; a finding WITHOUT a cohort reads back None —
+    offline analysis treats a MISSING cohort as 'unknown', never as an empty/isolated set."""
+    verdict = {
+        "verdict": "PASS",
+        "ticket_id": "T-9",
+        "ticket_type": "task",
+        "advisory": [
+            {
+                "id": "with",
+                "finding": "x",
+                "criteria": ["G3"],
+                "location": "L",
+                "decision": "advisory",
+                "cohort": ["G3", "G4"],
+            },
+            {
+                "id": "without",
+                "finding": "y",
+                "criteria": ["F1"],
+                "location": "L",
+                "decision": "advisory",
+            },
+        ],
+        "coverage": {"metrics": {}},
+        "coaching": [],
+    }
+    payload = sidecar.build_payload(verdict, material="m")
+    byid = {f["id"]: f for f in payload["findings"]}
+    assert byid["with"]["cohort"] == ["G3", "G4"]
+    assert byid["without"]["cohort"] is None  # missing => unknown
+
+
+def test_cohort_stamped_by_finder_paths() -> None:
+    """pass1_chunk stamps the sorted chunk id set; pass1_isf stamps the singleton ['ISF'];
+    pass1_container stamps the sorted container criteria ids."""
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.plan_review import passes
+    from rebar.llm.runner import FakeRunner
+
+    cfg = LLMConfig()
+    ch = passes.pass1_chunk(
+        FakeRunner(findings=[{"finding": "x", "criteria": ["G3"], "location": "L"}]),
+        cfg,
+        plan="P",
+        chunk=[{"id": "G3"}, {"id": "F1"}],
+    )
+    assert ch and ch[0]["cohort"] == ["F1", "G3"]
+
+    isf = passes.pass1_isf(
+        FakeRunner(findings=[{"finding": "y", "criteria": ["ISF"], "location": "L"}]),
+        cfg,
+        plan="P",
+        session_log_text="log",
+    )
+    assert isf and isf[0]["cohort"] == ["ISF"]
+
+    cont = passes.pass1_container(
+        FakeRunner(findings=[{"finding": "z", "criteria": ["G3"], "location": ""}]),
+        cfg,
+        parent_plan="P",
+        children=[{"id": "c1", "title": "t", "description": "d"}],
+        criteria=[{"id": "G3"}, {"id": "G4"}],
+        sibling_roster="",
+    )
+    assert cont and cont[0]["cohort"] == ["G3", "G4"]
+
+
+def test_cohort_contamination_rate_skips_missing() -> None:
+    """The blocking-tier contamination-rate script: cohort>1 = contaminated, missing = unknown
+    (excluded from the denominator), advisory findings ignored."""
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(sidecar.__file__).parents[4] / "scripts" / "plan_review_contamination_rate.py"
+    spec = importlib.util.spec_from_file_location("_contam", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    r = mod.contamination_rate(
+        [
+            {"decision": "block", "cohort": ["G3", "G4"]},  # contaminated (>1)
+            {"decision": "block", "cohort": ["F1"]},  # isolated
+            {"decision": "block"},  # missing => unknown, excluded
+            {"decision": "advisory", "cohort": ["A", "B"]},  # not blocking-tier
+        ]
+    )
+    assert r["blocking_with_cohort"] == 2 and r["contaminated"] == 1
+    assert r["unknown"] == 1 and r["rate"] == 0.5

@@ -324,6 +324,9 @@ def pass1_chunk(
                 "checklist_item": f.get("checklist_item", ""),
                 "suggested_fix": f.get("suggested_fix", ""),
                 "_agentic": agentic,
+                # COHORT (epic cite-stone-sea / WS9): the sorted set of criterion ids that were
+                # CO-RESIDENT in this finder call — the contamination-analysis key for R-1.
+                "cohort": sorted(ids),
             }
         )
     return out
@@ -423,6 +426,8 @@ def pass1_container(
                 "_agentic": True,
                 "_container_child": child_id,
                 "_container_bin": list(bin_ids),
+                # COHORT (WS9): the container criteria co-resident in this pairing call.
+                "cohort": sorted(valid_ids),
             }
         )
     return out
@@ -479,6 +484,9 @@ def pass1_isf(
                 "impact": f.get("impact", ""),
                 "_agentic": False,
                 "_reduced_confidence": summarized,
+                # COHORT (WS9): ISF runs a SINGLE fixed call, never co-resident with other
+                # criteria, so its cohort is the singleton ["ISF"] (contamination cohort = itself).
+                "cohort": ["ISF"],
             }
         )
     return out

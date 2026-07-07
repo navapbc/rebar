@@ -265,6 +265,9 @@ def pass1_with_ladder(
                     "suggested_fix": "Split the ticket into smaller children.",
                     "tier": "DET",
                     "_too_big": True,
+                    # COHORT (WS9): a size-ladder failure is a single-criterion finding — stamp its
+                    # singleton cohort so it isn't excluded from contamination analysis.
+                    "cohort": [crit["id"]],
                 }
             )
     return out
