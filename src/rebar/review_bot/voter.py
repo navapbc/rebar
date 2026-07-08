@@ -432,7 +432,6 @@ async def review_and_vote(
                                 diff_text,
                                 repo_root,
                                 info["patchset_ref"],
-                                config=cfg,
                                 merge_commits=merge_commits,
                             )
                     else:
@@ -442,7 +441,6 @@ async def review_and_vote(
                             diff_text,
                             repo_root,
                             info["patchset_ref"],
-                            config=cfg,
                             commit_message=commit_message,  # scope-intent overlay (non-merge path)
                         )
             except GerritError as exc:

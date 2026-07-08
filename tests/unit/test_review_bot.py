@@ -178,7 +178,7 @@ def test_adapter_clean_is_pass(monkeypatch, tmp_path):
         monkeypatch,
         {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {"llm_ran": True}},
     )
-    out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref")
     assert out["decision"] == "PASS" and out["coverage_gap"] is False
     assert out["message"].startswith("[LLM-Review: PASS]")
 
@@ -192,7 +192,7 @@ def test_adapter_blocking_finding_is_block(monkeypatch, tmp_path):
             "coverage": {},
         },
     )
-    out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref")
     assert out["decision"] == "BLOCK" and out["coverage_gap"] is False
     assert out["message"].startswith("[LLM-Review: BLOCK — finding]")
     assert any(f["detail"] == "rce" for f in out["findings"])
@@ -203,7 +203,7 @@ def test_adapter_indeterminate_is_coverage_gap_block(monkeypatch, tmp_path):
         monkeypatch,
         {"verdict": "INDETERMINATE", "coverage": {"llm_unavailable": True, "llm_error": "outage"}},
     )
-    out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref")
     assert out["decision"] == "BLOCK" and out["coverage_gap"] is True
     assert "coverage-gap (llm-unavailable)" in out["message"]
 
@@ -220,7 +220,7 @@ def test_adapter_indeterminate_no_gap_no_findings_is_coverage_gap_not_finding(
         monkeypatch,
         {"verdict": "INDETERMINATE", "blocking": [], "advisory": [], "coverage": {"llm_ran": True}},
     )
-    out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref")
     assert out["decision"] == "BLOCK" and out["coverage_gap"] is True
     assert "BLOCK — finding" not in out["message"]
     assert "coverage-gap (indeterminate)" in out["message"]
@@ -232,7 +232,7 @@ def test_adapter_inert_disabled_verdict_never_passes(monkeypatch, tmp_path):
     _patch_verdict(
         monkeypatch, {"verdict": "PASS", "coverage": {"enabled": False, "llm_ran": False}}
     )
-    out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref")
     assert out["decision"] == "BLOCK" and "coverage-gap (gate-disabled)" in out["message"]
 
 
@@ -252,7 +252,7 @@ def test_adapter_scanner_abstain_is_coverage_gap(monkeypatch, tmp_path):
             },
         },
     )
-    out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref")
     assert out["decision"] == "BLOCK" and out["coverage_gap"] is True
     assert "coverage-gap (scanner)" in out["message"]
 
@@ -267,7 +267,7 @@ def test_adapter_scanner_MATCH_is_a_real_finding(monkeypatch, tmp_path):
             "coverage": {"security_detectors": [{"reason": "detector-finding"}]},
         },
     )
-    out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref")
     assert out["decision"] == "BLOCK" and out["coverage_gap"] is False
     assert "BLOCK — finding" in out["message"]
 
@@ -304,7 +304,7 @@ def test_adapter_renders_named_finding_for_detector_match_block(monkeypatch, tmp
     assert verdict["verdict"] == "BLOCK" and verdict["blocking"]  # the fix populated `blocking`
     _patch_verdict(monkeypatch, verdict)
 
-    out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref")
     assert out["decision"] == "BLOCK" and out["coverage_gap"] is False
     assert out["message"].startswith("[LLM-Review: BLOCK — finding]")
     assert "found 1 blocking issue(s):" in out["message"]
@@ -323,7 +323,7 @@ def test_adapter_forces_gate_enabled(monkeypatch, tmp_path):
         return {"verdict": "PASS", "coverage": {"llm_ran": True}}
 
     monkeypatch.setattr(gd, "produce_code_review_verdict", fake, raising=True)
-    adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
+    adapter.code_review_decision("diff", str(tmp_path), "ref")
     assert calls.get("enabled") is True  # voter activation is the authoritative gate (ADR 0013)
 
 
@@ -334,13 +334,13 @@ def test_adapter_error_is_block_fail_closed(monkeypatch, tmp_path):
         raise RuntimeError("LLM down")
 
     monkeypatch.setattr(gd, "produce_code_review_verdict", boom, raising=True)
-    out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref")
     assert out["decision"] == "BLOCK" and "coverage-gap (review-error)" in out["message"]
 
 
 def test_adapter_unparseable_result_is_block(monkeypatch, tmp_path):
     _patch_verdict(monkeypatch, "not a dict")
-    out = adapter.code_review_decision("diff", str(tmp_path), "ref", config=_cfg(tmp_path))
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref")
     assert out["decision"] == "BLOCK"
 
 

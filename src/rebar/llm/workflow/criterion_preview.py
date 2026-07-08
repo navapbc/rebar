@@ -52,7 +52,6 @@ __all__ = [
     "handle_preview_post",
     "poll_job",
     "preview_criterion",
-    "preview_criterion_response",
     "preview_or_job",
     "write_criterion_overlay",
 ]
@@ -269,25 +268,6 @@ def handle_preview_post(
     if path.rstrip("/").endswith("/status"):
         return poll_job(str(data.get("job_id") or ""))
     return preview_or_job(data, repo_root=repo_root, runner=None)
-
-
-def preview_criterion_response(raw: bytes, *, repo_root: str | None) -> tuple[int, dict[str, Any]]:
-    """Back-compat SYNC shim (library/tests): parse the raw POST body, run
-    :func:`preview_criterion`, and return ``(status_code, body)``. A bad body / a
-    :class:`PreviewError` / a missing ``agents`` extra or credentials (``LLMError`` /
-    ``OptionalDependencyError``) is a clean 400 ``{error}``. The live editor endpoint uses
-    :func:`handle_preview_post` (async-aware)."""
-    from rebar._optional import OptionalDependencyError
-    from rebar.llm.errors import LLMError
-
-    try:
-        data = json.loads(raw.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError) as exc:
-        return 400, {"error": f"bad JSON body: {exc}"}
-    try:
-        return 200, preview_criterion(data, repo_root=repo_root, runner=None)
-    except (PreviewError, LLMError, OptionalDependencyError) as exc:
-        return 400, {"error": str(exc)}
 
 
 # ── LLM path ─────────────────────────────────────────────────────────────────────

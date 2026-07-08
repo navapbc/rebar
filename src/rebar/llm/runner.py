@@ -64,11 +64,6 @@ class RunRequest:
     # review callers are unchanged. (Post-cutover the pydantic_ai runner supplies
     # show_ticket natively, so this is always None in practice.)
     extra_tools: list | None = None
-    # Historical structured-output strategy knob (kept for the RunRequest contract).
-    # The pydantic_ai runtime always concludes naturally and parses/validates the
-    # structured output via the reliability stack, so this field no longer drives
-    # runner behaviour.
-    output_strategy: str = "tool"
     # Extended-thinking flag (1268). When set, the structured-output stack uses
     # PromptedOutput rather than a provider-native/strict constraint — a CURRENT
     # Anthropic API constraint (it 400s when extended thinking is on together with a

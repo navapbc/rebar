@@ -122,8 +122,6 @@ logger = logging.getLogger(__name__)
 def transition_issue(
     jira_key: str,
     status: str,
-    *,
-    acli_cmd: list[str] | None = None,
 ) -> dict[str, Any]:
     """Transition a Jira issue to *status* via REST (bug 85a1, Gap 8).
 
@@ -141,8 +139,6 @@ def transition_issue(
     so workflows that use ``Move to <state>`` transition names are handled.
 
     Returns ``{"key": jira_key, "status": <resolved_name>}`` on success.
-    The ``acli_cmd`` argument is accepted for backward compatibility but
-    is no longer used.
     """
     resolved = _LOCAL_STATUS_TO_JIRA.get(status, status.replace("_", " ").title())
     _s = resolve_jira_settings()
@@ -180,7 +176,7 @@ def update_issue(
         acli_cli_ops.update_priority(jira_key, priority_name, acli_cmd=acli_cmd)
 
     if status is not None:
-        transition_issue(jira_key, status, acli_cmd=acli_cmd)
+        transition_issue(jira_key, status)
 
     if not kwargs:
         # No editable fields remain (status/priority were already handled above)

@@ -34,8 +34,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from rebar.review_bot.config import ReceiverConfig
-
 logger = logging.getLogger("rebar.review_bot.adapter")
 
 __all__ = ["code_review_decision"]
@@ -164,7 +162,6 @@ def code_review_decision(
     repo_root,
     ref: str,
     *,
-    config: ReceiverConfig | None = None,
     merge_commits: int | None = None,
     commit_message: str = "",
 ) -> dict[str, Any]:
@@ -172,8 +169,7 @@ def code_review_decision(
     ``{decision, message, findings, coverage_gap}``. PASS only for a genuine full-coverage PASS;
     a real BLOCK, an INDETERMINATE, a fail-closed scanner abstain, an inert-disabled verdict, or
     ANY exception → BLOCK (fail-closed). Signature + return shape are stable (the voter is
-    unchanged); ``config`` is accepted for compatibility (the gate owns the threshold now)."""
-    _ = config  # the four-pass gate's Pass-3 owns the threshold; kept for signature stability
+    unchanged); the four-pass gate owns the threshold."""
     try:
         # Lazily imported: the [agents] extra (heavy) must not load merely because the receiver
         # package was imported — only when a review actually runs.

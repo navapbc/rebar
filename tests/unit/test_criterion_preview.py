@@ -27,14 +27,12 @@ from rebar.grounding.engine_b import ScanResult
 from rebar.llm.plan_review import det_invariants, registry
 from rebar.llm.prompting import prompt_library
 from rebar.llm.runner import FakeRunner
-from rebar.llm.workflow import criterion_preview
 from rebar.llm.workflow.criterion_preview import (
     PreviewError,
     author_criterion_overlay,
     handle_preview_post,
     poll_job,
     preview_criterion,
-    preview_criterion_response,
     preview_or_job,
     write_criterion_overlay,
 )
@@ -358,36 +356,6 @@ def test_criterion_preview_in_guarded_post_set():
     # the async poll path is guarded too, and both preview paths are grouped
     assert "/criterion/preview/status" in editor._POST_WRITE_PATHS
     assert set(editor._PREVIEW_PATHS) == {"/criterion/preview", "/criterion/preview/status"}
-
-
-def test_response_shim_bad_json_is_400():
-    code, body = preview_criterion_response(b"{not json", repo_root=None)
-    assert code == 400
-    assert "error" in body
-
-
-def test_response_shim_container_is_400():
-    raw = json.dumps({"criterion_id": "G3", "fixture": {"input": "x"}}).encode()
-    code, body = preview_criterion_response(raw, repo_root=None)
-    assert code == 400
-    assert "not previewable" in body["error"]
-
-
-def test_response_shim_success_is_200(monkeypatch):
-    monkeypatch.setattr(
-        criterion_preview,
-        "preview_criterion",
-        lambda data, *, repo_root, runner=None: {
-            "verdict": "no-fire",
-            "finding": None,
-            "rationale": "ok",
-        },
-    )
-    code, body = preview_criterion_response(
-        json.dumps({"criterion_id": "F1", "fixture": {"input": "x"}}).encode(), repo_root=None
-    )
-    assert code == 200
-    assert body["verdict"] == "no-fire"
 
 
 # ── GAP 2: spike-gate async job + poll ───────────────────────────────────────────
