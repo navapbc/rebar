@@ -57,12 +57,12 @@ from rebar_reconciler.acli_subprocess import (
     _run_acli,
     resolve_jira_settings,
 )
-from rebar_reconciler.adf import text_to_adf as _text_to_adf  # canonical location
 
-# Field sanitization + local↔Jira value maps live in jira_fields; re-exported
-# here so ``acli.<name>`` keeps resolving for callers and the characterization
-# suites (point-of-use read access).
-from rebar_reconciler.jira_fields import (
+# Field sanitization + local↔Jira value maps live in the Jira vendor adapter
+# (``adapters/jira/jira_fields.py``, relocated by ticket 44be); re-exported here
+# so ``acli.<name>`` keeps resolving for callers and the characterization suites
+# (point-of-use read access).
+from rebar_reconciler.adapters.jira.jira_fields import (
     _JIRA_LABEL_MAX_CHARS,
     _JIRA_SUMMARY_MAX_CHARS,
     _LOCAL_PRIORITY_TO_JIRA,
@@ -73,10 +73,12 @@ from rebar_reconciler.jira_fields import (
     _sanitize_label,
     _sanitize_summary,
 )
+from rebar_reconciler.adf import text_to_adf as _text_to_adf  # canonical location
 
-# Re-export facade. These names are imported from sibling acli_* / jira_fields
-# modules solely so ``acli.<name>`` keeps resolving for callers and the
-# characterization suites; ``__all__`` records them as intentional re-exports.
+# Re-export facade. These names are imported from the sibling acli_* modules and
+# the Jira vendor adapter (adapters/jira/jira_fields) solely so ``acli.<name>``
+# keeps resolving for callers and the characterization suites; ``__all__`` records
+# them as intentional re-exports.
 __all__ = [
     "AcliMutationError",
     "AcliTimeoutError",

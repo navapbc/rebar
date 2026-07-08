@@ -29,8 +29,11 @@ from rebar_reconciler.acli_subprocess import (
     _ASSIGNEE_NOT_FOUND_ERROR,
     _ASSIGNEE_PERMISSION_ERROR,
 )
+from rebar_reconciler.adapters.jira.jira_fields import (
+    _LOCAL_PRIORITY_TO_JIRA,
+    _sanitize_comment,
+)
 from rebar_reconciler.adf import text_to_adf as _text_to_adf  # canonical location
-from rebar_reconciler.jira_fields import _LOCAL_PRIORITY_TO_JIRA, _sanitize_comment
 
 logger = logging.getLogger(__name__)
 

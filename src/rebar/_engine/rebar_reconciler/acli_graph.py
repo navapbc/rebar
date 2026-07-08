@@ -19,7 +19,7 @@ import tempfile
 import urllib.error
 from typing import TYPE_CHECKING, Any
 
-from rebar_reconciler.jira_fields import _sanitize_label
+from rebar_reconciler.adapters.jira.jira_fields import _sanitize_label
 
 if TYPE_CHECKING:
     import subprocess
