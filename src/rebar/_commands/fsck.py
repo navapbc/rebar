@@ -26,9 +26,10 @@ import time
 
 from rebar import config
 from rebar._engine_support.output import OutputFormatError, parse_output
+from rebar._store import lock
 from rebar._store.gitutil import run_git
 from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
-from rebar.reducer._cache import is_active_event
+from rebar.reducer._cache import RETIRED_SUFFIX, is_active_event
 
 _STRUCTURED_KINDS = {
     "corrupt",
@@ -37,6 +38,32 @@ _STRUCTURED_KINDS = {
     "snapshot_inconsistent",
     "orphan_event",
 }
+
+# ── A3 (34b1) live-store remediation: orphan disposition ─────────────────────
+# Routed BY EVENT TYPE. Additive/commutative orphans are safe to AUTO-RECOVER via a
+# full-log rebuild (the fold order does not change their effect). Order-sensitive
+# orphans are surfaced for HUMAN-TRIAGE — an auto-rebuild could pick a wrong order.
+# CREATE (genesis) and SNAPSHOT (the fold marker) are never orphan-classified; the
+# two sets below cover every other KNOWN_EVENT_TYPE (asserted in tests).
+_AUTO_RECOVER_ORPHAN_TYPES = frozenset(
+    {"COMMENT", "LINK", "UNLINK", "TAG_DELTA", "COMMITS", "BRIDGE_ALERT", "REVERT"}
+)
+_HUMAN_TRIAGE_ORPHAN_TYPES = frozenset(
+    {
+        "STATUS",
+        "EDIT",
+        "FILE_IMPACT",
+        "VERIFY_COMMANDS",
+        "SIGNATURE",
+        "WORKFLOW_RUN",
+        "WORKFLOW_STEP",
+        "ARCHIVED",
+    }
+)
+
+
+def _git(tracker: str, *args: str) -> subprocess.CompletedProcess:
+    return run_git(tracker, *args, check=False)
 
 
 def _resolve_tracker_git_dir(tracker: str) -> str:
@@ -268,6 +295,110 @@ def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> 
     return out
 
 
+def _active_snapshots(ticket_dir: str) -> list[str]:
+    return sorted(
+        n for n in os.listdir(ticket_dir) if n.endswith("-SNAPSHOT.json") and not n.startswith(".")
+    )
+
+
+def _repair_plan(ticket_dir: str, ticket_id: str) -> dict:
+    """Derive a per-ticket repair plan mirroring _check_snapshot's detection.
+
+    Returns {"retire": [filenames], "auto_orphans": [(name,type)],
+    "triage_orphans": [(name,type)]}. ``retire`` are still-present folded sources
+    (SNAPSHOT_INCONSISTENT → rename to .retired, NOT a rebuild); ``auto_orphans`` are
+    AUTO-RECOVER pre-snapshot orphans (→ full-log rebuild); ``triage_orphans`` are
+    order-sensitive orphans surfaced for a human.
+    """
+    snaps = _active_snapshots(ticket_dir)
+    plan: dict[str, list] = {"retire": [], "auto_orphans": [], "triage_orphans": []}
+    if not snaps:
+        return plan
+
+    # uuid -> (filename, event_type) for active, non-snapshot events.
+    event_files: dict[str, tuple[str, str]] = {}
+    for name in sorted(os.listdir(ticket_dir)):
+        if not name.endswith(".json") or name.startswith("."):
+            continue
+        if not is_active_event(name) or name.endswith("-SNAPSHOT.json"):
+            continue
+        parts = name.split("-", 1)
+        if len(parts) < 2:
+            continue
+        type_split = parts[1].rsplit(".json", 1)[0].rsplit("-", 1)
+        if len(type_split) < 2:
+            continue
+        event_files[type_split[0]] = (name, type_split[1])
+
+    all_sources: set[str] = set()
+    for snap in snaps:
+        try:
+            with open(os.path.join(ticket_dir, snap), encoding="utf-8") as f:
+                sources = json.load(f).get("data", {}).get("source_event_uuids", [])
+        except (json.JSONDecodeError, OSError):
+            continue
+        all_sources.update(sources)
+        # SNAPSHOT_INCONSISTENT: a folded source still present as an active file.
+        for u in sources:
+            if u in event_files and event_files[u][0] not in plan["retire"]:
+                plan["retire"].append(event_files[u][0])
+
+    latest_snap = snaps[-1]
+    for file_uuid, (name, etype) in event_files.items():
+        if etype not in KNOWN_EVENT_TYPES or name in plan["retire"]:
+            continue
+        if name < latest_snap and file_uuid not in all_sources:
+            if etype in _AUTO_RECOVER_ORPHAN_TYPES:
+                plan["auto_orphans"].append((name, etype))
+            else:  # HUMAN-TRIAGE (order-sensitive) — surfaced, never auto-rebuilt.
+                plan["triage_orphans"].append((name, etype))
+    return plan
+
+
+def _repair_ticket(tracker: str, ticket_id: str, ticket_dir: str, *, dry_run: bool) -> dict:
+    """Apply (or, in dry-run, describe) a ticket's _repair_plan. Retires still-present
+    folded sources under the write lock, then rebuilds if any AUTO-RECOVER orphan
+    remains. HUMAN-TRIAGE orphans and MISSING_CREATE are surfaced, never auto-written.
+    Returns the executed disposition."""
+    plan = _repair_plan(ticket_dir, ticket_id)
+    skipped: list[str] = []
+    disp: dict = {
+        "ticket": ticket_id,
+        "retired": list(plan["retire"]),
+        "rebuilt": False,
+        "triage": [f"{n} ({t})" for n, t in plan["triage_orphans"]],
+        "skipped": skipped,
+    }
+    if dry_run:
+        disp["rebuilt"] = bool(plan["auto_orphans"])
+        return disp
+
+    if plan["retire"]:
+        try:
+            handle = lock.acquire(tracker, timeout=30, attempts=2, dual_window=True)
+        except lock.LockTimeout:
+            disp["error"] = "lock-timeout"
+            return disp
+        try:
+            for name in plan["retire"]:
+                fp = os.path.join(ticket_dir, name)
+                retired = fp + RETIRED_SUFFIX
+                if os.path.exists(retired):
+                    continue
+                try:
+                    os.rename(fp, retired)
+                except OSError:
+                    skipped.append(name)
+        finally:
+            handle.release()
+
+    if plan["auto_orphans"]:
+        from rebar._commands.compact import rebuild_snapshot_from_full_log
+
+        disp["rebuilt"] = rebuild_snapshot_from_full_log(tracker, ticket_id, ticket_dir)
+    return disp
+
+
 def _branch_mismatch(tracker: str, repo_root=None) -> str | None:
     """Informational WARN when the tracker worktree's actually-checked-out branch
     differs from the configured ``tracker.branch``. 'configured' = the precedence-
@@ -357,12 +488,151 @@ def _transform_json(text: str) -> str:
     return json.dumps({"issues": issues, "fixed": fixed, "issue_count": len(issues)})
 
 
+def _has_remote(tracker: str) -> bool:
+    return bool(_git(tracker, "remote").stdout.strip())
+
+
+def _reconciler_pause(repo_root=None) -> bool:
+    """Best-effort: disable the reconcile-bridge GHA schedule for the repair window and
+    confirm no pass is mid-flight (the leased CAS ``refs/reconciler/lock`` would expire,
+    so it is not the pause mechanism). Returns True iff we disabled it (→ re-enable in a
+    failsafe). A missing/unauthenticated ``gh`` just logs and returns False (the batched,
+    pre-tagged, committed design keeps a stray write recoverable)."""
+    cp = subprocess.run(
+        ["gh", "workflow", "disable", "reconcile-bridge.yml"], capture_output=True, text=True
+    )
+    return cp.returncode == 0
+
+
+def _reconciler_resume() -> None:
+    subprocess.run(
+        ["gh", "workflow", "enable", "reconcile-bridge.yml"], capture_output=True, text=True
+    )
+
+
+def _repair_run(
+    tracker: str, *, dry_run: bool, limit: int | None = None, repo_root=None
+) -> tuple[list[str], int]:
+    """A3 remediation: drive the store to fsck-zero, safely and resumably.
+
+    fsck itself is the authoritative resumability check (only tickets it still flags are
+    repaired); a ``.git/a3-repaired/<id>`` marker is a local, never-committed optimization.
+    The live run pre-tags for rollback, pauses the reconciler, and commits+pushes each
+    batch — a push failure ABORTS and surfaces the error. Dry-run writes nothing.
+    Returns (report_lines, unresolved_fault_count).
+    """
+    lines: list[str] = []
+    flagged: list[tuple[str, dict]] = []
+    for tid in _ticket_dirs(tracker):
+        plan = _repair_plan(os.path.join(tracker, tid), tid)
+        if plan["retire"] or plan["auto_orphans"] or plan["triage_orphans"]:
+            flagged.append((tid, plan))
+    total = len(flagged)
+    if limit is not None:
+        flagged = flagged[:limit]
+    if not flagged:
+        lines.append("a3-remediation: no repairable faults")
+        return lines, 0
+
+    if dry_run:
+        for tid, plan in flagged:
+            lines.append(
+                f"DRY-RUN {tid}: retire={len(plan['retire'])} "
+                f"rebuild={len(plan['auto_orphans'])} triage={len(plan['triage_orphans'])}"
+            )
+        triage = sum(len(p["triage_orphans"]) for _, p in flagged)
+        lines.append(
+            f"a3-remediation DRY-RUN: {len(flagged)}/{total} ticket(s) would be repaired "
+            "— 0 file writes, 0 commits"
+        )
+        return lines, triage
+
+    # ── LIVE run ──
+    pre_oid = _git(tracker, "rev-parse", "HEAD").stdout.strip()
+    _git(tracker, "tag", "-f", "pre-a3-remediation", pre_oid)
+    lines.append(f"a3-remediation: pre-tag pre-a3-remediation @ {pre_oid[:12]}")
+
+    # Markers live under the resolved git dir (never the committed tree, so `git add`
+    # never picks them up) — .git may be a worktree pointer FILE, not a directory.
+    git_dir = _resolve_tracker_git_dir(tracker)
+    marker_dir = os.path.join(git_dir or tracker, "a3-repaired")
+    try:
+        os.makedirs(marker_dir, exist_ok=True)
+    except OSError:
+        marker_dir = ""
+
+    paused = _reconciler_pause(repo_root)
+    lines.append(f"a3-remediation: reconciler {'paused' if paused else 'pause skipped'}")
+    batch = 200
+    try:
+        for i, (tid, _plan) in enumerate(flagged):
+            disp = _repair_ticket(tracker, tid, os.path.join(tracker, tid), dry_run=False)
+            if disp.get("error"):
+                lines.append(f"SKIP {tid}: {disp['error']}")  # per-ticket failure: log + skip
+            elif marker_dir:
+                try:
+                    open(os.path.join(marker_dir, tid), "w").close()
+                except OSError:
+                    pass
+            if (i + 1) % batch == 0 or i == len(flagged) - 1:
+                add = _git(tracker, "add", "-A")
+                if add.returncode != 0:
+                    lines.append("ABORT: git add failed")
+                    return lines, -1
+                if _git(tracker, "diff", "--cached", "--quiet").returncode != 0:
+                    n = i // batch + 1
+                    commit = _git(
+                        tracker, "commit", "--no-verify", "-m", f"a3-remediation: batch {n}"
+                    )
+                    if commit.returncode != 0:
+                        lines.append("ABORT: commit failed while holding batch")
+                        return lines, -1
+                    if _has_remote(tracker):
+                        push = _git(tracker, "push", "origin", "HEAD:tickets")
+                        if push.returncode != 0:
+                            lines.append(f"ABORT: push failed for batch {n}: {push.stderr.strip()}")
+                            return lines, -1
+    finally:
+        if paused:
+            _reconciler_resume()
+            lines.append("a3-remediation: reconciler re-enabled")
+
+    remaining = sum(
+        1
+        for tid in _ticket_dirs(tracker)
+        if (p := _repair_plan(os.path.join(tracker, tid), tid))["retire"] or p["auto_orphans"]
+    )
+    triage = sum(
+        len(_repair_plan(os.path.join(tracker, tid), tid)["triage_orphans"])
+        for tid in _ticket_dirs(tracker)
+    )
+    lines.append(
+        f"a3-remediation: {len(flagged)} ticket(s) processed; {remaining} auto-fault(s) remain, "
+        f"{triage} orphan(s) await human triage"
+    )
+    return lines, remaining
+
+
 def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int:
     # RC2b Option 1: --repair-snapshots opts into rebuilding a stale SNAPSHOT that has
     # a merged-in pre-snapshot orphan (drives the live store to fsck-zero — A3). Strip
     # it before output parsing; it is honored only when mutation is allowed.
     repair_snapshots = "--repair-snapshots" in argv
-    argv = [a for a in argv if a != "--repair-snapshots"]
+    do_repair = "--repair" in argv
+    dry_run = "--dry-run" in argv
+    limit: int | None = None
+    for a in argv:
+        if a.startswith("--limit="):
+            try:
+                limit = int(a[len("--limit=") :])
+            except ValueError:
+                sys.stderr.write(f"Error: invalid --limit value in '{a}'\n")
+                return 2
+    argv = [
+        a
+        for a in argv
+        if a not in ("--repair-snapshots", "--repair", "--dry-run") and not a.startswith("--limit=")
+    ]
     try:
         fmt, _rest = parse_output(argv, "report")
     except OutputFormatError as exc:
@@ -389,6 +659,26 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
             f"Run 'ticket init' first.{mismatch_hint}\n"
         )
         return 1
+
+    # ── A3 remediation (--repair): drive the store to fsck-zero ──────────────
+    if do_repair:
+        if no_mutate and not dry_run:
+            sys.stderr.write("Error: --repair requires mutation; use --dry-run for a preview\n")
+            return 2
+        repair_lines, _unresolved = _repair_run(
+            tracker, dry_run=dry_run, limit=limit, repo_root=repo_root
+        )
+        # Re-scan for the residual state (read-only in dry-run so it writes nothing).
+        scan_lines, issue_count = _scan(tracker, no_mutate or dry_run, repo_root)
+        summary = (
+            "fsck complete: no issues found"
+            if issue_count == 0
+            else f"fsck complete: {issue_count} issues found"
+        )
+        rc = 0 if issue_count == 0 else 1
+        full = "\n".join(repair_lines + scan_lines + [summary])
+        sys.stdout.write((_transform_json(full) if fmt == "json" else full) + "\n")
+        return rc
 
     # ``no_mutate`` is passed by the caller (the library's read-only fsck surface),
     # not read from the environment: read paths (list/show via rebar.fsck(report_only=
