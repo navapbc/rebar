@@ -36,6 +36,10 @@ from rebar._store.gitutil import run_git
 __all__ = [
     "TICKETS_BRANCH",
     "TICKETS_REF",
+    "TRACKER_DIR",
+    "BRIDGE_STATE_DIR",
+    "BINDINGS_FILE",
+    "BINDINGS_RETIRED_FILE",
     "run_git",
     "rev_parse",
     "cat_file_exists",
@@ -62,6 +66,17 @@ __all__ = [
 
 TICKETS_BRANCH = "tickets"  # short name / ``<branch>:<path>`` spec + ``rev-parse`` target
 TICKETS_REF = f"refs/heads/{TICKETS_BRANCH}"  # fully-qualified ref for ``update-ref``
+
+# The tickets orphan-branch worktree, relative to ``<repo_root>``. The binding-store
+# commit-back stages its state files here.  # tickets-boundary-ok
+TRACKER_DIR = ".tickets-tracker"
+# The bridge-state subdirectory (under ``TRACKER_DIR``) holding the binding stores.
+BRIDGE_STATE_DIR = ".bridge_state"
+# The live binding store — repo_root/TRACKER_DIR-relative path staged on commit-back.
+BINDINGS_FILE = f"{BRIDGE_STATE_DIR}/bindings.json"
+# The retired (soft-deleted) binding store, staged alongside ``BINDINGS_FILE`` so a
+# retirement-only pass is also committed (bug 1e08).
+BINDINGS_RETIRED_FILE = f"{BRIDGE_STATE_DIR}/bindings-retired.json"
 
 RepoRoot = str | os.PathLike[str]
 

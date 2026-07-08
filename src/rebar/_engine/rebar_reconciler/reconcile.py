@@ -161,12 +161,12 @@ def _commit_binding_store_snapshot(
     """
     from rebar_reconciler import git_adapter
 
-    tracker_dir = repo_root / ".tickets-tracker"  # tickets-boundary-ok
+    tracker_dir = repo_root / git_adapter.TRACKER_DIR
     # Bug 1e08: stage BOTH the live store and the retired-binding store. The
     # absence-lifecycle GC writes bindings-retired.json; a retirement-only pass
     # must also be committed (else a soft-deleted binding is silently lost on
     # the next ``git merge origin/tickets``).
-    _rel_files = [".bridge_state/bindings.json", ".bridge_state/bindings-retired.json"]
+    _rel_files = [git_adapter.BINDINGS_FILE, git_adapter.BINDINGS_RETIRED_FILE]
     _existing_rel = [rel for rel in _rel_files if (tracker_dir / rel).exists()]
     if not _existing_rel:
         return True  # Nothing to commit — not a failure
@@ -185,7 +185,11 @@ def _commit_binding_store_snapshot(
         _staged_basenames = {
             os.path.basename(line.strip()) for line in staged_names.splitlines() if line.strip()
         }
-        if not ({"bindings.json", "bindings-retired.json"} & _staged_basenames):
+        _tracked_basenames = {
+            os.path.basename(git_adapter.BINDINGS_FILE),
+            os.path.basename(git_adapter.BINDINGS_RETIRED_FILE),
+        }
+        if not (_tracked_basenames & _staged_basenames):
             return True  # Already up-to-date; nothing to commit.
         git_adapter.commit(
             tracker_dir,
