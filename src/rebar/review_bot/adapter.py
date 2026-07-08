@@ -156,6 +156,9 @@ def _block(
         "message": f"{tag}\n{_summarize(reason, verdict)}",
         "findings": _translate_findings(verdict),
         "coverage_gap": reason != "finding",
+        # The FULL verdict is threaded up (story limestone-unethical-zebrafinch) so the voter can
+        # emit a durable code_review artifact; {} on a fail-closed review-error (no artifact then).
+        "verdict": verdict,
     }
 
 
@@ -206,6 +209,7 @@ def code_review_decision(
             "message": f"{tag}\n{_summarize('PASS', verdict)}",
             "findings": _translate_findings(verdict),
             "coverage_gap": False,
+            "verdict": verdict,  # threaded up for the code_review artifact
         }
     if gap is not None:
         return _block(gap, verdict, merge_commits=merge_commits)

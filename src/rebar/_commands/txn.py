@@ -41,6 +41,7 @@ from rebar._store import event_append, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
 from rebar._store.gitutil import run_git
 from rebar.reducer import reduce_ticket
+from rebar.reducer._api import _NON_GRAPH_ARTIFACT_TYPES
 from rebar.reducer._sort import prefix_ts as _prefix_ts
 
 
@@ -165,12 +166,13 @@ def transition_core(
                 returncode=1,
             )
 
-        # session_log tickets are lifecycle-exempt: they have no workflow status
-        # to advance. Refuse transition authoritatively (before the concurrency
-        # check) so the message is clear regardless of the supplied current_status.
-        if state.get("ticket_type", "") == "session_log":
+        # session_log / code_review artifacts are lifecycle-exempt: they have no
+        # workflow status to advance. Refuse transition authoritatively (before the
+        # concurrency check) so the message is clear regardless of current_status.
+        if state.get("ticket_type", "") in _NON_GRAPH_ARTIFACT_TYPES:
+            _t = state.get("ticket_type", "")
             raise CommandError(
-                "Error: session_log tickets are lifecycle-exempt and cannot be "
+                f"Error: {_t} tickets are lifecycle-exempt and cannot be "
                 "transitioned (they are not claimed, transitioned, or closed)",
                 returncode=1,
             )
@@ -375,11 +377,12 @@ def claim_core(
                 "Error: reducer returned no state (ticket may be corrupt or missing events)",
                 returncode=1,
             )
-        # session_log tickets are lifecycle-exempt: they cannot be claimed (no
-        # status to advance, and they never participate in the work workflow).
-        if state.get("ticket_type", "") == "session_log":
+        # session_log / code_review artifacts are lifecycle-exempt: they cannot be claimed
+        # (no status to advance, and they never participate in the work workflow).
+        if state.get("ticket_type", "") in _NON_GRAPH_ARTIFACT_TYPES:
+            _t = state.get("ticket_type", "")
             raise CommandError(
-                "Error: session_log tickets are lifecycle-exempt and cannot be claimed",
+                f"Error: {_t} tickets are lifecycle-exempt and cannot be claimed",
                 returncode=1,
             )
         actual_status = state.get("status", "")

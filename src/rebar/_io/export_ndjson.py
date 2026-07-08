@@ -23,6 +23,7 @@ from typing import Any
 
 from rebar import config
 from rebar.reducer import reduce_ticket
+from rebar.reducer._api import _NON_GRAPH_ARTIFACT_TYPES
 from rebar.reducer._present import public_state
 
 from . import _strip
@@ -79,8 +80,9 @@ def iter_export_states(
 ) -> Iterator[dict]:
     """Yield export-ready ticket-state dicts (one per ticket) honoring scope flags.
 
-    Scope defaults (P1.2): all work types & statuses incl. closed; session_log
-    EXCLUDED (opt in with ``include_session_logs``); archived INCLUDED with its
+    Scope defaults (P1.2): all work types & statuses incl. closed; the non-graph
+    artifact types (session_log AND code_review) EXCLUDED (opt in with
+    ``include_session_logs``); archived INCLUDED with its
     ``archived: true`` marker (opt out with ``exclude_archived``); deleted EXCLUDED
     (opt in with ``include_deleted``). ``status`` / ``ticket_type`` accept a
     comma-list or iterable; ``parent`` matches ``parent_id`` exactly.
@@ -100,7 +102,7 @@ def iter_export_states(
         st = state.get("status")
         is_archived = bool(state.get("archived")) or st == "archived"
 
-        if ttype == "session_log" and not include_session_logs:
+        if ttype in _NON_GRAPH_ARTIFACT_TYPES and not include_session_logs:
             continue
         if st == "deleted" and not include_deleted:
             continue

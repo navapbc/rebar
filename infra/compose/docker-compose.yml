@@ -80,6 +80,16 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      # Data capture (story limestone-unethical-zebrafinch): auto-push every code_review artifact
+      # ticket event to origin/tickets as it is written. The push credential is a URL-scoped git
+      # credential helper materialized by the entrypoint from REVIEWBOT_TICKETS_PAT (see .env /
+      # fetch-secrets.sh); the persistent tickets worktree below is its store.
+      REBAR_SYNC_PUSH: "always"
+      # Point rebar's ambient tickets store (config.tracker_dir, read by the reviewbot's
+      # create_ticket/link/emit calls that pass repo_root=None) at the PERSISTENT tickets worktree,
+      # NOT the container's /app cwd — so artifact writes land in the pushable clone.
+      REBAR_TRACKER_DIR: "/var/gerrit/site/reviewbot-tickets"
     ports:
       # Publish on host loopback for the HOST nginx /review/ proxy. Host port is
       # single-sourced from .env (REVIEW_BOT_PORT, default 8000); container port
@@ -93,6 +103,11 @@ services:
       # volume is created by compose-up.sh (and pre-provisioned on the host). The review-bot
       # image runs as root, so the root-owned host dir is writable.
       - gerrit_reviewbot:/var/gerrit/site/reviewbot
+      # Persistent tickets worktree (story limestone-unethical-zebrafinch): a durable clone of the
+      # `tickets` branch that survives container recreation, so the reviewbot's code_review artifact
+      # writes accumulate + auto-push (REBAR_SYNC_PUSH=always) instead of living in an ephemeral
+      # /tmp dir. Materialized once by the entrypoint (see Dockerfile.reviewbot).
+      - gerrit_reviewbot_tickets:/var/gerrit/site/reviewbot-tickets
     # REBAR_MCP_ALLOW_LLM deliberately NOT set (gates only the stdio MCP server;
     # the receiver calls the rebar.llm library directly — S4b).
     logging:
@@ -121,4 +136,8 @@ volumes:
   # rebar review-bot state (dedup ledger + reconcile cursor) — bind onto
   # /var/gerrit/site/reviewbot; created by compose-up.sh alongside the gerrit_* volumes.
   gerrit_reviewbot:
+    external: true
+  # /var/gerrit/site/reviewbot-tickets — the persistent tickets worktree for code_review artifacts
+  # (story limestone-unethical-zebrafinch); created by compose-up.sh alongside the others.
+  gerrit_reviewbot_tickets:
     external: true

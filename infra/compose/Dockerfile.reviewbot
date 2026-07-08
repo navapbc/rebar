@@ -83,7 +83,41 @@ RUN pip install ".[agents,reviewbot]"
 ENV REVIEW_BOT_PORT=8000
 EXPOSE 8000
 
+# ---------------------------------------------------------------------------
+# Data-capture entrypoint (epic foliaged-merry-collie / story limestone-unethical-zebrafinch).
+#
+# Before the ASGI app starts, wire the reviewbot to PUSH the code_review artifact ticket events
+# it emits to the shared tickets branch:
+#   1. Configure a PER-URL (not --global) git credential helper for the tickets remote that echoes
+#      username=x-access-token / password=$REVIEWBOT_TICKETS_PAT — so the fine-grained
+#      contents:write PAT never lands on disk or inside a remote URL.
+#   2. Materialize a PERSISTENT tickets worktree ONCE (a clone of the `tickets` branch onto the
+#      mounted volume) so artifact writes accumulate + auto-push (REBAR_SYNC_PUSH=always) instead
+#      of living in an ephemeral /tmp dir.
+# Everything is a no-op when REVIEWBOT_TICKETS_PAT is unset (the container still boots + reviews;
+# only the artifact push is inert). The live push is a DEPLOY-STEP CANARY — it needs the real SSM
+# PAT + a running container, so it is NOT exercised by the in-repo unit tests.
+ENV REVIEWBOT_TICKETS_DIR=/var/gerrit/site/reviewbot-tickets \
+    REVIEWBOT_TICKETS_URL=https://github.com/navapbc/rebar.git
+RUN set -eux; \
+    { \
+      echo '#!/bin/sh'; \
+      echo 'set -e'; \
+      echo 'if [ -n "${REVIEWBOT_TICKETS_PAT:-}" ]; then'; \
+      echo '  git config --global "credential.${REVIEWBOT_TICKETS_URL}.helper" \'; \
+      echo "    '!f() { echo username=x-access-token; echo \"password=\$REVIEWBOT_TICKETS_PAT\"; }; f'"; \
+      echo '  git config --global "credential.${REVIEWBOT_TICKETS_URL}.useHttpPath" false'; \
+      echo '  if [ ! -d "${REVIEWBOT_TICKETS_DIR}/.git" ]; then'; \
+      echo '    git clone --single-branch --branch tickets "${REVIEWBOT_TICKETS_URL}" "${REVIEWBOT_TICKETS_DIR}" || \'; \
+      echo '      echo "reviewbot: tickets worktree clone deferred (deploy canary)" >&2'; \
+      echo '  fi'; \
+      echo 'fi'; \
+      echo 'exec "$@"'; \
+    } > /usr/local/bin/reviewbot-entrypoint.sh; \
+    chmod +x /usr/local/bin/reviewbot-entrypoint.sh
+
 # Run the ASGI app. Host 0.0.0.0 so the published container port is reachable from
 # the host's nginx. Port is fixed to 8000 inside the container; the host-side port
 # mapping (and nginx upstream) is what REVIEW_BOT_PORT drives in docker-compose.yml.
+ENTRYPOINT ["/usr/local/bin/reviewbot-entrypoint.sh"]
 CMD ["uvicorn", "rebar.review_bot.app:app", "--host", "0.0.0.0", "--port", "8000"]

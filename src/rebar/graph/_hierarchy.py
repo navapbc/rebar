@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from ..reducer._api import _NON_GRAPH_ARTIFACT_TYPES
 from ._loader import reduce_all_tickets, reduce_ticket
 from ._relations import _BLOCKING_RELATIONS
 
@@ -22,7 +23,14 @@ from ._relations import _BLOCKING_RELATIONS
 #                        it never participates in promotion at all)
 # Anything unrecognized is treated as a leaf (tier 0) so it never spuriously
 # out-ranks an epic/story and never gets promoted ABOVE its real ancestors.
-_TYPE_TIER: dict[str, int] = {"epic": 2, "story": 1, "task": 0, "bug": 0, "session_log": 0}
+_TYPE_TIER: dict[str, int] = {
+    "epic": 2,
+    "story": 1,
+    "task": 0,
+    "bug": 0,
+    "session_log": 0,
+    "code_review": 0,
+}
 
 
 def _tier_of(ticket_type: str | None) -> int:
@@ -167,20 +175,22 @@ def resolve_hierarchy_link(
             "is_redundant": is_redundant,
         }
 
-    # ── session_log endpoints never participate in blocking links. ────────────
-    # A session_log is a leaf, lifecycle-exempt log artifact and is excluded from
+    # ── non-graph artifact endpoints never participate in blocking links. ─────
+    # A session_log / code_review is a leaf, lifecycle-exempt artifact excluded from
     # the dependency graph; a blocks/depends_on to or from one is refused. (The
     # non-blocking relations relates_to / duplicates / supersedes / discovered_from
     # are permitted — they return at the early non-blocking branch above.)
-    if source_state.get("ticket_type") == "session_log":
+    if source_state.get("ticket_type") in _NON_GRAPH_ARTIFACT_TYPES:
+        _kind = source_state.get("ticket_type")
         return {
-            "error": f"ticket '{source_id}' is a session_log and cannot be a "
+            "error": f"ticket '{source_id}' is a {_kind} and cannot be a "
             f"'{relation}' (blocking) link endpoint; use relates_to/discovered_from",
             "ticket_id": source_id,
         }
-    if target_state.get("ticket_type") == "session_log":
+    if target_state.get("ticket_type") in _NON_GRAPH_ARTIFACT_TYPES:
+        _kind = target_state.get("ticket_type")
         return {
-            "error": f"ticket '{target_id}' is a session_log and cannot be a "
+            "error": f"ticket '{target_id}' is a {_kind} and cannot be a "
             f"'{relation}' (blocking) link endpoint; use relates_to/discovered_from",
             "ticket_id": target_id,
         }
