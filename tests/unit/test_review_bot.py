@@ -164,7 +164,7 @@ def _patch_verdict(monkeypatch, verdict):
     """Stub the four-pass gate the adapter now calls (WS6)."""
     import rebar.llm.workflow.gate_dispatch as gd
 
-    monkeypatch.setattr(gd, "produce_code_review_verdict", lambda cfg, **kw: verdict, raising=True)
+    monkeypatch.setattr(gd, "produce_code_review_verdict", lambda request: verdict, raising=True)
 
 
 def _patch_review(monkeypatch, findings):
@@ -318,8 +318,8 @@ def test_adapter_forces_gate_enabled(monkeypatch, tmp_path):
     calls = {}
     import rebar.llm.workflow.gate_dispatch as gd
 
-    def fake(cfg, **kw):
-        calls.update(kw)
+    def fake(request):
+        calls["enabled"] = request.enabled
         return {"verdict": "PASS", "coverage": {"llm_ran": True}}
 
     monkeypatch.setattr(gd, "produce_code_review_verdict", fake, raising=True)
@@ -330,7 +330,7 @@ def test_adapter_forces_gate_enabled(monkeypatch, tmp_path):
 def test_adapter_error_is_block_fail_closed(monkeypatch, tmp_path):
     import rebar.llm.workflow.gate_dispatch as gd
 
-    def boom(cfg, **kw):
+    def boom(request):
         raise RuntimeError("LLM down")
 
     monkeypatch.setattr(gd, "produce_code_review_verdict", boom, raising=True)

@@ -178,18 +178,23 @@ def code_review_decision(
         # Lazily imported: the [agents] extra (heavy) must not load merely because the receiver
         # package was imported — only when a review actually runs.
         from rebar.llm.config import LLMConfig
-        from rebar.llm.workflow.gate_dispatch import produce_code_review_verdict
+        from rebar.llm.workflow.gate_dispatch import (
+            CodeReviewRequest,
+            produce_code_review_verdict,
+        )
     except Exception as exc:  # noqa: BLE001 — a missing/broken extra is a fail-closed BLOCK
         logger.warning("adapter: gate import failed: %s", exc)
         return _block("review-error", {}, merge_commits=merge_commits)
 
     try:
         verdict = produce_code_review_verdict(
-            LLMConfig.from_env(repo_root=repo_root),
-            diff_text=diff_text,
-            commit_message=commit_message,  # drives the scope-intent overlay (default "")
-            repo_root=repo_root,
-            enabled=True,  # voter activation is the authoritative gate (ADR 0015)
+            CodeReviewRequest(
+                LLMConfig.from_env(repo_root=repo_root),
+                diff_text=diff_text,
+                commit_message=commit_message,  # drives the scope-intent overlay (default "")
+                repo_root=repo_root,
+                enabled=True,  # voter activation is the authoritative gate (ADR 0015)
+            )
         )
     except Exception as exc:  # noqa: BLE001 — ANY review failure is fail-closed
         logger.warning("adapter: produce_code_review_verdict raised: %s", exc)

@@ -101,14 +101,16 @@ def test_code_review_gate_runs_attested_with_code_and_ticket_roots(
     monkeypatch.setattr(_executor, "run_workflow", _spy)
 
     gate_dispatch.produce_code_review_verdict(
-        LLMConfig.from_env(repo_root=str(repo)),
-        head="HEAD",
-        source="attested",
-        diff_text=_DIFF,
-        changed_files=["x.py"],
-        runner=FakeRunner(structured={}),
-        repo_root=str(repo),
-        enabled=True,
+        gate_dispatch.CodeReviewRequest(
+            LLMConfig.from_env(repo_root=str(repo)),
+            head="HEAD",
+            source="attested",
+            diff_text=_DIFF,
+            changed_files=["x.py"],
+            runner=FakeRunner(structured={}),
+            repo_root=str(repo),
+            enabled=True,
+        )
     )
 
     assert seen.get("gated") is True, (
@@ -201,14 +203,16 @@ def test_code_review_gate_runner_is_rebuilt_from_rerooted_ticket_store(
     monkeypatch.setattr(_executor, "run_workflow", _spy)
 
     gate_dispatch.produce_code_review_verdict(
-        LLMConfig.from_env(repo_root=str(repo)),
-        head="HEAD",
-        source="attested",
-        diff_text=_DIFF,
-        changed_files=["x.py"],
-        runner=None,  # PRODUCTION path — the gate must build+rebuild the runner itself
-        repo_root=str(repo),
-        enabled=True,
+        gate_dispatch.CodeReviewRequest(
+            LLMConfig.from_env(repo_root=str(repo)),
+            head="HEAD",
+            source="attested",
+            diff_text=_DIFF,
+            changed_files=["x.py"],
+            runner=None,  # PRODUCTION path — the gate must build+rebuild the runner itself
+            repo_root=str(repo),
+            enabled=True,
+        )
     )
 
     assert seen.get("tickets_root"), "attested gate must materialize a ticket-store clone"

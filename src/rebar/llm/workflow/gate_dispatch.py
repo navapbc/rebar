@@ -25,8 +25,9 @@ driven by the B1 ``ProductionBatchRunner``; agent steps (verify/coach) run throu
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from rebar.llm.errors import LLMUnavailableError
 
@@ -414,14 +415,12 @@ def _degraded_plan_review_verdict(
 
 
 # ── code-review (epic b744 / WS4) ─────────────────────────────────────────────────────
-# The code-review gate reuses STEP_VERIFY ("verify") + STEP_DECIDE ("decide"); its Pass-0
-# assemble step (source of the changed-files/diff for the advisory grounding heuristic) is:
+# The code-review gate reuses STEP_VERIFY/STEP_DECIDE; its Pass-0 assemble (changed-files/diff) is:
 STEP_ASSEMBLE_DIFF = "assemble_diff"
 
 
 def code_review_enabled(repo_root=None) -> bool:
-    """Whether the off-by-default code-review capability is enabled
-    (`[code_review].enabled` via `verify.enable_code_review` / REBAR_VERIFY_ENABLE_CODE_REVIEW)."""
+    """Whether the off-by-default code-review capability is enabled (verify.enable_code_review)."""
     from rebar import config as _config
 
     try:
@@ -431,9 +430,7 @@ def code_review_enabled(repo_root=None) -> bool:
 
 
 def _inert_code_review_verdict() -> dict[str, Any]:
-    """The verdict the capability returns when DISABLED — INERT, zero LLM calls: a clean PASS
-    with no findings and `coverage.enabled=False`. (The shim translates this to an empty
-    review_result + a 'capability disabled' note.)"""
+    """DISABLED — INERT, zero LLM calls: clean PASS, no findings, `coverage.enabled=False`."""
     return {
         "verdict": "PASS",
         "blocking": [],
@@ -444,8 +441,7 @@ def _inert_code_review_verdict() -> dict[str, Any]:
 
 
 def _degraded_code_review_verdict(*, error, runner_name: str | None) -> dict[str, Any]:
-    """The unsigned INDETERMINATE verdict a systemic LLM outage / mid-run failure degrades to —
-    never a hollow PASS (no findings, `coverage.llm_unavailable=True`)."""
+    """Unsigned INDETERMINATE degrade (outage / mid-run failure) — never a hollow PASS."""
     return {
         "verdict": "INDETERMINATE",
         "blocking": [],
@@ -456,162 +452,161 @@ def _degraded_code_review_verdict(*, error, runner_name: str | None) -> dict[str
     }
 
 
-def produce_code_review_verdict(
-    cfg,
-    *,
-    base: str = "HEAD~1",
-    head: str = "HEAD",
-    source: str | None = None,
-    diff_text: str | None = None,
-    changed_files: list[str] | None = None,
-    commit_message: str = "",
-    runner=None,
-    target_ticket: str | None = None,
-    repo_root=None,
-    enabled: bool | None = None,
-) -> dict[str, Any]:
-    """Produce a ``code_review_verdict`` by running ``gates/code-review.yaml`` in-memory over a
-    DIFF (parallel to ``produce_plan_review_verdict``).
+@dataclass(frozen=True)
+class CodeReviewRequest:
+    """Bundled request for :func:`produce_code_review_verdict` (the 11 params it replaces)."""
 
-    OFF by default: when ``verify.enable_code_review`` is false the capability is INERT — returns
-    the disabled verdict WITHOUT preflighting/running (ZERO LLM calls). Pass ``enabled=True`` to
-    OVERRIDE that per-repo config read (the Gerrit voter's force-enable — see WS6/ADR 0015: voter
-    activation is the authoritative gate, so the reviewed repo's ``verify.enable_code_review`` flag
-    is a redundant second gate there). When enabled, preflights
-    the runner so a systemic outage degrades to INDETERMINATE before any billable call; a mid-run
-    failure degrades the same way (never a hollow PASS). Drives the per-overlay batch with the
-    gate-specific ``CodeReviewBatchRunner`` (constructed with the assembled diff context). Emits a
-    ``REVIEW_RESULT`` sidecar ONLY when an explicit ``target_ticket`` is supplied."""
-    import time
+    cfg: Any
+    base: str = "HEAD~1"
+    head: str = "HEAD"
+    source: str | None = None
+    diff_text: str | None = None
+    changed_files: list[str] | None = None
+    commit_message: str = ""
+    runner: Any = None
+    target_ticket: str | None = None
+    repo_root: Any = None
+    enabled: bool | None = None
 
-    from rebar.llm.code_review import assemble
-    from rebar.llm.code_review.batch_runner import CodeReviewBatchRunner
+
+class _CodeReviewPrep(NamedTuple):
+    dc: Any
+    doc: Any
+    rec: Any
+    inputs: dict[str, Any]
+    context_overrides: dict[str, Any] | None
+    t_total: float
+
+
+def produce_code_review_verdict(request: CodeReviewRequest) -> dict[str, Any]:
+    """Run ``gates/code-review.yaml`` in-memory over a DIFF — short orchestrator (preflight ->
+    assemble -> run-and-finalize). OFF by default (INERT, no LLM); ``enabled=True`` force-enables it
+    (Gerrit voter, WS6/ADR 0015). Outage/mid-run -> INDETERMINATE; sidecar only if target_ticket."""
+    early = _code_review_preflight(request)
+    if early is not None:
+        return early
+    prep = _assemble_code_review_run(request)
+    return _run_code_review_gate(request, prep)
+
+
+def _code_review_preflight(request: CodeReviewRequest) -> dict[str, Any] | None:
+    """Enabled-check + runner preflight → an EARLY short-circuit verdict, or None to proceed."""
     from rebar.llm.runner import get_runner
 
-    from . import executor as _ex
-    from .recorder import MemoryRecorder
-    from .runs import RunnerAgentStep
-
-    is_enabled = code_review_enabled(repo_root) if enabled is None else enabled
+    is_enabled = (
+        code_review_enabled(request.repo_root) if request.enabled is None else request.enabled
+    )
     if not is_enabled:
         return _inert_code_review_verdict()
 
-    runner_sel = runner or get_runner(cfg)
+    runner_sel = request.runner or get_runner(request.cfg)
     try:
         runner_sel.preflight()
     except LLMUnavailableError as exc:
         return _degraded_code_review_verdict(error=exc, runner_name=runner_sel.name)
+    return None
+
+
+def _assemble_code_review_run(request: CodeReviewRequest) -> _CodeReviewPrep:
+    """Assemble the diff context, scope-intent overlay, gate doc, recorder, and workflow inputs."""
+    import time
+
+    from rebar.llm.code_review import assemble
+
+    from .recorder import MemoryRecorder
 
     dc = assemble.assemble_diff_context(
-        base=base,
-        head=head,
-        diff_text=diff_text,
-        changed_files=changed_files,
-        repo_root=repo_root,
-        commit_message=commit_message,
+        base=request.base,
+        head=request.head,
+        diff_text=request.diff_text,
+        changed_files=request.changed_files,
+        repo_root=request.repo_root,
+        commit_message=request.commit_message,
     )
-    # scope-intent per-overlay context: the union scope/AC of the commit's rebar-ticket trailer
-    # tickets goes ONLY to the scope-intent overlay (base + every other overlay stay ticket-blind).
-    # Built ONLY when >=1 trailer ticket resolved (dc.scope_context non-empty); else omitted so the
-    # overlay is inert. The gate's overlay_union independently gates include_scope_intent on the
-    # same dc.scope_context (threaded through the workflow's assemble_diff step) so the two agree.
+    # scope-intent overlay (ONLY ticket-aware one): commit-trailer scope/AC, ONLY when >=1 resolved.
     context_overrides = {"code-review-scope-intent": dc.scope_context} if dc.scope_context else None
-    doc = _gate_doc("code-review", repo_root)
+    doc = _gate_doc("code-review", request.repo_root)
     rec = MemoryRecorder()
-    _t_total = time.monotonic()
+    t_total = time.monotonic()
     inputs = {
-        "base": base,
-        "head": head,
-        # Reuse the diff WE already assembled (above, for the batch runner context) so the gate's
-        # assemble_diff step doesn't re-shell `git diff` on the range path — dc.diff_text is the
-        # resolved diff (read from git or the supplied diff_text).
+        "base": request.base,
+        "head": request.head,
+        # Reuse the assembled diff (assemble_diff won't re-shell git diff) + thread commit_message.
         "diff_text": dc.diff_text,
         "changed_files": list(dc.changed_files),
-        # Thread the commit message so the workflow's assemble_diff re-derives the SAME
-        # scope_context and its overlay_union gates include_scope_intent consistently.
-        "commit_message": commit_message,
+        "commit_message": request.commit_message,
     }
-    # SNAPSHOT GATE (epic raze-vet-ditch): the four-pass gate runs AGENTIC passes — the 'base'
-    # reviewer + overlays read the code with filesystem tools — so, like EVERY other code-reading
-    # gate (operations.review_ticket / review_plan / verify_completion), the run MUST execute
-    # through gate_source using the SAME pattern they do (NOT an ad-hoc local root):
-    #   resolve_gate_handle -> apply_handle -> gate_read_root.
-    #
-    # resolve_gate_handle (attested — the configured default) materializes BOTH a pinned snapshot
-    # of the reviewed code AND a pinned clone of the ticket store, then apply_handle re-roots cfg
-    # onto both and gate_read_root marks the session + activates both roots. The ticket-store clone
-    # is a REQUIREMENT, not a nicety: the reviewed project's tickets live on the orphan `tickets`
-    # branch, which is ABSENT from any code checkout, so WITHOUT the materialized clone the agent's
-    # rebar ticket tools error on a missing `.tickets-tracker` and the agent cannot use the ticket
-    # system — the raze-vet-ditch design attaches it for exactly this reason. `head` is the ref of
-    # the code under review (the reviewed project — which may be a HOST/CLIENT project, not rebar's
-    # own tree); `source` follows the configured default (attested in prod; local offline). Without
-    # this wrapping runner.assert_gated also fail-closes the 'base' step. The retired single-pass
-    # review_code wrapped gate_read_root the same way; the WS4 four-pass swap dropped it.
-    from rebar.llm import gate_source
+    return _CodeReviewPrep(dc, doc, rec, inputs, context_overrides, t_total)
 
-    handle = gate_source.resolve_gate_handle(ref=head, source=source, repo_root=repo_root)
-    cfg = gate_source.apply_handle(cfg, handle)
-    # Rebuild the runner from the RE-ROOTED cfg (bug pelt-mead-aeon). apply_handle set
-    # cfg.tickets_path (the materialized ticket-store clone) and cfg.repo_path (the attested
-    # code snapshot) AFTER runner_sel was built above for the early preflight. get_runner(...,
-    # override=) returns the override verbatim and PydanticAIRunner.run reads its OWN baked-in
-    # self._config, so reusing the pre-snapshot runner_sel would run the agent's rebar ticket
-    # tools against the bare clone (tickets_path None -> repo_path) and error on a missing
-    # .tickets-tracker, casting no vote. An injected test runner (runner is not None) is preserved.
-    runner_sel = runner or get_runner(cfg)
+
+def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> dict[str, Any]:
+    """Run the four-pass gate (snapshot session) + finalize; outage/mid-tail -> INDETERMINATE."""
+    import time
+
+    from rebar.llm import gate_source
+    from rebar.llm.code_review.batch_runner import CodeReviewBatchRunner
+    from rebar.llm.runner import get_runner
+
+    from . import executor as _ex
+    from .runs import RunnerAgentStep
+
+    # SNAPSHOT GATE (raze-vet-ditch): run via gate_source (resolve/apply/gate_read_root) like every
+    # code-reading gate. Attested pins a code snapshot AND a ticket-store clone — REQUIRED: reviewed
+    # tickets live on the orphan `tickets` branch, else rebar tools fail. WS4 had dropped it.
+    handle = gate_source.resolve_gate_handle(
+        ref=request.head, source=request.source, repo_root=request.repo_root
+    )
+    cfg = gate_source.apply_handle(request.cfg, handle)
+    # Rebuild the runner from the RE-ROOTED cfg (bug pelt-mead-aeon): the preflight runner baked the
+    # pre-snapshot cfg; reusing it hits the bare clone (missing .tickets-tracker); injected kept.
+    runner_sel = request.runner or get_runner(cfg)
     try:
         with gate_source.gate_read_root(handle):
             res = _ex.run_workflow(
-                doc,
-                inputs,
-                target_ticket=target_ticket,
-                repo_root=repo_root,
-                agent_runner=RunnerAgentStep(runner=runner_sel, repo_root=repo_root, config=cfg),
-                batch_runner=CodeReviewBatchRunner(
-                    context=dc.context, context_overrides=context_overrides
+                prep.doc,
+                prep.inputs,
+                target_ticket=request.target_ticket,
+                repo_root=request.repo_root,
+                agent_runner=RunnerAgentStep(
+                    runner=runner_sel, repo_root=request.repo_root, config=cfg
                 ),
-                recorder=rec,
+                batch_runner=CodeReviewBatchRunner(
+                    context=prep.dc.context, context_overrides=prep.context_overrides
+                ),
+                recorder=prep.rec,
             )
     except LLMUnavailableError as exc:
         return _degraded_code_review_verdict(error=exc, runner_name=runner_sel.name)
-    total_ms = round((time.monotonic() - _t_total) * 1000, 1)
-
+    total_ms = round((time.monotonic() - prep.t_total) * 1000, 1)
     verdict = res.terminal_output
     if res.status == "succeeded" and isinstance(verdict, dict) and "verdict" in verdict:
-        _attach_code_review_metrics(verdict, rec, total_ms)
+        _attach_code_review_metrics(verdict, prep.rec, total_ms)
         verdict.setdefault("runner", runner_sel.name)
         verdict.setdefault("model", cfg.model)
-        # WS5 fail-CLOSED: a secrets/High-Critical-security detector that abstains (can't verify)
-        # or matches (on a changed file) forces BLOCK + a coverage-gap annotation. Runs in the
-        # consumer (here), never the fail-OPEN oracle.
+        # WS5 fail-CLOSED: a security detector abstain/match forces BLOCK (+ coverage-gap note).
         from rebar.llm.code_review import detectors as _detectors
 
         _detectors.apply_failclosed(
-            verdict, changed_files=list(dc.changed_files), repo_root=repo_root
+            verdict, changed_files=list(prep.dc.changed_files), repo_root=request.repo_root
         )
-        if target_ticket:
+        if request.target_ticket:
             from rebar.llm.code_review import sidecar as _sidecar
 
-            _sidecar.emit(verdict, target_ticket=target_ticket, repo_root=repo_root)
+            _sidecar.emit(verdict, target_ticket=request.target_ticket, repo_root=request.repo_root)
         return verdict
-    # The run failed mid-tail (the LLM tier did not produce a verdict) — degrade to
-    # INDETERMINATE, never a hollow PASS.
     return _degraded_code_review_verdict(
-        error=(res.error or "code-review workflow LLM tier failed"), runner_name=runner_sel.name
+        error=(res.error or "code-review workflow LLM tier failed"),
+        runner_name=runner_sel.name,
     )
 
 
-#: High-priority rule for the approach-viability signal (documented, ONE consistent rule):
-#: a finding whose kernel ``priority`` (validity × impact ∈ [0,1]) is ≥ this is "high-priority".
-#: We key off ``priority`` (always present after Pass-3) rather than the ``severity`` label so
-#: the rule is a single numeric comparison.
+#: High-priority floor for the approach-viability signal: a finding with kernel ``priority``
+#: (validity × impact ∈ [0,1]) ≥ this is "high-priority" (keyed off priority, not severity label).
 _HIGH_PRIORITY_FLOOR = 0.7
 
 
 def _count_diff_lines(text: str) -> int:
-    """A changed-lines proxy: unified-diff body lines (``+``/``-``), excluding the ``+++``/``---``
-    file headers. Computed over the assembled ``context`` string (which embeds the capped diff)."""
+    """Diff-body line count: ``+``/``-`` lines, excluding the ``+++``/``---`` file headers."""
     n = 0
     for ln in text.splitlines():
         if ln.startswith(("+", "-")) and not ln.startswith(("+++", "---")):
@@ -620,24 +615,11 @@ def _count_diff_lines(text: str) -> int:
 
 
 def _attach_code_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -> None:
-    """Reconstruct ``coverage['metrics']`` from the workflow recorder's step timings (the
-    code-review analog of ``_attach_plan_review_metrics``): ``llm_ms`` = wall-clock of the
-    billable LLM tier (agent/batch steps: base + Round-A/B overlays + verify + coach),
-    ``total_ms`` = the whole run, ``llm_calls`` = batch criteria_count + succeeded agent steps.
-
-    ADVISORY enrichment (story 1669) — all observational, NEVER touches ``verdict['verdict']``
-    nor adds a blocking source:
-
-    * ``metrics['findings_per_run']`` — blocking + advisory finding count.
-    * ``metrics['verify_requests']`` — Pass-2 verifier model-request count (mirrors
-      ``_attach_plan_review_metrics``'s STEP_VERIFY ``_usage.requests`` sum).
-    * ``metrics['grounding_health']`` — ``"low"`` iff the diff is non-trivial AND the verifier
-      made 0 model requests (findings may be under-grounded), else ``"ok"``.
-    * ``coverage['grounding_note']`` — emitted ONLY when grounding_health is ``"low"``.
-    * ``coverage['approach_viability_note']`` — emitted when the surviving high-priority count
-      or the Pass-2 drop-rate crosses the ledger thresholds (a Rule-of-Three viability hint).
-
-    Tolerant of untimed/partial records (never raises inside the gate)."""
+    """Reconstruct ``coverage['metrics']`` from recorder step timings (code-review analog of
+    ``_attach_plan_review_metrics``): llm_ms/total_ms, llm_calls, findings_per_run, verify_requests,
+    and grounding_health (``"low"`` iff non-trivial diff AND 0 verifier requests). ADVISORY only
+    (story 1669) — never touches ``verdict['verdict']``: emits coverage grounding_note (when
+    grounding_health low) + approach_viability_note (ledger thresholds); tolerant of partials."""
     from rebar.llm.code_review.fp_ledger import (
         MAX_PASS2_DROP_RATE,
         MIN_SURVIVING_HIGH_PRIORITY,
@@ -775,4 +757,8 @@ def produce_completion_verdict(
     return verdict
 
 
-__all__ = ["produce_plan_review_verdict", "produce_completion_verdict"]
+__all__ = [
+    "CodeReviewRequest",
+    "produce_plan_review_verdict",
+    "produce_completion_verdict",
+]

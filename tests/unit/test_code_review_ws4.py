@@ -48,7 +48,7 @@ def test_produce_verdict_disabled_is_inert_and_makes_zero_llm_calls(monkeypatch)
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: False)
     runner = _CountingRunner(structured=_STRUCTURED)
     v = gate_dispatch.produce_code_review_verdict(
-        LLMConfig.from_env(), diff_text=_DIFF, runner=runner
+        gate_dispatch.CodeReviewRequest(LLMConfig.from_env(), diff_text=_DIFF, runner=runner)
     )
     assert v["verdict"] == "PASS"
     assert v["blocking"] == [] and v["advisory"] == []
@@ -74,10 +74,12 @@ def test_produce_verdict_enabled_runs_gate_and_validates(monkeypatch):
 
     monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
     v = gate_dispatch.produce_code_review_verdict(
-        LLMConfig.from_env(),
-        diff_text=_DIFF,
-        changed_files=["x.py"],
-        runner=FakeRunner(structured=_STRUCTURED),
+        gate_dispatch.CodeReviewRequest(
+            LLMConfig.from_env(),
+            diff_text=_DIFF,
+            changed_files=["x.py"],
+            runner=FakeRunner(structured=_STRUCTURED),
+        )
     )
     assert v["verdict"] in ("PASS", "BLOCK")
     assert "coverage" in v and v["coverage"].get("llm_ran") is True
@@ -92,11 +94,13 @@ def test_produce_verdict_enabled_override_forces_run_when_config_disabled(monkey
 
     monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})  # focus on the gate path
     v = gate_dispatch.produce_code_review_verdict(
-        LLMConfig.from_env(),
-        diff_text=_DIFF,
-        changed_files=["x.py"],
-        runner=FakeRunner(structured=_STRUCTURED),
-        enabled=True,
+        gate_dispatch.CodeReviewRequest(
+            LLMConfig.from_env(),
+            diff_text=_DIFF,
+            changed_files=["x.py"],
+            runner=FakeRunner(structured=_STRUCTURED),
+            enabled=True,
+        )
     )
     assert v["coverage"].get("enabled") is not False  # NOT the inert disabled verdict
     assert v["coverage"].get("llm_ran") is True  # the gate actually ran
@@ -108,7 +112,9 @@ def test_produce_verdict_enabled_false_forces_inert_when_config_enabled(monkeypa
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
     runner = _CountingRunner(structured=_STRUCTURED)
     v = gate_dispatch.produce_code_review_verdict(
-        LLMConfig.from_env(), diff_text=_DIFF, runner=runner, enabled=False
+        gate_dispatch.CodeReviewRequest(
+            LLMConfig.from_env(), diff_text=_DIFF, runner=runner, enabled=False
+        )
     )
     assert v["verdict"] == "PASS" and v["coverage"]["enabled"] is False
     assert runner.calls == 0  # inert: the override short-circuited before any LLM call
@@ -132,7 +138,9 @@ def test_review_code_enabled_translates_verdict_to_review_result(monkeypatch):
 def test_produce_verdict_degrades_to_indeterminate_on_outage(monkeypatch):
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
     v = gate_dispatch.produce_code_review_verdict(
-        LLMConfig.from_env(), diff_text=_DIFF, runner=_OutageRunner(structured=_STRUCTURED)
+        gate_dispatch.CodeReviewRequest(
+            LLMConfig.from_env(), diff_text=_DIFF, runner=_OutageRunner(structured=_STRUCTURED)
+        )
     )
     assert v["verdict"] == "INDETERMINATE"
     assert v["coverage"]["llm_unavailable"] is True

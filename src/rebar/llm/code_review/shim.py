@@ -138,14 +138,16 @@ def review_code(
 
     cfg = config or LLMConfig.from_env(repo_root=repo_root)
     verdict = gate_dispatch.produce_code_review_verdict(
-        cfg,
-        base=base,
-        head=head,
-        diff_text=diff_text,
-        changed_files=changed_files,
-        commit_message=commit_message,
-        runner=runner,
-        repo_root=repo_root,
+        gate_dispatch.CodeReviewRequest(
+            cfg,
+            base=base,
+            head=head,
+            diff_text=diff_text,
+            changed_files=changed_files,
+            commit_message=commit_message,
+            runner=runner,
+            repo_root=repo_root,
+        )
     )
     from rebar.llm.code_review import assemble
 
