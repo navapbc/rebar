@@ -245,6 +245,22 @@ jobs:
           fi
           echo "Prompt-index drift gate: OK (index.json is up to date)."
 
+      # Env-var registry drift gate (story 0f21): docs/env-vars.md is DERIVED by scanning
+      # env-var reads under src/rebar and committed. Regenerate and fail if the working tree
+      # now differs — a stale registry means a new REBAR_* read shipped without regenerating.
+      # Style mirrors the Prompt-index drift gate above.
+      - name: Env-var registry drift gate
+        shell: bash
+        run: |
+          python scripts/gen_env_registry.py
+          if ! git diff --exit-code -- docs/env-vars.md; then
+            echo "::error::docs/env-vars.md is stale — regenerate it with"
+            echo "  python scripts/gen_env_registry.py"
+            echo "and commit the result (it is derived from env-var reads under src/rebar)."
+            exit 1
+          fi
+          echo "Env-var registry drift gate: OK (docs/env-vars.md is up to date)."
+
       # Security-rules freshness gate (epic b744 / WS5; ADR 0012). The vendored security rule
       # subset is pinned for reproducibility; this WARNS (never fails) when the recorded
       # `vendored_at` is older than the quarterly cadence, prompting a deliberate
