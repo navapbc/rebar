@@ -108,3 +108,42 @@ def test_push_retry_pop_conflict_leaves_consistent_worktree(diverged_tracker: st
     _git(diverged_tracker, "add", "-A")
     commit = _git(diverged_tracker, "commit", "-m", "post-push write", check=False)
     assert commit.returncode == 0, f"store write blocked after push-retry: {commit.stderr}"
+
+
+def test_async_push_spawn_failure_is_logged(tmp_path, monkeypatch, caplog):
+    """audit 3.2: a failed detached async-push spawn must be logged, not swallowed."""
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "async")
+
+    def _boom(*a, **k):
+        raise OSError("no resources to fork")
+
+    monkeypatch.setattr(push.subprocess, "Popen", _boom)
+    with caplog.at_level("WARNING"):
+        push.push_tickets_branch(str(tmp_path))  # best-effort; must not raise
+    assert "async tickets-branch push spawn failed" in caplog.text
+
+
+def test_push_retry_merge_skipped_when_write_lock_busy(
+    diverged_tracker: str, monkeypatch, caplog
+) -> None:
+    """audit reliability #2: when the write lock is held, the push-retry merge is skipped
+    (push stays pending) rather than racing a concurrent write — and never raises."""
+    from rebar._store import lock as _lock
+
+    def _busy(*a, **k):
+        raise _lock.LockTimeout("held by a concurrent writer")
+
+    monkeypatch.setattr("rebar._store.lock.write_lock", _busy)
+    head_before = _git(diverged_tracker, "rev-parse", "HEAD").stdout.strip()
+
+    with caplog.at_level("WARNING"):
+        push.push_tickets_branch(diverged_tracker)  # best-effort; must not raise
+
+    # The merge was skipped: HEAD is unchanged and there is no in-progress merge.
+    assert _git(diverged_tracker, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert not (Path(diverged_tracker) / ".git" / "MERGE_HEAD").exists()
+    assert "push stays pending" in caplog.text
+    # The store remains writable — the skipped merge did not wedge the tracker.
+    (Path(diverged_tracker) / "after.txt").write_text("x")
+    _git(diverged_tracker, "add", "-A")
+    assert _git(diverged_tracker, "commit", "-m", "post", check=False).returncode == 0

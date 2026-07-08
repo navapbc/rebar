@@ -28,6 +28,10 @@ _DIRTY_WD = re.compile(
     r"would be overwritten by merge|local changes.*would be overwritten", re.IGNORECASE
 )
 _MAX_RETRIES = 3
+# Bounded wait for the write lock around the push-retry merge (attempts=1, like sync.py's
+# reconverge). A timeout means another writer holds the lock, so we skip the merge and
+# leave the push pending rather than racing.
+_PUSH_MERGE_LOCK_TIMEOUT = 15
 
 
 def _push_mode(root: str | None = None) -> str:
@@ -133,8 +137,11 @@ def push_tickets_branch(base_path: str) -> None:
                 start_new_session=True,  # orphan it (own session); survives parent exit
                 close_fds=True,
             )
-        except OSError:
-            pass
+        except OSError as exc:
+            # Observability gap (audit 3.2): a failed detached spawn used to be swallowed
+            # silently, so an async push that never started looked identical to one that
+            # succeeded. Log it; the push simply stays pending (fsck surfaces PUSH_PENDING).
+            logger.warning("async tickets-branch push spawn failed: %r", exc)
         return
 
     # mode: always (default) — synchronous best-effort push.
@@ -165,67 +172,94 @@ def push_tickets_branch(base_path: str) -> None:
             logger.warning("tickets branch push failed (exit %s): %s", res.returncode, stderr)
             return  # non-retriable class — best-effort
 
-        # Non-fast-forward: reconcile by MERGE (not rebase).
+        # Non-fast-forward: reconcile by MERGE (not rebase). The fetch only moves
+        # remote-tracking refs, so it stays OUTSIDE the write lock; the merge/stash
+        # mutation below is taken UNDER the write lock (audit reliability #2). Without
+        # the lock this fetch+merge ran concurrently with a foreground writer's commit,
+        # spuriously failing that write against transient MERGE_HEAD/index state — the
+        # exact hazard sync.py::reconverge already guards.
         _git(base_path, "fetch", remote, branch)
         from rebar._store import lock as _lock
 
         try:
-            _lock.check_no_rebase_in_progress(base_path)
-        except _lock.RebaseGuard:
-            logger.warning(
-                "cannot reconcile push — tracker is in rebase/merge recovery "
-                "state. Run ticket-fsck-recover.sh."
-            )
-            return  # best-effort
+            with _lock.write_lock(
+                base_path, timeout=_PUSH_MERGE_LOCK_TIMEOUT, attempts=1, dual_window=True
+            ):
+                # Re-check INSIDE the lock (not only before acquiring it): a concurrent
+                # reconverge/push could create MERGE_HEAD between a pre-lock check and lock
+                # entry (TOCTOU). This mirrors sync.py::_do_reconverge's in-lock re-check.
+                try:
+                    _lock.check_no_rebase_in_progress(base_path)
+                except _lock.RebaseGuard:
+                    logger.warning(
+                        "cannot reconcile push — tracker is in rebase/merge recovery "
+                        "state. Run ticket-fsck-recover.sh."
+                    )
+                    return  # best-effort
 
-        merge = _git(
-            base_path,
-            "merge",
-            remote_ref,
-            "--no-edit",
-            "-m",
-            f"Merge {remote_ref} (auto-reconcile during push retry)",
-        )
-        if merge.returncode == 0:
-            continue  # merged clean — retry push next iter
-
-        if _DIRTY_WD.search(merge.stderr or ""):
-            # Dirty working tree (e.g. reconciler .bridge_state/* files): stash → merge → pop.
-            stash = _git(
-                base_path, "stash", "push", "--quiet", "-m", "_push_tickets_branch:auto-stash"
-            )
-            if stash.returncode != 0:
-                logger.warning("tickets branch push failed: stash failed (attempt %s)", attempt)
-                continue
-            merge2 = _git(
-                base_path,
-                "merge",
-                remote_ref,
-                "--no-edit",
-                "-m",
-                f"Merge {remote_ref} (auto-reconcile, post-stash)",
-            )
-            if merge2.returncode != 0:
-                # Merge itself conflicted: the stash is still safely on the stack —
-                # abort the merge, then restore the working-tree edits so we don't
-                # strand them.
-                _git(base_path, "merge", "--abort")
-                _git(base_path, "stash", "pop", "--quiet")
-                logger.warning(
-                    "tickets branch merge failed after stash recovery (attempt %s)", attempt
+                merge = _git(
+                    base_path,
+                    "merge",
+                    remote_ref,
+                    "--no-edit",
+                    "-m",
+                    f"Merge {remote_ref} (auto-reconcile during push retry)",
                 )
-                continue
-            # Merge succeeded; pop the stashed reconciler edits back. A clean pop is
-            # the happy path; an apply-with-conflict (markers + unmerged index, stash
-            # kept) is detected and repaired deterministically (bug 6818) so the tree
-            # is left consistent (no markers, no UU, committable).
-            pop = _git(base_path, "stash", "pop", "--quiet")
-            _resolve_conflicted_pop(base_path, pop)
-            continue
+                if merge.returncode == 0:
+                    continue  # merged clean — retry push next iter
 
-        # Real content conflict — retry won't help, but continue so _MAX_RETRIES is honored.
-        _git(base_path, "merge", "--abort")
-        logger.warning("tickets branch push failed (merge conflict, attempt %s)", attempt)
+                if _DIRTY_WD.search(merge.stderr or ""):
+                    # Dirty working tree (e.g. reconciler .bridge_state/* files): stash→merge→pop.
+                    stash = _git(
+                        base_path,
+                        "stash",
+                        "push",
+                        "--quiet",
+                        "-m",
+                        "push_tickets_branch:auto-stash",
+                    )
+                    if stash.returncode != 0:
+                        logger.warning(
+                            "tickets branch push failed: stash failed (attempt %s)", attempt
+                        )
+                        continue
+                    merge2 = _git(
+                        base_path,
+                        "merge",
+                        remote_ref,
+                        "--no-edit",
+                        "-m",
+                        f"Merge {remote_ref} (auto-reconcile, post-stash)",
+                    )
+                    if merge2.returncode != 0:
+                        # Merge itself conflicted: the stash is still safely on the stack —
+                        # abort the merge, then restore the working-tree edits so we don't
+                        # strand them.
+                        _git(base_path, "merge", "--abort")
+                        _git(base_path, "stash", "pop", "--quiet")
+                        logger.warning(
+                            "tickets branch merge failed after stash recovery (attempt %s)", attempt
+                        )
+                        continue
+                    # Merge succeeded; pop the stashed reconciler edits back. A clean pop is
+                    # the happy path; an apply-with-conflict (markers + unmerged index, stash
+                    # kept) is detected and repaired deterministically (bug 6818) so the tree
+                    # is left consistent (no markers, no UU, committable).
+                    pop = _git(base_path, "stash", "pop", "--quiet")
+                    _resolve_conflicted_pop(base_path, pop)
+                    continue
+
+                # Real content conflict — retry won't help, but continue so _MAX_RETRIES is honored.
+                _git(base_path, "merge", "--abort")
+                logger.warning("tickets branch push failed (merge conflict, attempt %s)", attempt)
+        except _lock.LockTimeout:
+            # Could not get the write lock in the bounded window — another writer/syncer
+            # holds it. Skip the merge and leave the push PENDING (best-effort) rather than
+            # racing a concurrent write; fsck surfaces PUSH_PENDING. Never fail the write.
+            logger.warning(
+                "tickets branch push-retry merge skipped: write lock busy; push stays pending"
+            )
+            return
 
     logger.warning("tickets branch push failed after %s retries", _MAX_RETRIES)
 
