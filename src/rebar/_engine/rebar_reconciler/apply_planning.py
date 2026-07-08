@@ -77,6 +77,8 @@ def _partition_by_mode_cap(mode, mutations):
     # Hoist the mode module load to a single call per apply() invocation.
     mode_mod = _load_mode_module() if mode is not None else None
     if mode is not None:
+        # mode_mod is loaded exactly when mode is not None (same guard above); narrow it.
+        assert mode_mod is not None
         # Validate / coerce mode to a Mode enum member (findings #1/#2).
         if isinstance(mode, str):
             mode = mode_mod.Mode.from_str(mode)
