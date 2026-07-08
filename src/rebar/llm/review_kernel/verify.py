@@ -300,6 +300,91 @@ def plan_review_verification_model(*, strict: bool = False) -> type:
     return _build_verification_output(forbid, PlanSeverityAttrs)
 
 
+def code_review_verification_model(*, strict: bool = False) -> type:
+    """The CODE-REVIEW Pass-2 model (story albite-lazy-barb): the same kernel ``Binary`` vocabulary
+    and ``VerificationOutput`` wrapper, but ``severity_attributes`` is a ``CodeSeverityAttrs`` that
+    EXTENDS the base five with the code-review consequence binaries + detection judgment that
+    :func:`rebar.llm.review_kernel.decide.impact_code` reads (the base five are kept for sidecar
+    continuity). Each binary/bool defaults ``False`` so an older/absent verifier ABSTAINS (a missing
+    binary contributes 0 to its lane — never inflates). ``trigger_likelihood`` is DELIBERATELY named
+    apart from the base ``likelihood`` (mapped by ``_LIKE01``) to avoid a field-override collision;
+    absent ⇒ ``common`` (1.0) so a serious correctness finding is not silently dampened."""
+    from pydantic import BaseModel, ConfigDict, Field
+
+    forbid = ConfigDict(extra="forbid") if strict else ConfigDict()
+
+    class CodeSeverityAttrs(BaseModel):
+        model_config = forbid
+        # Base severity attributes (kept for sidecar continuity; impact_code reads binaries below).
+        prod_impact: str = Field(default="none", description="none|low|medium|high")
+        debt_impact: str = Field(default="none", description="none|low|medium|high")
+        blast_radius: str = Field(default="local", description="local|module|system")
+        likelihood: str = Field(default="low", description="low|medium|high")
+        reversibility: str = Field(default="easy", description="easy|moderate|hard")
+        # ── PRODUCTION-lane consequence binaries (decide.impact_code MAXes tier values). ──
+        data_loss_without_recovery: bool = Field(
+            default=False,
+            description="TRUE if data can be lost/corrupted with no recovery (serious).",
+        )
+        security_bypass_not_enforced_elsewhere: bool = Field(
+            default=False,
+            description="TRUE if a security check is bypassed and not enforced (serious).",
+        )
+        silent_wrong_feeding_a_decision: bool = Field(
+            default=False,
+            description="TRUE if a silently-wrong value feeds a real decision (serious).",
+        )
+        capability_degraded: bool = Field(
+            default=False,
+            description="TRUE if a user-facing capability is degraded/partially broken (moderate).",
+        )
+        # ── MAINTAINABILITY-lane consequence binaries. ──
+        unversioned_published_contract_break: bool = Field(
+            default=False,
+            description="TRUE if a PUBLISHED contract breaks with no version bump (serious).",
+        )
+        safety_net_removal_without_replacement: bool = Field(
+            default=False,
+            description="TRUE if a test/guard/assert is removed with no replacement (serious).",
+        )
+        contract_drift: bool = Field(
+            default=False,
+            description="TRUE if an interface drifts from its documented contract (moderate).",
+        )
+        hidden_invariant: bool = Field(
+            default=False,
+            description="TRUE if the change relies on/breaks an undocumented invariant (moderate).",
+        )
+        implicit_coupling: bool = Field(
+            default=False,
+            description="TRUE if the change adds implicit cross-module coupling (minor).",
+        )
+        dead_code: bool = Field(
+            default=False,
+            description="TRUE if the change introduces dead/unreachable code (minor).",
+        )
+        # ── Per-lane likelihood + detection (drive impact_code multipliers/amplifier). ──
+        trigger_likelihood: str = Field(
+            default="common",
+            description="common|sometimes|rare — how often the PRODUCTION consequence triggers "
+            "(prod-lane multiplier common=1.0/sometimes=0.6/rare=0.25; distinct from base "
+            "likelihood; absent => common).",
+        )
+        silent_failure: bool = Field(
+            default=False,
+            description="TRUE if the defect fails SILENTLY (no error surfaces) — detection x1.0.",
+        )
+        escapes_automation: bool = Field(
+            default=False,
+            description="TRUE if the defect escapes existing tests/CI/lint — detection x1.0.",
+        )
+
+    # Binary vocabulary + the Verification/VerificationOutput wrapper come from the shared
+    # module-level builders; code-review's model reuses the EXACT Binary shape (only
+    # CodeSeverityAttrs differs), so the graded binary set never diverges across gates.
+    return _build_verification_output(forbid, CodeSeverityAttrs)
+
+
 def register_verification_contract() -> None:
     """Register the kernel ``verification`` contract (idempotent) — the single source of the
     binary vocabulary + severity enums every review gate's Pass-2 emits."""

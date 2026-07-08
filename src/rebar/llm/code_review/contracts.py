@@ -12,8 +12,10 @@ contracts (mirroring ``plan_review/passes.py``'s ``register_contracts()``):
   do not re-escalate; one-hop).
 - ``code_review_coach`` (WS2 Pass-4 coach) — move-picks ``[{move_id, subject, finding_refs}]``.
 
-The Pass-2 verifier reuses the kernel's gate-agnostic ``verification`` contract (registered by
-``review_kernel.verify``), so it is NOT re-registered here.
+- ``code_review_verification`` (Pass-2 verifier) — the kernel ``Verification`` shape with a
+  ``CodeSeverityAttrs`` that EXTENDS the base five with the code-review consequence binaries +
+  detection judgment that ``review_kernel.decide.impact_code`` aggregates. It reuses the kernel's
+  exact ``Binary`` vocabulary; the gate-agnostic ``verification`` contract stays byte-identical.
 
 Findings use the kernel Pass-1 shape (claim/criteria/evidence/impact — what the kernel Pass-2
 listing consumes); ``evidence`` is a ``list[str]`` so the kernel's ``' | '.join(...)`` cannot
@@ -116,9 +118,16 @@ def coach_model() -> type:
 
 def register_contracts() -> None:
     """Register the code-review structured-output contracts. Idempotent."""
+    from rebar.llm.review_kernel import code_review_verification_model
+
     contracts.register_contract("code_review_base_output", base_output_model)
     contracts.register_contract("code_review_findings", findings_model)
     contracts.register_contract("code_review_coach", coach_model)
+    # The Pass-2 verifier's own model factory (story albite-lazy-barb): the kernel Verification
+    # shape EXTENDED with the code-review consequence binaries + detection judgment that
+    # decide.impact_code aggregates. It reuses the kernel's exact Binary vocabulary; the kernel
+    # `verification` contract (plan-review default + any other gate) stays byte-identical.
+    contracts.register_contract("code_review_verification", code_review_verification_model)
 
 
 register_contracts()

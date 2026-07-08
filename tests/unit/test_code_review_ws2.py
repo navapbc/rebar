@@ -139,7 +139,9 @@ def test_verify_prompt_embeds_verifier_rules_scaffold_and_regrounds_on_diff():
         "verify prompt must embed VERIFIER_RULES_SCAFFOLD verbatim"
     )
     assert "{{ticket_context}}" in body  # re-grounds against the diff context
-    assert "outputs: verification" in body  # reuses the kernel's gate-agnostic contract
+    # emits the code-review-specific verifier contract (kernel Verification shape EXTENDED with the
+    # consequence binaries + detection judgment decide.impact_code reads; story albite-lazy-barb).
+    assert "outputs: code_review_verification" in body
 
 
 def test_all_code_review_prompts_are_canonical_front_matter_fixed_points():
