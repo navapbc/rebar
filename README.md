@@ -318,6 +318,7 @@ pip install -e '.[dev]'
 ```bash
 rebar init                                   # create the tickets branch + worktree
 rebar create story "Add login page"          # prints the ticket id
+rebar idea "Maybe cache the graph"           # capture an undesigned idea (born in status `idea`; unclaimable until promoted)
 rebar show <id|alias>                         # compiled ticket state (JSON)
 rebar summary <id> [<id> ...]                 # one-line summary + blocking status for one or more ids
 rebar list [--status=open] [--has-tag=...]   # JSON array
@@ -338,6 +339,7 @@ rebar session-log "<entry>"                   # append to the current session_lo
 rebar session-logs [--limit=<n>]              # list the newest session_log tickets, newest first
 rebar validate                                # repo-wide tracker health (NO ticket id; whole-store score 1-5)
 rebar review-plan <id>                        # plan-review gate: DET floor + 3-pass advisory; signs an attestation (exit 0=PASS,1=BLOCK,2=INDETERMINATE)
+rebar explain <criterion-id>                  # read the guide/rubric for a review criterion (pure registry read, no LLM call)
 rebar export [-o FILE]                        # store -> NDJSON (one ticket/line; for jq/DuckDB/pandas + rebar->rebar migration)
 rebar import [FILE]                           # import export NDJSON (fresh local ids; [--dry-run])
 rebar reconcile [--mode dry-run|reconcile-check|live]   # Jira sync (default: dry-run)
