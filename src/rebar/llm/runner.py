@@ -275,6 +275,15 @@ class PydanticAIRunner:
         )
         if eff_max_tokens:
             model_settings["max_tokens"] = eff_max_tokens
+        # Wire the configured wall-clock timeout so the operator's REBAR_LLM_TIMEOUT
+        # actually bounds each LLM call. Audit reliability #6: cfg.timeout_s was resolved
+        # into LLMConfig but never passed to the model, so every call silently rode the
+        # Anthropic SDK's ~600 s default regardless of the operator's setting. `timeout`
+        # is a base ModelSettings field mapping to the underlying httpx/Anthropic client
+        # request timeout. DEFAULT_TIMEOUT_S (600) equals the SDK default, so an unset
+        # knob is never lowered below it; an explicit operator value is honored verbatim.
+        if cfg.timeout_s:
+            model_settings["timeout"] = float(cfg.timeout_s)
         if model_settings:
             kwargs["model_settings"] = model_settings
         # pydantic-ai's request_limit counts MODEL REQUESTS (~1 per tool-call cycle).

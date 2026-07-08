@@ -227,12 +227,21 @@ for the future code-review op's "deterministic reviewer-selection rules."
 | `REBAR_LLM_API_KEY` | — | explicit model key (e.g. a dummy key for a local server) |
 | `REBAR_LLM_MAX_TOKENS` | `8000` | per-response token ceiling |
 | `REBAR_LLM_MAX_STEPS` | `50` | agent-loop step cap (~2 per tool call) |
-| `REBAR_LLM_TIMEOUT` | `600` | per-operation seconds |
+| `REBAR_LLM_TIMEOUT` | `600` | per-call wall-clock seconds (wired to the model's request timeout — see note below) |
 | `REBAR_LLM_REPO_PATH` | repo root | repo the read-only file tools see |
 | `REBAR_LLM_MCP_SERVERS` | `{}` | JSON of MCP servers (pydantic-ai MCP server / toolset shape) |
 | `ANTHROPIC_API_KEY` | — | model credentials (required to run the agent runtime) |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` | — | OTLP trace sink only (auto-enabled when both keys present + the `[tracing]` extra); never used for prompt text |
 | `REBAR_MCP_ALLOW_LLM` | off | gate the MCP `review_ticket` tool (it makes a live, billable call) |
+
+> **`REBAR_LLM_TIMEOUT` wiring & default semantics.** The resolved `timeout_s` is passed
+> into the model's request settings (the base `ModelSettings.timeout`, which maps to the
+> underlying httpx/Anthropic client per-request timeout), so it actually bounds each LLM
+> call rather than being an inert knob. The default (`600` s) equals the Anthropic SDK's
+> own default, so leaving it unset never lowers the effective timeout below the SDK floor;
+> an explicit operator value is honored verbatim (raise it for very large graph reviews,
+> lower it to fail faster). This does not add retry/backoff — it is a single per-call
+> wall-clock bound.
 
 Tracing is the optional `[tracing]` **OpenTelemetry exporter** to Langfuse's OTLP
 endpoint (Langfuse is an OTLP sink, not an SDK dependency) — wired in
