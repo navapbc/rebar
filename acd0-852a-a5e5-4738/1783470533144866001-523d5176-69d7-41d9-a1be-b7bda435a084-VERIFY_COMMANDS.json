@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"verify_commands":[{"command":"python -m pytest tests/scripts/bridge/ -k apply_outbound -q","dd_id":"C3-allowlist-alert","dd_text":"allowlist-dropped field emits a deduped alert"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1783470533144866001,"uuid":"523d5176-69d7-41d9-a1be-b7bda435a084"}
