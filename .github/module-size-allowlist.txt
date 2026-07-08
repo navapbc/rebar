@@ -1,3 +1,18 @@
+# Grandfathered over-cap modules — SOFT-CAP-EXEMPT MEMBERSHIP (one bare path per line).
+#
+# This file lists the files allowed to exceed the 800-LOC soft cap (docs/architecture.md
+# "Module-size policy"). It is intentionally kept in the legacy BARE-PATH format so the
+# module-size gate stays green in BOTH directions across the ratchet rollout (story S1 /
+# 9cf3): a change that adds the ratchet is verified by `main`'s CURRENT gate, which reads
+# THIS file with a full-line compare — mirroring the prompt-index gate's "green across the
+# move in both directions" pattern.
+#
+# The per-file GROWTH CEILING lives in the sibling `.github/module-size-ceilings.txt`
+# ("<path> <max-lines>"): membership here, the ratchet number there. The two files are
+# kept in sync (asserted by tests/unit/test_module_size_contract.py) — every path below
+# has a ceiling row, and vice versa. Adding a row (here + a ceiling there) or raising a
+# ceiling is a deliberate, reviewed act, and each file carries a remedy row in
+# docs/architecture.md. A file that drops back under the soft cap graduates off BOTH files.
 src/rebar/_engine/rebar_reconciler/inbound_differ.py
 src/rebar/_engine/rebar_reconciler/reconcile.py
 src/rebar/config.py

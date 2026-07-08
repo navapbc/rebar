@@ -148,21 +148,44 @@ jobs:
           git config --global init.defaultBranch main
 
       # --- The gates + suite, identical to test.yml (single source of truth) ---
+      # Module-size GROWTH RATCHET (story S1 / 9cf3): membership in the bare-path allowlist,
+      # per-file ceiling in the sibling ceilings file. Mirrors the test.yml step exactly.
       - name: Module-size gate
         shell: bash
         run: |
           allowlist=.github/module-size-allowlist.txt
+          ceilings=.github/module-size-ceilings.txt
+          fail=0
+          # 1) Ratchet: every file with a pinned ceiling must be within it.
+          echo "Allow-listed files (ceiling ratchet):"
+          while read -r path ceiling _rest; do
+            case "$path" in ''|\#*) continue;; esac
+            if [ ! -f "$path" ]; then
+              echo "::error::ceilings path does not exist: $path (remove or fix the row)"; fail=1; continue
+            fi
+            if ! printf '%s' "$ceiling" | grep -qE '^[0-9]+$'; then
+              echo "::error::ceilings row for $path has no integer ceiling: '$ceiling'"; fail=1; continue
+            fi
+            loc=$(wc -l < "$path")
+            printf "  %5d / %-5s  %s\n" "$loc" "$ceiling" "$path"
+            if [ "$loc" -gt "$ceiling" ]; then
+              echo "::error::$path is $loc LOC, over its pinned ceiling of $ceiling — shrink it (ratchet)."
+              fail=1
+            fi
+          done < "$ceilings"
+          # 2) No unlisted file over the soft cap (membership = the bare-path allowlist).
+          listed=$(grep -vE '^[[:space:]]*(#|$)' "$allowlist" | awk '{print $1}' | sort -u)
           over=$(find src/rebar -name '*.py' | grep -v __pycache__ \
             | xargs wc -l 2>/dev/null \
             | awk '$2 != "total" && $1 > 800 { print $2 }' | sort)
-          allowed=$(grep -vE '^[[:space:]]*(#|$)' "$allowlist" | sort)
-          new_offenders=$(comm -23 <(printf '%s\n' "$over") <(printf '%s\n' "$allowed") | grep -v '^$' || true)
+          new_offenders=$(comm -23 <(printf '%s\n' "$over") <(printf '%s\n' "$listed") | grep -v '^$' || true)
           if [ -n "$new_offenders" ]; then
             echo "::error::New file(s) over the 800-LOC soft cap and NOT in $allowlist:"
             printf '%s\n' "$new_offenders"
-            exit 1
+            fail=1
           fi
-          echo "Module-size gate: OK."
+          [ "$fail" = 1 ] && exit 1
+          echo "Module-size gate: OK (all allow-listed files within ceilings; no new over-cap files)."
 
       - name: Prompt-index drift gate
         shell: bash
