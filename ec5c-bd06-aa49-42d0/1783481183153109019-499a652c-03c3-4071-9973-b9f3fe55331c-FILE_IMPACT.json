@@ -1,0 +1,1 @@
+{"author":"Claude","data":{"file_impact":[{"path":"scripts/","reason":"SessionStart hook shim script"},{"path":"docs/","reason":"install instructions"}]},"env_id":"724d9d0c-bc4c-4cc4-b96b-1a19356102e2","event_type":"FILE_IMPACT","timestamp":1783481183153109019,"uuid":"499a652c-03c3-4071-9973-b9f3fe55331c"}
