@@ -317,3 +317,22 @@ Files in the 500–800 band (`_commands/transition.py`, `_commands/composer.py`,
 modules — `apply_inbound.py`, `_advisory_lock.py`, `acli.py`, `inbound_differ.py`,
 `differ.py`, `batch_dispatch.py`, `acli_cli_ops.py`) are at the ceiling, not over
 it — watch, don't split preemptively.
+
+## mypy strictness ratchet
+
+`make typecheck` (`mypy src/rebar`) gates the whole library. Two ratchet dials in
+`[tool.mypy]` tighten it over time, mirroring the module-size allowlist's *shrink-only*
+discipline:
+
+- **`check_untyped_defs = true`** (global) — mypy checks the *bodies* of un-annotated
+  functions, not just their signatures, so bugs inside un-typed defs can't slip through.
+- **`disallow_untyped_defs`** via `[[tool.mypy.overrides]]` — enabled per-package for
+  packages whose functions are fully annotated. This set is **shrink-only for the exempt
+  list**: a package may only be **added** to the strict override (never removed).
+  `tests/unit/test_mypy_ratchet.py` pins the committed baseline (`rebar.graph`,
+  `rebar.grounding`) as a subset of the enabled set, so a regression turns the build red.
+
+**To promote a package** into the strict set: annotate its remaining defs until
+`mypy src/rebar/<pkg> --disallow-untyped-defs` is clean, then add `rebar.<pkg>.*` to the
+override `module` list. New `type: ignore` must carry a specific code (e.g.
+`type: ignore[arg-type]`); blanket `ignore_errors` is not used.

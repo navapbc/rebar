@@ -138,6 +138,7 @@ def _load_engine_mode():
 
     mode_path = engine_dir() / "rebar_reconciler" / "mode.py"
     spec = importlib.util.spec_from_file_location("rebar._engine_mode", mode_path)
+    assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod.MODE_CAPS, mod.Mode
