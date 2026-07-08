@@ -1,5 +1,10 @@
 # rebar
 
+[![PyPI version](https://img.shields.io/pypi/v/nava-rebar)](https://pypi.org/project/nava-rebar/)
+[![Python versions](https://img.shields.io/pypi/pyversions/nava-rebar)](https://pypi.org/project/nava-rebar/)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![CI](https://github.com/navapbc/rebar/actions/workflows/test.yml/badge.svg)](https://github.com/navapbc/rebar/actions/workflows/test.yml)
+
 A git-native ticket system for coordinating coding agents — and the humans
 working alongside them.
 
