@@ -18,7 +18,7 @@
 # store-derived decomposition signal, child spangly-beggarly-blackrhino) and passes.py 839->852
 # (the Pass-1 finding-memory recall, child disused-unpoliced-solenodon) grew for the impact-redesign
 # epic; their ceilings are raised here to the landed size (remedy rows already in architecture.md).
-src/rebar/_engine/rebar_reconciler/inbound_differ.py 802
+src/rebar/_engine/rebar_reconciler/inbound_differ.py 806
 src/rebar/_engine/rebar_reconciler/reconcile.py 1083
 src/rebar/config.py 836
 src/rebar/llm/plan_review/attest.py 837
