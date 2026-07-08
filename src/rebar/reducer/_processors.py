@@ -165,6 +165,14 @@ def process_status(state: dict, event: dict, data: dict, filepath: str) -> None:
             loser_uuid,
             loser_env_id,
         )
+        # Record the resolved fork in PURE derived state (rebuilt identically on every
+        # replay — no external I/O) so a concurrent claim/status race becomes discoverable
+        # via fsck/show after the fact (audit reliability #1, story 3003). loser_env_id is
+        # intentionally NOT stored: it is unreliable across reopens, and claim-loss
+        # detection uses the authoritative `assignee` field instead (see _commands/claim).
+        state.setdefault("status_fork_resolutions", []).append(
+            {"winner_uuid": winner_uuid, "dropped_uuid": loser_uuid}
+        )
     else:
         state["status"] = data.get("status", state["status"])
         # Advance to THIS event's OWN UUID (not its data parent-pointer) so a
