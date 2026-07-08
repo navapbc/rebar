@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import os
 
-from ._cache import prepare_event_files, write_cache
+from ._cache import is_active_event, prepare_event_files, write_cache
 from ._processors import replay_events
 from ._state import make_error_dict, make_initial_state
 from .marker import remove_marker
@@ -57,7 +57,7 @@ def _compute_preconditions_summary(ticket_dir: str) -> dict:
     snapshot_files = sorted(
         f
         for f in os.listdir(ticket_dir)
-        if f.endswith("-PRECONDITIONS-SNAPSHOT.json") and not f.endswith(".retired")
+        if f.endswith("-PRECONDITIONS-SNAPSHOT.json") and is_active_event(f)
     )
     if snapshot_files:
         snap_path = os.path.join(ticket_dir, snapshot_files[-1])
@@ -82,7 +82,7 @@ def _compute_preconditions_summary(ticket_dir: str) -> dict:
         if (
             f.endswith("-PRECONDITIONS.json")
             and not f.endswith("-PRECONDITIONS-SNAPSHOT.json")
-            and not f.endswith(".retired")
+            and is_active_event(f)
         )
     )
     if not event_files:

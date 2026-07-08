@@ -15,6 +15,7 @@ SNAPSHOT bytes go through the single canonical serializer
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -28,6 +29,9 @@ from rebar._store import event_append, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
 from rebar._store.gitutil import run_git
 from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
+from rebar.reducer._cache import RETIRED_SUFFIX
+
+logger = logging.getLogger(__name__)
 
 
 def _usage() -> int:
@@ -137,11 +141,43 @@ def _compact_locked(
         )
         fsutil.atomic_write(final_path, canonical_str(snapshot_event), encoding="utf-8")
 
-        for fp in event_files:
+        # I1: RENAME folded sources to ``*.retired`` rather than deleting them. The
+        # SNAPSHOT above is written atomically FIRST, so a crash mid-rename leaves a
+        # valid SNAPSHOT plus some already-retired sources; the SNAPSHOT-present
+        # short-circuit makes a re-compact a no-op, and an existing ``.retired``
+        # target is skipped (idempotent). A rename failure is logged (never
+        # swallowed) and every completed rename is reversed before we abort, so the
+        # fold is atomic: either all sources are retired or none are.
+        renamed: list[tuple[str, str]] = []
+        try:
+            for fp in event_files:
+                retired = fp + RETIRED_SUFFIX
+                if os.path.exists(retired):
+                    continue  # idempotent re-run: source already retired
+                os.rename(fp, retired)
+                renamed.append((fp, retired))
+                logger.info("compact: retired folded event %s", os.path.basename(fp))
+        except OSError:
+            logger.warning(
+                "compact: failed to retire a folded event for %s — reversing %d rename(s) "
+                "and removing the uncommitted SNAPSHOT",
+                ticket_id,
+                len(renamed),
+                exc_info=True,
+            )
+            for orig, retired in reversed(renamed):
+                try:
+                    os.rename(retired, orig)
+                except OSError:
+                    logger.warning(
+                        "compact: could not reverse rename %s -> %s", retired, orig, exc_info=True
+                    )
             try:
-                os.remove(fp)
+                os.remove(final_path)
             except OSError:
-                pass
+                logger.warning("compact: could not remove uncommitted SNAPSHOT %s", final_path)
+            sys.stderr.write("Error: failed to retire folded events while holding lock\n")
+            return 1
         try:
             os.remove(os.path.join(ticket_dir, ".cache.json"))
         except OSError:
