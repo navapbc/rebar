@@ -243,7 +243,12 @@ def register_read_tools(mcp, ctx) -> None:
         include_blocked=True drops the unblocked-only filter."""
         import warnings
 
-        with warnings.catch_warnings():  # the tool's docstring is the deprecation signal
+        from rebar._deprecations import warn_deprecated
+
+        # Emit the MCP tool's own deprecation signal through the central registry, then
+        # suppress the inner library-level warning so callers see exactly one signal.
+        warn_deprecated("mcp:list_epics", via="warning")
+        with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
             return ListEpicsOut.model_validate(
                 rebar.list_epics(

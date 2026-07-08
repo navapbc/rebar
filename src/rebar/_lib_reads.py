@@ -294,15 +294,9 @@ def list_epics(
                            blocking_state="unblocked", min_children=N)
         rebar.list_tickets(ticket_type="bug", priority=0)
     """
-    import warnings
+    from rebar._deprecations import warn_deprecated
 
-    warnings.warn(
-        "rebar.list_epics is deprecated; compose list_tickets(ticket_type='epic', "
-        "status='open,in_progress', blocking_state='unblocked', min_children=N) and "
-        "list_tickets(ticket_type='bug', priority=0).",
-        DeprecationWarning,
-        stacklevel=2,
-    )
+    warn_deprecated("lib:rebar.list_epics()", via="warning", stacklevel=2)
     epics = list_tickets(
         ticket_type="epic",
         status="open,in_progress",

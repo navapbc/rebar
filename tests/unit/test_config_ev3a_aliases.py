@@ -55,10 +55,12 @@ def test_compact_legacy_alias_warns(
     with caplog.at_level(logging.WARNING, logger="rebar.config"):
         c = cfg.load_config(root=_proj(tmp_path))
     assert c.compact.threshold == 7
-    assert any(
-        "COMPACT_THRESHOLD" in r.getMessage() and "deprecated" in r.getMessage()
-        for r in caplog.records
-    )
+    # COMPACT_THRESHOLD -> REBAR_COMPACT_THRESHOLD is a PERMANENT ergonomic rename, not a
+    # scheduled removal, so the central deprecation signal must NOT claim it is
+    # "deprecated" (ticket 5274, AC4) — it names the alias as a permanent alias instead.
+    msgs = [r.getMessage() for r in caplog.records]
+    assert any("COMPACT_THRESHOLD" in m and "permanent alias" in m for m in msgs)
+    assert not any("COMPACT_THRESHOLD" in m and "deprecated" in m for m in msgs)
 
 
 def test_compact_canonical_beats_legacy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

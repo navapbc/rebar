@@ -38,6 +38,7 @@ from rebar._config_schema import TicketClarityConfig as TicketClarityConfig
 from rebar._config_schema import TicketConfig as TicketConfig
 from rebar._config_schema import TrackerConfig as TrackerConfig
 from rebar._config_schema import VerifyConfig as VerifyConfig
+from rebar._deprecations import warn_deprecated
 
 logger = logging.getLogger("rebar.config")
 
@@ -103,11 +104,15 @@ def config_file(root: str | os.PathLike[str] | None = None) -> Path | None:
 # load_config cache, e.g. the tracker-dir override, which is read on a hot path).
 _WARNED_LEGACY_ENV: set[str] = set()
 
+# Warn-once guard for the deprecated flat ``.rebar/config.conf`` reader (see
+# _read_legacy_conf); emitting per-read would be noisy on a cache miss.
+_WARNED_LEGACY_CONF = False
 
-def _warn_once_legacy_env(legacy: str, canonical: str) -> None:
+
+def _warn_once_legacy_env(legacy: str) -> None:
     if legacy not in _WARNED_LEGACY_ENV:
         _WARNED_LEGACY_ENV.add(legacy)
-        logger.warning("rebar config: env %s is deprecated; use %s", legacy, canonical)
+        warn_deprecated(f"env:{legacy}", logger=logger)
 
 
 def tracker_dir_override() -> str | None:
@@ -120,7 +125,7 @@ def tracker_dir_override() -> str | None:
         return val
     legacy = os.environ.get("TICKETS_TRACKER_DIR")
     if legacy:
-        _warn_once_legacy_env("TICKETS_TRACKER_DIR", "REBAR_TRACKER_DIR")
+        _warn_once_legacy_env("TICKETS_TRACKER_DIR")
         return legacy
     return None
 
@@ -305,7 +310,15 @@ def _read_legacy_conf(path: Path) -> dict:
     into a nested sparse mapping (values stay strings; coerce_sparse types them).
     A handful of legacy NON-dotted keys (:data:`_LEGACY_FLAT_CONF_KEYS`, e.g.
     ``rebar_id_guard_mode``) are mapped to their typed section.key for back-compat,
-    with the canonical dotted key winning if both appear in the file."""
+    with the canonical dotted key winning if both appear in the file.
+
+    Reading this format is itself deprecated (scheduled for removal at the v1.0.0
+    major boundary) in favour of ``rebar.toml`` / a ``[tool.rebar]`` pyproject
+    table — signalled once via the central deprecation registry."""
+    global _WARNED_LEGACY_CONF
+    if not _WARNED_LEGACY_CONF:
+        _WARNED_LEGACY_CONF = True
+        warn_deprecated("cfg:flat .rebar/config.conf reader", logger=logger)
     out: dict[str, dict] = {}
     flat_legacy: dict[tuple[str, str], str] = {}
     try:
@@ -434,28 +447,15 @@ def _canonical_env_name(sect: str, key: str) -> str:
 # truthy convention); ``REBAR_ID_GUARD_MODE``
 # is similarly value-mapped (warn → bypass/"true", raise/other → "false").
 #
-# ── Deprecation removal horizons (DOC-ONLY; item 16b-4 / ticket 4419-1c85) ──────────
-# rebar accretes back-compat aliases faster than it retires them. Dropping any of these
-# is a BREAKING change (it removes an input users may still set), so each is scheduled
-# for a MAJOR boundary — v1.0.0 — the first release where retiring a still-warned alias
-# is semver-legal. Recording a horizon keeps the set from growing unbounded; do NOT
-# remove an alias before its horizon (that would break users mid-0.x). Release: 0.6.0.
-#
-#   alias / shim                          canonical replacement                 remove in
-#   -----------------------------------   -----------------------------------   ---------
-#   env  REBAR_PUSH                        REBAR_SYNC_PUSH                        v1.0.0
-#   env  TICKETS_TRACKER_DIR               REBAR_TRACKER_DIR                     v1.0.0
-#   env  REBAR_MCP_ALLOW_RECONCILE_LIVE    REBAR_MCP_ALLOW_JIRA_SYNC             v1.0.0
-#   cfg  verify.require_verdict_for_close  verify.require_signature_for_close    v1.0.0
-#   cfg  flat .rebar/config.conf reader    rebar.toml / [tool.rebar] pyproject   v1.0.0
-#   lib  edit_ticket(tags=…)               set_tags / add_tags / remove_tags     v1.0.0
-#   lib  rebar.list_epics()                list_tickets(ticket_type='epic')      v1.0.0
-#
-# The env/cfg rows live in this module (_LEGACY_ENV_ALIASES / _ALIASES / _read_legacy_conf);
-# the `lib` rows live in rebar.__init__ (edit_ticket / list_epics). Any alias added later
-# MUST get a row here with a horizon so the registry stays complete. (REBAR_NO_SYNC and the
-# other _LEGACY_ENV_ALIASES entries are permanent ergonomic renames, tracked with the rest
-# of the rename window above — not scheduled for removal here.)
+# ── Deprecation removal horizons ────────────────────────────────────────────────────
+# The removal horizons (and permanent-vs-scheduled classification) for EVERY deprecated
+# user-facing surface — including these env aliases — now live in the machine-readable
+# registry in ``rebar._deprecations`` (the single source of truth), and every runtime
+# signal routes through :func:`rebar._deprecations.warn_deprecated`. The DICT below is
+# the RESOLUTION table (legacy env name -> section/key/canonical) the env layer consults;
+# its SCHEDULED subset (REBAR_PUSH / TICKETS_TRACKER_DIR / REBAR_MCP_ALLOW_RECONCILE_LIVE)
+# is retired at v1.0.0 there and the rest (REBAR_NO_SYNC, COMPACT_THRESHOLD, …) are
+# permanent renames. Adding an alias here without a registry row fails the registry test.
 _LEGACY_ENV_ALIASES: dict[str, tuple[str, str, str]] = {
     # legacy name                      -> (section, key, canonical name)
     "REBAR_PUSH": ("sync", "push", "REBAR_SYNC_PUSH"),
@@ -504,9 +504,9 @@ def env_overrides() -> dict:
             name = _canonical_env_name(sect, key)
             if name in os.environ:
                 out.setdefault(sect, {})[key] = os.environ[name]
-    for legacy, (sect, key, canonical) in _LEGACY_ENV_ALIASES.items():
+    for legacy, (sect, key, _canonical) in _LEGACY_ENV_ALIASES.items():
         if legacy in os.environ and key not in out.get(sect, {}):
-            logger.warning("rebar config: env %s is deprecated; use %s", legacy, canonical)
+            warn_deprecated(f"env:{legacy}", logger=logger)
             out.setdefault(sect, {})[key] = _map_legacy_env(legacy, os.environ[legacy])
     return out
 

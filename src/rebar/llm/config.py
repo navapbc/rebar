@@ -25,12 +25,16 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import json
+import logging
 import os
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from importlib.util import find_spec
 
 from rebar import config as _root_config
+from rebar._deprecations import warn_deprecated
+
+_LLM_LOGGER = logging.getLogger("rebar.llm.config")
 
 DEFAULT_MODEL = "claude-opus-4-8"
 # The decisive non-frontier model used by the gate VERIFIERS (plan-review Pass-2 verify and
@@ -364,9 +368,7 @@ def _env_int_aliased(name: str, legacy: str, default: int) -> int:
     """:func:`_env_int` for ``name``, honoring a deprecated ``legacy`` env var (with
     a one-time-ish warning) when the canonical name is unset."""
     if name not in os.environ and legacy in os.environ:
-        import logging
-
-        logging.getLogger("rebar.llm.config").warning("%s is deprecated; use %s", legacy, name)
+        warn_deprecated(f"env:{legacy}", logger=_LLM_LOGGER)
         name = legacy
     return _env_int(name, default)
 
@@ -414,9 +416,7 @@ def _llm_int(table: dict, cli: dict, env_name: str, file_key: str, default: int,
         candidates.append(cli[file_key])
     env_raw = os.environ.get(env_name)
     if (env_raw is None or not env_raw.strip()) and legacy and os.environ.get(legacy, "").strip():
-        import logging
-
-        logging.getLogger("rebar.llm.config").warning("%s is deprecated; use %s", legacy, env_name)
+        warn_deprecated(f"env:{legacy}", logger=_LLM_LOGGER)
         env_raw = os.environ.get(legacy)
     if env_raw is not None and env_raw.strip():
         candidates.append(env_raw)

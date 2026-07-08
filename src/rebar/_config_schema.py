@@ -20,6 +20,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from rebar._deprecations import warn_deprecated
+
 logger = logging.getLogger("rebar.config")
 
 
@@ -511,14 +513,7 @@ def coerce_sparse(raw: dict | None, *, source: str = "", strict: bool = False) -
         for old, new in _ALIASES.get(sect, {}).items():
             if old in d:
                 if new not in d:
-                    logger.warning(
-                        "rebar config%s: '%s.%s' is deprecated; use '%s.%s'",
-                        _src(source),
-                        sect,
-                        old,
-                        sect,
-                        new,
-                    )
+                    warn_deprecated(f"cfg:{sect}.{old}", logger=logger)
                     d[new] = d.pop(old)
                 else:
                     d.pop(old)  # canonical key wins

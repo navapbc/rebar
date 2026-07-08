@@ -13,6 +13,7 @@ import os
 import sys
 from typing import Any
 
+from rebar._deprecations import warn_deprecated
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.reads import (
     ReadError,
@@ -508,12 +509,7 @@ def _cmd_list_epics(argv: list[str], tracker: str) -> int:
     exactly TWO generic calls — one for epics, one for P0 bugs — assembled into
     ``{p0_bugs, epics}``. Replaces the retired bespoke list-epics reduction.
     Blocking-awareness is the generic blocking_state filter (default: unblocked)."""
-    print(
-        "WARNING: 'list-epics' is deprecated and will be removed in a future "
-        "release. Use 'rebar list --type=epic --status=open,in_progress --unblocked "
-        "[--min-children=N]' and 'rebar list --type=bug --priority=0'.",
-        file=sys.stderr,
-    )
+    warn_deprecated("cli:list-epics", via="stderr")
     try:
         fmt, rest = parse_output(argv, "report")
     except OutputFormatError as exc:
@@ -623,6 +619,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     # Freshness: strip --no-pull (canonical; --no-sync kept as a deprecated alias)
     # before the subcommand parses its own flags, so all read arms share one policy.
+    if "--no-sync" in rest:
+        warn_deprecated("cli:--no-sync", via="stderr")
     no_pull = "--no-pull" in rest or "--no-sync" in rest
     rest = [a for a in rest if a not in ("--no-pull", "--no-sync")]
     tracker = tracker_dir()

@@ -22,6 +22,7 @@ from rebar import config
 from rebar._commands._seam import CommandError
 from rebar._commands.transition_close import close_ticket
 from rebar._commands.txn import ConcurrencyMismatch
+from rebar._deprecations import warn_deprecated
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar.reducer import reduce_ticket
@@ -98,10 +99,7 @@ def _warn_verdict_hash_deprecated() -> None:
     signature (``rebar sign``), not a verdict hash. This one-line warning is the ONLY
     remaining trace of the flag: it is no longer threaded into ``transition_compute`` /
     ``close_ticket`` / ``transition_core`` / ``_signature_gate`` (item 16b-1)."""
-    sys.stderr.write(
-        "Warning: --verdict-hash is deprecated and ignored; the close gate now "
-        "uses signatures (rebar sign <id> <manifest>).\n"
-    )
+    warn_deprecated("cli:--verdict-hash", via="stderr")
 
 
 def _parse_flags(args: list[str]) -> tuple[str, bool, str]:

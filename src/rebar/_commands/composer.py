@@ -353,6 +353,9 @@ def edit_core(
     # Deprecated alias: edit(tags=...) -> --set-tags (pre-pass, BEFORE the
     # _EDIT_FIELDS validation loop, else 'tags' is rejected as an unknown field).
     if "tags" in fields:
+        from rebar._deprecations import warn_deprecated
+
+        warn_deprecated("lib:edit_ticket(tags=...)", via="warning")
         alias = fields.pop("tags")
         if tag_set is None and tag_add is None and tag_remove is None:
             tag_set = alias

@@ -25,6 +25,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from rebar._deprecations import warn_deprecated
+
 # ---------------------------------------------------------------------------
 # Module-level logger
 # ---------------------------------------------------------------------------
@@ -106,11 +108,7 @@ def _warn_if_file_backend() -> None:
     global _file_backend_warned
     if not _file_backend_warned and _lock_backend() == "file":
         _file_backend_warned = True
-        logger.warning(
-            "reconciler.lock_backend='file' is deprecated and ignored — the tickets-branch "
-            "file lock was removed (epic dust-troth-naval / ADR 0031); using the "
-            "refs/reconciler/* backend. Remove the key from your config."
-        )
+        warn_deprecated("cfg:reconciler.lock_backend='file'", logger=logger)
 
 
 # ---------------------------------------------------------------------------
