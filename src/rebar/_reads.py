@@ -62,6 +62,20 @@ def show_ticket(ticket_id: str, *, repo_root=None) -> dict:
         raise _rebar_error(f"rebar show failed (exit 1): {exc.message}") from None
 
 
+def list_by_query(query: ticket_reads.TicketQuery, *, repo_root=None) -> list[dict]:
+    """Single query-accepting read entry: resolve the tracker, apply the uniform
+    read-freshness policy, and run the filter core (``list_states``).
+
+    Every read boundary that already speaks :class:`TicketQuery` funnels through
+    here (the public library facade ``rebar.list_tickets`` and the scalar
+    :func:`list_tickets` shim below both build a query via
+    :meth:`TicketQuery.from_library` and hand it to this one entry), so the
+    tracker-resolution + freshness + ``list_states`` plumbing lives ONCE."""
+    tracker = _tracker(repo_root)
+    _fresh(tracker)
+    return ticket_reads.list_states(tracker, query)
+
+
 def list_tickets(
     *,
     status: str | None = None,
@@ -79,11 +93,11 @@ def list_tickets(
     include_body: bool = True,
     repo_root=None,
 ) -> list[dict]:
-    tracker = _tracker(repo_root)
-    _fresh(tracker)
-    # Keep this library shim's scalar signature (callers pass simple kwargs); build
-    # the TicketQuery here so the None→"" / priority-cast normalization lives once in
-    # TicketQuery.from_library rather than being respelled per read layer.
+    # Scalar shim kept for internal callers that pass a small kwarg subset (e.g.
+    # plan_review attest/orchestrator call ``list_tickets(parent=…)``). Build the
+    # TicketQuery via the single normalizer (``from_library`` owns the None→"" /
+    # priority-cast), then funnel through the one query-accepting read entry — the
+    # 14-field shape is never respelled per read layer.
     query = ticket_reads.TicketQuery.from_library(
         status=status,
         ticket_type=ticket_type,
@@ -99,7 +113,7 @@ def list_tickets(
         sort=sort,
         include_body=include_body,
     )
-    return ticket_reads.list_states(tracker, query)
+    return list_by_query(query, repo_root=repo_root)
 
 
 def deps(ticket_id: str, *, repo_root=None) -> dict:

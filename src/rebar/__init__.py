@@ -902,25 +902,31 @@ def list_tickets(
     MCP ``list_tickets`` tool).
     """
     from rebar import _reads
+    from rebar._engine_support.ticket_query import TicketQuery
 
+    # Build the TicketQuery at this public boundary (``full`` is the library
+    # spelling of the engine's ``include_body``), then funnel through the single
+    # query-accepting read entry. The scalar filter shape lives ONCE — in
+    # TicketQuery.from_library — so this facade no longer re-forwards it field by
+    # field; a new filter is added to the dataclass, not respelled here.
+    query = TicketQuery.from_library(
+        status=status,
+        ticket_type=ticket_type,
+        priority=priority,
+        parent=parent,
+        has_tag=has_tag,
+        without_tag=without_tag,
+        include_archived=include_archived,
+        exclude_deleted=exclude_deleted,
+        min_children=min_children,
+        blocking_state=blocking_state,
+        with_children_count=with_children_count,
+        sort=sort,
+        include_body=full,
+    )
     return cast(
         "list[TicketState]",
-        _reads.list_tickets(
-            status=status,
-            ticket_type=ticket_type,
-            priority=priority,
-            parent=parent,
-            has_tag=has_tag,
-            without_tag=without_tag,
-            include_archived=include_archived,
-            exclude_deleted=exclude_deleted,
-            min_children=min_children,
-            blocking_state=blocking_state,
-            with_children_count=with_children_count,
-            sort=sort,
-            include_body=full,
-            repo_root=repo_root,
-        ),
+        _reads.list_by_query(query, repo_root=repo_root),
     )
 
 
