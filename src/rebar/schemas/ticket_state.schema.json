@@ -20,6 +20,7 @@
       "items": { "type": "string" }
     },
     "assignee": { "type": ["string", "null"] },
+    "claimed_session": { "type": ["string", "null"] },
     "parent_id": { "type": ["string", "null"] },
     "alias": {
       "type": ["string", "null"],
