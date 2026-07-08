@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"docs/concurrency.md","reason":"replace dead shell-test citations"},{"path":"docs/architecture.md","reason":"refresh reconcile.py remedy row"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783541228342193001,"uuid":"eff49713-f05f-4913-8adc-5f5eb5fdbfb0"}
