@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import glob
 import hashlib
 import json
 import logging
@@ -95,6 +94,8 @@ def compute_dir_hash(ticket_dir: str, event_filenames: list[str]) -> str:
 
 def prepare_event_files(
     ticket_dir: str,
+    *,
+    include_retired: bool = False,
 ) -> tuple[str, str, list[str], dict | None]:
     """Build sorted event file list and compute dir_hash; check cache.
 
@@ -102,9 +103,16 @@ def prepare_event_files(
     cached_state_json_or_none is the raw cached state dict if a cache hit
     occurred, or None if a cache miss (caller must recompute).
 
-    ``event_files`` is the sorted list of *.json event file paths (glob-expanded,
-    excluding .cache.json via glob's dotfile exclusion).  Empty list means no
-    events in the directory.
+    Normal mode (``include_retired=False``): ``event_files`` is the sorted list of
+    active ``*.json`` event file paths (dotfiles and folded ``*.retired`` sources
+    excluded), and the reducer cache is consulted.
+
+    Rebuild mode (``include_retired=True``, RC2b Option 1): the folded ``*.retired``
+    tombstones are folded back into the set and every ``SNAPSHOT`` file is *excluded*,
+    so the full ordered history replays from scratch (no snapshot short-circuit) —
+    this reconstructs state that a stale snapshot's positional skip had silently
+    dropped. This path **bypasses the cache entirely** (it reads the full file set
+    directly and must never return a stale ``*.json``-only cache entry).
     """
     from ._sort import event_sort_key
 
@@ -114,18 +122,31 @@ def prepare_event_files(
         all_files = os.listdir(ticket_dir)
     except OSError:
         all_files = []
-    # Both listing paths exclude folded ``*.retired`` sources via is_active_event
-    # (I1): they are append-only tombstones, not live events, so they must never
-    # enter the replay set nor the dir hash that keys the reducer cache.
-    event_filenames = sorted(
-        f for f in all_files if f.endswith(".json") and f != ".cache.json" and is_active_event(f)
-    )
+
+    def _is_event(name: str) -> bool:
+        if name.startswith("."):  # .cache.json and any other dotfile
+            return False
+        if name.endswith(".json") and is_active_event(name):
+            # Rebuild replays the raw log directly, so a SNAPSHOT (which would
+            # short-circuit replay) is excluded from the set it rebuilds over.
+            return not (include_retired and name.endswith("-SNAPSHOT.json"))
+        # Rebuild also folds the append-only ``*.retired`` sources back in — except a
+        # retired SNAPSHOT, which is likewise not a raw event to replay.
+        return (
+            include_retired
+            and name.endswith(RETIRED_SUFFIX)
+            and not name.endswith("-SNAPSHOT.json" + RETIRED_SUFFIX)
+        )
+
+    event_filenames = sorted(f for f in all_files if _is_event(f))
     dir_hash = compute_dir_hash(ticket_dir, event_filenames)
 
-    cached = read_cache(cache_path, dir_hash)
+    # The rebuild path reads the full file set directly; never key it to (or serve it
+    # from) the active-only reducer cache.
+    cached = None if include_retired else read_cache(cache_path, dir_hash)
 
     event_files = sorted(
-        (p for p in glob.glob(os.path.join(ticket_dir, "*.json")) if is_active_event(p)),
+        (os.path.join(ticket_dir, f) for f in event_filenames),
         key=event_sort_key,
     )
 

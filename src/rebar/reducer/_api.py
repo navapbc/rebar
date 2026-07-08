@@ -126,6 +126,9 @@ def _compute_preconditions_summary(ticket_dir: str) -> dict:
 
 def reduce_ticket(
     ticket_dir_path: str | os.PathLike[str],
+    *,
+    include_retired: bool = False,
+    event_files_override: list[str] | None = None,
 ) -> dict | None:
     """Compile all events in ticket_dir_path to current ticket state.
 
@@ -138,13 +141,32 @@ def reduce_ticket(
     to replayed events only, so it composes with compaction: events before the
     latest SNAPSHOT — and events whose ``uuid`` the SNAPSHOT already captured —
     are skipped before dedup is consulted.
+
+    ``include_retired=True`` (RC2b Option 1, the fsck rebuild path) folds the
+    append-only ``*.retired`` sources back in, strips SNAPSHOTs, and replays the
+    full raw history from scratch — reconstructing state a stale snapshot's
+    positional skip had silently dropped. It bypasses the reducer cache.
+
+    ``event_files_override`` reduces an explicit, pre-sorted subset of event file
+    paths instead of scanning the directory (compaction uses this to compute the
+    SNAPSHOT over the *foldable* subset only). The result still gets the normal
+    post-replay treatment (preconditions summary, ``updated_at``) so a
+    subset-derived SNAPSHOT stays byte-parity with a full reduce when the subset is
+    the whole set. This path is never cached.
     """
     ticket_dir = os.path.normpath(str(ticket_dir_path))
     ticket_id = os.path.basename(ticket_dir)
 
-    cache_path, dir_hash, event_files, cached = prepare_event_files(ticket_dir)
-    if cached is not None:
-        return cached
+    if event_files_override is not None:
+        cache_path = os.path.join(ticket_dir, ".cache.json")
+        dir_hash = ""  # subset reduce — never keyed to (or served from) the cache
+        event_files = event_files_override
+    else:
+        cache_path, dir_hash, event_files, cached = prepare_event_files(
+            ticket_dir, include_retired=include_retired
+        )
+        if cached is not None:
+            return cached
     if not event_files:
         return None
 
@@ -156,7 +178,13 @@ def reduce_ticket(
 
     state = make_initial_state()
     valid_event_count, early_result = replay_events(
-        state, event_files, ticket_id, cache_path, dir_hash, tracker_dir=tracker_dir
+        state,
+        event_files,
+        ticket_id,
+        cache_path,
+        dir_hash,
+        tracker_dir=tracker_dir,
+        include_retired=include_retired,
     )
     if early_result is not None:
         return early_result
@@ -176,7 +204,10 @@ def reduce_ticket(
             result["preconditions_summary"] = _compute_preconditions_summary(ticket_dir)
         except OSError:
             result["preconditions_summary"] = {"status": "pre-manifest"}
-        write_cache(cache_path, dir_hash, result, ticket_dir)
+        # The subset (override) and rebuild (include_retired) paths are never keyed to
+        # the active-only dir hash, so they must not write the reducer cache.
+        if event_files_override is None and not include_retired:
+            write_cache(cache_path, dir_hash, result, ticket_dir)
 
     return result
 
