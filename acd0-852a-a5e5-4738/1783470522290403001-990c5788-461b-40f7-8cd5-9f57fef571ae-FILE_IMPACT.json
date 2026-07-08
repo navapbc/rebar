@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"src/rebar/_engine/rebar_reconciler/apply_outbound.py","reason":"alert on allowlist-dropped field"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783470522290403001,"uuid":"990c5788-461b-40f7-8cd5-9f57fef571ae"}
