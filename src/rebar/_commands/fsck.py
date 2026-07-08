@@ -63,7 +63,9 @@ def _ticket_dirs(tracker: str) -> list[str]:
     )
 
 
-def _scan(tracker: str, no_mutate: bool, repo_root=None) -> tuple[list[str], int]:
+def _scan(
+    tracker: str, no_mutate: bool, repo_root=None, *, repair_snapshots: bool = False
+) -> tuple[list[str], int]:
     lines: list[str] = []
     issue_count = 0
 
@@ -133,13 +135,36 @@ def _scan(tracker: str, no_mutate: bool, repo_root=None) -> tuple[list[str], int
     # ── Check 4: SNAPSHOT source_event_uuids consistency ─────────────────────
     for ticket_id in _ticket_dirs(tracker):
         ticket_dir = os.path.join(tracker, ticket_id)
-        for snap_name in sorted(
-            n
-            for n in os.listdir(ticket_dir)
-            if n.endswith("-SNAPSHOT.json") and not n.startswith(".")
-        ):
-            lines.extend(c4 := _check_snapshot(ticket_dir, ticket_id, snap_name))
-            issue_count += len(c4)
+
+        def _snap_findings(_dir: str = ticket_dir, _tid: str = ticket_id) -> list[str]:
+            out: list[str] = []
+            for snap_name in sorted(
+                n
+                for n in os.listdir(_dir)
+                if n.endswith("-SNAPSHOT.json") and not n.startswith(".")
+            ):
+                out.extend(_check_snapshot(_dir, _tid, snap_name))
+            return out
+
+        findings = _snap_findings()
+        # RC2b Option 1: rebuild a stale snapshot that dropped a merged-in orphan, then
+        # re-check. A rebuild folds the orphan back in (SNAPSHOT_INCONSISTENT / a KNOWN
+        # ORPHAN_EVENT before the snapshot) — the remediation A3 runs against the live store.
+        rebuildable = any("SNAPSHOT_INCONSISTENT" in f or "ORPHAN_EVENT" in f for f in findings)
+        if repair_snapshots and not no_mutate and rebuildable:
+            from rebar._commands.compact import rebuild_snapshot_from_full_log
+
+            if rebuild_snapshot_from_full_log(tracker, ticket_id, ticket_dir):
+                post = _snap_findings()
+                resolved = len(findings) - len(post)
+                if resolved > 0:
+                    lines.append(
+                        f"FIXED: rebuilt SNAPSHOT for {ticket_id} ({resolved} finding(s) resolved)"
+                    )
+                findings = post
+
+        lines.extend(findings)
+        issue_count += len(findings)
 
     # ── Check 4.5: push-pending (informational; no issue_count) ──────────────
     pp = _push_pending(tracker)
@@ -333,6 +358,11 @@ def _transform_json(text: str) -> str:
 
 
 def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int:
+    # RC2b Option 1: --repair-snapshots opts into rebuilding a stale SNAPSHOT that has
+    # a merged-in pre-snapshot orphan (drives the live store to fsck-zero — A3). Strip
+    # it before output parsing; it is honored only when mutation is allowed.
+    repair_snapshots = "--repair-snapshots" in argv
+    argv = [a for a in argv if a != "--repair-snapshots"]
     try:
         fmt, _rest = parse_output(argv, "report")
     except OutputFormatError as exc:
@@ -364,7 +394,7 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
     # not read from the environment: read paths (list/show via rebar.fsck(report_only=
     # True)) pass no_mutate=True so they never delete the stale lock; the CLI `fsck`
     # always mutates (default False).
-    lines, issue_count = _scan(tracker, no_mutate, repo_root)
+    lines, issue_count = _scan(tracker, no_mutate, repo_root, repair_snapshots=repair_snapshots)
     summary = (
         "fsck complete: no issues found"
         if issue_count == 0
