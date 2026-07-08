@@ -504,3 +504,76 @@ def test_failed_push_never_drops_local_commit(two_clones):
     _expire_sync_marker(tracker_a)
     _engine_run(repo_a, "list")
     assert local_ticket in _list_status(repo_a), "local commit dropped after failed-push sync"
+
+
+# ─────────────────── RC2b: snapshot horizon + rebuild-on-stray (36d1) ─────────
+def _seed_dir_files(tracker: Path, ticket_id: str, suffix: str) -> list[Path]:
+    return sorted(p for p in (tracker / ticket_id).glob(f"*{suffix}") if not p.name.startswith("."))
+
+
+def test_compaction_horizon_keeps_young_events_live(two_clones):
+    """RC2b Option 3: with a horizon larger than every event's age, nothing is folded
+    — recent 'hot-edge' events stay live ``.json`` (no SNAPSHOT, no ``.retired``)."""
+    remote, repo_a, _repo_b, seed = two_clones
+    tracker_a = _tracker(repo_a)
+    _remote_remove(tracker_a)
+
+    _engine_run(repo_a, "comment", seed, "c1")
+    _engine_run(repo_a, "comment", seed, "c2")
+
+    out = _engine_run(
+        repo_a, "compact", seed, "--threshold=0", "--horizon=9223372036854775807", "--skip-sync"
+    ).stdout
+    assert "within the compaction horizon" in out or "nothing to fold" in out, out
+
+    after = _event_files(tracker_a)
+    assert not any(n.endswith("-SNAPSHOT.json") for n in after), "no snapshot when all young"
+    assert not _seed_dir_files(tracker_a, seed, ".retired"), "no source retired when all young"
+
+
+def test_sub_horizon_append_orphan_recovered_by_fsck_rebuild(two_clones):
+    """RC2b regression (36d1): a comment appended on clone B that clone A never saw,
+    merged in AFTER A compacted, sorts before A's SNAPSHOT and is absent from
+    ``source_event_uuids`` — the positional skip silently drops it (the RC2 data-loss
+    class). ``fsck --repair-snapshots`` rebuilds the snapshot from the full log
+    (including ``*.retired``) and folds the orphan back in.
+
+    RED before the rebuild path (the orphan stays dropped); GREEN after.
+    """
+    remote, repo_a, repo_b, seed = two_clones
+    tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
+
+    _remote_remove(tracker_a)
+    _remote_remove(tracker_b)
+
+    # B appends a comment A will never witness before compacting.
+    _engine_run(repo_b, "comment", seed, "orphan-from-B")
+    b_comment = _seed_dir_files(tracker_b, seed, "-COMMENT.json")[-1]
+
+    # A adds its own comments and compacts (folds only what A can see; horizon 0).
+    _engine_run(repo_a, "comment", seed, "a1")
+    _engine_run(repo_a, "comment", seed, "a2")
+    out = _engine_run(repo_a, "compact", seed, "--threshold=0", "--horizon=0", "--skip-sync").stdout
+    assert "compacted" in out, out
+
+    # Merge-as-union outcome: B's comment file lands in A's ticket dir (union never
+    # drops a file the other side added). It now sorts before A's SNAPSHOT.
+    dest = tracker_a / seed / b_comment.name
+    dest.write_text(b_comment.read_text())
+    _git("add", "-A", cwd=tracker_a)
+    _git("commit", "-q", "--no-verify", "-m", "merge: union in B orphan", cwd=tracker_a)
+
+    def _show(repo: Path) -> str:
+        return _engine_run(repo, "show", seed).stdout
+
+    # RED surface: the orphan comment is dropped by the snapshot's positional skip.
+    assert "orphan-from-B" not in _show(repo_a), "expected the pre-rebuild drop"
+
+    # Remediation: rebuild the snapshot from the full log.
+    fsck_out = _engine_run(repo_a, "fsck", "--repair-snapshots", check=False).stdout
+    assert "rebuilt SNAPSHOT" in fsck_out, fsck_out
+
+    # GREEN: the orphan comment is recovered, and fsck is now clean.
+    assert "orphan-from-B" in _show(repo_a)
+    clean = _engine_run(repo_a, "fsck", check=False)
+    assert "ORPHAN_EVENT" not in clean.stdout and "SNAPSHOT_INCONSISTENT" not in clean.stdout

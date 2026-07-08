@@ -217,6 +217,22 @@ def _gate_source_local_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _compaction_horizon_zero_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default the compaction horizon to 0 for the offline suite (RC2b, 36d1).
+
+    In production ``compact.COMPACTION_HORIZON_NS`` defaults to 1800 s so recent
+    "hot-edge" events are not folded (they may still gain a concurrent sub-horizon
+    sibling on another clone). The test suite creates events and compacts them
+    milliseconds later — with the production default every fresh event is "young" and
+    nothing would ever fold, breaking every compaction test. Horizon 0 makes the
+    pre-RC2b behavior the test baseline. A test that specifically exercises the
+    horizon sets ``REBAR_COMPACTION_HORIZON_NS`` (or a config file) itself — an
+    explicit value wins over this default."""
+    if "REBAR_COMPACTION_HORIZON_NS" not in os.environ:
+        monkeypatch.setenv("REBAR_COMPACTION_HORIZON_NS", "0")
+
+
+@pytest.fixture(autouse=True)
 def _reset_config_cache() -> None:
     """``load_config`` memoizes resolution per process (perf: it is on the command
     hot path). Tests reconfigure env/files freely between cases, so clear the caches

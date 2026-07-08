@@ -343,6 +343,9 @@ _CANONICAL_ENV_NAMES: dict[tuple[str, str], str] = {
     # auto-derived REBAR_TICKET_DEFAULT_ASSIGNEE) so a per-checkout/agent default is
     # easy to export (story c36c).
     ("ticket", "default_assignee"): "REBAR_DEFAULT_ASSIGNEE",
+    # compact.COMPACTION_HORIZON_NS uses a clean top-level env name (not the
+    # auto-derived, doubly-prefixed REBAR_COMPACT_COMPACTION_HORIZON_NS).
+    ("compact", "COMPACTION_HORIZON_NS"): "REBAR_COMPACTION_HORIZON_NS",
 }
 
 
