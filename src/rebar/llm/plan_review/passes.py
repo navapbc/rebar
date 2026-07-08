@@ -61,6 +61,7 @@ from rebar.llm.review_kernel.verify import (  # noqa: F401
 )
 from rebar.llm.review_kernel.verify import (  # noqa: F401
     novelty_model,
+    plan_review_verification_model,
     score_novelty,
     verification_model,
     verify_instructions,
@@ -115,10 +116,13 @@ def _pass1_model() -> type:
 
 
 # Pass-2's `verification` contract (the binary sub-question vocabulary + the severity-attribute
-# enums) is owned by the shared review KERNEL (epic vivid-gang-day WS2) as the SINGLE source —
-# plan-review's `plan_review_verification` registers the SAME kernel model factory (an alias, NOT
-# a second copy of the shape). The kernel registers it under the canonical name `verification`.
-_pass2_model = verification_model
+# enums) is owned by the shared review KERNEL (epic vivid-gang-day WS2). Plan-review registers
+# its OWN model factory under `plan_review_verification`: the kernel's Verification shape EXTENDED
+# with the 7 plan-severity axes + a detection axis (story fishable-apivorous-redhead), which
+# decide.impact_plan aggregates. It reuses the kernel's exact Binary vocabulary (built from the
+# shared helper), so only the severity_attributes differ; the kernel `verification` contract used
+# by code-review + the kernel default stays byte-identical.
+_pass2_model = plan_review_verification_model
 # Pass-2's SEPARATE novelty sub-call contract (child 150b) — the same kernel `novelty` model
 # factory, aliased under the plan-review name `plan_review_novelty` (mirroring the verification
 # pairing). The kernel registers it under the canonical name `novelty`.
