@@ -1,0 +1,23 @@
+# rebar session-provenance capture — OpenAI Codex CLI (story 7656).
+# Copy this fragment into ~/.codex/config.toml (see docs/session-id-shims.md).
+#
+# IMPORTANT — what Codex can and cannot do here (per the Codex config reference:
+# https://developers.openai.com/codex/config-reference):
+#   * Codex SessionStart hooks CANNOT export environment variables into the shell commands
+#     Codex later runs (a hook's only structured effect is additionalContext) — so, unlike
+#     Claude Code's CLAUDE_ENV_FILE, there is NO hook that dynamically exports REBAR_SESSION_ID.
+#   * `shell_environment_policy.set` DOES inject a STATIC value into every subprocess Codex
+#     spawns. That reliably sets the harness-provenance tag, so a Codex `rebar claim` records
+#     `claim_harness = codex` even though the per-session id is not natively injectable.
+#   * Codex exposes no readable session-id env var; session "rollout" files live under
+#     ~/.codex/sessions/YYYY/MM/DD/rollout-*-<id>.jsonl. To also record REBAR_SESSION_ID, set
+#     it in your shell profile with `experimental_use_profile = true` (mind the G3 caveat in
+#     docs/session-id-shims.md), or set a static per-machine value below.
+
+[shell_environment_policy]
+# Reliably tags every Codex-spawned subprocess as the codex harness.
+set = { AI_AGENT = "codex" }
+
+# Optional: source your shell profile in subprocesses (lets a profile `export REBAR_SESSION_ID`
+# flow through). Leave commented unless you understand the G3 not-in-profile caveat.
+# experimental_use_profile = true

@@ -1,0 +1,4 @@
+{
+  "$schema": "https://www.cursor.com/schemas/environment.schema.json",
+  "install": "bash scripts/session-shims/cursor-provenance.sh"
+}
