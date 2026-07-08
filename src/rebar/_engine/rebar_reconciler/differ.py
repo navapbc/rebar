@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -174,6 +175,91 @@ def _emit(
     mutations_out.append(mutation)
 
 
+@dataclass
+class _DiffState:
+    """Derived indexes + loaded classes threaded to the per-key emit phases of
+    :func:`compute_mutations` — a mechanical bundle of what were locals in the
+    former single-function body (no behavior change)."""
+
+    config: Any
+    conflict_resolver: Any
+    Mutation: Any
+    MutationAction: Any
+    MutationDirection: Any
+    excluded: set
+    bound_local_ids: set
+    jira_local_id_to_key: dict
+    local_id_to_keys: dict
+    duplicate_local_ids: set
+    local_rebar_ids: set
+    mutations: list
+    all_keys: set
+
+
+def _compute_mutations_build_state(local_state, jira_state, seed_mutations) -> _DiffState:
+    """Setup phase: load config/resolver/mutation classes and build the derived
+    lookup indexes (bound ids, duplicate-local-id collisions, seed mutations, all_keys)."""
+    config = _load_config()
+    conflict_resolver = _load_conflict_resolver()
+    mutation_mod = _load_mutation()
+    Mutation = mutation_mod.Mutation
+    MutationAction = mutation_mod.MutationAction
+    MutationDirection = mutation_mod.MutationDirection
+
+    excluded = set(config.EXCLUDED_FIELDS)
+
+    # Build the set of local_ids already bound in the Jira working set.
+    # An outbound create for a local ticket whose local_id is already
+    # bound in Jira would re-create an already-mirrored issue (dd-4 AC).
+    bound_local_ids: set[str] = set()
+    # Reverse map: local_id -> jira_key, so we can detect dangling
+    # references where the Jira side claims a binding to a local ticket
+    # that no longer exists locally (dd-5).
+    jira_local_id_to_key: dict[str, str] = {}
+    for jira_key, jira_entry in jira_state.items():
+        if isinstance(jira_entry, dict):
+            cand = jira_entry.get("local_id")
+            if cand:
+                bound_local_ids.add(str(cand))
+                jira_local_id_to_key.setdefault(str(cand), jira_key)
+
+    # Build a map: local_id -> [local_key, ...] from local_state, to
+    # detect duplicate local_id collisions across local tickets (dd-5).
+    local_id_to_keys: dict[str, list[str]] = {}
+    for local_key, local_entry in local_state.items():
+        if isinstance(local_entry, dict):
+            cand = local_entry.get("local_id")
+            if cand:
+                local_id_to_keys.setdefault(str(cand), []).append(local_key)
+    # The set of local local_ids that have a collision (>1 owners).
+    duplicate_local_ids: set[str] = {lid for lid, keys in local_id_to_keys.items() if len(keys) > 1}
+    # The set of local local_ids that are present in local_state at all,
+    # used to short-circuit dangling-jira-ref detection.
+    local_rebar_ids: set[str] = set(local_id_to_keys.keys())
+
+    # Seed mutations (if any) are prepended to the result list before the
+    # differ walks local/jira state. They are NOT filtered through
+    # quarantine_set — the caller (e.g. invariants.check_dual_identity_complete)
+    # has authority over what it injects.
+    mutations: list[Any] = list(seed_mutations) if seed_mutations else []
+    all_keys = set(local_state) | set(jira_state)
+    return _DiffState(
+        config=config,
+        conflict_resolver=conflict_resolver,
+        Mutation=Mutation,
+        MutationAction=MutationAction,
+        MutationDirection=MutationDirection,
+        excluded=excluded,
+        bound_local_ids=bound_local_ids,
+        jira_local_id_to_key=jira_local_id_to_key,
+        local_id_to_keys=local_id_to_keys,
+        duplicate_local_ids=duplicate_local_ids,
+        local_rebar_ids=local_rebar_ids,
+        mutations=mutations,
+        all_keys=all_keys,
+    )
+
+
 def compute_mutations(
     local_state: dict[str, dict] | None = None,
     jira_state: dict[str, dict] | None = None,
@@ -223,298 +309,312 @@ def compute_mutations(
         local_state = {}
     if jira_state is None:
         jira_state = {}
-
-    config = _load_config()
-    conflict_resolver = _load_conflict_resolver()
-    mutation_mod = _load_mutation()
-    Mutation = mutation_mod.Mutation
-    MutationAction = mutation_mod.MutationAction
-    MutationDirection = mutation_mod.MutationDirection
-
-    excluded = set(config.EXCLUDED_FIELDS)
-
-    # Build the set of local_ids already bound in the Jira working set.
-    # An outbound create for a local ticket whose local_id is already
-    # bound in Jira would re-create an already-mirrored issue (dd-4 AC).
-    bound_local_ids: set[str] = set()
-    # Reverse map: local_id -> jira_key, so we can detect dangling
-    # references where the Jira side claims a binding to a local ticket
-    # that no longer exists locally (dd-5).
-    jira_local_id_to_key: dict[str, str] = {}
-    for jira_key, jira_entry in jira_state.items():
-        if isinstance(jira_entry, dict):
-            cand = jira_entry.get("local_id")
-            if cand:
-                bound_local_ids.add(str(cand))
-                jira_local_id_to_key.setdefault(str(cand), jira_key)
-
-    # Build a map: local_id -> [local_key, ...] from local_state, to
-    # detect duplicate local_id collisions across local tickets (dd-5).
-    local_id_to_keys: dict[str, list[str]] = {}
-    for local_key, local_entry in local_state.items():
-        if isinstance(local_entry, dict):
-            cand = local_entry.get("local_id")
-            if cand:
-                local_id_to_keys.setdefault(str(cand), []).append(local_key)
-    # The set of local local_ids that have a collision (>1 owners).
-    duplicate_local_ids: set[str] = {lid for lid, keys in local_id_to_keys.items() if len(keys) > 1}
-    # The set of local local_ids that are present in local_state at all,
-    # used to short-circuit dangling-jira-ref detection.
-    local_rebar_ids: set[str] = set(local_id_to_keys.keys())
-
-    # Seed mutations (if any) are prepended to the result list before the
-    # differ walks local/jira state. They are NOT filtered through
-    # quarantine_set — the caller (e.g. invariants.check_dual_identity_complete)
-    # has authority over what it injects.
-    mutations: list[Any] = list(seed_mutations) if seed_mutations else []
-    all_keys = set(local_state) | set(jira_state)
-
-    for key in sorted(all_keys):
+    state = _compute_mutations_build_state(local_state, jira_state, seed_mutations)
+    for key in sorted(state.all_keys):
         in_local = key in local_state
         in_jira = key in jira_state
-
         if in_local and not in_jira:
-            local_fields = local_state[key] or {}
-            local_id_val = local_fields.get("local_id") if isinstance(local_fields, dict) else None
-            local_id_str = str(local_id_val) if local_id_val else None
+            _compute_mutations_emit_local_only(
+                key, local_state, jira_state, state, quarantine_set=quarantine_set, ledger=ledger
+            )
+        elif in_jira and not in_local:
+            _compute_mutations_emit_jira_only(
+                key, jira_state, state, quarantine_set=quarantine_set, ledger=ledger
+            )
+        else:
+            _compute_mutations_emit_both(
+                key, local_state, jira_state, state, quarantine_set=quarantine_set, ledger=ledger
+            )
 
-            # dd-5: duplicate local_id collision across local tickets —
-            # surface each colliding owner as an (inbound, conflict) Mutation
-            # so the human or downstream tooling can disambiguate. Take
-            # precedence over the standard outbound-create path because the
-            # underlying state is unbindable as-is.
-            if local_id_str and local_id_str in duplicate_local_ids:
-                colliding = sorted(local_id_to_keys[local_id_str])
-                _emit(
-                    Mutation(
-                        direction=MutationDirection.inbound,
-                        action=MutationAction.conflict,
-                        target=key,
-                        payload={},
-                        provenance={
-                            "source": "differ",
-                            "reason": "duplicate_local_id",
-                            "local_id": local_id_str,
-                            "colliding_keys": colliding,
-                        },
-                    ),
-                    quarantine_set=quarantine_set,
-                    mutations_out=mutations,
-                    ledger=ledger,
-                )
-                continue
+    _compute_mutations_emit_absent_partner_probes(
+        local_state, jira_state, state, quarantine_set=quarantine_set, ledger=ledger
+    )
 
-            if local_id_val and str(local_id_val) in bound_local_ids:
-                # Already mirrored in Jira under a different key — do not
-                # emit a redundant outbound create. (dd-4)
-                continue
+    return state.mutations
 
-            # dd-5: ambiguous local binding — local ticket carries a
-            # local_id that matches the KEY of an unrelated Jira issue
-            # (an issue that exists in jira_state but does NOT carry a
-            # back-pointer local_id binding). This suggests a possibly
-            # stale or conflated binding: the local_id may once have referred
-            # to that Jira issue, but the Jira side no longer agrees. Emit
-            # (outbound, probe) so the applier can disambiguate before
-            # blindly creating a duplicate Jira issue.
-            #
-            # Design choice: a bare unbound_local with local_id and no
-            # jira-side signal is treated as a normal outbound create
-            # (preserving existing test_differ.py semantics) — the ambiguity
-            # signal is the presence of a jira_state entry under the same
-            # key as the local_id, without a reciprocal binding.
-            if local_id_str and local_id_str in jira_state:
-                jira_sibling = jira_state.get(local_id_str) or {}
-                sibling_local_id = (
-                    jira_sibling.get("local_id") if isinstance(jira_sibling, dict) else None
-                )
-                if not sibling_local_id:
-                    _emit(
-                        Mutation(
-                            direction=MutationDirection.outbound,
-                            action=MutationAction.probe,
-                            target=key,
-                            payload={},
-                            provenance={
-                                "source": "differ",
-                                "reason": "ambiguous_local_binding",
-                                "local_id": local_id_str,
-                                "jira_sibling_key": local_id_str,
-                            },
-                        ),
-                        quarantine_set=quarantine_set,
-                        mutations_out=mutations,
-                        ledger=ledger,
-                    )
-                    continue
 
-            payload = {f: v for f, v in local_fields.items() if f not in excluded}
-            if not payload:
-                # Only excluded fields → no useful create payload.
-                continue
+def _compute_mutations_emit_local_only(
+    key, local_state, jira_state, state, *, quarantine_set, ledger
+) -> None:
+    """Per-key phase: key present in local only — emit outbound create / conflict / probe."""
+    Mutation = state.Mutation
+    MutationDirection = state.MutationDirection
+    MutationAction = state.MutationAction
+    excluded = state.excluded
+    duplicate_local_ids = state.duplicate_local_ids
+    local_id_to_keys = state.local_id_to_keys
+    bound_local_ids = state.bound_local_ids
+    mutations = state.mutations
+
+    local_fields = local_state[key] or {}
+    local_id_val = local_fields.get("local_id") if isinstance(local_fields, dict) else None
+    local_id_str = str(local_id_val) if local_id_val else None
+
+    # dd-5: duplicate local_id collision across local tickets —
+    # surface each colliding owner as an (inbound, conflict) Mutation
+    # so the human or downstream tooling can disambiguate. Take
+    # precedence over the standard outbound-create path because the
+    # underlying state is unbindable as-is.
+    if local_id_str and local_id_str in duplicate_local_ids:
+        colliding = sorted(local_id_to_keys[local_id_str])
+        _emit(
+            Mutation(
+                direction=MutationDirection.inbound,
+                action=MutationAction.conflict,
+                target=key,
+                payload={},
+                provenance={
+                    "source": "differ",
+                    "reason": "duplicate_local_id",
+                    "local_id": local_id_str,
+                    "colliding_keys": colliding,
+                },
+            ),
+            quarantine_set=quarantine_set,
+            mutations_out=mutations,
+            ledger=ledger,
+        )
+        return
+
+    if local_id_val and str(local_id_val) in bound_local_ids:
+        # Already mirrored in Jira under a different key — do not
+        # emit a redundant outbound create. (dd-4)
+        return
+
+    # dd-5: ambiguous local binding — local ticket carries a
+    # local_id that matches the KEY of an unrelated Jira issue
+    # (an issue that exists in jira_state but does NOT carry a
+    # back-pointer local_id binding). This suggests a possibly
+    # stale or conflated binding: the local_id may once have referred
+    # to that Jira issue, but the Jira side no longer agrees. Emit
+    # (outbound, probe) so the applier can disambiguate before
+    # blindly creating a duplicate Jira issue.
+    #
+    # Design choice: a bare unbound_local with local_id and no
+    # jira-side signal is treated as a normal outbound create
+    # (preserving existing test_differ.py semantics) — the ambiguity
+    # signal is the presence of a jira_state entry under the same
+    # key as the local_id, without a reciprocal binding.
+    if local_id_str and local_id_str in jira_state:
+        jira_sibling = jira_state.get(local_id_str) or {}
+        sibling_local_id = jira_sibling.get("local_id") if isinstance(jira_sibling, dict) else None
+        if not sibling_local_id:
             _emit(
                 Mutation(
                     direction=MutationDirection.outbound,
-                    action=MutationAction.create,
+                    action=MutationAction.probe,
                     target=key,
-                    payload=payload,
-                    provenance=_derive_provenance(
-                        target=key,
-                        primary_fields=local_fields,
-                        fallback_fields=None,
-                        reason="unbound_local",
-                    ),
+                    payload={},
+                    provenance={
+                        "source": "differ",
+                        "reason": "ambiguous_local_binding",
+                        "local_id": local_id_str,
+                        "jira_sibling_key": local_id_str,
+                    },
                 ),
                 quarantine_set=quarantine_set,
                 mutations_out=mutations,
                 ledger=ledger,
             )
-        elif in_jira and not in_local:
-            jira_fields = jira_state[key] or {}
-            jira_local_id = jira_fields.get("local_id") if isinstance(jira_fields, dict) else None
-            jira_local_id_str = str(jira_local_id) if jira_local_id else None
+            return
 
-            # Bug 4354: when the snapshot lacks local_id (the fetcher
-            # stores Jira `fields` only — the local_id entity property
-            # is never in the snapshot), fall back to the `rebar-id:<local_id>`
-            # / `rebar-id-<local_id>` label as the bound-marker signal. The
-            # same prefixes are excluded by outbound_differ._EXCLUDED_PREFIXES
-            # and inbound_differ._EXCLUDED_PREFIXES — they're the canonical
-            # and legacy forms written by _apply_inbound_create / create_one
-            # (see applier.py:676 and applier.py:1825).
-            #
-            # When a label-derived binding is found, the issue is OWNED by
-            # the binding-aware differs (outbound_differ + inbound_differ
-            # in reconcile.py:617/703) — the snapshot-differ MUST stand
-            # down. Without this suppression, every bound issue that
-            # appears in curr_snapshot but not prev_snapshot (e.g. the pass
-            # immediately after outbound binding, before prev advances)
-            # mis-classifies as unbound and emits an inbound CREATE — which
-            # the applier materialises as a phantom `jira-dig-NNNN` local
-            # entity AND writes a ghost `rebar-id:jira-dig-NNNN` label back
-            # to Jira (empirically confirmed by labels-probe.sh on
-            # 2026-05-29: after binding 259f-... → DIG-5029, the next pass
-            # produced `['rebar-id:259f-...', 'rebar-id:jira-dig-5029',
-            # 'labelprobe-...']` on Jira). The label-derived path also
-            # suppresses the dangling-conflict emission below: a
-            # conflict's `suppress_pair` follow-on would otherwise drop
-            # the legitimate inbound_differ update for the same bound
-            # ticket (the T3 inbound-add label propagation failure).
-            #
-            # The label-derived suppression is intentionally scoped to the
-            # label fallback path. When local_id IS present on the
-            # snapshot entry (only via test fixtures, since the fetcher
-            # never writes it), preserve the existing dd-5 dangling-jira-ref
-            # semantics — a Jira issue that claims a binding via the
-            # explicit property but has no matching local ticket should
-            # still surface as inbound conflict so it isn't silently
-            # dropped.
-            if jira_local_id is None and isinstance(jira_fields, dict):
-                _labels = jira_fields.get("labels") or []
-                _has_rebar_id_label = False
-                if isinstance(_labels, (list, tuple)):
-                    for _lbl in _labels:
-                        if isinstance(_lbl, str) and (
-                            _lbl.startswith("rebar-id:") or _lbl.startswith("rebar-id-")
-                        ):
-                            _has_rebar_id_label = True
-                            break
-                if _has_rebar_id_label:
-                    # Bound — owned by binding-aware differs.
-                    continue
+    payload = {f: v for f, v in local_fields.items() if f not in excluded}
+    if not payload:
+        # Only excluded fields → no useful create payload.
+        return
+    _emit(
+        Mutation(
+            direction=MutationDirection.outbound,
+            action=MutationAction.create,
+            target=key,
+            payload=payload,
+            provenance=_derive_provenance(
+                target=key,
+                primary_fields=local_fields,
+                fallback_fields=None,
+                reason="unbound_local",
+            ),
+        ),
+        quarantine_set=quarantine_set,
+        mutations_out=mutations,
+        ledger=ledger,
+    )
 
-            # dd-5: dangling jira ref — the Jira issue claims a binding to a
-            # local_id that has no matching local ticket. Surface as
-            # (inbound, conflict) so the human can decide whether to recreate
-            # the local ticket, clear the Jira-side binding, or close the
-            # Jira issue. Never silently drop.
-            if jira_local_id_str and jira_local_id_str not in local_rebar_ids:
-                _emit(
-                    Mutation(
-                        direction=MutationDirection.inbound,
-                        action=MutationAction.conflict,
-                        target=key,
-                        payload={
-                            "jira_field_snapshot": dict(jira_fields),
-                        },
-                        provenance={
-                            "source": "differ",
-                            "reason": "dangling_jira_local_id",
-                            "dangling_local_id": jira_local_id_str,
-                        },
-                    ),
-                    quarantine_set=quarantine_set,
-                    mutations_out=mutations,
-                    ledger=ledger,
-                )
-                continue
 
-            payload = {f: v for f, v in jira_fields.items() if f not in excluded}
-            # An inbound create with an empty payload is still meaningful
-            # (it announces a new Jira-side issue) — keep the Mutation even
-            # if every field is excluded, because the target itself is the
-            # signal.
-            _emit(
-                Mutation(
-                    direction=MutationDirection.inbound,
-                    action=MutationAction.create,
-                    target=key,
-                    payload=payload,
-                    provenance=_derive_provenance(
-                        target=key,
-                        primary_fields=jira_fields,
-                        fallback_fields=None,
-                        reason="jira_new",
-                    ),
-                ),
-                quarantine_set=quarantine_set,
-                mutations_out=mutations,
-                ledger=ledger,
-            )
-        else:
-            # Present in both — diff non-excluded fields.
-            local_fields = local_state[key] or {}
-            jira_fields = jira_state[key] or {}
-            changed: dict[str, Any] = {}
-            for field in set(local_fields) | set(jira_fields):
-                if field in excluded:
-                    continue
-                local_val = local_fields.get(field)
-                jira_val = jira_fields.get(field)
-                if field == "labels" and _non_internal_labels(local_val) == _non_internal_labels(
-                    jira_val
+def _compute_mutations_emit_jira_only(key, jira_state, state, *, quarantine_set, ledger) -> None:
+    """Per-key phase: key present in Jira only — emit inbound create / conflict (dd-5)."""
+    Mutation = state.Mutation
+    MutationDirection = state.MutationDirection
+    MutationAction = state.MutationAction
+    excluded = state.excluded
+    local_rebar_ids = state.local_rebar_ids
+    mutations = state.mutations
+
+    jira_fields = jira_state[key] or {}
+    jira_local_id = jira_fields.get("local_id") if isinstance(jira_fields, dict) else None
+    jira_local_id_str = str(jira_local_id) if jira_local_id else None
+
+    # Bug 4354: when the snapshot lacks local_id (the fetcher
+    # stores Jira `fields` only — the local_id entity property
+    # is never in the snapshot), fall back to the `rebar-id:<local_id>`
+    # / `rebar-id-<local_id>` label as the bound-marker signal. The
+    # same prefixes are excluded by outbound_differ._EXCLUDED_PREFIXES
+    # and inbound_differ._EXCLUDED_PREFIXES — they're the canonical
+    # and legacy forms written by _apply_inbound_create / create_one
+    # (see applier.py:676 and applier.py:1825).
+    #
+    # When a label-derived binding is found, the issue is OWNED by
+    # the binding-aware differs (outbound_differ + inbound_differ
+    # in reconcile.py:617/703) — the snapshot-differ MUST stand
+    # down. Without this suppression, every bound issue that
+    # appears in curr_snapshot but not prev_snapshot (e.g. the pass
+    # immediately after outbound binding, before prev advances)
+    # mis-classifies as unbound and emits an inbound CREATE — which
+    # the applier materialises as a phantom `jira-dig-NNNN` local
+    # entity AND writes a ghost `rebar-id:jira-dig-NNNN` label back
+    # to Jira (empirically confirmed by labels-probe.sh on
+    # 2026-05-29: after binding 259f-... → DIG-5029, the next pass
+    # produced `['rebar-id:259f-...', 'rebar-id:jira-dig-5029',
+    # 'labelprobe-...']` on Jira). The label-derived path also
+    # suppresses the dangling-conflict emission below: a
+    # conflict's `suppress_pair` follow-on would otherwise drop
+    # the legitimate inbound_differ update for the same bound
+    # ticket (the T3 inbound-add label propagation failure).
+    #
+    # The label-derived suppression is intentionally scoped to the
+    # label fallback path. When local_id IS present on the
+    # snapshot entry (only via test fixtures, since the fetcher
+    # never writes it), preserve the existing dd-5 dangling-jira-ref
+    # semantics — a Jira issue that claims a binding via the
+    # explicit property but has no matching local ticket should
+    # still surface as inbound conflict so it isn't silently
+    # dropped.
+    if jira_local_id is None and isinstance(jira_fields, dict):
+        _labels = jira_fields.get("labels") or []
+        _has_rebar_id_label = False
+        if isinstance(_labels, (list, tuple)):
+            for _lbl in _labels:
+                if isinstance(_lbl, str) and (
+                    _lbl.startswith("rebar-id:") or _lbl.startswith("rebar-id-")
                 ):
-                    # Label drift confined to bridge-internal labels is our
-                    # own write-back from the prior pass (rebar-id: identity,
-                    # rebar-status: annotations) — not remote drift. Emitting
-                    # it produced a spurious one-pass-later (outbound, update)
-                    # echo per freshly bound issue (ticket robe-creek-zealot).
-                    continue
-                if local_val != jira_val:
-                    if field in conflict_resolver.FIELD_CLASSES:
-                        changed[field] = conflict_resolver.resolve_field(
-                            field, local_val, jira_val, provenance_record=None
-                        )
-                    else:
-                        changed[field] = local_val
-            if changed:
-                _emit(
-                    Mutation(
-                        direction=MutationDirection.outbound,
-                        action=MutationAction.update,
-                        target=key,
-                        payload=changed,
-                        provenance=_derive_provenance(
-                            target=key,
-                            primary_fields=jira_fields,
-                            fallback_fields=local_fields,
-                            reason="field_drift",
-                        ),
-                    ),
-                    quarantine_set=quarantine_set,
-                    mutations_out=mutations,
-                    ledger=ledger,
+                    _has_rebar_id_label = True
+                    break
+        if _has_rebar_id_label:
+            # Bound — owned by binding-aware differs.
+            return
+
+    # dd-5: dangling jira ref — the Jira issue claims a binding to a
+    # local_id that has no matching local ticket. Surface as
+    # (inbound, conflict) so the human can decide whether to recreate
+    # the local ticket, clear the Jira-side binding, or close the
+    # Jira issue. Never silently drop.
+    if jira_local_id_str and jira_local_id_str not in local_rebar_ids:
+        _emit(
+            Mutation(
+                direction=MutationDirection.inbound,
+                action=MutationAction.conflict,
+                target=key,
+                payload={
+                    "jira_field_snapshot": dict(jira_fields),
+                },
+                provenance={
+                    "source": "differ",
+                    "reason": "dangling_jira_local_id",
+                    "dangling_local_id": jira_local_id_str,
+                },
+            ),
+            quarantine_set=quarantine_set,
+            mutations_out=mutations,
+            ledger=ledger,
+        )
+        return
+
+    payload = {f: v for f, v in jira_fields.items() if f not in excluded}
+    # An inbound create with an empty payload is still meaningful
+    # (it announces a new Jira-side issue) — keep the Mutation even
+    # if every field is excluded, because the target itself is the
+    # signal.
+    _emit(
+        Mutation(
+            direction=MutationDirection.inbound,
+            action=MutationAction.create,
+            target=key,
+            payload=payload,
+            provenance=_derive_provenance(
+                target=key,
+                primary_fields=jira_fields,
+                fallback_fields=None,
+                reason="jira_new",
+            ),
+        ),
+        quarantine_set=quarantine_set,
+        mutations_out=mutations,
+        ledger=ledger,
+    )
+
+
+def _compute_mutations_emit_both(
+    key, local_state, jira_state, state, *, quarantine_set, ledger
+) -> None:
+    """Per-key phase: key present in both — field-by-field diff, emit outbound update."""
+    Mutation = state.Mutation
+    MutationDirection = state.MutationDirection
+    MutationAction = state.MutationAction
+    excluded = state.excluded
+    conflict_resolver = state.conflict_resolver
+    mutations = state.mutations
+
+    # Present in both — diff non-excluded fields.
+    local_fields = local_state[key] or {}
+    jira_fields = jira_state[key] or {}
+    changed: dict[str, Any] = {}
+    for field in set(local_fields) | set(jira_fields):
+        if field in excluded:
+            continue
+        local_val = local_fields.get(field)
+        jira_val = jira_fields.get(field)
+        if field == "labels" and _non_internal_labels(local_val) == _non_internal_labels(jira_val):
+            # Label drift confined to bridge-internal labels is our
+            # own write-back from the prior pass (rebar-id: identity,
+            # rebar-status: annotations) — not remote drift. Emitting
+            # it produced a spurious one-pass-later (outbound, update)
+            # echo per freshly bound issue (ticket robe-creek-zealot).
+            continue
+        if local_val != jira_val:
+            if field in conflict_resolver.FIELD_CLASSES:
+                changed[field] = conflict_resolver.resolve_field(
+                    field, local_val, jira_val, provenance_record=None
                 )
+            else:
+                changed[field] = local_val
+    if changed:
+        _emit(
+            Mutation(
+                direction=MutationDirection.outbound,
+                action=MutationAction.update,
+                target=key,
+                payload=changed,
+                provenance=_derive_provenance(
+                    target=key,
+                    primary_fields=jira_fields,
+                    fallback_fields=local_fields,
+                    reason="field_drift",
+                ),
+            ),
+            quarantine_set=quarantine_set,
+            mutations_out=mutations,
+            ledger=ledger,
+        )
+
+
+def _compute_mutations_emit_absent_partner_probes(
+    local_state, jira_state, state, *, quarantine_set, ledger
+) -> None:
+    """Final phase: symmetric inbound-probe pass for bound-but-absent Jira partners."""
+    Mutation = state.Mutation
+    MutationDirection = state.MutationDirection
+    MutationAction = state.MutationAction
+    mutations = state.mutations
 
     # Symmetric inbound-probe pass: a local ticket may carry a bound
     # ``jira_key`` pointing at a Jira issue that is ABSENT from the current
@@ -548,8 +648,6 @@ def compute_mutations(
             mutations_out=mutations,
             ledger=ledger,
         )
-
-    return mutations
 
 
 def compute_mutations_with_ledger(

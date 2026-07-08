@@ -368,6 +368,23 @@ def _is_illegal_transition_400(exc: Exception) -> bool:
     return "illegal" in msg or "transition" in msg
 
 
+# Bug 85a1: strip fields ACLI does not accept on `jira workitem edit`.
+# The legacy batch path here was unfiltered, so a local issuetype change
+# (e.g., probe Phase 2 ticket_type=task→bug) flowed through as
+# ``--issuetype Bug`` which ACLI rejects with non-zero exit, aborting the
+# ENTIRE batch loop and silently losing every subsequent outbound update.
+# The typed leaf ``_apply_outbound_update`` already filters via
+# ``_OUTBOUND_UPDATE_ALLOWLIST`` — apply the same allowlist here. Stripped
+# fields (issuetype, type-change in general) are intentional drops mirroring
+# the typed-leaf contract; outbound issuetype changes are BY_DESIGN
+# unsupported on the edit endpoint (Atlassian JRASERVER-71292).
+# status is included: bug 85a1 (Gap 8) removed the BY_DESIGN drop —
+# outbound status push now uses REST POST /transitions via
+# ``transition_issue`` (bypasses ACLI's silent-exit-0 failure mode).
+# The typed leaf's REBAR_RECONCILER_STATUS_GATING gate is also gone.
+_OUTBOUND_BATCH_ALLOWLIST = frozenset({"summary", "description", "assignee", "priority", "status"})
+
+
 def update_one(
     mutation: dict,
     client,
@@ -410,24 +427,35 @@ def update_one(
     # ``fields.get("status")`` after the allowlist strips it) can still
     # report the attempted local status (bug 85a1 follow-up).
     _attempted_status = fields.get("status")
-    # Bug 85a1: strip fields ACLI does not accept on `jira workitem edit`.
-    # The legacy batch path here was unfiltered, so a local issuetype change
-    # (e.g., probe Phase 2 ticket_type=task→bug) flowed through as
-    # ``--issuetype Bug`` which ACLI rejects with non-zero exit, aborting the
-    # ENTIRE batch loop and silently losing every subsequent outbound update.
-    # The typed leaf ``_apply_outbound_update`` already filters via
-    # ``_OUTBOUND_UPDATE_ALLOWLIST`` — apply the same allowlist here. Stripped
-    # fields (issuetype, type-change in general) are intentional drops mirroring
-    # the typed-leaf contract; outbound issuetype changes are BY_DESIGN
-    # unsupported on the edit endpoint (Atlassian JRASERVER-71292).
-    # status is included: bug 85a1 (Gap 8) removed the BY_DESIGN drop —
-    # outbound status push now uses REST POST /transitions via
-    # ``transition_issue`` (bypasses ACLI's silent-exit-0 failure mode).
-    # The typed leaf's REBAR_RECONCILER_STATUS_GATING gate is also gone.
-    _OUTBOUND_BATCH_ALLOWLIST = frozenset(
-        {"summary", "description", "assignee", "priority", "status"}
-    )
     issue_key = mutation.get("key")
+    _has_parent_op = _update_one_apply_parent(fields, issue_key, client)
+    fields = _update_one_filter_fields(fields, mutation)
+    result = _update_one_scalar_update(client, issue_key, fields, _has_parent_op, _attempted_status)
+
+    _labels_computed, _labels_applied = _update_one_dispatch_labels(mutation, client, issue_key)
+    _comments_computed, _comments_applied = _update_one_dispatch_comments(
+        mutation, client, issue_key, comment_errors
+    )
+    _links_computed, _links_applied = _update_one_dispatch_links(mutation, client, issue_key)
+
+    if subop_applied is not None:
+        subop_applied.update(
+            {
+                "labels_computed": _labels_computed,
+                "labels_applied": _labels_applied,
+                "comments_computed": _comments_computed,
+                "comments_applied": _comments_applied,
+                "links_computed": _links_computed,
+                "links_applied": _links_applied,
+            }
+        )
+
+    return result
+
+
+def _update_one_apply_parent(fields, issue_key, client) -> bool:
+    """Phase: route a parent reparent/clear through client.set_parent (popped from
+    ``fields`` before the allowlist filter). Returns whether a parent op was present."""
     # Parent reparent (ticket 8b25): the production outbound dispatch routes
     # through this legacy batch path, NOT the typed leaf _apply_outbound_update.
     # ACLI's ``jira workitem edit`` cannot reparent — the parent must go via
@@ -480,6 +508,11 @@ def update_one(
                 parent_key,
                 exc,
             )
+    return _has_parent_op
+
+
+def _update_one_filter_fields(fields, mutation) -> dict:
+    """Phase: log + strip fields ACLI's edit endpoint rejects, return the allowlisted set."""
     _stripped = {k: v for k, v in fields.items() if k not in _OUTBOUND_BATCH_ALLOWLIST}
     if _stripped:
         print(  # noqa: T201
@@ -487,7 +520,12 @@ def update_one(
             f"for {mutation.get('key')}: {sorted(_stripped.keys())}",
             file=sys.stderr,
         )
-    fields = {k: v for k, v in fields.items() if k in _OUTBOUND_BATCH_ALLOWLIST}
+    return {k: v for k, v in fields.items() if k in _OUTBOUND_BATCH_ALLOWLIST}
+
+
+def _update_one_scalar_update(client, issue_key, fields, _has_parent_op, _attempted_status):
+    """Phase: the scalar client.update_issue call + the 400 illegal-transition
+    comment-fallback. Returns the update result (or None)."""
     # When the only changed field was parent (the common reparent case), the
     # allowlisted set is now empty AND set_parent already did the work — skip
     # the otherwise-empty client.update_issue call so we don't issue a no-op
@@ -522,21 +560,12 @@ def update_one(
             )
             print(log_entry, file=sys.stderr)
             result = None
+    return result
 
-    # Bug 87e4: propagate label add/remove and comment additions from the
-    # mutation payload. The outbound differ emits these alongside changed
-    # scalar fields; update_issue can't carry them (Jira's edit endpoint
-    # doesn't accept label or comment kwargs), so they need separate
-    # add_label / remove_label / add_comment calls. Failures here are
-    # logged but non-fatal — the scalar update already succeeded.
-    # Story E (2359): track per-sub-op COMPUTED (what we attempt) vs APPLIED (what
-    # succeeded). "computed" for links is counted POST-DEDUP — only the adds we
-    # actually attempt after the already-present skip — so an idempotent re-sync
-    # (all links deduped) has links_computed==0 and does NOT trip the silent-no-op
-    # canary. labels/comments have no dedup, so computed == count of valid entries.
+
+def _update_one_dispatch_labels(mutation, client, issue_key) -> tuple[int, int]:
+    """Phase: dispatch label add/remove sub-ops. Returns (computed, applied) counts."""
     _labels_computed = _labels_applied = 0
-    _comments_computed = _comments_applied = 0
-    _links_computed = _links_applied = 0
 
     labels = mutation.get("labels", []) or []
     if isinstance(labels, list):
@@ -560,6 +589,13 @@ def update_one(
                     f"label={label_name!r}: {exc!r}",
                     file=sys.stderr,
                 )
+    return _labels_computed, _labels_applied
+
+
+def _update_one_dispatch_comments(mutation, client, issue_key, comment_errors) -> tuple[int, int]:
+    """Phase: dispatch comment-add sub-ops (in-band capture into comment_errors).
+    Returns (computed, applied) counts."""
+    _comments_computed = _comments_applied = 0
 
     comments = mutation.get("comments", []) or []
     if isinstance(comments, list):
@@ -583,6 +619,14 @@ def update_one(
                     f"update_one: add_comment failed for {issue_key}: {exc!r}",
                     file=sys.stderr,
                 )
+    return _comments_computed, _comments_applied
+
+
+def _update_one_dispatch_links(mutation, client, issue_key) -> tuple[int, int]:
+    """Phase: dispatch link ADD (deduped) + link REMOVE sub-ops. ``links_computed`` is
+    counted POST-DEDUP so an idempotent re-sync reports 0 (no false canary). Returns
+    (computed, applied) counts."""
+    _links_computed = _links_applied = 0
 
     # Bug 3f04: dispatch link adds (blocks/relates) via client.set_relationship.
     # The outbound differ emits these alongside changed scalar fields, but the
@@ -673,17 +717,4 @@ def update_one(
                         f"{to_key} ({link_type}): {exc!r}",
                         file=sys.stderr,
                     )
-
-    if subop_applied is not None:
-        subop_applied.update(
-            {
-                "labels_computed": _labels_computed,
-                "labels_applied": _labels_applied,
-                "comments_computed": _comments_computed,
-                "comments_applied": _comments_applied,
-                "links_computed": _links_computed,
-                "links_applied": _links_applied,
-            }
-        )
-
-    return result
+    return _links_computed, _links_applied
