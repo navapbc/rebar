@@ -35,6 +35,10 @@ git-growth expectations see [`docs/scale-envelope.md`](docs/scale-envelope.md).
 
 **New here? Jump to the [Quickstart](#quickstart)** to run one ticket end-to-end.
 
+**Documentation:** the full docs live under [`docs/`](docs/README.md) — start with
+the [docs index](docs/README.md) (grouped by audience: user / operator / contributor
+/ agent) or the day-to-day [user guide](docs/user-guide.md).
+
 ## Quickstart
 
 Install rebar, initialize a store in your repo, and run one ticket through the
