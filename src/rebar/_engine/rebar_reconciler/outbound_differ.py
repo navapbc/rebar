@@ -265,6 +265,12 @@ class OutboundDiffConfig:
     client: Any = None
     pass_id: str = ""
     prev_snapshot: dict[str, Any] | None = None
+    # Observability sinks (bugs a713/acd0). When provided, _diff_fields appends
+    # (jira_key, field) tuples: conflict_sink for a both-sides field conflict,
+    # dropped_field_sink for a mapped-but-allowlist-excluded field that differs. The
+    # orchestrator (run_differs) emits deduped bridge alerts from them post-pass.
+    conflict_sink: list[tuple[str, str]] | None = None
+    dropped_field_sink: list[tuple[str, str]] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +427,8 @@ def compute_outbound_mutations(
     client = config.client
     pass_id = config.pass_id
     prev_snapshot = config.prev_snapshot
+    conflict_sink = config.conflict_sink
+    dropped_field_sink = config.dropped_field_sink
     # The bound-but-absent ALIVE-GET sharing seam: populated below, returned to
     # the caller (replaces the former mutable out-param).
     absent_alive_fields: dict[str, dict[str, Any]] = {}
@@ -630,6 +638,8 @@ def compute_outbound_mutations(
                 assignee_resolver=_assignee_resolver,
                 jira_key=jira_key,
                 prev_jira_fields=(prev_snapshot or {}).get(jira_key),
+                conflict_sink=conflict_sink,
+                dropped_field_sink=dropped_field_sink,
             )
             # Comments use the resolved snapshot (the one-key overlay for the
             # bounded-GET path) so the GET's native fields.comment.comments is
