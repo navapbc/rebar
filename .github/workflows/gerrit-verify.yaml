@@ -120,10 +120,14 @@ jobs:
       # interpreter only (platform-compat coverage — flock/mkdir lock, gtimeout).
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
         exclude:
+          # macOS runs only the newest interpreter (runner cost); its value is
+          # platform-compat coverage (flock/mkdir lock, gtimeout), not the rev.
           - os: macos-latest
             python-version: "3.11"
+          - os: macos-latest
+            python-version: "3.12"
     steps:
       - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
         uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
