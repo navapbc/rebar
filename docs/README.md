@@ -35,6 +35,9 @@ Configuring, deploying, syncing, and releasing rebar.
 
 - **[config.md](config.md)** — rebar's configuration surface: the `.rebar/config.conf`
   keys, precedence, and the design of record behind them.
+- **[env-vars.md](env-vars.md)** — the generated registry of every `REBAR_*` (and other)
+  environment variable read under `src/rebar`, with its reading module and alias status
+  (kept in sync by a CI drift gate).
 - **[jira-sync-setup.md](jira-sync-setup.md)** — automating the rebar ⇄ Jira
   reconciler in GitHub Actions so a project can stand up bidirectional sync.
 - **[gerrit-aws-setup.md](gerrit-aws-setup.md)** — the optional/advanced deployment
