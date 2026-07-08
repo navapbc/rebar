@@ -22,6 +22,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,47 @@ def _load(name: str, relpath: str):
     reconcile.py).
     """
     return lazy_load(name, relpath)
+
+
+def _emit_outbound_field_alerts(
+    conflict_sink: list[tuple[str, str]],
+    dropped_field_sink: list[tuple[str, str]],
+    repo_root: Path,
+    pass_id: str,
+) -> None:
+    """Emit deduped bridge alerts for outbound both-sides conflicts (a713) and
+    allowlist-dropped fields (acd0), mirroring fetcher._flag_unmapped_statuses.
+
+    Deduped per (kind, ticket, field) over the alert_store 24h window so a persistent
+    condition does not re-file every pass. Fully fail-open — any error is swallowed so
+    observability can never break a reconcile pass."""
+    if not conflict_sink and not dropped_field_sink:
+        return
+    try:
+        alert_store = _load("rebar_reconciler.alert_store", "alert_store.py")
+    except Exception:  # noqa: BLE001 — observability only; never break the pass
+        return
+    for kind, sink in (
+        ("outbound-field-conflict", conflict_sink),
+        ("outbound-field-dropped", dropped_field_sink),
+    ):
+        for jira_key, field in sink:
+            dedup_key = f"{kind}:{jira_key}:{field}"
+            try:
+                if not alert_store.is_deduped(dedup_key, repo_root=repo_root):
+                    alert_store.append(
+                        {
+                            "kind": kind,
+                            "key": dedup_key,
+                            "jira_key": jira_key,
+                            "field": field,
+                            "pass_id": pass_id,
+                            "timestamp_ns": time.time_ns(),
+                        },
+                        repo_root=repo_root,
+                    )
+            except Exception:  # noqa: BLE001 — best-effort alert write
+                pass
 
 
 def _read_local_ticket_full(repo_root: Path, local_id: str, *, no_sync: bool) -> dict | None:
@@ -285,6 +327,7 @@ def _run_differs_outbound(ctx: Any, mutations) -> tuple[list, dict, Any]:
     local_tickets = ctx.local_tickets
     local_label_intent_mod = ctx.local_label_intent_mod
     tracker_dir = ctx.tracker_dir
+    repo_root = ctx.repo_root
     outbound_differ_mod = ctx.outbound_differ_mod
     pass_id = ctx.pass_id
     prev_snapshot = ctx.prev_snapshot
@@ -357,6 +400,12 @@ def _run_differs_outbound(ctx: Any, mutations) -> tuple[list, dict, Any]:
     # differ can mirror Jira-side changes for out-of-window keys WITHOUT a second
     # GET. We merge them into the inbound snapshot below. 404/transport keys are
     # intentionally absent from this dict (retirement stays outbound-owned).
+    # Observability sinks (bugs a713/acd0): the differ appends (jira_key, field) for a
+    # both-sides field conflict (local-wins silently overwrites a Jira edit) and for a
+    # mapped-but-allowlist-excluded field that differs (a silent outbound drop). We emit
+    # deduped bridge alerts from them below — behavior is otherwise unchanged.
+    conflict_sink: list[tuple[str, str]] = []
+    dropped_field_sink: list[tuple[str, str]] = []
     outbound_raw, absent_alive_fields = outbound_differ_mod.compute_outbound_mutations(
         local_tickets,
         curr_snapshot,
@@ -367,8 +416,11 @@ def _run_differs_outbound(ctx: Any, mutations) -> tuple[list, dict, Any]:
             client=outbound_diff_client,
             pass_id=pass_id,
             prev_snapshot=prev_snapshot,
+            conflict_sink=conflict_sink,
+            dropped_field_sink=dropped_field_sink,
         ),
     )
+    _emit_outbound_field_alerts(conflict_sink, dropped_field_sink, repo_root, pass_id)
     sync_logger.log(
         "outbound_differ_complete",
         count=len(outbound_raw),

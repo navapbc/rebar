@@ -287,6 +287,27 @@ def _local_matches_prev(field_name: str, local_val: Any, prev_jira_fields: dict[
     return local_val == prev_val
 
 
+def _jira_matches_prev(
+    field_name: str, jira_fields: dict[str, Any], prev_jira_fields: dict[str, Any]
+) -> bool:
+    """True when CURRENT Jira equals the LAST-SYNCED Jira value (baseline).
+
+    The Jira-side mirror of :func:`_local_matches_prev`: ``False`` means Jira has been
+    edited since the last sync. Used only to detect a both-sides conflict (bug a713);
+    returns ``True`` (no detectable Jira change) when there is no baseline, so an
+    absent baseline never fabricates a conflict."""
+    if not prev_jira_fields:
+        return True
+    if field_name == "assignee":
+        jira_assignee: Any = jira_fields.get("assignee")
+        return _assignee_matches(jira_assignee, prev_jira_fields.get("assignee"))
+    cur = _extract_jira_field(jira_fields, field_name)
+    prev = _extract_jira_field(prev_jira_fields, field_name)
+    if isinstance(cur, str) and isinstance(prev, str):
+        return cur.rstrip() == prev.rstrip()
+    return cur == prev
+
+
 def _parent_clear_is_managed(
     jira_parent_key: str, ticket: dict[str, Any], binding_store: Any
 ) -> bool:
@@ -317,8 +338,17 @@ def _diff_fields(
     assignee_resolver: Any = None,
     jira_key: str = "",
     prev_jira_fields: dict[str, Any] | None = None,
+    conflict_sink: list[tuple[str, str]] | None = None,
+    dropped_field_sink: list[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Compare local ticket to Jira fields. Return only changed fields.
+
+    Observability sinks (append-only; behavior unchanged when omitted):
+    ``dropped_field_sink`` collects ``(jira_key, field)`` for a mapped field that the
+    outbound allowlist excludes yet differs from Jira (bug acd0 — a silent drop);
+    ``conflict_sink`` collects ``(jira_key, field)`` for a both-sides conflict —
+    ``local != baseline AND jira != baseline`` — where local-wins silently overwrites
+    a concurrent Jira edit (bug a713). Local-wins is preserved either way.
 
     Uses local-wins: if local differs, push outbound regardless of Jira state.
     Assignee comparison is shape-tolerant via ``_assignee_matches`` so
@@ -355,6 +385,15 @@ def _diff_fields(
         # but the diff loop here only runs for bound update mutations,
         # so excluding the field here only affects updates.
         if field_name == "issuetype":
+            # acd0: this is the one place the outbound path drops a *mapped* field
+            # (the allowlist exclusion). Surface it when it actually differs from Jira
+            # so the silent drop is observable (deduped downstream); do NOT emit it.
+            if dropped_field_sink is not None and jira_key:
+                jira_it = _extract_jira_field(jira_fields, "issuetype")
+                if isinstance(jira_it, dict):
+                    jira_it = jira_it.get("name")
+                if local_val and jira_it and str(local_val).lower() != str(jira_it).lower():
+                    dropped_field_sink.append((jira_key, "issuetype"))
             continue
         # Inbound-sync directionality (Jira-side edits were reverted). For a field
         # the inbound differ can mirror, if local is UNCHANGED since the last sync
@@ -474,4 +513,15 @@ def _diff_fields(
                     f"RECON: field_diff ticket={ticket_id} field={field_name} local={_l} jira={_j}",
                     file=sys.stderr,
                 )
+    # a713: a both-sides conflict — local AND Jira both diverged from the last-synced
+    # baseline — means local-wins is silently overwriting a concurrent Jira edit.
+    # Record it for an observable conflict signal; local-wins itself is unchanged.
+    if conflict_sink is not None and prev_jira_fields and jira_key:
+        for fname in changed:
+            if (
+                fname in _INBOUND_MIRRORED_FIELDS
+                and not _local_matches_prev(fname, local_mapped.get(fname), prev_jira_fields)
+                and not _jira_matches_prev(fname, jira_fields, prev_jira_fields)
+            ):
+                conflict_sink.append((jira_key, fname))
     return changed
