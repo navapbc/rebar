@@ -54,16 +54,26 @@ class ConcurrencyMismatch(CommandError):
 
 
 def _stamp_session(status_data: dict) -> None:
-    """Add the claiming coding-agent session id to an ``open -> in_progress`` STATUS
-    event's ``data`` when the shared resolver finds one (epic crust-fetch-stump, story
-    68ef). When absent the key is OMITTED entirely, so the event bytes are identical to
-    the pre-feature path (older clones preserve-and-ignore the extra key). The value is
-    an opaque string, read verbatim — never interpolated or executed."""
-    from rebar._commands.session_id import resolve_session_id
+    """Add the claiming session provenance to an ``open -> in_progress`` STATUS event's
+    ``data`` when the shared resolvers find any (epic crust-fetch-stump, stories 68ef +
+    c557): the primary session id (``session``), the harness tag (``harness``), and the
+    secondary remote session (``remote_session``). Each absent value OMITS its key, so a
+    no-provenance claim's event bytes are identical to the pre-feature path (older clones
+    preserve-and-ignore the extra keys). Values are opaque strings, read verbatim — never
+    interpolated or executed."""
+    from rebar._commands.session_id import (
+        resolve_harness,
+        resolve_remote_session,
+        resolve_session_id,
+    )
 
-    session = resolve_session_id()
-    if session:
-        status_data["session"] = session
+    for key, value in (
+        ("session", resolve_session_id()),
+        ("harness", resolve_harness()),
+        ("remote_session", resolve_remote_session()),
+    ):
+        if value:
+            status_data[key] = value
 
 
 def _acquire_write_lock(tracker_dir: str) -> lock.LockHandle:

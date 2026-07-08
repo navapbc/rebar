@@ -337,13 +337,22 @@ standardization story `60ce`.
 session emitted an event" via ONE shared resolver
 (`rebar._commands.session_id.resolve_session_id`, epic crust-fetch-stump). Its ordered,
 data-driven var list resolves with precedence (first NON-EMPTY wins):
-`REBAR_SESSION_ID` → `CLAUDE_CODE_SESSION_ID` → `SESSION_ID` → `None`. `REBAR_SESSION_ID`
-is the explicit, rebar-owned override (authoritative — e.g. hook-injected); the native
-harness var `CLAUDE_CODE_SESSION_ID` is next; the ambient, externally-set (e.g. CI/agent)
-`SESSION_ID` is last. An empty / whitespace-only value is treated as **absent** (skipped).
-The resolver **never returns git HEAD** (a HEAD changes on every commit within one session,
-so it is not a session id). The var list is extensible — story c557 appends the OSS harness
-vars `OPENCODE_SESSION_ID` / `CODEX_THREAD_ID`.
+`REBAR_SESSION_ID` → `CLAUDE_CODE_SESSION_ID` → `OPENCODE_SESSION_ID` → `SESSION_ID` → `None`.
+`REBAR_SESSION_ID` is the explicit, rebar-owned override (authoritative — e.g. hook-injected);
+the native harness vars follow in popularity order (`CLAUDE_CODE_SESSION_ID`, then the OSS
+`OPENCODE_SESSION_ID` shipped by OpenCode); the ambient, externally-set (e.g. CI/agent)
+`SESSION_ID` is last. **Codex is not listed** — it exposes no supported readable session var,
+so it is covered by its SessionStart shim exporting `REBAR_SESSION_ID` instead. An empty /
+whitespace-only value is treated as **absent** (skipped). The resolver **never returns git
+HEAD** (a HEAD changes on every commit within one session, so it is not a session id). A
+wrongly-named / absent var simply falls through — never an error.
+
+**Harness provenance (`AI_AGENT`) + remote session (`CLAUDE_CODE_REMOTE_SESSION_ID`).** A
+claim also records, when present, an opaque harness-provenance tag from the rebar-owned
+`AI_AGENT` var (e.g. `claude-code_<ver>` / `opencode` / `codex` / `cursor`, populated by the
+per-harness shims) → `state["claim_harness"]`, and the secondary `CLAUDE_CODE_REMOTE_SESSION_ID`
+→ `state["claim_remote_session"]`. Both are opaque, read verbatim, local-only (never synced to
+Jira).
 
 This unifies two formerly divergent chains and is **additive "support both"**, *not* a
 deprecating rename: ambient `SESSION_ID` remains permanently valid, so there is **no

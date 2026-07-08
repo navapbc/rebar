@@ -114,6 +114,10 @@ def _fold_claimed_session(state: dict, data: dict) -> None:
     """
     if data.get("current_status") == "open" and data.get("status") == "in_progress":
         state["claimed_session"] = data.get("session")
+        # Multi-harness provenance (story c557): fold the harness tag and secondary remote
+        # session on the same edge, with the same fork-winner + session-less-clear semantics.
+        state["claim_harness"] = data.get("harness")
+        state["claim_remote_session"] = data.get("remote_session")
 
 
 def process_status(state: dict, event: dict, data: dict, filepath: str) -> None:

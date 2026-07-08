@@ -140,6 +140,17 @@ edge only (mirrors `assignee`; enumerated in `ticket_state.schema.json` and
 in a STATUS fork it follows the **lexical-UUID winner** and a losing concurrent claim
 never overwrites it; a session-less re-claim folds `None`, clearing any stale prior id.
 
+**Multi-harness provenance (story c557).** The same `open -> in_progress` STATUS additively
+carries two more opaque keys when present: `data["harness"]` (from the rebar-owned `AI_AGENT`
+convention var, naming the tool — e.g. `claude-code_<ver>` / `opencode` / `codex` / `cursor`)
+→ `state["claim_harness"]`, and `data["remote_session"]` (from `CLAUDE_CODE_REMOTE_SESSION_ID`)
+→ `state["claim_remote_session"]`. Both fold on the same edge with the same fork-winner gating
+and session-less-clear semantics as `claimed_session`, are defaulted in `make_initial_state`,
+and are enumerated in `ticket_state.schema.json` (+ `rebar.types`) and the LLM schema
+(compact keys `chn` / `rsn`). The resolver var list is extended to
+`REBAR_SESSION_ID -> CLAUDE_CODE_SESSION_ID -> OPENCODE_SESSION_ID -> SESSION_ID` (Codex has no
+readable session var; it uses its `REBAR_SESSION_ID` shim — see [`docs/config.md`](config.md)).
+
 **Forward/back-compat + compaction.** `data["session"]` is an additive data key; an
 older clone's reducer ignores it (it reads only `status` / `current_status`). A
 post-feature `SNAPSHOT` carries `claimed_session` in its `compiled_state` and restores

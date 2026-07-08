@@ -16,6 +16,8 @@ Key mapping:
   priority    → pr
   assignee    → asn
   claimed_session → csn
+  claim_harness → chn
+  claim_remote_session → rsn
   description → desc
   tags        → tg
   comments    → cm  (sub-keys: body→b, author→au; timestamp omitted)
@@ -37,6 +39,8 @@ KEY_MAP = {
     "priority": "pr",
     "assignee": "asn",
     "claimed_session": "csn",
+    "claim_harness": "chn",
+    "claim_remote_session": "rsn",
     "alias": "a",
     "description": "desc",
     "tags": "tg",
