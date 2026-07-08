@@ -122,6 +122,31 @@ Pinned by `tests/interfaces/contracts/test_event_schema_forward_compat.py`.
   kept as defense-in-depth for exact-equal prefixes, so every clone converges to
   the same winner regardless of clock skew or replay order (invariant I8).
 
+## Session provenance (`claimed_session`)
+
+A claim / bare `open -> in_progress` transition additively stamps the claiming
+coding-agent session id onto its `STATUS` event as **`data["session"]`** (epic
+crust-fetch-stump). The id is produced by the shared resolver
+`resolve_session_id()` with ordered precedence
+`REBAR_SESSION_ID -> CLAUDE_CODE_SESSION_ID -> SESSION_ID -> None` (first non-empty;
+never git HEAD — see [`docs/config.md`](config.md) "Session provenance"). When no
+session is present the key is **omitted**, so the event bytes are identical to the
+pre-feature path.
+
+The reducer (`_processors.py` `_fold_claimed_session`) folds `data["session"]` into
+the compiled-state key **`state["claimed_session"]`** on the `open -> in_progress`
+edge only (mirrors `assignee`; enumerated in `ticket_state.schema.json` and
+`rebar.types`). It is applied only when the incoming event's status is applied — so
+in a STATUS fork it follows the **lexical-UUID winner** and a losing concurrent claim
+never overwrites it; a session-less re-claim folds `None`, clearing any stale prior id.
+
+**Forward/back-compat + compaction.** `data["session"]` is an additive data key; an
+older clone's reducer ignores it (it reads only `status` / `current_status`). A
+post-feature `SNAPSHOT` carries `claimed_session` in its `compiled_state` and restores
+it verbatim; a pre-feature snapshot lacks the key and restores to an explicit `None`
+(the `process_snapshot` guard), so a snapshot-served state and a fresh-replay state
+agree. The key never enters the Jira reconciler (local reducer-state only).
+
 ## Compaction (I9)
 
 Compaction runs under the per-clone write lock, writes a `SNAPSHOT` that folds

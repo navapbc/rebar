@@ -15,6 +15,7 @@ Key mapping:
   parent_id   → pid
   priority    → pr
   assignee    → asn
+  claimed_session → csn
   description → desc
   tags        → tg
   comments    → cm  (sub-keys: body→b, author→au; timestamp omitted)
@@ -35,6 +36,7 @@ KEY_MAP = {
     "parent_id": "pid",
     "priority": "pr",
     "assignee": "asn",
+    "claimed_session": "csn",
     "alias": "a",
     "description": "desc",
     "tags": "tg",
