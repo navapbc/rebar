@@ -73,3 +73,56 @@ is actually populating the environment after install:
 If step 2 is empty, the hook is not firing (check the `settings.json` path/matcher) or this
 Claude Code version uses a different env-injection mechanism than the
 [hooks reference](https://code.claude.com/docs/en/hooks) documents.
+
+## Codex CLI — `shell_environment_policy` (harness tag) + rollout id
+
+Codex differs from Claude Code in two ways that constrain what a shim can do (per the
+[Codex config reference](https://developers.openai.com/codex/config-reference) and
+[hooks docs](https://developers.openai.com/codex/hooks)):
+
+- A Codex **SessionStart hook CANNOT export env vars** into the shell commands Codex later runs
+  (a hook's only structured effect is `additionalContext`) — so there is no Codex equivalent of
+  Claude Code's `CLAUDE_ENV_FILE` that could dynamically export `REBAR_SESSION_ID`.
+- Codex exposes **no readable session-id env var**; session "rollout" transcripts live under
+  `~/.codex/sessions/YYYY/MM/DD/rollout-*-<id>.jsonl` (root overridable via `CODEX_HOME`).
+
+What *is* reliable is `shell_environment_policy.set`, a static map injected into every subprocess
+Codex spawns. Copy [`scripts/session-shims/codex-config.toml`](../scripts/session-shims/codex-config.toml)
+into `~/.codex/config.toml`:
+
+```toml
+[shell_environment_policy]
+set = { AI_AGENT = "codex" }
+```
+
+This tags every Codex subprocess, so a Codex `rebar claim` records `claim_harness = codex`. To
+also record `REBAR_SESSION_ID`, either set a static value in `set` or `export REBAR_SESSION_ID`
+from your shell profile with `experimental_use_profile = true` (mind the G3 caveat above); Codex
+cannot inject a fresh per-session id automatically.
+
+## Cursor cloud agents — `.cursor/environment.json` install script + Secrets
+
+Cursor's [`environment.json`](https://www.cursor.com/schemas/environment.schema.json) has **no
+`env` field**, and Cursor exposes no readable session/agent-id env var (per the
+[cloud-agent setup docs](https://cursor.com/docs/cloud-agent/setup)). The first-class way to set
+env vars is the dashboard **Secrets** tab (dashboard-managed, environment-scoped — exposed to the
+agent as env vars); use it to set `AI_AGENT=cursor` (and `REBAR_SESSION_ID` if you have a value).
+
+As a repo-committed supplement for the harness tag, [`scripts/session-shims/cursor-environment.json`](../scripts/session-shims/cursor-environment.json)
+runs [`cursor-provenance.sh`](../scripts/session-shims/cursor-provenance.sh) as its `install`
+command:
+
+```json
+{ "install": "bash scripts/session-shims/cursor-provenance.sh" }
+```
+
+Because a cloud-agent VM is ephemeral and single-session (torn down after the run), the script
+appends `export AI_AGENT=cursor` to the VM's shell profile (`~/.bashrc` and `~/.profile`,
+idempotently) — the G3 not-in-profile caveat is about long-lived local machines, not throwaway
+VMs — so a Cursor `rebar claim` records `claim_harness = cursor`.
+
+**Caveat (best-effort):** a profile append only reaches `rebar` if the agent runs tool commands
+through an interactive (`~/.bashrc`) or login (`~/.profile`) shell; a bare non-interactive
+non-login `bash -c` would not source either. So the **Secrets tab is the reliable path** — set
+`AI_AGENT=cursor` (and `REBAR_SESSION_ID`, which has no native Cursor source) there; treat the
+`install`-script append as a supplement for shells that do source a profile.
