@@ -218,6 +218,55 @@ def norm_id(finding: dict[str, Any]) -> str:
     return "n" + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
 
 
+# ── recall: prior-review concerns re-surfaced POST-Pass-1 (story disused-unpoliced-solenodon) ──
+# Verdict-flips on identical material are a RECALL problem: the fresh finder MISSES a valid finding
+# a prior review caught. `prior_concerns()` returns the prior findings worth re-checking; run_pass1
+# adds the ones the fresh finder missed (matched by norm_id) as post-Pass-1 candidates for the
+# UNCHANGED Pass-2 verifier — the finder itself NEVER receives prior findings (independence by
+# construction; the pinned test_prior_findings_only_reach_the_novelty_seam + ADR 0008 Inv. 1 hold).
+RECALL_MIN_PRIORITY = 0.5  # "near/above the bar": the 0.60-0.70 blocking bars, minus a margin
+RECALL_CAP = 12  # cap the recalled-candidate set to bound the added Pass-2 verification cost
+
+
+def prior_concerns(ticket_id: str, *, repo_root=None) -> list[dict[str, Any]]:
+    """The prior-review findings worth re-checking on this ticket: from the most-recent
+    REVIEW_RESULT sidecar, those that scored NEAR/ABOVE the bar — ``priority >=
+    RECALL_MIN_PRIORITY`` AND ``decision`` in ``{"block", "advisory"}`` (the lowercase strings
+    pass3_decide emits; excludes "dropped"/"indeterminate") — highest-priority first, capped at
+    ``RECALL_CAP``.
+
+    Best-effort and NEVER raises (mirrors the sidecar's observability posture): a missing or
+    unreadable sidecar returns ``[]`` and recall becomes a no-op. Each concern carries the prior
+    ``finding``/``suggested_fix``/``criteria``/``location`` + its ``norm_id`` so the caller can
+    match it against the fresh findings without recomputing the fingerprint."""
+    try:
+        result = latest_review_result(ticket_id, repo_root=repo_root)
+        if not result:
+            return []
+        eligible = [
+            f
+            for f in (result.get("findings") or [])
+            if f.get("decision") in ("block", "advisory")
+            and float(f.get("priority") or 0.0) >= RECALL_MIN_PRIORITY
+        ]
+        eligible.sort(key=lambda f: float(f.get("priority") or 0.0), reverse=True)
+        return [
+            {
+                "finding": f.get("finding", ""),
+                "suggested_fix": f.get("suggested_fix", ""),
+                "criteria": list(f.get("criteria", []) or []),
+                "location": f.get("location", ""),
+                "norm_id": f.get("norm_id") or norm_id(f),
+            }
+            for f in eligible[:RECALL_CAP]
+        ]
+    except Exception:  # noqa: BLE001 — best-effort recall reader; broad-but-logged, never fails the review
+        logger.warning(
+            "prior_concerns recall read failed; treating as no prior concerns", exc_info=True
+        )
+        return []
+
+
 def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> dict[str, Any]:
     """The sidecar payload: per-finding fingerprints + decisions + verification
     attributes (everything needed to reconstruct per-criterion FP/remediation rates

@@ -27,7 +27,7 @@ from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.runner import Runner
 
-from . import det_floor, passes, registry, sizing
+from . import det_floor, passes, registry, sidecar, sizing
 from .det_floor import PlanContext
 
 logger = logging.getLogger(__name__)
@@ -495,6 +495,40 @@ def run_pass1(
             coverage["isf"]["error"] = str(exc)
     else:
         coverage["isf"] = {"ran": False, "reason": "no linked session_log"}
+
+    # Recall (disused-unpoliced-solenodon): re-surface prior-review findings the fresh finder
+    # MISSED, as post-Pass-1 candidates for the UNCHANGED Pass-2 verifier. The finder above ran
+    # WITHOUT any prior findings (independence by construction; ADR 0008 Inv. 1 / the pinned
+    # test_prior_findings_only_reach_the_novelty_seam). A candidate the current plan resolved fails
+    # Pass-2 validity and is dropped — recall never blocks on memory alone. Best-effort + bounded.
+    concerns = sidecar.prior_concerns(ctx.ticket_id, repo_root=ctx.repo_root)
+    if concerns:
+        seen = {sidecar.norm_id(f) for f in findings}
+        recalled = 0
+        for c in concerns:
+            nid = c.get("norm_id") or sidecar.norm_id(c)
+            if nid in seen:
+                continue  # the fresh finder already found it (or a dup within the concern set)
+            seen.add(nid)
+            findings.append(
+                {
+                    "finding": c.get("finding", ""),
+                    "suggested_fix": c.get("suggested_fix", ""),
+                    "criteria": list(c.get("criteria", []) or []),
+                    "location": c.get("location", ""),
+                    "evidence": [],
+                    "impact": "",
+                    # internal observability marker (underscore-prefixed, like _too_big / _shed)
+                    "_recall": True,
+                }
+            )
+            recalled += 1
+        if recalled:
+            coverage["recall_candidates"] = recalled
+            logger.info(
+                "Pass-1 recall: re-surfaced %d missed prior finding(s) as post-Pass-1 candidates",
+                recalled,
+            )
 
     # G5 decomposition backstop (spangly-beggarly-blackrhino): if the store shows this
     # ticket HAS children, drop any residual G5 "flat/undecomposed" finding the finder
