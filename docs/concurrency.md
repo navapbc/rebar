@@ -34,7 +34,25 @@ allowed a cross-client advisory lock (see I6).
 Never modify or delete an existing event file. The sole exception is
 **compaction**, which runs under the write lock and writes a `SNAPSHOT` event
 that folds the events it retires, renaming the folded files to `*.retired`
-(git represents this as adds/removes — still merge-as-union). See `ticket-compact.sh`.
+(git represents this as adds/removes — still merge-as-union). See
+`src/rebar/_commands/compact.py` (the fold loop `os.rename(fp, fp + RETIRED_SUFFIX)`);
+the shared `RETIRED_SUFFIX` + `is_active_event()` contract lives in
+`src/rebar/reducer/_cache.py` and is the single definition imported by compaction,
+the reducer (both listing paths), and fsck. The SNAPSHOT is written atomically
+*before* the renames, so a crash mid-fold leaves a valid SNAPSHOT plus some
+already-`.retired` sources; a re-compact short-circuits on the SNAPSHOT and skips
+files already retired (idempotent), and a rename failure reverses the completed
+renames and removes the uncommitted SNAPSHOT (atomic — all sources retired or none).
+
+**`.retired` lifecycle.** Retired files are kept **permanently** for now — an
+accepted storage tradeoff that guarantees a folded source is never lost and can
+never be resurrected into a `SNAPSHOT_INCONSISTENT`. A branch-wide `.retired`
+garbage-collection sweep is a documented **follow-up** (tracked separately), safe
+only past causal stability (once no clone can still be mid-reconvergence against
+the pre-compaction events). `.retired` files are **benign under a code rollback**:
+an older clone whose reducer/fsck predate `is_active_event` still ignores them,
+because it lists events by the `*.json` glob / `.endswith(".json")` filter and a
+`*.json.retired` name matches neither.
 
 ### I2 — Globally-unique event filenames
 Every new event is `${timestamp}-${uuid}-${TYPE}.json`

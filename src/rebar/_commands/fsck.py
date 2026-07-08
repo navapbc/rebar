@@ -28,6 +28,7 @@ from rebar import config
 from rebar._engine_support.output import OutputFormatError, parse_output
 from rebar._store.gitutil import run_git
 from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
+from rebar.reducer._cache import is_active_event
 
 _STRUCTURED_KINDS = {
     "corrupt",
@@ -198,6 +199,12 @@ def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> 
     event_files: dict[str, tuple[str, str]] = {}
     for name in sorted(os.listdir(ticket_dir)):
         if not name.endswith(".json") or name.startswith("."):
+            continue
+        # I1: a folded source renamed to ``*.retired`` is NOT a live event — it must
+        # never read as "source UUID still exists" (SNAPSHOT_INCONSISTENT). The
+        # ``.json`` filter above already excludes ``*.json.retired``; this guard makes
+        # the intent explicit and keeps fsck correct if the suffix scheme ever changes.
+        if not is_active_event(name):
             continue
         if name == snapshot_filename:
             continue

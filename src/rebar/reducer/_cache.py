@@ -10,6 +10,26 @@ import os
 
 logger = logging.getLogger(__name__)
 
+# Invariant I1 (docs/concurrency.md): compaction RENAMES the event files it folds
+# to ``<name>.retired`` instead of hard-deleting them. A hard delete can be
+# resurrected by a delete/add reconciliation (the RC1 rebase class) and then trips
+# SNAPSHOT_INCONSISTENT; an append-only rename never loses the source bytes and is
+# invisible to replay/fsck. This is the SINGLE source of truth for that suffix —
+# compaction (the producer), the reducer (both listing paths), and fsck all import
+# it so there is exactly one string literal to reason about.
+RETIRED_SUFFIX = ".retired"
+
+
+def is_active_event(name: str) -> bool:
+    """True for a live event file, False for a folded ``*.retired`` source.
+
+    A retired file is an append-only tombstone of an event that compaction has
+    already folded into a SNAPSHOT; it must be excluded from every replay, dir
+    hash, and fsck scan so it neither re-enters state nor reads as an
+    inconsistency."""
+    return not name.endswith(RETIRED_SUFFIX)
+
+
 # Reducer-logic cache version. The dir-hash captures EVENT-FILE changes, but not
 # changes to how the reducer PROJECTS those events into state. When the reducer's
 # projection semantics change, every previously-cached .cache.json would
@@ -94,11 +114,19 @@ def prepare_event_files(
         all_files = os.listdir(ticket_dir)
     except OSError:
         all_files = []
-    event_filenames = sorted(f for f in all_files if f.endswith(".json") and f != ".cache.json")
+    # Both listing paths exclude folded ``*.retired`` sources via is_active_event
+    # (I1): they are append-only tombstones, not live events, so they must never
+    # enter the replay set nor the dir hash that keys the reducer cache.
+    event_filenames = sorted(
+        f for f in all_files if f.endswith(".json") and f != ".cache.json" and is_active_event(f)
+    )
     dir_hash = compute_dir_hash(ticket_dir, event_filenames)
 
     cached = read_cache(cache_path, dir_hash)
 
-    event_files = sorted(glob.glob(os.path.join(ticket_dir, "*.json")), key=event_sort_key)
+    event_files = sorted(
+        (p for p in glob.glob(os.path.join(ticket_dir, "*.json")) if is_active_event(p)),
+        key=event_sort_key,
+    )
 
     return cache_path, dir_hash, event_files, cached
