@@ -270,3 +270,33 @@ unchanged and still works. Re-enable with `systemctl enable --now rebar-autodepl
 
 **Bot-code rollback (manual):** `docker tag compose-review-bot:prev compose-review-bot:latest
 && (cd infra/compose && docker compose up -d review-bot)` restores the prior image.
+
+## Voter errors — 409 "change is closed" (bug c943)
+
+**Symptom.** The `rebar/host:voter_errors` metric spikes and the `rebar-gerrit-voter-errors`
+alarm flaps; journald shows repeated
+`VOTER_ERROR {… "http_status":409, "error":"post_vote: … HTTP 409: change is closed"}`.
+
+**Root cause (2026-07, resolved).** The backfill reconciler re-selected MERGED/ABANDONED
+changes (no open-status filter) and cast LLM-Review on them, drawing a 409; the failure
+wrote no dedup row, so the same change was re-attempted every pass — amplified by the
+review-bot container having no persistent state volume (its reconcile cursor reset on every
+auto-deploy, forcing a full events-log re-scan). Fixed by: the `reconcile.py` open-status
+filter, `voter.py` 409-terminal handling (record + no `voter_errors` increment), and a
+persistent `gerrit_reviewbot` volume.
+
+**Votes-dropped confirmation.** No legitimate `LLM-Review` vote was dropped by this bug. All
+recurring 409 change_ids were confirmed **ABANDONED** via Gerrit REST
+(`GET /a/changes/<id>` → `"status":"ABANDONED"`); an abandoned change is unsubmittable and
+needs no vote. Open (`NEW`) changes voted normally throughout (webhook POSTs 202,
+`/review/health` 200). To re-confirm after any recurrence: pull the change_ids from the
+`VOTER_ERROR` markers and check each `status` via Gerrit REST — a 409 batch that is entirely
+non-`NEW` means no open change was affected.
+
+**Logging decision (review-bot logs → CloudWatch).** DECISION: do **not** ship review-bot
+logs to a CloudWatch Logs group at this time. Rationale: the host is SSM-managed, so journald
+is reachable read-only on demand (`aws ssm send-command … AWS-RunShellScript` →
+`journalctl -u …`), which was sufficient to root-cause this incident; a CloudWatch Logs group
+adds cost + a log-shipping agent for a single-host, low-volume service. Revisit if remote
+diagnosis frequency grows or the host becomes multi-instance — the follow-up would be a
+CloudWatch agent config + a `/rebar/reviewbot` log group in `infra/terraform`.

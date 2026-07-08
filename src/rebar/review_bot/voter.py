@@ -467,8 +467,22 @@ async def review_and_vote(
         try:
             http_status = await asyncio.to_thread(gc.post_vote, change_id, revision, value, message)
         except GerritError as exc:
-            # Vote POST failed → DO NOT record dedup (so a retry re-attempts) and never
-            # leave a half-cast MAX: the change simply stays unsubmittable.
+            # A 409 "change is closed" is TERMINAL, not a retryable failure: the change was
+            # merged/abandoned (a race past reconcile.py's open-status filter). Record it so
+            # it is never retried, and do NOT emit a VOTER_ERROR / increment voter_errors — a
+            # closed change needs no vote, so this is not an actionable fault (bug c943).
+            if getattr(exc, "status", None) == 409:
+                store.record_vote(change_id, revision, info["event_type"], value)
+                _emit(
+                    logging.INFO,
+                    "voter_skip_closed",
+                    change_id=change_id,
+                    revision_id=revision,
+                    http_status=409,
+                )
+                return {"status": "skipped", "change_id": change_id, "stage": "post_vote_closed"}
+            # Any other vote POST failure → DO NOT record dedup (so a retry re-attempts) and
+            # never leave a half-cast MAX: the change simply stays unsubmittable.
             _voter_error(
                 change_id=change_id,
                 revision_id=revision,

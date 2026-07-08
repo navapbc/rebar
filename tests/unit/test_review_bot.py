@@ -1033,3 +1033,20 @@ def test_voter_emits_merge_change_409_guard(monkeypatch, tmp_path, caplog):
     nonmerge_blob = "\n".join(r.message for r in caplog.records)
     assert "merge_change_409_guard" not in nonmerge_blob
     assert gn.get_patch_calls == 1
+
+
+def test_voter_treats_409_change_closed_as_terminal(monkeypatch, tmp_path):
+    # Bug c943: a 409 "change is closed" (a change merged/abandoned in the race window past
+    # reconcile.py's open-status filter) is TERMINAL, not a retryable failure — record it so
+    # it is never retried, and do NOT emit a VOTER_ERROR / increment the voter_errors metric
+    # (a closed change needs no vote, so it is not an actionable fault). A real vote failure
+    # (5xx) still stays a retryable voter_error with no dedup row (unchanged).
+    _patch_review(monkeypatch, [])  # clean diff → PASS verdict
+    errors: list = []
+    monkeypatch.setattr(voter, "_voter_error", lambda **kw: errors.append(kw))
+    g = FakeGerrit(raise_on_post=True, post_status=409)
+    store = DedupStore(str(tmp_path / "voted.db"))
+    res = asyncio.run(voter.review_and_vote(_event(), config=_cfg(tmp_path), gerrit=g, dedup=store))
+    assert res["status"] == "skipped"  # terminal, NOT "error"
+    assert errors == []  # no voter_error emitted / no voter_errors increment
+    assert store.already_voted("rebar~main~Iabc", "rev1")  # recorded → never retried
