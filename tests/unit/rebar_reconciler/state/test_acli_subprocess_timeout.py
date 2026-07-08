@@ -330,3 +330,49 @@ def test_delete_routes_through_chokepoint(record_run):
     cmd, retry = record_run[-1]
     assert "delete" in cmd
     assert retry is False
+
+
+# ---------------------------------------------------------------------------
+# C4 (943f): 429 rate-limit backoff in the live _run_acli retry loop
+# ---------------------------------------------------------------------------
+import logging  # noqa: E402
+
+_FAKE_429_THEN_OK = r"""
+import sys, os
+counter = os.environ["FAKE_429_COUNTER"]
+n = int(open(counter).read()) if os.path.exists(counter) else 0
+open(counter, "w").write(str(n + 1))
+if n == 0:
+    sys.stderr.write("ACLI error: HTTP 429 Too Many Requests\nRetry-After: 1\n")
+    sys.exit(1)
+sys.stdout.write("[]")
+"""
+
+
+def test_rate_limit_backoff_honors_retry_after() -> None:
+    assert acli_subprocess._rate_limit_backoff(0, "HTTP 429\nRetry-After: 7") == 7.0
+    # A hostile/huge Retry-After is capped at the ceiling.
+    assert acli_subprocess._rate_limit_backoff(0, "429 Retry-After: 99999") == 60.0
+
+
+def test_rate_limit_backoff_jitters_without_retry_after() -> None:
+    d = acli_subprocess._rate_limit_backoff(0, "429 Too Many Requests")
+    assert d is not None and 2.0 <= d <= 3.0  # 2**1 + jitter[0,1]
+
+
+def test_rate_limit_backoff_none_for_non_429() -> None:
+    assert acli_subprocess._rate_limit_backoff(0, "some other error") is None
+    assert acli_subprocess._rate_limit_backoff(0, None) is None
+
+
+def test_run_acli_429_retries_with_rate_limit_backoff(tmp_path, monkeypatch, caplog) -> None:
+    """A 429 exit routes through the rate-limit backoff (honoring Retry-After), the call
+    succeeds on retry, and NO uniform 2s sleep is used (add-on, not double-sleep)."""
+    monkeypatch.setenv("FAKE_429_COUNTER", str(tmp_path / "n"))
+    delays: list[float] = []
+    monkeypatch.setattr(acli_subprocess.time, "sleep", lambda s: delays.append(s))
+    with caplog.at_level(logging.WARNING):
+        result = acli_subprocess._run_acli(["search", "x"], acli_cmd=_fake_cmd(_FAKE_429_THEN_OK))
+    assert result.returncode == 0 and result.stdout == "[]"
+    assert delays == [1.0], f"expected one Retry-After=1 backoff, got {delays}"
+    assert any("429" in r.message for r in caplog.records)
