@@ -384,6 +384,14 @@ def _repair_ticket(tracker: str, ticket_id: str, ticket_dir: str, *, dry_run: bo
                 fp = os.path.join(ticket_dir, name)
                 retired = fp + RETIRED_SUFFIX
                 if os.path.exists(retired):
+                    # The source was already folded to *.retired (b306) and has been
+                    # RESURRECTED as a live .json by a delete/add reconciliation (RC1) —
+                    # the .json is a byte-identical duplicate of the preserved .retired,
+                    # so dropping it resolves SNAPSHOT_INCONSISTENT with no data loss.
+                    try:
+                        os.remove(fp)
+                    except OSError:
+                        skipped.append(name)
                     continue
                 try:
                     os.rename(fp, retired)

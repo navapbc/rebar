@@ -47,9 +47,10 @@ renames and removes the uncommitted SNAPSHOT (atomic — all sources retired or 
 **`.retired` lifecycle.** Retired files are kept **permanently** for now — an
 accepted storage tradeoff that guarantees a folded source is never lost and can
 never be resurrected into a `SNAPSHOT_INCONSISTENT`. A branch-wide `.retired`
-garbage-collection sweep is a documented **follow-up** (tracked separately), safe
-only past causal stability (once no clone can still be mid-reconvergence against
-the pre-compaction events). `.retired` files are **benign under a code rollback**:
+garbage-collection sweep is a documented **follow-up** — tracked as
+`polite-antivirus-bedbug` (`536b-8930-b922-4063`, status `idea`, linked
+`discovered_from` b306) — safe only past causal stability (once no clone can still
+be mid-reconvergence against the pre-compaction events). `.retired` files are **benign under a code rollback**:
 an older clone whose reducer/fsck predate `is_active_event` still ignores them,
 because it lists events by the `*.json` glob / `.endswith(".json")` filter and a
 `*.json.retired` name matches neither.

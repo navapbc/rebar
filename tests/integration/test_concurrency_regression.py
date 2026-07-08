@@ -634,3 +634,90 @@ def test_a3_repair_dry_run_noop_then_live_repair_pretag_and_rollback(two_clones)
     # ROLLBACK rehearsal: the pre-tag restores the pre-repair tree exactly.
     _git("reset", "--hard", "pre-a3-remediation", cwd=tracker_a)
     assert create_file.exists(), "rollback did not restore the pre-repair state"
+
+
+def test_two_clone_compaction_resurrection_no_data_loss_and_repairable(two_clones):
+    """b306 (I1) RC1 regression: clone A compacts (folding a source), and a merge with
+    clone B — which never compacted — resurrects the folded source file. Because A1
+    RENAMES folded sources to ``*.retired`` (never deletes), the source bytes are never
+    lost; the resurrected ``.json`` trips SNAPSHOT_INCONSISTENT, which ``fsck --repair``
+    resolves by re-retiring it. RED on the pre-b306 delete behavior (the resurrected
+    file would be an un-recoverable orphan); GREEN now.
+    """
+    remote, repo_a, _repo_b, seed = two_clones
+    tracker_a = _tracker(repo_a)
+    seed_dir = tracker_a / seed
+
+    # A compacts: the CREATE source is folded and RENAMED to *.retired (not deleted).
+    create_file = next(seed_dir.glob("*-CREATE.json"))
+    out = _engine_run(repo_a, "compact", seed, "--threshold=0", "--horizon=0", "--skip-sync").stdout
+    assert "compacted" in out, out
+    retired = seed_dir / (create_file.name + ".retired")
+    assert retired.exists(), "b306: source must be retired"
+    assert not create_file.exists(), "b306: source must be retired, not deleted"
+
+    # Merge-as-union with a clone that still held the source resurrects the .json file.
+    create_file.write_text(retired.read_text())
+    _git("add", "-A", cwd=tracker_a)
+    _git("commit", "-q", "--no-verify", "-m", "merge: union resurrects source", cwd=tracker_a)
+    assert "SNAPSHOT_INCONSISTENT" in _engine_run(repo_a, "fsck", check=False).stdout
+
+    # No data loss (the retired copy preserved it) and fsck --repair drives it clean.
+    _engine_run(repo_a, "fsck", "--repair", check=False)
+    clean = _engine_run(repo_a, "fsck", check=False).stdout
+    assert "SNAPSHOT_INCONSISTENT" not in clean
+    assert _engine_run(repo_a, "show", seed).returncode == 0  # ticket still reduces
+
+
+def test_rebuild_restarts_from_stale_bak_sentinel(two_clones):
+    """36d1 (RC2b) interrupted-rebuild restart: a ``.snapshot-rebuild.bak`` present at
+    entry means a prior rebuild crashed mid-flight. rebuild_snapshot_from_full_log must
+    rebuild again (idempotent), fold the merged-in orphan, and remove the sentinel after
+    a clean round-trip."""
+    import json as _json
+
+    from rebar._commands.compact import rebuild_snapshot_from_full_log
+    from rebar.reducer import reduce_ticket
+
+    remote, repo_a, _repo_b, seed = two_clones
+    tracker_a = _tracker(repo_a)
+    seed_dir = tracker_a / seed
+
+    # An orphan COMMENT (absent from the snapshot's source_event_uuids), sorting before
+    # the snapshot → the RC2 silent-drop shape.
+    # Compile a CREATE-only baseline, append a COMMENT (normal HLC ts), THEN craft a
+    # future-dated SNAPSHOT whose source set excludes the comment → the comment sorts
+    # before the snapshot and is a genuine orphan the positional skip drops. (The
+    # snapshot must be written AFTER the comment so it does not poison the HLC clock.)
+    create_file = next(seed_dir.glob("*-CREATE.json"))
+    create_uuid = _json.loads(create_file.read_text())["uuid"]
+    compiled = {k: v for k, v in reduce_ticket(str(seed_dir)).items() if k != "updated_at"}
+    _engine_run(repo_a, "comment", seed, "orphan-comment-body")
+    snap_uuid = "bbbbbbbb-1111-2222-3333-444444444444"
+    (seed_dir / f"9000000000000000000-{snap_uuid}-SNAPSHOT.json").write_text(
+        _json.dumps(
+            {
+                "event_type": "SNAPSHOT",
+                "timestamp": 9000000000000000000,
+                "uuid": snap_uuid,
+                "env_id": "00000000-0000-4000-8000-000000000001",
+                "author": "Test",
+                "data": {"compiled_state": compiled, "source_event_uuids": [create_uuid]},
+            }
+        )
+    )
+    assert not any(
+        "orphan-comment-body" in (c.get("body") or "")
+        for c in (reduce_ticket(str(seed_dir)) or {}).get("comments", [])
+    ), "orphan must be dropped before the rebuild"
+    # Simulate a crashed prior rebuild: the sentinel is present at entry.
+    bak = seed_dir / ".snapshot-rebuild.bak"
+    bak.write_text("stale sentinel from an interrupted rebuild")
+
+    did = rebuild_snapshot_from_full_log(str(tracker_a), seed, str(seed_dir), no_commit=True)
+
+    assert did is True, "must restart the rebuild when a stale .bak is present"
+    assert not bak.exists(), ".bak must be removed after a clean round-trip"
+    # The orphan comment is folded back in — its body is present in reduced state.
+    state = reduce_ticket(str(seed_dir))
+    assert any("orphan-comment-body" in (c.get("body") or "") for c in state.get("comments", []))
