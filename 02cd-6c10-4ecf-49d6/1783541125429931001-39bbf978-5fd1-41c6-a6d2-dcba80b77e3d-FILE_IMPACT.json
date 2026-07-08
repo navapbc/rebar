@@ -1,1 +1,0 @@
-{"author":"RebarBotNava","data":{"file_impact":[{"path":"src/rebar/llm/runner.py","reason":"thread timeout_s into client construction"},{"path":"src/rebar/llm/config.py","reason":"default semantics: never below SDK default"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783541125429931001,"uuid":"39bbf978-5fd1-41c6-a6d2-dcba80b77e3d"}
