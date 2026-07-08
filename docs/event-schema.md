@@ -142,7 +142,8 @@ never overwrites it; a session-less re-claim folds `None`, clearing any stale pr
 
 **Multi-harness provenance (story c557).** The same `open -> in_progress` STATUS additively
 carries two more opaque keys when present: `data["harness"]` (from the rebar-owned `AI_AGENT`
-convention var, naming the tool — e.g. `claude-code_<ver>` / `opencode` / `codex` / `cursor`)
+convention var, the tool base name `claude-code` / `opencode` / `codex` / `cursor`, optionally
+`_<version>`-suffixed)
 → `state["claim_harness"]`, and `data["remote_session"]` (from `CLAUDE_CODE_REMOTE_SESSION_ID`)
 → `state["claim_remote_session"]`. Both fold on the same edge with the same fork-winner gating
 and session-less-clear semantics as `claimed_session`, are defaulted in `make_initial_state`,
