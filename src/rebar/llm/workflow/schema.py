@@ -80,7 +80,7 @@ def _build_loader():
     """
     yaml = _yaml()
 
-    class _StrictWorkflowLoader(yaml.SafeLoader):
+    class _StrictWorkflowLoader(yaml.SafeLoader):  # type: ignore[name-defined]  # yaml is loaded lazily (Any)
         """SafeLoader hardened for the workflow DSL (anchors/merge/1.1-bools)."""
 
         def compose_node(self, parent, index):  # type: ignore[override]
