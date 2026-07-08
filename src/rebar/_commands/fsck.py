@@ -37,6 +37,7 @@ _STRUCTURED_KINDS = {
     "missing_create",
     "snapshot_inconsistent",
     "orphan_event",
+    "status_fork_resolved",
 }
 
 # ── A3 (34b1) live-store remediation: orphan disposition ─────────────────────
@@ -132,6 +133,15 @@ def _scan(
             issue_count += 1
         elif state.get("status") == "error":
             lines.append(f"MISSING_CREATE: {ticket_id} — no CREATE event found")
+            issue_count += 1
+        # Surface a resolved cross-clone STATUS/claim race (audit reliability #1, story
+        # 3003). The reducer records these in derived state; report the most recent one.
+        if state and state.get("status_fork_resolutions"):
+            last = state["status_fork_resolutions"][-1]
+            lines.append(
+                f"STATUS_FORK_RESOLVED: {ticket_id} — concurrent claim/status race resolved "
+                f"(dropped uuid={last.get('dropped_uuid')})"
+            )
             issue_count += 1
 
     # ── Check 3: stale .git/index.lock cleanup ───────────────────────────────

@@ -151,6 +151,16 @@ the lexically-lower UUID wins (`reducer/_processors.py:81-115`,
 state-dependent merge logic MUST resolve forks by UUID (or another
 skew-independent key), **never by timestamp alone**.
 
+**Surfacing a resolved fork (story 3003).** A resolved STATUS fork means two clones
+raced (e.g. both claimed the same open ticket) and one lost. This is now discoverable
+rather than silent: the reducer records each resolution in pure derived state
+(`status_fork_resolutions`, rebuilt identically on every replay), which `fsck` reports as
+a `STATUS_FORK_RESOLVED` finding and `show`/`list` surface as a field. Separately, a
+`claim` whose post-push merge reveals another clone already owns the ticket (the merged
+`assignee` — the ownership authority — is not the claimant) exits **10** ("claim lost on
+cross-clone merge") so the losing agent stops instead of duplicating work; when no merge
+is visible at claim time, the durable `fsck`/`show` surfacing catches it after the fact.
+
 ### I9 — Compaction is safe against concurrent remote appends
 Compaction (under the per-clone write lock) writes a SNAPSHOT folding the events
 it retires; a remote clone appending a *new* (unique-named) event merges as a
