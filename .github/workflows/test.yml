@@ -172,33 +172,49 @@ jobs:
           git config --global init.defaultBranch main
 
       # Module-size gate (policy: target 200-500 LOC, soft cap 800; docs/architecture.md).
-      # FAILS when a file exceeds 800 LOC and is NOT in .github/module-size-allowlist.txt,
-      # so the over-cap set cannot silently grow. The grandfathered offenders are
-      # allow-listed (and tracked with remedies in the architecture.md table); adding to
-      # the allowlist is a deliberate, reviewed act. Runs on every OS (pure wc/shell).
+      # A GROWTH RATCHET (story S1): each allow-listed row is "<path> <ceiling>", and the
+      # gate FAILS when that file EXCEEDS its pinned ceiling (a grandfathered file cannot
+      # creep upward) — shrinking is free. A NEW file over the 800 soft cap that is NOT
+      # listed also fails, so the over-cap set cannot silently grow. Adding a row / raising
+      # a ceiling is a deliberate, reviewed act (with a docs/architecture.md remedy row).
+      # Runs on every OS (pure wc/shell). Mirrored by tests/unit/test_module_size_contract.py.
       - name: Module-size gate
         shell: bash
         run: |
           allowlist=.github/module-size-allowlist.txt
+          fail=0
+          # 1) Ratchet: every allow-listed file must be within its pinned ceiling.
+          echo "Allow-listed files (ceiling ratchet):"
+          while read -r path ceiling _rest; do
+            case "$path" in ''|\#*) continue;; esac
+            if [ ! -f "$path" ]; then
+              echo "::error::allowlist path does not exist: $path (remove or fix the row)"; fail=1; continue
+            fi
+            loc=$(wc -l < "$path")
+            printf "  %5d / %-5s  %s\n" "$loc" "$ceiling" "$path"
+            if ! printf '%s' "$ceiling" | grep -qE '^[0-9]+$'; then
+              echo "::error::allowlist row for $path has no integer ceiling: '$ceiling'"; fail=1; continue
+            fi
+            if [ "$loc" -gt "$ceiling" ]; then
+              echo "::error::$path is $loc LOC, over its pinned ceiling of $ceiling — shrink it (ratchet)."
+              fail=1
+            fi
+          done < "$allowlist"
+          # 2) No unlisted file over the soft cap.
+          listed=$(grep -vE '^[[:space:]]*(#|$)' "$allowlist" | awk '{print $1}' | sort -u)
           over=$(find src/rebar -name '*.py' | grep -v __pycache__ \
             | xargs wc -l 2>/dev/null \
             | awk '$2 != "total" && $1 > 800 { print $2 }' | sort)
-          allowed=$(grep -vE '^[[:space:]]*(#|$)' "$allowlist" | sort)
-          new_offenders=$(comm -23 <(printf '%s\n' "$over") <(printf '%s\n' "$allowed") | grep -v '^$' || true)
-          echo "Over-cap files (allow-listed, tracked in docs/architecture.md):"
-          if [ -n "$over" ]; then
-            printf '%s\n' "$over" | while read -r f; do [ -n "$f" ] && printf "  %5d  %s\n" "$(wc -l < "$f")" "$f"; done
-          else
-            echo "  (none)"
-          fi
+          new_offenders=$(comm -23 <(printf '%s\n' "$over") <(printf '%s\n' "$listed") | grep -v '^$' || true)
           if [ -n "$new_offenders" ]; then
             echo "::error::New file(s) over the 800-LOC soft cap and NOT in $allowlist:"
             printf '%s\n' "$new_offenders" | while read -r f; do [ -n "$f" ] && printf "  %5d  %s\n" "$(wc -l < "$f")" "$f"; done
             echo "Split it along an existing call-graph seam, or (if genuinely cohesive) add"
-            echo "it to $allowlist AND add a remedy row to the docs/architecture.md table."
-            exit 1
+            echo "it to $allowlist with a ceiling AND a docs/architecture.md remedy row."
+            fail=1
           fi
-          echo "Module-size gate: OK (no new over-cap files)."
+          [ "$fail" = 1 ] && exit 1
+          echo "Module-size gate: OK (all allow-listed files within ceilings; no new over-cap files)."
 
       # Prompt-index drift gate (story afe6): reviewers/index.json is DERIVED from the
       # prompt front-matter and committed. Regenerate it and fail if the working tree

@@ -1,7 +1,16 @@
-src/rebar/_engine/rebar_reconciler/inbound_differ.py
-src/rebar/_engine/rebar_reconciler/reconcile.py
-src/rebar/config.py
-src/rebar/llm/plan_review/attest.py
-src/rebar/llm/plan_review/det_floor.py
-src/rebar/llm/plan_review/passes.py
-src/rebar/llm/workflow/lint_refs.py
+# Grandfathered over-cap modules with a PINNED per-file LOC CEILING (story S1 / 9cf3).
+#
+# Format: "<repo-relative-path> <max-lines>". The module-size gate in
+# .github/workflows/test.yml FAILS when an allow-listed file EXCEEDS its ceiling
+# (a growth ratchet) — shrinking is always free (lower the number when you shed
+# lines; graduate a file off this list once it drops back under the 800 soft cap).
+# A NEW file over the 800 soft cap that is NOT listed here also fails. Raising a
+# ceiling or adding a row is a deliberate, reviewed act, and each file carries a
+# remedy row in docs/architecture.md.
+src/rebar/_engine/rebar_reconciler/inbound_differ.py 802
+src/rebar/_engine/rebar_reconciler/reconcile.py 1083
+src/rebar/config.py 938
+src/rebar/llm/plan_review/attest.py 837
+src/rebar/llm/plan_review/det_floor.py 849
+src/rebar/llm/plan_review/passes.py 839
+src/rebar/llm/workflow/lint_refs.py 870

@@ -44,23 +44,28 @@ def compute_over_cap_modules(src_root: Path, *, cap: int = SOFT_CAP) -> set[str]
     return over
 
 
-def read_module_size_allowlist(path: Path) -> set[str]:
-    """The allowlist's declared paths: non-blank, non-comment lines, stripped. A set, so the
-    test asserts membership structurally (not line order / text)."""
-    return {
-        stripped
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if (stripped := line.strip()) and not stripped.startswith("#")
-    }
+def read_module_size_allowlist(path: Path) -> dict[str, int]:
+    """The allowlist as ``{path: ceiling}`` (story S1 growth ratchet). Each non-blank,
+    non-comment line is ``"<path> <max-lines>"``; a legacy bare-path line (no ceiling)
+    parses to a ceiling of :data:`SOFT_CAP`. A dict, so the tests assert membership +
+    the per-file ceiling structurally (not line order / text)."""
+    out: dict[str, int] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        parts = stripped.split()
+        out[parts[0]] = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else SOFT_CAP
+    return out
 
 
 def test_allowlist_equals_computed_over_cap_set() -> None:
-    """The module-size allowlist set == the computed over-cap set (a STRUCTURAL contract, both
-    directions). Catches a new over-cap offender (must be split or allowlisted) AND a stale or
-    garbage allowlist entry (must be removed) — neither of which the one-directional shell
-    ``comm -23`` gate detects."""
+    """The module-size allowlist PATHS == the computed over-cap set (a STRUCTURAL contract,
+    both directions). Catches a new over-cap offender (must be split or allowlisted) AND a
+    stale or garbage allowlist entry (must be removed) — neither of which the one-directional
+    shell ``comm -23`` gate detects."""
     over_cap = compute_over_cap_modules(SRC_ROOT)
-    allowed = read_module_size_allowlist(ALLOWLIST)
+    allowed = set(read_module_size_allowlist(ALLOWLIST))
 
     new_offenders = over_cap - allowed
     stale_entries = allowed - over_cap
@@ -70,7 +75,26 @@ def test_allowlist_equals_computed_over_cap_set() -> None:
         f"  NEW over-cap files NOT allow-listed (split them, or add to "
         f"{ALLOWLIST.name} + a docs/architecture.md remedy row): {sorted(new_offenders)}\n"
         f"  STALE allowlist entries no longer over cap / not a real over-cap path "
-        f"(remove them): {sorted(stale_entries)}"
+        f"(remove them, or lower/graduate the ceiling): {sorted(stale_entries)}"
+    )
+
+
+def test_allowlisted_files_within_pinned_ceilings() -> None:
+    """The growth ratchet (story S1): every allow-listed file is AT OR UNDER its pinned
+    ceiling. A grandfathered over-cap file can shrink freely but never grow past the number
+    recorded in the allowlist — mirrors the CI ``Module-size gate`` shell step so a breach is
+    caught locally too. (Growing a file requires deliberately raising its ceiling row.)"""
+    breaches: list[str] = []
+    for entry, ceiling in read_module_size_allowlist(ALLOWLIST).items():
+        f = REPO_ROOT / entry
+        if not f.is_file():
+            continue  # covered by test_every_allowlist_entry_is_a_real_file
+        loc = f.read_text(encoding="utf-8", errors="surrogateescape").count("\n")
+        if loc > ceiling:
+            breaches.append(f"{entry}: {loc} LOC > ceiling {ceiling}")
+    assert not breaches, (
+        "allow-listed file(s) exceeding their pinned ceiling (shrink them):\n  "
+        + "\n  ".join(breaches)
     )
 
 
