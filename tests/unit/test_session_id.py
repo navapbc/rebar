@@ -14,7 +14,12 @@ import pytest
 
 from rebar._commands.session_id import _SESSION_ID_VARS, resolve_session_id
 
-_ALL_VARS = ("REBAR_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "SESSION_ID")
+_ALL_VARS = (
+    "REBAR_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ID",
+    "OPENCODE_SESSION_ID",
+    "SESSION_ID",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -37,6 +42,23 @@ def test_claude_code_session_id_second(monkeypatch) -> None:
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "claude")
     monkeypatch.setenv("SESSION_ID", "ambient")
     assert resolve_session_id() == "claude"
+
+
+def test_opencode_session_id_recognised(monkeypatch) -> None:
+    """OPENCODE_SESSION_ID wins over the ambient SESSION_ID but below the Claude var."""
+    monkeypatch.setenv("OPENCODE_SESSION_ID", "opencode-1")
+    monkeypatch.setenv("SESSION_ID", "ambient")
+    assert resolve_session_id() == "opencode-1"
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "claude")
+    assert resolve_session_id() == "claude"  # claude outranks opencode
+
+
+def test_codex_not_a_native_var(monkeypatch) -> None:
+    """Codex exposes no readable session var (story 7656): CODEX_THREAD_ID is NOT recognised;
+    Codex is covered by its shim exporting REBAR_SESSION_ID instead."""
+    monkeypatch.setenv("CODEX_THREAD_ID", "codex-1")
+    assert resolve_session_id() is None
+    assert "CODEX_THREAD_ID" not in _SESSION_ID_VARS
 
 
 def test_ambient_session_id_last(monkeypatch) -> None:
@@ -98,7 +120,13 @@ def test_docs_document_unified_contract() -> None:
     and no longer states the stale resolver contract as the session-id precedence."""
     doc = _src("docs/config.md")
     assert "CLAUDE_CODE_SESSION_ID" in doc
-    assert "REBAR_SESSION_ID` → `CLAUDE_CODE_SESSION_ID` → `SESSION_ID`" in doc
+    # The unified ordered contract (extended to the full 5-var list by story c557).
+    # Normalise whitespace so line-wrapping in the doc doesn't matter.
+    normalized = " ".join(doc.split())
+    assert (
+        "`REBAR_SESSION_ID` → `CLAUDE_CODE_SESSION_ID` → `OPENCODE_SESSION_ID` → "
+        "`SESSION_ID`" in normalized
+    )
     # The stale contract (SESSION_ID directly after REBAR_SESSION_ID, then short HEAD as
     # the *resolver* precedence) must no longer be presented as the session-id chain.
     assert "`REBAR_SESSION_ID` → `SESSION_ID` → short git HEAD" not in doc

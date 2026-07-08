@@ -41,6 +41,8 @@ try:
         tags: list[str] = []
         assignee: str | None = None
         claimed_session: str | None = None
+        claim_harness: str | None = None
+        claim_remote_session: str | None = None
         parent_id: str | None = None
         alias: str | None = None
         description: str | None = None

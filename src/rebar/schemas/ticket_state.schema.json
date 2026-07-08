@@ -21,6 +21,8 @@
     },
     "assignee": { "type": ["string", "null"] },
     "claimed_session": { "type": ["string", "null"] },
+    "claim_harness": { "type": ["string", "null"] },
+    "claim_remote_session": { "type": ["string", "null"] },
     "parent_id": { "type": ["string", "null"] },
     "alias": {
       "type": ["string", "null"],
