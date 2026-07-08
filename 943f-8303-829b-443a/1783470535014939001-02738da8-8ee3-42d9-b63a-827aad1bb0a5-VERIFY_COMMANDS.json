@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"verify_commands":[{"command":"python -m pytest tests/scripts/bridge/ -k acli -q","dd_id":"C4-429-parity","dd_text":"bulk path honors Retry-After + jittered backoff on 429"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1783470535014939001,"uuid":"02738da8-8ee3-42d9-b63a-827aad1bb0a5"}
