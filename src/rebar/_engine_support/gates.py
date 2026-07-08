@@ -21,6 +21,10 @@ import sys
 from rebar._engine_support.output import OutputFormatError, parse_output
 from rebar._engine_support.reads import ReadError, deps_state, show_state
 
+# Non-graph artifact types (verbose logs / bulk review artifacts) carry no dispatchable work,
+# so the per-ticket readiness gates (check_ac / clarity / quality) are a no-op PASS for them.
+_GATE_EXEMPT_TYPES = ("session_log", "code_review")
+
 
 # ── shared text extraction ────────────────────────────────────────────────────
 def _ticket_text(state: dict) -> str:
@@ -63,8 +67,9 @@ def check_ac_compute(ticket_id: str, tracker: str) -> tuple[dict, int]:
         state = show_state(ticket_id, tracker)
     except ReadError:
         return {"verdict": "fail", "criteria_count": 0, "reason": f"could not load {ticket_id}"}, 1
-    if state.get("ticket_type") == "session_log":
-        return {"verdict": "pass", "criteria_count": 0, "reason": "session_log is gate-exempt"}, 0
+    if state.get("ticket_type") in _GATE_EXEMPT_TYPES:
+        _t = state.get("ticket_type")
+        return {"verdict": "pass", "criteria_count": 0, "reason": f"{_t} is gate-exempt"}, 0
     n = _count_ac_reset(_ticket_text(state))
     if n >= 1:
         return {"verdict": "pass", "criteria_count": n, "reason": f"{n} criteria lines"}, 0
@@ -151,9 +156,9 @@ def _clarity_threshold(repo_root: str | None, config_file: str | None) -> int:
 
 
 def clarity_check_compute(ticket_type: str, description: str, threshold: int) -> tuple[dict, int]:
-    if ticket_type == "session_log":
-        # session_log tickets carry verbose free-form logs, not dispatchable work,
-        # so the clarity heuristic does not apply — they are gate-exempt (pass).
+    if ticket_type in _GATE_EXEMPT_TYPES:
+        # session_log / code_review carry verbose free-form bodies, not dispatchable
+        # work, so the clarity heuristic does not apply — they are gate-exempt (pass).
         return {"score": 0, "verdict": "pass", "threshold": threshold}, 0
     score = _clarity_score(description, ticket_type)
     ac_count = _count_ac_reset(description)
@@ -277,7 +282,7 @@ def quality_check_compute(ticket_id: str, tracker: str) -> tuple[dict, int, str 
             1,
             None,
         )
-    if state.get("ticket_type") == "session_log":
+    if state.get("ticket_type") in _GATE_EXEMPT_TYPES:
         return (
             {
                 "verdict": "pass",
@@ -285,7 +290,7 @@ def quality_check_compute(ticket_id: str, tracker: str) -> tuple[dict, int, str 
                 "keyword_count": 0,
                 "ac_items": 0,
                 "file_impact": 0,
-                "reason": "session_log is gate-exempt",
+                "reason": f"{state.get('ticket_type')} is gate-exempt",
             },
             0,
             None,

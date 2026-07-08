@@ -166,6 +166,110 @@ def _merge_coverage_gap_decision(note: str) -> dict[str, Any]:
     }
 
 
+def emit_code_review_artifact(
+    decision: dict[str, Any],
+    *,
+    change_id: str,
+    revision: str,
+    commit_message: str,
+    diff_text: str,
+    repo_root: str | None = None,
+) -> str | None:
+    """Emit a durable, change-scoped ``code_review`` artifact ticket for a completed review and link
+    it ``relates_to`` every rebar ticket named in the change's ``rebar-ticket:`` trailers (story
+    limestone-unethical-zebrafinch). Returns the artifact ticket id (or None if nothing was
+    emitted). BEST-EFFORT: any failure is logged and swallowed — the vote is already cast, so
+    artifact emission must NEVER fail the review. Idempotent per ``(change_id, revision)``: a
+    re-review of the same revision reuses the existing artifact rather than duplicating."""
+    verdict = decision.get("verdict") or {}
+    if not verdict:
+        return None  # a fail-closed review-error carries no verdict → nothing durable to persist
+    try:
+        import rebar
+        from rebar import config as _config
+        from rebar._commands.verify_commit import extract_ticket_refs
+        from rebar._engine_support.resolver import resolve_ticket_id
+        from rebar.llm.code_review import sidecar
+        from rebar.llm.code_review.assemble import changed_from_diff
+
+        changed_files = changed_from_diff(diff_text or "")
+        change_fp = sidecar.change_fingerprint(change_id, revision, changed_files, diff_text or "")
+        title = f"code-review: {change_id} @ {revision}"
+
+        # Idempotency per (change_id, revision): reuse an existing artifact with the same title.
+        artifact_id: str | None = None
+        try:
+            for t in rebar.list_tickets(ticket_type="code_review", repo_root=repo_root) or []:
+                if str(t.get("title") or "") == title:
+                    artifact_id = str(t.get("ticket_id") or t.get("id") or "") or None
+                    break
+        except Exception:  # noqa: BLE001 — a lookup failure just means we create a fresh artifact
+            artifact_id = None
+
+        if not artifact_id:
+            created = rebar.create_ticket(
+                "code_review",
+                title,
+                description=(
+                    f"Code-review artifact for Gerrit change {change_id} (revision {revision}). "
+                    f"Decision: {decision.get('decision')}. change_fingerprint={change_fp}."
+                ),
+                return_alias=True,
+                repo_root=repo_root,
+            )
+            artifact_id = str(created["id"] if isinstance(created, dict) else created)
+
+        sidecar.emit(
+            verdict,
+            target_ticket=artifact_id,
+            repo_root=repo_root,
+            change_id=change_id,
+            revision=revision,
+            change_fp=change_fp,
+        )
+
+        # Trailer resolution → relates_to links. RESOLVABLE → link; UNRESOLVED/FOREIGN → WARN, skip.
+        try:
+            tracker: str | None = str(_config.tracker_dir(repo_root))
+        except Exception:  # noqa: BLE001 — an unlocatable store ⇒ no links (inert/safe)
+            tracker = None
+        refs = extract_ticket_refs(commit_message or "")
+        linked = 0
+        for ref in refs:
+            resolved = None
+            if tracker:
+                try:
+                    resolved = resolve_ticket_id(ref, tracker)
+                except Exception:  # noqa: BLE001 — a bad candidate is treated as unresolved
+                    resolved = None
+            if resolved:
+                try:
+                    rebar.link(artifact_id, resolved, "relates_to", repo_root=repo_root)
+                    linked += 1
+                except Exception:  # noqa: BLE001 — one failed link never aborts the rest
+                    logger.warning(
+                        "code_review artifact %s: relates_to link to %s failed",
+                        artifact_id,
+                        resolved,
+                        exc_info=True,
+                    )
+            else:
+                logger.warning(
+                    "code_review artifact %s: unresolved rebar-ticket trailer %r (change %s/%s)",
+                    artifact_id,
+                    ref,
+                    change_id,
+                    revision,
+                )
+        logger.info(
+            "code_review artifact %s: linked %d/%d trailer refs", artifact_id, linked, len(refs)
+        )
+        return artifact_id
+    except Exception:  # noqa: BLE001 — artifact emission is best-effort; never fail the vote
+        logger.warning("code_review artifact emission failed; continuing", exc_info=True)
+        return None
+
+
 def _assemble_merge_diff(
     gc: GerritClient, change_id: str, revision: str
 ) -> tuple[str, int, dict[str, Any]]:
@@ -362,6 +466,7 @@ async def review_and_vote(
         merge_commits: int | None = None
         parent_count = -1  # -1 = commit fetch failed (unknown); logged with the vote below
         commit_message = ""  # the change's commit body (drives scope-intent); "" if unknown
+        diff_text = ""  # the reviewed diff (drives the code_review artifact's change_fingerprint)
         try:
             commit_info = await asyncio.to_thread(gc.get_commit, change_id, revision)
             parent_count = len(commit_info.get("parents") or [])
@@ -505,6 +610,18 @@ async def review_and_vote(
             # change get reviewed the way it did". parent_count == -1 means commit fetch failed.
             merge=is_merge,
             parent_count=parent_count,
+        )
+        # Data capture (story limestone-unethical-zebrafinch): emit a durable, change-scoped
+        # code_review artifact into the AMBIENT tickets store (repo_root=None — NOT the temp code
+        # clone, which is already deleted) and link it relates_to the change's trailer-cited
+        # tickets. Best-effort: the vote is already cast, so this never fails the review.
+        emit_code_review_artifact(
+            decision,
+            change_id=change_id,
+            revision=revision,
+            commit_message=commit_message,
+            diff_text=diff_text,
+            repo_root=None,
         )
         return {
             "status": "voted",

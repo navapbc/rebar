@@ -183,14 +183,16 @@ def transition_compute(
 
     if current_status == target_status:
         # Same-status no-op short-circuits BEFORE the authoritative guard in
-        # txn.transition_core, so refuse a session_log here too — it is
-        # lifecycle-exempt and must never report a (no-op) transition success.
+        # txn.transition_core, so refuse an artifact type here too — session_log and
+        # code_review are lifecycle-exempt and must never report a (no-op) success.
         from rebar.reducer import reduce_ticket
+        from rebar.reducer._api import _NON_GRAPH_ARTIFACT_TYPES
 
         _state = reduce_ticket(os.path.join(tracker, ticket_id))
-        if _state is not None and _state.get("ticket_type") == "session_log":
+        if _state is not None and _state.get("ticket_type") in _NON_GRAPH_ARTIFACT_TYPES:
+            _t = _state.get("ticket_type")
             raise CommandError(
-                "Error: session_log tickets are lifecycle-exempt and cannot be "
+                f"Error: {_t} tickets are lifecycle-exempt and cannot be "
                 "transitioned (they are not claimed, transitioned, or closed)",
                 returncode=1,
             )

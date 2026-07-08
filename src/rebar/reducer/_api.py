@@ -17,6 +17,11 @@ from ._processors import replay_events
 from ._state import make_error_dict, make_initial_state
 from .marker import remove_marker
 
+# The NON-GRAPH ARTIFACT ticket types — verbose/bulk bodies (session_log, code_review) kept OUT
+# of the dependency-graph / store-health hot paths and default `list` (searchable via search/show).
+# The `exclude_session_logs` reducer flag drops exactly these (the flag name predates code_review).
+_NON_GRAPH_ARTIFACT_TYPES = ("session_log", "code_review")
+
 
 def _is_net_archived(ticket_dir: str) -> bool:
     """Return True only if the ticket's net archival state is archived."""
@@ -196,11 +201,12 @@ def reduce_all_tickets(
             must still surface deleted tickets for tombstone inspection. Uses
             the reduced ``status`` field (the authoritative net-deleted signal),
             not an event re-scan; error dicts (no ``status``) are kept intact.
-        exclude_session_logs: When True, drop ``session_log`` tickets. Default on
-            for the dependency-graph / store-health hot paths (``ready``,
-            ``next_batch``, ``deps``, ``validate``) so verbose log bodies never tax
-            those compiles; keeps logs out of default ``list``. ``search`` and
-            single-ticket ``show`` deliberately do NOT set this (logs stay
+        exclude_session_logs: When True, drop the NON-GRAPH ARTIFACT types —
+            ``session_log`` AND ``code_review`` (see :data:`_NON_GRAPH_ARTIFACT_TYPES`).
+            Default on for the dependency-graph / store-health hot paths (``ready``,
+            ``next_batch``, ``deps``, ``validate``) so verbose log/artifact bodies never
+            tax those compiles; keeps them out of default ``list``. ``search`` and
+            single-ticket ``show`` deliberately do NOT set this (they stay
             discoverable). Error dicts (no ``ticket_type``) are kept intact.
     """
     tracker_path = os.path.normpath(str(tracker_dir))
@@ -239,8 +245,8 @@ def reduce_all_tickets(
         results = [r for r in results if r.get("status") != "deleted"]
 
     if exclude_session_logs:
-        # Keep verbose log bodies out of the graph/health hot paths. Error dicts
-        # (no "ticket_type") are preserved intact.
-        results = [r for r in results if r.get("ticket_type") != "session_log"]
+        # Keep verbose log / bulk artifact bodies out of the graph/health hot paths.
+        # Error dicts (no "ticket_type") are preserved intact.
+        results = [r for r in results if r.get("ticket_type") not in _NON_GRAPH_ARTIFACT_TYPES]
 
     return results

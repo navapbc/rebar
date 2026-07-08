@@ -15,6 +15,7 @@
 #   /rebar/prod/gerrit-bot-token       -> GERRIT_BOT_TOKEN      (bot posts reviews)
 #   /rebar/prod/github-oauth-client-id     -> GITHUB_OAUTH_CLIENT_ID     (WS8, OPTIONAL)
 #   /rebar/prod/github-oauth-client-secret -> GITHUB_OAUTH_CLIENT_SECRET (WS8, OPTIONAL)
+#   /rebar/prod/reviewbot-tickets-pat      -> REVIEWBOT_TICKETS_PAT      (data capture, OPTIONAL)
 # The two OAuth creds are OPTIONAL here (blank if unpopulated) — they are only needed
 # under auth.type = OAUTH, and compose-up.sh FAILS LOUD if OAUTH is selected but they
 # are empty. Making them REQUIRED here would couple every boot (incl. non-OAUTH rollback)
@@ -84,6 +85,10 @@ gerrit_bot_token="$(get_param gerrit-bot-token)"
 # OPTIONAL (blank until an operator populates them + auth.type = OAUTH is in use).
 github_oauth_client_id="$(get_param_optional github-oauth-client-id)"
 github_oauth_client_secret="$(get_param_optional github-oauth-client-secret)"
+# OPTIONAL: the reviewbot's tickets-repo PAT (contents:write on the tickets repo only). Blank
+# until the operator populates the SSM slot; the container boots either way, and the code_review
+# artifact push (story limestone-unethical-zebrafinch) starts working once it is set.
+reviewbot_tickets_pat="$(get_param_optional reviewbot-tickets-pat)"
 
 # --- Write the .env atomically (0600), then move into place ----------------
 tmp="$(mktemp "${ENV_FILE}.XXXXXX")"
@@ -97,6 +102,7 @@ chmod 600 "${tmp}"
   echo "GERRIT_BOT_TOKEN=${gerrit_bot_token}"
   echo "GITHUB_OAUTH_CLIENT_ID=${github_oauth_client_id}"
   echo "GITHUB_OAUTH_CLIENT_SECRET=${github_oauth_client_secret}"
+  echo "REVIEWBOT_TICKETS_PAT=${reviewbot_tickets_pat}"
   echo "REVIEW_BOT_PORT=8000"
 } >"${tmp}"
 mv -f "${tmp}" "${ENV_FILE}"

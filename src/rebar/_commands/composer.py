@@ -31,19 +31,19 @@ from rebar._engine_support.resolver import resolve_ticket_id
 
 logger = logging.getLogger(__name__)
 
-_TYPES = ("bug", "epic", "story", "task", "session_log")
+_TYPES = ("bug", "epic", "story", "task", "session_log", "code_review")
 
 # Ticket types exempt from the plan-review file-impact-coverage gate (P9). Kept in
 # lockstep with the gate's own exemption at
 # rebar.llm.plan_review.orchestrator (bug/session_log short-circuit before P9). The
 # create-time warning below mirrors it so a freshly-created work ticket is nudged to
 # record file_impact early, before `review-plan` flags it.
-_FILE_IMPACT_EXEMPT_TYPES = ("bug", "session_log")
+_FILE_IMPACT_EXEMPT_TYPES = ("bug", "session_log", "code_review")
 
 _USAGE = (
     "Usage: ticket create <ticket_type> <title> [--parent <id>] [--priority <n>] "
     "[--assignee <name>] [--description <text>] [--tags <tag1,tag2>]\n"
-    "  ticket_type: bug | epic | story | task | session_log\n"
+    "  ticket_type: bug | epic | story | task | session_log | code_review\n"
     "  --priority, -p: 0-4 (0=critical, 4=backlog; default: 2)"
 )
 
@@ -105,7 +105,7 @@ def create_core(
     if ticket_type not in _TYPES:
         raise CommandError(
             f"Error: invalid ticket type '{ticket_type}'. "
-            "Must be one of: bug, epic, story, task, session_log",
+            "Must be one of: bug, epic, story, task, session_log, code_review",
             error_code="invalid_ticket_type",
             input_str=ticket_type,
         )
@@ -398,7 +398,7 @@ def edit_core(
             if value not in _TYPES:
                 raise CommandError(
                     f"Error: invalid ticket type '{value}'. "
-                    "Must be one of: bug, epic, story, task, session_log"
+                    "Must be one of: bug, epic, story, task, session_log, code_review"
                 )
             out["ticket_type"] = value
         elif key == "parent":

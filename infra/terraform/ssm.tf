@@ -41,6 +41,12 @@ locals {
     #     Verified. See infra/runbooks/g2p-ci-credentials.md for the operator steps.
     "/rebar/prod/g2p-github-pat",
     "/rebar/prod/ci-gerrit-ssh-key",
+    # Code-review data capture (epic foliaged-merry-collie / story limestone-unethical-zebrafinch).
+    # A fine-grained GitHub PAT with contents:write on the tickets repo ONLY — the reviewbot uses
+    # it (via a URL-scoped git credential helper materialized from the container .env, see
+    # fetch-secrets.sh's reviewbot-tickets-pat -> REVIEWBOT_TICKETS_PAT mapping) to push the
+    # code_review artifact ticket events to origin/tickets. Operator populates this SecureString.
+    "/rebar/prod/reviewbot-tickets-pat",
   ]
 }
 
