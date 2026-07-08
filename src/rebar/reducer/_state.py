@@ -16,6 +16,10 @@ def make_initial_state() -> dict:
         "parent_id": None,
         "priority": None,
         "assignee": None,
+        # Claiming coding-agent session id, folded on the open->in_progress edge (epic
+        # crust-fetch-stump, story 68ef). Defaulted here so a pre-feature snapshot / event
+        # replays to an explicit None (key-present) rather than key-absent.
+        "claimed_session": None,
         "alias": None,
         "description": "",
         "tags": [],

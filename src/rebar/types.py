@@ -91,6 +91,7 @@ class TicketState(TypedDict):
     priority: int
     tags: list[str]
     assignee: NotRequired[str | None]
+    claimed_session: NotRequired[str | None]
     parent_id: NotRequired[str | None]
     alias: NotRequired[str | None]
     description: NotRequired[str | None]

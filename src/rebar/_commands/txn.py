@@ -53,6 +53,19 @@ class ConcurrencyMismatch(CommandError):
         super().__init__(message, returncode=10)
 
 
+def _stamp_session(status_data: dict) -> None:
+    """Add the claiming coding-agent session id to an ``open -> in_progress`` STATUS
+    event's ``data`` when the shared resolver finds one (epic crust-fetch-stump, story
+    68ef). When absent the key is OMITTED entirely, so the event bytes are identical to
+    the pre-feature path (older clones preserve-and-ignore the extra key). The value is
+    an opaque string, read verbatim — never interpolated or executed."""
+    from rebar._commands.session_id import resolve_session_id
+
+    session = resolve_session_id()
+    if session:
+        status_data["session"] = session
+
+
 def _acquire_write_lock(tracker_dir: str) -> lock.LockHandle:
     """Acquire the unified write lock (fcntl + mkdir dual leg, 30s) for a txn
     critical section — mutually exclusive with bash leaf-writes on every platform
@@ -234,6 +247,16 @@ def transition_core(
 
         timestamp = hlc.next_tick(tracker_dir, ticket_id)
         event_uuid = str(uuid.uuid4())
+        status_data = {
+            "status": target_status,
+            "current_status": current_status,
+            "parent_status_uuid": parent_status_uuid,
+        }
+        # Record the claiming session id on ANY open -> in_progress STATUS (bare
+        # transition too, incl. the parent-first cascade), mirroring claim (epic
+        # crust-fetch-stump, story 68ef). Absent -> key omitted -> byte-identical.
+        if current_status == "open" and target_status == "in_progress":
+            _stamp_session(status_data)
         event = {
             "timestamp": timestamp,
             "uuid": event_uuid,
@@ -241,11 +264,7 @@ def transition_core(
             "env_id": env_id,
             "author": author,
             "parent_status_uuid": parent_status_uuid,
-            "data": {
-                "status": target_status,
-                "current_status": current_status,
-                "parent_status_uuid": parent_status_uuid,
-            },
+            "data": status_data,
         }
 
         final_filename = event_append.event_filename(timestamp, event_uuid, "STATUS")
@@ -398,6 +417,15 @@ def claim_core(
         # STATUS(open -> in_progress).
         ts1 = hlc.next_tick(tracker_dir, ticket_id)
         uuid1 = str(uuid.uuid4())
+        status_data = {
+            "status": "in_progress",
+            "current_status": "open",
+            "parent_status_uuid": parent_status_uuid,
+        }
+        # Record the claiming coding-agent session id when present (epic
+        # crust-fetch-stump, story 68ef). Absent -> key omitted -> byte-identical to the
+        # pre-feature event; the reducer folds it to state["claimed_session"].
+        _stamp_session(status_data)
         status_event = {
             "timestamp": ts1,
             "uuid": uuid1,
@@ -405,11 +433,7 @@ def claim_core(
             "env_id": env_id,
             "author": author,
             "parent_status_uuid": parent_status_uuid,
-            "data": {
-                "status": "in_progress",
-                "current_status": "open",
-                "parent_status_uuid": parent_status_uuid,
-            },
+            "data": status_data,
         }
         status_filename = event_append.event_filename(ts1, uuid1, "STATUS")
         status_path = os.path.join(ticket_dir_path, status_filename)

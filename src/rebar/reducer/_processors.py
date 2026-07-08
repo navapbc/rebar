@@ -96,6 +96,26 @@ def process_create(
     return None
 
 
+def _fold_claimed_session(state: dict, data: dict) -> None:
+    """Record the claiming session id on a winning ``open -> in_progress`` STATUS fold.
+
+    Epic crust-fetch-stump, story 68ef. ``claimed_session`` records the session that
+    performed the CURRENT ``open -> in_progress`` claim (mirrors ``assignee``). On that
+    edge we set it to ``data.get("session")`` — the id the write side stamped, or ``None``
+    when the claim carried no session. Setting to ``None`` on a session-less re-claim
+    deliberately CLEARS any stale prior id, so the field never mis-attributes the current
+    in_progress episode to a past session (advisory T9). Keyed on the ``open -> in_progress``
+    edge only, so a later ``blocked -> in_progress`` (etc.) leaves it untouched.
+
+    It is applied ONLY when this event's status is being applied — the caller invokes it in
+    the normal-update and fork-WINNER branches, never where the existing chain wins — so a
+    losing concurrent claim never overwrites the winner's session (advisory G6/T8). Older
+    clones ignore the additive ``data["session"]`` key (forward-compatible).
+    """
+    if data.get("current_status") == "open" and data.get("status") == "in_progress":
+        state["claimed_session"] = data.get("session")
+
+
 def process_status(state: dict, event: dict, data: dict, filepath: str) -> None:
     """Apply a STATUS event with fork detection and lexical UUID tie-break.
 
@@ -148,6 +168,7 @@ def process_status(state: dict, event: dict, data: dict, filepath: str) -> None:
             loser_env_id = state.get("last_status_env_id") or ""
             state["status"] = data.get("status", state["status"])
             state["parent_status_uuid"] = incoming_uuid  # winner's own UUID
+            _fold_claimed_session(state, data)  # only when THIS (winning) event is applied
         else:
             # Existing chain wins; keep state as-is.
             winner_uuid = existing_uuid
@@ -164,6 +185,7 @@ def process_status(state: dict, event: dict, data: dict, filepath: str) -> None:
         )
     else:
         state["status"] = data.get("status", state["status"])
+        _fold_claimed_session(state, data)  # normal (non-fork) update — this event is applied
         # Advance to THIS event's OWN UUID (not its data parent-pointer) so a
         # subsequent concurrent sibling forks against this event's identity and
         # resolves by the lexical-UUID rule above — deterministically and
