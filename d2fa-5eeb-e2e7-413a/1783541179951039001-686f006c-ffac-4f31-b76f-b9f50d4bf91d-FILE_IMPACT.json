@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"pyproject.toml","reason":"mypy flags + per-package overrides"},{"path":"src/rebar","reason":"annotation fixes forced by new flags"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783541179951039001,"uuid":"686f006c-ffac-4f31-b76f-b9f50d4bf91d"}
