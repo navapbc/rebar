@@ -577,3 +577,60 @@ def test_sub_horizon_append_orphan_recovered_by_fsck_rebuild(two_clones):
     assert "orphan-from-B" in _show(repo_a)
     clean = _engine_run(repo_a, "fsck", check=False)
     assert "ORPHAN_EVENT" not in clean.stdout and "SNAPSHOT_INCONSISTENT" not in clean.stdout
+
+
+def test_a3_repair_dry_run_noop_then_live_repair_pretag_and_rollback(two_clones):
+    """A3 (34b1) remediation on a real git-backed store: --dry-run writes/commits
+    nothing; the live --repair pre-tags for rollback, retires the still-present folded
+    source (SNAPSHOT_INCONSISTENT), commits, and reaches fsck-clean; resetting to the
+    pre-tag restores the pre-repair tree."""
+    from rebar.reducer import reduce_ticket
+
+    remote, repo_a, _repo_b, seed = two_clones
+    tracker_a = _tracker(repo_a)
+    seed_dir = tracker_a / seed
+
+    # Craft SNAPSHOT_INCONSISTENT: a SNAPSHOT that lists the still-present CREATE as a
+    # folded source (the live-store fault class, ~2422 of them).
+    import json as _json
+
+    create_file = next(seed_dir.glob("*-CREATE.json"))
+    create_uuid = _json.loads(create_file.read_text())["uuid"]
+    compiled = {k: v for k, v in reduce_ticket(str(seed_dir)).items() if k != "updated_at"}
+    snap_uuid = "aaaaaaaa-1111-2222-3333-444444444444"
+    snap_name = f"9000000000000000000-{snap_uuid}-SNAPSHOT.json"
+    (seed_dir / snap_name).write_text(
+        _json.dumps(
+            {
+                "event_type": "SNAPSHOT",
+                "timestamp": 9000000000000000000,
+                "uuid": snap_uuid,
+                "env_id": "00000000-0000-4000-8000-000000000001",
+                "author": "Test",
+                "data": {"compiled_state": compiled, "source_event_uuids": [create_uuid]},
+            }
+        )
+    )
+    _git("add", "-A", cwd=tracker_a)
+    _git("commit", "-q", "--no-verify", "-m", "craft: inconsistent snapshot", cwd=tracker_a)
+
+    assert "SNAPSHOT_INCONSISTENT" in _engine_run(repo_a, "fsck", check=False).stdout
+    head_before = _git("rev-parse", "HEAD", cwd=tracker_a).stdout.strip()
+
+    # DRY-RUN: describes the repair, writes nothing, commits nothing.
+    dry = _engine_run(repo_a, "fsck", "--repair", "--dry-run", check=False).stdout
+    assert "0 file writes, 0 commits" in dry, dry
+    assert _git("rev-parse", "HEAD", cwd=tracker_a).stdout.strip() == head_before
+    assert create_file.exists(), "dry-run must not retire anything"
+
+    # LIVE repair: pre-tag, retire the source, commit, reach fsck-clean.
+    live = _engine_run(repo_a, "fsck", "--repair", check=False).stdout
+    assert "pre-a3-remediation" in live, live
+    assert _git("rev-parse", "pre-a3-remediation", cwd=tracker_a).returncode == 0
+    assert not create_file.exists()
+    assert (seed_dir / (create_file.name + ".retired")).exists()
+    assert "SNAPSHOT_INCONSISTENT" not in _engine_run(repo_a, "fsck", check=False).stdout
+
+    # ROLLBACK rehearsal: the pre-tag restores the pre-repair tree exactly.
+    _git("reset", "--hard", "pre-a3-remediation", cwd=tracker_a)
+    assert create_file.exists(), "rollback did not restore the pre-repair state"

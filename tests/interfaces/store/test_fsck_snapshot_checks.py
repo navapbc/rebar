@@ -104,3 +104,81 @@ def test_snapshot_inconsistent_still_flags_undeleted_source(tmp_path: Path) -> N
     assert any("SNAPSHOT_INCONSISTENT" in line and src_uuid in line for line in out), (
         f"A source UUID whose event file still exists must be SNAPSHOT_INCONSISTENT; got:\n{out}"
     )
+
+
+# ─────────────────── A3 (34b1) live-store remediation ─────────────────────────
+from rebar.reducer import KNOWN_EVENT_TYPES  # noqa: E402
+
+_S1 = "11111111-aaaa-bbbb-cccc-000000000001"
+_S2 = "22222222-aaaa-bbbb-cccc-000000000002"
+_SNAP = "99999999-aaaa-bbbb-cccc-000000000009"
+
+
+def test_orphan_disposition_covers_all_known_event_types() -> None:
+    """The AUTO-RECOVER / HUMAN-TRIAGE disposition must classify EVERY orphan-eligible
+    KNOWN_EVENT_TYPE (all but CREATE/SNAPSHOT), with no overlap and no leftovers."""
+    auto, triage = fsck._AUTO_RECOVER_ORPHAN_TYPES, fsck._HUMAN_TRIAGE_ORPHAN_TYPES
+    assert auto.isdisjoint(triage), "an event type is in both dispositions"
+    assert auto | triage == set(KNOWN_EVENT_TYPES) - {"CREATE", "SNAPSHOT"}
+
+
+def test_repair_plan_marks_still_present_source_for_retire(tmp_path: Path) -> None:
+    """SNAPSHOT_INCONSISTENT: a folded source still present as an active file is queued
+    for retire (rename to .retired), NOT a rebuild."""
+    td = tmp_path / "reb-a3-1"
+    td.mkdir()
+    src = _write_event(td, "1000000000000000000", _S1, "COMMENT")  # listed AND still present
+    _write_snapshot(td, "2000000000000000000", _SNAP, [_S1])
+
+    plan = fsck._repair_plan(str(td), "reb-a3-1")
+    assert plan["retire"] == [src]
+    assert plan["auto_orphans"] == [] and plan["triage_orphans"] == []
+
+
+def test_repair_plan_routes_orphans_by_type(tmp_path: Path) -> None:
+    """A pre-snapshot orphan (absent from source_event_uuids) is routed by type:
+    additive → AUTO-RECOVER, order-sensitive → HUMAN-TRIAGE."""
+    td = tmp_path / "reb-a3-2"
+    td.mkdir()
+    auto = _write_event(td, "1000000000000000000", _S1, "COMMENT")  # additive orphan
+    triage = _write_event(td, "1000000000000000001", _S2, "STATUS")  # order-sensitive orphan
+    _write_snapshot(td, "2000000000000000000", _SNAP, [])  # folds nothing → both are orphans
+
+    plan = fsck._repair_plan(str(td), "reb-a3-2")
+    assert (auto, "COMMENT") in plan["auto_orphans"]
+    assert (triage, "STATUS") in plan["triage_orphans"]
+    assert auto not in [n for n, _ in plan["triage_orphans"]]
+
+
+def test_repair_dry_run_makes_no_writes(tmp_path: Path) -> None:
+    """--dry-run describes the repair but renames nothing."""
+    td = tmp_path / "reb-a3-3"
+    td.mkdir()
+    src = _write_event(td, "1000000000000000000", _S1, "COMMENT")
+    _write_snapshot(td, "2000000000000000000", _SNAP, [_S1])
+    before = {p.name for p in td.iterdir()}
+
+    disp = fsck._repair_ticket(str(tmp_path), "reb-a3-3", str(td), dry_run=True)
+
+    assert disp["retired"] == [src]
+    assert {p.name for p in td.iterdir()} == before, "dry-run must not touch the store"
+    assert (td / src).exists() and not (td / (src + ".retired")).exists()
+
+
+def test_repair_retires_still_present_source_live(tmp_path: Path) -> None:
+    """A live repair renames the still-present folded source to *.retired, resolving
+    SNAPSHOT_INCONSISTENT without a rebuild."""
+    td = tmp_path / "reb-a3-4"
+    td.mkdir()
+    src = _write_event(td, "1000000000000000000", _S1, "COMMENT")
+    snap = _write_snapshot(td, "2000000000000000000", _SNAP, [_S1])
+
+    assert any("SNAPSHOT_INCONSISTENT" in line for line in fsck._check_snapshot(str(td), "x", snap))
+
+    disp = fsck._repair_ticket(str(tmp_path), "reb-a3-4", str(td), dry_run=False)
+
+    assert disp["retired"] == [src] and disp["rebuilt"] is False
+    assert not (td / src).exists() and (td / (src + ".retired")).exists()
+    assert not any(
+        "SNAPSHOT_INCONSISTENT" in line for line in fsck._check_snapshot(str(td), "x", snap)
+    )
