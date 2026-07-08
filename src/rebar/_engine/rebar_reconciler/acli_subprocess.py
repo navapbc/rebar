@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
+import re
 import subprocess
 import sys
 import time
@@ -105,6 +107,41 @@ _ASSIGNEE_PERMISSION_ERROR: str = "cannot be assigned"
 _ASSIGNEE_NOT_FOUND_ERROR: str = (
     "User not found for email:"  # prefix match — email value varies per call
 )
+
+# C4 (943f): rate-limit (429) backoff for the live _run_acli subprocess loop. ACLI is a
+# subprocess, so a 429 surfaces only as text in stderr (its exit code + Retry-After
+# availability are provider-dependent and unverified) — so we detect it from stderr
+# markers and honor a Retry-After value IFF present. Cap any delay at _MAX_BACKOFF_S so a
+# huge/hostile Retry-After (or continuous 429s) can never hang the pass; _MAX_ATTEMPTS
+# still bounds the total attempts and the terminal error is unchanged (CalledProcessError).
+_MAX_BACKOFF_S: float = 60.0
+_RATE_LIMIT_MARKERS: tuple[str, ...] = ("429", "too many requests", "rate limit", "rate-limit")
+_RETRY_AFTER_RE = re.compile(r"retry[-\s]?after[:\s]+(\d+(?:\.\d+)?)", re.IGNORECASE)
+
+
+def _rate_limit_backoff(attempt: int, stderr: str | None) -> float | None:
+    """Return a backoff delay (seconds) if *stderr* looks like an HTTP 429 rate-limit,
+    else None (the caller keeps its default uniform backoff — this is add-on, not a
+    replacement of the general retry policy). Honors ``Retry-After`` when parseable,
+    otherwise jittered exponential backoff; both are capped at _MAX_BACKOFF_S."""
+    text = (stderr or "").lower()
+    if not any(m in text for m in _RATE_LIMIT_MARKERS):
+        return None
+    m = _RETRY_AFTER_RE.search(stderr or "")
+    if m:
+        try:
+            delay = min(float(m.group(1)), _MAX_BACKOFF_S)
+            logger.warning("acli: 429 rate-limited; honoring Retry-After=%.1fs", delay)
+            return delay
+        except ValueError:
+            pass
+    delay = min(2.0 ** (attempt + 1), _MAX_BACKOFF_S) + random.uniform(0, 1)
+    logger.warning(
+        "acli: 429 rate-limited; no Retry-After — jittered backoff %.1fs (attempt %d)",
+        delay,
+        attempt + 1,
+    )
+    return delay
 
 
 class AssigneeNotFoundError(ValueError):
@@ -361,9 +398,13 @@ def _run_acli(
                 _ASSIGNEE_PERMISSION_ERROR in cpe.stderr or _ASSIGNEE_NOT_FOUND_ERROR in cpe.stderr
             ):
                 raise cpe
-            # If more retries remain, sleep with exponential backoff
+            # If more retries remain, sleep before retrying. A detected 429 rate-limit
+            # gets add-on jittered backoff (honoring Retry-After when present); every
+            # other non-zero exit keeps the uniform exponential sleep — no double-sleep,
+            # and the terminal contract (CalledProcessError) is unchanged.
             if attempt < _MAX_ATTEMPTS - 1:
-                time.sleep(2 ** (attempt + 1))  # 2s, 4s
+                rl_delay = _rate_limit_backoff(attempt, cpe.stderr)
+                time.sleep(rl_delay if rl_delay is not None else 2 ** (attempt + 1))
             continue
 
         # Bug 44de: ACLI exits 0 even when a mutation fails. Inspect the
