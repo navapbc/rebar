@@ -150,6 +150,23 @@ def test_repair_plan_routes_orphans_by_type(tmp_path: Path) -> None:
     assert auto not in [n for n, _ in plan["triage_orphans"]]
 
 
+def test_repair_plan_retires_folded_older_snapshot(tmp_path: Path) -> None:
+    """SNAPSHOT_INCONSISTENT sub-case (found in the A3 live run): a re-compaction folds a
+    prior SNAPSHOT into the newer one's source_event_uuids. The still-present older
+    snapshot must be queued for retire (like any folded source) — NOT excluded merely for
+    being a ``-SNAPSHOT.json`` — while the latest snapshot (the horizon) is never touched
+    and the older snapshot is never mis-classified as an orphan."""
+    td = tmp_path / "reb-a3-snapfold"
+    td.mkdir()
+    older_snap = _write_snapshot(td, "1000000000000000000", _S1, [])  # still present, folded
+    newer_snap = _write_snapshot(td, "2000000000000000000", _S2, [_S1])  # folds the older snap
+
+    plan = fsck._repair_plan(str(td), "reb-a3-snapfold")
+    assert plan["retire"] == [older_snap], plan
+    assert newer_snap not in plan["retire"], "the latest snapshot (horizon) must never retire"
+    assert plan["auto_orphans"] == [] and plan["triage_orphans"] == []
+
+
 def test_repair_dry_run_makes_no_writes(tmp_path: Path) -> None:
     """--dry-run describes the repair but renames nothing."""
     td = tmp_path / "reb-a3-3"
