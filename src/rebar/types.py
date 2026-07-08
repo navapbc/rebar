@@ -124,6 +124,7 @@ class TicketStateLLM(TypedDict):
     pr: NotRequired[int]
     a: NotRequired[str | None]
     asn: NotRequired[str | None]
+    csn: NotRequired[str | None]
     pid: NotRequired[str | None]
     desc: NotRequired[str]
     cm: NotRequired[list[Any]]

@@ -620,6 +620,12 @@ def process_snapshot(state: dict, data: dict) -> None:
     compiled_state = data.get("compiled_state", {})
     for key, value in compiled_state.items():
         state[key] = value
+
+    # claimed_session (epic crust-fetch-stump, story 199b) needs NO active snapshot guard:
+    # a POST-feature snapshot carries the key and it is restored verbatim above, and a
+    # PRE-feature snapshot's compiled_state simply lacks it, leaving the make_initial_state
+    # seed (None) intact. Unlike managed_refs (seeded) / attestations (folded), there is no
+    # migration to perform — the round-trip regression test pins both directions.
     # Managed-ref provenance migration (safe-luge-nog): a SNAPSHOT written before
     # this field existed carries no ``managed_refs``, so restoring it would leave the
     # projection empty and silently disable removal-propagation for the ticket's
