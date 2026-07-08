@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"src/rebar/llm/plan_review/criteria_routing.json","reason":"per-criterion threshold/posture edits"},{"path":"tests/unit/","reason":"posture/threshold assertions"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783470055859863001,"uuid":"aa834b28-0248-4dc6-8878-8c0ae48ba0e1"}
