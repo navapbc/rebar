@@ -1,4 +1,4 @@
-Usage: rebar search <query> [--status=<s>] [--type=<t>] [--has-tag=<tag>] [--include-archived] [--sort=<key>] [--no-sync]
+Usage: rebar search <query> [--status=<s>] [--type=<t>] [--has-tag=<tag>] [--include-archived] [--sort=<key>] [--no-pull]
   <query>            AND of whitespace-separated, case-insensitive substring terms over
                      titles/descriptions/comments/tags. Also accepts field predicates:
                      status: type: priority: assignee: tag: parent: (exact; comma = OR
@@ -7,4 +7,4 @@ Usage: rebar search <query> [--status=<s>] [--type=<t>] [--has-tag=<tag>] [--inc
                      literal substring. The flags below AND-narrow on top of the query.
   --sort=<key>       Order by priority|created|updated|id|status ('-' prefix = descending;
                      unset values sort last). Default keeps store order.
-  --no-sync          Skip the best-effort fetch/reconverge (also: REBAR_NO_SYNC=1)
+  --no-pull          Skip the best-effort fetch/reconverge (also: REBAR_NO_SYNC=1)
