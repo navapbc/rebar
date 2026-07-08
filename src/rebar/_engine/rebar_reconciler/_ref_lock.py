@@ -237,7 +237,7 @@ def _git(
     text: bool = True,
     stdin: bytes | None = None,
 ) -> subprocess.CompletedProcess:
-    """Run ``git -C <repo_root> <args>`` with a timeout (the single git seam here).
+    """Run ``git -C <repo_root> <args>`` with a timeout (via the ``git_adapter`` seam).
 
     A :class:`subprocess.TimeoutExpired` is logged and re-raised as
     :class:`RefLockTimeoutError` (fail-closed — callers treat it as HELD). With
@@ -246,11 +246,13 @@ def _git(
     toggles str vs raw-bytes capture (blob content is read as bytes); ``stdin``
     feeds ``git hash-object`` its payload.
     """
+    from rebar_reconciler import git_adapter
+
     try:
-        return subprocess.run(
-            ["git", "-C", str(repo_root), *args],
-            input=stdin,
-            capture_output=True,
+        return git_adapter.run_git(
+            str(repo_root),
+            *args,
+            input_data=stdin,
             text=text,
             check=check,
             timeout=timeout,

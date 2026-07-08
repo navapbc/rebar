@@ -23,13 +23,14 @@ from collections.abc import Mapping
 
 
 def run_git(
-    cwd: str | os.PathLike[str],
+    cwd: str | os.PathLike[str] | None,
     *args: str,
     check: bool = True,
     capture_output: bool = True,
     text: bool = True,
     timeout: float | None = None,
     env: Mapping[str, str] | None = None,
+    input_data: str | bytes | None = None,
 ) -> subprocess.CompletedProcess:
     """Run ``git -C <cwd> <args…>`` and return the :class:`subprocess.CompletedProcess`.
 
@@ -41,12 +42,19 @@ def run_git(
     ``timeout`` (when set) lets :class:`subprocess.TimeoutExpired` propagate — a
     caller that wants a timeout folded into a synthetic failed result catches it
     itself. ``env=None`` inherits the current environment.
+
+    ``cwd=None`` omits the ``-C <cwd>`` prefix entirely, running ``git`` in the
+    process CWD (some callers verify commits relative to the caller's directory
+    rather than a fixed repo). ``input_data`` (when set) is fed to git's stdin —
+    forwarded to :func:`subprocess.run`'s ``input`` for e.g. ``git hash-object``.
     """
+    argv = ["git", *args] if cwd is None else ["git", "-C", cwd, *args]
     return subprocess.run(
-        ["git", "-C", cwd, *args],
+        argv,
         check=check,
         capture_output=capture_output,
         text=text,
         timeout=timeout,
         env=env,
+        input=input_data,
     )

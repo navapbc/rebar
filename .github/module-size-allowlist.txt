@@ -8,7 +8,7 @@
 # ceiling or adding a row is a deliberate, reviewed act, and each file carries a
 # remedy row in docs/architecture.md.
 src/rebar/_engine/rebar_reconciler/inbound_differ.py 802
-src/rebar/_engine/rebar_reconciler/reconcile.py 1083
+src/rebar/_engine/rebar_reconciler/reconcile.py 1064
 src/rebar/config.py 938
 src/rebar/llm/plan_review/attest.py 837
 src/rebar/llm/plan_review/det_floor.py 849

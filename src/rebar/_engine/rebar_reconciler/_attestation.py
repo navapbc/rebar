@@ -9,7 +9,6 @@ on-disk manifest contents.
 from __future__ import annotations
 
 import hashlib
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -116,29 +115,23 @@ def verify_attested_commit(sha: str, allowlist: list[str], repo_root: Path | Non
     Returns:
         True if the commit passes both checks, False otherwise.
     """
-    git = ["git", "-C", str(repo_root)] if repo_root is not None else ["git"]
+    # git_adapter is the reconciler's single git seam; it forwards repo_root as
+    # ``git -C <repo_root>`` and, when repo_root is None, omits ``-C`` entirely —
+    # preserving the F14 fix (run in the RIGHT repo) AND the default CWD-relative
+    # behaviour byte-for-byte.
+    from rebar_reconciler import git_adapter
+
     try:
-        result = subprocess.run(
-            [*git, "verify-commit", sha],
-            capture_output=True,
-            check=False,
-            # Bound the GPG verify: it can hang on a gpg-agent / keyserver lookup.
-            # TimeoutExpired is caught below and treated as a verification failure.
-            timeout=15,
-        )
+        # Bound the GPG verify: it can hang on a gpg-agent / keyserver lookup.
+        # TimeoutExpired is caught below and treated as a verification failure.
+        result = git_adapter.verify_commit(repo_root, sha, timeout=15)
         if result.returncode != 0:
             return False
     except Exception:  # noqa: BLE001 — any verify failure (incl. timeout) treated as unverified
         return False
 
     try:
-        email_result = subprocess.run(
-            [*git, "log", "-1", "--format=%ae", sha],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
-        )
+        email_result = git_adapter.commit_email(repo_root, sha, timeout=10)
         if email_result.returncode != 0:
             return False
         committer_email = email_result.stdout.strip()

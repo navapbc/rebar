@@ -59,19 +59,15 @@ def _get_commit_subject(repo_root, commit_sha: str) -> str:
     caller treats the drift as non-benign (fail-closed) and raises
     HeadDriftError as the strict detector originally did.
     """
-    import subprocess as _sp
+    import subprocess
+
+    from rebar_reconciler import git_adapter
 
     if not commit_sha:
         return ""
     try:
-        result = _sp.run(
-            ["git", "-C", str(repo_root), "log", "-1", commit_sha, "--format=%s"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-    except (OSError, _sp.SubprocessError):
+        result = git_adapter.log_format(repo_root, commit_sha, "%s", timeout=5)
+    except (OSError, subprocess.SubprocessError):
         return ""
     if result.returncode != 0:
         return ""
