@@ -1,0 +1,1 @@
+{"author":"Claude","data":{"file_impact":[{"path":"scripts/","reason":"Codex SessionStart hook + Cursor environment.json snippet"},{"path":"docs/","reason":"per-harness install docs"}]},"env_id":"724d9d0c-bc4c-4cc4-b96b-1a19356102e2","event_type":"FILE_IMPACT","timestamp":1783481189044948268,"uuid":"a7530b0d-dfe6-409d-9ffa-4ee07f31526d"}
