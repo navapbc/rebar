@@ -400,6 +400,55 @@ def test_cache_model_settings_attached_only_for_anthropic(monkeypatch, resolved,
         assert "anthropic_cache_tool_definitions" not in captured["model_settings"]
 
 
+def _capture_model_settings(monkeypatch, cfg):
+    """Run a structured call with a stubbed model, returning the model_settings dict
+    that run() assembled and passed to the Agent (mirrors the cache-wiring proof)."""
+    from rebar.llm import runner as runner_mod
+
+    captured: dict = {}
+
+    def _fake_structured(Agent, model, resolved_, req, kwargs, usage_limits):
+        captured["model_settings"] = kwargs.get("model_settings")
+        return {"verdict": "PASS", "findings": [], "summary": "s"}, {}
+
+    monkeypatch.setattr(runner_mod, "_pai_structured", _fake_structured)
+    monkeypatch.setattr(runner_mod, "_import_pydantic_ai", lambda: object)
+    monkeypatch.setattr(runner_mod, "_pai_model", lambda c: "anthropic:claude-opus-4-8")
+    monkeypatch.setattr(
+        runner_mod._findings,
+        "finalize_outcome",
+        lambda outcome, **kw: {**outcome["structured_response"]},
+    )
+    PydanticAIRunner(cfg).run(
+        RunRequest(
+            system_prompt="sys",
+            instructions="ins",
+            config=cfg,
+            execution_mode="single_turn",
+            mode="structured",
+            output_schema="completion_verdict",
+        )
+    )
+    return captured["model_settings"]
+
+
+def test_explicit_timeout_is_wired_into_model_settings_verbatim(monkeypatch):
+    # Audit reliability #6: an operator's REBAR_LLM_TIMEOUT (cfg.timeout_s) must actually
+    # reach the model settings that bound the call. An explicit value is honored verbatim.
+    ms = _capture_model_settings(monkeypatch, _cfg(timeout_s=1234))
+    assert ms["timeout"] == 1234.0
+
+
+def test_unset_timeout_defaults_to_sdk_floor(monkeypatch):
+    # With the knob unset, the effective timeout is the resolved default (DEFAULT_TIMEOUT_S),
+    # which equals the Anthropic SDK default (600 s) — never a hardcoded lower value.
+    from rebar.llm.config import DEFAULT_TIMEOUT_S
+
+    ms = _capture_model_settings(monkeypatch, _cfg())
+    assert ms["timeout"] == float(DEFAULT_TIMEOUT_S)
+    assert ms["timeout"] >= 600.0
+
+
 def test_usage_is_surfaced_on_the_result_dict():
     # An end-to-end (offline) run threads result.usage() onto the returned dict under
     # the private _usage key — the per-run observability hook callers read.
